@@ -137,13 +137,21 @@ const MESSAGE_WRITTEN_EVENT =
 
 const QUEUED = "queued" satisfies OrchestrationV2Run["status"];
 
-/** A command or launch as it goes on to upstream, and what is written once upstream takes it. */
+/**
+ * A command or launch as it goes on to upstream, what is written once upstream takes it, and
+ * what is undone if upstream refuses it.
+ */
 interface Admitted<C = OrchestrationV2Command> {
   readonly command: C;
   readonly accepted: Effect.Effect<void, SqlError.SqlError>;
+  readonly refused: Effect.Effect<void, SqlError.SqlError>;
 }
 
-const admitted = <C>(command: C): Admitted<C> => ({ command, accepted: Effect.void });
+const admitted = <C>(command: C): Admitted<C> => ({
+  command,
+  accepted: Effect.void,
+  refused: Effect.void,
+});
 
 export interface SharedConversationShape {
   /**
@@ -230,7 +238,7 @@ const make = Effect.gen(function* () {
   const lifecycle = yield* A2ALifecycleService;
   const changed = yield* Effect.acquireRelease(PubSub.unbounded<ThreadId>(), PubSub.shutdown);
   const touch = (threadId: ThreadId) => PubSub.publish(changed, threadId);
-  const { authorOn, announce, claimMessageId, recordAuthor } = yield* makeMessageStamps(touch);
+  const { authorOn, announce, recordAuthor } = yield* makeMessageStamps(touch);
 
   /**
    * Whether upstream's own log shows the answer's command settled its prompt, as a condition on
@@ -248,37 +256,33 @@ const make = Effect.gen(function* () {
   )`;
 
   /**
-   * A person's message as the agent will read it, with its author record; a command goes as typed
-   * (AC5). The record, the only mark that a note was carried, is written once upstream takes the
-   * message and only while its stored text is this one, since upstream may refuse or replay it.
+   * A person's message taken in on a shared thread: recorded under its author, which reserves its
+   * id, and returned as the agent will read it. A command goes on as typed (AC5). If upstream
+   * refuses it, the record is released, unless upstream stored a message under the id after all.
    */
   const stampMessage = Effect.fn("j5.sharing.sharedConversation.stampMessage")(function* (
     threadId: ThreadId,
     messageId: MessageId,
-    typed: string,
+    text: string,
     author: Author,
     launchingIn: ProjectId | null,
   ) {
-    yield* claimMessageId(messageId, author);
-    const carried = beginsWithSlash(typed)
-      ? { note: null, told: null }
-      : yield* announce(threadId, launchingIn);
-    const prefix = beginsWithSlash(typed) ? "" : prefixOf(carried.note, authorLine(author));
-    const text = `${prefix}${typed}`;
-    const createdAt = DateTime.formatIso(yield* DateTime.now);
-    const record = sql`
-      INSERT INTO j5_a2a_message_author (
-        thread_id, message_id, person_id, display_name, level, note, told_json, stored_prefix,
-        created_at
-      )
-      SELECT ${threadId}, ${messageId}, ${author.personId}, ${author.displayName},
-        ${author.level}, ${carried.note}, ${carried.told}, ${prefix}, ${createdAt}
-      FROM orchestration_v2_projection_messages
-      WHERE message_id = ${messageId} AND thread_id = ${threadId}
-        AND json_extract(payload_json, '$.text') = ${text}
-      ON CONFLICT (thread_id, message_id) DO NOTHING
+    const release = sql`
+      DELETE FROM j5_a2a_message_author
+      WHERE thread_id = ${threadId} AND message_id = ${messageId}
+        AND person_id = ${author.personId}
+        AND NOT EXISTS (
+          SELECT 1 FROM orchestration_v2_projection_messages WHERE message_id = ${messageId}
+        )
     `.pipe(Effect.andThen(touch(threadId)), Effect.asVoid);
-    return { text, accepted: record };
+    if (beginsWithSlash(text)) {
+      yield* recordAuthor(threadId, messageId, author, { note: null, told: null }, "");
+      return { text, release };
+    }
+    const carried = yield* announce(threadId, launchingIn);
+    const prefix = prefixOf(carried.note, authorLine(author));
+    yield* recordAuthor(threadId, messageId, author, carried, prefix);
+    return { text: `${prefix}${text}`, release };
   });
 
   /** The message a queued run would deliver, by upstream's own record of the run. */
@@ -390,7 +394,7 @@ const make = Effect.gen(function* () {
         told_json = excluded.told_json,
         edited_by = excluded.edited_by
     `.pipe(Effect.andThen(touch(command.threadId)), Effect.asVoid);
-    return { command: { ...command, text }, accepted: record };
+    return { ...admitted({ ...command, text }), accepted: record };
   });
 
   /**
@@ -503,7 +507,7 @@ const make = Effect.gen(function* () {
           author,
           null,
         );
-        return { command: { ...command, text: stamp.text }, accepted: stamp.accepted };
+        return { ...admitted({ ...command, text: stamp.text }), refused: stamp.release };
       }
       case "queued-run.edit": {
         if (!(yield* shared.isShared(command.threadId))) return admitted(command);
@@ -532,9 +536,14 @@ const make = Effect.gen(function* () {
           cause,
         }).pipe(Effect.andThen(Effect.fail(notAdmitted)));
 
-  // Upstream has already taken the message, so a failure to record it is logged and undoes nothing.
+  // Upstream has already taken the edit, so a failure to record it is logged and does not undo it.
   const notRecorded = (cause: unknown) =>
-    Effect.logError("J5 shared conversation could not record who wrote a message", { cause });
+    Effect.logError("J5 shared conversation could not record a queued message's edit", { cause });
+  // A record left behind holds its old prefix and note for a retry under the same id.
+  const notReleased = (cause: unknown) =>
+    Effect.logError("J5 shared conversation could not release a refused message's record", {
+      cause,
+    });
 
   const dispatch: SharedConversationShape["dispatch"] = Effect.fn(
     "j5.sharing.sharedConversation.dispatch",
@@ -560,7 +569,9 @@ const make = Effect.gen(function* () {
       const marked = stamped.type === "runtime-request.respond" && stamped.answers !== undefined;
       yield* recordAnswer(personId, stamped, marked);
     }
-    const result = yield* dispatchUpstream(stamped);
+    const result = yield* dispatchUpstream(stamped).pipe(
+      Effect.onError(() => stamp.refused.pipe(Effect.catch(notReleased))),
+    );
     yield* stamp.accepted.pipe(Effect.catch(notRecorded));
     if (
       stamped.type === "runtime-request.respond" &&
@@ -606,8 +617,8 @@ const make = Effect.gen(function* () {
         first.messageId ?? MessageId.make(`message:j5:launch:${NodeCrypto.randomUUID()}`);
       const stamp = yield* stampMessage(threadId, messageId, first.text, author, launchingIn);
       return {
-        command: { ...input, initialMessage: { ...first, messageId, text: stamp.text } },
-        accepted: stamp.accepted,
+        ...admitted({ ...input, initialMessage: { ...first, messageId, text: stamp.text } }),
+        refused: stamp.release,
       };
     }).pipe(Effect.catch(failClosed));
   });
@@ -620,9 +631,8 @@ const make = Effect.gen(function* () {
     launchUpstream: (input: OrchestrationV2ThreadLaunchInput) => Effect.Effect<A, E, R>,
   ) {
     const stamp = yield* admitLaunch(personId, input);
-    // Upstream's launch can fail after storing the message, so the conditional write runs either way.
     return yield* launchUpstream(stamp.command).pipe(
-      Effect.ensuring(stamp.accepted.pipe(Effect.catch(notRecorded))),
+      Effect.onError(() => stamp.refused.pipe(Effect.catch(notReleased))),
     );
   });
 

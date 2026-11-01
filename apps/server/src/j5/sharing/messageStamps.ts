@@ -206,16 +206,16 @@ export const makeMessageStamps = Effect.fn("j5.sharing.sharedConversation.makeMe
       return { note, told: note === null ? null : yield* encodeTold(now) };
     });
 
-    /**
-     * Refuses a message id that is not the author's to send. Upstream keys a message by id alone
-     * and overwrites on a repeat, so an id is its sender's: one recorded for someone else, or held
-     * by upstream for no one here, is refused. A retry goes on only if its send was recorded here,
-     * or upstream refused it; one sent just before sharing is refused.
-     */
-    const claimMessageId = Effect.fn("j5.sharing.sharedConversation.claimMessageId")(function* (
+    const recordAuthor = Effect.fn("j5.sharing.sharedConversation.recordAuthor")(function* (
+      threadId: ThreadId,
       messageId: MessageId,
       author: Author,
+      carried: { readonly note: string | null; readonly told: string | null },
+      storedPrefix: string,
     ) {
+      // Upstream keys a message by id alone and overwrites on a repeat, so an id is its sender's:
+      // one recorded for someone else, or held by upstream for no one here, is refused. A retry
+      // goes on only if its send was recorded here; one sent just before sharing is refused.
       const recorded = yield* sql<{ readonly person_id: string }>`
         SELECT person_id FROM j5_a2a_message_author WHERE message_id = ${messageId}
       `;
@@ -229,16 +229,6 @@ export const makeMessageStamps = Effect.fn("j5.sharing.sharedConversation.makeMe
       if (recorded.some((row) => row.person_id !== author.personId) || held.length > 0) {
         return yield* refused("This message was already sent.");
       }
-    });
-
-    const recordAuthor = Effect.fn("j5.sharing.sharedConversation.recordAuthor")(function* (
-      threadId: ThreadId,
-      messageId: MessageId,
-      author: Author,
-      carried: { readonly note: string | null; readonly told: string | null },
-      storedPrefix: string,
-    ) {
-      yield* claimMessageId(messageId, author);
       const createdAt = DateTime.formatIso(yield* DateTime.now);
       yield* sql`
         INSERT INTO j5_a2a_message_author (
@@ -253,6 +243,6 @@ export const makeMessageStamps = Effect.fn("j5.sharing.sharedConversation.makeMe
       yield* touch(threadId);
     });
 
-    return { writerLabel, authorOn, announce, claimMessageId, recordAuthor };
+    return { writerLabel, authorOn, announce, recordAuthor };
   },
 );

@@ -636,6 +636,70 @@ it.effect(
   },
 );
 
+it.effect(
+  "a message's id is held from admission, and its record kept once upstream stored it",
+  () => {
+    const harness = makeHarness();
+    const on = ThreadId.make("thread:shared-held-id");
+    return Effect.gen(function* () {
+      const people = yield* PersonAccess.PersonAccess;
+      const conversation = yield* SharedConversation.SharedConversation;
+      const threads = yield* ThreadManagementService;
+      yield* threads.dispatch({
+        type: "thread.create",
+        createdBy: "user",
+        creationSource: "web",
+        commandId: CommandId.make("command:held-id:create"),
+        threadId: on,
+        projectId,
+        title: "Shared",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+      });
+      const owner = (yield* people.firstOwner).personId;
+      yield* people.setName({ personId: owner, displayName: "Jackson" });
+      const scope = { kind: "thread" as const, threadId: on };
+      const priya = (yield* people.createPerson({ displayName: "Priya" })).personId;
+      const sam = (yield* people.createPerson({ displayName: "Sam" })).personId;
+      yield* people.setLevel({ personId: priya, scope, level: "collaborator" });
+      yield* people.setLevel({ personId: sam, scope, level: "collaborator" });
+
+      // Sam sends under her id while hers is still on its way to upstream: his is refused.
+      const hers = message("Ship Friday.", on);
+      const samsRefusal = yield* conversation.dispatch(priya, hers, (admitted) =>
+        send(sam, { ...message("Ship Monday.", on), messageId: hers.messageId }).pipe(
+          Effect.flip,
+          Effect.tap(() => threads.dispatch(admitted)),
+        ),
+      );
+      assert.strictEqual(samsRefusal.message, "This message was already sent.");
+      const record = (yield* authorRecord(hers.messageId))!;
+      assert.strictEqual(record.display_name, "Priya");
+      assert.strictEqual(
+        yield* storedText(on, hers.messageId),
+        `${record.stored_prefix}Ship Friday.`,
+      );
+
+      // Upstream stores her next message, then the request fails: the message keeps its record.
+      const late = message("Keep the migration step.", on);
+      yield* conversation
+        .dispatch(priya, late, (admitted) =>
+          threads.dispatch(admitted).pipe(Effect.andThen(Effect.fail("lost after commit"))),
+        )
+        .pipe(Effect.flip);
+      const kept = (yield* authorRecord(late.messageId))!;
+      assert.strictEqual(kept.display_name, "Priya");
+      assert.strictEqual(
+        yield* storedText(on, late.messageId),
+        `${kept.stored_prefix}Keep the migration step.`,
+      );
+    }).pipe(Effect.provide(layerFor(harness)));
+  },
+);
+
 it.effect("a launch upstream refuses leaves no author record for its first message", () => {
   const harness = makeHarness();
   const on = ThreadId.make("thread:shared-refused-launch");

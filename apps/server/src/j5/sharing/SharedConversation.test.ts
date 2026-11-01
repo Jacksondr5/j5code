@@ -78,18 +78,11 @@ const message = (threadId: ThreadId, text: string, extra: Record<string, unknown
   } as unknown as OrchestrationV2Command & { readonly type: "message.dispatch" };
 };
 
-/**
- * Upstream taking a command. A message is stored the way upstream records it, with a run in the
- * state given (`null` records no run); an edit leaves the queued run's message holding its text.
- */
-const upstreamTakes = (run: "completed" | "queued" | null = "completed") =>
-  Effect.fn("test.upstreamTakes")(function* (command: OrchestrationV2Command) {
-    if (command.type === "message.dispatch") {
-      yield* taken(command.threadId, command.messageId, run, command.text);
-    }
-    if (command.type !== "queued-run.edit") return command;
-    const sql = yield* SqlClient.SqlClient;
-    yield* sql`
+/** Upstream taking a command; an edit leaves the queued run's message holding its text. */
+const upstreamTakes = Effect.fn("test.upstreamTakes")(function* (command: OrchestrationV2Command) {
+  if (command.type !== "queued-run.edit") return command;
+  const sql = yield* SqlClient.SqlClient;
+  yield* sql`
     UPDATE orchestration_v2_projection_messages
     SET payload_json = json_set(payload_json, '$.text', ${command.text})
     WHERE message_id = (
@@ -97,16 +90,24 @@ const upstreamTakes = (run: "completed" | "queued" | null = "completed") =>
       WHERE run_id = ${command.runId}
     )
   `;
-    return command as OrchestrationV2Command;
-  });
+  return command as OrchestrationV2Command;
+});
 
-/** A person's command as upstream would be handed it, and taken as `upstreamTakes` takes it. */
+/**
+ * A person's command as upstream would be handed it. A message is then taken in the way
+ * upstream records it, with a run in the state given; `null` records no run. An edit is taken
+ * as upstream takes one of a queued run.
+ */
 const send = Effect.fn("test.send")(function* (
   personId: ParticipantId,
   command: OrchestrationV2Command,
   run: "completed" | "queued" | null = "completed",
 ) {
-  return yield* (yield* SharedConversation).dispatch(personId, command, upstreamTakes(run));
+  const admitted = yield* (yield* SharedConversation).dispatch(personId, command, upstreamTakes);
+  if (admitted.type === "message.dispatch") {
+    yield* taken(admitted.threadId, admitted.messageId, run, admitted.text);
+  }
+  return admitted;
 });
 
 /** A person's message as the agent will read it. */
@@ -943,7 +944,7 @@ it.effect(
         message(threadId, "Mine.", {
           messageId: MessageId.make("approval-feedback:request:pending"),
         }),
-        upstreamTakes(null),
+        upstreamTakes,
       );
       yield* answering(owner, "approval-feedback", {
         commandId: CommandId.make("command:owner-feedback"),
