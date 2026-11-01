@@ -194,6 +194,12 @@ const SEAMS: ReadonlyArray<Seam> = [
     reaches: ['action === "archive" && !(await confirmJ5Archive(thread))'],
   },
   {
+    file: "Stack.tsx",
+    record: "case 101: the Inbox route",
+    from: "./j5/inbox/routes",
+    reaches: ["...j5InboxRoutes(GLASS_HEADER_OPTIONS)"],
+  },
+  {
     file: "App.tsx",
     record: "case 21: archive preflight",
     from: "./j5/archive/ArchiveWarningSheet",

@@ -1,0 +1,294 @@
+import { useAtomValue } from "@effect/atom-react";
+import {
+  answeredByLine,
+  j5SourceNotice,
+  mergeHumanInboxSources,
+  type PresentedHumanInboxItem,
+} from "@t3tools/client-runtime/j5/inbox";
+import { presentParticipantIdentity } from "@t3tools/client-runtime/j5/participant-identity";
+import { spansMultipleEnvironments } from "@t3tools/client-runtime/j5/readSources";
+import type { EnvironmentId } from "@t3tools/contracts";
+import { scopedInboxItemKey } from "@t3tools/contracts/j5";
+import { useFocusEffect } from "@react-navigation/native";
+import { useCallback, useState } from "react";
+import { Pressable, RefreshControl, ScrollView, View } from "react-native";
+
+import { SymbolView } from "../../components/ui/AppSymbol";
+import { AppText as Text } from "../../components/ui/AppText";
+import { EmptyState } from "../../components/ui/EmptyState";
+import { useMarkdownPreviewStyles } from "../../features/files/FileMarkdownPreview";
+import { useOpenLinkedThread } from "../../features/threads/useOpenLinkedThread";
+import { relativeTime } from "../../lib/time";
+import { NativeStackScreenOptions } from "../../native/StackHeader";
+import { SelectableMarkdownText } from "../../native/SelectableMarkdownText";
+import { j5Sharing } from "../sharing/guestAccess";
+import {
+  answeredInboxQueryAtom,
+  answeredInboxSourcesAtom,
+  openInboxQueryAtom,
+  openInboxSourcesAtom,
+  refreshInboxSources,
+} from "./inboxSources";
+import { useScopedParticipantLabels } from "./senderLabels";
+
+type SenderLabels = ReadonlyMap<EnvironmentId, ReadonlyMap<string, string>>;
+
+const NO_LABELS: ReadonlyMap<string, string> = new Map();
+
+const URGENCY = {
+  blocking: { label: "Blocking", className: "text-danger-foreground" },
+  soon: { label: "Soon", className: "text-warning-foreground" },
+  fyi: { label: "FYI", className: "text-foreground-muted" },
+} as const;
+
+const senderName = (item: PresentedHumanInboxItem, labels: SenderLabels) =>
+  presentParticipantIdentity({
+    participantId: item.senderId,
+    participantLabels: labels.get(item.environmentId) ?? NO_LABELS,
+  }).label;
+
+/** The reader's own name on an item's server, so "Priya answered" can read "You answered". */
+function useOwnName(environmentId: EnvironmentId): string | null {
+  const access = useAtomValue(j5Sharing.connectionAccess(environmentId));
+  return access?.kind === "person" ? access.name : null;
+}
+
+function refreshAll() {
+  refreshInboxSources(openInboxSourcesAtom, openInboxQueryAtom);
+  refreshInboxSources(answeredInboxSourcesAtom, answeredInboxQueryAtom);
+}
+
+/**
+ * The person's Inbox: what agents on every connected server have asked them, most urgent first
+ * (Inbox AC6), and the asks already answered. Read-only here; answering comes with the answer box.
+ */
+export function InboxScreen() {
+  const openSources = useAtomValue(openInboxSourcesAtom);
+  const answeredSources = useAtomValue(answeredInboxSourcesAtom);
+  const items = mergeHumanInboxSources(openSources);
+  const answered = mergeHumanInboxSources(answeredSources);
+  const showEnvironment = spansMultipleEnvironments([...items, ...answered]);
+  const labels = useScopedParticipantLabels(
+    [...items, ...answered].map((item) => ({
+      environmentId: item.environmentId,
+      participantId: item.senderId,
+      connected: item.connected,
+    })),
+  );
+  // Reads again each time the Inbox comes into view; between visits the server's inbox signal
+  // rereads it. No timer.
+  useFocusEffect(useCallback(() => refreshAll(), []));
+  const loading =
+    !openSources.isReady || openSources.sources.some((source) => source.status === "loading");
+  const refreshing = [...openSources.sources, ...answeredSources.sources].some(
+    (source) => source.refreshing,
+  );
+  const notices = [
+    ...new Set(
+      [...openSources.sources, ...answeredSources.sources].flatMap((source) => {
+        const notice = j5SourceNotice(source);
+        return notice === null ? [] : [notice];
+      }),
+    ),
+  ];
+  return (
+    <ScrollView
+      className="flex-1 bg-sheet"
+      contentContainerClassName="gap-4 px-4 py-4"
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refreshAll} />}
+    >
+      <NativeStackScreenOptions options={{ title: "Inbox" }} />
+      {notices.map((notice) => (
+        <Text key={notice} className="text-sm text-foreground-muted">
+          {notice}
+        </Text>
+      ))}
+      {items.length === 0 ? (
+        loading ? (
+          <Text className="text-foreground-muted">Loading your inbox…</Text>
+        ) : (
+          <EmptyState
+            variant="plain"
+            title="Nothing waiting on you"
+            detail="When an agent asks you something, it shows up here."
+          />
+        )
+      ) : (
+        <View className="gap-3">
+          {items.map((item) => (
+            <InboxItem
+              key={scopedInboxItemKey(item)}
+              item={item}
+              labels={labels}
+              showEnvironment={showEnvironment}
+            />
+          ))}
+        </View>
+      )}
+      <AnsweredShelf items={answered} labels={labels} showEnvironment={showEnvironment} />
+    </ScrollView>
+  );
+}
+
+function ItemMeta(props: {
+  readonly item: PresentedHumanInboxItem;
+  readonly labels: SenderLabels;
+  readonly showEnvironment: boolean;
+  readonly trailing?: string | null;
+}) {
+  const { item } = props;
+  const parts = [
+    senderName(item, props.labels),
+    item.projectTitle,
+    item.forEveryone === true ? "for everyone here" : null,
+    props.showEnvironment || !item.connected
+      ? `${props.showEnvironment ? item.environmentLabel : ""}${item.connected ? "" : props.showEnvironment ? " (offline)" : "offline"}`
+      : null,
+    props.trailing ?? null,
+  ].filter((part): part is string => part !== null && part !== "");
+  return (
+    <Text className="text-xs text-foreground-muted" numberOfLines={2}>
+      {parts.join(" · ")}
+    </Text>
+  );
+}
+
+function InboxItem(props: {
+  readonly item: PresentedHumanInboxItem;
+  readonly labels: SenderLabels;
+  readonly showEnvironment: boolean;
+}) {
+  const { item } = props;
+  const [expanded, setExpanded] = useState(false);
+  const urgency = URGENCY[item.urgency];
+  return (
+    <View className="rounded-2xl border-continuous bg-card px-4 py-3">
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded }}
+        accessibilityLabel={`${urgency.label}. ${item.intent}`}
+        onPress={() => setExpanded(!expanded)}
+        className="gap-1"
+      >
+        <View className="flex-row items-center gap-2">
+          <Text className={`text-xs font-t3-semibold uppercase ${urgency.className}`}>
+            {urgency.label}
+          </Text>
+          <View className="flex-1" />
+          <SymbolView
+            name={expanded ? "chevron.down" : "chevron.right"}
+            size={12}
+            tintColorClassName="accent-icon-muted"
+          />
+        </View>
+        <Text className="text-base font-t3-semibold">{item.intent}</Text>
+        <ItemMeta
+          item={item}
+          labels={props.labels}
+          showEnvironment={props.showEnvironment}
+          trailing={`open ${relativeTime(item.openedAt)}`}
+        />
+      </Pressable>
+      {expanded ? (
+        <View className="mt-3 gap-3 border-t border-border-subtle pt-3">
+          <InboxMessage markdown={item.message} />
+          <OpenSenderThread item={item} />
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function InboxMessage(props: { readonly markdown: string }) {
+  const styles = useMarkdownPreviewStyles();
+  return <SelectableMarkdownText markdown={props.markdown} textStyle={styles.nativeTextStyle} />;
+}
+
+function OpenSenderThread(props: { readonly item: PresentedHumanInboxItem }) {
+  const openLinkedThread = useOpenLinkedThread();
+  const { item } = props;
+  const available = item.connected && item.senderThreadId !== null;
+  return (
+    <Pressable
+      accessibilityRole="link"
+      accessibilityState={{ disabled: !available }}
+      disabled={!available}
+      hitSlop={6}
+      onPress={() =>
+        item.senderThreadId !== null &&
+        openLinkedThread({
+          environmentId: String(item.environmentId),
+          threadId: item.senderThreadId,
+        })
+      }
+    >
+      <Text
+        className={`font-t3-medium text-sm ${available ? "text-foreground-secondary" : "text-foreground-muted"}`}
+      >
+        {available
+          ? "Open thread"
+          : item.senderThreadId === null
+            ? "The sender is no longer in the roster"
+            : "Its server is offline"}
+      </Text>
+    </Pressable>
+  );
+}
+
+function AnsweredShelf(props: {
+  readonly items: ReadonlyArray<PresentedHumanInboxItem>;
+  readonly labels: SenderLabels;
+  readonly showEnvironment: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  if (props.items.length === 0) return null;
+  return (
+    <View className="gap-2">
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        onPress={() => setOpen(!open)}
+        className="flex-row items-center gap-2 py-2"
+      >
+        <SymbolView
+          name={open ? "chevron.down" : "chevron.right"}
+          size={12}
+          tintColorClassName="accent-icon-muted"
+        />
+        <Text className="font-t3-medium text-foreground-muted">Answered {props.items.length}</Text>
+      </Pressable>
+      {open
+        ? props.items.map((item) => (
+            <AnsweredItem
+              key={scopedInboxItemKey(item)}
+              item={item}
+              labels={props.labels}
+              showEnvironment={props.showEnvironment}
+            />
+          ))
+        : null}
+    </View>
+  );
+}
+
+function AnsweredItem(props: {
+  readonly item: PresentedHumanInboxItem;
+  readonly labels: SenderLabels;
+  readonly showEnvironment: boolean;
+}) {
+  const { item } = props;
+  const answeredBy = answeredByLine(item.answeredBy, useOwnName(item.environmentId));
+  const when = item.terminalAt ? `answered ${relativeTime(item.terminalAt)}` : "answered";
+  return (
+    <View className="gap-1 rounded-2xl bg-card px-4 py-3">
+      <Text className="text-sm font-t3-medium">{item.intent}</Text>
+      <ItemMeta
+        item={item}
+        labels={props.labels}
+        showEnvironment={props.showEnvironment}
+        trailing={answeredBy === null ? when : `${when} · ${answeredBy}`}
+      />
+      <OpenSenderThread item={item} />
+    </View>
+  );
+}
