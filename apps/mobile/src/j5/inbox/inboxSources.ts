@@ -30,6 +30,8 @@ export const openInboxQueryAtom = (environmentId: EnvironmentId) =>
   j5Environment.inbox({ environmentId, input: { status: "open" } });
 export const answeredInboxQueryAtom = (environmentId: EnvironmentId) =>
   j5Environment.inbox({ environmentId, input: { status: "answered" } });
+export const inboxCountQueryAtom = (environmentId: EnvironmentId) =>
+  j5Environment.openCount({ environmentId, input: {} });
 
 /** Every connected server's open asks for this person; the server's inbox signal rereads them. */
 export const openInboxSourcesAtom = createJ5ReadSourcesAtom({
