@@ -187,14 +187,15 @@ yet run: iOS on the same Mac as the server (#857), and Android on macOS.
 #### First-time setup
 
 - **Android on Linux:** the Android SDK with `emulator`, `platform-tools` and
-  `cmdline-tools`, one system image for the machine's ABI (x86_64), Java for
-  `avdmanager`, and your user in the `kvm` group.
+  `cmdline-tools`, one system image for the machine's ABI (x86_64, or arm64-v8a
+  on an arm64 host), Java for `avdmanager`, and your user in the `kvm` group.
 - **Android on macOS:** the same SDK, with an image for the Mac's ABI (arm64 on
   Apple silicon, x86_64 on Intel); no KVM.
 - **iOS (a Mac):** Xcode, opened once so it installs its Simulator component,
   CocoaPods, and the pool's Simulators (`j5-test-1`, `j5-test-2`, ...) created
   in Xcode.
-- Put the SDK at `ANDROID_HOME` or its usual place, then restart J5 Code: the
+- Put the SDK at `ANDROID_HOME` or its usual place, then ask the developer to
+  restart J5 Code (never restart it yourself: it is the app you run in): the
   server behind the Device panel looks for the SDK only when it starts, so
   until then `device_list` shows no Android. `adb` need not be on `PATH`.
 
@@ -206,17 +207,17 @@ agent running inside J5 Code; without them, stop and report.
 
 1. `node scripts/j5/setup-agent-live-test.ts --mobile android` (or `ios`).
 2. When setup has finished and printed the Mobile block (the last part of its
-   output), call `device_open`
-   with the host and device it names. On Android the script has already booted
-   the emulator; on iOS `device_open` boots the Simulator. If setup says the
-   emulator is still booting, run the setup command from step 1 again (not
-   `rebuild`, which deletes the emulator) before calling `device_open`.
+   output), call `device_open` with the host and device it names. On Android the
+   script has already booted the emulator; on iOS `device_open` boots the
+   Simulator. If setup says the emulator is still booting, run the setup command
+   from step 1 again (not `rebuild`, which deletes the emulator) before calling
+   `device_open`.
 3. Run `node scripts/j5/setup-agent-live-test.ts mobile-open`. It installs the
    dev client for this checkout, opens it against your Metro, and pairs it as
    the test owner, so the app lists the test project's threads. The first list
    can take about 20 seconds: "Loading threads..." with "No threads yet" means
-   it is still loading, so take another screenshot before running it again.
-   Run it again whenever the app needs reloading or pairing again. Do not pair with
+   it is still loading, so take another screenshot before running it again. Run
+   it again whenever the app needs reloading or pairing again. Do not pair with
    `test-t3-mobile`'s `pair-client.sh`: it pairs a device that belongs to no
    one, which J5 shows as an empty app.
 4. Drive the app with the `agent-device` command that `device_open` returned,
@@ -249,13 +250,13 @@ file that exists.
 | `ports`          | `{ "first", "last" }` for the server and Metro   | 20000-29999                                              |
 | `phone.host`     | the address your phone reaches                   | `"tailscale"`                                            |
 
-- Devices come from a pool. When it is taken, setup refuses and names who
-  holds each device; it does not wait. Use only the device you claimed: `stop`
-  erases it. Create the pool's Simulators in Xcode (by default, any name
-  starting `j5-test-`); the rig makes and deletes its own AVDs, named
-  `j5-tester-1`, `j5-tester-2`, ... and shared by the machine's worktrees. A Simulator
-  booted outside the pool counts against `ios.maxBooted`. Claims coordinate
-  the worktrees on one machine, not two machines sharing an iOS host.
+- Devices come from a pool. When it is taken, setup refuses and names who holds
+  each device; it does not wait. Use only the device you claimed: `stop` erases
+  it. Create the pool's Simulators in Xcode (by default, any name starting
+  `j5-test-`); the rig makes and deletes its own AVDs, named `j5-tester-1`,
+  `j5-tester-2`, ... and shared by the machine's worktrees. A Simulator booted
+  outside the pool counts against `ios.maxBooted`. Claims coordinate the
+  worktrees on one machine, not two machines sharing an iOS host.
 - On Android, open the emulator by the `emulator-<port>` serial the script
   prints, never by its AVD name: asked to boot an AVD, the Device panel opens
   whichever emulator already runs, which can be another tester's.
