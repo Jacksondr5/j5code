@@ -189,6 +189,19 @@ export function useCanForkThread(
   return environmentId !== null && sharingAllowsStart(access, projectId);
 }
 
+/**
+ * Whether this connection may merge a fork back: upstream's server-wide "Operate tasks", which the
+ * command's dispatch needs and upstream's Merge back button does not ask, and the fork's project
+ * level, by which the server admits it as it does a fork.
+ */
+export function useCanMergeBack(
+  environmentId: EnvironmentId | null,
+  forkThreadId: ThreadId | null,
+): boolean {
+  const permitted = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
+  return useCanForkThread(environmentId, forkThreadId) && permitted;
+}
+
 // `threadOperability.ts` and `sharingMenu.ts` hold none of this module's imports, so it provides
 // their reads; the open thread's view already holds the level, so these ask nothing. Same rule as
 // `useCanOperateThread`, so the composer, details panel and menu agree on a thread that was a
