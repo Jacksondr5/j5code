@@ -182,8 +182,10 @@ export function useInboxAnswers(input: {
     shownItems,
     closedOf,
     answerText: (item: PresentedHumanInboxItem) => answers[scopedInboxItemKey(item)] ?? "",
-    setAnswerText: (item: PresentedHumanInboxItem, text: string) =>
-      setAnswers((current) => ({ ...current, [scopedInboxItemKey(item)]: text })),
+    setAnswerText: (item: PresentedHumanInboxItem, text: string) => {
+      const key = scopedInboxItemKey(item);
+      setAnswers((current) => ({ ...current, [key]: text }));
+    },
     answer,
     pendingKey,
     errorFor: (item: PresentedHumanInboxItem) =>
