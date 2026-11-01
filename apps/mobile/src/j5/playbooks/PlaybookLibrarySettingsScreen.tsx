@@ -14,7 +14,7 @@ import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useRemoteConnectionStatus } from "../../state/use-remote-environment-registry";
 import { AgentFolderPickerModal } from "../agents/AgentFolderPickerModal";
-import { useGuestEnvironmentIds } from "../sharing/guestAccess";
+import { useOwnedEnvironmentIds } from "../sharing/guestAccess";
 import { j5Environment } from "../state";
 import { PlaybookConversationModal } from "./PlaybookConversationModal";
 
@@ -24,8 +24,9 @@ export function PlaybookLibrarySettingsSection({
   environmentId: EnvironmentId | null;
 }) {
   const { connectedEnvironments } = useRemoteConnectionStatus();
-  const guests = useGuestEnvironmentIds();
-  const environments = connectedEnvironments.filter((entry) => !guests.has(entry.environmentId));
+  // Playbooks are managed on the servers the person owns (People and access AC27).
+  const owned = useOwnedEnvironmentIds();
+  const environments = connectedEnvironments.filter((entry) => owned.has(entry.environmentId));
   const environment = environments.find((entry) => entry.environmentId === environmentId);
   return environment ? (
     <PlaybookLibrary
