@@ -13,6 +13,10 @@ import {
   devClientUrl,
   emulatorPortForSlot,
   emulatorSerials,
+  finishSessionCleanup,
+  readMobileRecord,
+  serialRunningAvd,
+  sessionsOnDevice,
   iosBusy,
   iosPool,
   metroBundles,
@@ -239,6 +243,63 @@ describe("emulatorPortForSlot", () => {
   it("refuses a name that is not one of the rig's slots", () => {
     assert.throws(() => emulatorPortForSlot("Pixel_8"), LiveTestRefusal);
     assert.throws(() => emulatorPortForSlot("j5-tester-0"), LiveTestRefusal);
+  });
+});
+
+describe("sessionsOnDevice", () => {
+  it("names only the sessions on this device, so stop and setup leave other devices' alone", () => {
+    const list = JSON.stringify({
+      sessions: [
+        { name: "t3-a", id: "emulator-5558", device: "j5-tester-2" },
+        { name: "t3-b", id: "emulator-5556", device: "j5-tester-1" },
+        { name: "t3-c", id: "emulator-5558", device: "j5-tester-2" },
+      ],
+    });
+    assert.deepEqual(sessionsOnDevice(list, "emulator-5558"), ["t3-a", "t3-c"]);
+    assert.deepEqual(sessionsOnDevice(JSON.stringify({ sessions: [] }), "emulator-5558"), []);
+  });
+});
+
+describe("finishSessionCleanup", () => {
+  const withRecord = (record: object) => {
+    const root = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "j5-mobile-record-"));
+    NodeFS.writeFileSync(NodePath.join(root, "mobile.json"), JSON.stringify(record));
+    return { root };
+  };
+  const base = { platform: "android", slot: "j5-tester-2", serverPort: 6000, metroPort: 6001 };
+
+  it("closes a fresh claim's leftovers on the first boot that finishes, even after a timed-out one", () => {
+    const paths = withRecord({ ...base, sessionCleanupPending: true });
+    const closed: Array<string> = [];
+    finishSessionCleanup(paths, (record) => closed.push(record.slot));
+    assert.deepEqual(closed, ["j5-tester-2"]);
+    finishSessionCleanup(paths, (record) => closed.push(record.slot));
+    assert.deepEqual(closed, ["j5-tester-2"]);
+    assert.strictEqual(readMobileRecord(paths)?.sessionCleanupPending, undefined);
+  });
+
+  it("leaves a record without the marker alone, so the tester's own session survives", () => {
+    const closed: Array<string> = [];
+    finishSessionCleanup(withRecord(base), (record) => closed.push(record.slot));
+    assert.deepEqual(closed, []);
+  });
+});
+
+describe("serialRunningAvd", () => {
+  it("finds the slot's emulator by its AVD, so a foreign emulator on the slot's port is left alone", () => {
+    const devices = "List of devices attached\nemulator-5556\tdevice\nemulator-5558\tdevice\n";
+    const avds: Record<string, string> = {
+      "emulator-5556": "j5-tester-2\r\nOK",
+      "emulator-5558": "Pixel_8\r\nOK",
+    };
+    assert.strictEqual(
+      serialRunningAvd("j5-tester-2", devices, (serial) => avds[serial]),
+      "emulator-5556",
+    );
+    assert.strictEqual(
+      serialRunningAvd("j5-tester-1", devices, (serial) => avds[serial]),
+      undefined,
+    );
   });
 });
 
