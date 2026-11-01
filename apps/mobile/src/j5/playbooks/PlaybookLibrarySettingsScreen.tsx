@@ -39,7 +39,7 @@ export function PlaybookLibrarySettingsSection({
       }))}
     />
   ) : (
-    <Text className="p-4 text-muted-foreground">No environment connected.</Text>
+    <Text className="p-4 text-foreground-muted">No environment connected.</Text>
   );
 }
 
@@ -152,7 +152,7 @@ function PlaybookLibrary({
             </Pressable>
           </Menu>
         ) : (
-          <Text className="flex-1 text-sm text-muted-foreground">Available in every project.</Text>
+          <Text className="flex-1 text-sm text-foreground-muted">Available in every project.</Text>
         )}
         <Menu
           actions={[
@@ -188,13 +188,13 @@ function PlaybookLibrary({
         </Menu>
       </View>
       {project ? (
-        <Text className="px-4 pb-3 text-xs text-muted-foreground">
+        <Text className="px-4 pb-3 text-xs text-foreground-muted">
           Includes {project.title}'s .j5/playbooks folder. Those override a library playbook with
           the same name in that project.
         </Text>
       ) : null}
       {error || sources.error || query.error ? (
-        <Text accessibilityRole="alert" className="px-4 pb-3 text-destructive">
+        <Text accessibilityRole="alert" className="px-4 pb-3 text-danger-foreground">
           {error ?? sources.error ?? query.error}
         </Text>
       ) : null}
@@ -202,7 +202,7 @@ function PlaybookLibrary({
       {query.data?.playbooks.length === 0 ? (
         <View className="gap-1 p-4">
           <Text className="text-foreground">No playbooks yet</Text>
-          <Text className="text-sm text-muted-foreground">
+          <Text className="text-sm text-foreground-muted">
             Create a repeatable workflow with your agent, or import YAML.
           </Text>
         </View>
@@ -312,19 +312,19 @@ function PlaybookLibrary({
                   accessibilityRole="button"
                   accessibilityLabel={`More actions for ${playbook.title}`}
                 >
-                  <Text className="text-muted-foreground">•••</Text>
+                  <Text className="text-foreground-muted">•••</Text>
                 </Pressable>
               </Menu>
             </View>
-            <Text className="text-sm text-muted-foreground">{playbook.description}</Text>
-            <Text className="text-xs text-muted-foreground">
+            <Text className="text-sm text-foreground-muted">{playbook.description}</Text>
+            <Text className="text-xs text-foreground-muted">
               {playbook.stepCount} {playbook.stepCount === 1 ? "step" : "steps"}
               {source.kind === "folder" ? " · From source folder" : ""}
               {source.kind === "workspace" ? ` · From ${project?.title ?? "project"}` : ""}
               {playbook.overridesLibrary ? " · Overrides library copy" : ""}
             </Text>
             {playbook.issue ? (
-              <Text accessibilityRole="alert" className="text-destructive">
+              <Text accessibilityRole="alert" className="text-danger-foreground">
                 {playbook.issue.message}
               </Text>
             ) : null}
@@ -344,11 +344,11 @@ function PlaybookLibrary({
         .filter((entry) => entry.source.kind === "folder" || entry.issue)
         .map((entry) => (
           <View key={entry.path} className="gap-2 border-t border-border p-4">
-            <Text className="text-sm text-muted-foreground">
+            <Text className="text-sm text-foreground-muted">
               {entry.source.kind === "folder" ? entry.path : "Environment library"}
             </Text>
             {entry.issue ? (
-              <Text accessibilityRole="alert" className="text-destructive">
+              <Text accessibilityRole="alert" className="text-danger-foreground">
                 {entry.issue.message}
               </Text>
             ) : null}
