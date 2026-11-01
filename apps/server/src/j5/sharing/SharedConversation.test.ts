@@ -78,11 +78,18 @@ const message = (threadId: ThreadId, text: string, extra: Record<string, unknown
   } as unknown as OrchestrationV2Command & { readonly type: "message.dispatch" };
 };
 
-/** Upstream taking a command; an edit leaves the queued run's message holding its text. */
-const upstreamTakes = Effect.fn("test.upstreamTakes")(function* (command: OrchestrationV2Command) {
-  if (command.type !== "queued-run.edit") return command;
-  const sql = yield* SqlClient.SqlClient;
-  yield* sql`
+/**
+ * Upstream taking a command. A message is stored the way upstream records it, with a run in the
+ * state given (`null` records no run); an edit leaves the queued run's message holding its text.
+ */
+const upstreamTakes = (run: "completed" | "queued" | null = "completed") =>
+  Effect.fn("test.upstreamTakes")(function* (command: OrchestrationV2Command) {
+    if (command.type === "message.dispatch") {
+      yield* taken(command.threadId, command.messageId, run, command.text);
+    }
+    if (command.type !== "queued-run.edit") return command;
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`
     UPDATE orchestration_v2_projection_messages
     SET payload_json = json_set(payload_json, '$.text', ${command.text})
     WHERE message_id = (
@@ -90,24 +97,16 @@ const upstreamTakes = Effect.fn("test.upstreamTakes")(function* (command: Orches
       WHERE run_id = ${command.runId}
     )
   `;
-  return command as OrchestrationV2Command;
-});
+    return command as OrchestrationV2Command;
+  });
 
-/**
- * A person's command as upstream would be handed it. A message is then taken in the way
- * upstream records it, with a run in the state given; `null` records no run. An edit is taken
- * as upstream takes one of a queued run.
- */
+/** A person's command as upstream would be handed it, and taken as `upstreamTakes` takes it. */
 const send = Effect.fn("test.send")(function* (
   personId: ParticipantId,
   command: OrchestrationV2Command,
   run: "completed" | "queued" | null = "completed",
 ) {
-  const admitted = yield* (yield* SharedConversation).dispatch(personId, command, upstreamTakes);
-  if (admitted.type === "message.dispatch") {
-    yield* taken(admitted.threadId, admitted.messageId, run, admitted.text);
-  }
-  return admitted;
+  return yield* (yield* SharedConversation).dispatch(personId, command, upstreamTakes(run));
 });
 
 /** A person's message as the agent will read it. */
@@ -647,7 +646,7 @@ it.effect("a thread started in a project already shared is shared from its first
         attachments: [],
       },
     } as unknown as OrchestrationV2ThreadLaunchInput;
-    const admitted = yield* conversation.admitLaunch(owner, launch);
+    const admitted = yield* conversation.launch(owner, launch, Effect.succeed);
     const text = admitted.initialMessage!.text;
     assert.include(text, "Who can write: Jackson (owner), Priya (collaborator).");
     // A new thread has no messages from before.
@@ -659,7 +658,7 @@ it.effect("a thread started in a project already shared is shared from its first
       threadId: "thread:alone",
       projectId: ProjectId.make("project:other"),
     } as OrchestrationV2ThreadLaunchInput;
-    assert.strictEqual(yield* conversation.admitLaunch(owner, elsewhere), elsewhere);
+    assert.strictEqual(yield* conversation.launch(owner, elsewhere, Effect.succeed), elsewhere);
   }).pipe(Effect.provide(conversationLayer)),
 );
 
@@ -944,7 +943,7 @@ it.effect(
         message(threadId, "Mine.", {
           messageId: MessageId.make("approval-feedback:request:pending"),
         }),
-        upstreamTakes,
+        upstreamTakes(null),
       );
       yield* answering(owner, "approval-feedback", {
         commandId: CommandId.make("command:owner-feedback"),
@@ -1185,11 +1184,15 @@ it.effect(
         { scope: { kind: "project", projectId: PROJECT }, level: "collaborator" },
       ]);
       const conversation = yield* SharedConversation;
-      yield* conversation.admitLaunch(owner, {
-        commandId: CommandId.make("command:empty-launch"),
-        threadId: "thread:empty-launch" as ThreadId,
-        projectId: PROJECT,
-      } as unknown as OrchestrationV2ThreadLaunchInput);
+      yield* conversation.launch(
+        owner,
+        {
+          commandId: CommandId.make("command:empty-launch"),
+          threadId: "thread:empty-launch" as ThreadId,
+          projectId: PROJECT,
+        } as unknown as OrchestrationV2ThreadLaunchInput,
+        Effect.succeed,
+      );
       yield* conversation.dispatch(
         owner,
         {
