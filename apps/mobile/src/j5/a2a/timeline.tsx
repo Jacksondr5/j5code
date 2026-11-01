@@ -7,12 +7,14 @@ import type {
   J5UserMessagePresentation,
 } from "@t3tools/client-runtime/j5/user-message";
 import { isSharedNote } from "@t3tools/client-runtime/j5/shared-conversation";
+import type { ReactNode } from "react";
 import { Pressable, View } from "react-native";
 
 import { AppText as Text } from "../../components/ui/AppText";
 import { useOpenLinkedThread } from "../../features/threads/useOpenLinkedThread";
 import { cn } from "../../lib/cn";
 import { useQuietThreadShell } from "../../state/entities";
+import { PersonAvatar } from "../sharing/PersonAvatar";
 import { SharedConversationNote } from "../sharing/SharedConversationNote";
 import {
   presentJ5TimelineNotice,
@@ -123,12 +125,12 @@ export function J5MessageAuthorLine(props: {
       );
     }
     return (
-      <Text className="mb-1 pl-1 text-xs text-foreground-muted" numberOfLines={1}>
+      <PersonLine name={author.name}>
         <Text className="font-t3-medium text-xs text-foreground">
           {author.name ?? "Someone without a name"}
         </Text>
         {author.editedBy === null ? null : ` · edited by ${author.editedBy}`}
-      </Text>
+      </PersonLine>
     );
   }
   if (j5.group === "other-person") {
@@ -138,13 +140,25 @@ export function J5MessageAuthorLine(props: {
       senderThreadTitle: undefined,
     });
     return (
-      <Text className="mb-1 pl-1 text-xs text-foreground-muted" numberOfLines={1}>
+      <PersonLine name={j5.senderName ?? props.timeline.labels.get(j5.senderId) ?? null}>
         <Text className="font-t3-medium text-xs text-foreground">{name}</Text> · via Inbox
-      </Text>
+      </PersonLine>
     );
   }
   if (j5.group !== "participant") return null;
   return <ParticipantAuthorLine {...props} j5={j5} />;
+}
+
+/** Another person's line above their message: their avatar, then their name and what follows. */
+function PersonLine(props: { readonly name: string | null; readonly children: ReactNode }) {
+  return (
+    <View className="mb-1 max-w-[85%] flex-row items-center gap-1.5 pl-1">
+      <PersonAvatar name={props.name} />
+      <Text className="shrink text-xs text-foreground-muted" numberOfLines={1}>
+        {props.children}
+      </Text>
+    </View>
+  );
 }
 
 /** The identity line above a participant's letter: the sender's name and one tag or badge. */

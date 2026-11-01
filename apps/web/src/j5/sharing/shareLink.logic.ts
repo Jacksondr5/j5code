@@ -122,11 +122,3 @@ export function lifetimeLeft(expiresAtMs: number, nowMs: number): string | null 
   const days = Math.round(hours / 24);
   return `${days} ${plural(days, "day", "days")}`;
 }
-
-/** The first one or two letters a person's avatar shows. */
-export function initialsOf(name: string): string {
-  const words = name.trim().split(/\s+/u).filter(Boolean);
-  const letters =
-    words.length > 1 ? `${words[0]![0]}${words[words.length - 1]![0]}` : (words[0]?.[0] ?? "?");
-  return letters.toUpperCase();
-}
