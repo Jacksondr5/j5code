@@ -13,13 +13,12 @@ import { scopedInboxItemKey } from "@t3tools/contracts/j5";
 import { useFocusEffect } from "@react-navigation/native";
 import { useCallback, useState } from "react";
 import { Pressable, RefreshControl, View } from "react-native";
-import { KeyboardAvoidingView } from "react-native-keyboard-controller";
+import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { AppText as Text, AppTextInput as TextInput } from "../../components/ui/AppText";
 import { Button } from "../../components/ui/Button";
 import { EmptyState } from "../../components/ui/EmptyState";
-import { ScreenScrollView } from "../../components/ui/ScreenScrollView";
 import { useMarkdownPreviewStyles } from "../../features/files/FileMarkdownPreview";
 import { useOpenLinkedThread } from "../../features/threads/useOpenLinkedThread";
 import { relativeTime } from "../../lib/time";
@@ -99,55 +98,55 @@ export function InboxScreen() {
     ),
   ];
   return (
-    <KeyboardAvoidingView automaticOffset behavior="padding" className="flex-1 bg-sheet">
-      <ScreenScrollView
-        contentInsetAdjustmentBehavior="automatic"
-        className="flex-1"
-        contentContainerClassName="gap-4 px-4 py-4"
-        keyboardShouldPersistTaps="handled"
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refreshAll} />}
-      >
-        <NativeStackScreenOptions options={{ title: "Inbox" }} />
-        {notices.map((notice) => (
-          <Text key={notice} className="text-sm text-foreground-muted">
-            {notice}
-          </Text>
-        ))}
-        {answers.shownItems.length === 0 ? (
-          loading ? (
-            <Text className="text-foreground-muted">Loading your inbox…</Text>
-          ) : (
-            <EmptyState
-              variant="plain"
-              title="Nothing waiting on you"
-              detail="When an agent asks you something, it shows up here."
-            />
-          )
+    <KeyboardAwareScrollView
+      // Scrolls the answer being typed, and its Answer button below it, clear of the keyboard.
+      bottomOffset={72}
+      className="flex-1 bg-sheet"
+      contentInsetAdjustmentBehavior="automatic"
+      contentContainerClassName="gap-4 px-4 py-4"
+      keyboardShouldPersistTaps="handled"
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refreshAll} />}
+    >
+      <NativeStackScreenOptions options={{ title: "Inbox" }} />
+      {notices.map((notice) => (
+        <Text key={notice} className="text-sm text-foreground-muted">
+          {notice}
+        </Text>
+      ))}
+      {answers.shownItems.length === 0 ? (
+        loading ? (
+          <Text className="text-foreground-muted">Loading your inbox…</Text>
         ) : (
-          <View className="gap-3">
-            {answers.shownItems.map((item) => {
-              const key = scopedInboxItemKey(item);
-              return (
-                <InboxItem
-                  key={key}
-                  item={item}
-                  labels={labels}
-                  showEnvironment={showEnvironment}
-                  closed={answers.closedOf(item)}
-                  answerText={answers.answerText(item)}
-                  onChangeAnswer={(text) => answers.setAnswerText(item, text)}
-                  onAnswer={() => void answers.answer(item)}
-                  delivering={answers.pendingKey === key}
-                  error={answers.errorFor(item)}
-                  anyDelivering={answers.pendingKey !== null}
-                />
-              );
-            })}
-          </View>
-        )}
-        <AnsweredShelf items={answered} labels={labels} showEnvironment={showEnvironment} />
-      </ScreenScrollView>
-    </KeyboardAvoidingView>
+          <EmptyState
+            variant="plain"
+            title="Nothing waiting on you"
+            detail="When an agent asks you something, it shows up here."
+          />
+        )
+      ) : (
+        <View className="gap-3">
+          {answers.shownItems.map((item) => {
+            const key = scopedInboxItemKey(item);
+            return (
+              <InboxItem
+                key={key}
+                item={item}
+                labels={labels}
+                showEnvironment={showEnvironment}
+                closed={answers.closedOf(item)}
+                answerText={answers.answerText(item)}
+                onChangeAnswer={(text) => answers.setAnswerText(item, text)}
+                onAnswer={() => void answers.answer(item)}
+                delivering={answers.pendingKey === key}
+                error={answers.errorFor(item)}
+                anyDelivering={answers.pendingKey !== null}
+              />
+            );
+          })}
+        </View>
+      )}
+      <AnsweredShelf items={answered} labels={labels} showEnvironment={showEnvironment} />
+    </KeyboardAwareScrollView>
   );
 }
 
