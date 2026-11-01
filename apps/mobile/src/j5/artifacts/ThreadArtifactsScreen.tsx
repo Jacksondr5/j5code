@@ -4,8 +4,8 @@ import {
   artifactPreviewKind,
 } from "@t3tools/client-runtime/j5/artifacts";
 import type { ArtifactContent, ArtifactEntry, EnvironmentId, ProjectId } from "@t3tools/contracts";
-import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
-import { useEffect, useState } from "react";
+import { StackActions, useNavigation, type StaticScreenProps } from "@react-navigation/native";
+import { ThreadId } from "@t3tools/contracts";
 import { RefreshControl, ScrollView, View } from "react-native";
 
 import { AppText } from "../../components/ui/AppText";
@@ -13,13 +13,27 @@ import { Button } from "../../components/ui/Button";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { ListRow } from "../../components/ui/ListRow";
 import { ListSection } from "../../components/ui/ListSection";
-import { FileMarkdownPreview } from "../../features/files/FileMarkdownPreview";
-import { fileRoutePathSegments } from "../../features/files/filePath";
+import { useMarkdownPreviewStyles } from "../../features/files/FileMarkdownPreview";
+import {
+  fileRoutePathSegments,
+  resolveWorkspaceRelativeFilePath,
+} from "../../features/files/filePath";
 import { ThreadMarkdownImageView } from "../../features/threads/ThreadMarkdownImage";
+import { resolveMarkdownLinkPresentation } from "../../lib/markdownLinks";
+import { tryOpenExternalUrl } from "../../lib/openExternalUrl";
 import { relativeTime } from "../../lib/time";
+import { SelectableMarkdownText } from "../../native/SelectableMarkdownText";
+import { useMarkdownImageSource } from "../../native/useMarkdownImageSource";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { useThreadSelection } from "../../state/use-thread-selection";
 import { listArtifacts, readArtifact } from "./artifactClient";
+import {
+  artifactLinkContextMenu,
+  onArtifactLinkMenuAction,
+  openArtifactLink,
+  type ArtifactLinkContext,
+} from "./artifactLinks";
+import { useServerRead } from "./serverRead";
 
 type ThreadArtifactsParams = StaticScreenProps<{
   readonly environmentId: string;
@@ -31,48 +45,6 @@ type ThreadArtifactParams = StaticScreenProps<{
   readonly threadId: string;
   readonly path: string | string[];
 }>;
-
-type Load<T> =
-  | { readonly status: "loading" }
-  | { readonly status: "error"; readonly message: string }
-  | { readonly status: "ready"; readonly value: T };
-
-/** One read from the server, again on each pull to refresh; a stale answer is dropped. */
-function useServerRead<T>(key: string | null, read: () => Promise<T>) {
-  const [refreshes, setRefreshes] = useState(0);
-  const [state, setState] = useState<{ readonly key: string; readonly load: Load<T> } | null>(null);
-  const loadKey = key === null ? null : `${key}:${refreshes}`;
-  // oxlint-disable-next-line t3code/react-effect-budget -- reads the artifact store on the server, which React can't derive.
-  useEffect(() => {
-    if (loadKey === null) return;
-    let current = true;
-    read().then(
-      (value) => current && setState({ key: loadKey, load: { status: "ready", value } }),
-      (error: unknown) =>
-        current &&
-        setState({
-          key: loadKey,
-          load: {
-            status: "error",
-            message: error instanceof Error ? error.message : "Couldn't read artifacts.",
-          },
-        }),
-    );
-    return () => {
-      current = false;
-    };
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- `read` uses only the inputs `key` names.
-  }, [loadKey]);
-  const load: Load<T> =
-    state === null || (state.key !== loadKey && state.load.status !== "ready")
-      ? { status: "loading" }
-      : state.load;
-  return {
-    load,
-    refreshing: state !== null && state.key !== loadKey,
-    refresh: () => setRefreshes((count) => count + 1),
-  };
-}
 
 /** Artifacts belong to the thread's project, on the thread's server. */
 function useArtifactProject(params: { readonly environmentId: string }) {
@@ -131,16 +103,73 @@ export function ThreadArtifactsScreen(props: ThreadArtifactsParams) {
                 .filter((part) => part !== null)
                 .join(" · ")}
               onPress={() =>
-                navigation.navigate("ThreadArtifact", {
-                  environmentId,
-                  threadId,
-                  path: fileRoutePathSegments(entry.path),
-                })
+                navigation.dispatch(
+                  StackActions.push("ThreadArtifact", {
+                    environmentId,
+                    threadId,
+                    path: fileRoutePathSegments(entry.path),
+                  }),
+                )
               }
             />
           ))}
         </ListSection>
       )}
+    </ScrollView>
+  );
+}
+
+/**
+ * An artifact's Markdown. Its `artifacts/…` links open the viewer, as on web, and its other links
+ * resolve from the workspace root, as web's do.
+ */
+function ArtifactMarkdown(props: {
+  readonly markdown: string;
+  readonly links: ArtifactLinkContext & { readonly workspaceRoot: string };
+  readonly refreshing: boolean;
+  readonly onRefresh: () => void;
+}) {
+  const navigation = useNavigation();
+  const styles = useMarkdownPreviewStyles();
+  const { links } = props;
+  const resolveImageSource = useMarkdownImageSource({
+    environmentId: links.environmentId as EnvironmentId,
+    threadId: ThreadId.make(links.threadId),
+    workspaceRoot: links.workspaceRoot,
+  });
+  const onLinkPress = (href: string) => {
+    if (openArtifactLink(href, links)) return;
+    const presentation = resolveMarkdownLinkPresentation(href);
+    const relativePath =
+      presentation.kind === "file"
+        ? resolveWorkspaceRelativeFilePath(links.workspaceRoot, presentation.path)
+        : null;
+    if (relativePath !== null) {
+      navigation.navigate("ThreadFile", {
+        environmentId: links.environmentId,
+        threadId: links.threadId,
+        path: fileRoutePathSegments(relativePath),
+      });
+      return;
+    }
+    if (presentation.href) void tryOpenExternalUrl(presentation.href, "markdown-link");
+  };
+  return (
+    <ScrollView
+      className="flex-1"
+      contentContainerStyle={{ padding: 18 }}
+      refreshControl={<RefreshControl refreshing={props.refreshing} onRefresh={props.onRefresh} />}
+    >
+      <SelectableMarkdownText
+        markdown={props.markdown}
+        textStyle={styles.nativeTextStyle}
+        resolveImageSource={resolveImageSource}
+        onLinkPress={onLinkPress}
+        fileContextMenu={(href) => artifactLinkContextMenu(href, links.workspaceRoot)}
+        onFileContextMenuAction={(href, actionId) =>
+          onArtifactLinkMenuAction(href, actionId, links)
+        }
+      />
     </ScrollView>
   );
 }
@@ -213,17 +242,13 @@ export function ThreadArtifactScreen(props: ThreadArtifactParams) {
     artifactPreviewKind(load.value) === "markdown" &&
     workspaceRoot !== null
   ) {
-    // Relative links in an artifact resolve from the workspace root, as on web; a bare file
-    // name puts the markdown's directory there.
     return (
       <View className="flex-1 bg-sheet">
         {header}
-        <FileMarkdownPreview
-          cwd={workspaceRoot}
-          environmentId={project.environmentId}
+        <ArtifactMarkdown
           markdown={load.value.content}
-          relativePath={path.split("/").at(-1) ?? path}
-          threadId={null}
+          links={{ navigation, environmentId, threadId, workspaceRoot }}
+          refreshing={refreshing}
           onRefresh={refresh}
         />
       </View>

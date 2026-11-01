@@ -255,7 +255,11 @@ import {
   resolveWorkspaceRelativeFilePath,
 } from "../files/filePath";
 import { waitForThreadShellReady } from "./threadForkNavigation";
-import { openArtifactLink } from "../../j5/artifacts/artifactLinks";
+import {
+  artifactLinkContextMenu,
+  onArtifactLinkMenuAction,
+  openArtifactLink,
+} from "../../j5/artifacts/artifactLinks";
 import { resolveUserMessageIntentBadge } from "./userMessageIntentBadge";
 import { fileChipClipboardPath, fileChipMenu, resolveFileChipTarget } from "./fileChipMenu";
 import { useFileChipShare } from "./useFileChipShare";
@@ -2309,6 +2313,12 @@ export const ThreadFeed = memo(function ThreadFeed({
       source
     );
   };
+  const artifactLinkContext = {
+    navigation,
+    environmentId: String(props.environmentId),
+    threadId: String(props.threadId),
+    workspaceRoot: props.workspaceRoot,
+  };
   const onMarkdownLinkPress = (href: string, imageEmbed = false) => {
     markdownLinkRequest.current?.abort();
     const request = new AbortController();
@@ -2319,15 +2329,7 @@ export const ThreadFeed = memo(function ThreadFeed({
       if (instructionsPath) openSkillInstructions(instructionsPath);
       return;
     }
-    if (
-      openArtifactLink(href, {
-        navigation,
-        environmentId: String(props.environmentId),
-        threadId: String(props.threadId),
-        workspaceRoot: props.workspaceRoot,
-      })
-    )
-      return;
+    if (openArtifactLink(href, artifactLinkContext)) return;
     const target = resolveLinkedThread(href);
     if (target) {
       openLinkedThread({
@@ -2479,6 +2481,8 @@ export const ThreadFeed = memo(function ThreadFeed({
     onImagePress: (href) => onMarkdownLinkPress(href, true),
     resolveImageSource,
     fileContextMenu: (href) => {
+      const artifactMenu = artifactLinkContextMenu(href, props.workspaceRoot);
+      if (artifactMenu) return artifactMenu;
       const skill = enrichedSkillReference(href, props.skills);
       if (skill) {
         return {
@@ -2508,6 +2512,7 @@ export const ThreadFeed = memo(function ThreadFeed({
       return target ? fileChipMenu(target) : undefined;
     },
     onFileContextMenuAction: (href, actionId) => {
+      if (onArtifactLinkMenuAction(href, actionId, artifactLinkContext)) return;
       const skill = enrichedSkillReference(href, props.skills);
       if (skill) {
         const instructionsPath = enrichedSkillInstructionsPath(skill);

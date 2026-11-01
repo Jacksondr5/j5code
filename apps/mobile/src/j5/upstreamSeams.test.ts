@@ -182,7 +182,11 @@ const SEAMS: ReadonlyArray<Seam> = [
     file: "features/threads/ThreadFeed.tsx",
     record: "case 97: artifact link resolver",
     from: "../../j5/artifacts/artifactLinks",
-    reaches: ["openArtifactLink(href, {"],
+    reaches: [
+      "openArtifactLink(href, artifactLinkContext)",
+      "artifactLinkContextMenu(href, props.workspaceRoot)",
+      "onArtifactLinkMenuAction(href, actionId, artifactLinkContext)",
+    ],
   },
   {
     file: "App.tsx",
