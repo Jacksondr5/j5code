@@ -48,6 +48,7 @@ import { useConnectOnboardingNavigation } from "./features/cloud/connectOnboardi
 import { AttachmentFileScreen } from "./features/files/AttachmentFileScreen";
 import { ThreadFilesTreeScreen, ThreadFileScreen } from "./features/files/ThreadFilesRouteScreen";
 import { j5ThreadArtifactRoutes } from "./j5/artifacts/routes";
+import { j5InboxRoutes } from "./j5/inbox/routes";
 import { AdaptiveWorkspaceLayout } from "./features/layout/AdaptiveWorkspaceLayout";
 import { selectedPullRequestKey } from "./features/pull-requests/pullRequestSelection";
 import {
@@ -977,6 +978,7 @@ const RootStackConfig = createWorkspaceStackNavigator({
         sheetGrabberVisible: true,
       },
     }),
+    ...j5InboxRoutes(GLASS_HEADER_OPTIONS),
     ...SETTINGS_SCREENS,
     SettingsLegal: createNativeStackScreen({
       screen: SettingsLegalRouteScreen,
