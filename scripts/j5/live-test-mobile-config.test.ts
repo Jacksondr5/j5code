@@ -19,6 +19,10 @@ describe("mobileRigConfigPath", () => {
       "/x/j5code/mobile-rig.json",
     );
     assert.strictEqual(mobileRigConfigPath({ J5_MOBILE_RIG_CONFIG: "/a.json" }, "/h"), "/a.json");
+    assert.strictEqual(
+      mobileRigConfigPath({ J5_MOBILE_RIG_CONFIG: "~/rigs/m.json" }, "/h"),
+      "/h/rigs/m.json",
+    );
   });
 });
 

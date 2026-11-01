@@ -6,6 +6,7 @@
  * the file, the defaults below serve a single machine: iOS on this Mac, Android on this host.
  */
 import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
 import { LiveTestRefusal } from "./setup-agent-live-test.ts";
@@ -52,7 +53,7 @@ const DEFAULT_REMOTE_CHECKOUT = "~/.cache/j5-mobile-rig/checkout";
 
 export function mobileRigConfigPath(environment: NodeJS.ProcessEnv, home: string): string {
   const explicit = environment.J5_MOBILE_RIG_CONFIG?.trim();
-  if (explicit) return explicit;
+  if (explicit) return NodePath.resolve(expandHome(explicit, home));
   const configHome = environment.XDG_CONFIG_HOME?.trim() || NodePath.join(home, ".config");
   return NodePath.join(configHome, "j5code", "mobile-rig.json");
 }
@@ -159,8 +160,11 @@ let loaded: MobileRigConfig | undefined;
 /** This machine's settings, read once per command. */
 export function mobileRigConfig(): MobileRigConfig {
   if (loaded !== undefined) return loaded;
-  const home = process.env.HOME ?? "";
-  const path = mobileRigConfigPath(process.env, home);
+  const path = mobileRigConfigPath(process.env, NodeOS.homedir());
+  // A file someone named must be there; only the default location may be absent.
+  if (process.env.J5_MOBILE_RIG_CONFIG?.trim() && !NodeFS.existsSync(path)) {
+    throw new LiveTestRefusal(`J5_MOBILE_RIG_CONFIG names ${path}, which does not exist.`);
+  }
   const text = NodeFS.existsSync(path) ? NodeFS.readFileSync(path, "utf8") : undefined;
   // oxlint-disable-next-line t3code/no-global-process-runtime -- a standalone CLI with no Effect runtime.
   loaded = parseMobileRigConfig({ path, text, platform: process.platform });
