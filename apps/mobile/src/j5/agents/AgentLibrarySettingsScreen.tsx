@@ -10,6 +10,7 @@ import {
 import { AgentEditorModal } from "./AgentEditorModal";
 import { AgentFolderPickerModal } from "./AgentFolderPickerModal";
 import { sendWhenReconnected } from "./watchEnvironmentSessions";
+import { personaRowActions } from "./personaRowActions";
 import { Menu } from "../../components/ui/Menu";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import {
@@ -644,6 +645,11 @@ function PersonaRow(props: {
     .filter(Boolean)
     .join(" · ");
   const unavailable = !persona.removed && persona.availability !== "available";
+  const actions = personaRowActions(
+    { removed: persona.removed, editable: props.onEdit !== null },
+    props.otherEnvironments.length > 0,
+  );
+  const onEdit = actions.includes("edit") ? props.onEdit : null;
   const content = (
     <>
       <Text
@@ -672,13 +678,13 @@ function PersonaRow(props: {
         props.borderTop && "border-t border-border-subtle",
       )}
     >
-      {props.onEdit ? (
+      {onEdit ? (
         <Pressable
           accessibilityRole="button"
           accessibilityLabel={`Edit ${persona.displayName}`}
           accessibilityHint={persona.description}
           disabled={props.locked}
-          onPress={props.onEdit}
+          onPress={onEdit}
           className="min-w-0 flex-1 gap-0.5 py-1 active:opacity-70"
         >
           {content}
@@ -702,40 +708,41 @@ function PersonaRow(props: {
         />
       )}
       <Menu
-        actions={[
-          ...(props.onEdit
-            ? [{ id: "edit", title: "Edit", attributes: { disabled: props.locked } }]
-            : []),
-          {
-            id: "duplicate",
-            title: "Duplicate as personal persona",
-            attributes: { disabled: props.locked || persona.availability === "unsupported" },
-          },
-          { id: "export", title: "Export YAML", attributes: { disabled: props.busy } },
-          ...(props.otherEnvironments.length === 0
-            ? []
-            : [
-                {
-                  id: "copy",
-                  title: "Copy to environment",
-                  attributes: { disabled: props.busy },
-                  subactions: props.otherEnvironments.map((environment) => ({
-                    id: `copy:${environment.environmentId}`,
-                    title: environment.environmentLabel,
-                  })),
-                },
-              ]),
-          persona.removed
-            ? { id: "restore", title: "Restore", attributes: { disabled: props.locked } }
-            : {
-                id: "remove",
+        actions={actions.map((action) => {
+          switch (action) {
+            case "edit":
+              return { id: action, title: "Edit", attributes: { disabled: props.locked } };
+            case "duplicate":
+              return {
+                id: action,
+                title: "Duplicate as personal persona",
+                attributes: { disabled: props.locked || persona.availability === "unsupported" },
+              };
+            case "export":
+              return { id: action, title: "Export YAML", attributes: { disabled: props.busy } };
+            case "copy":
+              return {
+                id: action,
+                title: "Copy to environment",
+                attributes: { disabled: props.busy },
+                subactions: props.otherEnvironments.map((environment) => ({
+                  id: `copy:${environment.environmentId}`,
+                  title: environment.environmentLabel,
+                })),
+              };
+            case "remove":
+              return {
+                id: action,
                 title: "Remove",
                 attributes: { destructive: true, disabled: props.locked },
-              },
-        ]}
+              };
+            case "restore":
+              return { id: action, title: "Restore", attributes: { disabled: props.locked } };
+          }
+        })}
         onPressAction={({ nativeEvent }) => {
           const action = nativeEvent.event;
-          if (action === "edit") props.onEdit?.();
+          if (action === "edit") onEdit?.();
           else if (action === "duplicate") props.onDuplicate();
           else if (action === "export") props.onExport();
           else if (action === "remove") props.onRemove();
