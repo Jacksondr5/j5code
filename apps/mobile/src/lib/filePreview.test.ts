@@ -170,6 +170,14 @@ vi.mock("../state/session", () => ({
   usePreparedConnection: () => ({ _tag: "Some", value: { httpBaseUrl: "https://example.com" } }),
 }));
 vi.mock("../state/atom-registry", () => ({ appAtomRegistry: {} }));
+vi.mock("../j5/a2a/timelineState", () => ({
+  useJ5Timeline: (environmentId: string) => ({
+    environmentId,
+    viewerParticipantId: null,
+    labels: new Map(),
+    threads: new Map(),
+  }),
+}));
 vi.mock("../state/threads", () => ({ environmentThreadShells: {}, threadEnvironment: {} }));
 vi.mock("../state/entities", () => ({
   useLiveThreadLinkLabels: (text: string) => text,

@@ -1,21 +1,17 @@
-import { useAtomValue } from "@effect/atom-react";
 import {
   j5MessageAuthorName,
   j5SenderThreadRef,
 } from "@t3tools/client-runtime/j5/participant-identity";
-import {
-  participantIdsForJ5UserMessage,
-  type J5UserMessageInput,
+import type {
+  J5UserMessageInput,
+  J5UserMessagePresentation,
 } from "@t3tools/client-runtime/j5/user-message";
-import type { EnvironmentId } from "@t3tools/contracts";
 import { Pressable, View } from "react-native";
 
 import { AppText as Text } from "../../components/ui/AppText";
 import { useOpenLinkedThread } from "../../features/threads/useOpenLinkedThread";
 import { cn } from "../../lib/cn";
 import { useQuietThreadShell } from "../../state/entities";
-import { j5Sharing } from "../sharing/guestAccess";
-import { useParticipantIdentities } from "./participantIdentities";
 import {
   presentJ5TimelineNotice,
   type J5FeedMessagePresentation,
@@ -23,22 +19,6 @@ import {
 } from "./timelinePresentation";
 
 export { resolveJ5FeedMessage, type J5Timeline } from "./timelinePresentation";
-
-export function useJ5Timeline(
-  environmentId: EnvironmentId,
-  messages: ReadonlyArray<J5UserMessageInput>,
-): J5Timeline {
-  const access = useAtomValue(j5Sharing.connectionAccess(environmentId));
-  const identities = useParticipantIdentities(
-    environmentId,
-    messages.flatMap((message) => participantIdsForJ5UserMessage(message)),
-  );
-  return {
-    ...identities,
-    environmentId,
-    viewerParticipantId: access?.kind === "person" ? access.personId : null,
-  };
-}
 
 /** Silence lines and raw cards in place of upstream's row (`presentJ5TimelineNotice`). */
 export function renderJ5TimelineNotice(input: {
@@ -122,25 +102,42 @@ export function J5MessageAuthorLine(props: {
   readonly timeline: J5Timeline;
 }) {
   const j5 = props.presentation.j5;
-  const sender = useSenderThread(props.message, props.presentation, props.timeline);
   if (j5 === null) return null;
   if (j5.group === "person") {
     return j5.viaInbox ? (
       <Text className="mb-1 pr-1 text-2xs text-foreground-muted">You · via Inbox</Text>
     ) : null;
   }
-  const name = j5MessageAuthorName({
-    presentation: j5,
-    participantLabels: props.timeline.labels,
-    senderThreadTitle: sender.title,
-  });
   if (j5.group === "other-person") {
+    const name = j5MessageAuthorName({
+      presentation: j5,
+      participantLabels: props.timeline.labels,
+      senderThreadTitle: undefined,
+    });
     return (
       <Text className="mb-1 pl-1 text-xs text-foreground-muted" numberOfLines={1}>
         <Text className="font-t3-medium text-xs text-foreground">{name}</Text> · via Inbox
       </Text>
     );
   }
+  if (j5.group !== "participant") return null;
+  return <ParticipantAuthorLine {...props} j5={j5} />;
+}
+
+/** The identity line above a participant's letter: the sender's name and one tag or badge. */
+function ParticipantAuthorLine(props: {
+  readonly message: J5UserMessageInput & { readonly senderThreadId?: string | undefined };
+  readonly presentation: J5FeedMessagePresentation;
+  readonly timeline: J5Timeline;
+  readonly j5: Extract<J5UserMessagePresentation, { group: "participant" }>;
+}) {
+  const { j5 } = props;
+  const sender = useSenderThread(props.message, props.presentation, props.timeline);
+  const name = j5MessageAuthorName({
+    presentation: j5,
+    participantLabels: props.timeline.labels,
+    senderThreadTitle: sender.title,
+  });
   return (
     <View className="mb-1 max-w-[85%] flex-row items-center gap-1.5 pl-1">
       <Text className="shrink font-t3-medium text-xs text-foreground" numberOfLines={1}>

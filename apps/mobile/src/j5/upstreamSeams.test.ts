@@ -104,9 +104,16 @@ const SEAMS: ReadonlyArray<Seam> = [
       "renderJ5TimelineNotice({ message, timestampLabel })",
       "<J5MessageAuthorLine",
       "<J5OpenSenderThread",
+      'from "../../j5/a2a/timelineState"',
       "useJ5Timeline(",
       "resolveJ5FeedMessage(entry.message, j5Timeline)",
     ],
+  },
+  {
+    file: "lib/filePreview.test.ts",
+    record: "case 97: Timeline delegate",
+    from: "",
+    reaches: ['vi.mock("../j5/a2a/timelineState"'],
   },
   {
     file: "features/threads/ThreadQueueControl.tsx",

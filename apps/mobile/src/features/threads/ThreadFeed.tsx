@@ -271,9 +271,9 @@ import {
   J5OpenSenderThread,
   renderJ5TimelineNotice,
   resolveJ5FeedMessage,
-  useJ5Timeline,
   type J5Timeline,
 } from "../../j5/a2a/timeline";
+import { useJ5Timeline } from "../../j5/a2a/timelineState";
 import { useSelectWorkspaceDetail } from "../workspace/useSelectWorkspaceDetail";
 
 const WIDE_MARKDOWN_BLOCK_OPTIONS = {
