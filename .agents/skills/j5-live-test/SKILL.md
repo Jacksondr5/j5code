@@ -202,20 +202,21 @@ Mac reached over SSH; Android runs on this machine.
    open holds the device against the next tester. `stop` resets the device (a
    Simulator is erased, an Android AVD deleted) and releases it.
 
-Machine settings live in `~/.config/j5code/mobile-rig.json` (or the file
-`J5_MOBILE_RIG_CONFIG` names), never in the repository. Without the file, the
+Machine settings live in `$XDG_CONFIG_HOME/j5code/mobile-rig.json` (normally
+`~/.config/j5code/mobile-rig.json`), or the file `J5_MOBILE_RIG_CONFIG` names,
+never in the repository. Without the file, the
 defaults serve one machine. Setup names the setting to change when a default
 does not fit.
 
-| Setting          | What it sets                                     | Default                              |
-| ---------------- | ------------------------------------------------ | ------------------------------------ |
-| `ios.host`       | `"local"`, or `{ "ssh", "checkout", "envFile" }` | this Mac on macOS; none elsewhere    |
-| `ios.simulators` | a list of names: Simulators the rig may erase    | names starting `j5-test-`            |
-| `ios.maxBooted`  | Simulators booted on the iOS host at once        | 1                                    |
-| `android.sdk`    | the Android SDK                                  | `ANDROID_HOME`, then the usual place |
-| `android.slots`  | emulators at once                                | 2                                    |
-| `ports`          | `{ "first", "last" }` for the server and Metro   | 20000-29999                          |
-| `phone.host`     | the address your phone reaches                   | `"tailscale"`                        |
+| Setting          | What it sets                                     | Default                                                  |
+| ---------------- | ------------------------------------------------ | -------------------------------------------------------- |
+| `ios.host`       | `"local"`, or `{ "ssh", "checkout", "envFile" }` | this Mac on macOS; none elsewhere                        |
+| `ios.simulators` | a list of names: Simulators the rig may erase    | names starting `j5-test-`                                |
+| `ios.maxBooted`  | Simulators booted on the iOS host at once        | 1                                                        |
+| `android.sdk`    | the Android SDK                                  | `ANDROID_HOME`, `ANDROID_SDK_ROOT`, then the usual place |
+| `android.slots`  | emulators at once                                | 2                                                        |
+| `ports`          | `{ "first", "last" }` for the server and Metro   | 20000-29999                                              |
+| `phone.host`     | the address your phone reaches                   | `"tailscale"`                                            |
 
 - Devices come from a pool. When it is taken, setup refuses and names who
   holds each device; it does not wait. Use only the device you claimed: `stop`
