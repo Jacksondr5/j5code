@@ -82,8 +82,8 @@ function NameQuestion({
                 ? { kind: "new", name: typed }
                 : { kind: "person", personId: choice },
           });
-    setBusy(false);
     if (result._tag === "Failure") {
+      setBusy(false);
       const cause = squashAtomCommandFailure(result);
       setError(
         nameIsInUse(cause)
@@ -95,7 +95,8 @@ function NameQuestion({
       return;
     }
     // A claimed device's session is ended for renewal, which reconnects it and reads its access
-    // again. The first owner keeps their session, so their access is read again here.
+    // again, closing this; it stays "Saving…" until then, and the people list's failed re-read
+    // during the renewal is not shown. The first owner's access is read again here.
     j5Sharing.refreshConnectionAccess(appAtomRegistry, environmentId);
   };
 
@@ -168,7 +169,7 @@ function NameQuestion({
               </ListSection>
             ) : null}
             {naming ? nameInput(people.length > 0 ? "Someone new" : "Your name") : null}
-            {claimable.error === null ? null : (
+            {claimable.error === null || busy ? null : (
               <Text className="text-sm text-foreground-muted">
                 The people on this server could not be listed: {claimable.error}
               </Text>
