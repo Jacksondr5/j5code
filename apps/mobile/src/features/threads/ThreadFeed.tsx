@@ -1753,7 +1753,9 @@ function renderFeedEntry(
                 <UserMessageCopyButton
                   text={presentation.text}
                   onCopy={
-                    message.context && presentation.attribution !== "guest" && !presentation.j5
+                    message.context &&
+                    presentation.attribution !== "guest" &&
+                    !presentation.j5?.unwrapped
                       ? () =>
                           writeComposerContextClipboard(message.text, {
                             version: 1,
