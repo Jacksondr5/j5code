@@ -123,73 +123,75 @@ function NameQuestion({
   return (
     // Full screen, so it can't be swiped away: the question can't be put off.
     <Modal visible animationType="slide" presentationStyle="fullScreen" onRequestClose={() => {}}>
-      {/* Inline flex: on Android a `flex-1` class left this Modal's content zero-height. */}
-      <SafeAreaView className="bg-screen" style={{ flex: 1 }}>
-        <KeyboardAvoidingView automaticOffset behavior="padding" style={{ flex: 1 }}>
-          <ScrollView keyboardShouldPersistTaps="handled" contentContainerClassName="gap-5 p-5">
-            <View className="gap-2">
-              <Text accessibilityRole="header" className="text-2xl font-t3-semibold">
-                What should people and agents on {serverName} call you?
-              </Text>
-              {kind === "claim" ? (
-                <Text className="text-foreground-muted">
-                  This device is paired but the server does not know who it belongs to.
+      {/* SafeAreaView takes no className, so the theme surface and flex go on a View. */}
+      <View className="flex-1 bg-screen">
+        <SafeAreaView style={{ flex: 1 }}>
+          <KeyboardAvoidingView automaticOffset behavior="padding" style={{ flex: 1 }}>
+            <ScrollView keyboardShouldPersistTaps="handled" contentContainerClassName="gap-5 p-5">
+              <View className="gap-2">
+                <Text accessibilityRole="header" className="text-2xl font-t3-semibold">
+                  What should people and agents on {serverName} call you?
                 </Text>
+                {kind === "claim" ? (
+                  <Text className="text-foreground-muted">
+                    This device is paired but the server does not know who it belongs to.
+                  </Text>
+                ) : null}
+              </View>
+              {people.length > 0 ? (
+                <ListSection>
+                  {people.map((person, index) => {
+                    const level = offeredLevel(person.levels);
+                    return (
+                      <ListChoiceRow
+                        key={person.personId}
+                        label={person.name}
+                        description={level === null ? undefined : levelLabel(level)}
+                        selected={choice === person.personId}
+                        separated={index > 0}
+                        disabled={busy}
+                        onPress={() => {
+                          setChoice(person.personId);
+                          setError(null);
+                        }}
+                      />
+                    );
+                  })}
+                  <ListChoiceRow
+                    label="Someone new"
+                    selected={choice === SOMEONE_NEW}
+                    separated
+                    disabled={busy}
+                    onPress={() => {
+                      setChoice(SOMEONE_NEW);
+                      setError(null);
+                    }}
+                  />
+                </ListSection>
               ) : null}
-            </View>
-            {people.length > 0 ? (
-              <ListSection>
-                {people.map((person, index) => {
-                  const level = offeredLevel(person.levels);
-                  return (
-                    <ListChoiceRow
-                      key={person.personId}
-                      label={person.name}
-                      description={level === null ? undefined : levelLabel(level)}
-                      selected={choice === person.personId}
-                      separated={index > 0}
-                      disabled={busy}
-                      onPress={() => {
-                        setChoice(person.personId);
-                        setError(null);
-                      }}
-                    />
-                  );
-                })}
-                <ListChoiceRow
-                  label="Someone new"
-                  selected={choice === SOMEONE_NEW}
-                  separated
-                  disabled={busy}
-                  onPress={() => {
-                    setChoice(SOMEONE_NEW);
-                    setError(null);
-                  }}
-                />
-              </ListSection>
-            ) : null}
-            {naming ? nameInput(people.length > 0 ? "Someone new" : "Your name") : null}
-            {claimable.error === null || busy ? null : (
-              <Text className="text-sm text-foreground-muted">
-                The people on this server could not be listed: {claimable.error}
-              </Text>
-            )}
-            {error === null ? null : (
-              <Text accessibilityRole="alert" className="text-sm text-danger-foreground">
-                {error}
-              </Text>
-            )}
-            <Button
-              label={busy ? "Saving…" : "Continue"}
-              tone="primary"
-              fullWidth
-              loading={busy}
-              disabled={naming && name.trim() === ""}
-              onPress={() => void save()}
-            />
-          </ScrollView>
-        </KeyboardAvoidingView>
-      </SafeAreaView>
+              {naming ? nameInput(people.length > 0 ? "Someone new" : "Your name") : null}
+              {claimable.error === null || busy ? null : (
+                <Text className="text-sm text-foreground-muted">
+                  The people on this server could not be listed: {claimable.error}
+                </Text>
+              )}
+              {error === null ? null : (
+                <Text accessibilityRole="alert" className="text-sm text-danger-foreground">
+                  {error}
+                </Text>
+              )}
+              <Button
+                label={busy ? "Saving…" : "Continue"}
+                tone="primary"
+                fullWidth
+                loading={busy}
+                disabled={naming && name.trim() === ""}
+                onPress={() => void save()}
+              />
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </SafeAreaView>
+      </View>
     </Modal>
   );
 }

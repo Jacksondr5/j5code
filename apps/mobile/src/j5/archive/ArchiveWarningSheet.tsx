@@ -179,29 +179,32 @@ export function ArchiveWarningHost() {
       presentationStyle={Platform.OS === "ios" ? "pageSheet" : "fullScreen"}
       onRequestClose={() => answer(false)}
     >
-      {/* A Modal is its own native hierarchy, so it measures its own safe area. */}
+      {/* A Modal is its own native hierarchy, so it measures its own safe area. The theme's
+          surface goes on a View, as upstream's sheets do: SafeAreaView doesn't take className. */}
       <SafeAreaProvider style={{ flex: 1 }}>
-        <SafeAreaView style={{ flex: 1 }} className="bg-sheet">
-          <AppText textRole="title" className="px-5 pb-2 pt-5 font-t3-bold text-foreground">
-            {warning.title}
-          </AppText>
-          <ScrollView className="flex-1" contentContainerClassName="px-5 pb-6 pt-2">
-            {warning.payload === null ? null : <ArchiveWarningFacts payload={warning.payload} />}
-          </ScrollView>
-          <View className="flex-row gap-3 border-t border-separator px-5 pb-2 pt-3">
-            <View className="flex-1">
-              <Button label="Cancel" fullWidth onPress={() => answer(false)} />
+        <View className="flex-1 bg-sheet">
+          <SafeAreaView style={{ flex: 1 }}>
+            <AppText textRole="title" className="px-5 pb-2 pt-5 font-t3-bold text-foreground">
+              {warning.title}
+            </AppText>
+            <ScrollView className="flex-1" contentContainerClassName="px-5 pb-6 pt-2">
+              {warning.payload === null ? null : <ArchiveWarningFacts payload={warning.payload} />}
+            </ScrollView>
+            <View className="flex-row gap-3 border-t border-separator px-5 pb-2 pt-3">
+              <View className="flex-1">
+                <Button label="Cancel" fullWidth onPress={() => answer(false)} />
+              </View>
+              <View className="flex-1">
+                <Button
+                  label={warning.confirmLabel}
+                  tone="danger"
+                  fullWidth
+                  onPress={() => answer(true)}
+                />
+              </View>
             </View>
-            <View className="flex-1">
-              <Button
-                label={warning.confirmLabel}
-                tone="danger"
-                fullWidth
-                onPress={() => answer(true)}
-              />
-            </View>
-          </View>
-        </SafeAreaView>
+          </SafeAreaView>
+        </View>
       </SafeAreaProvider>
     </Modal>
   );
