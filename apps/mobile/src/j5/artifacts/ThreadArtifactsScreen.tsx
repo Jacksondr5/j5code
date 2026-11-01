@@ -6,13 +6,14 @@ import {
 import type { ArtifactContent, ArtifactEntry, EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { StackActions, useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { ThreadId } from "@t3tools/contracts";
-import { RefreshControl, ScrollView, View } from "react-native";
+import { RefreshControl, View } from "react-native";
 
 import { AppText } from "../../components/ui/AppText";
 import { Button } from "../../components/ui/Button";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { ListRow } from "../../components/ui/ListRow";
 import { ListSection } from "../../components/ui/ListSection";
+import { ScreenScrollView } from "../../components/ui/ScreenScrollView";
 import { useMarkdownPreviewStyles } from "../../features/files/FileMarkdownPreview";
 import {
   fileRoutePathSegments,
@@ -72,7 +73,8 @@ export function ThreadArtifactsScreen(props: ThreadArtifactsParams) {
     () => listArtifacts({ environmentId: project.environmentId, projectId: project.projectId! }),
   );
   return (
-    <ScrollView
+    <ScreenScrollView
+      contentInsetAdjustmentBehavior="automatic"
       className="flex-1 bg-sheet"
       contentContainerClassName="gap-4 px-4 py-4"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
@@ -115,7 +117,7 @@ export function ThreadArtifactsScreen(props: ThreadArtifactsParams) {
           ))}
         </ListSection>
       )}
-    </ScrollView>
+    </ScreenScrollView>
   );
 }
 
@@ -126,8 +128,6 @@ export function ThreadArtifactsScreen(props: ThreadArtifactsParams) {
 function ArtifactMarkdown(props: {
   readonly markdown: string;
   readonly links: ArtifactLinkContext & { readonly workspaceRoot: string };
-  readonly refreshing: boolean;
-  readonly onRefresh: () => void;
 }) {
   const navigation = useNavigation();
   const styles = useMarkdownPreviewStyles();
@@ -155,22 +155,14 @@ function ArtifactMarkdown(props: {
     if (presentation.href) void tryOpenExternalUrl(presentation.href, "markdown-link");
   };
   return (
-    <ScrollView
-      className="flex-1"
-      contentContainerStyle={{ padding: 18 }}
-      refreshControl={<RefreshControl refreshing={props.refreshing} onRefresh={props.onRefresh} />}
-    >
-      <SelectableMarkdownText
-        markdown={props.markdown}
-        textStyle={styles.nativeTextStyle}
-        resolveImageSource={resolveImageSource}
-        onLinkPress={onLinkPress}
-        fileContextMenu={(href) => artifactLinkContextMenu(href, links.workspaceRoot)}
-        onFileContextMenuAction={(href, actionId) =>
-          onArtifactLinkMenuAction(href, actionId, links)
-        }
-      />
-    </ScrollView>
+    <SelectableMarkdownText
+      markdown={props.markdown}
+      textStyle={styles.nativeTextStyle}
+      resolveImageSource={resolveImageSource}
+      onLinkPress={onLinkPress}
+      fileContextMenu={(href) => artifactLinkContextMenu(href, links.workspaceRoot)}
+      onFileContextMenuAction={(href, actionId) => onArtifactLinkMenuAction(href, actionId, links)}
+    />
   );
 }
 
@@ -224,54 +216,40 @@ export function ThreadArtifactScreen(props: ThreadArtifactParams) {
         path,
       }),
   );
-  const header = (
-    <View className="flex-row items-center justify-between gap-3 bg-sheet px-4 pt-3">
+  // One scroll view registered with the header, so iOS insets it under the transparent header
+  // and the status bar like upstream's screens; the path row scrolls with the document.
+  return (
+    <ScreenScrollView
+      contentInsetAdjustmentBehavior="automatic"
+      className="flex-1 bg-sheet"
+      contentContainerClassName="gap-4 px-4 py-4"
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
+    >
       <NativeStackScreenOptions options={{ title: path.split("/").at(-1) ?? "Artifact" }} />
-      <AppText textRole="label" className="min-w-0 shrink text-foreground-muted" selectable>
-        artifacts/{path}
-      </AppText>
-      <Button
-        label="All artifacts"
-        tone="text"
-        onPress={() => navigation.navigate("ThreadArtifacts", { environmentId, threadId })}
-      />
-    </View>
-  );
-  if (
-    load.status === "ready" &&
-    artifactPreviewKind(load.value) === "markdown" &&
-    workspaceRoot !== null
-  ) {
-    return (
-      <View className="flex-1 bg-sheet">
-        {header}
+      <View className="flex-row items-center justify-between gap-3">
+        <AppText textRole="label" className="min-w-0 shrink text-foreground-muted" selectable>
+          artifacts/{path}
+        </AppText>
+        <Button
+          label="All artifacts"
+          tone="text"
+          onPress={() => navigation.navigate("ThreadArtifacts", { environmentId, threadId })}
+        />
+      </View>
+      {project.projectId === null ? (
+        <EmptyState title="Artifact unavailable" detail="This thread has no project." />
+      ) : load.status === "loading" ? (
+        <AppText className="text-foreground-muted">Opening artifact…</AppText>
+      ) : load.status === "error" ? (
+        <EmptyState title="Couldn't open this artifact" detail={load.message} />
+      ) : artifactPreviewKind(load.value) === "markdown" && workspaceRoot !== null ? (
         <ArtifactMarkdown
           markdown={load.value.content}
           links={{ navigation, environmentId, threadId, workspaceRoot }}
-          refreshing={refreshing}
-          onRefresh={refresh}
         />
-      </View>
-    );
-  }
-  return (
-    <View className="flex-1 bg-sheet">
-      {header}
-      <ScrollView
-        className="flex-1"
-        contentContainerClassName="gap-4 px-4 py-4"
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
-      >
-        {project.projectId === null ? (
-          <EmptyState title="Artifact unavailable" detail="This thread has no project." />
-        ) : load.status === "loading" ? (
-          <AppText className="text-foreground-muted">Opening artifact…</AppText>
-        ) : load.status === "error" ? (
-          <EmptyState title="Couldn't open this artifact" detail={load.message} />
-        ) : (
-          <ArtifactBody content={load.value} />
-        )}
-      </ScrollView>
-    </View>
+      ) : (
+        <ArtifactBody content={load.value} />
+      )}
+    </ScreenScrollView>
   );
 }
