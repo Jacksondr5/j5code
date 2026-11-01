@@ -85,6 +85,7 @@ import { SwipeableScrollGateProvider, useSwipeableScrollGate } from "./thread-sw
 import { useFabScroll } from "./FabScrollContext";
 import { useWorkspaceTabs } from "../workspace/WorkspaceTabsContext";
 import { ThreadListFilters } from "./ThreadListFilters";
+import { logList842Data, logList842Render, useList842Variant } from "./list842Debug";
 
 interface HomeScreenProps {
   readonly projects: ReadonlyArray<EnvironmentProject>;
@@ -506,7 +507,10 @@ export function HomeScreen(props: HomeScreenProps) {
     if (swipeEnabled) activateVisibleRows(threadListV2Items);
   }, [activateVisibleRows, swipeEnabled, threadListV2Items]);
 
+  const list842Variant = useList842Variant();
+  logList842Data(threadListV2Items.map((entry) => entry.key));
   const renderV2Item = ({ item }: { readonly item: ThreadListV2ListItem }) => {
+    logList842Render(item.key);
     if (item.type === "v2-pending") {
       const pendingScopeKey = scopedProjectKey(
         item.pendingTask.environmentId,
@@ -656,6 +660,9 @@ export function HomeScreen(props: HomeScreenProps) {
     selectedThreadKey,
     threadSearchMatchByKey,
     workingShelfEnabled,
+    ...(list842Variant === "bump"
+      ? { list842Keys: threadListV2Items.map((entry) => entry.key).join(",") }
+      : {}),
   };
 
   const hasAnyThreads =
@@ -789,6 +796,7 @@ export function HomeScreen(props: HomeScreenProps) {
         <SwipeableScrollGateProvider enabled={swipeEnabled} activation={swipeRowActivation}>
           <GestureDetector gesture={homeScrollGesture}>
             <AnimatedLegendList
+              key={list842Variant}
               itemLayoutAnimation={primaryColumn ? THREAD_SIDEBAR_ROW_LAYOUT : undefined}
               ref={listRef}
               onLoad={() => activateVisibleRows(threadListV2Items)}
@@ -803,7 +811,7 @@ export function HomeScreen(props: HomeScreenProps) {
               itemsAreEqual={threadListV2ListItemsAreEqual}
               estimatedItemSize={ESTIMATED_THREAD_LIST_V2_ROW_HEIGHT}
               drawDistance={THREAD_LIST_V2_DRAW_DISTANCE}
-              recycleItems
+              recycleItems={list842Variant !== "norecycle"}
               extraData={v2ExtraData}
               ListHeaderComponent={v2ListHeader}
               ListFooterComponent={
