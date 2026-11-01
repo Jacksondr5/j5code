@@ -1,3 +1,5 @@
+import { appAtomRegistry } from "../../state/atom-registry";
+import { workspaceConnections } from "../../state/workspace";
 import {
   GUEST_LIBRARY_UNAVAILABLE,
   useGuestEnvironmentIds,
@@ -203,13 +205,32 @@ function MemberAgentLibrarySettingsScreen() {
     const environmentId = effectiveEnvironmentId;
     setBusy(true);
     const imported = await settlePromise(async () => {
+      console.log("IMPORT855 picker open");
       const files = await pickAgentDefinitions(kind);
+      console.log("IMPORT855 picker closed", files === null ? "cancelled" : "picked");
       if (files === null) return;
       const result = await importAgentPersonasWithConfirmation(
         files,
         async (input) => {
+          console.log(
+            "IMPORT855 send",
+            JSON.stringify(
+              appAtomRegistry
+                .get(workspaceConnections.environmentsAtom)
+                .find((environment) => environment.environmentId === environmentId)
+                ?.connectionState ?? null,
+            ),
+          );
           const response = await importAgents({ environmentId, input });
-          if (response._tag === "Failure") throw squashAtomCommandFailure(response);
+          if (response._tag === "Failure") {
+            const failure = squashAtomCommandFailure(response);
+            console.log(
+              "IMPORT855 failed",
+              (failure as { _tag?: string })._tag ?? null,
+              failure instanceof Error ? failure.message : String(failure),
+            );
+            throw failure;
+          }
           return response.value;
         },
         confirmReplacement,
