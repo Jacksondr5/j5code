@@ -11,6 +11,7 @@ import {
   chooseMobilePorts,
   claimSlot,
   devClientUrl,
+  emulatorPortForSlot,
   emulatorSerials,
   iosBusy,
   iosPool,
@@ -222,6 +223,22 @@ describe("androidAbi", () => {
     assert.strictEqual(androidAbi("x64"), "x86_64");
     assert.strictEqual(androidAbi("arm64"), "arm64-v8a");
     assert.throws(() => androidAbi("ia32"), LiveTestRefusal);
+  });
+});
+
+describe("emulatorPortForSlot", () => {
+  it("gives two setups claiming at once different slots, and so different ports", () => {
+    using fixture = claimsFixture();
+    const slots = ["j5-tester-1", "j5-tester-2"];
+    const input = { directory: fixture.directory, platform: "android", slots } as const;
+    const first = claimSlot({ ...input, worktree: fixture.worktree("a") });
+    const second = claimSlot({ ...input, worktree: fixture.worktree("b") });
+    assert.deepEqual([first, second].map(emulatorPortForSlot), [5556, 5558]);
+  });
+
+  it("refuses a name that is not one of the rig's slots", () => {
+    assert.throws(() => emulatorPortForSlot("Pixel_8"), LiveTestRefusal);
+    assert.throws(() => emulatorPortForSlot("j5-tester-0"), LiveTestRefusal);
   });
 });
 

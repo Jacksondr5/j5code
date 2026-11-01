@@ -549,13 +549,20 @@ function emulatorSerial(avd: string): string | undefined {
 }
 
 /**
- * Emulator console ports: even, each with its adb port above it. 5554 is left out: the Device
- * panel boots every AVD there, so an AVD it boots can never land on a rig emulator's port.
+ * The console port of slot `j5-tester-<n>`'s emulator: 5554 + 2n, so it comes with the slot's
+ * atomic claim and two setups can never pick the same one. Its adb port is the one above. 5554
+ * stays free: the Device panel boots every AVD there.
  */
-const EMULATOR_PORTS = Array.from({ length: 15 }, (_, index) => 5556 + 2 * index);
+export function emulatorPortForSlot(slot: string): number {
+  const number = Number(/^j5-tester-(\d+)$/.exec(slot)?.[1]);
+  if (!Number.isInteger(number) || number < 1) {
+    throw new LiveTestRefusal(`${slot} is not an Android slot the rig made.`);
+  }
+  return 5554 + 2 * number;
+}
 
 /**
- * Boots the slot's AVD here, on a free console port, headless. The Device panel attaches to a
+ * Boots the slot's AVD here, on the slot's own console port, headless. The Device panel attaches to a
  * running emulator by its serial; asked to boot an AVD while another emulator runs, it opens
  * the running one instead.
  */
@@ -569,10 +576,15 @@ async function startEmulator(
   if (isOurs(paths, record.emulator)) {
     return waitForBoot(sdk.adb, record.emulator!, deadline, again);
   }
-  const port = EMULATOR_PORTS.find(
-    (candidate) => listenerOn(candidate) === undefined && listenerOn(candidate + 1) === undefined,
-  );
-  if (port === undefined) throw new LiveTestRefusal("No emulator console port is free.");
+  const port = emulatorPortForSlot(record.slot);
+  for (const taken of [port, port + 1]) {
+    const holder = listenerOn(taken);
+    if (holder !== undefined) {
+      throw new LiveTestRefusal(
+        `Port ${taken}, which ${record.slot}'s emulator uses, is held by process ${holder}, which this script did not start.`,
+      );
+    }
+  }
   const log = mobileFiles(paths).emulatorLog;
   const emulator = {
     ...spawnRecorded(
@@ -599,6 +611,22 @@ async function startEmulator(
   };
   writeMobileRecord(paths, { ...readMobileRecord(paths)!, emulator });
   await waitForBoot(sdk.adb, emulator, deadline, again, log);
+  // The serial names a port, not an emulator: make sure the one behind it runs this slot's AVD.
+  const avd = NodeChildProcess.spawnSync(
+    sdk.adb,
+    ["-s", `emulator-${port}`, "emu", "avd", "name"],
+    {
+      encoding: "utf8",
+      timeout: 10_000,
+    },
+  )
+    .stdout?.split(/\r?\n/)[0]
+    ?.trim();
+  if (avd !== record.slot) {
+    throw new LiveTestRefusal(
+      `emulator-${port} runs the AVD ${avd ?? "(unknown)"}, not ${record.slot}. Do not open it; run stop, then set up again.`,
+    );
+  }
 }
 
 const emulatorBooted = (adb: string, port: number) =>
