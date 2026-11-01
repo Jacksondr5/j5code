@@ -9,6 +9,7 @@ import {
 } from "@t3tools/client-runtime/j5/agent-personas";
 import { AgentEditorModal } from "./AgentEditorModal";
 import { AgentFolderPickerModal } from "./AgentFolderPickerModal";
+import { sendWhenReconnected } from "./watchEnvironmentSessions";
 import { Menu } from "../../components/ui/Menu";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import {
@@ -204,11 +205,12 @@ function OwnerAgentLibrarySettingsScreen() {
       if (files === null) return;
       const result = await importAgentPersonasWithConfirmation(
         files,
-        async (input) => {
-          const response = await importAgents({ environmentId, input });
-          if (response._tag === "Failure") throw squashAtomCommandFailure(response);
-          return response.value;
-        },
+        (input) =>
+          sendWhenReconnected(environmentId, async () => {
+            const response = await importAgents({ environmentId, input });
+            if (response._tag === "Failure") throw squashAtomCommandFailure(response);
+            return response.value;
+          }),
         confirmReplacement,
       );
       if (result === null) return;
