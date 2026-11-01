@@ -538,14 +538,26 @@ function avdRunner(avd: string): number | undefined {
 function emulatorSerial(avd: string): string | undefined {
   const { adb } = androidSdk();
   const devices = NodeChildProcess.spawnSync(adb, ["devices"], { encoding: "utf8" }).stdout ?? "";
-  for (const serial of emulatorSerials(devices)) {
-    const name = NodeChildProcess.spawnSync(adb, ["-s", serial, "emu", "avd", "name"], {
-      encoding: "utf8",
-      timeout: 10_000,
-    }).stdout;
-    if (name?.split(/\r?\n/)[0]?.trim() === avd) return serial;
-  }
-  return undefined;
+  return serialRunningAvd(
+    avd,
+    devices,
+    (serial) =>
+      NodeChildProcess.spawnSync(adb, ["-s", serial, "emu", "avd", "name"], {
+        encoding: "utf8",
+        timeout: 10_000,
+      }).stdout,
+  );
+}
+
+/** The emulator serial whose AVD is `avd`; a serial names a port, not an emulator. */
+export function serialRunningAvd(
+  avd: string,
+  devices: string,
+  avdNameOf: (serial: string) => string | undefined,
+): string | undefined {
+  return emulatorSerials(devices).find(
+    (serial) => avdNameOf(serial)?.split(/\r?\n/)[0]?.trim() === avd,
+  );
 }
 
 /** Whether anything listens on `port`, even a process of another user's whose pid is hidden. */
@@ -995,14 +1007,6 @@ export async function startMobile(
     assertKvm();
   }
   const record = claim(paths, platform, iosHost);
-  // A fresh claim is exclusive, so a session already on the device belongs to a holder who is gone.
-  // Rejoining our own setup must keep ours.
-  if (recorded === undefined) {
-    closeAgentDeviceSessions(
-      record,
-      platform === "android" ? emulatorPortForSlot(record.slot) : undefined,
-    );
-  }
   const stopHint = `\nTo undo what was set up: ${selfCommand(paths, "stop")}`;
   try {
     console.log(`Starting the dev server, Metro and the ${platform} device slot ${record.slot}...`);
@@ -1018,6 +1022,9 @@ export async function startMobile(
     await startMetro(paths, record, deadline);
     const facts = await backend;
     await avd;
+    // A fresh claim is exclusive, so a session already on the device belongs to a holder who is gone.
+    // Rejoining our own setup must keep ours. After boot, so the emulator is proven to be the slot's.
+    if (recorded === undefined) closeAgentDeviceSessions(record);
     if (iosHost?.kind === "ssh") await startTunnel(paths, readMobileRecord(paths)!, iosHost);
     console.log(formatMobileServer(paths, facts));
     console.log(formatMobile(paths, readMobileRecord(paths)!));
@@ -1239,15 +1246,12 @@ export function sessionsOnDevice(listJson: string, deviceId: string): ReadonlyAr
  * leaves them open, and a session left open refuses the next holder with DEVICE_IN_USE. The sessions
  * live with the J5 Code the agent runs in; without its device tools there is nothing to close.
  */
-function closeAgentDeviceSessions(
-  record: MobileRecord,
-  emulatorPort = record.emulator?.port,
-): void {
+function closeAgentDeviceSessions(record: MobileRecord): void {
   const deviceId =
     record.platform === "ios"
       ? record.udid
-      : record.platform === "android" && emulatorPort !== undefined
-        ? `emulator-${emulatorPort}`
+      : record.platform === "android"
+        ? emulatorSerial(record.slot)
         : undefined;
   if (deviceId === undefined) return;
   const deviceHome = NodePath.join(
@@ -1261,7 +1265,7 @@ function closeAgentDeviceSessions(
   // sessions are left to device_close.
   if (record.platform === "ios" && record.iosHost?.kind === "ssh") {
     return console.log(
-      `agent-device sessions on ${record.slot} (host "${record.iosHost.ssh}"): not closed here; close yours with device_close`,
+      `agent-device sessions on ${record.slot} (host "${record.iosHost.ssh}"): not closed here; close yours with agent-device close (device_open's flags), then device_close`,
     );
   }
   const config = NodePath.join(

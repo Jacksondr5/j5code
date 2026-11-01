@@ -13,6 +13,7 @@ import {
   devClientUrl,
   emulatorPortForSlot,
   emulatorSerials,
+  serialRunningAvd,
   sessionsOnDevice,
   iosBusy,
   iosPool,
@@ -254,6 +255,24 @@ describe("sessionsOnDevice", () => {
     });
     assert.deepEqual(sessionsOnDevice(list, "emulator-5558"), ["t3-a", "t3-c"]);
     assert.deepEqual(sessionsOnDevice(JSON.stringify({ sessions: [] }), "emulator-5558"), []);
+  });
+});
+
+describe("serialRunningAvd", () => {
+  it("finds the slot's emulator by its AVD, so a foreign emulator on the slot's port is left alone", () => {
+    const devices = "List of devices attached\nemulator-5556\tdevice\nemulator-5558\tdevice\n";
+    const avds: Record<string, string> = {
+      "emulator-5556": "j5-tester-2\r\nOK",
+      "emulator-5558": "Pixel_8\r\nOK",
+    };
+    assert.strictEqual(
+      serialRunningAvd("j5-tester-2", devices, (serial) => avds[serial]),
+      "emulator-5556",
+    );
+    assert.strictEqual(
+      serialRunningAvd("j5-tester-1", devices, (serial) => avds[serial]),
+      undefined,
+    );
   });
 });
 
