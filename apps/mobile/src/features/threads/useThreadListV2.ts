@@ -32,6 +32,16 @@ type LayoutInput = Parameters<typeof buildThreadListV2Items>[0];
  * built inline, the list's inputs stayed open to mutation across the screen's other hooks, so
  * the React Compiler cached none of it and every render of the screen re-rendered every row.
  */
+/**
+ * J5 (FORK.md temporary patch): the React Compiler memoizes on the values a computation
+ * reads, not on listed dependencies, so the version an expired grace bumps is passed in here.
+ * A `useMemo` listing it unread kept a finished thread under Working until the threads changed.
+ */
+const observeInbox = (
+  threads: Parameters<typeof threadListInboxReturns.observe>[0],
+  _version: number,
+) => threadListInboxReturns.observe(threads);
+
 export function useThreadListV2(input: {
   readonly threads: LayoutInput["threads"];
   readonly pendingTasks: ReadonlyArray<PendingNewTask>;
@@ -61,11 +71,7 @@ export function useThreadListV2(input: {
     threadListInboxReturns.subscribe,
     threadListInboxReturns.getSnapshot,
   );
-  const inbox = useMemo(
-    () => threadListInboxReturns.observe(workingShelfEnabled ? threads : null),
-    // oxlint-disable-next-line react/memo-dependencies -- the version signals an expired grace
-    [threads, workingShelfEnabled, inboxVersion],
-  );
+  const inbox = observeInbox(workingShelfEnabled ? threads : null, inboxVersion);
   // Up/down menu availability for every card, computed once per section per
   // rebuild (see computeThreadMoveAvailability): per-thread planner calls made
   // list construction quadratic, and this list rebuilds on every minute tick.

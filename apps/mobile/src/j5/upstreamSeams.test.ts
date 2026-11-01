@@ -161,6 +161,12 @@ const SEAMS: ReadonlyArray<Seam> = [
     reaches: ["threadSearchMatchLabel(props.match)"],
   },
   {
+    file: "features/threads/useThreadListV2.ts",
+    record: "Temporary in-place patches: the mobile Working section releases a finished thread",
+    from: "",
+    reaches: ["observeInbox(workingShelfEnabled ? threads : null, inboxVersion)"],
+  },
+  {
     file: "features/threads/thread-list-v2-items.tsx",
     record: "Saved-agent mentions: agent identity",
     from: "../../j5/agents/AgentIdentityChip",
