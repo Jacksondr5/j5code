@@ -829,6 +829,7 @@ function ThreadRouteContent(
       return;
     }
     clearPendingThreadCreationOutcome(routeThreadIdentity);
+    console.log("LIOS2 edit-task navigate", restoredNewTaskDraftKey(creation.messageId));
     navigation.dispatch(
       StackActions.replace("Thread", {
         draft: {

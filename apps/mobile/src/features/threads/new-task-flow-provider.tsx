@@ -233,6 +233,7 @@ export function NewTaskFlowProvider(
   const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
 
   const reset = useCallback(() => {
+    console.log("LIOS2 flow reset");
     setSelectedEnvironmentId(null);
     setSelectedProjectKey(null);
     setActiveDraftKey(null);
@@ -324,6 +325,7 @@ export function NewTaskFlowProvider(
       return;
     }
     // oxlint-disable-next-line react/set-state-in-effect -- Creates the persistent draft once the project selection is ready; the key must exist before the composer mounts.
+    console.log("LIOS2 auto-create draft", selectedProject.id, props.routeDraftId ?? null);
     setActiveDraftKey(
       createNewTaskDraft({
         environmentId: selectedProject.environmentId,
@@ -549,6 +551,14 @@ export function NewTaskFlowProvider(
     const draft = appAtomRegistry.get(composerDraftsAtom)[draftKey];
     const stamp = draft?.project;
     if (!isNewTaskDraftKey(draftKey) || !stamp) {
+      console.log(
+        "LIOS2 openDraft refused: key or stamp",
+        draftKey,
+        Boolean(draft),
+        Object.keys(appAtomRegistry.get(composerDraftsAtom))
+          .filter((key) => key.includes("restored"))
+          .join(","),
+      );
       return false;
     }
     // Require the stamped project to load; selectedProject otherwise falls back and retargets the draft.
@@ -556,6 +566,7 @@ export function NewTaskFlowProvider(
       (project) => project.environmentId === stamp.environmentId && project.id === stamp.projectId,
     );
     if (!projectLoaded) {
+      console.log("LIOS2 openDraft refused: project not loaded", JSON.stringify(stamp));
       return false;
     }
     setActiveDraftKey(draftKey);

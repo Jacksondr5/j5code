@@ -405,7 +405,15 @@ export function NewTaskDraftScreen(props: {
       if (cancelled || attemptedDraftIdRef.current === draftId) {
         return;
       }
-      if (openDraft(draftId)) {
+      const opened = openDraft(draftId);
+      console.log(
+        "LIOS2 openDraft",
+        draftId,
+        opened,
+        JSON.stringify(getComposerDraftSnapshot(draftId).project ?? null),
+        projects.length,
+      );
+      if (opened) {
         attemptedDraftIdRef.current = draftId;
         return;
       }

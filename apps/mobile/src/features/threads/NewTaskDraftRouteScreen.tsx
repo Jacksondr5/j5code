@@ -99,6 +99,7 @@ export function NewTaskDraftRouteScreen({ route }: StaticScreenProps<NewTaskDraf
     setInitialized(true);
   }, [reset]);
   const draftId = Array.isArray(params.draftId) ? params.draftId[0] : params.draftId;
+  console.log("LIOS2 draft route params", JSON.stringify(params));
   const projects = useProjects();
   const { state: catalogState } = useWorkspaceState();
 
