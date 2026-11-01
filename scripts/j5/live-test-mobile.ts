@@ -71,23 +71,25 @@ export interface MobileRecord {
   readonly tunnel?: ProcessRecord;
   /** Android only: the emulator this script booted, and its console port (serial `emulator-<port>`). */
   readonly emulator?: ProcessRecord & { readonly port: number };
+  /** Set by a fresh claim until the first boot closes the sessions a gone holder left on the device. */
+  readonly sessionCleanupPending?: true;
 }
 
-const mobileFiles = (paths: LiveTestPaths) => ({
+const mobileFiles = (paths: Pick<LiveTestPaths, "root">) => ({
   record: NodePath.join(paths.root, "mobile.json"),
   metroLog: NodePath.join(paths.root, "metro.log"),
   tunnelLog: NodePath.join(paths.root, "tunnel.log"),
   emulatorLog: NodePath.join(paths.root, "emulator.log"),
 });
 
-export function readMobileRecord(paths: LiveTestPaths): MobileRecord | undefined {
+export function readMobileRecord(paths: Pick<LiveTestPaths, "root">): MobileRecord | undefined {
   const file = mobileFiles(paths).record;
   return NodeFS.existsSync(file)
     ? (JSON.parse(NodeFS.readFileSync(file, "utf8")) as MobileRecord)
     : undefined;
 }
 
-function writeMobileRecord(paths: LiveTestPaths, record: MobileRecord): void {
+function writeMobileRecord(paths: Pick<LiveTestPaths, "root">, record: MobileRecord): void {
   NodeFS.mkdirSync(paths.root, { recursive: true });
   NodeFS.writeFileSync(mobileFiles(paths).record, `${JSON.stringify(record, null, 2)}\n`);
 }
@@ -938,6 +940,7 @@ function claim(
     ...(udid === undefined ? {} : { udid, iosHost: iosHost! }),
     serverPort,
     metroPort,
+    sessionCleanupPending: true,
   };
   writeMobileRecord(paths, record);
   return record;
@@ -1022,9 +1025,7 @@ export async function startMobile(
     await startMetro(paths, record, deadline);
     const facts = await backend;
     await avd;
-    // A fresh claim is exclusive, so a session already on the device belongs to a holder who is gone.
-    // Rejoining our own setup must keep ours. After boot, so the emulator is proven to be the slot's.
-    if (recorded === undefined) closeAgentDeviceSessions(record);
+    finishSessionCleanup(paths, closeAgentDeviceSessions);
     if (iosHost?.kind === "ssh") await startTunnel(paths, readMobileRecord(paths)!, iosHost);
     console.log(formatMobileServer(paths, facts));
     console.log(formatMobile(paths, readMobileRecord(paths)!));
@@ -1246,6 +1247,22 @@ export function sessionsOnDevice(listJson: string, deviceId: string): ReadonlyAr
  * leaves them open, and a session left open refuses the next holder with DEVICE_IN_USE. The sessions
  * live with the J5 Code the agent runs in; without its device tools there is nothing to close.
  */
+/**
+ * A fresh claim is exclusive, so a session already on the device belongs to a holder who is gone.
+ * Runs once the device is up (so the emulator is proven the slot's), and only once: a later setup
+ * rejoining the claim keeps the tester's own session.
+ */
+export function finishSessionCleanup(
+  paths: Pick<LiveTestPaths, "root">,
+  close: (record: MobileRecord) => void,
+): void {
+  const record = readMobileRecord(paths);
+  if (record?.sessionCleanupPending !== true) return;
+  close(record);
+  const { sessionCleanupPending: _done, ...rest } = record;
+  writeMobileRecord(paths, rest);
+}
+
 function closeAgentDeviceSessions(record: MobileRecord): void {
   const deviceId =
     record.platform === "ios"
