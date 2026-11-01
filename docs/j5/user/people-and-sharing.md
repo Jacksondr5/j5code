@@ -70,7 +70,9 @@ menu.
 
 A server asks "What should people and agents on <server> call you?" before a device it cannot place
 uses it, and before the first owner's first device does. Pick yourself from the list, or name
-someone new.
+someone new. On the mobile app you can also choose **Remove this server** to forget it on that
+phone, and a phone the server does not know can choose **Not now**, which asks again the next time
+the app opens; until then that server shows nothing.
 
 ## What changes for people who are not Owners
 
