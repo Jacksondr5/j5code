@@ -6,12 +6,14 @@ import type {
   J5UserMessageInput,
   J5UserMessagePresentation,
 } from "@t3tools/client-runtime/j5/user-message";
+import { isSharedNote } from "@t3tools/client-runtime/j5/shared-conversation";
 import { Pressable, View } from "react-native";
 
 import { AppText as Text } from "../../components/ui/AppText";
 import { useOpenLinkedThread } from "../../features/threads/useOpenLinkedThread";
 import { cn } from "../../lib/cn";
 import { useQuietThreadShell } from "../../state/entities";
+import { SharedConversationNote } from "../sharing/SharedConversationNote";
 import {
   presentJ5TimelineNotice,
   type J5FeedMessagePresentation,
@@ -25,6 +27,9 @@ export function renderJ5TimelineNotice(input: {
   readonly message: J5UserMessageInput;
   readonly timestampLabel: string;
 }) {
+  if (isSharedNote(input.message)) {
+    return <SharedConversationNote message={input.message} timestampLabel={input.timestampLabel} />;
+  }
   const notice = presentJ5TimelineNotice(input.message);
   if (notice === null) return null;
   if (notice.kind === "silence") {
@@ -104,9 +109,27 @@ export function J5MessageAuthorLine(props: {
   const j5 = props.presentation.j5;
   if (j5 === null) return null;
   if (j5.group === "person") {
-    return j5.viaInbox ? (
-      <Text className="mb-1 pr-1 text-2xs text-foreground-muted">You · via Inbox</Text>
-    ) : null;
+    if (j5.viaInbox) {
+      return <Text className="mb-1 pr-1 text-2xs text-foreground-muted">You · via Inbox</Text>;
+    }
+    const author = props.presentation.sharedAuthor;
+    if (author === undefined) return null;
+    // The reader's own message names only who edited it while it was queued.
+    if (author.you) {
+      return author.editedBy === null ? null : (
+        <Text className="mb-1 pr-1 text-2xs text-foreground-muted">
+          Edited by {author.editedBy}
+        </Text>
+      );
+    }
+    return (
+      <Text className="mb-1 pl-1 text-xs text-foreground-muted" numberOfLines={1}>
+        <Text className="font-t3-medium text-xs text-foreground">
+          {author.name ?? "Someone without a name"}
+        </Text>
+        {author.editedBy === null ? null : ` · edited by ${author.editedBy}`}
+      </Text>
+    );
   }
   if (j5.group === "other-person") {
     const name = j5MessageAuthorName({

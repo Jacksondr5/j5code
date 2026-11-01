@@ -176,8 +176,10 @@ vi.mock("../j5/a2a/timelineState", () => ({
     viewerParticipantId: null,
     labels: new Map(),
     threads: new Map(),
+    sharedAuthors: new Map(),
   }),
 }));
+vi.mock("../j5/sharing/sharedConversation", () => ({ PromptAnsweredBy: () => null }));
 vi.mock("../state/threads", () => ({ environmentThreadShells: {}, threadEnvironment: {} }));
 vi.mock("../state/entities", () => ({
   useLiveThreadLinkLabels: (text: string) => text,

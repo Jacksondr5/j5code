@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { threadSearchMatchLabel } from "./searchAuthorLabel";
+import { threadSearchMatchLabel } from "./sharedConversation.ts";
 
 describe("threadSearchMatchLabel", () => {
   it("reads your own message as yours", () => {

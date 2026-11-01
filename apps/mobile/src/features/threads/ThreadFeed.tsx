@@ -2675,6 +2675,7 @@ export const ThreadFeed = memo(function ThreadFeed({
   );
   const j5Timeline = useJ5Timeline(
     props.environmentId,
+    props.threadId,
     props.feed.flatMap((entry) => (entry.type === "message" ? [entry.message] : [])),
   );
   // LegendList does not invalidate visible rows when only the renderItem closure changes.

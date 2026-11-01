@@ -6,11 +6,16 @@ import {
   type J5UserMessageInput,
 } from "@t3tools/client-runtime/j5/user-message";
 import type { EnvironmentId } from "@t3tools/contracts";
+import type { MessageAuthor } from "@t3tools/contracts/j5";
 
-/** What every J5 row in one thread's timeline reads: the reader, and the identity read's names. */
+/**
+ * What every J5 row in one thread's timeline reads: the reader, the identity read's names, and
+ * who sent each message of a shared conversation.
+ */
 export interface J5Timeline extends ParticipantIdentities {
   readonly environmentId: EnvironmentId;
   readonly viewerParticipantId: string | null;
+  readonly sharedAuthors: ReadonlyMap<string, MessageAuthor>;
 }
 
 /**
@@ -23,9 +28,15 @@ export function resolveJ5FeedMessage(message: J5UserMessageInput, timeline: J5Ti
     viewerParticipantId: timeline.viewerParticipantId,
   });
   const j5 = presentation.j5;
+  const sharedAuthor =
+    j5?.group === "person" && !j5.viaInbox && message.id !== undefined
+      ? timeline.sharedAuthors.get(String(message.id))
+      : undefined;
   return {
     ...presentation,
-    side: j5?.side ?? "right",
+    // Another person's message in a shared conversation sits on the left, named (AC16).
+    sharedAuthor,
+    side: sharedAuthor !== undefined && !sharedAuthor.you ? "left" : (j5?.side ?? "right"),
     preview: j5?.group === "participant" && j5.unwrapped ? j5.preview : null,
   };
 }

@@ -19,6 +19,7 @@ const timeline = (viewerParticipantId: string | null): J5Timeline => ({
   viewerParticipantId,
   labels: new Map(),
   threads: new Map(),
+  sharedAuthors: new Map(),
 });
 
 const askRaw = [
@@ -100,6 +101,36 @@ describe("resolveJ5FeedMessage", () => {
       side: "left",
       text: "Target v2.",
       j5: { group: "other-person", senderName: "Priya" },
+    });
+  });
+
+  it("puts another person's message in a shared conversation on the left, and the reader's on the right", () => {
+    const typed = {
+      id: "message-typed",
+      role: "user",
+      createdBy: "user" as const,
+      text: "Ship it.",
+    };
+    const author = {
+      messageId: "message-typed",
+      name: "Priya",
+      level: "collaborator" as const,
+      editedBy: null,
+      note: null,
+      storedPrefix: "",
+    };
+    const shared = (you: boolean): J5Timeline => ({
+      ...timeline("human:sam"),
+      sharedAuthors: new Map([["message-typed", { ...author, you }]]),
+    });
+    expect(resolveJ5FeedMessage(typed, shared(false))).toMatchObject({
+      side: "left",
+      sharedAuthor: { name: "Priya" },
+    });
+    expect(resolveJ5FeedMessage(typed, shared(true))).toMatchObject({ side: "right" });
+    expect(resolveJ5FeedMessage(typed, timeline("human:sam"))).toMatchObject({
+      side: "right",
+      sharedAuthor: undefined,
     });
   });
 

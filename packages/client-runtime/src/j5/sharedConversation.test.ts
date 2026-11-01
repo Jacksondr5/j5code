@@ -7,7 +7,7 @@ import {
   recallableMessages,
   sharedMessageView,
   typedText,
-} from "./sharedTimeline.logic";
+} from "./sharedConversation.ts";
 
 const author = (overrides: Partial<MessageAuthor> = {}): MessageAuthor => ({
   messageId: "message-1",

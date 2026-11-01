@@ -1,6 +1,45 @@
-import { type MessageAuthor, typedText } from "@t3tools/contracts/j5";
+import {
+  type MessageAuthor,
+  type PromptAnswer,
+  type ThreadAuthors,
+  type ThreadSearchAuthor,
+  typedText,
+} from "@t3tools/contracts/j5";
 
 export { typedText };
+
+/** A thread's record by message and by prompt, built once per answer the server gives. */
+export interface ThreadAuthorIndex {
+  readonly authors: ReadonlyMap<string, MessageAuthor>;
+  readonly answers: ReadonlyMap<string, PromptAnswer>;
+}
+const EMPTY_INDEX: ThreadAuthorIndex = { authors: new Map(), answers: new Map() };
+const indexes = new WeakMap<ThreadAuthors, ThreadAuthorIndex>();
+
+export function authorIndex(record: ThreadAuthors | null): ThreadAuthorIndex {
+  if (record === null) return EMPTY_INDEX;
+  const known = indexes.get(record);
+  if (known !== undefined) return known;
+  const index = {
+    authors: new Map(record.authors.map((author) => [author.messageId, author])),
+    answers: new Map(record.answers.map((answer) => [answer.requestId, answer])),
+  };
+  indexes.set(record, index);
+  return index;
+}
+
+/**
+ * Who a message search hit is from, as its label reads: an agent, the reader, or another person by
+ * the name the server tells. A user-role hit the server names no one for keeps upstream's "You".
+ */
+export function threadSearchMatchLabel(match: {
+  readonly source: "user" | "assistant";
+  readonly author?: ThreadSearchAuthor | undefined;
+}): string {
+  if (match.source === "assistant") return "Agent";
+  if (match.author?._tag === "person") return match.author.name ?? "Someone";
+  return "You";
+}
 
 // Keyed by the message object the timeline holds, so nothing is kept for a thread off screen.
 const notes = new WeakSet<object>();
@@ -87,6 +126,69 @@ export const readAnswersFor = (input: {
   readonly readAt: number | null;
   readonly firstSeenAt: number;
 }) => input.readAt !== null && input.readAt >= input.firstSeenAt;
+
+/**
+ * When this client first saw each server copy of a person's message, and what its person typed for
+ * the messages they sent from here, which are first drawn from what they typed.
+ */
+export interface SeenSharedMessages {
+  readonly firstSeen: ReadonlyMap<string, number>;
+  readonly typedHere: ReadonlyMap<string, string>;
+}
+
+export const NO_SHARED_MESSAGES_SEEN: SeenSharedMessages = {
+  firstSeen: new Map(),
+  typedHere: new Map(),
+};
+
+/** `seen` itself when the entries hold nothing it lacks, so render stores a new record only then. */
+export function observeSharedMessages(
+  seen: SeenSharedMessages,
+  messages: ReadonlyArray<{
+    readonly id: string;
+    readonly role: string;
+    readonly text: string;
+    readonly createdBy?: unknown;
+  }>,
+  now: () => number,
+): SeenSharedMessages {
+  let firstSeen: Map<string, number> | null = null;
+  let typedHere: Map<string, string> | null = null;
+  for (const message of messages) {
+    if (message.role !== "user") continue;
+    if (message.createdBy === undefined) {
+      if ((typedHere ?? seen.typedHere).get(message.id) === message.text) continue;
+      typedHere ??= new Map(seen.typedHere);
+      typedHere.set(message.id, message.text);
+    } else if (!(firstSeen ?? seen.firstSeen).has(message.id)) {
+      firstSeen ??= new Map(seen.firstSeen);
+      firstSeen.set(message.id, now());
+    }
+  }
+  if (firstSeen === null && typedHere === null) return seen;
+  return { firstSeen: firstSeen ?? seen.firstSeen, typedHere: typedHere ?? seen.typedHere };
+}
+
+/**
+ * A thread's queued messages with the words their authors typed, for the queue's rows and the
+ * composer an edit loads (Shared conversations AC14): the server records a message's author when
+ * it is queued. Until the thread's record has been read, or has failed, no queued row is shown,
+ * as the timeline holds a message back, so no line meant for the agent is drawn or edited.
+ */
+export function sharedQueuedRuns<
+  Queued extends { readonly run: { readonly userMessageId: string }; readonly text: string },
+>(
+  result: { readonly record: ThreadAuthors | null; readonly failed: boolean },
+  queued: ReadonlyArray<Queued>,
+): ReadonlyArray<Queued> {
+  const { authors } = authorIndex(result.record);
+  if (result.record === null && !result.failed) return [];
+  if (authors.size === 0) return queued;
+  return queued.map((item) => {
+    const author = authors.get(item.run.userMessageId);
+    return author === undefined ? item : { ...item, text: typedText(item.text, author) };
+  });
+}
 
 /** Whether one of the agent's prompts has been settled, read from the thread's own item for it. */
 export function isSettledPrompt(toolData: unknown): toolData is {
