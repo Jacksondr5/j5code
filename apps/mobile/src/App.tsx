@@ -20,6 +20,7 @@ import { J5_BRANDING } from "../../../scripts/lib/j5-branding.ts";
 import { ProjectChipIconRasterizer } from "./native/ProjectChipIconImages";
 import { ThreadArrangementHost } from "./features/threads/ThreadArrangementSheet";
 import * as Dialog from "./components/ui/Dialog";
+import { ArchiveWarningHost } from "./j5/archive/ArchiveWarningSheet";
 import { CloudAuthProvider } from "./features/cloud/CloudAuthProvider";
 import { prepareNativeShowcaseCapture } from "./features/showcase/nativeShowcaseScene";
 import { IncomingShareProvider } from "./features/sharing/IncomingShareProvider";
@@ -169,6 +170,7 @@ function AppContent() {
                   />
                 </IncomingShareProvider>
                 <Dialog.Host />
+                <ArchiveWarningHost />
                 <ThreadArrangementHost />
                 <ProjectChipIconRasterizer />
               </NativeLayoutMetricsProvider>

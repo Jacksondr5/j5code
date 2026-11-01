@@ -1,4 +1,5 @@
 import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import type { ArchiveWarning } from "@t3tools/client-runtime/j5/archive-flow";
 import type { PreArchiveFacts } from "@t3tools/contracts/j5";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/reactivity";
@@ -9,19 +10,16 @@ import { makeThreadShellFixture } from "../../test-fixtures";
 const state = vi.hoisted(() => ({
   facts: null as unknown,
   labels: [] as { participantId: string; displayName: string }[],
-  confirms: [] as {
-    title: string;
-    message?: string;
-    confirmText: string;
-    onConfirm: () => void;
-    onCancel?: () => void;
-  }[],
+  confirms: [] as { warning: ArchiveWarning; resolve: (confirmed: boolean) => void }[],
   alerts: [] as { title: string; message: string }[],
 }));
 
 vi.mock("../../components/ui/Dialog", () => ({
   alert: (title: string, message: string) => state.alerts.push({ title, message }),
-  confirm: (request: (typeof state.confirms)[number]) => state.confirms.push(request),
+}));
+vi.mock("./ArchiveWarningSheet", () => ({
+  presentArchiveWarning: (warning: ArchiveWarning) =>
+    new Promise<boolean>((resolve) => state.confirms.push({ warning, resolve })),
 }));
 vi.mock("../../state/atom-registry", () => ({ appAtomRegistry: {} }));
 vi.mock("../state", () => ({
@@ -120,11 +118,18 @@ describe("mobile archive preflight", () => {
     const proceed = confirmJ5Archive(thread);
     await nextDialog();
     const [dialog] = state.confirms;
-    expect(dialog?.title).toBe("Archive Billing agent?");
-    expect(dialog?.confirmText).toBe("Archive anyway");
-    expect(dialog?.message).toContain("1 open ask will be terminated (counterparty is notified)");
-    expect(dialog?.message).toContain("SOON · From Captain");
-    dialog?.onConfirm();
+    expect(dialog?.warning.title).toBe("Archive Billing agent?");
+    expect(dialog?.warning.confirmLabel).toBe("Archive anyway");
+    expect(dialog?.warning.payload?.openAsks).toEqual([
+      {
+        direction: "inbound",
+        participant: { displayName: "Captain", tooltipParticipantId: null },
+        urgency: "soon",
+        intent: "schema target",
+        openedAt: askFromCaptain.openedAt,
+      },
+    ]);
+    dialog?.resolve(true);
     expect(await proceed).toBe(true);
   });
 
@@ -132,7 +137,7 @@ describe("mobile archive preflight", () => {
     setup({ placementSubtree: { state: "known", participantIds: ["agent:child"] } });
     const proceed = confirmJ5Archive(thread);
     await nextDialog();
-    state.confirms[0]?.onCancel?.();
+    state.confirms[0]?.resolve(false);
     expect(await proceed).toBe(false);
   });
 
@@ -154,10 +159,8 @@ describe("mobile archive preflight", () => {
     setup(null);
     const proceed = confirmJ5Archive(thread);
     await nextDialog();
-    expect(state.confirms[0]?.message).toContain(
-      "Couldn't check open asks or the placement subtree.",
-    );
-    state.confirms[0]?.onConfirm();
+    expect(state.confirms[0]?.warning.payload?.factsUnavailable).toBe(true);
+    state.confirms[0]?.resolve(true);
     expect(await proceed).toBe(true);
   });
 });

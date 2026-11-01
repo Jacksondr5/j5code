@@ -8,7 +8,7 @@ import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell
 import * as Dialog from "../../components/ui/Dialog";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { j5Environment } from "../state";
-import { formatArchiveWarningText } from "./archiveWarningText";
+import { presentArchiveWarning } from "./ArchiveWarningSheet";
 
 /**
  * J5's archive preflight (register D13) before every mobile archive door: true when the archive
@@ -24,19 +24,7 @@ export async function confirmJ5Archive(thread: EnvironmentThreadShell): Promise<
         `${thread.title} is seat ${crewSeat.seat} of Crew ${crewSeat.crewName}`,
         "Crew members are never archived one by one. Retire the whole Crew with Archive crew on the Fleet page in J5 on web or desktop, or message the member instead.",
       ),
-    confirm: (warning) =>
-      new Promise<boolean>((resolve) =>
-        Dialog.confirm({
-          title: warning.title,
-          ...(warning.payload === null
-            ? {}
-            : { message: formatArchiveWarningText(warning.payload) }),
-          confirmText: warning.confirmLabel,
-          destructive: true,
-          onConfirm: () => resolve(true),
-          onCancel: () => resolve(false),
-        }),
-      ),
+    confirm: presentArchiveWarning,
     archive: async () => true,
   });
   return proceed === true;

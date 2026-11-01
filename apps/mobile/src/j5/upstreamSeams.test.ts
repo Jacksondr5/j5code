@@ -129,6 +129,12 @@ const SEAMS: ReadonlyArray<Seam> = [
   },
   {
     file: "App.tsx",
+    record: "case 21: archive preflight",
+    from: "./j5/archive/ArchiveWarningSheet",
+    reaches: ["<ArchiveWarningHost />"],
+  },
+  {
+    file: "App.tsx",
     record: "BRANDING.md: mobile OS identity and links",
     from: "../../../scripts/lib/j5-branding.ts",
     reaches: [
