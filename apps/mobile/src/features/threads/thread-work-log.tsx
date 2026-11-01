@@ -1108,9 +1108,9 @@ const ThreadWorkLogRow = function ThreadWorkLogRow(
                   }
                 >{`  ${answerPreview}`}</Text>
               ) : null}
-              {/* J5 (case 99): who answered a settled question or approval. */}
-              <PromptAnsweredBy environmentId={props.environmentId} item={row.projectedItem.item} />
             </WorkLogLabel>
+            {/* J5 (case 99): who answered a settled prompt; outside the label so it never truncates. */}
+            <PromptAnsweredBy environmentId={props.environmentId} item={row.projectedItem.item} />
           </>
         )}
 

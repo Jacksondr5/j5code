@@ -115,8 +115,8 @@ export function PromptAnsweredBy(props: {
   const answer = isSettledPrompt(props.item) ? answers.get(props.item.requestId) : undefined;
   if (answer === undefined) return null;
   return (
-    <Text className="text-foreground-subtle">
-      {` · answered by ${answer.you ? "you" : (answer.name ?? "someone")}`}
+    <Text numberOfLines={1} className="shrink-0 pl-1 text-sm text-foreground-subtle">
+      · answered by {answer.you ? "you" : (answer.name ?? "someone")}
     </Text>
   );
 }
