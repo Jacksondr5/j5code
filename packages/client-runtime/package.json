@@ -331,6 +331,10 @@
       "types": "./src/state/threadUndo.ts",
       "default": "./src/state/threadUndo.ts"
     },
+    "./j5/person-avatar": {
+      "types": "./src/j5/personAvatar.ts",
+      "default": "./src/j5/personAvatar.ts"
+    },
     "./j5/participant-identity": {
       "types": "./src/j5/participantIdentity.ts",
       "default": "./src/j5/participantIdentity.ts"
