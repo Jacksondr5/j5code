@@ -1,6 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import {
   answeredByLine,
+  closedLine,
   j5SourceNotice,
   mergeHumanInboxSources,
   type PresentedHumanInboxItem,
@@ -11,10 +12,12 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import { scopedInboxItemKey } from "@t3tools/contracts/j5";
 import { useFocusEffect } from "@react-navigation/native";
 import { useCallback, useState } from "react";
-import { Pressable, RefreshControl, View } from "react-native";
+import { Platform, Pressable, RefreshControl, View } from "react-native";
+import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 
 import { SymbolView } from "../../components/ui/AppSymbol";
-import { AppText as Text } from "../../components/ui/AppText";
+import { AppText as Text, AppTextInput as TextInput } from "../../components/ui/AppText";
+import { Button } from "../../components/ui/Button";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { ScreenScrollView } from "../../components/ui/ScreenScrollView";
 import { useMarkdownPreviewStyles } from "../../features/files/FileMarkdownPreview";
@@ -23,6 +26,8 @@ import { relativeTime } from "../../lib/time";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { SelectableMarkdownText } from "../../native/SelectableMarkdownText";
 import { j5Sharing } from "../sharing/guestAccess";
+import { j5Environment } from "../state";
+import { type ClosedItem, useInboxAnswers } from "./inboxAnswers";
 import {
   answeredInboxQueryAtom,
   answeredInboxSourcesAtom,
@@ -61,7 +66,7 @@ function refreshAll() {
 
 /**
  * The person's Inbox: what agents on every connected server have asked them, most urgent first
- * (Inbox AC6), and the asks already answered. Read-only here; answering comes with the answer box.
+ * (Inbox AC6), answered in place, and the asks already answered.
  */
 export function InboxScreen() {
   const openSources = useAtomValue(openInboxSourcesAtom);
@@ -76,6 +81,7 @@ export function InboxScreen() {
       connected: item.connected,
     })),
   );
+  const answers = useInboxAnswers({ openSources, items, answeredSources, answered });
   // Reads again each time the Inbox comes into view; between visits the server's inbox signal
   // rereads it. No timer.
   useFocusEffect(useCallback(() => refreshAll(), []));
@@ -92,20 +98,15 @@ export function InboxScreen() {
       }),
     ),
   ];
-  return (
-    <ScreenScrollView
-      contentInsetAdjustmentBehavior="automatic"
-      className="flex-1 bg-sheet"
-      contentContainerClassName="gap-4 px-4 py-4"
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refreshAll} />}
-    >
+  const content = (
+    <>
       <NativeStackScreenOptions options={{ title: "Inbox" }} />
       {notices.map((notice) => (
         <Text key={notice} className="text-sm text-foreground-muted">
           {notice}
         </Text>
       ))}
-      {items.length === 0 ? (
+      {answers.shownItems.length === 0 ? (
         loading ? (
           <Text className="text-foreground-muted">Loading your inbox…</Text>
         ) : (
@@ -117,18 +118,56 @@ export function InboxScreen() {
         )
       ) : (
         <View className="gap-3">
-          {items.map((item) => (
-            <InboxItem
-              key={scopedInboxItemKey(item)}
-              item={item}
-              labels={labels}
-              showEnvironment={showEnvironment}
-            />
-          ))}
+          {answers.shownItems.map((item) => {
+            const key = scopedInboxItemKey(item);
+            return (
+              <InboxItem
+                key={key}
+                item={item}
+                labels={labels}
+                showEnvironment={showEnvironment}
+                closed={answers.closedOf(item)}
+                answerText={answers.answerText(item)}
+                onChangeAnswer={(text) => answers.setAnswerText(item, text)}
+                onAnswer={() => void answers.answer(item)}
+                delivering={answers.pendingKey === key}
+                error={answers.errorFor(item)}
+                anyDelivering={answers.pendingKey !== null}
+              />
+            );
+          })}
         </View>
       )}
       <AnsweredShelf items={answered} labels={labels} showEnvironment={showEnvironment} />
+    </>
+  );
+  const refreshControl = <RefreshControl refreshing={refreshing} onRefresh={refreshAll} />;
+  // iOS keeps upstream's scroll view, which registers with the native header, and lets it move the
+  // focused answer box above the keyboard, as upstream's commit sheet does. Android has no header
+  // marker, so keyboard-controller's scroll view brings the box being typed in clear of the keyboard.
+  return Platform.OS === "ios" ? (
+    <ScreenScrollView
+      automaticallyAdjustKeyboardInsets
+      contentInsetAdjustmentBehavior="automatic"
+      className="flex-1 bg-sheet"
+      contentContainerClassName="gap-4 px-4 py-4"
+      keyboardShouldPersistTaps="handled"
+      refreshControl={refreshControl}
+    >
+      {content}
     </ScreenScrollView>
+  ) : (
+    <KeyboardAwareScrollView
+      bottomOffset={80}
+      className="flex-1 bg-sheet"
+      contentContainerClassName="gap-4 px-4 py-4"
+      // Android's content width cap, as upstream's ScreenScrollView applies it.
+      contentContainerStyle={{ width: "100%", maxWidth: 720, alignSelf: "center" }}
+      keyboardShouldPersistTaps="handled"
+      refreshControl={refreshControl}
+    >
+      {content}
+    </KeyboardAwareScrollView>
   );
 }
 
@@ -159,10 +198,25 @@ function InboxItem(props: {
   readonly item: PresentedHumanInboxItem;
   readonly labels: SenderLabels;
   readonly showEnvironment: boolean;
+  /** The item closed while the person had typed into it, and stays with their words (AC17). */
+  readonly closed: ClosedItem | undefined;
+  readonly answerText: string;
+  readonly onChangeAnswer: (text: string) => void;
+  readonly onAnswer: () => void;
+  readonly delivering: boolean;
+  readonly anyDelivering: boolean;
+  /** Why this ask's last answer was not delivered, or a stale list after it was. */
+  readonly error: string | null;
 }) {
   const { item } = props;
   const [expanded, setExpanded] = useState(false);
   const urgency = URGENCY[item.urgency];
+  const ownName = useOwnName(item.environmentId);
+  const mayAnswer = useAtomValue(
+    j5Environment.answerHumanExchange.permissionAtom(item.environmentId),
+  );
+  const canAnswer = item.sourceReady && mayAnswer;
+  const closedText = props.closed === undefined ? null : closedLine({ ...props.closed, ownName });
   return (
     <View className="rounded-2xl border-continuous bg-card px-4 py-3">
       <Pressable
@@ -188,13 +242,46 @@ function InboxItem(props: {
           item={item}
           labels={props.labels}
           showEnvironment={props.showEnvironment}
-          trailing={`open ${relativeTime(item.openedAt)}`}
+          trailing={props.closed === undefined ? `open ${relativeTime(item.openedAt)}` : null}
         />
       </Pressable>
       {expanded ? (
         <View className="mt-3 gap-3 border-t border-border-subtle pt-3">
           <InboxMessage markdown={item.message} />
-          <OpenSenderThread item={item} />
+          {/* Above the answer box, so it stays in view whenever the box is: iOS scrolls only the
+              focused box itself clear of the keyboard. */}
+          <View className="flex-row flex-wrap items-center justify-between gap-2">
+            <OpenSenderThread item={item} />
+            {closedText !== null ? (
+              <Text className="text-sm text-foreground-muted">{closedText}</Text>
+            ) : (
+              <Button
+                label={props.delivering ? "Delivering…" : "Answer"}
+                tone="primary"
+                loading={props.delivering}
+                disabled={!canAnswer || props.anyDelivering || props.answerText.length === 0}
+                accessibilityHint={
+                  canAnswer
+                    ? undefined
+                    : "This server is unavailable or this connection is read-only."
+                }
+                onPress={props.onAnswer}
+              />
+            )}
+          </View>
+          <TextInput
+            accessibilityLabel={`Answer ${item.intent}`}
+            multiline
+            placeholder="Type the answer exactly as it should be delivered"
+            value={props.answerText}
+            onChangeText={props.onChangeAnswer}
+            style={{ minHeight: 96, textAlignVertical: "top" }}
+          />
+          {props.error === null ? null : (
+            <Text accessibilityRole="alert" className="text-sm text-danger-foreground">
+              {props.error}
+            </Text>
+          )}
         </View>
       ) : null}
     </View>
