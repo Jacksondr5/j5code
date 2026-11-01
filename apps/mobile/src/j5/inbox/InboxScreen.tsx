@@ -12,7 +12,7 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import { scopedInboxItemKey } from "@t3tools/contracts/j5";
 import { useFocusEffect } from "@react-navigation/native";
 import { useCallback, useState } from "react";
-import { Pressable, RefreshControl, View } from "react-native";
+import { Platform, Pressable, RefreshControl, View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 
 import { SymbolView } from "../../components/ui/AppSymbol";
@@ -22,6 +22,7 @@ import { EmptyState } from "../../components/ui/EmptyState";
 import { useMarkdownPreviewStyles } from "../../features/files/FileMarkdownPreview";
 import { useOpenLinkedThread } from "../../features/threads/useOpenLinkedThread";
 import { relativeTime } from "../../lib/time";
+import { NativeScrollViewMarker } from "../../native/NativeScrollViewMarker";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { SelectableMarkdownText } from "../../native/SelectableMarkdownText";
 import { j5Sharing } from "../sharing/guestAccess";
@@ -97,7 +98,7 @@ export function InboxScreen() {
       }),
     ),
   ];
-  return (
+  const list = (
     <KeyboardAwareScrollView
       // Scrolls the answer being typed, and its Answer button below it, clear of the keyboard.
       bottomOffset={72}
@@ -147,6 +148,12 @@ export function InboxScreen() {
       )}
       <AnsweredShelf items={answered} labels={labels} showEnvironment={showEnvironment} />
     </KeyboardAwareScrollView>
+  );
+  // On iOS the list registers with the native header, as upstream's NativeScrollView does.
+  return Platform.OS === "ios" ? (
+    <NativeScrollViewMarker style={{ flex: 1 }}>{list}</NativeScrollViewMarker>
+  ) : (
+    list
   );
 }
 
