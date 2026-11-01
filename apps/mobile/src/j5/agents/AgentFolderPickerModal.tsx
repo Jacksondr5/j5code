@@ -64,9 +64,10 @@ export function AgentFolderPickerModal(props: {
       presentationStyle="pageSheet"
       onRequestClose={props.onClose}
     >
-      <SafeAreaView className="flex-1 bg-sheet">
+      {/* Inline flex: on Android a `flex-1` class left this Modal's content zero-height. */}
+      <SafeAreaView className="bg-sheet" style={{ flex: 1 }}>
         <KeyboardAvoidingView
-          className="flex-1"
+          style={{ flex: 1 }}
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
           <View className="flex-row items-center justify-between px-5 py-3">
