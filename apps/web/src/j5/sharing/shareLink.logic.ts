@@ -21,7 +21,7 @@ export const LINK_LIFETIMES: ReadonlyArray<{
 export type LinkLifetime = SharingLinkLifetime;
 export const DEFAULT_LINK_LIFETIME: LinkLifetime = "7d";
 
-export { NAME_IN_USE, NAME_NOT_USABLE } from "@t3tools/client-runtime/j5/sharing";
+export { NAME_NOT_USABLE } from "@t3tools/client-runtime/j5/sharing";
 
 /**
  * One way a link can reach the server: an address the server is already reachable at (AC38).
