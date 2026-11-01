@@ -3,6 +3,7 @@ import {
   type ConnectionAccess,
   type HeldPersonLevel,
   J5_ACCESS_WS_METHODS,
+  J5_SHARED_CONVERSATION_WS_METHODS,
   type PersonLevel,
   higherLevel,
   highestLevel,
@@ -19,6 +20,7 @@ import { request } from "../rpc/client.ts";
 import type { RpcSession } from "../rpc/session.ts";
 import {
   createEnvironmentQueryAtomFamily,
+  createEnvironmentRpcQueryAtomFamily,
   createEnvironmentRpcSubscriptionAtomFamily,
 } from "../state/runtime.ts";
 
@@ -309,6 +311,17 @@ export function createSharingEnvironmentAtoms<R, E>(
     ).pipe(Atom.withLabel(`j5:access:thread-operable:${key}`));
   });
 
+  /** Who sent each message of a thread and who answered each prompt (Shared conversations). */
+  const threadAuthors = createEnvironmentRpcQueryAtomFamily(runtime, {
+    label: "environment-data:j5-shared-conversation:authors",
+    tag: J5_SHARED_CONVERSATION_WS_METHODS.listThreadAuthors,
+    staleTimeMs: 0,
+  });
+  const threadAuthorsChanges = createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+    label: "environment-data:j5-shared-conversation:authors-changes",
+    tag: J5_SHARED_CONVERSATION_WS_METHODS.subscribeThreadAuthorsChanges,
+  });
+
   /**
    * Whether the connection is known to reach less than the whole server; false until the server
    * has said. Mobile's screens still call such a person a guest.
@@ -323,6 +336,8 @@ export function createSharingEnvironmentAtoms<R, E>(
     connectionAccessQuery,
     connectionAccess,
     isNarrow,
+    threadAuthors,
+    threadAuthorsChanges,
     /** Reads the connection's access again, after this client changed it (claim, leave, rename). */
     refreshConnectionAccess: (registry: AtomRegistry.AtomRegistry, environmentId: EnvironmentId) =>
       registry.refresh(connectionAccessQuery({ environmentId, input: {} })),

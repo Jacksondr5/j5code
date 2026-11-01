@@ -5,13 +5,10 @@ import { useEffect, useState } from "react";
 
 import {
   authorIndex,
-  readThreadAuthors,
-  useThreadAuthors,
-  useThreadAuthorsResult,
-  useThreadAuthorsValue,
-} from "./sharedConversation";
-import {
   answersWithoutPrefix,
+  NO_SHARED_MESSAGES_SEEN,
+  observeSharedMessages,
+  sharedQueuedRuns,
   isSharedNote,
   markSharedNote,
   readAnswersFor,
@@ -19,7 +16,13 @@ import {
   type SharedMessageView,
   sharedMessageView,
   typedText,
-} from "./sharedTimeline.logic";
+} from "@t3tools/client-runtime/j5/shared-conversation";
+import {
+  readThreadAuthors,
+  useThreadAuthors,
+  useThreadAuthorsResult,
+  useThreadAuthorsValue,
+} from "./sharedConversation";
 import { useScopePeople } from "./scopeAccess";
 
 interface MessageEntry {
@@ -110,49 +113,7 @@ export function sharedPromptHistoryMessages<
 export function useSharedQueuedRuns<
   Queued extends { readonly run: { readonly userMessageId: string }; readonly text: string },
 >(environmentId: EnvironmentId, threadId: ThreadId, queued: ReadonlyArray<Queued>) {
-  const { record, failed } = useThreadAuthorsResult(environmentId, threadId);
-  const { authors } = authorIndex(record);
-  const held = record === null && !failed;
-  return held
-    ? []
-    : authors.size === 0
-      ? queued
-      : queued.map((item) => {
-          const author = authors.get(item.run.userMessageId);
-          return author === undefined ? item : { ...item, text: typedText(item.text, author) };
-        });
-}
-
-/**
- * When this client first saw each server copy of a person's message, and what its person typed for
- * the messages they sent from here, which are first drawn from what they typed.
- */
-interface SeenMessages {
-  readonly firstSeen: ReadonlyMap<string, number>;
-  readonly typedHere: ReadonlyMap<string, string>;
-}
-
-const noneSeen: SeenMessages = { firstSeen: new Map(), typedHere: new Map() };
-
-/** `seen` itself when the entries hold nothing it lacks, so render stores a new record only then. */
-function observeMessages(seen: SeenMessages, entries: ReadonlyArray<MessageEntry>): SeenMessages {
-  let firstSeen: Map<string, number> | null = null;
-  let typedHere: Map<string, string> | null = null;
-  const now = Date.now();
-  for (const entry of entries) {
-    const message = entry.message;
-    if (message === undefined || message.role !== "user") continue;
-    if (message.createdBy === undefined) {
-      if ((typedHere ?? seen.typedHere).get(message.id) === message.text) continue;
-      typedHere ??= new Map(seen.typedHere);
-      typedHere.set(message.id, message.text);
-    } else if (!(firstSeen ?? seen.firstSeen).has(message.id)) {
-      firstSeen ??= new Map(seen.firstSeen);
-      firstSeen.set(message.id, now);
-    }
-  }
-  if (firstSeen === null && typedHere === null) return seen;
-  return { firstSeen: firstSeen ?? seen.firstSeen, typedHere: typedHere ?? seen.typedHere };
+  return sharedQueuedRuns(useThreadAuthorsResult(environmentId, threadId), queued);
 }
 
 /**
@@ -183,8 +144,12 @@ export function useSharedConversationEntries<Entry extends MessageEntry>(
   const mayBeShared =
     record?.shared === true || writers > 1 || readsOthers || (record === null && !failed);
 
-  const [stored, setStored] = useState(noneSeen);
-  const seen = observeMessages(stored, entries);
+  const [stored, setStored] = useState(NO_SHARED_MESSAGES_SEEN);
+  const seen = observeSharedMessages(
+    stored,
+    entries.flatMap((entry) => (entry.message === undefined ? [] : [entry.message])),
+    Date.now,
+  );
   if (seen !== stored) setStored(seen);
 
   const shown = (() => {

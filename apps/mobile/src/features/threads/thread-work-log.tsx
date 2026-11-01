@@ -60,6 +60,7 @@ import { useMarkdownCodeHighlight } from "./markdownCodeHighlightState";
 
 import { AppText as Text } from "../../components/ui/AppText";
 import { J5Wordmark } from "../../j5/branding/J5Wordmark";
+import { PromptAnsweredBy } from "../../j5/sharing/sharedConversation";
 import { BrowserAppIcon } from "./BrowserAppIcon";
 import { useAppActive, useReduceMotionEnabled } from "../../lib/appState";
 import { cn } from "../../lib/cn";
@@ -1107,6 +1108,8 @@ const ThreadWorkLogRow = function ThreadWorkLogRow(
                   }
                 >{`  ${answerPreview}`}</Text>
               ) : null}
+              {/* J5 (case 99): who answered a settled question or approval. */}
+              <PromptAnsweredBy environmentId={props.environmentId} item={row.projectedItem.item} />
             </WorkLogLabel>
           </>
         )}

@@ -126,13 +126,39 @@ const SEAMS: ReadonlyArray<Seam> = [
     file: "lib/filePreview.test.ts",
     record: "case 97: Timeline delegate",
     from: "",
-    reaches: ['vi.mock("../j5/a2a/timelineState"'],
+    reaches: ['vi.mock("../j5/a2a/timelineState"', 'vi.mock("../j5/sharing/sharedConversation"'],
   },
   {
     file: "features/threads/ThreadQueueControl.tsx",
     record: "case 97: Queue-row formatter",
     from: "../../j5/a2a/queuedDelivery",
     reaches: ["useJ5QueuedDeliveryLabel(", "queuedDeliveryLabel(text) ??"],
+  },
+  {
+    file: "features/threads/ThreadQueueControl.tsx",
+    record: "case 99: shared conversation queue rows",
+    from: "../../j5/sharing/sharedConversation",
+    reaches: ["const queuedRuns = useSharedQueuedRuns("],
+  },
+  {
+    file: "features/threads/ThreadRouteScreen.tsx",
+    record: "case 99: shared conversation authors",
+    from: "../../j5/sharing/sharedConversation",
+    reaches: ["useSharedConversationFeed(", "selectedThreadFeed={selectedThreadFeed}"],
+  },
+  {
+    file: "features/threads/thread-work-log.tsx",
+    record: "case 99: answered by",
+    from: "../../j5/sharing/sharedConversation",
+    reaches: [
+      "<PromptAnsweredBy environmentId={props.environmentId} item={row.projectedItem.item} />",
+    ],
+  },
+  {
+    file: "features/threads/thread-search-match.tsx",
+    record: "case 99: search authors",
+    from: "@t3tools/client-runtime/j5/shared-conversation",
+    reaches: ["threadSearchMatchLabel(props.match)"],
   },
   {
     file: "features/threads/thread-list-v2-items.tsx",

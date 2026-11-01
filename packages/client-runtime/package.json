@@ -463,6 +463,10 @@
       "types": "./src/j5/userMessagePresentation.ts",
       "default": "./src/j5/userMessagePresentation.ts"
     },
+    "./j5/shared-conversation": {
+      "types": "./src/j5/sharedConversation.ts",
+      "default": "./src/j5/sharedConversation.ts"
+    },
     "./j5/crew-notices": {
       "types": "./src/j5/crewNotices.ts",
       "default": "./src/j5/crewNotices.ts"
