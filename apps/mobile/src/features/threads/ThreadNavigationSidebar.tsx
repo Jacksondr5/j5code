@@ -882,7 +882,7 @@ function ThreadNavigationSidebarPane(
               }
             />
             <View className="flex-row items-center gap-2.5">
-              {/* J5: the Inbox bell beside the filter (FORK.md case 102). */}
+              {/* J5: the Inbox bell beside the filter in Android's split view (FORK.md case 102). */}
               <InboxBell variant="sidebar" />
               <Menu actions={listMenuActions} onPressAction={handleListMenuAction}>
                 <SidebarFilterButton accessibilityLabel="Filter threads" icon={filterIcon} />

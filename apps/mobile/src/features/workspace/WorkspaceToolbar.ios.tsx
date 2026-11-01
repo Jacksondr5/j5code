@@ -190,8 +190,8 @@ export function WorkspaceToolbar(props: {
       {workspace.settingsOpen && !foldedSearch ? null : (
         <Toolbar placement="right">
           {searchButton}
-          {/* J5: the Inbox bell on a phone's thread list; iPad's sidebar has its own (case 102). */}
-          {selectedTab === "threads" && deviceType === "phone" ? (
+          {/* J5: the Inbox bell on the thread list, iPhone and iPad alike (case 102). */}
+          {selectedTab === "threads" ? (
             <Toolbar.Custom>
               <InboxBell variant="header" />
             </Toolbar.Custom>
