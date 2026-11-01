@@ -11,11 +11,12 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import { scopedInboxItemKey } from "@t3tools/contracts/j5";
 import { useFocusEffect } from "@react-navigation/native";
 import { useCallback, useState } from "react";
-import { Pressable, RefreshControl, ScrollView, View } from "react-native";
+import { Pressable, RefreshControl, View } from "react-native";
 
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { AppText as Text } from "../../components/ui/AppText";
 import { EmptyState } from "../../components/ui/EmptyState";
+import { ScreenScrollView } from "../../components/ui/ScreenScrollView";
 import { useMarkdownPreviewStyles } from "../../features/files/FileMarkdownPreview";
 import { useOpenLinkedThread } from "../../features/threads/useOpenLinkedThread";
 import { relativeTime } from "../../lib/time";
@@ -92,7 +93,8 @@ export function InboxScreen() {
     ),
   ];
   return (
-    <ScrollView
+    <ScreenScrollView
+      contentInsetAdjustmentBehavior="automatic"
       className="flex-1 bg-sheet"
       contentContainerClassName="gap-4 px-4 py-4"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refreshAll} />}
@@ -126,7 +128,7 @@ export function InboxScreen() {
         </View>
       )}
       <AnsweredShelf items={answered} labels={labels} showEnvironment={showEnvironment} />
-    </ScrollView>
+    </ScreenScrollView>
   );
 }
 
