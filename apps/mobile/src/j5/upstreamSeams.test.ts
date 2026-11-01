@@ -200,6 +200,24 @@ const SEAMS: ReadonlyArray<Seam> = [
     reaches: ["...j5InboxRoutes(GLASS_HEADER_OPTIONS)"],
   },
   {
+    file: "features/home/ThreadListToolbar.tsx",
+    record: "case 102: the Inbox bell",
+    from: "../../j5/inbox/InboxBell",
+    reaches: ['<InboxBell variant="header" />'],
+  },
+  {
+    file: "features/workspace/WorkspaceToolbar.ios.tsx",
+    record: "case 102: the Inbox bell",
+    from: "../../j5/inbox/InboxBell",
+    reaches: ['<InboxBell variant="header" />'],
+  },
+  {
+    file: "features/threads/ThreadNavigationSidebar.tsx",
+    record: "case 102: the Inbox bell",
+    from: "../../j5/inbox/InboxBell",
+    reaches: ['<InboxBell variant="sidebar" />'],
+  },
+  {
     file: "App.tsx",
     record: "case 21: archive preflight",
     from: "./j5/archive/ArchiveWarningSheet",

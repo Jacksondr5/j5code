@@ -53,6 +53,26 @@ export function mergeOpenInboxCounts(
   };
 }
 
+/**
+ * What an inbox bell says: its badge, if any, and its spoken label. A count some server could not
+ * refresh is marked: `3*` when it is a last-known count, `?` when nothing is known.
+ */
+export function inboxBellPresentation(input: {
+  readonly count: number | null;
+  readonly incomplete: boolean;
+}): { readonly badge: string | null; readonly label: string } {
+  const { count, incomplete } = input;
+  const badge = incomplete
+    ? count !== null && count > 0
+      ? `${count}*`
+      : "?"
+    : count !== null && count > 0
+      ? String(count)
+      : null;
+  const label = `${count === null ? "Open inbox" : `Open inbox, ${incomplete ? "last known " : ""}${count} open`}${incomplete ? "; some environments could not be refreshed" : ""}`;
+  return { badge, label };
+}
+
 export function j5SourceNotice(source: J5ReadSource<unknown>): string | null {
   switch (source.status) {
     case "ready":

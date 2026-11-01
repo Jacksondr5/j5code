@@ -11,6 +11,7 @@ import type { J5ReadSource } from "./readSources.ts";
 import {
   answeredByLine,
   closedLine,
+  inboxBellPresentation,
   mergeHumanInboxSources,
   mergeOpenInboxCounts,
   nextKeptItems,
@@ -376,5 +377,27 @@ describe("who has an inbox", () => {
     expect(writesNowhere(person(["viewer", "collaborator"]))).toBe(false);
     expect(writesNowhere({ kind: "service" })).toBe(false);
     expect(writesNowhere(null)).toBe(false);
+  });
+});
+
+describe("what the inbox bell says", () => {
+  it("shows the open count, and nothing when none is open", () => {
+    expect(inboxBellPresentation({ count: 3, incomplete: false })).toEqual({
+      badge: "3",
+      label: "Open inbox, 3 open",
+    });
+    expect(inboxBellPresentation({ count: 0, incomplete: false }).badge).toBeNull();
+    expect(inboxBellPresentation({ count: null, incomplete: false })).toEqual({
+      badge: null,
+      label: "Open inbox",
+    });
+  });
+
+  it("marks a count some server could not refresh", () => {
+    expect(inboxBellPresentation({ count: 2, incomplete: true })).toEqual({
+      badge: "2*",
+      label: "Open inbox, last known 2 open; some environments could not be refreshed",
+    });
+    expect(inboxBellPresentation({ count: null, incomplete: true }).badge).toBe("?");
   });
 });

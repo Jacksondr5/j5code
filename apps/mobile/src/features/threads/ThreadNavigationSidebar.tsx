@@ -56,6 +56,7 @@ import { ThreadListToolbar } from "../home/ThreadListToolbar";
 import { useToolbarLayout } from "../../components/ui/useToolbarLayout";
 import { useFabScroll } from "../home/FabScrollContext";
 import { SidebarFilterButton } from "./sidebar-filter-button";
+import { InboxBell } from "../../j5/inbox/InboxBell";
 import { createSidebarHeaderItems } from "./sidebar-native-header-items";
 import { SidebarNavigationShell } from "./sidebar-navigation-shell";
 import {
@@ -881,6 +882,8 @@ function ThreadNavigationSidebarPane(
               }
             />
             <View className="flex-row items-center gap-2.5">
+              {/* J5: the Inbox bell beside the filter (FORK.md case 102). */}
+              <InboxBell variant="sidebar" />
               <Menu actions={listMenuActions} onPressAction={handleListMenuAction}>
                 <SidebarFilterButton accessibilityLabel="Filter threads" icon={filterIcon} />
               </Menu>
