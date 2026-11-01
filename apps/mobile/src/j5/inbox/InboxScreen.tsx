@@ -13,7 +13,7 @@ import { scopedInboxItemKey } from "@t3tools/contracts/j5";
 import { useFocusEffect } from "@react-navigation/native";
 import { useCallback, useState } from "react";
 import { Platform, Pressable, RefreshControl, View } from "react-native";
-import { KeyboardAvoidingView } from "react-native-keyboard-controller";
+import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { AppText as Text, AppTextInput as TextInput } from "../../components/ui/AppText";
@@ -98,64 +98,76 @@ export function InboxScreen() {
       }),
     ),
   ];
-  return (
-    // iOS: the scroll view moves the focused answer box above the keyboard itself, as upstream's
-    // commit sheet does. Android: the view makes room for the keyboard instead.
-    <KeyboardAvoidingView
-      automaticOffset
-      behavior="padding"
-      enabled={Platform.OS !== "ios"}
-      className="flex-1 bg-sheet"
-    >
-      <ScreenScrollView
-        automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
-        contentInsetAdjustmentBehavior="automatic"
-        className="flex-1"
-        contentContainerClassName="gap-4 px-4 py-4"
-        keyboardShouldPersistTaps="handled"
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refreshAll} />}
-      >
-        <NativeStackScreenOptions options={{ title: "Inbox" }} />
-        {notices.map((notice) => (
-          <Text key={notice} className="text-sm text-foreground-muted">
-            {notice}
-          </Text>
-        ))}
-        {answers.shownItems.length === 0 ? (
-          loading ? (
-            <Text className="text-foreground-muted">Loading your inbox…</Text>
-          ) : (
-            <EmptyState
-              variant="plain"
-              title="Nothing waiting on you"
-              detail="When an agent asks you something, it shows up here."
-            />
-          )
+  const content = (
+    <>
+      <NativeStackScreenOptions options={{ title: "Inbox" }} />
+      {notices.map((notice) => (
+        <Text key={notice} className="text-sm text-foreground-muted">
+          {notice}
+        </Text>
+      ))}
+      {answers.shownItems.length === 0 ? (
+        loading ? (
+          <Text className="text-foreground-muted">Loading your inbox…</Text>
         ) : (
-          <View className="gap-3">
-            {answers.shownItems.map((item) => {
-              const key = scopedInboxItemKey(item);
-              return (
-                <InboxItem
-                  key={key}
-                  item={item}
-                  labels={labels}
-                  showEnvironment={showEnvironment}
-                  closed={answers.closedOf(item)}
-                  answerText={answers.answerText(item)}
-                  onChangeAnswer={(text) => answers.setAnswerText(item, text)}
-                  onAnswer={() => void answers.answer(item)}
-                  delivering={answers.pendingKey === key}
-                  error={answers.errorFor(item)}
-                  anyDelivering={answers.pendingKey !== null}
-                />
-              );
-            })}
-          </View>
-        )}
-        <AnsweredShelf items={answered} labels={labels} showEnvironment={showEnvironment} />
-      </ScreenScrollView>
-    </KeyboardAvoidingView>
+          <EmptyState
+            variant="plain"
+            title="Nothing waiting on you"
+            detail="When an agent asks you something, it shows up here."
+          />
+        )
+      ) : (
+        <View className="gap-3">
+          {answers.shownItems.map((item) => {
+            const key = scopedInboxItemKey(item);
+            return (
+              <InboxItem
+                key={key}
+                item={item}
+                labels={labels}
+                showEnvironment={showEnvironment}
+                closed={answers.closedOf(item)}
+                answerText={answers.answerText(item)}
+                onChangeAnswer={(text) => answers.setAnswerText(item, text)}
+                onAnswer={() => void answers.answer(item)}
+                delivering={answers.pendingKey === key}
+                error={answers.errorFor(item)}
+                anyDelivering={answers.pendingKey !== null}
+              />
+            );
+          })}
+        </View>
+      )}
+      <AnsweredShelf items={answered} labels={labels} showEnvironment={showEnvironment} />
+    </>
+  );
+  const refreshControl = <RefreshControl refreshing={refreshing} onRefresh={refreshAll} />;
+  // iOS keeps upstream's scroll view, which registers with the native header, and lets it move the
+  // focused answer box above the keyboard, as upstream's commit sheet does. Android has no header
+  // marker, so keyboard-controller's scroll view brings the box being typed in clear of the keyboard.
+  return Platform.OS === "ios" ? (
+    <ScreenScrollView
+      automaticallyAdjustKeyboardInsets
+      contentInsetAdjustmentBehavior="automatic"
+      className="flex-1 bg-sheet"
+      contentContainerClassName="gap-4 px-4 py-4"
+      keyboardShouldPersistTaps="handled"
+      refreshControl={refreshControl}
+    >
+      {content}
+    </ScreenScrollView>
+  ) : (
+    <KeyboardAwareScrollView
+      bottomOffset={80}
+      className="flex-1 bg-sheet"
+      contentContainerClassName="gap-4 px-4 py-4"
+      // Android's content width cap, as upstream's ScreenScrollView applies it.
+      contentContainerStyle={{ width: "100%", maxWidth: 720, alignSelf: "center" }}
+      keyboardShouldPersistTaps="handled"
+      refreshControl={refreshControl}
+    >
+      {content}
+    </KeyboardAwareScrollView>
   );
 }
 
