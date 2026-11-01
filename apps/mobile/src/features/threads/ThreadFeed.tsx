@@ -255,6 +255,7 @@ import {
   resolveWorkspaceRelativeFilePath,
 } from "../files/filePath";
 import { waitForThreadShellReady } from "./threadForkNavigation";
+import { openArtifactLink } from "../../j5/artifacts/artifactLinks";
 import { resolveUserMessageIntentBadge } from "./userMessageIntentBadge";
 import { fileChipClipboardPath, fileChipMenu, resolveFileChipTarget } from "./fileChipMenu";
 import { useFileChipShare } from "./useFileChipShare";
@@ -2318,6 +2319,15 @@ export const ThreadFeed = memo(function ThreadFeed({
       if (instructionsPath) openSkillInstructions(instructionsPath);
       return;
     }
+    if (
+      openArtifactLink(href, {
+        navigation,
+        environmentId: String(props.environmentId),
+        threadId: String(props.threadId),
+        workspaceRoot: props.workspaceRoot,
+      })
+    )
+      return;
     const target = resolveLinkedThread(href);
     if (target) {
       openLinkedThread({
