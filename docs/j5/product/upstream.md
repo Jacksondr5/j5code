@@ -208,11 +208,11 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Decided:** the persona picker is Bryant's request (2026-09-08) and fix (2026-09-14). The persona model lock comes from Bryant's persona stack, whose scope was approved on 2026-09-08. The ordering against threads arrived in the 2026-09-24 advance (PR #262). Jackson approved it on 2026-09-28. Recorded in FORK.md's saved-agent mentions section and its PR #75–#86 table.
 
-#### D41. On mobile, a draft's saved agent has its own row, and the slash menu covers the draft rows
+#### D41. On mobile, a draft's persona has its own row, and the slash menu covers the draft rows
 
 **Upstream:** the mobile new-task composer shows the model in its input row and opens the slash menu above everything stacked over the input, including the checkout row.
 
-**J5:** a saved agent chosen for a new-task draft shows in its own row under the checkout row, with its route and remove action, instead of in the input row. The slash menu opens over the checkout and agent rows instead of above them. A started thread's composer is unchanged.
+**J5:** a persona chosen for a new-task draft shows in its own row under the checkout row, with its route and remove action, instead of in the input row. The slash menu opens over the checkout and persona rows instead of above them. A started thread's composer is unchanged.
 
 **Why:** in the input row, the agent's chip crowded the editor and was truncated past reading, and the slash menu was squeezed into the space left above the stacked rows (Jackson, Checkpoint 1 on his iPhone).
 
@@ -629,4 +629,4 @@ J5 kept a run from resuming after a usage-limit reset when the person had presse
 - 2026-10-31 — D33: the preview stream closes when its session is revoked, replaced or expires, as the RPC socket already did, so a lowered level stops a preview at once ([#798](https://github.com/Jacksondr5/j5code/issues/798)).
 - 2026-10-31 — D33: "Merge back" is disabled for someone who can't start a thread in the fork's project, which the server already refused (Jackson's 2026-10-31 approval; [#730](https://github.com/Jacksondr5/j5code/issues/730)).
 - 2026-11-01 — D33: the mobile client reads shared conversations as web does, with each message's author and avatar, who answered each prompt, and another person's message held until its author is known; sharing itself stays on web and desktop (the mobile catch-up; [#832](https://github.com/Jacksondr5/j5code/issues/832), [#871](https://github.com/Jacksondr5/j5code/issues/871), [#869](https://github.com/Jacksondr5/j5code/issues/869)).
-- 2026-11-01 — D41 added: on mobile, a draft's saved agent has its own row under the checkout row, and the slash menu covers the draft rows (Jackson, Checkpoint 1; [#866](https://github.com/Jacksondr5/j5code/issues/866)).
+- 2026-11-01 — D41 added: on mobile, a draft's persona has its own row under the checkout row, and the slash menu covers the draft rows (Jackson, Checkpoint 1; [#866](https://github.com/Jacksondr5/j5code/issues/866)).
