@@ -331,6 +331,14 @@
       "types": "./src/state/threadUndo.ts",
       "default": "./src/state/threadUndo.ts"
     },
+    "./j5/participant-identity": {
+      "types": "./src/j5/participantIdentity.ts",
+      "default": "./src/j5/participantIdentity.ts"
+    },
+    "./j5/archive-flow": {
+      "types": "./src/j5/archiveFlow.ts",
+      "default": "./src/j5/archiveFlow.ts"
+    },
     "./j5/agent-personas": {
       "types": "./src/j5/agentPersonas.ts",
       "default": "./src/j5/agentPersonas.ts"
