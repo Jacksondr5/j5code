@@ -138,7 +138,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Upstream:** archiving asks for confirmation only if the person turned that setting on, and the confirmation is generic.
 
-**J5:** when archiving would strand something, such as open asks, running work or Crews, the web dialog lists it, whatever that setting says. A failed read says "Couldn't check". A Crew seat can't be archived on its own from any door.
+**J5:** when archiving would strand something, such as open asks, running work or Crews, the archive dialog lists it on web and mobile, whatever that setting says. A failed read says "Couldn't check". A Crew seat can't be archived on its own from any door.
 
 **Why:** archiving is where obligations get stranded, and cleanup that happens silently is how a fleet loses track of itself. The platform's job is to put the facts in front of whoever decides. Crews archive as a unit: a member's failure is usually recoverable by messaging it again, and a member that can't be recovered has probably contaminated its crewmates.
 
