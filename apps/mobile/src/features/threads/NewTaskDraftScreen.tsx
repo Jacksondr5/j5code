@@ -31,7 +31,6 @@ import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScroll
 import { KeyboardController } from "react-native-keyboard-controller";
 
 import {
-  AuthOrchestrationOperateScope,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   resolveEnvironmentMachineKind,
 } from "@t3tools/contracts";
@@ -96,7 +95,7 @@ import { selectIncomingShareAttachmentsForServer } from "../sharing/incoming-sha
 import { appAtomRegistry } from "../../state/atom-registry";
 import { serverEnvironment } from "../../state/server";
 
-import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
+import { readCanStartTaskIn, useCanStartTaskIn } from "../../j5/sharing/startAccess";
 import { AgentDraftPicker } from "../../j5/agents/AgentDraftPicker";
 import { clearDraftAgent } from "../../j5/agents/agentDraftState";
 import { useDraftAgentAssignment } from "../../j5/agents/useDraftAgentAssignment";
@@ -189,9 +188,10 @@ export function NewTaskDraftScreen(props: {
     selectedProject?.environmentId ?? null,
   );
   const environmentConnected = connectionState === "connected";
-  const canOperate = useEnvironmentScope(
+  // J5: starting needs the person's level over the project too (FORK.md case 90).
+  const canOperate = useCanStartTaskIn(
     selectedProject?.environmentId ?? null,
-    AuthOrchestrationOperateScope,
+    selectedProject?.id ?? null,
   );
   const projectCloneState = useProjectClone(
     selectedProject
@@ -801,7 +801,7 @@ export function NewTaskDraftScreen(props: {
     }
     if (
       environmentConnected &&
-      !readEnvironmentScope(selectedProject.environmentId, AuthOrchestrationOperateScope)
+      !readCanStartTaskIn(selectedProject.environmentId, selectedProject.id)
     ) {
       return null;
     }

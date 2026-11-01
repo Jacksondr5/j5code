@@ -260,6 +260,7 @@ import {
   onArtifactLinkMenuAction,
   openArtifactLink,
 } from "../../j5/artifacts/artifactLinks";
+import { useCanForkThread } from "../../j5/sharing/startAccess";
 import { resolveUserMessageIntentBadge } from "./userMessageIntentBadge";
 import { fileChipClipboardPath, fileChipMenu, resolveFileChipTarget } from "./fileChipMenu";
 import { useFileChipShare } from "./useFileChipShare";
@@ -438,8 +439,10 @@ function AssistantForkButton(props: {
     capabilities: support.providerSession?.capabilities,
   });
   const runId = props.projectedItem.item.runId;
+  // J5: a fork is a new thread in the project, which the person's level there decides (case 90).
+  const levelAllowsFork = useCanForkThread(props.environmentId, props.projectedItem.sourceThreadId);
 
-  if (!canFork || runId === null) return null;
+  if (!canFork || !levelAllowsFork || runId === null) return null;
 
   return (
     <Pressable
