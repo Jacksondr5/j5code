@@ -1,6 +1,8 @@
 import {
+  levelReaches,
   type MessageAuthor,
   type PromptAnswer,
+  type ScopePerson,
   type ThreadAuthors,
   type ThreadSearchAuthor,
   typedText,
@@ -126,6 +128,27 @@ export const readAnswersFor = (input: {
   readonly readAt: number | null;
   readonly firstSeenAt: number;
 }) => input.readAt !== null && input.readAt >= input.firstSeenAt;
+
+/**
+ * Whether a message nobody is recorded for yet may carry lines for the agent. Who reaches the
+ * thread says so as soon as it is shared: more than one writer, or anyone else at all to a reader
+ * who is not the first owner. Until the first read answers or fails, any thread may be shared.
+ */
+export function mayBeSharedConversation(input: {
+  readonly record: ThreadAuthors | null;
+  readonly failed: boolean;
+  readonly people: ReadonlyArray<Pick<ScopePerson, "level" | "you" | "firstOwner">> | null;
+}): boolean {
+  const reaching = input.people ?? [];
+  const writers = reaching.filter((person) => levelReaches(person.level, "collaborator")).length;
+  const readsOthers = reaching.length > 1 && !reaching.some((p) => p.you && p.firstOwner);
+  return (
+    input.record?.shared === true ||
+    writers > 1 ||
+    readsOthers ||
+    (input.record === null && !input.failed)
+  );
+}
 
 /**
  * When this client first saw each server copy of a person's message, and what its person typed for

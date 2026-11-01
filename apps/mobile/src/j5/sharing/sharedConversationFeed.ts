@@ -2,12 +2,13 @@ import {
   answersWithoutPrefix,
   authorIndex,
   markSharedNote,
+  mayBeSharedConversation,
   readAnswersFor,
   type SeenSharedMessages,
   sharedMessageView,
 } from "@t3tools/client-runtime/j5/shared-conversation";
 import { MessageId } from "@t3tools/contracts";
-import type { ThreadAuthors } from "@t3tools/contracts/j5";
+import type { ScopePerson, ThreadAuthors } from "@t3tools/contracts/j5";
 
 import type { ThreadFeedEntry } from "../../lib/threadActivity";
 
@@ -22,10 +23,11 @@ export function presentSharedConversationFeed(input: {
   /** When the latest read came back; null before one has. */
   readonly readAt: number | null;
   readonly seen: SeenSharedMessages;
+  /** Who reaches the thread; null until that read answers, or when it fails. */
+  readonly people: ReadonlyArray<ScopePerson> | null;
 }): { readonly feed: ReadonlyArray<ThreadFeedEntry>; readonly pendingKey: string } {
   const { record, failed, readAt, seen } = input;
-  // Until the first read answers or fails, any thread may be shared.
-  const mayBeShared = record?.shared === true || (record === null && !failed);
+  const mayBeShared = mayBeSharedConversation({ record, failed, people: input.people });
   const { authors, answers } = authorIndex(record);
   const pending: string[] = [];
   const shown = input.feed.flatMap((entry): ReadonlyArray<ThreadFeedEntry> => {
