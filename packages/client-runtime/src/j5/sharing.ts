@@ -171,6 +171,20 @@ export const NAME_IN_USE = "That name is already in use on this server. Choose a
 export const nameIsInUse = (error: unknown) =>
   (error as { readonly code?: unknown } | null)?.code === "PersonNameTakenError";
 
+/**
+ * Whether upstream's "Permissions have changed / pair again" notice is for a connection. One J5
+ * places as a person, or as a device it will ask about, has its permissions renewed when that
+ * person's level changes, so pairing again never applies to it. The notice is held back until the
+ * server answers; a server that cannot answer (from before people) keeps upstream's notice.
+ */
+export function permissionNoticeApplies(
+  answer: AsyncResult.AsyncResult<KnownConnectionAccess, unknown>,
+): boolean {
+  if (answer._tag === "Initial") return false;
+  const access = Option.getOrNull(AsyncResult.value(answer));
+  return access?.kind !== "person" && access?.kind !== "unknown";
+}
+
 const asksThreadLevel = (access: KnownConnectionAccess) =>
   access?.kind === "person" && !access.wide;
 

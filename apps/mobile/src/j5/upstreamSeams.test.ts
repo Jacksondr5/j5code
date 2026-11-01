@@ -189,6 +189,12 @@ const SEAMS: ReadonlyArray<Seam> = [
     reaches: ["<NameQuestionHost />"],
   },
   {
+    file: "features/connection/permissionUpdateNotice.ts",
+    record: "case 73: no pair-again notice for a person",
+    from: "../../j5/sharing/upstreamNotices",
+    reaches: ["get(permissionNoticeEnvironmentIdsAtom).has(environmentId)"],
+  },
+  {
     file: "connection/runtime.ts",
     record: "case 70: session renewal",
     from: "@t3tools/client-runtime/j5/session-renewal",
