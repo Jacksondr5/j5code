@@ -96,7 +96,7 @@ import { appAtomRegistry } from "../../state/atom-registry";
 import { serverEnvironment } from "../../state/server";
 
 import { readCanStartTaskIn, useCanStartTaskIn } from "../../j5/sharing/startAccess";
-import { AgentDraftPicker } from "../../j5/agents/AgentDraftPicker";
+import { DraftAgentRow } from "../../j5/agents/DraftAgentRow";
 import { clearDraftAgent } from "../../j5/agents/agentDraftState";
 import { useDraftAgentAssignment } from "../../j5/agents/useDraftAgentAssignment";
 
@@ -1163,14 +1163,12 @@ export function NewTaskDraftScreen(props: {
                 </View>
               ) : null}
               {flow.canChooseWorkspace ? workspaceControls : null}
-              {draftAgent.personaId === null && flow.draftKey ? (
-                <View className="flex-row px-2 pt-1">
-                  <AgentDraftPicker
-                    environmentId={selectedProject.environmentId}
-                    draftKey={flow.draftKey}
-                    disabled={isComposerInteractionLocked}
-                  />
-                </View>
+              {flow.draftKey ? (
+                <DraftAgentRow
+                  environmentId={selectedProject.environmentId}
+                  draftKey={flow.draftKey}
+                  disabled={isComposerInteractionLocked}
+                />
               ) : null}
             </View>
           ),

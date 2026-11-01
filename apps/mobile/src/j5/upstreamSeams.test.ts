@@ -48,7 +48,7 @@ const SEAMS: ReadonlyArray<Seam> = [
     reaches: [
       "useDraftAgentAssignment(",
       "agentPersonaAssignment: draftAgent.assignment",
-      "<AgentDraftPicker",
+      "<DraftAgentRow",
       "clearDraftAgent(draftKey)",
       "expandPlaybookPrompt(draft.text.trim())",
     ],
@@ -103,7 +103,8 @@ const SEAMS: ReadonlyArray<Seam> = [
     reaches: [
       "<AgentPersonaAssignmentControls",
       "compact={!compactEditor.isExpanded}",
-      "draftKey: composerDraftKey",
+      "props.isDraft ? null : (",
+      '<View className="relative">\n            <ComposerPopoverAnchor>',
       "projectId: props.selectedThread.projectId",
       'composerMenu.trigger.kind === "slash-playbook"',
     ],
