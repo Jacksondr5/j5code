@@ -183,6 +183,18 @@ const SEAMS: ReadonlyArray<Seam> = [
     ],
   },
   {
+    file: "App.tsx",
+    record: "case 70: the name question",
+    from: "./j5/sharing/NameQuestion",
+    reaches: ["<NameQuestionHost />"],
+  },
+  {
+    file: "connection/runtime.ts",
+    record: "case 70: session renewal",
+    from: "@t3tools/client-runtime/j5/session-renewal",
+    reaches: ["Layer.provideMerge(J5SessionRenewal.layer)"],
+  },
+  {
     file: "features/connection/pairing.ts",
     record: "BRANDING.md: pairing QR handling",
     from: "../../../../../scripts/lib/j5-branding.ts",

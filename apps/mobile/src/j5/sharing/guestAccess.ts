@@ -10,8 +10,12 @@ import { Atom } from "effect/reactivity";
 import { environmentCatalog } from "../../connection/catalog";
 import { connectionAtomRuntime } from "../../connection/runtime";
 import { useEnvironmentScope } from "../../state/session";
+import { j5Environment } from "../state";
 
-export const j5Sharing = createSharingEnvironmentAtoms(connectionAtomRuntime);
+/** What this device's connection is on each server; read again when people or levels change. */
+export const j5Sharing = createSharingEnvironmentAtoms(connectionAtomRuntime, {
+  rereadOn: j5Environment.rereadOn("sharing"),
+});
 
 const NOTHING_WITHHELD = Atom.make(true);
 

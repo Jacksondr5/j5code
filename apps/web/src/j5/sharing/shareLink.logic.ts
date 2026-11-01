@@ -21,11 +21,7 @@ export const LINK_LIFETIMES: ReadonlyArray<{
 export type LinkLifetime = SharingLinkLifetime;
 export const DEFAULT_LINK_LIFETIME: LinkLifetime = "7d";
 
-/** What a person is told when a name is not one the server will take, before it is sent. */
-export const NAME_NOT_USABLE =
-  "Use a name of one line, up to 80 characters, with no invisible characters, no square or angle brackets, and no level in parentheses such as (owner).";
-/** What a person is told when the name they chose is someone else's on this server. */
-export const NAME_IN_USE = "That name is already in use on this server. Choose another.";
+export { NAME_IN_USE, NAME_NOT_USABLE } from "@t3tools/client-runtime/j5/sharing";
 
 /**
  * One way a link can reach the server: an address the server is already reachable at (AC38).

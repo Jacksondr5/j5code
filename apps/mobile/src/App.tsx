@@ -19,6 +19,7 @@ import { RegistryContext } from "@effect/atom-react";
 import { J5_BRANDING } from "../../../scripts/lib/j5-branding.ts";
 import { ProjectChipIconRasterizer } from "./native/ProjectChipIconImages";
 import { ThreadArrangementHost } from "./features/threads/ThreadArrangementSheet";
+import { NameQuestionHost } from "./j5/sharing/NameQuestion";
 import * as Dialog from "./components/ui/Dialog";
 import { ArchiveWarningHost } from "./j5/archive/ArchiveWarningSheet";
 import { CloudAuthProvider } from "./features/cloud/CloudAuthProvider";
@@ -172,6 +173,7 @@ function AppContent() {
                 <Dialog.Host />
                 <ArchiveWarningHost />
                 <ThreadArrangementHost />
+                <NameQuestionHost />
                 <ProjectChipIconRasterizer />
               </NativeLayoutMetricsProvider>
             </GlobalVoiceInputControl>
