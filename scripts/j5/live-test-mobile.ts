@@ -548,6 +548,18 @@ function emulatorSerial(avd: string): string | undefined {
   return undefined;
 }
 
+/** Whether anything listens on `port`, even a process of another user's whose pid is hidden. */
+function portInUse(port: number): boolean {
+  const listing =
+    // oxlint-disable-next-line t3code/no-global-process-runtime -- a standalone CLI with no Effect runtime.
+    process.platform === "darwin"
+      ? NodeChildProcess.spawnSync("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN"], {
+          encoding: "utf8",
+        })
+      : NodeChildProcess.spawnSync("ss", ["-H", "-ltn", `sport = :${port}`], { encoding: "utf8" });
+  return (listing.stdout ?? "").trim() !== "";
+}
+
 /**
  * The console port of slot `j5-tester-<n>`'s emulator: 5554 + 2n, so it comes with the slot's
  * atomic claim and two setups can never pick the same one. Its adb port is the one above. 5554
@@ -578,12 +590,11 @@ async function startEmulator(
   }
   const port = emulatorPortForSlot(record.slot);
   for (const taken of [port, port + 1]) {
+    if (!portInUse(taken)) continue;
     const holder = listenerOn(taken);
-    if (holder !== undefined) {
-      throw new LiveTestRefusal(
-        `Port ${taken}, which ${record.slot}'s emulator uses, is held by process ${holder}, which this script did not start.`,
-      );
-    }
+    throw new LiveTestRefusal(
+      `Port ${taken}, which ${record.slot}'s emulator uses, is already taken${holder === undefined ? "" : ` by process ${holder}`}, not by this script.`,
+    );
   }
   const log = mobileFiles(paths).emulatorLog;
   const emulator = {
