@@ -574,7 +574,7 @@ async function startEmulator(
   const sdk = androidSdk();
   const again = selfCommand(paths, "--mobile android");
   if (isOurs(paths, record.emulator)) {
-    return waitForBoot(sdk.adb, record.emulator!, deadline, again);
+    return bootedAsSlot(sdk.adb, record.emulator!, record.slot, deadline, again);
   }
   const port = emulatorPortForSlot(record.slot);
   for (const taken of [port, port + 1]) {
@@ -610,11 +610,25 @@ async function startEmulator(
     port,
   };
   writeMobileRecord(paths, { ...readMobileRecord(paths)!, emulator });
-  await waitForBoot(sdk.adb, emulator, deadline, again, log);
-  // The serial names a port, not an emulator: make sure the one behind it runs this slot's AVD.
+  await bootedAsSlot(sdk.adb, emulator, record.slot, deadline, again, log);
+}
+
+/**
+ * Waits for the emulator to boot, then makes sure the one behind its serial runs `slot`'s AVD:
+ * the serial names a port, not an emulator.
+ */
+async function bootedAsSlot(
+  adb: string,
+  emulator: ProcessRecord & { readonly port: number },
+  slot: string,
+  deadline: number,
+  again: string,
+  log?: string,
+): Promise<void> {
+  await waitForBoot(adb, emulator, deadline, again, log);
   const avd = NodeChildProcess.spawnSync(
-    sdk.adb,
-    ["-s", `emulator-${port}`, "emu", "avd", "name"],
+    adb,
+    ["-s", `emulator-${emulator.port}`, "emu", "avd", "name"],
     {
       encoding: "utf8",
       timeout: 10_000,
@@ -622,9 +636,9 @@ async function startEmulator(
   )
     .stdout?.split(/\r?\n/)[0]
     ?.trim();
-  if (avd !== record.slot) {
+  if (avd !== slot) {
     throw new LiveTestRefusal(
-      `emulator-${port} runs the AVD ${avd ?? "(unknown)"}, not ${record.slot}. Do not open it; run stop, then set up again.`,
+      `emulator-${emulator.port} runs the AVD ${avd ?? "(unknown)"}, not ${slot}. Do not open it; run stop, then set up again.`,
     );
   }
 }
