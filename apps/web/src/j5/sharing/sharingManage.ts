@@ -1,7 +1,6 @@
 import {
   createEnvironmentRpcCommand,
   createEnvironmentRpcQueryAtomFamily,
-  createEnvironmentRpcSubscriptionAtomFamily,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId } from "@t3tools/contracts";
@@ -38,15 +37,8 @@ export const sharingManage = {
     refreshTrigger: j5Environment.rereadOn("sharing"),
   }),
   /** Who reaches one thread or project, for anyone who reaches it (AC26). */
-  scopePeople: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
-    label: "environment-data:j5-people:scope",
-    tag: J5_PEOPLE_WS_METHODS.listScopePeople,
-    staleTimeMs: 0,
-  }),
-  scopePeopleChanges: createEnvironmentRpcSubscriptionAtomFamily(connectionAtomRuntime, {
-    label: "environment-data:j5-people:scope-changes",
-    tag: J5_PEOPLE_WS_METHODS.subscribeScopePeopleChanges,
-  }),
+  scopePeople: j5Sharing.scopePeople,
+  scopePeopleChanges: j5Sharing.scopePeopleChanges,
   /** For a device the server cannot place: everyone it could be (AC5). */
   claimablePeople: createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
     label: "environment-data:j5-access:claimable",

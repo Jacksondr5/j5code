@@ -1,10 +1,10 @@
 import type { EnvironmentId, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import type { MessageAuthor, PromptAnswer } from "@t3tools/contracts/j5";
-import { levelReaches } from "@t3tools/contracts/j5";
 import { useEffect, useState } from "react";
 
 import {
   authorIndex,
+  mayBeSharedConversation,
   answersWithoutPrefix,
   NO_SHARED_MESSAGES_SEEN,
   observeSharedMessages,
@@ -134,15 +134,11 @@ export function useSharedConversationEntries<Entry extends MessageEntry>(
     threadRef === null ? null : { kind: "thread" as const, threadId: threadRef.threadId };
   // The header's pill already reads who reaches the thread; this is the same read.
   const people = useScopePeople(threadRef?.environmentId ?? null, threadScope);
-  const reaching = people.data?.people ?? [];
-  const writers = reaching.filter((person) => levelReaches(person.level, "collaborator")).length;
-  // To anyone but the first owner, a message no one is recorded for may be the first owner's,
-  // which the next read says; their own view draws it as theirs.
-  const readsOthers = reaching.length > 1 && !reaching.some((p) => p.you && p.firstOwner);
-  // Until the first read answers or fails, any thread may be shared, so nothing is drawn plain
-  // that may carry lines for the agent.
-  const mayBeShared =
-    record?.shared === true || writers > 1 || readsOthers || (record === null && !failed);
+  const mayBeShared = mayBeSharedConversation({
+    record,
+    failed,
+    people: people.data?.people ?? null,
+  });
 
   const [stored, setStored] = useState(NO_SHARED_MESSAGES_SEEN);
   const seen = observeSharedMessages(

@@ -25,6 +25,32 @@ const NO_RECORD = Atom.make(AsyncResult.initial(false)) as ReturnType<
 const NO_CHANGES = Atom.make(AsyncResult.initial(false)) as ReturnType<
   typeof j5Sharing.threadAuthorsChanges
 >;
+const NO_PEOPLE = Atom.make(AsyncResult.initial(false)) as ReturnType<typeof j5Sharing.scopePeople>;
+const NO_PEOPLE_CHANGES = Atom.make(AsyncResult.initial(false)) as ReturnType<
+  typeof j5Sharing.scopePeopleChanges
+>;
+
+/**
+ * Who reaches a thread, read again whenever the server says it changed, so a thread shared while
+ * it is open is known to be shared before anyone else's first message arrives.
+ */
+function useThreadPeople(environmentId: EnvironmentId | null, threadId: ThreadId | null) {
+  const target =
+    environmentId === null || threadId === null
+      ? null
+      : { environmentId, input: { scope: { kind: "thread" as const, threadId } } };
+  const query = target === null ? NO_PEOPLE : j5Sharing.scopePeople(target);
+  const people = useAtomValue(query);
+  const changes = useAtomValue(
+    target === null ? NO_PEOPLE_CHANGES : j5Sharing.scopePeopleChanges(target),
+  );
+  const revision = Option.getOrNull(AsyncResult.value(changes))?.revision;
+  // oxlint-disable-next-line t3code/react-effect-budget -- rereads who reaches the thread when the server's change counter moves.
+  useEffect(() => {
+    if (revision !== undefined && revision > 0) appAtomRegistry.refresh(query);
+  }, [query, revision]);
+  return Option.getOrNull(AsyncResult.value(people))?.people ?? null;
+}
 
 function useThreadAuthorsResult(environmentId: EnvironmentId | null, threadId: ThreadId | null) {
   const result = useAtomValue(
@@ -60,7 +86,8 @@ export function useSharedQueuedRuns<
 
 /**
  * Shared conversations AC16 for the native timeline (`presentSharedConversationFeed`), from the
- * record of who sent each message, read again whenever the server says it changed.
+ * record of who sent each message and who reaches the thread, each read again whenever the server
+ * says it changed.
  */
 export function useSharedConversationFeed(
   environmentId: EnvironmentId | null,
@@ -71,6 +98,7 @@ export function useSharedConversationFeed(
     environmentId === null || threadId === null ? null : { environmentId, input: { threadId } };
   const query = target === null ? NO_RECORD : j5Sharing.threadAuthors(target);
   const { record, failed, readAt } = useThreadAuthorsResult(environmentId, threadId);
+  const people = useThreadPeople(environmentId, threadId);
   const changes = useAtomValue(
     target === null ? NO_CHANGES : j5Sharing.threadAuthorsChanges(target),
   );
@@ -94,6 +122,7 @@ export function useSharedConversationFeed(
     failed,
     readAt,
     seen,
+    people,
   });
   // oxlint-disable-next-line t3code/react-effect-budget -- asks once more about a message waiting on its author, in case the change feed is slow.
   useEffect(() => {

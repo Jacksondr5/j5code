@@ -3,6 +3,7 @@ import {
   type ConnectionAccess,
   type HeldPersonLevel,
   J5_ACCESS_WS_METHODS,
+  J5_PEOPLE_WS_METHODS,
   J5_SHARED_CONVERSATION_WS_METHODS,
   type PersonLevel,
   higherLevel,
@@ -321,6 +322,16 @@ export function createSharingEnvironmentAtoms<R, E>(
     label: "environment-data:j5-shared-conversation:authors-changes",
     tag: J5_SHARED_CONVERSATION_WS_METHODS.subscribeThreadAuthorsChanges,
   });
+  /** Who reaches one thread or project, for anyone who reaches it (People and access AC26). */
+  const scopePeople = createEnvironmentRpcQueryAtomFamily(runtime, {
+    label: "environment-data:j5-people:scope",
+    tag: J5_PEOPLE_WS_METHODS.listScopePeople,
+    staleTimeMs: 0,
+  });
+  const scopePeopleChanges = createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+    label: "environment-data:j5-people:scope-changes",
+    tag: J5_PEOPLE_WS_METHODS.subscribeScopePeopleChanges,
+  });
 
   /**
    * Whether the connection is known to reach less than the whole server; false until the server
@@ -338,6 +349,8 @@ export function createSharingEnvironmentAtoms<R, E>(
     isNarrow,
     threadAuthors,
     threadAuthorsChanges,
+    scopePeople,
+    scopePeopleChanges,
     /** Reads the connection's access again, after this client changed it (claim, leave, rename). */
     refreshConnectionAccess: (registry: AtomRegistry.AtomRegistry, environmentId: EnvironmentId) =>
       registry.refresh(connectionAccessQuery({ environmentId, input: {} })),

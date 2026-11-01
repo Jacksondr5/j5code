@@ -58,6 +58,7 @@ describe("presentSharedConversationFeed", () => {
       failed: false,
       readAt: 2,
       seen: seenAt(["m-1"], 1),
+      people: null,
     });
     expect(texts(feed)).toEqual([
       ["m-1:shared-note", "[Note for the agent]"],
@@ -75,9 +76,36 @@ describe("presentSharedConversationFeed", () => {
       failed: false,
       readAt: null,
       seen: seenAt(["m-2"], 1),
+      people: null,
     });
     expect(feed).toEqual([]);
     expect(pendingKey).toBe("m-2");
+  });
+
+  it("holds a new writer's first message in a thread shared after its record was read", () => {
+    // The record was read before the thread was shared, so it still says not shared.
+    const input = {
+      feed: [message("m-4", `${prefix}First words from Priya.`)],
+      record: record({ shared: false, authors: [] }),
+      failed: false,
+      readAt: 1,
+      seen: seenAt(["m-4"], 2),
+    };
+    const owner = { level: "owner" as const, you: true, firstOwner: true };
+    const collaborator = { level: "collaborator" as const, you: false, firstOwner: false };
+    const reaching = (people: ReadonlyArray<typeof owner | typeof collaborator>) =>
+      people.map((person, index) => ({
+        ...person,
+        personId: `human:${index}`,
+        name: null,
+        via: [],
+      }));
+    expect(
+      presentSharedConversationFeed({ ...input, people: reaching([owner, collaborator]) }),
+    ).toEqual({ feed: [], pendingKey: "m-4" });
+    expect(presentSharedConversationFeed({ ...input, people: reaching([owner]) }).feed).toEqual(
+      input.feed,
+    );
   });
 
   it("leaves a thread only one person writes to as stored", () => {
@@ -88,6 +116,7 @@ describe("presentSharedConversationFeed", () => {
       failed: false,
       readAt: 2,
       seen: seenAt(["m-3"], 1),
+      people: null,
     });
     expect(feed).toEqual([stored]);
   });
@@ -125,6 +154,7 @@ describe("presentSharedConversationFeed", () => {
       failed: false,
       readAt: 2,
       seen: NO_SHARED_MESSAGES_SEEN,
+      people: null,
     });
     const shown = feed[0];
     expect(

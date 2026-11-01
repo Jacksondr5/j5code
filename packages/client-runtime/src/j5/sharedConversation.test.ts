@@ -7,6 +7,7 @@ import {
   recallableMessages,
   sharedMessageView,
   typedText,
+  mayBeSharedConversation,
 } from "./sharedConversation.ts";
 
 const author = (overrides: Partial<MessageAuthor> = {}): MessageAuthor => ({
@@ -147,5 +148,49 @@ describe("up-arrow recall in a shared conversation", () => {
     expect(
       recallableMessages([stamped, reply], () => undefined).map((message) => message.text),
     ).toEqual(["Shipped."]);
+  });
+});
+
+describe("mayBeSharedConversation", () => {
+  const person = (
+    level: "viewer" | "collaborator" | "owner",
+    you: boolean,
+    firstOwner = false,
+  ) => ({
+    level,
+    you,
+    firstOwner,
+  });
+  const unshared = { shared: false, authors: [], answers: [] };
+
+  it("holds every message until the first read answers or fails", () => {
+    expect(mayBeSharedConversation({ record: null, failed: false, people: null })).toBe(true);
+    expect(mayBeSharedConversation({ record: null, failed: true, people: null })).toBe(false);
+  });
+
+  it("knows a thread is shared from who reaches it, before any author is recorded", () => {
+    const firstOwner = person("owner", true, true);
+    expect(
+      mayBeSharedConversation({
+        record: unshared,
+        failed: false,
+        people: [firstOwner, person("collaborator", false)],
+      }),
+    ).toBe(true);
+    expect(
+      mayBeSharedConversation({
+        record: unshared,
+        failed: false,
+        people: [firstOwner, person("viewer", false)],
+      }),
+    ).toBe(false);
+    // To a Viewer, a message nobody is recorded for may be the first owner's.
+    expect(
+      mayBeSharedConversation({
+        record: unshared,
+        failed: false,
+        people: [person("owner", false, true), person("viewer", true)],
+      }),
+    ).toBe(true);
   });
 });
