@@ -13,6 +13,7 @@ import {
   devClientUrl,
   emulatorPortForSlot,
   emulatorSerials,
+  sessionsOnDevice,
   iosBusy,
   iosPool,
   metroBundles,
@@ -239,6 +240,20 @@ describe("emulatorPortForSlot", () => {
   it("refuses a name that is not one of the rig's slots", () => {
     assert.throws(() => emulatorPortForSlot("Pixel_8"), LiveTestRefusal);
     assert.throws(() => emulatorPortForSlot("j5-tester-0"), LiveTestRefusal);
+  });
+});
+
+describe("sessionsOnDevice", () => {
+  it("names only the sessions on this device, so stop and setup leave other devices' alone", () => {
+    const list = JSON.stringify({
+      sessions: [
+        { name: "t3-a", id: "emulator-5558", device: "j5-tester-2" },
+        { name: "t3-b", id: "emulator-5556", device: "j5-tester-1" },
+        { name: "t3-c", id: "emulator-5558", device: "j5-tester-2" },
+      ],
+    });
+    assert.deepEqual(sessionsOnDevice(list, "emulator-5558"), ["t3-a", "t3-c"]);
+    assert.deepEqual(sessionsOnDevice(JSON.stringify({ sessions: [] }), "emulator-5558"), []);
   });
 });
 

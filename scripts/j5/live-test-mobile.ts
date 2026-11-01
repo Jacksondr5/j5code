@@ -995,6 +995,8 @@ export async function startMobile(
     assertKvm();
   }
   const record = claim(paths, platform, iosHost);
+  // Whoever held this device before us is gone: the claim is ours.
+  closeAgentDeviceSessions(record);
   const stopHint = `\nTo undo what was set up: ${selfCommand(paths, "stop")}`;
   try {
     console.log(`Starting the dev server, Metro and the ${platform} device slot ${record.slot}...`);
@@ -1216,6 +1218,61 @@ If it does not, run mobile-open again.${
   }`);
 }
 
+/** The names of the agent-device sessions on `deviceId`, from `agent-device session list` output. */
+export function sessionsOnDevice(listJson: string, deviceId: string): ReadonlyArray<string> {
+  const { sessions } = JSON.parse(listJson) as {
+    readonly sessions?: ReadonlyArray<{ readonly name: string; readonly id?: string }>;
+  };
+  return (sessions ?? [])
+    .filter((session) => session.id === deviceId)
+    .map((session) => session.name);
+}
+
+/**
+ * Ends the agent-device sessions that J5 Code's device host holds on this slot's device. `device_close`
+ * leaves them open, and a session left open refuses the next holder with DEVICE_IN_USE. The sessions
+ * live with the J5 Code the agent runs in; without its device tools there is nothing to close.
+ */
+function closeAgentDeviceSessions(record: MobileRecord): void {
+  const deviceId =
+    record.platform === "ios"
+      ? record.udid
+      : record.platform === "android"
+        ? `emulator-${emulatorPortForSlot(record.slot)}`
+        : undefined;
+  if (deviceId === undefined) return;
+  const deviceHome = NodePath.join(
+    process.env.J5CODE_HOME?.trim() || NodePath.join(NodeOS.homedir(), ".j5code"),
+    "userdata",
+    "device",
+  );
+  const agentDevice = NodePath.join(deviceHome, "bin", "agent-device");
+  const hosts = NodePath.join(deviceHome, "hosts");
+  if (!NodeFS.existsSync(agentDevice) || !NodeFS.existsSync(hosts)) return;
+  for (const file of NodeFS.readdirSync(hosts).filter((name) => name.endsWith(".json"))) {
+    const config = NodePath.join(hosts, file);
+    // The CLI wants a session flag on every call; listing ignores which one.
+    const list = NodeChildProcess.spawnSync(
+      agentDevice,
+      ["session", "list", "--config", config, "--session", "j5-live-test"],
+      { encoding: "utf8", timeout: 15_000 },
+    );
+    if (list.status !== 0) continue;
+    for (const session of sessionsOnDevice(list.stdout, deviceId)) {
+      const closed = NodeChildProcess.spawnSync(
+        agentDevice,
+        ["close", "--config", config, "--session", session],
+        { encoding: "utf8", timeout: 30_000 },
+      );
+      console.log(
+        closed.status === 0
+          ? `agent-device session ${session} on ${record.slot}: CLOSED`
+          : `agent-device session ${session} on ${record.slot} could not be closed: ${(closed.stderr || closed.stdout).trim()}`,
+      );
+    }
+  }
+}
+
 /**
  * Takes down everything `startMobile` recorded: Metro, the tunnel, the device (reset for the next
  * tester) and the claim. A step that fails keeps the record, so running `stop` again finishes it.
@@ -1232,6 +1289,7 @@ export async function stopMobile(paths: LiveTestPaths): Promise<void> {
     console.log(`${name}: STOPPED`);
   }
   if (record.platform === "phone") return NodeFS.rmSync(mobileFiles(paths).record, { force: true });
+  closeAgentDeviceSessions(record);
   if (record.platform === "ios") {
     const udid = record.udid!;
     const host = record.iosHost;
