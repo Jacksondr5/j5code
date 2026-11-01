@@ -729,7 +729,7 @@ explicitly marked.
 | `apps/mobile/src/features/settings/SettingsRouteScreen.tsx`                 | A       | 72, Role library                                   |
 | `apps/mobile/src/features/settings/components/SettingsScreen.tsx`           | N       | 72                                                 |
 | `apps/mobile/src/features/settings/settings-environment-filter.tsx`         | N       | 72                                                 |
-| `apps/mobile/src/Stack.tsx`                                                 | A       | 72, Role library                                   |
+| `apps/mobile/src/Stack.tsx`                                                 | A       | 72, 98, Role library                               |
 | `apps/mobile/src/features/archive/ArchivedThreadsRouteScreen.tsx`           | N       | 72                                                 |
 | `apps/mobile/src/features/threads/new-task-flow-provider.tsx`               | A       | 45                                                 |
 | `apps/mobile/src/features/threads/use-composer-command-menu.ts`             | A       | 45, 49                                             |
@@ -907,7 +907,6 @@ explicitly marked.
 | `apps/server/src/provider/CodexDeveloperInstructions.test.ts`               | N       | 8                                                  |
 | `apps/web/test/appScenarios.renders.tsx`                                    | N       | 80                                                 |
 | `apps/mobile/src/features/home/useThreadListActions.ts`                     | N       | 21                                                 |
-| `apps/mobile/src/Stack.tsx`                                                 | N       | 98                                                 |
 | `apps/web/test/renderScenarios.renders.tsx`                                 | N       | 80                                                 |
 | `packages/shared/src/devHome.ts`                                            | R       | H                                                  |
 | `packages/ssh/src/tunnel.ts`                                                | R       | H, 50                                              |
