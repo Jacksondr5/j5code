@@ -2,6 +2,7 @@ import type { EnvironmentId } from "@t3tools/contracts";
 
 import { environmentCatalog } from "../../connection/catalog";
 import { appAtomRegistry } from "../../state/atom-registry";
+import { sendAfterReconnect } from "./sendAfterReconnect";
 
 const RECONNECT_WAIT_MS = 15_000;
 
@@ -37,4 +38,17 @@ export function watchEnvironmentSessions(environmentId: EnvironmentId) {
     },
     dispose: unsubscribe,
   };
+}
+
+/** Sends once, and once more after a new session if the first send found none (`sendAfterReconnect`). */
+export async function sendWhenReconnected<A>(
+  environmentId: EnvironmentId,
+  send: () => Promise<A>,
+): Promise<A> {
+  const sessions = watchEnvironmentSessions(environmentId);
+  try {
+    return await sendAfterReconnect({ send, waitForReconnect: sessions.waitForNewSession });
+  } finally {
+    sessions.dispose();
+  }
 }
