@@ -63,11 +63,11 @@ function AskRow({ row }: { readonly row: ArchiveWarningRow }) {
   const urgency = row.urgency ?? "none";
   return (
     <View className="gap-1 rounded-xl bg-grouped-card px-4 py-3">
-      <View className="flex-row flex-wrap items-center gap-x-2">
-        <AppText textRole="caption" className={`font-t3-bold ${URGENCY_CLASSES[urgency]}`}>
+      <View className="flex-row flex-wrap items-center">
+        <AppText textRole="caption" className={`mr-2 font-t3-bold ${URGENCY_CLASSES[urgency]}`}>
           {URGENCY_LABELS[urgency]}
         </AppText>
-        <AppText textRole="label" className="min-w-0 shrink text-foreground-muted">
+        <AppText textRole="label" className="mr-2 min-w-0 shrink text-foreground-muted">
           {row.direction === "inbound" ? "From" : "To"}{" "}
           <AppText textRole="label" className="font-t3-medium text-foreground">
             {row.participant.displayName}
