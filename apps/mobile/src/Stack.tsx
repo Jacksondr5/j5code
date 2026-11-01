@@ -41,6 +41,7 @@ import {
   type RenderFailureProps,
 } from "./components/RenderErrorBoundary";
 import { ArchivedThreadsRouteScreen } from "./features/archive/ArchivedThreadsRouteScreen";
+import { ownerOnlySettingsRoute } from "./j5/sharing/ownerOnlySettingsRoute";
 import { useAgentNotificationNavigation } from "./features/agent-awareness/notificationNavigation";
 import { ConnectOnboardingRouteScreen } from "./features/cloud/ConnectOnboardingRouteScreen";
 import { useConnectOnboardingNavigation } from "./features/cloud/connectOnboardingNavigation";
@@ -323,7 +324,8 @@ const SETTINGS_SCREENS = {
     },
   }),
   SettingsArchive: createNativeStackScreen({
-    screen: ArchivedThreadsRouteScreen,
+    // J5: Archive is an Owner's page (FORK.md case 72).
+    screen: ownerOnlySettingsRoute(ArchivedThreadsRouteScreen, "Archive"),
     linking: "settings/archive",
     options: {
       ...SETTINGS_PAGE_OPTIONS,

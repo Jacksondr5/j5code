@@ -364,3 +364,104 @@ export function createSharingEnvironmentAtoms<R, E>(
       threadOperable(threadKey(environmentId, threadId)),
   };
 }
+
+/**
+ * Whether the person owns a connected server, or `"loading"` until a server says so or all have
+ * answered. An empty catalog is a client still starting (its own server is added after the first
+ * read). While loading, Settings lists what it lists anyone.
+ */
+export function ownerSomewhereState(input: {
+  readonly catalogReady: boolean;
+  /** Each server's answer; `null` for one still being asked. */
+  readonly answers: ReadonlyArray<"owner" | "other" | null>;
+}): boolean | "loading" {
+  if (!input.catalogReady || input.answers.length === 0) return "loading";
+  if (input.answers.includes("owner")) return true;
+  return input.answers.includes(null) ? "loading" : false;
+}
+
+/**
+ * What an Owner-only Settings page says, in its place, to someone who reaches it by a link or its
+ * address and owns no connected server. Someone who writes nowhere has no agent to ask.
+ */
+export function ownerOnlySettingsNotice(input: {
+  readonly serverName: string | null;
+  readonly writesSomewhere: boolean;
+}): { readonly title: string; readonly body: string } {
+  const server = input.serverName ?? "this server";
+  return {
+    title: "Coming soon",
+    body: input.writesSomewhere
+      ? `Only an Owner of ${server} can change this here for now. Ask an Owner, or ask an agent on a thread you can write to.`
+      : `Only an Owner of ${server} can change this here for now. Ask an Owner.`,
+  };
+}
+
+/** What J5's Personas and Playbooks pages say to someone who owns no connected server. */
+export const LIBRARY_FOR_OWNERS = "Personas and Playbooks are managed by a server's Owners.";
+
+/**
+ * What this person is across every connected server, for the pages that list servers (People and
+ * access AC23, AC27): web and mobile each build one from their catalog and sharing atoms.
+ */
+export function createSharingOwnershipAtoms(input: {
+  readonly catalogValueAtom: Atom.Atom<{
+    readonly isReady: boolean;
+    readonly entries: ReadonlyMap<EnvironmentId, unknown>;
+  }>;
+  readonly sharing: Pick<
+    ReturnType<typeof createSharingEnvironmentAtoms>,
+    "connectionAccess" | "connectionAccessQuery"
+  >;
+}) {
+  const { catalogValueAtom, sharing } = input;
+  const environmentIdsWhere = (label: string, test: (access: KnownConnectionAccess) => boolean) =>
+    Atom.make((get) => {
+      const ids = new Set<EnvironmentId>();
+      for (const id of get(catalogValueAtom).entries.keys()) {
+        if (test(get(sharing.connectionAccess(id)))) ids.add(id);
+      }
+      return ids as ReadonlySet<EnvironmentId>;
+    }).pipe(Atom.withLabel(label));
+
+  return {
+    /** Known to reach less than the whole server: nothing is left out before a server answers. */
+    narrowEnvironmentIds: environmentIdsWhere(
+      "j5:access:narrow-environments",
+      (access) => access !== null && !reachesServer(access),
+    ),
+    /** Owned, or not yet answered: a server is not taken from its Owner while it answers. */
+    ownedEnvironmentIds: environmentIdsWhere("j5:access:owned-environments", isOwnerAccess),
+    /** Whether the person owns a connected server, or `"loading"`; see `ownerSomewhereState`. */
+    ownerSomewhere: Atom.make((get) => {
+      const catalog = get(catalogValueAtom);
+      return ownerSomewhereState({
+        catalogReady: catalog.isReady,
+        // A server that cannot answer, one from before people, settles with no answer and holds
+        // this client to nothing, as `isOwnerAccess` does; only one still being asked is unknown.
+        answers: [...catalog.entries.keys()].map((environmentId) => {
+          const result = get(sharing.connectionAccessQuery({ environmentId, input: {} }));
+          if (result._tag === "Initial") return null;
+          return isOwnerAccess(Option.getOrNull(AsyncResult.value(result))) ? "owner" : "other";
+        }),
+      });
+    }).pipe(Atom.withLabel("j5:access:owner-somewhere")),
+    /**
+     * Writes to something: a Collaborator's or Owner's level anywhere, or a session that is no
+     * person's, so has an agent to ask. Before a server has answered nothing is assumed.
+     */
+    writesSomewhere: Atom.make((get) => {
+      for (const id of get(catalogValueAtom).entries.keys()) {
+        const access = get(sharing.connectionAccess(id));
+        if (access?.kind === "service") return true;
+        if (
+          access?.kind === "person" &&
+          access.levels.some((held) => levelReaches(held.level, "collaborator"))
+        ) {
+          return true;
+        }
+      }
+      return false;
+    }).pipe(Atom.withLabel("j5:access:writes-somewhere")),
+  };
+}

@@ -1,8 +1,5 @@
-import {
-  GUEST_LIBRARY_UNAVAILABLE,
-  useGuestEnvironmentIds,
-  useIsGuestEverywhere,
-} from "../sharing/guestAccess";
+import { LIBRARY_FOR_OWNERS } from "@t3tools/client-runtime/j5/sharing";
+import { useOwnedEnvironmentIds, useOwnerSomewhere } from "../sharing/guestAccess";
 import { AgentLibraryToast, type AgentLibraryNotification } from "./AgentLibraryToast";
 import { AgentImportConflictModal } from "./AgentImportConflictModal";
 import { AgentCreateModal } from "./AgentCreateModal";
@@ -49,24 +46,24 @@ import { SettingsSection } from "../../features/settings/components/SettingsSect
 import { PlaybookLibrarySettingsSection } from "../playbooks/PlaybookLibrarySettingsScreen";
 
 export function AgentLibrarySettingsScreen() {
-  // A guest is not offered a server's Personas or Playbooks (Shared server AC24).
-  return useIsGuestEverywhere() ? (
+  // Personas and Playbooks are managed by a server's Owners (People and access AC27).
+  return useOwnerSomewhere() === false ? (
     <View className="p-4">
-      <AgentMessage title={GUEST_LIBRARY_UNAVAILABLE} />
+      <AgentMessage title={LIBRARY_FOR_OWNERS} />
     </View>
   ) : (
-    <MemberAgentLibrarySettingsScreen />
+    <OwnerAgentLibrarySettingsScreen />
   );
 }
 
-function MemberAgentLibrarySettingsScreen() {
+function OwnerAgentLibrarySettingsScreen() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const { connectedEnvironments: connected } = useRemoteConnectionStatus();
-  const guestEnvironmentIds = useGuestEnvironmentIds();
+  const ownedEnvironmentIds = useOwnedEnvironmentIds();
   const connectedEnvironments = useMemo(
-    () => connected.filter((environment) => !guestEnvironmentIds.has(environment.environmentId)),
-    [connected, guestEnvironmentIds],
+    () => connected.filter((environment) => ownedEnvironmentIds.has(environment.environmentId)),
+    [connected, ownedEnvironmentIds],
   );
   const [selectedEnvironmentId, setSelectedEnvironmentId] = useState<EnvironmentId | null>(null);
   const effectiveEnvironmentId = connectedEnvironments.some(

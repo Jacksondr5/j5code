@@ -215,6 +215,36 @@ const SEAMS: ReadonlyArray<Seam> = [
     ],
   },
   {
+    file: "features/settings/SettingsRouteScreen.tsx",
+    record: "case 72: Settings for someone who is not an Owner",
+    from: "../../j5/sharing/settingsAccess",
+    reaches: ["useShownSettingsSections(["],
+  },
+  {
+    file: "features/settings/components/SettingsScreen.tsx",
+    record: "case 72: Settings for someone who is not an Owner",
+    from: "../../../j5/sharing/settingsAccess",
+    reaches: ["useOwnerOnlySettingsPage(route.name, props.children)"],
+  },
+  {
+    file: "features/archive/ArchivedThreadsRouteScreen.tsx",
+    record: "case 72: Settings for someone who is not an Owner",
+    from: "../../j5/sharing/settingsAccess",
+    reaches: ["useOwnedSettingsTargets(savedEnvironments)"],
+  },
+  {
+    file: "Stack.tsx",
+    record: "case 72: Settings for someone who is not an Owner",
+    from: "./j5/sharing/ownerOnlySettingsRoute",
+    reaches: ['ownerOnlySettingsRoute(ArchivedThreadsRouteScreen, "Archive")'],
+  },
+  {
+    file: "features/settings/settings-environment-filter.tsx",
+    record: "case 72: Settings for someone who is not an Owner",
+    from: "../../j5/sharing/settingsAccess",
+    reaches: ["useOwnedSettingsTargets(connectedSettingsTargets(environments))"],
+  },
+  {
     file: "App.tsx",
     record: "BRANDING.md: mobile OS identity and links",
     from: "../../../scripts/lib/j5-branding.ts",
