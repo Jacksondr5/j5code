@@ -1,6 +1,7 @@
 import type { OlderSettledScope } from "@t3tools/client-runtime/state/threads";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useMemo, useSyncExternalStore } from "react";
+import { isThreadWorking } from "@t3tools/client-runtime/state/thread-inbox";
 
 import { scopedProjectKey } from "../../lib/scopedEntities";
 import { useOlderSettledShelf, useOlderSettledShelfGrowth } from "../../state/olderSettledShelf";
@@ -32,6 +33,8 @@ type LayoutInput = Parameters<typeof buildThreadListV2Items>[0];
  * built inline, the list's inputs stayed open to mutation across the screen's other hooks, so
  * the React Compiler cached none of it and every render of the screen re-rendered every row.
  */
+const WORK842_SEEN = new Map<string, string>();
+
 export function useThreadListV2(input: {
   readonly threads: LayoutInput["threads"];
   readonly pendingTasks: ReadonlyArray<PendingNewTask>;
@@ -98,6 +101,31 @@ export function useThreadListV2(input: {
     // A search lists only matches, so the shelf would page forever; loaded pages stay.
     visibleCount: input.searchQuery.trim().length === 0 ? input.settledLimit : 0,
   });
+  // DEBUG ONLY (#842): log each thread whose working classification changes. Do not merge.
+  for (const thread of threads) {
+    const key = `${thread.environmentId}:${thread.id}`;
+    const signature = JSON.stringify([
+      isThreadWorking(thread),
+      inbox.isWorking(thread),
+      thread.runtime?.status ?? null,
+      thread.runtime?.activeRunId ?? null,
+      thread.latestRun?.status ?? null,
+      thread.latestRun?.runId ?? null,
+    ]);
+    if (WORK842_SEEN.get(key) !== signature) {
+      WORK842_SEEN.set(key, signature);
+      console.log(
+        "WORK842 thread",
+        thread.title,
+        key,
+        signature,
+        "inboxVersion=",
+        inboxVersion,
+        "shelf=",
+        workingShelfEnabled,
+      );
+    }
+  }
   const layout = buildThreadListV2Items({
     pendingOrder: input.pendingOrder,
     threads: threads.filter((thread) => thread.archivedAt === null),

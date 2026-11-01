@@ -141,9 +141,16 @@ export function createInboxReturnTracker() {
       if (state.deadline !== null) next = Math.min(next, state.deadline);
     }
     if (next === Infinity) return;
+    console.log(
+      "WORK842 tracker schedule in ms",
+      Math.max(0, next - now()),
+      "listeners=",
+      listeners.size,
+    );
     timer = setTimeout(
       () => {
         const at = now();
+        console.log("WORK842 tracker fired listeners=", listeners.size);
         for (const [key, state] of states) {
           if (state.deadline !== null && state.deadline <= at) {
             state.working = false;
