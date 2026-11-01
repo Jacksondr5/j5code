@@ -185,7 +185,8 @@ Mac reached over SSH; Android runs on this machine.
 2. When setup has finished and printed the Mobile block, call `device_open`
    with the host and device it names. On Android the script has already booted
    the emulator; on iOS `device_open` boots the Simulator. If setup says the
-   emulator is still booting, run it again before calling `device_open`.
+   emulator is still booting, run the setup command from step 1 again (not
+   `rebuild`, which deletes the emulator) before calling `device_open`.
 3. Run `node scripts/j5/setup-agent-live-test.ts mobile-open`. It installs the
    dev client for this checkout, opens it against your Metro, and pairs it as
    the test owner, so the app lists the test project's threads. Run it again
@@ -209,7 +210,7 @@ does not fit.
 | Setting          | What it sets                                     | Default                              |
 | ---------------- | ------------------------------------------------ | ------------------------------------ |
 | `ios.host`       | `"local"`, or `{ "ssh", "checkout", "envFile" }` | this Mac on macOS; none elsewhere    |
-| `ios.simulators` | the Simulators the rig may claim and erase       | names starting `j5-test-`            |
+| `ios.simulators` | a list of names: Simulators the rig may erase    | names starting `j5-test-`            |
 | `ios.maxBooted`  | Simulators booted on the iOS host at once        | 1                                    |
 | `android.sdk`    | the Android SDK                                  | `ANDROID_HOME`, then the usual place |
 | `android.slots`  | emulators at once                                | 2                                    |
@@ -231,8 +232,9 @@ does not fit.
   `node scripts/j5/setup-agent-live-test.ts mobile-build android` (or `ios`),
   in the background: a first build takes 6 to 15 minutes. Then run
   `mobile-open` again.
-- An iOS host over SSH needs Xcode, git, and node and `vp` in a login shell
-  (or `ios.host.envFile` naming the file that adds them). The rig reaches the
+- An iOS host needs Xcode, and CocoaPods for a first build (`pod install`). One
+  reached over SSH also needs git, and node and `vp` in a login shell (or
+  `ios.host.envFile` naming the file that adds them). The rig reaches the
   test server through an SSH tunnel, builds from your last commit in its own
   checkout there (commit native changes first), and runs one build at a time.
   When the host does not answer, setup says "iOS host offline".
