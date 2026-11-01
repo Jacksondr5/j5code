@@ -267,22 +267,32 @@ const make = Effect.gen(function* () {
     author: Author,
     launchingIn: ProjectId | null,
   ) {
-    const release = sql`
-      DELETE FROM j5_a2a_message_author
-      WHERE thread_id = ${threadId} AND message_id = ${messageId}
-        AND person_id = ${author.personId}
-        AND NOT EXISTS (
-          SELECT 1 FROM orchestration_v2_projection_messages WHERE message_id = ${messageId}
-        )
-    `.pipe(Effect.andThen(touch(threadId)), Effect.asVoid);
+    // An attempt releases only the record it wrote: an overlapping retry's holds the earlier one's.
+    const releaseIf = (reserved: boolean) =>
+      reserved
+        ? sql`
+            DELETE FROM j5_a2a_message_author
+            WHERE thread_id = ${threadId} AND message_id = ${messageId}
+              AND person_id = ${author.personId}
+              AND NOT EXISTS (
+                SELECT 1 FROM orchestration_v2_projection_messages WHERE message_id = ${messageId}
+              )
+          `.pipe(Effect.andThen(touch(threadId)), Effect.asVoid)
+        : Effect.void;
     if (beginsWithSlash(text)) {
-      yield* recordAuthor(threadId, messageId, author, { note: null, told: null }, "");
-      return { text, release };
+      const reserved = yield* recordAuthor(
+        threadId,
+        messageId,
+        author,
+        { note: null, told: null },
+        "",
+      );
+      return { text, release: releaseIf(reserved) };
     }
     const carried = yield* announce(threadId, launchingIn);
     const prefix = prefixOf(carried.note, authorLine(author));
-    yield* recordAuthor(threadId, messageId, author, carried, prefix);
-    return { text: `${prefix}${text}`, release };
+    const reserved = yield* recordAuthor(threadId, messageId, author, carried, prefix);
+    return { text: `${prefix}${text}`, release: releaseIf(reserved) };
   });
 
   /** The message a queued run would deliver, by upstream's own record of the run. */

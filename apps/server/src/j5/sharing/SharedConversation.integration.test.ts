@@ -696,6 +696,21 @@ it.effect(
         yield* storedText(on, late.messageId),
         `${kept.stored_prefix}Keep the migration step.`,
       );
+
+      // Her client retries a send still on its way to upstream, and the retry fails first: it
+      // releases nothing, so the first attempt's record stands once upstream takes it.
+      const pending = message("Ship it.", on);
+      yield* conversation.dispatch(priya, pending, (admitted) =>
+        conversation
+          .dispatch(priya, pending, () => Effect.fail("retry refused"))
+          .pipe(Effect.flip, Effect.andThen(threads.dispatch(admitted))),
+      );
+      const survived = (yield* authorRecord(pending.messageId))!;
+      assert.strictEqual(survived.display_name, "Priya");
+      assert.strictEqual(
+        yield* storedText(on, pending.messageId),
+        `${survived.stored_prefix}Ship it.`,
+      );
     }).pipe(Effect.provide(layerFor(harness)));
   },
 );
