@@ -54,6 +54,15 @@ const SEAMS: ReadonlyArray<Seam> = [
     ],
   },
   {
+    file: "features/threads/NewTaskDraftScreen.tsx",
+    record: "Saved-agent mentions: persona assignment (a draft's route drives the composer)",
+    from: "@t3tools/client-runtime/j5/agent-personas",
+    reaches: [
+      "composerModelSelectionForThread(draftAgent.assignment, draftModelSelection)",
+      "composerModelSelectionForThread(draftAgent.assignment, flow.selectedModel)",
+    ],
+  },
+  {
     file: "features/threads/new-task-flow-provider.tsx",
     record: "Saved-agent mentions: draft-as-agent entry point; case 45",
     from: "../../j5/agents/agentDraftState",
@@ -63,7 +72,10 @@ const SEAMS: ReadonlyArray<Seam> = [
     file: "state/threadOutboxDelivery.ts",
     record: "Saved-agent mentions: draft-as-agent entry point",
     from: "../j5/agents/agentDraftState",
-    reaches: ["selectDraftAgent(draftKey, queuedMessage.creation.agentPersonaId ?? null)"],
+    reaches: [
+      "selectDraftAgent(draftKey, queuedMessage.creation.agentPersonaId ?? null)",
+      "const checksDraftModel = creation.agentPersonaId === undefined;",
+    ],
   },
   {
     file: "features/threads/ThreadRouteScreen.tsx",
@@ -90,6 +102,7 @@ const SEAMS: ReadonlyArray<Seam> = [
     from: "../../j5/agents/AgentPersonaAssignmentControls",
     reaches: [
       "<AgentPersonaAssignmentControls",
+      "compact={!compactEditor.isExpanded}",
       "draftKey: composerDraftKey",
       "projectId: props.selectedThread.projectId",
       'composerMenu.trigger.kind === "slash-playbook"',

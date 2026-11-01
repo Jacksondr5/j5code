@@ -776,6 +776,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
         <AgentPersonaAssignmentControls
           assignment={agentPersonaAssignment}
           environmentId={props.environmentId}
+          compact={!compactEditor.isExpanded}
           {...(props.isDraft
             ? { draftKey: composerDraftKey }
             : { threadId: props.selectedThread.id })}

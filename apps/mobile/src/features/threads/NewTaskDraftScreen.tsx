@@ -1,3 +1,4 @@
+import { composerModelSelectionForThread } from "@t3tools/client-runtime/j5/agent-personas";
 import { expandPlaybookPrompt } from "@t3tools/client-runtime/j5/playbooks";
 import { DraftEnvironmentControl } from "./DraftEnvironmentControl";
 import { NativeScrollEdgeEffectsContext } from "../../native/NativeScrollViewMarker";
@@ -806,12 +807,16 @@ export function NewTaskDraftScreen(props: {
     }
     const draft = getComposerDraftSnapshot(draftKey);
     if (appAtomRegistry.get(composerContextImportsAtom)[draftKey]) return null;
-    const modelSelection =
+    const draftModelSelection =
       resolveSelectableModelSelection(
         selectedEnvironmentServerConfig,
         draft.modelSelection ?? null,
         selectedProject.id,
       ) ?? flow.selectedModel;
+    // J5: a saved agent launches on its own route, so that is the model to check.
+    const modelSelection =
+      draftModelSelection &&
+      composerModelSelectionForThread(draftAgent.assignment, draftModelSelection);
     const workspaceSelection = flow.resolveWorkspaceSelection(draft.workspaceSelection);
     const workspaceMode = workspaceSelection.mode;
     const selectedBranchName = workspaceSelection.branch;
@@ -1111,7 +1116,8 @@ export function NewTaskDraftScreen(props: {
       environmentId: selectedProject.environmentId,
       projectId: selectedProject.id,
       threadId: ThreadId.make(creationMetadata.threadId),
-      modelSelection: flow.selectedModel,
+      // J5: a saved agent's route drives slash commands, skills, limits and modes.
+      modelSelection: composerModelSelectionForThread(draftAgent.assignment, flow.selectedModel),
       runtimeMode: flow.runtimeMode,
       interactionMode: flow.interactionMode,
       branch: flow.selectedBranchName,
