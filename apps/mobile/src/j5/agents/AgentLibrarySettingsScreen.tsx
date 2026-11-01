@@ -10,7 +10,7 @@ import {
 import { AgentEditorModal } from "./AgentEditorModal";
 import { AgentFolderPickerModal } from "./AgentFolderPickerModal";
 import { sendAfterReconnect } from "./sendAfterReconnect";
-import { waitForEnvironmentConnected } from "./waitForEnvironmentConnected";
+import { watchEnvironmentSessions } from "./watchEnvironmentSessions";
 import { Menu } from "../../components/ui/Menu";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import {
@@ -206,15 +206,21 @@ function OwnerAgentLibrarySettingsScreen() {
       if (files === null) return;
       const result = await importAgentPersonasWithConfirmation(
         files,
-        (input) =>
-          sendAfterReconnect({
-            send: async () => {
-              const response = await importAgents({ environmentId, input });
-              if (response._tag === "Failure") throw squashAtomCommandFailure(response);
-              return response.value;
-            },
-            waitForConnected: () => waitForEnvironmentConnected(environmentId),
-          }),
+        async (input) => {
+          const sessions = watchEnvironmentSessions(environmentId);
+          try {
+            return await sendAfterReconnect({
+              send: async () => {
+                const response = await importAgents({ environmentId, input });
+                if (response._tag === "Failure") throw squashAtomCommandFailure(response);
+                return response.value;
+              },
+              waitForReconnect: sessions.waitForNewSession,
+            });
+          } finally {
+            sessions.dispose();
+          }
+        },
         confirmReplacement,
       );
       if (result === null) return;

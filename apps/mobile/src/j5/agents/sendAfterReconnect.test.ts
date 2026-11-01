@@ -19,19 +19,19 @@ describe("sendAfterReconnect", () => {
         order.push("send");
         return "imported";
       });
-    const waitForConnected = vi.fn(async () => {
+    const waitForReconnect = vi.fn(async () => {
       order.push("reconnected");
       return true;
     });
 
-    await expect(sendAfterReconnect({ send, waitForConnected })).resolves.toBe("imported");
+    await expect(sendAfterReconnect({ send, waitForReconnect })).resolves.toBe("imported");
     expect(order).toEqual(["send", "reconnected", "send"]);
   });
 
   it("fails visibly, without sending again, when the environment does not come back", async () => {
     const send = vi.fn<() => Promise<string>>().mockRejectedValue(notConnected);
 
-    await expect(sendAfterReconnect({ send, waitForConnected: async () => false })).rejects.toThrow(
+    await expect(sendAfterReconnect({ send, waitForReconnect: async () => false })).rejects.toThrow(
       "didn't reconnect in time",
     );
     expect(send).toHaveBeenCalledOnce();
@@ -40,10 +40,10 @@ describe("sendAfterReconnect", () => {
   it("does not wait or resend after a failure the server returned", async () => {
     const refused = new Error("Persona id already exists.");
     const send = vi.fn<() => Promise<string>>().mockRejectedValue(refused);
-    const waitForConnected = vi.fn(async () => true);
+    const waitForReconnect = vi.fn(async () => true);
 
-    await expect(sendAfterReconnect({ send, waitForConnected })).rejects.toBe(refused);
-    expect(waitForConnected).not.toHaveBeenCalled();
+    await expect(sendAfterReconnect({ send, waitForReconnect })).rejects.toBe(refused);
+    expect(waitForReconnect).not.toHaveBeenCalled();
     expect(send).toHaveBeenCalledOnce();
   });
 });
