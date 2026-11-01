@@ -406,7 +406,7 @@ Each advance checks for new upstream reads of `T3CODE_HOME` or `.t3` paths and n
   - whether every route still signs in through the functions J5 wraps;
   - whether upstream reshaped its permissions, since the level mapping follows them;
   - whether upstream's pairing gained a path that issues a session without J5 seeing it.
-- **Sharing is not supported on mobile.** The mobile client has no way to share or to leave, and draws a shared conversation's platform text as plain text (Jackson, 2026-10-13).
+- **Sharing is managed only from web and desktop.** The mobile client has no way to share or to leave (Jackson, 2026-10-13). It reads a shared conversation as web does: each person's message as they typed it, under their name and avatar, with who answered each prompt; and it holds another person's message until its author is known.
 - **The alternatives:**
   - **Follow upstream,** which means one person per server.
   - **Run a server per person,** which gives up the shared conversation.
@@ -616,3 +616,4 @@ J5 kept a run from resuming after a usage-limit reset when the person had presse
 - 2026-10-27 — the 2026-10-24 advance moved forward to upstream's stable v0.1.3: D40 added, upstream's guest links hidden because they need T3 Connect (Jackson, 2026-10-25; [#725](https://github.com/Jacksondr5/j5code/issues/725)); D1 takes upstream's shorter instructions and relaxed settings rule; D2 takes upstream's merged action tools (82 tools) and admits `t3_background_wait` (Jackson, 2026-10-27); D4 and D6 re-checked, with upstream's new steer default for a person's follow-ups leaving agent deliveries alone; D27's dev servers follow upstream's opt-in.
 - 2026-10-31 — D33: the preview stream closes when its session is revoked, replaced or expires, as the RPC socket already did, so a lowered level stops a preview at once ([#798](https://github.com/Jacksondr5/j5code/issues/798)).
 - 2026-10-31 — D33: "Merge back" is disabled for someone who can't start a thread in the fork's project, which the server already refused (Jackson's 2026-10-31 approval; [#730](https://github.com/Jacksondr5/j5code/issues/730)).
+- 2026-11-01 — D33: the mobile client reads shared conversations as web does, with each message's author and avatar, who answered each prompt, and another person's message held until its author is known; sharing itself stays on web and desktop (the mobile catch-up; [#832](https://github.com/Jacksondr5/j5code/issues/832), [#871](https://github.com/Jacksondr5/j5code/issues/871), [#869](https://github.com/Jacksondr5/j5code/issues/869)).
