@@ -174,13 +174,13 @@ const SEAMS: ReadonlyArray<Seam> = [
   },
   {
     file: "Stack.tsx",
-    record: "case 97: artifact routes",
+    record: "case 98: artifact routes",
     from: "./j5/artifacts/routes",
     reaches: ["...j5ThreadArtifactRoutes(THREAD_LINKING_PREFIX, GLASS_HEADER_OPTIONS)"],
   },
   {
     file: "features/threads/ThreadFeed.tsx",
-    record: "case 97: artifact link resolver",
+    record: "case 98: artifact link resolver",
     from: "../../j5/artifacts/artifactLinks",
     reaches: [
       "openArtifactLink(href, artifactLinkContext)",
