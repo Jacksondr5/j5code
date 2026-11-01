@@ -105,6 +105,12 @@ export function InboxScreen() {
       className="flex-1 bg-sheet"
       contentInsetAdjustmentBehavior="automatic"
       contentContainerClassName="gap-4 px-4 py-4"
+      // Android's content width cap, as upstream's ScreenScrollView applies it.
+      contentContainerStyle={
+        Platform.OS === "android"
+          ? { width: "100%", maxWidth: 720, alignSelf: "center" }
+          : undefined
+      }
       keyboardShouldPersistTaps="handled"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refreshAll} />}
     >
