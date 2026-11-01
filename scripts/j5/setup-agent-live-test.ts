@@ -1638,6 +1638,9 @@ async function start(
     // The head's generator reads this now; the manifest keeps it for every base start.
     process.env.J5_LIVE_TEST_NOW = String(Date.now());
   }
+  // A mobile start that cannot run is refused before the home is built.
+  if (mobile !== undefined)
+    (await import("./live-test-mobile.ts")).checkMobileCanStart(paths, mobile);
   if (built === undefined && currentServerState(paths).kind === "stopped") {
     buildHome(paths, mode, base);
   }

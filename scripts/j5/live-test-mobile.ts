@@ -20,11 +20,11 @@ import {
   listenerOn,
   liveTestEnvironment,
   mintPairingUrl,
-  printRunning,
   processGroupOf,
   readManifest,
   readServerLog,
   selfCommand,
+  type ServerLogFacts,
   startServer,
   startTimeOf,
   stopGroup,
@@ -932,6 +932,42 @@ function claim(
 }
 
 /**
+ * Refuses a mobile start that cannot run (settings, iOS host, Android SDK or KVM, phone address)
+ * before anything is built or started. A setup already recorded keeps the host it was made with.
+ */
+export function checkMobileCanStart(paths: LiveTestPaths, platform: MobileTarget): void {
+  mobileRigConfig();
+  const recorded = readMobileRecord(paths);
+  if (platform === "ios") {
+    if (recorded?.iosHost === undefined) reachableIosHost();
+  } else if (platform === "android") {
+    androidSdk();
+    androidAbi();
+    assertKvm();
+  } else if (recorded === undefined) {
+    phoneAddress();
+  }
+}
+
+/**
+ * What a mobile test needs to know about the test server. The browser's pairing link and the
+ * web port are left out: the device reaches the backend by the address in the Mobile block.
+ */
+function formatMobileServer(paths: LiveTestPaths, facts: ServerLogFacts): string {
+  const manifest = readManifest(paths);
+  const owner = "ownerName" in manifest ? manifest.ownerName : undefined;
+  return `J5 Code live-test server: RUNNING
+  Home          ${paths.home}
+  Log           ${paths.log}${owner === undefined ? "" : `\n  Owner         ${owner}`}${
+    "project" in manifest
+      ? `\n  Project       "${manifest.project.title}", ${paths.testRepo}\n  New threads   ${manifest.defaultModel}`
+      : ""
+  }
+  Browser       optional: http://localhost:${facts.webPort}, paired with ${selfCommand(paths, "status")}'s link
+`;
+}
+
+/**
  * Starts the backend on its mobile port, Metro, and the device side, joining any part that is
  * already running. A failure leaves what was started recorded; `stop` removes it.
  */
@@ -975,7 +1011,7 @@ export async function startMobile(
     const facts = await backend;
     await avd;
     if (iosHost?.kind === "ssh") await startTunnel(paths, readMobileRecord(paths)!, iosHost);
-    printRunning(paths, facts, undefined);
+    console.log(formatMobileServer(paths, facts));
     console.log(formatMobile(paths, readMobileRecord(paths)!));
   } catch (cause) {
     if (cause instanceof LiveTestRefusal) throw new LiveTestRefusal(`${cause.message}${stopHint}`);
@@ -1325,7 +1361,7 @@ async function startPhone(paths: LiveTestPaths, deadline: number): Promise<void>
   ]);
   backend.catch(() => undefined);
   await startMetro(paths, record, deadline);
-  printRunning(paths, await backend, undefined);
+  console.log(formatMobileServer(paths, await backend));
   console.log(formatPhone(paths, record));
 }
 
