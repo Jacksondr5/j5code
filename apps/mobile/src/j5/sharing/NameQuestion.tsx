@@ -14,6 +14,8 @@ import { KeyboardAvoidingView } from "react-native-keyboard-controller";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { AppText as Text, AppTextInput as TextInput } from "../../components/ui/AppText";
+import * as Dialog from "../../components/ui/Dialog";
+import { environmentCatalog } from "../../connection/catalog";
 import { Button } from "../../components/ui/Button";
 import { ListChoiceRow } from "../../components/ui/ListChoiceRow";
 import { ListSection } from "../../components/ui/ListSection";
@@ -22,7 +24,7 @@ import { environmentPresentations } from "../../state/presentation";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { j5Sharing } from "./guestAccess";
-import { identityCommands, nameToAskAtom } from "./identity";
+import { identityCommands, nameToAskAtom, putOffNameQuestionsAtom } from "./identity";
 
 const SOMEONE_NEW = "new";
 
@@ -38,8 +40,9 @@ export function NameQuestionHost() {
 
 /**
  * "What should people and agents on <server> call you?", asked before a device uses the server
- * (People and access AC5, AC6), as web's `NameDialog` asks it. There is no way to put it off:
- * until it is answered the device reaches nothing there.
+ * (People and access AC5, AC6), as web's `NameDialog` asks it. A device the server cannot place may
+ * put it off with "Not now" until the app next starts, and anyone may forget the server with
+ * "Remove this server"; both touch only this server.
  */
 function NameQuestion({
   environmentId,
@@ -57,6 +60,7 @@ function NameQuestion({
   const setFirstOwnerName = useAtomCommand(identityCommands.setFirstOwnerName, {
     reportFailure: false,
   });
+  const removeServer = useAtomCommand(environmentCatalog.remove, "environment remove");
   const people = kind === "claim" ? (claimable.data?.people ?? []) : [];
   const [choice, setChoice] = useState<string>(SOMEONE_NEW);
   const [name, setName] = useState("");
@@ -100,6 +104,23 @@ function NameQuestion({
     j5Sharing.refreshConnectionAccess(appAtomRegistry, environmentId);
   };
 
+  const putOff = () =>
+    appAtomRegistry.update(putOffNameQuestionsAtom, (ids) => new Set([...ids, environmentId]));
+
+  const confirmRemove = () =>
+    Dialog.alert(
+      "Remove from this device?",
+      `Forget ${serverName} and its cached threads on this device. Your other servers stay as they are.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Remove",
+          style: "destructive",
+          onPress: () => void removeServer(environmentId),
+        },
+      ],
+    );
+
   const nameInput = (label: string) => (
     <TextInput
       accessibilityLabel={label}
@@ -121,7 +142,7 @@ function NameQuestion({
   );
 
   return (
-    // Full screen, so it can't be swiped away: the question can't be put off.
+    // Full screen, so it can't be swiped away; "Not now" and "Remove this server" are the ways out.
     <Modal visible animationType="slide" presentationStyle="fullScreen" onRequestClose={() => {}}>
       {/* Inline flex: on Android a `flex-1` class left this Modal's content zero-height. */}
       <SafeAreaView className="bg-screen" style={{ flex: 1 }}>
@@ -186,6 +207,26 @@ function NameQuestion({
               loading={busy}
               disabled={naming && name.trim() === ""}
               onPress={() => void save()}
+            />
+            {/* Ways out that touch only this server. A device the server cannot place reaches nothing
+                there until it says whose it is, so it may put the question off; the first owner
+                already holds the server, so only naming or removing it ends their question (AC6). */}
+            {kind === "claim" ? (
+              <Button
+                label="Not now"
+                tone="secondary"
+                fullWidth
+                disabled={busy}
+                accessibilityHint={`Asks again the next time the app opens. Until then, ${serverName} shows nothing.`}
+                onPress={putOff}
+              />
+            ) : null}
+            <Button
+              label="Remove this server"
+              tone="text"
+              fullWidth
+              disabled={busy}
+              onPress={confirmRemove}
             />
           </ScrollView>
         </KeyboardAvoidingView>
