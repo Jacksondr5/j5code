@@ -134,11 +134,6 @@ export function useSharedConversationEntries<Entry extends MessageEntry>(
     threadRef === null ? null : { kind: "thread" as const, threadId: threadRef.threadId };
   // The header's pill already reads who reaches the thread; this is the same read.
   const people = useScopePeople(threadRef?.environmentId ?? null, threadScope);
-  const mayBeShared = mayBeSharedConversation({
-    record,
-    failed,
-    people: people.data?.people ?? null,
-  });
 
   const [stored, setStored] = useState(NO_SHARED_MESSAGES_SEEN);
   const seen = observeSharedMessages(
@@ -147,6 +142,14 @@ export function useSharedConversationEntries<Entry extends MessageEntry>(
     Date.now,
   );
   if (seen !== stored) setStored(seen);
+
+  // After the state hook: computed before it, the call stops the compiler memoizing the entries,
+  // and ConversationTimeline re-renders forever on entries that change each render.
+  const mayBeShared = mayBeSharedConversation({
+    record,
+    failed,
+    people: people.data?.people ?? null,
+  });
 
   const shown = (() => {
     const { authors, answers } = authorIndex(record);
