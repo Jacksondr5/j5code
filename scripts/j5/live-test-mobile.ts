@@ -995,8 +995,14 @@ export async function startMobile(
     assertKvm();
   }
   const record = claim(paths, platform, iosHost);
-  // Whoever held this device before us is gone: the claim is ours.
-  closeAgentDeviceSessions(record);
+  // A fresh claim is exclusive, so a session already on the device belongs to a holder who is gone.
+  // Rejoining our own setup must keep ours.
+  if (recorded === undefined) {
+    closeAgentDeviceSessions(
+      record,
+      platform === "android" ? emulatorPortForSlot(record.slot) : undefined,
+    );
+  }
   const stopHint = `\nTo undo what was set up: ${selfCommand(paths, "stop")}`;
   try {
     console.log(`Starting the dev server, Metro and the ${platform} device slot ${record.slot}...`);
@@ -1233,12 +1239,15 @@ export function sessionsOnDevice(listJson: string, deviceId: string): ReadonlyAr
  * leaves them open, and a session left open refuses the next holder with DEVICE_IN_USE. The sessions
  * live with the J5 Code the agent runs in; without its device tools there is nothing to close.
  */
-function closeAgentDeviceSessions(record: MobileRecord): void {
+function closeAgentDeviceSessions(
+  record: MobileRecord,
+  emulatorPort = record.emulator?.port,
+): void {
   const deviceId =
     record.platform === "ios"
       ? record.udid
-      : record.platform === "android"
-        ? `emulator-${emulatorPortForSlot(record.slot)}`
+      : record.platform === "android" && emulatorPort !== undefined
+        ? `emulator-${emulatorPort}`
         : undefined;
   if (deviceId === undefined) return;
   const deviceHome = NodePath.join(
@@ -1247,29 +1256,38 @@ function closeAgentDeviceSessions(record: MobileRecord): void {
     "device",
   );
   const agentDevice = NodePath.join(deviceHome, "bin", "agent-device");
-  const hosts = NodePath.join(deviceHome, "hosts");
-  if (!NodeFS.existsSync(agentDevice) || !NodeFS.existsSync(hosts)) return;
-  for (const file of NodeFS.readdirSync(hosts).filter((name) => name.endsWith(".json"))) {
-    const config = NodePath.join(hosts, file);
-    // The CLI wants a session flag on every call; listing ignores which one.
-    const list = NodeChildProcess.spawnSync(
-      agentDevice,
-      ["session", "list", "--config", config, "--session", "j5-live-test"],
-      { encoding: "utf8", timeout: 15_000 },
+  // Only the local device host's config can be named without the database (`agentDeviceConfigPath`
+  // in apps/server/src/device/AgentDeviceTarget.ts). An SSH host's id is in the database, so its
+  // sessions are left to device_close.
+  if (record.platform === "ios" && record.iosHost?.kind === "ssh") {
+    return console.log(
+      `agent-device sessions on ${record.slot} (host "${record.iosHost.ssh}"): not closed here; close yours with device_close`,
     );
-    if (list.status !== 0) continue;
-    for (const session of sessionsOnDevice(list.stdout, deviceId)) {
-      const closed = NodeChildProcess.spawnSync(
-        agentDevice,
-        ["close", "--config", config, "--session", session],
-        { encoding: "utf8", timeout: 30_000 },
-      );
-      console.log(
-        closed.status === 0
-          ? `agent-device session ${session} on ${record.slot}: CLOSED`
-          : `agent-device session ${session} on ${record.slot} could not be closed: ${(closed.stderr || closed.stdout).trim()}`,
-      );
-    }
+  }
+  const config = NodePath.join(
+    deviceHome,
+    "hosts",
+    `${NodeCrypto.createHash("sha256").update("local").digest("hex").slice(0, 24)}.json`,
+  );
+  if (!NodeFS.existsSync(agentDevice) || !NodeFS.existsSync(config)) return;
+  // The CLI wants a session flag on every call; listing ignores which one.
+  const list = NodeChildProcess.spawnSync(
+    agentDevice,
+    ["session", "list", "--config", config, "--session", "j5-live-test"],
+    { encoding: "utf8", timeout: 15_000 },
+  );
+  if (list.status !== 0) return;
+  for (const session of sessionsOnDevice(list.stdout, deviceId)) {
+    const closed = NodeChildProcess.spawnSync(
+      agentDevice,
+      ["close", "--config", config, "--session", session],
+      { encoding: "utf8", timeout: 30_000 },
+    );
+    console.log(
+      closed.status === 0
+        ? `agent-device session ${session} on ${record.slot}: CLOSED`
+        : `agent-device session ${session} on ${record.slot} could not be closed: ${(closed.stderr || closed.stdout).trim()}`,
+    );
   }
 }
 
