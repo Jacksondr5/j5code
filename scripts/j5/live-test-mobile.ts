@@ -565,7 +565,10 @@ async function startEmulator(
   deadline: number,
 ): Promise<void> {
   const sdk = androidSdk();
-  if (isOurs(paths, record.emulator)) return waitForBoot(sdk.adb, record.emulator!, deadline);
+  const again = selfCommand(paths, "--mobile android");
+  if (isOurs(paths, record.emulator)) {
+    return waitForBoot(sdk.adb, record.emulator!, deadline, again);
+  }
   const port = EMULATOR_PORTS.find(
     (candidate) => listenerOn(candidate) === undefined && listenerOn(candidate + 1) === undefined,
   );
@@ -595,7 +598,7 @@ async function startEmulator(
     port,
   };
   writeMobileRecord(paths, { ...readMobileRecord(paths)!, emulator });
-  await waitForBoot(sdk.adb, emulator, deadline, log);
+  await waitForBoot(sdk.adb, emulator, deadline, again, log);
 }
 
 const emulatorBooted = (adb: string, port: number) =>
@@ -613,6 +616,8 @@ async function waitForBoot(
   adb: string,
   emulator: ProcessRecord & { readonly port: number },
   deadline: number,
+  /** The setup command that resumes the wait without touching the emulator. */
+  again: string,
   log?: string,
 ): Promise<void> {
   const serial = `emulator-${emulator.port}`;
@@ -625,7 +630,7 @@ async function waitForBoot(
     }
     if (Date.now() > deadline) {
       throw new LiveTestRefusal(
-        `The emulator ${serial} is still booting; it has been left running. Do not call device_open yet: run the same command again, which waits for it and then prints the device to open.`,
+        `The emulator ${serial} is still booting; it has been left running. Do not call device_open yet: run ${again}, which waits for it and then prints the device to open. Not rebuild: that deletes the emulator.`,
       );
     }
     await NodeTimersPromises.setTimeout(1_000);
@@ -708,7 +713,7 @@ async function startMetro(
     }
     if (Date.now() > deadline) {
       throw new LiveTestRefusal(
-        `Metro was not listening on ${record.metroPort} in time; it has been left running. See ${metroLog}, then run the same command again.`,
+        `Metro was not listening on ${record.metroPort} in time; it has been left running. See ${metroLog}, then run ${selfCommand(paths, `--mobile ${record.platform}`)}.`,
       );
     }
     await NodeTimersPromises.setTimeout(250);
