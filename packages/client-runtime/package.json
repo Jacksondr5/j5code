@@ -339,6 +339,10 @@
       "types": "./src/j5/archiveFlow.ts",
       "default": "./src/j5/archiveFlow.ts"
     },
+    "./j5/artifacts": {
+      "types": "./src/j5/artifacts.ts",
+      "default": "./src/j5/artifacts.ts"
+    },
     "./j5/agent-personas": {
       "types": "./src/j5/agentPersonas.ts",
       "default": "./src/j5/agentPersonas.ts"

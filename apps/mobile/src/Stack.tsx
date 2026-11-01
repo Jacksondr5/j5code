@@ -46,6 +46,7 @@ import { ConnectOnboardingRouteScreen } from "./features/cloud/ConnectOnboarding
 import { useConnectOnboardingNavigation } from "./features/cloud/connectOnboardingNavigation";
 import { AttachmentFileScreen } from "./features/files/AttachmentFileScreen";
 import { ThreadFilesTreeScreen, ThreadFileScreen } from "./features/files/ThreadFilesRouteScreen";
+import { j5ThreadArtifactRoutes } from "./j5/artifacts/routes";
 import { AdaptiveWorkspaceLayout } from "./features/layout/AdaptiveWorkspaceLayout";
 import { selectedPullRequestKey } from "./features/pull-requests/pullRequestSelection";
 import {
@@ -871,6 +872,7 @@ const RootStackConfig = createWorkspaceStackNavigator({
       linking: `${THREAD_LINKING_PREFIX}/files/:path*`,
       options: GLASS_HEADER_OPTIONS,
     }),
+    ...j5ThreadArtifactRoutes(THREAD_LINKING_PREFIX, GLASS_HEADER_OPTIONS),
     ThreadMcpApp: createNativeStackScreen({
       screen: McpAppFullscreenScreen,
       linking: `${THREAD_LINKING_PREFIX}/apps/:itemId`,

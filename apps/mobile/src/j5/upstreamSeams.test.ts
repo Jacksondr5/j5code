@@ -173,6 +173,22 @@ const SEAMS: ReadonlyArray<Seam> = [
     reaches: ["<ArchiveWarningHost />"],
   },
   {
+    file: "Stack.tsx",
+    record: "case 98: artifact routes",
+    from: "./j5/artifacts/routes",
+    reaches: ["...j5ThreadArtifactRoutes(THREAD_LINKING_PREFIX, GLASS_HEADER_OPTIONS)"],
+  },
+  {
+    file: "features/threads/ThreadFeed.tsx",
+    record: "case 98: artifact link resolver",
+    from: "../../j5/artifacts/artifactLinks",
+    reaches: [
+      "openArtifactLink(href, artifactLinkContext)",
+      "artifactLinkContextMenu(href, props.workspaceRoot)",
+      "onArtifactLinkMenuAction(href, actionId, artifactLinkContext)",
+    ],
+  },
+  {
     file: "App.tsx",
     record: "BRANDING.md: mobile OS identity and links",
     from: "../../../scripts/lib/j5-branding.ts",
