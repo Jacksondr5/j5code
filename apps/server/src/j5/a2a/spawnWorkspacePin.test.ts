@@ -119,6 +119,7 @@ const resolveBase = (choice: Extract<SpawnWorkspaceChoice, { readonly type: "wor
       existingWorktreePaths: [],
       checkBranches: false,
       baseRefs: namedBaseRefs([choice]),
+      pinBases: true,
     });
     return resolveSpawnWorkspace(checkout, choice);
   });
@@ -197,4 +198,57 @@ it.effect(
         }).pipe(Effect.provide(layer));
       }),
     ),
+);
+
+it.effect("a local-only branch with origin present falls back to the local ref", () =>
+  inScratch(
+    Effect.gen(function* () {
+      const { work, layer } = yield* scenario;
+      yield* sh(work, "commit", "--allow-empty", "-m", "local only");
+      yield* sh(work, "branch", "local-only", "HEAD");
+      const localTip = yield* sh(work, "rev-parse", "local-only");
+      yield* Effect.gen(function* () {
+        const resolved = Result.getOrThrow(
+          yield* resolveBase({ type: "worktree", baseRef: "local-only", startFromOrigin: true }),
+        );
+        assert.equal(resolved.type === "worktree" && resolved.baseCommit, localTip);
+      }).pipe(Effect.provide(layer));
+    }),
+  ),
+);
+
+it.effect("an unreachable origin refuses only the seat that started from it", () =>
+  inScratch(
+    Effect.gen(function* () {
+      const { work, origin, layer } = yield* scenario;
+      const fs = yield* FileSystem.FileSystem;
+      yield* fs.remove(origin, { recursive: true });
+      const releaseCommit = yield* sh(work, "rev-parse", "release");
+      yield* Effect.gen(function* () {
+        const workspace = yield* SpawnWorkspaceService;
+        const choices: ReadonlyArray<SpawnWorkspaceChoice> = [
+          { type: "worktree", baseRef: "release" },
+          { type: "worktree", baseRef: "main", startFromOrigin: true },
+        ];
+        const checkout = yield* workspace.inspect({
+          projectId,
+          worktreePath: null,
+          existingWorktreePaths: [],
+          checkBranches: false,
+          baseRefs: namedBaseRefs(choices),
+          pinBases: true,
+        });
+        assert.isTrue(checkout.readable);
+        const [local, fromOrigin] = choices.map((choice) =>
+          resolveSpawnWorkspace(checkout, choice),
+        );
+        const pinned = Result.getOrThrow(local!);
+        assert.equal(pinned.type === "worktree" && pinned.baseCommit, releaseCommit);
+        assert.isTrue(Result.isFailure(fromOrigin!));
+        const failure = Result.isFailure(fromOrigin!) ? fromOrigin.failure : undefined;
+        assert.include(failure?.detail, "Base 'main' was chosen from origin");
+        assert.include(failure?.nextStep, "local branch");
+      }).pipe(Effect.provide(layer));
+    }),
+  ),
 );
