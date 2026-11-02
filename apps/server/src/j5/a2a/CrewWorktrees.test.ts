@@ -998,6 +998,36 @@ it.effect("skips a worktree whose files were already changed when they change ag
   ),
 );
 
+it.effect("skips a worktree whose staged content changed under identical working files", () =>
+  run(
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const staged = yield* f.seat("staged");
+      const file = f.path.join(staged.worktree, "tracked.txt");
+      // The file reads MM both times, with the same working copy; only the staged blob differs.
+      const stage = Effect.fn("test.stage")(function* (content: string) {
+        yield* f.fs.writeFileString(file, content);
+        yield* f.run(staged.worktree, ["add", "tracked.txt"]);
+        yield* f.fs.writeFileString(file, "working\n");
+      });
+      yield* stage("staged first\n");
+      yield* f.service.cleanup({ seats: [staged], crew });
+      const [item] = yield* f.service.listCleanups("open");
+
+      yield* stage("staged NEW\n");
+      const decided = yield* f.service.answerCleanup({
+        itemId: item!.id,
+        removePaths: [staged.worktree],
+      });
+      assert.deepStrictEqual(
+        decided.entries.map((entry) => [entry.outcome, entry.reason]),
+        [["skipped", "changed"]],
+      );
+      assert.isTrue(yield* f.fs.exists(staged.worktree));
+    }),
+  ),
+);
+
 it.effect("files nothing for commits its branch does not hold, and never removes them", () =>
   run(
     Effect.gen(function* () {

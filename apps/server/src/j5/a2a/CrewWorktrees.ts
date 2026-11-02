@@ -347,8 +347,10 @@ const makeLayer = (daemon: boolean) =>
 
       /**
        * What the worktree holds uncommitted, by content: the status lists names and codes, so an
-       * edit to a file that was already dirty would not show. Status git cut off, or a folder it
-       * lists whole (a nested repository), cannot be compared, so it never matches again and the
+       * edit to a file that was already dirty would not show, and neither would a changed staged
+       * blob under a file whose working copy stayed the same, so the index tree is part of it.
+       * Status git cut off, a folder it lists whole (a nested repository), or an index git cannot
+       * write a tree for (unmerged entries) cannot be compared, so it never matches again and the
        * worktree is kept.
        */
       const snapshotOf = Effect.fnUntraced(function* (worktreePath: string) {
@@ -361,18 +363,27 @@ const makeLayer = (daemon: boolean) =>
           .filter((record) => /^[ MTADRCU?!]{2} /.test(record) && !record.slice(0, 2).includes("D"))
           .map((record) => record.slice(3));
         if (paths.some((changed) => changed.endsWith("/"))) return { status, digest: unmatched() };
-        if (paths.length === 0) return { status, digest: digestOf(status.stdout) };
-        const hashed = yield* git.execute({
-          operation: "CrewWorktrees.contents",
-          cwd: worktreePath,
-          args: ["hash-object", "--", ...paths],
-          allowNonZeroExit: true,
-        });
+        const [index, hashed] = yield* Effect.all([
+          git.execute({
+            operation: "CrewWorktrees.index",
+            cwd: worktreePath,
+            args: ["write-tree"],
+            allowNonZeroExit: true,
+          }),
+          paths.length === 0
+            ? Effect.succeed({ exitCode: 0, stdout: "", stdoutTruncated: false })
+            : git.execute({
+                operation: "CrewWorktrees.contents",
+                cwd: worktreePath,
+                args: ["hash-object", "--", ...paths],
+                allowNonZeroExit: true,
+              }),
+        ]);
         return {
           status,
           digest:
-            hashed.exitCode === 0 && !hashed.stdoutTruncated
-              ? digestOf(`${status.stdout}\n${hashed.stdout}`)
+            index.exitCode === 0 && hashed.exitCode === 0 && !hashed.stdoutTruncated
+              ? digestOf(`${status.stdout}\n${hashed.stdout}\n${index.stdout}`)
               : unmatched(),
         };
       });
