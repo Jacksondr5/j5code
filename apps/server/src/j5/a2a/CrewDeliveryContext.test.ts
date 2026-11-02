@@ -3,6 +3,7 @@ import { assert, it } from "@effect/vitest";
 import {
   CommandId,
   MessageId,
+  RunId,
   ThreadId,
   type OrchestrationV2ServerCommand,
 } from "@t3tools/contracts";
@@ -125,17 +126,39 @@ const fixture = Effect.gen(function* () {
       return yield* (yield* Orchestrator.OrchestratorV2).dispatch(command);
     });
   const notified: Array<ReadonlyArray<string>> = [];
+  // What the member's thread was asked to keep, with a receipt's replay: a command id seen twice
+  // lands once.
+  const recorded = yield* Ref.make<ReadonlyArray<OrchestrationV2ServerCommand>>([]);
+  const recording = { fails: false };
+  const recorder = Layer.mock(Orchestrator.OrchestratorV2)({
+    dispatch: (command) =>
+      Effect.gen(function* () {
+        if (recording.fails)
+          return yield* new Orchestrator.OrchestratorDispatchError({
+            commandId: command.commandId,
+            commandType: command.type,
+          });
+        yield* Ref.update(recorded, (all) =>
+          all.some((seen) => seen.commandId === command.commandId) ? all : [...all, command],
+        );
+        return { sequence: 1, storedEvents: [] };
+      }),
+  });
   const deliveryLayer = CrewTurnContext.layerWithChanges.pipe(
     Layer.provide(
-      Layer.succeed(
-        ReadChanges,
-        ReadChanges.of({
-          notify: (...keys) => Effect.sync(() => void notified.push(keys)),
-          changes: Stream.empty,
-        }),
+      Layer.merge(
+        recorder,
+        Layer.succeed(
+          ReadChanges,
+          ReadChanges.of({
+            notify: (...keys) => Effect.sync(() => void notified.push(keys)),
+            changes: Stream.empty,
+          }),
+        ),
       ),
     ),
   );
+  const runId = RunId.make("run:reviewer");
   const providerThread = (native: string) =>
     ({
       id: "provider-thread:reviewer",
@@ -149,7 +172,12 @@ const fixture = Effect.gen(function* () {
     Effect.gen(function* () {
       let prompt: string | null = null;
       yield* (yield* CrewTurnContext.CrewTurnContext).deliver(
-        { threadId: seatId, providerThread: providerThread(options.native ?? "native-1"), text },
+        {
+          threadId: seatId,
+          runId: runId,
+          providerThread: providerThread(options.native ?? "native-1"),
+          text,
+        },
         (sent) =>
           options.fail === true
             ? Effect.fail("provider refused")
@@ -171,6 +199,7 @@ const fixture = Effect.gen(function* () {
       });
       yield* session.steerTurn({
         threadId: seatId,
+        runId,
         providerThread: providerThread("native-1"),
         message: { text },
       } as never);
@@ -188,6 +217,8 @@ const fixture = Effect.gen(function* () {
     deliver,
     steer,
     notified,
+    recorded,
+    recording,
   };
 });
 
@@ -505,4 +536,78 @@ it.effect("a thread that is not a Crew seat is dispatched untouched, without a r
     assert.deepStrictEqual((yield* Ref.get(f.commands))[0], command);
     assert.equal(f.receiptReads(), 0);
   }).pipe(Effect.provide(base)),
+);
+
+/** What the member's thread was asked to keep: the text, not the assignment that followed it. */
+const recordedTexts = (commands: ReadonlyArray<OrchestrationV2ServerCommand>) =>
+  commands.flatMap((command) => (command.type === "platform-message.record" ? [command.text] : []));
+
+it.effect(
+  "the introduction and each roster change are kept in the member's thread once, as the model read them",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const first = (yield* f.deliver("Review the fix.", { native: "native-1" }))!;
+      const [introduction] = recordedTexts(yield* Ref.get(f.recorded));
+      assert.isTrue(first.startsWith(`${introduction}\n\n`));
+      assert.isTrue(introduction!.startsWith("<j5_crew_delivery_context>\n"));
+      assert.include(introduction, "<spawner_brief>\nShared goal\n</spawner_brief>");
+      assert.notInclude(introduction, "Review the fix.");
+
+      yield* f.deliver("follow-up", { native: "native-1" });
+      yield* f.steer("steer");
+      assert.lengthOf(recordedTexts(yield* Ref.get(f.recorded)), 1);
+
+      yield* f.crews.addMembers("crew:test", [member("security")]);
+      const second = (yield* f.deliver("after the roster changed", { native: "native-1" }))!;
+      const changed = recordedTexts(yield* Ref.get(f.recorded)).at(-1)!;
+      assert.isTrue(second.startsWith(`${changed}\n\n`));
+      assert.include(changed, "<j5_crew_roster_changed>\njoined: security:");
+      assert.notInclude(changed, "after the roster changed");
+
+      yield* f.deliver("replaced conversation", { native: "native-2" });
+      const all = yield* Ref.get(f.recorded);
+      assert.lengthOf(recordedTexts(all), 3);
+      assert.include(recordedTexts(all).at(-1)!, "<spawner_brief>");
+      assert.lengthOf(new Set(all.map((command) => command.commandId)), 3);
+      const messages = all.flatMap((command) =>
+        command.type === "platform-message.record" ? [command.messageId] : [],
+      );
+      assert.lengthOf(new Set(messages), 3);
+    }).pipe(Effect.provide(base)),
+);
+
+it.effect("a refused or superseded send keeps nothing in the member's thread", () =>
+  Effect.gen(function* () {
+    const f = yield* fixture;
+    yield* f.deliver("refused", { fail: true }).pipe(Effect.result);
+    assert.isNull(yield* f.deliver("stopped", { sent: false }));
+    assert.lengthOf(yield* Ref.get(f.recorded), 0);
+    yield* f.deliver("accepted");
+    yield* f.crews.addMembers("crew:test", [member("security")]);
+    yield* f.steer("refused", { fail: true }).pipe(Effect.exit);
+    assert.lengthOf(yield* Ref.get(f.recorded), 1);
+  }).pipe(Effect.provide(base)),
+);
+
+it.effect(
+  "a record that cannot be kept never fails the turn, and a retried delivery keeps it once",
+  () =>
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      f.recording.fails = true;
+      assert.isTrue((yield* f.deliver("first"))!.endsWith("first"));
+      assert.lengthOf(yield* Ref.get(f.recorded), 0);
+      f.recording.fails = false;
+
+      // The prompt was accepted but its bookkeeping failed, so the next delivery carries the
+      // same context again and must land on the same record.
+      yield* f.sql`UPDATE j5_crew_seat_context SET delivered_roster = NULL`;
+      yield* f.sql`CREATE TRIGGER refuse_seat_context_update BEFORE UPDATE ON j5_crew_seat_context
+        BEGIN SELECT RAISE(ABORT, 'locked'); END`;
+      yield* f.deliver("second");
+      yield* f.sql`DROP TRIGGER refuse_seat_context_update`;
+      yield* f.deliver("third");
+      assert.lengthOf(yield* Ref.get(f.recorded), 1);
+    }).pipe(Effect.provide(base)),
 );
