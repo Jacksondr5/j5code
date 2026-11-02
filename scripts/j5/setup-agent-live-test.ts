@@ -1474,9 +1474,7 @@ export function peerRepairCommand(mode: LiveTestMode, local: string, remote: str
 }
 
 /**
- * Peers the two running servers, as `scripts/j5/pr-env.sh --peer` does. Safe
- * to repeat: issuing again rotates the credential and re-adding rotates the
- * record, so every start leaves one clean pair.
+ * Completes an unrecorded peering between the two running test servers.
  */
 async function peerServers(
   paths: LiveTestPaths,
@@ -1528,37 +1526,75 @@ async function peerServers(
       "Both servers report the same environment id; their homes are not separate.",
     );
   }
-  const poll = mode === "peer-poll";
-  // In poll mode only Remote holds a credential: it polls Local, which stores its messages.
-  const directions = poll
-    ? [{ issuer: withIds.local, holder: withIds.remote }]
-    : [
-        { issuer: withIds.remote, holder: withIds.local },
-        { issuer: withIds.local, holder: withIds.remote },
-      ];
-  for (const { issuer, holder } of directions) {
-    const steps = peerSteps({ issuer, holder, poll });
-    // A server that is seconds old can miss the first hello; pr-env.sh retries the same way.
-    for (let attempt = 1; ; attempt++) {
-      // Checked before every call, so a direction is never begun on spent time.
-      if (Date.now() > deadline) {
-        throw notPeeredYet(
-          `the time for this start ran out before ${holder.name} recorded ${issuer.name}.`,
-        );
+  await preservePeerSetup({
+    localId: withIds.local.environmentId,
+    remoteId: withIds.remote.environmentId,
+    list: (side) => {
+      const listed = peerCli(
+        paths,
+        ["list", "--json", "--base-dir", withIds[side].home, "--origin", withIds[side].origin],
+        deadline,
+      );
+      if (!listed.ok)
+        throw notPeeredYet("could not read the recorded peers; leaving credentials unchanged.");
+      return listed.output;
+    },
+    setup: async () => {
+      const poll = mode === "peer-poll";
+      // In poll mode only Remote holds a credential: it polls Local, which stores its messages.
+      const directions = poll
+        ? [{ issuer: withIds.local, holder: withIds.remote }]
+        : [
+            { issuer: withIds.remote, holder: withIds.local },
+            { issuer: withIds.local, holder: withIds.remote },
+          ];
+      for (const { issuer, holder } of directions) {
+        const steps = peerSteps({ issuer, holder, poll });
+        // A server that is seconds old can miss the first hello; pr-env.sh retries the same way.
+        for (let attempt = 1; ; attempt++) {
+          // Checked before every call, so a direction is never begun on spent time.
+          if (Date.now() > deadline) {
+            throw notPeeredYet(
+              `the time for this start ran out before ${holder.name} recorded ${issuer.name}.`,
+            );
+          }
+          const credential = peerCli(paths, steps.credential, deadline);
+          const added = credential.ok
+            ? peerCli(paths, steps.add(credential.output), deadline)
+            : credential;
+          if (added.ok) break;
+          if (attempt === 5) {
+            throw notPeeredYet(
+              `${holder.name} could not record ${issuer.name} as a peer after 5 attempts.\nThe peer command said:\n${added.error || "(nothing)"}`,
+            );
+          }
+          await NodeTimersPromises.setTimeout(3_000);
+        }
       }
-      const credential = peerCli(paths, steps.credential, deadline);
-      const added = credential.ok
-        ? peerCli(paths, steps.add(credential.output), deadline)
-        : credential;
-      if (added.ok) break;
-      if (attempt === 5) {
-        throw notPeeredYet(
-          `${holder.name} could not record ${issuer.name} as a peer after 5 attempts.\nThe peer command said:\n${added.error || "(nothing)"}`,
-        );
-      }
-      await NodeTimersPromises.setTimeout(3_000);
-    }
-  }
+    },
+  });
+}
+
+/** Recorded identities survive origin changes and temporary transport errors. */
+function recordsPeer(peerListJson: string, environmentId: string): boolean {
+  const { peers } = JSON.parse(peerListJson) as {
+    readonly peers: ReadonlyArray<{ readonly environmentId: string }>;
+  };
+  return peers.some((peer) => peer.environmentId === environmentId);
+}
+
+export async function preservePeerSetup(input: {
+  readonly localId: string;
+  readonly remoteId: string;
+  readonly list: (side: "local" | "remote") => string;
+  readonly setup: () => Promise<void>;
+}): Promise<void> {
+  if (
+    recordsPeer(input.list("local"), input.remoteId) &&
+    recordsPeer(input.list("remote"), input.localId)
+  )
+    return;
+  await input.setup();
 }
 
 /**
