@@ -11,7 +11,7 @@ Archiving an agent is where obligations get stranded: the agent that was owed a 
 
 ## Definition
 
-Archiving sets an agent aside, and a person can bring it back. It **never destroys work**: branches and pull requests survive, and so does every worktree that holds unfinished work until a person approves its removal. Archiving one agent removes nothing; archiving a Crew removes only the clean, merged worktrees J5 created for its seats ([Crews](crews.md) AC19), and files one Inbox item for the ones it kept with uncommitted or unmerged work, where the person removes all, the ones they pick, or none ([Inbox](inbox.md) AC18–AC22). It is **loud**: every open Exchange the agent holds ends with a notice to the waiter, and every fact that archiving will change is shown before it happens.
+Archiving sets an agent aside, and a person can bring it back. It **never destroys work**: branches and pull requests survive, and so does every worktree that holds unfinished work until a person approves its removal. Archiving one agent removes nothing; archiving a Crew removes only the clean, merged worktrees J5 created for its seats ([Crews](crews.md) AC19), and files one Inbox item per archive for the ones it kept with uncommitted or unmerged work that their branch holds, where the person removes all, the ones they pick, or none ([Inbox](inbox.md) AC18–AC22). It is **loud**: every open Exchange the agent holds ends with a notice to the waiter, and every fact that archiving will change is shown before it happens.
 
 Before the dialog appears, the platform reads the facts: the agent's open asks in both directions, and the agents placed beneath it. A fact it could not read is shown as "couldn't check" — never as an empty, reassuring list.
 
@@ -75,3 +75,4 @@ Archiving is **not** deleting, **not** a way to archive a single Crew member, an
 - 2026-10-07 — Squadrons retired: an agent's project is upstream's and never changes, so unarchiving has no home to restore, and there is no Squadron to archive (Jackson, 2026-10-05; [#412](https://github.com/Jacksondr5/j5code/issues/412)).
 - 2026-10-27 — archiving a Crew removes the clean, merged worktrees J5 created for its seats; the dialog lists what would go and what would stay; AC9 and the definition rewritten ([#748](https://github.com/Jacksondr5/j5code/issues/748); Crews proposal v2).
 - 2026-10-27 — the worktrees a Crew archive keeps with unfinished work are filed as one Inbox approval; AC9 and the definition rewritten ([#749](https://github.com/Jacksondr5/j5code/issues/749)).
+- 2026-11-02 — each archive of a Crew files its own worktree item, and unarchiving the Captain withdraws one still open ([#749](https://github.com/Jacksondr5/j5code/issues/749), review).
