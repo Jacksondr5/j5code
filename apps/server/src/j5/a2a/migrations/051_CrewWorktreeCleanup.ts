@@ -2,11 +2,9 @@ import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 
 /**
- * The Inbox approval an archive files for the worktrees it kept with unfinished work: one row per
- * item, its worktrees (as measured, then as decided) in `entries_json`. An item is open until
- * `decided_at` is set, and an archive of a Crew (named by the Crew's `archived_at`) has at most one
- * item, open or decided, so the same archive run again after "Keep all" files nothing, while a
- * Crew restored with its Captain and archived again files its own.
+ * The Inbox approval an archive files for the worktrees it kept: one row per item, open until
+ * `decided_at` is set. An archive (the Crew's `archived_at`) has at most one item, so running it
+ * again files nothing, while a Crew restored and archived again files its own.
  */
 export default Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;

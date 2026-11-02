@@ -145,7 +145,7 @@ export const outcomeSummary = (entries: ReadonlyArray<CrewWorktreeCleanupEntry>)
 export const cleanupNeedsAttention = (entries: ReadonlyArray<CrewWorktreeCleanupEntry>) =>
   entries.some((entry) => entry.outcome === "skipped" || entry.outcome === "failed");
 
-/** "PR #815" for a pull request link that names its number, else a plain "Pull request". */
+/** The pull request's number when its link names one, else a plain "Pull request". */
 export const pullRequestLabel = (url: string) => {
   const number = /\/pull\/(\d+)/.exec(url)?.[1];
   return number === undefined ? "Pull request" : `PR #${number}`;

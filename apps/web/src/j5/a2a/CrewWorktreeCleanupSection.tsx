@@ -7,7 +7,7 @@ import {
   CircleXIcon,
   TriangleAlertIcon,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
@@ -50,8 +50,8 @@ import {
 export function useWorktreeCleanupInbox() {
   const openSources = useAtomValue(openWorktreeCleanupSourcesAtom);
   const decidedSources = useAtomValue(decidedWorktreeCleanupSourcesAtom);
-  const open = useMemo(() => mergeWorktreeCleanupSources(openSources), [openSources]);
-  const decided = useMemo(() => mergeWorktreeCleanupSources(decidedSources), [decidedSources]);
+  const open = mergeWorktreeCleanupSources(openSources);
+  const decided = mergeWorktreeCleanupSources(decidedSources);
   // The answer's own item stands in until the decided read arrives; null is a refused answer.
   const [pinned, setPinned] = useState<ReadonlyMap<string, ScopedWorktreeCleanup | null>>(
     new Map(),

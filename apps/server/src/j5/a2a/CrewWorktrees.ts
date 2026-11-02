@@ -430,12 +430,10 @@ const makeLayer = (daemon: boolean) =>
       const digestOf = (text: string) => NodeCrypto.createHash("sha256").update(text).digest("hex");
 
       /**
-       * What the worktree holds uncommitted, by content: the status lists names and codes, so an
-       * edit to a file that was already dirty would not show, and neither would a changed staged
-       * blob under a file whose working copy stayed the same, so the index tree is part of it.
-       * Status git cut off, a folder it lists whole (a nested repository), or an index git cannot
-       * write a tree for (unmerged entries) cannot be compared, so it never matches again and the
-       * worktree is kept.
+       * What the worktree holds uncommitted, by content, since status lists only names and codes:
+       * the index tree is part of it so a changed staged blob shows. Cut-off status, a nested
+       * repository, or an index with no tree (unmerged) cannot be compared, so it never matches
+       * again and the worktree is kept.
        */
       const snapshotOf = Effect.fnUntraced(function* (worktreePath: string) {
         const status = yield* localChanges(worktreePath);
