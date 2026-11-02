@@ -328,7 +328,7 @@ const assertCrewFull = (error: { readonly _tag: string; readonly message: string
   assert.include(error.message, "propose a new crew");
 };
 
-const fixtureWithDatabase = (
+const fixtureWithDatabase = Effect.fn("test.crewProposal.fixture")(function* (
   filename: string,
   options: {
     readonly beforeCreate?: Effect.Effect<void>;
@@ -337,214 +337,230 @@ const fixtureWithDatabase = (
     readonly afterAdmit?: Effect.Effect<void, SqlError>;
     readonly settings?: Parameters<typeof ServerSettings.layerTest>[0];
   } = {},
-) =>
-  Effect.gen(function* () {
-    const database = NodeSqliteClient.layer({ filename });
-    const storage = Layer.mergeAll(crewInstanceLayer, proposalStoreLayer, ledgerLayer).pipe(
-      Layer.provideMerge(database),
-    );
-    const context = yield* Layer.build(storage);
-    const crews = Context.get(context, AgentCrewInstanceService);
-    yield* runMigrations().pipe(Effect.provide(context));
-    yield* runJ5A2AMigrations().pipe(Effect.provide(context));
-    yield* Effect.provide(
-      Effect.gen(function* () {
-        yield* (yield* A2ALedger).ensureProject({
-          projectId: projectId,
-          createdAt: DateTime.formatIso(createdAt),
-        });
-      }),
-      context,
-    );
-    const captainModel = yield* Ref.make("gpt-5.6-sol");
-    const notices = yield* Ref.make<ReadonlyArray<OrchestrationV2ServerCommand>>([]);
-    // Seat threads whose archive the store refuses, to prove a decline whose cleanup fails stays open.
-    const noticeFailure = yield* Ref.make(false);
-    const archiveFailures = yield* Ref.make<ReadonlySet<string>>(new Set());
-    // Seat threads that never came to exist (a not-found), and ones whose read the store cannot answer.
-    const missingThreads = yield* Ref.make<ReadonlySet<string>>(new Set());
-    const unreadableThreads = yield* Ref.make<ReadonlySet<string>>(new Set());
-    // Threads the person archived, and ones they deleted (the store keeps the row, stamped).
-    const archivedThreads = yield* Ref.make<ReadonlySet<string>>(new Set());
-    const deletedThreads = yield* Ref.make<ReadonlySet<string>>(new Set());
-    // An approval is told to the Captain by the launch report, once its seats have started; here the
-    // reporter records which proposals it was handed.
-    const watched = yield* Ref.make<ReadonlyArray<string>>([]);
-    // While set, a resolution lands nothing: the store answers as if the row were no longer open.
-    const resolveFailure = yield* Ref.make(false);
-    // While set, the proposal-to-Crew link write fails with a database error.
-    const attachFailure = yield* Ref.make(false);
-    const store = Context.get(context, AgentCrewProposalService);
-    const flakyStore = Layer.succeed(AgentCrewProposalService, {
-      ...store,
-      create: (input) =>
-        (options.beforeCreate ?? Effect.void).pipe(
-          Effect.andThen(store.create(input)),
-          Effect.tap(() => options.afterCreate ?? Effect.void),
-        ),
-      admit: (input, limits) =>
-        (options.beforeAdmit ?? Effect.void).pipe(
-          Effect.andThen(store.admit(input, limits)),
-          Effect.tap(() => options.afterAdmit ?? Effect.void),
-        ),
-      resolve: (input) =>
-        Ref.get(resolveFailure).pipe(
-          Effect.flatMap((failing) => (failing ? Effect.succeed(null) : store.resolve(input))),
-        ),
-      attachInstance: (id, crewInstanceId) =>
-        Ref.get(attachFailure).pipe(
-          Effect.flatMap((failing) =>
-            failing
-              ? Effect.fail(
-                  new SqlError({
-                    reason: new UnknownError({ cause: new Error("disk I/O error") }),
-                  }),
-                )
-              : store.attachInstance(id, crewInstanceId),
-          ),
-        ),
-    });
-    const layer = crewProposalLayer.pipe(
-      Layer.provideMerge(ServerSettings.layerTest(options.settings)),
-      Layer.provideMerge(flakyStore),
-      Layer.provideMerge(fakeLauncher(crews)),
-      Layer.provideMerge(
-        Layer.mock(CrewLaunchReporter)({
-          watch: (proposalId) => Ref.update(watched, (items) => [...items, proposalId]),
-        }),
+) {
+  const database = NodeSqliteClient.layer({ filename });
+  const storage = Layer.mergeAll(crewInstanceLayer, proposalStoreLayer, ledgerLayer).pipe(
+    Layer.provideMerge(database),
+  );
+  const context = yield* Layer.build(storage);
+  const crews = Context.get(context, AgentCrewInstanceService);
+  yield* runMigrations().pipe(Effect.provide(context));
+  yield* runJ5A2AMigrations().pipe(Effect.provide(context));
+  yield* Effect.provide(
+    Effect.gen(function* () {
+      yield* (yield* A2ALedger).ensureProject({
+        projectId: projectId,
+        createdAt: DateTime.formatIso(createdAt),
+      });
+    }),
+    context,
+  );
+  const captainModel = yield* Ref.make("gpt-5.6-sol");
+  const notices = yield* Ref.make<ReadonlyArray<OrchestrationV2ServerCommand>>([]);
+  // Seat threads whose archive the store refuses, to prove a decline whose cleanup fails stays open.
+  const noticeFailure = yield* Ref.make(false);
+  const archiveFailures = yield* Ref.make<ReadonlySet<string>>(new Set());
+  // Seat threads that never came to exist (a not-found), and ones whose read the store cannot answer.
+  const missingThreads = yield* Ref.make<ReadonlySet<string>>(new Set());
+  const unreadableThreads = yield* Ref.make<ReadonlySet<string>>(new Set());
+  // Threads the person archived, and ones they deleted (the store keeps the row, stamped).
+  const archivedThreads = yield* Ref.make<ReadonlySet<string>>(new Set());
+  const deletedThreads = yield* Ref.make<ReadonlySet<string>>(new Set());
+  // An approval is told to the Captain by the launch report, once its seats have started; here the
+  // reporter records which proposals it was handed.
+  const watched = yield* Ref.make<ReadonlyArray<string>>([]);
+  // While set, a resolution lands nothing: the store answers as if the row were no longer open.
+  const resolveFailure = yield* Ref.make(false);
+  // While set, the proposal-to-Crew link write fails with a database error.
+  const attachFailure = yield* Ref.make(false);
+  const store = Context.get(context, AgentCrewProposalService);
+  const flakyStore = Layer.succeed(AgentCrewProposalService, {
+    ...store,
+    create: (input) =>
+      (options.beforeCreate ?? Effect.void).pipe(
+        Effect.andThen(store.create(input)),
+        Effect.tap(() => options.afterCreate ?? Effect.void),
       ),
-      Layer.provideMerge(
-        Layer.mock(ThreadManagementService)({
-          getThreadProjection: (threadId) =>
-            Effect.gen(function* () {
-              // The orchestrator wraps the store's failure either way; the cause tells them apart.
-              if ((yield* Ref.get(missingThreads)).has(threadId))
-                return yield* new OrchestratorProjectionError({
-                  threadId,
-                  cause: new ProjectionStoreThreadNotFoundError({ threadId }),
-                });
-              if ((yield* Ref.get(unreadableThreads)).has(threadId))
-                return yield* new OrchestratorProjectionError({
-                  threadId,
-                  cause: new ProjectionStoreReadError({ threadId }),
-                });
-              return {
-                thread: {
-                  ...thread(threadId),
-                  archivedAt: (yield* Ref.get(archivedThreads)).has(threadId) ? createdAt : null,
-                  deletedAt: (yield* Ref.get(deletedThreads)).has(threadId) ? createdAt : null,
-                  modelSelection: {
-                    ...thread(threadId).modelSelection,
-                    model: yield* Ref.get(captainModel),
-                  },
-                },
-              } as unknown as OrchestrationV2ThreadProjection;
-            }),
-          dispatch: (command) =>
-            Effect.gen(function* () {
-              if (
-                (command.type === "thread.archive" &&
-                  (yield* Ref.get(archiveFailures)).has(command.threadId)) ||
-                (command.type === "message.dispatch" && (yield* Ref.get(noticeFailure)))
+    admit: (input, limits) =>
+      (options.beforeAdmit ?? Effect.void).pipe(
+        Effect.andThen(store.admit(input, limits)),
+        Effect.tap(() => options.afterAdmit ?? Effect.void),
+      ),
+    resolve: (input) =>
+      Ref.get(resolveFailure).pipe(
+        Effect.flatMap((failing) => (failing ? Effect.succeed(null) : store.resolve(input))),
+      ),
+    attachInstance: (id, crewInstanceId) =>
+      Ref.get(attachFailure).pipe(
+        Effect.flatMap((failing) =>
+          failing
+            ? Effect.fail(
+                new SqlError({
+                  reason: new UnknownError({ cause: new Error("disk I/O error") }),
+                }),
               )
-                return yield* Effect.fail(
-                  new OrchestratorDispatchError({
-                    commandId: command.commandId,
-                    commandType: command.type,
-                  }),
-                );
-              yield* Ref.update(notices, (items) => [...items, command]);
-              return { events: [], effects: [] } as never;
-            }),
-        }),
+            : store.attachInstance(id, crewInstanceId),
+        ),
       ),
-      Layer.provideMerge(playbookStoreLayer),
-      Layer.provideMerge(Layer.succeedContext(context)),
-      Layer.provideMerge(
-        personaLibraryLayer("j5-crew-proposal-", Object.values(BUILT_IN_AGENT_PERSONAS)),
-      ),
-      Layer.provideMerge(NodeServices.layer),
-    );
-    return {
-      layer,
-      notices,
-      watched,
-      archiveFailures,
-      missingThreads,
-      unreadableThreads,
-      archivedThreads,
-      deletedThreads,
-      noticeFailure,
-      resolveFailure,
-      attachFailure,
-      captainModel,
-    };
   });
+  const layer = crewProposalLayer.pipe(
+    Layer.provideMerge(ServerSettings.layerTest(options.settings)),
+    Layer.provideMerge(flakyStore),
+    Layer.provideMerge(fakeLauncher(crews)),
+    Layer.provideMerge(
+      Layer.mock(CrewLaunchReporter)({
+        watch: (proposalId) => Ref.update(watched, (items) => [...items, proposalId]),
+      }),
+    ),
+    Layer.provideMerge(
+      Layer.mock(ThreadManagementService)({
+        getThreadProjection: (threadId) =>
+          Effect.gen(function* () {
+            // The orchestrator wraps the store's failure either way; the cause tells them apart.
+            if ((yield* Ref.get(missingThreads)).has(threadId))
+              return yield* new OrchestratorProjectionError({
+                threadId,
+                cause: new ProjectionStoreThreadNotFoundError({ threadId }),
+              });
+            if ((yield* Ref.get(unreadableThreads)).has(threadId))
+              return yield* new OrchestratorProjectionError({
+                threadId,
+                cause: new ProjectionStoreReadError({ threadId }),
+              });
+            return {
+              thread: {
+                ...thread(threadId),
+                archivedAt: (yield* Ref.get(archivedThreads)).has(threadId) ? createdAt : null,
+                deletedAt: (yield* Ref.get(deletedThreads)).has(threadId) ? createdAt : null,
+                modelSelection: {
+                  ...thread(threadId).modelSelection,
+                  model: yield* Ref.get(captainModel),
+                },
+              },
+            } as unknown as OrchestrationV2ThreadProjection;
+          }),
+        dispatch: (command) =>
+          Effect.gen(function* () {
+            if (
+              (command.type === "thread.archive" &&
+                (yield* Ref.get(archiveFailures)).has(command.threadId)) ||
+              (command.type === "message.dispatch" && (yield* Ref.get(noticeFailure)))
+            )
+              return yield* new OrchestratorDispatchError({
+                commandId: command.commandId,
+                commandType: command.type,
+              });
+            yield* Ref.update(notices, (items) => [...items, command]);
+            return { events: [], effects: [] } as never;
+          }),
+      }),
+    ),
+    Layer.provideMerge(playbookStoreLayer),
+    Layer.provideMerge(Layer.succeedContext(context)),
+    Layer.provideMerge(
+      personaLibraryLayer("j5-crew-proposal-", Object.values(BUILT_IN_AGENT_PERSONAS)),
+    ),
+    Layer.provideMerge(NodeServices.layer),
+  );
+  return {
+    layer,
+    notices,
+    watched,
+    archiveFailures,
+    missingThreads,
+    unreadableThreads,
+    archivedThreads,
+    deletedThreads,
+    noticeFailure,
+    resolveFailure,
+    attachFailure,
+    captainModel,
+  };
+});
 const fixtureWithSettings = (settings: Parameters<typeof ServerSettings.layerTest>[0] = {}) =>
   fixtureWithDatabase(":memory:", { settings });
 
 const fixture = fixtureWithSettings();
 
-it.effect("reports what the person decided about a roster, and what they changed first", () =>
-  Effect.gen(function* () {
-    const { layer } = yield* fixture;
-    const recorded: Array<Readonly<Record<string, unknown>>> = [];
-    const analytics = Layer.succeed(
-      AnalyticsService,
-      AnalyticsService.of({
-        record: (event, properties = {}) =>
-          Effect.sync(() => void recorded.push({ event, ...properties })),
-        flush: Effect.void,
-      }),
-    );
-    yield* Effect.gen(function* () {
-      const gate = withPreview(yield* CrewProposalService);
-      const seat = (name: string) => ({
-        workspace: { type: "shared" as const },
-        seat: name,
-        agentId: name,
-        reason: `Does the ${name} work`,
-      });
-      const edited = yield* gate.propose({
-        requestKey: "analytics-edited",
-        captain,
-        displayName: "Edited Crew",
-        brief: "Fix the flaky login test.",
-        seats: [seat("builder"), seat("critic")],
-      });
-      // The person drops the critic and adds a security pass.
-      yield* gate.resolve({
-        proposalId: edited.proposal.id,
-        decision: "approve",
-        seats: [seat("builder"), seat("sentry")],
-      });
-      const refused = yield* gate.propose({
-        requestKey: "analytics-declined",
-        captain,
-        displayName: "Declined Crew",
-        brief: "Rewrite everything.",
-        seats: [seat("builder")],
-      });
-      yield* gate.resolve({ proposalId: refused.proposal.id, decision: "decline" });
-    }).pipe(Effect.provide(layer.pipe(Layer.provide(analytics))));
+it.effect(
+  "counts the person's roster decision, telling an edited roster from an unchanged one",
+  () =>
+    Effect.gen(function* () {
+      const { layer } = yield* fixture;
+      const recorded: Array<Readonly<Record<string, unknown>>> = [];
+      const analytics = Layer.succeed(
+        AnalyticsService,
+        AnalyticsService.of({
+          record: (event, properties = {}) =>
+            Effect.sync(() => void recorded.push({ event, ...properties })),
+          flush: Effect.void,
+          recordOwners: () => Effect.void,
+        }),
+      );
+      yield* Effect.gen(function* () {
+        const gate = withPreview(yield* CrewProposalService);
+        const seat = (name: string) => ({
+          workspace: { type: "shared" as const },
+          seat: name,
+          agentId: name,
+          reason: `Does the ${name} work`,
+        });
+        const asked = yield* gate.propose({
+          requestKey: "analytics-approved",
+          captain,
+          displayName: "Approved Crew",
+          brief: "Fix the flaky login test.",
+          seats: [seat("builder")],
+        });
+        yield* gate.resolve({
+          proposalId: asked.proposal.id,
+          decision: "approve",
+          seats: [seat("builder")],
+        });
+        const edited = yield* gate.propose({
+          requestKey: "analytics-edited",
+          captain,
+          displayName: "Edited Crew",
+          brief: "Fix the flaky login test.",
+          seats: [seat("builder"), seat("critic")],
+        });
+        // The person drops the critic and adds a security pass.
+        yield* gate.resolve({
+          proposalId: edited.proposal.id,
+          decision: "approve",
+          seats: [seat("builder"), seat("sentry")],
+        });
+        const moved = yield* gate.propose({
+          requestKey: "analytics-workspace",
+          captain,
+          displayName: "Moved Crew",
+          brief: "Fix the flaky login test.",
+          seats: [seat("builder")],
+        });
+        // Only the seat's workspace changes, to a worktree of its own.
+        yield* gate.resolve({
+          proposalId: moved.proposal.id,
+          decision: "approve",
+          seats: [{ ...seat("builder"), workspace: { type: "worktree", baseRef: "main" } }],
+        });
+        const refused = yield* gate.propose({
+          requestKey: "analytics-declined",
+          captain,
+          displayName: "Declined Crew",
+          brief: "Rewrite everything.",
+          seats: [seat("builder")],
+        });
+        yield* gate.resolve({ proposalId: refused.proposal.id, decision: "decline" });
+      }).pipe(Effect.provide(layer.pipe(Layer.provide(analytics))));
 
-    const resolved = { event: "j5.crew.proposal.resolved", kind: "roster", hasPlaybook: false };
-    assert.deepStrictEqual(recorded, [
-      {
-        ...resolved,
-        decision: "approved",
-        requestedSeats: 2,
-        durationMs: 0,
-        approvedSeats: 2,
-        seatsAdded: 1,
-        seatsRemoved: 1,
-        seatsRenamed: 0,
-        seatsRuntimeChanged: 0,
-        seatsInstructionsChanged: 0,
-      },
-      { ...resolved, decision: "declined", requestedSeats: 1, durationMs: 0 },
-    ]);
-  }),
+      const resolved = { event: "feature.used", feature: "crew.proposal.resolve" };
+      assert.deepStrictEqual(recorded, [
+        { ...resolved, variant: "approve" },
+        { ...resolved, variant: "edit" },
+        { ...resolved, variant: "edit" },
+        { ...resolved, variant: "decline" },
+      ]);
+    }),
 );
 
 it.effect(

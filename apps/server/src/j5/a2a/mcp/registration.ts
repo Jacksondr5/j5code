@@ -7,7 +7,6 @@ import * as OrchestratorMcpService from "../../../mcp/OrchestratorMcpService.ts"
 import * as ThreadMetadataMcpService from "../../../mcp/ThreadMetadataMcpService.ts";
 import * as ThreadCommandExecutor from "../../../orchestration-v2/ThreadCommandExecutor.ts";
 import * as ArtifactHandlers from "../../../mcp/toolkits/artifacts/handlers.ts";
-import { ArtifactToolkit } from "../../../mcp/toolkits/artifacts/tools.ts";
 import * as AttachmentHandlers from "../../../mcp/toolkits/attachment/handlers.ts";
 import * as EnvironmentHandlers from "../../../mcp/toolkits/environment/handlers.ts";
 import * as OrchestratorHandlers from "../../../mcp/toolkits/orchestrator/handlers.ts";
@@ -20,6 +19,7 @@ import * as J5OrchestratorSurfaceHandlers from "./orchestratorSurfaceHandlers.ts
 import * as J5AdaptedThread from "./threadTools.ts";
 import { J5Toolkit } from "./tools.ts";
 import {
+  J5ArtifactToolkit,
   J5EnvironmentToolkit,
   J5OrchestratorToolkit,
   J5ProjectToolkit,
@@ -28,11 +28,10 @@ import {
 } from "./upstreamCatalog.ts";
 
 /**
- * Everything J5 puts on `/mcp` besides the upstream toolkits it registers whole: J5's own
- * tools, and the admitted part of upstream's orchestrator, thread, attachment, project and
- * environment toolkits on upstream's own handlers. `register` is McpHttpServer's
- * `toolkitRegistration`, passed in because that module imports this one; it takes only handlers
- * McpToolAccess built, so every tool here has declared who may call it.
+ * Everything J5 puts on `/mcp` besides the upstream toolkits it registers whole: J5's tools and the
+ * admitted part of upstream's toolkits, on upstream's handlers. `register` is McpHttpServer's
+ * `toolkitRegistration`, passed in to avoid an import cycle; it takes only McpToolAccess-built
+ * handlers, so every tool declares who may call it.
  */
 export const layerJ5Toolkits = (register: typeof toolkitRegistration) =>
   Layer.mergeAll(
@@ -58,7 +57,7 @@ export const layerJ5Toolkits = (register: typeof toolkitRegistration) =>
       J5EnvironmentToolkit,
       handlersFor(J5EnvironmentToolkit, EnvironmentHandlers.layer),
     ).pipe(Layer.provide(ThreadCommandExecutor.layer)),
-    register(ArtifactToolkit, ArtifactHandlers.layer).pipe(
+    register(J5ArtifactToolkit, ArtifactHandlers.layer).pipe(
       Layer.provide(ArtifactMcpService.layer.pipe(Layer.provide(ArtifactWorkspaceLive))),
     ),
   );

@@ -147,7 +147,7 @@ it.effect(
                 ),
             }),
             Layer.mock(ThreadManagementService)({
-              getThreadProjection: (threadId) =>
+              getThreadRecords: (threadId) =>
                 threadId === captainThread
                   ? Effect.succeed(captainProjection("2026-09-17T08:00:00.000Z"))
                   : threadId === liveCaptain
@@ -275,6 +275,7 @@ const seatProjection = (
             kind: "user_input",
             status: "pending",
             createdAt: DateTime.makeUnsafe(seatAt),
+            responseCapability: { type: "live", providerSessionId: "session:seat" },
           },
         ]
       : [],
@@ -291,6 +292,7 @@ const seatProjection = (
             {
               id: "message:seat",
               role: "user",
+              text: "Next step",
               createdBy: "user",
               updatedAt: DateTime.makeUnsafe(facts.userMessageAt),
             },
@@ -397,7 +399,7 @@ it.effect("unarchiving a Captain brings back the Crews that retired with it", ()
           Layer.mock(ArchiveCrewService)({}),
           Layer.mock(ThreadManagementService)({
             // The builder's thread was archived with the Crew; the critic's was never created.
-            getThreadProjection: (threadId) =>
+            getThreadRecords: (threadId) =>
               threadId === criticThread
                 ? Effect.fail(
                     new OrchestratorProjectionError({
@@ -472,7 +474,7 @@ it.effect("a Captain archived again after an unarchive retires its Crew again", 
               }),
           }),
           Layer.mock(ThreadManagementService)({
-            getThreadProjection: (threadId) =>
+            getThreadRecords: (threadId) =>
               Effect.map(Ref.get(seatArchived), (archived) =>
                 seatProjection(threadId, {
                   archivedAt: archived ? "2026-09-17T08:00:00.000Z" : null,

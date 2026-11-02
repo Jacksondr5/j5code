@@ -1,5 +1,4 @@
 import {
-  J5_COORDINATION_TOOLS,
   J5_PREAPPROVED_TOOLS,
   j5PreapprovedTools,
   type J5RuntimePolicy,
@@ -11,7 +10,6 @@ const preapprovedToolConfig = (names: ReadonlyArray<string>) => ({
 });
 
 export const J5_CODEX_T3_MCP_SERVER_CONFIG = preapprovedToolConfig(J5_PREAPPROVED_TOOLS);
-export const J5_CODEX_COORDINATION_MCP_SERVER_CONFIG = preapprovedToolConfig(J5_COORDINATION_TOOLS);
 
 /** Spread into the injected `mcp_servers["t3-code"]` entry; the list is `j5PreapprovedTools`. */
 export const j5CodexT3McpServerConfig = (
