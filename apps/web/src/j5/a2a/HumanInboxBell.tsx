@@ -1,8 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { InboxIcon } from "lucide-react";
-import { useCallback } from "react";
 import { useAtomValue } from "@effect/atom-react";
-import { mergeOpenInboxCounts } from "@t3tools/client-runtime/j5/inbox";
+import { inboxBellPresentation, mergeOpenInboxCounts } from "@t3tools/client-runtime/j5/inbox";
 
 import { useSidebar } from "../../components/ui/sidebar";
 import { cn } from "../../lib/utils";
@@ -22,8 +21,6 @@ import { createVisibleRefreshHook } from "../useVisibleRefresh";
 const useCountRefresh = createVisibleRefreshHook(() => {
   void refreshJ5Sources(inboxCountSourcesAtom, inboxCountQueryAtom);
 });
-
-export const shouldShowOpenInboxCount = (count: number | null) => count !== null && count > 0;
 
 export function HumanInboxBell({ onBackdrop }: { readonly onBackdrop: boolean }) {
   const { isMobile, setOpenMobile } = useSidebar();
@@ -46,11 +43,11 @@ export function HumanInboxBell({ onBackdrop }: { readonly onBackdrop: boolean })
   useCountRefresh();
   useCrewProposalsRefresh();
 
-  const closeMobileSidebar = useCallback(() => {
+  const closeMobileSidebar = () => {
     if (isMobile) setOpenMobile(false);
-  }, [isMobile, setOpenMobile]);
+  };
 
-  const label = `${count === null ? "Open inbox" : `Open inbox, ${incomplete ? "last known " : ""}${count} open`}${incomplete ? "; some environments could not be refreshed" : ""}`;
+  const { badge, label } = inboxBellPresentation({ count, incomplete });
   return (
     <Link
       aria-label={label}
@@ -65,9 +62,9 @@ export function HumanInboxBell({ onBackdrop }: { readonly onBackdrop: boolean })
       to="/inbox"
     >
       <InboxIcon aria-hidden className="size-4" />
-      {shouldShowOpenInboxCount(count) || incomplete ? (
+      {badge !== null ? (
         <span className="absolute -end-1 -top-1 flex min-h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-3xs font-semibold leading-none text-primary-foreground tabular-nums ring-2 ring-sidebar">
-          {incomplete ? (count !== null && count > 0 ? `${count}*` : "?") : count}
+          {badge}
         </span>
       ) : null}
     </Link>

@@ -29,6 +29,7 @@ import * as PubSub from "effect/PubSub";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
+import type * as Statement from "effect/sql/Statement";
 import type * as SqlError from "effect/sql/SqlError";
 
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
@@ -43,15 +44,21 @@ import {
   layer as personAccessLayer,
 } from "./PersonAccess.ts";
 import { SharedThreads } from "./SharedThreads.ts";
-import { type Author, makeMessageStamps, prefixOf, refused } from "./messageStamps.ts";
+import {
+  type Author,
+  type MessageOrigin,
+  makeMessageStamps,
+  messageOriginColumns,
+  prefixOf,
+  refused,
+  typedByFirstOwner,
+} from "./messageStamps.ts";
 import { scheduledLine } from "./scheduledRuns.ts";
 
 /**
- * A shared conversation: a thread more than one person can write to, which stays one
- * (docs/j5/product/features/shared-conversations.md). In one, every message a person sends
- * reaches the agent beginning with its author's line, and the platform's note tells the agent who
- * can write when that changes. A thread only one person has ever been able to write to passes
- * through here untouched (AC2).
+ * A shared conversation: a thread more than one person can write to, which stays one. Each
+ * person's message reaches the agent with its author's line, and a note tells the agent who can
+ * write when that changes. A thread only one person could ever write to passes untouched (AC2).
  */
 
 /**
@@ -60,7 +67,7 @@ import { scheduledLine } from "./scheduledRuns.ts";
  * first line of the person's own, and their text always follows it, so text a person types to
  * look like this line, or like a note, sits below their real one.
  */
-export const authorLine = (author: Author, editedBy: Author | null = null) =>
+const authorLine = (author: Author, editedBy: Author | null = null) =>
   editedBy === null
     ? `[Message from ${authorLabel(author)}]`
     : `[Message from ${authorLabel(author)}, edited by ${authorLabel(editedBy)}]`;
@@ -71,7 +78,7 @@ export const authorLine = (author: Author, editedBy: Author | null = null) =>
  * it into a message, on others it goes back as the result of the agent's tool call. Either way
  * the agent reads the answer's words, so its author goes on the words.
  */
-export const answerLine = (author: Author) => `[Answer from ${authorLabel(author)}]`;
+const answerLine = (author: Author) => `[Answer from ${authorLabel(author)}]`;
 
 /**
  * A question's answers with their author on each: at the start of the text, or of the first
@@ -121,30 +128,37 @@ interface AuthorRow {
  * The event upstream logs when a prompt is answered. Typed against upstream's own event union, so
  * a rename there fails to compile here.
  */
-export const PROMPT_SETTLED_EVENT =
+const PROMPT_SETTLED_EVENT =
   "runtime-request.updated" satisfies OrchestrationV2StoredEvent["event"]["type"];
+
+/** The event upstream logs when it writes a message, pinned by the integration test. */
+const MESSAGE_WRITTEN_EVENT =
+  "message.updated" satisfies OrchestrationV2StoredEvent["event"]["type"];
 
 const QUEUED = "queued" satisfies OrchestrationV2Run["status"];
 
-/** A command as it goes on to upstream, and what is written once upstream takes it. */
-interface Admitted {
-  readonly command: OrchestrationV2Command;
+/**
+ * A command or launch as it goes on to upstream, what is written once upstream takes it, and
+ * what is undone if upstream refuses it.
+ */
+interface Admitted<C = OrchestrationV2Command> {
+  readonly command: C;
   readonly accepted: Effect.Effect<void, SqlError.SqlError>;
+  readonly refused: Effect.Effect<void, SqlError.SqlError>;
 }
 
-const admitted = (command: OrchestrationV2Command): Admitted => ({
+const admitted = <C>(command: C): Admitted<C> => ({
   command,
   accepted: Effect.void,
+  refused: Effect.void,
 });
 
 export interface SharedConversationShape {
   /**
-   * A client's command taken in and handed to upstream's `dispatch`, after `CommandAdmission` has
-   * checked that its sender may send it. `personId` is the person on the connection; `null` for a
-   * service session, whose commands are not a person's. A message for a shared conversation gains
-   * its author's line and any note due; an edit of one keeps its author's; an answer to a question
-   * carries who gave it. Who is answering a prompt is written down. A command carrying a context
-   * record of the platform's own kind is refused (AC8).
+   * A client command, already admitted by `CommandAdmission`, handed to upstream's `dispatch`.
+   * `personId` is null for a service session. In a shared conversation a message gains its
+   * author's line and any note due, an edit keeps its author, and answers record who gave them. A
+   * command carrying a platform-kind context record is refused (AC8).
    */
   readonly dispatch: <A, E, R>(
     personId: ParticipantId | null,
@@ -152,15 +166,16 @@ export interface SharedConversationShape {
     dispatch: (command: OrchestrationV2Command) => Effect.Effect<A, E, R>,
   ) => Effect.Effect<A, E | EnvironmentAuthorizationError, R>;
   /**
-   * A client's request to start a thread, as it goes on to upstream. A new thread's first message
-   * does not come as a command: upstream's launch sends it itself, so it is taken in here as
-   * `dispatch` takes in a message. A thread born under a scope that is already shared is a shared
-   * conversation from its first message.
+   * A client's request to start a thread, handed to upstream's launch. A new thread's first
+   * message does not come as a command: upstream's launch sends it itself, so it is taken in here
+   * as `dispatch` takes in a message. A thread born under a scope that is already shared is a
+   * shared conversation from its first message.
    */
-  readonly admitLaunch: (
+  readonly launch: <A, E, R>(
     personId: ParticipantId | null,
     input: OrchestrationV2ThreadLaunchInput,
-  ) => Effect.Effect<OrchestrationV2ThreadLaunchInput, EnvironmentAuthorizationError>;
+    launch: (input: OrchestrationV2ThreadLaunchInput) => Effect.Effect<A, E, R>,
+  ) => Effect.Effect<A, E | EnvironmentAuthorizationError, R>;
   /** Who sent each message and answered each prompt in a thread, for anyone who reads it. */
   readonly threadAuthors: (
     viewer: ParticipantId | null,
@@ -226,12 +241,10 @@ const make = Effect.gen(function* () {
   const { authorOn, announce, recordAuthor } = yield* makeMessageStamps(touch);
 
   /**
-   * Whether upstream's own log shows that the command an answer was written for settled its
-   * prompt, as a condition on `j5_a2a_prompt_answer AS answer`. Upstream answers "accepted" again
-   * for any command id it has already taken on the thread, so its saying so is not proof. The
-   * event that settles a prompt carries the id of the command that did it:
-   * `orchestration_events` is upstream's log, a thread's events are its stream, and this event's
-   * payload is the request itself (`SharedConversation.integration.test.ts` pins these).
+   * Whether upstream's own log shows the answer's command settled its prompt, as a condition on
+   * `j5_a2a_prompt_answer AS answer`. Upstream re-accepts any command id it already took, so its
+   * "accepted" is no proof; the settling event carries the command id (pinned by
+   * `SharedConversation.integration.test.ts`).
    */
   const settledItsPrompt = sql`EXISTS (
     SELECT 1 FROM orchestration_events AS event
@@ -243,8 +256,9 @@ const make = Effect.gen(function* () {
   )`;
 
   /**
-   * A person's message taken in on a shared thread: recorded under its author, and returned as
-   * the agent will read it. A command goes on as typed (AC5).
+   * A person's message taken in on a shared thread: recorded under its author, which reserves its
+   * id, and returned as the agent will read it. A command goes on as typed (AC5). If upstream
+   * refuses it, the record is released, unless upstream stored a message under the id after all.
    */
   const stampMessage = Effect.fn("j5.sharing.sharedConversation.stampMessage")(function* (
     threadId: ThreadId,
@@ -253,14 +267,32 @@ const make = Effect.gen(function* () {
     author: Author,
     launchingIn: ProjectId | null,
   ) {
+    // An attempt releases only the record it wrote: an overlapping retry's holds the earlier one's.
+    const releaseIf = (reserved: boolean) =>
+      reserved
+        ? sql`
+            DELETE FROM j5_a2a_message_author
+            WHERE thread_id = ${threadId} AND message_id = ${messageId}
+              AND person_id = ${author.personId}
+              AND NOT EXISTS (
+                SELECT 1 FROM orchestration_v2_projection_messages WHERE message_id = ${messageId}
+              )
+          `.pipe(Effect.andThen(touch(threadId)), Effect.asVoid)
+        : Effect.void;
     if (beginsWithSlash(text)) {
-      yield* recordAuthor(threadId, messageId, author, { note: null, told: null }, "");
-      return text;
+      const reserved = yield* recordAuthor(
+        threadId,
+        messageId,
+        author,
+        { note: null, told: null },
+        "",
+      );
+      return { text, release: releaseIf(reserved) };
     }
     const carried = yield* announce(threadId, launchingIn);
     const prefix = prefixOf(carried.note, authorLine(author));
-    yield* recordAuthor(threadId, messageId, author, carried, prefix);
-    return `${prefix}${text}`;
+    const reserved = yield* recordAuthor(threadId, messageId, author, carried, prefix);
+    return { text: `${prefix}${text}`, release: releaseIf(reserved) };
   });
 
   /** The message a queued run would deliver, by upstream's own record of the run. */
@@ -295,42 +327,21 @@ const make = Effect.gen(function* () {
   const unrecordedAuthor = Effect.fn("j5.sharing.sharedConversation.unrecordedAuthor")(function* (
     messageId: string,
   ) {
-    const rows = yield* sql<{
-      readonly created_by: string | null;
-      readonly creation_source: string | null;
-      readonly scheduled_task_id: string | null;
-      readonly sender_thread_id: string | null;
-    }>`
-      SELECT json_extract(payload_json, '$.createdBy') AS created_by,
-        json_extract(payload_json, '$.creationSource') AS creation_source,
-        json_extract(payload_json, '$.scheduledTaskId') AS scheduled_task_id,
-        json_extract(payload_json, '$.senderThreadId') AS sender_thread_id
-      FROM orchestration_v2_projection_messages WHERE message_id = ${messageId}
+    const rows = yield* sql<MessageOrigin & { readonly message_id: string }>`
+      SELECT message.message_id, ${sql.literal(messageOriginColumns("message"))}
+      FROM orchestration_v2_projection_messages AS message WHERE message_id = ${messageId}
     `;
     const row = rows[0];
-    // An inbox reply is the person's too, but comes as a delivery ("mcp") and carries its header.
-    const typedByOwner =
-      row !== undefined &&
-      row.created_by === "user" &&
-      row.creation_source !== "mcp" &&
-      row.scheduled_task_id === null &&
-      row.sender_thread_id === null;
-    if (!typedByOwner) return null;
+    if (row === undefined || !typedByFirstOwner(row)) return null;
     const owner = yield* people.firstOwner;
     return { personId: owner.personId, displayName: owner.displayName, level: "owner" } as Author;
   });
 
   /**
-   * A queued message edited (AC14): it stays under its author, with "edited by" when someone else
-   * edited it, and keeps the note it carries. A client that sends the stored text back has the
-   * platform's text taken off it before it is written again. Edited into a command, it goes on as
-   * typed and carries nothing; edited out of one, it is stamped as a new message would be. A
-   * message no person is recorded for is stamped too, so an edit never reaches the agent with no
-   * line: under the first owner when they typed it before the thread was shared, else as the
-   * editor's own words. The record is written only once upstream takes the edit, and only while the
-   * stored text is still the text this edit wrote: upstream refuses an edit whose run has started,
-   * replays a retried command's receipt without writing again, and may take another edit between
-   * this one's commit and its record. In each case the message keeps the record its text carries.
+   * A queued message edited (AC14) stays its author's, with "edited by" for someone else, and keeps
+   * its note; returned stored text is stripped first. As a command it carries nothing; out of one,
+   * or unrecorded, it is stamped anew. The record is written only once upstream takes the edit and
+   * only while the stored text is still this edit's, since upstream may refuse, replay or reorder.
    */
   const stampEdit = Effect.fn("j5.sharing.sharedConversation.stampEdit")(function* (
     command: Extract<OrchestrationV2Command, { readonly type: "queued-run.edit" }>,
@@ -393,23 +404,21 @@ const make = Effect.gen(function* () {
         told_json = excluded.told_json,
         edited_by = excluded.edited_by
     `.pipe(Effect.andThen(touch(command.threadId)), Effect.asVoid);
-    return { command: { ...command, text }, accepted: record };
+    return { ...admitted({ ...command, text }), accepted: record };
   });
 
   /**
-   * Writes down who is answering a prompt (AC10), on a shared thread. It is a claim, kept for each
-   * command that answers: who answered is read as the claim whose command upstream's log shows
-   * settled the prompt (`settledItsPrompt`), so an answer upstream refuses and one that loses to
-   * an earlier answer name no one; a command id upstream already took makes no claim. The first
-   * claim for a command stands. A failure to record is logged and does not stop the answer.
+   * Records who is answering a prompt (AC10) as a claim per command; the answerer is the claim
+   * whose command upstream's log shows settled it (`settledItsPrompt`), so refused or losing
+   * answers name no one. A command's first claim stands; a failed record never stops the answer.
    */
-  const recordAnswer = (
-    personId: ParticipantId,
-    answer: Parameters<SharedConversationShape["claimAnswer"]>[1],
-    /** Whether the answer is in words, which carry the answer line. */
-    marked: boolean,
-  ) =>
-    Effect.gen(function* () {
+  const recordAnswer = Effect.fn("j5.sharing.sharedConversation.recordAnswer")(
+    function* (
+      personId: ParticipantId,
+      answer: Parameters<SharedConversationShape["claimAnswer"]>[1],
+      /** Whether the answer is in words, which carry the answer line. */
+      marked: boolean,
+    ) {
       if (!(yield* shared.isShared(answer.threadId))) return;
       // A command upstream already took settled nothing now: its prompt, if it settled one, was
       // settled before this, by whoever sent it first. Only a claim made before its command is
@@ -435,13 +444,57 @@ const make = Effect.gen(function* () {
         )
         ON CONFLICT (thread_id, request_id, command_id) DO NOTHING
       `;
-    }).pipe(
-      Effect.catch((cause) =>
-        Effect.logError("J5 shared conversation could not record who answered a prompt", {
-          cause,
-        }),
-      ),
-    );
+    },
+    Effect.catch((cause) =>
+      Effect.logError("J5 shared conversation could not record who answered a prompt", {
+        cause,
+      }),
+    ),
+  );
+
+  /**
+   * The person's words upstream writes as a user message of its own when it settles their answer
+   * to a prompt: an approval's feedback, or answers it sends on to the agent as a message. Each
+   * user message the settling command wrote is recorded as written by whoever `recordAnswer`
+   * names. Upstream's message replaces any a person sent ahead under its id, so its record does too.
+   */
+  const recordAnswerMessages = Effect.fn("j5.sharing.sharedConversation.recordAnswerMessages")(
+    function* (answer: Parameters<SharedConversationShape["claimAnswer"]>[1]) {
+      const createdAt = DateTime.formatIso(yield* DateTime.now);
+      const recorded = yield* sql`
+        INSERT INTO j5_a2a_message_author (
+          thread_id, message_id, person_id, display_name, level, stored_prefix, created_at
+        )
+        SELECT DISTINCT answer.thread_id, json_extract(written.payload_json, '$.id'),
+          answer.person_id, answer.display_name, answer.level, '', ${createdAt}
+        FROM j5_a2a_prompt_answer AS answer
+        JOIN orchestration_events AS written
+          ON written.command_id = answer.command_id
+          AND written.aggregate_kind = 'thread'
+          AND written.stream_id = answer.thread_id
+          AND written.event_type = ${MESSAGE_WRITTEN_EVENT}
+          AND json_extract(written.payload_json, '$.role') = 'user'
+        WHERE answer.thread_id = ${answer.threadId} AND answer.request_id = ${answer.requestId}
+          AND answer.command_id = ${answer.commandId} AND ${settledItsPrompt}
+        ON CONFLICT (thread_id, message_id) DO UPDATE SET
+          person_id = excluded.person_id,
+          display_name = excluded.display_name,
+          level = excluded.level,
+          edited_by = NULL,
+          note = NULL,
+          told_json = NULL,
+          stored_prefix = ''
+        RETURNING message_id
+      `;
+      if (recorded.length > 0) yield* touch(answer.threadId);
+    },
+    // Upstream has already taken the answer, so a failure to record it is logged and undoes nothing.
+    Effect.catch((cause) =>
+      Effect.logError("J5 shared conversation could not record who wrote an answer's message", {
+        cause,
+      }),
+    ),
+  );
 
   const stampCommand = Effect.fn("j5.sharing.sharedConversation.stampCommand")(function* (
     personId: ParticipantId,
@@ -457,14 +510,14 @@ const make = Effect.gen(function* () {
         if (!(yield* shared.isShared(command.threadId))) return admitted(command);
         const author = yield* authorOn(personId, command.threadId);
         if (author === null) return admitted(command);
-        const text = yield* stampMessage(
+        const stamp = yield* stampMessage(
           command.threadId,
           command.messageId,
           command.text,
           author,
           null,
         );
-        return admitted({ ...command, text });
+        return { ...admitted({ ...command, text: stamp.text }), refused: stamp.release };
       }
       case "queued-run.edit": {
         if (!(yield* shared.isShared(command.threadId))) return admitted(command);
@@ -496,68 +549,153 @@ const make = Effect.gen(function* () {
   // Upstream has already taken the edit, so a failure to record it is logged and does not undo it.
   const notRecorded = (cause: unknown) =>
     Effect.logError("J5 shared conversation could not record a queued message's edit", { cause });
-
-  const dispatch: SharedConversationShape["dispatch"] = (personId, command, dispatchUpstream) =>
-    Effect.gen(function* () {
-      if (
-        (command.type === "message.dispatch" || command.type === "queued-run.edit") &&
-        carriesPlatformRecord(command.context)
-      ) {
-        return yield* refused("A message cannot carry a record of the platform's own.");
-      }
-      if (personId === null) return yield* dispatchUpstream(command);
-      const stamp = yield* stampCommand(personId, command).pipe(Effect.catch(failClosed));
-      const stamped = stamp.command;
-      if (
-        stamped.type === "runtime-request.respond" ||
-        stamped.type === "thread.user-input.dismiss"
-      ) {
-        // An answer in words had its mark put on it above; a decision or a dismissal has none.
-        const marked = stamped.type === "runtime-request.respond" && stamped.answers !== undefined;
-        yield* recordAnswer(personId, stamped, marked);
-      }
-      const result = yield* dispatchUpstream(stamped);
-      yield* stamp.accepted.pipe(Effect.catch(notRecorded));
-      return result;
+  // A record left behind holds its old prefix and note for a retry under the same id.
+  const notReleased = (cause: unknown) =>
+    Effect.logError("J5 shared conversation could not release a refused message's record", {
+      cause,
     });
 
-  const admitLaunch: SharedConversationShape["admitLaunch"] = (personId, input) =>
-    Effect.gen(function* () {
-      const first = input.initialMessage;
-      if (first !== undefined && carriesPlatformRecord(first.context)) {
-        return yield* refused("A message cannot carry a record of the platform's own.");
+  const dispatch: SharedConversationShape["dispatch"] = Effect.fn(
+    "j5.sharing.sharedConversation.dispatch",
+  )(function* <A, E, R>(
+    personId: ParticipantId | null,
+    command: OrchestrationV2Command,
+    dispatchUpstream: (command: OrchestrationV2Command) => Effect.Effect<A, E, R>,
+  ) {
+    if (
+      (command.type === "message.dispatch" || command.type === "queued-run.edit") &&
+      carriesPlatformRecord(command.context)
+    ) {
+      return yield* refused("A message cannot carry a record of the platform's own.");
+    }
+    if (personId === null) return yield* dispatchUpstream(command);
+    const stamp = yield* stampCommand(personId, command).pipe(Effect.catch(failClosed));
+    const stamped = stamp.command;
+    if (
+      stamped.type === "runtime-request.respond" ||
+      stamped.type === "thread.user-input.dismiss"
+    ) {
+      // An answer in words had its mark put on it above; a decision or a dismissal has none.
+      const marked = stamped.type === "runtime-request.respond" && stamped.answers !== undefined;
+      yield* recordAnswer(personId, stamped, marked);
+    }
+    const result = yield* dispatchUpstream(stamped).pipe(
+      Effect.onError(() => stamp.refused.pipe(Effect.catch(notReleased))),
+    );
+    yield* stamp.accepted.pipe(Effect.catch(notRecorded));
+    if (
+      stamped.type === "runtime-request.respond" &&
+      (stamped.feedback !== undefined || stamped.answers !== undefined)
+    ) {
+      yield* recordAnswerMessages(stamped);
+    }
+    return result;
+  });
+
+  const admitLaunch = Effect.fn("j5.sharing.sharedConversation.admitLaunch")(function* (
+    personId: ParticipantId | null,
+    input: OrchestrationV2ThreadLaunchInput,
+  ) {
+    const first = input.initialMessage;
+    if (first !== undefined && carriesPlatformRecord(first.context)) {
+      return yield* refused("A message cannot carry a record of the platform's own.");
+    }
+    // A launch into a thread that exists writes to it; otherwise its project's writers write.
+    const launchingIn =
+      input.reuseExistingThread === true && input.threadId !== undefined ? null : input.projectId;
+    if (first === undefined || personId === null) {
+      // A thread started under a scope already shared is shared from its start (AC6), with or
+      // without a first message.
+      if (input.threadId !== undefined) {
+        yield* shared.isShared(input.threadId, launchingIn).pipe(Effect.catch(failClosed));
       }
-      // A launch into a thread that exists writes to it; otherwise its project's writers write.
-      const launchingIn =
-        input.reuseExistingThread === true && input.threadId !== undefined ? null : input.projectId;
-      if (first === undefined || personId === null) {
-        // A thread started under a scope already shared is shared from its start (AC6), with or
-        // without a first message.
-        if (input.threadId !== undefined) {
-          yield* shared.isShared(input.threadId, launchingIn).pipe(Effect.catch(failClosed));
-        }
-        return input;
-      }
-      if (input.threadId === undefined) {
-        // No thread is named, so the message cannot be recorded under one; on a project more
-        // than one person writes to, that is a launch J5 cannot take in.
-        const writers = yield* shared
-          .projectWriters(input.projectId)
-          .pipe(Effect.catch(failClosed));
-        if (writers.length < 2) return input;
-        return yield* refused("A thread in a shared project is started with its id.");
-      }
-      const threadId = input.threadId;
-      return yield* Effect.gen(function* () {
-        if (!(yield* shared.isShared(threadId, launchingIn))) return input;
-        const author = yield* authorOn(personId, threadId, launchingIn);
-        if (author === null) return input;
-        const messageId =
-          first.messageId ?? MessageId.make(`message:j5:launch:${NodeCrypto.randomUUID()}`);
-        const text = yield* stampMessage(threadId, messageId, first.text, author, launchingIn);
-        return { ...input, initialMessage: { ...first, messageId, text } };
-      }).pipe(Effect.catch(failClosed));
-    });
+      return admitted(input);
+    }
+    if (input.threadId === undefined) {
+      // No thread is named, so the message cannot be recorded under one; on a project more
+      // than one person writes to, that is a launch J5 cannot take in.
+      const writers = yield* shared.projectWriters(input.projectId).pipe(Effect.catch(failClosed));
+      if (writers.length < 2) return admitted(input);
+      return yield* refused("A thread in a shared project is started with its id.");
+    }
+    const threadId = input.threadId;
+    return yield* Effect.gen(function* () {
+      if (!(yield* shared.isShared(threadId, launchingIn))) return admitted(input);
+      const author = yield* authorOn(personId, threadId, launchingIn);
+      if (author === null) return admitted(input);
+      const messageId =
+        first.messageId ?? MessageId.make(`message:j5:launch:${NodeCrypto.randomUUID()}`);
+      const stamp = yield* stampMessage(threadId, messageId, first.text, author, launchingIn);
+      return {
+        ...admitted({ ...input, initialMessage: { ...first, messageId, text: stamp.text } }),
+        refused: stamp.release,
+      };
+    }).pipe(Effect.catch(failClosed));
+  });
+
+  const launch: SharedConversationShape["launch"] = Effect.fn(
+    "j5.sharing.sharedConversation.launch",
+  )(function* <A, E, R>(
+    personId: ParticipantId | null,
+    input: OrchestrationV2ThreadLaunchInput,
+    launchUpstream: (input: OrchestrationV2ThreadLaunchInput) => Effect.Effect<A, E, R>,
+  ) {
+    const stamp = yield* admitLaunch(personId, input);
+    return yield* launchUpstream(stamp.command).pipe(
+      Effect.onError(() => stamp.refused.pipe(Effect.catch(notReleased))),
+    );
+  });
+
+  /**
+   * A thread's messages, its own and those a fork shows, that no person is recorded for but a
+   * person wrote: the first owner's, as search names them (`typedByFirstOwner`). Their own view
+   * draws them as theirs already, so they are read only for anyone else.
+   */
+  const firstOwnersUnrecorded = Effect.fn("j5.sharing.sharedConversation.firstOwnersUnrecorded")(
+    function* (
+      viewer: ParticipantId | null,
+      threadId: ThreadId,
+      forkSources: Statement.Fragment,
+      mayKnow: (personId: string) => Effect.Effect<boolean, PersonAccessStorageError>,
+    ) {
+      const owner = yield* people.firstOwner;
+      if (owner.personId === viewer) return [];
+      const rows = yield* sql<MessageOrigin & { readonly message_id: string }>`
+        ${forkSources}
+        SELECT message.message_id, ${sql.literal(messageOriginColumns("message"))}
+        FROM orchestration_v2_projection_messages AS message
+        WHERE message.thread_id = ${threadId} AND message.role = 'user'
+          AND NOT EXISTS (
+            SELECT 1 FROM j5_a2a_message_author AS author
+            WHERE author.thread_id = message.thread_id AND author.message_id = message.message_id
+          )
+        UNION ALL
+        SELECT message.message_id, ${sql.literal(messageOriginColumns("message"))}
+        FROM source
+        JOIN orchestration_v2_projection_runs AS forked_at ON forked_at.run_id = source.run_id
+        JOIN orchestration_v2_projection_messages AS message
+          ON message.thread_id = source.thread_id AND message.role = 'user'
+        JOIN orchestration_v2_projection_runs AS run
+          ON run.run_id = message.run_id AND run.ordinal <= forked_at.ordinal
+        WHERE NOT EXISTS (
+          SELECT 1 FROM j5_a2a_message_author AS author
+          WHERE author.thread_id = message.thread_id AND author.message_id = message.message_id
+        )
+      `;
+      const written = rows.filter(typedByFirstOwner);
+      if (written.length === 0) return [];
+      const name = (yield* mayKnow(owner.personId)) ? owner.displayName : null;
+      return written.map((row): MessageAuthor => ({
+        messageId: row.message_id,
+        name,
+        level: "owner",
+        editedBy: null,
+        you: false,
+        note: null,
+        storedPrefix: "",
+      }));
+    },
+  );
 
   const threadAuthors: SharedConversationShape["threadAuthors"] = Effect.fn(
     "j5.sharing.sharedConversation.threadAuthors",
@@ -565,16 +703,11 @@ const make = Effect.gen(function* () {
     const recorded = yield* sql<{ readonly found: number }>`
       SELECT 1 AS found FROM j5_a2a_shared_thread WHERE thread_id = ${threadId}
     `;
-    // A fork shows the messages of the thread it was forked from up to the run it was forked at,
-    // and that thread's own source's before them, as upstream's `buildVisibleTurnItems` does from
-    // the thread's `forkedFrom` and its runs' ordinals; those messages keep their authors here
-    // (#612). Only the messages a fork shows are read, so nothing after its fork point is named.
-    // A fork's reader need not reach the thread it was forked from, so for a reader an inherited
-    // record is read only where the stored text the fork shows begins with its prefix: then it
-    // restates what they already receive. A command carries no prefix.
-    const authors = yield* sql<
-      AuthorRow & { readonly created_at: string; readonly inherited: 0 | 1 }
-    >`
+    // A fork shows its source's messages up to the fork point (and their sources' before them), as
+    // upstream's `buildVisibleTurnItems` does; those keep their authors, and nothing past the fork
+    // point is named. A reader need not reach the source, so an inherited record applies only where
+    // the shown text begins with its prefix, restating what they already receive.
+    const forkSources = sql`
       WITH RECURSIVE source (thread_id, run_id) AS (
         SELECT json_extract(payload_json, '$.forkedFrom.threadId'),
           json_extract(payload_json, '$.forkedFrom.runId')
@@ -587,6 +720,11 @@ const make = Effect.gen(function* () {
         JOIN orchestration_v2_projection_threads AS thread ON thread.thread_id = source.thread_id
         WHERE json_extract(thread.payload_json, '$.forkedFrom.type') = 'run'
       )
+    `;
+    const authors = yield* sql<
+      AuthorRow & { readonly created_at: string; readonly inherited: 0 | 1 }
+    >`
+      ${forkSources}
       SELECT message_id, person_id, display_name, level, edited_by, note, told_json,
         stored_prefix, created_at, 0 AS inherited
       FROM j5_a2a_message_author
@@ -638,6 +776,7 @@ const make = Effect.gen(function* () {
       known.set(personId, visible);
       return visible;
     });
+    const unrecorded = yield* firstOwnersUnrecorded(viewer, threadId, forkSources, mayKnow);
     const told = yield* Effect.forEach(authors, (row) =>
       Effect.gen(function* () {
         const author: MessageAuthor = {
@@ -655,7 +794,7 @@ const make = Effect.gen(function* () {
     );
     return {
       shared: recorded.length > 0,
-      authors: told,
+      authors: [...told, ...unrecorded],
       answers: answers.map((row): PromptAnswer => ({
         requestId: row.request_id,
         name: row.display_name,
@@ -719,8 +858,10 @@ const make = Effect.gen(function* () {
     ),
   );
 
-  const endUnanswerableAsks: SharedConversationShape["endUnanswerableAsks"] = (personId) =>
-    Effect.gen(function* () {
+  const endUnanswerableAsks: SharedConversationShape["endUnanswerableAsks"] = Effect.fn(
+    "j5.sharing.sharedConversation.endUnanswerableAsks",
+  )(
+    function* (personId) {
       const endedAt = DateTime.formatIso(yield* DateTime.now);
       yield* lifecycle.endAsksOf({
         personId,
@@ -731,17 +872,16 @@ const make = Effect.gen(function* () {
             projectId: asker.projectId,
           }),
       });
-    }).pipe(
-      Effect.catch((cause) =>
-        Effect.logError(
-          "J5 shared conversation could not end the asks a person can no longer answer",
-          {
-            cause,
-          },
-        ),
+    },
+    Effect.catch((cause) =>
+      Effect.logError(
+        "J5 shared conversation could not end the asks a person can no longer answer",
+        {
+          cause,
+        },
       ),
-      Effect.withSpan("j5.sharing.sharedConversation.endUnanswerableAsks"),
-    );
+    ),
+  );
 
   // A person who can no longer write to a thread loses what they had queued there (AC15), and
   // the asks to them from its agents end (Inbox AC14).
@@ -780,7 +920,7 @@ const make = Effect.gen(function* () {
 
   return SharedConversation.of({
     dispatch,
-    admitLaunch,
+    launch,
     threadAuthors,
     authorsChanges: (threadId) =>
       Stream.unwrap(
@@ -797,8 +937,8 @@ const make = Effect.gen(function* () {
           );
         }),
       ),
-    rosterDecider: (personId, proposalId) =>
-      Effect.gen(function* () {
+    rosterDecider: Effect.fn("j5.sharing.sharedConversation.rosterDecider")(
+      function* (personId, proposalId) {
         if (personId === null) return null;
         const rows = yield* sql<{ readonly captain_thread_id: string }>`
           SELECT captain_thread_id FROM j5_agent_crew_proposal WHERE id = ${proposalId}
@@ -807,17 +947,17 @@ const make = Effect.gen(function* () {
         if (threadId === undefined || !(yield* shared.isShared(threadId))) return null;
         const author = yield* authorOn(personId, threadId);
         return author === null ? null : authorLabel(author);
-      }).pipe(
-        Effect.catch((cause) =>
-          Effect.logError("J5 shared conversation could not name who answered a roster", {
-            cause,
-          }).pipe(Effect.as(null)),
-        ),
+      },
+      Effect.catch((cause) =>
+        Effect.logError("J5 shared conversation could not name who answered a roster", {
+          cause,
+        }).pipe(Effect.as(null)),
       ),
+    ),
     withdrawQueued,
     endUnanswerableAsks,
-    recordReply: (personId, reply) =>
-      Effect.gen(function* () {
+    recordReply: Effect.fn("j5.sharing.sharedConversation.recordReply")(
+      function* (personId, reply) {
         if (!(yield* shared.isShared(reply.threadId))) return;
         const author = yield* authorOn(personId, reply.threadId);
         if (author === null) return;
@@ -831,15 +971,16 @@ const make = Effect.gen(function* () {
           carried,
           carried.note === null ? "" : `${carried.note}\n`,
         );
-      }).pipe(
-        Effect.mapError((cause) =>
-          cause._tag === "PersonAccessStorageError"
-            ? cause
-            : new PersonAccessStorageError({ operation: "record a reply's author", cause }),
-        ),
-        Effect.withSpan("j5.sharing.sharedConversation.recordReply"),
+      },
+      Effect.mapError((cause) =>
+        cause._tag === "PersonAccessStorageError"
+          ? cause
+          : new PersonAccessStorageError({ operation: "record a reply's author", cause }),
       ),
-    claimAnswer: (personId, answer) => recordAnswer(personId, answer, false),
+    ),
+    claimAnswer: Effect.fn("SharedConversation.claimAnswer")(function (personId, answer) {
+      return recordAnswer(personId, answer, false);
+    }),
   });
 });
 

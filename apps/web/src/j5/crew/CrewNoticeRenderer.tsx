@@ -7,13 +7,12 @@ import type { ReactNode } from "react";
 import { cn } from "../../lib/utils";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import {
-  crewGateTitle,
-  crewNoticeLines,
   presentCrewNotice,
-  type CrewNoticeLine,
   type CrewNoticeMessage,
   type CrewNoticePresentation,
-} from "./crewNotices.logic";
+} from "@t3tools/client-runtime/j5/crew-notices";
+
+import { crewGateTitle, crewNoticeLines, type CrewNoticeLine } from "./crewNotices.logic";
 
 export interface CrewNoticeRenderInput {
   readonly message: CrewNoticeMessage & {

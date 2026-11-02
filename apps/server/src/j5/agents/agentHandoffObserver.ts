@@ -14,16 +14,10 @@ import { agentHandoffArtifactPath } from "./agentPersonaArtifacts.ts";
 import { makeAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
 
 /**
- * The handoff check. After each completed run of a saved-agent task whose definition declares an
- * output artifact, look for the expected file in the shared artifacts. Present: record `written`.
- * Absent the first time: record `nudged` and queue one follow-up message asking the agent to write
- * it. Absent on any later run: record `missing`; the reminder is never repeated.
- *
- * This does not gate the parent. `RunFinalizationService.finalize` commits the run's completion,
- * and with it the delegated completion that wakes the parent, before it calls this observer, so
- * the parent has already been told the child finished when the reminder is queued. The reminder
- * starts a follow-up run in the child's own thread; the recorded status is what the person sees.
- * Wraps the upstream observer so the refresh behavior it owns is preserved.
+ * After each completed run of a saved-agent task that declares an output artifact: `written` if
+ * the file is there, else `nudged` with one queued reminder the first time, `missing` after. It
+ * never gates the parent: `RunFinalizationService.finalize` has already woken it. Wraps the
+ * upstream observer so the refresh behavior it owns is preserved.
  */
 export const layer = Layer.effect(
   RunFinalization.RunFinalizationObserver,
@@ -42,7 +36,9 @@ export const layer = Layer.effect(
       readonly threadId: ThreadId;
       readonly runId: RunId;
     }) {
-      const projection = yield* projections.getThreadProjection(input.threadId);
+      const projection = yield* projections.getThreadRecords(input.threadId, ["runs"], {
+        runIds: [input.runId],
+      });
       const assignment = projection.thread.agentPersonaAssignment;
       if (assignment === undefined) return;
       const run = projection.runs.find((candidate) => candidate.id === input.runId);
@@ -89,8 +85,8 @@ export const layer = Layer.effect(
 
     return RunFinalization.RunFinalizationObserver.of({
       refreshAfterTurn: upstream.refreshAfterTurn,
-      refresh: (input) =>
-        upstream.refresh(input).pipe(
+      refresh: Effect.fn("RunFinalization.RunFinalizationObserver.refresh")(function (input) {
+        return upstream.refresh(input).pipe(
           Effect.andThen(
             check(input).pipe(
               Effect.catchCause((cause) =>
@@ -102,7 +98,8 @@ export const layer = Layer.effect(
               ),
             ),
           ),
-        ),
+        );
+      }),
     });
   }),
 );

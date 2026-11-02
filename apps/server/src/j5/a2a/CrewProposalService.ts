@@ -37,7 +37,7 @@ import {
 } from "./CrewLaunchService.ts";
 import { planCrewPlaybook, withPersonaSwaps, type CrewPlaybookPlan } from "./crewPlaybookPlan.ts";
 import { crewDeclinedNoticeText, crewRosterChanges } from "./crewGateNotice.ts";
-import { durationMsBetween, j5AnalyticsRecorder } from "../analytics/recorder.ts";
+import { j5AnalyticsRecorder } from "../analytics/recorder.ts";
 import { CrewLaunchReporter } from "./CrewLaunchReporter.ts";
 import { crewSeatShapeProblem } from "./crewLimits.ts";
 import { CREW_PROPOSAL_SESSION } from "./crewSeatIds.ts";
@@ -71,7 +71,7 @@ const launchSeatOf = (seat: CrewProposalSeat): CrewLaunchSeat => {
   };
 };
 
-export class CrewProposalRequestError extends Data.TaggedError("CrewProposalRequestError")<{
+class CrewProposalRequestError extends Data.TaggedError("CrewProposalRequestError")<{
   readonly detail: string;
   readonly nextStep: string;
 }> {
@@ -89,7 +89,7 @@ export class CrewProposalNotOpenError extends Data.TaggedError("CrewProposalNotO
   }
 }
 
-export class CrewProposalNotFoundError extends Data.TaggedError("CrewProposalNotFoundError")<{
+class CrewProposalNotFoundError extends Data.TaggedError("CrewProposalNotFoundError")<{
   readonly proposalId: string;
 }> {
   override get message(): string {
@@ -97,7 +97,7 @@ export class CrewProposalNotFoundError extends Data.TaggedError("CrewProposalNot
   }
 }
 
-export class CrewProposalOperationError extends Data.TaggedError("CrewProposalOperationError")<{
+class CrewProposalOperationError extends Data.TaggedError("CrewProposalOperationError")<{
   readonly phase: string;
   readonly cause: unknown;
 }> {
@@ -236,6 +236,37 @@ const memberSteps = (instance: AgentCrewInstance | null) =>
     playbookStepIds: member.playbookStepIds ?? [],
   }));
 
+/** Whether the person changed a seat's workspace; `crewRosterChanges` leaves workspaces out. */
+const sameWorkspace = (a: CrewProposalSeat["workspace"], b: CrewProposalSeat["workspace"]) => {
+  if (a === undefined || b === undefined) return a === b;
+  switch (a.type) {
+    case "shared":
+      return b.type === "shared";
+    case "worktree":
+      return (
+        b.type === "worktree" &&
+        a.baseRef === b.baseRef &&
+        a.branch === b.branch &&
+        (a.startFromOrigin ?? false) === (b.startFromOrigin ?? false)
+      );
+    case "existing_worktree":
+      return (
+        b.type === "existing_worktree" &&
+        worktreePathKey(a.worktreePath) === worktreePathKey(b.worktreePath)
+      );
+  }
+};
+
+const rosterEdited = (
+  requested: ReadonlyArray<CrewProposalSeat>,
+  approved: ReadonlyArray<CrewProposalSeat>,
+) =>
+  Object.values(crewRosterChanges(requested, approved)).some((changed) => changed.length > 0) ||
+  approved.some((seat) => {
+    const asked = requested.find(({ seat: name }) => name === seat.seat);
+    return asked !== undefined && !sameWorkspace(asked.workspace, seat.workspace);
+  });
+
 type ProposalRequest = Omit<CreateCrewProposalInput, "playbook"> & {
   readonly playbook?: Pick<CrewPlaybookRef, "name"> | null | undefined;
 };
@@ -270,29 +301,22 @@ export const layer = Layer.effect(
     const launcher = yield* CrewLaunchService;
     const reporter = yield* CrewLaunchReporter;
     const recordAnalytics = yield* j5AnalyticsRecorder;
-    /** `j5.crew.proposal.resolved`: what the person decided, and what they changed first. */
+    /**
+     * The person's decision, as `feature.used`. Recorded here, not from the RPC, because only
+     * the proposal tells an edited roster from the one the Captain asked for.
+     */
     const recordResolved = Effect.fn("j5.a2a.crewProposal.recordResolved")(function* (
       proposal: CrewProposal,
       approved: ReadonlyArray<CrewProposalSeat> | null,
     ) {
-      const changes =
-        approved === null ? null : crewRosterChanges(proposal.requestedSeats, approved);
-      yield* recordAnalytics("j5.crew.proposal.resolved", {
-        kind: proposal.kind,
-        decision: approved === null ? "declined" : "approved",
-        requestedSeats: proposal.requestedSeats.length,
-        hasPlaybook: proposal.playbook !== undefined && proposal.playbook !== null,
-        ...durationMsBetween(proposal.createdAt, DateTime.formatIso(yield* DateTime.now)),
-        ...(approved === null || changes === null
-          ? {}
-          : {
-              approvedSeats: approved.length,
-              seatsAdded: changes.added.length,
-              seatsRemoved: changes.removed.length,
-              seatsRenamed: changes.renamed.length,
-              seatsRuntimeChanged: changes.runtimeChanged.length,
-              seatsInstructionsChanged: changes.instructionsChanged.length,
-            }),
+      yield* recordAnalytics("feature.used", {
+        feature: "crew.proposal.resolve",
+        variant:
+          approved === null
+            ? "decline"
+            : rosterEdited(proposal.requestedSeats, approved)
+              ? "edit"
+              : "approve",
       });
     });
     const threadManagement = yield* ThreadManagementService;
@@ -526,32 +550,29 @@ export const layer = Layer.effect(
      * Resolves the proposal as approved, compare-and-set from open. It runs before any seat
      * spawns, so a proposal that launched can never be approved or declined again.
      */
-    const recordApproval = (
+    const recordApproval = Effect.fn("j5.a2a.crewProposal.recordApproval")(function* (
       proposal: CrewProposal,
       seats: ReadonlyArray<CrewProposalSeat>,
-    ): Effect.Effect<void, CrewLaunchOperationError> =>
-      Effect.gen(function* () {
-        const failed = (cause: unknown) =>
-          new CrewLaunchOperationError({
-            phase: `approving proposal ${proposal.id}`,
-            seatName: null,
-            createdSeats: [],
-            cause,
-          });
-        const approved = yield* proposals
-          .resolve({
-            id: proposal.id,
-            decision: "approve",
-            approvedSeats: seats,
-            resolvedAt: DateTime.formatIso(yield* DateTime.now),
-            decidedBy: proposal.decidedBy,
-          })
-          .pipe(Effect.mapError(failed));
-        if (approved === null)
-          return yield* failed(
-            `proposal ${proposal.id} was no longer open, so nothing was launched`,
-          );
-      });
+    ): Effect.fn.Return<void, CrewLaunchOperationError> {
+      const failed = (cause: unknown) =>
+        new CrewLaunchOperationError({
+          phase: `approving proposal ${proposal.id}`,
+          seatName: null,
+          createdSeats: [],
+          cause,
+        });
+      const approved = yield* proposals
+        .resolve({
+          id: proposal.id,
+          decision: "approve",
+          approvedSeats: seats,
+          resolvedAt: DateTime.formatIso(yield* DateTime.now),
+          decidedBy: proposal.decidedBy,
+        })
+        .pipe(Effect.mapError(failed));
+      if (approved === null)
+        return yield* failed(`proposal ${proposal.id} was no longer open, so nothing was launched`);
+    });
 
     /**
      * Launch the approved seats: the Crew is recorded and linked, the proposal resolved, then every
@@ -635,8 +656,8 @@ export const layer = Layer.effect(
       return { proposal: original, instance };
     });
 
-    const propose: CrewProposalServiceShape["propose"] = (input) =>
-      Effect.gen(function* () {
+    const propose: CrewProposalServiceShape["propose"] = Effect.fn("j5.a2a.crewProposal.propose")(
+      function* (input) {
         const id = lifecycleId({
           kind: "crew",
           operation: "proposal",
@@ -662,7 +683,8 @@ export const layer = Layer.effect(
               ? null
               : { name: input.playbook.name.replace(/\.yaml$/, "") },
         } satisfies ProposalRequest;
-        // The optional playbook summary describes fresh validation; replay never reads a changed definition.
+        // The optional playbook summary describes fresh validation; a replay never reads a
+        // changed definition.
         if (original !== null) return yield* replayProposal(original, request);
         const playbookRef =
           input.playbook === undefined
@@ -690,87 +712,89 @@ export const layer = Layer.effect(
           .pipe(Effect.mapError(operationError("recording the proposal")));
         // Concurrent first attempts can both miss the read; the stored row decides which won.
         return { ...(yield* replayProposal(proposal, request)), playbook: playbookOutcome(plan) };
-      });
+      },
+    );
 
-    const requestMember: CrewProposalServiceShape["requestMember"] = (input) =>
-      Effect.gen(function* () {
-        const commanded = yield* crews
-          .listForCaptain({
-            projectId: input.captain.projectId,
-            captainParticipantId: input.captain.participantId,
-          })
-          .pipe(
-            Effect.map((instances) => instances.filter((instance) => instance.archivedAt === null)),
-            Effect.mapError(operationError("reading commanded crews")),
-          );
-        const instance =
-          input.crewInstanceId === null
-            ? commanded.length === 1
-              ? commanded[0]!
-              : null
-            : (commanded.find(({ id }) => id === input.crewInstanceId) ?? null);
-        if (instance === null)
-          return yield* new CrewProposalRequestError({
-            detail:
-              commanded.length === 0
-                ? "You command no live crew, so there is nothing to add a member to."
-                : input.crewInstanceId === null
-                  ? `You command ${commanded.length} crews; say which one.`
-                  : `You do not command crew ${input.crewInstanceId}.`,
-            nextStep:
-              commanded.length === 0
-                ? "Propose a crew with j5_propose_crew first."
-                : `Retry with crew_instance_id set to one of: ${commanded.map(({ id }) => id).join(", ")}.`,
-          });
-        const proposalId = lifecycleId({
-          kind: "crew",
-          operation: "proposal",
-          providerSessionId: PROPOSAL_SESSION,
-          requestKey: input.requestKey,
-        });
-        const request = {
-          id: proposalId,
+    const requestMember: CrewProposalServiceShape["requestMember"] = Effect.fn(
+      "j5.a2a.crewProposal.requestMember",
+    )(function* (input) {
+      const commanded = yield* crews
+        .listForCaptain({
           projectId: input.captain.projectId,
           captainParticipantId: input.captain.participantId,
-          captainThreadId: input.captain.thread.id,
-          crewInstanceId: instance.id,
-          kind: "addition",
-          brief: input.brief ?? instance.brief,
-          displayName: instance.displayName,
-          requestedSeats: [input.seat],
-          createdAt: DateTime.formatIso(yield* DateTime.now),
-          playbook: instance.playbook ?? null,
-        } satisfies CreateCrewProposalInput;
-        // Replays precede mutable catalog, playbook, seat-name and capacity validation.
-        const replayed = yield* proposals
-          .read(proposalId)
-          .pipe(Effect.mapError(operationError("reading the proposal")));
-        if (replayed !== null) return yield* replayProposal(replayed, request);
-        const definition = yield* readFollowed(instance.playbook, [input.seat], "crew");
-        const plan = yield* validateSeats(
-          [input.seat],
-          instance.members.map(({ seatName }) => seatName),
-          false,
-          definition === null ? null : { definition, existingMembers: memberSteps(instance) },
+        })
+        .pipe(
+          Effect.map((instances) => instances.filter((instance) => instance.archivedAt === null)),
+          Effect.mapError(operationError("reading commanded crews")),
         );
-        const admitted = yield* proposals
-          .admit(
-            { ...request, requestedSeats: withPersonaSwaps([input.seat], plan.swapsBySeat) },
-            { maxSeats: CREW_SEAT_CAP },
-          )
-          .pipe(Effect.mapError(operationError("recording the proposal")));
-        if (admitted.status === "cap-exceeded")
-          return yield* crewFullError(
-            instance.displayName,
-            admitted.held,
-            admitted.adding,
-            "request",
-          );
-        return {
-          ...(yield* replayProposal(admitted.proposal, request)),
-          playbook: playbookOutcome(plan),
-        };
+      const instance =
+        input.crewInstanceId === null
+          ? commanded.length === 1
+            ? commanded[0]!
+            : null
+          : (commanded.find(({ id }) => id === input.crewInstanceId) ?? null);
+      if (instance === null)
+        return yield* new CrewProposalRequestError({
+          detail:
+            commanded.length === 0
+              ? "You command no live crew, so there is nothing to add a member to."
+              : input.crewInstanceId === null
+                ? `You command ${commanded.length} crews; say which one.`
+                : `You do not command crew ${input.crewInstanceId}.`,
+          nextStep:
+            commanded.length === 0
+              ? "Propose a crew with j5_propose_crew first."
+              : `Retry with crew_instance_id set to one of: ${commanded.map(({ id }) => id).join(", ")}.`,
+        });
+      const proposalId = lifecycleId({
+        kind: "crew",
+        operation: "proposal",
+        providerSessionId: PROPOSAL_SESSION,
+        requestKey: input.requestKey,
       });
+      const request = {
+        id: proposalId,
+        projectId: input.captain.projectId,
+        captainParticipantId: input.captain.participantId,
+        captainThreadId: input.captain.thread.id,
+        crewInstanceId: instance.id,
+        kind: "addition",
+        brief: input.brief ?? instance.brief,
+        displayName: instance.displayName,
+        requestedSeats: [input.seat],
+        createdAt: DateTime.formatIso(yield* DateTime.now),
+        playbook: instance.playbook ?? null,
+      } satisfies CreateCrewProposalInput;
+      // Replays precede mutable catalog, playbook, seat-name and capacity validation.
+      const replayed = yield* proposals
+        .read(proposalId)
+        .pipe(Effect.mapError(operationError("reading the proposal")));
+      if (replayed !== null) return yield* replayProposal(replayed, request);
+      const definition = yield* readFollowed(instance.playbook, [input.seat], "crew");
+      const plan = yield* validateSeats(
+        [input.seat],
+        instance.members.map(({ seatName }) => seatName),
+        false,
+        definition === null ? null : { definition, existingMembers: memberSteps(instance) },
+      );
+      const admitted = yield* proposals
+        .admit(
+          { ...request, requestedSeats: withPersonaSwaps([input.seat], plan.swapsBySeat) },
+          { maxSeats: CREW_SEAT_CAP },
+        )
+        .pipe(Effect.mapError(operationError("recording the proposal")));
+      if (admitted.status === "cap-exceeded")
+        return yield* crewFullError(
+          instance.displayName,
+          admitted.held,
+          admitted.adding,
+          "request",
+        );
+      return {
+        ...(yield* replayProposal(admitted.proposal, request)),
+        playbook: playbookOutcome(plan),
+      };
+    });
 
     /**
      * A roster approval that recorded its Crew and then failed before it resolved (its link or

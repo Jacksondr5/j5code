@@ -1,10 +1,4 @@
-import {
-  CommandId,
-  OrchestrationV2RunStatus,
-  RunId,
-  ThreadId,
-  type OrchestrationV2ThreadProjection,
-} from "@t3tools/contracts";
+import { CommandId, OrchestrationV2RunStatus, RunId, ThreadId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
@@ -20,6 +14,7 @@ import {
   signPayload,
   timingSafeEqualBase64Url,
 } from "../../auth/utils.ts";
+import type { ProjectionRecords } from "../../orchestration-v2/ProjectionStore.ts";
 import { ThreadLifecycleService } from "../../orchestration-v2/ThreadLifecycleService.ts";
 import {
   ThreadManagementService,
@@ -33,7 +28,7 @@ import {
 import { A2ALedger } from "./LedgerService.ts";
 import { A2ALifecycleService } from "./LifecycleService.ts";
 import { stopThread } from "./stopThread.ts";
-import { getThreadProjectionIfPresent } from "./threadProjectionReads.ts";
+import { getThreadRecordsIfPresent } from "./threadProjectionReads.ts";
 import {
   ExchangeDroppedPayload,
   ExchangeId,
@@ -217,7 +212,7 @@ const decodeExchangeDroppedOption = Schema.decodeUnknownOption(ExchangeDroppedPa
 const decodeMessageSentOption = Schema.decodeUnknownOption(MessageSentPayload);
 
 interface ReadState {
-  readonly projection: OrchestrationV2ThreadProjection;
+  readonly projection: ProjectionRecords<"runs">;
   readonly retired: boolean;
   readonly archived: boolean;
   readonly facts: ArchiveAgentConsequenceFacts;
@@ -329,11 +324,9 @@ export interface ArchiveAgentServiceShape {
   ) => Effect.Effect<ArchiveAgentResult, ArchiveAgentError>;
   /**
    * Consequence facts without side effects, so a unit archive can warn about every member at once.
-   * Null when the target provably never came to exist: no home is registered for its thread and
-   * the projection store answers not-found for it. A Crew records every seat's row before the seat
-   * spawns, so a launch that failed partway leaves such rows behind, and the unit verbs pass them
-   * by. Every other failure propagates: absence is never inferred from a store that could not
-   * answer, and a home without a thread is a mismatch, not an absence.
+   * Null only when the target provably never existed (no home registered, projection not-found), as
+   * rows a partly failed Crew launch leaves. Every other failure propagates: absence is never
+   * inferred from a store that could not answer, and a home without a thread is a mismatch.
    */
   readonly readFacts: (
     target: ArchiveAgentTarget,
@@ -369,7 +362,7 @@ export const layer = Layer.effect(
       facts: ThreadPreArchiveFacts,
     ) {
       const projection = yield* threadManagement
-        .getThreadProjection(target.threadId)
+        .getThreadRecords(target.threadId, ["runs"])
         .pipe(Effect.mapError(operationError("reading the target thread projection")));
       if (
         facts.state !== "registered" ||
@@ -558,8 +551,8 @@ export const layer = Layer.effect(
       });
     });
 
-    const archive: ArchiveAgentServiceShape["archive"] = (input) =>
-      Effect.gen(function* () {
+    const archive: ArchiveAgentServiceShape["archive"] = Effect.fn("j5.a2a.archiveAgent.archive")(
+      function* (input) {
         const decodedToken =
           input.confirmationToken === undefined
             ? undefined
@@ -645,25 +638,28 @@ export const layer = Layer.effect(
           return yield* error;
         }
         return "archived" as const;
-      });
+      },
+    );
 
-    const readFacts: ArchiveAgentServiceShape["readFacts"] = (target) =>
-      Effect.gen(function* () {
-        const facts = yield* readArchiveFacts(target);
-        if (facts.state === "not-an-a2a-participant") {
-          const projection = yield* getThreadProjectionIfPresent(
-            threadManagement,
-            target.threadId,
-          ).pipe(Effect.mapError(operationError("reading the target thread projection")));
-          if (projection === null) return null;
-        }
-        const state = yield* readStateWith(target, facts);
-        return {
-          facts: state.facts,
-          threadArchived: state.projection.thread.archivedAt !== null,
-          retired: state.retired,
-        };
-      });
+    const readFacts: ArchiveAgentServiceShape["readFacts"] = Effect.fn(
+      "j5.a2a.archiveAgent.readFacts",
+    )(function* (target) {
+      const facts = yield* readArchiveFacts(target);
+      if (facts.state === "not-an-a2a-participant") {
+        const projection = yield* getThreadRecordsIfPresent(
+          threadManagement,
+          target.threadId,
+          [],
+        ).pipe(Effect.mapError(operationError("reading the target thread projection")));
+        if (projection === null) return null;
+      }
+      const state = yield* readStateWith(target, facts);
+      return {
+        facts: state.facts,
+        threadArchived: state.projection.thread.archivedAt !== null,
+        retired: state.retired,
+      };
+    });
 
     return ArchiveAgentService.of({ archive, readFacts });
   }),

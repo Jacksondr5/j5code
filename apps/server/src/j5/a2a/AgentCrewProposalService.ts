@@ -65,11 +65,7 @@ export type CrewProposalKind = "roster" | "addition";
  */
 export type CrewProposalStatus = "open" | "approved" | "declined";
 export type CrewProposalDecision = "approve" | "decline";
-export const CREW_PROPOSAL_STATUSES: ReadonlyArray<CrewProposalStatus> = [
-  "open",
-  "approved",
-  "declined",
-];
+const CREW_PROPOSAL_STATUSES: ReadonlyArray<CrewProposalStatus> = ["open", "approved", "declined"];
 const finalStatus = (decision: CrewProposalDecision) =>
   decision === "approve" ? ("approved" as const) : ("declined" as const);
 
@@ -372,17 +368,24 @@ export const layerNotifying = Layer.effect(
     const changed = changes.notify("crew");
     return AgentCrewProposalService.of({
       ...store,
-      create: (input) => store.create(input).pipe(Effect.tap(() => changed)),
-      admit: (input, options) =>
-        store
+      create: Effect.fn("AgentCrewProposalService.create")(function (input) {
+        return store.create(input).pipe(Effect.tap(() => changed));
+      }),
+      admit: Effect.fn("AgentCrewProposalService.admit")(function (input, options) {
+        return store
           .admit(input, options)
-          .pipe(Effect.tap((outcome) => (outcome.status === "created" ? changed : Effect.void))),
-      resolve: (input) =>
-        store
+          .pipe(Effect.tap((outcome) => (outcome.status === "created" ? changed : Effect.void)));
+      }),
+      resolve: Effect.fn("AgentCrewProposalService.resolve")(function (input) {
+        return store
           .resolve(input)
-          .pipe(Effect.tap((proposal) => (proposal === null ? Effect.void : changed))),
-      attachInstance: (id, crewInstanceId) =>
-        store.attachInstance(id, crewInstanceId).pipe(Effect.tap(() => changed)),
+          .pipe(Effect.tap((proposal) => (proposal === null ? Effect.void : changed)));
+      }),
+      attachInstance: Effect.fn("AgentCrewProposalService.attachInstance")(
+        function (id, crewInstanceId) {
+          return store.attachInstance(id, crewInstanceId).pipe(Effect.tap(() => changed));
+        },
+      ),
     });
   }),
 ).pipe(Layer.provide(layer));

@@ -6,16 +6,12 @@ import { AgentCrewInstanceService } from "./AgentCrewInstanceService.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
 
 /**
- * A Crew member is never archived or deleted one by one (Crews AC16): the unit retires through
- * Archive crew, on the Fleet page or by its Captain's `j5_archive_crew`, or when the Captain's own
- * thread is archived and the cascade retires its Crews. Every client door sends its archive as
- * one `dispatchCommand` over the socket, so this check sits on that handler and covers the web
- * sidebar, a mobile swipe, and any future client door alike. The adapted organize MCP tool
- * applies this same guard before dispatch; the web's pre-archive read still gives the
- * person the friendlier early toast. `j5_archive_crew` and the cascade archive seats through the
- * lifecycle service, not this handler, so the unit paths are untouched.
+ * A Crew member is never archived or deleted alone (Crews AC16); the unit retires through Archive
+ * crew, `j5_archive_crew`, or its Captain's archive. Every client archive is one `dispatchCommand`,
+ * so this check on that handler covers every door, and the organize MCP tool applies it too. The
+ * unit paths archive seats through the lifecycle service, not this handler.
  */
-export class CrewSeatArchivedAloneError extends Data.TaggedError("CrewSeatArchivedAloneError")<{
+class CrewSeatArchivedAloneError extends Data.TaggedError("CrewSeatArchivedAloneError")<{
   readonly threadId: string;
   readonly action: "archive" | "delete";
   readonly seatName: string;
@@ -23,7 +19,7 @@ export class CrewSeatArchivedAloneError extends Data.TaggedError("CrewSeatArchiv
   readonly crewInstanceId: string;
 }> {
   override get message(): string {
-    return `This thread is seat ${this.seatName} of Crew ${this.crewName}. Crew members are never ${this.action === "archive" ? "archived" : "deleted"} one by one; retire the whole Crew with Archive crew on the Fleet page, or message the member instead.`;
+    return `This thread is seat ${this.seatName} of Crew ${this.crewName}. Crew members are never ${this.action === "archive" ? "archived" : "deleted"} one by one; retire the whole Crew with Archive crew on the Fleet page in J5 on web or desktop, or message the member instead.`;
   }
 }
 

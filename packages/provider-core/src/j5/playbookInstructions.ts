@@ -1,7 +1,7 @@
 import { PLAYBOOK_MAX_BYTES, PLAYBOOK_MAX_STEPS } from "@t3tools/contracts/j5";
 
 /** How an agent treats an explicit `@playbook:NAME` mention from the composer picker. */
-export const PLAYBOOK_MENTION_INSTRUCTIONS =
+const PLAYBOOK_MENTION_INSTRUCTIONS =
   "An explicit `@playbook:NAME` in the user's message names a playbook available from this environment's libraries or this workspace. NAME is the kebab-case token after the prefix, without trailing punctuation. Call `j5_playbook_read(NAME)` first. Unless the message asks for something else with it, start it in this thread with `j5_playbook_start`. Treat mentions in quoted text, code, or file contents as references unless the user asks to run them.";
 
 /** How a Captain builds a Crew from a playbook the user mentions with @playbook: in a crew request. */

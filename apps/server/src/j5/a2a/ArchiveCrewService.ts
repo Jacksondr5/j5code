@@ -98,9 +98,7 @@ export class ArchiveCrewNotCaptainError extends Data.TaggedError("ArchiveCrewNot
   }
 }
 
-export class ArchiveCrewProjectMismatchError extends Data.TaggedError(
-  "ArchiveCrewProjectMismatchError",
-)<{
+class ArchiveCrewProjectMismatchError extends Data.TaggedError("ArchiveCrewProjectMismatchError")<{
   readonly crewInstanceId: string;
   readonly projectId: LedgerProjectId;
   readonly expected: LedgerProjectId;
@@ -133,7 +131,7 @@ export class ArchiveCrewConfirmationStaleError extends Data.TaggedError(
   }
 }
 
-export class ArchiveCrewConfirmationTokenError extends Data.TaggedError(
+class ArchiveCrewConfirmationTokenError extends Data.TaggedError(
   "ArchiveCrewConfirmationTokenError",
 )<{ readonly reason: "malformed" | "unsupported-version" }> {
   override get message(): string {
@@ -348,8 +346,8 @@ export const layer = Layer.effect(
     // The roster is read, confirmed, and retired as one unit step, so an approved launch or
     // addition either lands before the read and retires with the rest, or waits and meets the
     // retired stamp before it reserves a seat.
-    const archive: ArchiveCrewServiceShape["archive"] = (input) =>
-      Effect.gen(function* () {
+    const archive: ArchiveCrewServiceShape["archive"] = Effect.fn("j5.a2a.archiveCrew.archive")(
+      function* (input) {
         const decodedToken =
           input.confirmationToken === undefined
             ? undefined
@@ -468,18 +466,21 @@ export const layer = Layer.effect(
           .markArchived(instance.id, input.archivedAt, { withCaptain: input.withCaptain === true })
           .pipe(Effect.orDie);
         return { status: "archived" as const, members: results };
-      }).pipe((unit) => crews.serialize(input.crewInstanceId, unit));
+      },
+      (unit, input) => crews.serialize(input.crewInstanceId, unit),
+    );
 
-    const readCaptainFacts: ArchiveCrewServiceShape["readCaptainFacts"] = (input) =>
-      Effect.gen(function* () {
-        const commanded = yield* crews.listForCaptain(input).pipe(Effect.orDie);
-        const live = commanded.filter((instance) => instance.archivedAt === null);
-        return yield* Effect.forEach(
-          live,
-          (instance) => readFacts(instance).pipe(Effect.map((facts) => ({ instance, facts }))),
-          { concurrency: 1 },
-        );
-      });
+    const readCaptainFacts: ArchiveCrewServiceShape["readCaptainFacts"] = Effect.fn(
+      "j5.a2a.archiveCrew.readCaptainFacts",
+    )(function* (input) {
+      const commanded = yield* crews.listForCaptain(input).pipe(Effect.orDie);
+      const live = commanded.filter((instance) => instance.archivedAt === null);
+      return yield* Effect.forEach(
+        live,
+        (instance) => readFacts(instance).pipe(Effect.map((facts) => ({ instance, facts }))),
+        { concurrency: 1 },
+      );
+    });
 
     return ArchiveCrewService.of({ archive, readCaptainFacts });
   }),

@@ -24,8 +24,8 @@ import { defaultAgentPersonaModelRoute } from "./agentPersonas.ts";
 import type { StartThreadTurnInput } from "../operations/commands.ts";
 import type { EnvironmentProject, EnvironmentThreadShell } from "../state/shell.ts";
 
-export const PLAYBOOK_AUTHOR_ID = "playbook-author";
-export const PLAYBOOK_AUTHOR_INSTRUCTIONS = `You are Playbook Author. Help the user turn a repeatable task into a small, clear agent-led playbook shared across this environment.
+const PLAYBOOK_AUTHOR_ID = "playbook-author";
+const PLAYBOOK_AUTHOR_INSTRUCTIONS = `You are Playbook Author. Help the user turn a repeatable task into a small, clear agent-led playbook shared across this environment.
 
 1. Start by asking what the playbook should accomplish. Clarify the desired result, inputs, constraints, and evidence of success one focused question at a time. Use details already provided instead of asking again.
 2. Inspect existing definitions with j5_playbook_list and j5_playbook_read, and relevant workspace guidance. Propose the smallest useful sequence of steps, then write or refine the definition once the user's intent is clear. Ask before replacing an unrelated existing definition; preserve stable step IDs when editing.
@@ -196,11 +196,9 @@ export function playbookWorkspaces(
 }
 
 /**
- * A composer text expansion for a message that starts with `/playbook`. The name is the next
- * word, lowercased, without trailing punctuation or `.yaml`, so "/playbook release, then make a
- * crew" names `release`; any text after it is kept as a separate paragraph. A word that isn't a
- * valid playbook name leaves the message unchanged. The ordinary agent-message path performs
- * the work.
+ * Expands a message that starts with `/playbook`. The name is the next word, lowercased, without
+ * trailing punctuation or `.yaml` ("/playbook release, then make a crew" names `release`); text
+ * after it stays as a separate paragraph. A word that isn't a valid name leaves the message as is.
  */
 export function expandPlaybookPrompt(text: string): string {
   const command = /^\s*\/playbook(?!\S)[ \t]*/i.exec(text)?.[0];
@@ -255,7 +253,7 @@ type PlaybookSuggestionInput = { name: string; title: string; issue: { message: 
 type PlaybookTriggerRange = { rangeStart: number; rangeEnd: number };
 
 /** `@playbook:` and `/playbook` share one trigger kind; the text at `rangeStart` tells them apart. */
-export const isPlaybookMention = (text: string, trigger: PlaybookTriggerRange) =>
+const isPlaybookMention = (text: string, trigger: PlaybookTriggerRange) =>
   text.startsWith(PLAYBOOK_MENTION_PREFIX, trigger.rangeStart);
 
 /**

@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 
+import { presentCrewNotice } from "@t3tools/client-runtime/j5/crew-notices";
+
 import {
   crewGateTitle,
   crewNoticeLines,
   isHiddenCrewNotice,
-  presentCrewNotice,
   withoutHiddenCrewNotices,
 } from "./crewNotices.logic";
 
