@@ -56,6 +56,7 @@ import * as ContextHandoffService from "./ContextHandoffService.ts";
 import * as EventSink from "./EventSink.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
+import * as Orchestrator from "./Orchestrator.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
@@ -1961,6 +1962,10 @@ const crewServices = Layer.mergeAll(
   crewDatabase,
   Crews.layer.pipe(Layer.provide(crewDatabase)),
   ledgerLayer.pipe(Layer.provide(crewDatabase)),
+  // The seat records what it was told through a dispatch these tests do not inspect.
+  Layer.mock(Orchestrator.OrchestratorV2)({
+    dispatch: () => Effect.succeed({ sequence: 1, storedEvents: [] }),
+  }),
 );
 
 const recordSeat = (seatThreadId: ThreadId, options: { readonly seat?: boolean } = {}) =>

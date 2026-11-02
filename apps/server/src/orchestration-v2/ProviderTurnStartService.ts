@@ -1433,6 +1433,7 @@ export const layer: Layer.Layer<
           ? crewTurnContext.value.deliver(
               {
                 threadId: projection.thread.id,
+                runId: run.id,
                 providerThread: runningProviderThread,
                 text: userText,
               },
