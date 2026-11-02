@@ -1434,7 +1434,13 @@ const unitFixture = Effect.gen(function* () {
     archiveCrewLayer.pipe(
       Layer.provide(archiveAgent),
       Layer.provide(playbookStoreLayer),
-      Layer.provide(Layer.mock(CrewWorktrees)({ cleanup: () => Effect.succeed([]) })),
+      Layer.provide(
+        Layer.mock(CrewWorktrees)({
+          cleanup: () => Effect.succeed([]),
+          liveSessions: () => Effect.succeed([]),
+          closeSessions: () => Effect.void,
+        }),
+      ),
       Layer.provide(
         Layer.mock(ServerSecretStore)({
           getOrCreateRandom: () => Effect.succeed(new Uint8Array(32).fill(7)),
