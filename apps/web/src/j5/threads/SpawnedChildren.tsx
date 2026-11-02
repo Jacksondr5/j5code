@@ -148,7 +148,7 @@ function SpawnedChildrenRows(
 const childRowClassName =
   "flex w-full min-w-0 flex-col gap-0.5 rounded-md px-1.5 py-1 text-left outline-hidden hover:bg-sidebar-row-hover focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring";
 
-export function SpawnedChildGroupRows(
+function SpawnedChildGroupRows(
   props: SpawnedChildActions & {
     readonly environmentId: EnvironmentId;
     readonly group: SpawnedChildGroup<EnvironmentThreadShell>;
