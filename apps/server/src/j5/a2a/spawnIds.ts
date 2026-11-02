@@ -44,6 +44,25 @@ export const spawnThreadId = (input: SpawnStableInput) =>
       .digest("hex")}`,
   );
 
+/**
+ * The command and message that keep what a member was told in its own thread. Derived from the
+ * conversation and the text, so a retried delivery records it once.
+ */
+export const crewContextRecordIds = (input: {
+  readonly threadId: ThreadId;
+  readonly conversation: string;
+  readonly text: string;
+}) => {
+  const key = NodeCrypto.createHash("sha256")
+    .update(JSON.stringify([input.threadId, input.conversation, input.text]))
+    .digest("hex")
+    .slice(0, 24);
+  return {
+    commandId: CommandId.make(`command:j5:crew-context:${key}`),
+    messageId: MessageId.make(`message:j5:crew-context:${key}`),
+  };
+};
+
 export const spawnCrewInstanceId = (input: SpawnStableInput) =>
   lifecycleId({ kind: "crew", operation: "spawn-crew", ...input });
 
