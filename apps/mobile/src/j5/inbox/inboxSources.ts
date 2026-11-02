@@ -3,6 +3,7 @@ import {
   createJ5ReadSourcesAtom,
   type J5ReadSources,
 } from "@t3tools/client-runtime/j5/readSources";
+import { executeAtomQuery } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { AsyncResult, Atom } from "effect/reactivity";
 
@@ -63,3 +64,26 @@ export function refreshInboxSources<A>(
     appAtomRegistry.refresh(queryAtom(source.environmentId));
   }
 }
+
+const readConnectedSources = <A>(
+  sourcesAtom: Atom.Atom<J5ReadSources<A>>,
+  queryAtom: (environmentId: EnvironmentId) => Atom.Atom<AsyncResult.AsyncResult<A, unknown>>,
+) =>
+  appAtomRegistry.get(sourcesAtom).sources.flatMap((source) =>
+    !source.connected || source.status === "unsupported"
+      ? []
+      : [
+          executeAtomQuery(appAtomRegistry, queryAtom(source.environmentId), {
+            refresh: true,
+            reportFailure: false,
+            reportDefect: false,
+          }),
+        ],
+  );
+
+/** Reads every connected server's open and answered asks, and settles when all have answered. */
+export const readInboxSources = () =>
+  Promise.all([
+    ...readConnectedSources(openInboxSourcesAtom, openInboxQueryAtom),
+    ...readConnectedSources(answeredInboxSourcesAtom, answeredInboxQueryAtom),
+  ]);

@@ -33,8 +33,10 @@ import {
   answeredInboxSourcesAtom,
   openInboxQueryAtom,
   openInboxSourcesAtom,
+  readInboxSources,
   refreshInboxSources,
 } from "./inboxSources";
+import { createPullRefresh } from "./inboxPullRefresh.logic";
 import { useScopedParticipantLabels } from "./senderLabels";
 
 type SenderLabels = ReadonlyMap<EnvironmentId, ReadonlyMap<string, string>>;
@@ -87,8 +89,10 @@ export function InboxScreen() {
   useFocusEffect(useCallback(() => refreshAll(), []));
   const loading =
     !openSources.isReady || openSources.sources.some((source) => source.status === "loading");
-  const refreshing = [...openSources.sources, ...answeredSources.sources].some(
-    (source) => source.refreshing,
+  // The spinner is for a refresh the person asked for: an answer's re-read updates the list quietly.
+  const [refreshing, setRefreshing] = useState(false);
+  const [pullToRefresh] = useState(() =>
+    createPullRefresh({ read: readInboxSources, onChange: setRefreshing }),
   );
   const notices = [
     ...new Set(
@@ -141,7 +145,9 @@ export function InboxScreen() {
       <AnsweredShelf items={answered} labels={labels} showEnvironment={showEnvironment} />
     </>
   );
-  const refreshControl = <RefreshControl refreshing={refreshing} onRefresh={refreshAll} />;
+  const refreshControl = (
+    <RefreshControl refreshing={refreshing} onRefresh={() => void pullToRefresh()} />
+  );
   // iOS keeps upstream's scroll view, which registers with the native header, and lets it move the
   // focused answer box above the keyboard, as upstream's commit sheet does. Android has no header
   // marker, so keyboard-controller's scroll view brings the box being typed in clear of the keyboard.
