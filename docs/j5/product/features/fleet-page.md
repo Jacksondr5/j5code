@@ -69,7 +69,7 @@ The Fleet page is **not** the inbox: it never demands a reply. It is **not** a p
 9. Rows are arranged as the placement tree, siblings in creation order, and are never reordered by activity or by problems.
 10. People are never rows; a person appears only as the counterparty on an agent's asks. Provider-native Subagents never appear.
 11. A retired agent is not a row; an agent still live beneath it renders at its project's root.
-12. Each row shows its provenance as a fact: spawned by which agent, forked, or unrecorded. An outside agent that spawned it is named by its label.
+12. Rows carry no inline origin tag; placement shows which agent spawned a child. An outside spawner's name is available on hover over the agent's title, using its participant id when no name was recorded. Unknown provenance adds no label.
 13. Retired (see History).
 14. Clicking a row opens the agent's thread.
 

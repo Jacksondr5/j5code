@@ -40,7 +40,6 @@ import {
   countFleetProjects,
   fleetCrewAnchorId,
   orderFleetRowsByProject,
-  originLabel,
   partitionFleet,
   playbookRunHeader,
   retiredCrews,
@@ -64,7 +63,6 @@ import {
   FleetFactCells,
   FleetFactDetails,
   FleetSourceReadout,
-  FleetFactHint,
   FleetCrewSummary,
 } from "./FleetFacts";
 
@@ -682,31 +680,16 @@ export function FleetRowItem(
         }}
       >
         <span className="flex min-w-0 items-center gap-2">
-          <span className="truncate">{title}</span>
           {agent.outsideSpawner !== undefined ? (
-            // The label is whatever the client registered, so it yields to the agent's title; the
-            // name comes first so a cut keeps it, and the full text is on hover.
             <Tooltip>
-              <TooltipTrigger
-                render={
-                  <span className="max-w-[50%] shrink-0 truncate text-xs text-muted-foreground" />
-                }
-              >
-                {originLabel(agent)}
-              </TooltipTrigger>
-              <TooltipPopup>{originLabel(agent)}</TooltipPopup>
+              <TooltipTrigger render={<span className="truncate" />}>{title}</TooltipTrigger>
+              <TooltipPopup>
+                Started by {agent.outsideSpawner.name ?? agent.outsideSpawner.participantId}{" "}
+                (outside agent)
+              </TooltipPopup>
             </Tooltip>
-          ) : agent.origin === "human" ? null : (
-            <FleetFactHint
-              className="shrink-0 text-xs text-muted-foreground"
-              reason={
-                agent.origin === "unknown"
-                  ? "This environment has no recorded provenance for this agent."
-                  : undefined
-              }
-            >
-              {originLabel(agent)}
-            </FleetFactHint>
+          ) : (
+            <span className="truncate">{title}</span>
           )}
           {props.badge ? (
             <Badge variant="outline" size="sm" className="shrink-0">
