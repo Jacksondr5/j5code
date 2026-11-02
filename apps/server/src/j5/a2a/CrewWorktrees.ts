@@ -110,8 +110,10 @@ const makeLayer = (daemon: boolean) =>
       const path = yield* Path.Path;
       const isWindows = yield* HostProcess.isWindows;
 
-      const handleStoredEvent: CrewWorktreesShape["handleStoredEvent"] = (stored) =>
-        Effect.gen(function* () {
+      const handleStoredEvent: CrewWorktreesShape["handleStoredEvent"] = Effect.fn(
+        "j5.a2a.crewWorktrees.handleStoredEvent",
+      )(
+        function* (stored) {
           const event = stored.event;
           if (event.type !== "thread.metadata-updated" || event.payload.worktreePath === null)
             return false;
@@ -133,11 +135,11 @@ const makeLayer = (daemon: boolean) =>
             RETURNING thread_id
           `;
           return inserted.length > 0;
-        }).pipe(
-          Effect.catchCause((cause) =>
-            Effect.logWarning("J5 Crew worktree record skipped", { cause }).pipe(Effect.as(false)),
-          ),
-        );
+        },
+        Effect.catchCause((cause) =>
+          Effect.logWarning("J5 Crew worktree record skipped", { cause }).pipe(Effect.as(false)),
+        ),
+      );
 
       const readRecord = (threadId: ThreadId) =>
         sql<{
@@ -404,8 +406,8 @@ const makeLayer = (daemon: boolean) =>
         );
       });
 
-      const cleanup: CrewWorktreesShape["cleanup"] = ({ seats }) =>
-        Effect.gen(function* () {
+      const cleanup: CrewWorktreesShape["cleanup"] = Effect.fn("j5.a2a.crewWorktrees.cleanup")(
+        function* ({ seats }) {
           // No seat is exempt: a seat that was unarchived since the archive committed is bound to
           // its worktree again, and that is what must keep the worktree.
           const context: CheckContext = {
@@ -452,16 +454,16 @@ const makeLayer = (daemon: boolean) =>
             }
           }
           return results;
-        }).pipe(
-          Effect.catchCause((cause) =>
-            Effect.logWarning("J5 Crew worktree cleanup skipped", { cause }).pipe(
-              Effect.as([] as ReadonlyArray<CrewArchiveWorktree>),
-            ),
+        },
+        Effect.catchCause((cause) =>
+          Effect.logWarning("J5 Crew worktree cleanup skipped", { cause }).pipe(
+            Effect.as([] as ReadonlyArray<CrewArchiveWorktree>),
           ),
-        );
+        ),
+      );
 
-      const estimate: CrewWorktreesShape["estimate"] = ({ crews }) =>
-        Effect.gen(function* () {
+      const estimate: CrewWorktreesShape["estimate"] = Effect.fn("j5.a2a.crewWorktrees.estimate")(
+        function* ({ crews }) {
           const results: Array<CrewArchiveWorktreeEstimate> = [];
           for (const crew of crews) {
             const context: CheckContext = {
@@ -495,13 +497,13 @@ const makeLayer = (daemon: boolean) =>
             }
           }
           return results;
-        }).pipe(
-          Effect.catchCause((cause) =>
-            Effect.logWarning("J5 Crew worktree estimate skipped", { cause }).pipe(
-              Effect.as([] as ReadonlyArray<CrewArchiveWorktreeEstimate>),
-            ),
+        },
+        Effect.catchCause((cause) =>
+          Effect.logWarning("J5 Crew worktree estimate skipped", { cause }).pipe(
+            Effect.as([] as ReadonlyArray<CrewArchiveWorktreeEstimate>),
           ),
-        );
+        ),
+      );
 
       if (daemon) {
         // From the event store's current high-water mark: a launch that finished while the server

@@ -175,26 +175,25 @@ const make = Effect.gen(function* () {
       Effect.map((rows) => rows.length > 0),
       Effect.mapError((cause) => new CrewTurnContextError({ threadId, cause })),
     );
-  const deliver = <E, R>(
+  const deliver = Effect.fn("CrewTurnContext.deliver")(function* <E, R>(
     delivery: CrewDelivery,
     send: (text: string) => Effect.Effect<boolean, E, R>,
-  ) =>
-    Effect.gen(function* () {
-      const context = yield* prepare(delivery);
-      if (context === null) return yield* send(delivery.text);
-      const sent = yield* send(`${context.prefix}${delivery.text}`);
-      if (!sent) return false;
-      // The provider accepted the prompt; bookkeeping failure must not fail its running turn.
-      yield* context.delivered.pipe(
-        Effect.catch((cause) =>
-          Effect.logWarning("Failed to record delivered Crew context", {
-            threadId: delivery.threadId,
-            cause,
-          }),
-        ),
-      );
-      return true;
-    });
+  ) {
+    const context = yield* prepare(delivery);
+    if (context === null) return yield* send(delivery.text);
+    const sent = yield* send(`${context.prefix}${delivery.text}`);
+    if (!sent) return false;
+    // The provider accepted the prompt; bookkeeping failure must not fail its running turn.
+    yield* context.delivered.pipe(
+      Effect.catch((cause) =>
+        Effect.logWarning("Failed to record delivered Crew context", {
+          threadId: delivery.threadId,
+          cause,
+        }),
+      ),
+    );
+    return true;
+  });
   const steering: CrewTurnContext["Service"]["steering"] = (session) => ({
     steerTurn: (input) =>
       deliver(

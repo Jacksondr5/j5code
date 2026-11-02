@@ -1,5 +1,6 @@
-import { splitThreadSearchText } from "@t3tools/shared/threadSearch";
+import { findSearchTokenRanges, splitSearchText } from "@t3tools/shared/paletteSearch";
 import type { EnvironmentThreadSearchMatch } from "@t3tools/client-runtime/state/thread-search";
+import { threadSearchMatchLabel } from "@t3tools/client-runtime/j5/shared-conversation";
 
 import { AppText as Text } from "../../components/ui/AppText";
 import { cn } from "../../lib/cn";
@@ -12,7 +13,10 @@ export function ThreadSearchMatchExcerpt(props: {
   readonly sidebar?: boolean;
 }) {
   const isUser = props.match.source === "user";
-  const parts = splitThreadSearchText(props.match.snippet, props.query);
+  const parts = splitSearchText(
+    props.match.snippet,
+    findSearchTokenRanges(props.match.snippet, props.query),
+  );
   return (
     <Text
       className={cn(
@@ -37,7 +41,8 @@ export function ThreadSearchMatchExcerpt(props: {
               : "text-adaptive-emerald-600-400",
         )}
       >
-        {isUser ? "You:" : "Agent:"}{" "}
+        {/* J5 (case 99): another person's message names them. */}
+        {threadSearchMatchLabel(props.match)}:{" "}
       </Text>
       {parts.map((part) => (
         <Text

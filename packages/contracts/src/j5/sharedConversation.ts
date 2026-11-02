@@ -59,6 +59,16 @@ export function typedText(text: string, author: Pick<MessageAuthor, "storedPrefi
     : text;
 }
 
+/**
+ * Who typed a message Cmd+K found, as the person searching may know them: themselves, or another
+ * person by the name they wrote under (`null` when it is not told).
+ */
+export const ThreadSearchAuthor = Schema.Union([
+  Schema.TaggedStruct("you", {}),
+  Schema.TaggedStruct("person", { name: Schema.NullOr(Schema.String) }),
+]);
+export type ThreadSearchAuthor = typeof ThreadSearchAuthor.Type;
+
 /** Who answered one of the agent's prompts: a question, an approval or a Crew roster (AC10). */
 export const PromptAnswer = Schema.Struct({
   requestId: Schema.String,

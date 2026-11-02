@@ -2,7 +2,7 @@ import { detectPlaybookMention } from "./playbookMention.ts";
 
 export { PLAYBOOK_MENTION_PREFIX, playbookMentionReplacement } from "./playbookMention.ts";
 
-export const PERSONA_MENTION_PREFIX = "@persona:";
+const PERSONA_MENTION_PREFIX = "@persona:";
 
 /** The text a picker inserts for a chosen persona; the trailing space closes the mention. */
 export const agentMentionReplacement = (personaId: string) =>
@@ -10,7 +10,7 @@ export const agentMentionReplacement = (personaId: string) =>
 
 /**
  * The J5 token-level hook both composer trigger detectors call before bare-`@` file search. It
- * serves `@persona:` and `@playbook:`; the playbook mention rides #314's `"slash-playbook"` kind.
+ * serves `@persona:` and `@playbook:`; the playbook mention rides the `"slash-playbook"` kind.
  */
 export function detectAgentMention(token: string, start: number, end: number) {
   return (
