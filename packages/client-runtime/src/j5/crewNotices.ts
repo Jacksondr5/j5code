@@ -241,6 +241,34 @@ const parseSeats = (text: string): CrewNoticePresentation | null => {
     : { kind: "seats", seats: seats as ReadonlyArray<FinishedSeat> };
 };
 
+/**
+ * What the platform told a Crew member with an assignment, kept in the member's own thread: the
+ * text the model read, in the tag the server wrote it in. Strictly recognized from that tag.
+ */
+export interface CrewContextNotice {
+  readonly kind: "introduction" | "roster-changed";
+  readonly title: string;
+  /** The context without its wrapper, as the model read it. */
+  readonly text: string;
+}
+
+const CONTEXT_OPEN = "<j5_crew_delivery_context>\n";
+const CONTEXT_CLOSE = "\n</j5_crew_delivery_context>";
+const ROSTER_CHANGED_OPEN = "<j5_crew_roster_changed>";
+
+export const presentCrewContext = (message: CrewNoticeMessage): CrewContextNotice | null => {
+  if (message.role !== "user" || message.createdBy !== "system") return null;
+  const { text } = message;
+  if (!text.startsWith(CONTEXT_OPEN) || !text.endsWith(CONTEXT_CLOSE)) return null;
+  const body = text
+    .slice(CONTEXT_OPEN.length, text.length - CONTEXT_CLOSE.length)
+    .replaceAll("<\\/j5_crew_delivery_context>", "</j5_crew_delivery_context>");
+  if (body.trim() === "") return null;
+  return body.startsWith(ROSTER_CHANGED_OPEN)
+    ? { kind: "roster-changed", title: "Roster changed", text: body }
+    : { kind: "introduction", title: "Introduction", text: body };
+};
+
 /** Null for anything that is not a Crew notice; the ordinary renderer then owns the message. */
 export const presentCrewNotice = (message: CrewNoticeMessage): CrewNoticePresentation | null => {
   if (message.role !== "user") return null;

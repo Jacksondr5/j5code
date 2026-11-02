@@ -34,6 +34,7 @@ import { LedgerProjectId } from "../j5/a2a/contracts.ts";
 import { spawnFirstTurnText } from "../j5/a2a/spawnIds.ts";
 
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
+import * as Orchestrator from "./Orchestrator.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
@@ -349,6 +350,10 @@ const crewServices = Layer.mergeAll(
   crewDatabase,
   Crews.layer.pipe(Layer.provide(crewDatabase)),
   ledgerLayer.pipe(Layer.provide(crewDatabase)),
+  // The seat records what it was told through a dispatch these tests do not inspect.
+  Layer.mock(Orchestrator.OrchestratorV2)({
+    dispatch: () => Effect.succeed({ sequence: 1, storedEvents: [] }),
+  }),
 );
 
 it.effect("steering a busy Crew seat carries the roster change made while it worked", () =>
@@ -432,7 +437,7 @@ it.effect("steering a busy Crew seat carries the roster change made while it wor
     // The builder's assignment started the turn that is still running.
     yield* Effect.gen(function* () {
       yield* (yield* CrewTurnContext.CrewTurnContext).deliver(
-        { threadId, providerThread, text: "Build the fix." },
+        { threadId, runId: RunId.make("run:crew-builder"), providerThread, text: "Build the fix." },
         () => Effect.succeed(true),
       );
     }).pipe(Effect.provide(CrewTurnContext.layer));
