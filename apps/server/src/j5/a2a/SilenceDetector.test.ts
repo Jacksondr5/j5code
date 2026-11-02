@@ -7,7 +7,6 @@ import {
   type OrchestrationV2ProviderFailure,
   type OrchestrationV2Run,
   type OrchestrationV2StoredEvent,
-  type OrchestrationV2ThreadProjection,
   ProviderInstanceId,
   RunId,
   ThreadId,
@@ -147,17 +146,21 @@ const makeTestLayer = () => {
     Layer.provide(database),
   );
   const threads = threadMock({
-    getThreadProjection: () =>
-      Effect.succeed({
-        turnItems: [
-          {
-            runId: RunId.make("run:silence:test"),
-            type: "error",
-            status: "failed",
-            failure: failureDetail,
-          },
-        ],
-      } as unknown as OrchestrationV2ThreadProjection),
+    getThreadRecords: ((_threadId: ThreadId, fields: ReadonlyArray<string>) =>
+      Effect.succeed(
+        fields.includes("turnItems")
+          ? {
+              turnItems: [
+                {
+                  runId: RunId.make("run:silence:test"),
+                  type: "error",
+                  status: "failed",
+                  failure: failureDetail,
+                },
+              ],
+            }
+          : thread,
+      )) as never,
   });
   const transport = Layer.succeed(
     A2ADeliveryTransport,
@@ -785,7 +788,7 @@ it.effect("tells the sender once when its queued message is removed before it ru
   }).pipe(Effect.provide(makeTestLayer())),
 );
 
-// FORK.md case 84: cleanup survives removal of the unread-after-Stop notice (#694).
+// FORK.md case 89: cleanup survives removal of the unread-after-Stop notice.
 it.effect.each([
   { status: "interrupted", registered: true },
   { status: "failed", registered: true },

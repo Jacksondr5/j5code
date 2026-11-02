@@ -24,8 +24,7 @@ export const selectDraftAgent = (draftKey: string, personaId: string | null) => 
 
 export const clearDraftAgent = (draftKey: string) => selectDraftAgent(draftKey, null);
 
-export const readDraftAgentPersonaId = (draftKey: string): string | null =>
-  snapshot[draftKey] ?? null;
+const readDraftAgentPersonaId = (draftKey: string): string | null => snapshot[draftKey] ?? null;
 
 export function useDraftAgentPersonaId(draftKey: string | null): string | null {
   return useSyncExternalStore(subscribe, () =>

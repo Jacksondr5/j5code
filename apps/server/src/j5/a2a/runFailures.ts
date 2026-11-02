@@ -10,7 +10,7 @@ import type {
  * answer is nullable and callers say "no detail" rather than inventing one.
  */
 export const runFailureDetail = (
-  projection: OrchestrationV2ThreadProjection,
+  projection: Pick<OrchestrationV2ThreadProjection, "turnItems">,
   runId: RunId,
 ): OrchestrationV2ProviderFailure | null => {
   const item = projection.turnItems.findLast(
@@ -20,9 +20,9 @@ export const runFailureDetail = (
   return item?.type === "error" ? item.failure : null;
 };
 
-/** One line for a notice: `provider_error — API Error: Can't reach the API server`. */
+/** One line for a notice: `provider_error: API Error: Can't reach the API server`. */
 export const formatRunFailure = (failure: OrchestrationV2ProviderFailure | null) =>
-  failure === null ? "no error detail was recorded" : `${failure.class} — ${failure.message}`;
+  failure === null ? "no error detail was recorded" : `${failure.class}: ${failure.message}`;
 
 /**
  * Escape field and tag delimiters before provider text enters a line-oriented Crew notice. The

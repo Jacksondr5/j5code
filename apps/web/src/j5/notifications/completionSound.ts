@@ -1,7 +1,7 @@
 import { completionSoundStorage, type CompletionSound } from "./completionSoundStorage";
 
 export const COMPLETION_SOUND_MAX_BYTES = 5 * 1024 * 1024;
-export const COMPLETION_SOUND_MAX_SECONDS = 30;
+const COMPLETION_SOUND_MAX_SECONDS = 30;
 
 export async function validateCompletionSound(
   file: File,

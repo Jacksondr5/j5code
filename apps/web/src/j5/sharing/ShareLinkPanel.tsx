@@ -1,6 +1,6 @@
 import type { EnvironmentId } from "@t3tools/contracts";
 import { CopyIcon } from "lucide-react";
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useState } from "react";
 
 import { selectQrEndpointOption } from "../../components/settings/ConnectionsSettings.logic";
 import { Alert, AlertDescription } from "../../components/ui/alert";
@@ -34,17 +34,15 @@ import {
  * server advertises; any other client knows only the one it reached the server at. Nothing is
  * opened to make a link work (People and access AC38).
  */
-export function useLinkRoutes(environmentId: EnvironmentId): ReadonlyArray<LinkRoute> {
+function useLinkRoutes(environmentId: EnvironmentId): ReadonlyArray<LinkRoute> {
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const advertised = useEnvironmentQuery(
     isElectron && environmentId === primaryEnvironmentId ? desktopNetworkAccessStateAtom : null,
   );
   const baseUrl = useEnvironmentHttpBaseUrl(environmentId);
-  return useMemo(() => {
-    const routes = linkRoutesFromEndpoints(advertised.data?.advertisedEndpoints ?? []);
-    if (routes.length > 0) return routes;
-    return [linkRouteFromBaseUrl(baseUrl ?? window.location.origin)];
-  }, [advertised.data, baseUrl]);
+  const routes = linkRoutesFromEndpoints(advertised.data?.advertisedEndpoints ?? []);
+  if (routes.length > 0) return routes;
+  return [linkRouteFromBaseUrl(baseUrl ?? window.location.origin)];
 }
 
 /** The address a link has over the route this client would offer first, for a one-click copy. */
@@ -158,7 +156,7 @@ export function ShareLinkPanel({
             size={148}
             level="M"
             marginSize={1}
-            title="Link — scan to open on another device"
+            title="Link: scan to open on another device"
           />
         </div>
       ) : null}
