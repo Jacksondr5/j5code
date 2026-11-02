@@ -60,7 +60,11 @@ import {
   useWorktreeCleanupInbox,
 } from "./CrewWorktreeCleanupSection";
 import { refreshWorktreeCleanups } from "./crewWorktreeCleanupClient";
-import { worktreeCleanupKey, type ScopedWorktreeCleanup } from "./crewWorktreeCleanup.logic";
+import {
+  inboxSummary,
+  worktreeCleanupKey,
+  type ScopedWorktreeCleanup,
+} from "./crewWorktreeCleanup.logic";
 import {
   answeredInboxQueryAtom,
   answeredInboxSourcesAtom,
@@ -617,11 +621,12 @@ export function HumanInboxPage() {
                 <p className="mt-1 text-sm text-muted-foreground">
                   {loading && items.length === 0
                     ? "Loading questions waiting on you…"
-                    : `${items.length + cleanups.openCount} ${complete ? "open" : "loaded"} ${items.length + cleanups.openCount === 1 ? "question" : "questions"}${
-                        runtimeRequests.length + nativeQuestions.length === 0
-                          ? ""
-                          : ` · ${runtimeRequests.length + nativeQuestions.length} agent ${runtimeRequests.length + nativeQuestions.length === 1 ? "request" : "requests"}`
-                      }`}
+                    : inboxSummary({
+                        questions: items.length,
+                        complete,
+                        agentRequests: runtimeRequests.length + nativeQuestions.length,
+                        worktreeCleanups: cleanups.openCount,
+                      })}
                 </p>
               </div>
               <Button

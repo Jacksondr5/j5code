@@ -2,6 +2,7 @@ import {
   AuthAccessWriteScope,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
+  AuthSettingsWriteScope,
 } from "@t3tools/contracts";
 import {
   J5ActionError,
@@ -46,7 +47,7 @@ export const CLIENT_ACTION_RPC_SCOPES = {
   [METHODS.archiveCrew]: AuthOrchestrationOperateScope,
   [METHODS.respondCrewRuntimeRequest]: AuthOrchestrationOperateScope,
   [METHODS.answerHumanExchange]: AuthOrchestrationOperateScope,
-  [METHODS.answerCrewWorktreeCleanup]: AuthOrchestrationOperateScope,
+  [METHODS.answerCrewWorktreeCleanup]: AuthSettingsWriteScope,
   [METHODS.issuePeerCredential]: AuthAccessWriteScope,
   [METHODS.addPeer]: AuthAccessWriteScope,
   [METHODS.removePeer]: AuthAccessWriteScope,

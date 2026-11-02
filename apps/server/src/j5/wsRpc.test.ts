@@ -424,7 +424,8 @@ describe("J5 client action RPC scopes", () => {
                 tag: "EnvironmentAuthorizationError",
                 requiredPermission: method.startsWith("j5.peers.")
                   ? AuthAccessWriteScope
-                  : method.startsWith("j5.playbooks.")
+                  : method.startsWith("j5.playbooks.") ||
+                      method === ACTIONS.answerCrewWorktreeCleanup
                     ? AuthSettingsWriteScope
                     : AuthOrchestrationOperateScope,
               },
@@ -478,9 +479,13 @@ describe("J5 client action RPC handlers", () => {
         (yield* client[ACTIONS.archiveCrew]({ crewInstanceId: "crew:1" })).status,
         "archived",
       );
+      // Removing worktrees is an Owner's call, which the settings scope stands for.
+      const owner = yield* clientFor([...operator, AuthSettingsWriteScope]);
       assert.equal(
-        (yield* client[ACTIONS.answerCrewWorktreeCleanup]({ itemId: "cleanup:1", removePaths: [] }))
-          .item.status,
+        (yield* owner.client[ACTIONS.answerCrewWorktreeCleanup]({
+          itemId: "cleanup:1",
+          removePaths: [],
+        })).item.status,
         "decided",
       );
       assert.deepStrictEqual(
@@ -504,11 +509,11 @@ describe("J5 client action RPC handlers", () => {
         "resolve",
         "stop",
         "archive",
-        "cleanup",
         "respond",
         "answer",
         "delete artifact",
       ]);
+      assert.deepStrictEqual(owner.handled, ["cleanup"]);
     }).pipe(Effect.scoped),
   );
 

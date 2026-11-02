@@ -7,6 +7,7 @@ import {
   answerFailure,
   cleanupButtons,
   groupCleanupOutcomes,
+  inboxSummary,
   orderCleanupRows,
   outcomeReason,
   outcomeSummary,
@@ -159,4 +160,18 @@ describe("a refused answer", () => {
 it("names a pull request by its number when the link has one", () => {
   expect(pullRequestLabel("https://github.com/Jacksondr5/j5code/pull/815")).toBe("PR #815");
   expect(pullRequestLabel("https://example.test/mr/7")).toBe("Pull request");
+});
+
+describe("inboxSummary", () => {
+  it("counts worktree cleanups apart from questions", () => {
+    expect(
+      inboxSummary({ questions: 2, complete: true, agentRequests: 0, worktreeCleanups: 0 }),
+    ).toBe("2 questions open");
+    expect(
+      inboxSummary({ questions: 1, complete: false, agentRequests: 3, worktreeCleanups: 1 }),
+    ).toBe("1 question loaded · 3 agent requests · 1 worktree cleanup");
+    expect(
+      inboxSummary({ questions: 0, complete: true, agentRequests: 1, worktreeCleanups: 2 }),
+    ).toBe("0 questions open · 1 agent request · 2 worktree cleanups");
+  });
 });

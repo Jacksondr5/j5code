@@ -950,6 +950,7 @@ it.effect(
 
 const crew = {
   crewInstanceId: "crew:one",
+  archivedAt: "2026-10-27T13:00:00.000Z",
   crewName: "Crew One",
   projectId: projectId,
   captainThreadId: ThreadId.make("thread:crew-worktrees:captain"),
@@ -1145,6 +1146,110 @@ it.effect("skips a worktree whose files were already changed when they change ag
         yield* f.fs.readFileString(f.path.join(edited.worktree, "tracked.txt")),
         "edited again\n",
       );
+    }),
+  ),
+);
+
+it.effect("skips a worktree whose staged content changed under identical working files", () =>
+  run(
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const staged = yield* f.seat("staged");
+      const file = f.path.join(staged.worktree, "tracked.txt");
+      // The file reads MM both times, with the same working copy; only the staged blob differs.
+      const stage = Effect.fn("test.stage")(function* (content: string) {
+        yield* f.fs.writeFileString(file, content);
+        yield* f.run(staged.worktree, ["add", "tracked.txt"]);
+        yield* f.fs.writeFileString(file, "working\n");
+      });
+      yield* stage("staged first\n");
+      yield* f.service.cleanup({ seats: [staged], crew });
+      const [item] = yield* f.service.listCleanups("open");
+
+      yield* stage("staged NEW\n");
+      const decided = yield* f.service.answerCleanup({
+        itemId: item!.id,
+        removePaths: [staged.worktree],
+      });
+      assert.deepStrictEqual(
+        decided.entries.map((entry) => [entry.outcome, entry.reason]),
+        [["skipped", "changed"]],
+      );
+      assert.isTrue(yield* f.fs.exists(staged.worktree));
+    }),
+  ),
+);
+
+it.effect("files nothing for commits its branch does not hold, and never removes them", () =>
+  run(
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const strayed = yield* f.seat("strayed");
+      const tracked = f.path.join(strayed.worktree, "tracked.txt");
+      yield* f.run(strayed.worktree, ["checkout", "--detach"]);
+      yield* f.fs.writeFileString(tracked, "detached work\n");
+      yield* f.run(strayed.worktree, ["commit", "-am", "work"]);
+      const results = yield* f.service.cleanup({ seats: [strayed], crew });
+      assert.deepStrictEqual(
+        results.map((result) => [result.outcome, result.reason]),
+        [["kept", "unverified"]],
+      );
+      assert.lengthOf(yield* f.service.listCleanups("open"), 0);
+      assert.isTrue(yield* f.fs.exists(strayed.worktree));
+
+      // The same after an item was filed: the branch moved off the commit the item measured.
+      const moved = yield* f.seat("moved");
+      yield* f.fs.writeFileString(f.path.join(moved.worktree, "tracked.txt"), "committed\n");
+      yield* f.run(moved.worktree, ["commit", "-am", "work"]);
+      yield* f.service.cleanup({ seats: [moved], crew });
+      const [item] = yield* f.service.listCleanups("open");
+      yield* f.run(moved.worktree, ["checkout", "--detach"]);
+      yield* f.run(f.repo, ["update-ref", `refs/heads/${moved.branch}`, "main"]);
+      const decided = yield* f.service.answerCleanup({
+        itemId: item!.id,
+        removePaths: [moved.worktree],
+      });
+      assert.deepStrictEqual(
+        decided.entries.map((entry) => [entry.outcome, entry.reason]),
+        [["skipped", "unverified"]],
+      );
+      assert.isTrue(yield* f.fs.exists(moved.worktree));
+    }),
+  ),
+);
+
+it.effect("a Crew archived again after it came back files its own approval", () =>
+  run(
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const first = yield* f.seat("first");
+      yield* f.fs.writeFileString(f.path.join(first.worktree, "new.txt"), "new\n");
+      yield* f.service.cleanup({ seats: [first], crew });
+      assert.lengthOf(yield* f.service.listCleanups("open"), 1);
+
+      // The Captain came back: the open item has nothing left to decide, and shows nowhere.
+      f.notified.length = 0;
+      yield* f.service.withdrawCleanup(crew.crewInstanceId);
+      assert.lengthOf(yield* f.service.listCleanups("open"), 0);
+      assert.lengthOf(yield* f.service.listCleanups("decided"), 0);
+      assert.deepStrictEqual(f.notified, [["inbox"]]);
+
+      const second = yield* f.seat("second");
+      yield* f.fs.writeFileString(f.path.join(second.worktree, "new.txt"), "new\n");
+      const again = { ...crew, archivedAt: "2026-10-28T13:00:00.000Z" };
+      yield* f.service.cleanup({ seats: [first, second], crew: again });
+      const [item] = yield* f.service.listCleanups("open");
+      assert.deepStrictEqual(
+        item!.entries.map((entry) => entry.threadId),
+        [first.threadId, second.threadId],
+      );
+
+      // The same archive run again files nothing more, and withdrawing leaves an answered item.
+      yield* f.service.cleanup({ seats: [first, second], crew: again });
+      assert.lengthOf(yield* f.service.listCleanups("open"), 1);
+      yield* f.service.answerCleanup({ itemId: item!.id, removePaths: [] });
+      yield* f.service.withdrawCleanup(crew.crewInstanceId);
+      assert.lengthOf(yield* f.service.listCleanups("decided"), 1);
     }),
   ),
 );

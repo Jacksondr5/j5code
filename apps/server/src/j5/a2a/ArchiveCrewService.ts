@@ -216,8 +216,9 @@ const createdSeats = (facts: ArchiveCrewConsequenceFacts) =>
     .map((member) => ({ seatName: member.seatName, threadId: member.threadId }));
 
 /** Who the worktree approval is filed for. */
-const approvalCrew = (instance: AgentCrewInstance) => ({
+const approvalCrew = (instance: AgentCrewInstance, archivedAt: string) => ({
   crewInstanceId: instance.id,
+  archivedAt: instance.archivedAt ?? archivedAt,
   crewName: instance.displayName,
   projectId: instance.projectId,
   captainThreadId: instance.captainThreadId,
@@ -415,7 +416,7 @@ export const layer = Layer.effect(
                 : ("already_archived" as const),
             })),
             seats: createdSeats(facts),
-            crew: approvalCrew(instance),
+            crew: approvalCrew(instance, input.archivedAt),
             sessions: [] as ReadonlyArray<CrewSeatSession>,
           };
         }
@@ -502,7 +503,7 @@ export const layer = Layer.effect(
           status: "archived" as const,
           members: results,
           seats: createdSeats(facts),
-          crew: approvalCrew(instance),
+          crew: approvalCrew(instance, input.archivedAt),
           sessions,
         };
       },

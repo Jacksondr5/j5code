@@ -155,10 +155,12 @@ export interface CrewWorktreesShape {
     readonly seats: ReadonlyArray<CrewWorktreeSeat>;
     /**
      * Given, the worktrees kept for unfinished work (uncommitted changes, unmerged commits) are
-     * also filed as one Inbox approval for this Crew, unless it already has one.
+     * also filed as one Inbox approval for this archive of the Crew, unless it already has one.
      */
     readonly crew?: {
       readonly crewInstanceId: string;
+      /** The Crew's archive stamp: the same archive run again files nothing, a later one files its own. */
+      readonly archivedAt: string;
       readonly crewName: string;
       readonly projectId: string;
       readonly captainThreadId: ThreadId;
@@ -168,6 +170,11 @@ export interface CrewWorktreesShape {
   readonly listCleanups: (
     status: "open" | "decided",
   ) => Effect.Effect<ReadonlyArray<CrewWorktreeCleanupItem>, SqlError>;
+  /**
+   * The Crew came back (its Captain was unarchived): an open approval for its earlier archive no
+   * longer has anything to decide, so it is dropped. An answered one stays as the record.
+   */
+  readonly withdrawCleanup: (crewInstanceId: string) => Effect.Effect<void>;
   /**
    * A person's answer: removes the listed worktrees of the item, keeps the rest, and records what
    * happened to each. Each is checked again first, against what the archive measured, and one
@@ -424,8 +431,10 @@ const makeLayer = (daemon: boolean) =>
 
       /**
        * What the worktree holds uncommitted, by content: the status lists names and codes, so an
-       * edit to a file that was already dirty would not show. Status git cut off, or a folder it
-       * lists whole (a nested repository), cannot be compared, so it never matches again and the
+       * edit to a file that was already dirty would not show, and neither would a changed staged
+       * blob under a file whose working copy stayed the same, so the index tree is part of it.
+       * Status git cut off, a folder it lists whole (a nested repository), or an index git cannot
+       * write a tree for (unmerged entries) cannot be compared, so it never matches again and the
        * worktree is kept.
        */
       const snapshotOf = Effect.fnUntraced(function* (worktreePath: string) {
@@ -438,20 +447,47 @@ const makeLayer = (daemon: boolean) =>
           .filter((record) => /^[ MTADRCU?!]{2} /.test(record) && !record.slice(0, 2).includes("D"))
           .map((record) => record.slice(3));
         if (paths.some((changed) => changed.endsWith("/"))) return { status, digest: unmatched() };
-        if (paths.length === 0) return { status, digest: digestOf(status.stdout) };
-        const hashed = yield* git.execute({
-          operation: "CrewWorktrees.contents",
-          cwd: worktreePath,
-          args: ["hash-object", "--", ...paths],
-          allowNonZeroExit: true,
-        });
+        const [index, hashed] = yield* Effect.all([
+          git.execute({
+            operation: "CrewWorktrees.index",
+            cwd: worktreePath,
+            args: ["write-tree"],
+            allowNonZeroExit: true,
+          }),
+          paths.length === 0
+            ? Effect.succeed({ exitCode: 0, stdout: "", stdoutTruncated: false })
+            : git.execute({
+                operation: "CrewWorktrees.contents",
+                cwd: worktreePath,
+                args: ["hash-object", "--", ...paths],
+                allowNonZeroExit: true,
+              }),
+        ]);
         return {
           status,
           digest:
-            hashed.exitCode === 0 && !hashed.stdoutTruncated
-              ? digestOf(`${status.stdout}\n${hashed.stdout}`)
+            index.exitCode === 0 && hashed.exitCode === 0 && !hashed.stdoutTruncated
+              ? digestOf(`${status.stdout}\n${hashed.stdout}\n${index.stdout}`)
               : unmatched(),
         };
+      });
+
+      /**
+       * HEAD is on the branch the approval says removal keeps. A seat that detached or switched
+       * branches and then committed has commits only the reflog would hold once the worktree goes.
+       */
+      const branchHoldsHead = Effect.fnUntraced(function* (
+        worktreePath: string,
+        branch: string | null,
+      ) {
+        if (branch === null) return false;
+        const held = yield* git.execute({
+          operation: "CrewWorktrees.branchHoldsHead",
+          cwd: worktreePath,
+          args: ["merge-base", "--is-ancestor", "HEAD", `refs/heads/${branch}`],
+          allowNonZeroExit: true,
+        });
+        return held.exitCode === 0;
       });
 
       /**
@@ -541,6 +577,8 @@ const makeLayer = (daemon: boolean) =>
         if ((yield* sessionOpenIn(worktreePath)) || (yield* terminalOpenIn(worktreePath)))
           return { kind: "keep", reason: "in_use" } satisfies Verdict;
         if (context.baseline !== undefined) {
+          if (!(yield* branchHoldsHead(worktreePath, branch)))
+            return { kind: "keep", reason: "unverified" } satisfies Verdict;
           const [head, snapshot] = yield* Effect.all([
             git.resolveCommit({ cwd: worktreePath, revision: "HEAD" }),
             snapshotOf(worktreePath),
@@ -550,8 +588,14 @@ const makeLayer = (daemon: boolean) =>
             ? ({ kind: "remove", headSha: head.commitSha } satisfies Verdict)
             : ({ kind: "changed" } satisfies Verdict);
         }
+        // What is kept for unfinished work is offered for removal while its branch stays, so
+        // work the branch does not hold is never offered.
+        const unfinished = (reason: "uncommitted_changes" | "unmerged_commits") =>
+          branchHoldsHead(worktreePath, branch).pipe(
+            Effect.map((held): Verdict => ({ kind: "keep", reason: held ? reason : "unverified" })),
+          );
         if (yield* hasBlockingChanges(worktreePath))
-          return { kind: "keep", reason: "uncommitted_changes" } satisfies Verdict;
+          return yield* unfinished("uncommitted_changes");
         const unmerged = context.checkMerged
           ? yield* mergeKeepReason({
               worktreePath,
@@ -561,6 +605,7 @@ const makeLayer = (daemon: boolean) =>
               fetched: context.fetched,
             })
           : null;
+        if (unmerged === "unmerged_commits") return yield* unfinished(unmerged);
         if (unmerged !== null) return { kind: "keep", reason: unmerged } satisfies Verdict;
         const head = yield* git.resolveCommit({ cwd: worktreePath, revision: "HEAD" });
         return { kind: "remove", headSha: head.commitSha } satisfies Verdict;
@@ -680,7 +725,7 @@ const makeLayer = (daemon: boolean) =>
         } satisfies StoredCleanupEntry;
       });
 
-      /** One approval per Crew, answered or not, so an archive that runs again files nothing. */
+      /** One approval per archive of a Crew, answered or not, so the same archive run again files nothing. */
       const fileCleanup = Effect.fnUntraced(function* (
         crew: NonNullable<Parameters<CrewWorktreesShape["cleanup"]>[0]["crew"]>,
         unfinished: ReadonlyArray<UnfinishedWorktree>,
@@ -688,11 +733,12 @@ const makeLayer = (daemon: boolean) =>
         const entries = yield* Effect.forEach(unfinished, measure);
         const filed = yield* sql<{ readonly id: string }>`
           INSERT INTO j5_crew_worktree_cleanup (
-            id, crew_instance_id, crew_name, project_id, captain_thread_id, filed_at, entries_json
+            id, crew_instance_id, crew_name, project_id, captain_thread_id, archived_at, filed_at,
+            entries_json
           )
           VALUES (
             ${NodeCrypto.randomUUID()}, ${crew.crewInstanceId}, ${crew.crewName}, ${crew.projectId},
-            ${crew.captainThreadId}, ${DateTime.formatIso(yield* DateTime.now)},
+            ${crew.captainThreadId}, ${crew.archivedAt}, ${DateTime.formatIso(yield* DateTime.now)},
             ${yield* encodeEntries(entries)}
           )
           ON CONFLICT DO NOTHING
@@ -700,6 +746,22 @@ const makeLayer = (daemon: boolean) =>
         `;
         if (filed.length > 0) yield* changes.notify("inbox");
       });
+
+      const withdrawCleanup: CrewWorktreesShape["withdrawCleanup"] = Effect.fn(
+        "j5.a2a.crewWorktrees.withdrawCleanup",
+      )(
+        function* (crewInstanceId) {
+          const withdrawn = yield* sql<{ readonly id: string }>`
+            DELETE FROM j5_crew_worktree_cleanup
+            WHERE crew_instance_id = ${crewInstanceId} AND decided_at IS NULL
+            RETURNING id
+          `;
+          if (withdrawn.length > 0) yield* changes.notify("inbox");
+        },
+        Effect.catchCause((cause) =>
+          Effect.logWarning("J5 Crew worktree cleanup approval not withdrawn", { cause }),
+        ),
+      );
 
       const cleanup: CrewWorktreesShape["cleanup"] = Effect.fn("j5.a2a.crewWorktrees.cleanup")(
         function* ({ seats, crew }) {
@@ -985,6 +1047,7 @@ const makeLayer = (daemon: boolean) =>
         closeSessions,
         cleanup,
         estimate,
+        withdrawCleanup,
         listCleanups,
         answerCleanup,
       });

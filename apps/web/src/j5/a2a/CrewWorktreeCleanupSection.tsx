@@ -107,7 +107,7 @@ export function useWorktreeCleanupInbox() {
   };
 }
 
-const unavailable = "This environment is unavailable or this connection is read-only.";
+const unavailable = "This environment is unavailable, or only an Owner of this server can answer.";
 
 function ItemHeader({
   item,

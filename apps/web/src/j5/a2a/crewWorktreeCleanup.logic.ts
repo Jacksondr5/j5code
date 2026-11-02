@@ -169,3 +169,25 @@ export const answerFailure = (cause: unknown) => {
     cause.code === "CrewWorktreeCleanupAnsweredError";
   return { message: alreadyAnswered ? ANSWERED_ALREADY : message, alreadyAnswered };
 };
+
+const countOf = (count: number, one: string, many: string) =>
+  `${count} ${count === 1 ? one : many}`;
+
+/** The Inbox's count line: worktree cleanups are approvals of their own, not questions. */
+export const inboxSummary = (input: {
+  readonly questions: number;
+  readonly complete: boolean;
+  readonly agentRequests: number;
+  readonly worktreeCleanups: number;
+}) =>
+  [
+    `${countOf(input.questions, "question", "questions")} ${input.complete ? "open" : "loaded"}`,
+    input.agentRequests === 0
+      ? null
+      : countOf(input.agentRequests, "agent request", "agent requests"),
+    input.worktreeCleanups === 0
+      ? null
+      : countOf(input.worktreeCleanups, "worktree cleanup", "worktree cleanups"),
+  ]
+    .filter((part) => part !== null)
+    .join(" · ");
