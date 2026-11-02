@@ -2,6 +2,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
   CheckpointScopeId,
+  CommandId,
   EventId,
   MessageId,
   NodeId,
@@ -167,10 +168,17 @@ const fixture = Effect.gen(function* () {
   const service = yield* Effect.service(CrewWorktrees).pipe(Effect.provide(layer));
 
   let eventSequence = 0;
-  const metadataUpdated = (threadId: ThreadId, branch: string | null, worktreePath: string) =>
+  // The command upstream's launch gives the update when the seat's own preparation creates the worktree.
+  const preparationCommand = CommandId.make("command:j5:crew-seat-prepare:run:one:workspace");
+  const metadataUpdated = (
+    threadId: ThreadId,
+    branch: string | null,
+    worktreePath: string,
+    commandId: CommandId | null = preparationCommand,
+  ) =>
     ({
       sequence: ++eventSequence,
-      commandId: null,
+      commandId,
       event: {
         id: EventId.make(`event:crew-worktrees:${eventSequence}`),
         threadId,
@@ -676,6 +684,45 @@ it.effect("records only the first worktree path of a seat on a new worktree", ()
           SELECT thread_id, path FROM j5_crew_worktree
         `).map((row) => [row.thread_id, row.path]),
         [[first.threadId, first.worktree]],
+      );
+    }),
+  ),
+);
+
+it.effect("does not record a worktree a handoff or a metadata update bound to a waiting seat", () =>
+  run(
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const waiting = yield* f.seat("waiting", { record: false });
+      const existing = f.path.join(f.worktreesDir, "repo", "someone-elses");
+      // Before its first assignment the seat is pointed at a worktree that already existed.
+      assert.isFalse(
+        yield* f.service.handleStoredEvent(
+          f.metadataUpdated(
+            waiting.threadId,
+            "someone-elses",
+            existing,
+            CommandId.make("command:handoff:waiting"),
+          ),
+        ),
+      );
+      assert.isFalse(
+        yield* f.service.handleStoredEvent(
+          f.metadataUpdated(waiting.threadId, null, existing, null),
+        ),
+      );
+      assert.lengthOf(yield* f.sql`SELECT * FROM j5_crew_worktree`, 0);
+      // The preparation's own update, arriving afterwards, is still recorded.
+      assert.isTrue(
+        yield* f.service.handleStoredEvent(
+          f.metadataUpdated(waiting.threadId, waiting.branch, waiting.worktree),
+        ),
+      );
+      assert.deepStrictEqual(
+        (yield* f.sql<{ readonly path: string }>`SELECT path FROM j5_crew_worktree`).map(
+          (row) => row.path,
+        ),
+        [waiting.worktree],
       );
     }),
   ),

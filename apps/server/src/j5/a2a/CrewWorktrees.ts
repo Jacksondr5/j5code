@@ -32,6 +32,7 @@ import { storageCleanupPullRequestMerged } from "../../storageCleanup.ts";
 import * as TerminalManager from "../../terminal/Manager.ts";
 import * as GitVcsDriver from "../../vcs/GitVcsDriver.ts";
 import { withWorkspaceLease } from "../../workspace/workspaceLease.ts";
+import { isSeatWorktreeCreation } from "./CrewSeatPreparation.ts";
 import { readEventStoreHighWater } from "./eventStoreHighWater.ts";
 
 const decodeSeatWorkspace = Schema.decodeUnknownOption(Schema.fromJsonString(CrewSeatWorkspace));
@@ -63,7 +64,9 @@ type Verdict =
 export interface CrewWorktreesShape {
   /**
    * Records the worktree upstream's ThreadLaunch creates for a Crew seat on a new worktree, when
-   * the event is that seat's first `thread.metadata.update` binding a path. Returns whether a row
+   * the event is the `thread.metadata.update` that the seat's first-assignment preparation
+   * commits to bind it. A worktree the person retries the preparation into is not recorded and
+   * stays. Returns whether a row
    * was written. Worktrees bound any other way, and every worktree from before the record
    * existed, have no row and are never removed.
    */
@@ -117,6 +120,10 @@ const makeLayer = (daemon: boolean) =>
           const event = stored.event;
           if (event.type !== "thread.metadata-updated" || event.payload.worktreePath === null)
             return false;
+          // Only the worktree the seat's own first-assignment preparation creates. A seat can be
+          // pointed at an existing worktree before then (a handoff, a metadata update), and that
+          // one was never J5's to remove.
+          if (!isSeatWorktreeCreation(stored.commandId)) return false;
           const [context] = yield* sql<{ readonly workspace: string }>`
             SELECT workspace FROM j5_crew_seat_context WHERE thread_id = ${event.threadId}
           `;
