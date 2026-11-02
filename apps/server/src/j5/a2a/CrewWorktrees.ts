@@ -70,38 +70,30 @@ type Verdict =
 
 export interface CrewWorktreesShape {
   /**
-   * Records the worktree upstream's ThreadLaunch creates for a Crew seat on a new worktree, when
-   * the event is the `thread.metadata.update` that the seat's first-assignment preparation
-   * commits to bind it. A worktree the person retries the preparation into is not recorded and
-   * stays. Returns whether a row
-   * was written. Worktrees bound any other way, and every worktree from before the record
-   * existed, have no row and are never removed.
+   * Records the worktree ThreadLaunch creates for a Crew seat, when the event is the metadata
+   * update its first-assignment preparation commits. Worktrees bound any other way, a retried
+   * preparation's included, have no row and are never removed. Returns whether a row was written.
    */
   readonly handleStoredEvent: (event: OrchestrationV2StoredEvent) => Effect.Effect<boolean>;
   /**
-   * The live provider sessions these seats' threads are attached to. Read before the archive
-   * commits, because the thread's archive removes the binding that names them.
-   * Never fails: a seat whose sessions cannot be read keeps them, and the cleanup then reports
-   * its worktree as in use.
+   * The live provider sessions these seats' threads are attached to, read before the archive
+   * commits because it removes the binding that names them. Never fails: unreadable sessions are
+   * kept, and the cleanup reports the worktree as in use.
    */
   readonly liveSessions: (
     seats: ReadonlyArray<CrewWorktreeSeat>,
   ) => Effect.Effect<ReadonlyArray<CrewSeatSession>>;
   /**
-   * Closes the sessions `liveSessions` found, after the seats' archive committed and before the
-   * cleanup looks for sessions in a worktree. The seat's thread lets go of its session, as the
-   * archive's own outbox effect does but now, so the cleanup need not race it, and a session no
-   * other thread is attached to is closed rather than left to the idle release (Codex shares one
-   * session across threads). Never fails: a session that does not close stays live and the cleanup
+   * Closes the sessions `liveSessions` found, after the archive commits and before the cleanup
+   * looks for sessions, so the cleanup need not race the archive's own detach. A session another
+   * thread still uses (Codex shares one) stays open. Never fails: a session that does not close
    * keeps its worktree as in use.
    */
   readonly closeSessions: (sessions: ReadonlyArray<CrewSeatSession>) => Effect.Effect<void>;
   /**
    * The cleanup after a Crew's archive commits: each recorded worktree of an archived seat is
-   * removed when it is clean, merged, unshared (no other thread or project uses it) and unused (no
-   * session or terminal is open in it), and kept with its reason otherwise.
-   * Never fails: a problem checking or removing one worktree is that worktree's outcome, and a
-   * problem reading the records leaves the whole pass empty and logged.
+   * removed when clean, merged, unshared and unused, and kept with its reason otherwise. Never
+   * fails: one worktree's problem is its outcome, and unreadable records leave the pass empty.
    */
   readonly cleanup: (input: {
     readonly seats: ReadonlyArray<CrewWorktreeSeat>;
