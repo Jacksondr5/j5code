@@ -17,9 +17,8 @@ export function DraftAgentRow(props: {
   const draftAgent = useDraftAgentAssignment(props.draftKey, props.environmentId);
   if (draftAgent.personaId !== null && draftAgent.assignment === null) return null;
   return (
-    // The checkout row's controls are 44 tall too; overlapping their padding keeps these rows close.
-    // box-none: the row's empty width must not take those controls' touches.
-    <View className="-mt-2 flex-row px-2" pointerEvents="box-none">
+    // Clips the 44-tall controls' padding to sit closer to the checkout row, without overlapping it.
+    <View className="h-9 flex-row items-center overflow-hidden px-2">
       {draftAgent.assignment ? (
         <AgentPersonaAssignmentControls
           assignment={draftAgent.assignment}
