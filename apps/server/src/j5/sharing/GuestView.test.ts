@@ -418,6 +418,7 @@ const fullConfig = {
       repositoryIdentity: true,
       j5ProjectLedger: true,
       j5HumanInbox: true,
+      j5PersonalThreadReads: true,
       serverBrowser: true,
     },
   },
@@ -536,7 +537,11 @@ it.effect("a guest's configuration holds nothing of the host, and still decodes"
       platform: { os: "linux", arch: "x64" },
       serverVersion: "0.0.48",
       orchestrationProtocolVersion: 2,
-      capabilities: { repositoryIdentity: false, j5ProjectLedger: true },
+      capabilities: {
+        repositoryIdentity: false,
+        j5ProjectLedger: true,
+        j5PersonalThreadReads: true,
+      },
     });
     assert.deepStrictEqual(Object.keys(reduced).toSorted(), [
       "auth",
@@ -626,7 +631,11 @@ it.effect("a guest's lifecycle feed is a welcome that names nothing of the host"
             platform: { os: "linux", arch: "x64" },
             serverVersion: "0.0.48",
             orchestrationProtocolVersion: 2,
-            capabilities: { repositoryIdentity: false, j5ProjectLedger: true },
+            capabilities: {
+              repositoryIdentity: false,
+              j5ProjectLedger: true,
+              j5PersonalThreadReads: true,
+            },
           },
           cwd: "/",
           projectName: "Shared project",

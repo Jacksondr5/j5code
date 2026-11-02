@@ -355,9 +355,10 @@ export function readEnvironmentSupportsSnooze(environmentId: EnvironmentId): boo
 }
 
 export function readEnvironmentSupportsVisitedTracking(environmentId: EnvironmentId): boolean {
+  const capabilities = appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId)
+    ?.environment.capabilities;
   return (
-    appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId)?.environment.capabilities
-      .threadVisitedTracking === true
+    capabilities?.threadVisitedTracking === true || capabilities?.j5PersonalThreadReads === true
   );
 }
 

@@ -1,4 +1,5 @@
 import type { ThreadId } from "@t3tools/contracts";
+import { createPersonalThreadReadCommands } from "../j5/threadReads.ts";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -25,7 +26,6 @@ import {
   type DeleteThreadInput,
   type EditQueuedRunInput,
   type InterruptThreadTurnInput,
-  type MarkThreadUnreadInput,
   type ForkThreadFromRunInput,
   type MergeThreadBackInput,
   type PromoteQueuedRunInput,
@@ -55,7 +55,6 @@ import {
   type UnsettleThreadInput,
   type UnsnoozeThreadInput,
   type UpdateThreadMetadataInput,
-  type VisitThreadInput,
   archiveThread,
   closeGuestShare,
   resolveGuestMessage,
@@ -65,7 +64,6 @@ import {
   editQueuedRun,
   interruptThreadTurn,
   forkThreadFromRun,
-  markThreadUnread,
   mergeThreadBack,
   promoteQueuedRun,
   reorderQueuedRun,
@@ -92,7 +90,6 @@ import {
   unsettleThread,
   unsnoozeThread,
   updateThreadMetadata,
-  visitThread,
   watchThreadPullRequest,
 } from "../operations/commands.ts";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
@@ -283,18 +280,7 @@ export function createThreadEnvironmentAtoms<R, E>(
       scheduler,
       concurrency,
     }),
-    visit: createEnvironmentCommand(runtime, {
-      label: "environment-data:commands:thread:visit",
-      execute: (input: VisitThreadInput) => visitThread(input),
-      scheduler,
-      concurrency,
-    }),
-    markUnread: createEnvironmentCommand(runtime, {
-      label: "environment-data:commands:thread:mark-unread",
-      execute: (input: MarkThreadUnreadInput) => markThreadUnread(input),
-      scheduler,
-      concurrency,
-    }),
+    ...createPersonalThreadReadCommands(runtime),
     updateMetadata: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:update-metadata",
       execute: (input: UpdateThreadMetadataInput) => updateThreadMetadata(input),

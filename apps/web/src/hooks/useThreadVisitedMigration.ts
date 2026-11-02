@@ -1,3 +1,5 @@
+import { shouldImportLegacyReadMarkers } from "@t3tools/client-runtime/j5/threadReads";
+import { environmentServerConfigsAtom } from "../state/server";
 import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { runAtomCommand } from "@t3tools/client-runtime/state/runtime";
@@ -15,6 +17,13 @@ export function startThreadVisitedMigration(registry: AtomRegistry.AtomRegistry)
   const migratedThreadKeys = new Set<string>();
   const migrate = (threads: ReadonlyArray<EnvironmentThreadShell>) => {
     for (const thread of threads) {
+      if (
+        !shouldImportLegacyReadMarkers(
+          registry.get(environmentServerConfigsAtom).get(thread.environmentId)?.environment
+            .capabilities,
+        )
+      )
+        continue;
       // Missing means unsupported; retain the local value until the server upgrades.
       if (thread.lastVisitedAt === undefined) continue;
       const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));

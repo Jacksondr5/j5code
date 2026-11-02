@@ -11,6 +11,7 @@ import {
 } from "@t3tools/contracts";
 import {
   J5_ACCESS_WS_METHODS,
+  J5_THREAD_READ_WS_METHODS,
   J5_CLIENT_READ_WS_METHODS,
   J5_PLAYBOOK_WS_METHODS,
   LEVEL_PERMISSIONS,
@@ -154,6 +155,26 @@ const call = Effect.fn("test.call")(function* (
 });
 
 it.layer(testLayer)("access gate", (it) => {
+  it.effect("lets viewers change their own read state only on shared threads", () =>
+    Effect.gen(function* () {
+      const mine = yield* thread("thread:personal-read-viewer", PROJECT);
+      const other = yield* thread("thread:personal-read-other", OTHER_PROJECT);
+      const { session } = yield* signed(
+        "Personal reads viewer",
+        [{ scope: { kind: "thread", threadId: mine }, level: "viewer" }],
+        LEVEL_PERMISSIONS.viewer,
+      );
+      for (const method of [
+        J5_THREAD_READ_WS_METHODS.visit,
+        J5_THREAD_READ_WS_METHODS.markUnread,
+      ]) {
+        assert.equal(yield* call(session, method, { threadId: mine }), "ran");
+        assert.include(yield* call(session, method, { threadId: other }), "refused:");
+      }
+      assert.equal(yield* call(session, J5_THREAD_READ_WS_METHODS.subscribe, {}), "ran");
+    }),
+  );
+
   it.effect("allows artifact cleanup only within a project Collaborator's scope", () =>
     Effect.gen(function* () {
       const { session, person: builder } = yield* signed("Artifact builder", [

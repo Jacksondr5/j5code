@@ -97,6 +97,7 @@ const makeHarness = Effect.fn("TestThreadCommands.makeHarness")(function* (optio
     target: { environmentId: ENVIRONMENT_ID },
     session: yield* SubscriptionRef.make(
       Option.some({
+        initialConfig: Effect.succeed({ environment: { capabilities: {} } }),
         client: {
           [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command: OrchestrationV2Command) =>
             Effect.gen(function* () {

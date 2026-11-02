@@ -10,6 +10,7 @@ export * from "./j5/access.ts";
 export * from "./j5/levels.ts";
 export * from "./j5/people.ts";
 export * from "./j5/sharedConversation.ts";
+export * from "./j5/threadReads.ts";
 export * from "./j5/sharing.ts";
 
 import { FleetAgentFacts, FleetDeliveryProblem } from "./j5/fleet.ts";
@@ -482,6 +483,7 @@ export type CrewArchiveResponse = typeof CrewArchiveResponse.Type;
  */
 export const J5_LEDGER_CAPABILITIES = {
   j5ProjectLedger: true,
+  j5PersonalThreadReads: true,
   j5Squadrons: false,
   j5HumanInbox: false,
 } as const;

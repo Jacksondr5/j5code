@@ -523,6 +523,8 @@ migrations after upstream migrations.
 
 103.  Mobile's persona forms and Playbook conversation form are pushed settings pages ([#894](https://github.com/Jacksondr5/j5code/issues/894), [#902](https://github.com/Jacksondr5/j5code/issues/902)), since Android's `Menu` draws in the app's root window and can't appear over an RN `Modal` or upstream's `Sheet`. `apps/mobile/src/Stack.tsx` imports J5-owned `j5SettingsFormRoutes` (`apps/mobile/src/j5/agents/routes.ts`) and spreads it into `SETTINGS_SCREENS` after `SettingsAgents`, adding `SettingsPersonaNew`, `SettingsPersonaEdit` and `SettingsPlaybookConversation`. They follow upstream's `SettingsScheduledTaskNew` and `SettingsScheduledTaskEdit`, including the guard against losing unsaved changes. On a pin advance: if upstream reshapes `SETTINGS_SCREENS`, spread the routes among them again.
 
+104.  Personal thread read markers ([#629](https://github.com/Jacksondr5/j5code/issues/629), register D42). J5-owned `sharing/ThreadReadState` stores markers by authenticated person and thread, with a scoped change stream and retry receipts. `packages/contracts/src/rpc.ts` merges its J5 RPC group and `environment.ts` advertises the capability; the shared RPC client's subscription union admits its stream. `packages/client-runtime/src/state/threadCommands.ts` uses J5's read commands, while `threadShell.ts` and `threadDetail.ts` take an optional personal marker source. Web and mobile's `state/threads.ts` supply that source; desktop uses web. Web's `state/entities.ts` recognizes personal visit tracking for narrowed connections, and `hooks/useThreadVisitedMigration.ts` skips unowned local marks for personal servers. `packages/client-runtime/package.json` exports the J5 client module. The corresponding client-state tests cover the new projection. On a pin advance, preserve these composition points and upstream's completion-based unread rule, search-open ranking, and older-server fallback.
+
 ## Pin and upstream advance runbook
 
 Current pin: `d2c440312e5f39d59827ed466838a623516454d6`, upstream's stable release tag `v0.1.3` on `main` (frozen 2026-10-27). The previous pin was `70d60e03a7a35c6fa131825bbfa05ec893e69912`, upstream's nightly tag `v0.1.1-nightly.20261017.3238`.
@@ -861,9 +863,9 @@ explicitly marked.
 | `apps/web/src/branding.ts`                                                  | R       | B                                                  |
 | `apps/web/src/commandPaletteBus.ts`                                         | R       | 42                                                 |
 | `packages/contracts/src/index.ts`                                           | N       | 42, 44                                             |
-| `packages/contracts/src/rpc.ts`                                             | A       | 42, 44, 45, 64, 69                                 |
+| `packages/contracts/src/rpc.ts`                                             | A       | 42, 44, 45, 64, 69, 104                            |
 | `packages/contracts/src/clientRpcPermissions.ts`                            | N       | 64                                                 |
-| `packages/client-runtime/src/rpc/client.ts`                                 | A       | 45, 64, 69, 73                                     |
+| `packages/client-runtime/src/rpc/client.ts`                                 | A       | 45, 64, 69, 73, 104                                |
 | `apps/web/src/composer-logic.ts`                                            | A       | 45, 49                                             |
 | `apps/server/src/auth/RpcAuthorization.ts`                                  | A       | 42, 44, 45, 64                                     |
 | `apps/web/src/components/AppSidebarLayout.tsx`                              | N       | 75                                                 |
@@ -911,11 +913,11 @@ explicitly marked.
 | `apps/web/src/routeTree.gen.ts`                                             | R       | generated route registrations for 6/9              |
 | `apps/web/src/components/onboarding/WelcomeWizard.tsx`                      | R       | 39, B                                              |
 | `apps/web/tsconfig.json`                                                    | R       | B                                                  |
-| `packages/client-runtime/package.json`                                      | R       | 7, 23, 34, 45, 69, 70, 75, Role library            |
+| `packages/client-runtime/package.json`                                      | R       | 7, 23, 34, 45, 69, 70, 75, Role library, 104       |
 | `packages/client-runtime/src/connection/compatibility.ts`                   | A       | 56                                                 |
 | `packages/client-runtime/src/operations/commands.ts`                        | R       | Saved-agent mentions                               |
 | `packages/contracts/package.json`                                           | N       | 34                                                 |
-| `packages/contracts/src/environment.ts`                                     | N       | 34, 48                                             |
+| `packages/contracts/src/environment.ts`                                     | N       | 34, 48, 104                                        |
 | `packages/contracts/src/model.ts`                                           | A       | 32                                                 |
 | `packages/contracts/src/server.test.ts`                                     | N       | 43                                                 |
 | `packages/contracts/src/server.ts`                                          | N       | 42, 43                                             |
@@ -1053,6 +1055,13 @@ explicitly marked.
 | `apps/web/src/components/ThreadSearchMatch.tsx`                             | N       | 94                                                 |
 | `apps/web/src/components/CommandPalette.logic.ts`                           | N       | 94                                                 |
 | `apps/web/src/components/CommandPaletteThreadItems.tsx`                     | N       | 94                                                 |
+| `packages/client-runtime/src/state/threadCommands.ts`                       | A       | 104                                                |
+| `packages/client-runtime/src/state/threadShell.ts`                          | A       | 104                                                |
+| `packages/client-runtime/src/state/threadDetail.ts`                         | A       | 104                                                |
+| `apps/web/src/state/threads.ts`                                             | A       | 104                                                |
+| `apps/web/src/state/entities.ts`                                            | A       | 104                                                |
+| `apps/web/src/hooks/useThreadVisitedMigration.ts`                           | A       | 104                                                |
+| `apps/mobile/src/state/threads.ts`                                          | A       | 104                                                |
 
 The 2026-09-08 import correction adds bounded file-content schemas and shared selection preparation in `packages/client-runtime/src/state/agentPersonas.ts`, plus import/removal commands in the existing orchestration atom module. Clients send selected JSON contents to the chosen environment, never local paths as server destinations. J5 library code validates and atomically persists imports under a process-wide mutation permit, overlays them on source definitions, and preserves launch snapshots on replacement/removal. The Settings registrations remain thin mounts. Focused tests cover nested file selections, single-file selection, atomic rejection, conflicts, persisted imports, concurrent sessions, restoration, snapshots, and RPC scopes. Native picker/browser interaction still requires an authorized client pass.
 

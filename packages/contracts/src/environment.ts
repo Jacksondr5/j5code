@@ -72,6 +72,7 @@ export type ServerSelfUpdateCapability = typeof ServerSelfUpdateCapability.Type;
 export const ExecutionEnvironmentCapabilities = Schema.Struct({
   /** The J5 ledger is keyed by project. Absent on a server without J5's ledger. */
   j5ProjectLedger: Schema.optionalKey(Schema.Boolean),
+  j5PersonalThreadReads: Schema.optionalKey(Schema.Boolean),
   /**
    * The two keys a J5 server reported while its ledger was keyed by Squadron, naming the Fleet
    * routes and the Inbox and Crew request routes as they were then. A server keyed by project

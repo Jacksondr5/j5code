@@ -1,4 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
+import { createPersonalThreadReadAtoms } from "@t3tools/client-runtime/j5/threadReads";
 import {
   createEnvironmentThreadDetailAtoms,
   createEnvironmentThreadShellAtoms,
@@ -32,12 +33,15 @@ export const threadEnvironment = createThreadEnvironmentAtoms(
   threadFamilies.snapshotAtom,
 );
 export const environmentThreads = createEnvironmentThreadStateAtoms(connectionAtomRuntime);
+const personalReads = createPersonalThreadReadAtoms(connectionAtomRuntime);
 export const environmentThreadDetails = createEnvironmentThreadDetailAtoms(
   environmentThreads.stateAtom,
+  personalReads.markersAtom,
 );
 export const environmentThreadShells = createEnvironmentThreadShellAtoms({
   catalogValueAtom: environmentCatalog.catalogValueAtom,
   snapshotAtom: threadEnvironment.snapshotAtom,
+  personalReadMarkersAtom: personalReads.markersAtom,
 });
 
 /** Keeps the subagent tree under `rootThreadId` in the thread list while the caller shows it. */

@@ -52,6 +52,7 @@ import { layer as spawnCompositionLayer } from "./SpawnCompositionService.ts";
 import { layer as spawnWorkspaceLayer } from "./spawnWorkspace.ts";
 import * as RequestReplayService from "./RequestReplayService.ts";
 import { layer as sharedConversationLayer } from "../sharing/SharedConversation.ts";
+import { layer as threadReadStateLayer } from "../sharing/ThreadReadState.ts";
 import { layer as sharedThreadsLayer } from "../sharing/SharedThreads.ts";
 import { layer as agentHandoffArtifactDeleteLayer } from "../agents/agentHandoffArtifactDelete.ts";
 import { layer as agentHandoffNudgeQueueLayer } from "../agents/agentHandoffNudgeQueue.ts";
@@ -247,6 +248,7 @@ const makeJ5A2AAuxiliaryLayer = (
     // Shared conversations: what a person's message carries to the agent, and who wrote it. It
     // ends a person's asks through the one lifecycle service, whose permit orders every drop.
     sharedConversationLayer.pipe(Layer.provide(lifecycleServiceProvided)),
+    threadReadStateLayer,
   ).pipe(Layer.provideMerge(sharedThreadsLayer), Layer.provideMerge(peerRegistryProvided));
   // The person's permanent artifact delete, which also marks a handoff that pointed at the file.
   const artifactDeletionProvided = artifactDeletionLayer.pipe(
