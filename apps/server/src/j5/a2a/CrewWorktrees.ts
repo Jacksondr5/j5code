@@ -1,6 +1,7 @@
 import {
   OrchestrationV2ProviderSessionJson,
   ProjectId,
+  ProviderSessionId,
   type OrchestrationV2StoredEvent,
   type TerminalSummary,
   ThreadId,
@@ -40,6 +41,7 @@ import { storageCleanupPullRequestMerged } from "../../storageCleanup.ts";
 import * as TerminalManager from "../../terminal/Manager.ts";
 import * as GitVcsDriver from "../../vcs/GitVcsDriver.ts";
 import { withWorkspaceLease } from "../../workspace/workspaceLease.ts";
+import { isSeatWorktreeCreation } from "./CrewSeatPreparation.ts";
 import { readEventStoreHighWater } from "./eventStoreHighWater.ts";
 import { ReadChanges } from "./ReadChanges.ts";
 
@@ -96,6 +98,12 @@ export interface CrewWorktreeSeat {
   readonly threadId: ThreadId;
 }
 
+/** A provider session a seat's thread had attached, read before its archive removes the binding. */
+export interface CrewSeatSession {
+  readonly threadId: ThreadId;
+  readonly providerSessionId: ProviderSessionId;
+}
+
 type KeepReason = Exclude<CrewWorktreeReason, "failed">;
 
 interface RecordedWorktree {
@@ -118,18 +126,30 @@ type CleanupResult = Pick<StoredCleanupEntry, "outcome" | "reason" | "detail">;
 
 export interface CrewWorktreesShape {
   /**
-   * Records the worktree upstream's ThreadLaunch creates for a Crew seat on a new worktree, when
-   * the event is that seat's first `thread.metadata.update` binding a path. Returns whether a row
-   * was written. Worktrees bound any other way, and every worktree from before the record
-   * existed, have no row and are never removed.
+   * Records the worktree ThreadLaunch creates for a Crew seat, when the event is the metadata
+   * update its first-assignment preparation commits. Worktrees bound any other way, a retried
+   * preparation's included, have no row and are never removed. Returns whether a row was written.
    */
   readonly handleStoredEvent: (event: OrchestrationV2StoredEvent) => Effect.Effect<boolean>;
   /**
+   * The live provider sessions these seats' threads are attached to, read before the archive
+   * commits because it removes the binding that names them. Never fails: unreadable sessions are
+   * kept, and the cleanup reports the worktree as in use.
+   */
+  readonly liveSessions: (
+    seats: ReadonlyArray<CrewWorktreeSeat>,
+  ) => Effect.Effect<ReadonlyArray<CrewSeatSession>>;
+  /**
+   * Closes the sessions `liveSessions` found, after the archive commits and before the cleanup
+   * looks for sessions, so the cleanup need not race the archive's own detach. A session another
+   * thread still uses (Codex shares one) stays open. Never fails: a session that does not close
+   * keeps its worktree as in use.
+   */
+  readonly closeSessions: (sessions: ReadonlyArray<CrewSeatSession>) => Effect.Effect<void>;
+  /**
    * The cleanup after a Crew's archive commits: each recorded worktree of an archived seat is
-   * removed when it is clean, merged, unshared (no other thread or project uses it) and unused (no
-   * session or terminal is open in it), and kept with its reason otherwise.
-   * Never fails: a problem checking or removing one worktree is that worktree's outcome, and a
-   * problem reading the records leaves the whole pass empty and logged.
+   * removed when clean, merged, unshared and unused, and kept with its reason otherwise. Never
+   * fails: one worktree's problem is its outcome, and unreadable records leave the pass empty.
    */
   readonly cleanup: (input: {
     readonly seats: ReadonlyArray<CrewWorktreeSeat>;
@@ -197,6 +217,10 @@ const makeLayer = (daemon: boolean) =>
           const event = stored.event;
           if (event.type !== "thread.metadata-updated" || event.payload.worktreePath === null)
             return false;
+          // Only the worktree the seat's own first-assignment preparation creates. A seat can be
+          // pointed at an existing worktree before then (a handoff, a metadata update), and that
+          // one was never J5's to remove.
+          if (!isSeatWorktreeCreation(stored.commandId)) return false;
           const [context] = yield* sql<{ readonly workspace: string }>`
             SELECT workspace FROM j5_crew_seat_context WHERE thread_id = ${event.threadId}
           `;
@@ -220,6 +244,66 @@ const makeLayer = (daemon: boolean) =>
           Effect.logWarning("J5 Crew worktree record skipped", { cause }).pipe(Effect.as(false)),
         ),
       );
+
+      const liveSessions: CrewWorktreesShape["liveSessions"] = Effect.fn(
+        "j5.a2a.crewWorktrees.liveSessions",
+      )(
+        function* (seats) {
+          const found: Array<CrewSeatSession> = [];
+          for (const seat of seats) {
+            const rows = yield* sql<{ readonly provider_session_id: string }>`
+              SELECT session.provider_session_id
+              FROM orchestration_v2_projection_provider_session_bindings AS binding
+              INNER JOIN orchestration_v2_projection_provider_sessions AS session
+                ON session.provider_session_id = binding.provider_session_id
+              WHERE binding.thread_id = ${seat.threadId}
+                AND session.status NOT IN ('stopped', 'error')
+            `;
+            for (const row of rows)
+              found.push({
+                threadId: seat.threadId,
+                providerSessionId: ProviderSessionId.make(row.provider_session_id),
+              });
+          }
+          return found;
+        },
+        Effect.catchCause((cause) =>
+          Effect.logWarning("J5 Crew seat sessions could not be read", { cause }).pipe(
+            Effect.as([] as ReadonlyArray<CrewSeatSession>),
+          ),
+        ),
+      );
+
+      const closeSessions: CrewWorktreesShape["closeSessions"] = Effect.fn(
+        "j5.a2a.crewWorktrees.closeSessions",
+      )(function* (sessions) {
+        for (const { threadId, providerSessionId } of sessions) {
+          yield* Effect.gen(function* () {
+            // Revokes the thread's MCP credential, which the archive's own detach does too and,
+            // finding the thread already detached, would then not.
+            yield* providerSessions.detach({
+              providerSessionId,
+              threadId,
+              detail: "Thread archived.",
+              revokeMcpCredential: true,
+            });
+            const [others] = yield* sql<{ readonly count: number }>`
+              SELECT COUNT(*) AS count FROM orchestration_v2_projection_provider_session_bindings
+              WHERE provider_session_id = ${providerSessionId}
+            `;
+            if (others !== undefined && others.count > 0) return;
+            yield* providerSessions.close(providerSessionId);
+          }).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("J5 Crew seat session did not close", {
+                threadId,
+                providerSessionId,
+                cause,
+              }),
+            ),
+          );
+        }
+      });
 
       const readRecord = (threadId: ThreadId) =>
         sql<{
@@ -897,6 +981,8 @@ const makeLayer = (daemon: boolean) =>
 
       return CrewWorktrees.of({
         handleStoredEvent,
+        liveSessions,
+        closeSessions,
         cleanup,
         estimate,
         listCleanups,

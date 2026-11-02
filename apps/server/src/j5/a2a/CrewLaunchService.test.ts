@@ -520,6 +520,10 @@ it.effect(
         assert.include(brief, "<seat_instructions>\nWrite the running notes.");
         assert.notInclude(brief, "<seat_obligation>");
         assert.include(brief, "persona=custom");
+        const [stored] = yield* (yield* SqlClient.SqlClient)<{
+          readonly agent_display_name: string | null;
+        }>`SELECT agent_display_name FROM j5_crew_seat_context WHERE first_turn_text LIKE '%your_seat: scribe%'`;
+        assert.equal(stored?.agent_display_name, "custom");
 
         // A persona Captain runs under its persona's policy (workspace write, auto-accept-edits here)
         // and has the person supervising it; its custom seat still defaults to Full access.
@@ -1434,7 +1438,13 @@ const unitFixture = Effect.gen(function* () {
     archiveCrewLayer.pipe(
       Layer.provide(archiveAgent),
       Layer.provide(playbookStoreLayer),
-      Layer.provide(Layer.mock(CrewWorktrees)({ cleanup: () => Effect.succeed([]) })),
+      Layer.provide(
+        Layer.mock(CrewWorktrees)({
+          cleanup: () => Effect.succeed([]),
+          liveSessions: () => Effect.succeed([]),
+          closeSessions: () => Effect.void,
+        }),
+      ),
       Layer.provide(
         Layer.mock(ServerSecretStore)({
           getOrCreateRandom: () => Effect.succeed(new Uint8Array(32).fill(7)),
@@ -2380,6 +2390,63 @@ it.effect(
           "b".repeat(40),
         );
         assert.deepStrictEqual(yield* Ref.get(fetches), ["main"]);
+      }).pipe(Effect.provide(layer));
+    }),
+);
+
+it.effect(
+  "an unreachable origin refuses only the seat that started from it, naming that seat",
+  () =>
+    Effect.gen(function* () {
+      const { context, commands, captain } = yield* fixture;
+      const codex = provider("codex", "codex", [{ slug: "gpt-5.6-sol", options: ["high"] }]);
+      const layer = crewLaunchLayer.pipe(
+        Layer.provideMerge(
+          dependencies(
+            commands,
+            [codex],
+            new Set(),
+            new Set(),
+            new Set(),
+            false,
+            new Set(),
+            () => Effect.void,
+            {
+              checkout: {
+                isRepo: true,
+                refName: "j5/main",
+                commits: { main: "a".repeat(40) },
+                origin: { main: "b".repeat(40) },
+                unreachableOriginBranches: ["main"],
+              },
+            },
+          ),
+        ),
+        Layer.provideMerge(Layer.succeedContext(context)),
+        Layer.provideMerge(
+          personaLibraryLayer("j5-crew-launch-", Object.values(BUILT_IN_AGENT_PERSONAS)),
+        ),
+        Layer.provideMerge(NodeServices.layer),
+      );
+      const seat = (name: string, startFromOrigin: boolean) => ({
+        name,
+        agentId: null,
+        reason: "Builds",
+        instructions: "Build it",
+        workspace: { type: "worktree" as const, baseRef: "main", startFromOrigin },
+      });
+      yield* Effect.gen(function* () {
+        const launcher = yield* CrewLaunchService;
+        // The other seats of the roster resolve; the seat from origin is refused by name.
+        const pinned = yield* launcher
+          .pinWorkspaces(captain, [seat("local", false), seat("fresh", true)])
+          .pipe(Effect.flip);
+        assert.include(pinned.detail, 'Seat "fresh":');
+        assert.include(pinned.detail, "could not be fetched");
+        assert.notInclude(pinned.detail, "can't be read");
+        assert.include(pinned.nextStep, "local branch");
+        const [local] = yield* launcher.pinWorkspaces(captain, [seat("local", false)]);
+        assert.equal(local?.type === "worktree" && local.baseCommit, "a".repeat(40));
       }).pipe(Effect.provide(layer));
     }),
 );

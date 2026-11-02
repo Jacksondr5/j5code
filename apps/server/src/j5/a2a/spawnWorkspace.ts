@@ -2,6 +2,7 @@ import type { J5SpawnWorkspace } from "./mcp/tools.ts";
 import {
   type ChatAttachment,
   CommandId,
+  type GitCommandError,
   type MessageId,
   type ModelSelection,
   type ProjectId,
@@ -146,6 +147,8 @@ export type SpawnCheckout =
       readonly missingBaseRefs: ReadonlyArray<SpawnBaseRef>;
       /** The commit each base ref that resolved means now, or the saved pin that still exists. */
       readonly baseCommits: ReadonlyArray<SpawnBaseRef & { readonly sha: string }>;
+      /** Base refs chosen from origin whose fetch failed, with why; only their seats are refused. */
+      readonly unreachableBaseRefs: ReadonlyArray<SpawnBaseRef & { readonly problem: string }>;
     }
   | { readonly readable: false; readonly problem: string };
 
@@ -234,6 +237,15 @@ export const resolveSpawnWorkspace = (
     base.ref === choice.baseRef &&
     base.startFromOrigin === startFromOrigin &&
     base.commit === choice.baseCommit;
+  const unreachable = checkout.unreachableBaseRefs.find(sameBase);
+  if (unreachable !== undefined)
+    return Result.fail(
+      new SpawnWorkspaceError({
+        detail: `Base '${choice.baseRef}' was chosen from origin, but origin could not be fetched (${unreachable.problem}).`,
+        nextStep:
+          "Check the connection to origin, or start the member from the local branch instead.",
+      }),
+    );
   if (checkout.missingBaseRefs.some(sameBase))
     return Result.fail(
       choice.baseCommit === undefined
@@ -336,6 +348,11 @@ export interface SpawnWorkspaceServiceShape {
     readonly checkBranches: boolean;
     /** Base refs to check before anything is created (see `namedBaseRefs`). */
     readonly baseRefs: ReadonlyArray<SpawnBaseRef>;
+    /**
+     * Pin each base to a commit, fetching origin for one chosen from there. Off for a direct
+     * spawn, which doesn't use a pin: it only checks the ref exists, with no fetch.
+     */
+    readonly pinBases: boolean;
   }) => Effect.Effect<SpawnCheckout>;
   /**
    * What the roster card offers: the caller's branch, the directory its branch picker searches,
@@ -451,31 +468,56 @@ const make = Effect.gen(function* () {
     };
   });
 
+  type BaseResolution =
+    | { readonly kind: "commit"; readonly sha: string }
+    | { readonly kind: "found" }
+    | { readonly kind: "missing" }
+    | { readonly kind: "unreachable"; readonly problem: string };
+
   /**
    * The commit a base means, from where the caller works: its saved pin while that commit exists,
-   * else the ref now. From origin, the commit is origin's, fetched now as preparation would, so
-   * the pin is what a later preparation would have started from; with no such origin branch it is
-   * the local ref. Null when nothing resolves; no other revision is tried.
+   * else the ref now (from origin, origin's, fetched now). Missing when nothing resolves, and
+   * unreachable when the fetch fails, rather than pinning a stale ref the person didn't choose.
    */
   const resolveBase = Effect.fn("j5.spawnWorkspace.resolveBase")(function* (
     cwd: string,
     base: SpawnBaseRef,
-  ) {
+  ): Effect.fn.Return<BaseResolution, GitCommandError> {
     if (base.commit !== undefined)
-      return (yield* git.hasCommit({ cwd, refName: base.commit })) ? base.commit : null;
+      return (yield* git.hasCommit({ cwd, refName: base.commit }))
+        ? { kind: "commit", sha: base.commit }
+        : { kind: "missing" };
     if (base.startFromOrigin && (yield* git.remoteExists({ cwd, remoteName: "origin" }))) {
-      yield* git.fetchRemote({ cwd, remoteName: "origin", refName: base.ref });
+      const fetched = yield* git
+        .fetchRemote({ cwd, remoteName: "origin", refName: base.ref })
+        .pipe(Effect.result);
+      if (Result.isFailure(fetched))
+        return { kind: "unreachable", problem: detailOf(fetched.failure) };
       if (yield* git.remoteBranchExists({ cwd, remoteName: "origin", refName: base.ref }))
-        return (yield* git.resolveRemoteTrackingCommit({
-          cwd,
-          refName: base.ref,
-          fallbackRemoteName: "origin",
-        })).commitSha;
+        return {
+          kind: "commit",
+          sha: (yield* git.resolveRemoteTrackingCommit({
+            cwd,
+            refName: base.ref,
+            fallbackRemoteName: "origin",
+          })).commitSha,
+        };
     }
     return yield* driver.resolveCommit({ cwd, revision: base.ref }).pipe(
-      Effect.map(({ commitSha }) => commitSha),
-      Effect.orElseSucceed(() => null),
+      Effect.map(({ commitSha }): BaseResolution => ({ kind: "commit", sha: commitSha })),
+      Effect.orElseSucceed((): BaseResolution => ({ kind: "missing" })),
     );
+  });
+
+  /** Whether a base exists as asked, with no fetch; a base from origin may be its fetched copy. */
+  const baseExists = Effect.fn("j5.spawnWorkspace.baseExists")(function* (
+    cwd: string,
+    base: SpawnBaseRef,
+  ) {
+    const found = yield* git.hasCommit({ cwd, refName: base.ref });
+    return found || !base.startFromOrigin
+      ? found
+      : yield* git.hasCommit({ cwd, refName: `refs/remotes/origin/${base.ref}` });
   });
 
   const inspect: SpawnWorkspaceServiceShape["inspect"] = Effect.fn("j5.spawnWorkspace.inspect")(
@@ -500,11 +542,21 @@ const make = Effect.gen(function* () {
           : Effect.succeed(worktree),
       );
       const bases = yield* Effect.forEach(caller.baseRefs, (base) =>
-        resolveBase(cwd, base).pipe(Effect.map((sha) => ({ base, sha }))),
+        (caller.pinBases
+          ? resolveBase(cwd, base)
+          : baseExists(cwd, base).pipe(
+              Effect.map((found): BaseResolution => ({ kind: found ? "found" : "missing" })),
+            )
+        ).pipe(Effect.map((resolution) => ({ base, resolution }))),
       );
-      const missingBaseRefs = bases.flatMap(({ base, sha }) => (sha === null ? [base] : []));
-      const baseCommits = bases.flatMap(({ base, sha }) =>
-        sha === null ? [] : [{ ...base, sha }],
+      const missingBaseRefs = bases.flatMap(({ base, resolution }) =>
+        resolution.kind === "missing" ? [base] : [],
+      );
+      const baseCommits = bases.flatMap(({ base, resolution }) =>
+        resolution.kind === "commit" ? [{ ...base, sha: resolution.sha }] : [],
+      );
+      const unreachableBaseRefs = bases.flatMap(({ base, resolution }) =>
+        resolution.kind === "unreachable" ? [{ ...base, problem: resolution.problem }] : [],
       );
       return {
         readable: true,
@@ -512,6 +564,7 @@ const make = Effect.gen(function* () {
         localBranchNames: caller.checkBranches ? yield* git.listLocalBranchNames(cwd) : [],
         missingBaseRefs,
         baseCommits,
+        unreachableBaseRefs,
       } satisfies SpawnCheckout;
     },
     Effect.catch((cause) =>

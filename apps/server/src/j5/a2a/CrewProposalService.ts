@@ -947,97 +947,96 @@ export const layer = Layer.effect(
       },
     );
 
-    const resolveProposal = (
+    const resolveProposal = Effect.fn("j5.a2a.crewProposal.resolveProposal")(function* (
       input: ResolveCrewProposalInput,
       automatic = false,
-    ): Effect.Effect<CrewProposalOutcome, CrewProposalError> =>
-      Effect.gen(function* () {
-        // Who is answering rides on the proposal from here: both notices and the record read it.
-        const proposal = yield* proposals.read(input.proposalId).pipe(
-          Effect.mapError(operationError("reading the proposal")),
-          Effect.map((read) =>
-            read === null ? null : { ...read, decidedBy: input.decidedBy ?? null },
-          ),
-        );
-        if (proposal === null)
-          return yield* new CrewProposalNotFoundError({ proposalId: input.proposalId });
-        if (proposal.status !== "open")
+    ): Effect.fn.Return<CrewProposalOutcome, CrewProposalError> {
+      // Who is answering rides on the proposal from here: both notices and the record read it.
+      const proposal = yield* proposals.read(input.proposalId).pipe(
+        Effect.mapError(operationError("reading the proposal")),
+        Effect.map((read) =>
+          read === null ? null : { ...read, decidedBy: input.decidedBy ?? null },
+        ),
+      );
+      if (proposal === null)
+        return yield* new CrewProposalNotFoundError({ proposalId: input.proposalId });
+      if (proposal.status !== "open")
+        return yield* new CrewProposalNotOpenError({
+          proposalId: proposal.id,
+          status: proposal.status,
+        });
+      if (input.decision === "decline") {
+        // Told before it is recorded: a notice or cleanup the store refused leaves the
+        // proposal open for the person to decline again, and the notice id is deterministic.
+        yield* retireUnlaunchedCrew(proposal);
+        yield* notifyDeclined(proposal);
+        const declined = yield* proposals
+          .resolve({
+            id: proposal.id,
+            decision: "decline",
+            approvedSeats: null,
+            resolvedAt: DateTime.formatIso(yield* DateTime.now),
+            decidedBy: proposal.decidedBy,
+          })
+          .pipe(Effect.mapError(operationError("recording the decline")));
+        if (declined === null)
           return yield* new CrewProposalNotOpenError({
             proposalId: proposal.id,
-            status: proposal.status,
+            status: "resolved",
           });
-        if (input.decision === "decline") {
-          // Told before it is recorded: a notice or cleanup the store refused leaves the
-          // proposal open for the person to decline again, and the notice id is deterministic.
-          yield* retireUnlaunchedCrew(proposal);
-          yield* notifyDeclined(proposal);
-          const declined = yield* proposals
-            .resolve({
-              id: proposal.id,
-              decision: "decline",
-              approvedSeats: null,
-              resolvedAt: DateTime.formatIso(yield* DateTime.now),
-              decidedBy: proposal.decidedBy,
-            })
-            .pipe(Effect.mapError(operationError("recording the decline")));
-          if (declined === null)
-            return yield* new CrewProposalNotOpenError({
-              proposalId: proposal.id,
-              status: "resolved",
-            });
-          yield* recordResolved(proposal, null);
-          return { proposal: declined, instance: null } satisfies CrewProposalOutcome;
-        }
-        const seats = input.seats ?? proposal.requestedSeats;
-        const { plan, definition } = yield* validateProposalSeats(proposal, seats);
-        const captain = yield* captainFor(proposal);
-        const resolved = yield* resolveRuntime(captain, seats);
-        if (
-          !automatic &&
-          input.approvalToken !==
-            crewApprovalToken(proposal, captain, resolved, planDigest(proposal.playbook, plan))
-        )
-          return yield* new CrewProposalRequestError({
-            detail:
-              "The crew runtime preview is missing or has changed since it was shown: the roster, a seat's runtime, the playbook plan, a seat's workspace, or the Captain's branch or worktree may have changed.",
-            nextStep: "Refresh the preview and review the current settings before approving.",
-          });
-        const launched = yield* fulfil(
-          proposal,
-          captain,
-          withPersonaSwaps(
-            withBaseCommits(
-              seats,
-              resolved.map(({ workspace }) => workspace),
-            ),
-            plan.swapsBySeat,
+        yield* recordResolved(proposal, null);
+        return { proposal: declined, instance: null } satisfies CrewProposalOutcome;
+      }
+      const seats = input.seats ?? proposal.requestedSeats;
+      const { plan, definition } = yield* validateProposalSeats(proposal, seats);
+      const captain = yield* captainFor(proposal);
+      const resolved = yield* resolveRuntime(captain, seats);
+      if (
+        !automatic &&
+        input.approvalToken !==
+          crewApprovalToken(proposal, captain, resolved, planDigest(proposal.playbook, plan))
+      )
+        return yield* new CrewProposalRequestError({
+          detail:
+            "The crew runtime preview is missing or has changed since it was shown: the roster, a seat's runtime, the playbook plan, a seat's workspace, or the Captain's branch or worktree may have changed.",
+          nextStep: "Refresh the preview and review the current settings before approving.",
+        });
+      const launched = yield* fulfil(
+        proposal,
+        captain,
+        withPersonaSwaps(
+          withBaseCommits(
+            seats,
+            resolved.map(({ workspace }) => workspace),
           ),
-          resolved,
-          launchPlaybook(proposal.playbook, definition),
-        ).pipe(
-          // The member store is authoritative when concurrent additions claim the same step.
-          Effect.catchTags({
-            CrewStepAlreadyOwnedError: (error) =>
-              Effect.fail(
-                new CrewProposalRequestError({
-                  detail: `Step ${error.stepId} is already owned by seat ${error.ownerSeat}.`,
-                  nextStep: "Ask the Captain to request the seat again with only unowned steps.",
-                }),
-              ),
-          }),
-        );
-        const final = yield* proposals
-          .read(proposal.id)
-          .pipe(Effect.mapError(operationError("reading the approved proposal")));
-        // The Captain hears once the seats have started or failed to start, not now: a
-        // dispatched brief is intent, and the report says what became of it.
-        yield* reporter.watch(proposal.id, launched.seats);
-        yield* recordResolved(proposal, seats);
-        return {
-          proposal: final ?? proposal,
-          instance: launched.instance,
-        } satisfies CrewProposalOutcome;
-      });
+          plan.swapsBySeat,
+        ),
+        resolved,
+        launchPlaybook(proposal.playbook, definition),
+      ).pipe(
+        // The member store is authoritative when concurrent additions claim the same step.
+        Effect.catchTags({
+          CrewStepAlreadyOwnedError: (error) =>
+            Effect.fail(
+              new CrewProposalRequestError({
+                detail: `Step ${error.stepId} is already owned by seat ${error.ownerSeat}.`,
+                nextStep: "Ask the Captain to request the seat again with only unowned steps.",
+              }),
+            ),
+        }),
+      );
+      const final = yield* proposals
+        .read(proposal.id)
+        .pipe(Effect.mapError(operationError("reading the approved proposal")));
+      // The Captain hears once the seats have started or failed to start, not now: a
+      // dispatched brief is intent, and the report says what became of it.
+      yield* reporter.watch(proposal.id, launched.seats);
+      yield* recordResolved(proposal, seats);
+      return {
+        proposal: final ?? proposal,
+        instance: launched.instance,
+      } satisfies CrewProposalOutcome;
+    });
 
     const refusedAutomaticRequest = (proposal: CrewProposal, detail: string) =>
       new CrewProposalRequestError({
@@ -1047,28 +1046,29 @@ export const layer = Layer.effect(
       });
 
     const approveAutomatically = (proposalId: string) => {
-      const refused = (error: CrewProposalError): Effect.Effect<never, CrewProposalError> =>
-        Effect.gen(function* () {
-          const proposal = yield* proposals
-            .read(proposalId)
-            .pipe(Effect.mapError(operationError("reading the refused request")));
-          const detail = error._tag === "CrewProposalRequestError" ? error.detail : error.message;
-          if (proposal?.status === "open") {
-            yield* retireUnlaunchedCrew(proposal);
-            yield* proposals
-              .resolve({
-                id: proposalId,
-                decision: "decline",
-                refusalDetail: detail,
-                approvedSeats: null,
-                resolvedAt: DateTime.formatIso(yield* DateTime.now),
-              })
-              .pipe(Effect.mapError(operationError("recording the refusal")));
-            yield* recordResolved(proposal, null);
-          }
-          if (proposal === null) return yield* error;
-          return yield* refusedAutomaticRequest(proposal, detail);
-        });
+      const refused = Effect.fn("j5.a2a.crewProposal.refused")(function* (
+        error: CrewProposalError,
+      ): Effect.fn.Return<never, CrewProposalError> {
+        const proposal = yield* proposals
+          .read(proposalId)
+          .pipe(Effect.mapError(operationError("reading the refused request")));
+        const detail = error._tag === "CrewProposalRequestError" ? error.detail : error.message;
+        if (proposal?.status === "open") {
+          yield* retireUnlaunchedCrew(proposal);
+          yield* proposals
+            .resolve({
+              id: proposalId,
+              decision: "decline",
+              refusalDetail: detail,
+              approvedSeats: null,
+              resolvedAt: DateTime.formatIso(yield* DateTime.now),
+            })
+            .pipe(Effect.mapError(operationError("recording the refusal")));
+          yield* recordResolved(proposal, null);
+        }
+        if (proposal === null) return yield* error;
+        return yield* refusedAutomaticRequest(proposal, detail);
+      });
       return resolveProposal({ proposalId, decision: "approve" }, true).pipe(
         Effect.catchTags({
           CrewProposalRequestError: refused,

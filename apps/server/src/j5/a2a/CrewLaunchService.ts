@@ -306,6 +306,7 @@ export const layer = Layer.effect(
               (seat) => seat.workspace.type === "worktree" && seat.workspace.branch !== undefined,
             ),
             baseRefs: namedBaseRefs(seats.map((seat) => seat.workspace)),
+            pinBases: true,
             existingWorktreePaths: namedWorktreePaths(seats.map((seat) => seat.workspace)),
           });
 
@@ -808,8 +809,8 @@ export const layer = Layer.effect(
         });
         const workspaceJson = yield* encodeWorkspace(member.workspace);
         yield* sql`
-          INSERT INTO j5_crew_seat_context (thread_id, first_turn_text, workspace)
-          VALUES (${member.threadId}, ${text}, ${workspaceJson})
+          INSERT INTO j5_crew_seat_context (thread_id, first_turn_text, workspace, agent_display_name)
+          VALUES (${member.threadId}, ${text}, ${workspaceJson}, ${member.agentDisplayName})
           ON CONFLICT (thread_id) DO NOTHING
         `;
       }

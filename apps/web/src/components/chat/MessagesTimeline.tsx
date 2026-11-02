@@ -705,7 +705,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   });
   // J5 (case 104): a Crew notice with nothing for the person takes no row, dropped after the rows
   // are derived so it still bounds the Captain turn it started.
-  const rows = withoutHiddenCrewNotices(useStableRows(rawRows, listIdentityKey));
+  const rows = useStableRows(withoutHiddenCrewNotices(rawRows), listIdentityKey);
   // Run status/timestamps change per stream event; keep them out of shared row context.
   const runs = useStableHandoffRuns(runsProp);
   const minimapItems = deriveTimelineMinimapItems(rows);
