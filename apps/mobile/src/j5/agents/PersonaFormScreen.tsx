@@ -85,20 +85,29 @@ export function PersonaFormScreen(props: {
     <SettingsScreen title={props.title}>
       {Platform.OS === "ios" ? (
         <NativeStackScreenOptions
-          options={{
-            headerBackVisible: false,
-            gestureEnabled: !props.guarded,
-            // Native Back pops before removal guards; a bar action lets the guard run first.
-            unstable_headerLeftItems: () => [
-              withNativeGlassHeaderItem({
-                type: "button",
-                label: "",
-                accessibilityLabel: "Back",
-                icon: { type: "sfSymbol", name: "chevron.backward" },
-                onPress: () => navigation.goBack(),
-              }),
-            ],
-          }}
+          // A custom back item also turns off iOS's swipe back, so it stays only while guarded.
+          options={
+            props.guarded
+              ? {
+                  headerBackVisible: false,
+                  gestureEnabled: false,
+                  // Native Back pops before removal guards; a bar action lets the guard run first.
+                  unstable_headerLeftItems: () => [
+                    withNativeGlassHeaderItem({
+                      type: "button",
+                      label: "",
+                      accessibilityLabel: "Back",
+                      icon: { type: "sfSymbol", name: "chevron.backward" },
+                      onPress: () => navigation.goBack(),
+                    }),
+                  ],
+                }
+              : {
+                  headerBackVisible: true,
+                  gestureEnabled: true,
+                  unstable_headerLeftItems: undefined,
+                }
+          }
         />
       ) : null}
       <KeyboardAvoidingView
