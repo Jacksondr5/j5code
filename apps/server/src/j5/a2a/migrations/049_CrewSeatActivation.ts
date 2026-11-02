@@ -9,7 +9,8 @@ export default Effect.gen(function* () {
       first_turn_text TEXT NOT NULL,
       workspace TEXT NOT NULL,
       delivered_roster TEXT,
-      delivered_conversation TEXT
+      delivered_conversation TEXT,
+      agent_display_name TEXT
     )
   `;
   yield* sql`

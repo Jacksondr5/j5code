@@ -55,7 +55,14 @@ it.effect(
     `;
       assert.deepStrictEqual(
         columns.map((column) => column.name),
-        ["thread_id", "first_turn_text", "workspace", "delivered_roster", "delivered_conversation"],
+        [
+          "thread_id",
+          "first_turn_text",
+          "workspace",
+          "delivered_roster",
+          "delivered_conversation",
+          "agent_display_name",
+        ],
       );
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );

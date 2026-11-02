@@ -106,10 +106,20 @@ const make = Effect.gen(function* () {
       }
       const crew = yield* crews.read(membership.crewInstanceId);
       if (crew === null) return yield* new CrewTurnContextError({ threadId });
+      // The name each seat was launched with; a seat from before it was recorded falls back to
+      // its persona id.
+      const launched = yield* sql<{
+        readonly thread_id: string;
+        readonly agent_display_name: string | null;
+      }>`
+        SELECT thread_id, agent_display_name FROM j5_crew_seat_context
+        WHERE thread_id IN ${sql.in(crew.members.map((member) => member.threadId))}
+      `;
+      const displayNames = new Map(launched.map((row) => [row.thread_id, row.agent_display_name]));
       const roster = crew.members.map((member) => ({
         seat: member.seatName,
         participantId: member.participantId,
-        agentDisplayName: member.agentId ?? "custom",
+        agentDisplayName: displayNames.get(member.threadId) ?? member.agentId ?? "custom",
         reason: member.reason,
       }));
       const rosterJson = encodeRoster(roster);
@@ -152,17 +162,22 @@ const make = Effect.gen(function* () {
           ].join("\n");
       }
 
+      // Only a first delivery, a new roster or a new conversation changes what the Crew reads.
+      const unchanged =
+        context.delivered_roster === rosterJson && context.delivered_conversation === conversation;
       return {
         prefix: deliveryContext(prefix),
-        delivered: sql`
-          UPDATE j5_crew_seat_context
-          SET delivered_roster = ${rosterJson}, delivered_conversation = ${conversation}
-          WHERE thread_id = ${threadId}
-        `.pipe(
-          Effect.andThen(changes.notify("crew", "fleet")),
-          Effect.asVoid,
-          Effect.mapError((cause) => new CrewTurnContextError({ threadId, cause })),
-        ),
+        delivered: unchanged
+          ? Effect.void
+          : sql`
+              UPDATE j5_crew_seat_context
+              SET delivered_roster = ${rosterJson}, delivered_conversation = ${conversation}
+              WHERE thread_id = ${threadId}
+            `.pipe(
+              Effect.andThen(changes.notify("crew", "fleet")),
+              Effect.asVoid,
+              Effect.mapError((cause) => new CrewTurnContextError({ threadId, cause })),
+            ),
       };
     }).pipe(
       Effect.mapError((cause) =>
@@ -211,7 +226,9 @@ const make = Effect.gen(function* () {
   return CrewTurnContext.of({ isSeat, deliver, steering });
 });
 
-export const layer = Layer.effect(CrewTurnContext, make).pipe(
+/** The service over the caller's `ReadChanges`, so a test can watch what it announces. */
+export const layerWithChanges = Layer.effect(CrewTurnContext, make).pipe(
   Layer.provide(Crews.layer),
-  Layer.provide(ReadChanges.layer),
 );
+
+export const layer = layerWithChanges.pipe(Layer.provide(ReadChanges.layer));
