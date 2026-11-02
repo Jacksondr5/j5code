@@ -135,10 +135,12 @@ export interface CrewWorktreesShape {
     readonly seats: ReadonlyArray<CrewWorktreeSeat>;
     /**
      * Given, the worktrees kept for unfinished work (uncommitted changes, unmerged commits) are
-     * also filed as one Inbox approval for this Crew, unless it already has one.
+     * also filed as one Inbox approval for this archive of the Crew, unless it already has one.
      */
     readonly crew?: {
       readonly crewInstanceId: string;
+      /** The Crew's archive stamp: the same archive run again files nothing, a later one files its own. */
+      readonly archivedAt: string;
       readonly crewName: string;
       readonly projectId: string;
       readonly captainThreadId: ThreadId;
@@ -148,6 +150,11 @@ export interface CrewWorktreesShape {
   readonly listCleanups: (
     status: "open" | "decided",
   ) => Effect.Effect<ReadonlyArray<CrewWorktreeCleanupItem>, SqlError>;
+  /**
+   * The Crew came back (its Captain was unarchived): an open approval for its earlier archive no
+   * longer has anything to decide, so it is dropped. An answered one stays as the record.
+   */
+  readonly withdrawCleanup: (crewInstanceId: string) => Effect.Effect<void>;
   /**
    * A person's answer: removes the listed worktrees of the item, keeps the rest, and records what
    * happened to each. Each is checked again first, against what the archive measured, and one
@@ -596,7 +603,7 @@ const makeLayer = (daemon: boolean) =>
         } satisfies StoredCleanupEntry;
       });
 
-      /** One approval per Crew, answered or not, so an archive that runs again files nothing. */
+      /** One approval per archive of a Crew, answered or not, so the same archive run again files nothing. */
       const fileCleanup = Effect.fnUntraced(function* (
         crew: NonNullable<Parameters<CrewWorktreesShape["cleanup"]>[0]["crew"]>,
         unfinished: ReadonlyArray<UnfinishedWorktree>,
@@ -604,11 +611,12 @@ const makeLayer = (daemon: boolean) =>
         const entries = yield* Effect.forEach(unfinished, measure);
         const filed = yield* sql<{ readonly id: string }>`
           INSERT INTO j5_crew_worktree_cleanup (
-            id, crew_instance_id, crew_name, project_id, captain_thread_id, filed_at, entries_json
+            id, crew_instance_id, crew_name, project_id, captain_thread_id, archived_at, filed_at,
+            entries_json
           )
           VALUES (
             ${NodeCrypto.randomUUID()}, ${crew.crewInstanceId}, ${crew.crewName}, ${crew.projectId},
-            ${crew.captainThreadId}, ${DateTime.formatIso(yield* DateTime.now)},
+            ${crew.captainThreadId}, ${crew.archivedAt}, ${DateTime.formatIso(yield* DateTime.now)},
             ${yield* encodeEntries(entries)}
           )
           ON CONFLICT DO NOTHING
@@ -616,6 +624,22 @@ const makeLayer = (daemon: boolean) =>
         `;
         if (filed.length > 0) yield* changes.notify("inbox");
       });
+
+      const withdrawCleanup: CrewWorktreesShape["withdrawCleanup"] = Effect.fn(
+        "j5.a2a.crewWorktrees.withdrawCleanup",
+      )(
+        function* (crewInstanceId) {
+          const withdrawn = yield* sql<{ readonly id: string }>`
+            DELETE FROM j5_crew_worktree_cleanup
+            WHERE crew_instance_id = ${crewInstanceId} AND decided_at IS NULL
+            RETURNING id
+          `;
+          if (withdrawn.length > 0) yield* changes.notify("inbox");
+        },
+        Effect.catchCause((cause) =>
+          Effect.logWarning("J5 Crew worktree cleanup approval not withdrawn", { cause }),
+        ),
+      );
 
       const cleanup: CrewWorktreesShape["cleanup"] = Effect.fn("j5.a2a.crewWorktrees.cleanup")(
         function* ({ seats, crew }) {
@@ -899,6 +923,7 @@ const makeLayer = (daemon: boolean) =>
         handleStoredEvent,
         cleanup,
         estimate,
+        withdrawCleanup,
         listCleanups,
         answerCleanup,
       });

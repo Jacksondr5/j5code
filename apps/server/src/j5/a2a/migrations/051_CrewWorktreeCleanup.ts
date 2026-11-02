@@ -4,8 +4,9 @@ import * as SqlClient from "effect/sql/SqlClient";
 /**
  * The Inbox approval an archive files for the worktrees it kept with unfinished work: one row per
  * item, its worktrees (as measured, then as decided) in `entries_json`. An item is open until
- * `decided_at` is set, and a Crew has at most one item, open or decided, so an archive that runs
- * again after "Keep all" files nothing.
+ * `decided_at` is set, and an archive of a Crew (named by the Crew's `archived_at`) has at most one
+ * item, open or decided, so the same archive run again after "Keep all" files nothing, while a
+ * Crew restored with its Captain and archived again files its own.
  */
 export default Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
@@ -16,6 +17,7 @@ export default Effect.gen(function* () {
       crew_name TEXT NOT NULL,
       project_id TEXT NOT NULL,
       captain_thread_id TEXT NOT NULL,
+      archived_at TEXT NOT NULL,
       filed_at TEXT NOT NULL,
       decided_at TEXT,
       entries_json TEXT NOT NULL
@@ -23,6 +25,6 @@ export default Effect.gen(function* () {
   `;
   yield* sql`
     CREATE UNIQUE INDEX j5_crew_worktree_cleanup_crew
-    ON j5_crew_worktree_cleanup (crew_instance_id)
+    ON j5_crew_worktree_cleanup (crew_instance_id, archived_at)
   `;
 });

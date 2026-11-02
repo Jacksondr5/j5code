@@ -798,6 +798,7 @@ it.effect(
 
 const crew = {
   crewInstanceId: "crew:one",
+  archivedAt: "2026-10-27T13:00:00.000Z",
   crewName: "Crew One",
   projectId: projectId,
   captainThreadId: ThreadId.make("thread:crew-worktrees:captain"),
@@ -993,6 +994,42 @@ it.effect("skips a worktree whose files were already changed when they change ag
         yield* f.fs.readFileString(f.path.join(edited.worktree, "tracked.txt")),
         "edited again\n",
       );
+    }),
+  ),
+);
+
+it.effect("a Crew archived again after it came back files its own approval", () =>
+  run(
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const first = yield* f.seat("first");
+      yield* f.fs.writeFileString(f.path.join(first.worktree, "new.txt"), "new\n");
+      yield* f.service.cleanup({ seats: [first], crew });
+      assert.lengthOf(yield* f.service.listCleanups("open"), 1);
+
+      // The Captain came back: the open item has nothing left to decide, and shows nowhere.
+      f.notified.length = 0;
+      yield* f.service.withdrawCleanup(crew.crewInstanceId);
+      assert.lengthOf(yield* f.service.listCleanups("open"), 0);
+      assert.lengthOf(yield* f.service.listCleanups("decided"), 0);
+      assert.deepStrictEqual(f.notified, [["inbox"]]);
+
+      const second = yield* f.seat("second");
+      yield* f.fs.writeFileString(f.path.join(second.worktree, "new.txt"), "new\n");
+      const again = { ...crew, archivedAt: "2026-10-28T13:00:00.000Z" };
+      yield* f.service.cleanup({ seats: [first, second], crew: again });
+      const [item] = yield* f.service.listCleanups("open");
+      assert.deepStrictEqual(
+        item!.entries.map((entry) => entry.threadId),
+        [first.threadId, second.threadId],
+      );
+
+      // The same archive run again files nothing more, and withdrawing leaves an answered item.
+      yield* f.service.cleanup({ seats: [first, second], crew: again });
+      assert.lengthOf(yield* f.service.listCleanups("open"), 1);
+      yield* f.service.answerCleanup({ itemId: item!.id, removePaths: [] });
+      yield* f.service.withdrawCleanup(crew.crewInstanceId);
+      assert.lengthOf(yield* f.service.listCleanups("decided"), 1);
     }),
   ),
 );
