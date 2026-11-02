@@ -356,7 +356,7 @@ export async function saveState(stateDir: string, state: CatalogState) {
   await writeSkillStateAtomically(stateFilePath(stateDir), `${JSON.stringify(state, null, 2)}\n`);
 }
 
-export function reconcileLinks({
+function reconcileLinks({
   result,
   previousLinks,
 }: {
@@ -382,7 +382,7 @@ export class IncompleteApplyError extends Error {
   }
 }
 
-export function toApplyResult({
+function toApplyResult({
   explicitGroups,
   plan,
   result,

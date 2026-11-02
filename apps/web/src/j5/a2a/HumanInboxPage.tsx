@@ -1,12 +1,18 @@
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { ProjectId, ThreadId, type EnvironmentId } from "@t3tools/contracts";
-import { scopedInboxItemKey, type ScopedHumanInboxItem } from "@t3tools/contracts/j5";
+import { scopedInboxItemKey } from "@t3tools/contracts/j5";
 import { useAtomValue } from "@effect/atom-react";
 import {
+  answeredByLine,
+  closedLine,
   compareInboxItems,
+  type HumanInboxAnswerAttempt,
   j5SourceNotice,
+  keepForPersonScopes,
   mergeHumanInboxSources,
+  nextKeptItems,
   type PresentedHumanInboxItem as HumanInboxItem,
+  submitHumanInboxAnswer,
 } from "@t3tools/client-runtime/j5/inbox";
 import { spansMultipleEnvironments } from "@t3tools/client-runtime/j5/readSources";
 import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
@@ -20,7 +26,7 @@ import {
   InboxIcon,
   RefreshCwIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import ChatMarkdown from "../../components/ChatMarkdown";
 import { WorkspaceBreadcrumb, WorkspaceBreadcrumbItem } from "../../components/WorkspaceBreadcrumb";
@@ -35,10 +41,11 @@ import { isElectron } from "../../env";
 import { randomUUID } from "../../lib/utils";
 import { useProject, useThreadShell } from "../../state/entities";
 import { buildThreadRouteParams } from "../../threadRoutes";
-import { formatElapsedDurationLabel } from "../../timestampFormat";
+import { RelativeTime } from "../../components/RelativeTime";
+import { RelativeAge } from "../RelativeAge";
 import { answerHumanExchange } from "./humanInboxClient";
 import { useScopedParticipantLabels } from "./ParticipantIdentitiesClient";
-import { presentParticipantIdentity } from "./ParticipantIdentity";
+import { presentParticipantIdentity } from "@t3tools/client-runtime/j5/participant-identity";
 import { CrewRuntimeRequestsSection } from "../crew/CrewRuntimeRequestsSection";
 import type { ScopedCrewRuntimeRequest } from "../crew/crewRuntimeRequests.logic";
 import {
@@ -59,13 +66,7 @@ import {
 import { useLogicalProjects } from "../logicalProjects";
 import { createVisibleRefreshHook } from "../useVisibleRefresh";
 import { notifyHumanInboxChanged } from "./humanInboxRefresh";
-import { answeredByLine, closedLine, nextKeptItems } from "./inboxKept.logic";
 import { useConnectionAccess } from "../sharing/access";
-
-interface HumanInboxAnswerAttempt {
-  readonly message: string;
-  readonly clientRequestId: string;
-}
 
 type HumanInboxAnswers = Readonly<Record<string, string>>;
 type SenderLabels = ReadonlyMap<EnvironmentId, ReadonlyMap<string, string>>;
@@ -120,9 +121,6 @@ const urgencyPresentation = {
   fyi: { label: "FYI", variant: "secondary" as const },
 };
 
-export const formatAnsweredAgeLabel = (elapsed: string) =>
-  elapsed === "just now" ? "answered just now" : elapsed ? `answered ${elapsed} ago` : "answered";
-
 export function captureHumanInboxAnswer(
   event: { readonly currentTarget: { readonly value: string } },
   exchangeId: string,
@@ -133,61 +131,6 @@ export function captureHumanInboxAnswer(
     ...current,
     [exchangeId]: value,
   }));
-}
-
-export async function submitHumanInboxAnswer(input: {
-  readonly item: ScopedHumanInboxItem;
-  readonly message: string;
-  readonly attempts: Map<string, HumanInboxAnswerAttempt>;
-  readonly randomUUID: () => string;
-  readonly send: (
-    environmentId: EnvironmentId,
-    request: {
-      readonly exchangeId: string;
-      readonly message: string;
-      readonly clientRequestId: string;
-    },
-  ) => Promise<unknown>;
-  readonly refresh: (environmentId: EnvironmentId, personId: string) => Promise<void>;
-  readonly notifyChanged: (environmentId: EnvironmentId) => void;
-  readonly onAccepted: () => void;
-  readonly setPendingExchangeId: (exchangeId: string | null) => void;
-  readonly setError: (message: string | null) => void;
-}) {
-  const itemKey = scopedInboxItemKey(input.item);
-  input.setPendingExchangeId(itemKey);
-  input.setError(null);
-  try {
-    try {
-      const previousAttempt = input.attempts.get(itemKey);
-      const attempt =
-        previousAttempt?.message === input.message
-          ? previousAttempt
-          : { message: input.message, clientRequestId: input.randomUUID() };
-      input.attempts.set(itemKey, attempt);
-      // The server answers as the connection's own person; the request names no one.
-      await input.send(input.item.environmentId, {
-        exchangeId: input.item.exchangeId,
-        message: input.message,
-        clientRequestId: attempt.clientRequestId,
-      });
-    } catch (cause) {
-      input.setError(cause instanceof Error ? cause.message : "Could not deliver the answer.");
-      return;
-    }
-    input.attempts.delete(itemKey);
-    input.notifyChanged(input.item.environmentId);
-    input.onAccepted();
-    try {
-      await input.refresh(input.item.environmentId, input.item.personId);
-    } catch {
-      input.setError(
-        "Answer delivered, but the inbox could not be refreshed. The list may be stale.",
-      );
-    }
-  } finally {
-    input.setPendingExchangeId(null);
-  }
 }
 
 function OpenThreadButton({
@@ -284,7 +227,6 @@ function OpenInboxItem({
   readonly onOpenThread: (item: HumanInboxItem) => void;
 }) {
   const urgency = urgencyPresentation[item.urgency];
-  const openDuration = formatElapsedDurationLabel(item.openedAt);
   const mayAnswer = useAtomValue(
     j5Environment.answerHumanExchange.permissionAtom(item.environmentId),
   );
@@ -317,11 +259,11 @@ function OpenInboxItem({
                   </span>
                 </>
               ) : null}
-              {openDuration && closed === undefined ? (
+              {closed === undefined ? (
                 <>
                   <span aria-hidden>·</span>
                   <time className="tabular-nums" dateTime={item.openedAt}>
-                    open {openDuration}
+                    open <RelativeAge timestamp={item.openedAt} fallback="" />
                   </time>
                 </>
               ) : null}
@@ -405,9 +347,6 @@ function AnsweredShelf({
       </summary>
       <ol className="mt-1 divide-y divide-border/60 ps-6">
         {items.map((item) => {
-          const answeredDuration = item.terminalAt
-            ? formatElapsedDurationLabel(item.terminalAt)
-            : "";
           return (
             <li className="flex min-w-0 items-start gap-3 py-3" key={scopedInboxItemKey(item)}>
               <CheckCircle2Icon aria-hidden className="mt-0.5 size-4 shrink-0 text-success" />
@@ -417,7 +356,13 @@ function AnsweredShelf({
                   <SenderName item={item} senderLabels={senderLabels} /> · {projectNameOf(item)}
                   {showEnvironment ? ` · ${item.environmentLabel}` : ""}
                   {item.forEveryone === true ? " · for everyone here" : ""}
-                  {` · ${formatAnsweredAgeLabel(answeredDuration)}`}
+                  {" · answered"}
+                  {item.terminalAt ? (
+                    <>
+                      {" "}
+                      <RelativeTime timestamp={item.terminalAt} />
+                    </>
+                  ) : null}
                   <AnsweredBy item={item} />
                 </p>
               </div>
@@ -440,7 +385,7 @@ function AnsweredBy({ item }: { readonly item: HumanInboxItem }) {
   return line === null ? null : <> · {line}</>;
 }
 
-export async function refreshHumanInboxes(environmentId?: EnvironmentId, force = false) {
+async function refreshHumanInboxes(environmentId?: EnvironmentId, force = false) {
   const options = { force, ...(environmentId === undefined ? {} : { environmentId }) };
   const results = await Promise.all([
     refreshJ5Sources(openInboxSourcesAtom, openInboxQueryAtom, options),
@@ -459,8 +404,8 @@ export function HumanInboxPage() {
   const navigate = useNavigate();
   const openSources = useAtomValue(openInboxSourcesAtom);
   const answeredSources = useAtomValue(answeredInboxSourcesAtom);
-  const items = useMemo(() => mergeHumanInboxSources(openSources), [openSources]);
-  const answeredItems = useMemo(() => mergeHumanInboxSources(answeredSources), [answeredSources]);
+  const items = mergeHumanInboxSources(openSources);
+  const answeredItems = mergeHumanInboxSources(answeredSources);
   const showEnvironment = spansMultipleEnvironments([...items, ...answeredItems]);
   const senderLabels = useScopedParticipantLabels(
     [...items, ...answeredItems].map((item) => ({
@@ -471,24 +416,33 @@ export function HumanInboxPage() {
   );
   // The title the read carries stands in until the client's own project resolves.
   const projectOf = useLogicalProjects();
-  const projectNameOf = useCallback(
-    (item: HumanInboxItem) =>
-      projectOf(item.environmentId, item.projectId)?.displayName ?? item.projectTitle,
-    [projectOf],
-  );
+  const projectNameOf = (item: HumanInboxItem) =>
+    projectOf(item.environmentId, item.projectId)?.displayName ?? item.projectTitle;
   const [answers, setAnswers] = useState<HumanInboxAnswers>({});
+  // Removing a connection or changing its person must also discard that inbox's unsent replies.
+  const personScopes = JSON.stringify(
+    openSources.sources.map((source) => [source.environmentId, source.data?.personId ?? null]),
+  );
+  const [answersPersonScopes, setAnswersPersonScopes] = useState(personScopes);
+  if (answersPersonScopes !== personScopes) {
+    setAnswersPersonScopes(personScopes);
+    const keep = keepForPersonScopes(personScopes);
+    const entries = Object.entries(answers).filter(([key]) => keep(key));
+    if (entries.length !== Object.keys(answers).length) setAnswers(Object.fromEntries(entries));
+  }
   const [pendingExchangeId, setPendingExchangeId] = useState<string | null>(null);
   // An item that closed while the person was answering it stays in place with their words. It is
   // kept in the render it closes in, so its open row is never unmounted and drawn again closed;
   // `closedWith` is the answered list as it was then, to tell a later read of it.
   const [retention, setRetention] = useState(() => ({
+    openSources,
     items,
     answers,
     kept: new Map() as ReadonlyMap<string, HumanInboxItem>,
     closedWith: new Map() as ReadonlyMap<string, typeof answeredSources>,
   }));
   let { kept, closedWith } = retention;
-  if (retention.items !== items || retention.answers !== answers) {
+  if (retention.openSources !== openSources || retention.answers !== answers) {
     kept = nextKeptItems({
       previous: retention.items,
       current: items,
@@ -499,7 +453,7 @@ export function HumanInboxPage() {
     closedWith = new Map(
       [...kept.keys()].map((key) => [key, retention.closedWith.get(key) ?? answeredSources]),
     );
-    setRetention({ items, answers, kept, closedWith });
+    setRetention({ openSources, items, answers, kept, closedWith });
   }
   const shownItems =
     kept.size === 0 ? items : [...items, ...kept.values()].toSorted(compareInboxItems);
@@ -524,6 +478,7 @@ export function HumanInboxPage() {
   const runtimeSources = useAtomValue(crewRuntimeRequestSourcesAtom);
   const nativeQuestions = useNativeQuestionInbox();
   const previousOpenItems = useRef(new Map<EnvironmentId, ReadonlySet<string>>());
+  // oxlint-disable-next-line t3code/react-effect-budget -- an answered item leaving the open list rereads the answered list; it reacts to data arriving, not to a handler here.
   useEffect(() => {
     const next = new Map<EnvironmentId, ReadonlySet<string>>();
     for (const source of openSources.sources) {
@@ -572,27 +527,13 @@ export function HumanInboxPage() {
       ),
     ),
   ];
-  const refresh = useCallback(async (environmentId?: EnvironmentId) => {
+  const refresh = async (environmentId?: EnvironmentId) => {
     await refreshHumanInboxes(environmentId, true);
-  }, []);
+  };
 
-  // Removing a connection or changing its person must also discard that inbox's unsent replies.
-  const personScopes = JSON.stringify(
-    openSources.sources.map((source) => [source.environmentId, source.data?.personId ?? null]),
-  );
+  // oxlint-disable-next-line t3code/react-effect-budget -- prunes answer attempts for scopes this person no longer has; render may not write refs.
   useEffect(() => {
-    const people = new Map(JSON.parse(personScopes) as Array<[string, string | null]>);
-    const keep = (key: string) => {
-      const [environmentId, personId] = JSON.parse(key) as [string, string];
-      return (
-        people.has(environmentId) &&
-        (people.get(environmentId) === null || people.get(environmentId) === personId)
-      );
-    };
-    setAnswers((current) => {
-      const entries = Object.entries(current).filter(([key]) => keep(key));
-      return entries.length === Object.keys(current).length ? current : Object.fromEntries(entries);
-    });
+    const keep = keepForPersonScopes(personScopes);
     for (const key of answerAttempts.current.keys())
       if (!keep(key)) answerAttempts.current.delete(key);
   }, [personScopes]);
@@ -620,28 +561,24 @@ export function HumanInboxPage() {
     });
   };
 
-  const openCrewThread = useCallback(
-    (request: Pick<ScopedCrewRuntimeRequest, "environmentId" | "threadId">) => {
-      void navigate({
-        to: "/$environmentId/$threadId",
-        params: buildThreadRouteParams(scopeThreadRef(request.environmentId, request.threadId)),
-      });
-    },
-    [navigate],
-  );
+  const openCrewThread = (
+    request: Pick<ScopedCrewRuntimeRequest, "environmentId" | "threadId">,
+  ) => {
+    void navigate({
+      to: "/$environmentId/$threadId",
+      params: buildThreadRouteParams(scopeThreadRef(request.environmentId, request.threadId)),
+    });
+  };
 
-  const openThread = useCallback(
-    (item: HumanInboxItem) => {
-      if (!item.connected || item.senderThreadId === null) return;
-      void navigate({
-        to: "/$environmentId/$threadId",
-        params: buildThreadRouteParams(
-          scopeThreadRef(item.environmentId, ThreadId.make(item.senderThreadId)),
-        ),
-      });
-    },
-    [navigate],
-  );
+  const openThread = (item: HumanInboxItem) => {
+    if (!item.connected || item.senderThreadId === null) return;
+    void navigate({
+      to: "/$environmentId/$threadId",
+      params: buildThreadRouteParams(
+        scopeThreadRef(item.environmentId, ThreadId.make(item.senderThreadId)),
+      ),
+    });
+  };
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden">

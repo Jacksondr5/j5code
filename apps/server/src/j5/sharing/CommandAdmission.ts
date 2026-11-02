@@ -29,20 +29,10 @@ import { recordScheduler, storedPrompt } from "./scheduledRuns.ts";
 import { SharedConversation } from "./SharedConversation.ts";
 
 /**
- * What a person's client may send as a command or a thread launch (People and access AC13, AC14),
- * checked before upstream's handler runs. `ws.ts` wraps both requests with this one call (FORK.md
- * case 78). Once a command is admitted, a shared conversation takes it in: a person's message gains
- * its author's line (`SharedConversation`).
- *
- * For everyone who is not an Owner, archiving and deleting a thread is refused, for now: upstream
- * keeps unarchiving in Settings, which is for Owners. For a person whose scope is narrower than
- * the server, every command is checked against the scope its thread or project is in: a
- * Collaborator writes within their scope, starts a thread only in a project they reach, and forks
- * or merges back only within such a project. A Viewer sends nothing (AC13). A command type
- * without a row below is refused to a narrowed person, so one upstream adds later is closed to
- * them until it is listed here.
- *
- * A Crew seat is never archived or deleted alone (Crews AC16), checked here too.
+ * What a person's client may send as a command or thread launch (AC13, AC14), checked before
+ * upstream's handler (FORK.md case 78). Non-Owners cannot archive or delete (unarchive is an Owner
+ * setting); a Crew seat is never archived alone (Crews AC16). A narrowed Collaborator acts within
+ * scope, a Viewer sends nothing, and an unlisted command type is refused to them.
  */
 
 /** Where a command's target is: the thread it names, or the project of a thread it names. */
@@ -69,7 +59,7 @@ const onParent = (command: { readonly parentThreadId: ThreadId }): CommandScope 
  * Every command a narrowed Collaborator may send, by type, with where its target is. Keyed by
  * type so that a command upstream renames or removes fails to compile here.
  */
-export const NARROWED_COMMAND_SCOPES: {
+const NARROWED_COMMAND_SCOPES: {
   readonly [K in OrchestrationV2Command["type"]]?: (command: CommandOf<K>) => CommandScope;
 } = {
   // Starting a thread needs the project (AC14): a Collaborator on one thread starts none.
@@ -112,6 +102,8 @@ export const NARROWED_COMMAND_SCOPES: {
   "notification.delivery.accept": onThread,
   "subagent.stop": onThread,
   "run.interrupt": onThread,
+  // Upstream's Stop button; it also stops the thread's delegated tasks.
+  "thread.stop": onThread,
   "queued-message.promote-to-steer": onThread,
   "queue.resume": onThread,
   "queued-run.reorder": onThread,
@@ -153,9 +145,11 @@ export interface CommandAdmission {
     command: OrchestrationV2Command,
     dispatch: (command: OrchestrationV2Command) => Effect.Effect<A, E, R>,
   ) => Effect.Effect<A, E | EnvironmentAuthorizationError | OrchestrationV2DispatchCommandError, R>;
-  readonly admitLaunch: (
+  /** A person's launch of a thread, admitted and then handed to upstream's launch (FORK.md case 78). */
+  readonly launchThread: <A, E, R>(
     input: OrchestrationV2ThreadLaunchInput,
-  ) => Effect.Effect<OrchestrationV2ThreadLaunchInput, EnvironmentAuthorizationError>;
+    launch: (input: OrchestrationV2ThreadLaunchInput) => Effect.Effect<A, E, R>,
+  ) => Effect.Effect<A, E | EnvironmentAuthorizationError, R>;
   /**
    * A person's save of a scheduled task, with who scheduled it recorded: whoever creates it, and
    * whoever changes its prompt (`scheduledRuns`). `ws.ts` wraps upstream's upsert with this
@@ -172,15 +166,15 @@ export interface CommandAdmission {
  * session, which closes the socket (`Access`). A wide session's commands then cost nothing more;
  * a narrowed one's read the level at each command's scope.
  */
-export const makeCommandAdmission = (
-  crewSeatArchiveGuard: CrewSeatArchiveGuard,
-  session: SessionIdentity,
-): Effect.Effect<
-  CommandAdmission,
-  never,
-  PersonAccess | SharedConversation | SqlClient.SqlClient
-> =>
-  Effect.gen(function* () {
+export const makeCommandAdmission = Effect.fn("j5.sharing.commandAdmission.makeCommandAdmission")(
+  function* (
+    crewSeatArchiveGuard: CrewSeatArchiveGuard,
+    session: SessionIdentity,
+  ): Effect.fn.Return<
+    CommandAdmission,
+    never,
+    PersonAccess | SharedConversation | SqlClient.SqlClient
+  > {
     const sql = yield* SqlClient.SqlClient;
     const access = yield* PersonAccess;
     const conversation = yield* SharedConversation;
@@ -197,30 +191,36 @@ export const makeCommandAdmission = (
       }).pipe(Effect.andThen(Effect.fail(refused("Could not read what is shared with you."))));
 
     /** The level the person holds at a command's target, or `null` when they reach none of it. */
-    const levelAt = (personId: Parameters<typeof access.threadLevel>[0], scope: CommandScope) =>
-      Effect.gen(function* () {
-        switch (scope.kind) {
-          case "thread":
-            return yield* access.threadLevel(personId, scope.threadId);
-          case "project":
-            return yield* access.projectLevel(personId, scope.projectId);
-          case "projectOfThread": {
-            const projectId = yield* access.threadProject(scope.threadId);
-            return projectId === null ? null : yield* access.projectLevel(personId, projectId);
-          }
+    const levelAt = Effect.fn("j5.sharing.commandAdmission.levelAt")(function* (
+      personId: Parameters<typeof access.threadLevel>[0],
+      scope: CommandScope,
+    ) {
+      switch (scope.kind) {
+        case "thread":
+          return yield* access.threadLevel(personId, scope.threadId);
+        case "project":
+          return yield* access.projectLevel(personId, scope.projectId);
+        case "projectOfThread": {
+          const projectId = yield* access.threadProject(scope.threadId);
+          return projectId === null ? null : yield* access.projectLevel(personId, projectId);
         }
-      });
+      }
+    });
 
-    const requireLevel = (
+    const requireLevel: (
       scope: CommandScope,
       level: PersonLevel,
-    ): Effect.Effect<void, EnvironmentAuthorizationError> =>
-      Effect.gen(function* () {
+    ) => Effect.Effect<void, EnvironmentAuthorizationError> = Effect.fn(
+      "j5.sharing.commandAdmission.requireLevel",
+    )(
+      function* (scope, level) {
         if (isWide(reach)) return;
         if (reach.kind !== "person") return yield* refused(NOT_SHARED);
         const held = yield* levelAt(reach.person.personId, scope);
         if (!levelReaches(held, level)) return yield* refused(NOT_SHARED);
-      }).pipe(Effect.catchTags({ PersonAccessStorageError: refuseUnreadable }));
+      },
+      Effect.catchTags({ PersonAccessStorageError: refuseUnreadable }),
+    );
 
     const checked = Effect.fn("j5.sharing.commandAdmission.checked")(function* (
       command: OrchestrationV2Command,
@@ -250,6 +250,12 @@ export const makeCommandAdmission = (
         | undefined;
       if (scopeOf === undefined) return yield* refused(NOT_SHARED);
       yield* requireLevel(scopeOf(command), "collaborator");
+      if (command.type === "thread.visit") {
+        // The thread's `opens` rank its owner's Cmd+K, so a narrowed person's open and the query
+        // that found it do not count; their visit still moves the read marker.
+        const { opened: _opened, searchQuery: _searchQuery, ...visit } = command;
+        return visit;
+      }
       return command;
     });
 
@@ -290,16 +296,19 @@ export const makeCommandAdmission = (
         Effect.withSpan("j5.sharing.commandAdmission.dispatchCommand"),
       );
 
-    const admitLaunch: CommandAdmission["admitLaunch"] = Effect.fn(
-      "j5.sharing.commandAdmission.admitLaunch",
-    )(function* (input) {
+    const launchThread: CommandAdmission["launchThread"] = Effect.fn(
+      "j5.sharing.commandAdmission.launchThread",
+    )(function* <A, E, R>(
+      input: OrchestrationV2ThreadLaunchInput,
+      launch: (input: OrchestrationV2ThreadLaunchInput) => Effect.Effect<A, E, R>,
+    ) {
       // Launching into a thread that exists writes to it; otherwise it starts one in a project.
       const scope: CommandScope =
         input.reuseExistingThread === true && input.threadId !== undefined
           ? { kind: "thread", threadId: input.threadId }
           : { kind: "project", projectId: input.projectId };
       yield* requireLevel(scope, "collaborator");
-      return yield* conversation.admitLaunch(person, input);
+      return yield* conversation.launch(person, input, launch);
     });
 
     const upsertScheduledTask: CommandAdmission["upsertScheduledTask"] = (input, upsert) => {
@@ -338,5 +347,6 @@ export const makeCommandAdmission = (
       });
     };
 
-    return { dispatchCommand, admitLaunch, upsertScheduledTask };
-  });
+    return { dispatchCommand, launchThread, upsertScheduledTask };
+  },
+);
