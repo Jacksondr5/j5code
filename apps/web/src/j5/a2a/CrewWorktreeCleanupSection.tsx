@@ -72,7 +72,9 @@ export function useWorktreeCleanupInbox() {
   const answer = async (item: ScopedWorktreeCleanup, removePaths: ReadonlyArray<string>) => {
     const key = worktreeCleanupKey(item);
     setPendingKey(key);
-    setErrors(({ [key]: _cleared, ...rest }) => rest);
+    setErrors((current) =>
+      Object.fromEntries(Object.entries(current).filter(([errorKey]) => errorKey !== key)),
+    );
     try {
       const decidedItem = await answerCrewWorktreeCleanup(item.environmentId, {
         itemId: item.id,
@@ -92,9 +94,8 @@ export function useWorktreeCleanupInbox() {
         ...current,
         [key]: current[key] ?? "The inbox could not be refreshed. The list may be stale.",
       }));
-    } finally {
-      setPendingKey(null);
     }
+    setPendingKey(null);
   };
 
   return {

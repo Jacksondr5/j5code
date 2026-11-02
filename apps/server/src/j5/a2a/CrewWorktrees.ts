@@ -60,7 +60,7 @@ const encodeEntries = Schema.encodeEffect(StoredCleanupEntries);
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
-export class CrewWorktreeCleanupNotFoundError extends Data.TaggedError(
+class CrewWorktreeCleanupNotFoundError extends Data.TaggedError(
   "CrewWorktreeCleanupNotFoundError",
 )<{ readonly itemId: string }> {
   override get message(): string {
@@ -68,7 +68,7 @@ export class CrewWorktreeCleanupNotFoundError extends Data.TaggedError(
   }
 }
 
-export class CrewWorktreeCleanupAnsweredError extends Data.TaggedError(
+class CrewWorktreeCleanupAnsweredError extends Data.TaggedError(
   "CrewWorktreeCleanupAnsweredError",
 )<{ readonly itemId: string }> {
   override get message(): string {
@@ -76,7 +76,7 @@ export class CrewWorktreeCleanupAnsweredError extends Data.TaggedError(
   }
 }
 
-export class CrewWorktreeCleanupPathError extends Data.TaggedError("CrewWorktreeCleanupPathError")<{
+class CrewWorktreeCleanupPathError extends Data.TaggedError("CrewWorktreeCleanupPathError")<{
   readonly path: string;
 }> {
   override get message(): string {

@@ -38,7 +38,7 @@ export function mergeWorktreeCleanupSources(
 }
 
 /** Five rows show before "Show N more". */
-export const WORKTREE_CLEANUP_VISIBLE_ROWS = 5;
+const WORKTREE_CLEANUP_VISIBLE_ROWS = 5;
 
 /** Uncommitted work first, then commits only; the more of each, the nearer the top. */
 export const orderCleanupRows = (entries: ReadonlyArray<CrewWorktreeCleanupEntry>) =>
@@ -101,7 +101,7 @@ const skipReasonText: Record<SkipReason, string> = {
   unverified: "Couldn't be checked",
 };
 
-export const OUTCOME_GROUPS = [
+const OUTCOME_GROUPS = [
   { outcome: "removed", label: "Removed" },
   { outcome: "kept", label: "Kept" },
   { outcome: "skipped", label: "Skipped" },
@@ -129,7 +129,7 @@ export const groupCleanupOutcomes = (entries: ReadonlyArray<CrewWorktreeCleanupE
     return rows.length === 0 ? [] : [{ ...group, rows }];
   });
 
-export const outcomeCounts = (entries: ReadonlyArray<CrewWorktreeCleanupEntry>) =>
+const outcomeCounts = (entries: ReadonlyArray<CrewWorktreeCleanupEntry>) =>
   groupCleanupOutcomes(entries).map((group) => ({
     label: group.outcome,
     count: group.rows.length,
