@@ -14,6 +14,7 @@ import {
   recallableMessages,
   type SharedMessageView,
   sharedMessageAnsweredFor,
+  sharedMessageAwaitsRead,
   sharedMessageView,
   typedText,
 } from "@t3tools/client-runtime/j5/shared-conversation";
@@ -187,7 +188,13 @@ export function useSharedConversationEntries<Entry extends MessageEntry>(
         typedHere: seen.typedHere.get(message.id) ?? null,
       });
       views.set(message, view);
-      if (view.kind === "plain") return [entry];
+      if (view.kind === "plain") {
+        const awaitsRead =
+          fromServer &&
+          sharedMessageAwaitsRead({ messageId: message.id, readAt, seen, mayBeShared, failed });
+        if (awaitsRead) pending.push(message.id);
+        return [entry];
+      }
       if (view.kind === "pending") {
         pending.push(message.id);
         return view.typed === null ? [] : [{ ...entry, message: { ...message, text: view.typed } }];

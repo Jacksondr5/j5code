@@ -222,6 +222,27 @@ export function sharedMessageAnsweredFor(input: {
 }
 
 /**
+ * Whether a message left on screen still wants a read: the record may yet name who wrote it, so it
+ * is asked once more, though the row stays put meanwhile.
+ */
+export function sharedMessageAwaitsRead(input: {
+  readonly messageId: string;
+  readonly readAt: number | null;
+  readonly seen: SeenSharedMessages;
+  readonly mayBeShared: boolean;
+  readonly failed: boolean;
+}): boolean {
+  return (
+    input.mayBeShared &&
+    !input.failed &&
+    !readAnswersFor({
+      readAt: input.readAt,
+      firstSeenAt: input.seen.firstSeen.get(input.messageId) ?? Infinity,
+    })
+  );
+}
+
+/**
  * A thread's queued messages with the words their authors typed, for the queue's rows and the
  * composer an edit loads (Shared conversations AC14): the server records a message's author when
  * it is queued. Until the thread's record has been read, or has failed, no queued row is shown,

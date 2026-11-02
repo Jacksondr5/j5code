@@ -119,16 +119,22 @@ describe("presentSharedConversationFeed", () => {
       name: null,
       via: [],
     }));
-    const { feed, pendingKey } = presentSharedConversationFeed({
+    const shared = {
       feed: [stored],
       record: record({ shared: false, authors: [] }),
       failed: false,
-      readAt: 1,
       seen: { ...seenAt(["m-5"], 2), sharedSince: 3 },
       people: reaching,
+    };
+    // It stays on screen, and the record is asked once more, since it may yet name the author.
+    expect(presentSharedConversationFeed({ ...shared, readAt: 1 })).toEqual({
+      feed: [stored],
+      pendingKey: "m-5",
     });
-    expect(feed).toEqual([stored]);
-    expect(pendingKey).toBe("");
+    expect(presentSharedConversationFeed({ ...shared, readAt: 4 })).toEqual({
+      feed: [stored],
+      pendingKey: "",
+    });
   });
 
   it("leaves a thread only one person writes to as stored", () => {

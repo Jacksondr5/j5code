@@ -5,6 +5,7 @@ import {
   mayBeSharedConversation,
   type SeenSharedMessages,
   sharedMessageAnsweredFor,
+  sharedMessageAwaitsRead,
   sharedMessageView,
 } from "@t3tools/client-runtime/j5/shared-conversation";
 import { MessageId } from "@t3tools/contracts";
@@ -65,7 +66,13 @@ export function presentSharedConversationFeed(input: {
       mayBeShared,
       typedHere: seen.typedHere.get(message.id) ?? null,
     });
-    if (view.kind === "plain") return [entry];
+    if (view.kind === "plain") {
+      const awaitsRead =
+        fromServer &&
+        sharedMessageAwaitsRead({ messageId: message.id, readAt, seen, mayBeShared, failed });
+      if (awaitsRead) pending.push(message.id);
+      return [entry];
+    }
     if (view.kind === "pending") {
       pending.push(message.id);
       return view.typed === null ? [] : [{ ...entry, message: { ...message, text: view.typed } }];

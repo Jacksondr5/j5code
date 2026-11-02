@@ -11,6 +11,7 @@ import {
   NO_SHARED_MESSAGES_SEEN,
   observeSharedMessages,
   sharedMessageAnsweredFor,
+  sharedMessageAwaitsRead,
 } from "./sharedConversation.ts";
 
 const author = (overrides: Partial<MessageAuthor> = {}): MessageAuthor => ({
@@ -221,6 +222,22 @@ describe("holding a message for its author", () => {
     const seen = observeSharedMessages(NO_SHARED_MESSAGES_SEEN, [message("new")], true, clock(5));
     expect(sharedMessageAnsweredFor({ messageId: "new", readAt: 1, seen })).toBe(false);
     expect(sharedMessageAnsweredFor({ messageId: "new", readAt: 6, seen })).toBe(true);
+  });
+
+  it("still asks the record about a message left on screen, until a read answers for it", () => {
+    const seen = { ...NO_SHARED_MESSAGES_SEEN, firstSeen: new Map([["old", 2]]), sharedSince: 5 };
+    const asks = (overrides: { readAt: number; mayBeShared?: boolean; failed?: boolean }) =>
+      sharedMessageAwaitsRead({
+        messageId: "old",
+        seen,
+        mayBeShared: true,
+        failed: false,
+        ...overrides,
+      });
+    expect(asks({ readAt: 1 })).toBe(true);
+    expect(asks({ readAt: 3 })).toBe(false);
+    expect(asks({ readAt: 1, mayBeShared: false })).toBe(false);
+    expect(asks({ readAt: 1, failed: true })).toBe(false);
   });
 
   it("stores nothing new while nothing has changed", () => {
