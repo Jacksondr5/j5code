@@ -998,6 +998,44 @@ it.effect("skips a worktree whose files were already changed when they change ag
   ),
 );
 
+it.effect("files nothing for commits its branch does not hold, and never removes them", () =>
+  run(
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const strayed = yield* f.seat("strayed");
+      const tracked = f.path.join(strayed.worktree, "tracked.txt");
+      yield* f.run(strayed.worktree, ["checkout", "--detach"]);
+      yield* f.fs.writeFileString(tracked, "detached work\n");
+      yield* f.run(strayed.worktree, ["commit", "-am", "work"]);
+      const results = yield* f.service.cleanup({ seats: [strayed], crew });
+      assert.deepStrictEqual(
+        results.map((result) => [result.outcome, result.reason]),
+        [["kept", "unverified"]],
+      );
+      assert.lengthOf(yield* f.service.listCleanups("open"), 0);
+      assert.isTrue(yield* f.fs.exists(strayed.worktree));
+
+      // The same after an item was filed: the branch moved off the commit the item measured.
+      const moved = yield* f.seat("moved");
+      yield* f.fs.writeFileString(f.path.join(moved.worktree, "tracked.txt"), "committed\n");
+      yield* f.run(moved.worktree, ["commit", "-am", "work"]);
+      yield* f.service.cleanup({ seats: [moved], crew });
+      const [item] = yield* f.service.listCleanups("open");
+      yield* f.run(moved.worktree, ["checkout", "--detach"]);
+      yield* f.run(f.repo, ["update-ref", `refs/heads/${moved.branch}`, "main"]);
+      const decided = yield* f.service.answerCleanup({
+        itemId: item!.id,
+        removePaths: [moved.worktree],
+      });
+      assert.deepStrictEqual(
+        decided.entries.map((entry) => [entry.outcome, entry.reason]),
+        [["skipped", "unverified"]],
+      );
+      assert.isTrue(yield* f.fs.exists(moved.worktree));
+    }),
+  ),
+);
+
 it.effect("a Crew archived again after it came back files its own approval", () =>
   run(
     Effect.gen(function* () {

@@ -378,6 +378,24 @@ const makeLayer = (daemon: boolean) =>
       });
 
       /**
+       * HEAD is on the branch the approval says removal keeps. A seat that detached or switched
+       * branches and then committed has commits only the reflog would hold once the worktree goes.
+       */
+      const branchHoldsHead = Effect.fnUntraced(function* (
+        worktreePath: string,
+        branch: string | null,
+      ) {
+        if (branch === null) return false;
+        const held = yield* git.execute({
+          operation: "CrewWorktrees.branchHoldsHead",
+          cwd: worktreePath,
+          args: ["merge-base", "--is-ancestor", "HEAD", `refs/heads/${branch}`],
+          allowNonZeroExit: true,
+        });
+        return held.exitCode === 0;
+      });
+
+      /**
        * Merged into the project's default branch as last fetched, or named by a merged pull
        * request as exactly this commit, which is how a squash or rebase merge shows.
        */
@@ -464,6 +482,8 @@ const makeLayer = (daemon: boolean) =>
         if ((yield* sessionOpenIn(worktreePath)) || (yield* terminalOpenIn(worktreePath)))
           return { kind: "keep", reason: "in_use" } satisfies Verdict;
         if (context.baseline !== undefined) {
+          if (!(yield* branchHoldsHead(worktreePath, branch)))
+            return { kind: "keep", reason: "unverified" } satisfies Verdict;
           const [head, snapshot] = yield* Effect.all([
             git.resolveCommit({ cwd: worktreePath, revision: "HEAD" }),
             snapshotOf(worktreePath),
@@ -473,8 +493,14 @@ const makeLayer = (daemon: boolean) =>
             ? ({ kind: "remove", headSha: head.commitSha } satisfies Verdict)
             : ({ kind: "changed" } satisfies Verdict);
         }
+        // What is kept for unfinished work is offered for removal while its branch stays, so
+        // work the branch does not hold is never offered.
+        const unfinished = (reason: "uncommitted_changes" | "unmerged_commits") =>
+          branchHoldsHead(worktreePath, branch).pipe(
+            Effect.map((held): Verdict => ({ kind: "keep", reason: held ? reason : "unverified" })),
+          );
         if (yield* hasBlockingChanges(worktreePath))
-          return { kind: "keep", reason: "uncommitted_changes" } satisfies Verdict;
+          return yield* unfinished("uncommitted_changes");
         const unmerged = context.checkMerged
           ? yield* mergeKeepReason({
               worktreePath,
@@ -484,6 +510,7 @@ const makeLayer = (daemon: boolean) =>
               fetched: context.fetched,
             })
           : null;
+        if (unmerged === "unmerged_commits") return yield* unfinished(unmerged);
         if (unmerged !== null) return { kind: "keep", reason: unmerged } satisfies Verdict;
         const head = yield* git.resolveCommit({ cwd: worktreePath, revision: "HEAD" });
         return { kind: "remove", headSha: head.commitSha } satisfies Verdict;
