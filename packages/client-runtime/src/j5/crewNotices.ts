@@ -1,12 +1,7 @@
 /**
- * The platform's Crew notices as they appear in a Captain's thread, recognized from their tags so
- * the timeline can show lines instead of the raw block. Recognition is strict: a block the
- * parser does not understand stays raw, and prose is never guessed at.
- *
- * The parser reads every field the notices carry, including ones the timeline no longer draws
- * (crew version, roster changes, a seat's `start`, the handoff path and body). That is deliberate:
- * the strict parse is what keeps an unreadable block raw, and #742's approval line reads the
- * decision fields again (#741 review).
+ * The platform's Crew notices in a Captain's thread, recognized strictly from their tags: a block
+ * the parser does not understand stays raw. It reads every field, including ones the timeline no
+ * longer draws, since the strict parse keeps an unreadable block raw and the approval summary reads them.
  */
 export interface CrewNoticeMessage {
   readonly role: string;

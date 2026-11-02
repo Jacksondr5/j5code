@@ -1,7 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId } from "@t3tools/contracts";
 import type { CrewProposalSeatRuntime, CrewWorkspaceOptions } from "@t3tools/contracts/j5";
-import { useMemo } from "react";
 import { getProviderOptionCurrentValue } from "@t3tools/shared/model";
 
 import { Input } from "../../components/ui/input";
@@ -214,19 +213,15 @@ function CrewSeatWorkspaceField(props: CrewSeatEditorProps) {
 
 function CrewSeatRuntimeFields(props: CrewSeatEditorProps & { environmentId: EnvironmentId }) {
   const providers = useAtomValue(serverEnvironment.providersValueAtom(props.environmentId)) ?? [];
-  const choices = useMemo(
-    () =>
-      providers.filter(
-        (provider) =>
-          provider.enabled &&
-          provider.installed &&
-          provider.status === "ready" &&
-          provider.availability !== "unavailable" &&
-          provider.models.length > 0,
-      ),
-    [providers],
+  const choices = providers.filter(
+    (provider) =>
+      provider.enabled &&
+      provider.installed &&
+      provider.status === "ready" &&
+      provider.availability !== "unavailable" &&
+      provider.models.length > 0,
   );
-  const entries = useMemo(() => deriveProviderInstanceEntries(choices), [choices]);
+  const entries = deriveProviderInstanceEntries(choices);
   const value = resolvedCrewSeatDraft(props.value, props.runtime);
   const selection = value.modelSelection;
   const provider = providers.find(({ instanceId }) => instanceId === selection?.instanceId);

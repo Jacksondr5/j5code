@@ -19,6 +19,8 @@ import {
   type CommandReceiptV2,
 } from "../../orchestration-v2/CommandReceiptStore.ts";
 import * as Crews from "./AgentCrewInstanceService.ts";
+import { ReadChanges } from "./ReadChanges.ts";
+import * as Stream from "effect/Stream";
 import * as DeliveryContext from "./CrewDeliveryContext.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
@@ -122,7 +124,18 @@ const fixture = Effect.gen(function* () {
     Effect.gen(function* () {
       return yield* (yield* Orchestrator.OrchestratorV2).dispatch(command);
     });
-  const deliveryLayer = CrewTurnContext.layer;
+  const notified: Array<ReadonlyArray<string>> = [];
+  const deliveryLayer = CrewTurnContext.layerWithChanges.pipe(
+    Layer.provide(
+      Layer.succeed(
+        ReadChanges,
+        ReadChanges.of({
+          notify: (...keys) => Effect.sync(() => void notified.push(keys)),
+          changes: Stream.empty,
+        }),
+      ),
+    ),
+  );
   const providerThread = (native: string) =>
     ({
       id: "provider-thread:reviewer",
@@ -174,6 +187,7 @@ const fixture = Effect.gen(function* () {
     send,
     deliver,
     steer,
+    notified,
   };
 });
 
@@ -358,6 +372,67 @@ it.effect("the introduction is sent again only when the provider conversation ch
       yield* f.deliver("replaced conversation", { native: "native-2" }),
       "replaced conversation",
     );
+  }).pipe(Effect.provide(base)),
+);
+
+it.effect("a delivery that changes nothing writes and announces nothing", () =>
+  Effect.gen(function* () {
+    const f = yield* fixture;
+    yield* f.sql`CREATE TABLE seat_context_writes (n INTEGER)`;
+    yield* f.sql`CREATE TRIGGER count_seat_context_writes AFTER UPDATE ON j5_crew_seat_context
+      BEGIN INSERT INTO seat_context_writes VALUES (1); END`;
+    const writes = () =>
+      f.sql<{ readonly n: number }>`SELECT count(*) AS n FROM seat_context_writes`.pipe(
+        Effect.map(([row]) => row!.n),
+      );
+
+    yield* f.deliver("first", { native: "native-1" });
+    assert.equal(yield* writes(), 1);
+    assert.lengthOf(f.notified, 1);
+
+    yield* f.deliver("follow-up", { native: "native-1" });
+    yield* f.steer("steer");
+    assert.equal(yield* writes(), 1);
+    assert.lengthOf(f.notified, 1);
+
+    yield* f.crews.addMembers("crew:test", [member("security")]);
+    yield* f.deliver("after the roster changed", { native: "native-1" });
+    assert.equal(yield* writes(), 2);
+    assert.deepStrictEqual(f.notified.at(-1), ["crew", "fleet"]);
+    assert.lengthOf(f.notified, 2);
+
+    yield* f.deliver("replaced conversation", { native: "native-2" });
+    assert.equal(yield* writes(), 3);
+    yield* f.deliver("and again", { native: "native-2" });
+    assert.equal(yield* writes(), 3);
+    assert.lengthOf(f.notified, 3);
+  }).pipe(Effect.provide(base)),
+);
+
+it.effect("a refused delivery records nothing, so the next one still carries what is owed", () =>
+  Effect.gen(function* () {
+    const f = yield* fixture;
+    yield* f.deliver("first");
+    yield* f.crews.addMembers("crew:test", [member("security")]);
+    yield* f.deliver("refused", { fail: true }).pipe(Effect.result);
+    assert.lengthOf(f.notified, 1);
+    assert.include((yield* f.deliver("accepted"))!, "joined: security:");
+    assert.lengthOf(f.notified, 2);
+  }).pipe(Effect.provide(base)),
+);
+
+it.effect("the roster names each seat as it was launched, not by its persona id", () =>
+  Effect.gen(function* () {
+    const f = yield* fixture;
+    yield* f.sql`INSERT INTO j5_crew_seat_context (thread_id, first_turn_text, workspace, agent_display_name)
+      VALUES ('thread:builder', '', '{"type":"shared"}', 'Team Builder')`;
+    yield* f.sql`UPDATE j5_agent_crew_member SET agent_id = 'builder-persona' WHERE seat_name = 'builder'`;
+    const prompt = (yield* f.deliver("first"))!;
+    assert.include(prompt, "- builder: participant_id=");
+    assert.include(prompt, "persona=Team Builder");
+    assert.notInclude(prompt, "builder-persona");
+    assert.include(prompt, "- reviewer (you):");
+    assert.include(prompt, "persona=custom");
   }).pipe(Effect.provide(base)),
 );
 
