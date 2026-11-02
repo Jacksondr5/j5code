@@ -2,7 +2,12 @@ import type { OrchestrationV2ThreadProjection, ThreadId } from "@t3tools/contrac
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
-import { ProjectionStoreThreadNotFoundError } from "../../orchestration-v2/ProjectionStore.ts";
+import {
+  type ProjectionRecordField,
+  type ProjectionRecordFilter,
+  type ProjectionRecords,
+  ProjectionStoreThreadNotFoundError,
+} from "../../orchestration-v2/ProjectionStore.ts";
 import type { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 
 /**
@@ -19,6 +24,21 @@ export const getThreadProjectionIfPresent = (
 ) =>
   threads.getThreadProjection(threadId).pipe(
     Effect.map((projection): OrchestrationV2ThreadProjection | null => projection),
+    Effect.catchTags({
+      OrchestratorProjectionError: (error) =>
+        isThreadNotFound(error.cause) ? Effect.succeed(null) : Effect.fail(error),
+    }),
+  );
+
+/** The same not-found rule as `getThreadProjectionIfPresent`, reading only `fields`. */
+export const getThreadRecordsIfPresent = <K extends ProjectionRecordField>(
+  threads: Pick<ThreadManagementService["Service"], "getThreadRecords">,
+  threadId: ThreadId,
+  fields: ReadonlyArray<K>,
+  filter?: ProjectionRecordFilter,
+) =>
+  threads.getThreadRecords(threadId, fields, filter).pipe(
+    Effect.map((records): ProjectionRecords<K> | null => records),
     Effect.catchTags({
       OrchestratorProjectionError: (error) =>
         isThreadNotFound(error.cause) ? Effect.succeed(null) : Effect.fail(error),

@@ -5,14 +5,17 @@ import * as Option from "effect/Option";
 import { AnalyticsService } from "../../telemetry/AnalyticsService.ts";
 
 /**
- * Records a J5 analytics event from inside a service that has other work to do. The server's
- * graph always has the analytics service; a graph without one (most unit layers) records
- * nothing, so a service does not need it to be built.
+ * Records a J5 analytics event, or upstream's `feature.used`, from inside a service that has
+ * other work to do. The server's graph always has the analytics service; a graph without one
+ * (most unit layers) records nothing, so a service does not need it to be built.
  */
 export const j5AnalyticsRecorder = Effect.serviceOption(AnalyticsService).pipe(
   Effect.map(
     (analytics) =>
-      (event: `j5.${string}`, properties: Readonly<Record<string, unknown>>): Effect.Effect<void> =>
+      (
+        event: `j5.${string}` | "feature.used",
+        properties: Readonly<Record<string, unknown>>,
+      ): Effect.Effect<void> =>
         Option.isSome(analytics) ? analytics.value.record(event, properties) : Effect.void,
   ),
 );

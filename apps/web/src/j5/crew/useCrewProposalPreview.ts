@@ -1,6 +1,6 @@
 import type { EnvironmentId } from "@t3tools/contracts";
 import type { CrewProposalPreviewResponse, CrewProposalSeat } from "@t3tools/contracts/j5";
-import { useCallback, useEffect, useEffectEvent, useMemo, useState } from "react";
+import { useEffect, useEffectEvent, useState } from "react";
 
 import { previewCrewProposal } from "./crewProposalsClient";
 
@@ -27,11 +27,14 @@ export function useCrewProposalPreview(
   const proposalKey = JSON.stringify([environmentId, proposalId]);
   const scopeKey = JSON.stringify([environmentId, proposalId, seats]);
   const requestJson = JSON.stringify([scopeKey, revision, busy, enabled]);
-  const requestKey = useMemo(() => ({ value: requestJson }), [requestJson]);
-  const refresh = useCallback(() => setRevision((value) => value + 1), []);
+  // The identity, not the text, marks one request: after an approval attempt the same text asks
+  // again, and the earlier answer's approval token must not count for it.
+  const requestKey = { value: requestJson };
+  const refresh = () => setRevision((value) => value + 1);
 
   const readRequest = useEffectEvent(() => ({ seats, complete: state?.requestKey === requestKey }));
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- asks the server to preview the proposal whenever its seats change, and drops a stale answer.
   useEffect(() => {
     if (environmentId === null || busy || !enabled) return;
     const request = readRequest();
