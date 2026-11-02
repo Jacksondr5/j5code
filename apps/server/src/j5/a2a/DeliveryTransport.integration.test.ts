@@ -146,7 +146,7 @@ import {
   formatPeerEnvelope,
 } from "./EnvelopeFormatter.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
-import { readReceiverDelivery, withDeliveryOutcome } from "./receiverBacklog.ts";
+import { readReceiverBacklog, withDeliveryNotice } from "./receiverBacklog.ts";
 import { noneLayer as peerDirectoryNoneLayer } from "./PeerDirectory.ts";
 import { A2ALifecycleService, manualLayer as lifecycleServiceLayer } from "./LifecycleService.ts";
 import {
@@ -1177,23 +1177,20 @@ it.effect("measures the backlog a send waits behind on a busy receiver", () =>
         message: `Update ${name}`,
         acceptedAt: `2026-09-24T00:00:0${sequence++}.000Z`,
       });
-      const deliveryFor = (sent: { readonly messageId: LedgerMessageId }) =>
-        readReceiverDelivery({
+      const backlogFor = (sent: { readonly messageId: LedgerMessageId }) =>
+        readReceiverBacklog({
           receiverId: target.receiverId,
           callerThreadId: caller.threadId,
           sentMessageId: sent.messageId,
         });
-      const backlogFor = (sent: { readonly messageId: LedgerMessageId }) =>
-        deliveryFor(sent).pipe(Effect.map((delivery) => delivery?.backlog));
 
-      // An idle receiver, or a seat that has not started, takes the message at once: nothing to
-      // warn about.
+      // An idle receiver takes the message at once: nothing to warn about.
       const firstInput = sendInput(caller, "first");
       const first = yield* send.send(firstInput);
-      assert.deepStrictEqual(yield* deliveryFor(first), { outcome: "starting" });
+      assert.isUndefined(yield* backlogFor(first));
       // Nor once the message has started its own run.
       yield* worker.drain;
-      assert.deepStrictEqual(yield* deliveryFor(first), { outcome: "starting" });
+      assert.isUndefined(yield* backlogFor(first));
       yield* startPendingTestTurn(target.threadId);
       yield* finishTestTurn(harness, target.threadId);
 
@@ -1201,13 +1198,14 @@ it.effect("measures the backlog a send waits behind on a busy receiver", () =>
       // A replayed send of a message that has already run reports the current state.
       const replay = yield* send.send(firstInput);
       assert.equal(replay.messageId, first.messageId);
-      assert.isUndefined(yield* deliveryFor(replay));
+      assert.isUndefined(yield* backlogFor(replay));
       // Committed sends the worker has not handed over yet are waiting too.
       yield* send.send(sendInput(caller, "second"));
       const third = yield* send.send(sendInput(caller, "third"));
-      assert.deepStrictEqual(yield* deliveryFor(third), {
-        outcome: "queued",
-        backlog: { type: "behind_turn", waiting: 2, fromCaller: 2 },
+      assert.deepStrictEqual(yield* backlogFor(third), {
+        type: "behind_turn",
+        waiting: 2,
+        fromCaller: 2,
       });
       // Queued runs and pending deliveries add up; another sender's count is not the caller's.
       yield* worker.drain;
@@ -1220,7 +1218,7 @@ it.effect("measures the backlog a send waits behind on a busy receiver", () =>
 
       // Only agents on this server are measured.
       assert.isUndefined(
-        yield* readReceiverDelivery({
+        yield* readReceiverBacklog({
           receiverId: ParticipantId.make("agent:j5-a2a-delivery-backlog-elsewhere"),
           callerThreadId: caller.threadId,
           sentMessageId: third.messageId,
@@ -1268,98 +1266,34 @@ it.effect("counts a message queued before an Astra turn became steerable", () =>
         "queued",
       );
       assert.deepStrictEqual(
-        yield* readReceiverDelivery({
+        yield* readReceiverBacklog({
           receiverId: target.receiverId,
           callerThreadId: ThreadId.make("thread:j5-a2a-delivery-backlog-astra-queued-caller"),
           sentMessageId: target.messageId,
         }),
-        { outcome: "queued", backlog: { type: "behind_turn", waiting: 1, fromCaller: 0 } },
+        { type: "behind_turn", waiting: 1, fromCaller: 0 },
       );
     }).pipe(Effect.provide(makeTestLayer(harness)));
   }),
 );
 
-it.effect("predicts how a message lands on a busy receiver, before and after the worker acts", () =>
-  Effect.gen(function* () {
-    const harness = yield* makeHarness;
-    yield* Effect.gen(function* () {
-      const send = yield* A2ASendService;
-      const worker = yield* A2ADeliveryWorker;
-      const effects = yield* OrchestrationEffectWorkerV2;
-      const caller = yield* seedTarget("outcome-caller");
-      let sequence = 0;
-      const sendTo = (
-        target: { readonly receiverId: ParticipantId },
-        name: string,
-        mode?: "steer" | "restart",
-      ) =>
-        send.send({
-          commandId: CommCommandId.make(`command:j5-a2a-delivery-outcome-${name}`),
-          senderThreadId: caller.threadId,
-          to: target.receiverId,
-          message: `Update ${name}`,
-          ...(mode === undefined
-            ? {}
-            : { mode, modeLimit: { runtimeMode: "full-access", interactionMode: "default" } }),
-          acceptedAt: `2026-09-24T00:00:0${sequence++}.000Z`,
-        });
-      const outcomeOf = (
-        target: { readonly receiverId: ParticipantId },
-        sent: { readonly messageId: LedgerMessageId },
-        mode?: "steer" | "restart",
-      ) =>
-        readReceiverDelivery({
-          receiverId: target.receiverId,
-          callerThreadId: caller.threadId,
-          sentMessageId: sent.messageId,
-          mode,
-        }).pipe(Effect.map((delivery) => delivery?.outcome));
-
-      // A running GPT 6 turn takes the update mid-turn. Once the worker has steered it, the
-      // message has no run of its own, and still reads as steered.
-      const astra = yield* seedTarget(
-        "outcome-astra",
-        "gpt-6-astra",
-        undefined,
-        caller.ledgerProjectId,
-      );
-      yield* startBusyTurn(astra);
-      const steeredByDefault = yield* sendTo(astra, "astra");
-      assert.equal(yield* outcomeOf(astra, steeredByDefault), "steered");
-      const drained = yield* worker.drain.pipe(Effect.forkChild({ startImmediately: true }));
-      yield* runWorkerUntil(effects, drained);
-      assert.lengthOf(yield* Ref.get(harness.steerInputs), 1);
-      assert.equal(yield* outcomeOf(astra, steeredByDefault), "steered");
-
-      // Another model queues a plain update behind the turn, steers when asked, and starts a new
-      // turn for a restart.
-      const other = yield* seedTarget(
-        "outcome-other",
-        modelSelection.model,
-        undefined,
-        caller.ledgerProjectId,
-      );
-      yield* startBusyTurn(other);
-      assert.equal(yield* outcomeOf(other, yield* sendTo(other, "plain")), "queued");
-      assert.equal(
-        yield* outcomeOf(other, yield* sendTo(other, "steer", "steer"), "steer"),
-        "steered",
-      );
-      assert.equal(
-        yield* outcomeOf(other, yield* sendTo(other, "restart", "restart"), "restart"),
-        "starting",
-      );
-
-      // Nobody is on a thread that has not started: the message starts its first turn.
-      const idle = yield* seedTarget(
-        "outcome-idle",
-        modelSelection.model,
-        undefined,
-        caller.ledgerProjectId,
-      );
-      assert.equal(yield* outcomeOf(idle, yield* sendTo(idle, "idle")), "starting");
-    }).pipe(Effect.provide(makeLifecycleTestLayer(harness)));
-  }),
+it.effect(
+  "reports no backlog for a running Astra receiver, which takes peer messages mid-turn",
+  () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const target = yield* seedTarget("backlog-astra", "gpt-6-astra");
+        yield* startBusyTurn(target);
+        assert.isUndefined(
+          yield* readReceiverBacklog({
+            receiverId: target.receiverId,
+            callerThreadId: ThreadId.make("thread:j5-a2a-delivery-backlog-astra-caller"),
+            sentMessageId: target.messageId,
+          }),
+        );
+      }).pipe(Effect.provide(makeTestLayer(harness)));
+    }),
 );
 
 it.effect(
@@ -4015,7 +3949,7 @@ const sendNoticeTo = Effect.fn("A2AIntegration.sendNoticeTo")(function* (
     message: "An update",
     acceptedAt: "2026-09-24T00:00:00.000Z",
   });
-  return (yield* withDeliveryOutcome(sent, {
+  return (yield* withDeliveryNotice(sent, {
     receiverId: target.receiverId,
     callerThreadId: caller.threadId,
   })).deliveryNotice;

@@ -55,7 +55,7 @@ import { A2ALedger } from "../LedgerService.ts";
 import { PeerDirectory } from "../PeerDirectory.ts";
 import { PeerRegistryService } from "../PeerRegistryService.ts";
 import { ParticipantPlacementService } from "../PlacementService.ts";
-import { withDeliveryOutcome } from "../receiverBacklog.ts";
+import { withDeliveryNotice } from "../receiverBacklog.ts";
 import { A2ASendService } from "../SendService.ts";
 import { AGENT_STOP_REASON, stopThread } from "../stopThread.ts";
 import { sendClaimingAttachments } from "./attachments.ts";
@@ -413,7 +413,7 @@ const handlers = {
           ? yield* send()
           : yield* sendClaimingAttachments(receiverThreadId, attachments, send);
       yield* worker.notify;
-      return yield* withDeliveryOutcome(result, {
+      return yield* withDeliveryNotice(result, {
         receiverId: input.to,
         callerThreadId: scope.thread.threadId,
         mode,
