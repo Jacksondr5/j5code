@@ -23,7 +23,7 @@ import {
   type ArchiveAgentResult,
 } from "./ArchiveAgentService.ts";
 import { ParticipantId, LedgerProjectId } from "./contracts.ts";
-import { CrewWorktrees } from "./CrewWorktrees.ts";
+import { CrewWorktrees, type CrewSeatSession } from "./CrewWorktrees.ts";
 
 const TOKEN_VERSION = "j5-crew-archive-confirmation/v1" as const;
 const TOKEN_SECRET_NAME = "j5-a2a-archive-confirmation-v1";
@@ -407,6 +407,7 @@ export const layer = Layer.effect(
                 : ("already_archived" as const),
             })),
             seats: createdSeats(facts),
+            sessions: [] as ReadonlyArray<CrewSeatSession>,
           };
         }
 
@@ -434,6 +435,7 @@ export const layer = Layer.effect(
         }
 
         const results: Array<ArchiveCrewMemberResult> = [];
+        const sessions: Array<CrewSeatSession> = [];
         for (const member of facts.members) {
           if (member.neverCreated) {
             results.push({
@@ -444,6 +446,12 @@ export const layer = Layer.effect(
             continue;
           }
           const ids = input.commandIds(member.seatName);
+          // Before the archive: committing it removes the binding that names the session.
+          sessions.push(
+            ...(yield* worktrees.liveSessions([
+              { seatName: member.seatName, threadId: member.threadId },
+            ])),
+          );
           const result = yield* archiveAgent
             .archive({
               providerSessionId: input.providerSessionId,
@@ -481,7 +489,12 @@ export const layer = Layer.effect(
         yield* crews
           .markArchived(instance.id, input.archivedAt, { withCaptain: input.withCaptain === true })
           .pipe(Effect.orDie);
-        return { status: "archived" as const, members: results, seats: createdSeats(facts) };
+        return {
+          status: "archived" as const,
+          members: results,
+          seats: createdSeats(facts),
+          sessions,
+        };
       },
       (unit, input) => crews.serialize(input.crewInstanceId, unit),
     );
@@ -491,7 +504,9 @@ export const layer = Layer.effect(
     // open, or because a check failed, gets another look when the archive is asked for again.
     const archive: ArchiveCrewServiceShape["archive"] = Effect.fn("j5.a2a.archiveCrew.archive")(
       function* (input) {
-        const { seats, ...outcome } = yield* archiveUnit(input);
+        const { seats, sessions, ...outcome } = yield* archiveUnit(input);
+        // Each seat's session is closed before the cleanup looks for one open in its worktree.
+        yield* worktrees.closeSessions(sessions);
         const removed = yield* worktrees.cleanup({ seats });
         return { ...outcome, worktrees: removed };
       },
