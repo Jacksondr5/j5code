@@ -14,16 +14,22 @@ import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import { stringify as yaml } from "yaml";
 
 import { prepareAgentPersonaLaunch } from "./agentPersonaLaunch.ts";
-import { definitionDigest, createAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
+import {
+  AgentPersonaLibraryError,
+  definitionDigest,
+  createAgentPersonaLibrary,
+} from "./agentPersonaLibrary.ts";
 import { BUILT_IN_AGENT_PERSONAS, decodeAgentPersonaDefinition } from "./agentPersonas.ts";
 import { validateAgentPersonaAssignment } from "./agentPersonaAssignment.ts";
 import { resolveAgentPersonaRuntime } from "./agentPersonaRuntime.ts";
 
 const isImportConflict = Schema.is(AgentPersonaImportConflictError);
+const isLibraryError = Schema.is(AgentPersonaLibraryError);
 
 const json = (value: unknown) => JSON.stringify(value);
 
@@ -36,6 +42,8 @@ const custom = decodeAgentPersonaDefinition({
   outputArtifact: "TeamBrief",
   instructions: "# Identity\nTeam researcher.\n# Operating principles\nCite your evidence.",
 });
+
+const diagnosticCanary = "persona-diagnostic-canary-not-a-real-secret";
 
 const fixture = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
@@ -137,11 +145,165 @@ describe("folder-backed persona library", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("reports oversized sources while keeping valid definitions", () =>
+    Effect.gen(function* () {
+      const { library, write, fs, path, folder } = yield* fixture;
+      yield* write("valid.yaml", custom);
+      yield* fs.writeFileString(path.join(folder, "oversized.yaml"), "a".repeat(65537));
+      const catalog = yield* library.catalog();
+      assert.deepEqual(
+        catalog.definitions.map(({ id }) => id),
+        [custom.id],
+      );
+      assert.lengthOf(catalog.diagnostics, 1);
+      assert.include(catalog.diagnostics[0]!.path, "oversized.yaml");
+      assert.include(catalog.diagnostics[0]!.message, "exceeds 64 KiB");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect.each([
+    {
+      name: "YAML syntax",
+      content: `instructions: [${diagnosticCanary}`,
+      reason: "YAMLParseError",
+      location: true,
+    },
+    {
+      name: "YAML warning",
+      content: `instructions: !${diagnosticCanary} value`,
+      reason: "YAMLWarning",
+      location: true,
+    },
+    {
+      name: "YAML conversion",
+      content: `instructions: *${diagnosticCanary}`,
+      reason: "Invalid YAML document",
+      location: false,
+    },
+    {
+      name: "schema validation",
+      content: yaml({ ...custom, version: diagnosticCanary }),
+      reason: "Invalid persona definition",
+      location: false,
+    },
+    {
+      name: "artifact reference",
+      content: yaml({ ...custom, outputArtifact: diagnosticCanary }),
+      reason: "Invalid persona definition",
+      location: false,
+    },
+  ])("keeps source contents out of $name diagnostics", ({ content, reason, location }) =>
+    Effect.gen(function* () {
+      const { library, write, fs, path, folder } = yield* fixture;
+      yield* write("valid.yaml", custom);
+      const file = path.join(folder, "invalid.yaml");
+      yield* fs.writeFileString(file, content);
+      const catalog = yield* library.catalog();
+      assert.deepEqual(
+        catalog.definitions.map(({ id }) => id),
+        [custom.id],
+      );
+      assert.lengthOf(catalog.diagnostics, 1);
+      const diagnostic = catalog.diagnostics[0]!;
+      assert.equal(diagnostic.path, file);
+      assert.notInclude(json(catalog.diagnostics), diagnosticCanary);
+      assert.isBelow(diagnostic.message.length, 180);
+      assert.include(diagnostic.message, reason);
+      if (location) assert.match(diagnostic.message, /line \d+, column \d+/);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("retains the original YAML failure only as the cause of a bounded error", () =>
+    Effect.gen(function* () {
+      const { library } = yield* fixture;
+      const error = yield* library
+        .importFiles({
+          files: [{ name: "broken.yaml", content: `instructions: [${diagnosticCanary}` }],
+          replaceExisting: false,
+        })
+        .pipe(Effect.flip);
+      if (!isLibraryError(error) || !isLibraryError(error.cause))
+        throw new Error("Expected the import error to retain the definition error as its cause.");
+      assert.notInclude(error.cause.message, diagnosticCanary);
+      assert.include(String(error.cause.cause), diagnosticCanary);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect.each(["stat", "readFileString"] as const)(
+    "keeps filesystem failure contents out of %s diagnostics",
+    (method) =>
+      Effect.gen(function* () {
+        const { write, fs, path, stateDir, folder } = yield* fixture;
+        yield* write("valid.yaml", custom);
+        yield* write("blocked.yaml", { ...custom, id: "blocked" });
+        const file = path.join(folder, "blocked.yaml");
+        const failure = PlatformError.systemError({
+          _tag: "PermissionDenied",
+          module: "FileSystem",
+          method,
+          pathOrDescriptor: file,
+          description: diagnosticCanary,
+          cause: new Error(diagnosticCanary),
+        });
+        let inspections = 0;
+        const library = createAgentPersonaLibrary({
+          stateDir,
+          path,
+          fs: {
+            ...fs,
+            stat: (target) =>
+              target === file && method === "stat"
+                ? Effect.suspend(() => {
+                    inspections += 1;
+                    return inspections === 1 ? fs.stat(target) : Effect.fail(failure);
+                  })
+                : fs.stat(target),
+            readFileString: (target, encoding) =>
+              target === file && method === "readFileString"
+                ? Effect.fail(failure)
+                : fs.readFileString(target, encoding),
+          },
+        });
+        const catalog = yield* library.catalog();
+        assert.deepEqual(
+          catalog.definitions.map(({ id }) => id),
+          [custom.id],
+        );
+        assert.notInclude(json(catalog.diagnostics), diagnosticCanary);
+        assert.deepEqual(catalog.diagnostics, [
+          {
+            path: file,
+            message:
+              method === "stat"
+                ? "Could not inspect persona file."
+                : "Could not read persona file.",
+          },
+        ]);
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("reports invalid files, invalid configuration, and missing configured folders", () =>
     Effect.gen(function* () {
       const { library, write, fs, path, stateDir } = yield* fixture;
       yield* write("invalid.yaml", { ...custom, outputArtifact: "UndefinedArtifact" });
-      assert.include(String(yield* library.load().pipe(Effect.flip)), "Invalid persona file");
+      yield* write("valid.yaml", custom);
+      yield* fs.writeFileString(path.join(stateDir, "personas", "syntax.yaml"), "id: [");
+      const catalog = yield* library.catalog();
+      assert.deepEqual(
+        (yield* library.load()).map(({ id }) => id),
+        [custom.id],
+      );
+      assert.lengthOf(catalog.diagnostics, 2);
+      assert.include(catalog.diagnostics[0]!.path, "invalid.yaml");
+      assert.equal(
+        catalog.diagnostics[0]!.message,
+        "Invalid persona definition: check field types, authority policy, and artifact references.",
+      );
+      assert.notInclude(catalog.diagnostics[0]!.message, "UndefinedArtifact");
+      assert.include(catalog.diagnostics[1]!.path, "syntax.yaml");
+      yield* fs.remove(path.join(stateDir, "personas", "invalid.yaml"));
+      yield* fs.remove(path.join(stateDir, "personas", "syntax.yaml"));
+      assert.deepEqual((yield* library.catalog()).diagnostics, []);
       yield* fs.writeFileString(path.join(stateDir, "agent-personas.json"), "not json");
       assert.isDefined(yield* library.load().pipe(Effect.flip));
       yield* fs.writeFileString(

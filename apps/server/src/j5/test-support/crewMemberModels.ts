@@ -1,7 +1,6 @@
 import type { ServerProvider } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 
 import { ProjectService } from "../../project/ProjectService.ts";
 import { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
@@ -31,9 +30,7 @@ export const crewMemberModelsLayer = (input: {
         Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed(input.providers) }),
         Layer.mock(ProjectService)({
           getById: (id) =>
-            Effect.succeed(
-              Option.some({ id, title: input.projectTitle ?? "Test project" } as never),
-            ),
+            Effect.succeedSome({ id, title: input.projectTitle ?? "Test project" } as never),
         }),
       ),
     ),

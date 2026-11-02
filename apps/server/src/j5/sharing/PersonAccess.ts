@@ -24,13 +24,9 @@ import { getLocalOperatorHumanPersonId } from "../a2a/HumanPersonRegistry.ts";
 import { ReadChanges, layer as readChangesLayer } from "../a2a/ReadChanges.ts";
 
 /**
- * People, their levels at scopes, and the devices that are theirs
- * (docs/j5/product/features/people-and-access.md). A device is one of upstream's auth sessions. A
- * person's level at the server covers everything; at a project, its threads; at a thread, the
- * thread and the agents beneath it. Where two levels cover one thing the higher applies.
- *
- * What a device reaches is read here on every request, by its session id. A change of what a
- * person holds is made through `Access`, which also renews their devices' sessions.
+ * People, their levels at scopes, and their devices (upstream auth sessions). A server level
+ * covers everything, a project's its threads, a thread's the agents beneath it; the higher of two
+ * applies. Reach is read here on every request; changes go through `Access`, which renews sessions.
  */
 
 /**
@@ -39,20 +35,17 @@ import { ReadChanges, layer as readChangesLayer } from "../a2a/ReadChanges.ts";
  * permissions upstream issued it for its purpose. MCP clients are approved only by an Owner, and
  * lowering or removing an Owner refuses an approval still waiting (`Access.issueMcpClient`).
  */
-export const isServiceSubject = (subject: string) =>
+const isServiceSubject = (subject: string) =>
   subject.startsWith("peer:") ||
   subject.startsWith("machine:") ||
   subject === "mcp-client" ||
   subject === "cli-issued-session";
 
 /**
- * Sessions that are the first owner's by how they were issued: the link the server prints when
- * it starts, the desktop app on its own machine, T3 Connect, and the development credential
- * (AC2). Upstream mints Connect's credential only for the cloud account the server was linked
- * to, which is the server's own; J5 does not know which person linked it, so it is the first
- * owner's. The first three are bound to the first owner as they are issued (`PairingIntents`);
- * the subject decides for the development credential, which upstream never stores, and for a
- * session from before.
+ * Sessions that are the first owner's by how they were issued (AC2): the startup link, the
+ * desktop app, T3 Connect (minted only for the server's own linked account), and the development
+ * credential. The first three are bound as issued (`PairingIntents`); the subject decides for the
+ * dev credential, which upstream never stores, and for older sessions.
  */
 export const FIRST_OWNER_SUBJECTS: ReadonlySet<string> = new Set([
   "administrative-bootstrap",
@@ -229,6 +222,13 @@ export interface PersonAccessShape {
     personId: ParticipantId,
     threadId: ThreadId,
   ) => Effect.Effect<PersonLevel | null, PersonAccessStorageError>;
+  /**
+   * Every thread a person holds a level over, as `threadLevel` reads one; `null` for a level at
+   * server scope, which covers every thread.
+   */
+  readonly reachableThreads: (
+    personId: ParticipantId,
+  ) => Effect.Effect<ReadonlyArray<ThreadId> | null, PersonAccessStorageError>;
   /** The highest level a person holds over a project as a whole: at the server or the project. */
   readonly projectLevel: (
     personId: ParticipantId,
@@ -533,35 +533,38 @@ const make: Layer.Layer<PersonAccess, never, SqlClient.SqlClient | ReadChanges> 
       Effect.mapError(storage("read whose a session is")),
     );
 
-    // Every thread from the one asked about up to the root of its tree. A Subagent's parent is
-    // its upstream lineage parent; a Peer Agent's is its placement parent, unless it is a fork.
+    // The thread above `chain.thread_id`. A Subagent's parent is its upstream lineage parent; a
+    // Peer Agent's is its placement parent, unless it is a fork.
+    const parentInChain = sql`
+      COALESCE(
+        (
+          SELECT json_extract(thread.payload_json, '$.lineage.parentThreadId')
+          FROM orchestration_v2_projection_threads AS thread
+          WHERE thread.thread_id = chain.thread_id
+            AND json_extract(thread.payload_json, '$.lineage.relationshipToParent') = 'subagent'
+        ),
+        (
+          SELECT parent.thread_id
+          FROM j5_a2a_membership AS child
+          JOIN j5_a2a_participant_placement AS placement
+            ON placement.project_id = child.project_id
+           AND placement.participant_id = child.participant_id
+          JOIN j5_a2a_membership AS parent
+            ON parent.project_id = placement.project_id
+           AND parent.participant_id = placement.placement_parent_id
+          WHERE child.thread_id = chain.thread_id
+            AND placement.provenance_kind <> 'forked-from'
+          LIMIT 1
+        )
+      )
+    `;
+
+    // Every thread from the one asked about up to the root of its tree.
     const chain = (threadId: ThreadId) => sql`
       WITH RECURSIVE chain(thread_id, depth) AS (
         SELECT ${threadId}, 0
         UNION ALL
-        SELECT
-          COALESCE(
-            (
-              SELECT json_extract(thread.payload_json, '$.lineage.parentThreadId')
-              FROM orchestration_v2_projection_threads AS thread
-              WHERE thread.thread_id = chain.thread_id
-                AND json_extract(thread.payload_json, '$.lineage.relationshipToParent') = 'subagent'
-            ),
-            (
-              SELECT parent.thread_id
-              FROM j5_a2a_membership AS child
-              JOIN j5_a2a_participant_placement AS placement
-                ON placement.project_id = child.project_id
-               AND placement.participant_id = child.participant_id
-              JOIN j5_a2a_membership AS parent
-                ON parent.project_id = placement.project_id
-               AND parent.participant_id = placement.placement_parent_id
-              WHERE child.thread_id = chain.thread_id
-                AND placement.provenance_kind <> 'forked-from'
-              LIMIT 1
-            )
-          ),
-          chain.depth + 1
+        SELECT ${parentInChain}, chain.depth + 1
         FROM chain
         WHERE chain.thread_id IS NOT NULL AND chain.depth < ${MAX_ANCESTOR_DEPTH}
       )
@@ -593,6 +596,51 @@ const make: Layer.Layer<PersonAccess, never, SqlClient.SqlClient | ReadChanges> 
         return highestLevel(rows.map((row) => row.level));
       },
       Effect.mapError(storage("read a person's level on a thread")),
+    );
+
+    const reachableThreads: PersonAccessShape["reachableThreads"] = Effect.fn(
+      "j5.sharing.personAccess.reachableThreads",
+    )(
+      function* (personId) {
+        const levels = yield* levelsOf(personId);
+        if (levels.some((held) => held.scope.kind === "server")) return null;
+        if (levels.length === 0) return [];
+        // `coveringThread` for every thread at once: each thread's line of ancestors, kept where a
+        // thread on it, or the thread's project, is one the person holds a level on. The lines are
+        // walked only for someone who holds a thread.
+        const underThreads = levels.some((held) => held.scope.kind === "thread")
+          ? sql`
+              WITH RECURSIVE chain(origin, thread_id, depth) AS (
+                SELECT thread_id, thread_id, 0
+                FROM orchestration_v2_projection_threads
+                WHERE deleted_at IS NULL
+                UNION ALL
+                SELECT chain.origin, ${parentInChain}, chain.depth + 1
+                FROM chain
+                WHERE chain.thread_id IS NOT NULL AND chain.depth < ${MAX_ANCESTOR_DEPTH}
+              )
+              SELECT DISTINCT chain.origin AS thread_id
+              FROM chain
+              JOIN j5_a2a_person_level AS held
+                ON held.person_id = ${personId}
+               AND held.scope_kind = 'thread'
+               AND held.scope_id = chain.thread_id
+              UNION
+            `
+          : sql``;
+        const rows = yield* sql<{ readonly thread_id: string }>`
+          ${underThreads}
+          SELECT threads.thread_id
+          FROM orchestration_v2_projection_threads AS threads
+          JOIN j5_a2a_person_level AS held
+            ON held.person_id = ${personId}
+           AND held.scope_kind = 'project'
+           AND held.scope_id = threads.project_id
+          WHERE threads.deleted_at IS NULL
+        `;
+        return rows.map((row) => row.thread_id as ThreadId);
+      },
+      Effect.mapError(storage("read the threads a person reaches")),
     );
 
     const projectInFeed: PersonAccessShape["projectInFeed"] = Effect.fn(
@@ -633,12 +681,9 @@ const make: Layer.Layer<PersonAccess, never, SqlClient.SqlClient | ReadChanges> 
       Effect.mapError(storage("read whether a project is in a person's sidebar")),
     );
 
-    // Whether a person is on a list of who reaches a thread or project the viewer reaches
-    // (`scopePeople` behind AC26): some thread both reach, or a project the viewer reaches whose
-    // level the person holds. A removed person holds no level, so is on none. Each thread's
-    // levels come from one line of ancestors, so two people share a thread exactly when one
-    // reaches a thread the other holds, or a thread in a project the other holds; checking each
-    // one's own levels is enough.
+    // Whether a person is on a roster the viewer can read (`scopePeople`, AC26): a thread both
+    // reach, or a viewer-reached project the person holds a level in. Each thread's levels come
+    // from one line of ancestors, so checking each one's own levels is enough.
     const onReadableRoster = Effect.fn("j5.sharing.personAccess.onReadableRoster")(function* (
       viewerId: ParticipantId,
       personId: ParticipantId,
@@ -707,6 +752,8 @@ const make: Layer.Layer<PersonAccess, never, SqlClient.SqlClient | ReadChanges> 
 
       threadLevel,
 
+      reachableThreads,
+
       projectLevel: Effect.fn("j5.sharing.personAccess.projectLevel")(
         function* (personId, projectId) {
           const rows = yield* sql<{ readonly level: PersonLevel }>`
@@ -719,8 +766,8 @@ const make: Layer.Layer<PersonAccess, never, SqlClient.SqlClient | ReadChanges> 
         Effect.mapError(storage("read a person's level on a project")),
       ),
 
-      scheduledTaskHome: (taskId) =>
-        sql<{ readonly project_id: string; readonly thread_id: string | null }>`
+      scheduledTaskHome: Effect.fn("PersonAccess.scheduledTaskHome")(function (taskId) {
+        return sql<{ readonly project_id: string; readonly thread_id: string | null }>`
           SELECT project_id, thread_id FROM scheduled_tasks WHERE task_id = ${taskId}
         `.pipe(
           Effect.map((rows) =>
@@ -733,10 +780,11 @@ const make: Layer.Layer<PersonAccess, never, SqlClient.SqlClient | ReadChanges> 
           ),
           Effect.mapError(storage("read where a scheduled task is bound")),
           Effect.withSpan("j5.sharing.personAccess.scheduledTaskHome"),
-        ),
+        );
+      }),
 
-      projectRoots: (personId) =>
-        sql<{ readonly workspace_root: string }>`
+      projectRoots: Effect.fn("PersonAccess.projectRoots")(function (personId) {
+        return sql<{ readonly workspace_root: string }>`
           SELECT project.workspace_root
           FROM j5_a2a_person_level AS held
           JOIN projection_projects AS project
@@ -746,16 +794,18 @@ const make: Layer.Layer<PersonAccess, never, SqlClient.SqlClient | ReadChanges> 
           Effect.map((rows) => rows.map((row) => row.workspace_root)),
           Effect.mapError(storage("read the folders of a person's projects")),
           Effect.withSpan("j5.sharing.personAccess.projectRoots"),
-        ),
+        );
+      }),
 
-      threadProject: (threadId) =>
-        sql<{ readonly project_id: string }>`
+      threadProject: Effect.fn("PersonAccess.threadProject")(function (threadId) {
+        return sql<{ readonly project_id: string }>`
           SELECT project_id FROM orchestration_v2_projection_threads WHERE thread_id = ${threadId}
         `.pipe(
           Effect.map((rows) => (rows[0] === undefined ? null : (rows[0].project_id as ProjectId))),
           Effect.mapError(storage("read a thread's project")),
           Effect.withSpan("j5.sharing.personAccess.threadProject"),
-        ),
+        );
+      }),
 
       projectInFeed,
 
@@ -900,14 +950,15 @@ const make: Layer.Layer<PersonAccess, never, SqlClient.SqlClient | ReadChanges> 
         Effect.withSpan("j5.sharing.personAccess.listPeople"),
       ),
 
-      listLevels: (personId) =>
-        levelsOf(personId).pipe(
+      listLevels: Effect.fn("PersonAccess.listLevels")(function (personId) {
+        return levelsOf(personId).pipe(
           Effect.mapError(storage("list a person's levels")),
           Effect.withSpan("j5.sharing.personAccess.listLevels"),
-        ),
+        );
+      }),
 
-      listDevices: (personId) =>
-        sql<DeviceRow>`
+      listDevices: Effect.fn("PersonAccess.listDevices")(function (personId) {
+        return sql<DeviceRow>`
           SELECT session_id, person_id, ceiling_scopes, renew_pending_since
           FROM j5_a2a_person_session WHERE person_id = ${personId}
           ORDER BY bound_at, session_id
@@ -915,7 +966,8 @@ const make: Layer.Layer<PersonAccess, never, SqlClient.SqlClient | ReadChanges> 
           Effect.map((rows) => rows.map(toDevice)),
           Effect.mapError(storage("list a person's devices")),
           Effect.withSpan("j5.sharing.personAccess.listDevices"),
-        ),
+        );
+      }),
 
       createPerson: Effect.fn("j5.sharing.personAccess.createPerson")(
         function* (input) {

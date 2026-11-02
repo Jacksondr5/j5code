@@ -1,25 +1,29 @@
 import type { EnvironmentId, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import type { MessageAuthor, PromptAnswer } from "@t3tools/contracts/j5";
-import { levelReaches } from "@t3tools/contracts/j5";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useState } from "react";
 
 import {
   authorIndex,
+  mayBeSharedConversation,
+  answersWithoutPrefix,
+  NO_SHARED_MESSAGES_SEEN,
+  observeSharedMessages,
+  sharedQueuedRuns,
+  isSharedNote,
+  markSharedNote,
+  recallableMessages,
+  type SharedMessageView,
+  sharedMessageAnsweredFor,
+  sharedMessageAwaitsRead,
+  sharedMessageView,
+  typedText,
+} from "@t3tools/client-runtime/j5/shared-conversation";
+import {
   readThreadAuthors,
   useThreadAuthors,
   useThreadAuthorsResult,
   useThreadAuthorsValue,
 } from "./sharedConversation";
-import {
-  answersWithoutPrefix,
-  isSharedNote,
-  markSharedNote,
-  readAnswersFor,
-  recallableMessages,
-  type SharedMessageView,
-  sharedMessageView,
-  typedText,
-} from "./sharedTimeline.logic";
 import { useScopePeople } from "./scopeAccess";
 
 interface MessageEntry {
@@ -90,7 +94,7 @@ export function sharedMessageTypedText(
 }
 
 /**
- * A thread's messages for the composer's up-arrow recall, as its timeline shows them (#612), read
+ * A thread's messages for the composer's up-arrow recall, as its timeline shows them, read
  * as the key is pressed; see `recallableMessages`. `null` for a draft, which holds only what was
  * typed here.
  */
@@ -110,31 +114,14 @@ export function sharedPromptHistoryMessages<
 export function useSharedQueuedRuns<
   Queued extends { readonly run: { readonly userMessageId: string }; readonly text: string },
 >(environmentId: EnvironmentId, threadId: ThreadId, queued: ReadonlyArray<Queued>) {
-  const { record, failed } = useThreadAuthorsResult(environmentId, threadId);
-  const { authors } = authorIndex(record);
-  const held = record === null && !failed;
-  return useMemo(
-    () =>
-      held
-        ? []
-        : authors.size === 0
-          ? queued
-          : queued.map((item) => {
-              const author = authors.get(item.run.userMessageId);
-              return author === undefined ? item : { ...item, text: typedText(item.text, author) };
-            }),
-    [authors, held, queued],
-  );
+  return sharedQueuedRuns(useThreadAuthorsResult(environmentId, threadId), queued);
 }
 
 /**
- * A thread's timeline as a shared conversation shows it (Shared conversations AC16). Each
- * person's message the server records an author for is shown as typed, and the note it carried
- * to the agent becomes a notice just before it. An answer to the agent's question is shown as
- * given. A message whose author the server has not answered for yet is shown as this client's
- * person typed it, or held back for the moment until the answer comes, so no line meant for the
- * agent is drawn. Every other entry, and every entry of a thread only one person has ever been
- * able to write to, is returned as it came.
+ * Shared conversations AC16: an authored message is shown as typed, with its note to the agent as a
+ * notice just before it. A message whose author is not answered yet is shown as this client's
+ * person typed it, or held back until the answer comes, so no line meant for the agent is drawn.
+ * Other entries, and all of a thread only one person could write to, are returned as they came.
  */
 export function useSharedConversationEntries<Entry extends MessageEntry>(
   threadRef: ScopedThreadRef | null,
@@ -144,32 +131,28 @@ export function useSharedConversationEntries<Entry extends MessageEntry>(
     threadRef?.environmentId ?? null,
     threadRef?.threadId ?? null,
   );
-  const threadScope = useMemo(
-    () => (threadRef === null ? null : { kind: "thread" as const, threadId: threadRef.threadId }),
-    [threadRef],
-  );
+  const threadScope =
+    threadRef === null ? null : { kind: "thread" as const, threadId: threadRef.threadId };
   // The header's pill already reads who reaches the thread; this is the same read.
   const people = useScopePeople(threadRef?.environmentId ?? null, threadScope);
-  const writers = (people.data?.people ?? []).filter((person) =>
-    levelReaches(person.level, "collaborator"),
-  ).length;
-  // Until the first read answers or fails, any thread may be shared, so nothing is drawn plain
-  // that may carry lines for the agent.
-  const mayBeShared = record?.shared === true || writers > 1 || (record === null && !failed);
 
-  // When this client first saw each server copy, and what its person typed for the messages they
-  // sent from here, which are first drawn from what they typed.
-  const firstSeen = useRef(new Map<string, number>());
-  const typedHere = useRef(new Map<string, string>());
-  const now = Date.now();
-  for (const entry of entries) {
-    const message = entry.message;
-    if (message === undefined || message.role !== "user") continue;
-    if (message.createdBy === undefined) typedHere.current.set(message.id, message.text);
-    else if (!firstSeen.current.has(message.id)) firstSeen.current.set(message.id, now);
-  }
+  const [stored, setStored] = useState(NO_SHARED_MESSAGES_SEEN);
+  // After the state hook: computed before it, the call stops the compiler memoizing the entries,
+  // and ConversationTimeline re-renders forever on entries that change each render.
+  const mayBeShared = mayBeSharedConversation({
+    record,
+    failed,
+    people: people.data?.people ?? null,
+  });
+  const seen = observeSharedMessages(
+    stored,
+    entries.flatMap((entry) => (entry.message === undefined ? [] : [entry.message])),
+    mayBeShared,
+    Date.now,
+  );
+  if (seen !== stored) setStored(seen);
 
-  const shown = useMemo(() => {
+  const shown = (() => {
     const { authors, answers } = authorIndex(record);
     const pending: string[] = [];
     const out = entries.flatMap((entry): ReadonlyArray<Entry> => {
@@ -200,12 +183,18 @@ export function useSharedConversationEntries<Entry extends MessageEntry>(
         answeredFor:
           !fromServer ||
           failed ||
-          readAnswersFor({ readAt, firstSeenAt: firstSeen.current.get(message.id) ?? Infinity }),
+          sharedMessageAnsweredFor({ messageId: message.id, readAt, seen }),
         mayBeShared,
-        typedHere: typedHere.current.get(message.id) ?? null,
+        typedHere: seen.typedHere.get(message.id) ?? null,
       });
       views.set(message, view);
-      if (view.kind === "plain") return [entry];
+      if (view.kind === "plain") {
+        const awaitsRead =
+          fromServer &&
+          sharedMessageAwaitsRead({ messageId: message.id, readAt, seen, mayBeShared, failed });
+        if (awaitsRead) pending.push(message.id);
+        return [entry];
+      }
       if (view.kind === "pending") {
         pending.push(message.id);
         return view.typed === null ? [] : [{ ...entry, message: { ...message, text: view.typed } }];
@@ -217,10 +206,9 @@ export function useSharedConversationEntries<Entry extends MessageEntry>(
       return [{ ...entry, id: `${entry.id}:shared-note`, message: note }, typed];
     });
     return { entries: out, pendingKey: pending.join("|") };
-  }, [entries, failed, mayBeShared, readAt, record]);
+  })();
 
-  // A message waiting on its author is asked about once more; the server's change feed usually
-  // brings the answer first.
+  // oxlint-disable-next-line t3code/react-effect-budget -- asks once more about a message waiting on its author, in case the change feed is slow.
   useEffect(() => {
     if (shown.pendingKey !== "") refresh();
   }, [refresh, shown.pendingKey]);
