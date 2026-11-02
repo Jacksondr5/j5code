@@ -226,7 +226,7 @@ const makeHarness = (options: HarnessOptions = {}) => {
       },
     }),
     Layer.mock(ThreadManagementService)({
-      getThreadProjection: () => Effect.succeed(projection()),
+      getThreadRecords: () => Effect.succeed(projection()),
       dispatch: (command) => {
         order.push(command.type === "thread.stop" ? "interrupt_requested" : command.type);
         return Effect.succeed({ sequence: 1, storedEvents: [] });
@@ -477,7 +477,7 @@ const readFactsFor = (home: "none" | "registered", thread: "missing" | "unreadab
                 ),
             }),
             Layer.mock(ThreadManagementService)({
-              getThreadProjection: () =>
+              getThreadRecords: () =>
                 thread === "present"
                   ? Effect.succeed({
                       thread: { id: threadId, projectId, archivedAt: null },
