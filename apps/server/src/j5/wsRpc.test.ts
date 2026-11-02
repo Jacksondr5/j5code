@@ -20,6 +20,7 @@ import {
   J5_ACCESS_WS_METHODS,
   J5_CLIENT_ACTION_WS_METHODS,
   J5_PEOPLE_WS_METHODS,
+  J5_THREAD_READ_WS_METHODS,
   J5_PLAYBOOK_WS_METHODS,
 } from "@t3tools/contracts/j5";
 import { assert, describe, it } from "@effect/vitest";
@@ -347,6 +348,8 @@ const READ_SCOPED_COMMANDS = [
   J5_ACCESS_WS_METHODS.leave,
   J5_ACCESS_WS_METHODS.markRetiredLinksSeen,
   J5_PEOPLE_WS_METHODS.renameSelf,
+  J5_THREAD_READ_WS_METHODS.visit,
+  J5_THREAD_READ_WS_METHODS.markUnread,
 ] as const;
 
 describe("J5 client action RPC scopes", () => {

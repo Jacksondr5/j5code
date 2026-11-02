@@ -464,7 +464,7 @@ Recorded in `FORK.md` cases 69 to 73, 78 and 80.
 
 ### Clients
 
-#### D42. Thread read markers belong to the person
+#### D43. Thread read markers belong to the person
 
 **Upstream:** a thread has one read marker on the server. Opening it or marking it unread changes that marker for everyone.
 
