@@ -192,7 +192,7 @@ export const AgentPersonaEditableDetails = Schema.Struct({
   definitionDigest: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
   modelRoute: Schema.Tuple([AgentPersonaModelTarget, AgentPersonaModelTarget]),
 });
-const AGENT_PERSONA_INSTRUCTIONS_MAX_LENGTH = 32768;
+export const AGENT_PERSONA_INSTRUCTIONS_MAX_LENGTH = 32768;
 const AgentPersonaInstructions = Schema.String.check(
   Schema.isMinLength(1),
   Schema.isMaxLength(AGENT_PERSONA_INSTRUCTIONS_MAX_LENGTH),
