@@ -2,7 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { presentAgentPersonaCatalog } from "@t3tools/client-runtime/j5/agent-personas";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { PlusIcon, UsersIcon } from "lucide-react";
-import { useEffect, useId, useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../../components/ui/tooltip";
 import { useParticipantLabels } from "../a2a/ParticipantIdentitiesClient";
@@ -63,10 +63,10 @@ export function CrewProposalCard(props: {
       readCrewProposalDraft(props.environmentId, proposal.id) ??
       crewProposalRows(proposal.requestedSeats),
   );
-  useEffect(
-    () => saveCrewProposalDraft(props.environmentId, proposal.id, rows),
-    [props.environmentId, proposal.id, rows],
-  );
+  const changeRows = (next: typeof rows) => {
+    saveCrewProposalDraft(props.environmentId, proposal.id, next);
+    setRows(next);
+  };
   const [editing, setEditing] = useState<CrewProposalRow | null>(null);
   const [fullBrief, setFullBrief] = useState(false);
   const briefId = useId();
@@ -221,7 +221,7 @@ export function CrewProposalCard(props: {
                   }}
                   onRemove={() => {
                     addButton.current?.focus();
-                    setRows((current) => current.filter((candidate) => candidate.id !== row.id));
+                    changeRows(rows.filter((candidate) => candidate.id !== row.id));
                   }}
                 >
                   {seat.steps?.length ? (
@@ -333,10 +333,10 @@ export function CrewProposalCard(props: {
           disabled={props.busy}
           onClose={() => setEditing(null)}
           onSave={(value) => {
-            setRows((current) =>
+            changeRows(
               editing.original === null
-                ? [...current, { ...editing, value }]
-                : current.map((row) => (row.id === editing.id ? { ...row, value } : row)),
+                ? [...rows, { ...editing, value }]
+                : rows.map((row) => (row.id === editing.id ? { ...row, value } : row)),
             );
             setEditing(null);
           }}

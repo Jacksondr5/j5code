@@ -46,11 +46,9 @@ export const J5_PREAPPROVED_TOOLS: ReadonlyArray<string> = [
 
 /**
  * Interactive modes pre-approve routine communication, owner-thread playbook progress, and Crew
- * staffing. Staffing is the Captain's own decision and is automatic by design: an initial roster
- * waits for the person unless the project's Crew approval setting is automatic, and
- * `j5_request_crew_member` adds a member directly, so a Supervised Captain can start a custom
- * member that defaults to Full access without review. The person accepted that. Other lifecycle
- * and spawning tools keep the harness's prompting in those modes.
+ * staffing. A roster waits for the person unless the project's Crew approval is automatic, and
+ * `j5_request_crew_member` adds a member directly, so a Supervised Captain can start a Full-access
+ * custom member without review (Jackson accepted that, 2026-10-31).
  */
 export const J5_COORDINATION_TOOLS: ReadonlyArray<string> = [
   "j5_send_message",
