@@ -148,8 +148,8 @@ export const makeClientReadRpcHandlers = Effect.fn("j5.makeClientReadRpcHandlers
       clientReads
         .preArchiveFacts(input.threadId)
         .pipe(Effect.catch(failed("Pre-archive fact lookup failed."))),
-    [METHODS.readCrewArchiveWorktrees]: (input: CrewArchiveWorktreesRequest) =>
-      Effect.gen(function* () {
+    [METHODS.readCrewArchiveWorktrees]: Effect.fn("j5.a2a.clientReadRpc.readCrewArchiveWorktrees")(
+      function* (input: CrewArchiveWorktreesRequest) {
         const listed = yield* clientReads
           .crewArchiveWorktrees(input.crewInstanceIds)
           .pipe(Effect.catch(failed("Crew worktree lookup failed.")));
@@ -163,7 +163,8 @@ export const makeClientReadRpcHandlers = Effect.fn("j5.makeClientReadRpcHandlers
             ({ captainThreadId: _captainThreadId, ...estimate }) => estimate,
           ),
         };
-      }),
+      },
+    ),
     [METHODS.readParticipantIdentities]: (input: ParticipantIdentitiesRequest) =>
       clientReads
         .participantIdentities({ participantIds: input.participantIds.filter(isParticipantId) })

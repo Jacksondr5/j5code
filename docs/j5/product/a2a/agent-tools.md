@@ -347,7 +347,7 @@ participant, so no Captain check applies to it (Bryant, 2026-09-14).
 
 ### `j5_archive_crew`
 
-**Description (contract):** "Retire a whole Crew you command. Crews archive only as a unit —
+**Description (contract):** "Retire a whole Crew you command. Crews archive only as a unit;
 members are never retired one by one. A clean archive completes immediately; otherwise the call
 refuses with the facts and a confirmation_token. Before retrying with that token, check with the
 user. Archiving removes the worktrees J5 created for the Crew's seats when they are clean, merged,

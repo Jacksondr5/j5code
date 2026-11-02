@@ -7,7 +7,7 @@ import type {
   CrewMemberReasoning,
   CrewWorkspaceOptions,
 } from "@t3tools/contracts/j5";
-import { useEffect, useEffectEvent, useMemo, useState, type RefObject } from "react";
+import { useEffect, useEffectEvent, useState, type RefObject } from "react";
 
 import { Button } from "../../components/ui/button";
 import {
@@ -55,6 +55,7 @@ export function CrewProposalMemberDialog(props: {
   const loadingPersona = !custom && loadedPersona !== personaId;
   const currentDraft = useEffectEvent(() => value);
 
+  // oxlint-disable-next-line t3code/react-effect-budget -- reads the chosen persona from the server whenever the choice changes, and drops a stale answer.
   useEffect(() => {
     if (custom || props.environmentId === null || personaError !== null) return;
     let current = true;
@@ -97,20 +98,17 @@ export function CrewProposalMemberDialog(props: {
   const error = roster.errors.get(props.row.id);
   // Runtime defaults can be repaired independently of invalid names, instructions, or workspaces.
   // Only the card's complete roster preview can authorize approval.
-  const seats = useMemo(
-    () => [
-      {
-        seat: props.previewSeatName,
-        agentId: custom ? null : personaId,
-        reason: "Member runtime preview",
-        workspace: { type: "shared" as const },
-        ...(value.modelSelection ? { modelSelection: value.modelSelection } : {}),
-        ...(value.runtimeMode ? { runtimeMode: value.runtimeMode } : {}),
-        ...(custom ? { instructions: "Crew member" } : {}),
-      },
-    ],
-    [props.previewSeatName, custom, personaId, value.modelSelection, value.runtimeMode],
-  );
+  const seats = [
+    {
+      seat: props.previewSeatName,
+      agentId: custom ? null : personaId,
+      reason: "Member runtime preview",
+      workspace: { type: "shared" as const },
+      ...(value.modelSelection ? { modelSelection: value.modelSelection } : {}),
+      ...(value.runtimeMode ? { runtimeMode: value.runtimeMode } : {}),
+      ...(custom ? { instructions: "Crew member" } : {}),
+    },
+  ];
   const preview = useCrewProposalPreview(
     props.environmentId,
     props.proposalId,
