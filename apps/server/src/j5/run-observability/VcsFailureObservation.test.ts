@@ -60,7 +60,7 @@ function fixture() {
     turnItems,
   } as unknown as OrchestrationV2ThreadProjection;
   const projections = Layer.mock(ProjectionStore.ProjectionStoreV2)({
-    getThreadProjection: () => Effect.succeed(projection),
+    getThreadRecords: () => Effect.succeed(projection),
     getCheckpointContext: () => Effect.succeed(projection as never),
   });
   const events = Layer.mock(EventSink.EventSinkV2)({
@@ -81,7 +81,7 @@ it.effect.each([
   { phase: "refresh", reportFails: false },
   { phase: "refresh", reportFails: true },
 ] as const)(
-  "preserves $phase VCS failure through real finalization and observer (reportFails=$reportFails)",
+  "handles a $phase VCS failure through real finalization and observer (reportFails=$reportFails)",
   ({ phase, reportFails }) => {
     const { turnItems, projections, events } = fixture();
     const vcs =
@@ -133,6 +133,13 @@ it.effect.each([
     );
     return Effect.gen(function* () {
       const service = yield* RunFinalization.RunFinalizationService;
+      if (phase === "refresh") {
+        // Upstream logs a failed display refresh once the checkpoint is durable, so
+        // finalization succeeds and there is no delay to observe.
+        yield* service.finalize(input);
+        assert.equal(turnItems.length, 0);
+        return;
+      }
       for (let repeat = 0; repeat < 2; repeat += 1) {
         const error = yield* service.finalize(input).pipe(Effect.flip);
         assert.instanceOf(error, RunFinalization.RunFinalizationError);
@@ -156,7 +163,7 @@ it.effect("ignores ordinary and cyclic causes before reading projection state", 
     Layer.provide(
       Layer.mergeAll(
         Layer.mock(ProjectionStore.ProjectionStoreV2)({
-          getThreadProjection: () =>
+          getThreadRecords: () =>
             Effect.sync(() => {
               reads += 1;
               throw new Error("unexpected read");

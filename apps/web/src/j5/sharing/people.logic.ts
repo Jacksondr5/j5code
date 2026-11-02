@@ -9,18 +9,14 @@ import type {
   ScopeReach,
 } from "@t3tools/contracts/j5";
 import { LEVEL_PERMISSIONS, levelReaches } from "@t3tools/contracts/j5";
+import { levelLabel } from "@t3tools/client-runtime/j5/sharing";
 import { AUTH_SCOPE_OPTIONS } from "@t3tools/shared/authScopeOptions";
 
 import { lifetimeLeft } from "./shareLink.logic";
 
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
-const LEVEL_LABELS: Record<PersonLevel, string> = {
-  viewer: "Viewer",
-  collaborator: "Collaborator",
-  owner: "Owner",
-};
-export const levelLabel = (level: PersonLevel) => LEVEL_LABELS[level];
+export { levelLabel };
 
 /** The levels offered at a scope: Owner only at server scope (AC8). */
 export const levelsAt = (scope: PersonScope): ReadonlyArray<PersonLevel> =>
@@ -368,12 +364,9 @@ export function peopleServerState(input: {
 }
 
 /**
- * Where an Owner can widen a person from their row, at the person's highest level, which their
- * devices already hold: the whole server, and each listed project they do not already reach at
- * that level, in the server's order. `null` when they hold nothing yet, or already hold the server
- * at their highest level and so reach everything at it. Owner is
- * held only at server scope, so an Owner is never offered anything. A narrower level the new one
- * covers is left in place for the Owner to remove.
+ * Where an Owner can widen a person at their highest level: the server, then each listed project
+ * not yet reached at it, in server order. `null` when they hold nothing, already hold the server at
+ * that level, or are an Owner (server scope only). Narrower levels stay for the Owner to remove.
  */
 export function widenTargets(
   levels: ReadonlyArray<HeldPersonLevel>,
