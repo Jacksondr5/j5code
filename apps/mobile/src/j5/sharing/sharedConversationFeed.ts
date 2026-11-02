@@ -3,8 +3,8 @@ import {
   authorIndex,
   markSharedNote,
   mayBeSharedConversation,
-  readAnswersFor,
   type SeenSharedMessages,
+  sharedMessageAnsweredFor,
   sharedMessageView,
 } from "@t3tools/client-runtime/j5/shared-conversation";
 import { MessageId } from "@t3tools/contracts";
@@ -61,9 +61,7 @@ export function presentSharedConversationFeed(input: {
       fromServer,
       author: authors.get(message.id),
       answeredFor:
-        !fromServer ||
-        failed ||
-        readAnswersFor({ readAt, firstSeenAt: seen.firstSeen.get(message.id) ?? Infinity }),
+        !fromServer || failed || sharedMessageAnsweredFor({ messageId: message.id, readAt, seen }),
       mayBeShared,
       typedHere: seen.typedHere.get(message.id) ?? null,
     });

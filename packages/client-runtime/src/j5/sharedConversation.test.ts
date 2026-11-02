@@ -8,6 +8,9 @@ import {
   sharedMessageView,
   typedText,
   mayBeSharedConversation,
+  NO_SHARED_MESSAGES_SEEN,
+  observeSharedMessages,
+  sharedMessageAnsweredFor,
 } from "./sharedConversation.ts";
 
 const author = (overrides: Partial<MessageAuthor> = {}): MessageAuthor => ({
@@ -192,5 +195,41 @@ describe("mayBeSharedConversation", () => {
         people: [person("owner", false, true), person("viewer", true)],
       }),
     ).toBe(true);
+  });
+});
+
+describe("holding a message for its author", () => {
+  const message = (id: string) => ({ id, role: "user", text: "Hello", createdBy: "user" });
+  const clock = (...times: ReadonlyArray<number>) => {
+    let index = 0;
+    return () => times[index++]!;
+  };
+
+  it("never holds a message already on screen when the thread comes to be shared", () => {
+    const unshared = observeSharedMessages(
+      NO_SHARED_MESSAGES_SEEN,
+      [message("old")],
+      false,
+      clock(2),
+    );
+    const shared = observeSharedMessages(unshared, [message("old")], true, clock(5));
+    expect(shared.sharedSince).toBe(5);
+    expect(sharedMessageAnsweredFor({ messageId: "old", readAt: 1, seen: shared })).toBe(true);
+  });
+
+  it("holds a message first seen once the thread may be shared, until a read answers for it", () => {
+    const seen = observeSharedMessages(NO_SHARED_MESSAGES_SEEN, [message("new")], true, clock(5));
+    expect(sharedMessageAnsweredFor({ messageId: "new", readAt: 1, seen })).toBe(false);
+    expect(sharedMessageAnsweredFor({ messageId: "new", readAt: 6, seen })).toBe(true);
+  });
+
+  it("stores nothing new while nothing has changed", () => {
+    const seen = observeSharedMessages(NO_SHARED_MESSAGES_SEEN, [message("a")], true, clock(5));
+    expect(observeSharedMessages(seen, [message("a")], true, clock(9))).toBe(seen);
+  });
+
+  it("forgets the thread was shared when a read says it is not", () => {
+    const seen = observeSharedMessages(NO_SHARED_MESSAGES_SEEN, [], true, clock(5));
+    expect(observeSharedMessages(seen, [], false, clock(9)).sharedSince).toBeNull();
   });
 });

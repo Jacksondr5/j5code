@@ -11,9 +11,9 @@ import {
   sharedQueuedRuns,
   isSharedNote,
   markSharedNote,
-  readAnswersFor,
   recallableMessages,
   type SharedMessageView,
+  sharedMessageAnsweredFor,
   sharedMessageView,
   typedText,
 } from "@t3tools/client-runtime/j5/shared-conversation";
@@ -136,13 +136,6 @@ export function useSharedConversationEntries<Entry extends MessageEntry>(
   const people = useScopePeople(threadRef?.environmentId ?? null, threadScope);
 
   const [stored, setStored] = useState(NO_SHARED_MESSAGES_SEEN);
-  const seen = observeSharedMessages(
-    stored,
-    entries.flatMap((entry) => (entry.message === undefined ? [] : [entry.message])),
-    Date.now,
-  );
-  if (seen !== stored) setStored(seen);
-
   // After the state hook: computed before it, the call stops the compiler memoizing the entries,
   // and ConversationTimeline re-renders forever on entries that change each render.
   const mayBeShared = mayBeSharedConversation({
@@ -150,6 +143,13 @@ export function useSharedConversationEntries<Entry extends MessageEntry>(
     failed,
     people: people.data?.people ?? null,
   });
+  const seen = observeSharedMessages(
+    stored,
+    entries.flatMap((entry) => (entry.message === undefined ? [] : [entry.message])),
+    mayBeShared,
+    Date.now,
+  );
+  if (seen !== stored) setStored(seen);
 
   const shown = (() => {
     const { authors, answers } = authorIndex(record);
@@ -182,7 +182,7 @@ export function useSharedConversationEntries<Entry extends MessageEntry>(
         answeredFor:
           !fromServer ||
           failed ||
-          readAnswersFor({ readAt, firstSeenAt: seen.firstSeen.get(message.id) ?? Infinity }),
+          sharedMessageAnsweredFor({ messageId: message.id, readAt, seen }),
         mayBeShared,
         typedHere: seen.typedHere.get(message.id) ?? null,
       });
