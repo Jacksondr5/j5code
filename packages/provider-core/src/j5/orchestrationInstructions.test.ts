@@ -255,7 +255,7 @@ describe("J5 orchestration instructions", () => {
       J5_ORCHESTRATION_INSTRUCTIONS,
       "resolved provider, model, reasoning, and access",
     );
-    // #745: approval creates seats; members start on their first assignment and are reused.
+    // Approval creates seats; members start on their first assignment and are reused.
     assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "send each member its first assignment");
     assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "Reuse finished members for follow-up work");
     assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "Captains of other crews");
