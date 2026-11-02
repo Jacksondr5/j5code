@@ -9,7 +9,7 @@ import {
 } from "@t3tools/contracts/j5";
 import { Link } from "@tanstack/react-router";
 import { AlertTriangleIcon, ChevronDownIcon, ChevronRightIcon } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import { ProviderInstanceIcon } from "../../components/chat/ProviderInstanceIcon";
 import { SettingResetButton, SettingsRow } from "../../components/settings/settingsLayout";
@@ -141,7 +141,7 @@ export function CrewMemberModelsSettings() {
   const catalog = useEnvironmentQuery(
     environmentId === null ? null : agentPersonaEnvironment.catalog({ environmentId, input: {} }),
   );
-  const entries = useMemo(() => deriveProviderInstanceEntries(providers ?? []), [providers]);
+  const entries = deriveProviderInstanceEntries(providers ?? []);
   const known = providers ?? [];
   const setUp = entries.filter((entry) => isCrewMemberProviderSetUp(entry.snapshot));
   const notSetUp = entries.filter((entry) => !isCrewMemberProviderSetUp(entry.snapshot));
