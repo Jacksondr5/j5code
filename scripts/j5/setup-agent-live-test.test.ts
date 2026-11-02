@@ -1033,6 +1033,45 @@ describe("formatInstructions", () => {
     assert.notInclude(skills, "Skills writes are prohibited");
   });
 
+  it("reports preserved unhealthy peer records without claiming direct delivery", async () => {
+    const list = (side: "local" | "remote") =>
+      JSON.stringify({
+        peers: [
+          {
+            environmentId: side === "local" ? "remote-id" : "local-id",
+            label: side === "local" ? "Remote" : "Local",
+            lastError: "connection refused",
+          },
+        ],
+      });
+    let issued = 0;
+    const justPeered = await preservePeerSetup({
+      localId: "local-id",
+      remoteId: "remote-id",
+      list,
+      setup: async () => {
+        issued++;
+      },
+    });
+    assert.isFalse(justPeered);
+    const output = formatInstructions({
+      paths,
+      manifest: { ...built, mode: "peer" },
+      facts,
+      pairingUrl: undefined,
+      remote: {
+        facts,
+        ownerName: "Remote owner",
+        addToBrowserUrl: undefined,
+        peered:
+          justPeered || (listsPeer(list("local"), "Remote") && listsPeer(list("remote"), "Local")),
+      },
+    });
+    assert.equal(issued, 0);
+    assert.include(output, "The two are NOT peered yet");
+    assert.notInclude(output, "send to each other directly");
+  });
+
   it("names each server's owner in a peer build", () => {
     const output = formatInstructions({
       paths,
@@ -1496,6 +1535,33 @@ describe("preservePeerSetup", () => {
         },
       });
       assert.equal(issued, 1);
+    }
+  });
+
+  it("reads Remote before repairing a missing Local record", async () => {
+    for (const remote of [
+      () => {
+        throw new Error("peer list unavailable");
+      },
+      () => "not json",
+    ]) {
+      const reads: Array<string> = [];
+      let issued = 0;
+      await expect(
+        preservePeerSetup({
+          localId: "local-id",
+          remoteId: "remote-id",
+          list: (side) => {
+            reads.push(side);
+            return side === "local" ? JSON.stringify({ peers: [] }) : remote();
+          },
+          setup: async () => {
+            issued++;
+          },
+        }),
+      ).rejects.toThrow();
+      assert.deepEqual(reads, ["local", "remote"]);
+      assert.equal(issued, 0);
     }
   });
 

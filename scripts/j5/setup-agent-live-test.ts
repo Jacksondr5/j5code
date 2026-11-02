@@ -1481,7 +1481,7 @@ async function peerServers(
   mode: LiveTestMode,
   ports: { readonly local: number; readonly remote: number },
   deadline: number,
-): Promise<void> {
+): Promise<boolean> {
   const local = { home: paths.home, origin: `http://127.0.0.1:${ports.local}`, name: "Local" };
   const remote = {
     home: paths.remote.home,
@@ -1526,7 +1526,7 @@ async function peerServers(
       "Both servers report the same environment id; their homes are not separate.",
     );
   }
-  await preservePeerSetup({
+  return preservePeerSetup({
     localId: withIds.local.environmentId,
     remoteId: withIds.remote.environmentId,
     list: (side) => {
@@ -1588,13 +1588,12 @@ export async function preservePeerSetup(input: {
   readonly remoteId: string;
   readonly list: (side: "local" | "remote") => string;
   readonly setup: () => Promise<void>;
-}): Promise<void> {
-  if (
-    recordsPeer(input.list("local"), input.remoteId) &&
-    recordsPeer(input.list("remote"), input.localId)
-  )
-    return;
+}): Promise<boolean> {
+  const localRecorded = recordsPeer(input.list("local"), input.remoteId);
+  const remoteRecorded = recordsPeer(input.list("remote"), input.localId);
+  if (localRecorded && remoteRecorded) return false;
   await input.setup();
+  return true;
 }
 
 /**
@@ -1744,8 +1743,13 @@ async function start(
   if (local.serverPort === undefined || remote.serverPort === undefined) {
     throw new LiveTestRefusal("A server is running without a reported port; cannot peer.");
   }
-  await peerServers(paths, mode, { local: local.serverPort, remote: remote.serverPort }, deadline);
-  printRunning(paths, local, remote, true);
+  const justPeered = await peerServers(
+    paths,
+    mode,
+    { local: local.serverPort, remote: remote.serverPort },
+    deadline,
+  );
+  printRunning(paths, local, remote, justPeered);
 }
 
 /** A base ref as the caller gave it, and the commit it names now. */
