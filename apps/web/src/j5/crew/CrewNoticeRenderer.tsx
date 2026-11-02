@@ -107,6 +107,7 @@ function CrewNoticeLines(props: {
         const threadId = line.threadId;
         // A folded notice can carry one seat twice (it failed, was messaged, failed again).
         return (
+          // oxlint-disable-next-line react/no-array-index-key -- a folded notice can repeat a seat with the same reason, so no field is unique.
           <li key={`${line.threadId ?? line.seat}:${index}`}>
             {threadId === null || environmentId === undefined ? (
               <div className={className}>{content}</div>
