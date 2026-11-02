@@ -520,6 +520,10 @@ it.effect(
         assert.include(brief, "<seat_instructions>\nWrite the running notes.");
         assert.notInclude(brief, "<seat_obligation>");
         assert.include(brief, "persona=custom");
+        const [stored] = yield* (yield* SqlClient.SqlClient)<{
+          readonly agent_display_name: string | null;
+        }>`SELECT agent_display_name FROM j5_crew_seat_context WHERE first_turn_text LIKE '%your_seat: scribe%'`;
+        assert.equal(stored?.agent_display_name, "custom");
 
         // A persona Captain runs under its persona's policy (workspace write, auto-accept-edits here)
         // and has the person supervising it; its custom seat still defaults to Full access.
