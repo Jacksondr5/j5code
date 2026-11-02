@@ -173,7 +173,7 @@ const participantArchiveCommandId = (projectId: LedgerProjectId, participantId: 
   );
 
 /** What an agent is told when the person it asked can no longer write to its thread. */
-export const formatAccessEndedNotice = (input: {
+const formatAccessEndedNotice = (input: {
   readonly exchangeId: ExchangeId;
   readonly personId: ParticipantId;
 }): string =>
@@ -185,7 +185,7 @@ export const formatAccessEndedNotice = (input: {
     "This is a platform-authored terminal notice, not a peer reply.",
   ].join("\n\n");
 
-export const formatLifecycleNotice = (input: {
+const formatLifecycleNotice = (input: {
   readonly exchangeId: ExchangeId;
   readonly retiredParticipantId: ParticipantId;
   readonly disposition: ExchangeDropDisposition;

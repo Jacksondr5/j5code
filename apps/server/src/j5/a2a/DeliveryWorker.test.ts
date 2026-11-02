@@ -613,7 +613,7 @@ it.effect("keeps a message queued behind a held receiver queue undelivered until
       Layer.provide(database),
     );
     const threadManagement = Layer.mock(ThreadManagementService)({
-      getThreadProjection: () =>
+      getThreadRecords: () =>
         Effect.succeed({
           thread: { projectId: "project:held", archivedAt: null },
           messages: [],

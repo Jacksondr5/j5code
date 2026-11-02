@@ -2,7 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { presentAgentPersonaCatalog } from "@t3tools/client-runtime/j5/agent-personas";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { PlusIcon, UsersIcon } from "lucide-react";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { Tooltip, TooltipTrigger, TooltipPopup } from "../../components/ui/tooltip";
 import { useParticipantLabels } from "../a2a/ParticipantIdentitiesClient";
@@ -93,16 +93,13 @@ export function CrewProposalCard(props: {
       ? null
       : agentPersonaEnvironment.catalog({ environmentId: props.environmentId, input: {} }),
   );
-  const agents = useMemo(
-    () =>
-      catalog.data == null
-        ? []
-        : presentAgentPersonaCatalog(catalog.data).filter(
-            (agent) => agent.availability === "available",
-          ),
-    [catalog.data],
-  );
-  const roster = useMemo(() => crewProposalRoster(rows), [rows]);
+  const agents =
+    catalog.data == null
+      ? []
+      : presentAgentPersonaCatalog(catalog.data).filter(
+          (agent) => agent.availability === "available",
+        );
+  const roster = crewProposalRoster(rows);
   const { seats, errors } = roster;
   const preview = useCrewProposalPreview(
     props.environmentId,

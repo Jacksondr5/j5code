@@ -14,6 +14,7 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import type { ParticipantId } from "../a2a/contracts.ts";
+import { isDeliveryMessageId } from "../a2a/DeliveryTransport.ts";
 import { authorLabel } from "./authorLabel.ts";
 import { PersonAccess } from "./PersonAccess.ts";
 import { SharedThreads, type ThreadWriter } from "./SharedThreads.ts";
@@ -32,6 +33,41 @@ export interface Author {
   readonly displayName: string | null;
   readonly level: WriterLevel;
 }
+
+/** How upstream's record of a message says it came to be. */
+export interface MessageOrigin {
+  readonly created_by: string | null;
+  readonly creation_source: string | null;
+  readonly scheduled_task_id: string | null;
+  readonly sender_thread_id: string | null;
+  readonly created_at: string;
+  /** When a second person could first write to the message's thread; `null` while none can. */
+  readonly shared_at: string | null;
+}
+
+/** `MessageOrigin`'s columns, read from `orchestration_v2_projection_messages` as `alias`. */
+export const messageOriginColumns = (alias: string) => `
+  json_extract(${alias}.payload_json, '$.createdBy') AS created_by,
+  json_extract(${alias}.payload_json, '$.creationSource') AS creation_source,
+  json_extract(${alias}.payload_json, '$.scheduledTaskId') AS scheduled_task_id,
+  json_extract(${alias}.payload_json, '$.senderThreadId') AS sender_thread_id,
+  ${alias}.created_at AS created_at,
+  (SELECT shared.shared_at FROM j5_a2a_shared_thread AS shared
+    WHERE shared.thread_id = ${alias}.thread_id) AS shared_at
+`;
+
+/**
+ * Whether a message no person is recorded for was written by one while the first owner was the
+ * only person who could write to its thread, so was theirs (AC3, AC16): one typed in the thread,
+ * or an Inbox reply, the only delivery a person sends. Any other "mcp" message is an agent's or a
+ * session's; one from after a second writer came is the server's, as every person's is recorded.
+ */
+export const typedByFirstOwner = (message: MessageOrigin & { readonly message_id: string }) =>
+  message.created_by === "user" &&
+  (message.creation_source !== "mcp" || isDeliveryMessageId(message.message_id)) &&
+  message.scheduled_task_id === null &&
+  message.sender_thread_id === null &&
+  (message.shared_at === null || message.created_at < message.shared_at);
 
 /** The platform's text a stored message begins with: the note it carries, then the line naming
  * whose it is. */
@@ -60,14 +96,9 @@ interface CarrierRun {
 }
 
 /**
- * Whether what a message carried has reached the agent: it is the message its run was started
- * for, the run has started, so the provider was handed it, and it has not been rolled back,
- * which takes the agent's conversation back to before it. A message whose run is queued,
- * preparing or starting has told the agent nothing yet, and may never; nor has one with no run.
- * Nor has a message steered into a run started for another: it is recorded against that run,
- * which has started, whether or not the provider ever took the steer, and nothing says it did.
- * Until one is known to have run, every message carries the note again: a note told twice is
- * better than one never told.
+ * Whether a message's note reached the agent: its run was started for it, has started, and was not
+ * rolled back. Queued, preparing or run-less messages told nothing yet; nor did one steered into
+ * another run, since nothing says the provider took it. A note told twice beats one never told.
  */
 const reachedAgent = (run: CarrierRun) =>
   run.carried !== null &&
@@ -78,8 +109,8 @@ const reachedAgent = (run: CarrierRun) =>
 /**
  * Over the server's records. `touch` moves a thread's authors for the clients that read them.
  */
-export const makeMessageStamps = (touch: (threadId: ThreadId) => Effect.Effect<unknown>) =>
-  Effect.gen(function* () {
+export const makeMessageStamps = Effect.fn("j5.sharing.sharedConversation.makeMessageStamps")(
+  function* (touch: (threadId: ThreadId) => Effect.Effect<unknown>) {
     const sql = yield* SqlClient.SqlClient;
     const people = yield* PersonAccess;
     const shared = yield* SharedThreads;
@@ -110,16 +141,10 @@ export const makeMessageStamps = (touch: (threadId: ThreadId) => Effect.Effect<u
     });
 
     /**
-     * Who the agent was last told can write to a thread: what the message with a note whose run
-     * started last said. `null` for an agent that has been told nothing that still
-     * stands. A note on a message whose run has not started has told the agent nothing yet, and
-     * may never, since the message can be withdrawn or its run fail first. So until one is known to
-     * have run, every message carries the note (AC4).
-     *
-     * Read from upstream's own records by SQL: a message's `run_id`, a run's `status` and the
-     * `startedAt` in its payload (`SharedConversation.integration.test.ts` fails if upstream
-     * reshapes them). It is asked when the next message arrives, so every way a message can be
-     * lost, a rewind included, is covered without a hook on any of them.
+     * Who the agent was last told can write: the note on the message whose run started last, or
+     * `null`. Until a note is known to have run, every message carries it (AC4). Read by SQL from
+     * upstream's `run_id`, run `status` and `startedAt` (pinned by the integration test) when the
+     * next message arrives, so every way a message is lost, a rewind included, is covered.
      */
     const lastTold = Effect.fn("j5.sharing.sharedConversation.lastTold")(function* (
       threadId: ThreadId,
@@ -188,11 +213,9 @@ export const makeMessageStamps = (touch: (threadId: ThreadId) => Effect.Effect<u
       carried: { readonly note: string | null; readonly told: string | null },
       storedPrefix: string,
     ) {
-      // Upstream keys a message by its id alone and writes a send that names one it holds over it.
-      // So a message id is its sender's own: one recorded for someone else, or one upstream holds
-      // that is no one's here, is refused. A retry of a person's own send goes on only when that
-      // send was recorded here, in a shared conversation; a retry of one sent just before the thread
-      // became shared finds no record and is refused as already sent.
+      // Upstream keys a message by id alone and overwrites on a repeat, so an id is its sender's:
+      // one recorded for someone else, or held by upstream for no one here, is refused. A retry
+      // goes on only if its send was recorded here; one sent just before sharing is refused.
       const recorded = yield* sql<{ readonly person_id: string }>`
         SELECT person_id FROM j5_a2a_message_author WHERE message_id = ${messageId}
       `;
@@ -207,7 +230,7 @@ export const makeMessageStamps = (touch: (threadId: ThreadId) => Effect.Effect<u
         return yield* refused("This message was already sent.");
       }
       const createdAt = DateTime.formatIso(yield* DateTime.now);
-      yield* sql`
+      const inserted = yield* sql`
         INSERT INTO j5_a2a_message_author (
           thread_id, message_id, person_id, display_name, level, note, told_json, stored_prefix,
           created_at
@@ -216,9 +239,13 @@ export const makeMessageStamps = (touch: (threadId: ThreadId) => Effect.Effect<u
           ${carried.note}, ${carried.told}, ${storedPrefix}, ${createdAt}
         )
         ON CONFLICT (thread_id, message_id) DO NOTHING
+        RETURNING message_id
       `;
       yield* touch(threadId);
+      // Whether this call wrote the record, rather than finding an earlier attempt's.
+      return inserted.length > 0;
     });
 
     return { writerLabel, authorOn, announce, recordAuthor };
-  });
+  },
+);

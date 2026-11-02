@@ -83,12 +83,10 @@ import {
 } from "./contracts.ts";
 
 /**
- * Poll mode end to end: a work VM that can be reached, and a laptop behind an
- * office firewall that cannot. The laptop opens every connection. Its sends go
- * to the VM directly; the VM stores what it has for the laptop until the laptop
- * polls. Each side runs its real ledger, send, inbound and worker; the VM runs
- * the real store service and the laptop the real poller, whose HTTP call is
- * handed straight to the VM's store service.
+ * Poll mode end to end: a reachable work VM, and a laptop behind a firewall that opens every
+ * connection. The laptop sends directly; the VM stores what it has for the laptop until it polls.
+ * Both run their real ledger, send, inbound and worker; the laptop's poller calls the VM's real
+ * store service in place of HTTP.
  */
 
 const timestamp = "2026-10-02T12:00:00.000Z";
@@ -954,7 +952,7 @@ it.effect(
         };
         const waiting = yield* vmServer.send.send(note);
         assert.equal(waiting.receiverServer, laptop.label);
-        assert.equal(waiting.deliveryOutcome, "waiting_for_recipient");
+        assert.equal(waiting.delivery, "waiting_for_recipient");
         assert.isString(waiting.recipientLastAvailableAt);
         assert.equal(
           waiting.note,
@@ -985,7 +983,7 @@ it.effect(
         for (const retry of [note, ended]) {
           const retried = yield* vmServer.send.send(retry);
           assert.equal(retried.receiverServer, laptop.label, retry.commandId);
-          assert.isUndefined(retried.deliveryOutcome, retry.commandId);
+          assert.isUndefined(retried.delivery, retry.commandId);
           assert.isUndefined(retried.note, retry.commandId);
         }
       }),

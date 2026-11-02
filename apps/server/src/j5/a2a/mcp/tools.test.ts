@@ -9,6 +9,15 @@ import { Tool } from "effect/ai";
 
 import { J5DelegateTaskTool } from "../../agents/agentDelegation.ts";
 import { A2A_SEND_TOOL_DESCRIPTION } from "../EnvelopeFormatter.ts";
+import { J5AttachmentUploadToolkit } from "./attachments.ts";
+import { J5AdaptedThreadToolkit } from "./threadTools.ts";
+import {
+  J5ArtifactToolkit,
+  J5EnvironmentToolkit,
+  J5ProjectToolkit,
+  J5OrchestratorToolkit,
+  J5ThreadToolkit,
+} from "./upstreamCatalog.ts";
 import { J5OrchestratorSurface } from "./orchestratorSurface.ts";
 import { J5_CLAUDE_MCP_ALLOWED_TOOLS } from "./claudeAllowedTools.ts";
 import {
@@ -142,11 +151,50 @@ it("publishes the ratified single-target lifecycle contracts fail-closed", () =>
   assert.isFalse(Context.get(J5StopAgentTool.annotations, Tool.Idempotent));
 });
 
-// Claude Code drops EVERY tool of an MCP server when one tool's input schema has no top-level
-// `type: "object"` (verified 2026-09-10 with a probe server: a single top-level `anyOf` tool made
-// the whole server's inventory vanish while it still reported "connected"). `Schema.Struct({})`
-// encodes as exactly that anyOf, which is how `j5_list_personas` silently took the whole t3-code
-// toolkit away from every Claude thread. No-input tools must omit `parameters` instead.
+// These are provider-facing safety hints, independent of J5's pre-approval list. This
+// checks the advertised contract; actual Codex policy acceptance needs a live provider run.
+it("publishes closed-world, non-destructive hints for every read-only J5 tool", () => {
+  const tools = [
+    ...Object.values(J5Toolkit.tools),
+    ...Object.values(J5ArtifactToolkit.tools),
+    ...Object.values(J5OrchestratorSurface.tools),
+    ...Object.values(J5EnvironmentToolkit.tools),
+    ...Object.values(J5ProjectToolkit.tools),
+    ...Object.values(J5OrchestratorToolkit.tools),
+    ...Object.values(J5ThreadToolkit.tools),
+    ...Object.values(J5AdaptedThreadToolkit.tools),
+    ...Object.values(J5AttachmentUploadToolkit.tools),
+  ];
+  const reads = tools.filter((tool) => Context.get(tool.annotations, Tool.Readonly));
+  assert.includeMembers(
+    reads.map((tool) => tool.name),
+    [
+      "j5_playbook_list",
+      "j5_playbook_read",
+      "j5_playbook_current",
+      "orchestrator_capabilities",
+      "t3_environment_read",
+      "t3_project_read",
+      "t3_thread_search",
+      "j5_list_personas",
+      "j5_list_participants",
+    ],
+  );
+  for (const tool of reads) {
+    assert.isFalse(Context.get(tool.annotations, Tool.Destructive), tool.name);
+    assert.isFalse(Context.get(tool.annotations, Tool.OpenWorld), tool.name);
+  }
+  for (const tool of [
+    J5OrchestratorToolkit.tools.t3_thread_read,
+    J5OrchestratorToolkit.tools.task_status,
+  ]) {
+    assert.isFalse(Context.get(tool.annotations, Tool.Readonly), tool.name);
+  }
+});
+
+// Claude Code drops EVERY tool of an MCP server when one tool's input schema lacks a top-level
+// `type: "object"` (verified 2026-09-10), while still reporting "connected". `Schema.Struct({})`
+// encodes as a top-level anyOf, so no-input tools must omit `parameters`.
 it("publishes every tool with a top-level object input schema", () => {
   for (const tool of [
     ...Object.values(J5Toolkit.tools),
@@ -215,15 +263,16 @@ it("refuses a blank spawn title and stores it trimmed", () => {
 });
 
 it("says which of the two ways to get help each tool serves", () => {
-  // j5_spawn_agent serves neither: it is for a standalone agent the user asked for.
-  assert.include(J5_SPAWN_AGENT_DESCRIPTION, "Not a way to get help with your own work");
-  assert.include(J5_SPAWN_AGENT_DESCRIPTION, "explicitly asks for a standalone agent");
+  // j5_spawn_agent serves neither: it is for a Peer Agent the user asked for.
+  assert.include(J5_SPAWN_AGENT_DESCRIPTION, "explicitly asks for a Peer Agent");
+  assert.include(
+    J5_SPAWN_AGENT_DESCRIPTION,
+    "When nobody asked for one, it is not a way to get help with your own work",
+  );
   assert.include(J5_SPAWN_AGENT_DESCRIPTION, "create a subagent");
   assert.include(J5_PROPOSE_CREW_DESCRIPTION, "the second of the two ways to get help");
-  assert.include(
-    J5_PROPOSE_CREW_DESCRIPTION,
-    "the word 'crew' in the user's message does not decide it",
-  );
+  assert.include(J5_PROPOSE_CREW_DESCRIPTION, "Use it when the user asks for a crew");
+  assert.notInclude(J5_PROPOSE_CREW_DESCRIPTION, "does not decide it");
   assert.include(J5_REQUEST_CREW_MEMBER_DESCRIPTION, "the second of the two ways to get help");
   assert.include(J5DelegateTaskTool.description, "the first of the two ways to get help");
 });

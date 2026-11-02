@@ -190,8 +190,10 @@ const makeLayer = (daemon: boolean) =>
       const path = yield* Path.Path;
       const isWindows = yield* HostProcess.isWindows;
 
-      const handleStoredEvent: CrewWorktreesShape["handleStoredEvent"] = (stored) =>
-        Effect.gen(function* () {
+      const handleStoredEvent: CrewWorktreesShape["handleStoredEvent"] = Effect.fn(
+        "j5.a2a.crewWorktrees.handleStoredEvent",
+      )(
+        function* (stored) {
           const event = stored.event;
           if (event.type !== "thread.metadata-updated" || event.payload.worktreePath === null)
             return false;
@@ -213,11 +215,11 @@ const makeLayer = (daemon: boolean) =>
             RETURNING thread_id
           `;
           return inserted.length > 0;
-        }).pipe(
-          Effect.catchCause((cause) =>
-            Effect.logWarning("J5 Crew worktree record skipped", { cause }).pipe(Effect.as(false)),
-          ),
-        );
+        },
+        Effect.catchCause((cause) =>
+          Effect.logWarning("J5 Crew worktree record skipped", { cause }).pipe(Effect.as(false)),
+        ),
+      );
 
       const readRecord = (threadId: ThreadId) =>
         sql<{
@@ -615,8 +617,8 @@ const makeLayer = (daemon: boolean) =>
         if (filed.length > 0) yield* changes.notify("inbox");
       });
 
-      const cleanup: CrewWorktreesShape["cleanup"] = ({ seats, crew }) =>
-        Effect.gen(function* () {
+      const cleanup: CrewWorktreesShape["cleanup"] = Effect.fn("j5.a2a.crewWorktrees.cleanup")(
+        function* ({ seats, crew }) {
           // No seat is exempt: a seat that was unarchived since the archive committed is bound to
           // its worktree again, and that is what must keep the worktree.
           const context: CheckContext = {
@@ -679,16 +681,16 @@ const makeLayer = (daemon: boolean) =>
               ),
             );
           return results;
-        }).pipe(
-          Effect.catchCause((cause) =>
-            Effect.logWarning("J5 Crew worktree cleanup skipped", { cause }).pipe(
-              Effect.as([] as ReadonlyArray<CrewArchiveWorktree>),
-            ),
+        },
+        Effect.catchCause((cause) =>
+          Effect.logWarning("J5 Crew worktree cleanup skipped", { cause }).pipe(
+            Effect.as([] as ReadonlyArray<CrewArchiveWorktree>),
           ),
-        );
+        ),
+      );
 
-      const estimate: CrewWorktreesShape["estimate"] = ({ crews }) =>
-        Effect.gen(function* () {
+      const estimate: CrewWorktreesShape["estimate"] = Effect.fn("j5.a2a.crewWorktrees.estimate")(
+        function* ({ crews }) {
           const results: Array<CrewArchiveWorktreeEstimate> = [];
           for (const crew of crews) {
             const context: CheckContext = {
@@ -722,13 +724,13 @@ const makeLayer = (daemon: boolean) =>
             }
           }
           return results;
-        }).pipe(
-          Effect.catchCause((cause) =>
-            Effect.logWarning("J5 Crew worktree estimate skipped", { cause }).pipe(
-              Effect.as([] as ReadonlyArray<CrewArchiveWorktreeEstimate>),
-            ),
+        },
+        Effect.catchCause((cause) =>
+          Effect.logWarning("J5 Crew worktree estimate skipped", { cause }).pipe(
+            Effect.as([] as ReadonlyArray<CrewArchiveWorktreeEstimate>),
           ),
-        );
+        ),
+      );
 
       interface CleanupRow {
         readonly id: string;
@@ -759,20 +761,21 @@ const makeLayer = (daemon: boolean) =>
         ),
       });
 
-      const listCleanups: CrewWorktreesShape["listCleanups"] = (status) =>
-        Effect.gen(function* () {
-          const rows = yield* sql<CleanupRow>`
+      const listCleanups: CrewWorktreesShape["listCleanups"] = Effect.fn(
+        "j5.a2a.crewWorktrees.listCleanups",
+      )(function* (status) {
+        const rows = yield* sql<CleanupRow>`
             SELECT * FROM j5_crew_worktree_cleanup
             WHERE (decided_at IS NULL) = (${status} = 'open')
             ORDER BY COALESCE(decided_at, filed_at) DESC
           `;
-          return yield* Effect.forEach(rows, (row) =>
-            decodeEntries(row.entries_json).pipe(
-              Effect.map((entries) => projectCleanup(row, entries)),
-              Effect.orDie,
-            ),
-          );
-        });
+        return yield* Effect.forEach(rows, (row) =>
+          decodeEntries(row.entries_json).pipe(
+            Effect.map((entries) => projectCleanup(row, entries)),
+            Effect.orDie,
+          ),
+        );
+      });
 
       const skippedFor = (reason: KeepReason): CleanupResult => ({
         outcome: "skipped",
@@ -831,43 +834,43 @@ const makeLayer = (daemon: boolean) =>
         }
       });
 
-      const answerCleanup: CrewWorktreesShape["answerCleanup"] = ({ itemId, removePaths }) =>
-        Effect.gen(function* () {
-          const [row] = yield* sql<CleanupRow>`
+      const answerCleanup: CrewWorktreesShape["answerCleanup"] = Effect.fn(
+        "j5.a2a.crewWorktrees.answerCleanup",
+      )(function* ({ itemId, removePaths }) {
+        const [row] = yield* sql<CleanupRow>`
             SELECT * FROM j5_crew_worktree_cleanup WHERE id = ${itemId}
           `;
-          if (row === undefined) return yield* new CrewWorktreeCleanupNotFoundError({ itemId });
-          if (row.decided_at !== null)
-            return yield* new CrewWorktreeCleanupAnsweredError({ itemId });
-          const entries = yield* decodeEntries(row.entries_json).pipe(Effect.orDie);
-          for (const removePath of removePaths)
-            if (!entries.some((entry) => entry.path === removePath))
-              return yield* new CrewWorktreeCleanupPathError({ path: removePath });
-          // The claim comes before any removal, so a second answer meanwhile is refused.
-          const decidedAt = DateTime.formatIso(yield* DateTime.now);
-          const claimed = yield* sql<{ readonly id: string }>`
+        if (row === undefined) return yield* new CrewWorktreeCleanupNotFoundError({ itemId });
+        if (row.decided_at !== null) return yield* new CrewWorktreeCleanupAnsweredError({ itemId });
+        const entries = yield* decodeEntries(row.entries_json).pipe(Effect.orDie);
+        for (const removePath of removePaths)
+          if (!entries.some((entry) => entry.path === removePath))
+            return yield* new CrewWorktreeCleanupPathError({ path: removePath });
+        // The claim comes before any removal, so a second answer meanwhile is refused.
+        const decidedAt = DateTime.formatIso(yield* DateTime.now);
+        const claimed = yield* sql<{ readonly id: string }>`
             UPDATE j5_crew_worktree_cleanup SET decided_at = ${decidedAt}
             WHERE id = ${itemId} AND decided_at IS NULL
             RETURNING id
           `;
-          if (claimed.length === 0) return yield* new CrewWorktreeCleanupAnsweredError({ itemId });
-          const approved = new Set(removePaths);
-          const decided: Array<StoredCleanupEntry> = [];
-          for (const entry of entries)
-            decided.push({
-              ...entry,
-              ...(approved.has(entry.path)
-                ? yield* removeApproved(row.project_id, entry)
-                : ({ outcome: "kept", reason: null, detail: null } satisfies CleanupResult)),
-            });
-          yield* sql`
+        if (claimed.length === 0) return yield* new CrewWorktreeCleanupAnsweredError({ itemId });
+        const approved = new Set(removePaths);
+        const decided: Array<StoredCleanupEntry> = [];
+        for (const entry of entries)
+          decided.push({
+            ...entry,
+            ...(approved.has(entry.path)
+              ? yield* removeApproved(row.project_id, entry)
+              : ({ outcome: "kept", reason: null, detail: null } satisfies CleanupResult)),
+          });
+        yield* sql`
             UPDATE j5_crew_worktree_cleanup
             SET entries_json = ${yield* encodeEntries(decided).pipe(Effect.orDie)}
             WHERE id = ${itemId}
           `;
-          yield* changes.notify("inbox");
-          return projectCleanup({ ...row, decided_at: decidedAt }, decided);
-        });
+        yield* changes.notify("inbox");
+        return projectCleanup({ ...row, decided_at: decidedAt }, decided);
+      });
 
       if (daemon) {
         // From the event store's current high-water mark: a launch that finished while the server

@@ -4,7 +4,7 @@ import { createScopedThreadReadStore } from "@t3tools/client-runtime/j5/scopedTh
 import type { EnvironmentId, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
 import type { SpawnedChild, SpawnedChildrenEntry } from "@t3tools/contracts/j5";
 import * as Cause from "effect/Cause";
-import { useMemo, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { j5Environment } from "../state";
@@ -84,28 +84,8 @@ export function useSpawnedChildren(ref: ScopedThreadRef): ReadonlyArray<SpawnedC
   return snapshot.get(scopedThreadKey(ref))?.children ?? EMPTY;
 }
 
-/**
- * Whether a participant holds a seat in a live Crew under this thread. It selects one boolean, so
- * a timeline card re-renders only when that answer changes, not on every row read. It is false
- * until the sidebar has read this thread's children, and on a connection that is never given
- * that read; a member's message then keeps the full card (#741).
- */
-export function useIsLiveCrewSeat(ref: ScopedThreadRef | null, participantId: string): boolean {
-  const isSeat = () =>
-    ref !== null &&
-    (store
-      .getSnapshot()
-      .get(scopedThreadKey(ref))
-      ?.children.some((child) => child.participantId === participantId && child.seat !== null) ??
-      false);
-  return useSyncExternalStore(store.subscribe, isSeat, isSeat);
-}
-
 /** The scoped keys of the rows an agent spawned, for the sidebar's membership rule. */
 export function useAgentSpawnedThreadKeys(): ReadonlySet<string> {
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
-  return useMemo(
-    () => new Set([...snapshot].flatMap(([key, row]) => (row.spawnedByAgent ? [key] : []))),
-    [snapshot],
-  );
+  return new Set([...snapshot].flatMap(([key, row]) => (row.spawnedByAgent ? [key] : [])));
 }

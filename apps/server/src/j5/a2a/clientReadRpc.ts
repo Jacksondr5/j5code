@@ -81,16 +81,17 @@ export const makeClientReadRpcHandlers = Effect.fn("j5.makeClientReadRpcHandlers
     Effect.provideService(SharedThreads, shared),
   );
   // Listed to whoever reaches the Crew's Captain, like its archive's worktrees.
-  const cleanupsReached = (status: CrewWorktreeCleanupListRequest["status"]) =>
-    Effect.gen(function* () {
-      const listed = yield* clientReads
-        .crewWorktreeCleanups(status)
-        .pipe(Effect.catch(failed("Reading worktree cleanups failed.")));
-      const reachesCaptain = yield* reaches;
-      return yield* Effect.filter(listed, (item) =>
-        reachesCaptain(Effect.succeed(item.captainThreadId)),
-      );
-    });
+  const cleanupsReached = Effect.fn("j5.a2a.clientReadRpc.cleanupsReached")(function* (
+    status: CrewWorktreeCleanupListRequest["status"],
+  ) {
+    const listed = yield* clientReads
+      .crewWorktreeCleanups(status)
+      .pipe(Effect.catch(failed("Reading worktree cleanups failed.")));
+    const reachesCaptain = yield* reaches;
+    return yield* Effect.filter(listed, (item) =>
+      reachesCaptain(Effect.succeed(item.captainThreadId)),
+    );
+  });
   return {
     [METHODS.listHumanInbox]: (input: HumanInboxListRequest) =>
       personOf.pipe(
@@ -112,24 +113,26 @@ export const makeClientReadRpcHandlers = Effect.fn("j5.makeClientReadRpcHandlers
           ),
         ),
       ),
-    [METHODS.listCrewWorktreeCleanups]: (input: CrewWorktreeCleanupListRequest) =>
-      cleanupsReached(input.status).pipe(Effect.map((items) => ({ items }))),
-    [METHODS.listCrewProposals]: () =>
-      Effect.gen(function* () {
-        const listed = yield* clientReads.crewProposals.pipe(
-          Effect.catch(failed("Reading crew proposals failed.")),
-        );
-        // Listed to whoever reaches the Captain: a Viewer sees a roster's prompt and how it was
-        // answered, with nothing to press (Shared conversations AC11).
-        const reachesCaptain = yield* reaches;
-        return {
-          proposals: yield* Effect.filter(listed.proposals, (proposal) =>
-            reachesCaptain(Effect.succeed(ThreadId.make(proposal.captainThreadId))),
-          ),
-        };
-      }),
-    [METHODS.listCrewRuntimeRequests]: () =>
-      Effect.gen(function* () {
+    [METHODS.listCrewWorktreeCleanups]: Effect.fn("j5.a2a.clientReadRpc.listCrewWorktreeCleanups")(
+      function* (input: CrewWorktreeCleanupListRequest) {
+        return { items: yield* cleanupsReached(input.status) };
+      },
+    ),
+    [METHODS.listCrewProposals]: Effect.fn("j5.a2a.clientReadRpc.listCrewProposals")(function* () {
+      const listed = yield* clientReads.crewProposals.pipe(
+        Effect.catch(failed("Reading crew proposals failed.")),
+      );
+      // Listed to whoever reaches the Captain: a Viewer sees a roster's prompt and how it was
+      // answered, with nothing to press (Shared conversations AC11).
+      const reachesCaptain = yield* reaches;
+      return {
+        proposals: yield* Effect.filter(listed.proposals, (proposal) =>
+          reachesCaptain(Effect.succeed(ThreadId.make(proposal.captainThreadId))),
+        ),
+      };
+    }),
+    [METHODS.listCrewRuntimeRequests]: Effect.fn("j5.a2a.clientReadRpc.listCrewRuntimeRequests")(
+      function* () {
         const listed = yield* clientReads.crewRuntimeRequests.pipe(
           Effect.catch(failed("Reading crew requests failed.")),
         );
@@ -144,18 +147,20 @@ export const makeClientReadRpcHandlers = Effect.fn("j5.makeClientReadRpcHandlers
           mayAnswer(Effect.succeed(question.threadId)),
         );
         return { requests, questions };
-      }),
-    [METHODS.listCrewMemberships]: (input: ThreadHomesRequest) =>
-      Effect.gen(function* () {
-        // A narrowed person is told the Crews of the threads they reach, and no others.
-        const reachesThread = yield* reaches;
-        const threadIds = yield* Effect.filter(input.threadIds, (threadId) =>
-          reachesThread(Effect.succeed(threadId)),
-        );
-        return yield* clientReads
-          .crewMemberships(threadIds)
-          .pipe(Effect.catch(failed("Crew membership read failed.")));
-      }),
+      },
+    ),
+    [METHODS.listCrewMemberships]: Effect.fn("j5.a2a.clientReadRpc.listCrewMemberships")(function* (
+      input: ThreadHomesRequest,
+    ) {
+      // A narrowed person is told the Crews of the threads they reach, and no others.
+      const reachesThread = yield* reaches;
+      const threadIds = yield* Effect.filter(input.threadIds, (threadId) =>
+        reachesThread(Effect.succeed(threadId)),
+      );
+      return yield* clientReads
+        .crewMemberships(threadIds)
+        .pipe(Effect.catch(failed("Crew membership read failed.")));
+    }),
     [METHODS.readFleet]: (input: FleetReadRequest) =>
       clientReads
         .fleet(input.includeRetired === true)

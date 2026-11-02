@@ -17,7 +17,6 @@ import { exceededDispatchModeLimit } from "../../../orchestration-v2/DispatchMod
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
 import { type CommCommandId, outsideAgentParticipantId } from "../contracts.ts";
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
-import { withDeliveryOutcome } from "../receiverBacklog.ts";
 import { A2ASendService } from "../SendService.ts";
 import { sendClaimingAttachments } from "./attachments.ts";
 import type { J5SendMessageInput } from "./tools.ts";
@@ -40,11 +39,10 @@ export const spawnAndBrief = (task: string) =>
   `Start an agent with j5_spawn_agent and brief it to ${task}.`;
 
 /**
- * Declares a tool that acts as the calling thread and so is refused to an outside agent. Upstream's
- * own refusal says only that a thread is needed; this one also names what the outside agent can do
- * instead. Every J5 tool that needs a calling thread is declared with this, so none can admit an
- * outside agent by forgetting the check. It is `writes` underneath: a read-only client is refused,
- * and the caller needs the orchestration capability, which every provider session J5 starts has.
+ * Declares a tool that acts as the calling thread, so it is refused to an outside agent with a
+ * message naming what it can do instead. Every such J5 tool uses this, so none admits an outside
+ * agent by a forgotten check. It is `writes` underneath: read-only clients are refused, and callers
+ * need the orchestration capability every J5 provider session has.
  */
 export const actsAsThreadCaller = <P, A, E, R>(
   tool: string,
@@ -202,7 +200,7 @@ export const sendAsOutsideAgent = Effect.fn("j5.a2a.mcp.sendAsOutsideAgent")(fun
       ? yield* send()
       : yield* sendClaimingAttachments(receiver.threadId, attachments, send);
   yield* (yield* A2ADeliveryWorker).notify;
-  // The outcome only: the backlog notice counts the caller's own waiting messages by its thread,
-  // and an outside agent has none.
-  return yield* withDeliveryOutcome(result, { receiverId: input.to, mode });
+  // No backlog notice: it counts the caller's own waiting messages by its thread, and an outside
+  // agent has none.
+  return result;
 });

@@ -4,7 +4,6 @@ import { ProjectId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 import type * as Scope from "effect/Scope";
@@ -98,7 +97,7 @@ const scenario = Effect.gen(function* () {
       Layer.mergeAll(
         workflowOverDriver,
         Layer.mock(ProjectService)({
-          getById: (id) => Effect.succeed(Option.some({ id, workspaceRoot: work } as never)),
+          getById: (id) => Effect.succeedSome({ id, workspaceRoot: work } as never),
         }),
         Layer.mock(CommandReceiptStoreV2)({}),
         Layer.mock(ThreadLaunchService)({}),

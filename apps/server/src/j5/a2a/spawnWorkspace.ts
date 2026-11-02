@@ -352,15 +352,10 @@ export interface SpawnWorkspaceServiceShape {
     readonly workspace: ResolvedSpawnWorkspace["type"];
   }) => Effect.Effect<void, SpawnWorkspaceError>;
   /**
-   * Runs one spawn's start (create, facts, brief), refusing it while another start for the same
-   * thread is in flight.
-   *
-   * Invariant: every door that dispatches `thread.create` for a spawn thread id goes through this.
-   * The orchestrator has no existing-thread guard and the projection upserts, so a second create
-   * under another workspace type's command id would overwrite the first thread. A key keeps its
-   * workspace type through its request binding; a pre-upgrade thread's create receipt is checked
-   * before its first binding inside the guard. A Crew seat's approval records its workspace
-   * before any seat starts.
+   * Runs one spawn's start (create, facts, brief), refusing it while another start for the thread
+   * is in flight. Every door dispatching `thread.create` for a spawn thread must use this: the
+   * projection upserts, so a second create would overwrite the first. A key keeps its workspace
+   * type through its request binding, and a Crew seat's approval records it before any seat starts.
    */
   readonly withSpawnStart: <A, E, R>(
     input: {
@@ -370,11 +365,10 @@ export interface SpawnWorkspaceServiceShape {
     effect: Effect.Effect<A, E, R>,
   ) => Effect.Effect<A, E | SpawnWorkspaceError, R>;
   /**
-   * Starts the brief on a created, registered thread. Shared and an existing worktree start it
-   * now; a new worktree hands the thread to ThreadLaunch, which holds the brief as a preparing run until the worktree exists
-   * and is bound, then releases it (or fails the run). The project's setup script starts before
-   * the release but is awaited only when it asks to finish first, so the agent may begin while it
-   * is still running.
+   * Starts the brief on a created, registered thread: at once for shared or an existing worktree,
+   * while a new worktree hands it to ThreadLaunch, which holds it as a preparing run until the
+   * worktree is bound. Setup is awaited only when it asks to finish first, so the agent may begin
+   * while it runs.
    */
   readonly startBrief: (
     input: StartSpawnBriefInput,
@@ -463,27 +457,29 @@ const make = Effect.gen(function* () {
    * the pin is what a later preparation would have started from; with no such origin branch it is
    * the local ref. Null when nothing resolves; no other revision is tried.
    */
-  const resolveBase = (cwd: string, base: SpawnBaseRef) =>
-    Effect.gen(function* () {
-      if (base.commit !== undefined)
-        return (yield* git.hasCommit({ cwd, refName: base.commit })) ? base.commit : null;
-      if (base.startFromOrigin && (yield* git.remoteExists({ cwd, remoteName: "origin" }))) {
-        yield* git.fetchRemote({ cwd, remoteName: "origin", refName: base.ref });
-        if (yield* git.remoteBranchExists({ cwd, remoteName: "origin", refName: base.ref }))
-          return (yield* git.resolveRemoteTrackingCommit({
-            cwd,
-            refName: base.ref,
-            fallbackRemoteName: "origin",
-          })).commitSha;
-      }
-      return yield* driver.resolveCommit({ cwd, revision: base.ref }).pipe(
-        Effect.map(({ commitSha }) => commitSha),
-        Effect.catch(() => Effect.succeed(null)),
-      );
-    });
+  const resolveBase = Effect.fn("j5.spawnWorkspace.resolveBase")(function* (
+    cwd: string,
+    base: SpawnBaseRef,
+  ) {
+    if (base.commit !== undefined)
+      return (yield* git.hasCommit({ cwd, refName: base.commit })) ? base.commit : null;
+    if (base.startFromOrigin && (yield* git.remoteExists({ cwd, remoteName: "origin" }))) {
+      yield* git.fetchRemote({ cwd, remoteName: "origin", refName: base.ref });
+      if (yield* git.remoteBranchExists({ cwd, remoteName: "origin", refName: base.ref }))
+        return (yield* git.resolveRemoteTrackingCommit({
+          cwd,
+          refName: base.ref,
+          fallbackRemoteName: "origin",
+        })).commitSha;
+    }
+    return yield* driver.resolveCommit({ cwd, revision: base.ref }).pipe(
+      Effect.map(({ commitSha }) => commitSha),
+      Effect.orElseSucceed(() => null),
+    );
+  });
 
-  const inspect: SpawnWorkspaceServiceShape["inspect"] = (caller) =>
-    Effect.gen(function* () {
+  const inspect: SpawnWorkspaceServiceShape["inspect"] = Effect.fn("j5.spawnWorkspace.inspect")(
+    function* (caller) {
       const workspaceRoot = yield* projectRoot(caller.projectId);
       const cwd = caller.worktreePath ?? workspaceRoot;
       // Membership comes from upstream's ref snapshot, which coalesces refreshes for 5 seconds,
@@ -499,7 +495,7 @@ const make = Effect.gen(function* () {
             git.invalidateLocalStatus(worktree.path).pipe(
               Effect.andThen(git.localStatus({ cwd: worktree.path })),
               Effect.map((status) => ({ path: worktree.path, branch: status.refName })),
-              Effect.catch(() => Effect.succeed({ path: worktree.path, branch: null })),
+              Effect.orElseSucceed(() => ({ path: worktree.path, branch: null })),
             )
           : Effect.succeed(worktree),
       );
@@ -517,14 +513,16 @@ const make = Effect.gen(function* () {
         missingBaseRefs,
         baseCommits,
       } satisfies SpawnCheckout;
-    }).pipe(
-      Effect.catch((cause) =>
-        Effect.succeed({ readable: false, problem: detailOf(cause) } satisfies SpawnCheckout),
-      ),
-    );
+    },
+    Effect.catch((cause) =>
+      Effect.succeed({ readable: false, problem: detailOf(cause) } satisfies SpawnCheckout),
+    ),
+  );
 
-  const workspaceOptions: SpawnWorkspaceServiceShape["workspaceOptions"] = (caller) =>
-    Effect.gen(function* () {
+  const workspaceOptions: SpawnWorkspaceServiceShape["workspaceOptions"] = Effect.fn(
+    "j5.spawnWorkspace.workspaceOptions",
+  )(
+    function* (caller) {
       const workspaceRoot = yield* projectRoot(caller.projectId);
       const cwd = caller.worktreePath ?? workspaceRoot;
       const listed = yield* listWorktrees(cwd, workspaceRoot);
@@ -534,32 +532,35 @@ const make = Effect.gen(function* () {
         cwd,
         worktrees: listed.worktrees,
       };
-    }).pipe(Effect.catch(() => Effect.succeed(NO_WORKSPACE_OPTIONS)));
+    },
+    Effect.orElseSucceed(() => NO_WORKSPACE_OPTIONS),
+  );
 
-  const assertExistingWorkspace: SpawnWorkspaceServiceShape["assertExistingWorkspace"] = (input) =>
-    Effect.gen(function* () {
-      for (const other of ["shared", "worktree", "existing_worktree"] as const) {
-        if (other === input.workspace) continue;
-        const receipt = yield* receipts
-          .getByCommandId(spawnCreateCommandId(input.stableInput, other))
-          .pipe(
-            Effect.mapError(
-              (cause) =>
-                new SpawnWorkspaceError({
-                  detail: "The spawn's earlier workspace choice could not be read.",
-                  nextStep: "Retry with the same client_request_id.",
-                  cause,
-                }),
-            ),
-          );
-        if (Option.isSome(receipt) && receipt.value.status === "accepted") {
-          return yield* new SpawnWorkspaceError({
-            detail: `client_request_id ${input.stableInput.requestKey} is already bound to workspace {"type":"${other}"}.`,
-            nextStep: "Retry with that workspace, or use a fresh client_request_id.",
-          });
-        }
+  const assertExistingWorkspace: SpawnWorkspaceServiceShape["assertExistingWorkspace"] = Effect.fn(
+    "j5.spawnWorkspace.assertExistingWorkspace",
+  )(function* (input) {
+    for (const other of ["shared", "worktree", "existing_worktree"] as const) {
+      if (other === input.workspace) continue;
+      const receipt = yield* receipts
+        .getByCommandId(spawnCreateCommandId(input.stableInput, other))
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new SpawnWorkspaceError({
+                detail: "The spawn's earlier workspace choice could not be read.",
+                nextStep: "Retry with the same client_request_id.",
+                cause,
+              }),
+          ),
+        );
+      if (Option.isSome(receipt) && receipt.value.status === "accepted") {
+        return yield* new SpawnWorkspaceError({
+          detail: `client_request_id ${input.stableInput.requestKey} is already bound to workspace {"type":"${other}"}.`,
+          nextStep: "Retry with that workspace, or use a fresh client_request_id.",
+        });
       }
-    });
+    }
+  });
 
   const withSpawnStart: SpawnWorkspaceServiceShape["withSpawnStart"] = <A, E, R>(
     input: Parameters<SpawnWorkspaceServiceShape["withSpawnStart"]>[0],
@@ -625,10 +626,14 @@ const make = Effect.gen(function* () {
           })
           .pipe(Effect.asVoid);
 
-  const briefAccepted: SpawnWorkspaceServiceShape["briefAccepted"] = (input) =>
-    receipts
-      .getByCommandId(spawnBriefCommandId(input.stableInput, input.workspace))
-      .pipe(Effect.map((receipt) => Option.isSome(receipt) && receipt.value.status === "accepted"));
+  const briefAccepted: SpawnWorkspaceServiceShape["briefAccepted"] = Effect.fn(
+    "j5.spawnWorkspace.briefAccepted",
+  )(function* (input) {
+    const receipt = yield* receipts.getByCommandId(
+      spawnBriefCommandId(input.stableInput, input.workspace),
+    );
+    return Option.isSome(receipt) && receipt.value.status === "accepted";
+  });
 
   return SpawnWorkspaceService.of({
     inspect,

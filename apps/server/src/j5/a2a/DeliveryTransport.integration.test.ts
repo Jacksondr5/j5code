@@ -6,11 +6,6 @@ import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderS
 import { PlacementCommandId } from "./placementContracts.ts";
 import { dispatchCommand as dispatchIntakeCommand } from "../../orchestration-v2/ThreadMessageIntake.ts";
 import { J5AdaptedThreadToolkit, J5AdaptedThreadHandlersLive } from "./mcp/threadTools.ts";
-import { handlersFor } from "./mcp/upstreamCatalog.ts";
-import * as McpToolAccess from "../../mcp/McpToolAccess.ts";
-import * as ThreadHandlers from "../../mcp/toolkits/thread/handlers.ts";
-import { ThreadToolkit } from "../../mcp/toolkits/thread/tools.ts";
-import { Toolkit } from "effect/ai";
 import { claimPersonQueuedEdit } from "./queuedEdits.ts";
 import {
   A2ASilenceDetector,
@@ -151,7 +146,7 @@ import {
   formatPeerEnvelope,
 } from "./EnvelopeFormatter.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
-import { readReceiverDelivery, withDeliveryOutcome } from "./receiverBacklog.ts";
+import { readReceiverBacklog, withDeliveryNotice } from "./receiverBacklog.ts";
 import { noneLayer as peerDirectoryNoneLayer } from "./PeerDirectory.ts";
 import { A2ALifecycleService, manualLayer as lifecycleServiceLayer } from "./LifecycleService.ts";
 import {
@@ -174,6 +169,7 @@ import {
   ParticipantId,
   type AgentParticipant,
 } from "./contracts.ts";
+import { noDocumentTextLayer } from "../test-support/documentText.ts";
 
 const decodeSentFact = Schema.decodeUnknownEffect(Schema.fromJsonString(MessageSentPayload));
 const decodeToolFailure = Schema.decodeUnknownEffect(
@@ -401,7 +397,7 @@ const makeTestLayer = (
     ),
     Layer.provide(
       Layer.mock(ProjectService.ProjectService)({
-        getById: () => Effect.succeed(Option.none()),
+        getById: () => Effect.succeedNone,
       }),
     ),
     Layer.provide(mcpSessionRegistryTestLayer),
@@ -419,10 +415,11 @@ const makeTestLayer = (
       const threads = yield* ThreadManagementService;
       return ThreadManagementService.of({
         ...threads,
-        getThreadProjection: (threadId) =>
+        getThreadRecords: (threadId, fields, filter) =>
           Ref.get(harness.staleProjection).pipe(
-            Effect.flatMap((stale) =>
-              stale === undefined ? threads.getThreadProjection(threadId) : Effect.succeed(stale),
+            Effect.filterOrElse(
+              (stale) => stale !== undefined,
+              () => threads.getThreadRecords(threadId, fields, filter),
             ),
           ),
         sendToThread: (input) =>
@@ -1108,6 +1105,51 @@ it.effect("lands a message the way its sender asked, on any model", () =>
   }),
 );
 
+// Upstream refuses a steer to a run that Stop has reached, and keeps the refusal for its command.
+it.effect("queues a message for a GPT 6 run that is stopping instead of failing it for good", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const threads = yield* ThreadManagementService;
+      const transport = yield* A2ADeliveryTransport;
+      const worker = yield* OrchestrationEffectWorkerV2;
+      const target = yield* seedTarget("gpt6-stopping", "gpt-6-astra");
+      yield* startBusyTurn(target);
+      const running = (yield* threads.getThreadProjection(target.threadId)).runs[0]!;
+      // Until the worker runs Stop's interrupt, the run still reads as running and steerable.
+      yield* threads.dispatch({
+        type: "thread.stop",
+        commandId: CommandId.make("command:gpt6-stopping:stop"),
+        threadId: target.threadId,
+      });
+      const stopping = yield* threads.getThreadProjection(target.threadId);
+      assert.equal(peerSteeringRun(stopping, "peer")?.id, running.id);
+
+      // The refused steer falls back to the queue, and a retry finds the queued message.
+      const ownRuns = threads
+        .getThreadProjection(target.threadId)
+        .pipe(
+          Effect.map((projection) =>
+            projection.runs
+              .filter((run) => run.userMessageId === deliveryMessageId(target.messageId))
+              .map((run) => run.status),
+          ),
+        );
+      for (let attempt = 0; attempt < 2; attempt++) yield* transport.deliverAgent(target.delivery);
+      assert.deepStrictEqual(yield* ownRuns, ["queued"]);
+      // Once Stop lands, it starts, as upstream's own send in that window does.
+      yield* worker.drain();
+      assert.deepStrictEqual(yield* ownRuns, ["running"]);
+      const after = yield* threads.getThreadProjection(target.threadId);
+      assert.lengthOf(
+        after.messages.filter((message) => message.id === deliveryMessageId(target.messageId)),
+        1,
+      );
+      assert.lengthOf(yield* Ref.get(harness.steerInputs), 0);
+    }).pipe(Effect.provide(makeTestLayer(harness)));
+  }),
+);
+
 it.effect("measures the backlog a send waits behind on a busy receiver", () =>
   Effect.gen(function* () {
     const harness = yield* makeHarness;
@@ -1135,23 +1177,20 @@ it.effect("measures the backlog a send waits behind on a busy receiver", () =>
         message: `Update ${name}`,
         acceptedAt: `2026-09-24T00:00:0${sequence++}.000Z`,
       });
-      const deliveryFor = (sent: { readonly messageId: LedgerMessageId }) =>
-        readReceiverDelivery({
+      const backlogFor = (sent: { readonly messageId: LedgerMessageId }) =>
+        readReceiverBacklog({
           receiverId: target.receiverId,
           callerThreadId: caller.threadId,
           sentMessageId: sent.messageId,
         });
-      const backlogFor = (sent: { readonly messageId: LedgerMessageId }) =>
-        deliveryFor(sent).pipe(Effect.map((delivery) => delivery?.backlog));
 
-      // An idle receiver, or a seat that has not started, takes the message at once: nothing to
-      // warn about.
+      // An idle receiver takes the message at once: nothing to warn about.
       const firstInput = sendInput(caller, "first");
       const first = yield* send.send(firstInput);
-      assert.deepStrictEqual(yield* deliveryFor(first), { outcome: "starting" });
+      assert.isUndefined(yield* backlogFor(first));
       // Nor once the message has started its own run.
       yield* worker.drain;
-      assert.deepStrictEqual(yield* deliveryFor(first), { outcome: "starting" });
+      assert.isUndefined(yield* backlogFor(first));
       yield* startPendingTestTurn(target.threadId);
       yield* finishTestTurn(harness, target.threadId);
 
@@ -1159,13 +1198,14 @@ it.effect("measures the backlog a send waits behind on a busy receiver", () =>
       // A replayed send of a message that has already run reports the current state.
       const replay = yield* send.send(firstInput);
       assert.equal(replay.messageId, first.messageId);
-      assert.isUndefined(yield* deliveryFor(replay));
+      assert.isUndefined(yield* backlogFor(replay));
       // Committed sends the worker has not handed over yet are waiting too.
       yield* send.send(sendInput(caller, "second"));
       const third = yield* send.send(sendInput(caller, "third"));
-      assert.deepStrictEqual(yield* deliveryFor(third), {
-        outcome: "queued",
-        backlog: { type: "behind_turn", waiting: 2, fromCaller: 2 },
+      assert.deepStrictEqual(yield* backlogFor(third), {
+        type: "behind_turn",
+        waiting: 2,
+        fromCaller: 2,
       });
       // Queued runs and pending deliveries add up; another sender's count is not the caller's.
       yield* worker.drain;
@@ -1178,7 +1218,7 @@ it.effect("measures the backlog a send waits behind on a busy receiver", () =>
 
       // Only agents on this server are measured.
       assert.isUndefined(
-        yield* readReceiverDelivery({
+        yield* readReceiverBacklog({
           receiverId: ParticipantId.make("agent:j5-a2a-delivery-backlog-elsewhere"),
           callerThreadId: caller.threadId,
           sentMessageId: third.messageId,
@@ -1226,98 +1266,34 @@ it.effect("counts a message queued before an Astra turn became steerable", () =>
         "queued",
       );
       assert.deepStrictEqual(
-        yield* readReceiverDelivery({
+        yield* readReceiverBacklog({
           receiverId: target.receiverId,
           callerThreadId: ThreadId.make("thread:j5-a2a-delivery-backlog-astra-queued-caller"),
           sentMessageId: target.messageId,
         }),
-        { outcome: "queued", backlog: { type: "behind_turn", waiting: 1, fromCaller: 0 } },
+        { type: "behind_turn", waiting: 1, fromCaller: 0 },
       );
     }).pipe(Effect.provide(makeTestLayer(harness)));
   }),
 );
 
-it.effect("predicts how a message lands on a busy receiver, before and after the worker acts", () =>
-  Effect.gen(function* () {
-    const harness = yield* makeHarness;
-    yield* Effect.gen(function* () {
-      const send = yield* A2ASendService;
-      const worker = yield* A2ADeliveryWorker;
-      const effects = yield* OrchestrationEffectWorkerV2;
-      const caller = yield* seedTarget("outcome-caller");
-      let sequence = 0;
-      const sendTo = (
-        target: { readonly receiverId: ParticipantId },
-        name: string,
-        mode?: "steer" | "restart",
-      ) =>
-        send.send({
-          commandId: CommCommandId.make(`command:j5-a2a-delivery-outcome-${name}`),
-          senderThreadId: caller.threadId,
-          to: target.receiverId,
-          message: `Update ${name}`,
-          ...(mode === undefined
-            ? {}
-            : { mode, modeLimit: { runtimeMode: "full-access", interactionMode: "default" } }),
-          acceptedAt: `2026-09-24T00:00:0${sequence++}.000Z`,
-        });
-      const outcomeOf = (
-        target: { readonly receiverId: ParticipantId },
-        sent: { readonly messageId: LedgerMessageId },
-        mode?: "steer" | "restart",
-      ) =>
-        readReceiverDelivery({
-          receiverId: target.receiverId,
-          callerThreadId: caller.threadId,
-          sentMessageId: sent.messageId,
-          mode,
-        }).pipe(Effect.map((delivery) => delivery?.outcome));
-
-      // A running GPT 6 turn takes the update mid-turn. Once the worker has steered it, the
-      // message has no run of its own, and still reads as steered.
-      const astra = yield* seedTarget(
-        "outcome-astra",
-        "gpt-6-astra",
-        undefined,
-        caller.ledgerProjectId,
-      );
-      yield* startBusyTurn(astra);
-      const steeredByDefault = yield* sendTo(astra, "astra");
-      assert.equal(yield* outcomeOf(astra, steeredByDefault), "steered");
-      const drained = yield* worker.drain.pipe(Effect.forkChild({ startImmediately: true }));
-      yield* runWorkerUntil(effects, drained);
-      assert.lengthOf(yield* Ref.get(harness.steerInputs), 1);
-      assert.equal(yield* outcomeOf(astra, steeredByDefault), "steered");
-
-      // Another model queues a plain update behind the turn, steers when asked, and starts a new
-      // turn for a restart.
-      const other = yield* seedTarget(
-        "outcome-other",
-        modelSelection.model,
-        undefined,
-        caller.ledgerProjectId,
-      );
-      yield* startBusyTurn(other);
-      assert.equal(yield* outcomeOf(other, yield* sendTo(other, "plain")), "queued");
-      assert.equal(
-        yield* outcomeOf(other, yield* sendTo(other, "steer", "steer"), "steer"),
-        "steered",
-      );
-      assert.equal(
-        yield* outcomeOf(other, yield* sendTo(other, "restart", "restart"), "restart"),
-        "starting",
-      );
-
-      // Nobody is on a thread that has not started: the message starts its first turn.
-      const idle = yield* seedTarget(
-        "outcome-idle",
-        modelSelection.model,
-        undefined,
-        caller.ledgerProjectId,
-      );
-      assert.equal(yield* outcomeOf(idle, yield* sendTo(idle, "idle")), "starting");
-    }).pipe(Effect.provide(makeLifecycleTestLayer(harness)));
-  }),
+it.effect(
+  "reports no backlog for a running Astra receiver, which takes peer messages mid-turn",
+  () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const target = yield* seedTarget("backlog-astra", "gpt-6-astra");
+        yield* startBusyTurn(target);
+        assert.isUndefined(
+          yield* readReceiverBacklog({
+            receiverId: target.receiverId,
+            callerThreadId: ThreadId.make("thread:j5-a2a-delivery-backlog-astra-caller"),
+            sentMessageId: target.messageId,
+          }),
+        );
+      }).pipe(Effect.provide(makeTestLayer(harness)));
+    }),
 );
 
 it.effect(
@@ -2939,6 +2915,7 @@ it.effect(
       const base = makeMessageLifecycleLayer(harness).pipe(
         Layer.provideMerge(serverConfigLayer),
         Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(noDocumentTextLayer),
       );
       const layer = base;
       yield* Effect.gen(function* () {
@@ -3075,6 +3052,7 @@ it.effect(
       const base = makeMessageLifecycleLayer(harness).pipe(
         Layer.provideMerge(serverConfigLayer),
         Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(noDocumentTextLayer),
       );
       yield* Effect.gen(function* () {
         const registrar = yield* A2AHomeRegistrar;
@@ -3157,23 +3135,25 @@ it.effect(
         yield* sendSource("second");
         yield* startPendingTestTurn(source.threadId);
         const toolkit = yield* J5AdaptedThreadToolkit;
-        const invokeFork = toolkit.handle("t3_thread_fork", { sourcePoint }).pipe(
-          Stream.unwrap,
-          Stream.run(Sink.last()),
-          Effect.flatMap(Effect.fromOption),
-          Effect.provideService(McpInvocationContext, {
-            environmentId: EnvironmentId.make("environment:fork-test"),
-            requestNamespace: "fork-test",
-            thread: {
-              threadId: source.threadId,
-              providerSessionId: "fork-test",
-              providerInstanceId: modelSelection.instanceId,
-            },
-            client: undefined,
-            capabilities: new Set(["orchestration"] as const),
-            issuedAt: 1,
-          }),
-        );
+        const invokeFork = toolkit
+          .handle("t3_thread_transfer", { action: "fork", sourcePoint })
+          .pipe(
+            Stream.unwrap,
+            Stream.run(Sink.last()),
+            Effect.flatMap(Effect.fromOption),
+            Effect.provideService(McpInvocationContext, {
+              environmentId: EnvironmentId.make("environment:fork-test"),
+              requestNamespace: "fork-test",
+              thread: {
+                threadId: source.threadId,
+                providerSessionId: "fork-test",
+                providerInstanceId: modelSelection.instanceId,
+              },
+              client: undefined,
+              capabilities: new Set(["orchestration"] as const),
+              issuedAt: 1,
+            }),
+          );
         yield* sql`CREATE TEMP TRIGGER fail_mcp_fork_placement BEFORE INSERT ON j5_a2a_placement_event
           BEGIN SELECT RAISE(ABORT, 'injected MCP placement failure'); END`;
         const mcpFailure = yield* invokeFork;
@@ -3969,7 +3949,7 @@ const sendNoticeTo = Effect.fn("A2AIntegration.sendNoticeTo")(function* (
     message: "An update",
     acceptedAt: "2026-09-24T00:00:00.000Z",
   });
-  return (yield* withDeliveryOutcome(sent, {
+  return (yield* withDeliveryNotice(sent, {
     receiverId: target.receiverId,
     callerThreadId: caller.threadId,
   })).deliveryNotice;
@@ -4359,15 +4339,6 @@ it.effect("registers an archived older thread as archived, in one step or not at
   }),
 );
 
-/** Upstream's queue cancel and promote, run on upstream's handlers as `/mcp` registers them. */
-const QueueRemovalToolkit = Toolkit.make(
-  ThreadToolkit.tools.t3_queue_cancel,
-  ThreadToolkit.tools.t3_queue_promote_to_steer,
-);
-const QueueRemovalHandlersLive = McpToolAccess.HandlersLayer.layer(
-  handlersFor(QueueRemovalToolkit, ThreadHandlers.layer),
-);
-
 it.effect(
   "an agent edits only its own queued message, inside its envelope, and the ledger follows every edit",
   () =>
@@ -4378,6 +4349,7 @@ it.effect(
         Layer.provideMerge(makeMessageLifecycleLayer(harness)),
         Layer.provideMerge(serverConfigLayer),
         Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(noDocumentTextLayer),
       );
       yield* Effect.gen(function* () {
         const registrar = yield* A2AHomeRegistrar;
@@ -4451,7 +4423,12 @@ it.effect(
           Effect.gen(function* () {
             const toolkit = yield* J5AdaptedThreadToolkit;
             return yield* toolkit
-              .handle("t3_queue_edit", { threadId: receiver.threadId, queuedRunId, text })
+              .handle("t3_queue", {
+                action: "edit",
+                threadId: receiver.threadId,
+                queuedRunId,
+                text,
+              })
               .pipe(
                 Stream.unwrap,
                 Stream.run(Sink.last()),
@@ -4459,7 +4436,7 @@ it.effect(
                 Effect.provideService(McpInvocationContext, scope),
               );
           }).pipe(Effect.provide(J5AdaptedThreadHandlersLive));
-        const removals = yield* Effect.provide(QueueRemovalToolkit, QueueRemovalHandlersLive);
+        const removals = yield* Effect.provide(J5AdaptedThreadToolkit, J5AdaptedThreadHandlersLive);
         const asEditor = <A, E, R>(stream: Stream.Stream<A, E, R>) =>
           stream.pipe(
             Stream.run(Sink.last()),
@@ -4545,7 +4522,7 @@ it.effect(
         const othersFailure = yield* decodeToolFailure(refusedOthers.result);
         assert.equal(othersFailure.code, "capability_denied");
         assert.include(othersFailure.message, other.receiverId);
-        assert.include(othersFailure.message, "t3_queue_cancel");
+        assert.include(othersFailure.message, "cancel, reorder and promote_to_steer");
         const personQueued = yield* queued(MessageId.make("message:edit:person"));
         const refusedPerson = yield* edit(personQueued.run.id, "Hijacked");
         assert.isTrue(refusedPerson.isFailure);
@@ -4650,7 +4627,8 @@ it.effect(
         assert.isFalse(
           (yield* asEditor(
             Stream.unwrap(
-              removals.handle("t3_queue_promote_to_steer", {
+              removals.handle("t3_queue", {
+                action: "promote_to_steer",
                 threadId: receiver.threadId,
                 queuedRunId: promotedQueued.run.id,
                 targetRunId: receiverRun.id,
@@ -4729,7 +4707,8 @@ it.effect(
         assert.isFalse(
           (yield* asEditor(
             Stream.unwrap(
-              removals.handle("t3_queue_cancel", {
+              removals.handle("t3_queue", {
+                action: "cancel",
                 threadId: receiver.threadId,
                 queuedRunId: othersQueued.run.id,
               }),

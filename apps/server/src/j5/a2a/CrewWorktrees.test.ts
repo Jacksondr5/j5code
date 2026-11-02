@@ -43,6 +43,7 @@ import * as ProviderSessionManager from "../../orchestration-v2/ProviderSessionM
 import * as ProviderTurnStart from "../../orchestration-v2/ProviderTurnStartService.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { runMigrations } from "../../persistence/Migrations.ts";
+import * as ServerSettings from "../../serverSettings.ts";
 import { ProjectService } from "../../project/ProjectService.ts";
 import * as TerminalManager from "../../terminal/Manager.ts";
 import * as GitVcsDriver from "../../vcs/GitVcsDriver.ts";
@@ -80,6 +81,9 @@ const fixture = Effect.gen(function* () {
   const root = yield* fs.makeTempDirectoryScoped({ prefix: "crew-worktrees-" });
   const repo = path.join(root, "repo");
   const origin = path.join(root, "origin.git");
+  // Two folders below the worktrees directory, where upstream's repair treats a path as managed.
+  const worktreesDir = path.join(root, "worktrees");
+  yield* fs.makeDirectory(path.join(worktreesDir, "repo"), { recursive: true });
   const run = (cwd: string, args: ReadonlyArray<string>) =>
     git.execute({ operation: "crew-worktrees-test", cwd, args });
   yield* fs.makeDirectory(repo);
@@ -119,7 +123,7 @@ const fixture = Effect.gen(function* () {
           }) as never,
         }),
         Layer.mock(ProjectService)({
-          getById: () => Effect.succeed(Option.some({ workspaceRoot: repo } as never)),
+          getById: () => Effect.succeedSome({ workspaceRoot: repo } as never),
           listShells: () =>
             Effect.succeed(
               [repo, ...otherProjectRoots].map((workspaceRoot) => ({ workspaceRoot }) as never),
@@ -196,7 +200,7 @@ const fixture = Effect.gen(function* () {
     } = {},
   ) {
     const threadId = ThreadId.make(`thread:crew-worktrees:${name}`);
-    const worktree = path.join(root, `wt-${name}`);
+    const worktree = path.join(worktreesDir, "repo", name);
     const branch = `j5/${name}`;
     yield* run(repo, ["worktree", "add", "-b", branch, worktree]);
     threads.set(threadId, {
@@ -223,6 +227,7 @@ const fixture = Effect.gen(function* () {
     repo,
     origin,
     root,
+    worktreesDir,
     layer,
     service,
     run,
@@ -746,10 +751,11 @@ it.effect(
               Layer.succeed(FileSystem.FileSystem, f.fs),
               Layer.mock(GitWorkflowService)({
                 pruneWorktrees: (input) => f.git.pruneWorktrees(input),
+                listLocalBranchNames: (cwd) => f.git.listLocalBranchNames(cwd),
                 createWorktree: (input) => f.git.createWorktree(input),
               }),
               Layer.mock(ProjectService)({
-                getById: () => Effect.succeed(Option.some({ workspaceRoot: f.repo } as never)),
+                getById: () => Effect.succeedSome({ workspaceRoot: f.repo } as never),
               }),
               Layer.mock(ProjectionStoreV2)({
                 getThreadRecords: () => Effect.succeed(projection),
@@ -763,6 +769,10 @@ it.effect(
                     }),
                   ),
               }),
+              Layer.mock(ServerConfig.ServerConfig)({
+                worktreesDir: f.worktreesDir,
+              } as ServerConfig.ServerConfig["Service"]),
+              ServerSettings.layerTest(),
               Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({}),
               Layer.mock(ProviderAuthService.ProviderAuthService)({
                 tryHandlePromptCommand: () => Effect.succeed(false),

@@ -2,10 +2,16 @@ import {
   DEFAULT_SERVER_SETTINGS,
   type ExecutionEnvironmentDescriptor,
   type OrchestrationProjectShell,
+  OrchestrationV2AppThread,
+  OrchestrationV2DomainEvent,
   OrchestrationV2GetShellSnapshotError,
   type OrchestrationV2ShellSnapshot,
+  type OrchestrationV2SearchThreadsInput,
+  type OrchestrationV2SearchThreadsResult,
   type OrchestrationV2ShellStreamItem,
+  type OrchestrationV2ThreadProjection,
   type OrchestrationV2ThreadShell,
+  type OrchestrationV2ThreadStreamItem,
   type ProjectId,
   type ServerConfig,
   type ServerConfigStreamEvent,
@@ -20,6 +26,7 @@ import * as Effect from "effect/Effect";
 import { identity } from "effect/Function";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
+import type * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
 
 import { guestIconPath } from "./GuestProjectIcons.ts";
@@ -27,22 +34,19 @@ import { levelReaches } from "@t3tools/contracts/j5";
 
 import {
   PersonAccess,
+  type PersonAccessStorageError,
   type SessionIdentity,
   type SessionReach,
   isWide,
   reachPersonId,
 } from "./PersonAccess.ts";
+import { makeSearchAuthors } from "./searchAuthors.ts";
 
 /**
- * What a narrowed connection is told (People and access AC24, AC25): a person whose scope is
- * narrower than the server, a Viewer at server scope, or a device no one has claimed. Its client
- * cannot connect without the server configuration, the lifecycle welcome and the sidebar feed. A
- * Viewer gets each in a reduced form: what a client needs to draw a thread in reach, and none of
- * the host's paths, network addresses, provider accounts or settings; its providers are named,
- * with their models, and nothing more. A Collaborator, who can open a terminal on the host, gets
- * upstream's configuration, and a sidebar cut to what they reach with its folders kept. A thread
- * in reach is shared whole: its thread load and its feed carry its worktree path and working
- * directory, as its history already does. A wide connection gets upstream's answers untouched.
+ * What a narrowed connection is told (AC24, AC25): config, lifecycle welcome and sidebar feed,
+ * which its client needs. A Viewer gets them reduced, with no host paths, addresses, accounts or
+ * settings. A Collaborator gets upstream's config and a sidebar cut to their reach. A thread in
+ * reach is shared whole (worktree path too) but for the Owner's searches. Wide: upstream's.
  */
 
 /** Stands in for every host path a required field would otherwise carry. */
@@ -96,15 +100,6 @@ const reduceModel = (model: ServerProviderModel): ServerProviderModel => ({
 });
 
 /**
- * A provider as a Viewer's client is told of it: which one it is, what it is called and the models
- * it offers. Upstream's composer shows its "enable a provider" setup state when the list is empty,
- * and with these it shows a thread's model and, for a Viewer, its own read-only state.
- * Nothing of the provider's sign-in, version, health, paths, usage or commands is sent, and its
- * skills only as `reduceSkill` tells them:
- * each is left out or given its emptiest valid value. Built field by field, so a field upstream
- * adds later is left out until it is listed here.
- */
-/**
  * A skill as a Viewer is told of it: its name and what it is for, and none of its files (People
  * and access AC20, AC23). Built field by field, so a field upstream adds is left out.
  */
@@ -126,6 +121,11 @@ const reduceSkill = (skill: ServerProviderSkill): ServerProviderSkill => ({
 export type SkillsShown = (skill: ServerProviderSkill) => boolean;
 const NO_SKILLS: SkillsShown = () => false;
 
+/**
+ * A provider as a Viewer's client is told of it: id, name and models, so upstream's composer shows
+ * the thread's model rather than its setup state. Nothing of sign-in, version, health, paths or
+ * usage; skills only via `reduceSkill`. Built field by field, so new upstream fields are left out.
+ */
 const reduceProvider = (provider: ServerProvider, skillsShown: SkillsShown): ServerProvider => ({
   instanceId: provider.instanceId,
   driver: provider.driver,
@@ -151,7 +151,7 @@ const reduceProviders = (providers: ServerConfig["providers"], skillsShown: Skil
  * The configuration a Viewer's client is given. Built field by field, so a field upstream adds
  * later is left out until it is listed here.
  */
-export const reduceServerConfig = (
+const reduceServerConfig = (
   config: ServerConfig,
   skillsShown: SkillsShown = NO_SKILLS,
 ): ServerConfig => ({
@@ -177,11 +177,9 @@ export const reduceServerConfig = (
 });
 
 /**
- * A project as a Viewer's client is told of it: enough to draw the thread under its project's name
- * and chosen icon. The icon a person chose (`projectIcon`: a named glyph, an emoji or a monogram)
- * is plain data and passes. A favicon file is asked for by the project's folder upstream, which a
- * Viewer is not told, so its path is replaced by one that names the project by id, and J5 serves
- * the file (`GuestProjectIcons.ts`).
+ * A project as a Viewer's client is told of it: its name and chosen icon (`projectIcon` is plain
+ * data). A favicon is requested by folder upstream, so its path becomes one naming the project by
+ * id, and J5 serves the file (`GuestProjectIcons.ts`).
  */
 const reduceProject = (project: OrchestrationProjectShell): OrchestrationProjectShell => ({
   id: project.id,
@@ -196,8 +194,64 @@ const reduceProject = (project: OrchestrationProjectShell): OrchestrationProject
   updatedAt: project.updatedAt,
 });
 
-const reduceThread = (thread: OrchestrationV2ThreadShell): OrchestrationV2ThreadShell =>
-  thread.worktreePath === null ? thread : { ...thread, worktreePath: PLACEHOLDER_PATH };
+/**
+ * A thread as any narrowed connection is told of it. `opens` holds the last Cmd+K queries that
+ * picked the thread, which are the owner's searches (decision 6, 2026-10-24).
+ */
+const narrowThread = ({
+  opens: _opens,
+  ...thread
+}: OrchestrationV2ThreadShell): OrchestrationV2ThreadShell => thread;
+
+/** A thread as a Viewer's client is told of it: no folder of the host. */
+const reduceThread = (shell: OrchestrationV2ThreadShell): OrchestrationV2ThreadShell => {
+  const thread = narrowThread(shell);
+  return thread.worktreePath === null ? thread : { ...thread, worktreePath: PLACEHOLDER_PATH };
+};
+
+/**
+ * A thread's detail as any narrowed connection is told of it: no `opens`, as in its sidebar, and no
+ * `guestShare`, upstream's guest link, which holds its guests' messages and the tunnel's host. J5
+ * never sets it; it is dropped in case upstream ever does.
+ */
+const narrowAppThread = ({
+  opens: _opens,
+  guestShare: _guestShare,
+  ...thread
+}: OrchestrationV2AppThread): OrchestrationV2AppThread => thread;
+
+const narrowProjection = (
+  projection: OrchestrationV2ThreadProjection,
+): OrchestrationV2ThreadProjection => ({
+  ...projection,
+  thread: narrowAppThread(projection.thread),
+});
+
+type ThreadPayloadEvent = Extract<
+  OrchestrationV2DomainEvent,
+  { readonly payload: OrchestrationV2AppThread }
+>;
+
+/** Read from the schema, so an event upstream adds that carries the whole thread is narrowed too. */
+const THREAD_PAYLOAD_EVENTS: ReadonlySet<string> = new Set(
+  OrchestrationV2DomainEvent.members.flatMap((member) => {
+    if (member.fields.payload !== OrchestrationV2AppThread) return [];
+    const type = member.fields.type;
+    return "literals" in type ? type.literals : [type.literal];
+  }),
+);
+const carriesThread = (event: OrchestrationV2DomainEvent): event is ThreadPayloadEvent =>
+  THREAD_PAYLOAD_EVENTS.has(event.type);
+
+const narrowThreadItem = (
+  item: OrchestrationV2ThreadStreamItem,
+): OrchestrationV2ThreadStreamItem => {
+  if (item.kind === "snapshot") return { ...item, projection: narrowProjection(item.projection) };
+  if (item.kind === "event" && carriesThread(item.event)) {
+    return { ...item, event: { ...item.event, payload: narrowAppThread(item.event.payload) } };
+  }
+  return item;
+};
 
 type ShellSubscribeInput = {
   readonly afterSequence?: number;
@@ -227,7 +281,29 @@ export interface ConnectionView {
       input: ShellSubscribeInput,
     ) => Stream.Stream<OrchestrationV2ShellStreamItem, OrchestrationV2GetShellSnapshotError, R>,
   ) => Stream.Stream<OrchestrationV2ShellStreamItem, OrchestrationV2GetShellSnapshotError, R>;
+  /** Upstream's thread-detail feed: its snapshot and every event that carries the thread. */
+  readonly threadStream: <E, R>(
+    stream: Stream.Stream<OrchestrationV2ThreadStreamItem, E, R>,
+  ) => Stream.Stream<OrchestrationV2ThreadStreamItem, E, R>;
+  /** Upstream's one-shot thread load, the same detail without the feed. */
+  readonly threadProjection: <E, R>(
+    load: Effect.Effect<OrchestrationV2ThreadProjection, E, R>,
+  ) => Effect.Effect<OrchestrationV2ThreadProjection, E, R>;
+  /**
+   * Upstream's Cmd+K message search. `search` runs it; a narrowed connection's is held to the
+   * threads its person reaches and ranked without `opens`.
+   */
+  readonly searchThreads: <E, R>(
+    input: OrchestrationV2SearchThreadsInput,
+    search: NarrowedSearch<E, R>,
+  ) => Effect.Effect<OrchestrationV2SearchThreadsResult, E | PersonAccessStorageError, R>;
 }
+
+/** Upstream's search, given a narrowed connection's reach (all threads when absent). */
+type NarrowedSearch<E, R> = (
+  input: OrchestrationV2SearchThreadsInput,
+  narrowed?: { readonly threadIds?: ReadonlyArray<ThreadId>; readonly withoutOpens: true },
+) => Effect.Effect<OrchestrationV2SearchThreadsResult, E, R>;
 
 const MEMBER_VIEW: ConnectionView = {
   scheduledTasks: identity,
@@ -236,6 +312,9 @@ const MEMBER_VIEW: ConnectionView = {
   configStream: identity,
   lifecycleStream: identity,
   shellStream: (input, subscribe) => subscribe(input),
+  threadStream: identity,
+  threadProjection: identity,
+  searchThreads: (input, search) => search(input),
 };
 
 /**
@@ -254,7 +333,7 @@ const makeShellFilter = (access: PersonAccess["Service"], reach: SessionReach, r
       ? Effect.succeed(false)
       : access.projectLevel(personId, projectId).pipe(Effect.map((level) => level !== null));
   const project = reduce ? reduceProject : identity<OrchestrationProjectShell>;
-  const thread = reduce ? reduceThread : identity<OrchestrationV2ThreadShell>;
+  const thread = reduce ? reduceThread : narrowThread;
 
   /** The threads a person reaches, and the projects those threads or a level name. */
   const snapshot = Effect.fn("j5.sharing.guestView.shellSnapshot")(function* (
@@ -447,40 +526,74 @@ const narrowedView = (
           );
         }),
       ).pipe(Stream.mapError(shellFailure)),
+    threadStream: (stream) => stream.pipe(Stream.map(narrowThreadItem)),
+    threadProjection: (load) => load.pipe(Effect.map(narrowProjection)),
+    // Reach is read on each search, so a share taken away ends with the next one. A narrowed
+    // sidebar has no older-settled cut, so the older-settled rows, read from every settled
+    // thread, are never asked for.
+    searchThreads: Effect.fn("j5.sharing.guestView.searchThreads")(function* <E, R>(
+      input: OrchestrationV2SearchThreadsInput,
+      search: NarrowedSearch<E, R>,
+    ) {
+      if (personId === null) return NO_MATCHES;
+      const threadIds = yield* access.reachableThreads(personId);
+      if (threadIds !== null && threadIds.length === 0) return NO_MATCHES;
+      const {
+        olderSettledBefore: _olderSettledBefore,
+        projectIds: _projectIds,
+        environmentLabel: _environmentLabel,
+        ...request
+      } = input;
+      return yield* search(
+        request,
+        threadIds === null ? { withoutOpens: true } : { threadIds, withoutOpens: true },
+      );
+    }),
   };
 };
+
+const NO_MATCHES: OrchestrationV2SearchThreadsResult = { matches: [] };
 
 /**
  * The view for one WebSocket connection: upstream's own for a wide session, the narrowed one for
  * anyone else. Whose the session is is read once, when the socket opens; a change that would
  * alter it renews the session, which closes the socket (`Access`).
  */
-export const connectionView = (
+export const connectionView = Effect.fn("j5.sharing.guestView.connectionView")(function* (
   session: SessionIdentity,
-): Effect.Effect<ConnectionView, never, PersonAccess> =>
-  Effect.gen(function* () {
-    const access = yield* PersonAccess;
-    const reach = yield* access.sessionReach(session).pipe(
-      Effect.catch((cause) =>
-        Effect.logError("J5 could not read whose a socket is; narrowing its view", {
-          cause,
-        }).pipe(Effect.as({ kind: "unknown" } as SessionReach)),
+): Effect.fn.Return<ConnectionView, never, PersonAccess | SqlClient.SqlClient> {
+  const access = yield* PersonAccess;
+  const reach = yield* access.sessionReach(session).pipe(
+    Effect.catch((cause) =>
+      Effect.logError("J5 could not read whose a socket is; narrowing its view", {
+        cause,
+      }).pipe(Effect.as({ kind: "unknown" } as SessionReach)),
+    ),
+  );
+  // Each message hit names who wrote it, as this session's person may know them.
+  const searchAuthors = yield* makeSearchAuthors;
+  const viewer = reachPersonId(reach);
+  const withAuthors = (view: ConnectionView): ConnectionView => ({
+    ...view,
+    searchThreads: (input, search) =>
+      Effect.flatMap(view.searchThreads(input, search), (result) =>
+        Effect.map(searchAuthors(viewer, result.matches), (matches) => ({ ...result, matches })),
       ),
-    );
-    if (isWide(reach)) return MEMBER_VIEW;
-    // A Viewer at server scope is told every provider's skills; one at a project, the skills in
-    // that project's own folders; anyone else, none.
-    const roots =
-      reach.kind !== "person"
-        ? []
-        : reach.levels.some((held) => held.scope.kind === "server")
-          ? null
-          : yield* access
-              .projectRoots(reach.person.personId)
-              .pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<string>));
-    const skillsShown: SkillsShown =
-      roots === null
-        ? () => true
-        : (skill) => roots.some((root) => skill.path.startsWith(`${root.replace(/\/+$/u, "")}/`));
-    return narrowedView(access, reach, skillsShown);
   });
+  if (isWide(reach)) return withAuthors(MEMBER_VIEW);
+  // A Viewer at server scope is told every provider's skills; one at a project, the skills in
+  // that project's own folders; anyone else, none.
+  const roots =
+    reach.kind !== "person"
+      ? []
+      : reach.levels.some((held) => held.scope.kind === "server")
+        ? null
+        : yield* access
+            .projectRoots(reach.person.personId)
+            .pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<string>));
+  const skillsShown: SkillsShown =
+    roots === null
+      ? () => true
+      : (skill) => roots.some((root) => skill.path.startsWith(`${root.replace(/\/+$/u, "")}/`));
+  return withAuthors(narrowedView(access, reach, skillsShown));
+});

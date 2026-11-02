@@ -27,6 +27,7 @@ import type {
   ProviderDriverKind,
   ServerProvider,
   AgentPersonaId,
+  ModelSelection,
   OrchestrationV2AgentPersonaAssignment,
   OrchestrationV2AgentPersonaCatalog,
 } from "@t3tools/contracts";
@@ -203,7 +204,7 @@ const ROUTE_FAILURE_TEXT: Readonly<Record<AgentPersonaRouteFailureCode, string>>
 };
 
 /** "Primary · Codex gpt-5.6-terra: model is not offered…" for each rejected route. */
-export function agentPersonaBlockedReasons(
+function agentPersonaBlockedReasons(
   attempts: ReadonlyArray<AgentPersonaRouteAttempt>,
 ): ReadonlyArray<string> {
   return attempts.map((attempt) => {
@@ -358,7 +359,7 @@ export async function importAgentPersonasWithConfirmation(
 export const AGENT_PERSONA_IMPORT_CONFIRMATION_MESSAGE =
   "Turn off agents you don’t want to replace.";
 
-export const AGENT_PERSONA_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+const AGENT_PERSONA_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 
 /** Suggest a stable ID from a display name: lowercase, hyphenated, starting with a letter. */
 export function agentPersonaIdFromName(name: string): string {
@@ -604,6 +605,16 @@ export function draftAgentAssignmentPreview(
     resolvedModelSelection: persona.availability.resolvedModelSelection,
   };
 }
+
+/**
+ * The model a composer presents and sends for a thread or draft. A saved agent always runs on its
+ * route: the server rejects a model change on a persona thread ("has an immutable model route")
+ * and launches a persona draft on the route whatever the draft remembered.
+ */
+export const composerModelSelectionForThread = (
+  assignment: OrchestrationV2AgentPersonaAssignment | null | undefined,
+  fallback: ModelSelection,
+): ModelSelection => assignment?.resolvedModelSelection ?? fallback;
 
 export interface AgentHandoffPresentation {
   readonly label: string;

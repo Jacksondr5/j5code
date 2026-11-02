@@ -239,9 +239,7 @@ async function linkStatus(link: RecordedLink): Promise<ManagedSkillLink["status"
   );
 }
 
-export async function loadManagedSkillLinks(
-  stateDir: string,
-): Promise<ReadonlyArray<RecordedLink>> {
+async function loadManagedSkillLinks(stateDir: string): Promise<ReadonlyArray<RecordedLink>> {
   const contents = await NodeFSP.readFile(
     NodePath.join(stateDir, "skill-links.json"),
     "utf8",

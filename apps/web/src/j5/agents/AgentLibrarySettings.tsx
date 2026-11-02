@@ -34,13 +34,14 @@ import type {
   AgentPersonaImportConflictError,
   EnvironmentId,
 } from "@t3tools/contracts";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import { useOpenInPreferredEditor } from "../../editorPreferences";
 import { useServerConfigs } from "../../state/entities";
 import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
 import { useSettingsScopeEnvironments } from "../settingsScopeEnvironment";
-import { LIBRARY_FOR_OWNERS, useIsOwnerSomewhere, useOwnedEnvironmentIds } from "../sharing/access";
+import { LIBRARY_FOR_OWNERS } from "@t3tools/client-runtime/j5/sharing";
+import { useIsOwnerSomewhere, useOwnedEnvironmentIds } from "../sharing/access";
 import { agentPersonaEnvironment } from "./agentPersonaAtoms";
 import { SettingsScopeNotice } from "../../components/settings/SettingsScopeNotice";
 import { AgentSetupLinks } from "./AgentSetupLinks";
@@ -70,6 +71,19 @@ import {
   SettingsUnavailableGroup,
 } from "../../components/settings/settingsLayout";
 
+/** Outside the component: the React Compiler cannot compile `try`/`finally` or `throw` inside `try`. */
+async function runPersonaAction(failureTitle: string, action: () => Promise<void>) {
+  try {
+    await action();
+  } catch (error) {
+    toastManager.add({
+      type: "error",
+      title: failureTitle,
+      description: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 export function AgentLibrarySettings() {
   // Settings is an Owner's, for the servers they own (People and access AC27).
   return !useIsOwnerSomewhere() ? (
@@ -86,20 +100,15 @@ export function AgentLibrarySettings() {
 function MemberAgentLibrarySettings() {
   const { environments: connected, isReady } = useEnvironments();
   const ownedEnvironmentIds = useOwnedEnvironmentIds();
-  const environments = useMemo(
-    () => connected.filter((environment) => ownedEnvironmentIds.has(environment.environmentId)),
-    [connected, ownedEnvironmentIds],
+  const environments = connected.filter((environment) =>
+    ownedEnvironmentIds.has(environment.environmentId),
   );
   const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const orderedEnvironments = useMemo(
-    () =>
-      environments.toSorted((left, right) => {
-        const leftPrimary = left.environmentId === primaryEnvironmentId;
-        const rightPrimary = right.environmentId === primaryEnvironmentId;
-        return Number(rightPrimary) - Number(leftPrimary) || left.label.localeCompare(right.label);
-      }),
-    [environments, primaryEnvironmentId],
-  );
+  const orderedEnvironments = environments.toSorted((left, right) => {
+    const leftPrimary = left.environmentId === primaryEnvironmentId;
+    const rightPrimary = right.environmentId === primaryEnvironmentId;
+    return Number(rightPrimary) - Number(leftPrimary) || left.label.localeCompare(right.label);
+  });
   const { candidates: libraryEnvironments, initialEnvironmentId } = useSettingsScopeEnvironments(
     orderedEnvironments,
     primaryEnvironmentId,
@@ -126,7 +135,7 @@ function MemberAgentLibrarySettings() {
       ? null
       : agentPersonaEnvironment.usage({ environmentId: effectiveEnvironmentId, input: {} }),
   );
-  const usageById = useMemo(() => agentPersonaUsageById(usage.data), [usage.data]);
+  const usageById = agentPersonaUsageById(usage.data);
   const librarySources = useEnvironmentQuery(
     effectiveEnvironmentId === null
       ? null
@@ -207,7 +216,7 @@ function MemberAgentLibrarySettings() {
   ) {
     if (busy) return;
     setBusy(true);
-    try {
+    await runPersonaAction("Persona action failed", async () => {
       const { definition, fileName, yaml } = await readDefinition(personaId);
       const result = await importAgentPersonasWithConfirmation(
         [{ name: fileName, content: yaml }],
@@ -227,34 +236,20 @@ function MemberAgentLibrarySettings() {
             : `Copied ${definition.displayName} to ${target.label}`,
       });
       if (target.environmentId === effectiveEnvironmentId) catalog.refresh();
-    } catch (error) {
-      toastManager.add({
-        type: "error",
-        title: "Persona action failed",
-        description: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      setBusy(false);
-    }
+    });
+    setBusy(false);
   }
   async function saveFolders(folders: ReadonlyArray<string>) {
     if (effectiveEnvironmentId === null || busy) return;
     const environmentId = effectiveEnvironmentId;
     setBusy(true);
-    try {
+    await runPersonaAction("Library folders not saved", async () => {
       const result = await setLibraryFolders({ environmentId, input: { folders } });
       if (result._tag === "Failure") throw squashAtomCommandFailure(result);
       librarySources.refresh();
       catalog.refresh();
-    } catch (error) {
-      toastManager.add({
-        type: "error",
-        title: "Library folders not saved",
-        description: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      setBusy(false);
-    }
+    });
+    setBusy(false);
   }
   async function openFolder(path: string) {
     const result = await openInEditor(path);
@@ -270,7 +265,7 @@ function MemberAgentLibrarySettings() {
     if (effectiveEnvironmentId === null || busy) return;
     const environmentId = effectiveEnvironmentId;
     setBusy(true);
-    try {
+    await runPersonaAction("Persona action failed", async () => {
       const read = await readImportFiles({ environmentId, input: { path } });
       if (read._tag === "Failure") throw squashAtomCommandFailure(read);
       const result = await importAgentPersonasWithConfirmation(
@@ -288,15 +283,8 @@ function MemberAgentLibrarySettings() {
         title: `Imported ${result.importedIds.length} persona(s).`,
       });
       catalog.refresh();
-    } catch (error) {
-      toastManager.add({
-        type: "error",
-        title: "Persona action failed",
-        description: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      setBusy(false);
-    }
+    });
+    setBusy(false);
   }
   const setAgentEnabled = useAtomCommand(agentPersonaEnvironment.setAgentPersonaEnabled, {
     reportFailure: false,
@@ -305,25 +293,18 @@ function MemberAgentLibrarySettings() {
     if (effectiveEnvironmentId === null || busy) return;
     const environmentId = effectiveEnvironmentId;
     setBusy(true);
-    try {
+    await runPersonaAction("Persona action failed", async () => {
       const result = await setAgentEnabled({ environmentId, input: { personaId, enabled } });
       if (result._tag === "Failure") throw squashAtomCommandFailure(result);
       catalog.refresh();
-    } catch (error) {
-      toastManager.add({
-        type: "error",
-        title: "Persona action failed",
-        description: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      setBusy(false);
-    }
+    });
+    setBusy(false);
   }
   async function removePersona(personaId: string) {
     if (effectiveEnvironmentId === null || busy) return;
     const environmentId = effectiveEnvironmentId;
     setBusy(true);
-    try {
+    await runPersonaAction("Persona action failed", async () => {
       const result = await removeAgent({
         environmentId,
         input: { personaId },
@@ -331,15 +312,8 @@ function MemberAgentLibrarySettings() {
       if (result._tag === "Failure") throw squashAtomCommandFailure(result);
       toastManager.add({ type: "success", title: "Persona removed" });
       catalog.refresh();
-    } catch (error) {
-      toastManager.add({
-        type: "error",
-        title: "Persona action failed",
-        description: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      setBusy(false);
-    }
+    });
+    setBusy(false);
   }
   async function readDefinition(personaId: string) {
     if (effectiveEnvironmentId === null) throw new Error("Select an environment first.");
@@ -353,23 +327,16 @@ function MemberAgentLibrarySettings() {
   async function duplicatePersona(personaId: string) {
     if (busy) return;
     setBusy(true);
-    try {
+    await runPersonaAction("Persona action failed", async () => {
       const { definition } = await readDefinition(personaId);
       setCreating({ initial: agentPersonaDuplicateDraft(definition) });
-    } catch (error) {
-      toastManager.add({
-        type: "error",
-        title: "Persona action failed",
-        description: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      setBusy(false);
-    }
+    });
+    setBusy(false);
   }
   async function exportPersona(personaId: string) {
     if (busy) return;
     setBusy(true);
-    try {
+    await runPersonaAction("Persona action failed", async () => {
       const { fileName, yaml } = await readDefinition(personaId);
       const url = URL.createObjectURL(new Blob([yaml], { type: "application/yaml" }));
       const anchor = document.createElement("a");
@@ -378,34 +345,20 @@ function MemberAgentLibrarySettings() {
       anchor.click();
       URL.revokeObjectURL(url);
       toastManager.add({ type: "success", title: `Exported ${fileName}` });
-    } catch (error) {
-      toastManager.add({
-        type: "error",
-        title: "Persona action failed",
-        description: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      setBusy(false);
-    }
+    });
+    setBusy(false);
   }
   async function restorePersona(personaId: string) {
     if (effectiveEnvironmentId === null || busy) return;
     const environmentId = effectiveEnvironmentId;
     setBusy(true);
-    try {
+    await runPersonaAction("Persona action failed", async () => {
       const result = await restoreAgent({ environmentId, input: { personaId } });
       if (result._tag === "Failure") throw squashAtomCommandFailure(result);
       toastManager.add({ type: "success", title: "Persona restored" });
       catalog.refresh();
-    } catch (error) {
-      toastManager.add({
-        type: "error",
-        title: "Persona action failed",
-        description: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      setBusy(false);
-    }
+    });
+    setBusy(false);
   }
   const personas =
     catalog.data === null || catalog.data === undefined
@@ -481,6 +434,13 @@ function MemberAgentLibrarySettings() {
           </div>
         }
       >
+        {catalog.data?.diagnostics?.map((diagnostic) => (
+          <SettingsRow
+            key={diagnostic.path}
+            title={`Invalid persona file: ${diagnostic.path}`}
+            description={diagnostic.message}
+          />
+        ))}
         {effectiveEnvironmentId === null ? (
           <SettingsRow
             title={isReady ? "No connected environments" : "Loading environments"}
