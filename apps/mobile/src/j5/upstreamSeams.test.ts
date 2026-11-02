@@ -151,9 +151,7 @@ const SEAMS: ReadonlyArray<Seam> = [
     file: "features/threads/thread-work-log.tsx",
     record: "case 99: answered by",
     from: "../../j5/sharing/sharedConversation",
-    reaches: [
-      "<PromptAnsweredBy environmentId={props.environmentId} item={row.projectedItem.item} />",
-    ],
+    reaches: ["<PromptAnswerTail", "!row.workEntry.questionAnswer"],
   },
   {
     file: "features/threads/thread-search-match.tsx",
