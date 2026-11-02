@@ -31,6 +31,8 @@ export interface FakeCheckout {
   readonly commits?: Readonly<Record<string, string>>;
   /** Branches on the `origin` remote and their tips; the remote exists only when this is given. */
   readonly origin?: Readonly<Record<string, string>>;
+  /** Branches whose fetch from `origin` fails, as a dead network or bad credentials would. */
+  readonly unreachableOriginBranches?: ReadonlyArray<string>;
 }
 
 /** A full-length id for a ref the checkout doesn't pin to a particular commit. */
@@ -113,9 +115,17 @@ export const fakeSpawnWorkspaceLayer = (options: {
             current.pipe(Effect.map((checkout) => !(checkout.missingRefs ?? []).includes(refName))),
           remoteExists: () => current.pipe(Effect.map((checkout) => checkout.origin !== undefined)),
           fetchRemote: ({ refName }) =>
-            options.fetches === undefined
+            (options.fetches === undefined
               ? Effect.void
-              : Ref.update(options.fetches, (all) => [...all, refName ?? ""]),
+              : Ref.update(options.fetches, (all) => [...all, refName ?? ""])
+            ).pipe(
+              Effect.andThen(current),
+              Effect.flatMap((checkout) =>
+                (checkout.unreachableOriginBranches ?? []).includes(refName ?? "")
+                  ? Effect.fail(new Error("could not read from remote repository") as never)
+                  : Effect.void,
+              ),
+            ),
           remoteBranchExists: ({ refName }) =>
             current.pipe(Effect.map((checkout) => checkout.origin?.[refName] !== undefined)),
           resolveRemoteTrackingCommit: ({ refName }) =>
