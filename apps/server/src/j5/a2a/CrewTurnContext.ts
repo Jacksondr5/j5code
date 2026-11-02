@@ -1,4 +1,4 @@
-import { type OrchestrationV2ProviderThread, ThreadId } from "@t3tools/contracts";
+import { type OrchestrationV2ProviderThread, type RunId, ThreadId } from "@t3tools/contracts";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -6,10 +6,11 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import * as Orchestrator from "../../orchestration-v2/Orchestrator.ts";
 import * as Crews from "./AgentCrewInstanceService.ts";
 import * as ReadChanges from "./ReadChanges.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
-import { crewContextText } from "./spawnIds.ts";
+import { crewContextRecordIds, crewContextText } from "./spawnIds.ts";
 
 class CrewTurnContextError extends Schema.TaggedError<CrewTurnContextError>()(
   "CrewTurnContextError",
@@ -27,6 +28,8 @@ const isCrewTurnContextError = Schema.is(CrewTurnContextError);
 
 export interface CrewDelivery {
   readonly threadId: ThreadId;
+  /** The run the text belongs to; the member's thread keeps what it was told under that run. */
+  readonly runId: RunId;
   /** The provider conversation about to receive the text; a new one needs the introduction again. */
   readonly providerThread: Pick<OrchestrationV2ProviderThread, "id" | "nativeThreadRef">;
   readonly text: string;
@@ -86,6 +89,7 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const crews = yield* Crews.AgentCrewInstanceService;
   const changes = yield* ReadChanges.ReadChanges;
+  const orchestrator = yield* Orchestrator.OrchestratorV2;
   const prepare = Effect.fn("j5.crewTurnContext.prepare")(function* (delivery: CrewDelivery) {
     const { threadId } = delivery;
     const conversation = conversationOf(delivery.providerThread);
@@ -165,8 +169,20 @@ const make = Effect.gen(function* () {
       // Only a first delivery, a new roster or a new conversation changes what the Crew reads.
       const unchanged =
         context.delivered_roster === rosterJson && context.delivered_conversation === conversation;
+      const delivered = deliveryContext(prefix);
+      const recordedText = delivered.trimEnd();
       return {
-        prefix: deliveryContext(prefix),
+        prefix: delivered,
+        // What the model read, kept in the member's thread without the assignment after it.
+        record:
+          recordedText === ""
+            ? null
+            : {
+                threadId,
+                runId: delivery.runId,
+                text: recordedText,
+                ...crewContextRecordIds({ threadId, conversation, text: recordedText }),
+              },
         delivered: unchanged
           ? Effect.void
           : sql`
@@ -207,6 +223,16 @@ const make = Effect.gen(function* () {
         }),
       ),
     );
+    // Best effort like the bookkeeping above: the member already has the context.
+    if (context.record !== null)
+      yield* orchestrator.dispatch({ type: "platform-message.record", ...context.record }).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning("Failed to record the Crew context in the member's thread", {
+            threadId: delivery.threadId,
+            cause,
+          }),
+        ),
+      );
     return true;
   });
   const steering: CrewTurnContext["Service"]["steering"] = (session) => ({
@@ -214,6 +240,7 @@ const make = Effect.gen(function* () {
       deliver(
         {
           threadId: input.threadId,
+          runId: input.runId,
           providerThread: input.providerThread,
           text: input.message.text,
         },
