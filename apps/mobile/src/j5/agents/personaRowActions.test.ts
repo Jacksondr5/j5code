@@ -7,9 +7,10 @@ describe("personaRowActions", () => {
     expect(personaRowActions({ removed: true, editable: true }, true)).toEqual(["restore"]);
   });
 
-  it("offers Edit only for an editable persona, and Copy only with another environment", () => {
+  it("offers Edit and Details only for an editable persona, and Copy only with another environment", () => {
     expect(personaRowActions({ removed: false, editable: true }, true)).toEqual([
       "edit",
+      "details",
       "duplicate",
       "export",
       "copy",
