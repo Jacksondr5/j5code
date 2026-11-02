@@ -7,6 +7,7 @@ import {
   agentPersonaDuplicateDraft,
   type AgentPersonaCreateDraft,
 } from "@t3tools/client-runtime/j5/agent-personas";
+import { AgentDetailsModal } from "./AgentDetailsModal";
 import { AgentEditorModal } from "./AgentEditorModal";
 import { AgentFolderPickerModal } from "./AgentFolderPickerModal";
 import { sendWhenReconnected } from "./watchEnvironmentSessions";
@@ -141,6 +142,7 @@ function OwnerAgentLibrarySettingsScreen() {
   } | null>(null);
   const [notification, setNotification] = useState<AgentLibraryNotification | null>(null);
   const [creating, setCreating] = useState<{ initial?: AgentPersonaCreateDraft } | null>(null);
+  const [viewing, setViewing] = useState<string | null>(null);
   const dismissNotification = useCallback(() => setNotification(null), []);
   const importAgents = useAtomCommand(agentPersonaEnvironment.importAgentPersonas, {
     reportFailure: false,
@@ -314,6 +316,7 @@ function OwnerAgentLibrarySettingsScreen() {
       ? []
       : presentAgentPersonaCatalog(catalog.data);
 
+  const viewedPersona = personas.find((persona) => persona.personaId === viewing);
   const folders = librarySources.data?.folders ?? [];
   const environmentLabel =
     connectedEnvironments.find(
@@ -427,17 +430,13 @@ function OwnerAgentLibrarySettingsScreen() {
               <PersonaRow
                 key={persona.personaId}
                 persona={persona}
-                usageLine={(() => {
-                  const entry = usageById.get(persona.personaId);
-                  return entry === undefined ? null : presentAgentPersonaUsage(entry).line;
-                })()}
                 borderTop={index > 0}
                 locked={locked}
                 busy={busy}
                 otherEnvironments={otherEnvironments}
                 onToggle={(enabled) => void toggleAgent(persona.personaId, enabled)}
                 onEdit={
-                  persona.edit && effectiveEnvironmentId
+                  persona.edit && effectiveEnvironmentId && canOperate
                     ? () => {
                         if (persona.edit && effectiveEnvironmentId)
                           setEditing({
@@ -447,6 +446,7 @@ function OwnerAgentLibrarySettingsScreen() {
                       }
                     : null
                 }
+                onDetails={() => setViewing(persona.personaId)}
                 onDuplicate={() => void duplicatePersona(persona.personaId)}
                 onExport={() => void exportPersona(persona.personaId)}
                 onCopy={(target) => void copyPersona(persona.personaId, target)}
@@ -547,6 +547,18 @@ function OwnerAgentLibrarySettingsScreen() {
           }}
         />
       ) : null}
+      {viewedPersona && effectiveEnvironmentId ? (
+        <AgentDetailsModal
+          key={`${effectiveEnvironmentId}:${viewedPersona.personaId}`}
+          environmentId={effectiveEnvironmentId}
+          persona={viewedPersona}
+          usageLine={(() => {
+            const entry = usageById.get(viewedPersona.personaId);
+            return entry === undefined ? null : presentAgentPersonaUsage(entry).line;
+          })()}
+          onClose={() => setViewing(null)}
+        />
+      ) : null}
       {editing ? (
         <AgentEditorModal
           key={`${editing.environmentId}:${editing.initial.personaId}`}
@@ -619,7 +631,6 @@ type PresentedPersona = ReturnType<typeof presentAgentPersonaCatalog>[number];
 /** One persona as a settings row: name and status, its switch, and the rest in a menu. */
 function PersonaRow(props: {
   readonly persona: PresentedPersona;
-  readonly usageLine: string | null;
   readonly borderTop: boolean;
   readonly locked: boolean;
   readonly busy: boolean;
@@ -629,6 +640,7 @@ function PersonaRow(props: {
   }>;
   readonly onToggle: (enabled: boolean) => void;
   readonly onEdit: (() => void) | null;
+  readonly onDetails: () => void;
   readonly onDuplicate: () => void;
   readonly onExport: () => void;
   readonly onCopy: (target: { environmentId: EnvironmentId; label: string }) => void;
@@ -636,41 +648,12 @@ function PersonaRow(props: {
   readonly onRestore: () => void;
 }) {
   const { persona } = props;
-  const status = [
-    persona.removed ? "Removed" : persona.availabilityLabel,
-    persona.originLabel,
-    persona.unsandboxed ? "Full access" : null,
-    props.usageLine,
-  ]
-    .filter(Boolean)
-    .join(" · ");
   const unavailable = !persona.removed && persona.availability !== "available";
   const actions = personaRowActions(
     { removed: persona.removed, editable: props.onEdit !== null },
     props.otherEnvironments.length > 0,
   );
   const onEdit = actions.includes("edit") ? props.onEdit : null;
-  const content = (
-    <>
-      <Text
-        textRole="body"
-        className={
-          persona.enabled && !persona.removed ? "text-foreground" : "text-foreground-muted"
-        }
-        numberOfLines={1}
-      >
-        {persona.displayName}
-      </Text>
-      <Text className="text-sm text-foreground-muted" numberOfLines={1}>
-        {status}
-      </Text>
-      {unavailable && persona.blockedReasons[0] ? (
-        <Text className="text-sm text-danger-foreground" numberOfLines={2}>
-          {persona.blockedReasons[0]}
-        </Text>
-      ) : null}
-    </>
-  );
   return (
     <View
       className={cn(
@@ -678,29 +661,36 @@ function PersonaRow(props: {
         props.borderTop && "border-t border-border-subtle",
       )}
     >
-      {onEdit ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`Edit ${persona.displayName}`}
-          accessibilityHint={persona.description}
-          disabled={props.locked}
-          onPress={onEdit}
-          className="min-w-0 flex-1 gap-0.5 py-1 active:opacity-70"
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={
+          onEdit ? `Edit ${persona.displayName}` : `Details for ${persona.displayName}`
+        }
+        accessibilityHint={persona.description}
+        disabled={props.busy}
+        onPress={onEdit ?? props.onDetails}
+        className="min-w-0 flex-1 gap-0.5 py-1 active:opacity-70"
+      >
+        <Text
+          textRole="body"
+          className={
+            persona.enabled && !persona.removed ? "text-foreground" : "text-foreground-muted"
+          }
+          numberOfLines={1}
         >
-          {content}
-        </Pressable>
-      ) : (
-        <View
-          accessible
-          accessibilityLabel={`${persona.displayName}, ${status}`}
-          accessibilityHint={persona.description}
-          className="min-w-0 flex-1 gap-0.5 py-1"
-        >
-          {content}
-        </View>
-      )}
+          {persona.displayName}
+        </Text>
+        {persona.removed ? <Text className="text-sm text-foreground-muted">Removed</Text> : null}
+        {unavailable && persona.blockedReasons[0] ? (
+          <Text className="text-sm text-danger-foreground" numberOfLines={2}>
+            {persona.blockedReasons[0]}
+          </Text>
+        ) : null}
+      </Pressable>
       {persona.removed ? null : (
         <ThemedSwitch
+          // React Native's Switch sets alignSelf: flex-start, which ignores the row's centring.
+          style={{ alignSelf: "center" }}
           value={persona.enabled}
           disabled={props.locked}
           accessibilityLabel={`Enable ${persona.displayName}`}
