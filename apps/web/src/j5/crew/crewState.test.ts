@@ -4,6 +4,7 @@ import {
   classifyCrewSeat,
   crewHasRunningSeat,
   formatCrewStateSummary,
+  seatQuietLabel,
   seatRunLabel,
   summarizeCrewState,
   type CrewSeatThread,
@@ -109,5 +110,16 @@ describe("crew state", () => {
     expect(seatRunLabel("running")).toBeNull();
     expect(seatRunLabel("idle")).toBeNull();
     expect(seatRunLabel(undefined)).toBeNull();
+  });
+
+  it("reads Not started only for a seat that never ran, and how its run ended otherwise", () => {
+    expect(seatQuietLabel({ notStarted: true })).toBe("Not started");
+    expect(seatQuietLabel({ notStarted: true, runtime: { status: "idle" } })).toBe("Not started");
+    expect(seatQuietLabel({ notStarted: true, runtime: { status: "failed" } })).toBe("Failed");
+    expect(seatQuietLabel({ notStarted: true, runtime: { status: "interrupted" } })).toBe(
+      "Interrupted",
+    );
+    expect(seatQuietLabel({ notStarted: false })).toBe("Idle");
+    expect(seatQuietLabel({})).toBe("Idle");
   });
 });

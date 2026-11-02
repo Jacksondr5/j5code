@@ -2,6 +2,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
   CheckpointScopeId,
+  CommandId,
   EventId,
   MessageId,
   NodeId,
@@ -20,7 +21,6 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as SqlClient from "effect/sql/SqlClient";
 
@@ -100,6 +100,8 @@ const fixture = Effect.gen(function* () {
   const threads = new Map<ThreadId, SeatThread>();
   let otherBoundPaths: Array<{ threadId: ThreadId; worktreePath: string }> = [];
   let sessionLive = true;
+  let closeFails = false;
+  const sessionCalls: Array<string> = [];
   let otherProjectRoots: Array<string> = [];
   let openTerminals: Array<Pick<TerminalSummary, "cwd" | "worktreePath" | "status">> = [];
   let pullRequest: unknown = null;
@@ -147,6 +149,16 @@ const fixture = Effect.gen(function* () {
         }),
         Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({
           isLive: () => Effect.succeed(sessionLive),
+          // A detach alone leaves the session open, as it does for a session shared across threads.
+          detach: ({ providerSessionId, threadId }) =>
+            Effect.sync(() => void sessionCalls.push(`detach:${providerSessionId}:${threadId}`)),
+          close: (providerSessionId) =>
+            Effect.suspend(() => {
+              sessionCalls.push(`close:${providerSessionId}`);
+              if (closeFails) return Effect.die("the runtime would not stop");
+              sessionLive = false;
+              return Effect.void;
+            }),
         }),
         // Only the daemon reads the event store, and this is the layer without it.
         Layer.mock(EventSinkV2)({}),
@@ -167,10 +179,17 @@ const fixture = Effect.gen(function* () {
   const service = yield* Effect.service(CrewWorktrees).pipe(Effect.provide(layer));
 
   let eventSequence = 0;
-  const metadataUpdated = (threadId: ThreadId, branch: string | null, worktreePath: string) =>
+  // The command upstream's launch gives the update when the seat's own preparation creates the worktree.
+  const preparationCommand = CommandId.make("command:j5:crew-seat-prepare:run:one:workspace");
+  const metadataUpdated = (
+    threadId: ThreadId,
+    branch: string | null,
+    worktreePath: string,
+    commandId: CommandId | null = preparationCommand,
+  ) =>
     ({
       sequence: ++eventSequence,
-      commandId: null,
+      commandId,
       event: {
         id: EventId.make(`event:crew-worktrees:${eventSequence}`),
         threadId,
@@ -212,6 +231,34 @@ const fixture = Effect.gen(function* () {
     return { name, threadId, worktree, branch, seatName: name };
   });
 
+  const setSession = (cwd: string | null, live = true) => {
+    sessionLive = live;
+    return sql`DELETE FROM orchestration_v2_projection_provider_sessions`.pipe(
+      Effect.andThen(
+        cwd === null
+          ? Effect.void
+          : sql`
+              INSERT INTO orchestration_v2_projection_provider_sessions
+                (provider_session_id, thread_id, provider, status, updated_at, payload_json)
+              VALUES ('session:one', NULL, 'codex', 'ready', '2026-10-27T12:00:00.000Z', ${JSON.stringify(
+                {
+                  id: "session:one",
+                  driver: "codex",
+                  providerInstanceId: "codex",
+                  status: "ready",
+                  cwd,
+                  model: null,
+                  capabilities: CodexProviderCapabilitiesV2,
+                  createdAt: "2026-10-27T12:00:00.000Z",
+                  updatedAt: "2026-10-27T12:00:00.000Z",
+                  lastError: null,
+                },
+              )})
+            `,
+      ),
+    );
+  };
+
   return {
     fs,
     path,
@@ -233,33 +280,31 @@ const fixture = Effect.gen(function* () {
     setProjectRoots: (roots: typeof otherProjectRoots) => (otherProjectRoots = roots),
     setTerminals: (terminals: typeof openTerminals) => (openTerminals = terminals),
     setOtherBoundPaths: (paths: typeof otherBoundPaths) => (otherBoundPaths = paths),
-    setSession: (cwd: string | null, live = true) => {
-      sessionLive = live;
-      return sql`DELETE FROM orchestration_v2_projection_provider_sessions`.pipe(
-        Effect.andThen(
-          cwd === null
-            ? Effect.void
-            : sql`
-                INSERT INTO orchestration_v2_projection_provider_sessions
-                  (provider_session_id, thread_id, provider, status, updated_at, payload_json)
-                VALUES ('session:one', NULL, 'codex', 'ready', '2026-10-27T12:00:00.000Z', ${JSON.stringify(
-                  {
-                    id: "session:one",
-                    driver: "codex",
-                    providerInstanceId: "codex",
-                    status: "ready",
-                    cwd,
-                    model: null,
-                    capabilities: CodexProviderCapabilitiesV2,
-                    createdAt: "2026-10-27T12:00:00.000Z",
-                    updatedAt: "2026-10-27T12:00:00.000Z",
-                    lastError: null,
-                  },
-                )})
-              `,
-        ),
-      );
+    sessionCalls,
+    failClose: () => {
+      closeFails = true;
     },
+    /** A live session open in `cwd`, attached to each of these threads. */
+    attachSession: Effect.fn("test.attachSession")(function* (
+      cwd: string,
+      threadIds: ReadonlyArray<ThreadId>,
+    ) {
+      yield* setSession(cwd);
+      yield* sql`DELETE FROM orchestration_v2_projection_provider_session_bindings`;
+      for (const threadId of threadIds)
+        yield* sql`
+          INSERT INTO orchestration_v2_projection_provider_session_bindings
+            (provider_session_id, thread_id)
+          VALUES ('session:one', ${threadId})
+        `;
+    }),
+    /** What committing a thread's archive does to its binding. */
+    detachBinding: (threadId: ThreadId) =>
+      sql`
+        DELETE FROM orchestration_v2_projection_provider_session_bindings
+        WHERE thread_id = ${threadId}
+      `,
+    setSession,
     setPullRequest: (next: unknown) => {
       pullRequest = next;
     },
@@ -501,6 +546,74 @@ it.effect("keeps a worktree a terminal is open in, but not one that has exited",
   ),
 );
 
+it.effect(
+  "closes a seat's session when the Crew archives, so its clean, merged worktree goes",
+  () =>
+    run(
+      Effect.gen(function* () {
+        const f = yield* fixture;
+        const working = yield* f.seat("working");
+        const idle = yield* f.seat("idle-seat");
+        yield* f.attachSession(working.worktree, [working.threadId]);
+        // Read before the archive commits, which is what removes the binding naming it.
+        assert.deepStrictEqual(yield* f.service.liveSessions([working, idle]), [
+          { threadId: working.threadId, providerSessionId: ProviderSessionId.make("session:one") },
+        ]);
+        const sessions = yield* f.service.liveSessions([working, idle]);
+        yield* f.detachBinding(working.threadId);
+        yield* f.service.closeSessions(sessions);
+        assert.deepStrictEqual(f.sessionCalls, [
+          `detach:session:one:${working.threadId}`,
+          "close:session:one",
+        ]);
+        assert.deepStrictEqual(
+          (yield* cleanup(f, [working])).map((entry) => [entry.outcome, entry.reason]),
+          [["removed", null]],
+        );
+        assert.isFalse(yield* f.fs.exists(working.worktree));
+      }),
+    ),
+);
+
+it.effect("lets a seat's session go but leaves one another thread is attached to open", () =>
+  run(
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const archived = yield* f.seat("archived-seat");
+      const other = ThreadId.make("thread:crew-worktrees:other-thread");
+      yield* f.attachSession(archived.worktree, [archived.threadId, other]);
+      const sessions = yield* f.service.liveSessions([archived]);
+      yield* f.detachBinding(archived.threadId);
+      yield* f.service.closeSessions(sessions);
+      assert.deepStrictEqual(f.sessionCalls, [`detach:session:one:${archived.threadId}`]);
+      assert.deepStrictEqual(
+        (yield* cleanup(f, [archived])).map((entry) => [entry.outcome, entry.reason]),
+        [["kept", "in_use"]],
+      );
+    }),
+  ),
+);
+
+it.effect("a session that will not close keeps the worktree as in use and fails nothing", () =>
+  run(
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const stuck = yield* f.seat("stuck");
+      yield* f.attachSession(stuck.worktree, [stuck.threadId]);
+      f.failClose();
+      const sessions = yield* f.service.liveSessions([stuck]);
+      yield* f.detachBinding(stuck.threadId);
+      yield* f.service.closeSessions(sessions);
+      assert.include(f.sessionCalls, "close:session:one");
+      assert.deepStrictEqual(
+        (yield* cleanup(f, [stuck])).map((entry) => [entry.outcome, entry.reason]),
+        [["kept", "in_use"]],
+      );
+      assert.isTrue(yield* f.fs.exists(stuck.worktree));
+    }),
+  ),
+);
+
 it.effect("keeps a worktree a live provider session is open in, or in a folder of it", () =>
   run(
     Effect.gen(function* () {
@@ -676,6 +789,45 @@ it.effect("records only the first worktree path of a seat on a new worktree", ()
           SELECT thread_id, path FROM j5_crew_worktree
         `).map((row) => [row.thread_id, row.path]),
         [[first.threadId, first.worktree]],
+      );
+    }),
+  ),
+);
+
+it.effect("does not record a worktree a handoff or a metadata update bound to a waiting seat", () =>
+  run(
+    Effect.gen(function* () {
+      const f = yield* fixture;
+      const waiting = yield* f.seat("waiting", { record: false });
+      const existing = f.path.join(f.worktreesDir, "repo", "someone-elses");
+      // Before its first assignment the seat is pointed at a worktree that already existed.
+      assert.isFalse(
+        yield* f.service.handleStoredEvent(
+          f.metadataUpdated(
+            waiting.threadId,
+            "someone-elses",
+            existing,
+            CommandId.make("command:handoff:waiting"),
+          ),
+        ),
+      );
+      assert.isFalse(
+        yield* f.service.handleStoredEvent(
+          f.metadataUpdated(waiting.threadId, null, existing, null),
+        ),
+      );
+      assert.lengthOf(yield* f.sql`SELECT * FROM j5_crew_worktree`, 0);
+      // The preparation's own update, arriving afterwards, is still recorded.
+      assert.isTrue(
+        yield* f.service.handleStoredEvent(
+          f.metadataUpdated(waiting.threadId, waiting.branch, waiting.worktree),
+        ),
+      );
+      assert.deepStrictEqual(
+        (yield* f.sql<{ readonly path: string }>`SELECT path FROM j5_crew_worktree`).map(
+          (row) => row.path,
+        ),
+        [waiting.worktree],
       );
     }),
   ),
