@@ -179,7 +179,7 @@ vi.mock("../j5/a2a/timelineState", () => ({
     sharedAuthors: new Map(),
   }),
 }));
-vi.mock("../j5/sharing/sharedConversation", () => ({ PromptAnsweredBy: () => null }));
+vi.mock("../j5/sharing/sharedConversation", () => ({ PromptAnswerTail: () => null }));
 vi.mock("../j5/sharing/startAccess", () => ({ useCanForkThread: () => true }));
 vi.mock("../state/threads", () => ({ environmentThreadShells: {}, threadEnvironment: {} }));
 vi.mock("../state/entities", () => ({

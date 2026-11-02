@@ -133,19 +133,28 @@ export function useSharedConversationFeed(
 }
 
 /**
- * Who answered one of the agent's prompts, after the prompt's own line: " · answered by Priya".
- * Nothing for a prompt nobody is recorded as answering, or one still open (AC10).
+ * The end of a work row for one of the agent's prompts: the answer, then who gave it (AC10). The
+ * question truncates before either. Who is drawn only for a prompt someone is recorded as answering.
  */
-export function PromptAnsweredBy(props: {
+export function PromptAnswerTail(props: {
   readonly environmentId: EnvironmentId;
   readonly item: { readonly threadId: ThreadId };
+  readonly answer: string | null;
 }) {
   const { answers } = useThreadAuthorIndex(props.environmentId, props.item.threadId);
-  const answer = isSettledPrompt(props.item) ? answers.get(props.item.requestId) : undefined;
-  if (answer === undefined) return null;
+  const by = isSettledPrompt(props.item) ? answers.get(props.item.requestId) : undefined;
   return (
-    <Text numberOfLines={1} className="shrink-0 pl-1 text-sm text-foreground-subtle">
-      · answered by {answer.you ? "you" : (answer.name ?? "someone")}
-    </Text>
+    <>
+      {props.answer === null ? null : (
+        <Text numberOfLines={1} className="max-w-[45%] shrink pl-1 text-sm text-foreground">
+          {props.answer}
+        </Text>
+      )}
+      {by === undefined ? null : (
+        <Text numberOfLines={1} className="shrink-0 pl-1 text-sm text-foreground-subtle">
+          · answered by {by.you ? "you" : (by.name ?? "someone")}
+        </Text>
+      )}
+    </>
   );
 }
