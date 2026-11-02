@@ -187,15 +187,18 @@ describe("J5 action commands", () => {
         atoms.archiveCrew,
         atoms.respondCrewRuntimeRequest,
         atoms.answerHumanExchange,
-        atoms.answerCrewWorktreeCleanup,
         atoms.deleteArtifact,
         atoms.deleteAllArtifacts,
       ]) {
         expect(command.requiredScopes()).toEqual([AuthOrchestrationOperateScope]);
         expect(registry.get(command.permissionAtom(work))).toBe(true);
       }
-      // The Playbook library is changed by Owners only.
-      for (const command of [atoms.deletePlaybook, atoms.renamePlaybook]) {
+      // The Playbook library is changed by Owners only, and so are an archive's kept worktrees.
+      for (const command of [
+        atoms.deletePlaybook,
+        atoms.renamePlaybook,
+        atoms.answerCrewWorktreeCleanup,
+      ]) {
         expect(command.requiredScopes()).toEqual([AuthSettingsWriteScope]);
         expect(registry.get(command.permissionAtom(work))).toBe(false);
       }

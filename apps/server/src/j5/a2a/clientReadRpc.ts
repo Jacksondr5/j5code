@@ -15,7 +15,7 @@ import * as Schema from "effect/Schema";
 
 import { failAsJ5ActionError } from "../rpcActionError.ts";
 import { connectionPersonId } from "../sharing/connectionPerson.ts";
-import { connectionReads, connectionWrites } from "../sharing/connectionWriter.ts";
+import { connectionReads, connectionWrites, isOwner } from "../sharing/connectionWriter.ts";
 import { PersonAccess, type SessionIdentity } from "../sharing/PersonAccess.ts";
 import { SharedThreads } from "../sharing/SharedThreads.ts";
 import { ClientReadsService } from "./ClientReadsService.ts";
@@ -80,17 +80,15 @@ export const makeClientReadRpcHandlers = Effect.fn("j5.makeClientReadRpcHandlers
     Effect.provideService(PersonAccess, people),
     Effect.provideService(SharedThreads, shared),
   );
-  // Listed to whoever reaches the Crew's Captain, like its archive's worktrees.
+  // Listed to Owners only: removing worktrees is the Owner's call, so no one else has anything
+  // to answer, and the count is of what waits on the person.
   const cleanupsReached = Effect.fn("j5.a2a.clientReadRpc.cleanupsReached")(function* (
     status: CrewWorktreeCleanupListRequest["status"],
   ) {
-    const listed = yield* clientReads
+    if (!(yield* isOwner(session).pipe(Effect.provideService(PersonAccess, people)))) return [];
+    return yield* clientReads
       .crewWorktreeCleanups(status)
       .pipe(Effect.catch(failed("Reading worktree cleanups failed.")));
-    const reachesCaptain = yield* reaches;
-    return yield* Effect.filter(listed, (item) =>
-      reachesCaptain(Effect.succeed(item.captainThreadId)),
-    );
   });
   return {
     [METHODS.listHumanInbox]: (input: HumanInboxListRequest) =>
