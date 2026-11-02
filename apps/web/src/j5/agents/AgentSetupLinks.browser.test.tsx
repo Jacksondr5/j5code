@@ -6,24 +6,13 @@ import {
   createRouter,
   RouterProvider,
 } from "@tanstack/react-router";
-import { act } from "react";
-import { create, type ReactTestRenderer } from "react-test-renderer";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { describe, expect, it, vi } from "vite-plus/test";
 
+import { render } from "../../../test/render";
 import { AgentSetupLinks } from "./AgentSetupLinks";
 
 const scope = { project: "repo:review", machine: "remote-server", checkout: "/repo/worktree" };
 const initialEntry = `/settings/personas?${new URLSearchParams(scope)}`;
-let renderer: ReactTestRenderer | undefined;
-
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-});
-afterEach(async () => {
-  await act(() => renderer?.unmount());
-  renderer = undefined;
-  vi.unstubAllGlobals();
-});
 
 function desktopHistory(href = `file:///app/index.html#${initialEntry}`) {
   const location = new URL(href);
@@ -71,22 +60,17 @@ describe("Agent Setup section navigation", () => {
       const router = settingsRouter(history);
       try {
         await router.load();
-        await act(() => {
-          renderer = create(<RouterProvider router={router} />);
-        });
+        await using screen = await render(<RouterProvider router={router} />, { router: false });
         for (const section of ["crews", "playbooks", "personas"]) {
-          const link = renderer!.root
-            .findAllByType("a")
-            .find(
-              (entry) =>
-                entry.children.join("") ===
-                (section === "crews"
-                  ? "Crews"
-                  : section === "playbooks"
-                    ? "Playbooks"
-                    : "Personas"),
-            )!;
-          const destination = new URL(link.props.href, shell?.location ?? "http://localhost");
+          const label =
+            section === "crews" ? "Crews" : section === "playbooks" ? "Playbooks" : "Personas";
+          const link = [...screen.container.querySelectorAll("a")].find(
+            (entry) => entry.textContent === label,
+          )!;
+          const destination = new URL(
+            link.getAttribute("href")!,
+            shell?.location ?? "http://localhost",
+          );
           const followed = desktop
             ? desktopHistory(destination.href).history
             : createMemoryHistory({
@@ -103,8 +87,6 @@ describe("Agent Setup section navigation", () => {
           }
         }
       } finally {
-        await act(() => renderer?.unmount());
-        renderer = undefined;
         history.destroy();
       }
     },
