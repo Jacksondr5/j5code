@@ -94,7 +94,9 @@ export function AdjudicationDock(props: {
       await answerHumanExchange(environmentId, request);
       attempt.current = null;
       notifyHumanInboxChanged(environmentId);
-      setAnswers(({ [shown.exchangeId]: _sent, ...rest }) => rest);
+      setAnswers((current) =>
+        Object.fromEntries(Object.entries(current).filter(([id]) => id !== shown.exchangeId)),
+      );
       query.refresh();
     } catch (cause) {
       if (isAskAlreadyClosed(cause)) {
@@ -103,9 +105,8 @@ export function AdjudicationDock(props: {
       } else {
         setError(cause instanceof Error ? cause.message : "Could not deliver the answer.");
       }
-    } finally {
-      setPending(false);
     }
+    setPending(false);
   };
 
   return (
