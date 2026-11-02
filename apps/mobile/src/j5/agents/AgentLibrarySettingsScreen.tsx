@@ -702,6 +702,8 @@ function PersonaRow(props: {
           switch (action) {
             case "edit":
               return { id: action, title: "Edit", attributes: { disabled: props.locked } };
+            case "details":
+              return { id: action, title: "Details" };
             case "duplicate":
               return {
                 id: action,
@@ -733,6 +735,7 @@ function PersonaRow(props: {
         onPressAction={({ nativeEvent }) => {
           const action = nativeEvent.event;
           if (action === "edit") onEdit?.();
+          else if (action === "details") props.onDetails();
           else if (action === "duplicate") props.onDuplicate();
           else if (action === "export") props.onExport();
           else if (action === "remove") props.onRemove();
