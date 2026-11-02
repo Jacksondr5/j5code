@@ -1,5 +1,3 @@
-// @vitest-environment jsdom
-
 import {
   EnvironmentId,
   ProviderDriverKind,
@@ -11,9 +9,7 @@ import type {
   CrewProposalPreviewRequest,
   CrewProposalPreviewResponse,
 } from "@t3tools/contracts/j5";
-import { act } from "react";
-import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
+import { expect, it, vi } from "vite-plus/test";
 
 const state = vi.hoisted(() => ({
   permitted: true,
@@ -21,7 +17,10 @@ const state = vi.hoisted(() => ({
   read: vi.fn(),
   memberModels: null as ReadonlyArray<{ instanceId: string; model: string }> | null,
 }));
-vi.mock("@effect/atom-react", () => ({ useAtomValue: (atom: unknown) => atom }));
+vi.mock(import("@effect/atom-react"), async (importOriginal) => ({
+  ...(await importOriginal()),
+  useAtomValue: ((atom: unknown) => atom) as never,
+}));
 vi.mock("../state", () => ({
   j5Environment: { resolveCrewProposal: { permissionAtom: () => state.permitted } },
   crewProposalsQueryAtom: () => "crew-proposals",
@@ -58,6 +57,7 @@ vi.mock("../../components/WorktreeBaseBranchPicker", () => ({
 }));
 vi.mock("../../state/use-atom-command", () => ({ useAtomCommand: () => state.read }));
 
+import { act, render } from "../../../test/render";
 import { CrewProposalCard } from "./CrewProposalCard";
 import { CrewRosterGate } from "./CrewRosterGate";
 import { clearCrewProposalDraft } from "./crewProposalDraftStore";
@@ -130,23 +130,8 @@ const preview = (
       workspace: seat.workspace ?? { type: "shared" },
     })),
   });
-let container: HTMLDivElement;
-let root: Root;
 const resolve = vi.fn();
-beforeEach(() => {
-  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  Object.defineProperty(Element.prototype, "getAnimations", {
-    configurable: true,
-    value: () => [],
-  });
-  vi.stubGlobal(
-    "ResizeObserver",
-    class {
-      observe() {}
-      unobserve() {}
-      disconnect() {}
-    },
-  );
+function setup() {
   state.permitted = true;
   state.memberModels = null;
   state.preview.mockReset().mockImplementation(preview);
@@ -158,32 +143,18 @@ beforeEach(() => {
   );
   resolve.mockReset();
   clearCrewProposalDraft(EnvironmentId.make("test"), proposal.id);
-  container = document.createElement("div");
-  document.body.append(container);
-  root = createRoot(container);
-});
-afterEach(async () => {
-  await act(() => root.unmount());
-  container.remove();
-  Reflect.deleteProperty(Element.prototype, "getAnimations");
-  vi.useRealTimers();
-  vi.unstubAllGlobals();
-});
-async function render(overrides: Partial<React.ComponentProps<typeof CrewProposalCard>> = {}) {
-  await act(async () =>
-    root.render(
-      <ul>
-        <CrewProposalCard
-          proposal={proposal}
-          environmentId={EnvironmentId.make("test")}
-          busy={false}
-          onResolve={resolve}
-          {...overrides}
-        />
-      </ul>,
-    ),
-  );
 }
+const card = (overrides: Partial<React.ComponentProps<typeof CrewProposalCard>> = {}) => (
+  <ul>
+    <CrewProposalCard
+      proposal={proposal}
+      environmentId={EnvironmentId.make("test")}
+      busy={false}
+      onResolve={resolve}
+      {...overrides}
+    />
+  </ul>
+);
 const button = (label: string) =>
   [...document.querySelectorAll<HTMLButtonElement>("button")].findLast(
     (item) => item.getAttribute("aria-label") === label || item.textContent === label,
@@ -220,7 +191,8 @@ async function input(label: string, value: string) {
 }
 
 it("saves modal edits atomically and preserves the Captain's reason", async () => {
-  await render();
+  setup();
+  await using screen = await render(card(), { router: false });
   await click(button("Edit seat builder"));
   expect(approve().disabled).toBe(true);
   await input("Member instructions", "Implement carefully");
@@ -228,7 +200,7 @@ it("saves modal edits atomically and preserves the Captain's reason", async () =
     "Implement carefully",
   );
   await click(button("Save changes"));
-  expect(container.textContent).toContain("Edited");
+  expect(screen.container.textContent).toContain("Edited");
   await click(approve());
   expect(resolve).toHaveBeenCalledWith(
     "approve",
@@ -241,17 +213,19 @@ it("saves modal edits atomically and preserves the Captain's reason", async () =
 });
 
 it("Cancel discards edits without changing the approval roster", async () => {
-  await render();
+  setup();
+  await using screen = await render(card(), { router: false });
   await click(button("Edit seat builder"));
   await input("Member instructions", "Discard this edit");
   await click(button("Cancel"));
-  expect(container.textContent).not.toContain("Edited");
+  expect(screen.container.textContent).not.toContain("Edited");
   await click(approve());
   expect(resolve.mock.calls[0]?.[1]).toEqual(proposal.requestedSeats);
 });
 
 it("adds only a complete member and Cancel does not add an empty row", async () => {
-  await render();
+  setup();
+  await using screen = await render(card(), { router: false });
   await click(button("Add crew member"));
   expect(button("Add member").disabled).toBe(true);
   await input("Member name", "tester");
@@ -262,15 +236,16 @@ it("adds only a complete member and Cancel does not add an empty row", async () 
   await input("Member name", "tester");
   await input("Member instructions", "Test the filters");
   await click(button("Add member"));
-  expect(container.querySelectorAll('[data-testid^="crew-member-"]')).toHaveLength(3);
+  expect(screen.container.querySelectorAll('[data-testid^="crew-member-"]')).toHaveLength(3);
   expect(approve().textContent).toBe("Approve Crew");
   await click(button("Remove seat tester"));
-  expect(container.querySelectorAll('[data-testid^="crew-member-"]')).toHaveLength(2);
+  expect(screen.container.querySelectorAll('[data-testid^="crew-member-"]')).toHaveLength(2);
   expect(approve().textContent).toBe("Approve Crew");
 });
 
 it("populates persona name and instructions and uses the persona runtime defaults", async () => {
-  await render();
+  setup();
+  await using _screen = await render(card(), { router: false });
   await click(button("Edit seat builder"));
   await click(button("Member persona"));
   await click(option("Member persona", "Sentry"));
@@ -290,12 +265,16 @@ it("populates persona name and instructions and uses the persona runtime default
 });
 
 it("opening a persona member preserves its name and additional instructions without duplicating defaults", async () => {
-  await render({
-    proposal: {
-      ...proposal,
-      requestedSeats: [{ ...proposal.requestedSeats[1]!, instructions: "Check auth" }],
-    },
-  });
+  setup();
+  await using _screen = await render(
+    card({
+      proposal: {
+        ...proposal,
+        requestedSeats: [{ ...proposal.requestedSeats[1]!, instructions: "Check auth" }],
+      },
+    }),
+    { router: false },
+  );
   await click(button("Edit seat reviewer"));
   expect(document.querySelector<HTMLInputElement>('[aria-label="Member name"]')?.value).toBe(
     "reviewer",
@@ -312,6 +291,7 @@ it("opening a persona member preserves its name and additional instructions with
 });
 
 it("ignores a late persona read after switching back to a custom member", async () => {
+  setup();
   let finish!: (value: unknown) => void;
   state.read.mockImplementation(
     () =>
@@ -319,7 +299,7 @@ it("ignores a late persona read after switching back to a custom member", async 
         finish = resolve;
       }),
   );
-  await render();
+  await using _screen = await render(card(), { router: false });
   await click(button("Edit seat builder"));
   await click(button("Member persona"));
   await click(option("Member persona", "Sentry"));
@@ -342,7 +322,8 @@ it("ignores a late persona read after switching back to a custom member", async 
 });
 
 it("blocks saving a duplicate name and offers recovery after a persona read fails", async () => {
-  await render();
+  setup();
+  await using _screen = await render(card(), { router: false });
   await click(button("Edit seat builder"));
   await input("Member name", "reviewer");
   expect(button("Save changes").disabled).toBe(true);
@@ -357,15 +338,17 @@ it("blocks saving a duplicate name and offers recovery after a persona read fail
 });
 
 it("keeps edits and approval disabled without permission", async () => {
+  setup();
   state.permitted = false;
-  await render();
+  await using _screen = await render(card(), { router: false });
   expect(approve().disabled).toBe(true);
   expect(button("Edit seat builder").disabled).toBe(true);
   expect(button("Add crew member").disabled).toBe(true);
 });
 
 it("uses only a fresh full-roster token after saving a member", async () => {
-  await render();
+  setup();
+  await using _screen = await render(card(), { router: false });
   await click(button("Edit seat builder"));
   await input("Member instructions", "Changed brief");
   let finish!: () => void;
@@ -388,7 +371,8 @@ it("uses only a fresh full-roster token after saving a member", async () => {
 });
 
 it("keeps a portalled picker inside the modal and saves its chosen model", async () => {
-  await render();
+  setup();
+  await using _screen = await render(card(), { router: false });
   await click(button("Edit seat builder"));
   await click(button("builder model"));
   await click(option("builder model", "Other model"));
@@ -399,6 +383,7 @@ it("keeps a portalled picker inside the modal and saves its chosen model", async
 });
 
 it("allows workspace repair in the modal when the full-roster preview fails", async () => {
+  setup();
   state.preview.mockImplementation(
     (environment: EnvironmentId, request: CrewProposalPreviewRequest) => {
       if (request.seats?.some((seat) => seat.workspace?.type === "existing_worktree"))
@@ -406,18 +391,21 @@ it("allows workspace repair in the modal when the full-roster preview fails", as
       return preview(environment, request);
     },
   );
-  await render({
-    proposal: {
-      ...proposal,
-      requestedSeats: [
-        {
-          ...proposal.requestedSeats[0]!,
-          workspace: { type: "existing_worktree", worktreePath: "/gone" },
-        },
-        proposal.requestedSeats[1]!,
-      ],
-    },
-  });
+  await using _screen = await render(
+    card({
+      proposal: {
+        ...proposal,
+        requestedSeats: [
+          {
+            ...proposal.requestedSeats[0]!,
+            workspace: { type: "existing_worktree", worktreePath: "/gone" },
+          },
+          proposal.requestedSeats[1]!,
+        ],
+      },
+    }),
+    { router: false },
+  );
   expect(approve().disabled).toBe(true);
   await click(button("Edit seat builder"));
   await click(button("builder workspace"));
@@ -429,7 +417,8 @@ it("allows workspace repair in the modal when the full-roster preview fails", as
 });
 
 it("Escape discards modal edits and returns focus to the member's edit control", async () => {
-  await render();
+  setup();
+  await using _screen = await render(card(), { router: false });
   await click(button("Edit seat builder"));
   await input("Member instructions", "Discard on escape");
   const field = document.querySelector<HTMLTextAreaElement>('[aria-label="Member instructions"]')!;
@@ -445,15 +434,16 @@ it("Escape discards modal edits and returns focus to the member's edit control",
 });
 
 it("starts as a compact strip and keeps member edits when collapsed and reopened", async () => {
-  await act(async () =>
-    root.render(
-      <CrewRosterGate
-        environmentId={EnvironmentId.make("collapse-test")}
-        threadId={ThreadId.make("captain-thread")}
-      />,
-    ),
+  setup();
+  await using screen = await render(
+    <CrewRosterGate
+      environmentId={EnvironmentId.make("collapse-test")}
+      threadId={ThreadId.make("captain-thread")}
+    />,
+    { router: false },
   );
-  const region = () => container.querySelector<HTMLElement>('[aria-label="Crew proposal roster"]')!;
+  const region = () =>
+    screen.container.querySelector<HTMLElement>('[aria-label="Crew proposal roster"]')!;
   expect(button("Expand Crew proposal").getAttribute("aria-expanded")).toBe("false");
   expect(button("Expand Crew proposal").textContent).toContain("2 members");
   expect(region().hidden).toBe(true);
@@ -473,6 +463,7 @@ it("starts as a compact strip and keeps member edits when collapsed and reopened
 });
 
 it("remembers disclosure for each environment and thread when the composer remounts", async () => {
+  setup();
   const gate = (environment: string) => (
     <CrewRosterGate
       key={environment}
@@ -480,22 +471,23 @@ it("remembers disclosure for each environment and thread when the composer remou
       threadId={ThreadId.make("captain-thread")}
     />
   );
-  await act(async () => root.render(gate("remember-test")));
+  await using screen = await render(gate("remember-test"), { router: false });
   await click(button("Expand Crew proposal"));
-  await act(async () => root.render(null));
-  await act(async () => root.render(gate("remember-test")));
+  await screen.rerender(null);
+  await screen.rerender(gate("remember-test"));
   expect(button("Collapse Crew proposal").getAttribute("aria-expanded")).toBe("true");
-  await act(async () => root.render(gate("different-environment")));
+  await screen.rerender(gate("different-environment"));
   expect(button("Expand Crew proposal").getAttribute("aria-expanded")).toBe("false");
-  await act(async () => root.render(gate("remember-test")));
+  await screen.rerender(gate("remember-test"));
   await click(button("Collapse Crew proposal"));
-  await act(async () => root.render(null));
-  await act(async () => root.render(gate("remember-test")));
+  await screen.rerender(null);
+  await screen.rerender(gate("remember-test"));
   expect(button("Expand Crew proposal").getAttribute("aria-expanded")).toBe("false");
 });
 
 it("switches provider with its model defaults and keeps the model menu scoped to that provider", async () => {
-  await render();
+  setup();
+  await using _screen = await render(card(), { router: false });
   await click(button("Edit seat builder"));
   await click(button("builder provider"));
   await click(option("builder provider", "Claude"));
@@ -514,30 +506,32 @@ it("switches provider with its model defaults and keeps the model menu scoped to
 });
 
 it("restores saved roster edits when the card returns, for that proposal only", async () => {
+  setup();
   const environmentId = EnvironmentId.make("draft-restore");
-  await render({ environmentId });
+  await using screen = await render(card({ environmentId }), { router: false });
   await click(button("Edit seat builder"));
   await input("Member instructions", "Edited before the composer asked a question");
   await click(button("Save changes"));
   await click(button("Remove seat reviewer"));
-  await act(async () => root.render(null));
+  await screen.rerender(null);
 
-  await render({ environmentId });
-  expect(container.querySelectorAll('[data-testid^="crew-member-"]')).toHaveLength(1);
+  await screen.rerender(card({ environmentId }));
+  expect(screen.container.querySelectorAll('[data-testid^="crew-member-"]')).toHaveLength(1);
   await click(approve());
   expect(resolve.mock.calls[0]?.[1]).toEqual([
     expect.objectContaining({ instructions: "Edited before the composer asked a question" }),
   ]);
 
-  await act(async () => root.render(null));
-  await render({ environmentId, proposal: { ...proposal, id: "proposal:2" } });
-  expect(container.querySelectorAll('[data-testid^="crew-member-"]')).toHaveLength(2);
-  await act(async () => root.render(null));
-  await render({ environmentId: EnvironmentId.make("other-draft-environment") });
-  expect(container.querySelectorAll('[data-testid^="crew-member-"]')).toHaveLength(2);
+  await screen.rerender(null);
+  await screen.rerender(card({ environmentId, proposal: { ...proposal, id: "proposal:2" } }));
+  expect(screen.container.querySelectorAll('[data-testid^="crew-member-"]')).toHaveLength(2);
+  await screen.rerender(null);
+  await screen.rerender(card({ environmentId: EnvironmentId.make("other-draft-environment") }));
+  expect(screen.container.querySelectorAll('[data-testid^="crew-member-"]')).toHaveLength(2);
 });
 
 it("a new member added after a restore does not reuse an earlier added row", async () => {
+  setup();
   const environmentId = EnvironmentId.make("draft-added-rows");
   const addMember = async (name: string) => {
     await click(button("Add crew member"));
@@ -545,47 +539,49 @@ it("a new member added after a restore does not reuse an earlier added row", asy
     await input("Member instructions", `${name} instructions`);
     await click(button("Add member"));
   };
-  await render({ environmentId });
+  await using screen = await render(card({ environmentId }), { router: false });
   await addMember("first");
-  await act(async () => root.render(null));
-  await render({ environmentId });
+  await screen.rerender(null);
+  await screen.rerender(card({ environmentId }));
   await addMember("second");
-  expect(container.querySelectorAll('[data-testid^="crew-member-"]')).toHaveLength(4);
+  expect(screen.container.querySelectorAll('[data-testid^="crew-member-"]')).toHaveLength(4);
 });
 
 it("drops a proposal's saved edits once it is approved or declined", async () => {
+  setup();
   const environmentId = EnvironmentId.make("draft-resolved");
   const gate = (
     <CrewRosterGate environmentId={environmentId} threadId={ThreadId.make("captain-thread")} />
   );
-  await act(async () => root.render(gate));
+  await using screen = await render(gate, { router: false });
   await click(button("Expand Crew proposal"));
   await click(button("Remove seat reviewer"));
-  await act(async () => root.render(null));
-  await act(async () => root.render(gate));
-  expect(container.querySelectorAll('[data-testid^="crew-member-"]')).toHaveLength(1);
+  await screen.rerender(null);
+  await screen.rerender(gate);
+  expect(screen.container.querySelectorAll('[data-testid^="crew-member-"]')).toHaveLength(1);
 
   await click(approve());
   expect(resolveCrewProposal).toHaveBeenCalledTimes(1);
-  await act(async () => root.render(null));
-  await act(async () => root.render(gate));
-  expect(container.querySelectorAll('[data-testid^="crew-member-"]')).toHaveLength(2);
+  await screen.rerender(null);
+  await screen.rerender(gate);
+  expect(screen.container.querySelectorAll('[data-testid^="crew-member-"]')).toHaveLength(2);
 });
 
 const instructionsBox = () =>
   document.querySelector<HTMLTextAreaElement>('[aria-label="Member instructions"]')!.value;
 
 it("an edited persona text replaces the persona's and returns when the member is reopened", async () => {
+  setup();
   const environmentId = EnvironmentId.make("persona-replace");
-  await render({ environmentId });
+  await using screen = await render(card({ environmentId }), { router: false });
   await click(button("Edit seat reviewer"));
   expect(instructionsBox()).toBe("sentry default instructions");
   await input("Member instructions", "Only review the auth code.");
   await click(button("Save changes"));
-  expect(container.textContent).toContain("Edited");
-  await act(async () => root.render(null));
+  expect(screen.container.textContent).toContain("Edited");
+  await screen.rerender(null);
 
-  await render({ environmentId });
+  await screen.rerender(card({ environmentId }));
   await click(button("Edit seat reviewer"));
   expect(instructionsBox()).toBe("Only review the auth code.");
   await click(button("Cancel"));
@@ -599,7 +595,8 @@ it("an edited persona text replaces the persona's and returns when the member is
 });
 
 it("a cleared persona text blocks Save until it is reset", async () => {
-  await render();
+  setup();
+  await using _screen = await render(card(), { router: false });
   await click(button("Edit seat reviewer"));
   await input("Member instructions", "");
   expect(document.body.textContent).toContain("Member instructions can't be empty");
@@ -612,7 +609,8 @@ it("a cleared persona text blocks Save until it is reset", async () => {
 });
 
 it("Reset to persona text restores the persona's own and sends no replacement", async () => {
-  await render();
+  setup();
+  await using screen = await render(card(), { router: false });
   await click(button("Edit seat reviewer"));
   expect(button("Reset to persona text")).toBeUndefined();
   await input("Member instructions", "Something else entirely.");
@@ -620,14 +618,15 @@ it("Reset to persona text restores the persona's own and sends no replacement", 
   expect(instructionsBox()).toBe("sentry default instructions");
   expect(button("Reset to persona text")).toBeUndefined();
   await click(button("Save changes"));
-  expect(container.textContent).not.toContain("Edited");
+  expect(screen.container.textContent).not.toContain("Edited");
   await click(approve());
   expect(resolve.mock.calls[0]?.[1][1]).toEqual(proposal.requestedSeats[1]);
 });
 
 it("offers a custom member only the models its project's list allows", async () => {
+  setup();
   state.memberModels = [{ instanceId: "codex", model: "gpt-6" }];
-  await render();
+  await using _screen = await render(card(), { router: false });
   await click(button("Edit seat builder"));
   await click(button("builder model"));
   expect(option("builder model", "GPT-6")).toBeDefined();
@@ -640,8 +639,9 @@ it("offers a custom member only the models its project's list allows", async () 
 });
 
 it("leaves a persona member's pickers whole, since it runs on its own model", async () => {
+  setup();
   state.memberModels = [{ instanceId: "codex", model: "gpt-6" }];
-  await render();
+  await using _screen = await render(card(), { router: false });
   await click(button("Edit seat reviewer"));
   await click(button("reviewer model"));
   expect(option("reviewer model", "Other model")).toBeDefined();

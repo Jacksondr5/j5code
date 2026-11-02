@@ -6,7 +6,6 @@ import {
   type CrewProposalSeatRuntime,
   type CrewWorkspaceOptions,
 } from "@t3tools/contracts/j5";
-import { useMemo } from "react";
 import { getProviderOptionCurrentValue } from "@t3tools/shared/model";
 
 import { Input } from "../../components/ui/input";
@@ -224,30 +223,26 @@ function CrewSeatRuntimeFields(props: CrewSeatEditorProps & { environmentId: Env
   // A custom member runs on a model the project's list allows; a persona keeps its own model, so
   // its pickers stay whole (the server checks a persona seat whose model was changed).
   const memberModels = props.value.agentId === CUSTOM_AGENT ? props.memberModels : null;
-  const choices = useMemo(
-    () =>
-      providers.flatMap((provider) => {
-        if (
-          !(
-            provider.enabled &&
-            provider.installed &&
-            provider.status === "ready" &&
-            provider.availability !== "unavailable" &&
-            provider.models.length > 0
-          )
-        )
-          return [];
-        const models = provider.models.filter((model) =>
-          isCrewMemberModelChecked(memberModels, {
-            instanceId: provider.instanceId,
-            model: model.slug,
-          }),
-        );
-        return models.length === 0 ? [] : [{ ...provider, models }];
+  const choices = providers.flatMap((provider) => {
+    if (
+      !(
+        provider.enabled &&
+        provider.installed &&
+        provider.status === "ready" &&
+        provider.availability !== "unavailable" &&
+        provider.models.length > 0
+      )
+    )
+      return [];
+    const models = provider.models.filter((model) =>
+      isCrewMemberModelChecked(memberModels, {
+        instanceId: provider.instanceId,
+        model: model.slug,
       }),
-    [providers, memberModels],
-  );
-  const entries = useMemo(() => deriveProviderInstanceEntries(choices), [choices]);
+    );
+    return models.length === 0 ? [] : [{ ...provider, models }];
+  });
+  const entries = deriveProviderInstanceEntries(choices);
   const value = resolvedCrewSeatDraft(props.value, props.runtime);
   const selection = value.modelSelection;
   const provider = providers.find(({ instanceId }) => instanceId === selection?.instanceId);
