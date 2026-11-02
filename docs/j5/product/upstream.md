@@ -244,6 +244,18 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Decided:** Jackson, 2026-11-01, at Checkpoint 1 ([#866](https://github.com/Jacksondr5/j5code/issues/866)). Recorded in FORK.md case 100.
 
+#### D44. On mobile, an answered question reads as its question, its answer and who gave it
+
+**Upstream:** a resolved question's work row folds to one truncating label, so a long question hides its answer. Opened, it draws the readable answer, then the raw item as JSON.
+
+**J5:** folded, the answer and who gave it sit after the label, so the question truncates first and both stay visible. Opened, the row stops at the question and its answer. Other work rows, approvals included, keep upstream's detail.
+
+**Why:** Jackson saw a giant JSON blob under an answer, and a folded row that read as only the question, on his iPhone at Checkpoint 2. His direction was to minimize the row to the question, the answer and who answered. Web draws no raw item either.
+
+**Consequences:** a small edit in upstream's mobile `thread-work-log.tsx`, carried at each advance (FORK.md case 99). If upstream stops drawing the raw item, drop J5's half of that edit.
+
+**Decided:** Jackson, 2026-11-01, at Checkpoint 2 ([#891](https://github.com/Jacksondr5/j5code/issues/891)). Recorded in FORK.md case 99.
+
 ### Storage, install, and identity
 
 #### D19. J5 never shares on-disk state with T3 Code
@@ -657,4 +669,5 @@ J5 kept a run from resuming after a usage-limit reset when the person had presse
 - 2026-11-01 — D41 added: on mobile, a draft's persona has its own row under the checkout row, and the slash menu covers the draft rows (Jackson, Checkpoint 1; [#866](https://github.com/Jacksondr5/j5code/issues/866)).
 - 2026-10-27 — D1: when the person asked for none, agents choose between working directly, subagents and a Crew from the work, and get help in two ways, a subagent or a Crew member; an explicit request for a Crew, a Peer Agent or a subagent still gets that mechanism; `j5_spawn_agent` is described as for a Peer Agent the user asks for, not as a way to get help (Bryant, with Jackson's 2026-10-31 decision; [#746](https://github.com/Jacksondr5/j5code/issues/746)).
 - 2026-10-31 — D43 added: a thread can keep a message the platform wrote without a run, so a Crew member's introduction and roster changes show in its own thread (Jackson, 2026-10-31).
+- 2026-11-01 — D44 added: on mobile, an answered question reads as its question, its answer and who gave it (Jackson, Checkpoint 2; [#891](https://github.com/Jacksondr5/j5code/issues/891)).
 - 2026-11-02 — D38 now covers J5's platform notices and prompts, built on web ([#698](https://github.com/Jacksondr5/j5code/issues/698)); the raw card is retired. Upstream's platform messages stay on upstream's own rows, since upstream no longer draws them as user messages (Jackson, 2026-10-24 and 2026-10-31; Captain's call on the build, Jackson told).
