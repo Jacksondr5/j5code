@@ -476,10 +476,8 @@ const make = Effect.gen(function* () {
 
   /**
    * The commit a base means, from where the caller works: its saved pin while that commit exists,
-   * else the ref now. From origin, the commit is origin's, fetched now as preparation would, so
-   * the pin is what a later preparation would have started from; with no such origin branch it is
-   * the local ref. Missing when nothing resolves (no other revision is tried), and unreachable
-   * when the fetch itself fails, rather than pinning a stale ref the person didn't choose.
+   * else the ref now (from origin, origin's, fetched now). Missing when nothing resolves, and
+   * unreachable when the fetch fails, rather than pinning a stale ref the person didn't choose.
    */
   const resolveBase = Effect.fn("j5.spawnWorkspace.resolveBase")(function* (
     cwd: string,
