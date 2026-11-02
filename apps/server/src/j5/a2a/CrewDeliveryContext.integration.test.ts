@@ -43,7 +43,7 @@ it.effect(
         harness.layer,
         Crews.layer.pipe(Layer.provide(harness.layer)),
         ledgerLayer.pipe(Layer.provide(harness.layer)),
-        CrewTurnContext.layer.pipe(Layer.provide(harness.layer)),
+        CrewTurnContext.layer.pipe(Layer.provide(Layer.merge(harness.layer, harness.orchestrator))),
       );
       const layer = Preparation.layer.pipe(
         Layer.provideMerge(services),
@@ -168,6 +168,7 @@ it.effect(
             yield* crewContext.deliver(
               {
                 threadId,
+                runId: ready.runs[0]!.id,
                 providerThread: {
                   id: "provider-thread:crew-reviewer",
                   nativeThreadRef: null,
@@ -183,6 +184,13 @@ it.effect(
             return prompt;
           });
         assert.include(yield* promptFor(ready.messages[0]!.text), "Shared goal");
+        // The member's thread keeps what it was told, once, and the record starts no run.
+        const introduced = yield* threads.getThreadProjection(threadId);
+        const kept = introduced.messages.filter((message) => message.createdBy === "system");
+        assert.lengthOf(kept, 1);
+        assert.include(kept[0]!.text, "<spawner_brief>\nShared goal\n</spawner_brief>");
+        assert.notInclude(kept[0]!.text, "Review the code now.");
+        assert.lengthOf(introduced.runs, ready.runs.length);
         yield* crews.addMembers("crew:integration", [
           {
             seatName: "tester",
