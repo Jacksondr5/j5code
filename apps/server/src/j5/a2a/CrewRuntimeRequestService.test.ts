@@ -144,7 +144,7 @@ const makeThreads = () => {
   };
   const layer = Layer.mock(ThreadManagementService)({
     // Fails the way the real service does: a typed projection error whose cause says why.
-    getThreadProjection: (threadId) => {
+    getThreadRecords: (threadId) => {
       const projection = state.get(threadId);
       if (broken.has(threadId))
         return Effect.fail(

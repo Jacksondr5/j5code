@@ -76,24 +76,25 @@ Read-only; no events.
 
 Agents have two ways to get help: a subagent (their provider's own, or `delegate_task`) or members on a Crew (`j5_propose_crew`, `j5_request_crew_member`). `j5_spawn_agent` serves neither. Its description limits it to a user's explicit request for a standalone agent they will talk to, and to callers that name it, such as an outside agent or a skill. Nothing a caller depends on was removed.
 
-**Description (contract):** "Not a way to get help with your own work: use this only when the user
-explicitly asks for a standalone agent they will talk to, or when an outside agent or a skill you
-are following names it. For help, create a subagent (your native Subagent tool, or delegate_task) or
-put members on a Crew (j5_propose_crew). Spawn a Peer Agent: a full-citizen teammate with its own
+**Description (contract):** "Use this when the user explicitly asks for a Peer Agent or a standalone agent they will talk to, or
+when an outside agent or a skill you are following names it. When nobody asked for one, it is not a
+way to get help with your own work: create a subagent (your native Subagent tool, or delegate_task)
+or put members on a Crew (j5_propose_crew). Spawn a Peer Agent: a full-citizen teammate with its own
 top-level thread, starting on your brief as its first turn. It joins your project unless you name
 another with project_id or set scratch for none, and records you as its immutable spawner; in your
 own project it is placed under you. It is addressable the moment this returns. In your brief, tell
 the new agent what it should do first and whether it should reply to you. Choose provider, model,
-and reasoning for the work in the brief — see orchestrator_capabilities for what's available. To run
+and reasoning for the work in the brief; see orchestrator_capabilities for what's available. To run
 a persona from j5_list_personas, set `persona` to its id: the spawn gets that persona's instructions
 and runtime policy, and provider, model, and reasoning must be one of that persona's declared
 routes. Without a persona it runs in your permission and interaction modes, or in narrower ones you
-set with runtime_mode and interaction_mode. Without a persona its model and reasoning level must be ones the project's Models for custom members lists allow; an ineligible one is refused with the eligible ones. Attach files to the brief with attachments. Choose its
-workspace every time (see the workspace field). A new worktree is prepared after this returns, and
-the agent begins once it is bound, possibly while the project's setup script is still running; if
-preparing it fails, the agent's thread shows why, and it is not retried. Reuse client_request_id to
-retry the same spawn safely; reusing it with any change to the request is refused, so use a fresh one for new
-work."
+set with runtime_mode and interaction_mode. Without a persona its model and reasoning level must be
+ones the project's Models for custom members lists allow; an ineligible one is refused with the
+eligible ones. Attach files to the brief with attachments. Choose its workspace every time (see the
+workspace field). A new worktree is prepared after this returns, and the agent begins once it is
+bound, possibly while the project's setup script is still running; if preparing it fails, the
+agent's thread shows why, and it is not retried. Reuse client_request_id to retry the same spawn
+safely; reusing it with any change to the request is refused, so use a fresh one for new work."
 
 | Input               | Type                                  | Required | Meaning                                           |
 | ------------------- | ------------------------------------- | -------- | ------------------------------------------------- |
@@ -200,37 +201,40 @@ asked for.
 
 ### `j5_propose_crew`
 
-**Description (contract):** "Put members on a Crew, the second of the two ways to get help (the
-first is a subagent). Propose the crew you need for the brief you were given. Use it when the work
+**Description (contract):** "Put members on a Crew, the second of the two ways to get help (the first is a subagent). Propose the
+crew you need for the brief you were given. Use it when the user asks for a crew, or when the work
 needs workers who must respond to each other, such as a builder and reviewers iterating on a change;
-independent assignments go to subagents instead, and the word 'crew' in the user's message does not
-decide it. Mix saved personas and custom seats in the same roster: call j5_list_personas when
-choosing a saved persona, or leave persona unset for a custom seat with its own instructions
-(required) and the brief. Custom seats inherit your harness, model, and reasoning by default and run
-with full-access unless you set runtime_mode; to choose different ones, set model_selection
-(instanceId, model, options) and/or runtime_mode using orchestrator_capabilities. A custom seat's model and reasoning level, yours included, must be ones the project's Models for custom members lists allow; an ineligible one is refused with the eligible ones. Saved personas are
-proposed with their own configuration; only the human may override their runtime before approval. To
-have the crew follow a playbook, set playbook to a name from j5_playbook_list and give seats the
-step ids they own (steps, from j5_playbook_read); a step has one owner, steps no seat owns are yours
-as Captain, and the result reports unowned steps and any step whose persona differs from its seat's.
-For a crew built from a playbook, staff one seat per distinct persona its steps name, each owning
-that persona's steps, and propose a custom seat, noted in its reason, where a named persona isn't
-available. Every seat names its workspace, with the same three choices as j5_spawn_agent. Name the
-crew for what it is for and give each seat a short lowercase-hyphen name like code-reviewer. By
-default the user reviews and edits the roster in this thread, then approves or declines. If
-Auto-approve new Crews is on for your project, the proposed roster is created immediately with no
-approval card. The result says whether it is open or approved; the launch report arrives here once
-creation finishes or fails. Approval creates seats without starting turns. Send each member its
-first assignment when it has work; reuse finished members for follow-up work in the same thread.
-Each seat keeps its configured access and tool approvals, which may exceed yours. You become the
-crew's Captain and may command several crews at once; later requests, stops, and archives name the
-crew they mean. Use j5_send_message for member-to-member, member-to-Captain, and Captain-to-Captain
-coordination, including findings and direct results; artifacts do not gate these conversations.
-Members run their own review loops and message you only for a review pass, a blocker, a
-disagreement they could not settle, or their final result or step report; you resolve technical disagreements within the agreed scope and
-ask the user only when product intent or their judgment is needed. Reuse client_request_id to retry
-safely; a changed request is refused, so use a fresh one for new work. This tool works under every sandbox and approval policy, including approval policy never;
-never refuse the brief because approvals are disabled."
+independent assignments go to subagents instead. Mix saved personas and custom seats in the same
+roster: call j5_list_personas when choosing a saved persona, or leave persona unset for a custom
+seat with its own instructions (required) and the brief. Custom seats inherit your harness, model,
+and reasoning by default and run with full-access unless you set runtime_mode; to choose different
+ones, set model_selection (instanceId, model, options) and/or runtime_mode using
+orchestrator_capabilities. A custom seat's model and reasoning level, yours included, must be ones
+the project's Models for custom members lists allow; an ineligible one is refused with the eligible
+ones. Saved personas are proposed with their own configuration; only the human may override their
+runtime before approval. To have the crew follow a playbook, set playbook to a name from
+j5_playbook_list and give seats the step ids they own (steps, from j5_playbook_read); a step has one
+owner, steps no seat owns are yours as Captain, and the result reports unowned steps and any step
+whose persona differs from its seat's. For a crew built from a playbook, staff one seat per distinct
+persona its steps name, each owning that persona's steps, and propose a custom seat, noted in its
+reason, where a named persona isn't available. Every seat names its workspace, with the same three
+choices as j5_spawn_agent. Name the crew for what it is for and give each seat a short
+lowercase-hyphen name like code-reviewer. By default the user reviews and edits the roster in this
+thread, then approves or declines. If Auto-approve new Crews is on for your project, the proposed
+roster is created immediately with no approval card. The result says whether it is open or approved;
+the launch report arrives here once creation finishes or fails. Approval creates seats without
+starting turns. Send each member its first assignment when it has work; reuse finished members for
+follow-up work in the same thread. Each seat keeps its configured access and tool approvals, which
+may exceed yours. You become the crew's Captain and may command several crews at once; later
+requests, stops, and archives name the crew they mean. Use j5_send_message for member-to-member,
+member-to-Captain, and Captain-to-Captain coordination, including findings and direct results;
+artifacts do not gate these conversations. Members run their own review loops and message you only
+for a review pass, a blocker, a disagreement they could not settle, or their final result or step
+report; you resolve technical disagreements within the agreed scope and ask the user only when
+product intent or their judgment is needed. Reuse client_request_id to retry safely; a changed
+request is refused, so use a fresh one for new work. This tool works under every sandbox and
+approval policy, including approval policy never; never refuse the brief because approvals are
+disabled."
 
 Published with `destructiveHint: true`: depending on the project setting, this call can launch agents immediately.
 
@@ -269,18 +273,21 @@ New Crews require human approval by default. **Settings → Agent Setup → Crew
 
 ### `j5_request_crew_member`
 
-**Description (contract):** "Put one more member on a Crew, the second of the two ways to get help:
-add one seat directly to a running crew you command when the work needs expertise the roster lacks.
-No human approval is needed, regardless of Auto-approve new Crews. Give a seat name, a persona id
-from j5_list_personas or required instructions for a custom seat, a reason identifying the missing
-expertise, and its workspace (the same choices as j5_propose_crew). Custom seats inherit your model
-selection and run with full-access unless you set model_selection or runtime_mode; a custom seat's model and reasoning level must be ones the project's Models for custom members lists allow, and saved personas use their own configuration. Optionally give a brief; otherwise the seat gets the Crew's brief. On a
-playbook Crew, steps may claim only unowned step ids from j5_playbook_read. The result returns the
-updated roster or refuses the seat with its name and reason; creation is reported separately here.
-The new member waits for its first assignment; send it with j5_send_message when the work is ready.
-Each member's configured access still controls tool approvals. Captain-only: a member sends the
-concern to its Captain with j5_send_message. Reuse client_request_id to retry safely; a changed request is refused, so use a fresh one for new
-work. Works under every approval policy, including approval policy never."
+**Description (contract):** "Put one more member on a Crew, the second of the two ways to get help: add one seat directly to a
+running crew you command when the work needs expertise the roster lacks. No human approval is
+needed, regardless of Auto-approve new Crews. Give a seat name, a persona id from j5_list_personas
+or required instructions for a custom seat, a reason identifying the missing expertise, and its
+workspace (the same choices as j5_propose_crew). Custom seats inherit your model selection and run
+with full-access unless you set model_selection or runtime_mode; a custom seat's model and reasoning
+level must be ones the project's Models for custom members lists allow, and saved personas use their
+own configuration. Optionally give a brief; otherwise the seat gets the Crew's brief. On a playbook
+Crew, steps may claim only unowned step ids from j5_playbook_read. The result returns the updated
+roster or refuses the seat with its name and reason; creation is reported separately here. The new
+member waits for its first assignment; send it with j5_send_message when the work is ready. Each
+member's configured access still controls tool approvals. Captain-only: a member sends the concern
+to its Captain with j5_send_message. Reuse client_request_id to retry safely; a changed request is
+refused, so use a fresh one for new work. Works under every approval policy, including approval
+policy never."
 
 | Input                             | Type           | Required | Meaning                                                                     |
 | --------------------------------- | -------------- | -------- | --------------------------------------------------------------------------- |
@@ -400,11 +407,14 @@ run; `j5_stop_crew` doesn't, and unarchiving doesn't restart it.
 
 - `orchestrator_capabilities` — providers and models (ids, labels, option descriptors) for spawn targeting, plus runtime and interaction-mode facts. It deliberately stays silent about delegation even though `delegate_task` is back on the surface: that tool's own description carries its persona use, and J5 verbs are advertised by their own descriptions.
 - `delegate_task`, `task_status`, `task_cancel` — upstream's provider-owned child delegation. J5 re-declares `delegate_task` with its own description, which names the way to get help it serves and leads with the optional `persona` (a persona id from an `@persona:ID` mention or the Settings → Agent Setup library) and presents the plain child as the fallback for cross-provider or T3-tracked work rather than the default for any subagent request. With `persona`, the server pins that persona's instructions, model route, reasoning, and runtime policy and refuses `target` and `runtimeMode`; without it, the child is upstream's plain subagent, and the model it will run on, one inherited from its parent included, must be one the project's [Models for custom members](../features/crews.md) list allows. J5's wrapper hands upstream's `delegateTask` a hook that is called with that resolved model before anything is created, so the check sees what the child will really run on; a retry of a delegation already accepted is not checked again. A refusal is a `model_unavailable` error naming the model, the project and the setting and listing the eligible models, which the agent passes in `target`; a persona's own model is never checked. Upstream's `isolation: "worktree"` gives a child a checkout of its own, started from the parent's local commit, and the description says so in upstream's words. J5's description says it is the first of the two ways to get help (a subagent; the second is a Crew member). The child is backing storage under the calling thread, not a Peer Agent; `j5_spawn_agent` is the tool for a participant the user asked for. Its wait mode is safe where `t3_thread_wait` was not: a child that messages its parent ends its own turn, so the wait returns and the parent reads the message on its next turn (latency, never starvation).
-- `schedule_task`, `list_scheduled_tasks`, `update_scheduled_task`, `delete_scheduled_task` — consumed as-is.
+- `schedule_task` (which also updates a task since upstream folded `update_scheduled_task` into it at v0.1.3), `list_scheduled_tasks`, `delete_scheduled_task`, `run_scheduled_task_now` — consumed as-is.
 - `t3_thread_list`, `t3_thread_read` — consumed as-is; if an upstream description mentions delegation, J5 re-declares that tool with corrected prose.
-- `html_preview`, `html_render`, `request_secret`, `preview_dialog`, `preview_hover`, `preview_select`, `preview_drag`, `preview_upload`, `watch_pull_request`, `unwatch_pull_request` — consumed as-is.
+- `html_preview`, `html_render`, `request_secret`, `preview_dialog`, `preview_act`, `watch_pull_request`, `unwatch_pull_request` — consumed as-is. `preview_act` is upstream's one browser-control tool since v0.1.3, in place of `preview_click`, `preview_drag`, `preview_hover`, `preview_press`, `preview_scroll`, `preview_select`, `preview_type` and `preview_upload`.
 - `t3_workflow_stop`, `write_pull_request_guides`, `read_pull_request_guide` — consumed as-is.
-- `t3_queue_cancel`, `t3_queue_reorder`, `t3_queue_promote_to_steer` — consumed as-is, on any queued message. `t3_queue_edit` keeps upstream's parameters with J5's rule: an agent edits only a queued message it sent, and for a message sent with `j5_send_message` it passes the new message, alone or inside the envelope `t3_queue_read` showed it, and the platform puts it inside the envelope the message was delivered with. An edit to another participant's message or a person's is refused with an error naming the three tools that still work, and so is an edit to a message whose envelope someone rewrote in the queue. The ledger records the new text of every edited agent message and who edited it, a person's edit included.
+- `t3_queue` — upstream's one queue tool since v0.1.3, re-declared by J5 with upstream's parameters. Its `list`, `read`, `cancel`, `reorder` and `promote_to_steer` actions work as upstream ships them, on any queued message. Its `edit` action keeps J5's rule: an agent edits only a queued message it sent, and for a message sent with `j5_send_message` it passes the new message, alone or inside the envelope the `read` action showed it, and the platform puts it inside the envelope the message was delivered with. An edit to another participant's message or a person's is refused with an error naming the three actions that still work, and so is an edit to a message whose envelope someone rewrote in the queue. The ledger records the new text of every edited agent message and who edited it, a person's edit included.
+- `t3_thread_transfer` — upstream's fork, merge-back and transfer-status tool since v0.1.3, re-declared by J5 with upstream's parameters so that a fork whose placement cannot be recorded names the durable fork and its command for repair. Its `merge_back` and `status` actions work as upstream ships them.
+- `t3_pending_request`, `t3_thread_configure` — consumed as-is. A placed agent's native-question notice tells its parent to read and answer with `t3_pending_request`'s `read` and `respond` actions.
+- `t3_background_wait` — upstream's new tool in v0.1.3: a Claude agent names background work it waits on, so its thread stays Working. Consumed as-is; Jackson admitted it on 2026-10-27.
 - `t3_project_create`, `t3_project_update`, `t3_environment_preferences_update` — consumed as-is. `t3_project_delete` is not on the J5 surface until J5 settles what deleting a project does to the state it keeps for each project.
 - `t3_thread_wait` is **withdrawn** from the J5 surface. Platform notices queue behind a running turn, so a participant that blocks inside its turn waiting on another thread can never receive the notice that thread's finish produces; a Captain that waited on a seat this way starved itself of its own Crew's news (Bryant, 2026-09-14). Whatever a participant is waiting for arrives as a message once it ends its turn.
 
@@ -499,4 +509,5 @@ run; `j5_stop_crew` doesn't, and unarchiving doesn't restart it.
 - 2026-10-24 — `j5_send_message`'s `deliveryNotice` also tells the sender when its message waits on the receiver's held queue, failed worktree setup or usage limit, and that it should not be sent again (Jackson, [#272](https://github.com/Jacksondr5/j5code/issues/272)).
 - 2026-10-24 — upstream's queue tools join the kept upstream tools; `t3_queue_edit` edits only a message the caller sent, inside its envelope (Jackson, [#136](https://github.com/Jacksondr5/j5code/issues/136)).
 - 2026-10-24 — a pre-upgrade spawn retry binds its request when the workspace type matches its accepted create receipt and is refused otherwise (Jackson, 2026-10-24; [PR #660](https://github.com/Jacksondr5/j5code/pull/660)).
+- 2026-10-27 — the advance onto upstream's stable v0.1.3, which merged 18 tools into action tools: the kept tools name `t3_queue` (J5's edit rule on its `edit` action), `t3_thread_transfer` (J5's fork error), `t3_pending_request`, `preview_act` and `schedule_task`'s updates in place of the tools they replaced, and `t3_background_wait` joins (Jackson, 2026-10-27) ([register of divergences](../upstream.md), D2).
 - 2026-10-27 — custom Crew seats, a plain `j5_spawn_agent` and a plain `delegate_task` run only on a model and reasoning level the project's lists of models for custom members allow, inherited ones included; AC38 (Bryant; [#744](https://github.com/Jacksondr5/j5code/issues/744)).

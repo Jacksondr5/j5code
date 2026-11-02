@@ -19,7 +19,7 @@ import * as Path from "effect/Path";
 import type { PlatformError } from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
-import { parseDocument } from "yaml";
+import { parseDocument, YAMLParseError, YAMLWarning } from "yaml";
 
 import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
 import { ServerConfig } from "../../config.ts";
@@ -46,13 +46,35 @@ const decodeSnapshot = Effect.fn("AgentPersonaLibrary.decodeSnapshot")(function*
 const decodeDefinition = Effect.fn("AgentPersonaLibrary.decodeDefinition")(function* (
   text: string,
 ) {
-  const definition = yield* Effect.try((): unknown => {
-    const document = parseDocument(text, { version: "1.2", uniqueKeys: true });
-    const issue = document.errors[0] ?? document.warnings[0];
-    if (issue) throw issue;
-    return document.toJS({ maxAliasCount: 0 });
+  const definition = yield* Effect.try({
+    try: (): unknown => {
+      const document = parseDocument(text, { version: "1.2", uniqueKeys: true });
+      const issue = document.errors[0] ?? document.warnings[0];
+      if (issue) throw issue;
+      return document.toJS({ maxAliasCount: 0 });
+    },
+    catch: (cause) => {
+      const issue =
+        cause instanceof YAMLParseError || cause instanceof YAMLWarning ? cause : undefined;
+      const position = issue?.linePos?.[0];
+      return new AgentPersonaLibraryError({
+        message:
+          issue === undefined
+            ? "Invalid YAML document."
+            : `${issue.name} (${issue.code})${position === undefined ? "" : ` at line ${position.line}, column ${position.col}`}.`,
+        cause,
+      });
+    },
   });
-  return yield* Effect.try(() => decodeAgentPersonaDefinition(definition));
+  return yield* Effect.try({
+    try: () => decodeAgentPersonaDefinition(definition),
+    catch: (cause) =>
+      new AgentPersonaLibraryError({
+        message:
+          "Invalid persona definition: check field types, authority policy, and artifact references.",
+        cause,
+      }),
+  });
 });
 const ImportedDefinition = Schema.Struct({
   ...AgentPersonaDefinition.fields,
@@ -104,9 +126,10 @@ export function createAgentPersonaLibrary(storage?: {
     if (storage === undefined) return { configured: false, folders: [] };
     const { stateDir, fs, path } = storage;
     const configText = yield* fs.readFileString(path.join(stateDir, "agent-personas.json")).pipe(
-      Effect.map(Option.some),
-      Effect.catch((error) =>
-        error.reason._tag === "NotFound" ? Effect.succeed(Option.none()) : Effect.fail(error),
+      Effect.asSome,
+      Effect.catchIf(
+        (error) => error.reason._tag === "NotFound",
+        () => Effect.succeedNone,
       ),
     );
     const configuredPaths = Option.isSome(configText)
@@ -122,12 +145,10 @@ export function createAgentPersonaLibrary(storage?: {
   });
 
   /**
-   * Every definition file under a folder, walking subfolders in sorted order like the
-   * import picker does. Dot-directories such as .git and `node_modules` are skipped, and so is
-   * an entry that vanished or is a dangling link; depth is capped so a symlink cycle cannot spin
-   * forever. With a `limit`, the walk stops once it has found more files than that, so a caller
-   * refusing an oversized selection need not scan the rest of the tree. Returns null when the
-   * root does not exist.
+   * Every definition file under a folder, in the import picker's sorted order, skipping
+   * dot-directories, `node_modules` and vanished or dangling entries; depth is capped against
+   * symlink cycles. With a `limit`, stops past it so an oversized selection is refused without
+   * scanning the rest. Null when the root does not exist.
    */
   const listDefinitionFiles = Effect.fn("AgentPersonaLibrary.listDefinitionFiles")(function* (
     root: string,
@@ -144,9 +165,10 @@ export function createAgentPersonaLibrary(storage?: {
         if (files.length > limit) return;
         const entry = path.join(folder, name);
         const stat = yield* fs.stat(entry).pipe(
-          Effect.map(Option.some),
-          Effect.catch((error) =>
-            error.reason._tag === "NotFound" ? Effect.succeed(Option.none()) : Effect.fail(error),
+          Effect.asSome,
+          Effect.catchIf(
+            (error) => error.reason._tag === "NotFound",
+            () => Effect.succeedNone,
           ),
         );
         if (Option.isNone(stat)) continue;
@@ -228,17 +250,18 @@ export function createAgentPersonaLibrary(storage?: {
   });
 
   const loadSources = Effect.fn("AgentPersonaLibrary.loadSources")(function* () {
-    if (storage === undefined) return { definitions: [], paths: new Map<string, string>() };
+    if (storage === undefined)
+      return { definitions: [], paths: new Map<string, string>(), diagnostics: [] };
     const { fs } = storage;
     const { configured, folders } = yield* resolveFolders();
     const definitions = new Map<string, AgentPersonaDefinition>();
     const paths = new Map<string, string>();
+    const diagnostics: Array<{ path: string; message: string }> = [];
     for (const folder of folders.map(({ path }) => path)) {
       const files = yield* listDefinitionFiles(folder).pipe(
-        Effect.catch((error) =>
-          !configured && error.reason._tag === "NotFound"
-            ? Effect.succeed(null)
-            : Effect.fail(error),
+        Effect.catchIf(
+          (error) => !configured && error.reason._tag === "NotFound",
+          () => Effect.succeed(null),
         ),
       );
       if (files === null) {
@@ -249,18 +272,33 @@ export function createAgentPersonaLibrary(storage?: {
         continue;
       }
       for (const file of files) {
-        const stat = yield* fs.stat(file);
-        if (Number(stat.size) > 65536)
-          return yield* new AgentPersonaLibraryError({
-            message: `Persona file exceeds 64 KiB: ${file}`,
-          });
-        const text = yield* fs.readFileString(file);
-        const definition = yield* decodeDefinition(text).pipe(
-          Effect.mapError(
-            (cause) =>
-              new AgentPersonaLibraryError({ message: `Invalid persona file ${file}`, cause }),
-          ),
-        );
+        const result = yield* Effect.gen(function* () {
+          const stat = yield* fs.stat(file).pipe(
+            Effect.mapError(
+              (cause) =>
+                new AgentPersonaLibraryError({
+                  message: "Could not inspect persona file.",
+                  cause,
+                }),
+            ),
+          );
+          if (Number(stat.size) > 65536)
+            return yield* new AgentPersonaLibraryError({ message: "Persona file exceeds 64 KiB" });
+          const text = yield* fs
+            .readFileString(file)
+            .pipe(
+              Effect.mapError(
+                (cause) =>
+                  new AgentPersonaLibraryError({ message: "Could not read persona file.", cause }),
+              ),
+            );
+          return yield* decodeDefinition(text);
+        }).pipe(Effect.result);
+        if (result._tag === "Failure") {
+          diagnostics.push({ path: file, message: result.failure.message });
+          continue;
+        }
+        const definition = result.success;
         if (definitions.has(definition.id))
           return yield* new AgentPersonaLibraryError({
             message: `Duplicate persona id: ${definition.id}`,
@@ -269,7 +307,7 @@ export function createAgentPersonaLibrary(storage?: {
         paths.set(definition.id, file);
       }
     }
-    return { definitions: [...definitions.values()], paths };
+    return { definitions: [...definitions.values()], paths, diagnostics };
   });
 
   /** Folder inventory for Settings; counts YAML files in the folder tree without decoding them. */
@@ -282,9 +320,7 @@ export function createAgentPersonaLibrary(storage?: {
     const { configured, folders } = yield* resolveFolders();
     const inventory = [];
     for (const folder of folders) {
-      const files = yield* listDefinitionFiles(folder.path).pipe(
-        Effect.catch(() => Effect.succeed(null)),
-      );
+      const files = yield* listDefinitionFiles(folder.path).pipe(Effect.orElseSucceed(() => null));
       inventory.push({
         ...folder,
         exists: files !== null,
@@ -320,9 +356,10 @@ export function createAgentPersonaLibrary(storage?: {
       resolved.add(absolute);
       const insideStateDir = !path.relative(stateDir, absolute).startsWith("..");
       const stat = yield* fs.stat(absolute).pipe(
-        Effect.map(Option.some),
-        Effect.catch((error) =>
-          error.reason._tag === "NotFound" ? Effect.succeed(Option.none()) : Effect.fail(error),
+        Effect.asSome,
+        Effect.catchIf(
+          (error) => error.reason._tag === "NotFound",
+          () => Effect.succeedNone,
         ),
       );
       if (Option.isNone(stat)) {
@@ -352,8 +389,9 @@ export function createAgentPersonaLibrary(storage?: {
     const text = yield* storage.fs
       .readFileString(storage.path.join(storage.stateDir, "imported-agent-personas.json"))
       .pipe(
-        Effect.catch((error) =>
-          error.reason._tag === "NotFound" ? Effect.succeed("[]") : Effect.fail(error),
+        Effect.catchIf(
+          (error) => error.reason._tag === "NotFound",
+          () => Effect.succeed("[]"),
         ),
       );
     const definitions = yield* decodeImports(text);
@@ -374,8 +412,9 @@ export function createAgentPersonaLibrary(storage?: {
     const text = yield* storage.fs
       .readFileString(storage.path.join(storage.stateDir, "removed-source-agent-personas.json"))
       .pipe(
-        Effect.catch((error) =>
-          error.reason._tag === "NotFound" ? Effect.succeed("[]") : Effect.fail(error),
+        Effect.catchIf(
+          (error) => error.reason._tag === "NotFound",
+          () => Effect.succeed("[]"),
         ),
       );
     return yield* decodeRemovedSourceIds(text);
@@ -387,8 +426,9 @@ export function createAgentPersonaLibrary(storage?: {
       const text = yield* storage.fs
         .readFileString(storage.path.join(storage.stateDir, DISABLED_SOURCES_FILE))
         .pipe(
-          Effect.catch((error) =>
-            error.reason._tag === "NotFound" ? Effect.succeed("[]") : Effect.fail(error),
+          Effect.catchIf(
+            (error) => error.reason._tag === "NotFound",
+            () => Effect.succeed("[]"),
           ),
         );
       return yield* decodeRemovedSourceIds(text);
@@ -426,6 +466,7 @@ export function createAgentPersonaLibrary(storage?: {
     const importedIds = new Set(imported.map(({ id }) => id));
     return {
       definitions: [...definitions.values()],
+      diagnostics: loaded.diagnostics,
       importedIds: [...importedIds],
       disabledIds: [
         ...imported.filter(({ enabled }) => enabled === false).map(({ id }) => id),

@@ -1,14 +1,9 @@
-import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
+import type { ParticipantIdentities } from "@t3tools/client-runtime/j5/participant-identity";
+import type { EnvironmentId } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
 
 import { useConnectedEnvironmentIds } from "../../state/environments";
 import { readParticipantIdentities, readParticipantLabels } from "./archiveFlowClient";
-
-export interface ParticipantIdentities {
-  readonly labels: ReadonlyMap<string, string>;
-  /** Each agent's thread, on whichever server it is: this one or a peer. */
-  readonly threads: ReadonlyMap<string, ScopedThreadRef>;
-}
 
 const NO_IDENTITIES: ParticipantIdentities = { labels: new Map(), threads: new Map() };
 
@@ -26,13 +21,10 @@ export function useParticipantIdentities(
   const key = `${environmentId}\n${idsKey}`;
   const connected = useConnectedEnvironmentIds().includes(environmentId);
   const [result, setResult] = useState({ key: "", identities: NO_IDENTITIES });
+  // oxlint-disable-next-line t3code/react-effect-budget -- reads identities from the server for the ids on screen, and drops a stale answer when they change.
   useEffect(() => {
-    const ids = idsKey === "" ? [] : idsKey.split("\0");
-    if (ids.length === 0) {
-      setResult({ key, identities: NO_IDENTITIES });
-      return;
-    }
-    if (!connected) return;
+    if (idsKey === "" || !connected) return;
+    const ids = idsKey.split("\0");
     let active = true;
     void readParticipantIdentities(environmentId, ids).then((next) => {
       if (active) setResult({ key, identities: next });
@@ -75,6 +67,7 @@ export function useScopedParticipantLabels(refs: ReadonlyArray<ScopedParticipant
   const [labels, setLabels] = useState<ReadonlyMap<EnvironmentId, ReadonlyMap<string, string>>>(
     () => new Map(),
   );
+  // oxlint-disable-next-line t3code/react-effect-budget -- reads labels from each server for the participants on screen, and drops a stale answer when they change.
   useEffect(() => {
     const byEnvironment = new Map<EnvironmentId, Array<string>>();
     for (const entry of key === "" ? [] : key.split("\n")) {

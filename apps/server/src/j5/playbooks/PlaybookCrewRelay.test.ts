@@ -124,7 +124,7 @@ const fixture = Effect.gen(function* () {
   // A thread whose projection can't be read right now (not missing: the store can't answer).
   const projectionFault = yield* Ref.make<ThreadId | null>(null);
   const threads = ThreadManagementService.of({
-    getThreadProjection: (threadId: ThreadId) =>
+    getThreadRecords: (threadId: ThreadId) =>
       Effect.all([Ref.get(seats), Ref.get(projectionFault)]).pipe(
         Effect.flatMap(([current, unreadable]) => {
           if (unreadable === threadId)

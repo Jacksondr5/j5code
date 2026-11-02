@@ -1,21 +1,11 @@
 // @effect-diagnostics nodeBuiltinImport:off - a build-time generator; plain file writes and one child process.
 /**
- * Builds the self-contained home an agent live-tests against, with no model:
- *
- *   node apps/server/src/j5/test-support/liveTestHome.ts --root <absolute directory> --owner-name <name>
- *
- * Under `<root>` it makes `test-repo` (see liveTestRepo.ts) with its bare
- * origin, and `home`, a J5 home holding one project, replayed Claude and Codex
- * threads from upstream's provider replay kit, J5's delivery seed, two light
- * personas, Claude Haiku as the default model, and an owner who already has a
- * name, so sharing works without the startup dialog. Two of the threads are
- * finished into a state no recording has (see `ReplayState`). It finishes by writing
- * `<root>/manifest.json`, which is what `scripts/j5/setup-agent-live-test.ts`
- * reads. Nothing in the home points outside `<root>`.
- *
- * The replayed threads are for viewing. Their provider sessions never existed,
- * so a turn sent in one fails or starts a fresh provider conversation.
+ * Builds the home an agent live-tests against, with no model:
+ *   node apps/server/src/j5/test-support/liveTestHome.ts --root <absolute dir> --owner-name <name>
+ * Writes `test-repo`, a `home` with replayed (view-only) threads, and `<root>/manifest.json` for
+ * `scripts/j5/setup-agent-live-test.ts`. Nothing in the home points outside `<root>`.
  */
+import { seedLiveTestSkills } from "./liveTestSkills.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   ChatAttachmentId,
@@ -78,14 +68,9 @@ import {
 type ReplayDriver = "claudeAgent" | "codex";
 
 /**
- * A state a replayed thread is left in that no recording has.
- * - `image`: the user's message carries an image. Display only: the event log
- *   has no attachment and the provider never saw one.
- * - `question`: Codex asked a question without holding its turn open, which is
- *   the one kind of pending request that startup recovery keeps. It can be
- *   answered once; the answer starts a real turn in a new provider conversation.
- *
- * A pending approval cannot be pre-made: recovery expires every other request.
+ * A state no recording has. `image`: the user's message shows an image the provider never saw.
+ * `question`: a Codex question that does not hold its turn, the one pending request startup
+ * recovery keeps; answering starts a real turn. No approvals: recovery expires them.
  */
 type ReplayState = "image" | "question";
 /** The title each state's thread gets, which is how a tester finds it. */
@@ -281,11 +266,9 @@ function asAsyncQuestion(recorded: ProviderReplayTranscript): ProviderReplayTran
 }
 
 /**
- * Puts the image on the thread's one user message, as stored. Replaying a
- * message that carries an attachment fails its turn: the recorded prompt has
- * none, and the replay harness keeps attachments in a temporary directory of
- * its own. So the file goes into the home and the reference onto the two
- * projection rows the client reads.
+ * Puts the image on the thread's user message as stored. Replaying a message with an attachment
+ * fails its turn (the recorded prompt has none), so the file goes into the home and the reference
+ * onto the two projection rows the client reads.
  */
 function attachLiveTestImage(input: {
   readonly home: string;
@@ -329,15 +312,10 @@ function attachLiveTestImage(input: {
 }
 
 /**
- * Replays one recorded provider transcript into the home's database as a
- * thread of `projectId`, and returns that thread's id.
- *
- * Adapted from `runFixtureProvider` in upstream's
- * `orchestration-v2/testkit/OrchestratorReplayFixtures.integration.test.ts`,
- * which is private to that test file. It differs in writing to a file
- * database, putting the thread in our project with our repository as its cwd,
- * starting the clock at `startAtMs`, and asserting nothing: each fixture's own
- * assertions expect a database that holds only its thread.
+ * Replays one recorded provider transcript into the home's database as a thread of `projectId`.
+ * Adapted from the private `runFixtureProvider` in upstream's
+ * `OrchestratorReplayFixtures.integration.test.ts`: a file database, our project and repository,
+ * a clock from `startAtMs`, and no assertions (each fixture's expect a database of one thread).
  */
 const replayFixture = Effect.fn("liveTestHome.replayFixture")(function* <
   Transcript extends ProviderReplayTranscript,
@@ -425,7 +403,10 @@ const replayFixture = Effect.fn("liveTestHome.replayFixture")(function* <
   return threadId;
 });
 
-function writeSettingsAndPersonas(home: string): void {
+function writeSettingsAndPersonas(
+  home: string,
+  skills: Partial<Effect.Success<ReturnType<typeof seedLiveTestSkills>>>,
+): void {
   const stateDir = NodePath.join(home, "userdata");
   NodeFS.writeFileSync(
     NodePath.join(stateDir, "settings.json"),
@@ -435,6 +416,7 @@ function writeSettingsAndPersonas(home: string): void {
         // A provider found behind its latest release raises a toast that covers the top-right
         // controls of every page until dismissed, and tests click those controls.
         enableProviderUpdateChecks: false,
+        ...skills,
       },
       null,
       2,
@@ -501,6 +483,7 @@ export const buildLiveTestHome = Effect.fn("buildLiveTestHome")(function* (input
   readonly root: string;
   readonly ownerName: string;
   readonly replays?: ReadonlyArray<LiveTestReplay>;
+  readonly skillsOnly?: boolean;
 }) {
   const ownerName = yield* checkedPersonName(input.ownerName);
   const paths = liveTestHomePaths(input.root);
@@ -554,7 +537,12 @@ export const buildLiveTestHome = Effect.fn("buildLiveTestHome")(function* (input
     project: { id: projectId, workspaceRoot: testRepo },
   });
   yield* nameOwner(databasePath, ownerName);
-  writeSettingsAndPersonas(home);
+  writeSettingsAndPersonas(
+    home,
+    input.skillsOnly
+      ? yield* seedLiveTestSkills(home).pipe(Effect.provide(NodeServices.layer))
+      : { skillCatalogSource: "" },
+  );
 
   const manifest: LiveTestHomeManifest = {
     version: 1,
@@ -587,7 +575,7 @@ if (import.meta.main) {
   const root = args[1];
   const ownerName = args[3];
   if (
-    args.length !== 4 ||
+    (args.length !== 4 && !(args.length === 5 && args[4] === "--skills")) ||
     args[0] !== "--root" ||
     args[2] !== "--owner-name" ||
     root === undefined ||
@@ -595,12 +583,12 @@ if (import.meta.main) {
     !NodePath.isAbsolute(root)
   ) {
     process.stderr.write(
-      "Usage: liveTestHome.ts --root <absolute directory> --owner-name <name>\n",
+      "Usage: liveTestHome.ts --root <absolute directory> --owner-name <name> [--skills]\n",
     );
     process.exit(64);
   }
   Effect.runPromise(
-    buildLiveTestHome({ root, ownerName }).pipe(
+    buildLiveTestHome({ root, ownerName, skillsOnly: args[4] === "--skills" }).pipe(
       Effect.provide(Logger.layer([], { mergeWithExisting: false })),
     ),
   ).then(

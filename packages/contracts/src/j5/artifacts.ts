@@ -36,15 +36,12 @@ export const J5_ARTIFACT_WS_METHODS = {
   deleteAllArtifacts: "j5.artifacts.deleteAll",
 } as const;
 
-export const WsJ5SubscribeArtifactChangesRpc = Rpc.make(
-  J5_ARTIFACT_WS_METHODS.subscribeArtifactChanges,
-  {
-    payload: ArtifactWatchInput,
-    success: ArtifactChangeEvent,
-    error: Schema.Union([ArtifactWatchError, EnvironmentAuthorizationError]),
-    stream: true,
-  },
-);
+const WsJ5SubscribeArtifactChangesRpc = Rpc.make(J5_ARTIFACT_WS_METHODS.subscribeArtifactChanges, {
+  payload: ArtifactWatchInput,
+  success: ArtifactChangeEvent,
+  error: Schema.Union([ArtifactWatchError, EnvironmentAuthorizationError]),
+  stream: true,
+});
 
 export const J5ArtifactRpcGroup = RpcGroup.make(
   WsJ5SubscribeArtifactChangesRpc,
