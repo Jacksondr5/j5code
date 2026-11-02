@@ -188,9 +188,10 @@ class CrewLaunchSeatUnavailableError extends Data.TaggedError("CrewLaunchSeatUna
 }
 
 /** A custom seat's model is not on the project's "Models for custom members" list. */
-class CrewLaunchModelNotEligibleError extends Data.TaggedError(
-  "CrewLaunchModelNotEligibleError",
-)<{ readonly seatName: string; readonly detail: string }> {
+class CrewLaunchModelNotEligibleError extends Data.TaggedError("CrewLaunchModelNotEligibleError")<{
+  readonly seatName: string;
+  readonly detail: string;
+}> {
   override get message(): string {
     return `Seat ${this.seatName}: ${this.detail} Nothing was spawned.`;
   }
