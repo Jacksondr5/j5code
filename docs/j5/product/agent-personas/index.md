@@ -43,10 +43,15 @@ Each definition has:
 | `instructions`                                         | Nonempty markdown identity and operating principles, at most 32,768 characters. The spawner supplies the task brief separately.                              |
 | `acceptedInput`                                        | Optional human-readable input summary; ordinary prompts and supporting evidence are allowed.                                                                 |
 | `inputArtifacts`, `outputArtifact`, `artifacts`        | Retired. A definition that still carries them loads, and they are ignored; they stay part of the content fingerprint so stored snapshots keep their digests. |
-| `authority.defaultPolicy`, `authority.allowedPolicies` | A default and allowed selection from the runtime-policy vocabulary below. The default must be allowed.                                                       |
-| `modelRoute`                                           | Ordered primary and fallback targets. Each names `driver`, exact `model`, and `reasoningEffort`.                                                             |
+| `access`                                               | One of `read-only`, `workspace-write`, or `full-access`. Mutually exclusive with legacy `authority`.                                                         |
+| `authority.defaultPolicy`, `authority.allowedPolicies` | Legacy storage. New launches map the default to one access level; the former allowed list grants no additional access.                                       |
+| `modelRoute`                                           | A nonempty ordered list. Entries accept legacy `driver`/`model`/`reasoningEffort` or `instanceId`/`model`/`options`.                                         |
 
-Files are limited to 64 KiB. This slice retains exactly two route targets. A target may name any provider, and the reasoning value uses whichever option the model advertises for it (`reasoningEffort`, `effort`, `reasoning`, `variant`, or `thinking`). Activation still requires a provider that can enforce the persona's runtime policy, currently Codex and Claude; other providers stay Blocked until their adapter policies are supported. Broader ordered model allowlists belong to a later Role-library revision; none of these limits fixes the persona's name or model choices to the starter examples.
+Files are limited to 64 KiB. Reading a definition never rewrites it. Legacy artifact values remain in stored identity but do not affect behavior. Snapshot digests are checked against their stored JSON bytes before decoding, so upgrades preserve running workers without migrating their snapshots.
+
+New launches map `critic-review` to read-only and `critic-fix` to workspace-write; diagnostic and publication-only defaults are invalid, with a repair message naming the three supported levels. An unsupported policy only in the retired allowed list is ignored. Existing assignments retain their saved policy and human-approved runtime override. A legacy reviewer with an allowed fix policy therefore remains read-only for new launches, while its existing fix workers continue with their saved workspace access.
+
+Read responses keep legacy authority and two-target summaries alongside the complete model list and access. A one-entry list repeats its entry only in that summary. Older clients can read personas and continue tasks; the server withholds legacy edit metadata and rejects edits that would truncate a new definition. The legacy summary labels an absent provider as unconfigured and an unspecified reasoning option as Provider default; these labels are never execution selections. The full YAML export preserves the stored definition. Ordered-list and access editors ship separately.
 
 ## Historical examples
 
@@ -111,7 +116,7 @@ J5 does not append policy rules to a persona's instructions; they would be hidde
 
 Routing and launch reject unsupported runtime policies. Resume also rejects unsupported policies on new snapshotted assignments. Historical assignments without snapshots retain the prior conservative read-only fallback where applicable. Ordinary threads without personas keep their existing runtime-mode behavior.
 
-Critic's example defaults to `critic-review`; `critic-fix` must be explicitly requested and allowed by the definition. Investigator's clean-source handoff and Publisher's publication-only scope are retained requirements for their eventual supported operations, not claims that a generic shell enforces them.
+Critic's historical example defaults to `critic-review`; its former `critic-fix` choice does not widen new launches. Investigator's clean-source handoff and Publisher's publication-only scope are retained requirements for their eventual supported operations, not claims that a generic shell enforces them.
 
 ## Durable assignment and replay
 
@@ -133,7 +138,7 @@ Agents can also launch a persona as a Peer Agent: `j5_spawn_agent` accepts an op
 
 Focused verification covers imported ids, malformed and missing sources, duplicates, route eligibility, unsupported policies, snapshot integrity, source edits/removal, launch receipts, compatibility with old assignments, and shared client presentation. Server, contracts, and affected client typechecks accompany the focused tests. Browser and simulator verification require an explicit request.
 
-Follow-up work: in-app git commit/push/pull (status nudges and open-in-editor ship; write operations are deliberately out of scope), skill allowlists and ordered model allowlists beyond a persona's two routes, posture visibility, and supported diagnostic/publication operations. None is marked complete by this contract. A project's [Models for custom members](../features/crews.md) list is not a persona allowlist: a persona always runs on its own configured route, even on a model that list leaves out.
+Follow-up work: in-app git commit/push/pull (status nudges and open-in-editor ship; write operations are deliberately out of scope), skill allowlists, ordered-list editing and the remaining model-selection checks (#778), access-level editing (#779), and posture visibility. None is marked complete by this contract. A project's [Models for custom members](../features/crews.md) list is not a persona allowlist: a persona always runs on its own configured route, even on a model that list leaves out.
 
 ## History
 
