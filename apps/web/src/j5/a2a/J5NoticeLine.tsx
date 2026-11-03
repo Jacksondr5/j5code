@@ -46,7 +46,8 @@ export function J5NoticeLine(props: {
         className={cn("size-3.5 shrink-0", TONE_CLASS[props.tone ?? "none"])}
         data-j5-notice-tone={props.tone}
       />
-      <span className="min-w-0 truncate" data-thread-find-text="true">
+      {/* Find can only show a match in a summary that isn't cut off. */}
+      <span className={cn("min-w-0", !findActive && "truncate")} data-thread-find-text="true">
         {props.summary}
       </span>
       {props.timestampLabel ? (
