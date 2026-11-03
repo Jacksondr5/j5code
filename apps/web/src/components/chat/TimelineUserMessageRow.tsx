@@ -187,7 +187,10 @@ function AutomationMessageRow({ row }: { row: Extract<TimelineRow, { kind: "mess
         <UserMessageIntentMarker intent={row.message.inputIntent} />
       ) : null}
       <div
-        className={cn("min-w-0 max-w-[80%] rounded-2xl border border-border", expanded && "w-full")}
+        className={cn(
+          "min-w-0 max-w-[80%] rounded-2xl border border-border",
+          (expanded || j5Prompt) && "w-full",
+        )}
       >
         <MessageAuthorHeading>{j5Prompt?.label ?? "Automation"}</MessageAuthorHeading>
         <FoldedMessageHeader
