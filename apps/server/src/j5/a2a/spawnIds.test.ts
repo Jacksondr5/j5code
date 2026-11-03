@@ -80,14 +80,11 @@ it("has members run their own review loops and reach the Captain only for a pass
   );
 });
 
-it("retains declared persona output while allowing conversation before that output exists", () => {
-  const text = spawnFirstTurnText({
-    ...identity,
-    crew: { ...crew, obligation: { kind: "ReviewHandoff", path: "handoffs/review.md" } },
-  });
+it("lets a seat coordinate without waiting for an artifact and owes no file of its own", () => {
+  const text = spawnFirstTurnText({ ...identity, crew });
   assert.include(text, "do not wait for an artifact or coordination approval");
-  assert.include(text, "j5_write_artifact to exactly `handoffs/review.md`");
-  assert.include(text, "must not delay sharing findings or results");
+  assert.notInclude(text, "seat_obligation");
+  assert.notInclude(text, "j5_write_artifact");
   assert.notInclude(text, "a chat message is not a delivery");
 });
 

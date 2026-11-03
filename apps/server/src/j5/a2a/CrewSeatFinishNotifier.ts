@@ -1,4 +1,3 @@
-// @effect-diagnostics nodeBuiltinImport:off - synchronous hashing for deterministic ids and digests.
 import { makeCrewFailureAlert } from "./crewFailureAlert.ts";
 import { layer as sharedThreadsLayer } from "../sharing/SharedThreads.ts";
 import {
@@ -13,19 +12,11 @@ import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
-import * as Result from "effect/Result";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
-import * as NodeCrypto from "node:crypto";
 
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
-import {
-  agentHandoffArtifactPath,
-  agentHandoffLogicalPath,
-} from "../agents/agentPersonaArtifacts.ts";
-import { makeAgentPersonaLibrary } from "../agents/agentPersonaLibrary.ts";
-import { ArtifactWorkspace, type ArtifactWorkspaceError } from "../artifacts/ArtifactWorkspace.ts";
 import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
 import { CrewLaunchReporter } from "./CrewLaunchReporter.ts";
 import { CrewCaptainArchiveCascade } from "./CrewCaptainArchiveCascade.ts";
@@ -36,7 +27,7 @@ import { lifecycleCommandId, lifecycleId } from "./spawnIds.ts";
 
 /**
  * A seat tells its Captain when its run ends owing no reply: a notice with the measured outcome and
- * its handoff file (inline when short). The seat is never settled; upstream settles by hand, PR or
+ * the seat's reply (cut when long). The seat is never settled; upstream settles by hand, PR or
  * idle days. A notice repeats only when its facts changed, and one arriving mid-turn folds into the
  * seat notice already queued, so a Captain absorbs its Crew's news in one turn.
  */
@@ -59,8 +50,8 @@ export class CrewSeatFinishNotifier extends Context.Service<
 >()("t3/j5/a2a/CrewSeatFinishNotifier") {}
 
 const FINISH_SESSION = "j5-crew-seat-finish";
-/** Bodies up to this size ride inline in the Captain's notice; longer ones are read on demand. */
-const INLINE_HANDOFF_MAX_CHARS = 4_000;
+/** A longer reply is cut in the Captain's notice; the rest is in the seat's own thread. */
+const REPLY_MAX_CHARS = 4_000;
 
 /**
  * A seat has finished only when its run completed or failed. Interrupted, cancelled and rolled back
@@ -127,43 +118,18 @@ export const queuedSeatDigest = (
 };
 
 /**
- * A seat's body must not be able to end the body block and continue as platform voice, nor open
+ * A seat's reply must not be able to end the reply block and continue as platform voice, nor open
  * a seat section of its own: a Critic reviewing this feature will quote a notice, and both the
  * notifier's sections and the card's parser split on the opening tag.
  */
-const noticeBody = (body: string) =>
-  body
-    .replace(/<\/handoff_body>/g, "<\\/handoff_body>")
+const noticeReply = (reply: string) =>
+  reply
+    .replace(/<\/seat_reply>/g, "<\\/seat_reply>")
     .replace(/<j5_seat_finished>/g, "<\\j5_seat_finished>");
-
-/** Twelve hex characters of the body's SHA-256, so a rewritten handoff changes the notice text. */
-const handoffDigest = (body: string) =>
-  NodeCrypto.createHash("sha256").update(body).digest("hex").slice(0, 12);
-
-export type SeatHandoffFact =
-  | {
-      readonly status: "written";
-      readonly kind: string;
-      readonly path: string;
-      readonly body: string | null;
-      /** Over the artifact read limit: it exists and is read by path, never inlined. */
-      readonly tooLarge?: true;
-    }
-  | { readonly status: "missing"; readonly kind: string; readonly path: string }
-  /** Something is at the path but it can never be a handoff; the reason says why. */
-  | {
-      readonly status: "unavailable";
-      readonly kind: string;
-      readonly path: string;
-      readonly reason: string;
-    }
-  | { readonly status: "none declared" };
 
 /**
  * The platform-composed notice the Captain receives when a seat finishes: measured facts about
- * the run and the handoff, then the handoff body when it exists and is short. A written handoff
- * always carries its size and digest in the facts, so a re-briefed seat that rewrites a body too
- * long to inline still produces a changed notice and the Captain hears of it.
+ * the run, then the seat's reply when it wrote one.
  */
 export const seatFinishedNoticeText = (input: {
   readonly seatName: string;
@@ -172,27 +138,28 @@ export const seatFinishedNoticeText = (input: {
   readonly participantId: string;
   readonly threadId: string;
   readonly runStatus: string;
-  /** The run's recorded error when it failed; the notice leads with it, not the handoff lines. */
+  /** The run's recorded error when it failed; the notice leads with it. */
   readonly failure: OrchestrationV2ProviderFailure | null;
-  readonly handoff: SeatHandoffFact;
+  readonly reply: string | null;
 }) => {
-  const handoffLine =
-    input.handoff.status === "none declared"
-      ? "handoff: none declared"
-      : input.handoff.status === "missing"
-        ? `handoff: missing (${input.handoff.kind})\nartifact: ${agentHandoffLogicalPath(input.handoff.path)}`
-        : input.handoff.status === "unavailable"
-          ? `handoff: unavailable (${input.handoff.kind})\nartifact: ${agentHandoffLogicalPath(input.handoff.path)}\nhandoff_reason: ${input.handoff.reason}`
-          : `handoff: written (${input.handoff.kind})\nartifact: ${agentHandoffLogicalPath(input.handoff.path)}${input.handoff.tooLarge === true ? "\nhandoff_size: over the read limit" : `\nhandoff_chars: ${input.handoff.body?.length ?? 0}\nhandoff_digest: ${input.handoff.body === null ? "binary" : handoffDigest(input.handoff.body)}`}`;
-  // The outcome first: a seat that died read as "finished, forgot its handoff" when the failure
-  // was one line among the handoff lines (Jackson's dogfood, 2026-09-17).
   const failureLine =
     input.runStatus === "failed" ? `\nfailure: ${formatRunFailureField(input.failure)}` : "";
-  const head = `<j5_seat_finished>\nrun_status: ${input.runStatus}${failureLine}\nseat: ${input.seatName}\ncrew: ${input.crewName}\nparticipant_id: ${input.participantId}\nthread_id: ${input.threadId}\n${handoffLine}\n</j5_seat_finished>`;
-  if (input.handoff.status !== "written") return head;
-  return input.handoff.body !== null && input.handoff.body.length <= INLINE_HANDOFF_MAX_CHARS
-    ? `${head}\n\n<handoff_body>\n${noticeBody(input.handoff.body)}\n</handoff_body>`
-    : `${head}\n\nRead it with j5_read_artifact (path: ${input.handoff.path}).`;
+  const head = `<j5_seat_finished>\nrun_status: ${input.runStatus}${failureLine}\nseat: ${input.seatName}\ncrew: ${input.crewName}\nparticipant_id: ${input.participantId}\nthread_id: ${input.threadId}\n</j5_seat_finished>`;
+  if (input.reply === null) return head;
+  const cut = input.reply.length > REPLY_MAX_CHARS;
+  const body = cut ? input.reply.slice(0, REPLY_MAX_CHARS) : input.reply;
+  return `${head}\n\n<seat_reply>\n${noticeReply(body)}${cut ? `\n[reply cut at ${REPLY_MAX_CHARS} characters; the rest is in the seat's thread]` : ""}\n</seat_reply>`;
+};
+
+/** The seat's reply for a run: its last finished assistant message with any text. */
+const runReply = (projection: Pick<OrchestrationV2ThreadProjection, "messages">): string | null => {
+  const last = projection.messages
+    .filter((message) => message.role === "assistant" && !message.streaming)
+    .filter((message) => message.text.trim() !== "")
+    .toSorted(
+      (a, b) => DateTime.toEpochMillis(b.createdAt) - DateTime.toEpochMillis(a.createdAt),
+    )[0];
+  return last?.text.trim() ?? null;
 };
 
 const makeLayer = (daemon: boolean) =>
@@ -204,8 +171,6 @@ const makeLayer = (daemon: boolean) =>
       const crews = yield* AgentCrewInstanceService;
       const reporter = yield* CrewLaunchReporter;
       const cascade = yield* CrewCaptainArchiveCascade;
-      const workspace = yield* ArtifactWorkspace;
-      const agents = yield* makeAgentPersonaLibrary;
       const sql = yield* SqlClient.SqlClient;
 
       const owedReplies = Effect.fn("j5.a2a.crewSeatFinish.owedReplies")(function* (
@@ -219,54 +184,6 @@ const makeLayer = (daemon: boolean) =>
       });
 
       /**
-       * Where the seat's declared handoff stands, read from the file: none is "missing", too large
-       * to inline is "written", a directory or a link out of the artifacts directory is
-       * "unavailable". Those never change on retry, so the notice goes out; only a real I/O failure
-       * fails it, for the next finish or the boot sweep.
-       */
-      const handoffFact = Effect.fn("j5.a2a.crewSeatFinish.handoffFact")(function* (
-        projection: Pick<OrchestrationV2ThreadProjection, "thread">,
-        kind: string | null,
-      ): Effect.fn.Return<SeatHandoffFact, ArtifactWorkspaceError, never> {
-        const assignment = projection.thread.agentPersonaAssignment;
-        if (kind === null || assignment === undefined) return { status: "none declared" } as const;
-        const path = agentHandoffArtifactPath({
-          personaId: assignment.personaId,
-          artifact: kind,
-          threadId: projection.thread.id,
-        });
-        const projectId = projection.thread.projectId;
-        // One read answers both questions; listing the whole artifacts tree to check for a single
-        // known path is a full directory walk on every seat finish.
-        const content = yield* Effect.result(workspace.read({ projectId, relativePath: path }));
-        if (Result.isFailure(content)) {
-          switch (content.failure.reason) {
-            case "not_found":
-              return { status: "missing", kind, path };
-            case "too_large":
-              return { status: "written", kind, path, body: null, tooLarge: true };
-            case "not_a_file":
-              return { status: "unavailable", kind, path, reason: "not a regular file" };
-            case "outside_root":
-              return {
-                status: "unavailable",
-                kind,
-                path,
-                reason: "link leaves the artifacts directory",
-              };
-            default:
-              return yield* content.failure;
-          }
-        }
-        return {
-          status: "written",
-          kind,
-          path,
-          body: content.success.encoding === "utf8" ? content.success.content : null,
-        } as const;
-      });
-
-      /**
        * Tells the Captain what changed. Ids derive from the run, so a redelivered event cannot
        * post twice; a fold checks the digest for the same text for the same reason.
        */
@@ -275,7 +192,7 @@ const makeLayer = (daemon: boolean) =>
         seatName: string,
         projection: Pick<OrchestrationV2ThreadProjection, "thread" | "turnItems">,
         run: OrchestrationV2Run,
-        handoff: SeatHandoffFact,
+        reply: string | null,
       ) {
         const threadId = projection.thread.id;
         // Seat notices are system-authored user messages; the digest is a queued run's user message.
@@ -292,7 +209,7 @@ const makeLayer = (daemon: boolean) =>
           threadId,
           runStatus: run.status,
           failure: run.status === "failed" ? runFailureDetail(projection, run.id) : null,
-          handoff,
+          reply,
         });
         if (latestSeatNotice(captain, participantIdForThread(threadId)) === text.trim())
           return "unchanged" as const;
@@ -335,10 +252,16 @@ const makeLayer = (daemon: boolean) =>
         if (membership === null) return null;
         const instance = yield* crews.read(membership.crewInstanceId);
         if (instance === null || instance.archivedAt !== null) return null;
-        const projection = yield* threads.getThreadRecords(threadId, ["runs", "turnItems"], {
-          turnItemRunId: run.id,
-          turnItemTypes: ["error"],
-        });
+        const projection = yield* threads.getThreadRecords(
+          threadId,
+          ["runs", "turnItems", "messages"],
+          {
+            turnItemRunId: run.id,
+            turnItemTypes: ["error"],
+            messageRoles: ["assistant"],
+            messageRunIds: [run.id],
+          },
+        );
         if (projection.thread.archivedAt !== null) return null;
         if (ThreadManagement.latestActiveRun(projection) !== undefined) return null;
         if (run.status === "failed")
@@ -355,17 +278,9 @@ const makeLayer = (daemon: boolean) =>
         // detector. A failed run is reported whatever the seat owes: the silence detector stays
         // quiet about a seat's failure to its Captain, so this is where the Captain hears it.
         if (run.status === "completed" && (yield* owedReplies(participantId)) > 0) return null;
-        // What the seat owes comes from its immutable snapshot, not today's library. A snapshot
-        // that cannot be read leaves the seat unreported and logged rather than quietly finished.
-        const assignment = projection.thread.agentPersonaAssignment;
-        const owedKind =
-          assignment === undefined
-            ? null
-            : ((yield* agents.readSnapshot(assignment)).outputArtifact ?? null);
-        const handoff = yield* handoffFact(projection, owedKind);
-        // A failed dispatch or an unreadable handoff is logged. Retry is passive: a later finish
-        // or the boot sweep; there is no guarantee of prompt delivery while the seat stays idle.
-        yield* notifyCaptain(instance, membership.seatName, projection, run, handoff);
+        // A failed dispatch is logged. Retry is passive: a later finish or the boot sweep; there
+        // is no guarantee of prompt delivery while the seat stays idle.
+        yield* notifyCaptain(instance, membership.seatName, projection, run, runReply(projection));
         return threadId;
       });
 

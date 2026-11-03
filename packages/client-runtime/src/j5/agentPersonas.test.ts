@@ -46,7 +46,6 @@ const catalog: OrchestrationV2AgentPersonaCatalog = {
     displayName: personaId,
     description: `${personaId} description`,
     acceptedInput: `${personaId} input`,
-    outputArtifact: "ContextBrief",
     defaultAuthorityPolicy: "read-only",
     allowedAuthorityPolicies: ["read-only"],
     availability:
@@ -146,12 +145,10 @@ it("presents custom library ids and immutable display names on every client", ()
     ...catalog.personas[0]!,
     personaId: "team-researcher",
     displayName: "Team Researcher",
-    outputArtifact: "TeamBrief",
   };
   expect(presentAgentPersonaCatalog({ personas: [custom] })[0]).toMatchObject({
     personaId: "team-researcher",
     displayName: "Team Researcher",
-    outputArtifact: "TeamBrief",
   });
   expect(
     presentAgentPersonaAssignment({
@@ -1122,8 +1119,8 @@ describe("blocked reasons and folder status", () => {
   });
 });
 
-describe("handoff artifacts", () => {
-  it("presents written, pending, and missing handoffs with the logical artifact path", () => {
+describe("handoffs recorded by older runs", () => {
+  it("still presents a stored written, pending or missing handoff with its logical artifact path", () => {
     const base = {
       threadId: "8f3a2c1d-0000-4000-8000-000000000000",
       projectId: "project",

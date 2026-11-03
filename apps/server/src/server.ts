@@ -141,9 +141,6 @@ import { peopleLayer as J5PeopleLive } from "./j5/sharing/PairingIntents.ts";
 import { J5A2AAuxiliaryLayer, J5ThreadRegistrationLayer } from "./j5/a2a/runtimeLayer.ts";
 import { layer as J5ArtifactRunFinalizationObserverLive } from "./j5/artifacts/ArtifactRunFinalizationObserver.ts";
 import { layer as J5ArtifactWorkspaceLive } from "./j5/artifacts/ArtifactWorkspace.ts";
-import { layer as J5AgentHandoffNudgeQueueLive } from "./j5/agents/agentHandoffNudgeQueue.ts";
-import { layer as J5AgentHandoffObserverLive } from "./j5/agents/agentHandoffObserver.ts";
-import { layer as J5AgentHandoffRefreshesLive } from "./j5/agents/agentHandoffRefreshes.ts";
 import {
   relayHookBaseUrl,
   ScheduledTaskWebhookOrigin,
@@ -533,23 +530,15 @@ const layerOrchestrationV2Runtime = RuntimeLayer.layerProduction.pipe(
   Layer.provide(layerCheckpointStore),
   Layer.provide(layerGitWorkflow),
   Layer.provide(
-    // J5: the saved-agent handoff gate wraps the artifact observer, which wraps upstream's.
-    J5AgentHandoffObserverLive.pipe(
-      Layer.provide(J5AgentHandoffNudgeQueueLive),
-      Layer.provide(J5AgentHandoffRefreshesLive),
+    // J5: the artifact observer wraps upstream's.
+    J5ArtifactRunFinalizationObserverLive.pipe(
       Layer.provide(J5ArtifactWorkspaceLive),
       Layer.provide(ProjectionStoreV2.layer),
       Layer.provide(
-        J5ArtifactRunFinalizationObserverLive.pipe(
-          Layer.provide(J5ArtifactWorkspaceLive),
+        RunFinalizationService.layerObserver.pipe(
           Layer.provide(ProjectionStoreV2.layer),
-          Layer.provide(
-            RunFinalizationService.layerObserver.pipe(
-              Layer.provide(ProjectionStoreV2.layer),
-              Layer.provide(layerPullRequestService),
-              Layer.provide(RuntimeLayer.layerProjectService),
-            ),
-          ),
+          Layer.provide(layerPullRequestService),
+          Layer.provide(RuntimeLayer.layerProjectService),
         ),
       ),
     ),

@@ -250,7 +250,6 @@ import { commandFeatureUsage, featureUsage } from "./telemetry/FeatureUsage.ts";
 import type { TelemetryOwner } from "./telemetry/Identify.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as ArtifactWorkspace from "./j5/artifacts/ArtifactWorkspace.ts";
-import { AgentHandoffRefreshes } from "./j5/agents/agentHandoffRefreshes.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
 import * as PullRequestReviewGuideService from "./pullRequest/PullRequestReviewGuideService.ts";
@@ -3360,8 +3359,6 @@ export const layer = Layer.unwrap(
     const pullRequests = yield* PullRequestService.PullRequestService;
     const reviewGuides = yield* PullRequestReviewGuideService.PullRequestReviewGuideService;
     const sql = yield* SqlClient.SqlClient;
-    // J5: the revision counter the saved-agent handoff observer bumps; one instance per server.
-    const agentHandoffRefreshes = yield* AgentHandoffRefreshes;
     const playbooks = yield* PlaybookStore;
     const j5RpcServices = yield* j5WsRpcServices;
     return HttpRouter.add(
@@ -3450,7 +3447,6 @@ export const layer = Layer.unwrap(
               Layer.provide(Layer.succeed(ServerSelfUpdate.ServerSelfUpdate, serverSelfUpdate)),
               // Share server-lifetime PR caches so WS mutations invalidate every client's HTTP diffs.
               Layer.provide(Layer.succeed(PullRequestService.PullRequestService, pullRequests)),
-              Layer.provide(Layer.succeed(AgentHandoffRefreshes, agentHandoffRefreshes)),
               Layer.provide(Layer.succeed(PlaybookStore, playbooks)),
               // J5: the server's J5 services, for command admission (FORK.md case 78).
               Layer.provide(Layer.succeedContext(j5RpcServices)),

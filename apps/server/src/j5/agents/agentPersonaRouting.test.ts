@@ -435,7 +435,7 @@ describe("agent persona routing", () => {
     assert.equal(catalog.personas[0]?.personaId, "scout");
     assert.equal(catalog.personas[0]?.definitionVersion, 1);
     assert.equal(catalog.personas[0]?.acceptedInput, "Evidence request or prompt");
-    assert.equal(catalog.personas[0]?.outputArtifact, "ContextBrief");
+    assert.notProperty(catalog.personas[0]!, "outputArtifact");
     assert.deepEqual(catalog.personas[0]?.availability, {
       status: "available",
       resolvedRoute: "primary",

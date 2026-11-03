@@ -211,7 +211,6 @@ const fakeLauncher = (crews: AgentCrewInstanceService["Service"]) =>
               assignment: null,
               modelSelection: seat.modelSelection ?? captain.thread.modelSelection,
               runtimeMode: seat.runtimeMode ?? captain.thread.runtimeMode,
-              outputArtifact: null,
               agentDisplayName: seat.agentId ?? "custom",
               workspace: fakeWorkspace(seat),
               runtime: {

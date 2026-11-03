@@ -35,17 +35,16 @@ Crew composition, Playbook steps, workflow gates, and lifecycle automation remai
 
 Each definition has:
 
-| Field                                                  | Meaning                                                                                                                                                                           |
-| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`                                                   | Stable lowercase slug, such as `team-researcher`. Custom ids require no code changes.                                                                                             |
-| `version`                                              | Positive integer chosen by the author. Changing it communicates a revision; content is also fingerprinted, so same-version edits are detected at launch.                          |
-| `displayName`, `description`                           | Human-facing identity and a concise purpose.                                                                                                                                      |
-| `instructions`                                         | Nonempty markdown identity and operating principles, at most 32,768 characters. The spawner supplies the task brief separately.                                                   |
-| `acceptedInput`                                        | Optional human-readable input summary; ordinary prompts and supporting evidence are allowed.                                                                                      |
-| `inputArtifacts`, `outputArtifact`                     | Optional structured handoff artifact names for pipeline roles. Every reference must name a standard artifact below or one declared by this definition. Personal agents omit them. |
-| `artifacts`                                            | Optional names for user-defined artifacts. These declare references, not executable validators.                                                                                   |
-| `authority.defaultPolicy`, `authority.allowedPolicies` | A default and allowed selection from the runtime-policy vocabulary below. The default must be allowed.                                                                            |
-| `modelRoute`                                           | Ordered primary and fallback targets. Each names `driver`, exact `model`, and `reasoningEffort`.                                                                                  |
+| Field                                                  | Meaning                                                                                                                                                      |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `id`                                                   | Stable lowercase slug, such as `team-researcher`. Custom ids require no code changes.                                                                        |
+| `version`                                              | Positive integer chosen by the author. Changing it communicates a revision; content is also fingerprinted, so same-version edits are detected at launch.     |
+| `displayName`, `description`                           | Human-facing identity and a concise purpose.                                                                                                                 |
+| `instructions`                                         | Nonempty markdown identity and operating principles, at most 32,768 characters. The spawner supplies the task brief separately.                              |
+| `acceptedInput`                                        | Optional human-readable input summary; ordinary prompts and supporting evidence are allowed.                                                                 |
+| `inputArtifacts`, `outputArtifact`, `artifacts`        | Retired. A definition that still carries them loads, and they are ignored; they stay part of the content fingerprint so stored snapshots keep their digests. |
+| `authority.defaultPolicy`, `authority.allowedPolicies` | A default and allowed selection from the runtime-policy vocabulary below. The default must be allowed.                                                       |
+| `modelRoute`                                           | Ordered primary and fallback targets. Each names `driver`, exact `model`, and `reasoningEffort`.                                                             |
 
 Files are limited to 64 KiB. This slice retains exactly two route targets. A target may name any provider, and the reasoning value uses whichever option the model advertises for it (`reasoningEffort`, `effort`, `reasoning`, `variant`, or `thinking`). Activation still requires a provider that can enforce the persona's runtime policy, currently Codex and Claude; other providers stay Blocked until their adapter policies are supported. Broader ordered model allowlists belong to a later Role-library revision; none of these limits fixes the persona's name or model choices to the starter examples.
 
@@ -53,19 +52,19 @@ Files are limited to 64 KiB. This slice retains exactly two route targets. A tar
 
 These examples document historical assignments and are not selectable unless a user authors or imports a definition. Their operating instructions describe intended behavior, including no-commit or no-merge expectations; those words do not themselves enforce permissions.
 
-| ID             | Display name | Description                                                         | Accepted input                                            | Required output       | Authority                       | Primary route            | Secondary route           |
-| -------------- | ------------ | ------------------------------------------------------------------- | --------------------------------------------------------- | --------------------- | ------------------------------- | ------------------------ | ------------------------- |
-| `scout`        | Scout        | Collects cited evidence into a Context Brief. Read-only.            | Evidence request or prompt                                | `ContextBrief`        | `read-only`                     | `gpt-5.6-terra`, high    | `claude-opus-5`, high     |
-| `navigator`    | Navigator    | Turns a Context Brief into an implementation plan. Read-only.       | `ContextBrief`                                            | `PlanHandoff`         | `read-only`                     | `gpt-5.6-sol`, high      | `claude-fable-5-1`, high  |
-| `advocate`     | Advocate     | Checks a plan against product and design requirements.              | `PlanHandoff` plus Jira, Confluence, or Figma evidence    | `PlanCritique`        | `read-only`                     | `claude-sonnet-5`, high  | `gpt-5.6-terra`, high     |
-| `skeptic`      | Skeptic      | Stress-tests a plan for feasibility, risk, and hidden scope.        | `PlanHandoff` plus repository evidence                    | `PlanCritique`        | `read-only`                     | `claude-opus-5`, high    | `gpt-5.6-terra`, high     |
-| `builder`      | Builder      | Implements an approved handoff. Never commits or pushes.            | `PlanHandoff`, `DiagnosisHandoff`, or `ReviewInbox`       | `CodeCompleteHandoff` | `workspace-write`               | `gpt-5.6-sol`, high      | `claude-opus-5`, high     |
-| `critic`       | Critic       | Reviews implementation; Fix Mode may apply targeted fixes.          | `CodeCompleteHandoff` plus governing handoff and diff     | `ReviewHandoff`       | `critic-review` or `critic-fix` | `claude-opus-5`, high    | `gpt-5.6-terra`, high     |
-| `sentry`       | Sentry       | Reviews a diff for security, authorization, secrets, and PII risks. | `CodeCompleteHandoff` plus diff and relevant architecture | `ReviewHandoff`       | `read-only`                     | `claude-fable-5-1`, high | `gpt-5.6-terra`, high     |
-| `publisher`    | Publisher    | Commits, pushes, and opens or updates a PR. Never merges.           | `CodeCompleteHandoff` plus resolved review findings       | `PublicationReceipt`  | `publish-only`                  | `gpt-5.6-terra`, medium  | `claude-sonnet-5`, medium |
-| `investigator` | Investigator | Reproduces and diagnoses bugs without landing a fix.                | Bug report, Jira issue, or diagnostic prompt              | `DiagnosisHandoff`    | `diagnostic`                    | `gpt-5.6-sol`, high      | `claude-fable-5-1`, high  |
-| `prosecutor`   | Prosecutor   | Challenges a diagnosis, its evidence, and proposed repair.          | `DiagnosisHandoff` plus available evidence                | `DiagnosisCritique`   | `read-only`                     | `claude-opus-5`, high    | `gpt-5.6-terra`, high     |
-| `herald`       | Herald       | Reads and classifies GitHub review feedback.                        | Pull request target and review state                      | `ReviewInbox`         | `read-only`                     | `gpt-5.6-terra`, high    | `claude-sonnet-5`, high   |
+| ID             | Display name | Description                                                         | Accepted input                                            | Authority                       | Primary route            | Secondary route           |
+| -------------- | ------------ | ------------------------------------------------------------------- | --------------------------------------------------------- | ------------------------------- | ------------------------ | ------------------------- |
+| `scout`        | Scout        | Collects cited evidence into a Context Brief. Read-only.            | Evidence request or prompt                                | `read-only`                     | `gpt-5.6-terra`, high    | `claude-opus-5`, high     |
+| `navigator`    | Navigator    | Turns a Context Brief into an implementation plan. Read-only.       | `ContextBrief`                                            | `read-only`                     | `gpt-5.6-sol`, high      | `claude-fable-5-1`, high  |
+| `advocate`     | Advocate     | Checks a plan against product and design requirements.              | `PlanHandoff` plus Jira, Confluence, or Figma evidence    | `read-only`                     | `claude-sonnet-5`, high  | `gpt-5.6-terra`, high     |
+| `skeptic`      | Skeptic      | Stress-tests a plan for feasibility, risk, and hidden scope.        | `PlanHandoff` plus repository evidence                    | `read-only`                     | `claude-opus-5`, high    | `gpt-5.6-terra`, high     |
+| `builder`      | Builder      | Implements an approved handoff. Never commits or pushes.            | `PlanHandoff`, `DiagnosisHandoff`, or `ReviewInbox`       | `workspace-write`               | `gpt-5.6-sol`, high      | `claude-opus-5`, high     |
+| `critic`       | Critic       | Reviews implementation; Fix Mode may apply targeted fixes.          | `CodeCompleteHandoff` plus governing handoff and diff     | `critic-review` or `critic-fix` | `claude-opus-5`, high    | `gpt-5.6-terra`, high     |
+| `sentry`       | Sentry       | Reviews a diff for security, authorization, secrets, and PII risks. | `CodeCompleteHandoff` plus diff and relevant architecture | `read-only`                     | `claude-fable-5-1`, high | `gpt-5.6-terra`, high     |
+| `publisher`    | Publisher    | Commits, pushes, and opens or updates a PR. Never merges.           | `CodeCompleteHandoff` plus resolved review findings       | `publish-only`                  | `gpt-5.6-terra`, medium  | `claude-sonnet-5`, medium |
+| `investigator` | Investigator | Reproduces and diagnoses bugs without landing a fix.                | Bug report, Jira issue, or diagnostic prompt              | `diagnostic`                    | `gpt-5.6-sol`, high      | `claude-fable-5-1`, high  |
+| `prosecutor`   | Prosecutor   | Challenges a diagnosis, its evidence, and proposed repair.          | `DiagnosisHandoff` plus available evidence                | `read-only`                     | `claude-opus-5`, high    | `gpt-5.6-terra`, high     |
+| `herald`       | Herald       | Reads and classifies GitHub review feedback.                        | Pull request target and review state                      | `read-only`                     | `gpt-5.6-terra`, high    | `claude-sonnet-5`, high   |
 
 ## Model routing
 
@@ -76,88 +75,11 @@ These examples document historical assignments and are not selectable unless a u
 
 No model spelling is silently rewritten. Persona threads keep their selected provider/model; later provider/model mutations are rejected. Importing a definition does not copy credentials or environment-local provider ids.
 
-## Artifact contracts
+## Deliverables
 
-Handoff artifacts are files in the project's shared artifacts (see the Artifacts feature), not transcript prose. A definition's `outputArtifact` is written by the agent with `j5_write_artifact` to `handoffs/<agent id>/<Artifact>-<task>.md`; the persona instructions name that exact path and the checklist below, and declared `inputArtifacts` are read with `j5_list_artifacts` and `j5_read_artifact` from the same folder. A rewritten handoff artifact adds a version to the top of the same file rather than replacing it; every other artifact path keeps upstream's overwrite. At the end of each completed run the server checks for the file and records the task's handoff artifact as written, or asks once and then records it missing; the reminder is a follow-up run in the child's own thread and does not gate the parent, which has already been told the child finished. The status shows on the task's persona control and, for a delegated child, on its persona chip beside its row in the parent's Lineage section and beside its subagent card in the conversation; the chip opens the artifact. The lists below are the minimum contents the instructions demand. They are prompt templates: the server verifies that the file exists, not what it says. Only `inputArtifacts` and `outputArtifact` are structured references; `acceptedInput`, ordinary prompts, evidence, and prose counterpart references are not parsed as artifacts. A Crew seat writes the same file: its first turn names the path, the handoff gate reminds it once, and each time the seat finishes its Captain is told in its thread whether the handoff artifact was written, missing, or never declared (see [Crews](../features/crews.md)).
+A persona says how to work, not what to produce. The assignment, a brief or a Playbook step, names the deliverable; a file it asks for is written with `j5_write_artifact` and shows up on the Artifacts page like any other requested work. A run owes no file: the server appends no artifact instructions, checks nothing at the end of a run, and sends no reminder. A Crew member's finish notice carries how the run ended and the member's reply.
 
-### `ContextBrief`
-
-- Request and bounded scope.
-- Sources consulted, with stable citations or paths.
-- Relevant facts separated from inference.
-- Conflicts, missing evidence, and access limitations.
-- Concise findings suitable for planning.
-
-### `PlanHandoff`
-
-- Objective, scope, and explicit non-goals.
-- Product-sliced delivery tracks.
-- Dependencies and sequencing constraints.
-- Expected files or architectural boundaries.
-- Validation strategy, risks, and unresolved decisions.
-
-### `PlanCritique`
-
-- Reviewer lens: `advocate` or `skeptic`.
-- Finding list with evidence and severity.
-- Covered, partial, missing, or contested items where applicable.
-- Required revisions and non-blocking observations.
-- Verdict: `accept`, `revise`, or `blocked`.
-
-### `CodeCompleteHandoff`
-
-- Governing handoff and implemented scope.
-- Changed paths and behavior summary.
-- Tests and checks run with results.
-- Known limitations, residual risks, and unverified areas.
-- Review-ready diff identity when available.
-- Explicit statement that no commit or push was performed.
-
-### `ReviewHandoff`
-
-- Review lens: functional or security.
-- Findings with severity, evidence, and affected paths.
-- Validation performed.
-- Fixes applied, only when the activation authorized them.
-- Remaining findings and verdict.
-- Explicit statement that no commit was performed.
-
-### `PublicationReceipt`
-
-`PublicationReceipt` is the canonical name for Publisher's output.
-
-- Branch and commit SHA or ordered commit SHAs.
-- Conventional commit subjects.
-- Push target and result.
-- Pull request number and URL.
-- Whether the pull request was opened or updated.
-- Checks or publication failures observed before handoff.
-- Explicit `merged: false` assertion.
-
-### `DiagnosisHandoff`
-
-- Expected and observed behavior.
-- Deterministic reproduction or the strongest bounded attempt.
-- Failing boundary and causal mechanism supported by evidence.
-- Alternatives considered and ruled out.
-- Minimal fix sketch, without landing the fix.
-- Confidence, limitations, and recommended validation.
-
-### `DiagnosisCritique`
-
-- Reproduction gaps or contradictions.
-- Root-cause challenges and viable alternatives.
-- Evidence quality and missing proof.
-- Over-broad or unsafe repair concerns.
-- Verdict: `accept`, `revise`, or `blocked`.
-
-### `ReviewInbox`
-
-- Review source and stable comment or thread identity.
-- Blocking request, actionable non-blocker, or nit classification.
-- Requested change mapped to relevant paths or lines when known.
-- Duplicate, superseded, resolved, or still-open state.
-- Ambiguities requiring human clarification.
+Tasks that ran before this keep the handoff status they recorded, read-only, on the persona control and chip. Nothing recomputes it.
 
 ## Behavioral instructions and runtime permissions
 

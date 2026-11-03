@@ -1,5 +1,4 @@
 import {
-  BUILT_IN_AGENT_ARTIFACT_IDS,
   BUILT_IN_AGENT_PERSONA_IDS,
   AgentPersonaAuthorityPolicy,
   AgentPersonaId,
@@ -69,8 +68,11 @@ export const AgentPersonaDefinition = Schema.Struct({
   version: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
   displayName: NonEmpty,
   description: NonEmpty,
-  /** Handoff pipelines declare inputs and outputs; personal agents may leave them out. */
   acceptedInput: Schema.optional(NonEmpty),
+  /**
+   * Legacy handoff fields: accepted and ignored. They stay in the schema because they are part of
+   * `definitionDigest`, which stored snapshots are verified against.
+   */
   artifacts: Schema.optional(Schema.Array(NonEmpty)),
   inputArtifacts: Schema.optional(Schema.Array(NonEmpty)),
   outputArtifact: Schema.optional(NonEmpty),
@@ -89,17 +91,6 @@ export function decodeAgentPersonaDefinition(value: unknown): AgentPersonaDefini
   const definition = decodeDefinition(value);
   if (!definition.authority.allowedPolicies.includes(definition.authority.defaultPolicy)) {
     throw new Error(`Persona ${definition.id}: default authority must be allowed.`);
-  }
-  const artifacts = new Set<string>([
-    ...BUILT_IN_AGENT_ARTIFACT_IDS,
-    ...(definition.artifacts ?? []),
-  ]);
-  for (const artifact of [
-    ...(definition.inputArtifacts ?? []),
-    ...(definition.outputArtifact === undefined ? [] : [definition.outputArtifact]),
-  ]) {
-    if (!artifacts.has(artifact))
-      throw new Error(`Persona ${definition.id}: undefined artifact ${artifact}.`);
   }
   return definition;
 }

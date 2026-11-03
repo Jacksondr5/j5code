@@ -2,7 +2,6 @@ import {
   presentCrewNotice,
   type CrewNoticeMessage,
   type CrewNoticePresentation,
-  type FinishedSeat,
 } from "@t3tools/client-runtime/j5/crew-notices";
 
 export interface CrewNoticeLine {
@@ -14,27 +13,6 @@ export interface CrewNoticeLine {
   readonly reason: string;
   readonly tone: "bad" | "warn";
 }
-
-const handoffLine = (seat: FinishedSeat, crewName: string | null): CrewNoticeLine | null => {
-  const handoff = seat.handoff;
-  if (handoff.status === "missing")
-    return {
-      seat: seat.seat,
-      crewName,
-      threadId: seat.threadId,
-      reason: `finished · ${handoff.kind} missing`,
-      tone: "warn",
-    };
-  if (handoff.status === "unavailable")
-    return {
-      seat: seat.seat,
-      crewName,
-      threadId: seat.threadId,
-      reason: `finished · ${handoff.kind} can't be read${handoff.reason === null ? "" : `: ${handoff.reason}`}`,
-      tone: "warn",
-    };
-  return null;
-};
 
 /**
  * What the person would act on in a notice, one line per seat: a seat that didn't start, or a run
@@ -74,10 +52,7 @@ export const crewNoticeLines = (notice: CrewNoticePresentation): ReadonlyArray<C
   const severalCrews = new Set(notice.seats.map((seat) => seat.crewName)).size > 1;
   return notice.seats.flatMap((seat): ReadonlyArray<CrewNoticeLine> => {
     const crewName = severalCrews ? seat.crewName : null;
-    if (seat.runStatus === "completed") {
-      const line = handoffLine(seat, crewName);
-      return line === null ? [] : [line];
-    }
+    if (seat.runStatus === "completed") return [];
     const ended =
       seat.runStatus === "failed" || seat.runStatus === "errored"
         ? "run failed"
