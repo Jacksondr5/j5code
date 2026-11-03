@@ -9,10 +9,9 @@ import { useEnvironmentQuery } from "../../state/query";
 import { agentPersonaEnvironment } from "./agentPersonaAtoms";
 
 /**
- * The declared handoff artifact of a saved-agent task: written, pending after the one reminder,
- * or missing. Opens the Artifacts page at the file. Renders nothing until the first run ends.
- * Every chip in an environment reads the same environment-wide query, which the server's handoff
- * refresh signal keeps current.
+ * The handoff status an older run recorded for a task: written, pending, or missing. Read-only:
+ * runs no longer record one, so it renders nothing for them. Opens the Artifacts page at the file.
+ * Every chip in an environment reads the same environment-wide query.
  */
 export function AgentHandoffChip(props: {
   readonly environmentId: EnvironmentId;

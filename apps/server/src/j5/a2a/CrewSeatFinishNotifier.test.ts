@@ -86,6 +86,10 @@ it("cuts a long reply and says so, keeping the seat's thread id for the rest", (
   assert.include(cut, "thread_id: real-thread");
   assert.notInclude(cut, "x".repeat(4_001));
   assert.equal(notice(null).includes("<seat_reply>"), false);
+  // The cut never leaves half of an emoji behind.
+  const emoji = notice(`${"x".repeat(3_999)}😀 tail`);
+  assert.notMatch(emoji, /[\uD800-\uDBFF](?![\uDC00-\uDFFF])/);
+  assert.include(emoji, "reply cut");
 });
 
 const projectId = LedgerProjectId.make("ledger:crew-finish");
@@ -143,9 +147,12 @@ const criticMessage = (
   text,
   streaming,
   createdAt: DateTime.makeUnsafe(at),
+  updatedAt: DateTime.makeUnsafe(at),
 });
+// The draft and the final share a timestamp, as providers can finalize messages together; the
+// turn items below say which one came last.
 const criticMessages = [
-  criticMessage("msg:draft", "run:2b", "2026-09-09T16:00:01Z", "Draft: still reading."),
+  criticMessage("msg:draft", "run:2b", "2026-09-09T16:00:02Z", "Draft: still reading."),
   criticMessage(
     "msg:final",
     "run:2b",
@@ -157,17 +164,38 @@ const criticMessages = [
   criticMessage("msg:other-run", "run:2c", "2026-09-09T16:00:05Z", "A later run's reply."),
 ];
 
+const criticItem = (ordinal: number, runId: string, messageId: string, text: string) => ({
+  type: "assistant_message",
+  runId: RunId.make(runId),
+  ordinal,
+  messageId,
+  text,
+});
+const criticTurnItems = [
+  criticItem(1, "run:2b", "msg:draft", "Draft: still reading."),
+  criticItem(2, "run:2b", "msg:final", "# Review"),
+  criticItem(3, "run:2b", "msg:blank", "  \n "),
+  criticItem(4, "run:2c", "msg:other-run", "A later run's reply."),
+];
+
 /** What the store returns for the filters the notifier passes. */
 const filteredRecords = (
   threadId: ThreadId,
   filter?: {
     readonly messageRoles?: ReadonlyArray<string>;
     readonly messageRunIds?: ReadonlyArray<string>;
+    readonly turnItemRunId?: string;
+    readonly turnItemTypes?: ReadonlyArray<string>;
   },
 ) => {
   const records = projection(threadId);
   return {
     ...records,
+    turnItems: records.turnItems.filter(
+      (item) =>
+        (filter?.turnItemRunId === undefined || item.runId === filter.turnItemRunId) &&
+        (filter?.turnItemTypes === undefined || filter.turnItemTypes.includes(item.type)),
+    ),
     messages: records.messages.filter(
       (message) =>
         (filter?.messageRoles === undefined || filter.messageRoles.includes(message.role)) &&
@@ -201,21 +229,23 @@ const projection = (
       : [],
     // The scout's failed run left its provider error behind, so its notice can carry it.
     turnItems:
-      threadId === scoutThread
-        ? [
-            {
-              runId: RunId.make("run:s1"),
-              type: "error",
-              status: "failed",
-              failure: {
-                class: "provider_error",
-                message: "API Error: Can't reach the API server",
-                code: "sdk_result_error",
-                retryable: null,
+      threadId === criticThread
+        ? criticTurnItems
+        : threadId === scoutThread
+          ? [
+              {
+                runId: RunId.make("run:s1"),
+                type: "error",
+                status: "failed",
+                failure: {
+                  class: "provider_error",
+                  message: "API Error: Can't reach the API server",
+                  code: "sdk_result_error",
+                  retryable: null,
+                },
               },
-            },
-          ]
-        : [],
+            ]
+          : [],
     messages: threadId === criticThread ? criticMessages : [],
   }) as unknown as OrchestrationV2ThreadProjection;
 
@@ -455,6 +485,18 @@ it.effect("tells the Captain how each finished seat ended, and settles nothing",
         assert.equal(notice.text.split("</seat_reply>").length, 2);
         assert.equal(notice.text.split("<j5_seat_finished>").length, 2);
         assert.lengthOf(seatNoticeSections(notice.text), 1);
+      }
+      // A later run of the same seat ends with a reply of its own, and that is what the Captain
+      // is told: each run's facts, reply included, make its own notice.
+      assert.equal(
+        yield* notifier.handleStoredEvent(terminalRunEvent(criticThread, "run:2c")),
+        criticThread,
+      );
+      const second = (yield* Ref.get(dispatched))[4];
+      assert.equal(second?.type, "message.dispatch");
+      if (second?.type === "message.dispatch") {
+        assert.include(second.text, "<seat_reply>\nA later run's reply.\n</seat_reply>");
+        assert.notInclude(second.text, "No findings.");
       }
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),

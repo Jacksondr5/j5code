@@ -636,7 +636,7 @@ export function presentAgentHandoff(handoff: AgentHandoff): AgentHandoffPresenta
     case "nudged":
       return {
         label: `${handoff.artifact} pending`,
-        detail: `The run ended without ${handoff.artifact}; the agent was asked once to write ${logicalPath}.`,
+        detail: `The run ended without ${handoff.artifact} at ${logicalPath}.`,
         tone: "warning",
         logicalPath,
       };

@@ -69,7 +69,7 @@ instructions: |-
 
 Choose exact models and reasoning values advertised by the environment. A route may name any provider driver, but a persona activates only on a provider that can enforce its runtime policy. `read-only` and `critic-review` run on Codex and Claude, `workspace-write` and `critic-fix` on Codex only, and `full-access` on every provider, since it needs no sandbox. A route to a provider that cannot enforce the policy shows as Blocked. `diagnostic` and `publish-only` are blocked pending the required operation boundaries.
 
-Copy and customize the starter files in `apps/server/src/j5/agents/examples/` when working from the repository. Source folders may be shared through git. The source format is identical for starter and custom personas. The file limit is 64 KiB, with 32,768 characters available for instructions. Declare custom handoff names in an optional `artifacts` array before referencing them in `inputArtifacts` or `outputArtifact`.
+Copy and customize the starter files in `apps/server/src/j5/agents/examples/` when working from the repository. Source folders may be shared through git. The source format is identical for starter and custom personas. The file limit is 64 KiB, with 32,768 characters available for instructions.
 
 Reopen Settings → Agent Setup to read the updated catalog, or launch a new persona through the existing orchestrator contract. The server reads files on each catalog request and new activation; a restart is unnecessary. Empty libraries display an empty state. Missing configured folders, malformed files, undefined artifact references, or duplicate ids fail the library read and prevent new persona launches. Fix the indicated source and retry.
 

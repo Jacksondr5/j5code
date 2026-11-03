@@ -8,6 +8,7 @@ import {
   AgentPersonaImportConflictError,
   ProviderDriverKind,
   ProviderInstanceId,
+  ThreadId,
   type OrchestrationV2AgentPersonaAssignment,
 } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -327,10 +328,13 @@ describe("folder-backed persona library", () => {
         });
         const restored = yield* freshLibrary.readSnapshot(assignment);
         assert.isUndefined(validateAgentPersonaAssignment(assignment, restored));
-        const policy = yield* resolveAgentPersonaRuntime(
-          { agentPersonaAssignment: assignment, runtimeMode: "full-access" },
-          freshLibrary,
-        );
+        // A thread with an id is what used to get the artifact section appended.
+        const thread = {
+          id: ThreadId.make("thread:persona-run"),
+          agentPersonaAssignment: assignment,
+          runtimeMode: "full-access" as const,
+        };
+        const policy = yield* resolveAgentPersonaRuntime(thread, freshLibrary);
         assert.include(
           "agentPersonaInstructions" in policy ? policy.agentPersonaInstructions : "",
           custom.instructions,

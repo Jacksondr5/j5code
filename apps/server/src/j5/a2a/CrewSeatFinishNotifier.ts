@@ -147,19 +147,35 @@ export const seatFinishedNoticeText = (input: {
   const head = `<j5_seat_finished>\nrun_status: ${input.runStatus}${failureLine}\nseat: ${input.seatName}\ncrew: ${input.crewName}\nparticipant_id: ${input.participantId}\nthread_id: ${input.threadId}\n</j5_seat_finished>`;
   if (input.reply === null) return head;
   const cut = input.reply.length > REPLY_MAX_CHARS;
-  const body = cut ? input.reply.slice(0, REPLY_MAX_CHARS) : input.reply;
+  // Never leave half of a surrogate pair at the cut.
+  const body = cut
+    ? input.reply.slice(0, REPLY_MAX_CHARS).replace(/[\uD800-\uDBFF]$/, "")
+    : input.reply;
   return `${head}\n\n<seat_reply>\n${noticeReply(body)}${cut ? `\n[reply cut at ${REPLY_MAX_CHARS} characters; the rest is in the seat's thread]` : ""}\n</seat_reply>`;
 };
 
-/** The seat's reply for a run: its last finished assistant message with any text. */
-const runReply = (projection: Pick<OrchestrationV2ThreadProjection, "messages">): string | null => {
-  const last = projection.messages
-    .filter((message) => message.role === "assistant" && !message.streaming)
-    .filter((message) => message.text.trim() !== "")
-    .toSorted(
-      (a, b) => DateTime.toEpochMillis(b.createdAt) - DateTime.toEpochMillis(a.createdAt),
+/**
+ * The seat's reply for a run: its last finished assistant message with any text. Turn-item order
+ * decides, because providers can finalize messages with identical timestamps; timestamps break
+ * the tie only when no turn item names a message.
+ */
+const runReply = (
+  projection: Pick<OrchestrationV2ThreadProjection, "messages" | "turnItems">,
+): string | null => {
+  const messages = projection.messages.filter(
+    (message) => message.role === "assistant" && !message.streaming && message.text.trim() !== "",
+  );
+  const lastItem = projection.turnItems
+    .flatMap((item) => (item.type === "assistant_message" && item.text.trim() !== "" ? [item] : []))
+    .toSorted((a, b) => b.ordinal - a.ordinal)[0];
+  const message =
+    messages.find((candidate) => candidate.id === lastItem?.messageId) ??
+    messages.toSorted(
+      (a, b) =>
+        DateTime.toEpochMillis(b.updatedAt) - DateTime.toEpochMillis(a.updatedAt) ||
+        DateTime.toEpochMillis(b.createdAt) - DateTime.toEpochMillis(a.createdAt),
     )[0];
-  return last?.text.trim() ?? null;
+  return message?.text.trim() ?? null;
 };
 
 const makeLayer = (daemon: boolean) =>
@@ -257,7 +273,7 @@ const makeLayer = (daemon: boolean) =>
           ["runs", "turnItems", "messages"],
           {
             turnItemRunId: run.id,
-            turnItemTypes: ["error"],
+            turnItemTypes: ["error", "assistant_message"],
             messageRoles: ["assistant"],
             messageRunIds: [run.id],
           },
