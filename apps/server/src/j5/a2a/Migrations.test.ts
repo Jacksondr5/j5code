@@ -33,7 +33,7 @@ const enableAndAssertForeignKeys = Effect.gen(function* () {
   assert.deepStrictEqual(rows, [{ foreign_keys: 1 }]);
 });
 
-it.effect("upgrades the pre-replay schema with replay storage and personal reads", () =>
+it.effect("upgrades the pre-replay schema with replay storage", () =>
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;
     yield* runMigrations();
@@ -65,12 +65,9 @@ it.effect("upgrades the pre-replay schema with replay storage and personal reads
     yield* runJ5A2AMigrations();
     const applied = yield* sql<{ readonly migration_id: number; readonly name: string }>`
       SELECT migration_id, name FROM j5_a2a_migrations
-      WHERE migration_id >= 47 ORDER BY migration_id
+      WHERE migration_id = 47 ORDER BY migration_id
     `;
-    assert.deepStrictEqual(applied, [
-      { migration_id: 47, name: "RequestReplay" },
-      { migration_id: 48, name: "PersonalThreadReads" },
-    ]);
+    assert.deepStrictEqual(applied, [{ migration_id: 47, name: "RequestReplay" }]);
   }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
 
@@ -142,7 +139,11 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
       { migration_id: 45, name: "McpClientApprovers" },
       { migration_id: 46, name: "LocalDeliveryOrder" },
       { migration_id: 47, name: "RequestReplay" },
-      { migration_id: 48, name: "PersonalThreadReads" },
+      { migration_id: 48, name: "CrewApprovalMode" },
+      { migration_id: 49, name: "CrewSeatActivation" },
+      { migration_id: 50, name: "CrewWorktrees" },
+      { migration_id: 51, name: "CrewWorktreeCleanup" },
+      { migration_id: 52, name: "PersonalThreadReads" },
     ]);
     assert.deepStrictEqual(
       migrationEntries.map(([id, name]) => [id, name]),
@@ -194,7 +195,11 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
         [45, "McpClientApprovers"],
         [46, "LocalDeliveryOrder"],
         [47, "RequestReplay"],
-        [48, "PersonalThreadReads"],
+        [48, "CrewApprovalMode"],
+        [49, "CrewSeatActivation"],
+        [50, "CrewWorktrees"],
+        [51, "CrewWorktreeCleanup"],
+        [52, "PersonalThreadReads"],
       ],
     );
   }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
@@ -1443,7 +1448,7 @@ it.effect("recreates earlier-shaped crews tables when 14 runs over them", () =>
       applied.map((row) => row.migration_id),
       [
         13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35,
-        36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48,
+        36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52,
       ],
     );
     const memberColumns = yield* sql<{ readonly name: string }>`

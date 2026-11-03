@@ -32,9 +32,18 @@ import { fleetDetailSourcesAtom, j5Environment } from "../state";
 import { useLogicalProjects } from "../logicalProjects";
 import { requestConfirmDialog } from "../../confirmDialog";
 import type { ArchiveWarningCrew } from "@t3tools/client-runtime/j5/archive-flow";
-import { ArchiveWarningCrewSeats } from "../a2a/ArchiveWarningContent";
+import {
+  ArchiveWarningCrewSeats,
+  ArchiveWarningWorktreeSection,
+} from "../a2a/ArchiveWarningContent";
+import { readCrewArchiveWorktrees } from "../a2a/archiveFlowClient";
 import { archiveCrew } from "../crew/crewArchiveClient";
-import { crewHasRunningSeat, summarizeCrewState } from "../crew/crewState";
+import {
+  classifyCrewSeat,
+  crewHasRunningSeat,
+  seatQuietLabel,
+  summarizeCrewState,
+} from "../crew/crewState";
 import { stopCrew } from "../crew/crewStopClient";
 import {
   countFleetProjects,
@@ -79,12 +88,17 @@ const threadFor = (
   threadsByKey: ThreadLookup,
   environmentId: EnvironmentId,
   agent: FleetAgent,
-): EnvironmentThreadShell | undefined =>
-  agent.threadId === null
-    ? undefined
-    : threadsByKey.get(
-        scopedThreadKey(scopeThreadRef(environmentId, ThreadId.make(agent.threadId))),
-      );
+): (EnvironmentThreadShell & { readonly notStarted?: boolean }) | undefined => {
+  const thread =
+    agent.threadId === null
+      ? undefined
+      : threadsByKey.get(
+          scopedThreadKey(scopeThreadRef(environmentId, ThreadId.make(agent.threadId))),
+        );
+  return thread === undefined || agent.crew?.notStarted === undefined
+    ? thread
+    : { ...thread, notStarted: agent.crew.notStarted };
+};
 
 const projectKey = (ledgerProject: ScopedFleetLedgerProject) =>
   `${ledgerProject.environmentId}:${ledgerProject.id}`;
@@ -374,6 +388,11 @@ function FleetNodeRows(
       }),
     };
     const consequential = warning.seats.some((seat) => seat.runningTurn || seat.openAsks > 0);
+    // Read before the dialog opens, so it can say what happens to each seat's worktree. A read
+    // that fails says so rather than promising nothing is removed.
+    const worktrees = await readCrewArchiveWorktrees(environmentId, [crew.crewInstanceId]).catch(
+      () => null,
+    );
     const confirmed = await (requestConfirmDialog(
       `Archive crew ${crew.crewName}?`,
       { variant: "destructive" },
@@ -382,10 +401,8 @@ function FleetNodeRows(
           <div className="space-y-3 text-left">
             <p>Its {warning.seats.length === 1 ? "seat retires" : "seats retire"} together:</p>
             <ArchiveWarningCrewSeats crew={warning} />
-            <p className="border-t border-border/60 pt-3 text-muted-foreground">
-              Worktrees, branches, and pull requests remain. The roster stays readable under Retired
-              crews.
-            </p>
+            <ArchiveWarningWorktreeSection worktrees={worktrees} />
+            <p className="text-muted-foreground">The roster stays readable under Retired crews.</p>
           </div>
         ),
         confirmLabel: consequential ? "Archive anyway" : "Archive",
@@ -719,7 +736,15 @@ export function FleetRowItem(
         </span>
         {/* A placement tree lives in one project, so only its root names it. */}
         {props.row.depth === 0 ? <ProjectLabel {...props} agent={agent} /> : <span />}
-        <FleetFactCells environmentId={environmentId} agent={agent} />
+        <FleetFactCells
+          environmentId={environmentId}
+          agent={agent}
+          notStarted={
+            thread !== undefined &&
+            classifyCrewSeat(thread) !== "settled" &&
+            seatQuietLabel(thread) === "Not started"
+          }
+        />
       </button>
       <FleetFactDetails environmentId={environmentId} agent={agent} title={title} />
     </li>

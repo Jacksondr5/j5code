@@ -9,7 +9,7 @@ import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { humanPersonRegistryLayer } from "../a2a/HumanPersonRegistry.ts";
-import migration from "../a2a/migrations/048_PersonalThreadReads.ts";
+import { runJ5A2AMigrations } from "../a2a/Migrations.ts";
 import { makeHarness, modelSelection, projectId } from "../test-support/threadLaunchHarness.ts";
 import * as PersonAccess from "./PersonAccess.ts";
 import * as ThreadReads from "./ThreadReadState.ts";
@@ -277,7 +277,7 @@ it.effect("refuses mark unread without a completed run", () =>
   }).pipe(Effect.provide(layer(false))),
 );
 
-it.effect("migrates existing markers only to the first owner", () =>
+it.effect("upgrades migration 51 and migrates existing markers only to the first owner", () =>
   Effect.gen(function* () {
     yield* seed;
     yield* viewer("Alice");
@@ -293,7 +293,18 @@ it.effect("migrates existing markers only to the first owner", () =>
     const sql = yield* SqlClient.SqlClient;
     yield* sql`DROP TABLE j5_thread_read`;
     yield* sql`DROP TABLE j5_thread_read_command`;
-    yield* migration;
+    yield* sql`DELETE FROM j5_a2a_migrations WHERE migration_id = 52`;
+    const before = yield* sql<{
+      readonly migration_id: number;
+      readonly name: string;
+    }>`SELECT migration_id, name FROM j5_a2a_migrations ORDER BY migration_id`;
+    assert.equal(before.at(-1)?.migration_id, 51);
+    yield* runJ5A2AMigrations();
+    yield* runJ5A2AMigrations();
+    assert.deepEqual(
+      yield* sql`SELECT migration_id, name FROM j5_a2a_migrations ORDER BY migration_id`,
+      [...before, { migration_id: 52, name: "PersonalThreadReads" }],
+    );
     assert.deepEqual(yield* sql`SELECT * FROM j5_thread_read`, [
       { person_id: reach.person.personId, thread_id: threadId, last_visited_at: readAt },
     ]);
