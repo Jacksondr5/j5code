@@ -2340,7 +2340,7 @@ it.effect("lists every ordered model entry with structured reasons and chosen in
       const { personas } = response.result as {
         readonly personas: ReadonlyArray<{
           readonly id: string;
-          readonly runtime_policy: string;
+          readonly access: string;
           readonly availability: string;
           readonly entries: ReadonlyArray<{
             readonly modelSelection?: { readonly instanceId: string; readonly model: string };
@@ -2360,7 +2360,7 @@ it.effect("lists every ordered model entry with structured reasons and chosen in
       const scout = personas.find((persona) => persona.id === "scout");
       assert.deepStrictEqual(
         [
-          scout?.runtime_policy,
+          scout?.access,
           scout?.availability,
           scout?.selected_entry_index,
           scout?.entries[0]?.modelSelection?.instanceId,

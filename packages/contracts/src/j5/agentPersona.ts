@@ -225,7 +225,7 @@ export const AgentPersonaEditInput = Schema.Struct({
   displayName: TrimmedNonEmptyString.check(Schema.isMaxLength(65536)),
   description: TrimmedNonEmptyString.check(Schema.isMaxLength(65536)),
   instructions: AgentPersonaInstructions,
-  authorityPolicy: AgentPersonaAuthorityPolicy,
+  access: AgentPersonaAccess,
   modelRoute: AgentPersonaModelRoute,
   modelRouteFormat: Schema.optional(Schema.Literal("ordered")),
 });
@@ -255,7 +255,7 @@ export const AgentPersonaCreateInput = Schema.Struct({
   displayName: TrimmedNonEmptyString.check(Schema.isMaxLength(65536)),
   description: TrimmedNonEmptyString.check(Schema.isMaxLength(65536)),
   instructions: AgentPersonaInstructions,
-  authorityPolicy: AgentPersonaAuthorityPolicy,
+  access: AgentPersonaAccess,
   modelRoute: AgentPersonaModelRoute,
 });
 export type AgentPersonaCreateInput = typeof AgentPersonaCreateInput.Type;

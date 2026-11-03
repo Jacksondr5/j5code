@@ -9,12 +9,9 @@ import {
   agentPersonaModelGroups,
   agentPersonaPolicyDrivers,
   agentPersonaPolicyNote,
+  agentPersonaEntryDriver,
 } from "@t3tools/client-runtime/j5/agent-personas";
-import type {
-  AgentPersonaAuthorityPolicy,
-  AgentPersonaModelEntry,
-  EnvironmentId,
-} from "@t3tools/contracts";
+import type { AgentPersonaAccess, AgentPersonaModelEntry, EnvironmentId } from "@t3tools/contracts";
 import { Pressable, View } from "react-native";
 
 import { AppText as Text } from "../../components/ui/AppText";
@@ -24,11 +21,11 @@ import { serverEnvironment } from "../../state/server";
 import { agentPersonaEnvironment } from "./agentPersonaAtoms";
 
 export interface AgentRoutePolicyValue {
-  readonly authorityPolicy: AgentPersonaAuthorityPolicy;
+  readonly access: AgentPersonaAccess;
   readonly modelRoute: ReadonlyArray<AgentPersonaModelEntry>;
 }
 
-/** Runtime policy and ordered model entries, shared by the create and edit modals. */
+/** Access level and ordered model entries, shared by the create and edit modals. */
 export function AgentRoutePolicyFields(props: {
   environmentId: EnvironmentId;
   value: AgentRoutePolicyValue;
@@ -46,40 +43,41 @@ export function AgentRoutePolicyFields(props: {
   const catalog = useEnvironmentQuery(
     agentPersonaEnvironment.catalog({ environmentId: props.environmentId, input: {} }),
   );
+  const drivers = agentPersonaPolicyDrivers(catalog.data, value.access);
   const policyNote = agentPersonaPolicyNote(
-    agentPersonaPolicyDrivers(catalog.data, value.authorityPolicy),
+    drivers,
     value.modelRoute,
-    value.authorityPolicy,
+    value.access,
     providers ?? [],
   );
   return (
     <>
       <View className="gap-2">
-        <Text className="text-sm font-t3-medium">Runtime policy</Text>
+        <Text className="text-sm font-t3-medium">Access level</Text>
         <View pointerEvents={disabled ? "none" : "auto"}>
           <Menu
             actions={AGENT_PERSONA_POLICY_OPTIONS.map((policy) => ({
               id: policy.value,
               title: policy.label,
-              state: policy.value === value.authorityPolicy ? "on" : "off",
+              state: policy.value === value.access ? "on" : "off",
             }))}
             onPressAction={({ nativeEvent }) => {
               const policy = AGENT_PERSONA_POLICY_OPTIONS.find(
                 (item) => item.value === nativeEvent.event,
               );
-              if (policy) props.onChange({ ...value, authorityPolicy: policy.value });
+              if (policy) props.onChange({ ...value, access: policy.value });
             }}
           >
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel="Runtime policy"
+              accessibilityLabel="Access level"
               accessibilityState={{ disabled }}
               disabled={disabled}
               className="rounded-xl border border-border px-3 py-3"
             >
               <Text numberOfLines={1}>
-                {AGENT_PERSONA_POLICY_OPTIONS.find((item) => item.value === value.authorityPolicy)
-                  ?.label ?? value.authorityPolicy}
+                {AGENT_PERSONA_POLICY_OPTIONS.find((item) => item.value === value.access)?.label ??
+                  value.access}
               </Text>
             </Pressable>
           </Menu>
@@ -91,6 +89,8 @@ export function AgentRoutePolicyFields(props: {
       {value.modelRoute.map((target, index) => {
         const label = `Model ${index + 1}`;
         const effort = agentPersonaEntryReasoning(target);
+        const driver = agentPersonaEntryDriver(target, providers ?? []);
+        const unsupported = drivers && driver && !drivers.includes(driver);
         const selected = choices.find(({ id }) => id === agentPersonaModelChoiceId(target));
         const reasoningDisabled = disabled || !selected?.efforts.length;
         const updateTarget = (next: AgentPersonaModelEntry) =>
@@ -187,6 +187,11 @@ export function AgentRoutePolicyFields(props: {
                 </View>
               </View>
             </View>
+            {unsupported ? (
+              <Text className="text-xs text-foreground-muted">
+                This provider cannot enforce {value.access}.
+              </Text>
+            ) : null}
             <View className="flex-row gap-4">
               <Pressable
                 accessibilityRole="button"
@@ -257,7 +262,7 @@ export function AgentRoutePolicyFields(props: {
         </Text>
       </Pressable>
       <Text className="text-xs text-foreground-muted">
-        Model availability and runtime policy support are checked for each launch.
+        Model availability and access level support are checked for each launch.
       </Text>
     </>
   );

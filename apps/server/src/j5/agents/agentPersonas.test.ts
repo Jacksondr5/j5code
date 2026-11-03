@@ -1,7 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 
 import {
-  AGENT_AUTHORITY_RULES,
   agentPersonaAccess,
   AGENT_PERSONA_IDS,
   BUILT_IN_AGENT_PERSONAS,
@@ -47,27 +46,10 @@ describe("built-in agent persona catalog", () => {
     }
   });
 
-  it("gives Builder a writable workspace and Publisher a publication-only one", () => {
-    const builder = AGENT_AUTHORITY_RULES[BUILT_IN_AGENT_PERSONAS.builder.authority.defaultPolicy];
-    assert.equal(builder.workspace, "write");
-    const publisher =
-      AGENT_AUTHORITY_RULES[BUILT_IN_AGENT_PERSONAS.publisher.authority.defaultPolicy];
-    assert.equal(publisher.workspace, "publication-only");
-  });
-
-  it("allows Critic workspace edits only in explicitly requested Fix Mode", () => {
-    assert.equal(AGENT_AUTHORITY_RULES["critic-review"].workspace, "read-only");
-    assert.equal(AGENT_AUTHORITY_RULES["critic-fix"].workspace, "write");
-    assert.equal(BUILT_IN_AGENT_PERSONAS.critic.authority.defaultPolicy, "critic-review");
-  });
-
-  it("denies workspace writes to every read-only persona", () => {
-    for (const definition of listBuiltInAgentPersonas()) {
-      const policy = definition.authority.defaultPolicy;
-      if (policy === "read-only" || policy === "critic-review") {
-        assert.equal(AGENT_AUTHORITY_RULES[policy].workspace, "read-only", definition.id);
-      }
-    }
+  it("maps legacy defaults to access without treating allowed choices as alternatives", () => {
+    assert.equal(agentPersonaAccess(BUILT_IN_AGENT_PERSONAS.builder), "workspace-write");
+    assert.equal(agentPersonaAccess(BUILT_IN_AGENT_PERSONAS.publisher), undefined);
+    assert.equal(agentPersonaAccess(BUILT_IN_AGENT_PERSONAS.critic), "read-only");
   });
 });
 

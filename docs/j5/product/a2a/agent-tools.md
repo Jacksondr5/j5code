@@ -87,7 +87,7 @@ the new agent what it should do first and whether it should reply to you. Choose
 for the work in the brief, and reasoning if the model has a reasoning option; see
 orchestrator_capabilities for what's available. To run
 a persona from j5_list_personas, set `persona` to its id: the spawn gets that persona's instructions
-and runtime policy, and provider, model, and reasoning must be one of that persona's ordered model entries. Without a persona it runs in your permission and interaction modes, or in narrower ones you
+and access level, and provider, model, and reasoning must be one of that persona's ordered model entries. Without a persona it runs in your permission and interaction modes, or in narrower ones you
 set with runtime_mode and interaction_mode. Without a persona its model and reasoning level must be
 ones the project's Models for custom members lists allow; an ineligible one is refused with the
 eligible ones. Attach files to the brief with attachments. Choose its workspace every time (see the

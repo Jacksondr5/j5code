@@ -32,6 +32,7 @@ import {
   agentPersonaPolicyDrivers,
   AGENT_PERSONA_POLICY_OPTIONS,
   agentPersonaPolicyNote,
+  agentPersonaEntryDriver,
   defaultAgentPersonaModelRoute,
   agentPersonaModelChoices,
   withAgentPersonaReasoning,
@@ -275,7 +276,12 @@ it("offers editing only for imported entries with server-provided editable detai
   expect(
     presentAgentPersonaCatalog({
       personas: [
-        { ...persona, imported: true, editable: { definitionDigest: "a".repeat(64), modelRoute } },
+        {
+          ...persona,
+          access: "read-only",
+          imported: true,
+          editable: { definitionDigest: "a".repeat(64), modelRoute },
+        },
       ],
     })[0]?.edit,
   ).toEqual({
@@ -284,7 +290,7 @@ it("offers editing only for imported entries with server-provided editable detai
     modelRouteFormat: "ordered",
     displayName: persona.displayName,
     description: persona.description,
-    authorityPolicy: persona.defaultAuthorityPolicy,
+    access: "read-only",
     modelRoute,
   });
   const choices = agentPersonaModelChoices([], modelRoute);
@@ -709,11 +715,11 @@ describe("personal agent authoring", () => {
       "Sandboxed on Codex and Claude.",
     );
     expect(agentPersonaPolicyNote(readOnly, [target("cursor"), target("codex")])).toBe(
-      "Sandboxed on Codex and Claude. Cursor routes won't launch with this policy.",
+      "Sandboxed on Codex and Claude. Cursor routes won't launch with this access level.",
     );
     expect(
       agentPersonaPolicyNote(agentPersonaPolicyDrivers(catalog, "publish-only"), [target("codex")]),
-    ).toBe("No provider can sandbox this policy yet, so it won't launch.");
+    ).toBe("No provider can sandbox this access level yet, so it won't launch.");
     const fullAccess = agentPersonaPolicyDrivers(
       {
         personas: [],
@@ -730,7 +736,7 @@ describe("personal agent authoring", () => {
       "Unsandboxed: runs with full access on Codex and Cursor.",
     );
     expect(agentPersonaPolicyNote(fullAccess, [target("claudeAgent")], "full-access")).toBe(
-      "Unsandboxed: runs with full access on Codex and Cursor. Claude routes won't launch with this policy.",
+      "Unsandboxed: runs with full access on Codex and Cursor. Claude routes won't launch with this access level.",
     );
     // An older server sends no table; the editor says nothing rather than guessing.
     expect(
@@ -747,6 +753,7 @@ it("prefills a duplicate with the source content and a fresh name and ID", () =>
       displayName: "Scout",
       description: "Collects evidence.",
       instructions: "# Scout",
+      access: "read-only",
       authority: { defaultPolicy: "read-only", allowedPolicies: ["read-only", "critic-review"] },
       modelRoute: [
         {
@@ -766,7 +773,7 @@ it("prefills a duplicate with the source content and a fresh name and ID", () =>
     id: "scout-copy",
     description: "Collects evidence.",
     instructions: "# Scout",
-    authorityPolicy: "read-only",
+    access: "read-only",
     modelRoute: [
       { driver: ProviderDriverKind.make("codex"), model: "gpt-5.6-terra", reasoningEffort: "high" },
       {
@@ -802,12 +809,13 @@ it("labels the full-access policy and offers it in the editor", () => {
       displayName: "Operator",
       description: "Operates.",
       instructions: "# Operator",
+      access: "full-access",
       authority: { defaultPolicy: "full-access", allowedPolicies: ["full-access"] },
       modelRoute: [
         { driver: ProviderDriverKind.make("codex"), model: "m", reasoningEffort: "high" },
         { driver: ProviderDriverKind.make("cursor"), model: "m", reasoningEffort: "high" },
       ],
-    }).authorityPolicy,
+    }).access,
   ).toBe("full-access");
 });
 
@@ -885,7 +893,10 @@ describe("a policy this app does not know", () => {
 
   it("costs one unsupported row, not the catalog or the shell snapshot", () => {
     const decoded = decodeCatalogJson({
-      personas: [entry("scout", "read-only"), entry("future", invented)],
+      personas: [
+        { ...entry("scout", "read-only"), access: "read-only" },
+        entry("future", invented),
+      ],
       policyEnforcement: [
         { policy: "read-only", drivers: ["codex"] },
         { policy: invented, drivers: ["codex"] },
@@ -893,7 +904,7 @@ describe("a policy this app does not know", () => {
     });
     const [known, future] = presentAgentPersonaCatalog(decoded);
     expect(known).toMatchObject({ availability: "available", blockedReasons: [] });
-    expect(known?.edit?.authorityPolicy).toBe("read-only");
+    expect(known?.edit?.access).toBe("read-only");
     expect(future).toMatchObject({
       availability: "unsupported",
       availabilityLabel: "Unsupported",
@@ -981,7 +992,7 @@ describe("a policy this app does not know", () => {
         authority: { defaultPolicy: invented, allowedPolicies: [invented] },
         modelRoute,
       }),
-    ).toThrow(`Runtime policy "${invented}" is not supported by this app version.`);
+    ).toThrow("Update the environment to duplicate this persona with its access level.");
   });
 });
 
@@ -1237,6 +1248,7 @@ it("edits and duplicates the complete ordered list without using the legacy summ
       {
         ...persona,
         imported: true,
+        access: "read-only",
         orderedEditable: { definitionDigest: "a".repeat(64), modelRoute: models },
       },
     ],
@@ -1249,6 +1261,7 @@ it("edits and duplicates the complete ordered list without using the legacy summ
     displayName: persona.displayName,
     description: persona.description,
     instructions: "Review",
+    access: "read-only" as const,
     authority: { defaultPolicy: "read-only", allowedPolicies: ["read-only"] },
     modelRoute: [
       { driver: ProviderDriverKind.make("codex"), model: "summary", reasoningEffort: "high" },
@@ -1416,4 +1429,28 @@ it("labels blocked entries with provider names, ambiguous instance IDs and reaso
   expect(row.blockedReasons).toEqual([
     "Entry 1 · Claude limited (low): provider is at its usage limit",
   ]);
+});
+
+it("offers only three access levels and resolves each model entry's enforcing driver", () => {
+  expect(AGENT_PERSONA_POLICY_OPTIONS.map(({ value }) => value)).toEqual([
+    "read-only",
+    "workspace-write",
+    "full-access",
+  ]);
+  const provider = {
+    instanceId: ProviderInstanceId.make("claude-account"),
+    driver: ProviderDriverKind.make("claudeAgent"),
+  };
+  expect(agentPersonaEntryDriver({ instanceId: provider.instanceId, model: "m" }, [provider])).toBe(
+    "claudeAgent",
+  );
+  expect(
+    agentPersonaEntryDriver({ instanceId: ProviderInstanceId.make("missing"), model: "m" }, []),
+  ).toBeUndefined();
+  expect(
+    agentPersonaEntryDriver(
+      { driver: ProviderDriverKind.make("codex"), model: "m", reasoningEffort: "high" },
+      [],
+    ),
+  ).toBe("codex");
 });

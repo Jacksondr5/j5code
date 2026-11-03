@@ -26,41 +26,6 @@ export type { AgentPersonaId };
 export type AgentArtifactId = string;
 export type AgentAuthorityPolicyId = AgentPersonaAuthorityPolicy;
 
-export interface AgentAuthorityRules {
-  readonly workspace:
-    | "read-only"
-    | "write"
-    | "diagnostic-write"
-    | "publication-only"
-    | "unrestricted";
-}
-
-/** The workspace access each policy asks a provider sandbox for. */
-export const AGENT_AUTHORITY_RULES = {
-  "read-only": {
-    workspace: "read-only",
-  },
-  "workspace-write": {
-    workspace: "write",
-  },
-  "critic-review": {
-    workspace: "read-only",
-  },
-  "critic-fix": {
-    workspace: "write",
-  },
-  diagnostic: {
-    workspace: "diagnostic-write",
-  },
-  "publish-only": {
-    workspace: "publication-only",
-  },
-  // No J5 restriction: each driver applies its native full-access behavior.
-  "full-access": {
-    workspace: "unrestricted",
-  },
-} as const satisfies Record<AgentAuthorityPolicyId, AgentAuthorityRules>;
-
 const NonEmpty = TrimmedNonEmptyString;
 const AgentModelTarget = AgentPersonaModelTarget;
 export type AgentModelTarget = typeof AgentModelTarget.Type;
@@ -157,8 +122,5 @@ export const getBuiltInAgentPersona = (id: string) => {
   if (!definition) throw new Error(`Unknown agent persona: ${id}.`);
   return definition;
 };
-
-export const getAgentAuthorityRules = (id: AgentAuthorityPolicyId): AgentAuthorityRules =>
-  AGENT_AUTHORITY_RULES[id];
 
 export const listBuiltInAgentPersonas = () => Object.values(BUILT_IN_AGENT_PERSONAS);

@@ -413,6 +413,27 @@ describe("folder-backed persona library", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("refuses a workspace-write snapshot on Claude", () =>
+    Effect.gen(function* () {
+      const { library } = yield* fixture;
+      const definition = decodeAgentPersonaDefinition({
+        ...custom,
+        authority: undefined,
+        access: "workspace-write",
+      });
+      const assignment = {
+        ...assignmentFor(yield* library.snapshot(definition)),
+        authorityPolicy: "workspace-write" as const,
+        resolvedDriver: ProviderDriverKind.make("claudeAgent"),
+      };
+      const error = yield* resolveAgentPersonaRuntime(
+        { agentPersonaAssignment: assignment, runtimeMode: "full-access" },
+        library,
+      ).pipe(Effect.flip);
+      assert.include(String(error), "runtime permissions are unsupported");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("continues a saved critic-fix worker without the retired allowed-policy check", () =>
     Effect.gen(function* () {
       const { library, fs, path, stateDir } = yield* fixture;
@@ -588,7 +609,7 @@ describe("folder-backed persona library", () => {
           displayName: custom.displayName,
           description: custom.description,
           instructions: custom.instructions,
-          authorityPolicy: "read-only",
+          access: "read-only",
           modelRoute: custom.modelRoute,
         })
         .pipe(Effect.flip);
@@ -601,7 +622,7 @@ describe("folder-backed persona library", () => {
         displayName: "Edited ordered persona",
         description: definition.description,
         instructions: definition.instructions,
-        authorityPolicy: "read-only",
+        access: "read-only",
         modelRouteFormat: "ordered",
         modelRoute: [...definition.modelRoute].reverse(),
       });
@@ -1014,7 +1035,8 @@ describe("editing imported agents", () => {
     displayName: definition.displayName,
     instructions: definition.instructions,
     description: definition.description,
-    authorityPolicy: definition.authority.defaultPolicy,
+    access: "read-only",
+    modelRouteFormat: "ordered",
     modelRoute: definition.modelRoute,
   });
 
@@ -1028,8 +1050,11 @@ describe("editing imported agents", () => {
       const file = path.join(stateDir, "imported-agent-personas.json");
       const before = yield* fs.readFileString(file);
       for (const authorityPolicy of ["diagnostic", "publish-only"] as const) {
-        const error = yield* library.editImported({ ...edit(), authorityPolicy }).pipe(Effect.flip);
-        assert.include(String(error), "read-only, workspace-write, or full-access");
+        const error = yield* library
+          // @ts-expect-error untyped input must also fail before writing.
+          .editImported({ ...edit(), access: authorityPolicy })
+          .pipe(Effect.flip);
+        assert.include(String(error), "Invalid agent details");
         assert.equal(yield* fs.readFileString(file), before);
         assert.deepEqual(
           (yield* library.load()).map(({ id }) => id),
@@ -1055,7 +1080,7 @@ describe("editing imported agents", () => {
           ...edit(),
           displayName: "Edited Researcher",
           description: "Edited description",
-          authorityPolicy: "workspace-write",
+          access: "workspace-write",
           modelRoute: [
             {
               driver: ProviderDriverKind.make("codex"),
@@ -1069,14 +1094,15 @@ describe("editing imported agents", () => {
         const restarted = createAgentPersonaLibrary({ fs, path, stateDir });
         const catalog = yield* restarted.catalog();
         const changed = catalog.definitions.find(({ id }) => id === custom.id)!;
+        const { authority: _legacyAuthority, ...details } = custom;
         assert.deepEqual(
           changed,
           decodeAgentPersonaDefinition({
-            ...custom,
+            ...details,
             displayName: update.displayName,
             description: update.description,
             version: custom.version + 1,
-            authority: { defaultPolicy: "workspace-write", allowedPolicies: ["workspace-write"] },
+            access: "workspace-write",
             modelRoute: update.modelRoute,
           }),
         );
@@ -1131,7 +1157,7 @@ describe("editing imported agents", () => {
   );
 
   it.effect(
-    "requires an imported copy and retains allowed policy choices when the default is unchanged",
+    "requires an imported copy and replaces legacy policy choices with one access level",
     () =>
       Effect.gen(function* () {
         const { library, write } = yield* fixture;
@@ -1149,7 +1175,8 @@ describe("editing imported agents", () => {
           replaceExisting: true,
         });
         yield* library.editImported({ ...edit(definition), displayName: "New name" });
-        assert.deepEqual((yield* library.load())[0]?.authority, definition.authority);
+        assert.equal((yield* library.load())[0]?.authority, undefined);
+        assert.equal((yield* library.load())[0]?.access, "read-only");
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });
@@ -1273,7 +1300,7 @@ describe("confirmed import replacement", () => {
         displayName: "Concurrent edit",
         description: custom.description,
         instructions: custom.instructions,
-        authorityPolicy: custom.authority.defaultPolicy,
+        access: "read-only",
         modelRoute: custom.modelRoute,
       });
       yield* library.importFiles({
@@ -1540,11 +1567,14 @@ describe("personal agents", () => {
         modelRoute: custom.modelRoute,
       };
       for (const authorityPolicy of ["diagnostic", "publish-only"] as const) {
-        const error = yield* library.createPersona({ ...input, authorityPolicy }).pipe(Effect.flip);
-        assert.include(String(error), "read-only, workspace-write, or full-access");
+        const error = yield* library
+          // @ts-expect-error untyped input must also fail before writing.
+          .createPersona({ ...input, access: authorityPolicy })
+          .pipe(Effect.flip);
+        assert.include(String(error), "Invalid agent details");
         assert.isFalse(yield* fs.exists(path.join(stateDir, "imported-agent-personas.json")));
       }
-      yield* library.createPersona({ ...input, authorityPolicy: "read-only" });
+      yield* library.createPersona({ ...input, access: "read-only" });
       assert.deepEqual(
         (yield* library.load()).map(({ id }) => id),
         [custom.id],
@@ -1568,7 +1598,7 @@ describe("personal agents", () => {
           description: custom.description,
           instructions: custom.instructions,
           modelRoute: custom.modelRoute,
-          authorityPolicy: "read-only",
+          access: "read-only",
         })
         .pipe(Effect.flip);
       assert.include(String(error), "already exists");
@@ -1589,7 +1619,7 @@ describe("personal agents", () => {
           displayName: "My Reviewer",
           description: "Reviews my changes.",
           instructions: "# My Reviewer\n\nReview carefully.",
-          authorityPolicy: "read-only",
+          access: "read-only",
           modelRoute: custom.modelRoute,
         });
         assert.equal(created.personaId, "my-reviewer");
@@ -1598,10 +1628,8 @@ describe("personal agents", () => {
         const definition = catalog.definitions.find(({ id }) => id === "my-reviewer");
         assert.isTrue(catalog.importedIds.includes("my-reviewer"));
         assert.isFalse(catalog.disabledIds.includes("my-reviewer"));
-        assert.deepEqual(definition?.authority, {
-          defaultPolicy: "read-only",
-          allowedPolicies: ["read-only"],
-        });
+        assert.equal(definition?.access, "read-only");
+        assert.equal(definition?.authority, undefined);
         assert.equal(definition?.outputArtifact, undefined);
         assert.equal(definition?.acceptedInput, undefined);
         assert.equal(definition?.version, 1);
@@ -1612,7 +1640,7 @@ describe("personal agents", () => {
             displayName: "Again",
             description: "Again.",
             instructions: "Again.",
-            authorityPolicy: "read-only",
+            access: "read-only",
             modelRoute: custom.modelRoute,
           })
           .pipe(Effect.flip);
@@ -1623,7 +1651,7 @@ describe("personal agents", () => {
           displayName: "Scout",
           description: "My research persona.",
           instructions: "Collect evidence.",
-          authorityPolicy: "read-only",
+          access: "read-only",
           modelRoute: custom.modelRoute,
         });
         assert.equal(scout.personaId, "scout");
@@ -1652,7 +1680,7 @@ describe("reading and editing definitions", () => {
         displayName: "My Reviewer",
         description: "Reviews my changes.",
         instructions: "Review carefully.",
-        authorityPolicy: "read-only",
+        access: "read-only",
         modelRoute: custom.modelRoute,
       });
       const before = yield* library.read(created.personaId);
@@ -1662,7 +1690,8 @@ describe("reading and editing definitions", () => {
         displayName: before.displayName,
         description: before.description,
         instructions: "Review carefully.\n\nAlways cite file paths.",
-        authorityPolicy: "read-only",
+        access: "read-only",
+        modelRouteFormat: "ordered",
         modelRoute: custom.modelRoute,
       });
       const after = yield* library.read(created.personaId);

@@ -7,11 +7,7 @@ import {
   type AgentPersonaCreateDraft,
 } from "@t3tools/client-runtime/j5/agent-personas";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import type {
-  AgentPersonaAuthorityPolicy,
-  AgentPersonaModelEntry,
-  EnvironmentId,
-} from "@t3tools/contracts";
+import type { AgentPersonaAccess, AgentPersonaModelEntry, EnvironmentId } from "@t3tools/contracts";
 import { useState } from "react";
 
 import { Button } from "../../components/ui/button";
@@ -59,7 +55,7 @@ export function AgentCreateDialog(props: {
     idEdited: boolean;
     description: string;
     instructions: string;
-    authorityPolicy: AgentPersonaAuthorityPolicy;
+    access: AgentPersonaAccess;
     modelRoute: ReadonlyArray<AgentPersonaModelEntry> | null;
   }>(
     props.initial
@@ -70,7 +66,7 @@ export function AgentCreateDialog(props: {
           idEdited: false,
           description: "",
           instructions: "",
-          authorityPolicy: "read-only",
+          access: "read-only",
           modelRoute: null,
         },
   );
@@ -99,7 +95,7 @@ export function AgentCreateDialog(props: {
         displayName: draft.displayName.trim(),
         description: draft.description.trim(),
         instructions: draft.instructions,
-        authorityPolicy: draft.authorityPolicy,
+        access: draft.access,
         modelRoute,
       },
     });
@@ -189,7 +185,7 @@ export function AgentCreateDialog(props: {
                 />
               </div>
               <span className="text-xs text-muted-foreground">
-                Markdown. Instructions describe behavior; the runtime policy below is what is
+                Markdown. Instructions describe behavior; the access level below is what is
                 enforced.
               </span>
             </label>
@@ -200,7 +196,7 @@ export function AgentCreateDialog(props: {
             ) : (
               <AgentRoutePolicyFields
                 environmentId={props.environmentId}
-                value={{ authorityPolicy: draft.authorityPolicy, modelRoute }}
+                value={{ access: draft.access, modelRoute }}
                 disabled={saving}
                 onChange={(next) => setDraft({ ...draft, ...next })}
               />

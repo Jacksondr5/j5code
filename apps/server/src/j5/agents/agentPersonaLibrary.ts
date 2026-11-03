@@ -26,7 +26,6 @@ import { ServerConfig } from "../../config.ts";
 import {
   decodeAgentPersonaDefinition,
   agentPersonaAccess,
-  mapAgentPersonaPolicy,
   AGENT_PERSONA_ACCESS_REPAIR,
   agentPersonaLegacyEditable,
   getBuiltInAgentPersona,
@@ -632,17 +631,8 @@ export function createAgentPersonaLibrary(storage?: {
         displayName: input.displayName,
         description: input.description,
         instructions: input.instructions,
-        ...(original.access === undefined
-          ? {
-              authority:
-                input.authorityPolicy === original.authority!.defaultPolicy
-                  ? original.authority
-                  : {
-                      defaultPolicy: input.authorityPolicy,
-                      allowedPolicies: [input.authorityPolicy],
-                    },
-            }
-          : { access: mapAgentPersonaPolicy(input.authorityPolicy) }),
+        authority: undefined,
+        access: input.access,
         modelRoute: input.modelRoute,
       }),
     ).pipe(
@@ -650,8 +640,6 @@ export function createAgentPersonaLibrary(storage?: {
         (cause) => new AgentPersonaLibraryError({ message: "Invalid agent details.", cause }),
       ),
     );
-    if (agentPersonaAccess(updated) === undefined)
-      return yield* new AgentPersonaLibraryError({ message: AGENT_PERSONA_ACCESS_REPAIR });
     const encoded = yield* encodeDefinition(updated);
     if (new TextEncoder().encode(encoded).byteLength > AGENT_PERSONA_IMPORT_MAX_BYTES)
       return yield* new AgentPersonaLibraryError({ message: "Persona definition exceeds 64 KiB." });
@@ -692,10 +680,7 @@ export function createAgentPersonaLibrary(storage?: {
         displayName: input.displayName,
         description: input.description,
         instructions: input.instructions,
-        authority: {
-          defaultPolicy: input.authorityPolicy,
-          allowedPolicies: [input.authorityPolicy],
-        },
+        access: input.access,
         modelRoute: input.modelRoute,
       }),
     ).pipe(
@@ -703,8 +688,6 @@ export function createAgentPersonaLibrary(storage?: {
         (cause) => new AgentPersonaLibraryError({ message: "Invalid agent details.", cause }),
       ),
     );
-    if (agentPersonaAccess(definition) === undefined)
-      return yield* new AgentPersonaLibraryError({ message: AGENT_PERSONA_ACCESS_REPAIR });
     const encoded = yield* encodeDefinition(definition);
     if (new TextEncoder().encode(encoded).byteLength > AGENT_PERSONA_IMPORT_MAX_BYTES)
       return yield* new AgentPersonaLibraryError({ message: "Persona definition exceeds 64 KiB." });
