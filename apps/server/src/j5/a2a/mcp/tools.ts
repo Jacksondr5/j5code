@@ -320,7 +320,7 @@ export const J5SpawnAgentInput = Schema.Struct({
   reasoning: Schema.optional(
     NonEmptyString.annotate({
       description:
-        "Required when the model has a reasoning option in orchestrator_capabilities: one with string values, such as effort or reasoningEffort. Pass one of those values. Omit it for any other model; a true/false option such as thinking is not a reasoning option.",
+        "Required when the model has a reasoning option in orchestrator_capabilities: effort, reasoningEffort, reasoning, variant, or a thinking option with string values. Pass one of its values. Omit it for any other model; a true/false thinking option is not one.",
     }),
   ),
   workspace: J5SpawnAgentWorkspace.annotate({
