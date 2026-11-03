@@ -263,7 +263,7 @@ const makeLayer = (daemon: boolean) =>
           member?.notStarted === false
             ? seatThread.runs.toSorted((a, b) => a.ordinal - b.ordinal)[0]
             : seatThread.runs.find((candidate) => isFirstTurnRun(seat, candidate));
-        // Read after the run, so a run that has failed already has its error item here.
+        // Read after the run, so the items are at least as new as its status.
         const items = verdictReadsItems(run)
           ? yield* threads.getThreadRecords(seat.threadId, ["turnItems"], {
               turnItemRunId: run.id,
