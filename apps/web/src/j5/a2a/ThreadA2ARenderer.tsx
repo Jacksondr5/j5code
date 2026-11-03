@@ -1,19 +1,37 @@
 import {
   j5MessageAuthorName,
   j5SenderThreadRef,
+  nameJ5NoticeParticipants,
 } from "@t3tools/client-runtime/j5/participant-identity";
 import {
-  isJ5DeliveryMessage,
   participantIdsForJ5UserMessage,
   presentJ5UserMessage,
   resolveJ5UserMessagePresentation,
+  type J5NoticeKind,
+  type J5PromptKind,
+  type J5UserMessagePresentation,
 } from "@t3tools/client-runtime/j5/user-message";
 import type { ScopedThreadRef } from "@t3tools/contracts";
-import { Link, useNavigate } from "@tanstack/react-router";
-import { BotIcon } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import {
+  BellIcon,
+  BotIcon,
+  CircleCheckIcon,
+  CircleHelpIcon,
+  GitBranchIcon,
+  ListChecksIcon,
+  type LucideIcon,
+  MailWarningIcon,
+  MessageCircleOffIcon,
+  RotateCwIcon,
+  ShrinkIcon,
+  UndoIcon,
+  UnlinkIcon,
+} from "lucide-react";
 import { use, type ReactNode } from "react";
 
 import { TimelineRowCtx } from "../../components/chat/timelineRowContext";
+import { PullRequestGlyph } from "../../components/pullRequest/pullRequestIcons";
 import { Badge } from "../../components/ui/badge";
 import { InlineButton } from "../../components/ui/button";
 import { useQuietThreadShell } from "../../state/entities";
@@ -22,12 +40,14 @@ import type { ResolvedUserMessageContext } from "~/lib/composerContextRecords";
 import type { ChatMessage } from "~/types";
 import { renderCrewNotice } from "../crew/CrewNoticeRenderer";
 import { useConnectionAccess } from "../sharing/access";
+import { J5NoticeActions, J5NoticeDetailText, J5NoticeLine } from "./J5NoticeLine";
 import { PersonAvatar } from "../sharing/PersonAvatar";
 import {
   renderSharedConversationNote,
   SharedMessageAuthorLine,
 } from "../sharing/SharedConversationCards";
 
+export { J5OpenThread as J5OpenSenderThread } from "./J5NoticeLine";
 export { J5_A2A_DELIVERY_MESSAGE_PREFIX } from "@t3tools/client-runtime/j5/user-message";
 export {
   formatJ5QueuedDelivery as formatThreadA2AQueuedDelivery,
@@ -46,60 +66,118 @@ export interface ThreadA2ADeliveryCompositionInput {
   /** The shown thread, for notices that open seats and render markdown. */
   readonly threadRef?: ScopedThreadRef | null | undefined;
   readonly markdownCwd?: string | undefined;
+  /** What upstream's row gives a message: J5 keeps them on the messages upstream writes. */
+  readonly upstreamRow?: {
+    readonly marker: ReactNode;
+    readonly status: ReactNode;
+    readonly revert: ReactNode;
+  };
 }
 
 export function participantIdsForThreadA2ADelivery(message: ChatMessage): ReadonlyArray<string> {
   return participantIdsForJ5UserMessage(message);
 }
 
-function RawEnvelopeExpander({ rawEnvelope }: { readonly rawEnvelope: string }) {
+const NOTICE_ICONS: Partial<Record<J5NoticeKind, LucideIcon>> = {
+  silence: MessageCircleOffIcon,
+  "not-delivered": MailWarningIcon,
+  "exchange-dropped": UnlinkIcon,
+  "exchange-withdrawn": UndoIcon,
+  "handoff-nudge": BellIcon,
+  "restart-continuation": RotateCwIcon,
+  "pr-watch": PullRequestGlyph.pullRequest,
+  "delegated-completion": CircleCheckIcon,
+  "background-task": CircleCheckIcon,
+  "worktree-continuation": GitBranchIcon,
+};
+
+// Upstream's row offers these on the messages upstream writes; J5's own notices never had them.
+const UPSTREAM_WRITTEN: ReadonlySet<J5NoticeKind> = new Set([
+  "restart-continuation",
+  "pr-watch",
+  "delegated-completion",
+  "background-task",
+  "worktree-continuation",
+]);
+
+function J5PlatformNotice(props: {
+  readonly notice: Extract<J5UserMessagePresentation, { group: "notice" }>;
+  readonly input: ThreadA2ADeliveryCompositionInput;
+}) {
+  const { participantLabels } = use(TimelineRowCtx);
+  const { notice, input } = props;
+  const named = (text: string) =>
+    nameJ5NoticeParticipants(text, notice.participantIds, participantLabels);
+  const upstreamRow = UPSTREAM_WRITTEN.has(notice.kind) ? input.upstreamRow : undefined;
+  const hasActions = notice.link !== null || Boolean(upstreamRow?.revert);
   return (
-    <details className="mt-2 rounded-md border border-border/60 bg-background/55" open>
-      <summary className="cursor-pointer px-2.5 py-1.5 text-xs font-medium text-muted-foreground">
-        Show raw envelope
-      </summary>
-      <pre className="overflow-x-auto border-t border-border/50 p-2.5 text-xs leading-relaxed whitespace-pre-wrap break-words">
-        {rawEnvelope}
-      </pre>
-    </details>
+    <J5NoticeLine
+      kind={notice.kind}
+      icon={NOTICE_ICONS[notice.kind] ?? BellIcon}
+      summary={named(notice.summary ?? "")}
+      timestampLabel={input.timestampLabel}
+      marker={upstreamRow?.marker}
+      status={upstreamRow?.status}
+    >
+      {notice.detail !== null || hasActions ? (
+        <>
+          {notice.detail === null ? null : <J5NoticeDetailText text={named(notice.detail)} />}
+          {hasActions ? (
+            <J5NoticeActions>
+              {notice.link === null ? null : (
+                <InlineButton
+                  tone="muted"
+                  render={<a href={notice.link.url} target="_blank" rel="noreferrer" />}
+                >
+                  {notice.link.label}
+                </InlineButton>
+              )}
+              {upstreamRow?.revert}
+            </J5NoticeActions>
+          ) : null}
+        </>
+      ) : null}
+    </J5NoticeLine>
   );
 }
 
 /**
  * J5's platform notices (group 4), drawn in place of upstream's user row: Crew notices, a shared
- * conversation's note, and the platform's notices about deliveries. Every other user message,
- * agents' letters and Inbox replies included, is upstream's row (`useJ5UserMessagePresentation`).
+ * conversation's note, and every other notice the classifier has a summary for. Every other user
+ * message is upstream's row (`useJ5UserMessagePresentation`), prompts included (`j5PromptRow`), and
+ * so is a notice nothing here can read.
  */
 export function renderThreadA2ADelivery(props: ThreadA2ADeliveryCompositionInput): ReactNode {
   const crewNotice = renderCrewNotice(props);
   if (crewNotice !== null) return crewNotice;
   const sharedNote = renderSharedConversationNote(props);
   if (sharedNote !== null) return sharedNote;
-  if (!isJ5DeliveryMessage(props.message) || props.message.createdBy !== "system") return null;
-
   const presentation = presentJ5UserMessage(props.message);
-  if (presentation?.group === "notice" && presentation.kind === "silence") {
-    return (
-      <section className="text-xs text-muted-foreground" data-j5-a2a-renderer="silence">
-        <span data-j5-a2a-silence-summary>
-          ⚠ {presentation.summary}
-          {props.timestampLabel ? ` · ${props.timestampLabel}` : null}
-        </span>
-      </section>
-    );
-  }
+  if (presentation?.group !== "notice" || presentation.summary === null) return null;
+  return <J5PlatformNotice notice={presentation} input={props} />;
+}
 
-  // A platform notice this client cannot read yet keeps today's raw card until the notices are
-  // redrawn: upstream's row would draw it as the reader's own message.
-  return (
-    <section
-      className="rounded-md border border-border/60 bg-muted/20 p-2.5"
-      data-j5-a2a-renderer="raw"
-    >
-      <p className="text-xs font-medium text-muted-foreground">Raw A2A delivery</p>
-      <RawEnvelopeExpander rawEnvelope={props.message.text} />
-    </section>
-  );
+const PROMPT_ICONS: Record<Exclude<J5PromptKind, "automation">, LucideIcon> = {
+  "playbook-step": ListChecksIcon,
+  "native-question": CircleHelpIcon,
+  "delegated-question": CircleHelpIcon,
+  compaction: ShrinkIcon,
+};
+
+/**
+ * What upstream's Automation row shows for J5's other platform prompts (group 5). Null for anything
+ * else, an automation run included: that row reads its own.
+ */
+export function j5PromptRow(message: ChatMessage) {
+  const j5 = presentJ5UserMessage(message);
+  if (j5?.group !== "prompt" || j5.kind === "automation") return null;
+  return {
+    text: j5.text,
+    scheduledTaskId: undefined,
+    label: j5.label,
+    summary: j5.preview,
+    icon: PROMPT_ICONS[j5.kind],
+  };
 }
 
 export function literalUserMessageContext(text: string): ResolvedUserMessageContext {
@@ -226,26 +304,5 @@ export function J5MessageAuthorLine({
         </Badge>
       ) : null}
     </p>
-  );
-}
-
-/**
- * The expanded row's "Open thread" for a message J5 read. It opens the sender's resolved thread,
- * which upstream's footer cannot reach for a spawn brief or a peer's message (no `senderThreadId`).
- */
-export function J5OpenSenderThread({ threadRef }: { readonly threadRef: ScopedThreadRef }) {
-  const navigate = useNavigate();
-  return (
-    <InlineButton
-      onClick={() =>
-        void navigate({
-          to: "/$environmentId/$threadId",
-          params: buildThreadRouteParams(threadRef),
-        })
-      }
-      tone="muted"
-    >
-      Open thread
-    </InlineButton>
   );
 }

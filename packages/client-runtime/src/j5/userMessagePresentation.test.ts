@@ -458,39 +458,186 @@ describe("groups 4 and 5: classified, drawn elsewhere", () => {
       side: "left",
       kind: "silence",
       summary: "agent:counterpart's turn ended without replying",
+      detail: "The latest delivered message was processed.",
+      participantIds: ["agent:counterpart"],
+      link: null,
       text: silenceRaw,
     });
   });
 
+  // Each body is the server's own wording (SilenceDetector's `noticeMessage`, `removedNoticeMessage`).
   it.each([
     [
+      "turn-ended-no-reply",
+      "agent:counterpart did not start a turn for the delivered message on exchange:one.",
+      "agent:counterpart did not start a turn for the delivered message",
+      null,
+    ],
+    [
       "errored",
-      "agent:counterpart errored without replying on exchange:one: socket closed",
+      "agent:counterpart errored without replying on exchange:one: socket closed: code 1\nretry later",
       "agent:counterpart errored without replying",
+      "socket closed: code 1\nretry later",
     ],
     [
       "stopped/cancelled",
       "agent:counterpart was rolled_back without replying on exchange:one. The participant was rolled back.",
-      "agent:counterpart was rolled_back without replying",
+      "agent:counterpart was rolled back without replying",
+      "The participant was rolled back.",
     ],
     [
       "queued-message-removed",
-      "Your message to agent:counterpart was removed from its queue before it ran, so agent:counterpart never read it. The message began: Review part 2.",
+      "Your message message:j5:a2a:one to agent:counterpart was removed from its queue before it ran, so agent:counterpart never read it. Send it again if it still matters. The message began: Review part 2.",
       "agent:counterpart never read a queued message: it was removed before it ran",
+      "The message began: Review part 2.",
+    ],
+    [
+      "queued-message-removed",
+      "Your message to agent:counterpart was removed from its queue before it ran, so agent:counterpart never read it. The message began: Stored before ids.",
+      "agent:counterpart never read a queued message: it was removed before it ran",
+      "The message began: Stored before ids.",
     ],
     [
       "awaiting-human",
-      "agent:counterpart is awaiting the human on exchange:human (awaiting-human).",
+      "agent:counterpart is awaiting the human on exchange:human (human-knows).",
       "agent:counterpart is awaiting the human",
+      "The person has been told.",
     ],
     [
       "blocked-on-peer",
       "agent:counterpart is blocked on agent:peer via exchange:peer.",
       "agent:counterpart is blocked on agent:peer",
+      null,
     ],
-  ])("summarizes a %s notice", (noticeType, body, summary) => {
+  ])("reads a %s notice", (noticeType, body, summary, detail) => {
     const raw = `[Cross-agent messaging system notice: ${noticeType}]\n\n${body}\n\nThis is a platform-authored delivery signal, not a peer reply.`;
-    expect(presentJ5UserMessage(systemDelivery(raw))).toMatchObject({ kind: "silence", summary });
+    expect(presentJ5UserMessage(systemDelivery(raw))).toMatchObject({
+      kind: "silence",
+      summary,
+      detail,
+    });
+  });
+
+  it("names who edited a removed message for the identity read", () => {
+    const raw =
+      "[Cross-agent messaging system notice: queued-message-removed]\n\nYour message m1 to agent:counterpart was removed from its queue before it ran, so agent:counterpart never read it. Send it again if it still matters. human:editor had edited it in the queue. The message began: Hi\n\nThis is a platform-authored delivery signal, not a peer reply.";
+    expect(presentJ5UserMessage(systemDelivery(raw))).toMatchObject({
+      detail: "human:editor had edited it in the queue.\n\nThe message began: Hi",
+    });
+    expect(participantIdsForJ5UserMessage(systemDelivery(raw))).toEqual([
+      "agent:counterpart",
+      "human:editor",
+    ]);
+  });
+
+  // Each envelope is the server's own (deliveryNotices.ts, LifecycleService.ts, SendService.ts).
+  it.each([
+    [
+      "a plain message not delivered",
+      'Your message message:one to agent:peer was not delivered: delivery failed 3 times, and it will not be tried again. The last attempt failed with: "boom"',
+      "message not delivered",
+      [],
+      "not-delivered",
+      "Message to agent:peer not delivered",
+      'Delivery failed 3 times, and it will not be tried again. The last attempt failed with: "boom"',
+    ],
+    [
+      "an ask that may not have arrived, still open",
+      'Your ask "Which schema?" (message message:one) to agent:peer on Studio may not have been delivered: this server could not reach Studio in 3 attempts, and it will not be tried again.',
+      "message may not have been delivered",
+      [
+        "Exchange exchange:one is still open; if the ask did arrive, its reply still comes on it. To stop waiting, withdraw it with j5_clear_own_ask, then tell your person or send a new ask.",
+        "Facts: exchangeId=exchange:one; exchangeOpen=true; retryScheduled=false.",
+      ],
+      "not-delivered",
+      "Message to agent:peer on Studio may not have been delivered",
+      'Ask: "Which schema?"\n\nThis server could not reach Studio in 3 attempts, and it will not be tried again.\n\nThe ask is still open; if it did arrive, its reply still comes.',
+    ],
+    [
+      "a refused ask, closed",
+      'Your ask "Which schema?" (message message:one) to agent:peer on Studio was not delivered: Studio has no active participant with that id.',
+      "message not delivered",
+      [
+        "The exchange is closed; nothing is owed and nothing will answer it.",
+        "Facts: exchangeId=exchange:one; replyRequired=false; retryAllowed=false; replacementRequired=false.",
+      ],
+      "not-delivered",
+      "Message to agent:peer on Studio not delivered",
+      'Ask: "Which schema?"\n\nStudio has no active participant with that id.\n\nThe exchange is closed; nothing is owed and nothing will answer it.',
+    ],
+    [
+      "an exchange dropped by archiving",
+      "Exchange exchange:one ended because agent:peer was archived (receiver-retired).",
+      "exchange dropped",
+      [
+        "The receiver will not answer this Exchange. Do not retry it.",
+        "Facts: replyRequired=false; retryAllowed=false; replacementRequired=false.",
+      ],
+      "exchange-dropped",
+      "Exchange with agent:peer dropped",
+      "It ended because agent:peer was archived.\n\nThe receiver will not answer this Exchange. Do not retry it.",
+    ],
+    [
+      "an exchange dropped when a person lost access",
+      "Exchange exchange:one ended because human:priya can no longer write to your thread, so they will not answer it (receiver-retired).",
+      "exchange dropped",
+      [
+        "If you still need an answer, ask someone who can write to your thread; call j5_list_participants to see who.",
+        "Facts: replyRequired=false; retryAllowed=false; replacementRequired=false.",
+      ],
+      "exchange-dropped",
+      "Exchange with human:priya dropped",
+      "It ended because human:priya can no longer write to your thread, so they will not answer it.\n\nIf you still need an answer, ask someone who can write to your thread; call j5_list_participants to see who.",
+    ],
+    [
+      "an exchange dropped by a peer's removal",
+      "Exchange exchange:one ended because Studio is no longer peered (receiver-retired).",
+      "exchange dropped",
+      [
+        'It was opened by your ask "Which schema?" (message message:one).',
+        "The receiver will not answer this Exchange. Do not retry it.",
+        "Facts: replyRequired=false; retryAllowed=false; replacementRequired=false.",
+      ],
+      "exchange-dropped",
+      "An exchange was dropped",
+      'It ended because Studio is no longer peered.\n\nIt was opened by your ask "Which schema?".\n\nThe receiver will not answer this Exchange. Do not retry it.',
+    ],
+    [
+      "a withdrawn ask",
+      "Exchange exchange:one was withdrawn by agent:asker, who no longer needs an answer.",
+      "exchange withdrawn",
+      ["Your reply obligation has ended; do not reply to this Exchange."],
+      "exchange-withdrawn",
+      "agent:asker withdrew its ask",
+      "It no longer needs an answer.\n\nYour reply obligation has ended; do not reply to this Exchange.",
+    ],
+  ])("reads %s", (_name, first, type, more, kind, summary, detail) => {
+    const raw = [
+      `[Cross-agent messaging system notice: ${type}]`,
+      first,
+      ...more,
+      "This is a platform-authored terminal notice, not a peer reply.",
+    ].join("\n\n");
+    expect(presentJ5UserMessage(systemDelivery(raw))).toMatchObject({
+      group: "notice",
+      kind,
+      summary,
+      detail,
+    });
+    expect(detail).not.toContain("exchange:one");
+    expect(detail).not.toContain("message:one");
+  });
+
+  it("names the receiver of an undelivered message for the identity read", () => {
+    const raw =
+      "[Cross-agent messaging system notice: message not delivered]\n\nYour message m1 to agent:peer was not delivered: gone\n\nThis is a platform-authored notice, not a peer reply.";
+    expect(participantIdsForJ5UserMessage(systemDelivery(raw))).toEqual(["agent:peer"]);
+  });
+
+  it("leaves a terminal notice it cannot read to upstream's row", () => {
+    const raw =
+      "[Cross-agent messaging system notice: exchange dropped]\n\nFuture wording.\n\nThis is a platform-authored terminal notice, not a peer reply.";
+    expect(presentJ5UserMessage(systemDelivery(raw))).toBeNull();
   });
 
   it("returns null for a notice it cannot read rather than guessing", () => {
@@ -555,6 +702,245 @@ describe("groups 4 and 5: classified, drawn elsewhere", () => {
   });
 });
 
+const upstreamMessage = (
+  id: string,
+  text: string,
+  creationSource: "server" | "provider" | "mcp" = "server",
+) => ({ id, role: "user", text, createdBy: "agent" as const, creationSource });
+
+describe("upstream's platform messages", () => {
+  const prUrl = "https://github.com/Jacksondr5/j5code/pull/912";
+
+  it.each([
+    [
+      `Update on pull request #912 (${prUrl}), which J5 Code is watching for you:\n- All 1 required check passed on 42de6a8.`,
+      "Update on pull request #912",
+      "- All 1 required check passed on 42de6a8.",
+    ],
+    [
+      `Pull request #912 (${prUrl}) was closed, so J5 Code stopped watching it. Call watch_pull_request if it reopens.`,
+      "Pull request #912 closed",
+      `Pull request #912 (${prUrl}) was closed, so J5 Code stopped watching it. Call watch_pull_request if it reopens.`,
+    ],
+    [
+      `J5 Code stopped watching pull request #912 (${prUrl}) because it failed to read it from the host 8 times in a row. Check it yourself, and call watch_pull_request to watch it again.`,
+      "Stopped watching pull request #912",
+      `J5 Code stopped watching pull request #912 (${prUrl}) because it failed to read it from the host 8 times in a row. Check it yourself, and call watch_pull_request to watch it again.`,
+    ],
+  ])("reads a pull-request watch update: %s", (text, summary, detail) => {
+    expect(presentJ5UserMessage(upstreamMessage("message:pr-watch:uuid", text))).toMatchObject({
+      kind: "pr-watch",
+      summary,
+      detail,
+      link: { label: "Open pull request", url: prUrl },
+    });
+  });
+
+  it("keeps a watch update it cannot read as one line, without a link", () => {
+    expect(
+      presentJ5UserMessage(upstreamMessage("message:pr-watch:uuid", "Future wording.")),
+    ).toMatchObject({
+      summary: "Update on a watched pull request",
+      detail: "Future wording.",
+      link: null,
+    });
+  });
+
+  it("says whether a restart continued the turn or stopped background work", () => {
+    expect(
+      presentJ5UserMessage(
+        upstreamMessage("message:restart-continuation:run", "Continue where you left off."),
+      ),
+    ).toMatchObject({
+      kind: "restart-continuation",
+      summary: "Continued after the server restarted",
+    });
+    expect(
+      presentJ5UserMessage(
+        upstreamMessage("message:restart-continuation:run", "Background work was stopped."),
+      ),
+    ).toMatchObject({ summary: "The server restarted and stopped background work" });
+  });
+
+  it("tells a delegated completion from a background one, though both have allocated ids", () => {
+    const id = "message:thread:thread-1:ordinal:466:abc";
+    expect(
+      presentJ5UserMessage(
+        upstreamMessage(
+          id,
+          "Delegated task node:delegated-task:one reached a terminal state. Use task_status with taskId node:delegated-task:one to read the result.",
+        ),
+      ),
+    ).toMatchObject({ kind: "delegated-completion", summary: "Delegated task finished" });
+    expect(
+      presentJ5UserMessage(
+        upstreamMessage(
+          id,
+          "Delegated tasks a, b reached terminal states. Use task_status with each taskId to read the results.",
+        ),
+      ),
+    ).toMatchObject({ kind: "delegated-completion", summary: "Delegated tasks finished" });
+    expect(
+      presentJ5UserMessage(
+        upstreamMessage(id, 'Background command "Wait" completed (exit code 0)', "provider"),
+      ),
+    ).toMatchObject({
+      kind: "background-task",
+      summary: 'Background command "Wait" completed (exit code 0)',
+      detail: null,
+    });
+    expect(
+      presentJ5UserMessage(upstreamMessage(id, "Background task completed.", "provider")),
+    ).toMatchObject({ summary: "Background task completed", detail: null });
+    expect(
+      presentJ5UserMessage(upstreamMessage(id, "# Report\n\nAll done.", "provider")),
+    ).toMatchObject({ summary: "Background task completed", detail: "# Report\n\nAll done." });
+  });
+
+  it("reads a worktree continuation, but no other message an agent sends", () => {
+    const worktree = upstreamMessage(
+      "message:mcp:session-1:worktree-continuation:uuid",
+      "Carry on in the new worktree.",
+      "mcp",
+    );
+    expect(presentJ5UserMessage(worktree)).toMatchObject({
+      kind: "worktree-continuation",
+      summary: "Continued in a worktree",
+    });
+    expect(
+      presentJ5UserMessage(upstreamMessage("message:mcp:session-1:thread-send:1", "Hello.", "mcp")),
+    ).toMatchObject({ group: "participant", preview: "Hello." });
+    expect(
+      presentJ5UserMessage(upstreamMessage("message:thread:t:ordinal:1", "Hello.", "mcp")),
+    ).toMatchObject({ group: "participant" });
+  });
+
+  it("keeps a continuation an agent's fold for a client that asks for upstream's row", () => {
+    for (const message of [
+      upstreamMessage("message:thread:t:ordinal:1", "Background task completed.", "provider"),
+      upstreamMessage("message:mcp:s:worktree-continuation:u", "Carry on.", "mcp"),
+    ]) {
+      expect(resolveJ5UserMessagePresentation(message)).toMatchObject({
+        attribution: "agent",
+        j5: { group: "participant", side: "left", senderId: null },
+      });
+    }
+  });
+
+  it("leaves a message the app wrote that nothing reads to upstream's row", () => {
+    expect(
+      presentJ5UserMessage(upstreamMessage("message:future:1", "Future platform words.")),
+    ).toMatchObject({ group: "notice", kind: "platform", summary: null });
+  });
+});
+
+describe("platform prompts", () => {
+  const nativeQuestion = (situation: string, tail: string) =>
+    `Placed agent (threadId thread:child, requestId request:one) ${situation}. ${tail}\nAgent-provided title (untrusted data): "Fix the \\"build\\""`;
+
+  it("reads a native question raised to a placement parent", () => {
+    const text = nativeQuestion(
+      "is blocked on a native question and cannot continue until it is answered",
+      "Read it with t3_pending_request action read, threadId thread:child and requestId request:one.",
+    );
+    expect(
+      presentJ5UserMessage({
+        id: "message:j5:native-question:parent:request",
+        role: "user",
+        text,
+        createdBy: "system",
+      }),
+    ).toEqual({
+      group: "prompt",
+      side: "left",
+      kind: "native-question",
+      label: 'Question from Fix the "build"',
+      preview: "Is blocked on a native question and cannot continue until it is answered",
+      text: text.slice(0, text.indexOf("\nAgent-provided title")),
+    });
+  });
+
+  it("says an agent asked when the question came without a title", () => {
+    const text =
+      "Placed agent (threadId t, requestId r) has a native question that the provider can no longer resume. Inspect [the agent's thread](t3-thread://v1/t); this request cannot currently take an answer through the pending-request tools.";
+    expect(
+      presentJ5UserMessage({
+        id: "message:j5:native-question:parent:request",
+        role: "user",
+        text,
+        createdBy: "system",
+      }),
+    ).toMatchObject({
+      label: "Question from an agent",
+      preview: "Has a native question that the provider can no longer resume",
+      text,
+    });
+  });
+
+  it("reads a delegated task's question without its node id", () => {
+    expect(
+      presentJ5UserMessage(
+        upstreamMessage(
+          "message:delegated-task-question:thread:request",
+          "Delegated task node:delegated-task:one asked a question and is still working. Read it with t3_pending_request action read, threadId t, and requestId r.",
+        ),
+      ),
+    ).toMatchObject({
+      kind: "delegated-question",
+      label: "Question from a delegated task",
+      preview: "Asked a question and is still working",
+    });
+  });
+
+  it("reads a playbook step handed to a seat, as the server writes it", () => {
+    const text = [
+      "<j5_playbook_step>",
+      "playbook: review | Review a change",
+      "crew_instance_id: crew:1",
+      "step: build | Build the fix",
+      "position: 2 of 5",
+      "captain_participant_id: agent:captain",
+      "</j5_playbook_step>",
+      "<step_prompt>",
+      "Build it.\n\nQuote <\\/step_prompt> if you must.",
+      "</step_prompt>",
+      "Do this step now. When it's done, report back to your Captain with j5_send_message, including what you did and the evidence. The Captain advances the playbook; you don't call playbook tools.",
+    ].join("\n");
+    expect(
+      presentJ5UserMessage({
+        id: "message:j5:a2a:mcp:s:x",
+        role: "user",
+        text,
+        createdBy: "system",
+      }),
+    ).toEqual({
+      group: "prompt",
+      side: "left",
+      kind: "playbook-step",
+      label: "Playbook step 2 of 5",
+      preview: "Build the fix",
+      text: "Build it.\n\nQuote </step_prompt> if you must.",
+    });
+    expect(
+      presentJ5UserMessage({ id: "message:1", role: "user", text, createdBy: "user" }),
+    ).toMatchObject({ group: "person" });
+  });
+
+  it("calls a handoff reminder a notice, and leaves any other system message unread", () => {
+    expect(
+      presentJ5UserMessage({
+        id: "agent-handoff-nudge:run-1",
+        role: "user",
+        text: "Your run ended without the declared review handoff.",
+        createdBy: "system",
+      }),
+    ).toMatchObject({ kind: "handoff-nudge", summary: "Reminded to write its handoff" });
+    expect(
+      presentJ5UserMessage({ id: "other", role: "user", text: "Hm.", createdBy: "system" }),
+    ).toMatchObject({ kind: "platform", summary: null });
+  });
+});
+
 describe("participant ids for the identity read", () => {
   it("names each sender once, and nothing for a person's own words", () => {
     expect(participantIdsForJ5UserMessage(agentMessage(peerAsk))).toEqual([
@@ -568,7 +954,9 @@ describe("participant ids for the identity read", () => {
         ),
       ),
     ).toEqual([]);
-    expect(participantIdsForJ5UserMessage(systemDelivery(silenceRaw))).toEqual([]);
+    expect(participantIdsForJ5UserMessage(systemDelivery(silenceRaw))).toEqual([
+      "agent:counterpart",
+    ]);
     expect(participantIdsForJ5UserMessage({ role: "user", text: "Hi." })).toEqual([]);
   });
 
