@@ -148,6 +148,7 @@ export function UserMessageRow({ row }: { row: Extract<TimelineRow, { kind: "mes
         typeof row.revertTurnCount === "number" ? (
           <RevertUserMessageButton turnCount={row.revertTurnCount} messageId={row.message.id} />
         ) : null,
+      copy: <MessageCopyButton text={row.message.text} variant="ghost" />,
     },
   });
   if (j5Notice !== null) return j5Notice;

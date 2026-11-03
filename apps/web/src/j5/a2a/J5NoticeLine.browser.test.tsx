@@ -79,6 +79,7 @@ it("keeps upstream's affordances on a message upstream wrote, and only there", a
     marker: <span>steered</span>,
     status: <span>failed</span>,
     revert: <button type="button">Edit from here</button>,
+    copy: <button type="button">Copy</button>,
   };
   await using screen = await render(
     <TimelineRowCtx value={rowContext()}>
@@ -99,8 +100,9 @@ it("keeps upstream's affordances on a message upstream wrote, and only there", a
   const watch = screen.getByRole("button", { name: /Update on a watched pull request/ });
   await userEvent.click(watch);
   await expect.element(screen.getByRole("button", { name: "Edit from here" })).toBeVisible();
+  await expect.element(screen.getByRole("button", { name: "Copy" })).toBeVisible();
   await userEvent.click(screen.getByRole("button", { name: /Message to Builder/ }));
-  expect(screen.container.querySelectorAll("button")).toHaveLength(3);
+  expect(screen.container.querySelectorAll("button")).toHaveLength(4);
   expect(screen.container.textContent?.match(/steered/g)).toHaveLength(1);
 });
 

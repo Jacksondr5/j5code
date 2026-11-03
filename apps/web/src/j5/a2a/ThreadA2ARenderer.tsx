@@ -71,6 +71,7 @@ export interface ThreadA2ADeliveryCompositionInput {
     readonly marker: ReactNode;
     readonly status: ReactNode;
     readonly revert: ReactNode;
+    readonly copy: ReactNode;
   };
 }
 
@@ -109,7 +110,7 @@ function J5PlatformNotice(props: {
   const named = (text: string) =>
     nameJ5NoticeParticipants(text, notice.participantIds, participantLabels);
   const upstreamRow = UPSTREAM_WRITTEN.has(notice.kind) ? input.upstreamRow : undefined;
-  const hasActions = notice.link !== null || Boolean(upstreamRow?.revert);
+  const hasActions = notice.link !== null || upstreamRow !== undefined;
   return (
     <J5NoticeLine
       kind={notice.kind}
@@ -133,6 +134,7 @@ function J5PlatformNotice(props: {
                 </InlineButton>
               )}
               {upstreamRow?.revert}
+              {upstreamRow?.copy}
             </J5NoticeActions>
           ) : null}
         </>
