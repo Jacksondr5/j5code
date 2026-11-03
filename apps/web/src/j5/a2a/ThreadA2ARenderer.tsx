@@ -16,31 +16,25 @@ import { Link } from "@tanstack/react-router";
 import {
   BellIcon,
   BotIcon,
-  CircleCheckIcon,
   CircleHelpIcon,
-  GitBranchIcon,
   ListChecksIcon,
   type LucideIcon,
   MailWarningIcon,
   MessageCircleOffIcon,
-  RotateCwIcon,
-  ShrinkIcon,
   UndoIcon,
   UnlinkIcon,
 } from "lucide-react";
 import { use, type ReactNode } from "react";
 
 import { TimelineRowCtx } from "../../components/chat/timelineRowContext";
-import { PullRequestGlyph } from "../../components/pullRequest/pullRequestIcons";
 import { Badge } from "../../components/ui/badge";
-import { InlineButton } from "../../components/ui/button";
 import { useQuietThreadShell } from "../../state/entities";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import type { ResolvedUserMessageContext } from "~/lib/composerContextRecords";
 import type { ChatMessage } from "~/types";
 import { renderCrewNotice } from "../crew/CrewNoticeRenderer";
 import { useConnectionAccess } from "../sharing/access";
-import { J5NoticeActions, J5NoticeDetailText, J5NoticeLine } from "./J5NoticeLine";
+import { J5NoticeDetailText, J5NoticeLine } from "./J5NoticeLine";
 import { PersonAvatar } from "../sharing/PersonAvatar";
 import {
   renderSharedConversationNote,
@@ -66,13 +60,6 @@ export interface ThreadA2ADeliveryCompositionInput {
   /** The shown thread, for notices that open seats and render markdown. */
   readonly threadRef?: ScopedThreadRef | null | undefined;
   readonly markdownCwd?: string | undefined;
-  /** What upstream's row gives a message: J5 keeps them on the messages upstream writes. */
-  readonly upstreamRow?: {
-    readonly marker: ReactNode;
-    readonly status: ReactNode;
-    readonly revert: ReactNode;
-    readonly copy: ReactNode;
-  };
 }
 
 export function participantIdsForThreadA2ADelivery(message: ChatMessage): ReadonlyArray<string> {
@@ -84,70 +71,33 @@ const NOTICE_ICONS: Partial<Record<J5NoticeKind, LucideIcon>> = {
   "not-delivered": MailWarningIcon,
   "exchange-dropped": UnlinkIcon,
   "exchange-withdrawn": UndoIcon,
-  "handoff-nudge": BellIcon,
-  "restart-continuation": RotateCwIcon,
-  "pr-watch": PullRequestGlyph.pullRequest,
-  "delegated-completion": CircleCheckIcon,
-  "background-task": CircleCheckIcon,
-  "worktree-continuation": GitBranchIcon,
 };
-
-// Upstream's row offers these on the messages upstream writes; J5's own notices never had them.
-const UPSTREAM_WRITTEN: ReadonlySet<J5NoticeKind> = new Set([
-  "restart-continuation",
-  "pr-watch",
-  "delegated-completion",
-  "background-task",
-  "worktree-continuation",
-]);
 
 function J5PlatformNotice(props: {
   readonly notice: Extract<J5UserMessagePresentation, { group: "notice" }>;
-  readonly input: ThreadA2ADeliveryCompositionInput;
+  readonly timestampLabel: string | undefined;
 }) {
   const { participantLabels } = use(TimelineRowCtx);
-  const { notice, input } = props;
+  const { notice } = props;
   const named = (text: string) =>
     nameJ5NoticeParticipants(text, notice.participantIds, participantLabels);
-  const upstreamRow = UPSTREAM_WRITTEN.has(notice.kind) ? input.upstreamRow : undefined;
-  const hasActions = notice.link !== null || upstreamRow !== undefined;
   return (
     <J5NoticeLine
       kind={notice.kind}
       icon={NOTICE_ICONS[notice.kind] ?? BellIcon}
       summary={named(notice.summary ?? "")}
-      timestampLabel={input.timestampLabel}
-      marker={upstreamRow?.marker}
-      status={upstreamRow?.status}
+      timestampLabel={props.timestampLabel}
     >
-      {notice.detail !== null || hasActions ? (
-        <>
-          {notice.detail === null ? null : <J5NoticeDetailText text={named(notice.detail)} />}
-          {hasActions ? (
-            <J5NoticeActions>
-              {notice.link === null ? null : (
-                <InlineButton
-                  tone="muted"
-                  render={<a href={notice.link.url} target="_blank" rel="noreferrer" />}
-                >
-                  {notice.link.label}
-                </InlineButton>
-              )}
-              {upstreamRow?.revert}
-              {upstreamRow?.copy}
-            </J5NoticeActions>
-          ) : null}
-        </>
-      ) : null}
+      {notice.detail === null ? null : <J5NoticeDetailText text={named(notice.detail)} />}
     </J5NoticeLine>
   );
 }
 
 /**
  * J5's platform notices (group 4), drawn in place of upstream's user row: Crew notices, a shared
- * conversation's note, and every other notice the classifier has a summary for. Every other user
- * message is upstream's row (`useJ5UserMessagePresentation`), prompts included (`j5PromptRow`), and
- * so is a notice nothing here can read.
+ * conversation's note, and any notice the classifier has a summary for. Every other user message is
+ * upstream's row, including a notice nothing here can read. Upstream's own platform messages never
+ * get here: they are its notification and compaction rows.
  */
 export function renderThreadA2ADelivery(props: ThreadA2ADeliveryCompositionInput): ReactNode {
   const crewNotice = renderCrewNotice(props);
@@ -156,14 +106,12 @@ export function renderThreadA2ADelivery(props: ThreadA2ADeliveryCompositionInput
   if (sharedNote !== null) return sharedNote;
   const presentation = presentJ5UserMessage(props.message);
   if (presentation?.group !== "notice" || presentation.summary === null) return null;
-  return <J5PlatformNotice notice={presentation} input={props} />;
+  return <J5PlatformNotice notice={presentation} timestampLabel={props.timestampLabel} />;
 }
 
 const PROMPT_ICONS: Record<Exclude<J5PromptKind, "automation">, LucideIcon> = {
   "playbook-step": ListChecksIcon,
   "native-question": CircleHelpIcon,
-  "delegated-question": CircleHelpIcon,
-  compaction: ShrinkIcon,
 };
 
 /**

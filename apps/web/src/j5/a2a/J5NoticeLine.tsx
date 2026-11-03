@@ -28,10 +28,6 @@ export function J5NoticeLine(props: {
   readonly tone?: keyof typeof TONE_CLASS;
   readonly summary: string;
   readonly timestampLabel?: string | undefined;
-  /** Upstream's marker for a message that steered the turn, above the line. */
-  readonly marker?: ReactNode;
-  /** A failed message's status: on the line's level, so it never hides behind the chevron. */
-  readonly status?: ReactNode;
   readonly children?: ReactNode;
 }) {
   const { findActive } = use(TimelineRowCtx);
@@ -63,7 +59,6 @@ export function J5NoticeLine(props: {
       className="flex min-w-0 max-w-[80%] flex-col items-start gap-1 text-xs text-muted-foreground"
       data-j5-notice={props.kind}
     >
-      {props.marker}
       {hasDetail ? (
         <button
           type="button"
@@ -81,7 +76,6 @@ export function J5NoticeLine(props: {
       ) : (
         <div className={lineClass}>{content}</div>
       )}
-      {props.status}
       {/* Find reads the DOM, so a folded detail stays mounted but hidden while find is open. */}
       {hasDetail && (expanded || findActive) ? (
         <div

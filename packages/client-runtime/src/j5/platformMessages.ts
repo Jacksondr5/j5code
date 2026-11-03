@@ -1,5 +1,5 @@
 /**
- * Reads the platform's notices and prompts from what the server writes into a thread. Each reader
+ * Reads J5's platform notices and prompts from what the server writes into a thread. Each reader
  * is strict: words it does not recognize return null and the message falls back to upstream's row.
  * Summaries and details keep participant ids, named in `participantIds`, for a client to replace
  * with the identity read's labels; nothing else here is an id a reader should see.
@@ -8,7 +8,6 @@ export interface PlatformNotice {
   readonly summary: string;
   readonly detail: string | null;
   readonly participantIds: ReadonlyArray<string>;
-  readonly link: { readonly label: string; readonly url: string } | null;
 }
 
 export type DeliveryNoticeKind =
@@ -21,7 +20,7 @@ const notice = (
   summary: string,
   detail: string | null = null,
   participantIds: ReadonlyArray<string> = [],
-): PlatformNotice => ({ summary, detail, participantIds, link: null });
+): PlatformNotice => ({ summary, detail, participantIds });
 
 const SILENCE_SUFFIX = "\n\nThis is a platform-authored delivery signal, not a peer reply.";
 const TERMINAL_FOOTER = /^This is a platform-authored (?:terminal )?notice, not a peer reply\.$/;
@@ -192,78 +191,6 @@ export function parseDeliveryNotice(
   return parsed;
 }
 
-const CONTINUE_PROMPT = "Continue where you left off.";
-
-export function restartNotice(text: string): PlatformNotice {
-  return notice(
-    text.endsWith(CONTINUE_PROMPT)
-      ? "Continued after the server restarted"
-      : "The server restarted and stopped background work",
-    text,
-  );
-}
-
-const PR_WATCH_READS: ReadonlyArray<{
-  readonly pattern: RegExp;
-  readonly summary: (number: string) => string;
-  /** Update wakes lead with a sentence the summary and link already say. */
-  readonly dropFirstLine: boolean;
-}> = [
-  {
-    pattern: /^Update on pull request #(\d+) \((https?:\/\/[^\s)]+)\)/,
-    summary: (number) => `Update on pull request #${number}`,
-    dropFirstLine: true,
-  },
-  {
-    pattern: /^Pull request #(\d+) \((https?:\/\/[^\s)]+)\) was closed/,
-    summary: (number) => `Pull request #${number} closed`,
-    dropFirstLine: false,
-  },
-  {
-    pattern: /^.+? stopped watching pull request #(\d+) \((https?:\/\/[^\s)]+)\)/,
-    summary: (number) => `Stopped watching pull request #${number}`,
-    dropFirstLine: false,
-  },
-];
-
-export function pullRequestWatchNotice(text: string): PlatformNotice {
-  for (const read of PR_WATCH_READS) {
-    const match = read.pattern.exec(text);
-    if (match === null) continue;
-    const newline = text.indexOf("\n");
-    const detail = !read.dropFirstLine ? text : newline < 0 ? "" : text.slice(newline + 1).trim();
-    return {
-      summary: read.summary(match[1]!),
-      detail: detail.length === 0 ? null : detail,
-      participantIds: [],
-      link: { label: "Open pull request", url: match[2]! },
-    };
-  }
-  return notice("Update on a watched pull request", text);
-}
-
-const DELEGATED_COMPLETION =
-  /^Delegated (tasks?) \S.* reached (?:a terminal state|terminal states)\. Use task_status /;
-
-/** Upstream's completion of a delegated task; its id is allocated, so its words identify it. */
-export function delegatedCompletionNotice(text: string): PlatformNotice | null {
-  const match = DELEGATED_COMPLETION.exec(text);
-  if (match === null) return null;
-  return notice(match[1] === "task" ? "Delegated task finished" : "Delegated tasks finished", text);
-}
-
-const BACKGROUND_SUMMARY_MAX = 160;
-
-/** A provider continuation's note: its own line when it has one, else the note under a title. */
-export function backgroundTaskNotice(text: string): PlatformNotice {
-  const note = text.trim();
-  return !note.includes("\n") && note.length > 0 && note.length <= BACKGROUND_SUMMARY_MAX
-    ? notice(note.replace(/\.$/, ""))
-    : notice("Background task completed", note.length === 0 ? null : note);
-}
-
-export const worktreeContinuationNotice = (text: string) => notice("Continued in a worktree", text);
-
 export const handoffNudgeNotice = (text: string) => notice("Reminded to write its handoff", text);
 
 const NATIVE_QUESTION =
@@ -295,15 +222,6 @@ export function nativeQuestionPrompt(text: string): PlatformPrompt | null {
     label: `Question from ${titleFrom(title?.[1]) ?? "an agent"}`,
     preview: capitalized(situation),
     text: title === null ? text : text.slice(0, title.index),
-  };
-}
-
-export function delegatedQuestionPrompt(text: string): PlatformPrompt {
-  const situation = /^Delegated task \S+ (.+?)\. Read it /.exec(text)?.[1];
-  return {
-    label: "Question from a delegated task",
-    preview: situation === undefined ? (text.split("\n")[0] ?? "") : capitalized(situation),
-    text,
   };
 }
 

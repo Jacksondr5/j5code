@@ -460,7 +460,6 @@ describe("groups 4 and 5: classified, drawn elsewhere", () => {
       summary: "agent:counterpart's turn ended without replying",
       detail: "The latest delivered message was processed.",
       participantIds: ["agent:counterpart"],
-      link: null,
       text: silenceRaw,
     });
   });
@@ -656,7 +655,7 @@ describe("groups 4 and 5: classified, drawn elsewhere", () => {
     ).toBeNull();
   });
 
-  it("classifies Crew notices and upstream's platform messages, leaving upstream's row as is", () => {
+  it("classifies Crew notices and an automation run, leaving upstream's row as is", () => {
     const gate = [
       "<j5_crew_gate>",
       "proposal_id: crew:proposal:1",
@@ -675,16 +674,6 @@ describe("groups 4 and 5: classified, drawn elsewhere", () => {
         createdBy: "system",
       }),
     ).toMatchObject({ group: "notice", kind: "crew-context", summary: "Introduction" });
-    expect(
-      presentJ5UserMessage({
-        id: "message:restart-continuation:run-1",
-        role: "user",
-        text: "Go on.",
-      }),
-    ).toMatchObject({ group: "notice", kind: "restart-continuation" });
-    expect(
-      presentJ5UserMessage({ id: "idle-compact:thread:run", role: "user", text: "/compact" }),
-    ).toMatchObject({ group: "prompt", kind: "compaction" });
     const automation = {
       id: "message:1",
       role: "user",
@@ -709,128 +698,35 @@ const upstreamMessage = (
 ) => ({ id, role: "user", text, createdBy: "agent" as const, creationSource });
 
 describe("upstream's platform messages", () => {
-  const prUrl = "https://github.com/Jacksondr5/j5code/pull/912";
-
   it.each([
-    [
-      `Update on pull request #912 (${prUrl}), which J5 Code is watching for you:\n- All 1 required check passed on 42de6a8.`,
-      "Update on pull request #912",
-      "- All 1 required check passed on 42de6a8.",
-    ],
-    [
-      `Pull request #912 (${prUrl}) was closed, so J5 Code stopped watching it. Call watch_pull_request if it reopens.`,
-      "Pull request #912 closed",
-      `Pull request #912 (${prUrl}) was closed, so J5 Code stopped watching it. Call watch_pull_request if it reopens.`,
-    ],
-    [
-      `J5 Code stopped watching pull request #912 (${prUrl}) because it failed to read it from the host 8 times in a row. Check it yourself, and call watch_pull_request to watch it again.`,
-      "Stopped watching pull request #912",
-      `J5 Code stopped watching pull request #912 (${prUrl}) because it failed to read it from the host 8 times in a row. Check it yourself, and call watch_pull_request to watch it again.`,
-    ],
-  ])("reads a pull-request watch update: %s", (text, summary, detail) => {
-    expect(presentJ5UserMessage(upstreamMessage("message:pr-watch:uuid", text))).toMatchObject({
-      kind: "pr-watch",
-      summary,
-      detail,
-      link: { label: "Open pull request", url: prUrl },
+    ["message:pr-watch:uuid", "Update on pull request #912."],
+    ["message:restart-continuation:run", "Continue where you left off."],
+    ["message:delegated-task-question:thread:request", "Delegated task t asked a question."],
+    ["idle-compact:thread:run", "/compact"],
+  ])("leaves %s to upstream, unread", (id, text) => {
+    const message = upstreamMessage(id, text);
+    expect(presentJ5UserMessage(message)).toMatchObject({
+      group: "notice",
+      kind: "platform",
+      summary: null,
+    });
+    expect(resolveJ5UserMessagePresentation(message)).toMatchObject({
+      attribution: "t3code",
+      j5: null,
     });
   });
 
-  it("keeps a watch update it cannot read as one line, without a link", () => {
-    expect(
-      presentJ5UserMessage(upstreamMessage("message:pr-watch:uuid", "Future wording.")),
-    ).toMatchObject({
-      summary: "Update on a watched pull request",
-      detail: "Future wording.",
-      link: null,
-    });
-  });
-
-  it("says whether a restart continued the turn or stopped background work", () => {
-    expect(
-      presentJ5UserMessage(
-        upstreamMessage("message:restart-continuation:run", "Continue where you left off."),
-      ),
-    ).toMatchObject({
-      kind: "restart-continuation",
-      summary: "Continued after the server restarted",
-    });
-    expect(
-      presentJ5UserMessage(
-        upstreamMessage("message:restart-continuation:run", "Background work was stopped."),
-      ),
-    ).toMatchObject({ summary: "The server restarted and stopped background work" });
-  });
-
-  it("tells a delegated completion from a background one, though both have allocated ids", () => {
-    const id = "message:thread:thread-1:ordinal:466:abc";
-    expect(
-      presentJ5UserMessage(
-        upstreamMessage(
-          id,
-          "Delegated task node:delegated-task:one reached a terminal state. Use task_status with taskId node:delegated-task:one to read the result.",
-        ),
-      ),
-    ).toMatchObject({ kind: "delegated-completion", summary: "Delegated task finished" });
-    expect(
-      presentJ5UserMessage(
-        upstreamMessage(
-          id,
-          "Delegated tasks a, b reached terminal states. Use task_status with each taskId to read the results.",
-        ),
-      ),
-    ).toMatchObject({ kind: "delegated-completion", summary: "Delegated tasks finished" });
-    expect(
-      presentJ5UserMessage(
-        upstreamMessage(id, 'Background command "Wait" completed (exit code 0)', "provider"),
-      ),
-    ).toMatchObject({
-      kind: "background-task",
-      summary: 'Background command "Wait" completed (exit code 0)',
-      detail: null,
-    });
-    expect(
-      presentJ5UserMessage(upstreamMessage(id, "Background task completed.", "provider")),
-    ).toMatchObject({ summary: "Background task completed", detail: null });
-    expect(
-      presentJ5UserMessage(upstreamMessage(id, "# Report\n\nAll done.", "provider")),
-    ).toMatchObject({ summary: "Background task completed", detail: "# Report\n\nAll done." });
-  });
-
-  it("reads a worktree continuation, but no other message an agent sends", () => {
-    const worktree = upstreamMessage(
-      "message:mcp:session-1:worktree-continuation:uuid",
-      "Carry on in the new worktree.",
-      "mcp",
-    );
-    expect(presentJ5UserMessage(worktree)).toMatchObject({
-      kind: "worktree-continuation",
-      summary: "Continued in a worktree",
-    });
-    expect(
-      presentJ5UserMessage(upstreamMessage("message:mcp:session-1:thread-send:1", "Hello.", "mcp")),
-    ).toMatchObject({ group: "participant", preview: "Hello." });
-    expect(
-      presentJ5UserMessage(upstreamMessage("message:thread:t:ordinal:1", "Hello.", "mcp")),
-    ).toMatchObject({ group: "participant" });
-  });
-
-  it("keeps a continuation an agent's fold for a client that asks for upstream's row", () => {
+  it("keeps a provider continuation and a worktree continuation as an agent's fold", () => {
     for (const message of [
       upstreamMessage("message:thread:t:ordinal:1", "Background task completed.", "provider"),
       upstreamMessage("message:mcp:s:worktree-continuation:u", "Carry on.", "mcp"),
+      upstreamMessage("message:mcp:s:thread-send:1", "Hello.", "mcp"),
     ]) {
       expect(resolveJ5UserMessagePresentation(message)).toMatchObject({
         attribution: "agent",
         j5: { group: "participant", side: "left", senderId: null },
       });
     }
-  });
-
-  it("leaves a message the app wrote that nothing reads to upstream's row", () => {
-    expect(
-      presentJ5UserMessage(upstreamMessage("message:future:1", "Future platform words.")),
-    ).toMatchObject({ group: "notice", kind: "platform", summary: null });
   });
 });
 
@@ -874,21 +770,6 @@ describe("platform prompts", () => {
       label: "Question from an agent",
       preview: "Has a native question that the provider can no longer resume",
       text,
-    });
-  });
-
-  it("reads a delegated task's question without its node id", () => {
-    expect(
-      presentJ5UserMessage(
-        upstreamMessage(
-          "message:delegated-task-question:thread:request",
-          "Delegated task node:delegated-task:one asked a question and is still working. Read it with t3_pending_request action read, threadId t, and requestId r.",
-        ),
-      ),
-    ).toMatchObject({
-      kind: "delegated-question",
-      label: "Question from a delegated task",
-      preview: "Asked a question and is still working",
     });
   });
 

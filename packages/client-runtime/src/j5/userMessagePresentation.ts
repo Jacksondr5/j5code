@@ -13,16 +13,10 @@ import {
   presentCrewNotice,
 } from "./crewNotices.ts";
 import {
-  backgroundTaskNotice,
-  delegatedCompletionNotice,
-  delegatedQuestionPrompt,
   handoffNudgeNotice,
   nativeQuestionPrompt,
   parseDeliveryNotice,
   playbookStepPrompt,
-  pullRequestWatchNotice,
-  restartNotice,
-  worktreeContinuationNotice,
   type PlatformNotice,
 } from "./platformMessages.ts";
 
@@ -55,18 +49,8 @@ export type J5NoticeKind =
   | "crew-seats"
   | "crew-context"
   | "handoff-nudge"
-  | "restart-continuation"
-  | "pr-watch"
-  | "delegated-completion"
-  | "background-task"
-  | "worktree-continuation"
   | "platform";
-export type J5PromptKind =
-  | "automation"
-  | "playbook-step"
-  | "native-question"
-  | "delegated-question"
-  | "compaction";
+export type J5PromptKind = "automation" | "playbook-step" | "native-question";
 
 export type J5UserMessagePresentation =
   | {
@@ -124,7 +108,6 @@ export type J5UserMessagePresentation =
       readonly detail: string | null;
       /** The ids `summary` and `detail` name, for a client to replace with labels. */
       readonly participantIds: ReadonlyArray<string>;
-      readonly link: PlatformNotice["link"];
       readonly text: string;
     }
   | {
@@ -398,61 +381,6 @@ const noticeFrom = (
   text: string,
 ): J5UserMessagePresentation => ({ group: "notice", side: "left", kind, ...read, text });
 
-const WORKTREE_CONTINUATION_ID = /^message:mcp:[^:]+:worktree-continuation:/;
-// A provider continuation's id is allocated for its thread, so it has no prefix of its own.
-const ALLOCATED_MESSAGE_ID_PREFIX = "message:thread:";
-
-/**
- * Upstream's platform messages, by the id its server gives them, and those with an allocated id by
- * who wrote them. An id upstream changes falls through to the attribution upstream's own resolver
- * gives the message.
- */
-function presentUpstreamPlatformMessage(
-  message: J5UserMessageInput,
-): J5UserMessagePresentation | null {
-  const id = String(message.id ?? "");
-  const text = message.text;
-  if (id.startsWith("message:restart-continuation:")) {
-    return noticeFrom("restart-continuation", restartNotice(text), text);
-  }
-  if (id.startsWith("message:pr-watch:")) {
-    return noticeFrom("pr-watch", pullRequestWatchNotice(text), text);
-  }
-  if (id.startsWith("message:delegated-task-question:")) {
-    return {
-      group: "prompt",
-      side: "left",
-      kind: "delegated-question",
-      ...delegatedQuestionPrompt(text),
-    };
-  }
-  if (id.startsWith("idle-compact:")) {
-    return {
-      group: "prompt",
-      side: "left",
-      kind: "compaction",
-      label: "Compaction",
-      preview: firstLine(text),
-      text,
-    };
-  }
-  if (WORKTREE_CONTINUATION_ID.test(id) && message.createdBy === "agent") {
-    return noticeFrom("worktree-continuation", worktreeContinuationNotice(text), text);
-  }
-  if (message.createdBy !== "agent") return null;
-  if (message.creationSource === "server") {
-    const completion = delegatedCompletionNotice(text);
-    if (completion !== null) return noticeFrom("delegated-completion", completion, text);
-  }
-  if (
-    id.startsWith(ALLOCATED_MESSAGE_ID_PREFIX) &&
-    (message.creationSource === "server" || message.creationSource === "provider")
-  ) {
-    return noticeFrom("background-task", backgroundTaskNotice(text), text);
-  }
-  return null;
-}
-
 /** J5's own platform messages outside A2A delivery; only the platform writes `system` messages. */
 function presentSystemMessage(message: J5UserMessageInput): J5UserMessagePresentation {
   const text = message.text;
@@ -466,7 +394,6 @@ function presentSystemMessage(message: J5UserMessageInput): J5UserMessagePresent
       summary: context.title,
       detail: context.text,
       participantIds: [],
-      link: null,
       text,
     };
   }
@@ -479,7 +406,6 @@ function presentSystemMessage(message: J5UserMessageInput): J5UserMessagePresent
       summary: crewNoticeSummary(crew),
       detail: null,
       participantIds: [],
-      link: null,
       text,
     };
   }
@@ -502,23 +428,9 @@ function presentSystemMessage(message: J5UserMessageInput): J5UserMessagePresent
     summary: null,
     detail: null,
     participantIds: [],
-    link: null,
     text,
   };
 }
-
-/** The fold every other participant gets: a message J5 did not unwrap, naming no J5 sender. */
-const agentFold = (text: string): J5UserMessagePresentation => ({
-  group: "participant",
-  side: "left",
-  text,
-  preview: firstLine(text),
-  senderId: null,
-  senderThreadId: null,
-  badge: null,
-  tag: null,
-  unwrapped: false,
-});
 
 /**
  * Classifies a user-role message by who is speaking. Null when not user-role, and for a J5
@@ -590,8 +502,6 @@ export function presentJ5UserMessage(
         };
   }
 
-  const platform = presentUpstreamPlatformMessage(message);
-  if (platform !== null) return platform;
   if (message.createdBy === "system") return presentSystemMessage(message);
 
   const upstream = resolveUserMessagePresentation(message);
@@ -615,11 +525,22 @@ export function presentJ5UserMessage(
       summary: null,
       detail: null,
       participantIds: [],
-      link: null,
       text,
     };
   }
-  if (upstream.attribution === "agent") return agentFold(text);
+  if (upstream.attribution === "agent") {
+    return {
+      group: "participant",
+      side: "left",
+      text,
+      preview: firstLine(text),
+      senderId: null,
+      senderThreadId: null,
+      badge: null,
+      tag: null,
+      unwrapped: false,
+    };
+  }
   return { group: "person", side: "right", text, viaInbox: false, unwrapped: false };
 }
 
@@ -634,13 +555,7 @@ export function resolveJ5UserMessagePresentation(
   options: { readonly viewerParticipantId?: string | null } = {},
 ) {
   const upstream = resolveUserMessagePresentation(message);
-  const presented = presentJ5UserMessage(message, options);
-  // Web draws notices before asking this; mobile draws only `system` ones itself, so a continuation
-  // upstream calls an agent's stays that agent's fold on the left there.
-  const j5 =
-    presented?.group === "notice" && upstream.attribution === "agent"
-      ? agentFold(message.text)
-      : presented;
+  const j5 = presentJ5UserMessage(message, options);
   if (j5 === null || j5.group === "notice" || j5.group === "prompt") {
     return { ...upstream, j5: null };
   }

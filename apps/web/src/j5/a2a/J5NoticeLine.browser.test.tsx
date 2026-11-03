@@ -74,38 +74,6 @@ it("opens a folded notice when find matches its detail", async () => {
   await expect.element(line).toHaveAttribute("aria-expanded", "true");
 });
 
-it("keeps upstream's affordances on a message upstream wrote, and only there", async () => {
-  const upstreamRow = {
-    marker: <span>steered</span>,
-    status: <span>failed</span>,
-    revert: <button type="button">Edit from here</button>,
-    copy: <button type="button">Copy</button>,
-  };
-  await using screen = await render(
-    <TimelineRowCtx value={rowContext()}>
-      {renderThreadA2ADelivery({
-        message: notice("message:pr-watch:1", "Future wording.", {
-          createdBy: "agent",
-          creationSource: "server",
-        }),
-        upstreamRow,
-      })}
-      {renderThreadA2ADelivery({ message: notDelivered, upstreamRow })}
-    </TimelineRowCtx>,
-    { router: false },
-  );
-  await expect.element(screen.getByText("steered")).toBeVisible();
-  await expect.element(screen.getByText("failed")).toBeVisible();
-  expect(screen.container.querySelectorAll("[data-j5-notice]")).toHaveLength(2);
-  const watch = screen.getByRole("button", { name: /Update on a watched pull request/ });
-  await userEvent.click(watch);
-  await expect.element(screen.getByRole("button", { name: "Edit from here" })).toBeVisible();
-  await expect.element(screen.getByRole("button", { name: "Copy" })).toBeVisible();
-  await userEvent.click(screen.getByRole("button", { name: /Message to Builder/ }));
-  expect(screen.container.querySelectorAll("button")).toHaveLength(4);
-  expect(screen.container.textContent?.match(/steered/g)).toHaveLength(1);
-});
-
 it("draws a seat in trouble with its tone, opening to the error", async () => {
   const report = [
     "<j5_crew_gate>",

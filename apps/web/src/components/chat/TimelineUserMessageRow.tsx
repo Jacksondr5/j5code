@@ -137,19 +137,6 @@ export function UserMessageRow({ row }: { row: Extract<TimelineRow, { kind: "mes
     participantLabels: ctx.participantLabels,
     threadRef: ctx.threadRef,
     markdownCwd: ctx.markdownCwd,
-    upstreamRow: {
-      marker:
-        row.message.inputIntent === "steer" ||
-        row.message.inputIntent === "promoted_queued_to_steer" ? (
-          <UserMessageIntentMarker intent={row.message.inputIntent} />
-        ) : null,
-      status: <UserMessageProjectedStatus row={row} />,
-      revert:
-        typeof row.revertTurnCount === "number" ? (
-          <RevertUserMessageButton turnCount={row.revertTurnCount} messageId={row.message.id} />
-        ) : null,
-      copy: <MessageCopyButton text={row.message.text} variant="ghost" />,
-    },
   });
   if (j5Notice !== null) return j5Notice;
   return ctx.workflowOpening?.messageId === row.message.id ? (

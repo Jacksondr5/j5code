@@ -18,8 +18,10 @@ Every message in the person's place in a thread is shown by **who is speaking**,
 1. **The person.** Upstream's full bubble on the right, unchanged. A reply the person sent from the inbox carries a caption above it, "You · via Inbox".
 2. **Other people.** In a shared conversation, a full bubble on the left with their initials and name. An inbox reply from another person adds "· via Inbox" after the name.
 3. **Other participants:** agents, machine participants, outside agents, agents on peer servers, and the agent that spawned this one. On the left, an **identity line** above the row, then upstream's folded row: the first line of the letter and a chevron. Opened, it shows the whole letter with upstream's footer: open the sender's thread, the time, copy.
-4. **Platform notices.** One muted line on the left, with no bubble and no identity: an icon, a plain summary, the time and a chevron. Opened, the detail hangs under a thin rule, with a link where there is something to open. J5's notices (a silence, a message not delivered, an Exchange dropped or withdrawn, a queued message removed, a Crew notice) and upstream's (a pull-request watch update, a finished delegated or background task, a continuation after a restart or in a worktree) look the same. A line with nothing more to say has no chevron. Which Crew notices appear is the [Crews](crews.md) rule; a seat in trouble carries a red or amber icon. A message upstream writes keeps what upstream's row gives it: its steer marker and a failed status on the line, and Edit from here and copy in the detail.
-5. **Platform prompts.** An outlined pill on the left: an icon, a kind label, the task or step title and a chevron. Opened, the full prompt. It covers upstream's automation runs and idle compaction, a playbook step handed to a Crew seat, and a question raised to a parent, whether a native question to a placement parent or a delegated task's question.
+4. **Platform notices** that J5 writes. One muted line on the left, with no bubble and no identity: an icon, a plain summary, the time and a chevron. Opened, the detail hangs under a thin rule, with a link where there is something to open. It covers a silence, a message not delivered, an Exchange dropped or withdrawn, a queued message removed, a handoff reminder and a Crew notice. A line with nothing more to say has no chevron. Which Crew notices appear is the [Crews](crews.md) rule; a seat in trouble carries a red or amber icon.
+5. **Platform prompts.** An outlined pill on the left: an icon, a kind label, the task or step title and a chevron. Opened, the full prompt. It covers upstream's automation runs, a playbook step handed to a Crew seat, and a native question raised to a placement parent.
+
+**Upstream's own platform rows keep upstream's look.** A pull-request watch update, a finished delegated or background task, a continuation after a restart, a delegated task's question and idle compaction are not user messages in the timeline: upstream draws them on its own notification and compaction rows, which are already one muted line. J5 leaves them there, because restyling them would be a new edit to upstream's work rows for little gain.
 
 The identity line is a bot glyph, the sender's name and at most one badge or tag. The **name** is the participant's label, a persona or agent name; without one, the title of the sender's thread; and otherwise "Agent". A spawn brief's line reads "⟨spawner⟩ · brief". The **badge** appears only when the message asks something of the reader, in the inbox's words: **Expects reply** on an ask, in amber, and **Replied** on a reply that closed an Exchange, in quiet green. A plain message and a follow-up carry none, because the platform never asserts a role it did not measure. A sender that is not an agent gets a **tag** instead: **Automation** for a machine participant, **Outside agent** for an MCP sign-in. The line leaves out Crew or Captain context (the seat's name says it), the delivery mode (upstream's steer marker already shows it) and the peer server's name. Badges are the only colored elements. Whether an Exchange is still open is not drawn: the [inbox](inbox.md) tracks waiting.
 
@@ -48,12 +50,12 @@ This is **not** a change to what agents receive, **not** a summary layer, and **
 
 ### Platform notices
 
-8. A platform notice, J5's or upstream's, is one muted line on the left with an icon, a plain summary and the time, visibly distinct from any message, and opens to its detail when it has one.
+8. A platform notice J5 writes is one muted line on the left with an icon, a plain summary and the time, visibly distinct from any message, and opens to its detail when it has one.
 9. A silence notice's summary names the counterpart, by its label, and shows when it was noticed.
 
 ### Platform prompts
 
-10. A platform prompt (an automation run, idle compaction, a playbook step for a Crew seat, a question raised to a parent) is an outlined pill on the left with its kind and title, and opens to the full prompt.
+10. A platform prompt (an automation run, a playbook step for a Crew seat, a native question raised to a parent) is an outlined pill on the left with its kind and title, and opens to the full prompt.
 
 ### Sent messages
 
@@ -67,7 +69,7 @@ This is **not** a change to what agents receive, **not** a summary layer, and **
 
 ### Conversation
 
-15. Everything that is not a message in the person's place (the agent's replies, tool calls, work logs) renders exactly as upstream renders it.
+15. Everything that is not a message in the person's place (the agent's replies, tool calls, work logs, upstream's notification and compaction rows) renders exactly as upstream renders it.
 16. In-thread find reaches every folded row, and a match in a folded row opens it.
 
 ## Scenarios
@@ -90,4 +92,4 @@ This is **not** a change to what agents receive, **not** a summary layer, and **
 - 2026-10-10 — sent messages no longer get a card (AC6). Upstream's V2 orchestrator sends clients a trimmed tool call, without the message body or the Exchange state the card was drawn from, so the card had not rendered since J5 moved to it; Jackson chose to retire it over exempting sends from the trimming (#522).
 - 2026-10-17 — the sender's name links only when this client can open the sender's thread, on its own server or a connected peer; automations, outside agents and people have no thread to open (AC1). The 2026-08-31 clickable name had not been built (#625).
 - 2026-10-24 — rewritten from cards to five groups by speaker, after upstream began folding other agents' messages into one-line rows (pingdotgg/t3code#23135); Jackson's design of that day, register D38. Groups 1 to 3 are built; the notices and prompts (AC8 to AC10) wait on [#698](https://github.com/Jacksondr5/j5code/issues/698), and mobile on [#699](https://github.com/Jacksondr5/j5code/issues/699). A follow-up no longer shows a badge. Former identifiers: AC1 → AC4, AC5; AC2 → AC12, AC13; AC3 → AC6; AC4 → AC2, AC3; AC5 → AC8, AC9; AC6 → AC11; AC7 → AC7; AC8 → AC1; AC10 → AC14; AC13 → AC15. Former AC9 (clamped card bodies), AC11 (a reply's quote of its ask) and AC12 (a badge's link to its pair) are dropped with the cards.
-- 2026-11-02 — groups 4 and 5 built on web ([#698](https://github.com/Jacksondr5/j5code/issues/698)): the raw card is gone, so a notice J5 cannot read is upstream's row. AC9 no longer asks for an age, which the notice doesn't carry; the line shows the time. AC14 lets a notice name what happened to an Exchange. AC16 added. Mobile draws silences and a labelled card for the rest until it follows.
+- 2026-11-02 — groups 4 and 5 built on web ([#698](https://github.com/Jacksondr5/j5code/issues/698)): the raw card is gone, so a notice J5 cannot read is upstream's row. Upstream's platform messages left groups 4 and 5: the 2026-10-24 design assumed they were user messages, but upstream now draws them on its own notification and compaction rows, so J5 follows upstream (Captain's call on the build, Jackson told). AC9 no longer asks for an age, which the notice doesn't carry; the line shows the time. AC14 lets a notice name what happened to an Exchange. AC16 added. Mobile draws silences and a labelled card for the rest until it follows.
