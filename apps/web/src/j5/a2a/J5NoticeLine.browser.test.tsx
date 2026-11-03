@@ -45,7 +45,6 @@ it("folds a notice to one named line and opens to its detail", async () => {
     <TimelineRowCtx value={rowContext()}>
       {renderThreadA2ADelivery({ message: notDelivered, timestampLabel: "8:00 AM" })}
     </TimelineRowCtx>,
-    { router: false },
   );
   const line = screen.getByRole("button", { name: /Message to Builder not delivered/ });
   await expect.element(line).toHaveAttribute("aria-expanded", "false");
@@ -63,7 +62,6 @@ it("opens a folded notice when find matches its detail", async () => {
     <TimelineRowCtx value={rowContext(true)}>
       {renderThreadA2ADelivery({ message: notDelivered })}
     </TimelineRowCtx>,
-    { router: false },
   );
   const line = screen.getByRole("button", { name: /Message to Builder not delivered/ });
   const detail = screen.container.querySelector<HTMLElement>("[data-j5-notice-detail]")!;
@@ -92,7 +90,6 @@ it("draws a seat in trouble with its tone, opening to the error", async () => {
     <TimelineRowCtx value={rowContext()}>
       {renderThreadA2ADelivery({ message: notice("message:crew", report) })}
     </TimelineRowCtx>,
-    { router: false },
   );
   await expect.element(screen.getByText("punchline couldn't start")).toBeVisible();
   await expect.element(screen.getByText("prosecutor hasn't confirmed it started")).toBeVisible();
@@ -112,7 +109,6 @@ it("draws a declined roster as one line", async () => {
     <TimelineRowCtx value={rowContext()}>
       {renderThreadA2ADelivery({ message: notice("message:crew", declined) })}
     </TimelineRowCtx>,
-    { router: false },
   );
   await userEvent.click(
     screen.getByRole("button", { name: /Crew Comedy · roster declined by Priya/ }),

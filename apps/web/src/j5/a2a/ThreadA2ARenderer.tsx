@@ -167,7 +167,8 @@ export function useJ5UserMessagePresentation(message: ChatMessage) {
     literalContext,
     authorName,
     senderThreadRef: senderThread === null ? null : senderThreadRef,
-    side: j5?.side ?? "right",
+    // The platform's words are never the reader's, even in a notice nothing here can read.
+    side: j5?.side ?? (message.createdBy === "system" ? "left" : "right"),
     // Upstream's own fold summary reads a message J5 did not unwrap.
     preview: j5?.group === "participant" && j5.unwrapped ? j5.preview : null,
   };
