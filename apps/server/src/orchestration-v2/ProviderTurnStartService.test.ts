@@ -1,3 +1,7 @@
+import { createAgentPersonaLibrary } from "../j5/agents/agentPersonaLibrary.ts";
+import { BUILT_IN_AGENT_PERSONAS } from "../j5/agents/agentPersonas.ts";
+import { resolveAgentPersonaRuntime } from "../j5/agents/agentPersonaRuntime.ts";
+import { stringify as yamlStringify } from "yaml";
 import * as CrewTurnContext from "../j5/a2a/CrewTurnContext.ts";
 import * as Crews from "../j5/a2a/AgentCrewInstanceService.ts";
 import { participantIdForThread } from "../j5/a2a/HomeRegistrar.ts";
@@ -11,6 +15,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it, vi } from "vite-plus/test";
 import { it as effectIt } from "@effect/vitest";
 import {
+  type OrchestrationV2AgentPersonaAssignment,
   CheckpointScopeId,
   ContextHandoffId,
   EventId,
@@ -1482,6 +1487,10 @@ const makeCodexResumeSchemaFailure = Effect.fn("makeCodexResumeSchemaFailure")(f
  * start writes is applied to one projection, as the store would.
  */
 function makeNativeResumeHarness(input: {
+  readonly persona?: {
+    readonly assignment: OrchestrationV2AgentPersonaAssignment;
+    readonly resolve: RuntimePolicy.RuntimePolicyV2Shape["resolve"];
+  };
   readonly crewDelivery?: CrewTurnContext.CrewTurnContext["Service"];
   readonly keepNativeThread?: boolean;
   /** Builds history handoffs with the real service instead of a canned summary. */
@@ -1500,7 +1509,12 @@ function makeNativeResumeHarness(input: {
     text: input.text ?? "Continue",
     previousMessages: ["Existing native conversation"],
   }).projection();
-  const run = initial.runs[0]!;
+  const run = {
+    ...initial.runs[0]!,
+    ...(input.persona === undefined
+      ? {}
+      : { modelSelection: input.persona.assignment.resolvedModelSelection }),
+  };
   const nativeThreadRef = {
     driver: CODEX_DRIVER,
     nativeId: "native-context-must-survive",
@@ -1517,6 +1531,16 @@ function makeNativeResumeHarness(input: {
   };
   let projection: OrchestrationV2ThreadProjection = {
     ...initial,
+    thread:
+      input.persona === undefined
+        ? initial.thread
+        : {
+            ...initial.thread,
+            agentPersonaAssignment: input.persona.assignment,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+          },
+    runs: [run],
     providerThreads: [providerThread],
     contextHandoffs: (input.contextHandoffs?.({
       ...ids,
@@ -1634,7 +1658,7 @@ function makeNativeResumeHarness(input: {
         }),
         Layer.mock(RunExecutionService.RunExecutionServiceV2)({ startRootRun }),
         Layer.mock(RuntimePolicy.RuntimePolicyV2)({
-          resolve: () => Effect.succeed({} as never),
+          resolve: input.persona?.resolve ?? (() => Effect.succeed({} as never)),
         }),
       ),
     ),
@@ -1674,6 +1698,103 @@ function makeNativeResumeHarness(input: {
       }).pipe(Effect.provide(layer.pipe(Layer.provideMerge(Path.layer)))),
   };
 }
+
+effectIt.effect(
+  "resumes a pre-upgrade persona turn with its saved instructions and mapped access",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const stateDir = yield* fs.makeTempDirectoryScoped({ prefix: "j5-persona-resume-" });
+      const library = createAgentPersonaLibrary({ fs, path, stateDir });
+      const definition = {
+        ...BUILT_IN_AGENT_PERSONAS.critic,
+        instructions:
+          "Review using the pre-upgrade saved standard and preserve this exact instruction.",
+        modelRoute: [
+          { driver: "codex", model: "gpt-5.4", reasoningEffort: "high" },
+          { driver: "claudeAgent", model: "claude-opus-5", reasoningEffort: "high" },
+        ],
+      };
+      const digest = "8604f75173b9b26bb0ebc7ea6be22f67133dfa029a283756dec2db64d6bbdc6c";
+      const snapshotPath = path.join(stateDir, "agent-persona-snapshots", `${digest}.json`);
+      const bytes = JSON.stringify(definition);
+      yield* fs.makeDirectory(path.dirname(snapshotPath), { recursive: true });
+      yield* fs.writeFileString(snapshotPath, bytes);
+      const folder = path.join(stateDir, "personas");
+      yield* fs.makeDirectory(folder);
+      yield* fs.writeFileString(
+        path.join(folder, "critic.yaml"),
+        yamlStringify({ ...definition, instructions: "Changed source instructions." }),
+      );
+      yield* fs.remove(folder, { recursive: true });
+      const assignment: OrchestrationV2AgentPersonaAssignment = {
+        personaId: definition.id,
+        definitionVersion: definition.version,
+        displayName: definition.displayName,
+        definitionDigest: digest,
+        authorityPolicy: "critic-fix",
+        resolvedRoute: "primary",
+        resolvedDriver: CODEX_DRIVER,
+        resolvedModelSelection: {
+          instanceId: ProviderInstanceId.make("codex-personal"),
+          model: "gpt-5.4",
+          options: [{ id: "reasoningEffort", value: "high" }],
+        },
+      };
+      const harness = makeNativeResumeHarness({
+        keepNativeThread: true,
+        resumeThread: () => Effect.die("The original native thread must be retained"),
+        persona: {
+          assignment,
+          resolve: ({ thread }) =>
+            resolveAgentPersonaRuntime(thread, library).pipe(
+              Effect.orDie,
+              Effect.map((policy) =>
+                ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+                  ...policy,
+                  interactionMode: thread.interactionMode,
+                  cwd: thread.worktreePath,
+                }),
+              ),
+            ),
+        },
+      });
+      yield* harness.start();
+      expect(harness.startRootRun).toHaveBeenCalledTimes(1);
+      const requested = harness.startRootRun.mock.calls[0]![0];
+      yield* requested.session.startTurn({
+        appThread: requested.appThread,
+        threadId: requested.appThread.id,
+        runId: requested.run.id,
+        runOrdinal: requested.run.ordinal,
+        providerTurnOrdinal: requested.providerTurnOrdinal,
+        attemptId: requested.attemptId,
+        rootNodeId: requested.rootNode.id,
+        providerThread: requested.providerThread,
+        message: requested.message,
+        modelSelection: requested.modelSelection,
+        runtimePolicy: requested.runtimePolicy,
+      });
+      expect(harness.resumeThread).toHaveBeenCalledTimes(1);
+      expect(harness.ensureThread).not.toHaveBeenCalled();
+      expect(harness.nativeStartTurn).toHaveBeenCalledTimes(1);
+      const sent = harness.nativeStartTurn.mock.calls[0]![0];
+      expect(sent.runtimePolicy).toMatchObject({
+        runtimeMode: "auto-accept-edits",
+        approvalPolicy: "never",
+        sandboxPolicy: { type: "workspaceWrite", networkAccess: false },
+      });
+      expect(sent.runtimePolicy.agentPersonaInstructions).toContain(definition.instructions);
+      expect(sent.runtimePolicy.agentPersonaInstructions).not.toContain(
+        "Changed source instructions.",
+      );
+      expect(sent.modelSelection).toEqual(assignment.resolvedModelSelection);
+      expect(sent.providerThread.nativeThreadRef).toEqual(harness.nativeThreadRef);
+      expect(harness.projection().thread.agentPersonaAssignment).toEqual(assignment);
+      expect(yield* fs.readFileString(snapshotPath)).toBe(bytes);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
 
 const failResume =
   (

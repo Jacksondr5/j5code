@@ -2,6 +2,7 @@ import { assert, describe, it } from "@effect/vitest";
 
 import {
   AGENT_AUTHORITY_RULES,
+  agentPersonaAccess,
   AGENT_PERSONA_IDS,
   BUILT_IN_AGENT_PERSONAS,
   decodeAgentPersonaDefinition,
@@ -89,5 +90,64 @@ it("accepts a personal agent without handoff artifact fields", () => {
   assert.equal(
     decodeAgentPersonaDefinition({ ...definition, outputArtifact: "Undeclared" }).outputArtifact,
     "Undeclared",
+  );
+});
+
+it("loads ordered instance targets and access without legacy authority", () => {
+  const { authority: _authority, ...legacy } = BUILT_IN_AGENT_PERSONAS.scout;
+  const modelRoute = [
+    { instanceId: "codex", model: "first", options: [{ id: "reasoningEffort", value: "high" }] },
+    { instanceId: "claudeAgent", model: "second", options: [{ id: "effort", value: "high" }] },
+    { instanceId: "codex", model: "third" },
+  ];
+  const definition = decodeAgentPersonaDefinition({ ...legacy, access: "read-only", modelRoute });
+  assert.deepEqual<unknown>(definition.modelRoute, modelRoute);
+  assert.equal(definition.access, "read-only");
+  assert.isUndefined(definition.authority);
+});
+
+it("ignores obsolete artifact field types without dropping their stored values", () => {
+  const definition = decodeAgentPersonaDefinition({
+    ...BUILT_IN_AGENT_PERSONAS.scout,
+    artifacts: { obsolete: true },
+    inputArtifacts: 42,
+    outputArtifact: false,
+  });
+  assert.deepEqual(definition.artifacts, { obsolete: true });
+  assert.equal(definition.inputArtifacts, 42);
+  assert.equal(definition.outputArtifact, false);
+});
+
+it("maps legacy defaults to three access levels without widening to allowed policies", () => {
+  for (const [old, access] of [
+    ["read-only", "read-only"],
+    ["critic-review", "read-only"],
+    ["workspace-write", "workspace-write"],
+    ["critic-fix", "workspace-write"],
+    ["full-access", "full-access"],
+    ["diagnostic", undefined],
+    ["publish-only", undefined],
+  ] as const) {
+    const definition = decodeAgentPersonaDefinition({
+      ...BUILT_IN_AGENT_PERSONAS.scout,
+      authority: { defaultPolicy: old, allowedPolicies: [old] },
+    });
+    assert.equal(agentPersonaAccess(definition), access);
+  }
+  assert.equal(agentPersonaAccess(BUILT_IN_AGENT_PERSONAS.critic), "read-only");
+  assert.equal(
+    agentPersonaAccess(
+      decodeAgentPersonaDefinition({
+        ...BUILT_IN_AGENT_PERSONAS.scout,
+        authority: { defaultPolicy: "read-only", allowedPolicies: ["read-only", "diagnostic"] },
+      }),
+    ),
+    "read-only",
+  );
+});
+
+it("rejects ambiguous authority and access without changing the stored format", () => {
+  assert.throws(() =>
+    decodeAgentPersonaDefinition({ ...BUILT_IN_AGENT_PERSONAS.scout, access: "read-only" }),
   );
 });

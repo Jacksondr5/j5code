@@ -64,6 +64,24 @@ const catalog: OrchestrationV2AgentPersonaCatalog = {
 };
 
 describe("agent persona catalog presentation", () => {
+  it("prefers new access while retaining old-server presentation and read-only new definitions", () => {
+    const old = presentAgentPersonaCatalog(catalog)[0]!;
+    const [current] = presentAgentPersonaCatalog({
+      personas: [
+        {
+          ...catalog.personas[0]!,
+          access: "workspace-write",
+          models: [{ instanceId: ProviderInstanceId.make("codex"), model: "new-model" }],
+        },
+      ],
+    });
+    expect(old.authority).toBe("Read only (default)");
+    expect(current?.authority).toBe("Workspace write");
+    expect(current?.edit).toBeNull();
+    expect(current?.route).toBe(old.route);
+    expect(current?.availability).toBe("available");
+  });
+
   it("presents a durable assignment with its immutable provider route", () => {
     expect(
       presentAgentPersonaAssignment({
@@ -1170,4 +1188,30 @@ describe("composerModelSelectionForThread", () => {
     expect(composerModelSelectionForThread(undefined, draftPick)).toBe(draftPick);
     expect(composerModelSelectionForThread(null, draftPick)).toBe(draftPick);
   });
+});
+
+it("refuses a duplicate that the legacy editor would truncate", () => {
+  const target = {
+    driver: ProviderDriverKind.make("codex"),
+    model: "model",
+    reasoningEffort: "high",
+  };
+  const definition = {
+    id: "new-persona",
+    version: 1,
+    displayName: "New persona",
+    description: "Specialist",
+    instructions: "Review",
+    authority: { defaultPolicy: "read-only", allowedPolicies: ["read-only"] },
+    modelRoute: [target, target] as const,
+  };
+  expect(() =>
+    agentPersonaDuplicateDraft({ ...definition, models: [target, target, target] }),
+  ).toThrow("Export YAML");
+  expect(() =>
+    agentPersonaDuplicateDraft({
+      ...definition,
+      models: [{ instanceId: ProviderInstanceId.make("codex"), model: "model" }],
+    }),
+  ).toThrow("Export YAML");
 });

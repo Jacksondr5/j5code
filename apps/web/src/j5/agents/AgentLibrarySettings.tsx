@@ -436,7 +436,7 @@ function MemberAgentLibrarySettings() {
       >
         {catalog.data?.diagnostics?.map((diagnostic) => (
           <SettingsRow
-            key={diagnostic.path}
+            key={`${diagnostic.path}:${diagnostic.message}`}
             title={`Invalid persona file: ${diagnostic.path}`}
             description={diagnostic.message}
           />

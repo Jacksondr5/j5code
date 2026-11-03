@@ -1,5 +1,7 @@
+import { modelSelectionsEqual } from "@t3tools/shared/model";
 import {
   isAgentPersonaReasoningOptionId,
+  isAgentPersonaAuthorityPolicy,
   type OrchestrationV2AgentPersonaAssignment,
   type OrchestrationV2AgentPersonaCommandAssignment,
   ProviderDriverKind,
@@ -9,6 +11,8 @@ import type { AgentPersonaRouteResolution } from "./agentPersonaRouting.ts";
 import { providerCanEnforceAgentPersonaAuthority } from "./agentPersonaProviderPolicy.ts";
 import {
   getBuiltInAgentPersona,
+  agentPersonaPolicy,
+  mapAgentPersonaPolicy,
   type AgentAuthorityPolicyId,
   type AgentPersonaId,
   type AgentPersonaDefinition,
@@ -40,13 +44,13 @@ export function buildAgentPersonaAssignment(input: {
   readonly authorityPolicy?: AgentAuthorityPolicyId;
 }): AgentPersonaAssignmentResult {
   const definition = input.definition ?? getBuiltInAgentPersona(input.resolution.personaId);
-  const authorityPolicy = input.authorityPolicy ?? definition.authority.defaultPolicy;
-  if (!definition.authority.allowedPolicies.some((policy) => policy === authorityPolicy)) {
+  const authorityPolicy = input.authorityPolicy ?? agentPersonaPolicy(definition);
+  if (mapAgentPersonaPolicy(authorityPolicy) !== agentPersonaPolicy(definition)) {
     return {
       status: "invalid-authority-policy",
       personaId: definition.id,
       requestedPolicy: authorityPolicy,
-      allowedPolicies: definition.authority.allowedPolicies,
+      allowedPolicies: [agentPersonaPolicy(definition)],
     };
   }
   if (!providerCanEnforceAgentPersonaAuthority(input.resolution.driver, authorityPolicy)) {
@@ -63,7 +67,10 @@ export function buildAgentPersonaAssignment(input: {
     assignment: {
       personaId: definition.id,
       definitionVersion: definition.version,
-      authorityPolicy,
+      authorityPolicy: mapAgentPersonaPolicy(authorityPolicy),
+      ...(input.resolution.index === undefined
+        ? {}
+        : { resolvedRouteIndex: input.resolution.index }),
       resolvedRoute: input.resolution.route,
       resolvedDriver: ProviderDriverKind.make(input.resolution.driver),
       resolvedModelSelection: input.resolution.modelSelection,
@@ -79,7 +86,8 @@ export function validateAgentPersonaAssignment(
     return "Persona assignment uses an unknown definition version.";
   }
   if (
-    !definition.authority.allowedPolicies.some((policy) => policy === assignment.authorityPolicy)
+    !isAgentPersonaAuthorityPolicy(assignment.authorityPolicy) ||
+    mapAgentPersonaPolicy(assignment.authorityPolicy) !== agentPersonaPolicy(definition)
   ) {
     return "Persona assignment uses an authority policy outside its definition.";
   }
@@ -94,7 +102,16 @@ export function validateAgentPersonaAssignment(
       ? "Human runtime overrides require a saved persona snapshot."
       : undefined;
   }
-  const target = definition.modelRoute[assignment.resolvedRoute === "primary" ? 0 : 1];
+  const target =
+    definition.modelRoute[
+      assignment.resolvedRouteIndex ?? (assignment.resolvedRoute === "primary" ? 0 : 1)
+    ];
+  if (target === undefined) return "Persona assignment does not match its declared model route.";
+  if ("instanceId" in target) {
+    return modelSelectionsEqual(assignment.resolvedModelSelection, target)
+      ? undefined
+      : "Persona assignment does not match its declared model route.";
+  }
   // Launches carry exactly one reasoning option; a second one would leave the provider's choice ambiguous.
   const reasoningOptions = (assignment.resolvedModelSelection.options ?? []).filter(({ id }) =>
     isAgentPersonaReasoningOptionId(id),

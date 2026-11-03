@@ -1,3 +1,6 @@
+import { modelSelectionsEqual } from "@t3tools/shared/model";
+import { agentPersonaPolicy } from "../agents/agentPersonas.ts";
+import { agentPersonaTargets } from "../agents/agentPersonaRouting.ts";
 import { CrewSeatWorkspace, crewMemberSelectionLevel } from "@t3tools/contracts/j5";
 import {
   describeCrewSeatRuntime,
@@ -495,11 +498,13 @@ export const layer = Layer.effect(
             (candidate) => candidate.instanceId === frozen.instanceId,
           )?.driver;
           const keepsPersonaModel =
-            definition?.modelRoute.some(
+            (definition === undefined ? [] : agentPersonaTargets(definition, providers)).some(
               (target) =>
-                target.driver === frozenDriver &&
-                target.model === frozen.model &&
-                target.reasoningEffort === levelOf(frozen),
+                target.selection === undefined
+                  ? target.driver === frozenDriver &&
+                    target.model === frozen.model &&
+                    target.reasoningEffort === levelOf(frozen)
+                  : modelSelectionsEqual(target.selection, frozen),
             ) ?? false;
           const { modelSelection, provider } = yield* resolveSelection(
             seat,
@@ -516,7 +521,7 @@ export const layer = Layer.effect(
             seat.runtimeMode === undefined &&
             !providerCanEnforceAgentPersonaAuthority(
               provider.driver,
-              definition.authority.defaultPolicy,
+              agentPersonaPolicy(definition),
             )
           )
             return yield* new CrewLaunchSeatUnavailableError({
@@ -531,7 +536,7 @@ export const layer = Layer.effect(
             definitionVersion: definition.version,
             definitionDigest,
             displayName: definition.displayName,
-            authorityPolicy: definition.authority.defaultPolicy,
+            authorityPolicy: agentPersonaPolicy(definition),
             resolvedRoute: "override" as const,
             resolvedDriver: provider.driver,
             resolvedModelSelection: modelSelection,

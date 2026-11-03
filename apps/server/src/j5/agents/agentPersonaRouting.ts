@@ -1,8 +1,11 @@
 import {
   agentPersonaReasoningDescriptor,
+  isAgentPersonaReasoningOptionId,
   defaultInstanceIdForDriver,
+  ProviderDriverKind,
   isProviderAvailable,
   type AgentPersonaAuthorityPolicy,
+  type AgentPersonaDefinitionView,
   type AgentPersonaRouteFailureCode as ContractRouteFailureCode,
   type ModelSelection,
   type OrchestrationV2AgentPersonaCatalog,
@@ -12,11 +15,71 @@ import {
 
 import {
   getBuiltInAgentPersona,
+  agentPersonaPolicy,
+  agentPersonaAccess,
   type AgentModelTarget,
   type AgentPersonaDefinition,
   type AgentPersonaId,
 } from "./agentPersonas.ts";
 import { providerCanEnforceAgentPersonaAuthority } from "./agentPersonaProviderPolicy.ts";
+
+type ResolvedTarget = AgentModelTarget & {
+  readonly selection?: ModelSelection;
+  readonly index: number;
+};
+
+export function agentPersonaTargets(
+  definition: AgentPersonaDefinition,
+  providers: ReadonlyArray<ServerProvider>,
+): ReadonlyArray<ResolvedTarget> {
+  return definition.modelRoute.flatMap((entry, index) => {
+    if ("driver" in entry) return [{ ...entry, index }];
+    const provider = providers.find(({ instanceId }) => instanceId === entry.instanceId);
+    if (provider === undefined) return [];
+    const reasoning = entry.options?.find(({ id }) => isAgentPersonaReasoningOptionId(id))?.value;
+    return [
+      {
+        driver: provider.driver,
+        model: entry.model,
+        reasoningEffort: typeof reasoning === "string" ? reasoning : "Provider default",
+        selection: entry,
+        index,
+      },
+    ];
+  });
+}
+
+export function agentPersonaDefinitionView(
+  definition: AgentPersonaDefinition,
+  providers: ReadonlyArray<ServerProvider>,
+): AgentPersonaDefinitionView {
+  // A legacy summary is display-only; new definitions never expose the legacy edit metadata.
+  const summary = (entry: AgentPersonaDefinition["modelRoute"][number]) => {
+    if ("driver" in entry) return entry;
+    const reasoning = entry.options?.find(({ id }) => isAgentPersonaReasoningOptionId(id))?.value;
+    return {
+      driver:
+        providers.find(({ instanceId }) => instanceId === entry.instanceId)?.driver ??
+        ProviderDriverKind.make("unconfigured"),
+      model: entry.model,
+      reasoningEffort: typeof reasoning === "string" ? reasoning : "Provider default",
+    };
+  };
+  const [primary, secondary] = definition.modelRoute;
+  const policy = agentPersonaPolicy(definition);
+  return {
+    id: definition.id,
+    version: definition.version,
+    displayName: definition.displayName,
+    description: definition.description,
+    instructions: definition.instructions,
+    ...(definition.acceptedInput === undefined ? {} : { acceptedInput: definition.acceptedInput }),
+    authority: { defaultPolicy: policy, allowedPolicies: [policy] },
+    modelRoute: [summary(primary), summary(secondary ?? primary)],
+    access: agentPersonaAccess(definition),
+    models: definition.modelRoute,
+  };
+}
 
 export type AgentPersonaRouteFailureCode = ContractRouteFailureCode;
 
@@ -37,6 +100,7 @@ export type AgentPersonaRouteResolution =
       readonly personaId: AgentPersonaId;
       readonly definitionVersion: number;
       readonly route: "primary" | "fallback";
+      readonly index?: number;
       readonly driver: AgentModelTarget["driver"];
       readonly modelSelection: ModelSelection;
       readonly rejectedTargets: ReadonlyArray<AgentPersonaRouteAttempt>;
@@ -51,9 +115,10 @@ export type AgentPersonaRouteResolution =
 export function unavailableAgentPersonaReason(
   resolution: Extract<AgentPersonaRouteResolution, { status: "unavailable" }>,
 ): "routes-unavailable" | "authority-not-enforceable" {
-  return resolution.attempts.every(({ failures }) =>
-    failures.some(({ code }) => code === "authority-not-enforceable"),
-  )
+  return resolution.attempts.length > 0 &&
+    resolution.attempts.every(({ failures }) =>
+      failures.some(({ code }) => code === "authority-not-enforceable"),
+    )
     ? "authority-not-enforceable"
     : "routes-unavailable";
 }
@@ -61,8 +126,9 @@ export function unavailableAgentPersonaReason(
 /** The launch selection for a target on a provider that already passed the availability check. */
 export function agentPersonaModelSelection(
   provider: ServerProvider,
-  target: AgentModelTarget,
+  target: AgentModelTarget & { readonly selection?: ModelSelection },
 ): ModelSelection {
+  if (target.selection !== undefined) return target.selection;
   const descriptor = agentPersonaReasoningDescriptor(
     provider.models.find((model) => model.slug === target.model),
   );
@@ -81,7 +147,7 @@ export function agentPersonaModelSelection(
 /** Why one provider instance cannot serve one declared route target right now. */
 export function agentPersonaTargetUnavailableReason(
   provider: ServerProvider,
-  target: AgentModelTarget,
+  target: AgentModelTarget & { readonly selection?: ModelSelection },
 ): AgentPersonaRouteFailureCode | undefined {
   if (!isProviderAvailable(provider)) return "provider-unavailable";
   if (!provider.enabled) return "provider-disabled";
@@ -92,7 +158,23 @@ export function agentPersonaTargetUnavailableReason(
   if (model === undefined) return "model-not-advertised";
 
   const descriptor = agentPersonaReasoningDescriptor(model);
-  if (!descriptor?.options.some((option) => option.id === target.reasoningEffort)) {
+  const explicitReasoning = target.selection?.options?.find(({ id }) =>
+    isAgentPersonaReasoningOptionId(id),
+  );
+  if (target.selection !== undefined) {
+    if (
+      (target.selection.options?.filter(({ id }) => isAgentPersonaReasoningOptionId(id)).length ??
+        0) > 1 ||
+      (explicitReasoning !== undefined && explicitReasoning.id !== descriptor?.id)
+    )
+      return "reasoning-effort-not-advertised";
+    if (explicitReasoning === undefined) return undefined;
+  }
+  if (
+    !descriptor?.options.some(
+      (option) => option.id === (explicitReasoning?.value ?? target.reasoningEffort),
+    )
+  ) {
     return "reasoning-effort-not-advertised";
   }
   return undefined;
@@ -100,10 +182,14 @@ export function agentPersonaTargetUnavailableReason(
 
 function candidatesForTarget(
   providers: ReadonlyArray<ServerProvider>,
-  target: AgentModelTarget,
+  target: AgentModelTarget & { readonly selection?: ModelSelection },
 ): ReadonlyArray<ServerProvider> {
   return providers
-    .filter((provider) => provider.driver === target.driver)
+    .filter((provider) =>
+      target.selection === undefined
+        ? provider.driver === target.driver
+        : provider.instanceId === target.selection.instanceId,
+    )
     .map((provider, index) => ({
       provider,
       index,
@@ -122,10 +208,10 @@ export function resolveAgentPersonaRoute(input: {
   readonly authorityPolicy?: AgentPersonaAuthorityPolicy;
 }): AgentPersonaRouteResolution {
   const definition = input.definition ?? getBuiltInAgentPersona(input.personaId);
-  const authorityPolicy = input.authorityPolicy ?? definition.authority.defaultPolicy;
+  const authorityPolicy = input.authorityPolicy ?? agentPersonaPolicy(definition);
   const rejectedTargets: Array<AgentPersonaRouteAttempt> = [];
 
-  for (const [index, target] of definition.modelRoute.entries()) {
+  for (const { index, ...target } of agentPersonaTargets(definition, input.providers)) {
     const route = index === 0 ? "primary" : "fallback";
     const candidates = candidatesForTarget(input.providers, target);
     const failures: Array<AgentPersonaRouteFailure> = [];
@@ -159,6 +245,7 @@ export function resolveAgentPersonaRoute(input: {
         personaId: definition.id,
         definitionVersion: definition.version,
         route,
+        ...(definition.modelRoute.length > 2 || definition.access !== undefined ? { index } : {}),
         driver: target.driver,
         modelSelection: agentPersonaModelSelection(provider, target),
         rejectedTargets,
@@ -195,8 +282,10 @@ export function buildAgentPersonaCatalog(
         ...(definition.acceptedInput === undefined
           ? {}
           : { acceptedInput: definition.acceptedInput }),
-        defaultAuthorityPolicy: definition.authority.defaultPolicy,
-        allowedAuthorityPolicies: [...definition.authority.allowedPolicies],
+        access: agentPersonaAccess(definition),
+        models: definition.modelRoute,
+        defaultAuthorityPolicy: agentPersonaPolicy(definition),
+        allowedAuthorityPolicies: [agentPersonaPolicy(definition)],
         availability:
           resolution.status === "available"
             ? {

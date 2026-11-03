@@ -1,3 +1,4 @@
+import { agentPersonaPolicy, mapAgentPersonaPolicy } from "./agentPersonas.ts";
 import type { OrchestrationV2AgentPersonaRequest, ServerProvider } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import { buildAgentPersonaAssignment } from "./agentPersonaAssignment.ts";
@@ -68,7 +69,7 @@ export const prepareAgentPersonaLaunch = Effect.fn("prepareAgentPersonaLaunch")(
     });
   if (
     request.authorityPolicy !== undefined &&
-    !definition.authority.allowedPolicies.includes(request.authorityPolicy)
+    mapAgentPersonaPolicy(request.authorityPolicy) !== agentPersonaPolicy(definition)
   ) {
     return yield* new AgentPersonaLibraryError({
       message: `Authority policy ${request.authorityPolicy} is not allowed for ${request.personaId}.`,

@@ -118,22 +118,21 @@ export function presentAgentPersonaCatalog(
       persona.availability.status === "unavailable" && persona.availability.reason === "disabled";
     const removed =
       persona.availability.status === "unavailable" && persona.availability.reason === "removed";
-    const unsupported = !isAgentPersonaAuthorityPolicy(persona.defaultAuthorityPolicy);
+    const policy = persona.access ?? persona.defaultAuthorityPolicy;
+    const unsupported = !isAgentPersonaAuthorityPolicy(policy);
     return {
       personaId: persona.personaId,
       imported: persona.imported ?? false,
       removed,
       enabled: !disabled && !removed,
       edit:
-        persona.imported &&
-        persona.editable &&
-        isAgentPersonaAuthorityPolicy(persona.defaultAuthorityPolicy)
+        persona.imported && persona.editable && isAgentPersonaAuthorityPolicy(policy)
           ? {
               personaId: persona.personaId,
               expectedDigest: persona.editable.definitionDigest,
               displayName: persona.displayName,
               description: persona.description,
-              authorityPolicy: persona.defaultAuthorityPolicy,
+              authorityPolicy: policy,
               modelRoute: persona.editable.modelRoute,
             }
           : null,
@@ -142,8 +141,14 @@ export function presentAgentPersonaCatalog(
       displayName: persona.displayName,
       description: persona.description,
       acceptedInput: persona.acceptedInput,
-      unsandboxed: persona.allowedAuthorityPolicies.includes("full-access"),
-      authority: persona.allowedAuthorityPolicies
+      unsandboxed:
+        persona.access === undefined
+          ? persona.allowedAuthorityPolicies.includes("full-access")
+          : persona.access === "full-access",
+      authority: (persona.access === undefined
+        ? persona.allowedAuthorityPolicies
+        : [persona.access]
+      )
         .map(
           (policy) =>
             `${authorityLabel(policy)}${policy === persona.defaultAuthorityPolicy ? " (default)" : ""}`,
@@ -447,7 +452,13 @@ export interface AgentPersonaCreateDraft {
 export function agentPersonaDuplicateDraft(
   definition: AgentPersonaDefinitionView,
 ): AgentPersonaCreateDraft {
-  const authorityPolicy = definition.authority.defaultPolicy;
+  if (
+    definition.models !== undefined &&
+    (definition.models.length !== 2 || definition.models.some((entry) => !("driver" in entry)))
+  ) {
+    throw new Error("Export YAML to copy this persona without losing its model list or options.");
+  }
+  const authorityPolicy = definition.access ?? definition.authority.defaultPolicy;
   if (!isAgentPersonaAuthorityPolicy(authorityPolicy))
     throw new Error(unsupportedPolicyReason(authorityPolicy));
   return {

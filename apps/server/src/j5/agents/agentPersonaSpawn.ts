@@ -9,9 +9,10 @@ import { buildAgentPersonaAssignment } from "./agentPersonaAssignment.ts";
 import { AgentPersonaLibraryError, type createAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
 import {
   agentPersonaModelSelection,
+  agentPersonaTargets,
   agentPersonaTargetUnavailableReason,
 } from "./agentPersonaRouting.ts";
-import type { AgentModelTarget, AgentPersonaId } from "./agentPersonas.ts";
+import { agentPersonaPolicy, type AgentModelTarget, type AgentPersonaId } from "./agentPersonas.ts";
 
 type Library = ReturnType<typeof createAgentPersonaLibrary>;
 
@@ -56,16 +57,19 @@ export const prepareAgentPersonaPeerSpawn = Effect.fn("j5.prepareAgentPersonaPee
       message: `Provider ${request.instanceId} is not configured in this environment.`,
     });
   }
-  const index = definition.modelRoute.findIndex(
+  const targets = agentPersonaTargets(definition, [provider]);
+  const index = targets.findIndex(
     (target) =>
       target.driver === provider.driver &&
       target.model === request.model &&
-      target.reasoningEffort === request.reasoning,
+      (target.selection === undefined
+        ? target.reasoningEffort === request.reasoning
+        : target.reasoningEffort === (request.reasoning ?? "Provider default")),
   );
-  const target = definition.modelRoute[index];
+  const target = targets[index];
   if (target === undefined) {
     return yield* new AgentPersonaLibraryError({
-      message: `Agent ${request.personaId} allows only ${definition.modelRoute
+      message: `Agent ${request.personaId} allows only ${targets
         .map(describeTarget)
         .join(
           " or ",
@@ -85,7 +89,10 @@ export const prepareAgentPersonaPeerSpawn = Effect.fn("j5.prepareAgentPersonaPee
       status: "available",
       personaId: definition.id,
       definitionVersion: definition.version,
-      route: index === 0 ? "primary" : "fallback",
+      route: target.index === 0 ? "primary" : "fallback",
+      ...(definition.modelRoute.length > 2 || definition.access !== undefined
+        ? { index: target.index }
+        : {}),
       driver: target.driver,
       modelSelection,
       rejectedTargets: [],
@@ -93,7 +100,7 @@ export const prepareAgentPersonaPeerSpawn = Effect.fn("j5.prepareAgentPersonaPee
   });
   if (result.status !== "assigned") {
     return yield* new AgentPersonaLibraryError({
-      message: `Agent ${request.personaId} cannot enforce its ${definition.authority.defaultPolicy} permissions on ${target.driver}.`,
+      message: `Agent ${request.personaId} cannot enforce its ${agentPersonaPolicy(definition)} permissions on ${target.driver}.`,
     });
   }
   const definitionDigest = yield* library.snapshot(definition);

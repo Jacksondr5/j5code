@@ -16,7 +16,8 @@ import { definitionDigest, makeAgentPersonaLibrary } from "./agentPersonaLibrary
 import { makeAgentHandoffStore } from "./agentHandoffStore.ts";
 import { agentPersonaFolderGitStatus } from "./agentPersonaLibraryGit.ts";
 import { agentPersonaPolicyEnforcement } from "./agentPersonaProviderPolicy.ts";
-import { buildAgentPersonaCatalog } from "./agentPersonaRouting.ts";
+import { agentPersonaLegacyEditable } from "./agentPersonas.ts";
+import { buildAgentPersonaCatalog, agentPersonaDefinitionView } from "./agentPersonaRouting.ts";
 import { agentPersonaUsage } from "./agentPersonaUsage.ts";
 
 const METHODS = J5_AGENT_PERSONA_WS_METHODS;
@@ -68,7 +69,8 @@ export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHand
         "j5.agents.agentPersonaRpc.getAgentPersonaCatalog",
       )(function* (_input: Input<"getAgentPersonaCatalog">) {
         const current = yield* library.catalog().pipe(Effect.mapError(catalogError));
-        const catalog = buildAgentPersonaCatalog(yield* deps.providers, current.definitions);
+        const providers = yield* deps.providers;
+        const catalog = buildAgentPersonaCatalog(providers, current.definitions);
         const importedIds = new Set(current.importedIds);
         const digests = new Map(
           [...current.definitions, ...current.removedSources].map((definition) => [
@@ -78,12 +80,15 @@ export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHand
         );
         const editable = new Map(
           current.definitions
-            .filter(({ id }) => importedIds.has(id))
+            .filter(
+              (definition) =>
+                importedIds.has(definition.id) && agentPersonaLegacyEditable(definition),
+            )
             .map((definition) => [
               definition.id,
               {
                 definitionDigest: definitionDigest(definition),
-                modelRoute: definition.modelRoute,
+                modelRoute: agentPersonaDefinitionView(definition, providers).modelRoute,
               },
             ]),
         );
@@ -156,16 +161,23 @@ export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHand
         library.restoreSource(input.personaId).pipe(Effect.mapError(catalogError)),
       [METHODS.createAgentPersona]: (input: Input<"createAgentPersona">) =>
         library.createPersona(input).pipe(Effect.mapError(catalogError)),
-      [METHODS.readAgentPersona]: (input: Input<"readAgentPersona">) =>
-        library.read(input.personaId).pipe(
-          Effect.map((definition) => ({
-            definition,
+      [METHODS.readAgentPersona]: Effect.fn("j5.agents.agentPersonaRpc.readAgentPersona")(
+        function* (input: Input<"readAgentPersona">) {
+          const definition = yield* library
+            .read(input.personaId)
+            .pipe(Effect.mapError(catalogError));
+          const providers = yield* deps.providers;
+          const view = yield* Effect.try({
+            try: () => agentPersonaDefinitionView(definition, providers),
+            catch: catalogError,
+          });
+          return {
+            definition: view,
             fileName: `${definition.id}.yaml`,
-            // Block scalars keep multiline instructions readable; the import parser accepts the result.
             yaml: toYaml(definition, { lineWidth: 0 }),
-          })),
-          Effect.mapError(catalogError),
-        ),
+          };
+        },
+      ),
       [METHODS.getAgentPersonaUsage]: (_input: Input<"getAgentPersonaUsage">) =>
         usage().pipe(Effect.mapError(catalogError)),
       [METHODS.getAgentPersonaLibrarySources]: Effect.fn(
