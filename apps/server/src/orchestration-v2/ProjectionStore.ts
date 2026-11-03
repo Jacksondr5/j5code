@@ -1,3 +1,8 @@
+import {
+  readAgentPersonaLimitedInstances,
+  limitedPersonaInstancesFromProjections,
+} from "../j5/agents/readAgentPersonaUsageLimits.ts";
+import type { AgentPersonaLibraryError } from "../j5/agents/agentPersonaLibrary.ts";
 import { pendingGuestMessageCount } from "@t3tools/contracts";
 import { applyThreadPullRequestLinkUpdate } from "../sourceControl/threadPullRequests.ts";
 import { projectTurnItemForWire } from "./WireProjection.ts";
@@ -505,6 +510,9 @@ export interface ProjectionStoreV2Shape {
   readonly getThread: (
     threadId: ThreadId,
   ) => Effect.Effect<OrchestrationV2AppThread, ProjectionStoreV2Error>;
+  readonly getPersonaUsageLimitedProviderInstances: (
+    now: number,
+  ) => Effect.Effect<ReadonlySet<ProviderInstanceId>, AgentPersonaLibraryError>;
   readonly getLimitRecoveryCandidates: (options: {
     readonly now: DateTime.Utc;
     readonly autoResume: boolean;
@@ -6780,8 +6788,18 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       (...args: Args): Effect.Effect<A, E, R> =>
         method(...args).pipe(NodeSqliteClient.readOnly);
 
+    const getPersonaUsageLimitedProviderInstances = Effect.fn(
+      "ProjectionStore.getPersonaUsageLimitedProviderInstances",
+    )(function* (now: number) {
+      return yield* readAgentPersonaLimitedInstances(now).pipe(
+        Effect.provideService(SqlClient.SqlClient, sql),
+      );
+    });
     return {
       apply,
+      getPersonaUsageLimitedProviderInstances: readOnReader(
+        getPersonaUsageLimitedProviderInstances,
+      ),
       getShellSnapshot: readOnReader(getShellSnapshot),
       listActiveSubagentThreadIds: readOnReader(listActiveSubagentThreadIds),
       readShellSnapshot: readOnReader(readShellSnapshot),
@@ -6836,6 +6854,12 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
     const sequence = yield* Ref.make(0);
 
     const service: ProjectionStoreV2Shape = {
+      getPersonaUsageLimitedProviderInstances: (now) =>
+        Ref.get(replayState).pipe(
+          Effect.map((state) =>
+            limitedPersonaInstancesFromProjections([...state.projections.values()], now),
+          ),
+        ),
       apply:
         /* This helper runs for individual orchestration events; the enclosing operation owns the span. */
         Effect.fnUntraced(function* (event) {

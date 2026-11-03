@@ -17,6 +17,46 @@ const decodePersonaRequest = Schema.decodeUnknownSync(OrchestrationV2AgentPerson
 const decodePersonaCreate = Schema.decodeUnknownSync(AgentPersonaCreateInput);
 
 describe("agent persona contracts", () => {
+  it("accepts one or many ordered instance entries and rejects an empty list", () => {
+    const input = {
+      id: "ordered",
+      displayName: "Ordered",
+      description: "Ordered models",
+      instructions: "Work",
+      authorityPolicy: "read-only",
+      modelRoute: [
+        {
+          instanceId: "codex",
+          model: "first",
+          options: [{ id: "reasoningEffort", value: "high" }],
+        },
+      ],
+    };
+    expect(decodePersonaCreate(input).modelRoute).toEqual(input.modelRoute);
+    const many = {
+      ...input,
+      modelRoute: [
+        ...input.modelRoute,
+        { instanceId: "claudeAgent", model: "second" },
+        { instanceId: "codex-other", model: "third" },
+      ],
+    };
+    expect(decodePersonaCreate(many).modelRoute).toEqual(many.modelRoute);
+    expect(() => decodePersonaCreate({ ...input, modelRoute: [] })).toThrow();
+    expect(() =>
+      decodePersonaCreate({
+        ...input,
+        modelRoute: [{ provider: "codex", model: "first", reasoningEffort: "high" }],
+      }),
+    ).toThrow();
+    expect(() =>
+      decodePersonaCreate({
+        ...input,
+        modelRoute: [{ instanceId: "codex", model: "first", reasoningEffort: "high" }],
+      }),
+    ).toThrow();
+  });
+
   it("rejects server-owned persona assignments on the public command boundary", () => {
     const command = {
       type: "thread.create",
@@ -170,4 +210,24 @@ describe("agent persona contracts", () => {
       }),
     ).toThrow();
   });
+});
+
+it("keeps indexed assignments readable by the legacy assignment schema", () => {
+  const legacy = Schema.Struct({
+    ...OrchestrationV2AgentPersonaAssignment.fields,
+    resolvedEntryIndex: Schema.optional(Schema.Never),
+  });
+  const raw = {
+    personaId: "ordered",
+    definitionVersion: 1,
+    authorityPolicy: "read-only",
+    resolvedRoute: "fallback",
+    resolvedDriver: "codex",
+    resolvedEntryIndex: 2,
+    resolvedModelSelection: { instanceId: "codex", model: "third" },
+  };
+  const { resolvedEntryIndex: _newField, ...legacyFields } = legacy.fields;
+  const oldReader = Schema.Struct(legacyFields);
+  expect(Schema.decodeUnknownSync(oldReader)(raw).resolvedRoute).toBe("fallback");
+  expect(decodePersonaAssignment(raw).resolvedEntryIndex).toBe(2);
 });

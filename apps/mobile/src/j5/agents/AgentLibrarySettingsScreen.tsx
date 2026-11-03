@@ -656,9 +656,9 @@ function PersonaRow(props: {
           {persona.displayName}
         </Text>
         {persona.removed ? <Text className="text-sm text-foreground-muted">Removed</Text> : null}
-        {unavailable && persona.blockedReasons[0] ? (
-          <Text className="text-sm text-danger-foreground" numberOfLines={2}>
-            {persona.blockedReasons[0]}
+        {unavailable && persona.blockedReasons.join("; ") ? (
+          <Text className="text-sm text-danger-foreground">
+            {persona.blockedReasons.join("; ")}
           </Text>
         ) : null}
       </Pressable>

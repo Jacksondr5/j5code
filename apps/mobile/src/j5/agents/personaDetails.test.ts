@@ -36,8 +36,8 @@ describe("personaDetailRows", () => {
       ["Status", "Available"],
       ["Source", "/srv/personas/luna.yaml"],
       ["Access", "Read only (default), Full access"],
-      ["Primary model", "Codex · gpt-6-luna · low"],
-      ["Fallback model", "Claude · haiku · low"],
+      ["Model 1", "Codex · gpt-6-luna · low"],
+      ["Model 2", "Claude · haiku · low"],
       ["Description", "Reviews changes."],
     ]);
   });
@@ -92,7 +92,7 @@ describe("personaDetailRows", () => {
   it("falls back to the catalog's route when the definition can't be read", () => {
     const rows = rowsOf(personaDetailRows(persona, { status: "failed" }, null));
     expect(rows).toContainEqual(["Model", "Codex · gpt-6-luna · primary"]);
-    expect(rows.map(([label]) => label)).not.toContain("Primary model");
+    expect(rows.map(([label]) => label)).not.toContain("Model 1");
   });
 
   it("lists every blocked reason in danger text, and usage when there is any", () => {

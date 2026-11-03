@@ -174,3 +174,63 @@ describe("agent persona assignment", () => {
     });
   });
 });
+
+it("validates an indexed entry and declared options while allowing materialized defaults", () => {
+  const base = listBuiltInAgentPersonas()[0]!;
+  const target = {
+    instanceId: ProviderInstanceId.make("selected-account"),
+    model: "third",
+    options: [{ id: "effort", value: "high" }],
+  };
+  const definition = {
+    ...base,
+    modelRoute: [base.modelRoute[0], base.modelRoute[1], target] as const,
+  };
+  const assignment = {
+    personaId: base.id,
+    definitionVersion: base.version,
+    authorityPolicy: base.authority.defaultPolicy,
+    resolvedRoute: "fallback" as const,
+    resolvedEntryIndex: 2,
+    resolvedDriver: ProviderDriverKind.make("codex"),
+    resolvedModelSelection: {
+      ...target,
+      options: [...target.options, { id: "fastMode", value: false }],
+    },
+  };
+  for (const fastMode of [false, true]) {
+    assert.isUndefined(
+      validateAgentPersonaAssignment(
+        {
+          ...assignment,
+          resolvedModelSelection: {
+            ...assignment.resolvedModelSelection,
+            options: [...target.options, { id: "fastMode", value: fastMode }],
+          },
+        },
+        definition,
+      ),
+    );
+  }
+  assert.isDefined(
+    validateAgentPersonaAssignment({ ...assignment, resolvedEntryIndex: 3 }, definition),
+  );
+  assert.isDefined(
+    validateAgentPersonaAssignment(
+      {
+        ...assignment,
+        resolvedModelSelection: { ...target, instanceId: ProviderInstanceId.make("other-account") },
+      },
+      definition,
+    ),
+  );
+  assert.isDefined(
+    validateAgentPersonaAssignment(
+      {
+        ...assignment,
+        resolvedModelSelection: { ...target, options: [{ id: "effort", value: "low" }] },
+      },
+      definition,
+    ),
+  );
+});

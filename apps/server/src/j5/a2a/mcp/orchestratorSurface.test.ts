@@ -1,3 +1,4 @@
+import { layer as personaUsageLimitsLayer } from "../../agents/agentPersonaUsageLimits.ts";
 import { expect, it } from "@effect/vitest";
 import {
   EnvironmentId,
@@ -95,6 +96,7 @@ const TestLayer = McpHttpServer.toolkitRegistration(
   J5OrchestratorSurface,
   J5OrchestratorSurfaceHandlers.layer,
 ).pipe(
+  Layer.provide(personaUsageLimitsLayer),
   Layer.provide(
     Layer.mergeAll(
       Layer.mock(OrchestratorMcpService)({

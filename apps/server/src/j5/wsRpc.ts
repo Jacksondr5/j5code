@@ -1,3 +1,4 @@
+import { AgentPersonaUsageLimits } from "./agents/agentPersonaUsageLimits.ts";
 import {
   J5AgentPersonaRpcGroup,
   J5ArtifactRpcGroup,
@@ -64,6 +65,7 @@ export const J5_WS_RPC_METHODS = [...J5WsRpcGroup.requests.keys()] as ReadonlyAr
 >;
 
 type J5WsRpcServices =
+  | AgentPersonaUsageLimits
   | ClientActionsService
   | ClientReadsService
   | PeerAdminService
@@ -84,6 +86,7 @@ export const j5WsRpcServices = Effect.context<J5WsRpcServices>().pipe(
   // Only these: the whole server context laid over a socket's would shadow that socket's own.
   Effect.map(
     Context.pick(
+      AgentPersonaUsageLimits,
       ClientActionsService,
       ClientReadsService,
       PeerAdminService,

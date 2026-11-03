@@ -1,3 +1,4 @@
+import { AgentPersonaUsageLimits } from "../agents/agentPersonaUsageLimits.ts";
 import * as SpawnCompositionService from "./SpawnCompositionService.ts";
 import * as AgentCrewInstanceService from "./AgentCrewInstanceService.ts";
 import * as ProviderRegistry from "../../provider/ProviderRegistry.ts";
@@ -183,7 +184,7 @@ const prepareSpawnPersona = Effect.fn("j5.a2a.mcp.prepareSpawnPersona")(function
     Effect.mapError((error) =>
       stateError(
         `Persona ${input.persona} cannot be spawned as requested: ${error.message}`,
-        "Call orchestrator_capabilities, then retry j5_spawn_agent with a provider, model, and reasoning from that persona's declared routes, or omit persona for a plain Peer Agent.",
+        "Call orchestrator_capabilities, then retry j5_spawn_agent with a provider, model, and reasoning from that persona's ordered model entries, or omit persona for a plain Peer Agent.",
       ),
     ),
   );
@@ -386,7 +387,11 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
   const persona =
     personaId === undefined || existing !== null
       ? undefined
-      : yield* prepareSpawnPersona({ ...input, persona: personaId }, selected);
+      : yield* prepareSpawnPersona({ ...input, persona: personaId }, selected).pipe(
+          Effect.provideService(AgentPersonaUsageLimits, {
+            limitedInstances: threadManagement.getPersonaUsageLimitedProviderInstances,
+          }),
+        );
   const modelSelection = existing?.modelSelection ?? persona?.modelSelection ?? selected;
   // A persona's policy sets its permissions. Without one the agent gets the caller's modes,
   // or the ones the caller chose, which upstream's rule keeps within the caller's own.

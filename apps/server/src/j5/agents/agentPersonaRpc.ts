@@ -1,3 +1,5 @@
+import { AgentPersonaUsageLimits } from "./agentPersonaUsageLimits.ts";
+import * as Clock from "effect/Clock";
 import {
   AgentPersonaCatalogError,
   AgentPersonaImportConflictError,
@@ -58,6 +60,7 @@ const catalogError = (cause: unknown) => new AgentPersonaCatalogError({ message:
 export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHandlers")(
   function* (deps: { readonly providers: Effect.Effect<ReadonlyArray<ServerProvider>> }) {
     const library = yield* makeAgentPersonaLibrary;
+    const quota = yield* AgentPersonaUsageLimits;
     // Usage reads the projections through the session's SqlClient, captured once here.
     const sql = yield* SqlClient.SqlClient;
     const usage = () => agentPersonaUsage().pipe(Effect.provideService(SqlClient.SqlClient, sql));
@@ -70,7 +73,16 @@ export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHand
       )(function* (_input: Input<"getAgentPersonaCatalog">) {
         const current = yield* library.catalog().pipe(Effect.mapError(catalogError));
         const providers = yield* deps.providers;
-        const catalog = buildAgentPersonaCatalog(providers, current.definitions);
+        const now = yield* Clock.currentTimeMillis;
+        const limitedInstances = yield* quota
+          .limitedInstances(now)
+          .pipe(Effect.mapError(catalogError));
+        const catalog = buildAgentPersonaCatalog(
+          providers,
+          current.definitions,
+          now,
+          limitedInstances,
+        );
         const importedIds = new Set(current.importedIds);
         const digests = new Map(
           [...current.definitions, ...current.removedSources].map((definition) => [
@@ -92,6 +104,17 @@ export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHand
               },
             ]),
         );
+        const orderedEditable = new Map(
+          current.definitions
+            .filter(({ id }) => importedIds.has(id))
+            .map((definition) => [
+              definition.id,
+              {
+                definitionDigest: definitionDigest(definition),
+                modelRoute: definition.modelRoute,
+              },
+            ]),
+        );
         const disabledIds = new Set(current.disabledIds);
         const origin = (personaId: string) => {
           const path = current.sourcePaths.get(personaId);
@@ -101,7 +124,12 @@ export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHand
               ? { kind: "bundled" as const }
               : { kind: "folder" as const, path };
         };
-        const removed = buildAgentPersonaCatalog(yield* deps.providers, current.removedSources);
+        const removed = buildAgentPersonaCatalog(
+          providers,
+          current.removedSources,
+          now,
+          limitedInstances,
+        );
         return {
           diagnostics: current.diagnostics,
           personas: [
@@ -112,6 +140,9 @@ export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHand
               definitionDigest: digests.get(persona.personaId)!,
               ...(editable.has(persona.personaId)
                 ? { editable: editable.get(persona.personaId)! }
+                : {}),
+              ...(orderedEditable.has(persona.personaId)
+                ? { orderedEditable: orderedEditable.get(persona.personaId)! }
                 : {}),
               availability: disabledIds.has(persona.personaId)
                 ? { status: "unavailable" as const, reason: "disabled" as const }

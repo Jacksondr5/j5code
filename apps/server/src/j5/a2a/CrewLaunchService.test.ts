@@ -21,7 +21,10 @@ import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 
-import { makeAgentPersonaLibrary } from "../agents/agentPersonaLibrary.ts";
+import {
+  AgentPersonaLibraryError,
+  makeAgentPersonaLibrary,
+} from "../agents/agentPersonaLibrary.ts";
 import { BUILT_IN_AGENT_PERSONAS } from "../agents/agentPersonas.ts";
 import { stringify as toYaml } from "yaml";
 import { resolveAgentPersonaRuntime } from "../agents/agentPersonaRuntime.ts";
@@ -186,6 +189,7 @@ const threadManagementFake = (
   ) => Effect.Effect<void, OrchestratorDispatchError>,
 ) =>
   Layer.mock(ThreadManagementService)({
+    getPersonaUsageLimitedProviderInstances: () => Effect.succeed(new Set<ProviderInstanceId>()),
     getThreadRecords: (threadId) =>
       realThreads
         ? Ref.get(commands).pipe(
@@ -2942,4 +2946,119 @@ it.effect("a persona keeps its own level off the list, until its level is change
       assert.include(refused.message, `Reasoning level ${otherLevel}`);
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "launches an indexed persona entry through Crew defaults and the thread-create guard",
+  () =>
+    Effect.gen(function* () {
+      const { context, commands, captain } = yield* fixture;
+      const basic = provider("codex", "codex", [{ slug: "ordered-crew", options: ["high"] }]);
+      const advertised: ServerProvider = {
+        ...basic,
+        models: basic.models.map((model) => ({
+          ...model,
+          capabilities: {
+            ...model.capabilities,
+            optionDescriptors: [
+              ...(model.capabilities?.optionDescriptors ?? []),
+              { id: "fastMode", label: "Fast", type: "boolean" as const, currentValue: false },
+            ],
+          },
+        })),
+      };
+      const quotaReads = yield* Ref.make(0);
+      const quotaFails = yield* Ref.make(false);
+      const limited = { ...advertised, instanceId: ProviderInstanceId.make("limited") };
+      const layer = crewLaunchLayer.pipe(
+        Layer.updateService(ThreadManagementService, (service) => ({
+          ...service,
+          getPersonaUsageLimitedProviderInstances: Effect.fn("fixture.readQuota")(function* () {
+            yield* Ref.update(quotaReads, (count) => count + 1);
+            if (yield* Ref.get(quotaFails))
+              return yield* new AgentPersonaLibraryError({ message: "Quota read unavailable." });
+            return new Set([limited.instanceId]);
+          }),
+        })),
+        Layer.provideMerge(dependencies(commands, [limited, advertised])),
+        Layer.provideMerge(Layer.succeedContext(context)),
+        Layer.provideMerge(
+          personaLibraryLayer("j5-ordered-crew-", [BUILT_IN_AGENT_PERSONAS.scout]),
+        ),
+        Layer.provideMerge(NodeServices.layer),
+      );
+      yield* Effect.gen(function* () {
+        const launcher = yield* CrewLaunchService;
+        const library = yield* makeAgentPersonaLibrary;
+        const chosen = {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "ordered-crew",
+          options: [{ id: "reasoningEffort", value: "high" }],
+        };
+        yield* library.importFiles({
+          files: [
+            {
+              name: "ordered.yaml",
+              content: toYaml({
+                ...BUILT_IN_AGENT_PERSONAS.scout,
+                id: "ordered",
+                modelRoute: [
+                  { instanceId: "limited", model: chosen.model },
+                  { instanceId: chosen.instanceId, model: "not-offered" },
+                  chosen,
+                ],
+              }),
+            },
+          ],
+          replaceExisting: false,
+        });
+        const seat = {
+          name: "ordered",
+          agentId: "ordered",
+          reason: "Review",
+          workspace: { type: "shared" as const },
+        };
+        for (const request of [seat, { ...seat, modelSelection: chosen }]) {
+          const readsBefore = yield* Ref.get(quotaReads);
+          const resolvedSeats = yield* launcher.resolveSeats(captain, [
+            request,
+            { ...request, name: "ordered-second" },
+          ]);
+          assert.equal(yield* Ref.get(quotaReads), readsBefore + 1);
+          assert.deepStrictEqual(
+            resolvedSeats.map((seat) => seat.assignment?.resolvedEntryIndex),
+            [2, 2],
+          );
+          const resolved = resolvedSeats[0];
+          assert.equal(resolved!.assignment?.resolvedEntryIndex, 2);
+          assert.deepStrictEqual(resolved!.modelSelection.options, [
+            ...chosen.options,
+            { id: "fastMode", value: false },
+          ]);
+          yield* guardAgentPersonaThreadCreate(
+            {
+              type: "thread.create",
+              createdBy: "agent",
+              creationSource: "mcp",
+              commandId: CommandId.make("ordered-create"),
+              threadId: ThreadId.make("ordered-thread"),
+              projectId: captain.thread.projectId,
+              title: "Ordered",
+              modelSelection: resolved!.modelSelection,
+              runtimeMode: resolved!.runtimeMode,
+              interactionMode: "default",
+              agentPersonaAssignment: resolved!.assignment!,
+              branch: null,
+              worktreePath: null,
+            },
+            library,
+            () => Effect.succeed("codex"),
+          );
+        }
+        yield* Ref.set(quotaFails, true);
+        const failure = yield* launcher.resolveSeats(captain, [seat]).pipe(Effect.flip);
+        assert.equal(failure._tag, "CrewLaunchOperationError");
+        assert.lengthOf(yield* Ref.get(commands), 0);
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
 );

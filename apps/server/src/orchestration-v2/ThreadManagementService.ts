@@ -391,6 +391,7 @@ export interface ThreadManagementServiceShape {
     Effect.Effect<OrchestrationV2ThreadShellSnapshot, Orchestrator.OrchestratorV2Error>,
     Orchestrator.OrchestratorV2Error
   >;
+  readonly getPersonaUsageLimitedProviderInstances: Orchestrator.OrchestratorV2["Service"]["getPersonaUsageLimitedProviderInstances"];
   readonly getThreadShell: Orchestrator.OrchestratorV2["Service"]["getThreadShell"];
   readonly listProjectThreads: (input: {
     readonly projectId: ProjectId;
@@ -1256,6 +1257,7 @@ const make = Effect.gen(function* () {
     listOlderSettledThreads: orchestrator.listOlderSettledThreads,
     readShellSnapshot: orchestrator.readShellSnapshot,
     getThreadShell: orchestrator.getThreadShell,
+    getPersonaUsageLimitedProviderInstances: orchestrator.getPersonaUsageLimitedProviderInstances,
     listProjectThreads,
     sendToThread,
     assertProviderInstanceEnabled,

@@ -18,8 +18,8 @@ Crew composition, Playbook steps, workflow gates, and lifecycle automation remai
 
 ## User-authored library
 
-- Settings → Agent Setup offers **Create persona**, which authors a personal persona (name, stable ID, description, markdown instructions, runtime policy, primary and fallback models) and stores it as an imported definition of the selected environment; the server supplies the remaining contract fields. It also offers one **Import** menu with **Persona file** (one YAML definition) and **Folder** (all YAML definitions, including subfolders). The selected files are copied into the selected environment, so the same flow works remotely. Up to 50 files of 64 KiB each are validated as one atomic batch.
-- Imported agents can be edited in Settings: name, description, instructions, runtime policy, and primary/fallback models with reasoning settings. Any listed agent, including removed folder sources, can be duplicated into a personal agent or exported as YAML. Changes apply only to the imported copy and future launches, preserve enabled state, and reject stale concurrent edits.
+- Settings → Agent Setup offers **Create persona**, which authors a personal persona (name, stable ID, description, markdown instructions, runtime policy, an ordered model list) and stores it as an imported definition of the selected environment; the server supplies the remaining contract fields. It also offers one **Import** menu with **Persona file** (one YAML definition) and **Folder** (all YAML definitions, including subfolders). The selected files are copied into the selected environment, so the same flow works remotely. Up to 50 files of 64 KiB each are validated as one atomic batch.
+- Imported agents can be edited in Settings: name, description, instructions, runtime policy, and ordered model entries with reasoning settings. Any listed agent, including removed folder sources, can be duplicated into a personal agent or exported as YAML. Changes apply only to the imported copy and future launches, preserve enabled state, and reject stale concurrent edits.
 - Every listed agent has an environment-local **On/Off** setting, including folder definitions. New imports start enabled; disabling prevents new launches and keeps the entry visible. Replacement imports preserve the setting; removing an import clears it. Source ids are disabled through a separate state file that never touches their files. Running tasks retain their snapshots.
 - UI imports show a confirmation for existing IDs: each conflicting agent has a replacement toggle. Cancel imports nothing; Import selected imports new agents and overwrites only the selected existing definitions, including local edits, while preserving enabled state and saved tasks. Toggled-off agents are skipped throughout the import. New or changed conflicts require fresh confirmation. Duplicate IDs within a selection fail the batch. The trash action removes the imported copy and excludes any underlying source definition, without altering running tasks. Removed source definitions stay listed as **Removed** with a **Restore** action, so removal from Settings is reversible without any file. Source edits require reimporting unless the server reads that folder directly through configuration.
 - A library combines imported copies with optional source folders on the selected environment's filesystem. Definitions are plain YAML files with markdown instruction content, editable and shareable through ordinary editors and git. Git is optional. Loading never clones, pulls, pushes, or executes a file.
@@ -51,7 +51,7 @@ Files are limited to 64 KiB. Reading a definition never rewrites it. Legacy arti
 
 New launches map `critic-review` to read-only and `critic-fix` to workspace-write; diagnostic and publication-only defaults are invalid, with a repair message naming the three supported levels. An unsupported policy only in the retired allowed list is ignored. Existing assignments retain their saved policy and human-approved runtime override. A legacy reviewer with an allowed fix policy therefore remains read-only for new launches, while its existing fix workers continue with their saved workspace access.
 
-Read responses keep legacy authority and two-target summaries alongside the complete model list and access. A one-entry list repeats its entry only in that summary. Older clients can read personas and continue tasks; the server withholds legacy edit metadata and rejects edits that would truncate a new definition. The legacy summary labels an absent provider as unconfigured and an unspecified reasoning option as Provider default; these labels are never execution selections. The full YAML export preserves the stored definition. Ordered-list and access editors ship separately.
+Read responses keep legacy authority and two-target summaries alongside the complete model list and access. A one-entry list repeats its entry only in that summary. Older clients can read personas and continue tasks; the server withholds legacy edit metadata and rejects edits that would truncate a new definition. The legacy summary labels an absent provider as unconfigured and an unspecified reasoning option as Provider default; these labels are never execution selections. The full YAML export preserves the stored definition. Ordered-list editors use additive edit metadata and an explicit format marker so legacy clients cannot truncate a newer definition. Access-level editing ships separately.
 
 ## Historical examples
 
@@ -73,12 +73,14 @@ These examples document historical assignments and are not selectable unless a u
 
 ## Model routing
 
-1. Evaluate primary, then fallback, against the selected environment's current provider snapshots. No project-default or third route is inferred.
-2. Require supported runtime permissions before selecting a target. For matching instances, prefer the canonical default instance, then configured order.
-3. Require an available driver, enabled and installed instance, no error/disabled state, no unauthenticated state, and the exact advertised model and reasoning option.
-4. Return a canonical environment-local `ModelSelection`, with the provider-specific reasoning option, or typed rejection reasons.
+1. Evaluate entries in declared order against the selected environment's provider snapshots, and select the first eligible entry. A new entry binds its exact provider instance; legacy driver entries prefer the canonical default instance, then configured order.
+2. Require enforceable runtime permissions, an available/enabled/installed provider, an authenticated provider when authentication is reported, and the exact advertised model and supported declared options.
+3. Skip observed quota exhaustion with a future reset. This check is account-wide, including model-scoped windows. Missing/no-reset/unsupported telemetry is unknown; retained exhausted observations from a failed probe still apply until their reset. Persisted usage-limit failures on active workers also block their provider instance, with or without a reset time; an elapsed reset or a later successful run on that instance clears the signal.
+4. Report each entry with its rejection codes and effective selection when available. Exhaustion fails visibly with per-entry reasons. Each new assignment records the selected entry index; legacy route labels remain on the wire for older clients.
 
-No model spelling is silently rewritten. Persona threads keep their selected provider/model; later provider/model mutations are rejected. Importing a definition does not copy credentials or environment-local provider ids.
+Declared option values must match. Options left unspecified may use provider defaults or an explicit spawn or human-approved Crew choice; the assignment retains the effective selection.
+
+No model spelling is silently rewritten. Persona threads keep their selected provider/model; later provider/model mutations are rejected. Importing a definition does not copy credentials or rewrite account identities for another environment. Legacy definitions and snapshots retain their stored shape; the decoder does not rewrite library files.
 
 ## Deliverables
 
@@ -130,15 +132,15 @@ Backups and environment migration must preserve snapshots together with the even
 
 Settings → Agent Setup displays the selected environment's persona library, including empty, error, available, and blocked states. Web and mobile use shared presentation logic; desktop inherits web. Clients neither load server-local files nor resolve models. Local, remote, relay, and tunnel clients use the same authenticated catalog RPC.
 
-Activation continues through the existing orchestrator launch contract. No direct persona picker or editor is added in this slice. A launched task shows its snapshotted display name and fixed route. Runtime activity for launched provider children stays in upstream's Lineage section and subagent cards, separate from the persona library.
+Activation continues through the existing orchestrator launch contract. New tasks can select a persona, and Agent Setup edits its ordered model entries. A launched task shows its snapshotted display name and fixed route. Runtime activity for launched provider children stays in upstream's Lineage section and subagent cards, separate from the persona library.
 
-Agents can also launch a persona as a Peer Agent: `j5_spawn_agent` accepts an optional `persona` id and refuses any provider, model, and reasoning pick outside that persona's declared routes. A route always names a level, so a persona spawn always gives one. The resulting thread carries the same immutable assignment as a composer launch. See [agent tools](../a2a/agent-tools.md).
+Agents can also launch a persona as a Peer Agent: `j5_spawn_agent` accepts an optional `persona` id and refuses any provider, model, and reasoning pick outside that persona's ordered model entries. When the entry declares a reasoning level, the spawn must match it. Otherwise a model with a reasoning control accepts the explicitly requested level; a model with no reasoning control omits it. The resulting thread carries the same immutable assignment as a composer launch. See [agent tools](../a2a/agent-tools.md).
 
 ## Verification and remaining work
 
 Focused verification covers imported ids, malformed and missing sources, duplicates, route eligibility, unsupported policies, snapshot integrity, source edits/removal, launch receipts, compatibility with old assignments, and shared client presentation. Server, contracts, and affected client typechecks accompany the focused tests. Browser and simulator verification require an explicit request.
 
-Follow-up work: in-app git commit/push/pull (status nudges and open-in-editor ship; write operations are deliberately out of scope), skill allowlists, ordered-list editing and the remaining model-selection checks (#778), access-level editing (#779), and posture visibility. None is marked complete by this contract. A project's [Models for custom members](../features/crews.md) list is not a persona allowlist: a persona always runs on its own configured route, even on a model that list leaves out.
+Follow-up work: in-app git commit/push/pull (status nudges and open-in-editor ship; write operations are deliberately out of scope), skill allowlists, access-level editing (#779), and posture visibility. None is marked complete by this contract. A project's [Models for custom members](../features/crews.md) list is not a persona allowlist: a persona always runs on its own configured route, even on a model that list leaves out.
 
 ## History
 
@@ -146,3 +148,5 @@ Follow-up work: in-app git commit/push/pull (status nudges and open-in-editor sh
 - 2026-09-24 — upstream removed the Agents right panel in the V2 advance (PR #262); handoff status and persona identity for delegated children moved to the chip beside their Lineage rows and subagent cards.
 - 2026-09-24 — the J5 document is named "handoff artifact" to distinguish it from upstream's context handoffs.
 - 2026-10-03 — a runtime policy means only what the provider's sandbox enforces (Jackson, [#439](https://github.com/Jacksondr5/j5code/issues/439)).
+
+- 2026-11-03 — ordered model editing, per-entry eligibility and quota-aware new launches ([#778](https://github.com/Jacksondr5/j5code/issues/778)).

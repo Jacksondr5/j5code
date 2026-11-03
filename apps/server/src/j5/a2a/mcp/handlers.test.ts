@@ -158,6 +158,7 @@ const threadManagementMock = (
   service: Partial<ThreadManagementService["Service"]> = {},
 ): Layer.Layer<ThreadManagementService> =>
   Layer.mock(ThreadManagementService)({
+    getPersonaUsageLimitedProviderInstances: () => Effect.succeed(new Set<ProviderInstanceId>()),
     getThreadShell: (threadId) =>
       Effect.succeed(threadId === invocation.threadId ? liveThreadShell(threadId) : null),
     ...service,
@@ -1608,6 +1609,8 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
         },
       ],
     };
+    const personaProviders = yield* Ref.make<ReadonlyArray<ServerProvider>>([codex, claude]);
+    const knownWorkerLimits = yield* Ref.make<ReadonlySet<ProviderInstanceId>>(new Set());
     const callerRow = {
       projectId: ledgerProjectId,
       participantId: callerParticipantId,
@@ -1655,6 +1658,7 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
           }),
       }),
       threadManagementMock({
+        getPersonaUsageLimitedProviderInstances: () => Ref.get(knownWorkerLimits),
         getThreadRecords: (threadId) =>
           Ref.get(commands).pipe(
             Effect.map((all) => {
@@ -1701,7 +1705,7 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
             },
           }),
       }),
-      Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed([codex, claude]) }),
+      Layer.mock(ProviderRegistry)({ getProviders: Ref.get(personaProviders) }),
       permissiveCrewMemberModels,
       Layer.mock(AgentCrewInstanceService)({ findMembership: () => Effect.succeed(null) }),
       Layer.mock(ParticipantPlacementService)({}),
@@ -1977,6 +1981,102 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
       const withinCreate = (yield* createdThreads()).at(-1)!;
       assert.equal(withinCreate.agentPersonaAssignment?.personaId, "scout");
       assert.equal(withinCreate.runtimeMode, "approval-required");
+      yield* library.importFiles({
+        files: [
+          {
+            name: "unpinned.yaml",
+            content: toYaml({
+              ...BUILT_IN_AGENT_PERSONAS.scout,
+              id: "unpinned",
+              modelRoute: [
+                { instanceId: "missing", model: "unavailable" },
+                { instanceId: "codex", model: "missing" },
+                { instanceId: "codex", model: "gpt-5.6-terra" },
+              ],
+            }),
+          },
+        ],
+        replaceExisting: false,
+      });
+      const unpinned = yield* call({
+        ...scout,
+        persona: "unpinned",
+        client_request_id: "spawn-unpinned",
+      });
+      assert.isFalse(unpinned.isFailure, failureMessage(unpinned));
+      const unpinnedCreate = (yield* createdThreads()).at(-1)!;
+      assert.equal(unpinnedCreate.agentPersonaAssignment?.resolvedEntryIndex, 2);
+      assert.deepStrictEqual(unpinnedCreate.modelSelection.options, [
+        { id: "reasoningEffort", value: "high" },
+      ]);
+
+      yield* library.importFiles({
+        files: [
+          {
+            name: "options.yaml",
+            content: toYaml({
+              ...BUILT_IN_AGENT_PERSONAS.scout,
+              id: "options",
+              modelRoute: [
+                {
+                  instanceId: "claudeAgent",
+                  model: "claude-haiku-4-5",
+                  options: [{ id: "thinking", value: true }],
+                },
+              ],
+            }),
+          },
+        ],
+        replaceExisting: false,
+      });
+      const options = yield* call({
+        ...scoutWithoutReasoning,
+        provider: ProviderInstanceId.make("claudeAgent"),
+        model: "claude-haiku-4-5",
+        persona: "options",
+        client_request_id: "spawn-options",
+      });
+      assert.isFalse(options.isFailure, failureMessage(options));
+      assert.deepStrictEqual((yield* createdThreads()).at(-1)!.modelSelection.options, [
+        { id: "thinking", value: true },
+      ]);
+      const beforeLimited = (yield* createdThreads()).length;
+      yield* Ref.set(personaProviders, [
+        {
+          ...codex,
+          usageLimits: {
+            checkedAt: "2026-11-03T00:00:00Z",
+            windows: [
+              {
+                id: "weekly",
+                kind: "weekly",
+                label: "Weekly",
+                usedPercent: 100,
+                resetsAt: "2030-01-01T00:00:00Z",
+              },
+            ],
+          },
+        },
+        claude,
+      ]);
+      const limited = yield* call({
+        ...scout,
+        persona: "unpinned",
+        client_request_id: "spawn-limited-entry",
+      });
+      assert.isTrue(limited.isFailure);
+      assert.include(failureMessage(limited), "usage-limit");
+      assert.lengthOf(yield* createdThreads(), beforeLimited);
+      yield* Ref.set(personaProviders, [codex, claude]);
+      yield* Ref.set(knownWorkerLimits, new Set([ProviderInstanceId.make("codex")]));
+      const workerLimited = yield* call({
+        ...scout,
+        persona: "unpinned",
+        client_request_id: "spawn-worker-limited-entry",
+      });
+      assert.isTrue(workerLimited.isFailure);
+      assert.include(failureMessage(workerLimited), "usage-limit");
+      assert.lengthOf(yield* createdThreads(), beforeLimited);
     }).pipe(Effect.provide(layer));
   }),
 );
@@ -2172,7 +2272,7 @@ it.effect("archives a crew only as a unit through its captain with one confirmat
   }),
 );
 
-it.effect("lists saved agents with purpose, policy, availability, and route", () =>
+it.effect("lists every ordered model entry with structured reasons and chosen index", () =>
   Effect.gen(function* () {
     const codex = personaProvider("codex", "codex", [
       { slug: "gpt-5.6-terra", options: ["high"] },
@@ -2211,6 +2311,23 @@ it.effect("lists saved agents with purpose, policy, availability, and route", ()
         path.join(folder, "broken.yaml"),
         `instructions: [${diagnosticCanary}`,
       );
+      yield* fs.writeFileString(
+        path.join(folder, "ordered-list.yaml"),
+        toYaml({
+          ...BUILT_IN_AGENT_PERSONAS.scout,
+          id: "ordered-list",
+          modelRoute: [
+            { instanceId: "absent-account", model: "gpt-5.6-terra" },
+            { instanceId: "codex", model: "not-offered" },
+            {
+              instanceId: "codex",
+              model: "gpt-5.6-terra",
+              options: [{ id: "reasoningEffort", value: "high" }],
+            },
+            { instanceId: "codex", model: "also-not-offered" },
+          ],
+        }),
+      );
       const toolkit = yield* J5Toolkit;
       const response = yield* toolkit
         .handle("j5_list_personas", {})
@@ -2235,14 +2352,30 @@ it.effect("lists saved agents with purpose, policy, availability, and route", ()
           readonly id: string;
           readonly runtime_policy: string;
           readonly availability: string;
-          readonly route: string | null;
+          readonly entries: ReadonlyArray<{
+            readonly modelSelection?: { readonly instanceId: string; readonly model: string };
+            readonly failures: ReadonlyArray<string>;
+          }>;
+          readonly selected_entry_index: number | null;
         }>;
       };
-      assert.lengthOf(personas, launchablePersonas.length);
+      assert.lengthOf(personas, launchablePersonas.length + 1);
+      const ordered = personas.find((persona) => persona.id === "ordered-list");
+      assert.equal(ordered?.selected_entry_index, 2);
+      assert.deepStrictEqual(
+        ordered?.entries.map(({ failures }) => failures),
+        [["provider-not-configured"], ["model-not-advertised"], [], ["model-not-advertised"]],
+      );
+      assert.equal(ordered?.entries[2]?.modelSelection?.instanceId, "codex");
       const scout = personas.find((persona) => persona.id === "scout");
       assert.deepStrictEqual(
-        [scout?.runtime_policy, scout?.availability, scout?.route],
-        ["read-only", "available", "codex · gpt-5.6-terra · high"],
+        [
+          scout?.runtime_policy,
+          scout?.availability,
+          scout?.selected_entry_index,
+          scout?.entries[0]?.modelSelection?.instanceId,
+        ],
+        ["read-only", "available", 0, "codex"],
       );
       assert.isUndefined(personas.find((persona) => persona.id === "publisher"));
     }).pipe(Effect.provide(layer));

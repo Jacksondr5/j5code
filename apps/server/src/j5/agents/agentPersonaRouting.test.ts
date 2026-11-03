@@ -18,6 +18,7 @@ import {
 import {
   agentPersonaModelSelection,
   agentPersonaDefinitionView,
+  agentPersonaTargetUnavailableReason,
   buildAgentPersonaCatalog,
   resolveAgentPersonaRoute,
 } from "./agentPersonaRouting.ts";
@@ -96,10 +97,54 @@ function providerForTarget(
 }
 
 describe("agent persona routing", () => {
+  it("selects the first eligible instance from an ordered list and reports every entry", () => {
+    const definition = listBuiltInAgentPersonas()[0]!;
+    const target = (instance: string, slug = "ordered-model") => ({
+      instanceId: ProviderInstanceId.make(instance),
+      model: slug,
+      options: [{ id: "reasoningEffort", value: "high" }],
+    });
+    const signedOut = provider({
+      instanceId: "signed-out",
+      driver: "codex",
+      authStatus: "unauthenticated",
+      models: [model("ordered-model", "reasoningEffort")],
+    });
+    const wrongModel = provider({ instanceId: "wrong-model", driver: "codex", models: [] });
+    const ready = provider({
+      instanceId: "ready",
+      driver: "codex",
+      models: [model("ordered-model", "reasoningEffort")],
+    });
+    const resolution = resolveAgentPersonaRoute({
+      now: 0,
+      personaId: definition.id,
+      definition: {
+        ...definition,
+        modelRoute: [
+          target("signed-out"),
+          target("wrong-model"),
+          target("ready"),
+          target("missing"),
+        ],
+      },
+      providers: [ready, wrongModel, signedOut],
+    });
+    assert.equal(resolution.status, "available");
+    if (resolution.status !== "available") return;
+    assert.equal(resolution.entryIndex, 2);
+    assert.equal(resolution.modelSelection.instanceId, "ready");
+    assert.deepEqual(
+      resolution.entries!.map((entry) => entry.failures.map(({ code }) => code)),
+      [["provider-unauthenticated"], ["model-not-advertised"], [], ["provider-not-configured"]],
+    );
+  });
+
   it("uses every enforceable persona's declared primary route when it is available", () => {
     for (const definition of listBuiltInAgentPersonas()) {
       const [primary, fallback] = definition.modelRoute;
       const resolution = resolveAgentPersonaRoute({
+        now: 0,
         personaId: definition.id,
         providers: [providerForTarget(fallback), providerForTarget(primary)],
       });
@@ -120,6 +165,7 @@ describe("agent persona routing", () => {
     for (const definition of listBuiltInAgentPersonas()) {
       const [primary, fallback] = definition.modelRoute;
       const resolution = resolveAgentPersonaRoute({
+        now: 0,
         personaId: definition.id,
         providers: [providerForTarget(primary, { enabled: false }), providerForTarget(fallback)],
       });
@@ -144,6 +190,7 @@ describe("agent persona routing", () => {
     const definition = listBuiltInAgentPersonas().find(({ id }) => id === "critic")!;
     const [primary, fallback] = definition.modelRoute;
     const resolution = resolveAgentPersonaRoute({
+      now: 0,
       personaId: "critic",
       authorityPolicy: "critic-fix",
       providers: [providerForTarget(primary), providerForTarget(fallback)],
@@ -167,7 +214,7 @@ describe("agent persona routing", () => {
         personaId === "builder"
           ? [providerForTarget(primary, { enabled: false }), providerForTarget(fallback)]
           : [providerForTarget(primary), providerForTarget(fallback)];
-      const resolution = resolveAgentPersonaRoute({ personaId, providers });
+      const resolution = resolveAgentPersonaRoute({ now: 0, personaId, providers });
 
       assert.equal(resolution.status, "unavailable", personaId);
       if (resolution.status === "available") continue;
@@ -189,6 +236,7 @@ describe("agent persona routing", () => {
         providerForTarget({ ...fallback, model: "some-other-model" }),
       ],
       [scout],
+      0,
     );
     const availability = catalog.personas[0]!.availability;
     assert.equal(availability.status, "unavailable");
@@ -196,6 +244,7 @@ describe("agent persona routing", () => {
     assert.deepEqual(availability.attempts, [
       {
         route: "primary",
+        entryIndex: 0,
         driver: primary.driver,
         model: primary.model,
         reasoningEffort: primary.reasoningEffort,
@@ -203,6 +252,7 @@ describe("agent persona routing", () => {
       },
       {
         route: "fallback",
+        entryIndex: 1,
         driver: fallback.driver,
         model: fallback.model,
         reasoningEffort: fallback.reasoningEffort,
@@ -214,6 +264,7 @@ describe("agent persona routing", () => {
   it("blocks every persona when both declared routes are unavailable", () => {
     for (const definition of listBuiltInAgentPersonas()) {
       const resolution = resolveAgentPersonaRoute({
+        now: 0,
         personaId: definition.id,
         providers: [],
       });
@@ -237,6 +288,7 @@ describe("agent persona routing", () => {
 
   it("selects the primary provider, exact model, and provider-specific effort option", () => {
     const resolution = resolveAgentPersonaRoute({
+      now: 0,
       personaId: "scout",
       providers: [
         provider({
@@ -247,7 +299,7 @@ describe("agent persona routing", () => {
       ],
     });
 
-    assert.deepEqual(resolution, {
+    assert.deepInclude(resolution, {
       status: "available",
       personaId: "scout",
       definitionVersion: 1,
@@ -270,6 +322,7 @@ describe("agent persona routing", () => {
       reasoningEffort: "high",
     };
     const resolution = resolveAgentPersonaRoute({
+      now: 0,
       personaId: scout!.id,
       definition: { ...scout!, modelRoute: [cursorRoute, cursorRoute] },
       providers: [
@@ -280,10 +333,19 @@ describe("agent persona routing", () => {
     assert.equal(resolution.status, "unavailable");
     if (resolution.status !== "unavailable") return;
     assert.deepEqual(
-      resolution.attempts.map(({ target, failures }) => [String(target.driver), failures]),
+      resolution.attempts.map(({ target, failures }) => [
+        String("driver" in target ? target.driver : target.instanceId),
+        failures,
+      ]),
       [
-        ["cursor", [{ code: "authority-not-enforceable" }]],
-        ["cursor", [{ code: "authority-not-enforceable" }]],
+        [
+          "cursor",
+          [{ code: "authority-not-enforceable", instanceId: ProviderInstanceId.make("cursor") }],
+        ],
+        [
+          "cursor",
+          [{ code: "authority-not-enforceable", instanceId: ProviderInstanceId.make("cursor") }],
+        ],
       ],
     );
   });
@@ -296,6 +358,7 @@ describe("agent persona routing", () => {
       reasoningEffort: "high",
     };
     const resolution = resolveAgentPersonaRoute({
+      now: 0,
       personaId: scout!.id,
       definition: {
         ...scout!,
@@ -320,6 +383,7 @@ describe("agent persona routing", () => {
       reasoningEffort: "high",
     };
     const resolution = resolveAgentPersonaRoute({
+      now: 0,
       personaId: scout!.id,
       definition: { ...scout!, modelRoute: [typo, typo] },
       providers: [],
@@ -350,6 +414,7 @@ describe("agent persona routing", () => {
 
   it("uses fallback only after recording why the primary is ineligible", () => {
     const resolution = resolveAgentPersonaRoute({
+      now: 0,
       personaId: "skeptic",
       providers: [
         provider({
@@ -373,6 +438,7 @@ describe("agent persona routing", () => {
     assert.deepEqual(resolution.rejectedTargets, [
       {
         route: "primary",
+        entryIndex: 0,
         target: {
           driver: ProviderDriverKind.make("claudeAgent"),
           model: "claude-opus-5",
@@ -391,6 +457,7 @@ describe("agent persona routing", () => {
   it("prefers the default instance before configured custom instances", () => {
     const terra = model("gpt-5.6-terra", "reasoningEffort");
     const resolution = resolveAgentPersonaRoute({
+      now: 0,
       personaId: "scout",
       providers: [
         provider({
@@ -413,6 +480,7 @@ describe("agent persona routing", () => {
 
   it("fails closed when neither target advertises the exact model and effort", () => {
     const resolution = resolveAgentPersonaRoute({
+      now: 0,
       personaId: "skeptic",
       providers: [
         provider({
@@ -446,6 +514,7 @@ describe("agent persona routing", () => {
         }),
       ],
       listBuiltInAgentPersonas(),
+      0,
     );
 
     assert.equal(catalog.personas.length, 11);
@@ -456,6 +525,7 @@ describe("agent persona routing", () => {
     assert.deepEqual(catalog.personas[0]?.availability, {
       status: "available",
       resolvedRoute: "primary",
+      resolvedEntryIndex: 0,
       resolvedDriver: ProviderDriverKind.make("codex"),
       resolvedModelSelection: {
         instanceId: ProviderInstanceId.make("codex"),
@@ -488,12 +558,111 @@ it("presents imported definitions without transmitting their instruction bodies"
   const catalog = buildAgentPersonaCatalog(
     [providerForTarget(definition.modelRoute[0])],
     [definition],
+    0,
   );
   assert.lengthOf(catalog.personas, 1);
   assert.equal(catalog.personas[0]?.personaId, "team-researcher");
   assert.equal(catalog.personas[0]?.availability.status, "available");
   assert.notProperty(catalog.personas[0], "instructions");
-  assert.deepEqual(buildAgentPersonaCatalog([], []), { personas: [] });
+  assert.deepEqual(buildAgentPersonaCatalog([], [], 0), { personas: [] });
+});
+
+it("reports exhausted entries in order and skips only observed future quota exhaustion", () => {
+  const now = Date.parse("2026-11-03T12:00:00Z");
+  const base = listBuiltInAgentPersonas()[0]!;
+  const selection = { instanceId: ProviderInstanceId.make("quota"), model: "quota-model" };
+  const ready = provider({
+    instanceId: "quota",
+    driver: "codex",
+    models: [{ slug: "quota-model", name: "Quota", isCustom: false, capabilities: {} }],
+  });
+  const later = { ...ready, instanceId: ProviderInstanceId.make("later") };
+  const definition = {
+    ...base,
+    modelRoute: [selection, { ...selection, instanceId: later.instanceId }] as const,
+  };
+  const limits = (
+    reset: string | undefined,
+    unavailable?: "probeFailed" | "unsupported",
+  ): NonNullable<ServerProvider["usageLimits"]> => ({
+    checkedAt: "2026-11-03T12:00:00Z",
+    windows: [
+      {
+        id: "session",
+        kind: "session",
+        label: "Session",
+        usedPercent: 100,
+        ...(reset === undefined ? {} : { resetsAt: reset }),
+      },
+    ],
+    ...(unavailable === undefined ? {} : { unavailable: { reason: unavailable } }),
+  });
+  for (const [usageLimits, expected] of [
+    [limits("2026-11-03T13:00:00Z"), "later"],
+    [limits("2026-11-03T13:00:00Z", "probeFailed"), "later"],
+    [limits("2026-11-03T11:00:00Z"), "quota"],
+    [limits(undefined), "quota"],
+    [limits("2026-11-03T13:00:00Z", "unsupported"), "quota"],
+  ] as const) {
+    const result = resolveAgentPersonaRoute({
+      now,
+      personaId: base.id,
+      definition,
+      providers: [{ ...ready, usageLimits }, later],
+    });
+    assert.equal(result.status, "available");
+    if (result.status === "available")
+      assert.equal(String(result.modelSelection.instanceId), expected);
+  }
+  const blocked = resolveAgentPersonaRoute({
+    now,
+    personaId: base.id,
+    definition: {
+      ...definition,
+      modelRoute: [
+        { ...selection, instanceId: ProviderInstanceId.make("absent") },
+        selection,
+        { ...selection, model: "missing-model" },
+      ],
+    },
+    providers: [{ ...ready, usageLimits: limits("2026-11-03T13:00:00Z") }],
+  });
+  assert.equal(blocked.status, "unavailable");
+  if (blocked.status === "unavailable")
+    assert.deepEqual(
+      blocked.attempts.map(({ failures }) => failures.map(({ code }) => code)),
+      [["provider-not-configured"], ["usage-limit"], ["model-not-advertised"]],
+    );
+});
+
+it("keeps a valid boolean thinking option separate from another option rejection", () => {
+  const configured = provider({
+    instanceId: "boolean",
+    driver: "claudeAgent",
+    models: [
+      {
+        slug: "thinking-model",
+        name: "Thinking",
+        isCustom: false,
+        capabilities: {
+          optionDescriptors: [{ id: "thinking", label: "Thinking", type: "boolean" }],
+        },
+      },
+    ],
+  });
+  const code = agentPersonaTargetUnavailableReason(
+    configured,
+    {
+      instanceId: configured.instanceId,
+      model: "thinking-model",
+      options: [
+        { id: "thinking", value: true },
+        { id: "missing", value: "value" },
+      ],
+    },
+    0,
+  );
+  assert.equal(code, "option-not-advertised");
 });
 
 it("projects a new list for old readers while keeping its complete instance entries", () => {
@@ -547,7 +716,12 @@ it("projects a new list for old readers while keeping its complete instance entr
   assert.isFalse("artifacts" in response.definition);
   assert.isFalse("outputArtifact" in response.definition);
   assert.deepEqual(decodeDefinitionView(old).modelRoute, old.modelRoute);
-  const resolution = resolveAgentPersonaRoute({ personaId: definition.id, definition, providers });
+  const resolution = resolveAgentPersonaRoute({
+    now: 0,
+    personaId: definition.id,
+    definition,
+    providers,
+  });
   assert.equal(resolution.status, "available");
   if (resolution.status !== "available") return;
   const built = buildAgentPersonaAssignment({ resolution, definition });
@@ -593,7 +767,12 @@ it("retains the third entry index when new-format candidates fail before it", ()
       models: [model("claude", "effort")],
     }),
   ];
-  const resolution = resolveAgentPersonaRoute({ personaId: definition.id, definition, providers });
+  const resolution = resolveAgentPersonaRoute({
+    now: 0,
+    personaId: definition.id,
+    definition,
+    providers,
+  });
   assert.equal(resolution.status, "available");
   if (resolution.status !== "available") return;
   const result = buildAgentPersonaAssignment({ resolution, definition });

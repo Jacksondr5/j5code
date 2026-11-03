@@ -403,6 +403,7 @@ export interface OrchestratorV2Shape {
     Effect.Effect<OrchestrationV2ThreadShellSnapshot, OrchestratorV2Error>,
     OrchestratorV2Error
   >;
+  readonly getPersonaUsageLimitedProviderInstances: ProjectionStoreV2["Service"]["getPersonaUsageLimitedProviderInstances"];
   readonly getThreadShell: (
     threadId: ThreadId,
   ) => Effect.Effect<OrchestrationV2ThreadShell | null, OrchestratorV2Error>;
@@ -12828,6 +12829,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           Effect.map(Effect.mapError(shellProjectionError)),
         );
     }),
+    getPersonaUsageLimitedProviderInstances:
+      projectionStore.getPersonaUsageLimitedProviderInstances,
     getThreadShell: Effect.fn("OrchestratorV2.getThreadShell")(function (threadId) {
       return projectionStore
         .getThreadShell(threadId)

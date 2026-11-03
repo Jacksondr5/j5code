@@ -475,6 +475,8 @@ const fixtureWithDatabase = Effect.fn("test.crewProposal.fixture")(function* (
     ),
     Layer.provideMerge(
       Layer.mock(ThreadManagementService)({
+        getPersonaUsageLimitedProviderInstances: () =>
+          Effect.succeed(new Set<ProviderInstanceId>()),
         getThreadRecords: (threadId) =>
           Effect.gen(function* () {
             // The orchestrator wraps the store's failure either way; the cause tells them apart.
@@ -1851,6 +1853,8 @@ const playbookFixtureWithSettings = (
       Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: { isRepo: true, refName: "main" } })),
       Layer.provideMerge(
         Layer.mock(ThreadManagementService)({
+          getPersonaUsageLimitedProviderInstances: () =>
+            Effect.succeed(new Set<ProviderInstanceId>()),
           getThreadRecords: (threadId) => Effect.succeed({ thread: thread(threadId) } as never),
           dispatch: (command) =>
             Ref.update(commands, (items) => [...items, command]).pipe(
@@ -2433,7 +2437,7 @@ it.effect(
           [["persona_disabled", "review"]],
         );
         const current = yield* library.catalog();
-        const catalog = buildAgentPersonaCatalog([codex], current.definitions);
+        const catalog = buildAgentPersonaCatalog([codex], current.definitions, 0);
         const usable = (id: string) =>
           !current.disabledIds.includes(id) &&
           catalog.personas.find(({ personaId }) => personaId === id)?.availability.status ===

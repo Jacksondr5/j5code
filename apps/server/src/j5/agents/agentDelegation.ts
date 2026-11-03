@@ -1,3 +1,4 @@
+import { AgentPersonaUsageLimits } from "./agentPersonaUsageLimits.ts";
 import {
   AgentPersonaId,
   OrchestratorMcpDelegateTaskInput,
@@ -48,6 +49,7 @@ export const J5DelegateTaskTool = Tool.make("delegate_task", {
   failure: OrchestratorMcpFailure,
   failureMode: "return",
   dependencies: [
+    AgentPersonaUsageLimits,
     McpInvocationContext,
     OrchestratorMcpService,
     ThreadManagementService,

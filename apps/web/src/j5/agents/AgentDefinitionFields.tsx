@@ -2,6 +2,8 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   AGENT_PERSONA_POLICY_OPTIONS,
   agentPersonaModelChoiceId,
+  agentPersonaEntryReasoning,
+  withAgentPersonaReasoning,
   agentPersonaModelChoices,
   agentPersonaModelGroups,
   agentPersonaPolicyDrivers,
@@ -9,7 +11,7 @@ import {
 } from "@t3tools/client-runtime/j5/agent-personas";
 import type {
   AgentPersonaAuthorityPolicy,
-  AgentPersonaModelTarget,
+  AgentPersonaModelEntry,
   EnvironmentId,
 } from "@t3tools/contracts";
 import { ChevronDownIcon } from "lucide-react";
@@ -39,14 +41,14 @@ import { agentPersonaEnvironment } from "./agentPersonaAtoms";
 
 export interface AgentRoutePolicyValue {
   readonly authorityPolicy: AgentPersonaAuthorityPolicy;
-  readonly modelRoute: readonly [AgentPersonaModelTarget, AgentPersonaModelTarget];
+  readonly modelRoute: ReadonlyArray<AgentPersonaModelEntry>;
 }
 
-/** Runtime policy plus primary/fallback route pickers, shared by the create and edit dialogs. */
+/** Runtime policy and ordered model entries, shared by the create and edit dialogs. */
 export function AgentRoutePolicyFields(props: {
   environmentId: EnvironmentId;
   value: AgentRoutePolicyValue;
-  retainRoute?: ReadonlyArray<AgentPersonaModelTarget>;
+  retainRoute?: ReadonlyArray<AgentPersonaModelEntry>;
   disabled: boolean;
   onChange: (next: AgentRoutePolicyValue) => void;
 }) {
@@ -64,6 +66,7 @@ export function AgentRoutePolicyFields(props: {
     agentPersonaPolicyDrivers(catalog.data, value.authorityPolicy),
     value.modelRoute,
     value.authorityPolicy,
+    providers ?? [],
   );
   return (
     <>
@@ -98,16 +101,62 @@ export function AgentRoutePolicyFields(props: {
         )}
       </div>
       {value.modelRoute.map((target, index) => {
-        const label = index === 0 ? "Primary model" : "Fallback model";
+        const label = `Model ${index + 1}`;
+        const effort = agentPersonaEntryReasoning(target);
         const selected = choices.find(({ id }) => id === agentPersonaModelChoiceId(target));
-        const updateTarget = (next: AgentPersonaModelTarget) =>
+        const updateTarget = (next: AgentPersonaModelEntry) =>
           props.onChange({
             ...value,
-            modelRoute: index === 0 ? [next, value.modelRoute[1]] : [value.modelRoute[0], next],
+            modelRoute: value.modelRoute.map((entry, entryIndex) =>
+              entryIndex === index ? next : entry,
+            ),
           });
+        const moveEntry = (offset: number) => {
+          const next = [...value.modelRoute];
+          const destination = index + offset;
+          if (disabled || destination < 0 || destination >= next.length) return;
+          [next[index], next[destination]] = [next[destination]!, next[index]!];
+          props.onChange({ ...value, modelRoute: next });
+        };
         return (
           <div key={label} className="grid gap-2 rounded-lg border p-3">
-            <span className="text-sm font-medium">{label}</span>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm font-medium">{label}</span>
+              <div className="flex gap-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={disabled || index === 0}
+                  aria-label={`Move ${label} up`}
+                  onClick={() => moveEntry(-1)}
+                >
+                  Up
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={disabled || index === value.modelRoute.length - 1}
+                  aria-label={`Move ${label} down`}
+                  onClick={() => moveEntry(1)}
+                >
+                  Down
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={disabled || value.modelRoute.length === 1}
+                  aria-label={`Remove ${label}`}
+                  onClick={() =>
+                    props.onChange({
+                      ...value,
+                      modelRoute: value.modelRoute.filter((_, i) => i !== index),
+                    })
+                  }
+                >
+                  Remove
+                </Button>
+              </div>
+            </div>
             <div className="grid grid-cols-[minmax(0,1fr)_7rem] items-center gap-2">
               <Menu>
                 <MenuTrigger
@@ -126,30 +175,31 @@ export function AgentRoutePolicyFields(props: {
                   ) : null}
                   {modelGroups.map((harness) => (
                     <MenuSub key={harness.driver}>
-                      <MenuSubTrigger
-                        disabled={!harness.models.some(({ efforts }) => efforts.length > 0)}
-                      >
+                      <MenuSubTrigger disabled={harness.models.length === 0}>
                         {harness.label}
                       </MenuSubTrigger>
                       <MenuSubPopup>
                         <MenuRadioGroup
                           value={agentPersonaModelChoiceId(target)}
                           onValueChange={(next) => {
+                            if (next === agentPersonaModelChoiceId(target)) return;
                             const choice = harness.models.find(({ id }) => id === next);
-                            if (choice && choice.efforts.length > 0)
-                              updateTarget({
-                                ...choice.target,
-                                reasoningEffort: choice.efforts.includes(target.reasoningEffort)
-                                  ? target.reasoningEffort
-                                  : choice.target.reasoningEffort,
-                              });
+                            if (choice?.available)
+                              updateTarget(
+                                typeof effort === "string" && choice.efforts.includes(effort)
+                                  ? withAgentPersonaReasoning(
+                                      choice.target,
+                                      effort,
+                                      choice.reasoningOptionId,
+                                    )
+                                  : choice.target,
+                              );
                           }}
                         >
-                          {harness.models.map(({ id, modelLabel, efforts }) => (
+                          {harness.models.map(({ id, modelLabel }) => (
                             <MenuRadioItem
                               key={id}
                               value={id}
-                              disabled={efforts.length === 0}
                               // Base UI radio items stay open by default; a model pick is a one-shot choice.
                               closeOnClick
                             >
@@ -163,15 +213,17 @@ export function AgentRoutePolicyFields(props: {
                 </MenuPopup>
               </Menu>
               <Select
-                value={target.reasoningEffort}
+                value={typeof effort === "string" ? effort : null}
                 disabled={disabled || !selected?.efforts.length}
                 onValueChange={(next) => {
                   if (next && selected?.efforts.includes(next))
-                    updateTarget({ ...target, reasoningEffort: next });
+                    updateTarget(
+                      withAgentPersonaReasoning(target, next, selected.reasoningOptionId),
+                    );
                 }}
               >
                 <SelectTrigger className="min-w-0 w-full" aria-label={`${label} reasoning`}>
-                  <SelectValue>{target.reasoningEffort}</SelectValue>
+                  <SelectValue>{effort ?? "Default"}</SelectValue>
                 </SelectTrigger>
                 <SelectPopup>
                   {selected?.efforts.map((effort) => (
@@ -185,6 +237,18 @@ export function AgentRoutePolicyFields(props: {
           </div>
         );
       })}
+      <Button
+        type="button"
+        variant="outline"
+        disabled={disabled || !choices.some((choice) => choice.available)}
+        onClick={() => {
+          const choice = choices.find((choice) => choice.available);
+          if (choice)
+            props.onChange({ ...value, modelRoute: [...value.modelRoute, choice.target] });
+        }}
+      >
+        Add model
+      </Button>
       <p className="text-xs text-muted-foreground">
         Model availability and runtime policy support are checked for each launch.
       </p>

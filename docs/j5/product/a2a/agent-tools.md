@@ -87,8 +87,7 @@ the new agent what it should do first and whether it should reply to you. Choose
 for the work in the brief, and reasoning if the model has a reasoning option; see
 orchestrator_capabilities for what's available. To run
 a persona from j5_list_personas, set `persona` to its id: the spawn gets that persona's instructions
-and runtime policy, and provider, model, and reasoning must be one of that persona's declared
-routes. Without a persona it runs in your permission and interaction modes, or in narrower ones you
+and runtime policy, and provider, model, and reasoning must be one of that persona's ordered model entries. Without a persona it runs in your permission and interaction modes, or in narrower ones you
 set with runtime_mode and interaction_mode. Without a persona its model and reasoning level must be
 ones the project's Models for custom members lists allow; an ineligible one is refused with the
 eligible ones. Attach files to the brief with attachments. Choose its workspace every time (see the
@@ -136,14 +135,7 @@ safely; reusing it with any change to the request is refused, so use a fresh one
 
 ### `j5_stop_agent`
 
-**Persona spawn (built 2026-09-09 as the `agent` input, `persona` since 2026-09-17):** the persona's declared routes are the
-allowlist SP3 describes. The explicit provider/model/reasoning pick must equal one route target on
-a provider instance that runs that driver and currently advertises the model and reasoning option;
-otherwise the call refuses, naming the persona and listing its routes, and nothing is created. A
-route always names a level, so a spawn that omits reasoning never matches one and no level is
-inferred from the routes. The
-matching route becomes the child's immutable persona assignment (same snapshot and digest as a
-composer launch), and its authority policy sets the child's runtime mode. The child's permissions
+**Persona spawn:** the persona's ordered model entries are the allowlist SP3 describes. The explicit provider instance and model must match an entry, and any declared reasoning level must match the requested level. An entry without a declared reasoning level accepts an explicitly requested supported value; models with no reasoning control omit it. Other declared model options are carried into the assignment. Unsupported or limited entries refuse without creating a child or silently selecting another entry. Legacy driver-wide targets remain supported. The matching entry becomes the child's immutable persona assignment, with its index, snapshot and digest, and its authority policy sets the child's runtime mode. The child's permissions
 come from its own persona's policy, never from the parent's: J5 carries no parent-child
 permission ceiling between Peer Agents (Jackson, 2026-09-16), since any such guard is one message
 to a trusting peer away from bypass. Disabled, removed, and unknown personas refuse before creation.
@@ -193,16 +185,9 @@ Use `action: "unarchive"` to restore the same identity. Old Exchanges remain clo
 
 ### `j5_list_personas`
 
-**Description (contract):** "List the personas in this environment: id, purpose, runtime policy,
-whether each can start now, and the provider, model, and reasoning it would run on. Read this before
-choosing a persona for delegate_task, a crew roster, or j5_spawn_agent so the choice fits the task
-and the user's budget. Read-only."
+Lists the personas in the selected environment before choosing one for delegation, a Crew roster, or a Peer Agent spawn. It reports each persona's purpose, runtime policy, and whether it can start now.
 
-Named `list_agents` until 2026-09-17. No inputs. Result: `personas[]` with `id`, `display_name`, `description`, `runtime_policy`,
-`availability` (`available`, `blocked`, `disabled`) and `route` (driver · model · reasoning, or
-null when blocked). The same catalog Settings → Agent Setup shows; disabled imports read as disabled,
-unroutable or unenforceable personas as blocked. This is the P-B(a) spawn listing the spawning guide
-asked for.
+Named `list_agents` until 2026-09-17. It has no inputs. Each persona returns its ordered `entries`: an index, the declared provider/model/options target, its effective `modelSelection` when eligible, and per-entry rejection codes. Legacy driver-wide entries report the provider instance that would serve them when one is available. `selected_entry_index` identifies the first eligible entry and is null when the persona is blocked or disabled. The listing uses the same eligibility rules as launch and Agent Setup, including provider usage limits and persisted worker-limit signals.
 
 ### `j5_propose_crew`
 
@@ -511,3 +496,5 @@ run; `j5_stop_crew` doesn't, and unarchiving doesn't restart it.
 - 2026-10-27 — the advance onto upstream's stable v0.1.3, which merged 18 tools into action tools: the kept tools name `t3_queue` (J5's edit rule on its `edit` action), `t3_thread_transfer` (J5's fork error), `t3_pending_request`, `preview_act` and `schedule_task`'s updates in place of the tools they replaced, and `t3_background_wait` joins (Jackson, 2026-10-27) ([register of divergences](../upstream.md), D2).
 - 2026-10-27 — custom Crew seats, a plain `j5_spawn_agent` and a plain `delegate_task` run only on a model and reasoning level the project's lists of models for custom members allow, inherited ones included; AC38 (Bryant; [#744](https://github.com/Jacksondr5/j5code/issues/744)).
 - 2026-11-02 — `reasoning` on `j5_spawn_agent` is required only for a model with a reasoning option, so a model such as Claude Haiku 4.5 can be spawned ([#704](https://github.com/Jacksondr5/j5code/issues/704)).
+
+- 2026-11-03 — persona listings report every ordered model entry and spawn matching permits supported reasoning when the entry leaves it unspecified ([#778](https://github.com/Jacksondr5/j5code/issues/778)).

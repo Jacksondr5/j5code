@@ -1,3 +1,7 @@
+import {
+  AgentPersonaUsageLimits,
+  layer as agentPersonaUsageLimitsLayer,
+} from "../j5/agents/agentPersonaUsageLimits.ts";
 import * as WorktreeSetupTracker from "../project/WorktreeSetupTracker.ts";
 import * as ProjectCloneTracker from "../project/ProjectCloneTracker.ts";
 import * as TerminalManager from "../terminal/Manager.ts";
@@ -206,6 +210,7 @@ function failureDetail(error: unknown): string {
 
 const make = Effect.gen(function* () {
   const personaLibrary = yield* makeAgentPersonaLibrary;
+  const personaUsageLimits = yield* AgentPersonaUsageLimits;
   const projects = yield* ProjectService.ProjectService;
   const setupTracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
   const cloneTracker = yield* ProjectCloneTracker.ProjectCloneTracker;
@@ -845,7 +850,10 @@ const make = Effect.gen(function* () {
         replay: Option.isSome(launchReceipt),
         providers: providerRegistry.getProviders,
         library: personaLibrary,
-      }).pipe(Effect.mapError(mapError(input, "resolve-agent-persona")));
+      }).pipe(
+        Effect.provideService(AgentPersonaUsageLimits, personaUsageLimits),
+        Effect.mapError(mapError(input, "resolve-agent-persona")),
+      );
       // J5: check the instance the persona resolved to, which is what the thread runs on.
       yield* threads.assertProviderInstanceEnabled({
         projectId: input.projectId,
@@ -1133,4 +1141,6 @@ const make = Effect.gen(function* () {
   return ThreadLaunchService.of({ launch, checkWorktreeBase, retryPreparation, prepareRun });
 });
 
-export const layer = Layer.effect(ThreadLaunchService, make);
+export const layer = Layer.effect(ThreadLaunchService, make).pipe(
+  Layer.provide(agentPersonaUsageLimitsLayer),
+);

@@ -1,3 +1,4 @@
+import { layer as agentPersonaUsageLimitsLayer } from "./j5/agents/agentPersonaUsageLimits.ts";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 import type { RelayManagedEndpointRuntimeConfig } from "@t3tools/contracts/relay";
 import * as Random from "effect/Random";
@@ -755,6 +756,7 @@ const layerMakeRoutes = Layer.mergeAll(
   ),
 ).pipe(
   Layer.provide(J5A2AAuxiliaryLayer),
+  Layer.provide(agentPersonaUsageLimitsLayer),
   Layer.provide(
     PullRequestReviewGuideService.layer.pipe(Layer.provide(PullRequestReviewGuides.layer)),
   ),

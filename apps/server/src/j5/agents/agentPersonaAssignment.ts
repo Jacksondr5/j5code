@@ -1,12 +1,11 @@
-import { modelSelectionsEqual } from "@t3tools/shared/model";
 import {
-  isAgentPersonaReasoningOptionId,
   isAgentPersonaAuthorityPolicy,
   type OrchestrationV2AgentPersonaAssignment,
   type OrchestrationV2AgentPersonaCommandAssignment,
   ProviderDriverKind,
 } from "@t3tools/contracts";
 
+import { agentPersonaEntryMatches } from "./agentPersonaRouting.ts";
 import type { AgentPersonaRouteResolution } from "./agentPersonaRouting.ts";
 import { providerCanEnforceAgentPersonaAuthority } from "./agentPersonaProviderPolicy.ts";
 import {
@@ -68,10 +67,13 @@ export function buildAgentPersonaAssignment(input: {
       personaId: definition.id,
       definitionVersion: definition.version,
       authorityPolicy: mapAgentPersonaPolicy(authorityPolicy),
-      ...(input.resolution.index === undefined
-        ? {}
-        : { resolvedRouteIndex: input.resolution.index }),
       resolvedRoute: input.resolution.route,
+      ...(definition.modelRoute.length > 2 || definition.access !== undefined
+        ? { resolvedRouteIndex: input.resolution.entryIndex }
+        : {}),
+      ...(input.resolution.entryIndex === undefined
+        ? {}
+        : { resolvedEntryIndex: input.resolution.entryIndex }),
       resolvedDriver: ProviderDriverKind.make(input.resolution.driver),
       resolvedModelSelection: input.resolution.modelSelection,
     },
@@ -104,23 +106,13 @@ export function validateAgentPersonaAssignment(
   }
   const target =
     definition.modelRoute[
-      assignment.resolvedRouteIndex ?? (assignment.resolvedRoute === "primary" ? 0 : 1)
+      assignment.resolvedEntryIndex ??
+        assignment.resolvedRouteIndex ??
+        (assignment.resolvedRoute === "primary" ? 0 : 1)
     ];
-  if (target === undefined) return "Persona assignment does not match its declared model route.";
-  if ("instanceId" in target) {
-    return modelSelectionsEqual(assignment.resolvedModelSelection, target)
-      ? undefined
-      : "Persona assignment does not match its declared model route.";
-  }
-  // Launches carry exactly one reasoning option; a second one would leave the provider's choice ambiguous.
-  const reasoningOptions = (assignment.resolvedModelSelection.options ?? []).filter(({ id }) =>
-    isAgentPersonaReasoningOptionId(id),
-  );
   if (
-    assignment.resolvedDriver !== target.driver ||
-    assignment.resolvedModelSelection.model !== target.model ||
-    reasoningOptions.length !== 1 ||
-    reasoningOptions[0]?.value !== target.reasoningEffort
+    target === undefined ||
+    !agentPersonaEntryMatches(target, assignment.resolvedModelSelection, assignment.resolvedDriver)
   ) {
     return "Persona assignment does not match its declared model route.";
   }

@@ -1,9 +1,5 @@
 import type { AgentPersonaCatalogRow } from "@t3tools/client-runtime/j5/agent-personas";
-import {
-  PROVIDER_DISPLAY_NAMES,
-  type AgentPersonaModelTarget,
-  type AgentPersonaModelEntry,
-} from "@t3tools/contracts";
+import { PROVIDER_DISPLAY_NAMES, type AgentPersonaModelEntry } from "@t3tools/contracts";
 
 export interface PersonaDetailRow {
   readonly label: string;
@@ -12,14 +8,17 @@ export interface PersonaDetailRow {
 }
 
 const modelLabel = (target: AgentPersonaModelEntry) =>
-  ("driver" in target
-    ? [PROVIDER_DISPLAY_NAMES[target.driver] ?? target.driver, target.model, target.reasoningEffort]
+  "driver" in target
+    ? [
+        PROVIDER_DISPLAY_NAMES[target.driver] ?? target.driver,
+        target.model,
+        target.reasoningEffort,
+      ].join(" · ")
     : [
         target.instanceId,
         target.model,
-        ...(target.options ?? []).map(({ id, value }) => `${id}: ${value}`),
-      ]
-  ).join(" · ");
+        ...(target.options ?? []).map(({ id, value }) => `${id}: ${String(value)}`),
+      ].join(" · ");
 
 /**
  * What the read-only sheet shows for a persona the person can't edit. Models come from the
@@ -41,8 +40,8 @@ export function personaDetailRows(
     | { readonly status: "failed" }
     | {
         readonly status: "loaded";
-        readonly route: readonly [AgentPersonaModelTarget, AgentPersonaModelTarget];
-        readonly models?: ReadonlyArray<AgentPersonaModelEntry> | undefined;
+        readonly route: ReadonlyArray<AgentPersonaModelEntry>;
+        readonly models?: ReadonlyArray<AgentPersonaModelEntry>;
       },
   usageLine: string | null,
 ): ReadonlyArray<PersonaDetailRow> {
@@ -57,15 +56,10 @@ export function personaDetailRows(
     ...(source === null ? [] : [{ label: "Source", value: source }]),
     { label: "Access", value: persona.authority },
     ...(models.status === "loaded"
-      ? models.models === undefined
-        ? [
-            { label: "Primary model", value: modelLabel(models.route[0]) },
-            { label: "Fallback model", value: modelLabel(models.route[1]) },
-          ]
-        : models.models.map((target, index) => ({
-            label: `Model ${index + 1}`,
-            value: modelLabel(target),
-          }))
+      ? (models.models ?? models.route).map((entry, index) => ({
+          label: `Model ${index + 1}`,
+          value: modelLabel(entry),
+        }))
       : [{ label: "Model", value: models.status === "loading" ? "Loading…" : persona.route }]),
     { label: "Description", value: persona.description },
     ...(usageLine === null ? [] : [{ label: "Usage", value: usageLine }]),

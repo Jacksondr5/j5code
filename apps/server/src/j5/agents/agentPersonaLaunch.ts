@@ -1,37 +1,44 @@
 import { agentPersonaPolicy, mapAgentPersonaPolicy } from "./agentPersonas.ts";
-import type { OrchestrationV2AgentPersonaRequest, ServerProvider } from "@t3tools/contracts";
+import { AgentPersonaUsageLimits } from "./agentPersonaUsageLimits.ts";
+import * as Clock from "effect/Clock";
+import type {
+  OrchestrationV2AgentPersonaRequest,
+  ProviderInstanceId,
+  ServerProvider,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import { buildAgentPersonaAssignment } from "./agentPersonaAssignment.ts";
 import { AgentPersonaLibraryError, type createAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
-import {
-  resolveAgentPersonaRoute,
-  unavailableAgentPersonaReason,
-  type AgentPersonaRouteAttempt,
-} from "./agentPersonaRouting.ts";
+import { resolveAgentPersonaRoute, type AgentPersonaRouteAttempt } from "./agentPersonaRouting.ts";
 
 const routeFailurePhrase = (
   target: AgentPersonaRouteAttempt["target"],
   failure: AgentPersonaRouteAttempt["failures"][number],
 ) => {
+  const provider = "driver" in target ? target.driver : target.instanceId;
   switch (failure.code) {
     case "provider-not-configured":
-      return `no ${target.driver} provider is configured`;
+      return `no ${provider} provider is configured`;
     case "provider-unavailable":
-      return `${target.driver} is unavailable`;
+      return `${provider} is unavailable`;
     case "provider-disabled":
-      return `${target.driver} is disabled`;
+      return `${provider} is disabled`;
     case "provider-not-installed":
-      return `${target.driver} is not installed`;
+      return `${provider} is not installed`;
     case "provider-error":
-      return `${target.driver} reports an error`;
+      return `${provider} reports an error`;
     case "provider-unauthenticated":
-      return `${target.driver} is signed out`;
+      return `${provider} is signed out`;
     case "model-not-advertised":
-      return `${target.driver} does not advertise ${target.model}`;
+      return `${provider} does not advertise ${target.model}`;
     case "reasoning-effort-not-advertised":
-      return `${target.driver} does not advertise reasoning effort ${target.reasoningEffort} for ${target.model}`;
+      return `${provider} does not advertise reasoning effort ${"reasoningEffort" in target ? target.reasoningEffort : "requested"} for ${target.model}`;
+    case "usage-limit":
+      return `${provider} is at its usage limit`;
+    case "option-not-advertised":
+      return `${provider} does not support the requested model options`;
     case "authority-not-enforceable":
-      return `${target.driver} cannot enforce the persona's authority policy`;
+      return `${provider} cannot enforce the persona's authority policy`;
   }
 };
 
@@ -43,7 +50,7 @@ const describeRouteAttempts = (attempts: ReadonlyArray<AgentPersonaRouteAttempt>
   attempts
     .map(
       (attempt) =>
-        `${attempt.route} ${attempt.target.model} (${[
+        `entry ${attempt.entryIndex + 1} ${attempt.target.model} (${[
           ...new Set(
             attempt.failures.map((failure) => routeFailurePhrase(attempt.target, failure)),
           ),
@@ -56,6 +63,10 @@ export const prepareAgentPersonaLaunch = Effect.fn("prepareAgentPersonaLaunch")(
   request: OrchestrationV2AgentPersonaRequest,
   providers: ReadonlyArray<ServerProvider>,
   library: ReturnType<typeof createAgentPersonaLibrary>,
+  quotaSnapshot?: {
+    readonly now: number;
+    readonly limitedInstances: ReadonlySet<ProviderInstanceId>;
+  },
 ) {
   const catalog = yield* library.catalog();
   if (catalog.disabledIds.includes(request.personaId))
@@ -77,7 +88,13 @@ export const prepareAgentPersonaLaunch = Effect.fn("prepareAgentPersonaLaunch")(
   }
   const authority =
     request.authorityPolicy === undefined ? {} : { authorityPolicy: request.authorityPolicy };
+  const now = quotaSnapshot?.now ?? (yield* Clock.currentTimeMillis);
+  const limitedInstances =
+    quotaSnapshot?.limitedInstances ??
+    (yield* (yield* AgentPersonaUsageLimits).limitedInstances(now));
   const resolution = resolveAgentPersonaRoute({
+    now,
+    limitedInstances,
     personaId: request.personaId,
     ...authority,
     definition,
@@ -85,10 +102,7 @@ export const prepareAgentPersonaLaunch = Effect.fn("prepareAgentPersonaLaunch")(
   });
   if (resolution.status === "unavailable") {
     return yield* new AgentPersonaLibraryError({
-      message:
-        unavailableAgentPersonaReason(resolution) === "authority-not-enforceable"
-          ? `Persona ${request.personaId} is blocked because neither route can enforce its authority policy.`
-          : `Persona ${request.personaId} is blocked because its primary and fallback models are unavailable: ${describeRouteAttempts(resolution.attempts)}.`,
+      message: `Persona ${request.personaId} is blocked because its ordered model entries are unavailable: ${describeRouteAttempts(resolution.attempts)}.`,
     });
   }
   const result = buildAgentPersonaAssignment({ ...authority, definition, resolution });

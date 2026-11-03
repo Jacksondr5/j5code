@@ -34,6 +34,7 @@ import {
   agentPersonaPolicyNote,
   defaultAgentPersonaModelRoute,
   agentPersonaModelChoices,
+  withAgentPersonaReasoning,
   agentPersonaModelGroups,
   presentAgentPersonaAssignment,
   presentAgentPersonaCatalog,
@@ -127,7 +128,7 @@ describe("agent persona catalog presentation", () => {
     expect(presentAgentPersonaCatalog(catalog)[0]).toMatchObject({
       availability: "available",
       availabilityLabel: "Available",
-      route: "Codex · server-selected-model · fallback",
+      route: "Codex · server-selected-model · entry 2",
     });
   });
 
@@ -135,7 +136,7 @@ describe("agent persona catalog presentation", () => {
     expect(presentAgentPersonaCatalog(catalog)[1]).toMatchObject({
       availability: "blocked",
       availabilityLabel: "Blocked",
-      route: "Primary and fallback models unavailable",
+      route: "Ordered model entries unavailable",
     });
   });
 
@@ -279,6 +280,7 @@ it("offers editing only for imported entries with server-provided editable detai
   ).toEqual({
     personaId: persona.personaId,
     expectedDigest: "a".repeat(64),
+    modelRouteFormat: "ordered",
     displayName: persona.displayName,
     description: persona.description,
     authorityPolicy: persona.defaultAuthorityPolicy,
@@ -286,11 +288,13 @@ it("offers editing only for imported entries with server-provided editable detai
   });
   const choices = agentPersonaModelChoices([], modelRoute);
   expect(choices).toHaveLength(2);
-  expect(choices.find(({ target }) => target.driver === "codex")?.efforts).toEqual(["high"]);
+  expect(
+    choices.find(({ target }) => "driver" in target && target.driver === "codex")?.efforts,
+  ).toEqual(["high"]);
   expect(choices.every(({ label }) => label.includes("not advertised"))).toBe(true);
 });
 
-it("uses the selected environment's advertised models and reasoning options without duplicating instances", () => {
+it("uses the selected environment's advertised models and reasoning options without merging provider instances", () => {
   const provider: ServerProvider = {
     instanceId: ProviderInstanceId.make("remote-codex"),
     driver: ProviderDriverKind.make("codex"),
@@ -342,14 +346,18 @@ it("uses the selected environment's advertised models and reasoning options with
     expect(configured).toHaveLength(1);
     expect(configured[0]?.available).toBe(false);
   }
-  expect(choices).toHaveLength(1);
-  expect(choices[0]).toMatchObject({
-    available: true,
-    label: "Codex · team-model",
+  expect(choices).toHaveLength(3);
+  const available = choices.filter(({ available }) => available);
+  expect(available).toHaveLength(2);
+  expect(
+    available.map(({ target }) => ("instanceId" in target ? target.instanceId : null)),
+  ).toEqual(["remote-codex", "second-codex"]);
+  expect(available[0]).toMatchObject({
+    label: "Codex · remote-codex · team-model",
     target: {
-      driver: ProviderDriverKind.make("codex"),
+      instanceId: "remote-codex",
       model: "team-model",
-      reasoningEffort: "high",
+      options: [{ id: "reasoningEffort", value: "high" }],
     },
     efforts: ["xhigh", "high", "medium", "minimal", "max"],
   });
@@ -397,14 +405,23 @@ it("offers every signed-in harness with its own reasoning option", () => {
     ],
   };
   const choices = agentPersonaModelChoices([cursor], []);
-  expect(choices).toMatchObject([
-    {
-      label: "Cursor · gpt-5.5",
-      target: { driver: "cursor", model: "gpt-5.5", reasoningEffort: "high" },
-      efforts: ["low", "high"],
+  expect(choices).toHaveLength(2);
+  expect(choices.find(({ target }) => target.model === "gpt-5.5")).toMatchObject({
+    label: "Cursor · cursor · gpt-5.5",
+    target: {
+      instanceId: "cursor",
+      model: "gpt-5.5",
+      options: [{ id: "reasoning", value: "high" }],
     },
+    efforts: ["low", "high"],
+  });
+  expect(choices.find(({ target }) => target.model === "composer-2")).toMatchObject({
+    available: true,
+    efforts: [],
+  });
+  expect(agentPersonaModelGroups(choices)).toMatchObject([
+    { driver: "cursor", label: "Cursor · cursor" },
   ]);
-  expect(agentPersonaModelGroups(choices)).toMatchObject([{ driver: "cursor", label: "Cursor" }]);
 });
 
 it("retains unadvertised models and their configured reasoning levels", () => {
@@ -644,35 +661,31 @@ describe("personal agent authoring", () => {
     expect(agentPersonaIdError("-lead")).toMatch(/starting with a letter/);
   });
 
-  it("picks a launchable default route and prefers a second harness for the fallback", () => {
+  it("starts with a single launchable instance entry and prefers enforceable providers", () => {
     expect(defaultAgentPersonaModelRoute([])).toBeNull();
     const providers = [
       provider("codex", "codex", ["gpt-5.6-terra"], "reasoningEffort"),
       provider("claudeAgent", "claude", ["claude-opus-5"], "effort"),
     ];
     expect(defaultAgentPersonaModelRoute(providers)).toEqual([
-      {
-        driver: ProviderDriverKind.make("claudeAgent"),
-        model: "claude-opus-5",
-        reasoningEffort: "high",
-      },
-      { driver: ProviderDriverKind.make("codex"), model: "gpt-5.6-terra", reasoningEffort: "high" },
+      { instanceId: "claude", model: "claude-opus-5", options: [{ id: "effort", value: "high" }] },
     ]);
-    const single = defaultAgentPersonaModelRoute([providers[0]!]);
-    expect(single?.[0]).toEqual(single?.[1]);
+    expect(defaultAgentPersonaModelRoute([providers[0]!])).toHaveLength(1);
     const cursor = provider("cursor", "cursor", ["composer-2"], "reasoning");
     const withCursor = defaultAgentPersonaModelRoute(
       [cursor, providers[0]!],
       [ProviderDriverKind.make("codex")],
     );
-    expect(withCursor?.map(({ driver }) => String(driver))).toEqual(["codex", "codex"]);
+    expect(
+      withCursor?.map((target) => String("driver" in target ? target.driver : target.instanceId)),
+    ).toEqual(["codex"]);
     // With no sandboxing driver signed in, any advertised model still makes a starting route.
     expect(
       defaultAgentPersonaModelRoute([cursor], [ProviderDriverKind.make("codex")])?.[0],
     ).toEqual({
-      driver: ProviderDriverKind.make("cursor"),
+      instanceId: ProviderInstanceId.make("cursor"),
       model: "composer-2",
-      reasoningEffort: "high",
+      options: [{ id: "reasoning", value: "high" }],
     });
   });
 
@@ -1190,28 +1203,59 @@ describe("composerModelSelectionForThread", () => {
   });
 });
 
-it("refuses a duplicate that the legacy editor would truncate", () => {
-  const target = {
-    driver: ProviderDriverKind.make("codex"),
+it("changes reasoning without discarding other declared model options", () => {
+  const entry = {
+    instanceId: ProviderInstanceId.make("remote"),
     model: "model",
-    reasoningEffort: "high",
+    options: [
+      { id: "fastMode", value: true },
+      { id: "effort", value: "low" },
+    ],
   };
+  expect(withAgentPersonaReasoning(entry, "high")).toEqual({
+    ...entry,
+    options: [
+      { id: "fastMode", value: true },
+      { id: "effort", value: "high" },
+    ],
+  });
+  expect(entry.options[1]?.value).toBe("low");
+});
+
+it("edits and duplicates the complete ordered list without using the legacy summary", () => {
+  const persona = catalog.personas[0]!;
+  const models = [
+    { instanceId: ProviderInstanceId.make("remote"), model: "first" },
+    { instanceId: ProviderInstanceId.make("codex"), model: "second" },
+    {
+      instanceId: ProviderInstanceId.make("remote"),
+      model: "third",
+      options: [{ id: "fastMode", value: true }],
+    },
+  ] as const;
+  const row = presentAgentPersonaCatalog({
+    personas: [
+      {
+        ...persona,
+        imported: true,
+        orderedEditable: { definitionDigest: "a".repeat(64), modelRoute: models },
+      },
+    ],
+  })[0]!;
+  expect(row.edit?.modelRoute).toEqual(models);
+  expect(row.edit?.modelRouteFormat).toBe("ordered");
   const definition = {
-    id: "new-persona",
+    id: persona.personaId,
     version: 1,
-    displayName: "New persona",
-    description: "Specialist",
+    displayName: persona.displayName,
+    description: persona.description,
     instructions: "Review",
     authority: { defaultPolicy: "read-only", allowedPolicies: ["read-only"] },
-    modelRoute: [target, target] as const,
+    modelRoute: [
+      { driver: ProviderDriverKind.make("codex"), model: "summary", reasoningEffort: "high" },
+      { driver: ProviderDriverKind.make("codex"), model: "summary", reasoningEffort: "high" },
+    ] as const,
+    models,
   };
-  expect(() =>
-    agentPersonaDuplicateDraft({ ...definition, models: [target, target, target] }),
-  ).toThrow("Export YAML");
-  expect(() =>
-    agentPersonaDuplicateDraft({
-      ...definition,
-      models: [{ instanceId: ProviderInstanceId.make("codex"), model: "model" }],
-    }),
-  ).toThrow("Export YAML");
+  expect(agentPersonaDuplicateDraft(definition).modelRoute).toEqual(models);
 });

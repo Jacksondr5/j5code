@@ -9,7 +9,7 @@ import {
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import type {
   AgentPersonaAuthorityPolicy,
-  AgentPersonaModelTarget,
+  AgentPersonaModelEntry,
   EnvironmentId,
 } from "@t3tools/contracts";
 import { useState } from "react";
@@ -60,7 +60,7 @@ export function AgentCreateDialog(props: {
     description: string;
     instructions: string;
     authorityPolicy: AgentPersonaAuthorityPolicy;
-    modelRoute: readonly [AgentPersonaModelTarget, AgentPersonaModelTarget] | null;
+    modelRoute: ReadonlyArray<AgentPersonaModelEntry> | null;
   }>(
     props.initial
       ? { ...props.initial, idEdited: true }
@@ -100,7 +100,7 @@ export function AgentCreateDialog(props: {
         description: draft.description.trim(),
         instructions: draft.instructions,
         authorityPolicy: draft.authorityPolicy,
-        modelRoute: [modelRoute[0], modelRoute[1]],
+        modelRoute,
       },
     });
     if (result._tag === "Failure") {

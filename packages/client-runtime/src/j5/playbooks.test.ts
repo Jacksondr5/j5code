@@ -149,15 +149,20 @@ describe("saved Playbook Author instructions", () => {
       instructions: original,
       authorityPolicy: "workspace-write",
       modelRoute: [
-        { driver: "codex", model: "my-model", reasoningEffort: "high" },
-        { driver: "codex", model: "my-model", reasoningEffort: "high" },
+        {
+          instanceId: "remote-codex",
+          model: "my-model",
+          options: [{ id: "reasoningEffort", value: "high" }],
+        },
       ],
     }).modelRoute;
     const edits: AgentPersonaEditInput[] = [];
     const input: Parameters<typeof ensurePlaybookAuthor>[0] = {
       providers: [],
       readCatalog: async () => ({
-        personas: [{ ...author, editable: { definitionDigest: "a".repeat(64), modelRoute } }],
+        personas: [
+          { ...author, orderedEditable: { definitionDigest: "a".repeat(64), modelRoute } },
+        ],
       }),
       createPersona: async () => {
         throw new Error("must not recreate saved author");
@@ -169,7 +174,11 @@ describe("saved Playbook Author instructions", () => {
         description: author.description,
         instructions,
         authority: { defaultPolicy: "workspace-write", allowedPolicies: ["workspace-write"] },
-        modelRoute,
+        modelRoute: [
+          { driver: ProviderDriverKind.make("codex"), model: "my-model", reasoningEffort: "high" },
+          { driver: ProviderDriverKind.make("codex"), model: "my-model", reasoningEffort: "high" },
+        ],
+        models: [modelRoute[0]!, ...modelRoute.slice(1)],
       }),
       editPersona: async (edit) => {
         edits.push(edit);
@@ -183,6 +192,7 @@ describe("saved Playbook Author instructions", () => {
       expect(edits[0]).toMatchObject({
         expectedDigest: "a".repeat(64),
         displayName: author.displayName,
+        modelRouteFormat: "ordered",
         modelRoute,
       });
     else expect(instructions).toBe(original);
@@ -211,8 +221,11 @@ describe("Playbook Author installation", () => {
       id: "playbook-author",
       authorityPolicy: "workspace-write",
       modelRoute: [
-        { driver: "codex", model: "my-model", reasoningEffort: "high" },
-        { driver: "codex", model: "my-model", reasoningEffort: "high" },
+        {
+          instanceId: "remote-codex",
+          model: "my-model",
+          options: [{ id: "reasoningEffort", value: "high" }],
+        },
       ],
     });
   });
