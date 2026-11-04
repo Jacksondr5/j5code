@@ -10,8 +10,10 @@ import * as Effect from "effect/Effect";
 import * as Crypto from "effect/Crypto";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
+import * as SubscriptionRef from "effect/SubscriptionRef";
 import { AsyncResult, Atom, type AtomRegistry } from "effect/reactivity";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
+import { EnvironmentSupervisor } from "../connection/supervisor.ts";
 import { getInitialServerConfig, subscribe } from "../rpc/client.ts";
 import {
   createAtomCommandScheduler,
@@ -49,11 +51,25 @@ export function createPersonalThreadReadAtoms<R, E>(
     subscribe: () =>
       Stream.unwrap(
         Effect.gen(function* () {
-          const config = yield* getInitialServerConfig();
-          if (config.environment.capabilities.j5PersonalThreadReads !== true)
-            return Stream.succeed(undefined);
-          return subscribe(J5_THREAD_READ_WS_METHODS.subscribe, {}).pipe(
-            Stream.scan(() => EMPTY_MARKERS, applyPersonalReadChange),
+          const supervisor = yield* EnvironmentSupervisor;
+          return SubscriptionRef.changes(supervisor.session).pipe(
+            Stream.switchMap(
+              Option.match({
+                onNone: () => Stream.succeed(EMPTY_MARKERS),
+                onSome: (session) =>
+                  Stream.unwrap(
+                    session.initialConfig.pipe(
+                      Effect.map((config) =>
+                        config.environment.capabilities.j5PersonalThreadReads === true
+                          ? subscribe(J5_THREAD_READ_WS_METHODS.subscribe, {}).pipe(
+                              Stream.scan(() => EMPTY_MARKERS, applyPersonalReadChange),
+                            )
+                          : Stream.succeed(undefined),
+                      ),
+                    ),
+                  ),
+              }),
+            ),
           );
         }),
       ),

@@ -106,7 +106,7 @@ const setup = Effect.fn("test.personalReads")(function* (personal: boolean) {
     (registry) => Effect.sync(() => registry.dispose()),
   );
   registry.set(sessions(environmentId), AsyncResult.success(grant(true)));
-  return { runtime: Atom.runtime(layer), registry, calls, changes };
+  return { runtime: Atom.runtime(layer), registry, calls, changes, session: supervisor.session };
 });
 
 it.effect(
@@ -176,6 +176,34 @@ it.effect("keeps upstream visit and mark-unread commands on servers without pers
         Stream.runHead,
       ),
     ).toEqual(Option.some(undefined));
+  }).pipe(Effect.scoped),
+);
+
+it.effect("waits for the first connection and restores personal markers after reconnecting", () =>
+  Effect.gen(function* () {
+    const { runtime, registry, session } = yield* setup(true);
+    const connected = yield* SubscriptionRef.get(session);
+    yield* SubscriptionRef.set(session, Option.none());
+    const atom = createPersonalThreadReadAtoms(runtime).markersAtom(environmentId);
+    yield* AtomRegistry.mount(registry, atom);
+    expect(yield* AtomRegistry.toStream(registry, atom).pipe(Stream.runHead)).toEqual(
+      Option.some(new Map()),
+    );
+    yield* SubscriptionRef.set(session, connected);
+    yield* AtomRegistry.toStream(registry, atom).pipe(
+      Stream.filter((markers) => markers?.get(threadId) === at),
+      Stream.runHead,
+    );
+    yield* SubscriptionRef.set(session, Option.none());
+    yield* AtomRegistry.toStream(registry, atom).pipe(
+      Stream.filter((markers) => markers?.size === 0),
+      Stream.runHead,
+    );
+    yield* SubscriptionRef.set(session, connected);
+    yield* AtomRegistry.toStream(registry, atom).pipe(
+      Stream.filter((markers) => markers?.get(threadId) === at),
+      Stream.runHead,
+    );
   }).pipe(Effect.scoped),
 );
 
