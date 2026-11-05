@@ -103,9 +103,7 @@ export function validateAgentPersonaAssignment(
   }
   const target =
     definition.modelRoute[
-      assignment.resolvedEntryIndex ??
-        assignment.resolvedRouteIndex ??
-        (assignment.resolvedRoute === "primary" ? 0 : 1)
+      assignment.resolvedEntryIndex ?? (assignment.resolvedRoute === "primary" ? 0 : 1)
     ];
   if (
     target === undefined ||

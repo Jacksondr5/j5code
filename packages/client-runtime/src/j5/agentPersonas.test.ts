@@ -1322,3 +1322,32 @@ it("shows blocked entry diagnostics without legacy availability attempts", () =>
   })[0]!;
   expect(row.blockedReasons).toEqual(["Entry 3 · remote limited: provider is at its usage limit"]);
 });
+
+it("labels driver-format entries without an instance when a non-default instance is first", () => {
+  const remote: ServerProvider = {
+    instanceId: ProviderInstanceId.make("remote"),
+    driver: ProviderDriverKind.make("codex"),
+    enabled: true,
+    installed: true,
+    version: null,
+    status: "ready",
+    auth: { status: "authenticated" },
+    checkedAt: "2026-11-05T00:00:00Z",
+    models: [{ slug: "model", name: "Model", isCustom: false, capabilities: {} }],
+    slashCommands: [],
+    skills: [],
+  };
+  const providers = [remote, { ...remote, instanceId: ProviderInstanceId.make("codex") }];
+  const entries = ["model", "missing"].map((model) => ({
+    driver: remote.driver,
+    model,
+    reasoningEffort: "high",
+  }));
+  const retained = agentPersonaModelChoices(providers, entries).filter(
+    ({ target }) => "driver" in target,
+  );
+  expect(retained.map(({ label, instanceLabel }) => ({ label, instanceLabel }))).toEqual([
+    { label: "Codex · missing (not advertised)", instanceLabel: "Codex" },
+    { label: "Codex · model", instanceLabel: "Codex" },
+  ]);
+});

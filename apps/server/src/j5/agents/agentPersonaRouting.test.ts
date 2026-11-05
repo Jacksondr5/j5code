@@ -8,8 +8,6 @@ import {
 import { assert, describe, it } from "@effect/vitest";
 import {
   ProviderDriverKind,
-  OrchestrationV2AgentPersonaAssignment,
-  OrchestrationV2AgentPersonaCommandAssignment,
   AgentPersonaDefinitionView,
   AgentPersonaModelTarget,
   J5AgentPersonaRpcSchemas,
@@ -31,9 +29,6 @@ import {
   listBuiltInAgentPersonas,
   type AgentModelTarget,
 } from "./agentPersonas.ts";
-
-const decodeSavedAssignment = Schema.decodeSync(OrchestrationV2AgentPersonaAssignment);
-const decodeCommandAssignment = Schema.decodeSync(OrchestrationV2AgentPersonaCommandAssignment);
 
 const decodePersonaRead = Schema.decodeSync(J5AgentPersonaRpcSchemas.readAgentPersona.output);
 const decodeDefinitionView = Schema.decodeSync(AgentPersonaDefinitionView);
@@ -898,7 +893,7 @@ it("ignores Claude model-scoped exhaustion while honoring its account windows", 
   );
 });
 
-it("writes only resolvedEntryIndex while reading historical route indices", () => {
+it("records the selected entry index in an assignment", () => {
   const definition = decodeAgentPersonaDefinition({
     ...listBuiltInAgentPersonas()[0]!,
     modelRoute: [
@@ -925,17 +920,5 @@ it("writes only resolvedEntryIndex while reading historical route indices", () =
   assert.equal(result.status, "assigned");
   if (result.status !== "assigned") return;
   assert.equal(result.assignment.resolvedEntryIndex, 2);
-  assert.isFalse("resolvedRouteIndex" in result.assignment);
-  const historical = { ...result.assignment, resolvedRouteIndex: 2 };
-  assert.isFalse("resolvedRouteIndex" in decodeCommandAssignment(historical));
-  const { resolvedEntryIndex: _index, ...assignment } = result.assignment;
-  assert.isUndefined(
-    validateAgentPersonaAssignment(
-      decodeSavedAssignment({
-        ...assignment,
-        resolvedRouteIndex: 2,
-      }),
-      definition,
-    ),
-  );
+  assert.isUndefined(validateAgentPersonaAssignment(result.assignment, definition));
 });

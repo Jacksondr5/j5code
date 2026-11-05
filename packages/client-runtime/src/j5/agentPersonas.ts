@@ -390,12 +390,13 @@ export function agentPersonaModelChoices(
     ];
     choices.set(id, {
       id,
-      label: `${provider ? instanceLabel(provider) : "driver" in target ? providerLabel(target.driver) : target.instanceId} · ${target.model}${model ? "" : " (not advertised)"}`,
-      instanceLabel: provider
-        ? instanceLabel(provider)
-        : "driver" in target
+      label: `${"driver" in target ? providerLabel(target.driver) : provider ? instanceLabel(provider) : target.instanceId} · ${target.model}${model ? "" : " (not advertised)"}`,
+      instanceLabel:
+        "driver" in target
           ? providerLabel(target.driver)
-          : target.instanceId,
+          : provider
+            ? instanceLabel(provider)
+            : target.instanceId,
       modelLabel: target.model,
       available: false,
       target,
