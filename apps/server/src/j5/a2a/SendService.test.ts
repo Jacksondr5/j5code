@@ -591,6 +591,7 @@ it.effect("keeps asks to a person distinct and joins a follow-up only when it na
       ask("follow-up-unknown", { regarding: ExchangeId.make("exchange:unknown") }),
     );
     assert.equal(unknown._tag, "A2AExchangeNotOpenError");
+    assert.include(unknown.message, "without exchange_id or regarding");
 
     const sql = yield* SqlClient.SqlClient;
     assert.deepStrictEqual(

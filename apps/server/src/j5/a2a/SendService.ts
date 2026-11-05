@@ -234,7 +234,7 @@ export class A2AExchangeNotOpenError extends Schema.TaggedError<A2AExchangeNotOp
   { exchangeId: Schema.String },
 ) {
   override get message(): string {
-    return `Exchange ${this.exchangeId} is not open. Call j5_send_message without exchange_id to start a new message or exchange.`;
+    return `Exchange ${this.exchangeId} is not open. Call j5_send_message without exchange_id or regarding to start a new message or exchange.`;
   }
 }
 
