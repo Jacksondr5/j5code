@@ -22,6 +22,13 @@ import {
   isAskAlreadyClosed,
   pickShownAsk,
 } from "./adjudicationDock.logic";
+import {
+  AnswerAttachButton,
+  AnswerAttachmentList,
+  answerAttachmentInputHandlers,
+  useAnswerAttachmentSupport,
+  useAnswerAttachments,
+} from "./AnswerAttachments";
 import { answerHumanExchange, type HumanInboxItem } from "./humanInboxClient";
 import { notifyHumanInboxChanged } from "./humanInboxRefresh";
 
@@ -61,9 +68,14 @@ export function AdjudicationDock(props: {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refused, setRefused] = useState<ReadonlyArray<HumanInboxItem>>([]);
-  const attempt = useRef<{ exchangeId: string; message: string; clientRequestId: string } | null>(
-    null,
-  );
+  const attempt = useRef<{
+    exchangeId: string;
+    message: string;
+    attachmentIds: string;
+    clientRequestId: string;
+  } | null>(null);
+  const attachments = useAnswerAttachments();
+  const support = useAnswerAttachmentSupport(environmentId);
 
   const asks = adjudicationAsks({
     items: query.data?.items ?? [],
@@ -80,19 +92,37 @@ export function AdjudicationDock(props: {
   const openFor = formatElapsedDurationLabel(shown.openedAt);
   const threadRef = threadId == null ? undefined : scopeThreadRef(environmentId, threadId);
 
+  const readiness = attachments.ready(shown.exchangeId, environmentId);
+  const waitingOn = "blocked" in readiness ? readiness.blocked : null;
+  const addFiles =
+    support === null || !isOpen
+      ? null
+      : (files: ReadonlyArray<File>) =>
+          attachments.add(shown.exchangeId, environmentId, support.maxFileBytes, files);
+  const answerId = `adjudication-answer-${encodeURIComponent(shown.exchangeId)}`;
+
   const answer = async () => {
-    if (message === "") return;
-    // A retry of the same words reuses its request id, so a lost reply cannot answer twice.
+    if (message === "" || "blocked" in readiness) return;
+    const attachmentIds = readiness.attachments.map((attachment) => attachment.id).join("\n");
+    // A retry of the same words and files reuses its request id, so a lost reply cannot answer twice.
     const request =
-      attempt.current?.exchangeId === shown.exchangeId && attempt.current.message === message
+      attempt.current?.exchangeId === shown.exchangeId &&
+      attempt.current.message === message &&
+      attempt.current.attachmentIds === attachmentIds
         ? attempt.current
-        : { exchangeId: shown.exchangeId, message, clientRequestId: randomUUID() };
+        : { exchangeId: shown.exchangeId, message, attachmentIds, clientRequestId: randomUUID() };
     attempt.current = request;
     setPending(true);
     setError(null);
     try {
-      await answerHumanExchange(environmentId, request);
+      await answerHumanExchange(environmentId, {
+        exchangeId: request.exchangeId,
+        message: request.message,
+        ...(readiness.attachments.length === 0 ? {} : { attachments: readiness.attachments }),
+        clientRequestId: request.clientRequestId,
+      });
       attempt.current = null;
+      attachments.delivered(shown.exchangeId);
       notifyHumanInboxChanged(environmentId);
       setAnswers((current) =>
         Object.fromEntries(Object.entries(current).filter(([id]) => id !== shown.exchangeId)),
@@ -150,12 +180,20 @@ export function AdjudicationDock(props: {
           <Textarea
             aria-label={`Answer ${shown.intent}`}
             className="min-h-9"
+            id={answerId}
             onChange={(event) => {
               const value = event.currentTarget.value;
               setAnswers((current) => ({ ...current, [shown.exchangeId]: value }));
             }}
             placeholder="Type the answer exactly as it should be delivered"
             value={message}
+            {...(addFiles === null ? {} : answerAttachmentInputHandlers(addFiles))}
+          />
+          <AnswerAttachmentList
+            attachments={attachments.list(shown.exchangeId)}
+            environmentId={environmentId}
+            error={attachments.error(shown.exchangeId)}
+            onRemove={(id) => attachments.remove(shown.exchangeId, id)}
           />
           {error ? (
             <p className="text-sm text-destructive" role="alert">
@@ -163,11 +201,18 @@ export function AdjudicationDock(props: {
             </p>
           ) : null}
           <div className="flex items-center justify-end gap-2">
+            {addFiles === null ? null : (
+              <AnswerAttachButton
+                focusAnswer={() => document.getElementById(answerId)?.focus()}
+                onFiles={addFiles}
+              />
+            )}
             {isOpen ? (
               <Button
-                disabled={pending || message === ""}
+                disabled={pending || message === "" || waitingOn !== null}
                 onClick={() => void answer()}
                 size="sm"
+                title={waitingOn ?? undefined}
                 type="button"
               >
                 {pending ? "Delivering…" : "Answer"}

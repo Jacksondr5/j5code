@@ -1,7 +1,7 @@
 import { EffectOutboxV2 } from "../../orchestration-v2/EffectOutbox.ts";
 import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";
 import { assert, it } from "@effect/vitest";
-import { ThreadId } from "@t3tools/contracts";
+import { ChatAttachmentId, ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
@@ -552,4 +552,99 @@ it.effect("answers a Captain's ask once from either view and drops a withdrawn a
       );
     }).pipe(Effect.provide(makeTestLayer(deliveries)));
   }),
+);
+
+it.effect(
+  "an answer's files are claimed into the asking agent's thread and delivered with it",
+  () =>
+    Effect.gen(function* () {
+      const deliveries = yield* Ref.make<ReadonlyArray<AgentDeliveryInput>>([]);
+      yield* Effect.gen(function* () {
+        yield* runMigrations();
+        yield* runJ5A2AMigrations();
+        const at = "2026-11-05T00:00:00.000Z";
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`
+        INSERT INTO j5_a2a_human_person (person_id, is_local_operator, created_at)
+        VALUES (${firstPerson.id}, 1, ${at})
+      `;
+        yield* sql`
+        INSERT INTO j5_a2a_person_level (person_id, scope_kind, scope_id, level, created_at, updated_at)
+        VALUES (${firstPerson.id}, 'server', '', 'owner', ${at}, ${at})
+      `;
+        const ledger = yield* A2ALedger;
+        const worker = yield* A2ADeliveryWorker;
+        const projectId = LedgerProjectId.make("project:human-inbox:files");
+        const agent: AgentParticipant = {
+          kind: "agent",
+          id: ParticipantId.make("agent:human-inbox:files"),
+          threadId: ThreadId.make("thread:human-inbox:files"),
+        };
+        yield* ledger.ensureProject({ projectId, createdAt: at });
+        yield* ledger.appendEvents({
+          commandId: CommCommandId.make("command:human-inbox:join:files"),
+          projectId,
+          acceptedAt: at,
+          events: [
+            {
+              kind: "participant.joined",
+              sender: null,
+              receiver: agent.id,
+              exchangeId: null,
+              correlationId: null,
+              payload: { participant: agent },
+              createdAt: at,
+            },
+          ],
+        });
+        const asked = yield* (yield* A2ASendService).send({
+          commandId: CommCommandId.make("command:human-inbox:ask:files"),
+          senderThreadId: agent.threadId,
+          to: firstPerson.id,
+          message: "Which layout looks right?",
+          expectReply: true,
+          intent: "Pick a layout",
+          urgency: "soon",
+          acceptedAt: at,
+        });
+        yield* worker.drain;
+
+        const upload = {
+          type: "image" as const,
+          id: ChatAttachmentId.make("pending-00000000-0000-4000-8000-000000000000"),
+          name: "layout.png",
+          mimeType: "image/png",
+          sizeBytes: 3,
+        };
+        const claimed = { ...upload, id: ChatAttachmentId.make("claimed-layout") };
+        const claimedFor: Array<ThreadId> = [];
+        yield* (yield* A2AHumanInbox).answer(
+          {
+            commandId: CommCommandId.make("command:human-inbox:answer:files"),
+            personId: firstPerson.id,
+            exchangeId: asked.exchangeId!,
+            message: "The second one.",
+            attachments: [upload],
+            acceptedAt: at,
+          },
+          undefined,
+          (threadId, attachments) =>
+            Effect.sync(() => {
+              claimedFor.push(threadId);
+              assert.deepStrictEqual(attachments, [upload]);
+              return [claimed];
+            }),
+        );
+        yield* worker.drain;
+
+        assert.deepStrictEqual(claimedFor, [agent.threadId]);
+        const replies = (yield* Ref.get(deliveries)).filter(
+          (delivery) => delivery.exchangeRole === "reply",
+        );
+        assert.deepStrictEqual(
+          replies.map((delivery) => delivery.attachments),
+          [[claimed]],
+        );
+      }).pipe(Effect.provide(makeTestLayer(deliveries)));
+    }),
 );

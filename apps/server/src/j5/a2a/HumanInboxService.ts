@@ -4,7 +4,7 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
-import { ThreadId } from "@t3tools/contracts";
+import { type ChatAttachment, ThreadId } from "@t3tools/contracts";
 
 import {
   type AnswerHumanExchangeInput,
@@ -18,9 +18,11 @@ import {
   type HumanInboxListStatus,
   isDurableHumanParticipantId,
   LedgerMessageId,
+  MessageSentPayload,
   ParticipantId,
   type SendMessageResult,
 } from "./contracts.ts";
+import { AttachmentClaimError } from "../../orchestration-v2/AttachmentClaims.ts";
 import { A2ALedger, type A2ALedgerError } from "./LedgerService.ts";
 import {
   type A2ALocalOperatorNotFoundError,
@@ -108,6 +110,8 @@ interface ExistingReplyRow {
   readonly sent_seq: number;
 }
 
+const encodeSentPayload = Schema.encodeEffect(Schema.toCodecJson(MessageSentPayload));
+
 const messageIdFor = (commandId: CommCommandId) =>
   LedgerMessageId.make(`message:j5:a2a:${encodeURIComponent(commandId)}`);
 
@@ -138,7 +142,16 @@ export interface A2AHumanInboxShape {
       readonly threadId: ThreadId;
       readonly messageId: LedgerMessageId;
     }) => Effect.Effect<void, PersonAccessStorageError>,
-  ) => Effect.Effect<SendMessageResult, A2AHumanInboxError>;
+    /**
+     * Claims `input.attachments` into the asking agent's thread, once the reply is known to be one
+     * this person may give and no one else answered first. Nothing undoes the claim: the only later
+     * failure is recording the reply, after which nobody knows whether it was recorded.
+     */
+    claimAttachments?: (
+      threadId: ThreadId,
+      attachments: ReadonlyArray<ChatAttachment>,
+    ) => Effect.Effect<ReadonlyArray<ChatAttachment>, AttachmentClaimError>,
+  ) => Effect.Effect<SendMessageResult, A2AHumanInboxError | AttachmentClaimError>;
 }
 
 export class A2AHumanInbox extends Context.Service<A2AHumanInbox, A2AHumanInboxShape>()(
@@ -270,7 +283,7 @@ export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlC
       });
 
       const answer: A2AHumanInboxShape["answer"] = Effect.fn("j5.a2a.humanInbox.answer")(
-        function* (input, beforeReply) {
+        function* (input, beforeReply, claimAttachments) {
           yield* assertPersonId(input.personId);
           if (!(yield* isHumanPerson(sql, input.personId))) {
             return yield* new A2AParticipantNotFoundError({ participantId: input.personId });
@@ -367,6 +380,19 @@ export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlC
             WHERE project_id = ${exchange.project_id} AND exchange_id = ${exchange.exchange_id}
               AND person_id = ${input.personId}
           `.pipe(Effect.ignore);
+          const requested = input.attachments ?? [];
+          const attachments =
+            requested.length === 0
+              ? []
+              : yield* (
+                  exchange.sender_thread_id === null || claimAttachments === undefined
+                    ? Effect.fail(
+                        new AttachmentClaimError({
+                          message: "This ask's agent has no thread to receive files.",
+                        }),
+                      )
+                    : claimAttachments(ThreadId.make(exchange.sender_thread_id), requested)
+                ).pipe(Effect.onError(() => (forEveryone ? releaseClaim : Effect.void)));
 
           const projectId = LedgerProjectId.make(exchange.project_id);
           const senderId = ParticipantId.make(exchange.sender_id);
@@ -378,14 +404,16 @@ export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlC
               receiver: senderId,
               exchangeId: input.exchangeId,
               correlationId,
-              payload: {
+              // Every field is already decoded, so encoding cannot fail.
+              payload: yield* encodeSentPayload({
                 messageId,
                 text: input.message,
+                ...(attachments.length === 0 ? {} : { attachments }),
                 originProjectId: projectId,
                 receiverProjectId: projectId,
                 exchangeRole: "reply",
                 envelopeChannel: "peer",
-              },
+              }).pipe(Effect.orDie),
               createdAt: input.acceptedAt,
             },
             {

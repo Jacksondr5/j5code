@@ -1,4 +1,4 @@
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { ChatAttachment, EnvironmentId } from "@t3tools/contracts";
 import {
   type ConnectionAccess,
   type HumanInboxResponse,
@@ -157,12 +157,15 @@ export function closedLine(input: {
 /** One answer being delivered: a retry with the same words reuses its `clientRequestId`. */
 export interface HumanInboxAnswerAttempt {
   readonly message: string;
+  /** The attachment ids sent with it; a retry reuses the request id only for the same ones. */
+  readonly attachmentIds?: string;
   readonly clientRequestId: string;
 }
 
 export async function submitHumanInboxAnswer(input: {
   readonly item: ScopedHumanInboxItem;
   readonly message: string;
+  readonly attachments?: ReadonlyArray<ChatAttachment>;
   readonly attempts: Map<string, HumanInboxAnswerAttempt>;
   readonly randomUUID: () => string;
   readonly send: (
@@ -170,6 +173,7 @@ export async function submitHumanInboxAnswer(input: {
     request: {
       readonly exchangeId: string;
       readonly message: string;
+      readonly attachments?: ReadonlyArray<ChatAttachment>;
       readonly clientRequestId: string;
     },
   ) => Promise<unknown>;
@@ -184,16 +188,20 @@ export async function submitHumanInboxAnswer(input: {
   input.setError(null);
   try {
     try {
+      const attachments = input.attachments ?? [];
+      const attachmentIds = attachments.map((attachment) => attachment.id).join("\n");
       const previousAttempt = input.attempts.get(itemKey);
       const attempt =
-        previousAttempt?.message === input.message
+        previousAttempt?.message === input.message &&
+        (previousAttempt.attachmentIds ?? "") === attachmentIds
           ? previousAttempt
-          : { message: input.message, clientRequestId: input.randomUUID() };
+          : { message: input.message, attachmentIds, clientRequestId: input.randomUUID() };
       input.attempts.set(itemKey, attempt);
       // The server answers as the connection's own person; the request names no one.
       await input.send(input.item.environmentId, {
         exchangeId: input.item.exchangeId,
         message: input.message,
+        ...(attachments.length === 0 ? {} : { attachments }),
         clientRequestId: attempt.clientRequestId,
       });
     } catch (cause) {

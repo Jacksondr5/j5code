@@ -1,11 +1,12 @@
 import { assert, it } from "@effect/vitest";
-import { ThreadId } from "@t3tools/contracts";
+import { ChatAttachmentId, ThreadId } from "@t3tools/contracts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as Effect from "effect/Effect";
 import { FetchHttpClient } from "effect/http";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import { AttachmentClaimError } from "../../orchestration-v2/AttachmentClaims.ts";
 import { EffectOutboxV2 } from "../../orchestration-v2/EffectOutbox.ts";
 import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
@@ -231,6 +232,42 @@ it.effect(
     `;
       assert.deepStrictEqual(replies, [{ sender_id: PRIYA }]);
     }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("an answer whose files cannot be claimed leaves an ask to everyone open", () =>
+  Effect.gen(function* () {
+    yield* seed;
+    const exchangeId = yield* ask(EVERYONE_HERE_PERSON_ID, "files");
+    const failed = yield* Effect.flip(
+      A2AHumanInbox.use((inbox) =>
+        inbox.answer(
+          {
+            commandId: CommCommandId.make(`command:answer:${PRIYA}:files`),
+            personId: PRIYA,
+            exchangeId: exchangeId as never,
+            message: "Acme, see the screenshot.",
+            attachments: [
+              {
+                type: "image",
+                id: ChatAttachmentId.make("pending-00000000-0000-4000-8000-000000000000"),
+                name: "screen.png",
+                mimeType: "image/png",
+                sizeBytes: 3,
+              },
+            ],
+            acceptedAt: AT,
+          },
+          undefined,
+          () => Effect.fail(new AttachmentClaimError({ message: "attachment not found" })),
+        ),
+      ),
+    );
+    assert.strictEqual(failed._tag, "AttachmentClaimError");
+    assert.deepStrictEqual(yield* intents(PRIYA), [{ for: true, answeredBy: null }]);
+
+    yield* answer(SAM, exchangeId, "Globex first.");
+    assert.deepStrictEqual(yield* intents(PRIYA, "answered"), [{ for: true, answeredBy: "Sam" }]);
+  }).pipe(Effect.provide(testLayer)),
 );
 
 it.effect(

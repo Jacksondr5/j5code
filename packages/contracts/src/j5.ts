@@ -26,6 +26,7 @@ import {
 } from "./providerPolicy.ts";
 import { EnvironmentAuthorizationError } from "./auth.ts";
 import { EnvironmentId, RuntimeRequestId, ThreadId } from "./baseSchemas.ts";
+import { ChatAttachment } from "./chatAttachment.ts";
 import { J5ActionError } from "./j5/actionError.ts";
 import { AgentPersonaId } from "./j5/agentPersona.ts";
 
@@ -64,6 +65,8 @@ export type HumanInboxResponse = typeof HumanInboxResponse.Type;
 export const AnswerHumanExchangeRequest = Schema.Struct({
   exchangeId: Schema.String.check(Schema.isNonEmpty()),
   message: Schema.String.check(Schema.isNonEmpty()),
+  /** Pending uploads, claimed into the asking agent's thread with the answer. */
+  attachments: Schema.optional(Schema.Array(ChatAttachment)),
   clientRequestId: Schema.String.check(Schema.isNonEmpty()),
 });
 export type AnswerHumanExchangeRequest = typeof AnswerHumanExchangeRequest.Type;
