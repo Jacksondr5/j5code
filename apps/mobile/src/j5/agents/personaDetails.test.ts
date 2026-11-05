@@ -1,4 +1,9 @@
-import { ProviderInstanceId, type AgentPersonaModelTarget } from "@t3tools/contracts";
+import {
+  ProviderInstanceId,
+  ProviderDriverKind,
+  type ServerProvider,
+  type AgentPersonaModelTarget,
+} from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { personaDetailRows } from "./personaDetails";
@@ -83,9 +88,9 @@ describe("personaDetailRows", () => {
       null,
     );
     expect(rows.filter(({ label }) => label.startsWith("Model "))).toEqual([
-      { label: "Model 1", value: "remote-codex · first · reasoningEffort: high" },
-      { label: "Model 2", value: "claudeAgent · second · effort: medium" },
-      { label: "Model 3", value: "remote-codex · third · fastMode: true" },
+      { label: "Model 1", value: "remote-codex · first · high" },
+      { label: "Model 2", value: "claudeAgent · second · medium" },
+      { label: "Model 3", value: "remote-codex · third" },
     ]);
   });
 
@@ -111,4 +116,47 @@ describe("personaDetailRows", () => {
     ]);
     expect(rows.at(-1)).toEqual({ label: "Usage", value: "3 tasks" });
   });
+});
+
+it("labels Details with provider names, ambiguous instance IDs and reasoning values", () => {
+  const provider: ServerProvider = {
+    instanceId: ProviderInstanceId.make("claudeAgent"),
+    driver: ProviderDriverKind.make("claudeAgent"),
+    enabled: true,
+    installed: true,
+    version: null,
+    status: "ready",
+    auth: { status: "authenticated" },
+    checkedAt: "2026-11-05T00:00:00Z",
+    models: [],
+    slashCommands: [],
+    skills: [],
+  };
+  const entry = {
+    instanceId: provider.instanceId,
+    model: "claude-haiku-5-5",
+    options: [{ id: "effort", value: "low" }],
+  };
+  for (const [providers, expected] of [
+    [[provider], "Claude"],
+    [
+      [{ ...provider, instanceId: ProviderInstanceId.make("remote") }, provider],
+      "Claude · claudeAgent",
+    ],
+    [[], "claudeAgent"],
+  ] as const) {
+    const rows = personaDetailRows(persona, { status: "loaded", route: [entry] }, null, providers);
+    expect(rows.find(({ label }) => label === "Model 1")?.value).toBe(
+      `${expected} · claude-haiku-5-5 · low`,
+    );
+  }
+  const rows = personaDetailRows(
+    persona,
+    { status: "loaded", route: [target("claudeAgent", "claude-haiku-5-5", "low")] },
+    null,
+    [{ ...provider, instanceId: ProviderInstanceId.make("remote") }, provider],
+  );
+  expect(rows.find(({ label }) => label === "Model 1")?.value).toBe(
+    "Claude · claude-haiku-5-5 · low",
+  );
 });

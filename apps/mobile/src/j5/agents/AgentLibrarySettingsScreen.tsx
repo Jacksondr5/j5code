@@ -1,3 +1,4 @@
+import { serverEnvironment } from "../../state/server";
 import { LIBRARY_FOR_OWNERS } from "@t3tools/client-runtime/j5/sharing";
 import { useOwnedEnvironmentIds, useOwnerSomewhere } from "../sharing/guestAccess";
 import { AgentLibraryToast, type AgentLibraryNotification } from "./AgentLibraryToast";
@@ -23,6 +24,7 @@ import {
   type AgentPersonaImportConflictError,
   type AgentPersonaLibraryFolder,
   type EnvironmentId,
+  type ServerProvider,
 } from "@t3tools/contracts";
 import { Platform, Pressable, Share, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -44,6 +46,8 @@ import { SettingsScreen } from "../../features/settings/components/SettingsScree
 import { SettingsActionRow } from "../../features/settings/components/SettingsActionRow";
 import { ThemedSwitch } from "../../components/ui/ThemedSwitch";
 import { PlaybookLibrarySettingsSection } from "../playbooks/PlaybookLibrarySettingsScreen";
+
+const noProvidersAtom = Atom.make<ReadonlyArray<ServerProvider>>([]);
 
 export function AgentLibrarySettingsScreen() {
   // Personas and Playbooks are managed by a server's Owners (People and access AC27).
@@ -75,6 +79,11 @@ function OwnerAgentLibrarySettingsScreen() {
   )
     ? selectedEnvironmentId
     : (connectedEnvironments[0]?.environmentId ?? null);
+  const providers = useAtomValue(
+    effectiveEnvironmentId === null
+      ? noProvidersAtom
+      : serverEnvironment.providersValueAtom(effectiveEnvironmentId),
+  );
   const catalog = useEnvironmentQuery(
     effectiveEnvironmentId === null
       ? null
@@ -312,7 +321,7 @@ function OwnerAgentLibrarySettingsScreen() {
   const personas =
     catalog.data === null || catalog.data === undefined
       ? []
-      : presentAgentPersonaCatalog(catalog.data);
+      : presentAgentPersonaCatalog(catalog.data, providers ?? []);
 
   const viewedPersona = personas.find((persona) => persona.personaId === viewing);
   const folders = librarySources.data?.folders ?? [];

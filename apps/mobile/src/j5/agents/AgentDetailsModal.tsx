@@ -1,3 +1,5 @@
+import { useAtomValue } from "@effect/atom-react";
+import { serverEnvironment } from "../../state/server";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import type { AgentPersonaCatalogRow } from "@t3tools/client-runtime/j5/agent-personas";
 import type { AgentPersonaModelEntry, EnvironmentId } from "@t3tools/contracts";
@@ -49,7 +51,8 @@ export function AgentDetailsModal(props: {
       cancelled = true;
     };
   }, [props.environmentId, personaId, read]);
-  const rows = personaDetailRows(props.persona, models, props.usageLine);
+  const providers = useAtomValue(serverEnvironment.providersValueAtom(props.environmentId));
+  const rows = personaDetailRows(props.persona, models, props.usageLine, providers ?? []);
   return (
     <Modal
       visible

@@ -83,6 +83,32 @@ function providerLabel(driver: ProviderDriverKind): string {
   return PROVIDER_DISPLAY_NAMES[driver] ?? driver;
 }
 
+export function agentPersonaEntryLabel(
+  target: {
+    readonly driver?: ProviderDriverKind | undefined;
+    readonly instanceId?: ModelSelection["instanceId"] | undefined;
+    readonly reasoningEffort?: string | undefined;
+    readonly options?: ModelSelection["options"];
+  },
+  providers: ReadonlyArray<ServerProvider>,
+) {
+  const provider = providers.find(({ instanceId }) => instanceId === target.instanceId);
+  const label =
+    target.driver !== undefined
+      ? providerLabel(target.driver)
+      : provider === undefined
+        ? (target.instanceId ?? "Provider")
+        : providers.filter(({ driver }) => driver === provider.driver).length > 1
+          ? `${providerLabel(provider.driver)} · ${provider.instanceId}`
+          : providerLabel(provider.driver);
+  return {
+    provider: label,
+    reasoning:
+      target.reasoningEffort ??
+      target.options?.find(({ id }) => isAgentPersonaReasoningOptionId(id))?.value,
+  };
+}
+
 export function presentAgentPersonaAssignment(
   assignment: OrchestrationV2AgentPersonaAssignment,
 ): AgentPersonaAssignmentPresentation {
@@ -111,6 +137,7 @@ export function presentAgentPersonaAssignment(
 
 export function presentAgentPersonaCatalog(
   catalog: OrchestrationV2AgentPersonaCatalog,
+  providers: ReadonlyArray<ServerProvider> = [],
 ): ReadonlyArray<AgentPersonaCatalogRow> {
   return catalog.personas.map((persona) => {
     const available = persona.availability.status === "available";
@@ -190,6 +217,7 @@ export function presentAgentPersonaCatalog(
                       ...target,
                       failures,
                     })),
+                providers,
               )
             : [],
       route: available
@@ -221,7 +249,10 @@ const ROUTE_FAILURE_TEXT: Readonly<Record<AgentPersonaRouteFailureCode, string>>
 
 /** "Primary · Codex gpt-5.6-terra: model is not offered…" for each rejected route. */
 function agentPersonaBlockedReasons(
-  attempts: ReadonlyArray<AgentPersonaRouteAttempt>,
+  attempts: ReadonlyArray<
+    AgentPersonaRouteAttempt & { readonly options?: ModelSelection["options"] }
+  >,
+  providers: ReadonlyArray<ServerProvider>,
 ): ReadonlyArray<string> {
   return attempts.map((attempt) => {
     const label =
@@ -231,7 +262,8 @@ function agentPersonaBlockedReasons(
           : "Fallback"
         : `Entry ${attempt.entryIndex + 1}`;
     const reasons = attempt.failures.map((code) => ROUTE_FAILURE_TEXT[code]).join("; ");
-    return `${label} · ${attempt.instanceId ?? (attempt.driver === undefined ? "Provider" : providerLabel(attempt.driver))} ${attempt.model}${attempt.reasoningEffort === undefined ? "" : ` (${attempt.reasoningEffort})`}: ${reasons === "" ? "unavailable" : reasons}`;
+    const entry = agentPersonaEntryLabel(attempt, providers);
+    return `${label} · ${entry.provider} ${attempt.model}${entry.reasoning === undefined ? "" : ` (${entry.reasoning})`}: ${reasons === "" ? "unavailable" : reasons}`;
   });
 }
 
@@ -331,13 +363,10 @@ export function agentPersonaModelChoices(
       reasoningOptionId?: string;
     }
   >();
-  const instanceLabel = (provider: ServerProvider) =>
-    providers.filter(({ driver }) => driver === provider.driver).length > 1
-      ? `${providerLabel(provider.driver)} · ${provider.instanceId}`
-      : providerLabel(provider.driver);
   for (const provider of providers) {
     if (!provider.enabled || !provider.installed || provider.auth.status !== "authenticated")
       continue;
+    const label = agentPersonaEntryLabel({ instanceId: provider.instanceId }, providers).provider;
     for (const model of provider.models) {
       const descriptor = agentPersonaReasoningDescriptor(model);
       const efforts = descriptor?.options.map(({ id }) => id) ?? [];
@@ -352,8 +381,8 @@ export function agentPersonaModelChoices(
       const id = agentPersonaModelChoiceId(target);
       choices.set(id, {
         id,
-        label: `${instanceLabel(provider)} · ${model.slug}`,
-        instanceLabel: instanceLabel(provider),
+        label: `${label} · ${model.slug}`,
+        instanceLabel: label,
         modelLabel: model.slug,
         available: true,
         target,
@@ -388,15 +417,11 @@ export function agentPersonaModelChoices(
         ...(typeof configuredEffort === "string" ? [configuredEffort] : []),
       ]),
     ];
+    const entryLabel = agentPersonaEntryLabel(target, providers).provider;
     choices.set(id, {
       id,
-      label: `${"driver" in target ? providerLabel(target.driver) : provider ? instanceLabel(provider) : target.instanceId} · ${target.model}${model ? "" : " (not advertised)"}`,
-      instanceLabel:
-        "driver" in target
-          ? providerLabel(target.driver)
-          : provider
-            ? instanceLabel(provider)
-            : target.instanceId,
+      label: `${entryLabel} · ${target.model}${model ? "" : " (not advertised)"}`,
+      instanceLabel: entryLabel,
       modelLabel: target.model,
       available: false,
       target,

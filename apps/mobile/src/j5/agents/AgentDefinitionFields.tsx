@@ -194,7 +194,9 @@ export function AgentRoutePolicyFields(props: {
                 disabled={disabled || index === 0}
                 onPress={() => moveEntry(-1)}
               >
-                <Text>Up</Text>
+                <Text className={disabled || index === 0 ? "text-foreground-muted" : undefined}>
+                  Up
+                </Text>
               </Pressable>
               <Pressable
                 accessibilityRole="button"
@@ -202,7 +204,15 @@ export function AgentRoutePolicyFields(props: {
                 disabled={disabled || index === value.modelRoute.length - 1}
                 onPress={() => moveEntry(1)}
               >
-                <Text>Down</Text>
+                <Text
+                  className={
+                    disabled || index === value.modelRoute.length - 1
+                      ? "text-foreground-muted"
+                      : undefined
+                  }
+                >
+                  Down
+                </Text>
               </Pressable>
               <Pressable
                 accessibilityRole="button"
@@ -215,7 +225,13 @@ export function AgentRoutePolicyFields(props: {
                   })
                 }
               >
-                <Text>Remove</Text>
+                <Text
+                  className={
+                    disabled || value.modelRoute.length === 1 ? "text-foreground-muted" : undefined
+                  }
+                >
+                  Remove
+                </Text>
               </Pressable>
             </View>
           </View>
@@ -230,7 +246,15 @@ export function AgentRoutePolicyFields(props: {
             props.onChange({ ...value, modelRoute: [...value.modelRoute, choice.target] });
         }}
       >
-        <Text>Add model</Text>
+        <Text
+          className={
+            disabled || !nextAgentPersonaModelChoice(choices, value.modelRoute)
+              ? "text-foreground-muted"
+              : undefined
+          }
+        >
+          Add model
+        </Text>
       </Pressable>
       <Text className="text-xs text-foreground-muted">
         Model availability and runtime policy support are checked for each launch.

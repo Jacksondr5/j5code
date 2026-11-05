@@ -1351,3 +1351,69 @@ it("labels driver-format entries without an instance when a non-default instance
     { label: "Codex · model", instanceLabel: "Codex" },
   ]);
 });
+
+it("labels blocked entries with provider names, ambiguous instance IDs and reasoning values", () => {
+  const provider: ServerProvider = {
+    instanceId: ProviderInstanceId.make("claudeAgent"),
+    driver: ProviderDriverKind.make("claudeAgent"),
+    enabled: true,
+    installed: true,
+    version: null,
+    status: "ready",
+    auth: { status: "authenticated" },
+    checkedAt: "2026-11-05T00:00:00Z",
+    models: [],
+    slashCommands: [],
+    skills: [],
+  };
+  const target = {
+    instanceId: provider.instanceId,
+    model: "limited",
+    options: [{ id: "effort", value: "low" }],
+  };
+  for (const [providers, expected] of [
+    [[provider], "Claude"],
+    [
+      [{ ...provider, instanceId: ProviderInstanceId.make("remote") }, provider],
+      "Claude · claudeAgent",
+    ],
+    [[], "claudeAgent"],
+  ] as const) {
+    const row = presentAgentPersonaCatalog(
+      {
+        personas: [
+          {
+            ...catalog.personas[0]!,
+            availability: { status: "unavailable", reason: "routes-unavailable" },
+            modelEntries: [{ index: 0, target, failures: ["usage-limit"] }],
+          },
+        ],
+      },
+      providers,
+    )[0]!;
+    expect(row.blockedReasons).toEqual([
+      `Entry 1 · ${expected} limited (low): provider is at its usage limit`,
+    ]);
+  }
+  const row = presentAgentPersonaCatalog(
+    {
+      personas: [
+        {
+          ...catalog.personas[0]!,
+          availability: { status: "unavailable", reason: "routes-unavailable" },
+          modelEntries: [
+            {
+              index: 0,
+              target: { driver: provider.driver, model: "limited", reasoningEffort: "low" },
+              failures: ["usage-limit"],
+            },
+          ],
+        },
+      ],
+    },
+    [{ ...provider, instanceId: ProviderInstanceId.make("remote") }, provider],
+  )[0]!;
+  expect(row.blockedReasons).toEqual([
+    "Entry 1 · Claude limited (low): provider is at its usage limit",
+  ]);
+});
