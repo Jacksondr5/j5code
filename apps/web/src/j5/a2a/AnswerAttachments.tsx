@@ -23,6 +23,12 @@ import { type AnswerAttachment, stageAnswerAttachments } from "./answerAttachmen
 
 const NO_ATTACHMENTS: ReadonlyArray<AnswerAttachment> = [];
 
+function without<T>(record: Readonly<Record<string, T>>, key: string): Record<string, T> {
+  const rest = { ...record };
+  delete rest[key];
+  return rest;
+}
+
 function forget(attachment: AnswerAttachment) {
   releaseDraftAttachment(attachment);
   if (attachment.type === "image") URL.revokeObjectURL(attachment.previewUrl);
@@ -47,10 +53,7 @@ export function useAnswerAttachments() {
   const [errors, setErrors] = useState<Readonly<Record<string, string>>>({});
   const uploadsByImageId = useAttachmentUploadStore((state) => state.uploadsByImageId);
   const setError = (key: string, error: string | null) =>
-    setErrors((current) => {
-      const { [key]: _previous, ...rest } = current;
-      return error === null ? rest : { ...rest, [key]: error };
-    });
+    setErrors((current) => (error === null ? without(current, key) : { ...current, [key]: error }));
   const list = (key: string) => byKey[key] ?? NO_ATTACHMENTS;
   return {
     list,
@@ -87,7 +90,7 @@ export function useAnswerAttachments() {
     /** The server copied the files into the agent's thread; the uploads are no longer needed. */
     delivered: (key: string) => {
       for (const attachment of list(key)) forget(attachment);
-      setByKey(({ [key]: _delivered, ...rest }) => rest);
+      setByKey((current) => without(current, key));
       setError(key, null);
     },
     /** The uploaded files to send, or why the answer must wait. */
