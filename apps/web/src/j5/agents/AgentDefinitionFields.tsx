@@ -243,9 +243,9 @@ export function AgentRoutePolicyFields(props: {
       <Button
         type="button"
         variant="outline"
-        disabled={disabled || !nextAgentPersonaModelChoice(choices, value.modelRoute)}
+        disabled={disabled || !nextAgentPersonaModelChoice(choices, value.modelRoute, drivers)}
         onClick={() => {
-          const choice = nextAgentPersonaModelChoice(choices, value.modelRoute);
+          const choice = nextAgentPersonaModelChoice(choices, value.modelRoute, drivers);
           if (choice)
             props.onChange({ ...value, modelRoute: [...value.modelRoute, choice.target] });
         }}

@@ -27,7 +27,6 @@ import {
   decodeAgentPersonaDefinition,
   agentPersonaAccess,
   AGENT_PERSONA_ACCESS_REPAIR,
-  agentPersonaLegacyEditable,
   getBuiltInAgentPersona,
   AgentPersonaDefinition,
 } from "./agentPersonas.ts";
@@ -615,10 +614,6 @@ export function createAgentPersonaLibrary(storage?: {
         message: "Imported agent no longer exists. Refresh the library.",
       });
     const original = yield* Effect.try(() => decodeAgentPersonaDefinition(current));
-    if (input.modelRouteFormat !== "ordered" && !agentPersonaLegacyEditable(original))
-      return yield* new AgentPersonaLibraryError({
-        message: "Update J5 to edit this persona without losing its model list or access settings.",
-      });
     if (definitionDigest(original) !== input.expectedDigest)
       return yield* new AgentPersonaLibraryError({
         message:

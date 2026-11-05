@@ -16,6 +16,7 @@ const decodePersonaId = Schema.decodeUnknownSync(AgentPersonaId);
 const decodePersonaAssignment = Schema.decodeUnknownSync(OrchestrationV2AgentPersonaAssignment);
 const decodePersonaRequest = Schema.decodeUnknownSync(OrchestrationV2AgentPersonaRequest);
 const decodePersonaCreate = Schema.decodeUnknownSync(AgentPersonaCreateInput);
+const decodePersonaEdit = Schema.decodeUnknownSync(AgentPersonaEditInput);
 
 describe("agent persona contracts", () => {
   it("accepts one or many ordered instance entries and rejects an empty list", () => {
@@ -248,4 +249,21 @@ it("accepts only three access levels for new persona writes", () => {
     for (const access of [undefined, "critic-review", "critic-fix", "diagnostic", "publish-only"])
       expect(() => decode({ ...details, access, authorityPolicy: "read-only" })).toThrow();
   }
+});
+
+it("rejects an old-client edit without access during decoding", () => {
+  expect(() =>
+    decodePersonaEdit({
+      personaId: "reviewer",
+      expectedDigest: "a".repeat(64),
+      displayName: "Reviewer",
+      description: "Review changes",
+      instructions: "Review",
+      authorityPolicy: "read-only",
+      modelRoute: [
+        { driver: "codex", model: "first", reasoningEffort: "high" },
+        { driver: "codex", model: "second", reasoningEffort: "high" },
+      ],
+    }),
+  ).toThrow(/access/);
 });

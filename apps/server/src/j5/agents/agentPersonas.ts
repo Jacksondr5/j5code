@@ -96,12 +96,6 @@ export const agentPersonaAccess = (definition: AgentPersonaDefinition) => {
 export const AGENT_PERSONA_ACCESS_REPAIR =
   "Choose read-only, workspace-write, or full-access instead of diagnostic or publish-only.";
 
-export const agentPersonaLegacyEditable = (definition: AgentPersonaDefinition) =>
-  definition.access === undefined &&
-  definition.authority !== undefined &&
-  definition.modelRoute.length === 2 &&
-  definition.modelRoute.every((target) => "driver" in target);
-
 /** Historical assignments retain their definitions even when their access cannot launch today. */
 export const BUILT_IN_AGENT_PERSONAS = {
   scout: decodeLegacyExample(scout),

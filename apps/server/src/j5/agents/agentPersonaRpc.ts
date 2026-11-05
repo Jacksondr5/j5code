@@ -17,7 +17,6 @@ import { definitionDigest, makeAgentPersonaLibrary } from "./agentPersonaLibrary
 import { makeAgentHandoffStore } from "./agentHandoffStore.ts";
 import { agentPersonaFolderGitStatus } from "./agentPersonaLibraryGit.ts";
 import { agentPersonaPolicyEnforcement } from "./agentPersonaProviderPolicy.ts";
-import { agentPersonaLegacyEditable } from "./agentPersonas.ts";
 import { buildAgentPersonaCatalog, agentPersonaDefinitionView } from "./agentPersonaRouting.ts";
 import { agentPersonaUsage } from "./agentPersonaUsage.ts";
 
@@ -80,20 +79,6 @@ export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHand
             definitionDigest(definition),
           ]),
         );
-        const editable = new Map(
-          current.definitions
-            .filter(
-              (definition) =>
-                importedIds.has(definition.id) && agentPersonaLegacyEditable(definition),
-            )
-            .map((definition) => [
-              definition.id,
-              {
-                definitionDigest: definitionDigest(definition),
-                modelRoute: agentPersonaDefinitionView(definition, providers).modelRoute,
-              },
-            ]),
-        );
         const orderedEditable = new Map(
           current.definitions
             .filter(({ id }) => importedIds.has(id))
@@ -123,9 +108,6 @@ export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHand
               imported: importedIds.has(persona.personaId),
               origin: origin(persona.personaId),
               definitionDigest: digests.get(persona.personaId)!,
-              ...(editable.has(persona.personaId)
-                ? { editable: editable.get(persona.personaId)! }
-                : {}),
               ...(orderedEditable.has(persona.personaId)
                 ? { orderedEditable: orderedEditable.get(persona.personaId)! }
                 : {}),

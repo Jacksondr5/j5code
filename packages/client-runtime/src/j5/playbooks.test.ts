@@ -192,7 +192,6 @@ describe("saved Playbook Author instructions", () => {
       expect(edits[0]).toMatchObject({
         expectedDigest: "a".repeat(64),
         displayName: author.displayName,
-        modelRouteFormat: "ordered",
         modelRoute,
       });
     else expect(instructions).toBe(original);

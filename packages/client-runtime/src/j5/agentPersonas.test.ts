@@ -280,14 +280,13 @@ it("offers editing only for imported entries with server-provided editable detai
           ...persona,
           access: "read-only",
           imported: true,
-          editable: { definitionDigest: "a".repeat(64), modelRoute },
+          orderedEditable: { definitionDigest: "a".repeat(64), modelRoute },
         },
       ],
     })[0]?.edit,
   ).toEqual({
     personaId: persona.personaId,
     expectedDigest: "a".repeat(64),
-    modelRouteFormat: "ordered",
     displayName: persona.displayName,
     description: persona.description,
     access: "read-only",
@@ -837,7 +836,7 @@ describe("a policy this app does not know", () => {
   const entry = (personaId: string, defaultAuthorityPolicy: string) => ({
     personaId,
     imported: true,
-    editable: {
+    orderedEditable: {
       definitionDigest: "a".repeat(64),
       modelRoute: [
         { driver: "codex", model: "gpt-5.6-terra", reasoningEffort: "high" },
@@ -1254,7 +1253,6 @@ it("edits and duplicates the complete ordered list without using the legacy summ
     ],
   })[0]!;
   expect(row.edit?.modelRoute).toEqual(models);
-  expect(row.edit?.modelRouteFormat).toBe("ordered");
   const definition = {
     id: persona.personaId,
     version: 1,
@@ -1305,15 +1303,19 @@ it("labels unique drivers without instance IDs and adds each model only once", (
     "Claude · claudeAgent",
     "Claude · remote",
   ]);
-  const first = nextAgentPersonaModelChoice(single, [])!;
-  const second = nextAgentPersonaModelChoice(single, [first.target])!;
+  const first = nextAgentPersonaModelChoice(single, [], [provider.driver])!;
+  const second = nextAgentPersonaModelChoice(single, [first.target], [provider.driver])!;
   expect(first.target.model).toBe("a");
   expect(second.target.model).toBe("b");
-  expect(nextAgentPersonaModelChoice(single, [first.target, second.target])).toBeUndefined();
   expect(
-    nextAgentPersonaModelChoice(single, [
-      { driver: provider.driver, model: "a", reasoningEffort: "high" },
-    ])?.target.model,
+    nextAgentPersonaModelChoice(single, [first.target, second.target], [provider.driver]),
+  ).toBeUndefined();
+  expect(
+    nextAgentPersonaModelChoice(
+      single,
+      [{ driver: provider.driver, model: "a", reasoningEffort: "high" }],
+      [provider.driver],
+    )?.target.model,
   ).toBe("b");
 });
 
@@ -1453,4 +1455,32 @@ it("offers only three access levels and resolves each model entry's enforcing dr
       [],
     ),
   ).toBe("codex");
+});
+
+it("adds only an unused model whose driver enforces the selected access", () => {
+  const providers = ["claudeAgent", "codex", "cursor"].map((driver): ServerProvider => ({
+    instanceId: ProviderInstanceId.make(driver),
+    driver: ProviderDriverKind.make(driver),
+    enabled: true,
+    installed: true,
+    version: null,
+    status: "ready",
+    auth: { status: "authenticated" },
+    checkedAt: "2026-11-05T00:00:00Z",
+    models: [{ slug: "model", name: "Model", isCustom: false, capabilities: {} }],
+    slashCommands: [],
+    skills: [],
+  }));
+  const choices = agentPersonaModelChoices(providers, []);
+  const codex = ProviderDriverKind.make("codex");
+  const claude = ProviderDriverKind.make("claudeAgent");
+  const readOnly = nextAgentPersonaModelChoice(choices, [], [codex, claude]);
+  expect(readOnly?.driver).toBe(claude);
+  const writable = nextAgentPersonaModelChoice(choices, [], [codex]);
+  expect(writable?.driver).toBe(codex);
+  expect(nextAgentPersonaModelChoice(choices, [writable!.target], [codex])).toBeUndefined();
+  expect(nextAgentPersonaModelChoice(choices, [], [])).toBeUndefined();
+  expect(nextAgentPersonaModelChoice(choices, [], undefined)).toBeUndefined();
+  const fullAccess = providers.map(({ driver }) => driver);
+  expect(nextAgentPersonaModelChoice(choices, [], fullAccess)?.driver).toBe(claude);
 });

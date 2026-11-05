@@ -244,16 +244,16 @@ export function AgentRoutePolicyFields(props: {
       })}
       <Pressable
         accessibilityRole="button"
-        disabled={disabled || !nextAgentPersonaModelChoice(choices, value.modelRoute)}
+        disabled={disabled || !nextAgentPersonaModelChoice(choices, value.modelRoute, drivers)}
         onPress={() => {
-          const choice = nextAgentPersonaModelChoice(choices, value.modelRoute);
+          const choice = nextAgentPersonaModelChoice(choices, value.modelRoute, drivers);
           if (choice)
             props.onChange({ ...value, modelRoute: [...value.modelRoute, choice.target] });
         }}
       >
         <Text
           className={
-            disabled || !nextAgentPersonaModelChoice(choices, value.modelRoute)
+            disabled || !nextAgentPersonaModelChoice(choices, value.modelRoute, drivers)
               ? "text-foreground-muted"
               : undefined
           }

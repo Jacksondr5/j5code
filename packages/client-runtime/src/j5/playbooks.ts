@@ -94,7 +94,7 @@ export async function ensurePlaybookAuthor(input: {
     );
   // Saved authors predate environment libraries. Update only the exact stock instructions,
   // using the existing digest guard so a concurrent human edit is never overwritten.
-  const editable = persona.orderedEditable ?? persona.editable;
+  const editable = persona.orderedEditable;
   if (editable && input.readDefinition && input.editPersona) {
     const definition = await input.readDefinition(PLAYBOOK_AUTHOR_ID);
     if (definition.instructions === LEGACY_PLAYBOOK_AUTHOR_INSTRUCTIONS) {
@@ -106,7 +106,6 @@ export async function ensurePlaybookAuthor(input: {
         instructions: PLAYBOOK_AUTHOR_INSTRUCTIONS,
         access: "workspace-write",
         modelRoute: definition.models ?? definition.modelRoute,
-        modelRouteFormat: "ordered",
       });
     }
   }

@@ -147,7 +147,7 @@ export function presentAgentPersonaCatalog(
     const removed =
       persona.availability.status === "unavailable" && persona.availability.reason === "removed";
     const policy = persona.access ?? persona.defaultAuthorityPolicy;
-    const editable = persona.orderedEditable ?? persona.editable;
+    const editable = persona.orderedEditable;
     const unsupported = !isAgentPersonaAuthorityPolicy(policy);
     return {
       personaId: persona.personaId,
@@ -163,7 +163,6 @@ export function presentAgentPersonaCatalog(
               description: persona.description,
               access: persona.access,
               modelRoute: editable.modelRoute,
-              modelRouteFormat: "ordered" as const,
             }
           : null,
       origin: persona.origin ?? null,
@@ -433,10 +432,13 @@ export function agentPersonaModelChoices(
 export const nextAgentPersonaModelChoice = (
   choices: ReturnType<typeof agentPersonaModelChoices>,
   current: ReadonlyArray<AgentPersonaModelEntry>,
+  enforcingDrivers: ReadonlyArray<ProviderDriverKind> | undefined,
 ) =>
   choices.find(
     (choice) =>
       choice.available &&
+      choice.driver !== undefined &&
+      enforcingDrivers?.includes(choice.driver) &&
       !current.some(
         (entry) =>
           entry.model === choice.target.model &&

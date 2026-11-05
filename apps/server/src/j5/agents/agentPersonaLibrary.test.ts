@@ -581,9 +581,9 @@ describe("folder-backed persona library", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("loads new imports but rejects legacy edits before changing bytes", () =>
+  it.effect("loads and edits ordered imports while preserving saved snapshots", () =>
     Effect.gen(function* () {
-      const { library, write, fs, path, stateDir } = yield* fixture;
+      const { library, write } = yield* fixture;
       const { authority: _authority, ...legacy } = custom;
       const newer = {
         ...legacy,
@@ -600,22 +600,6 @@ describe("folder-backed persona library", () => {
         replaceExisting: true,
       });
       const definition = yield* library.read(custom.id);
-      const file = path.join(stateDir, "imported-agent-personas.json");
-      const before = yield* fs.readFileString(file);
-      const error = yield* library
-        .editImported({
-          personaId: custom.id,
-          expectedDigest: definitionDigest(definition),
-          displayName: custom.displayName,
-          description: custom.description,
-          instructions: custom.instructions,
-          access: "read-only",
-          modelRoute: custom.modelRoute,
-        })
-        .pipe(Effect.flip);
-      assert.include(String(error), "Update J5");
-      assert.equal(yield* fs.readFileString(file), before);
-      assert.lengthOf((yield* library.load())[0]!.modelRoute, 3);
       yield* library.editImported({
         personaId: custom.id,
         expectedDigest: definitionDigest(definition),
@@ -623,7 +607,6 @@ describe("folder-backed persona library", () => {
         description: definition.description,
         instructions: definition.instructions,
         access: "read-only",
-        modelRouteFormat: "ordered",
         modelRoute: [...definition.modelRoute].reverse(),
       });
       const edited = yield* library.read(custom.id);
@@ -1036,7 +1019,6 @@ describe("editing imported agents", () => {
     instructions: definition.instructions,
     description: definition.description,
     access: "read-only",
-    modelRouteFormat: "ordered",
     modelRoute: definition.modelRoute,
   });
 
@@ -1691,7 +1673,6 @@ describe("reading and editing definitions", () => {
         description: before.description,
         instructions: "Review carefully.\n\nAlways cite file paths.",
         access: "read-only",
-        modelRouteFormat: "ordered",
         modelRoute: custom.modelRoute,
       });
       const after = yield* library.read(created.personaId);
