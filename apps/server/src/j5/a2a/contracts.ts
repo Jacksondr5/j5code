@@ -551,6 +551,7 @@ export const AnswerHumanExchangeInput = Schema.Struct({
   personId: ParticipantId,
   exchangeId: ExchangeId,
   message: Schema.String.check(Schema.isNonEmpty()),
+  attachments: Schema.optional(Schema.Array(ChatAttachment)),
   acceptedAt: Schema.String,
 });
 export type AnswerHumanExchangeInput = typeof AnswerHumanExchangeInput.Type;

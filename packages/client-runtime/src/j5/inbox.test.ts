@@ -355,6 +355,45 @@ it("retries an uncertain answer on its original server with the same request id 
   assert.deepStrictEqual(notifyChanged.mock.calls, [["other"], ["remote"]]);
 });
 
+it("sends a retry with other attachments as a new answer request", async () => {
+  const attempts = new Map<string, { message: string; clientRequestId: string }>();
+  const send = vi.fn().mockRejectedValue(new Error("Connection lost after sending"));
+  const randomUUID = vi
+    .fn()
+    .mockReturnValueOnce("request:first")
+    .mockReturnValueOnce("request:second");
+  const screenshot = (id: string) =>
+    ({ type: "image", id, name: "shot.png", mimeType: "image/png", sizeBytes: 3 }) as const;
+  const submit = (attachments: ReadonlyArray<ReturnType<typeof screenshot>>) =>
+    submitHumanInboxAnswer({
+      item: { ...item, environmentId: EnvironmentId.make("alpha") },
+      message: "See attached.",
+      attachments,
+      attempts,
+      randomUUID,
+      send,
+      refresh: vi.fn(async () => undefined),
+      notifyChanged: vi.fn(),
+      onAccepted: vi.fn(),
+      setPendingExchangeId: vi.fn(),
+      setError: vi.fn(),
+    });
+  await submit([screenshot("pending-a")]);
+  await submit([screenshot("pending-a")]);
+  await submit([screenshot("pending-b")]);
+  assert.deepStrictEqual(
+    send.mock.calls.map(([, input]) => [
+      input.clientRequestId,
+      input.attachments.map((attachment: { id: string }) => attachment.id),
+    ]),
+    [
+      ["request:first", ["pending-a"]],
+      ["request:first", ["pending-a"]],
+      ["request:second", ["pending-b"]],
+    ],
+  );
+});
+
 describe("who has an inbox", () => {
   const person = (levels: Array<"viewer" | "collaborator" | "owner">) =>
     ({

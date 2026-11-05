@@ -1,10 +1,12 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { RuntimeRequestId, ThreadId } from "@t3tools/contracts";
+import { ChatAttachmentId, RuntimeRequestId, ThreadId } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
+import * as ServerConfig from "../../config.ts";
 import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
+import { noDocumentTextLayer } from "../test-support/documentText.ts";
 import type { CrewProposal } from "./AgentCrewProposalService.ts";
 import {
   ArchiveCrewNotFoundError,
@@ -154,15 +156,21 @@ const serviceWith = (seen: ReturnType<typeof calls>) =>
             }),
         }),
         Layer.mock(A2AHumanInbox)({
-          answer: (input) => {
+          answer: (input, _beforeReply, claimAttachments) => {
             seen.answerCommandIds.push(input.commandId);
-            return Effect.succeed({
-              messageId: LedgerMessageId.make(`message:test:${input.exchangeId}`),
-              exchangeId: input.exchangeId,
-              exchangeState: "closed" as const,
-              joinedExistingExchange: false,
-              durableAtSeq: 1,
-            });
+            const claim =
+              input.attachments === undefined || claimAttachments === undefined
+                ? Effect.void
+                : claimAttachments(ThreadId.make("thread:asker"), input.attachments);
+            return claim.pipe(
+              Effect.as({
+                messageId: LedgerMessageId.make(`message:test:${input.exchangeId}`),
+                exchangeId: input.exchangeId,
+                exchangeState: "closed" as const,
+                joinedExistingExchange: false,
+                durableAtSeq: 1,
+              }),
+            );
           },
         }),
         Layer.mock(A2ADeliveryWorker)({
@@ -171,8 +179,10 @@ const serviceWith = (seen: ReturnType<typeof calls>) =>
           }),
         }),
         Layer.mock(CrewWorktrees)({}),
+        noDocumentTextLayer,
       ),
     ),
+    Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "j5-client-actions-" })),
     Layer.provide(NodeServices.layer),
   );
 
@@ -321,3 +331,30 @@ it.effect(
     }).pipe(Effect.provide(serviceWith(seen)));
   },
 );
+
+it.effect("refuses an answer attachment that is not a new upload", () => {
+  const seen = calls();
+  return Effect.gen(function* () {
+    const actions = yield* ClientActionsService;
+    const refused = yield* actions
+      .answerHumanExchange({
+        personId: ParticipantId.make("human:local-operator"),
+        exchangeId: ExchangeId.make("exchange:with-file"),
+        message: "See the screenshot.",
+        // A file stored on another thread, named by its id.
+        attachments: [
+          {
+            type: "image",
+            id: ChatAttachmentId.make("thread-other-00000000-0000-4000-8000-000000000000"),
+            name: "secret.png",
+            mimeType: "image/png",
+            sizeBytes: 10,
+          },
+        ],
+        clientRequestId: "with-file",
+      })
+      .pipe(Effect.flip);
+    assert.equal(refused._tag, "AttachmentClaimError");
+    assert.equal(seen.notified, 0);
+  }).pipe(Effect.provide(serviceWith(seen)));
+});

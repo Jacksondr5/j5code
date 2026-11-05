@@ -120,7 +120,7 @@ const measureNestedRuntimeBuilds = (nested: "http" | "mcp") =>
         ).pipe(
           Layer.provide(runtime),
           Layer.provide(ServerSettingsService.layerTest()),
-          Layer.provide(quietAccessLayer),
+          Layer.provide(Layer.mergeAll(quietAccessLayer, noDocumentTextLayer)),
           Layer.provide(threadManagement),
           Layer.provide(emptyEventStore),
           Layer.provide(Layer.mock(ProviderRegistry)({})),

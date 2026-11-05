@@ -1,5 +1,10 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
-import { CommandId, type RuntimeRequestId, type ThreadId } from "@t3tools/contracts";
+import {
+  type ChatAttachment,
+  CommandId,
+  type RuntimeRequestId,
+  type ThreadId,
+} from "@t3tools/contracts";
 import type {
   AnswerHumanExchangeRequest,
   AnswerHumanExchangeResponse,
@@ -20,8 +25,16 @@ import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 
+import { ServerConfig } from "../../config.ts";
+import {
+  AttachmentClaimError,
+  attachmentIsPendingUpload,
+  claimPendingAttachments,
+} from "../../orchestration-v2/AttachmentClaims.ts";
+import { DocumentText } from "../../provider/DocumentText.ts";
 import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
 import { ArchiveCrewService } from "./ArchiveCrewService.ts";
 import { CommCommandId, ExchangeId, ParticipantId } from "./contracts.ts";
@@ -136,6 +149,21 @@ const make = Effect.gen(function* () {
   // A random source that fails is the host's fault, not a refusal a client can act on.
   const freshId = (yield* Crypto.Crypto).randomUUIDv4().pipe(Effect.orDie);
   const projectProposal = projectCrewProposal(yield* PlaybookStore);
+  const claimContext = yield* Effect.context<FileSystem.FileSystem | ServerConfig | DocumentText>();
+  // Only fresh uploads: an attachment id that names a thread would let an answer hand the agent
+  // a file from a thread the person may not read.
+  const claimAnswerAttachments = (
+    threadId: ThreadId,
+    attachments: ReadonlyArray<ChatAttachment>,
+  ) =>
+    attachments.every(attachmentIsPendingUpload)
+      ? claimPendingAttachments({ threadId, attachments }).pipe(
+          Effect.map((claimed) => claimed.attachments),
+          Effect.provideContext(claimContext),
+        )
+      : Effect.fail(
+          new AttachmentClaimError({ message: "An answer can only attach new uploads." }),
+        );
 
   return ClientActionsService.of({
     previewCrewProposal: Effect.fn("ClientActionsService.previewCrewProposal")(function (input) {
@@ -234,9 +262,11 @@ const make = Effect.gen(function* () {
             personId: input.personId,
             exchangeId: ExchangeId.make(input.exchangeId),
             message: input.message,
+            ...(input.attachments === undefined ? {} : { attachments: input.attachments }),
             acceptedAt,
           },
           beforeReply,
+          claimAnswerAttachments,
         );
         yield* worker.notify;
         return { result };

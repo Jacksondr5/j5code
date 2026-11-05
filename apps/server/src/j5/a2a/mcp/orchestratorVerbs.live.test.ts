@@ -278,7 +278,9 @@ const liveLayer = Layer.mergeAll(
   ),
   Layer.provide(NodeServices.layer),
 );
-const testLayer = Layer.mergeAll(liveLayer, NodeServices.layer, noDocumentTextLayer);
+const testLayer = liveLayer.pipe(
+  Layer.provideMerge(Layer.mergeAll(NodeServices.layer, noDocumentTextLayer)),
+);
 
 const runStatus = (threadId: ThreadId, statuses: ReadonlySet<string>) =>
   Effect.gen(function* () {
