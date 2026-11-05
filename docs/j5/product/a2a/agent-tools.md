@@ -187,7 +187,7 @@ Use `action: "unarchive"` to restore the same identity. Old Exchanges remain clo
 
 Lists the personas in the selected environment before choosing one for delegation, a Crew roster, or a Peer Agent spawn. It reports each persona's purpose, runtime policy, and whether it can start now.
 
-Named `list_agents` until 2026-09-17. It has no inputs. Each persona returns its ordered `entries`: an index, the declared provider/model/options target, its effective `modelSelection` when eligible, and per-entry rejection codes. Legacy driver-wide entries report the provider instance that would serve them when one is available. `selected_entry_index` identifies the first eligible entry and is null when the persona is blocked or disabled. The listing uses the same eligibility rules as launch and Agent Setup, including provider usage limits and persisted worker-limit signals.
+Named `list_agents` until 2026-09-17. It has no inputs. Each persona returns its ordered `entries`: an index, the declared provider/model/options target, its effective `modelSelection` when eligible, and per-entry rejection codes. Legacy driver-wide entries report the provider instance that would serve them when one is available. `selected_entry_index` identifies the first eligible entry and is null when the persona is blocked or disabled. The listing uses the same eligibility rules as launch and Agent Setup, including known account-wide provider usage limits.
 
 ### `j5_propose_crew`
 

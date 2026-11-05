@@ -1,6 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off - deterministic legacy hashes and FIFO fixture subprocesses.
 import * as NodeCrypto from "node:crypto";
-import { AgentPersonaUsageLimits } from "./agentPersonaUsageLimits.ts";
 import * as NodeChildProcess from "node:child_process";
 
 import { assert, describe, it } from "@effect/vitest";
@@ -31,16 +30,7 @@ import { BUILT_IN_AGENT_PERSONAS, decodeAgentPersonaDefinition } from "./agentPe
 import { validateAgentPersonaAssignment } from "./agentPersonaAssignment.ts";
 import { resolveAgentPersonaRuntime } from "./agentPersonaRuntime.ts";
 
-const prepareAgentPersonaLaunch = Effect.fn("fixture.preparePersonaLaunch")(
-  (...args: Parameters<typeof prepareLaunch>) =>
-    prepareLaunch(...args).pipe(
-      Effect.provideService(AgentPersonaUsageLimits, {
-        limitedInstances: Effect.fn("AgentPersonaUsageLimits.limitedInstances")(() =>
-          Effect.succeed(new Set<ProviderInstanceId>()),
-        ),
-      }),
-    ),
-);
+const prepareAgentPersonaLaunch = prepareLaunch;
 
 const isImportConflict = Schema.is(AgentPersonaImportConflictError);
 const isLibraryError = Schema.is(AgentPersonaLibraryError);

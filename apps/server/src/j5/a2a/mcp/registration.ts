@@ -1,4 +1,3 @@
-import { layer as personaUsageLimitsLayer } from "../../agents/agentPersonaUsageLimits.ts";
 import * as Layer from "effect/Layer";
 
 import { layer as ArtifactWorkspaceLive } from "../../artifacts/ArtifactWorkspace.ts";
@@ -61,4 +60,4 @@ export const layerJ5Toolkits = (register: typeof toolkitRegistration) =>
     register(J5ArtifactToolkit, ArtifactHandlers.layer).pipe(
       Layer.provide(ArtifactMcpService.layer.pipe(Layer.provide(ArtifactWorkspaceLive))),
     ),
-  ).pipe(Layer.provide(personaUsageLimitsLayer));
+  );

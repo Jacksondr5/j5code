@@ -1,11 +1,6 @@
 import { agentPersonaPolicy, mapAgentPersonaPolicy } from "./agentPersonas.ts";
-import { AgentPersonaUsageLimits } from "./agentPersonaUsageLimits.ts";
 import * as Clock from "effect/Clock";
-import type {
-  OrchestrationV2AgentPersonaRequest,
-  ProviderInstanceId,
-  ServerProvider,
-} from "@t3tools/contracts";
+import type { OrchestrationV2AgentPersonaRequest, ServerProvider } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import { buildAgentPersonaAssignment } from "./agentPersonaAssignment.ts";
 import { AgentPersonaLibraryError, type createAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
@@ -63,10 +58,6 @@ export const prepareAgentPersonaLaunch = Effect.fn("prepareAgentPersonaLaunch")(
   request: OrchestrationV2AgentPersonaRequest,
   providers: ReadonlyArray<ServerProvider>,
   library: ReturnType<typeof createAgentPersonaLibrary>,
-  quotaSnapshot?: {
-    readonly now: number;
-    readonly limitedInstances: ReadonlySet<ProviderInstanceId>;
-  },
 ) {
   const catalog = yield* library.catalog();
   if (catalog.disabledIds.includes(request.personaId))
@@ -88,13 +79,9 @@ export const prepareAgentPersonaLaunch = Effect.fn("prepareAgentPersonaLaunch")(
   }
   const authority =
     request.authorityPolicy === undefined ? {} : { authorityPolicy: request.authorityPolicy };
-  const now = quotaSnapshot?.now ?? (yield* Clock.currentTimeMillis);
-  const limitedInstances =
-    quotaSnapshot?.limitedInstances ??
-    (yield* (yield* AgentPersonaUsageLimits).limitedInstances(now));
+  const now = yield* Clock.currentTimeMillis;
   const resolution = resolveAgentPersonaRoute({
     now,
-    limitedInstances,
     personaId: request.personaId,
     ...authority,
     definition,

@@ -1,4 +1,3 @@
-import { AgentPersonaUsageLimits } from "../agents/agentPersonaUsageLimits.ts";
 import * as SpawnCompositionService from "./SpawnCompositionService.ts";
 import * as AgentCrewInstanceService from "./AgentCrewInstanceService.ts";
 import * as ProviderRegistry from "../../provider/ProviderRegistry.ts";
@@ -387,11 +386,7 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
   const persona =
     personaId === undefined || existing !== null
       ? undefined
-      : yield* prepareSpawnPersona({ ...input, persona: personaId }, selected).pipe(
-          Effect.provideService(AgentPersonaUsageLimits, {
-            limitedInstances: threadManagement.getPersonaUsageLimitedProviderInstances,
-          }),
-        );
+      : yield* prepareSpawnPersona({ ...input, persona: personaId }, selected);
   const modelSelection = existing?.modelSelection ?? persona?.modelSelection ?? selected;
   // A persona's policy sets its permissions. Without one the agent gets the caller's modes,
   // or the ones the caller chose, which upstream's rule keeps within the caller's own.

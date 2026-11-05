@@ -145,7 +145,6 @@ export function agentPersonaTargetUnavailableReason(
   provider: ServerProvider,
   target: AgentPersonaModelEntry,
   now: number,
-  limitedInstances: ReadonlySet<ProviderInstanceId> = new Set(),
 ): AgentPersonaRouteFailureCode | undefined {
   if (!isProviderAvailable(provider)) return "provider-unavailable";
   if (!provider.enabled) return "provider-disabled";
@@ -169,13 +168,15 @@ export function agentPersonaTargetUnavailableReason(
     if (!descriptor?.options.some((option) => option.id === target.reasoningEffort))
       return "reasoning-effort-not-advertised";
   }
-  if (limitedInstances.has(provider.instanceId)) return "usage-limit";
   const limits = provider.usageLimits;
   // No-reset spend telemetry does not establish that a provider cannot start work.
   if (
     limits?.unavailable?.reason !== "unsupported" &&
     limits?.windows.some(
       (window) =>
+        ((provider.driver === "claudeAgent" && ["five_hour", "seven_day"].includes(window.id)) ||
+          (provider.driver === "codex" &&
+            ["primary", "secondary", "individual"].includes(window.id))) &&
         window.usedPercent >= 100 &&
         window.resetsAt !== undefined &&
         Date.parse(window.resetsAt) > now,
@@ -210,7 +211,6 @@ export function resolveAgentPersonaRoute(input: {
   readonly providers: ReadonlyArray<ServerProvider>;
   readonly authorityPolicy?: AgentPersonaAuthorityPolicy;
   readonly now: number;
-  readonly limitedInstances?: ReadonlySet<ProviderInstanceId>;
 }): AgentPersonaRouteResolution {
   const definition = input.definition ?? getBuiltInAgentPersona(input.personaId);
   const authority = input.authorityPolicy ?? agentPersonaPolicy(definition);
@@ -227,7 +227,7 @@ export function resolveAgentPersonaRoute(input: {
     for (const provider of candidates) {
       const reason = !providerCanEnforceAgentPersonaAuthority(provider.driver, authority)
         ? "authority-not-enforceable"
-        : agentPersonaTargetUnavailableReason(provider, target, now, input.limitedInstances);
+        : agentPersonaTargetUnavailableReason(provider, target, now);
       if (reason !== undefined) {
         failures.push({ code: reason, instanceId: provider.instanceId });
         continue;
@@ -271,7 +271,6 @@ export function buildAgentPersonaCatalog(
   providers: ReadonlyArray<ServerProvider>,
   definitions: ReadonlyArray<AgentPersonaDefinition>,
   now: number,
-  limitedInstances: ReadonlySet<ProviderInstanceId> = new Set(),
 ): OrchestrationV2AgentPersonaCatalog {
   return {
     personas: definitions.map((definition) => {
@@ -280,7 +279,6 @@ export function buildAgentPersonaCatalog(
         definition,
         providers,
         now,
-        limitedInstances,
       });
       const entries =
         resolution.status === "available" ? (resolution.entries ?? []) : resolution.attempts;
@@ -314,21 +312,6 @@ export function buildAgentPersonaCatalog(
             : {
                 status: "unavailable" as const,
                 reason: unavailableAgentPersonaReason(resolution),
-                attempts: resolution.attempts.map((attempt) => ({
-                  route: attempt.route,
-                  entryIndex: attempt.entryIndex,
-                  ...("driver" in attempt.target
-                    ? {
-                        driver: attempt.target.driver,
-                        reasoningEffort: attempt.target.reasoningEffort,
-                      }
-                    : {}),
-                  ...("instanceId" in attempt.target
-                    ? { instanceId: attempt.target.instanceId }
-                    : {}),
-                  model: attempt.target.model,
-                  failures: [...new Set(attempt.failures.map(({ code }) => code))],
-                })),
               },
       };
     }),

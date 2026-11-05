@@ -1,3 +1,4 @@
+import { claudeUsageResponseToLimits } from "../../provider/claudeUsageLimits.ts";
 import * as Schema from "effect/Schema";
 import { stringify as yaml } from "yaml";
 import {
@@ -7,6 +8,8 @@ import {
 import { assert, describe, it } from "@effect/vitest";
 import {
   ProviderDriverKind,
+  OrchestrationV2AgentPersonaAssignment,
+  OrchestrationV2AgentPersonaCommandAssignment,
   AgentPersonaDefinitionView,
   AgentPersonaModelTarget,
   J5AgentPersonaRpcSchemas,
@@ -28,6 +31,9 @@ import {
   listBuiltInAgentPersonas,
   type AgentModelTarget,
 } from "./agentPersonas.ts";
+
+const decodeSavedAssignment = Schema.decodeSync(OrchestrationV2AgentPersonaAssignment);
+const decodeCommandAssignment = Schema.decodeSync(OrchestrationV2AgentPersonaCommandAssignment);
 
 const decodePersonaRead = Schema.decodeSync(J5AgentPersonaRpcSchemas.readAgentPersona.output);
 const decodeDefinitionView = Schema.decodeSync(AgentPersonaDefinitionView);
@@ -241,24 +247,11 @@ describe("agent persona routing", () => {
     const availability = catalog.personas[0]!.availability;
     assert.equal(availability.status, "unavailable");
     if (availability.status === "available") return;
-    assert.deepEqual(availability.attempts, [
-      {
-        route: "primary",
-        entryIndex: 0,
-        driver: primary.driver,
-        model: primary.model,
-        reasoningEffort: primary.reasoningEffort,
-        failures: ["provider-disabled"],
-      },
-      {
-        route: "fallback",
-        entryIndex: 1,
-        driver: fallback.driver,
-        model: fallback.model,
-        reasoningEffort: fallback.reasoningEffort,
-        failures: ["model-not-advertised"],
-      },
-    ]);
+    assert.isUndefined(availability.attempts);
+    assert.deepEqual(
+      catalog.personas[0]!.modelEntries?.map(({ failures }) => failures),
+      [["provider-disabled"], ["model-not-advertised"]],
+    );
   });
 
   it("blocks every persona when both declared routes are unavailable", () => {
@@ -542,7 +535,7 @@ describe("agent persona routing", () => {
     if (publisher.availability.status === "unavailable") {
       assert.equal(publisher.availability.reason, "authority-not-enforceable");
       assert.deepEqual(
-        publisher.availability.attempts?.map(({ failures }) => failures),
+        publisher.modelEntries?.map(({ failures }) => failures),
         [["authority-not-enforceable"], ["authority-not-enforceable", "provider-not-configured"]],
       );
     }
@@ -588,7 +581,7 @@ it("reports exhausted entries in order and skips only observed future quota exha
     checkedAt: "2026-11-03T12:00:00Z",
     windows: [
       {
-        id: "session",
+        id: "primary",
         kind: "session",
         label: "Session",
         usedPercent: 100,
@@ -727,7 +720,7 @@ it("projects a new list for old readers while keeping its complete instance entr
   const built = buildAgentPersonaAssignment({ resolution, definition });
   assert.equal(built.status, "assigned");
   if (built.status !== "assigned") return;
-  assert.equal(built.assignment.resolvedRouteIndex, 1);
+  assert.equal(built.assignment.resolvedEntryIndex, 1);
   assert.equal(built.assignment.resolvedModelSelection.model, "second");
   assert.isUndefined(validateAgentPersonaAssignment(built.assignment, definition));
 });
@@ -778,11 +771,171 @@ it("retains the third entry index when new-format candidates fail before it", ()
   const result = buildAgentPersonaAssignment({ resolution, definition });
   assert.equal(result.status, "assigned");
   if (result.status !== "assigned") return;
-  assert.equal(result.assignment.resolvedRouteIndex, 2);
+  assert.equal(result.assignment.resolvedEntryIndex, 2);
   assert.equal(result.assignment.resolvedModelSelection.model, "available");
   assert.isUndefined(validateAgentPersonaAssignment(result.assignment, definition));
   assert.deepEqual(
     resolution.rejectedTargets.map(({ failures }) => failures[0]?.code),
     ["model-not-advertised", "authority-not-enforceable"],
+  );
+});
+
+it("keeps blocked instance entries readable by the legacy catalog decoder", () => {
+  const oldFailure = Schema.Literals([
+    "provider-not-configured",
+    "provider-unavailable",
+    "provider-disabled",
+    "provider-not-installed",
+    "provider-error",
+    "provider-unauthenticated",
+    "model-not-advertised",
+    "reasoning-effort-not-advertised",
+    "authority-not-enforceable",
+  ]);
+  const oldCatalog = Schema.Struct({
+    personas: Schema.Array(
+      Schema.Struct({
+        availability: Schema.Struct({
+          status: Schema.Literal("unavailable"),
+          reason: Schema.Literals([
+            "routes-unavailable",
+            "authority-not-enforceable",
+            "disabled",
+            "removed",
+          ]),
+          attempts: Schema.optional(
+            Schema.Array(
+              Schema.Struct({
+                route: Schema.Literals(["primary", "fallback"]),
+                driver: ProviderDriverKind,
+                model: Schema.String,
+                reasoningEffort: Schema.String,
+                failures: Schema.Array(oldFailure),
+              }),
+            ),
+          ),
+        }),
+      }),
+    ),
+  });
+  const ready = provider({
+    instanceId: "codex",
+    driver: "codex",
+    models: [model("limited", "reasoningEffort")],
+  });
+  const definition = decodeAgentPersonaDefinition({
+    ...listBuiltInAgentPersonas()[0]!,
+    modelRoute: [{ instanceId: "codex", model: "limited" }],
+  });
+  const result = buildAgentPersonaCatalog(
+    [
+      {
+        ...ready,
+        usageLimits: {
+          checkedAt: "2026-11-03T12:00:00Z",
+          windows: [
+            {
+              id: "primary",
+              kind: "session",
+              label: "Session",
+              usedPercent: 100,
+              resetsAt: "2026-11-03T13:00:00Z",
+            },
+          ],
+        },
+      },
+    ],
+    [definition],
+    Date.parse("2026-11-03T12:00:00Z"),
+  );
+  assert.deepEqual(result.personas[0]?.modelEntries?.[0]?.failures, ["usage-limit"]);
+  assert.doesNotThrow(() => Schema.decodeUnknownSync(oldCatalog)(result));
+});
+
+it("ignores Claude model-scoped exhaustion while honoring its account windows", () => {
+  const response = {
+    rate_limits_available: true,
+    rate_limits: {
+      seven_day: { utilization: 20, resets_at: "2026-11-03T13:00:00Z" },
+      ...({
+        model_scoped: [
+          { display_name: "Fable", utilization: 100, resets_at: "2026-11-03T13:00:00Z" },
+        ],
+      } as object),
+    },
+  };
+  const ready = provider({
+    instanceId: "claudeAgent",
+    driver: "claudeAgent",
+    models: [model("claude-opus-5", "effort")],
+  });
+  const target = { instanceId: ready.instanceId, model: "claude-opus-5" };
+  const usageLimits = claudeUsageResponseToLimits({ checkedAt: "2026-11-03T12:00:00Z", response });
+  assert.isUndefined(
+    agentPersonaTargetUnavailableReason(
+      { ...ready, usageLimits: usageLimits.limits },
+      target,
+      Date.parse("2026-11-03T12:00:00Z"),
+    ),
+  );
+  const exhausted = claudeUsageResponseToLimits({
+    checkedAt: "2026-11-03T12:00:00Z",
+    response: {
+      ...response,
+      rate_limits: {
+        ...response.rate_limits,
+        seven_day: { utilization: 100, resets_at: "2026-11-03T13:00:00Z" },
+      },
+    },
+  });
+  assert.equal(
+    agentPersonaTargetUnavailableReason(
+      { ...ready, usageLimits: exhausted.limits },
+      target,
+      Date.parse("2026-11-03T12:00:00Z"),
+    ),
+    "usage-limit",
+  );
+});
+
+it("writes only resolvedEntryIndex while reading historical route indices", () => {
+  const definition = decodeAgentPersonaDefinition({
+    ...listBuiltInAgentPersonas()[0]!,
+    modelRoute: [
+      { instanceId: "absent", model: "missing" },
+      { instanceId: "absent", model: "missing" },
+      { instanceId: "codex", model: "chosen" },
+    ],
+  });
+  const resolution = resolveAgentPersonaRoute({
+    now: 0,
+    personaId: definition.id,
+    definition,
+    providers: [
+      provider({
+        instanceId: "codex",
+        driver: "codex",
+        models: [model("chosen", "reasoningEffort")],
+      }),
+    ],
+  });
+  assert.equal(resolution.status, "available");
+  if (resolution.status !== "available") return;
+  const result = buildAgentPersonaAssignment({ resolution, definition });
+  assert.equal(result.status, "assigned");
+  if (result.status !== "assigned") return;
+  assert.equal(result.assignment.resolvedEntryIndex, 2);
+  assert.isFalse("resolvedRouteIndex" in result.assignment);
+  const historical = { ...result.assignment, resolvedRouteIndex: 2 };
+  assert.isFalse("resolvedRouteIndex" in decodeCommandAssignment(historical));
+  const { resolvedEntryIndex: _index, ...assignment } = result.assignment;
+  assert.isUndefined(
+    validateAgentPersonaAssignment(
+      decodeSavedAssignment({
+        ...assignment,
+        resolvedRouteIndex: 2,
+      }),
+      definition,
+    ),
   );
 });

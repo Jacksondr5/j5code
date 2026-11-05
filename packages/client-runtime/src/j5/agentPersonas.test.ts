@@ -35,6 +35,7 @@ import {
   defaultAgentPersonaModelRoute,
   agentPersonaModelChoices,
   withAgentPersonaReasoning,
+  nextAgentPersonaModelChoice,
   agentPersonaModelGroups,
   presentAgentPersonaAssignment,
   presentAgentPersonaCatalog,
@@ -407,7 +408,7 @@ it("offers every signed-in harness with its own reasoning option", () => {
   const choices = agentPersonaModelChoices([cursor], []);
   expect(choices).toHaveLength(2);
   expect(choices.find(({ target }) => target.model === "gpt-5.5")).toMatchObject({
-    label: "Cursor · cursor · gpt-5.5",
+    label: "Cursor · gpt-5.5",
     target: {
       instanceId: "cursor",
       model: "gpt-5.5",
@@ -419,9 +420,7 @@ it("offers every signed-in harness with its own reasoning option", () => {
     available: true,
     efforts: [],
   });
-  expect(agentPersonaModelGroups(choices)).toMatchObject([
-    { driver: "cursor", label: "Cursor · cursor" },
-  ]);
+  expect(agentPersonaModelGroups(choices)).toMatchObject([{ driver: "cursor", label: "Cursor" }]);
 });
 
 it("retains unadvertised models and their configured reasoning levels", () => {
@@ -1258,4 +1257,68 @@ it("edits and duplicates the complete ordered list without using the legacy summ
     models,
   };
   expect(agentPersonaDuplicateDraft(definition).modelRoute).toEqual(models);
+});
+
+it("labels unique drivers without instance IDs and adds each model only once", () => {
+  const provider: ServerProvider = {
+    instanceId: ProviderInstanceId.make("claudeAgent"),
+    driver: ProviderDriverKind.make("claudeAgent"),
+    enabled: true,
+    installed: true,
+    version: null,
+    status: "ready",
+    auth: { status: "authenticated" },
+    checkedAt: "2026-11-05T00:00:00Z",
+    models: ["a", "b"].map((slug) => ({ slug, name: slug, isCustom: false, capabilities: {} })),
+    slashCommands: [],
+    skills: [],
+  };
+  const missing = { instanceId: provider.instanceId, model: "missing" };
+  const single = agentPersonaModelChoices([provider], [missing]);
+  expect(single.map(({ label }) => label)).toEqual([
+    "Claude · a",
+    "Claude · b",
+    "Claude · missing (not advertised)",
+  ]);
+  expect(agentPersonaModelGroups(single).map(({ label }) => label)).toEqual(["Claude"]);
+  const multi = agentPersonaModelChoices(
+    [provider, { ...provider, instanceId: ProviderInstanceId.make("remote") }],
+    [missing],
+  );
+  expect(
+    multi.some(({ label }) => label === "Claude · claudeAgent · missing (not advertised)"),
+  ).toBe(true);
+  expect(agentPersonaModelGroups(multi).map(({ label }) => label)).toEqual([
+    "Claude · claudeAgent",
+    "Claude · remote",
+  ]);
+  const first = nextAgentPersonaModelChoice(single, [])!;
+  const second = nextAgentPersonaModelChoice(single, [first.target])!;
+  expect(first.target.model).toBe("a");
+  expect(second.target.model).toBe("b");
+  expect(nextAgentPersonaModelChoice(single, [first.target, second.target])).toBeUndefined();
+  expect(
+    nextAgentPersonaModelChoice(single, [
+      { driver: provider.driver, model: "a", reasoningEffort: "high" },
+    ])?.target.model,
+  ).toBe("b");
+});
+
+it("shows blocked entry diagnostics without legacy availability attempts", () => {
+  const row = presentAgentPersonaCatalog({
+    personas: [
+      {
+        ...catalog.personas[0]!,
+        availability: { status: "unavailable", reason: "routes-unavailable" },
+        modelEntries: [
+          {
+            index: 2,
+            target: { instanceId: ProviderInstanceId.make("remote"), model: "limited" },
+            failures: ["usage-limit"],
+          },
+        ],
+      },
+    ],
+  })[0]!;
+  expect(row.blockedReasons).toEqual(["Entry 3 · remote limited: provider is at its usage limit"]);
 });

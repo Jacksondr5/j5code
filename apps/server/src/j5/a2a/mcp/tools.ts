@@ -1,4 +1,3 @@
-import { AgentPersonaUsageLimits } from "../../agents/agentPersonaUsageLimits.ts";
 import { AgentPersonaModelEntryStatus } from "@t3tools/contracts";
 import * as SpawnAgentService from "../SpawnAgentService.ts";
 import * as RequestReplayService from "../RequestReplayService.ts";
@@ -675,11 +674,7 @@ const crewProposalDependencies = [
   ProjectService,
 ];
 
-const listAgentsDependencies = [
-  AgentPersonaUsageLimits,
-  McpInvocationContext.McpInvocationContext,
-  ProviderRegistry,
-];
+const listAgentsDependencies = [McpInvocationContext.McpInvocationContext, ProviderRegistry];
 
 const stopDependencies = [
   McpInvocationContext.McpInvocationContext,

@@ -181,7 +181,16 @@ export function presentAgentPersonaCatalog(
         : disabled || removed
           ? []
           : persona.availability.status === "unavailable"
-            ? agentPersonaBlockedReasons(persona.availability.attempts ?? [])
+            ? agentPersonaBlockedReasons(
+                persona.modelEntries === undefined
+                  ? (persona.availability.attempts ?? [])
+                  : persona.modelEntries.map(({ index, target, failures }) => ({
+                      route: index === 0 ? "primary" : "fallback",
+                      entryIndex: index,
+                      ...target,
+                      failures,
+                    })),
+              )
             : [],
       route: available
         ? `${providerLabel(persona.availability.resolvedDriver)} · ${persona.availability.resolvedModelSelection.model} · entry ${1 + (persona.availability.resolvedEntryIndex ?? (persona.availability.resolvedRoute === "primary" ? 0 : 1))}`
@@ -295,7 +304,7 @@ export function agentPersonaModelGroups(choices: ReturnType<typeof agentPersonaM
     const key = choice.target.instanceId;
     const group = groups.get(key) ?? {
       driver: key,
-      label: `${providerLabel(choice.driver)} · ${key}`,
+      label: choice.instanceLabel,
       models: [],
     };
     group.models.push(choice);
@@ -314,6 +323,7 @@ export function agentPersonaModelChoices(
       id: string;
       label: string;
       modelLabel: string;
+      instanceLabel: string;
       available: boolean;
       target: AgentPersonaModelEntry;
       driver: ProviderDriverKind | undefined;
@@ -321,6 +331,10 @@ export function agentPersonaModelChoices(
       reasoningOptionId?: string;
     }
   >();
+  const instanceLabel = (provider: ServerProvider) =>
+    providers.filter(({ driver }) => driver === provider.driver).length > 1
+      ? `${providerLabel(provider.driver)} · ${provider.instanceId}`
+      : providerLabel(provider.driver);
   for (const provider of providers) {
     if (!provider.enabled || !provider.installed || provider.auth.status !== "authenticated")
       continue;
@@ -338,7 +352,8 @@ export function agentPersonaModelChoices(
       const id = agentPersonaModelChoiceId(target);
       choices.set(id, {
         id,
-        label: `${providerLabel(provider.driver)} · ${provider.instanceId} · ${model.slug}`,
+        label: `${instanceLabel(provider)} · ${model.slug}`,
+        instanceLabel: instanceLabel(provider),
         modelLabel: model.slug,
         available: true,
         target,
@@ -375,7 +390,12 @@ export function agentPersonaModelChoices(
     ];
     choices.set(id, {
       id,
-      label: `${"driver" in target ? providerLabel(target.driver) : target.instanceId} · ${target.model}${model ? "" : " (not advertised)"}`,
+      label: `${provider ? instanceLabel(provider) : "driver" in target ? providerLabel(target.driver) : target.instanceId} · ${target.model}${model ? "" : " (not advertised)"}`,
+      instanceLabel: provider
+        ? instanceLabel(provider)
+        : "driver" in target
+          ? providerLabel(target.driver)
+          : target.instanceId,
       modelLabel: target.model,
       available: false,
       target,
@@ -386,6 +406,22 @@ export function agentPersonaModelChoices(
   }
   return [...choices.values()].sort((a, b) => a.label.localeCompare(b.label));
 }
+
+export const nextAgentPersonaModelChoice = (
+  choices: ReturnType<typeof agentPersonaModelChoices>,
+  current: ReadonlyArray<AgentPersonaModelEntry>,
+) =>
+  choices.find(
+    (choice) =>
+      choice.available &&
+      !current.some(
+        (entry) =>
+          entry.model === choice.target.model &&
+          ("driver" in entry
+            ? entry.driver === choice.driver
+            : "instanceId" in choice.target && entry.instanceId === choice.target.instanceId),
+      ),
+  );
 
 const isImportConflict = Schema.is(AgentPersonaImportConflictError);
 

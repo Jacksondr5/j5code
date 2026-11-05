@@ -1,4 +1,3 @@
-import { layer as agentPersonaUsageLimitsLayer } from "../agents/agentPersonaUsageLimits.ts";
 import * as CrewSeatPreparation from "./CrewSeatPreparation.ts";
 import * as SpawnAgentService from "./SpawnAgentService.ts";
 import * as Layer from "effect/Layer";
@@ -169,7 +168,6 @@ const makeJ5A2AAuxiliaryLayer = (
     Layer.provideMerge(playbookStoreLayer),
   );
   const crewLaunchProvided = crewLaunchLayer.pipe(
-    Layer.provide(agentPersonaUsageLimitsLayer),
     Layer.provideMerge(agentCrewInstanceLayer),
     Layer.provideMerge(spawnWorkspaceProvided),
     Layer.provideMerge(crewMemberModelsLayer),
@@ -258,10 +256,7 @@ const makeJ5A2AAuxiliaryLayer = (
     clientActionsLayer,
     peerAdminLayer,
     artifactDeletionProvided,
-  ).pipe(
-    Layer.provideMerge(runtimeWithoutClientReads),
-    Layer.provideMerge(agentPersonaUsageLimitsLayer),
-  );
+  ).pipe(Layer.provideMerge(runtimeWithoutClientReads));
 };
 
 export const makeJ5A2ARuntimeLayer = (

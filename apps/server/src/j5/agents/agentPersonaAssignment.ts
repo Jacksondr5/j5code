@@ -68,9 +68,6 @@ export function buildAgentPersonaAssignment(input: {
       definitionVersion: definition.version,
       authorityPolicy: mapAgentPersonaPolicy(authorityPolicy),
       resolvedRoute: input.resolution.route,
-      ...(definition.modelRoute.length > 2 || definition.access !== undefined
-        ? { resolvedRouteIndex: input.resolution.entryIndex }
-        : {}),
       ...(input.resolution.entryIndex === undefined
         ? {}
         : { resolvedEntryIndex: input.resolution.entryIndex }),

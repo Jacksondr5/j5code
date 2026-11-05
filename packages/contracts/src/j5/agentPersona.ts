@@ -81,6 +81,7 @@ export const OrchestrationV2AgentPersonaAssignment = Schema.Struct({
   displayName: Schema.optional(TrimmedNonEmptyString),
   authorityPolicy: AgentPersonaReportedAuthorityPolicy,
   resolvedRoute: Schema.Literals(["primary", "fallback", "override"]),
+  // Read-only compatibility for assignments saved before resolvedEntryIndex.
   resolvedRouteIndex: Schema.optional(NonNegativeInt),
   resolvedEntryIndex: Schema.optional(NonNegativeInt),
   resolvedDriver: ProviderDriverKind,
@@ -93,9 +94,12 @@ export const OrchestrationV2AgentPersonaAssignment = Schema.Struct({
 export type OrchestrationV2AgentPersonaAssignment =
   typeof OrchestrationV2AgentPersonaAssignment.Type;
 
+const { resolvedRouteIndex: _legacyRouteIndex, ...commandAssignmentFields } =
+  OrchestrationV2AgentPersonaAssignment.fields;
+
 /** The assignment as the server issues it in commands, where only known policies are valid. */
 export const OrchestrationV2AgentPersonaCommandAssignment = Schema.Struct({
-  ...OrchestrationV2AgentPersonaAssignment.fields,
+  ...commandAssignmentFields,
   authorityPolicy: AgentPersonaAuthorityPolicy,
 });
 export type OrchestrationV2AgentPersonaCommandAssignment =

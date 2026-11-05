@@ -21,10 +21,7 @@ import * as Layer from "effect/Layer";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 
-import {
-  AgentPersonaLibraryError,
-  makeAgentPersonaLibrary,
-} from "../agents/agentPersonaLibrary.ts";
+import { makeAgentPersonaLibrary } from "../agents/agentPersonaLibrary.ts";
 import { BUILT_IN_AGENT_PERSONAS } from "../agents/agentPersonas.ts";
 import { stringify as toYaml } from "yaml";
 import { resolveAgentPersonaRuntime } from "../agents/agentPersonaRuntime.ts";
@@ -189,7 +186,6 @@ const threadManagementFake = (
   ) => Effect.Effect<void, OrchestratorDispatchError>,
 ) =>
   Layer.mock(ThreadManagementService)({
-    getPersonaUsageLimitedProviderInstances: () => Effect.succeed(new Set<ProviderInstanceId>()),
     getThreadRecords: (threadId) =>
       realThreads
         ? Ref.get(commands).pipe(
@@ -2967,19 +2963,23 @@ it.effect(
           },
         })),
       };
-      const quotaReads = yield* Ref.make(0);
-      const quotaFails = yield* Ref.make(false);
-      const limited = { ...advertised, instanceId: ProviderInstanceId.make("limited") };
+      const limited: ServerProvider = {
+        ...advertised,
+        instanceId: ProviderInstanceId.make("limited"),
+        usageLimits: {
+          checkedAt: "2026-11-03T12:00:00Z",
+          windows: [
+            {
+              id: "primary",
+              kind: "session",
+              label: "Session",
+              usedPercent: 100,
+              resetsAt: "2099-11-03T13:00:00Z",
+            },
+          ],
+        },
+      };
       const layer = crewLaunchLayer.pipe(
-        Layer.updateService(ThreadManagementService, (service) => ({
-          ...service,
-          getPersonaUsageLimitedProviderInstances: Effect.fn("fixture.readQuota")(function* () {
-            yield* Ref.update(quotaReads, (count) => count + 1);
-            if (yield* Ref.get(quotaFails))
-              return yield* new AgentPersonaLibraryError({ message: "Quota read unavailable." });
-            return new Set([limited.instanceId]);
-          }),
-        })),
         Layer.provideMerge(dependencies(commands, [limited, advertised])),
         Layer.provideMerge(Layer.succeedContext(context)),
         Layer.provideMerge(
@@ -3019,12 +3019,10 @@ it.effect(
           workspace: { type: "shared" as const },
         };
         for (const request of [seat, { ...seat, modelSelection: chosen }]) {
-          const readsBefore = yield* Ref.get(quotaReads);
           const resolvedSeats = yield* launcher.resolveSeats(captain, [
             request,
             { ...request, name: "ordered-second" },
           ]);
-          assert.equal(yield* Ref.get(quotaReads), readsBefore + 1);
           assert.deepStrictEqual(
             resolvedSeats.map((seat) => seat.assignment?.resolvedEntryIndex),
             [2, 2],
@@ -3055,10 +3053,6 @@ it.effect(
             () => Effect.succeed("codex"),
           );
         }
-        yield* Ref.set(quotaFails, true);
-        const failure = yield* launcher.resolveSeats(captain, [seat]).pipe(Effect.flip);
-        assert.equal(failure._tag, "CrewLaunchOperationError");
-        assert.lengthOf(yield* Ref.get(commands), 0);
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped),
 );

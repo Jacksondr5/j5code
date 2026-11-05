@@ -1,4 +1,3 @@
-import { AgentPersonaUsageLimits } from "./agentPersonaUsageLimits.ts";
 import * as Clock from "effect/Clock";
 import {
   isAgentPersonaReasoningOptionId,
@@ -101,14 +100,10 @@ export const prepareAgentPersonaPeerSpawn = Effect.fn("j5.prepareAgentPersonaPee
         )}; ${provider.driver} ${request.model} (${request.reasoning ?? "no reasoning"}) is outside its declared routes.`,
     });
   }
-  const limitedInstances = yield* (yield* AgentPersonaUsageLimits).limitedInstances(
-    yield* Clock.currentTimeMillis,
-  );
   const unavailable = agentPersonaTargetUnavailableReason(
     provider,
     target,
     yield* Clock.currentTimeMillis,
-    limitedInstances,
   );
   if (unavailable !== undefined) {
     return yield* new AgentPersonaLibraryError({

@@ -1,10 +1,6 @@
 import { agentPersonaPolicy } from "../agents/agentPersonas.ts";
 import { CrewSeatWorkspace } from "@t3tools/contracts/j5";
 import {
-  AgentPersonaUsageLimits,
-  layer as personaUsageLimitsLayer,
-} from "../agents/agentPersonaUsageLimits.ts";
-import {
   agentPersonaEntryMatches,
   agentPersonaTargetUnavailableReason,
 } from "../agents/agentPersonaRouting.ts";
@@ -14,7 +10,6 @@ import type { CrewProposalSeatRuntime, CrewWorkspaceOptions } from "@t3tools/con
 import { isProviderAvailable } from "@t3tools/contracts";
 import type {
   ModelSelection,
-  ProviderInstanceId,
   OrchestrationV2AgentPersonaCommandAssignment,
   OrchestrationV2AppThread,
   RuntimeMode,
@@ -298,7 +293,6 @@ export const layer = Layer.effect(
     const crews = yield* AgentCrewInstanceService;
     const recordAnalytics = yield* j5AnalyticsRecorder;
     const registry = yield* ProviderRegistry;
-    const quota = yield* AgentPersonaUsageLimits;
     const agents = yield* makeAgentPersonaLibrary;
     const spawnWorkspace = yield* SpawnWorkspaceService;
     const memberModels = yield* CrewMemberModels;
@@ -357,22 +351,6 @@ export const layer = Layer.effect(
     ) {
       const providers = yield* registry.getProviders;
       const now = yield* Clock.currentTimeMillis;
-      const limitedInstances = seats.some(
-        (seat) => seat.agentId != null && seat.agentId !== "custom",
-      )
-        ? yield* quota.limitedInstances(now).pipe(
-            Effect.mapError(
-              (cause) =>
-                new CrewLaunchOperationError({
-                  phase: "reading provider usage limits",
-                  seatName: null,
-                  createdSeats: [],
-                  cause,
-                }),
-            ),
-          )
-        : new Set<ProviderInstanceId>();
-      const quotaSnapshot = { now, limitedInstances };
       // Every seat's workspace resolves against one read of the Captain's repository, here at
       // preview, so the approval token binds what each seat will get. Shared seats need none.
       const checkout = yield* inspectWorkspaces(captain, seats);
@@ -491,8 +469,7 @@ export const layer = Layer.effect(
               { personaId: agentId },
               providers,
               agents,
-              quotaSnapshot,
-            ).pipe(Effect.provideService(AgentPersonaUsageLimits, quota));
+            );
             return {
               ...prepared,
               resolvedModelSelection: (yield* resolveSelection(
@@ -550,12 +527,7 @@ export const layer = Layer.effect(
             });
           const declared = definition.modelRoute[matchingIndex];
           if (declared !== undefined) {
-            const unavailable = agentPersonaTargetUnavailableReason(
-              provider,
-              declared,
-              now,
-              limitedInstances,
-            );
+            const unavailable = agentPersonaTargetUnavailableReason(provider, declared, now);
             if (unavailable !== undefined)
               return yield* new CrewLaunchSeatUnavailableError({
                 seatName: seat.name,
@@ -1080,4 +1052,4 @@ export const layer = Layer.effect(
       workspaceOptions,
     });
   }),
-).pipe(Layer.provide(personaUsageLimitsLayer));
+);

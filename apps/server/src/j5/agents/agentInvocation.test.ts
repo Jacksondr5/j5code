@@ -1,4 +1,3 @@
-import { AgentPersonaUsageLimits } from "./agentPersonaUsageLimits.ts";
 import { assert, describe, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
@@ -167,13 +166,6 @@ const fixture = Effect.gen(function* () {
 });
 const testLayer = ServerConfig.layerTest(process.cwd(), { prefix: "j5-agent-invocation-" }).pipe(
   Layer.provideMerge(NodeServices.layer),
-  Layer.provideMerge(
-    Layer.succeed(AgentPersonaUsageLimits, {
-      limitedInstances: Effect.fn("AgentPersonaUsageLimits.limitedInstances")(() =>
-        Effect.succeed(new Set<ProviderInstanceId>()),
-      ),
-    }),
-  ),
 );
 
 describe("saved agent subagent invocation", () => {

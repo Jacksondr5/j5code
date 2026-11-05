@@ -158,7 +158,6 @@ const threadManagementMock = (
   service: Partial<ThreadManagementService["Service"]> = {},
 ): Layer.Layer<ThreadManagementService> =>
   Layer.mock(ThreadManagementService)({
-    getPersonaUsageLimitedProviderInstances: () => Effect.succeed(new Set<ProviderInstanceId>()),
     getThreadShell: (threadId) =>
       Effect.succeed(threadId === invocation.threadId ? liveThreadShell(threadId) : null),
     ...service,
@@ -1610,7 +1609,6 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
       ],
     };
     const personaProviders = yield* Ref.make<ReadonlyArray<ServerProvider>>([codex, claude]);
-    const knownWorkerLimits = yield* Ref.make<ReadonlySet<ProviderInstanceId>>(new Set());
     const callerRow = {
       projectId: ledgerProjectId,
       participantId: callerParticipantId,
@@ -1658,7 +1656,6 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
           }),
       }),
       threadManagementMock({
-        getPersonaUsageLimitedProviderInstances: () => Ref.get(knownWorkerLimits),
         getThreadRecords: (threadId) =>
           Ref.get(commands).pipe(
             Effect.map((all) => {
@@ -2048,7 +2045,7 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
             checkedAt: "2026-11-03T00:00:00Z",
             windows: [
               {
-                id: "weekly",
+                id: "secondary",
                 kind: "weekly",
                 label: "Weekly",
                 usedPercent: 100,
@@ -2068,14 +2065,7 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
       assert.include(failureMessage(limited), "usage-limit");
       assert.lengthOf(yield* createdThreads(), beforeLimited);
       yield* Ref.set(personaProviders, [codex, claude]);
-      yield* Ref.set(knownWorkerLimits, new Set([ProviderInstanceId.make("codex")]));
-      const workerLimited = yield* call({
-        ...scout,
-        persona: "unpinned",
-        client_request_id: "spawn-worker-limited-entry",
-      });
-      assert.isTrue(workerLimited.isFailure);
-      assert.include(failureMessage(workerLimited), "usage-limit");
+
       assert.lengthOf(yield* createdThreads(), beforeLimited);
     }).pipe(Effect.provide(layer));
   }),

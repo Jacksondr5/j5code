@@ -1,5 +1,3 @@
-import type { ProviderInstanceId } from "@t3tools/contracts";
-import { AgentPersonaUsageLimits } from "../agents/agentPersonaUsageLimits.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -26,13 +24,6 @@ export const personaLibraryLayer = (
       });
     }),
   ).pipe(
-    Layer.provideMerge(
-      Layer.succeed(AgentPersonaUsageLimits, {
-        limitedInstances: Effect.fn("AgentPersonaUsageLimits.limitedInstances")(() =>
-          Effect.succeed(new Set<ProviderInstanceId>()),
-        ),
-      }),
-    ),
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix })),
     Layer.provideMerge(NodeServices.layer),
   );

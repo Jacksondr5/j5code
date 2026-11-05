@@ -1,4 +1,3 @@
-import { AgentPersonaUsageLimits } from "./agentPersonaUsageLimits.ts";
 import * as Clock from "effect/Clock";
 import {
   AgentPersonaCatalogError,
@@ -60,7 +59,6 @@ const catalogError = (cause: unknown) => new AgentPersonaCatalogError({ message:
 export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHandlers")(
   function* (deps: { readonly providers: Effect.Effect<ReadonlyArray<ServerProvider>> }) {
     const library = yield* makeAgentPersonaLibrary;
-    const quota = yield* AgentPersonaUsageLimits;
     // Usage reads the projections through the session's SqlClient, captured once here.
     const sql = yield* SqlClient.SqlClient;
     const usage = () => agentPersonaUsage().pipe(Effect.provideService(SqlClient.SqlClient, sql));
@@ -74,15 +72,7 @@ export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHand
         const current = yield* library.catalog().pipe(Effect.mapError(catalogError));
         const providers = yield* deps.providers;
         const now = yield* Clock.currentTimeMillis;
-        const limitedInstances = yield* quota
-          .limitedInstances(now)
-          .pipe(Effect.mapError(catalogError));
-        const catalog = buildAgentPersonaCatalog(
-          providers,
-          current.definitions,
-          now,
-          limitedInstances,
-        );
+        const catalog = buildAgentPersonaCatalog(providers, current.definitions, now);
         const importedIds = new Set(current.importedIds);
         const digests = new Map(
           [...current.definitions, ...current.removedSources].map((definition) => [
@@ -124,12 +114,7 @@ export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHand
               ? { kind: "bundled" as const }
               : { kind: "folder" as const, path };
         };
-        const removed = buildAgentPersonaCatalog(
-          providers,
-          current.removedSources,
-          now,
-          limitedInstances,
-        );
+        const removed = buildAgentPersonaCatalog(providers, current.removedSources, now);
         return {
           diagnostics: current.diagnostics,
           personas: [

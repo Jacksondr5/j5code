@@ -1,5 +1,3 @@
-import { layer as personaUsageLimitsLayer } from "../../agents/agentPersonaUsageLimits.ts";
-import { AgentPersonaUsageLimits } from "../../agents/agentPersonaUsageLimits.ts";
 import * as Clock from "effect/Clock";
 import * as Layer from "effect/Layer";
 import * as SpawnAgentService from "../SpawnAgentService.ts";
@@ -819,7 +817,6 @@ const handlers = {
         providers,
         current.definitions,
         yield* Clock.currentTimeMillis,
-        yield* (yield* AgentPersonaUsageLimits).limitedInstances(yield* Clock.currentTimeMillis),
       );
       return {
         diagnostics: current.diagnostics,
@@ -1040,5 +1037,4 @@ export const layer = McpToolAccess.toLayer(J5Toolkit, handlers);
 /** The same handlers as a plain layer, for tests that call a tool without registering it. */
 export const J5ToolkitHandlersLive = McpToolAccess.HandlersLayer.layer(layer).pipe(
   Layer.provideMerge(SpawnAgentService.layer),
-  Layer.provideMerge(personaUsageLimitsLayer),
 );

@@ -2,6 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   AGENT_PERSONA_POLICY_OPTIONS,
   agentPersonaModelChoiceId,
+  nextAgentPersonaModelChoice,
   agentPersonaEntryReasoning,
   withAgentPersonaReasoning,
   agentPersonaModelChoices,
@@ -222,9 +223,9 @@ export function AgentRoutePolicyFields(props: {
       })}
       <Pressable
         accessibilityRole="button"
-        disabled={disabled || !choices.some((choice) => choice.available)}
+        disabled={disabled || !nextAgentPersonaModelChoice(choices, value.modelRoute)}
         onPress={() => {
-          const choice = choices.find((choice) => choice.available);
+          const choice = nextAgentPersonaModelChoice(choices, value.modelRoute);
           if (choice)
             props.onChange({ ...value, modelRoute: [...value.modelRoute, choice.target] });
         }}

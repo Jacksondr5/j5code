@@ -226,7 +226,6 @@ it.effect(
           listActiveSubagentThreadIds: () => Effect.die("unused listActiveSubagentThreadIds"),
           listOlderSettledThreads: () => Effect.die("unused listOlderSettledThreads"),
           readShellSnapshot: () => Effect.die("unused readShellSnapshot"),
-          getPersonaUsageLimitedProviderInstances: () => Effect.die("unused persona quota"),
           getThreadShell: () => Effect.die("unused getThreadShell"),
           findGuestShareThreadId: () => Effect.die("unused findGuestShareThreadId"),
           getThread: () => Ref.get(projection).pipe(Effect.map((state) => state.thread)),
