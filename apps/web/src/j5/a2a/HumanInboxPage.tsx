@@ -324,7 +324,7 @@ function OpenInboxItem({
               attachments={attachments.list(itemKey)}
               environmentId={item.environmentId}
               error={attachments.error(itemKey)}
-              onRemove={(id) => attachments.remove(itemKey, id)}
+              onRemove={pendingExchangeId === null ? (id) => attachments.remove(itemKey, id) : null}
             />
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-1">

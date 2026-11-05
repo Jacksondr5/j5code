@@ -172,7 +172,8 @@ export function AnswerAttachmentList(props: {
   readonly environmentId: EnvironmentId;
   readonly attachments: ReadonlyArray<AnswerAttachment>;
   readonly error: string | null;
-  readonly onRemove: (id: string) => void;
+  /** Null while the answer is being delivered: the server is claiming these uploads. */
+  readonly onRemove: ((id: string) => void) | null;
 }) {
   const uploadsByImageId = useAttachmentUploadStore((state) => state.uploadsByImageId);
   if (props.attachments.length === 0 && props.error === null) return null;
@@ -230,7 +231,8 @@ export function AnswerAttachmentList(props: {
                 ) : null}
                 <Button
                   aria-label={`Remove ${attachment.name}`}
-                  onClick={() => props.onRemove(attachment.id)}
+                  disabled={props.onRemove === null}
+                  onClick={() => props.onRemove?.(attachment.id)}
                   size="icon-xs"
                   type="button"
                   variant="ghost"

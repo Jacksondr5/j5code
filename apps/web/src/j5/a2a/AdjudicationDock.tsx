@@ -193,7 +193,7 @@ export function AdjudicationDock(props: {
             attachments={attachments.list(shown.exchangeId)}
             environmentId={environmentId}
             error={attachments.error(shown.exchangeId)}
-            onRemove={(id) => attachments.remove(shown.exchangeId, id)}
+            onRemove={pending ? null : (id) => attachments.remove(shown.exchangeId, id)}
           />
           {error ? (
             <p className="text-sm text-destructive" role="alert">
