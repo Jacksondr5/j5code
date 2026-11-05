@@ -162,7 +162,7 @@ export function AdjudicationDock(props: {
             </Badge>
           </div>
           <h3 className="text-sm font-semibold leading-snug text-foreground">{shown.intent}</h3>
-          <div className="flex max-h-[50vh] flex-col gap-2 overflow-y-auto">
+          <div className="max-h-[50vh] space-y-2 overflow-y-auto">
             {questionText(shown.message)}
             {shown.followUps?.map((followUp) => (
               <div className="flex flex-col gap-1" key={followUp.messageId}>
