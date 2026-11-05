@@ -351,6 +351,30 @@ it.effect("an ask to someone removed from the server ends", () =>
   }).pipe(Effect.provide(testLayer)),
 );
 
+it.effect("an open ask to everyone here still takes a follow-up once one writer remains", () =>
+  Effect.gen(function* () {
+    yield* seed;
+    const exchangeId = yield* ask(EVERYONE_HERE_PERSON_ID, "everyone-then-alone");
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`
+      INSERT INTO j5_a2a_shared_thread (thread_id, shared_at) VALUES (${threadId}, ${AT})
+    `;
+    yield* sql`
+      UPDATE j5_a2a_person_level SET level = 'viewer' WHERE person_id IN (${PRIYA}, ${SAM})
+    `;
+    const followUp = yield* (yield* A2ASendService).send({
+      commandId: CommCommandId.make("command:everyone-then-alone:follow-up"),
+      senderThreadId: threadId,
+      to: EVERYONE_HERE_PERSON_ID,
+      message: "One more detail.",
+      regarding: exchangeId,
+      acceptedAt: AT,
+    });
+    assert.strictEqual(followUp.exchangeId, exchangeId);
+    assert.isTrue(followUp.joinedExistingExchange);
+  }).pipe(Effect.provide(testLayer)),
+);
+
 it.effect("where only one person can write to the agent's thread, there is no everyone here", () =>
   Effect.gen(function* () {
     yield* seed;

@@ -574,10 +574,12 @@ it.effect("keeps asks to a person distinct and joins a follow-up only when it na
     assert.equal(replayed.messageId, followUp.messageId);
     assert.isTrue(replayed.joinedExistingExchange);
 
-    const withUrgency = yield* Effect.flip(
-      ask("follow-up-urgency", { regarding: first.exchangeId!, urgency: "blocking" }),
+    // Written as a full ask, a follow-up is told what to drop rather than sent to a new ask.
+    const asFullAsk = yield* Effect.flip(
+      ask("follow-up-full-ask", { ...asking, regarding: first.exchangeId! }),
     );
-    assert.equal(withUrgency._tag, "A2AUrgencyRequiresExchangeError");
+    assert.equal(asFullAsk._tag, "A2ARegardingNotAllowedError");
+    assert.include(asFullAsk.message, "Retry without intent and urgency");
     const withReply = yield* Effect.flip(
       ask("follow-up-reply", { regarding: first.exchangeId!, exchangeId: second.exchangeId! }),
     );
@@ -628,7 +630,7 @@ it.effect("refuses plain human sends while allowing human asks and replies", () 
     assert.equal(plainSend._tag, "A2AHumanAskOrReplyRequiredError");
     assert.equal(
       plainSend.message,
-      `A plain send to human participant ${person.id} is refused. To the human, use an ask with expect_reply=true, intent, and urgency=blocking|soon|fyi; regarding=<exchange id> to add to an ask you have open; or a reply with exchange_id. If nobody needs to act, say it in your own thread instead.`,
+      `A plain send to human participant ${person.id} is refused. To the human, use an ask with expect_reply=true, intent, and urgency=blocking|soon|fyi, or regarding=<exchange id> to add to an ask you have open. If nobody needs to act, say it in your own thread instead.`,
     );
     const rejectedWrites = yield* sql<{ readonly count: number }>`
       SELECT COUNT(*) AS count
@@ -659,7 +661,7 @@ it.effect("refuses plain human sends while allowing human asks and replies", () 
         acceptedAt: timestamp,
       }),
     );
-    assert.equal(replyToOwnAsk._tag, "A2AHumanFollowupNotAllowedError");
+    assert.equal(replyToOwnAsk._tag, "A2AReplyToOwnAskError");
     assert.include(replyToOwnAsk.message, "regarding=");
     assert.deepStrictEqual(
       yield* sql`

@@ -190,7 +190,7 @@ export class A2AHumanAskOrReplyRequiredError extends Schema.TaggedError<A2AHuman
   { participantId: Schema.String },
 ) {
   override get message(): string {
-    return `A plain send to human participant ${this.participantId} is refused. To the human, use an ask with expect_reply=true, intent, and urgency=blocking|soon|fyi; regarding=<exchange id> to add to an ask you have open; or a reply with exchange_id. If nobody needs to act, say it in your own thread instead.`;
+    return `A plain send to human participant ${this.participantId} is refused. To the human, use an ask with expect_reply=true, intent, and urgency=blocking|soon|fyi, or regarding=<exchange id> to add to an ask you have open. If nobody needs to act, say it in your own thread instead.`;
   }
 }
 
@@ -209,8 +209,8 @@ export class A2AEveryoneHereNotSharedError extends Schema.TaggedError<A2AEveryon
   }
 }
 
-export class A2AHumanFollowupNotAllowedError extends Schema.TaggedError<A2AHumanFollowupNotAllowedError>()(
-  "A2AHumanFollowupNotAllowedError",
+export class A2AReplyToOwnAskError extends Schema.TaggedError<A2AReplyToOwnAskError>()(
+  "A2AReplyToOwnAskError",
   { participantId: Schema.String },
 ) {
   override get message(): string {
@@ -220,12 +220,20 @@ export class A2AHumanFollowupNotAllowedError extends Schema.TaggedError<A2AHuman
 
 export class A2ARegardingNotAllowedError extends Schema.TaggedError<A2ARegardingNotAllowedError>()(
   "A2ARegardingNotAllowedError",
-  { participantId: Schema.String, reason: Schema.Literals(["not-a-person", "with-exchange-id"]) },
+  {
+    participantId: Schema.String,
+    reason: Schema.Literals(["not-a-person", "with-exchange-id", "with-ask-fields"]),
+  },
 ) {
   override get message(): string {
-    return this.reason === "not-a-person"
-      ? `regarding follows up an ask to a person, and ${this.participantId} is not one. Between agents, a further ask with expect_reply=true joins the open exchange.`
-      : "regarding adds to your own ask and exchange_id replies to someone else's, so one send cannot carry both. Retry with the one you mean.";
+    switch (this.reason) {
+      case "not-a-person":
+        return `regarding follows up an ask to a person, and ${this.participantId} is not one. Between agents, a further ask with expect_reply=true joins the open exchange.`;
+      case "with-exchange-id":
+        return "regarding adds to your own ask and exchange_id replies to someone else's, so one send cannot carry both. Retry with the one you mean.";
+      case "with-ask-fields":
+        return "regarding joins an open ask, which keeps its own intent and urgency. Retry without intent and urgency.";
+    }
   }
 }
 
@@ -371,7 +379,7 @@ export type A2ASendError =
   | A2AUrgencyRequiresExchangeError
   | A2AHumanAskOrReplyRequiredError
   | A2AEveryoneHereNotSharedError
-  | A2AHumanFollowupNotAllowedError
+  | A2AReplyToOwnAskError
   | A2ARegardingNotAllowedError
   | A2AExchangeNotOpenError
   | A2AExchangeAlreadyAnsweredError
@@ -408,7 +416,7 @@ export const isSendRefusal = Schema.is(
     A2AUrgencyRequiresExchangeError,
     A2AHumanAskOrReplyRequiredError,
     A2AEveryoneHereNotSharedError,
-    A2AHumanFollowupNotAllowedError,
+    A2AReplyToOwnAskError,
     A2ARegardingNotAllowedError,
     A2AExchangeNotOpenError,
     A2AExchangeAlreadyAnsweredError,
@@ -1018,9 +1026,10 @@ const rawLayer: Layer.Layer<
 
       const receiver = yield* participantMembership(input.to, sender.projectId, remote);
       const receiverId = receiver.participantId;
+      const namedExchangeId = input.regarding ?? input.exchangeId;
       // An agent asks only someone who can write to its thread, or everyone here where more
-      // than one person can (Inbox AC14, AC15).
-      if (receiver.kind === "human" && input.exchangeId === undefined) {
+      // than one person can (Inbox AC14, AC15). A follow-up joins an ask that passed this.
+      if (receiver.kind === "human" && namedExchangeId === undefined) {
         const senderThread = yield* sql<{ readonly thread_id: string | null }>`
           SELECT thread_id FROM j5_a2a_membership
           WHERE project_id = ${sender.projectId} AND participant_id = ${sender.participantId}
@@ -1056,7 +1065,12 @@ const rawLayer: Layer.Layer<
           reason: "with-exchange-id",
         });
       }
-      const namedExchangeId = input.regarding ?? input.exchangeId;
+      if (input.regarding !== undefined && (input.intent ?? input.urgency) !== undefined) {
+        return yield* new A2ARegardingNotAllowedError({
+          participantId: receiverId,
+          reason: "with-ask-fields",
+        });
+      }
       if (
         receiver.kind === "human" &&
         input.expectReply !== true &&
@@ -1176,7 +1190,7 @@ const rawLayer: Layer.Layer<
         exchangeRole === "followup" &&
         input.regarding === undefined
       ) {
-        return yield* new A2AHumanFollowupNotAllowedError({ participantId: receiverId });
+        return yield* new A2AReplyToOwnAskError({ participantId: receiverId });
       }
 
       // A receiver on a peer server is sent to only while that server is still a
