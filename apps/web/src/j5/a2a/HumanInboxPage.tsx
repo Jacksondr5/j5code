@@ -258,7 +258,7 @@ function OpenInboxItem({
   const answerId = `inbox-answer-${encodeURIComponent(itemKey)}`;
   const support = useAnswerAttachmentSupport(item.environmentId);
   const addFiles =
-    support === null || closedText !== null
+    support === null || closedText !== null || pendingExchangeId !== null
       ? null
       : (files: ReadonlyArray<File>) =>
           attachments.add(itemKey, item.environmentId, support.maxFileBytes, files);

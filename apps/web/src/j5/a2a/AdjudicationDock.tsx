@@ -95,7 +95,7 @@ export function AdjudicationDock(props: {
   const readiness = attachments.ready(shown.exchangeId, environmentId);
   const waitingOn = "blocked" in readiness ? readiness.blocked : null;
   const addFiles =
-    support === null || !isOpen
+    support === null || !isOpen || pending
       ? null
       : (files: ReadonlyArray<File>) =>
           attachments.add(shown.exchangeId, environmentId, support.maxFileBytes, files);

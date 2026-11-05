@@ -1,7 +1,7 @@
 import type { ChatAttachment, EnvironmentId } from "@t3tools/contracts";
 import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
 import { FileIcon, RefreshCwIcon, XIcon } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { ComposerAttachButton } from "../../components/chat/ComposerAttachmentStrip";
 import { shouldHandleComposerAttachmentPaste } from "../../components/chat/composerAttachmentFiles";
@@ -50,6 +50,12 @@ export function useAnswerAttachmentSupport(environmentId: EnvironmentId | undefi
  */
 export function useAnswerAttachments() {
   const [byKey, setByKey] = useState<Readonly<Record<string, ReadonlyArray<AnswerAttachment>>>>({});
+  const staged = useRef(new Map<string, AnswerAttachment>());
+  // oxlint-disable-next-line t3code/react-effect-budget -- releases unsent uploads and previews when the page closes.
+  useEffect(() => {
+    const live = staged.current;
+    return () => live.forEach(forget);
+  }, []);
   const [errors, setErrors] = useState<Readonly<Record<string, string>>>({});
   const uploadsByImageId = useAttachmentUploadStore((state) => state.uploadsByImageId);
   const setError = (key: string, error: string | null) =>
@@ -64,24 +70,30 @@ export function useAnswerAttachments() {
       maxFileBytes: number | null,
       files: ReadonlyArray<File>,
     ) => {
-      const staged = stageAnswerAttachments({
+      const result = stageAnswerAttachments({
         current: list(key),
         files,
         maxFileBytes,
         newId: randomUUID,
         previewUrl: (file) => URL.createObjectURL(file),
       });
-      if ("error" in staged) {
-        setError(key, staged.error);
+      if ("error" in result) {
+        setError(key, result.error);
         return;
       }
       setError(key, null);
-      for (const image of staged.attachments) startAttachmentUpload({ environmentId, image });
-      setByKey((current) => ({ ...current, [key]: [...list(key), ...staged.attachments] }));
+      for (const image of result.attachments) {
+        staged.current.set(image.id, image);
+        startAttachmentUpload({ environmentId, image });
+      }
+      setByKey((current) => ({ ...current, [key]: [...list(key), ...result.attachments] }));
     },
     remove: (key: string, id: string) => {
       const attachment = list(key).find((candidate) => candidate.id === id);
-      if (attachment !== undefined) forget(attachment);
+      if (attachment !== undefined) {
+        staged.current.delete(id);
+        forget(attachment);
+      }
       setByKey((current) => ({
         ...current,
         [key]: (current[key] ?? []).filter((candidate) => candidate.id !== id),
@@ -89,7 +101,10 @@ export function useAnswerAttachments() {
     },
     /** The server copied the files into the agent's thread; the uploads are no longer needed. */
     delivered: (key: string) => {
-      for (const attachment of list(key)) forget(attachment);
+      for (const attachment of list(key)) {
+        staged.current.delete(attachment.id);
+        forget(attachment);
+      }
       setByKey((current) => without(current, key));
       setError(key, null);
     },

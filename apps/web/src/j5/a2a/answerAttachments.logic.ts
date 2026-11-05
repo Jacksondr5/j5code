@@ -1,4 +1,7 @@
-import { getProviderAttachmentLimitError } from "@t3tools/contracts";
+import {
+  getProviderAttachmentLimitError,
+  PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
+} from "@t3tools/contracts";
 import {
   clampFileAttachmentUploadBytes,
   fileAttachmentTooLargeMessage,
@@ -34,6 +37,11 @@ export function stageAnswerAttachments(input: {
     }
     if (kind === "image") {
       const file = normalizeComposerImageFileMimeType(picked);
+      if (file.size > PROVIDER_SEND_TURN_MAX_IMAGE_BYTES) {
+        return {
+          error: fileAttachmentTooLargeMessage(picked.name, PROVIDER_SEND_TURN_MAX_IMAGE_BYTES),
+        };
+      }
       staged.push({
         type: "image",
         id: input.newId(),

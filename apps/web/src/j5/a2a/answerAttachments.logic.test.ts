@@ -60,6 +60,15 @@ describe("staging files on an answer", () => {
     expect(previews).toEqual([]);
   });
 
+  it("refuses an image too large to upload and makes no preview for the batch", () => {
+    const { result, previews } = stage([
+      file("run.log", "text/plain"),
+      file("huge.png", "image/png", 10 * 1024 * 1024 + 1),
+    ]);
+    expect(result).toHaveProperty("error");
+    expect(previews).toEqual([]);
+  });
+
   it("refuses a batch that takes the answer past the attachment count limit", () => {
     expect(stage([file("run.log", "text/plain")], { current: 100 }).result).toHaveProperty("error");
   });
