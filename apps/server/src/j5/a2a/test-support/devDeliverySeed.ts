@@ -714,6 +714,10 @@ export const runDevDeliverySeed = Effect.fn("j5.a2a.devDeliverySeed.runDevDelive
         const reply = projected.messages.find((message) => message.id === replyDeliveryMessageId);
         const expectedEnvelope = formatClosedHumanEnvelope({
           senderId: localOperatorPersonId,
+          answeredAsk: {
+            exchangeId: opened.exchangeId,
+            intent: "Seed a real HumanInbox answer delivery.",
+          },
           message: replyText,
         });
         if (

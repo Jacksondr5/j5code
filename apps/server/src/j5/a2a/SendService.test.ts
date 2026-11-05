@@ -19,6 +19,7 @@ import {
   ExchangeId,
   LedgerProjectId,
   ParticipantId,
+  type SendMessageInput,
 } from "./contracts.ts";
 
 const timestamp = "2026-08-16T12:00:00.000Z";
@@ -540,6 +541,72 @@ it.effect("validates intent and human-only urgency at exchange open", () =>
   }).pipe(Effect.provide(testLayer)),
 );
 
+it.effect("keeps asks to a person distinct and joins a follow-up only when it names one", () =>
+  Effect.gen(function* () {
+    yield* setupSameProject();
+    yield* registerPerson();
+    const service = yield* A2ASendService;
+    const ask = (suffix: string, fields: Partial<SendMessageInput> = {}) =>
+      service.send({
+        commandId: CommCommandId.make(`command:several-asks:${suffix}`),
+        senderThreadId: sender.threadId,
+        to: person.id,
+        message: `Message ${suffix}`,
+        acceptedAt: timestamp,
+        ...fields,
+      });
+    const asking = { expectReply: true, intent: "Choose", urgency: "soon" } as const;
+
+    const first = yield* ask("first", asking);
+    const second = yield* ask("second", asking);
+    assert.notEqual(first.exchangeId, second.exchangeId);
+    assert.isFalse(second.joinedExistingExchange);
+
+    const unspecified = yield* Effect.flip(ask("no-urgency", { expectReply: true, intent: "X" }));
+    assert.equal(unspecified._tag, "A2AUrgencyRequiredError");
+
+    const followUp = yield* ask("follow-up", { regarding: first.exchangeId! });
+    assert.equal(followUp.exchangeId, first.exchangeId);
+    assert.equal(followUp.exchangeState, "open");
+    assert.isTrue(followUp.joinedExistingExchange);
+    // A retry replays the original send rather than joining twice.
+    const replayed = yield* ask("follow-up", { regarding: first.exchangeId! });
+    assert.equal(replayed.messageId, followUp.messageId);
+    assert.isTrue(replayed.joinedExistingExchange);
+
+    const withUrgency = yield* Effect.flip(
+      ask("follow-up-urgency", { regarding: first.exchangeId!, urgency: "blocking" }),
+    );
+    assert.equal(withUrgency._tag, "A2AUrgencyRequiresExchangeError");
+    const withReply = yield* Effect.flip(
+      ask("follow-up-reply", { regarding: first.exchangeId!, exchangeId: second.exchangeId! }),
+    );
+    assert.equal(withReply._tag, "A2ARegardingNotAllowedError");
+    const toAgent = yield* Effect.flip(
+      ask("follow-up-agent", { to: receiver.id, regarding: first.exchangeId! }),
+    );
+    assert.equal(toAgent._tag, "A2ARegardingNotAllowedError");
+    assert.include(toAgent.message, "expect_reply=true");
+    const unknown = yield* Effect.flip(
+      ask("follow-up-unknown", { regarding: ExchangeId.make("exchange:unknown") }),
+    );
+    assert.equal(unknown._tag, "A2AExchangeNotOpenError");
+
+    const sql = yield* SqlClient.SqlClient;
+    assert.deepStrictEqual(
+      yield* sql`
+        SELECT exchange_id, exchange_role FROM j5_a2a_delivery
+        WHERE sender_id = ${sender.id} AND receiver_id = ${person.id} ORDER BY sent_seq
+      `,
+      [
+        { exchange_id: first.exchangeId, exchange_role: "ask" },
+        { exchange_id: second.exchangeId, exchange_role: "ask" },
+        { exchange_id: first.exchangeId, exchange_role: "followup" },
+      ],
+    );
+  }).pipe(Effect.provide(testLayer)),
+);
+
 it.effect("refuses plain human sends while allowing human asks and replies", () =>
   Effect.gen(function* () {
     const projectId = yield* setupSameProject();
@@ -560,7 +627,7 @@ it.effect("refuses plain human sends while allowing human asks and replies", () 
     assert.equal(plainSend._tag, "A2AHumanAskOrReplyRequiredError");
     assert.equal(
       plainSend.message,
-      `A plain send to human participant ${person.id} is refused. To the human, use an ask with expect_reply=true, intent, and urgency=blocking|soon|fyi, or a reply with exchange_id. If nobody needs to act, say it in your own thread instead.`,
+      `A plain send to human participant ${person.id} is refused. To the human, use an ask with expect_reply=true, intent, and urgency=blocking|soon|fyi; regarding=<exchange id> to add to an ask you have open; or a reply with exchange_id. If nobody needs to act, say it in your own thread instead.`,
     );
     const rejectedWrites = yield* sql<{ readonly count: number }>`
       SELECT COUNT(*) AS count
@@ -581,39 +648,25 @@ it.effect("refuses plain human sends while allowing human asks and replies", () 
     });
     assert.equal(ask.exchangeState, "open");
 
-    const explicitFollowup = yield* Effect.flip(
+    const replyToOwnAsk = yield* Effect.flip(
       service.send({
-        commandId: CommCommandId.make("command:human-explicit-followup"),
+        commandId: CommCommandId.make("command:human-reply-to-own-ask"),
         senderThreadId: sender.threadId,
         to: person.id,
-        message: "This must not follow up on the human ask.",
+        message: "exchange_id replies; this is the agent's own ask.",
         exchangeId: ask.exchangeId!,
         acceptedAt: timestamp,
       }),
     );
-    assert.equal(explicitFollowup._tag, "A2AHumanFollowupNotAllowedError");
-
-    const implicitFollowup = yield* Effect.flip(
-      service.send({
-        commandId: CommCommandId.make("command:human-implicit-followup"),
-        senderThreadId: sender.threadId,
-        to: person.id,
-        message: "This also must not follow up on the human ask.",
-        expectReply: true,
-        acceptedAt: timestamp,
-      }),
+    assert.equal(replyToOwnAsk._tag, "A2AHumanFollowupNotAllowedError");
+    assert.include(replyToOwnAsk.message, "regarding=");
+    assert.deepStrictEqual(
+      yield* sql`
+        SELECT COUNT(*) AS count FROM j5_a2a_comm_event
+        WHERE command_id = 'command:human-reply-to-own-ask'
+      `,
+      [{ count: 0 }],
     );
-    assert.equal(implicitFollowup._tag, "A2AHumanFollowupNotAllowedError");
-    assert.equal(
-      implicitFollowup.message,
-      `A follow-up to human participant ${person.id} is refused. To the human, use an ask with expect_reply=true, intent, and urgency=blocking|soon|fyi, or a reply with exchange_id; after an ask is open, wait for its reply, or j5_clear_own_ask on the open exchange and re-ask with the combined content. If nobody needs to act, say it in your own thread instead.`,
-    );
-    const followupWrites = yield* sql<{ readonly count: number }>`
-      SELECT COUNT(*) AS count
-      FROM j5_a2a_comm_event
-      WHERE command_id IN ('command:human-explicit-followup', 'command:human-implicit-followup')
-    `;
-    assert.deepStrictEqual(followupWrites, [{ count: 0 }]);
 
     const inboundExchangeId = ExchangeId.make("exchange:human-inbound");
     yield* ledgerService.append({

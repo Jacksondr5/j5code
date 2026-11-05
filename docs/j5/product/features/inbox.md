@@ -21,9 +21,9 @@ A plain message to a person is refused; agents send an ask when a reply is owed.
 
 An agent may have several asks open with the same person at once, each its own item. A follow-up to a question the person has not yet answered — sent by the agent with the open Exchange's id — joins that item and is shown beneath the original ask, so the person always reads the whole question.
 
-An item shows who is asking and from which project, the ask's **intent** as its subject line, the body, its **urgency** — the loudest element — and how long it has been open. The list orders by urgency, then age.
+An item shows who is asking and from which project, the ask's **intent** as its subject line, the body, its **urgency** — the loudest element — how long it has been open, and how many follow-ups it holds. The list orders by urgency, then age.
 
-A person answers in one of two ways. **Reply in place**: the answer, exactly as written and with any images or files attached to it, is the reply that closes the Exchange and reaches the agent, with an envelope that tells the agent the platform closed it. An answer always has words; files go with them, not instead. **Go to the agent**: the person opens the asker's thread, reads the context, and replies in ordinary chat; the agent then withdraws its own ask once the conversation resolved it, and the item leaves the inbox honestly.
+A person answers in one of two ways. **Reply in place**: the answer, exactly as written and with any images or files attached to it, is the reply that closes the Exchange and reaches the agent, with an envelope that tells the agent which ask it answers and that the platform closed it. An answer always has words; files go with them, not instead. **Go to the agent**: the person opens the asker's thread, reads the context, and replies in ordinary chat; the agent then withdraws its own ask once the conversation resolved it, and the item leaves the inbox honestly.
 
 A replied item recedes to a collapsed **Replied** shelf. An ask whose sender is archived leaves the inbox immediately — the archive dialog was the loud moment, and a confirmed archive means the person wants it gone.
 
@@ -54,7 +54,7 @@ The inbox is **not** a backlog (a non-blocking note an agent wants to keep is a 
 
 ### Answering
 
-8. Replying in place delivers the person's text to the asker exactly as written, with the images and files they attached by pasting, dropping or picking them, closes the Exchange, and tells the agent the platform closed it.
+8. Replying in place delivers the person's text to the asker exactly as written, with the images and files they attached by pasting, dropping or picking them, closes the Exchange, and tells the agent which ask it answers, by intent and id, and that the platform closed it.
 9. "Open thread" navigates to the asker's thread; an ask resolved there stays open until the agent withdraws it, and then leaves the inbox.
 10. A replied item moves to the collapsed Replied shelf and is no longer counted.
 11. An ask whose sender is archived leaves the inbox immediately, with no terminal row.
@@ -103,4 +103,5 @@ The inbox is **not** a backlog (a non-blocking note an agent wants to keep is a 
 - 2026-10-27 — archiving a Crew files one worktree cleanup item for the J5-created worktrees it keeps with unfinished work (AC18–AC22; [#749](https://github.com/Jacksondr5/j5code/issues/749); Crews proposal v2).
 - 2026-11-01 — the mobile app has the Inbox: a bell with the open count in the thread list's header, and asks read and answered in place, across every connected server; Crew requests and seat approvals join it with Crews on mobile (Jackson, [#830](https://github.com/Jacksondr5/j5code/issues/830)).
 - 2026-11-02 — the cleanup item belongs to one archive of a Crew and goes away when the Crew comes back; it is not offered for commits its branch does not hold; the recheck covers staged content; only Owners are shown and counted it, and the count line names it apart from questions (AC18, AC20, AC21; review of [#749](https://github.com/Jacksondr5/j5code/issues/749)).
+- 2026-11-04 — several open asks and follow-ups built ([#111](https://github.com/Jacksondr5/j5code/issues/111)). A folded item counts its follow-ups, a Crew alert's later failures are follow-ups rather than one rewritten message, and a reply tells the agent which ask it answers (AC8).
 - 2026-11-05 — an answer carries the images and files attached to it, on web first; the mobile app follows (AC8; Jackson, [#926](https://github.com/Jacksondr5/j5code/issues/926)).

@@ -89,6 +89,14 @@ export const J5SendMessageInput = Schema.Struct({
   client_request_id: Schema.optional(Schema.NullOr(Schema.String.check(Schema.isNonEmpty()))),
   expect_reply: Schema.optional(Schema.NullOr(Schema.Boolean)),
   exchange_id: Schema.optional(Schema.NullOr(ExchangeId)),
+  regarding: Schema.optional(
+    Schema.NullOr(
+      ExchangeId.annotate({
+        description:
+          "An ask you have open with this person. The message joins it and is shown beneath it, in place of a new ask.",
+      }),
+    ),
+  ),
   intent: Schema.optional(
     Schema.NullOr(
       Schema.String.check(Schema.isNonEmpty()).annotate({

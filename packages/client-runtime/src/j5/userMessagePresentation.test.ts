@@ -216,6 +216,15 @@ describe("unrecognized envelopes fall back to upstream's row", () => {
     expect(presentJ5UserMessage({ id: deliveryId("x"), role: "user", text: peerAsk })).toBeNull();
   });
 
+  it("leaves the agent's line about which ask out of a person's reply", () => {
+    const reply = envelope(
+      "[Message from Jackson (owner) (human:viewer)]",
+      'Call Acme first.\n\nThis answers your ask "Who first?" (exchange:one).',
+      closedInstruction,
+    );
+    expect(presentJ5UserMessage(personReply(reply))).toMatchObject({ text: "Call Acme first." });
+  });
+
   it("returns null for the older v6 human template", () => {
     const v6 = [
       "[Message from the human]",

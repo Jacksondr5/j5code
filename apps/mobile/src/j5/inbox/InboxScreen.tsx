@@ -2,6 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   answeredByLine,
   closedLine,
+  followUpCountLabel,
   j5SourceNotice,
   mergeHumanInboxSources,
   type PresentedHumanInboxItem,
@@ -248,12 +249,25 @@ function InboxItem(props: {
           item={item}
           labels={props.labels}
           showEnvironment={props.showEnvironment}
-          trailing={props.closed === undefined ? `open ${relativeTime(item.openedAt)}` : null}
+          trailing={
+            [
+              props.closed === undefined ? `open ${relativeTime(item.openedAt)}` : null,
+              followUpCountLabel(item),
+            ]
+              .filter((part) => part !== null)
+              .join(" · ") || null
+          }
         />
       </Pressable>
       {expanded ? (
         <View className="mt-3 gap-3 border-t border-border-subtle pt-3">
           <InboxMessage markdown={item.message} />
+          {item.followUps?.map((followUp) => (
+            <View className="gap-1" key={followUp.messageId}>
+              <Text className="text-xs font-t3-medium text-foreground-muted">Follow-up</Text>
+              <InboxMessage markdown={followUp.message} />
+            </View>
+          ))}
           {/* Above the answer box, so it stays in view whenever the box is: iOS scrolls only the
               focused box itself clear of the keyboard. */}
           <View className="flex-row flex-wrap items-center justify-between gap-2">

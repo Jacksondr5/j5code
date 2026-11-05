@@ -414,6 +414,8 @@ export const SendMessageInput = Schema.Struct({
   message: Schema.String.check(Schema.isNonEmpty()),
   expectReply: Schema.optional(Schema.Boolean),
   exchangeId: Schema.optional(ExchangeId),
+  /** An open ask to a person that this message follows up on. */
+  regarding: Schema.optional(ExchangeId),
   intent: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
   urgency: Schema.optional(Urgency),
   acceptedAt: Schema.String,
@@ -533,6 +535,10 @@ export const HumanInboxItem = Schema.Struct({
   intent: Schema.String,
   urgency: Urgency,
   message: Schema.String,
+  /** What the agent added to this ask, oldest first; absent when it added nothing. */
+  followUps: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ messageId: Schema.String, message: Schema.String })),
+  ),
   openedAt: Schema.String,
   status: Schema.Literals(["open", "answered"]),
   terminalAt: Schema.NullOr(Schema.String),

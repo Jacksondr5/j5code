@@ -139,6 +139,17 @@ export function AdjudicationDock(props: {
     setPending(false);
   };
 
+  const questionText = (text: string) => (
+    <div className={expanded.has(shown.exchangeId) ? "text-sm" : "line-clamp-3 text-sm"}>
+      <ChatMarkdown
+        cwd={undefined}
+        environmentId={environmentId}
+        lineBreaks={shouldPreserveAssistantLineBreaks(text)}
+        text={text}
+        threadRef={threadRef}
+      />
+    </div>
+  );
   return (
     <ComposerBanner.Attachment>
       <ComposerBanner.Root density="comfortable" data-testid="adjudication-dock">
@@ -151,16 +162,15 @@ export function AdjudicationDock(props: {
             </Badge>
           </div>
           <h3 className="text-sm font-semibold leading-snug text-foreground">{shown.intent}</h3>
-          <div className={expanded.has(shown.exchangeId) ? "text-sm" : "line-clamp-3 text-sm"}>
-            <ChatMarkdown
-              cwd={undefined}
-              environmentId={environmentId}
-              lineBreaks={shouldPreserveAssistantLineBreaks(shown.message)}
-              text={shown.message}
-              threadRef={threadRef}
-            />
-          </div>
-          {hasMoreThanExcerpt(shown.message) ? (
+          {questionText(shown.message)}
+          {shown.followUps?.map((followUp) => (
+            <div className="flex flex-col gap-1" key={followUp.messageId}>
+              <p className="text-xs font-medium text-muted-foreground">Follow-up</p>
+              {questionText(followUp.message)}
+            </div>
+          ))}
+          {hasMoreThanExcerpt(shown.message) ||
+          shown.followUps?.some((followUp) => hasMoreThanExcerpt(followUp.message)) ? (
             <Button
               className="w-fit"
               onClick={() =>

@@ -10,6 +10,7 @@ import {
 import type { J5ReadSource } from "./readSources.ts";
 import {
   answeredByLine,
+  followUpCountLabel,
   closedLine,
   inboxBellPresentation,
   mergeHumanInboxSources,
@@ -185,6 +186,13 @@ describe("what a kept item says", () => {
       "No longer open",
     );
   });
+});
+
+it("says how many follow-ups a folded item holds", () => {
+  expect(followUpCountLabel({})).toBeNull();
+  const followUp = { messageId: "message:one", message: "More." };
+  expect(followUpCountLabel({ followUps: [followUp] })).toBe("1 follow-up");
+  expect(followUpCountLabel({ followUps: [followUp, followUp] })).toBe("2 follow-ups");
 });
 
 describe("who answered an ask", () => {

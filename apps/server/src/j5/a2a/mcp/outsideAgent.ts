@@ -146,12 +146,13 @@ export const sendAsOutsideAgent = Effect.fn("j5.a2a.mcp.sendAsOutsideAgent")(fun
   if (
     input.expect_reply === true ||
     input.exchange_id != null ||
+    input.regarding != null ||
     input.intent != null ||
     input.urgency != null
   ) {
     return yield* new J5OutsideAgentToolError({
       state:
-        "An outside agent sends plain messages only. It cannot receive a reply, so expect_reply, exchange_id, intent and urgency are refused.",
+        "An outside agent sends plain messages only. It cannot receive a reply, so expect_reply, exchange_id, regarding, intent and urgency are refused.",
       nextCommand: "Retry j5_send_message without them.",
     });
   }

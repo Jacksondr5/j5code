@@ -41,6 +41,10 @@ export const HumanInboxItem = Schema.Struct({
   intent: Schema.String,
   urgency: Schema.Literals(["blocking", "soon", "fyi"]),
   message: Schema.String,
+  /** What the agent added to this ask, oldest first; absent when it added nothing. */
+  followUps: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ messageId: Schema.String, message: Schema.String })),
+  ),
   openedAt: Schema.String,
   status: Schema.Literals(["open", "answered"]),
   terminalAt: Schema.NullOr(Schema.String),

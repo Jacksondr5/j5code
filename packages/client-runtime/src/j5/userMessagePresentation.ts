@@ -269,6 +269,8 @@ export function parseJ5AgentEnvelope(text: string): AgentEnvelope | null {
 // parentheses. The level is the agent's to read and is not shown (Shared conversations AC16).
 const HUMAN_NAMED_HEADER = /^\[Message from ([^\]\n]+) \((human:[^\]\s()]+)\)\]\n\n/;
 const WRITER_LEVEL_TAG = / \((?:owner|collaborator)\)$/;
+// The line a reply carries for the agent, saying which of its asks this answers.
+const ANSWERED_ASK_LINE = /\n\nThis answers your ask "[^\n]*" \([^\n]*\)\.$/;
 
 function parseHumanEnvelope(text: string) {
   // #11 c487cf8's exact template, whose whole header is the sender's id; stored replies and a
@@ -285,7 +287,7 @@ function parseHumanEnvelope(text: string) {
     parts !== null &&
     parseKnownInstruction({ senderId, instruction: parts.instruction })?.exchange === "closed"
   ) {
-    return { senderId, senderName, letter: parts.letter };
+    return { senderId, senderName, letter: parts.letter.replace(ANSWERED_ASK_LINE, "") };
   }
 
   const markerIndex = content.lastIndexOf(HUMAN_DELIVERY_MARKER);

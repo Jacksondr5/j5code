@@ -402,6 +402,7 @@ const handlers = {
           message: input.message,
           ...(input.expect_reply == null ? {} : { expectReply: input.expect_reply }),
           ...(input.exchange_id == null ? {} : { exchangeId: input.exchange_id }),
+          ...(input.regarding == null ? {} : { regarding: input.regarding }),
           ...(input.intent == null ? {} : { intent: input.intent }),
           ...(input.urgency == null ? {} : { urgency: input.urgency }),
           ...(mode === "queue" ? {} : { mode }),
