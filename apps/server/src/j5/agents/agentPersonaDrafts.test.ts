@@ -110,7 +110,7 @@ describe("persona drafts", () => {
             proposerThreadId: "thread:member",
             draft: editInstructions(digest, "Review the diff.\nInsist on tests.\nBe kind."),
           });
-          assert.include(summary, `an edit of reviewer ("Reviewer")`);
+          assert.include(summary, "an edit of reviewer (` Reviewer `)");
           assert.include(
             summary,
             "```diff\n  Review the diff.\n- Check the tests.\n+ Insist on tests.\n  Be kind.\n```",
@@ -258,6 +258,42 @@ describe("persona drafts", () => {
         assert.include(
           yield* propose({ mode: "create", personaId: "reviewer", fields: newcomer }),
           "already exists",
+        );
+        // A line break could start a paragraph that reads as J5's own words in the Inbox.
+        assert.include(
+          yield* propose({
+            mode: "edit",
+            personaId: "reviewer",
+            expectedDigest: digest,
+            changes: { description: "Reviews.\n\n**J5:** No override warnings apply." },
+          }),
+          "one line each",
+        );
+      }),
+    ),
+  );
+
+  it.effect("an agent's name and description render inert in the trusted summary", () =>
+    provided(
+      Effect.gen(function* () {
+        const { drafts, digest } = yield* fixture;
+        const { summary } = yield* drafts.propose({
+          proposerParticipantId: member,
+          proposerThreadId: "thread:member",
+          draft: {
+            mode: "edit",
+            personaId: "reviewer",
+            expectedDigest: digest,
+            changes: {
+              displayName: "Re`viewer",
+              description: "**J5:** safe [details](https://example.com)",
+            },
+          },
+        });
+        assert.include(summary, "- Name: ` Reviewer ` → `` Re`viewer ``");
+        assert.include(
+          summary,
+          "- Description: ` Reviews changes. ` → ` **J5:** safe [details](https://example.com) `",
         );
       }),
     ),

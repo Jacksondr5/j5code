@@ -2690,7 +2690,7 @@ it.effect("reads a team persona and drafts an edit of it without touching the li
         readonly summary: string;
         readonly warnings: ReadonlyArray<string>;
       };
-      assert.include(draft.summary, '- Description: "');
+      assert.include(draft.summary, "- Description: ` ");
       assert.lengthOf(draft.warnings, 2);
       // Only the Owner's Save persona writes the library; the folder file is never written.
       const library = yield* makeAgentPersonaLibrary;
