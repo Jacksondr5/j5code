@@ -209,11 +209,19 @@ const payloadFor = (input: ArchiveCrewInput, facts: ArchiveCrewConsequenceFacts)
   })),
 });
 
-/** The seats whose threads exist; a seat that never came to exist has no worktree to look at. */
-const createdSeats = (facts: ArchiveCrewConsequenceFacts) =>
-  facts.members
+/**
+ * The worktrees an archive looks at: each seat whose thread exists (one that never came to exist
+ * has none), and each member the Captain replaced, whose worktree was made for this Crew too.
+ */
+const cleanupSeats = (instance: AgentCrewInstance, facts: ArchiveCrewConsequenceFacts) => [
+  ...facts.members
     .filter((member) => !member.neverCreated)
-    .map((member) => ({ seatName: member.seatName, threadId: member.threadId }));
+    .map((member) => ({ seatName: member.seatName, threadId: member.threadId })),
+  ...(instance.replaced ?? []).map((member) => ({
+    seatName: member.seatName,
+    threadId: member.threadId,
+  })),
+];
 
 /** Who the worktree approval is filed for. */
 const approvalCrew = (instance: AgentCrewInstance, archivedAt: string) => ({
@@ -415,7 +423,7 @@ export const layer = Layer.effect(
                 ? ("never_created" as const)
                 : ("already_archived" as const),
             })),
-            seats: createdSeats(facts),
+            seats: cleanupSeats(instance, facts),
             crew: approvalCrew(instance, input.archivedAt),
             sessions: [] as ReadonlyArray<CrewSeatSession>,
           };
@@ -502,7 +510,7 @@ export const layer = Layer.effect(
         return {
           status: "archived" as const,
           members: results,
-          seats: createdSeats(facts),
+          seats: cleanupSeats(instance, facts),
           crew: approvalCrew(instance, input.archivedAt),
           sessions,
         };

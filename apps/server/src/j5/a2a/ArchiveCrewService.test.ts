@@ -89,6 +89,8 @@ const fixture = Effect.gen(function* () {
   const unreadableSeat = yield* Ref.make<ParticipantId | null>(null);
   const marked = yield* Ref.make<ReadonlyArray<string>>([]);
   const crewArchivedAt = yield* Ref.make<string | null>(null);
+  // Members the Captain replaced: off the roster, but their worktrees were made for this Crew.
+  const replaced = yield* Ref.make<NonNullable<AgentCrewInstance["replaced"]>>([]);
   // The order of cancels and retired stamps, so a test can see the run ends before the stamp.
   const lifecycle = yield* Ref.make<ReadonlyArray<string>>([]);
   // What cleanup was asked about, and what it reports back.
@@ -165,8 +167,10 @@ const fixture = Effect.gen(function* () {
         Layer.mock(AgentCrewInstanceService)({
           serialize: (_id, effect) => effect,
           read: (id) =>
-            Ref.get(crewArchivedAt).pipe(
-              Effect.map((archivedAt) => (id === instance.id ? { ...instance, archivedAt } : null)),
+            Effect.all([Ref.get(crewArchivedAt), Ref.get(replaced)]).pipe(
+              Effect.map(([archivedAt, gone]) =>
+                id === instance.id ? { ...instance, archivedAt, replaced: gone } : null,
+              ),
             ),
           markArchived: (id, archivedAt) =>
             Effect.all(
@@ -210,6 +214,7 @@ const fixture = Effect.gen(function* () {
   return {
     layer,
     input,
+    replaced,
     archived,
     failSeat,
     unreadableSeat,
@@ -607,6 +612,36 @@ it.effect("a failed archive removes nothing", () =>
         .pipe(Effect.flip);
       assert.instanceOf(failure, ArchiveCrewPartialFailureError);
       assert.lengthOf(yield* Ref.get(cleanedSeats), 0);
+    }).pipe(Effect.provide(layer));
+  }),
+);
+
+it.effect("looks at a replaced member's worktree too, without archiving its thread", () =>
+  Effect.gen(function* () {
+    const { layer, input, replaced, archived, cleanedSeats } = yield* fixture;
+    const oldCritic = ThreadId.make("t:old-critic");
+    yield* Ref.set(replaced, [
+      {
+        seatName: "critic",
+        agentId: "critic",
+        participantId: ParticipantId.make("agent:j5:a2a:thread:old-critic"),
+        threadId: oldCritic,
+        playbookStepIds: [],
+        replacedBySeat: "critic",
+        replacedByParticipantId: critic,
+        replacedAt: "2026-09-09T16:30:00.000Z",
+      },
+    ]);
+    yield* Effect.gen(function* () {
+      const service = yield* ArchiveCrewService;
+      yield* service.archive(input({ callerParticipantId: null, confirmationSatisfied: true }));
+      assert.deepStrictEqual(yield* Ref.get(cleanedSeats), [
+        [ThreadId.make("t:b"), ThreadId.make("t:c"), oldCritic],
+      ]);
+      assert.deepStrictEqual(
+        (yield* Ref.get(archived)).map(({ target }) => target.threadId),
+        [ThreadId.make("t:b"), ThreadId.make("t:c")],
+      );
     }).pipe(Effect.provide(layer));
   }),
 );
