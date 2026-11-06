@@ -33,6 +33,7 @@ An agent learns what it can do from its tools, and it reads a tool's description
 | `regarding`         | ExchangeId        | no                                   | Follow up on an open Exchange you opened with this person; the message joins it                                                      |
 | `exchange_id`       | ExchangeId        | no                                   | Marks this send as the reply that closes that Exchange                                                                               |
 | `escalation_id`     | string            | no                                   | Only on a new ask to a person: a refused persona launch, the caller's or a member's; an id already on the `regarding` ask is ignored |
+| `persona_draft_id`  | string            | no                                   | Only on a new ask to a person, not with `regarding`: a persona draft, the caller's or a member's; never with `escalation_id`         |
 | `client_request_id` | string            | no                                   | Reuse to retry safely                                                                                                                |
 | `mode`              | SendMode          | no                                   | `queue` (the default), `steer` or `restart`: how it lands on a mid-turn agent                                                        |
 | `attachments`       | attachment list   | no                                   | One to eight files for an agent on this server                                                                                       |
@@ -215,6 +216,14 @@ Use `action: "unarchive"` to restore the same identity. Old Exchanges remain clo
 Lists the personas in the selected environment before choosing one for delegation, a Crew roster, or a Peer Agent spawn. It reports each persona's purpose, access level, and whether it can start now.
 
 Named `list_agents` until 2026-09-17. It has no inputs. Each persona returns its ordered `entries`: an index, the declared provider/model/options target, its effective `modelSelection` when eligible, and per-entry rejection codes. Legacy driver-wide entries report the provider instance that would serve them when one is available. `selected_entry_index` identifies the first eligible entry and is null when the persona is blocked or disabled. The listing uses the same eligibility rules as launch and Agent Setup, including known account-wide provider usage limits.
+
+### `j5_read_persona`
+
+Reads one listed persona before an agent drafts an edit of it: the definition as **Export YAML** writes it, the `digest` an edit needs, its `origin` (`folder` or `imported`), `folder_file` (the folder file it comes from or overrides), `overrides_folder`, and `disabled`. A removed or unknown persona is refused. Read-only.
+
+### `j5_propose_persona`
+
+Drafts a persona for an Owner to save ([Editing in conversation](../agent-personas/index.md#editing-in-conversation)). `mode` is `create`, with `persona_id`, `display_name`, `description`, `instructions`, `access` and `models` all required, or `edit`, with `persona_id`, the read's `expected_digest`, and only the fields that change; `independent_reviewer` is optional in both. It validates like Settings and returns `draft_id`, the `summary` the ask will carry, and `warnings` (the two override warnings for a folder persona). It writes nothing to the library; the agent then asks the person with `persona_draft_id`. An outside agent can't ask, so it is refused. No agent tool removes, restores, switches on or off, or saves a persona, and none changes folders.
 
 ### `j5_propose_crew`
 
@@ -558,5 +567,6 @@ run; `j5_stop_crew` doesn't, and unarchiving doesn't restart it.
 - 2026-11-03 — persona listings report every ordered model entry and spawn matching permits supported reasoning when the entry leaves it unspecified ([#778](https://github.com/Jacksondr5/j5code/issues/778)).
 - 2026-11-04 — `regarding` and the several-asks rule built on `j5_send_message`, and added to its description ([#111](https://github.com/Jacksondr5/j5code/issues/111)).
 - 2026-11-06 — independent reviewer personas prefer a model their authors didn't run on: `j5_spawn_agent` takes `author_threads` and, with a persona, leaves provider and model optional; `delegate_task` takes `authorThreads`; Crew seats and additions take `reviews`; `j5_list_personas` reports `independent_reviewer` ([#782](https://github.com/Jacksondr5/j5code/issues/782)).
+- 2026-11-06 — agents read a persona with `j5_read_persona`, draft a create or edit with `j5_propose_persona`, and ask with `persona_draft_id` for an Owner's Save persona ([#786](https://github.com/Jacksondr5/j5code/issues/786)).
 - 2026-11-06 — who picked a persona sets its limits: an agent's pick is held to Models for custom members and to its caller's effective access on every launch path, a person's pick is held to neither, and the assignment records the pick; AC44 ([#781](https://github.com/Jacksondr5/j5code/issues/781)).
 - 2026-11-07 — the agent tools after linked environments: `j5_stop_agent` retires for upstream's `t3_thread_interrupt`, whose `stop: true` is the full Stop, with J5's rule that a Captain may stop its own seats; `t3_thread_wait` is admitted again; `t3_thread_launch` is admitted to link sessions only, and threads it launches with `delegatedFrom` stay out of the ledger; the link tools are kept; `j5_list_participants` rows carry `thread_id`; `j5_spawn_agent` gains `environment_id` to start a Peer Agent on another J5 machine; a persona can be delegated to another J5 machine; a `delegate_task` child is called a delegate. AC6, AC9 and AC32 rewritten, AC39–AC43 added. The contract descriptions change when the tools do (Jackson, 2026-11-06 and 2026-11-07; [record](../../worklog/2026-11-07-agent-tool-boundary-session.md), [#952](https://github.com/Jacksondr5/j5code/issues/952)).
