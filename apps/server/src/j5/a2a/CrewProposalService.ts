@@ -521,6 +521,21 @@ export const layer = Layer.effect(
               "Pick an enabled persona from j5_list_personas, or ask the user to turn it on.",
           });
       }
+      // Reviewers resolve after every other seat, so one can't see another reviewer's model.
+      const isReviewer = (name: string) => {
+        const agentId = seats.find((other) => other.seat === name)?.agentId;
+        return catalog.definitions.some(
+          ({ id, independentReviewer }) => id === agentId && independentReviewer === true,
+        );
+      };
+      for (const seat of humanReview ? [] : seats) {
+        const reviewer = seat.reviews?.find(isReviewer);
+        if (reviewer !== undefined)
+          return yield* new CrewProposalRequestError({
+            detail: `Seat ${seat.seat} reviews "${reviewer}", another independent reviewer on this roster, whose model is chosen only after the seats it reviews.`,
+            nextStep: "Name the seats whose work it reviews in reviews, not other reviewers.",
+          });
+      }
       const plan = planCrewPlaybook({
         definition: playbook?.definition ?? null,
         seats,
