@@ -16,6 +16,7 @@ import type {
   AgentPersonaFolderGitStatus,
   AgentPersonaLibraryFolder,
   AgentPersonaOrigin,
+  AgentPersonaPickConstraint,
   AgentPersonaRouteAttempt,
   AgentPersonaRouteFailureCode,
   AgentPersonaUsage,
@@ -255,6 +256,12 @@ const ROUTE_FAILURE_TEXT: Readonly<Record<AgentPersonaRouteFailureCode, string>>
   "option-not-advertised": "model options are not offered by this provider",
   "model-not-eligible": "model or reasoning level is not checked in Models for custom members",
   "access-above-caller": "broader access than the agent picking it runs with",
+};
+
+/** The one limit "Allow this once" lifts, as the person reads it on the button. */
+export const ALLOW_ONCE_LIFTS: Readonly<Record<AgentPersonaPickConstraint, string>> = {
+  "model-not-eligible": "a model Models for custom members doesn't check",
+  "access-above-caller": "broader access than the agent asking runs with",
 };
 
 /** "Primary · Codex gpt-5.6-terra: model is not offered…" for each rejected route. */
