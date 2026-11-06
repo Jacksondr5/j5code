@@ -204,6 +204,39 @@ describe("persona drafts", () => {
     ),
   );
 
+  it.effect("a retry finishes a save that wrote the library but never marked the draft", () =>
+    provided(
+      Effect.gen(function* () {
+        const { library, drafts, digest } = yield* fixture;
+        const { draftId } = yield* drafts.propose({
+          proposerParticipantId: member,
+          proposerThreadId: "thread:member",
+          draft: editInstructions(digest, "Be strict."),
+        });
+        yield* drafts.linkAsk({ draftId, exchangeId: "exchange:crash" });
+        // The first press wrote the override, then the process died before the draft was marked.
+        yield* library.overrideSource({
+          personaId: "reviewer",
+          expectedDigest: digest,
+          displayName: reviewer.displayName,
+          description: reviewer.description,
+          instructions: "Be strict.",
+          access: "read-only",
+          modelRoute: [
+            { driver: ProviderDriverKind.make("codex"), model: "gpt-5", reasoningEffort: "high" },
+          ],
+        });
+        yield* drafts.save({ exchangeId: "exchange:crash", savedBy: "human:owner" });
+        assert.equal(
+          (yield* drafts.forExchanges(["exchange:crash"])).get("exchange:crash")?.status,
+          "saved",
+        );
+        // Recognized, not written a second time.
+        assert.equal((yield* library.read("reviewer")).version, reviewer.version + 1);
+      }),
+    ),
+  );
+
   it.effect("an approved create lands in the environment library", () =>
     provided(
       Effect.gen(function* () {
