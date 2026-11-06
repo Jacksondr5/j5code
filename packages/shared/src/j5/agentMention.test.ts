@@ -84,8 +84,18 @@ describe("agent mention syntax", () => {
           "> @persona:quoted",
           'He said "@persona:said" here',
           "me@persona:email",
+          "foo@persona:identifier",
+          "He said 'run @persona:single' earlier",
+          "Then \u2018@persona:curly\u2019 too",
         ].join("\n"),
       ),
     ).toEqual([]);
+  });
+  it("finds a mention after opening punctuation and beside apostrophes", () => {
+    expect(
+      mentionedPersonaIds(
+        "Please use (@persona:scout), [@persona:builder] or {@persona:critic}. Don't skip @persona:sentry, it's Bryant's call.",
+      ),
+    ).toEqual(["scout", "builder", "critic", "sentry"]);
   });
 });

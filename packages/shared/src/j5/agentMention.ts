@@ -26,10 +26,12 @@ export function detectAgentMention(token: string, start: number, end: number) {
   );
 }
 
-// Code, `>` quotes and double-quoted text name a persona without asking for it.
+// Code, `>` quotes and quoted text name a persona without asking for it. A single quote opens a
+// quote only where a word can't end before it, so apostrophes ("don't", "Bryant's") stay prose.
 const QUOTED_TEXT =
-  /```[\s\S]*?(?:```|(?![\s\S]))|`[^`\n]*`|^[ \t]*>.*$|"[^"\n]*"|\u201c[^\u201d\n]*\u201d/gmu;
-const PERSONA_MENTION = /(?<=^|\s)@persona:([a-z][a-z0-9]*(?:-[a-z0-9]+)*)(?![a-z0-9-])/gu;
+  /```[\s\S]*?(?:```|(?![\s\S]))|`[^`\n]*`|^[ \t]*>.*$|"[^"\n]*"|\u201c[^\u201d\n]*\u201d|(?<=^|[\s([{])(?:'[^'\n]*'|\u2018[^\u2019\n]*\u2019)(?=$|[\s.,;:!?)\]}])/gmu;
+// Opening punctuation may precede a mention; a letter or digit (an email, an identifier) may not.
+const PERSONA_MENTION = /(?<=^|[\s([{])@persona:([a-z][a-z0-9]*(?:-[a-z0-9]+)*)(?![a-z0-9-])/gu;
 
 /** Persona ids a message asks for with an unquoted `@persona:ID`, in order, without repeats. */
 export function mentionedPersonaIds(text: string): ReadonlyArray<string> {
