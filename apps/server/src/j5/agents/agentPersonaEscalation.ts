@@ -56,7 +56,7 @@ export const personaBlockText = (block: {
           `escalation_id: ${block.escalationId}.`,
           block.waivable === null
             ? "No single exception lets it run, so the cause must be fixed."
-            : `An Owner can allow it once past ${CONSTRAINT_TEXT[block.waivable]}.`,
+            : `An Owner can allow it once past ${CONSTRAINT_TEXT[block.waivable]}, with a button on your ask; a typed reply never allows it, so don't ask for one.`,
           "A Crew member tells its Captain the escalation_id; anyone else asks the person with j5_send_message (expect_reply, escalation_id) in a fresh ask, after clearing or settling any ask already open with them.",
           block.waivable === null
             ? ""
