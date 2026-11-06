@@ -19,14 +19,13 @@ import {
 } from "../../orchestration-v2/ThreadManagementService.ts";
 import { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
 import { prepareAgentPersonaLaunch } from "./agentPersonaLaunch.ts";
-import { makeAgentPersonaLibrary, type createAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
+import { makeAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
 import { translateAgentPersonaProviderPolicy } from "./agentPersonaProviderPolicy.ts";
 import { resolveAgentPersonaRuntime } from "./agentPersonaRuntime.ts";
+import type { AgentPersonaEntryEligibility } from "./agentPersonaRouting.ts";
 import { prepareAgentPersonaPeerSpawn } from "./agentPersonaSpawn.ts";
 import type { AgentPersonaId } from "./agentPersonas.ts";
 import { CrewMemberModels } from "./crewMemberModels.ts";
-
-type Library = ReturnType<typeof createAgentPersonaLibrary>;
 
 /** What an agent runs with: its runtime mode, and the persona sandbox that bounds it, if any. */
 export interface AgentAccess {
@@ -34,10 +33,14 @@ export interface AgentAccess {
   readonly sandbox?: "readOnly" | "workspaceWrite" | undefined;
 }
 
-/** Who launches the pick: an agent's thread, or an outside agent at its approved sign-in level. */
+/**
+ * Who launches the pick: an agent's thread, an outside agent at its approved sign-in level, or
+ * access already resolved for a caller that picks several times (a Crew's Captain).
+ */
 export type AgentPersonaPickCaller =
   | { readonly thread: Pick<OrchestrationV2AppThread, "agentPersonaAssignment" | "runtimeMode"> }
-  | { readonly approvedLevel: RuntimeMode };
+  | { readonly approvedLevel: RuntimeMode }
+  | { readonly access: AgentAccess };
 
 export type AgentPersonaPickSourceKind = "person" | "agent";
 
@@ -79,15 +82,18 @@ export const agentAccessOf = (policy: {
 }): AgentAccess => ({ runtimeMode: policy.runtimeMode, sandbox: policy.sandboxPolicy?.type });
 
 /** The caller's effective access: what its thread actually runs with, not its stored mode. */
-const callerAccess = (caller: AgentPersonaPickCaller, library: Library) =>
-  "approvedLevel" in caller
-    ? Effect.succeed<AgentAccess>({ runtimeMode: caller.approvedLevel })
-    : resolveAgentPersonaRuntime(caller.thread, library).pipe(
-        Effect.map(agentAccessOf),
-        Effect.mapError(
-          (error) => new AgentPersonaPickError({ message: error.message, constraint: null }),
-        ),
-      );
+export const resolveCallerAccess = Effect.fn("j5.agents.resolveCallerAccess")(function* (
+  caller: AgentPersonaPickCaller,
+) {
+  if ("access" in caller) return caller.access;
+  if ("approvedLevel" in caller) return { runtimeMode: caller.approvedLevel } satisfies AgentAccess;
+  return yield* resolveAgentPersonaRuntime(caller.thread, yield* makeAgentPersonaLibrary).pipe(
+    Effect.map(agentAccessOf),
+    Effect.mapError(
+      (error) => new AgentPersonaPickError({ message: error.message, constraint: null }),
+    ),
+  );
+});
 
 /**
  * The access limit on anything an agent picks: never more than the caller runs with, and nothing
@@ -98,8 +104,7 @@ export const assertWithinCallerAccess = Effect.fn("j5.agents.assertWithinCallerA
   child: AgentAccess,
   caller: AgentPersonaPickCaller,
 ) {
-  const library = yield* makeAgentPersonaLibrary;
-  const limit = yield* callerAccess(caller, library);
+  const limit = yield* resolveCallerAccess(caller);
   if (
     !broaderThan(child.runtimeMode, limit.runtimeMode) &&
     (limit.sandbox !== "readOnly" || child.sandbox === "readOnly")
@@ -109,13 +114,6 @@ export const assertWithinCallerAccess = Effect.fn("j5.agents.assertWithinCallerA
     constraint: "access-above-caller",
     message: `${subject} would run with ${accessLabel(child)}, which is broader than the ${accessLabel(limit)} its caller runs with. An agent can only start workers within its own access.`,
   });
-});
-
-/** The caller's effective access as a runtime mode for a worker with no sandbox of its own. */
-export const callerRuntimeMode = Effect.fn("j5.agents.callerRuntimeMode")(function* (
-  caller: AgentPersonaPickCaller,
-) {
-  return (yield* callerAccess(caller, yield* makeAgentPersonaLibrary)).runtimeMode;
 });
 
 const libraryRefusal = (error: {
@@ -141,12 +139,14 @@ export const pickAgentPersona = Effect.fn("j5.agents.pickAgentPersona")(function
   };
   /** An access mode chosen for the worker in place of the persona's own (a Crew seat's). */
   readonly runtimeMode?: RuntimeMode | undefined;
+  /** The project's lists, already read by a caller that picks several times. */
+  readonly eligible?: AgentPersonaEntryEligibility | undefined;
 }) {
   const library = yield* makeAgentPersonaLibrary;
   const providers = yield* (yield* ProviderRegistry).getProviders;
   const agentPick = input.source === "agent";
   const eligible = agentPick
-    ? yield* (yield* CrewMemberModels).eligibility(input.projectId)
+    ? (input.eligible ?? (yield* (yield* CrewMemberModels).eligibility(input.projectId)))
     : undefined;
   const pinned = input.pinned;
   const assignment: OrchestrationV2AgentPersonaCommandAssignment =

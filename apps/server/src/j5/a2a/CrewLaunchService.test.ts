@@ -2929,6 +2929,56 @@ it.effect(
     }).pipe(Effect.scoped),
 );
 
+it.effect("an automatic roster reads the project's lists once, however many seats it has", () =>
+  Effect.gen(function* () {
+    const { context, commands, captain } = yield* fixture;
+    const reads = yield* Ref.make(0);
+    const counted = Layer.mock(CrewMemberModels)({
+      assertEligible: () => Effect.void,
+      eligibility: () => Ref.update(reads, (count) => count + 1).pipe(Effect.as(() => true)),
+    });
+    const providers = [
+      codexModels("gpt-5.6-sol", "gpt-5.6-terra"),
+      provider("claudeAgent", "claudeAgent", [{ slug: "claude-opus-5", options: ["high"] }]),
+    ];
+    const layer = crewLaunchLayer.pipe(
+      Layer.provideMerge(
+        dependencies(
+          commands,
+          providers,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          counted,
+        ),
+      ),
+      Layer.provideMerge(Layer.succeedContext(context)),
+      Layer.provideMerge(personaLibraryLayer("j5-crew-reads-", launchablePersonas)),
+      Layer.provideMerge(NodeServices.layer),
+    );
+    yield* Effect.gen(function* () {
+      const launcher = yield* CrewLaunchService;
+      const seat = (name: string) => ({
+        workspace: { type: "shared" as const },
+        name,
+        agentId: "scout",
+        reason: "Finds evidence",
+      });
+      const resolved = yield* launcher.resolveSeats(
+        captain,
+        [seat("scout-a"), seat("scout-b"), seat("scout-c"), customSeat("notes")],
+        "agent",
+      );
+      assert.lengthOf(resolved, 4);
+      assert.equal(yield* Ref.get(reads), 1);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
 const codexLevel = (level: string) => ({ instanceId: ProviderInstanceId.make("codex"), level });
 const solAt = (value: string) => ({ ...sol, options: [{ id: "reasoningEffort", value }] });
 const terraAt = (value: string) => ({ ...terra, options: [{ id: "reasoningEffort", value }] });
