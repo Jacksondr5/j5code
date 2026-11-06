@@ -1,5 +1,6 @@
 import { useAtomValue } from "@effect/atom-react";
-import type { AgentPersonaPickConstraint, EnvironmentId } from "@t3tools/contracts";
+import { ALLOW_ONCE_LIFTS } from "@t3tools/client-runtime/j5/agent-personas";
+import type { EnvironmentId } from "@t3tools/contracts";
 import { useRef, useState } from "react";
 
 import { Button } from "../../components/ui/button";
@@ -7,11 +8,6 @@ import { randomUUID } from "../../lib/utils";
 import { j5Environment } from "../state";
 import { allowPersonaOnce, type HumanInboxItem } from "./humanInboxClient";
 import { notifyHumanInboxChanged } from "./humanInboxRefresh";
-
-const LIFTS: Record<AgentPersonaPickConstraint, string> = {
-  "model-not-eligible": "a model Models for custom members doesn't check",
-  "access-above-caller": "broader access than the agent asking runs with",
-};
 
 /**
  * The Owner's answer to an ask escalating a blocked persona: it lets that one launch past the one
@@ -61,7 +57,7 @@ export function AllowPersonaOnceButton(props: {
         disabled={props.disabled || pending}
         onClick={() => void allow()}
         size={props.size}
-        title={`Lets ${escalation.personaId} start once on ${LIFTS[escalation.waivable]}. Later launches keep its usual limits.`}
+        title={`Lets ${escalation.personaId} start once on ${ALLOW_ONCE_LIFTS[escalation.waivable]}. Later launches keep its usual limits.`}
         type="button"
         variant="outline"
       >
