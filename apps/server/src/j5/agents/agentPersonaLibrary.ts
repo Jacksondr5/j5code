@@ -22,7 +22,7 @@ import * as Path from "effect/Path";
 import type { PlatformError } from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
-import { parseDocument, YAMLParseError, YAMLWarning } from "yaml";
+import { parseDocument, stringify as toYaml, YAMLParseError, YAMLWarning } from "yaml";
 
 import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
 import { ServerConfig } from "../../config.ts";
@@ -151,6 +151,9 @@ const reviewerFlag = (flag: boolean | undefined) =>
   flag === true ? { independentReviewer: true } : {};
 export const definitionDigest = (definition: AgentPersonaDefinition): string =>
   NodeCrypto.createHash("sha256").update(serializeDefinition(definition)).digest("hex");
+/** A definition as Export YAML writes it, which a persona folder loads as is. */
+export const definitionYaml = (definition: AgentPersonaDefinition): string =>
+  toYaml(definition, { lineWidth: 0 });
 
 /** Why a catalog cannot staff `id`, or null when it can; j5_propose_crew and playbooks share this. */
 export const personaCatalogProblem = (
@@ -165,6 +168,19 @@ export const personaCatalogProblem = (
     : catalog.disabledIds.includes(id)
       ? "disabled"
       : null;
+
+/** Whether a new persona's id is taken, by a listed, imported, or removed folder persona. */
+export const personaIdInUse = (
+  catalog: {
+    readonly definitions: ReadonlyArray<{ readonly id: string }>;
+    readonly importedIds: ReadonlyArray<string>;
+    readonly removedSources: ReadonlyArray<{ readonly id: string }>;
+  },
+  id: string,
+) =>
+  catalog.importedIds.includes(id) ||
+  catalog.definitions.some((definition) => definition.id === id) ||
+  catalog.removedSources.some((definition) => definition.id === id);
 
 /** Source folders are read on catalog requests and launches; running tasks use immutable snapshots. */
 export function createAgentPersonaLibrary(storage?: {
@@ -643,21 +659,11 @@ export function createAgentPersonaLibrary(storage?: {
     return { importedIds: [...incoming.keys()] };
   }, importPermit.withPermit);
 
-  const editImported = Effect.fn("AgentPersonaLibrary.editImported")(function* (
+  /** The definition an edit saves: the next version, with Settings' fields replaced. */
+  const editedDefinition = Effect.fn("AgentPersonaLibrary.editedDefinition")(function* (
+    original: AgentPersonaDefinition,
     input: AgentPersonaEditInput,
   ) {
-    const imported = yield* readImports();
-    const current = imported.find(({ id }) => id === input.personaId);
-    if (current === undefined)
-      return yield* new AgentPersonaLibraryError({
-        message: "Imported agent no longer exists. Refresh the library.",
-      });
-    const original = yield* Effect.try(() => decodeAgentPersonaDefinition(current));
-    if (definitionDigest(original) !== input.expectedDigest)
-      return yield* new AgentPersonaLibraryError({
-        message:
-          "This agent changed in another session. Close the editor, refresh the library, and try again.",
-      });
     const { independentReviewer: storedFlag, ...kept } = original;
     const updated = yield* Effect.try(() =>
       decodeAgentPersonaDefinition({
@@ -679,6 +685,25 @@ export function createAgentPersonaLibrary(storage?: {
     const encoded = yield* encodeDefinition(updated);
     if (new TextEncoder().encode(encoded).byteLength > AGENT_PERSONA_IMPORT_MAX_BYTES)
       return yield* new AgentPersonaLibraryError({ message: "Persona definition exceeds 64 KiB." });
+    return updated;
+  });
+
+  const editImported = Effect.fn("AgentPersonaLibrary.editImported")(function* (
+    input: AgentPersonaEditInput,
+  ) {
+    const imported = yield* readImports();
+    const current = imported.find(({ id }) => id === input.personaId);
+    if (current === undefined)
+      return yield* new AgentPersonaLibraryError({
+        message: "Imported agent no longer exists. Refresh the library.",
+      });
+    const original = yield* Effect.try(() => decodeAgentPersonaDefinition(current));
+    if (definitionDigest(original) !== input.expectedDigest)
+      return yield* new AgentPersonaLibraryError({
+        message:
+          "This agent changed in another session. Close the editor, refresh the library, and try again.",
+      });
+    const updated = yield* editedDefinition(original, input);
     yield* writeImports(
       imported.map((definition) =>
         definition.id === input.personaId
@@ -691,24 +716,38 @@ export function createAgentPersonaLibrary(storage?: {
     );
   }, importPermit.withPermit);
 
-  /** Personal agents become imported definitions: editable, switchable, and removable like any import. */
-  const createPersona = Effect.fn("AgentPersonaLibrary.createPersona")(function* (
+  /**
+   * Save an edit of a folder persona as an environment override: an imported copy with the same
+   * id, on or off as the folder persona was. The folder file is never written.
+   */
+  const overrideSource = Effect.fn("AgentPersonaLibrary.overrideSource")(function* (
+    input: AgentPersonaEditInput,
+  ) {
+    const current = yield* catalog();
+    const source = current.definitions.find(({ id }) => id === input.personaId);
+    if (
+      source === undefined ||
+      current.importedIds.includes(input.personaId) ||
+      !current.sourcePaths.has(input.personaId)
+    )
+      return yield* new AgentPersonaLibraryError({
+        message: `${input.personaId} is no longer a folder persona in this environment.`,
+      });
+    if (definitionDigest(source) !== input.expectedDigest)
+      return yield* new AgentPersonaLibraryError({
+        message: `The folder persona ${input.personaId} changed since it was read.`,
+      });
+    const updated = yield* editedDefinition(source, input);
+    yield* writeImports([
+      ...(yield* readImports()),
+      { ...updated, enabled: !current.disabledIds.includes(input.personaId) },
+    ]);
+  }, importPermit.withPermit);
+
+  /** The definition a create saves, at version 1. */
+  const createdDefinition = Effect.fn("AgentPersonaLibrary.createdDefinition")(function* (
     input: AgentPersonaCreateInput,
   ) {
-    if (storage === undefined)
-      return yield* new AgentPersonaLibraryError({
-        message: "Persona import storage is unavailable.",
-      });
-    const current = yield* catalog();
-    if (
-      current.importedIds.includes(input.id) ||
-      current.definitions.some(({ id }) => id === input.id) ||
-      current.removedSources.some(({ id }) => id === input.id)
-    ) {
-      return yield* new AgentPersonaLibraryError({
-        message: `An agent with the ID "${input.id}" already exists. Choose another ID.`,
-      });
-    }
     const definition = yield* Effect.try(() =>
       decodeAgentPersonaDefinition({
         id: input.id,
@@ -728,6 +767,24 @@ export function createAgentPersonaLibrary(storage?: {
     const encoded = yield* encodeDefinition(definition);
     if (new TextEncoder().encode(encoded).byteLength > AGENT_PERSONA_IMPORT_MAX_BYTES)
       return yield* new AgentPersonaLibraryError({ message: "Persona definition exceeds 64 KiB." });
+    return definition;
+  });
+
+  /** Personal agents become imported definitions: editable, switchable, and removable like any import. */
+  const createPersona = Effect.fn("AgentPersonaLibrary.createPersona")(function* (
+    input: AgentPersonaCreateInput,
+  ) {
+    if (storage === undefined)
+      return yield* new AgentPersonaLibraryError({
+        message: "Persona import storage is unavailable.",
+      });
+    const current = yield* catalog();
+    if (personaIdInUse(current, input.id)) {
+      return yield* new AgentPersonaLibraryError({
+        message: `An agent with the ID "${input.id}" already exists. Choose another ID.`,
+      });
+    }
+    const definition = yield* createdDefinition(input);
     yield* writeImports([...(yield* readImports()), { ...definition, enabled: true }]);
     return { personaId: definition.id };
   }, importPermit.withPermit);
@@ -906,7 +963,10 @@ export function createAgentPersonaLibrary(storage?: {
     readImportFiles,
     createPersona,
     read,
+    editedDefinition,
+    createdDefinition,
     editImported,
+    overrideSource,
     setImportedEnabled,
     setEnabled,
     removeImported,

@@ -106,6 +106,20 @@ export const AgentPersonaEscalationView = Schema.Struct({
 export type AgentPersonaEscalationView = typeof AgentPersonaEscalationView.Type;
 
 /**
+ * A persona create or edit an agent drafted, as an ask to the person shows it. "Save persona"
+ * writes it to the library while it is open; a saved draft is never saved again.
+ */
+export const AgentPersonaDraftView = Schema.Struct({
+  draftId: Schema.String,
+  personaId: Schema.String,
+  mode: Schema.Literals(["create", "edit"]),
+  /** An edit of a folder persona, which saves as an environment override. */
+  overridesFolder: Schema.Boolean,
+  status: Schema.Literals(["open", "saved"]),
+});
+export type AgentPersonaDraftView = typeof AgentPersonaDraftView.Type;
+
+/**
  * Who picked the persona, which sets its limits: a person's pick runs on its own models with its
  * saved access; an agent's is held to Models for custom members and the caller's access.
  */
