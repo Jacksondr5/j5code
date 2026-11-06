@@ -533,6 +533,63 @@ it.effect("lets a person switch a reviewer onto its author's model, and queues a
   }).pipe(Effect.provide(switchLayer(harness)), Effect.scoped);
 });
 
+it.effect("follows a queued switch onto the assignment when its run starts", () => {
+  const harness = switchHarness();
+  return Effect.gen(function* () {
+    const launches = yield* ThreadLaunch.ThreadLaunchService;
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    const launched = yield* launches.launch({
+      ...launchInput({ command: "command:switch:queued", thread: "thread:switch:queued" }),
+      agentPersona: { personaId: "scout" },
+    });
+    const threadId = launched.threadId;
+    const send = (id: string, modelSelection?: ModelSelection) =>
+      asPerson(
+        threads.dispatch({
+          type: "message.dispatch",
+          createdBy: "user",
+          creationSource: "web",
+          commandId: CommandId.make(`command:switch:queued:${id}`),
+          threadId,
+          messageId: MessageId.make(`message:switch:queued:${id}`),
+          text: id,
+          attachments: [],
+          ...(modelSelection === undefined ? {} : { modelSelection }),
+          dispatchMode: { type: "queue_after_active" },
+        }),
+      );
+    yield* send("first");
+    const opus = selection("claudeAgent", "claude-opus-5", "high");
+    yield* send("switch", opus);
+    // Stop ends the active run and holds the queue; resuming starts the queued run.
+    yield* threads.dispatch({
+      type: "thread.stop",
+      commandId: CommandId.make("command:switch:queued:stop"),
+      threadId,
+    });
+    yield* threads.dispatch({
+      type: "queue.resume",
+      commandId: CommandId.make("command:switch:queued:resume"),
+      threadId,
+    });
+    const projection = yield* threads.getThreadProjection(threadId);
+    assert.deepEqual(
+      projection.runs.map(({ status, modelSelection }) => [status, modelSelection.model]),
+      [
+        ["interrupted", "gpt-5.6-terra"],
+        ["starting", "claude-opus-5"],
+      ],
+    );
+    assert.deepEqual(projection.thread.modelSelection, opus);
+    assert.deepInclude(projection.thread.agentPersonaAssignment, {
+      resolvedModelSelection: opus,
+      resolvedDriver: ProviderDriverKind.make("claudeAgent"),
+      resolvedEntryIndex: 1,
+      modelSwitchedBy: "person",
+    });
+  }).pipe(Effect.provide(switchLayer(harness)), Effect.scoped);
+});
+
 const yamlPersonaFixture = (value: unknown) => yamlStringify(value);
 
 it.effect(
