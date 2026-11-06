@@ -328,6 +328,43 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
     );
   });
 
+  /**
+   * After a seat is replaced, hands a current step the old member held to its new owner, by
+   * reselecting it as `j5_playbook_reselect` does. A hand-off pending toward the old thread is
+   * skipped first so no drain sends it there; `requestKey` makes a retry replay. Null: nothing held.
+   */
+  const handOver = Effect.fn("j5.playbooks.playbookCrewRelay.handOver")(function* (input: {
+    readonly crewInstanceId: string;
+    readonly fromThreadId: ThreadId;
+    readonly requestKey: string;
+  }) {
+    return yield* withCrew(
+      input.crewInstanceId,
+      Effect.gen(function* () {
+        const active = yield* store.activeRunForCrew(input.crewInstanceId);
+        if (active === null) return null;
+        const landing = yield* store.latestLanding(active.runId, active.currentStepId);
+        if (
+          landing === null ||
+          landing.targetThreadId !== input.fromThreadId ||
+          landing.outcome === "captain"
+        )
+          return null;
+        if (landing.resolvedAt === null)
+          yield* store.resolveLanding(active.runId, landing.requestId, "skipped");
+        yield* drainLocked(active.runId);
+        const response = yield* store.mutate(active.ownerThreadId, {
+          runId: active.runId,
+          client_request_id: input.requestKey,
+          operation: "reselect",
+          expectedStepId: active.currentStepId,
+          stepId: active.currentStepId,
+        });
+        return yield* respond(response, input.requestKey);
+      }),
+    );
+  }, Effect.mapError(operationFailed));
+
   /** The run's live prompt and progress, with who holds a Crew-linked run's current step. */
   const current = Effect.fn("j5.playbooks.playbookCrewRelay.current")(function* (
     owner: ThreadId,
@@ -373,7 +410,7 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
     } satisfies NonNullable<FleetCrew["playbookRun"]>;
   });
 
-  return { start, mutate, current, deliver, drainRun, currentDelivery, fleetRun };
+  return { start, mutate, current, deliver, drainRun, currentDelivery, fleetRun, handOver };
 });
 
 export class PlaybookCrewRelay extends Context.Service<

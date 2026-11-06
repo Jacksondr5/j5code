@@ -144,6 +144,7 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
       { migration_id: 50, name: "CrewWorktrees" },
       { migration_id: 51, name: "CrewWorktreeCleanup" },
       { migration_id: 52, name: "PersonAsksStayDistinct" },
+      { migration_id: 53, name: "CrewSeatReplacement" },
     ]);
     assert.deepStrictEqual(
       migrationEntries.map(([id, name]) => [id, name]),
@@ -200,6 +201,7 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
         [50, "CrewWorktrees"],
         [51, "CrewWorktreeCleanup"],
         [52, "PersonAsksStayDistinct"],
+        [53, "CrewSeatReplacement"],
       ],
     );
   }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
@@ -1448,7 +1450,7 @@ it.effect("recreates earlier-shaped crews tables when 14 runs over them", () =>
       applied.map((row) => row.migration_id),
       [
         13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35,
-        36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52,
+        36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53,
       ],
     );
     const memberColumns = yield* sql<{ readonly name: string }>`

@@ -793,6 +793,7 @@ const handlers = {
               ...(input.runtime_mode === undefined ? {} : { runtimeMode: input.runtime_mode }),
               ...(input.steps === undefined ? {} : { steps: input.steps }),
               ...(input.reviews === undefined ? {} : { reviews: input.reviews }),
+              ...(input.replaces === undefined ? {} : { replaces: input.replaces }),
               workspace: spawnWorkspaceFromInput(input.workspace),
             },
             brief: input.brief ?? null,

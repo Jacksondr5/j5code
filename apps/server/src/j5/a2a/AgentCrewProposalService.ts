@@ -50,6 +50,8 @@ export const CrewProposalSeat = Schema.Struct({
   reviews: Schema.optionalKey(
     Schema.Array(bounded(CREW_NAME_MAX_CHARS)).check(Schema.isMaxLength(CREW_SEAT_CAP)),
   ),
+  /** Set only by a Captain's addition: the live seat this one takes over. */
+  replaces: Schema.optionalKey(bounded(CREW_NAME_MAX_CHARS)),
   /**
    * Where the seat works, as the Captain or the person chose it. Required at every door that
    * files or approves a seat. A stored one this version can't read, such as one written by another

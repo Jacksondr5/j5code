@@ -716,6 +716,18 @@ export function FleetRowItem(
           {props.captainOf !== undefined && props.captainOf.length > 0 ? (
             <CaptainMark title={`Commands ${props.captainOf.join(", ")}`} />
           ) : null}
+          {agent.replaced === undefined ? null : (
+            <Tooltip>
+              <TooltipTrigger
+                render={<span className="shrink-0 truncate text-xs text-muted-foreground" />}
+              >
+                Replaced by {agent.replaced.replacedBy}
+              </TooltipTrigger>
+              <TooltipPopup>
+                Was seat {agent.replaced.seat} of crew {agent.replaced.crewName}
+              </TooltipPopup>
+            </Tooltip>
+          )}
         </span>
         {/* A placement tree lives in one project, so only its root names it. */}
         {props.row.depth === 0 ? <ProjectLabel {...props} agent={agent} /> : <span />}

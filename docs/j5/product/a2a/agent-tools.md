@@ -299,7 +299,12 @@ their own configuration, held to the models that list checks and to no more acce
 with; a refusal names the limit. A persona marked independent_reviewer prefers a model none of the
 members it reviews runs on: every member that is not a reviewer, unless reviews names some.
 Optionally give a brief; otherwise the seat gets the Crew's brief. On a playbook Crew, steps may
-claim only unowned step ids from j5_playbook_read. The result returns the updated roster or refuses
+claim only unowned step ids from j5_playbook_read. To put a member's work on a different model,
+such as a reviewer whose model just wrote the work it will review, set replaces to that member's
+seat: the new member may reuse the seat name, and once it launches it takes over the seat's
+unfinished steps, gets any current step already handed to the old member, and is told where the
+old member's thread is. The replaced member is stopped and leaves the Crew, and its thread stays
+readable. If the new member fails to launch, nothing changes. The result returns the updated roster or refuses
 the seat with its name and reason; creation is reported separately here. The new member waits for
 its first assignment; send it with j5_send_message when the work is ready. Each member's configured
 access still controls tool approvals. Captain-only: a member sends the concern to its Captain with
@@ -316,10 +321,11 @@ fresh one for new work. Works under every approval policy, including approval po
 | `instructions`                    | string         | no       | Seat wiring text, verbatim                                                 |
 | `steps`                           | string[]       | no       | Playbook step ids no seat owns yet; only on a Crew that follows a playbook |
 | `reviews`                         | string[]       | no       | Independent reviewer personas only: the members it reviews                 |
+| `replaces`                        | string         | no       | A live member's seat this one replaces; never the Captain                  |
 | `workspace`                       | object         | yes      | Where the seat works; the same three choices as `j5_propose_crew`          |
 | `client_request_id`               | string         | no       | Supply and reuse to make retries safe                                      |
 
-Result: as `j5_propose_crew`. Only the Captain can add a seat. The member is added directly regardless of the auto-approval setting, with the same validation, model and capacity checks as a launch, so a custom seat on a model off the project's list is refused naming the seat, the model and the setting. The result returns the updated roster or a refusal naming the seat and reason; the launch report later records its startup outcome. Retries reuse the original request and cannot add a second copy. A refused automatic request repeats its original reason on retry; a revised request needs a new `client_request_id`. Existing pending addition requests remain human decisions above their Captain's composer, where they can still be approved or declined; additions never appear in the Inbox or its bell count. Member tool approvals remain in the Inbox.
+Result: as `j5_propose_crew`. Only the Captain can add a seat. The member is added directly regardless of the auto-approval setting, with the same validation, model and capacity checks as a launch, so a custom seat on a model off the project's list is refused naming the seat, the model and the setting. The result returns the updated roster or a refusal naming the seat and reason; the launch report later records its startup outcome. Retries reuse the original request and cannot add a second copy. With `replaces`, the new member launches first; only then does one write move the replaced seat's unfinished steps (the run's current step and every later one, or all its steps without an active run) and take the old member off the roster, which then interrupts its turn without a message and hands it a current step it held. A launch that fails moves nothing. An unknown seat, an already replaced one, or the Captain is refused; a retry finishes a stop or hand-off that didn't happen. A refused automatic request repeats its original reason on retry; a revised request needs a new `client_request_id`. Existing pending addition requests remain human decisions above their Captain's composer, where they can still be approved or declined; additions never appear in the Inbox or its bell count. Member tool approvals remain in the Inbox.
 
 ### Seat finish notices
 

@@ -51,6 +51,7 @@ import {
 import {
   AgentCrewInstanceService,
   CrewStepAlreadyOwnedError,
+  replacementProblem,
   type AgentCrewInstance,
 } from "./AgentCrewInstanceService.ts";
 import { j5AnalyticsRecorder } from "../analytics/recorder.ts";
@@ -180,7 +181,26 @@ export interface CrewAddSeatsInput {
   readonly onReserved?: (
     instance: AgentCrewInstance,
   ) => Effect.Effect<void, CrewLaunchOperationError>;
+  /**
+   * Set when the one added seat replaces a live seat. Nothing is reserved: the seat launches, and
+   * only a seat that was created is swapped in, so a failed launch moves nothing.
+   */
+  readonly replacement?: CrewSeatReplacement | undefined;
 }
+
+export interface CrewSeatReplacement {
+  readonly seatName: string;
+  /** The replaced seat's steps that move: the run's current step and every later one it owns. */
+  readonly movedStepIds: ReadonlyArray<string>;
+}
+
+/** The line a replacement's first turn carries about the seat it takes over. */
+const crewReplacementLine = (input: {
+  readonly seatName: string;
+  readonly model: string | null;
+  readonly threadId: string;
+}) =>
+  `You replace seat ${input.seatName}${input.model === null ? "" : `, which ran on ${input.model}`}. Its thread is ${input.threadId}; read it with t3_thread_read before continuing.`;
 
 /**
  * How one approved seat's launch went: `created` when its thread and home exist and it is waiting for work;
@@ -281,8 +301,8 @@ export interface CrewLaunchServiceShape {
     captain: CrewCaptain,
     seats: ReadonlyArray<CrewLaunchSeat>,
     pick: CrewSeatPick,
-    /** The Crew the seats join, for an addition: its members are authors a reviewer may review. */
-    crew?: Pick<AgentCrewInstance, "members"> | null,
+    /** The Crew the seats join, for an addition: its members, live or replaced, are authors a reviewer may review. */
+    crew?: Pick<AgentCrewInstance, "members" | "replaced"> | null,
   ) => Effect.Effect<ReadonlyArray<ResolvedCrewLaunchSeat>, CrewLaunchError>;
   /**
    * Each seat's workspace choice as it should be stored: a new worktree's base resolved to a
@@ -377,7 +397,7 @@ export const layer = Layer.effect(
       captain: CrewCaptain,
       seats: ReadonlyArray<CrewLaunchSeat>,
       pick: CrewSeatPick,
-      crew: Pick<AgentCrewInstance, "members"> | null,
+      crew: Pick<AgentCrewInstance, "members" | "replaced"> | null,
     ) {
       const agentPick = pick === "agent";
       // Read once: an agent's seats are held to the Captain's access and the project's lists.
@@ -439,7 +459,8 @@ export const layer = Layer.effect(
       const isReviewer = (seat: CrewLaunchSeat) =>
         seat.agentId !== null && reviewerIds.has(seat.agentId);
       // A reviewer's authors are the seats and members it reviews; by default every one that is
-      // not a reviewer itself. Seats on this roster resolve first, so their models are known.
+      // not a reviewer itself. A replaced member's work is still in the Crew's, so it counts too.
+      // Seats on this roster resolve first, so their models are known.
       const reviewAuthors = (seat: CrewLaunchSeat): ReviewAuthorsRequest => {
         // A name the person renamed or removed on the card is dropped; with none left, the default.
         const named = seat.reviews?.filter(
@@ -454,7 +475,7 @@ export const layer = Layer.effect(
           (other) => reviewed(other.name) && (reviews !== undefined || !isReviewer(other)),
         );
         return {
-          threads: (crew?.members ?? [])
+          threads: [...(crew?.members ?? []), ...(crew?.replaced ?? [])]
             .filter((member) => reviewed(member.seatName))
             .map((member) => ({
               threadId: member.threadId,
@@ -795,7 +816,7 @@ export const layer = Layer.effect(
       captain: CrewCaptain,
       seats: ReadonlyArray<CrewLaunchSeat>,
       pick: CrewSeatPick,
-      crew: Pick<AgentCrewInstance, "members"> | null = null,
+      crew: Pick<AgentCrewInstance, "members" | "replaced"> | null = null,
     ) =>
       resolveSeatsWithPick(captain, seats, pick, crew).pipe(
         Effect.provideService(CrewMemberModels, memberModels),
@@ -987,6 +1008,8 @@ export const layer = Layer.effect(
       brief: string,
       playbook: CrewLaunchPlaybook | null,
       addition: boolean,
+      /** False when nothing was reserved, so there is no row to drop for a seat never created. */
+      reserved = true,
     ) {
       yield* prepareBriefs(captain, instance, planned, brief, playbook).pipe(
         Effect.mapError(
@@ -1005,7 +1028,7 @@ export const layer = Layer.effect(
       );
       // A row the store refused to delete is dropped by the launch report, which removes every
       // row this proposal minted whose thread does not exist before it measures the seats.
-      if (notCreated.length > 0)
+      if (reserved && notCreated.length > 0)
         yield* crews.removeMembers(instance.id, notCreated).pipe(
           Effect.catchCause((cause) =>
             Effect.logWarning("J5 crew launch could not drop seats that were never created", {
@@ -1113,6 +1136,89 @@ export const layer = Layer.effect(
         ),
     );
 
+    /**
+     * Launch one seat in place of a live one, holding the Crew's lock like any addition. Checked
+     * again here under the lock; the swap is one store write after the seat's thread exists. Until
+     * then it is no member, and a seat that is no member takes no message, so nothing reaches it.
+     */
+    const replaceSeat = Effect.fn("j5.a2a.crewLaunch.replaceSeat")(function* (
+      input: CrewAddSeatsInput,
+      replacement: CrewSeatReplacement,
+      planned: ReadonlyArray<Planned>,
+    ) {
+      const failed = (phase: string) => (cause: unknown) =>
+        new CrewLaunchOperationError({ phase, seatName: null, createdSeats: [], cause });
+      const requested = planned[0];
+      if (requested === undefined || planned.length !== 1)
+        return yield* failed("replacing a seat")("a replacement launches exactly one seat");
+      const current = yield* crews
+        .read(input.instance.id)
+        .pipe(Effect.mapError(failed("reading the crew")));
+      if (current === null)
+        return yield* failed("replacing a seat")(`crew ${input.instance.id} no longer exists`);
+      const problem = replacementProblem(current, replacement.seatName, requested.seat.name);
+      if (problem !== null) return yield* failed("replacing a seat")(problem);
+      const old = current.members.find(({ seatName }) => seatName === replacement.seatName)!;
+      // Its brief lists the steps it takes over beside any it claimed itself.
+      const steps = [
+        ...new Set([
+          ...(requested.seat.steps ?? []),
+          ...(old.playbookStepIds ?? []).filter((id) => replacement.movedStepIds.includes(id)),
+        ]),
+      ];
+      const member = { ...requested, seat: { ...requested.seat, steps } };
+      const oldThread = yield* getThreadRecordsIfPresent(threadManagement, old.threadId, []).pipe(
+        Effect.orElseSucceed(() => null),
+      );
+      if (input.onReserved !== undefined) yield* input.onReserved(current);
+      const newMember = {
+        seatName: member.seat.name,
+        agentId: member.seat.agentId,
+        participantId: member.participantId,
+        threadId: member.threadId,
+        reason: member.seat.reason,
+        playbookStepIds: member.seat.steps,
+      };
+      // The brief's roster reads as it will once the swap lands.
+      const briefed = {
+        ...current,
+        members: current.members.map((seat) =>
+          seat.seatName === old.seatName
+            ? { ...newMember, addedVersion: current.version + 1 }
+            : seat,
+        ),
+      };
+      const launched = yield* spawnAndBrief(
+        input.captain,
+        briefed,
+        [member],
+        `${input.brief ?? current.brief}\n\n${crewReplacementLine({
+          seatName: old.seatName,
+          model: oldThread?.thread.modelSelection.model ?? null,
+          threadId: old.threadId,
+        })}`,
+        input.playbook ?? null,
+        true,
+        false,
+      );
+      if (launched.seats.some((seat) => seat.kind !== "created"))
+        return { instance: current, seats: launched.seats } satisfies CrewLaunchResult;
+      const swapped = yield* crews
+        .replaceMember(current.id, {
+          seatName: old.seatName,
+          participantId: old.participantId,
+          member: newMember,
+          movedStepIds: replacement.movedStepIds,
+          replacedAt: DateTime.formatIso(yield* DateTime.now),
+        })
+        .pipe(Effect.mapError(unlessStepOwned(failed("swapping in the replacement"))));
+      if (swapped.status !== "replaced")
+        return yield* failed("swapping in the replacement")(
+          swapped.status === "missing" ? `crew ${current.id} no longer exists` : swapped.detail,
+        );
+      return { instance: swapped.instance, seats: launched.seats } satisfies CrewLaunchResult;
+    });
+
     // One unit step from the reservation through the briefs, like a launch.
     const addSeats: CrewLaunchServiceShape["addSeats"] = Effect.fn("j5.a2a.crewLaunch.addSeats")(
       function* (input) {
@@ -1120,6 +1226,8 @@ export const layer = Layer.effect(
           input.resolvedSeats ??
           (yield* resolveSeats(input.captain, input.seats, input.pick, input.instance));
         const planned = plan(input.providerSessionId, input.requestKey, resolved);
+        if (input.replacement !== undefined)
+          return yield* replaceSeat(input, input.replacement, planned);
         // Reserve the seats before anything spawns: the store decides the cap and the version in
         // one transaction, so two approvals landing together cannot both pass.
         const reservation = yield* crews

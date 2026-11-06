@@ -19,7 +19,12 @@ import * as KeyedLock from "@t3tools/shared/KeyedLock";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { makeAgentPersonaLibrary, personaCatalogProblem } from "../agents/agentPersonaLibrary.ts";
 import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
-import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
+import { makePlaybookCrewRelay } from "../playbooks/PlaybookCrewRelay.ts";
+import {
+  AgentCrewInstanceService,
+  replacementProblem,
+  type AgentCrewInstance,
+} from "./AgentCrewInstanceService.ts";
 import {
   AgentCrewProposalService,
   type CrewPlaybookRef,
@@ -36,6 +41,7 @@ import {
   type CrewLaunchPlaybook,
   type CrewLaunchSeat,
   type CrewSeatPick,
+  type CrewSeatReplacement,
   type ResolvedCrewLaunchSeat,
 } from "./CrewLaunchService.ts";
 import { planCrewPlaybook, withPersonaSwaps, type CrewPlaybookPlan } from "./crewPlaybookPlan.ts";
@@ -43,7 +49,9 @@ import { crewDeclinedNoticeText, crewRosterChanges } from "./crewGateNotice.ts";
 import { j5AnalyticsRecorder } from "../analytics/recorder.ts";
 import { CrewLaunchReporter } from "./CrewLaunchReporter.ts";
 import { crewSeatShapeProblem } from "./crewLimits.ts";
-import { CREW_PROPOSAL_SESSION } from "./crewSeatIds.ts";
+import { CREW_PROPOSAL_SESSION, crewSeatThreadId } from "./crewSeatIds.ts";
+import { participantIdForThread } from "./HomeRegistrar.ts";
+import { AGENT_STOP_REASON, stopThread } from "./stopThread.ts";
 import { A2ALedger } from "./LedgerService.ts";
 import { lifecycleCommandId, lifecycleId } from "./spawnIds.ts";
 import type { ResolvedSpawnWorkspace, SpawnWorkspaceChoice } from "./spawnWorkspace.ts";
@@ -241,6 +249,25 @@ const memberSteps = (instance: AgentCrewInstance | null) =>
     seatName: member.seatName,
     playbookStepIds: member.playbookStepIds ?? [],
   }));
+
+/** The live seats these seats take over. */
+const replacedSeatNames = (seats: ReadonlyArray<CrewProposalSeat>) =>
+  seats.flatMap((seat) => (seat.replaces === undefined ? [] : [seat.replaces]));
+
+/** The Crew as a replacement joins it: the seats it takes over have already left. */
+const withoutReplaced = (instance: AgentCrewInstance, seats: ReadonlyArray<CrewProposalSeat>) => {
+  const leaving = replacedSeatNames(seats);
+  return {
+    ...instance,
+    members: instance.members.filter((member) => !leaving.includes(member.seatName)),
+  };
+};
+
+/** Seats a reviewer may name besides the live ones: those replaced, or being replaced now. */
+const formerSeatNames = (instance: AgentCrewInstance, seats: ReadonlyArray<CrewProposalSeat>) => [
+  ...(instance.replaced ?? []).map((member) => member.seatName),
+  ...replacedSeatNames(seats),
+];
 
 const omitBaseCommit = ({
   baseCommit: _pin,
@@ -447,6 +474,8 @@ export const layer = Layer.effect(
         readonly definition: PlaybookReadResponse;
         readonly existingMembers: ReturnType<typeof memberSteps>;
       } | null = null,
+      /** Replaced seats an addition's reviewer may still name: their work is in the Crew's. */
+      formerSeats: ReadonlyArray<string> = [],
     ) {
       if (seats.length === 0)
         return yield* new CrewProposalRequestError({
@@ -485,7 +514,11 @@ export const layer = Layer.effect(
           const unknown = seat.reviews?.find(
             (name) =>
               name === seat.seat ||
-              !(seats.some((other) => other.seat === name) || existingSeatNames?.includes(name)),
+              !(
+                seats.some((other) => other.seat === name) ||
+                existingSeatNames?.includes(name) ||
+                formerSeats.includes(name)
+              ),
           );
           if (unknown !== undefined)
             return yield* new CrewProposalRequestError({
@@ -690,6 +723,11 @@ export const layer = Layer.effect(
           detail: `Proposal ${proposal.id} adds to crew ${proposal.crewInstanceId}, which no longer exists.`,
           nextStep: "Decline this proposal.",
         });
+      const replaces = replacedSeatNames(seats)[0];
+      const replacement: CrewSeatReplacement | undefined =
+        replaces === undefined
+          ? undefined
+          : { seatName: replaces, movedStepIds: yield* unfinishedSteps(instance, replaces) };
       return yield* launcher.addSeats({
         providerSessionId: PROPOSAL_SESSION,
         requestKey: proposal.id,
@@ -701,6 +739,7 @@ export const layer = Layer.effect(
         brief: proposal.brief,
         playbook,
         onReserved: () => recordApproval(proposal, seats),
+        replacement,
       });
     });
 
@@ -779,6 +818,113 @@ export const layer = Layer.effect(
       );
     };
 
+    /** Why these seats can't replace the seats they name, as the Captain is told; null when they can. */
+    const replacementRefusal = (
+      instance: AgentCrewInstance,
+      seats: ReadonlyArray<CrewProposalSeat>,
+      captainTitle: string | null,
+    ) => {
+      const replacing = seats.filter((seat) => seat.replaces !== undefined);
+      if (replacing.length === 0) return null;
+      const seatList = instance.members.map(({ seatName }) => seatName).join(", ") || "none";
+      if (seats.length > 1)
+        return new CrewProposalRequestError({
+          detail: "A replacement is one seat at a time.",
+          nextStep: "Request the replacement on its own.",
+        });
+      const seat = replacing[0]!;
+      const replaces = seat.replaces!;
+      const own = ["captain", captainTitle?.toLowerCase()].includes(replaces.toLowerCase());
+      if (own && !instance.members.some(({ seatName }) => seatName === replaces))
+        return new CrewProposalRequestError({
+          detail: `${replaces} is you, this crew's Captain, not one of its seats; a Captain can't replace itself.`,
+          nextStep: `Name the member seat to replace: ${seatList}.`,
+        });
+      const problem = replacementProblem(instance, replaces, seat.seat);
+      return problem === null
+        ? null
+        : new CrewProposalRequestError({
+            detail: problem,
+            nextStep: `Name a live member's seat to replace: ${seatList}.`,
+          });
+    };
+
+    /**
+     * The replaced seat's steps that move: the Crew run's current step and every later one in
+     * the live order. Without an active run, every step it owns moves; a run whose definition
+     * can't be read can't say which steps are done, so the replacement is refused.
+     */
+    const unfinishedSteps = Effect.fn("j5.a2a.crewProposal.unfinishedSteps")(function* (
+      instance: AgentCrewInstance,
+      seatName: string,
+    ) {
+      const owned =
+        instance.members.find((member) => member.seatName === seatName)?.playbookStepIds ?? [];
+      if (owned.length === 0) return [];
+      const run = yield* playbooks
+        .activeRunForCrew(instance.id)
+        .pipe(Effect.mapError(operationError("reading the crew's playbook run")));
+      if (run === null) return owned;
+      const order = run.steps.map(({ id }) => id);
+      const current = order.indexOf(run.currentStepId);
+      if (current < 0)
+        return yield* new CrewProposalRequestError({
+          detail: `The crew's playbook run is at step ${run.currentStepId}, which its definition can't show${run.issue ? ` (${run.issue.message})` : ""}, so the steps seat ${seatName} finished can't be told apart.`,
+          nextStep: "Fix the playbook or reselect a step, then request the replacement again.",
+        });
+      const later = order.slice(current);
+      return owned.filter((stepId) => later.includes(stepId));
+    });
+
+    const relay = yield* makePlaybookCrewRelay;
+
+    /**
+     * After the swap: the replaced member's running turn is interrupted, with no message to it,
+     * and a current step it had been handed goes to its replacement. Both are keyed by the
+     * request, so a retry of the same call finishes whichever did not happen.
+     */
+    const finishReplacement = Effect.fn("j5.a2a.crewProposal.finishReplacement")(function* (
+      outcome: CrewProposalOutcome,
+      proposalId: string,
+      seat: CrewProposalSeat,
+    ) {
+      if (seat.replaces === undefined || outcome.instance === null) return;
+      const replacedBy = participantIdForThread(crewSeatThreadId(proposalId, seat.seat));
+      const replaced = (outcome.instance.replaced ?? []).find(
+        (member) =>
+          member.seatName === seat.replaces && member.replacedByParticipantId === replacedBy,
+      );
+      if (replaced === undefined) return;
+      const thread = yield* getThreadRecordsIfPresent(threadManagement, replaced.threadId, []).pipe(
+        Effect.mapError(operationError("reading the replaced member")),
+      );
+      if (thread !== null && thread.thread.archivedAt === null && thread.thread.deletedAt == null)
+        yield* stopThread(threadManagement, {
+          commandId: lifecycleCommandId({
+            providerSessionId: PROPOSAL_SESSION,
+            requestKey: proposalId,
+            operation: "replaced-seat-stop",
+          }),
+          threadId: replaced.threadId,
+          reason: AGENT_STOP_REASON,
+        }).pipe(Effect.mapError(operationError("stopping the replaced member")));
+      yield* relay
+        .handOver({
+          crewInstanceId: outcome.instance.id,
+          fromThreadId: replaced.threadId,
+          requestKey: `replace:${proposalId}`,
+        })
+        .pipe(
+          Effect.mapError(
+            (error) =>
+              new CrewProposalRequestError({
+                detail: `Seat ${seat.replaces} was replaced by ${seat.seat}, but the step it held wasn't handed over: ${error.message}`,
+                nextStep: "Retry this call with the same client_request_id.",
+              }),
+          ),
+        );
+    });
+
     const requestMember: CrewProposalServiceShape["requestMember"] = (input) => {
       const proposalId = lifecycleId({
         kind: "crew",
@@ -836,13 +982,20 @@ export const layer = Layer.effect(
           const existing = yield* proposals
             .read(proposalId)
             .pipe(Effect.mapError(operationError("reading the proposal")));
-          if (existing !== null) return yield* replayProposal(existing, request);
+          if (existing !== null)
+            return yield* replayProposal(existing, request).pipe(
+              Effect.tap((outcome) => finishReplacement(outcome, proposalId, input.seat)),
+            );
+          const refusal = replacementRefusal(instance, [input.seat], input.captain.thread.title);
+          if (refusal !== null) return yield* refusal;
+          const live = withoutReplaced(instance, [input.seat]);
           const definition = yield* readFollowed(instance.playbook, [input.seat], "crew");
           const plan = yield* validateSeats(
             [input.seat],
-            instance.members.map(({ seatName }) => seatName),
+            live.members.map(({ seatName }) => seatName),
             false,
-            definition === null ? null : { definition, existingMembers: memberSteps(instance) },
+            definition === null ? null : { definition, existingMembers: memberSteps(live) },
+            formerSeatNames(instance, [input.seat]),
           );
           const seats = withPersonaSwaps(
             yield* pinSeats(input.captain, [input.seat]),
@@ -856,7 +1009,8 @@ export const layer = Layer.effect(
                 approvalMode: "automatic",
                 requestedSeats: seats,
               },
-              { maxSeats: CREW_SEAT_CAP },
+              // A replacement frees the seat it takes.
+              { maxSeats: CREW_SEAT_CAP + replacedSeatNames(seats).length },
             )
             .pipe(Effect.mapError(operationError("recording the proposal")));
           if (admitted.status === "cap-exceeded")
@@ -866,10 +1020,9 @@ export const layer = Layer.effect(
               admitted.adding,
               "request",
             );
-          return {
-            ...(yield* replayProposal(admitted.proposal, request)),
-            playbook: playbookOutcome(plan),
-          };
+          const outcome = yield* replayProposal(admitted.proposal, request);
+          yield* finishReplacement(outcome, proposalId, input.seat);
+          return { ...outcome, playbook: playbookOutcome(plan) };
         }),
       );
     };
@@ -928,10 +1081,15 @@ export const layer = Layer.effect(
           detail: `Proposal ${proposal.id} adds to crew ${existingCrew.id}, which has been retired.`,
           nextStep: "Decline this proposal.",
         });
+      if (existingCrew !== null) {
+        const problem = replacementRefusal(existingCrew, seats, null);
+        if (problem !== null) return yield* problem;
+      }
+      const liveCrew = existingCrew === null ? null : withoutReplaced(existingCrew, seats);
       const otherSeats =
         proposal.kind === "roster"
           ? null
-          : (existingCrew?.members ?? []).map(({ seatName }) => seatName);
+          : (liveCrew?.members ?? []).map(({ seatName }) => seatName);
       // Read again at every preview and approval: a step removed or a file broken since the
       // Captain proposed refuses a seat claiming steps here, and the card shows why.
       const definition = yield* readFollowed(proposal.playbook, seats, "approval");
@@ -939,7 +1097,8 @@ export const layer = Layer.effect(
         seats,
         otherSeats,
         true,
-        definition === null ? null : { definition, existingMembers: memberSteps(existingCrew) },
+        definition === null ? null : { definition, existingMembers: memberSteps(liveCrew) },
+        existingCrew === null ? [] : formerSeatNames(existingCrew, seats),
       );
       // The request was counted against open requests when it was filed; the approval only has
       // to fit the live rows, which the member store enforces again when it reserves them.
