@@ -52,6 +52,7 @@ import {
   useAnswerAttachments,
 } from "./AnswerAttachments";
 import { answerHumanExchange } from "./humanInboxClient";
+import { AllowPersonaOnceButton } from "./AllowPersonaOnceButton";
 import { useScopedParticipantLabels } from "./ParticipantIdentitiesClient";
 import { presentParticipantIdentity } from "@t3tools/client-runtime/j5/participant-identity";
 import { CrewRuntimeRequestsSection } from "../crew/CrewRuntimeRequestsSection";
@@ -356,23 +357,31 @@ function OpenInboxItem({
                   {closedText}
                 </p>
               ) : (
-                <Button
-                  disabled={
-                    !canAnswer ||
-                    pendingExchangeId !== null ||
-                    answerText.length === 0 ||
-                    waitingOn !== null
-                  }
-                  title={
-                    canAnswer
-                      ? (waitingOn ?? undefined)
-                      : "This environment is unavailable or this connection is read-only."
-                  }
-                  onClick={() => answer(item)}
-                  type="button"
-                >
-                  {pendingExchangeId === scopedInboxItemKey(item) ? "Delivering…" : "Answer"}
-                </Button>
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <AllowPersonaOnceButton
+                    disabled={!item.sourceReady || pendingExchangeId !== null}
+                    environmentId={item.environmentId}
+                    item={item}
+                    size="default"
+                  />
+                  <Button
+                    disabled={
+                      !canAnswer ||
+                      pendingExchangeId !== null ||
+                      answerText.length === 0 ||
+                      waitingOn !== null
+                    }
+                    title={
+                      canAnswer
+                        ? (waitingOn ?? undefined)
+                        : "This environment is unavailable or this connection is read-only."
+                    }
+                    onClick={() => answer(item)}
+                    type="button"
+                  >
+                    {pendingExchangeId === scopedInboxItemKey(item) ? "Delivering…" : "Answer"}
+                  </Button>
+                </div>
               )}
             </div>
           </div>

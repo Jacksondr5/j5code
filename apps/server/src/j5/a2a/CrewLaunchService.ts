@@ -7,7 +7,7 @@ import {
 import { crewModelSelectionProblem } from "../agents/agentModelSelection.ts";
 import { describeCrewSeatRuntime, materializeCrewModelSelection } from "./crewRuntimePreview.ts";
 import type { CrewProposalSeatRuntime, CrewWorkspaceOptions } from "@t3tools/contracts/j5";
-import { isProviderAvailable } from "@t3tools/contracts";
+import { type AgentPersonaBlockCode, isProviderAvailable } from "@t3tools/contracts";
 import type {
   ModelSelection,
   OrchestrationV2AgentPersonaCommandAssignment,
@@ -26,6 +26,8 @@ import * as Result from "effect/Result";
 
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
+import { AgentPersonaEscalations } from "../agents/agentPersonaEscalation.ts";
+import { findAgentPersonaDefinition } from "../agents/agentPersonaLaunch.ts";
 import { CrewMemberModels } from "../agents/crewMemberModels.ts";
 import {
   agentAccessOf,
@@ -104,6 +106,8 @@ export interface CrewLaunchSeat {
   readonly reviews?: ReadonlyArray<string> | undefined;
   /** Where the seat works, chosen for every seat. */
   readonly workspace: SpawnWorkspaceChoice;
+  /** A granted escalation the Captain retries this persona seat with; only an agent's pick reads it. */
+  readonly allowOnce?: string | undefined;
 }
 
 /**
@@ -234,6 +238,8 @@ export class CrewLaunchSeatUnavailableError extends Data.TaggedError(
   readonly seatName: string;
   readonly agentId: string;
   readonly detail: string;
+  /** Why a persona seat was refused, the same code its other launch paths give. */
+  readonly blockCode?: AgentPersonaBlockCode | undefined;
 }> {
   override get message(): string {
     return `Seat ${this.seatName} (agent ${this.agentId}) is unavailable: ${this.detail} Nothing was spawned.`;
@@ -354,6 +360,7 @@ export const layer = Layer.effect(
     const agents = yield* makeAgentPersonaLibrary;
     const spawnWorkspace = yield* SpawnWorkspaceService;
     const memberModels = yield* CrewMemberModels;
+    const escalations = yield* AgentPersonaEscalations;
 
     /** One read of the Captain's repository for what these seats name; null when all are shared. */
     const inspectWorkspaces = (captain: CrewCaptain, seats: ReadonlyArray<CrewLaunchSeat>) =>
@@ -565,6 +572,7 @@ export const layer = Layer.effect(
             seatName: seat.name,
             agentId: agentId ?? "custom seat",
             detail: error.message,
+            blockCode: error.code,
           });
         if (agentId === null) {
           const selection = seat.modelSelection ?? captain.thread.modelSelection;
@@ -618,6 +626,10 @@ export const layer = Layer.effect(
               runtimeMode: seat.runtimeMode,
               eligible,
               ...(isReviewer(seat) ? { reviewAuthors: reviewAuthors(seat) } : {}),
+              // A card the person previews shows the refusal to them, so only the Captain's
+              // own pick escalates.
+              escalateFor: agentPick ? captain.participantId : undefined,
+              allowOnce: seat.allowOnce,
             });
             return {
               ...prepared,
@@ -629,8 +641,17 @@ export const layer = Layer.effect(
               ...(seat.runtimeMode === undefined ? {} : { runtimeModeOverride: seat.runtimeMode }),
             };
           }
-          const catalog = yield* agents.catalog();
-          const definition = catalog.definitions.find(({ id }) => id === agentId);
+          const definition = yield* findAgentPersonaDefinition(agentId, agents).pipe(
+            Effect.mapError(
+              (error) =>
+                new CrewLaunchSeatUnavailableError({
+                  seatName: seat.name,
+                  agentId,
+                  detail: error.message,
+                  blockCode: error.code,
+                }),
+            ),
+          );
           // Editing any field on the roster card freezes the model it showed into the seat, and
           // that is the fallback route when the primary's provider was signed out at proposal
           // time. A seat counts as keeping the persona's model and level by matching either route,
@@ -656,12 +677,6 @@ export const layer = Layer.effect(
             seat.modelSelection,
             !keepsPersonaModel || agentPick,
           );
-          if (definition === undefined || catalog.disabledIds.includes(agentId))
-            return yield* new CrewLaunchSeatUnavailableError({
-              seatName: seat.name,
-              agentId,
-              detail: "The selected persona is unknown or disabled in this environment.",
-            });
           if (
             seat.runtimeMode === undefined &&
             !providerCanEnforceAgentPersonaAuthority(
@@ -674,6 +689,7 @@ export const layer = Layer.effect(
               agentId,
               detail:
                 "This harness cannot enforce the persona's default access. Select an explicit access mode.",
+              blockCode: "models_exhausted",
             });
           const declared = definition.modelRoute[matchingIndex];
           if (declared !== undefined) {
@@ -683,6 +699,7 @@ export const layer = Layer.effect(
                 seatName: seat.name,
                 agentId,
                 detail: `Persona entry ${matchingIndex + 1} is unavailable: ${unavailable}.`,
+                blockCode: "models_exhausted",
               });
           }
           if (agentPick)
@@ -728,18 +745,27 @@ export const layer = Layer.effect(
         }).pipe(
           // The lists refuse a persona's own entries as they refuse a model chosen on the card.
           Effect.mapError((error) =>
-            error._tag === "CrewLaunchModelNotEligibleError"
+            error._tag === "CrewLaunchModelNotEligibleError" ||
+            error._tag === "CrewLaunchSeatUnavailableError"
               ? error
-              : error._tag === "AgentPersonaPickError" && error.constraint === "model-not-eligible"
-                ? new CrewLaunchModelNotEligibleError({
-                    seatName: seat.name,
-                    detail: error.message,
-                  })
-                : new CrewLaunchSeatUnavailableError({
+              : error._tag === "AgentPersonaPickError" && error.code !== undefined
+                ? // A blocked persona keeps the code every launch path gives it.
+                  new CrewLaunchSeatUnavailableError({
                     seatName: seat.name,
                     agentId,
                     detail: error.message,
-                  }),
+                    blockCode: error.code,
+                  })
+                : error._tag === "AgentPersonaPickError" && error.constraint === "model-not-eligible"
+                  ? new CrewLaunchModelNotEligibleError({
+                      seatName: seat.name,
+                      detail: error.message,
+                    })
+                  : new CrewLaunchSeatUnavailableError({
+                      seatName: seat.name,
+                      agentId,
+                      detail: error.message,
+                    }),
           ),
         );
         // The person's edited text runs instead of the persona's, never beside it: the seat's
@@ -832,6 +858,28 @@ export const layer = Layer.effect(
         Effect.provideService(CrewMemberModels, memberModels),
         Effect.provideService(ProviderRegistry, registry),
         Effect.provideService(ThreadManagementService, threadManagement),
+        Effect.provideService(AgentPersonaEscalations, escalations),
+      );
+
+    /** A seat let past its limit once spends that allowance as it launches. */
+    const spendAllowances = (resolved: ReadonlyArray<ResolvedCrewLaunchSeat>) =>
+      Effect.forEach(
+        resolved.filter(
+          ({ seat, assignment }) =>
+            seat.allowOnce !== undefined && assignment?.pickSource?.kind === "allow-once",
+        ),
+        ({ seat }) =>
+          escalations.use(seat.allowOnce!).pipe(
+            Effect.mapError(
+              (error) =>
+                new CrewLaunchSeatUnavailableError({
+                  seatName: seat.name,
+                  agentId: seat.agentId ?? "custom seat",
+                  detail: error.message,
+                }),
+            ),
+          ),
+        { discard: true },
       );
 
     const plan = (
@@ -1076,6 +1124,7 @@ export const layer = Layer.effect(
       function* (input) {
         const resolved =
           input.resolvedSeats ?? (yield* resolveSeats(input.captain, input.seats, input.pick));
+        yield* spendAllowances(resolved);
         const planned = plan(input.providerSessionId, input.requestKey, resolved);
         const recordError = (phase: string) => (cause: unknown) =>
           new CrewLaunchOperationError({ phase, seatName: null, createdSeats: [], cause });
@@ -1270,6 +1319,7 @@ export const layer = Layer.effect(
         const resolved =
           input.resolvedSeats ??
           (yield* resolveSeats(input.captain, input.seats, input.pick, input.instance));
+        yield* spendAllowances(resolved);
         const planned = plan(input.providerSessionId, input.requestKey, resolved);
         if (input.replacement !== undefined)
           return yield* replaceSeat(input, input.replacement, planned);

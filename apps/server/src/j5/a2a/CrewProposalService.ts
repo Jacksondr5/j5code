@@ -83,6 +83,7 @@ const launchSeatOf = (seat: CrewProposalSeat): CrewLaunchSeat => {
     steps: seat.steps,
     reviews: seat.reviews,
     workspace: seat.workspace,
+    allowOnce: seat.allowOnce,
   };
 };
 

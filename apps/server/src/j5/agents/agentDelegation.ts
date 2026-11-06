@@ -14,6 +14,11 @@ import { OrchestratorMcpService } from "../../mcp/OrchestratorMcpService.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import * as ProviderRegistry from "../../provider/ProviderRegistry.ts";
 import { invokeAgent } from "./agentInvocation.ts";
+import {
+  AgentPersonaEscalations,
+  AllowOnceInput,
+  BLOCKED_PERSONA_TOOL_TEXT,
+} from "./agentPersonaEscalation.ts";
 import { CrewMemberModels } from "./crewMemberModels.ts";
 
 export const AuthorThreads = Schema.Array(ThreadId)
@@ -37,6 +42,7 @@ export const J5DelegateTaskInput = Schema.Struct({
     }),
   ),
   authorThreads: Schema.optional(AuthorThreads),
+  allow_once: Schema.optional(AllowOnceInput),
 });
 export type J5DelegateTaskInput = typeof J5DelegateTaskInput.Type;
 
@@ -47,7 +53,9 @@ export type J5DelegateTaskInput = typeof J5DelegateTaskInput.Type;
  * fallback.
  */
 export const J5_DELEGATE_TASK_DESCRIPTION =
-  "Create a subagent, the first of the two ways to get help (the second is a Crew member): start one child agent with only `task`. No parent history. Pass persona=ID when the user writes @persona:ID or asks for a persona by name, or when a persona from j5_list_personas fits the work: the server pins that persona's instructions, provider, model, reasoning, and runtime policy, so omit target and runtimeMode. A persona the user named with @persona:ID in the message that started this turn runs as saved; one you pick yourself uses only its models the project's Models for custom members checks, and is refused if it needs more access than you run with. For a persona j5_list_personas marks independent_reviewer, the server prefers a model that didn't write the work: yours and your delegate_task children's unless authorThreads names other threads. Give the persona a self-contained task, and if that call fails, report the error instead of substituting a plain child. Without persona, this is a plain J5-tracked child for cross-provider work, for same-provider work the native subagent tool cannot run, or for work the user wants tracked as a J5 task; for an ordinary subagent request, use your provider's native subagent mechanism instead. Without persona the child's model and reasoning level, inherited ones included, must be ones the project's Models for custom members lists allow; a refusal lists the eligible ones to retry with in `target`. Separate checkout or PR per child: `isolation:'worktree'`. Keep `taskId` for `task_status` and `task_cancel`.";
+  "Create a subagent, the first of the two ways to get help (the second is a Crew member): start one child agent with only `task`. No parent history. Pass persona=ID when the user writes @persona:ID or asks for a persona by name, or when a persona from j5_list_personas fits the work: the server pins that persona's instructions, provider, model, reasoning, and runtime policy, so omit target and runtimeMode. A persona the user named with @persona:ID in the message that started this turn runs as saved; one you pick yourself uses only its models the project's Models for custom members checks, and is refused if it needs more access than you run with. " +
+  BLOCKED_PERSONA_TOOL_TEXT +
+  " For a persona j5_list_personas marks independent_reviewer, the server prefers a model that didn't write the work: yours and your delegate_task children's unless authorThreads names other threads. Give the persona a self-contained task, and if that call fails, report the error instead of substituting a plain child. Without persona, this is a plain J5-tracked child for cross-provider work, for same-provider work the native subagent tool cannot run, or for work the user wants tracked as a J5 task; for an ordinary subagent request, use your provider's native subagent mechanism instead. Without persona the child's model and reasoning level, inherited ones included, must be ones the project's Models for custom members lists allow; a refusal lists the eligible ones to retry with in `target`. Separate checkout or PR per child: `isolation:'worktree'`. Keep `taskId` for `task_status` and `task_cancel`.";
 
 /** J5's delegate_task: the upstream tool with the persona extension, registered in place of it. */
 export const J5DelegateTaskTool = Tool.make("delegate_task", {
@@ -63,6 +71,8 @@ export const J5DelegateTaskTool = Tool.make("delegate_task", {
     ProviderRegistry.ProviderRegistry,
     // A plain child's model and reasoning level are held to the project's lists for custom members.
     CrewMemberModels,
+    // A refused persona is recorded as an escalation, and a granted one is spent.
+    AgentPersonaEscalations,
   ],
 })
   .annotate(Tool.Title, "Delegate a child task")
@@ -70,7 +80,7 @@ export const J5DelegateTaskTool = Tool.make("delegate_task", {
   .annotate(Tool.OpenWorld, true);
 
 export const delegateTask = Effect.fn("j5.delegateTask")(function* (input: J5DelegateTaskInput) {
-  const { persona: personaId, authorThreads, ...delegate } = input;
+  const { persona: personaId, authorThreads, allow_once: allowOnce, ...delegate } = input;
   if (personaId === undefined) {
     const scope = yield* McpInvocationContext;
     const service = yield* OrchestratorMcpService;
@@ -108,5 +118,6 @@ export const delegateTask = Effect.fn("j5.delegateTask")(function* (input: J5Del
     personaId,
     ...personaDelegate,
     ...(authorThreads === undefined ? {} : { authorThreads }),
+    ...(allowOnce === undefined ? {} : { allowOnce }),
   });
 });

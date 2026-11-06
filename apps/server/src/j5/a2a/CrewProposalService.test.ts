@@ -1,4 +1,5 @@
 import { assert, it } from "@effect/vitest";
+import { agentPersonaEscalationsTestLayer } from "../test-support/agentPersonaEscalations.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   ProjectId,
@@ -1912,6 +1913,7 @@ const playbookFixtureWithSettings = (
     const layer = crewProposalLayer.pipe(
       Layer.provideMerge(settingsLayer),
       Layer.provideMerge(crewLaunchLayer),
+      Layer.provideMerge(agentPersonaEscalationsTestLayer()),
       Layer.provideMerge(
         crewMemberModelsLayer({
           providers: [codex],
@@ -3554,7 +3556,7 @@ it.effect(
             ),
           );
         const aboveCaptain =
-          "would run with Full access, which is broader than the Supervised its caller runs with.";
+          "would run with Full access, which is broader than the Supervised its caller runs with";
 
         const above = yield* gate
           .propose({

@@ -1,4 +1,5 @@
 import { assert, it } from "@effect/vitest";
+import { agentPersonaEscalationsTestLayer } from "../test-support/agentPersonaEscalations.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CommandId,
@@ -125,6 +126,7 @@ const makeTestLayer = (memberModels: Layer.Layer<CrewMemberModels>) =>
     registry,
     mcp,
     memberModels,
+    agentPersonaEscalationsTestLayer(),
     Projections.layer.pipe(Layer.provide(database)),
     NodeServices.layer,
   ).pipe(

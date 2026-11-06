@@ -26,7 +26,11 @@ import {
   definitionDigest,
   createAgentPersonaLibrary,
 } from "./agentPersonaLibrary.ts";
-import { BUILT_IN_AGENT_PERSONAS, decodeAgentPersonaDefinition } from "./agentPersonas.ts";
+import {
+  AGENT_PERSONA_ACCESS_REPAIR,
+  BUILT_IN_AGENT_PERSONAS,
+  decodeAgentPersonaDefinition,
+} from "./agentPersonas.ts";
 import { validateAgentPersonaAssignment } from "./agentPersonaAssignment.ts";
 import { resolveAgentPersonaRuntime } from "./agentPersonaRuntime.ts";
 
@@ -1884,6 +1888,54 @@ describe("switching source agents off", () => {
         String(yield* library.setEnabled("no-such-agent", false).pipe(Effect.flip)),
         "no longer exists",
       );
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+});
+
+describe("refusing a persona launch", () => {
+  it.effect("tells the six reasons apart, each with its own code", () =>
+    Effect.gen(function* () {
+      const { library, write, fs, path, stateDir } = yield* fixture;
+      const refusal = (personaId: string) =>
+        prepareAgentPersonaLaunch({ personaId }, [], library).pipe(
+          Effect.flip,
+          Effect.map((error) => ({
+            code: "code" in error ? error.code : undefined,
+            message: error.message,
+          })),
+        );
+
+      assert.deepEqual(yield* refusal(custom.id), {
+        code: "library_empty",
+        message: `This environment has no personas, so ${custom.id} cannot launch.`,
+      });
+      yield* write("researcher.yaml", custom);
+      assert.deepEqual(yield* refusal("nobody"), {
+        code: "persona_not_found",
+        message: "Unknown persona nobody in this environment.",
+      });
+      // An invalid file names the persona, so its launch says how to repair it.
+      yield* write("diagnostic.yaml", { ...custom, id: "diagnostic-agent", access: "diagnostic" });
+      const invalid = yield* refusal("diagnostic-agent");
+      assert.equal(invalid.code, "persona_invalid");
+      assert.include(invalid.message, "diagnostic.yaml");
+      assert.include(invalid.message, AGENT_PERSONA_ACCESS_REPAIR);
+      // With no provider signed in, every entry gives its own reason.
+      const exhausted = yield* refusal(custom.id);
+      assert.equal(exhausted.code, "models_exhausted");
+      assert.include(exhausted.message, "entry 1");
+      yield* library.setEnabled(custom.id, false);
+      assert.deepEqual(yield* refusal(custom.id), {
+        code: "persona_disabled",
+        message: `Persona ${custom.id} is disabled in this environment.`,
+      });
+      yield* fs.writeFileString(
+        path.join(stateDir, "agent-personas.json"),
+        json({ folders: ["missing"] }),
+      );
+      const unreadable = yield* refusal(custom.id);
+      assert.equal(unreadable.code, "library_unreadable");
+      assert.include(unreadable.message, "Configured persona folder does not exist");
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });

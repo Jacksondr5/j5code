@@ -28,7 +28,7 @@ import { EnvironmentAuthorizationError } from "./auth.ts";
 import { EnvironmentId, RuntimeRequestId, ThreadId } from "./baseSchemas.ts";
 import { ChatAttachment } from "./chatAttachment.ts";
 import { J5ActionError } from "./j5/actionError.ts";
-import { AgentPersonaId } from "./j5/agentPersona.ts";
+import { AgentPersonaEscalationView, AgentPersonaId } from "./j5/agentPersona.ts";
 
 export const HumanInboxItem = Schema.Struct({
   personId: Schema.String,
@@ -52,6 +52,8 @@ export const HumanInboxItem = Schema.Struct({
   forEveryone: Schema.optionalKey(Schema.Boolean),
   /** Who answered an ask that is closed, by the name they had then (Inbox AC16). */
   answeredBy: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  /** A refused persona launch this ask escalates, as the server recorded it. */
+  escalation: Schema.optionalKey(AgentPersonaEscalationView),
 });
 export type HumanInboxItem = typeof HumanInboxItem.Type;
 export type ScopedHumanInboxItem = HumanInboxItem & { readonly environmentId: EnvironmentId };
@@ -83,6 +85,16 @@ export const AnswerHumanExchangeResponse = Schema.Struct({
     durableAtSeq: Schema.Number,
   }),
 });
+
+/**
+ * The Owner's "Allow this once" on an ask escalating a refused persona launch: it answers the
+ * ask with a fixed reply and lets the asking agent retry that one launch past its one limit.
+ */
+export const AllowPersonaOnceRequest = Schema.Struct({
+  exchangeId: Schema.String.check(Schema.isNonEmpty()),
+  clientRequestId: Schema.String.check(Schema.isNonEmpty()),
+});
+export type AllowPersonaOnceRequest = typeof AllowPersonaOnceRequest.Type;
 
 export const OpenInboxCountResponse = Schema.Struct({
   personId: Schema.String,
@@ -1162,6 +1174,7 @@ export const J5_CLIENT_ACTION_WS_METHODS = {
   archiveCrew: "j5.crews.archive",
   respondCrewRuntimeRequest: "j5.crews.respondRuntimeRequest",
   answerHumanExchange: "j5.inbox.answer",
+  allowPersonaOnce: "j5.inbox.allowPersonaOnce",
   answerCrewWorktreeCleanup: "j5.crews.answerWorktreeCleanup",
   issuePeerCredential: "j5.peers.issueCredential",
   addPeer: "j5.peers.add",
@@ -1201,6 +1214,11 @@ export const J5ClientActionRpcGroup = RpcGroup.make(
   }),
   Rpc.make(J5_CLIENT_ACTION_WS_METHODS.answerHumanExchange, {
     payload: AnswerHumanExchangeRequest,
+    success: AnswerHumanExchangeResponse,
+    error: clientActionError,
+  }),
+  Rpc.make(J5_CLIENT_ACTION_WS_METHODS.allowPersonaOnce, {
+    payload: AllowPersonaOnceRequest,
     success: AnswerHumanExchangeResponse,
     error: clientActionError,
   }),

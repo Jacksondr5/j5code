@@ -254,6 +254,7 @@ const ROUTE_FAILURE_TEXT: Readonly<Record<AgentPersonaRouteFailureCode, string>>
   "usage-limit": "provider is at its usage limit",
   "option-not-advertised": "model options are not offered by this provider",
   "model-not-eligible": "model or reasoning level is not checked in Models for custom members",
+  "access-above-caller": "broader access than the agent picking it runs with",
 };
 
 /** "Primary · Codex gpt-5.6-terra: model is not offered…" for each rejected route. */

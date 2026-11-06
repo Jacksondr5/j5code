@@ -13,6 +13,7 @@ import * as Effect from "effect/Effect";
 
 import { buildAgentPersonaAssignment } from "./agentPersonaAssignment.ts";
 import { AgentPersonaLibraryError, type createAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
+import { findAgentPersonaDefinition, routeFailurePhrase } from "./agentPersonaLaunch.ts";
 import {
   agentPersonaModelSelection,
   agentPersonaEntryMatches,
@@ -47,23 +48,18 @@ export const prepareAgentPersonaPeerSpawn = Effect.fn("j5.prepareAgentPersonaPee
   request: AgentPersonaPeerSpawnRequest,
   library: Library,
 ) {
-  const catalog = yield* library.catalog();
-  if (catalog.disabledIds.includes(request.personaId)) {
-    return yield* new AgentPersonaLibraryError({
-      message: `Agent ${request.personaId} is disabled in this environment.`,
+  const definition = yield* findAgentPersonaDefinition(request.personaId, library);
+  // A pin is a list of one: when it cannot run, the launch is refused rather than moved.
+  const pinBlocked = (reason: string) =>
+    new AgentPersonaLibraryError({
+      code: "models_exhausted",
+      message: `Persona ${request.personaId} is blocked because its pinned entry cannot run: ${reason}.`,
     });
-  }
-  const definition = catalog.definitions.find(({ id }) => id === request.personaId);
-  if (definition === undefined) {
-    return yield* new AgentPersonaLibraryError({
-      message: `Unknown agent ${request.personaId} in this environment.`,
-    });
-  }
   const provider = request.provider;
   if (provider === undefined) {
-    return yield* new AgentPersonaLibraryError({
-      message: `Provider ${request.instanceId} is not configured in this environment.`,
-    });
+    return yield* pinBlocked(
+      `provider ${request.instanceId} is not configured in this environment`,
+    );
   }
   const reasoningDescriptor = agentPersonaReasoningDescriptor(
     provider.models.find(({ slug }) => slug === request.model),
@@ -106,9 +102,9 @@ export const prepareAgentPersonaPeerSpawn = Effect.fn("j5.prepareAgentPersonaPee
     yield* Clock.currentTimeMillis,
   );
   if (unavailable !== undefined) {
-    return yield* new AgentPersonaLibraryError({
-      message: `Agent ${request.personaId} route ${describeTarget(target)} is unavailable on provider ${request.instanceId}: ${unavailable}.`,
-    });
+    return yield* pinBlocked(
+      `entry ${index + 1} ${describeTarget(target)}: ${routeFailurePhrase(target, { code: unavailable }, request.instanceId)}`,
+    );
   }
   const declaredSelection = agentPersonaModelSelection(provider, target);
   const descriptor = agentPersonaReasoningDescriptor(
@@ -133,9 +129,9 @@ export const prepareAgentPersonaPeerSpawn = Effect.fn("j5.prepareAgentPersonaPee
     yield* Clock.currentTimeMillis,
   );
   if (selectionProblem !== undefined)
-    return yield* new AgentPersonaLibraryError({
-      message: `Agent ${request.personaId} model options are unavailable: ${selectionProblem}.`,
-    });
+    return yield* pinBlocked(
+      `entry ${index + 1} ${describeTarget(target)}: ${routeFailurePhrase(target, { code: selectionProblem }, request.instanceId)}`,
+    );
   const result = buildAgentPersonaAssignment({
     definition,
     resolution: {
@@ -150,9 +146,9 @@ export const prepareAgentPersonaPeerSpawn = Effect.fn("j5.prepareAgentPersonaPee
     },
   });
   if (result.status !== "assigned") {
-    return yield* new AgentPersonaLibraryError({
-      message: `Agent ${request.personaId} cannot enforce its ${agentPersonaPolicy(definition)} permissions on ${provider.driver}.`,
-    });
+    return yield* pinBlocked(
+      `the persona cannot enforce its ${agentPersonaPolicy(definition)} permissions on ${provider.driver}`,
+    );
   }
   const definitionDigest = yield* library.snapshot(definition);
   const assignment: OrchestrationV2AgentPersonaCommandAssignment = {
