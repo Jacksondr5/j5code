@@ -275,7 +275,7 @@ const encodeStepIds = Schema.encodeSync(StepIds);
  * write stores an incoming seat's steps even over its existing row: ownership is always the plan
  * the person approved last.
  */
-const stepOwnershipConflict = (
+export const stepOwnershipConflict = (
   crewInstanceId: string,
   existing: ReadonlyArray<AgentCrewMember>,
   incoming: ReadonlyArray<NewAgentCrewMember>,

@@ -4257,6 +4257,16 @@ it.effect(
         yield* Ref.set(factsFault, false);
         assert.deepStrictEqual((yield* crews.read(crewId))!.members, before.members);
         assert.equal(yield* sentTo(oldPlanner.threadId, "thread.stop"), 0);
+        // The thread that never got its home is archived, so nothing is left beside the seat.
+        const halfStarted = (yield* Ref.get(commands)).flatMap((command) =>
+          command.type === "thread.create" && command.title === "planner-2" ? [command] : [],
+        )[0]!;
+        assert.isTrue(
+          (yield* Ref.get(commands)).some(
+            (command) =>
+              command.type === "thread.archive" && command.threadId === halfStarted.threadId,
+          ),
+        );
 
         // Only planner's unfinished review moves; the finished plan stays its record.
         const replaced = yield* request("replace-planner", {
@@ -4521,6 +4531,123 @@ it.effect("a retry after a replacement's stop failed finishes the stop and hand-
       assert.isAbove(stops.length, 0);
       assert.equal(new Set(stops).size, 1);
       assert.equal(yield* sent(newBuilder.threadId, "message.dispatch"), 1);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect("of two replacements of one seat, the second is refused and its request declined", () =>
+  Effect.gen(function* () {
+    const { layer, lockHook } = yield* playbookFixture;
+    yield* Effect.gen(function* () {
+      const gate = withPreview(yield* CrewProposalService);
+      const proposals = yield* AgentCrewProposalService;
+      const opened = yield* gate.propose({
+        requestKey: "twice-crew",
+        captain,
+        displayName: "Pair",
+        brief: "Fix it.",
+        seats: [custom("builder"), custom("reviewer")],
+      });
+      const approved = yield* gate.resolve({ proposalId: opened.proposal.id, decision: "approve" });
+      const crewId = approved.instance!.id;
+      const replace = (requestKey: string, seat: string) =>
+        gate.requestMember({
+          requestKey,
+          captain,
+          crewInstanceId: crewId,
+          seat: { ...custom(seat), replaces: "reviewer" },
+          brief: null,
+        });
+      // Both pass their checks; the first takes the Crew while the second waits for it.
+      yield* Ref.set(lockHook, (id) =>
+        id === crewId
+          ? Ref.set(lockHook, () => Effect.void).pipe(
+              Effect.andThen(replace("first", "reviewer-a")),
+              Effect.orDie,
+              Effect.asVoid,
+            )
+          : Effect.void,
+      );
+      const second = yield* replace("second", "reviewer-b").pipe(Effect.flip);
+      assert.include(second.message, "Seat reviewer was already replaced.");
+      const declined = (yield* proposals.listForCaptain(captainId)).filter(
+        (proposal) => proposal.status === "open",
+      );
+      assert.lengthOf(declined, 0);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect("a step claimed while a replacement waits for the Crew refuses it before it spawns", () =>
+  Effect.gen(function* () {
+    const { layer, workspaceRoot, commands, lockHook } = yield* playbookFixture;
+    yield* Effect.gen(function* () {
+      const gate = withPreview(yield* CrewProposalService);
+      const opened = yield* proposeRelease(gate, workspaceRoot, "claim-crew");
+      const approved = yield* gate.resolve({ proposalId: opened.proposal.id, decision: "approve" });
+      const crewId = approved.instance!.id;
+      const request = (requestKey: string, seat: CrewProposalSeat) =>
+        gate.requestMember({ requestKey, captain, crewInstanceId: crewId, seat, brief: null });
+      // review is unowned when the replacement is checked, then a scribe claims it.
+      yield* Ref.set(lockHook, (id) =>
+        id === crewId
+          ? Ref.set(lockHook, () => Effect.void).pipe(
+              Effect.andThen(request("scribe", custom("scribe", ["review"]))),
+              Effect.orDie,
+              Effect.asVoid,
+            )
+          : Effect.void,
+      );
+      const refused = yield* request("replace-planner", {
+        ...custom("planner-2", ["review"]),
+        replaces: "planner",
+      }).pipe(Effect.flip);
+      assert.include(refused.message, "Step review is already owned by seat scribe");
+      assert.isFalse(
+        (yield* Ref.get(commands)).some(
+          (command) => command.type === "thread.create" && command.title === "planner-2",
+        ),
+      );
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect("two replacements on a full Crew both go through", () =>
+  Effect.gen(function* () {
+    const { layer, lockHook } = yield* playbookFixture;
+    yield* Effect.gen(function* () {
+      const gate = withPreview(yield* CrewProposalService);
+      const opened = yield* gate.propose({
+        requestKey: "full-crew",
+        captain,
+        displayName: "Full",
+        brief: "Fix it.",
+        seats: Array.from({ length: CREW_SEAT_CAP }, (_, index) => custom(`seat-${index}`)),
+      });
+      const approved = yield* gate.resolve({ proposalId: opened.proposal.id, decision: "approve" });
+      const crewId = approved.instance!.id;
+      const replace = (requestKey: string, seat: string, replaces: string) =>
+        gate.requestMember({
+          requestKey,
+          captain,
+          crewInstanceId: crewId,
+          seat: { ...custom(seat), replaces },
+          brief: null,
+        });
+      // The first is still an open request when the second is filed.
+      yield* Ref.set(lockHook, (id) =>
+        id === crewId
+          ? Ref.set(lockHook, () => Effect.void).pipe(
+              Effect.andThen(replace("second", "seat-1b", "seat-1")),
+              Effect.orDie,
+              Effect.asVoid,
+            )
+          : Effect.void,
+      );
+      const first = yield* replace("first", "seat-0b", "seat-0");
+      const names = first.instance!.members.map(({ seatName }) => seatName);
+      assert.lengthOf(names, CREW_SEAT_CAP);
+      assert.includeMembers(names, ["seat-0b", "seat-1b"]);
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
 );

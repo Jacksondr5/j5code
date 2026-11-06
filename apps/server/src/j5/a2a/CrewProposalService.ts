@@ -1029,8 +1029,11 @@ export const layer = Layer.effect(
                 approvalMode: "automatic",
                 requestedSeats: seats,
               },
-              // A replacement frees the seat it takes.
-              { maxSeats: CREW_SEAT_CAP + replacedSeatNames(seats).length },
+              // A replacement never grows the Crew, so it isn't held to the cap.
+              {
+                maxSeats:
+                  replacedSeatNames(seats).length > 0 ? Number.MAX_SAFE_INTEGER : CREW_SEAT_CAP,
+              },
             )
             .pipe(Effect.mapError(operationError("recording the proposal")));
           if (admitted.status === "cap-exceeded")
