@@ -35,6 +35,7 @@ import {
 import {
   CREW_SEAT_CAP,
   CrewLaunchOperationError,
+  CrewLaunchSeatUnavailableError,
   CrewLaunchService,
   type CrewCaptain,
   type CrewLaunchError,
@@ -723,11 +724,30 @@ export const layer = Layer.effect(
           detail: `Proposal ${proposal.id} adds to crew ${proposal.crewInstanceId}, which no longer exists.`,
           nextStep: "Decline this proposal.",
         });
-      const replaces = replacedSeatNames(seats)[0];
+      const replacing = seats.find((seat) => seat.replaces !== undefined);
       const replacement: CrewSeatReplacement | undefined =
-        replaces === undefined
+        replacing?.replaces === undefined
           ? undefined
-          : { seatName: replaces, movedStepIds: yield* unfinishedSteps(instance, replaces) };
+          : {
+              seatName: replacing.replaces,
+              unfinishedSteps: (crew) =>
+                unfinishedSteps(crew, replacing.replaces!).pipe(
+                  Effect.mapError((error) =>
+                    error._tag === "CrewProposalRequestError"
+                      ? new CrewLaunchSeatUnavailableError({
+                          seatName: replacing.seat,
+                          agentId: replacing.agentId ?? "custom seat",
+                          detail: `${error.detail} ${error.nextStep}`,
+                        })
+                      : new CrewLaunchOperationError({
+                          phase: "reading the crew's playbook run",
+                          seatName: replacing.seat,
+                          createdSeats: [],
+                          cause: error.cause,
+                        }),
+                  ),
+                ),
+            };
       return yield* launcher.addSeats({
         providerSessionId: PROPOSAL_SESSION,
         requestKey: proposal.id,
