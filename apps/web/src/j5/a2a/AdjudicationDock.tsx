@@ -210,6 +210,8 @@ export function AdjudicationDock(props: {
             )}
             {isOpen ? (
               <AllowPersonaOnceButton
+                // One instance per ask, so an error or request id never carries to the next.
+                key={shown.exchangeId}
                 disabled={pending}
                 environmentId={environmentId}
                 item={shown}
