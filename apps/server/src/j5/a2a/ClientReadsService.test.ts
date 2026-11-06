@@ -584,6 +584,8 @@ it.effect("puts an escalation only on the ask that carries it", () =>
             personaId: "reviewer",
             waivable: "access-above-caller",
             status: "open",
+            summary:
+              "Persona reviewer is blocked. Allow this once would let one launch attempt past broader access than its caller runs with.",
           },
         ],
         ["ordinary-question", undefined],

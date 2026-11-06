@@ -334,26 +334,22 @@ const handlers = {
           "Call j5_list_participants to find the intended recipient, or use schedule_task if you need a future trigger for yourself.",
         );
       }
-      // The server's own record of a refused persona launch, appended to the ask about it.
+      // An ask about a refused persona launch; the Inbox shows J5's record of it apart from the text.
       const escalationId = input.escalation_id ?? undefined;
-      const escalationNote =
-        escalationId === undefined
-          ? undefined
-          : input.expect_reply !== true || !isHumanParticipantId(input.to)
-            ? yield* stateError(
-                "escalation_id goes only on an ask to a person.",
-                "Retry j5_send_message to the person with expect_reply=true, intent and urgency, or, as a Crew member, tell your Captain the escalation_id in an ordinary message.",
-              )
-            : yield* (yield* AgentPersonaEscalations)
-                .askSummary({ escalationId, askerParticipantId: callerParticipantId })
-                .pipe(
-                  Effect.mapError((error) =>
-                    stateError(
-                      error.message,
-                      "Check the escalation_id from the refusal and retry.",
-                    ),
-                  ),
-                );
+      if (escalationId !== undefined) {
+        if (input.expect_reply !== true || !isHumanParticipantId(input.to))
+          return yield* stateError(
+            "escalation_id goes only on an ask to a person.",
+            "Retry j5_send_message to the person with expect_reply=true, intent and urgency, or, as a Crew member, tell your Captain the escalation_id in an ordinary message.",
+          );
+        yield* (yield* AgentPersonaEscalations)
+          .authorizeAsk({ escalationId, askerParticipantId: callerParticipantId })
+          .pipe(
+            Effect.mapError((error) =>
+              stateError(error.message, "Check the escalation_id from the refusal and retry."),
+            ),
+          );
+      }
       const crypto = yield* Crypto.Crypto;
       const service = yield* A2ASendService;
       const worker = yield* A2ADeliveryWorker;
@@ -440,8 +436,7 @@ const handlers = {
           }),
           senderThreadId: scope.thread.threadId,
           to: input.to,
-          message:
-            escalationNote === undefined ? input.message : `${input.message}\n\n${escalationNote}`,
+          message: input.message,
           ...(input.expect_reply == null ? {} : { expectReply: input.expect_reply }),
           ...(input.exchange_id == null ? {} : { exchangeId: input.exchange_id }),
           ...(input.intent == null ? {} : { intent: input.intent }),

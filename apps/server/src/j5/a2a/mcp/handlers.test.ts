@@ -600,7 +600,8 @@ it.effect(
         assert.isFalse((yield* call({ to: targetParticipantId, message })).isFailure);
         assert.lengthOf(yield* Ref.get(sends), 4);
 
-        // An ask about a refused persona carries the server's own record of the block.
+        // An ask about a refused persona is the agent's words alone; J5's record of the block
+        // travels as data on the Inbox item, where the agent's text can't reach it.
         const escalationId = yield* (yield* AgentPersonaEscalations).record({
           callerParticipantId: participantIdForThread(invocation.threadId),
           personaId: "reviewer",
@@ -625,12 +626,9 @@ it.effect(
             escalation_id: escalationId,
           })).isFailure,
         );
-        const ask = (yield* Ref.get(sends)).at(-1)!.message;
-        assert.isTrue(ask.startsWith("May reviewer run?\n\n"));
-        assert.include(
-          ask,
-          `J5 recorded this blocked launch (escalation ${escalationId}, persona_disabled): Persona reviewer is disabled in this environment.`,
-        );
+        const ask = (yield* Ref.get(sends)).at(-1)!;
+        assert.equal(ask.message, "May reviewer run?");
+        assert.isTrue(ask.freshAsk);
       }).pipe(Effect.provide(layer));
     }),
 );

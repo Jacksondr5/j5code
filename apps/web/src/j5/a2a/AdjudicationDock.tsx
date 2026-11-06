@@ -30,6 +30,7 @@ import {
   useAnswerAttachments,
 } from "./AnswerAttachments";
 import { AllowPersonaOnceButton } from "./AllowPersonaOnceButton";
+import { J5RecordPanel } from "./J5RecordPanel";
 import { answerHumanExchange, type HumanInboxItem } from "./humanInboxClient";
 import { notifyHumanInboxChanged } from "./humanInboxRefresh";
 
@@ -161,6 +162,9 @@ export function AdjudicationDock(props: {
               threadRef={threadRef}
             />
           </div>
+          {shown.escalation === undefined ? null : (
+            <J5RecordPanel text={shown.escalation.summary} />
+          )}
           {hasMoreThanExcerpt(shown.message) ? (
             <Button
               className="w-fit"
