@@ -121,7 +121,7 @@ const fixture = Effect.gen(function* () {
   // models agents may pick.
   const turn: {
     message?: TurnMessage;
-    steered?: TurnMessage;
+    steered?: TurnMessage | undefined;
     eligible: (selection: ModelSelection) => boolean;
   } = { eligible: () => true };
   const records = (
