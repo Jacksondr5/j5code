@@ -1201,6 +1201,23 @@ it.effect(
           assert.equal(failure._tag, "CrewLaunchSeatUnavailableError");
           assert.include(failure.message, "cannot enforce the selected access mode");
         }
+        // Approved automatically under an Auto Captain, the seat inherits Auto, which the harness
+        // refuses; Full access would be above the Captain, so the refusal names Supervised.
+        const automatic = yield* launcher
+          .resolveSeats(
+            { ...captain, thread: { ...captain.thread, runtimeMode: "auto" } },
+            [acp],
+            "agent",
+          )
+          .pipe(Effect.flip);
+        assert.include(automatic.message, "Set runtime_mode to approval-required (Supervised).");
+        assert.notInclude(automatic.message, "Choose Supervised or Full access");
+        const [supervised] = yield* launcher.resolveSeats(
+          { ...captain, thread: { ...captain.thread, runtimeMode: "auto" } },
+          [{ ...acp, runtimeMode: "approval-required" }],
+          "agent",
+        );
+        assert.equal(supervised!.runtimeMode, "approval-required");
         assert.lengthOf(yield* Ref.get(commands), 0);
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped),
