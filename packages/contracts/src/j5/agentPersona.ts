@@ -11,10 +11,10 @@ import {
   ThreadId,
   TrimmedNonEmptyString,
 } from "../baseSchemas.ts";
-import type { SelectProviderOptionDescriptor } from "../model.ts";
+import { ProviderOptionSelections, type SelectProviderOptionDescriptor } from "../model.ts";
 import { ModelSelection } from "../modelSelection.ts";
 import { RuntimeMode } from "../providerPolicy.ts";
-import { ProviderDriverKind } from "../providerInstance.ts";
+import { ProviderDriverKind, ProviderInstanceId } from "../providerInstance.ts";
 import type { ServerProviderModel } from "../server.ts";
 
 /**
@@ -43,6 +43,9 @@ export type AgentPersonaId = typeof AgentPersonaId.Type;
 
 export const BuiltInAgentPersonaId = Schema.Literals(BUILT_IN_AGENT_PERSONA_IDS);
 export type BuiltInAgentPersonaId = typeof BuiltInAgentPersonaId.Type;
+
+export const AgentPersonaAccess = Schema.Literals(["read-only", "workspace-write", "full-access"]);
+export type AgentPersonaAccess = typeof AgentPersonaAccess.Type;
 
 export const AgentPersonaAuthorityPolicy = Schema.Literals([
   "read-only",
@@ -78,6 +81,7 @@ export const OrchestrationV2AgentPersonaAssignment = Schema.Struct({
   displayName: Schema.optional(TrimmedNonEmptyString),
   authorityPolicy: AgentPersonaReportedAuthorityPolicy,
   resolvedRoute: Schema.Literals(["primary", "fallback", "override"]),
+  resolvedRouteIndex: Schema.optional(NonNegativeInt),
   resolvedDriver: ProviderDriverKind,
   resolvedModelSelection: ModelSelection,
   /** Human-approved crew access, independent of the persona behavior instructions. */
@@ -150,6 +154,16 @@ export const AgentPersonaModelTarget = Schema.Struct({
 });
 export type AgentPersonaModelTarget = typeof AgentPersonaModelTarget.Type;
 
+export const AgentPersonaModelEntry = Schema.Union([
+  AgentPersonaModelTarget,
+  Schema.Struct({
+    instanceId: ProviderInstanceId,
+    model: TrimmedNonEmptyString,
+    options: Schema.optionalKey(ProviderOptionSelections),
+  }),
+]);
+export type AgentPersonaModelEntry = typeof AgentPersonaModelEntry.Type;
+
 /**
  * The select option that carries a model's reasoning level. Providers name it differently:
  * Codex and Grok `reasoningEffort`, Claude and Cursor `effort` or `reasoning`, OpenCode
@@ -193,7 +207,7 @@ export const AgentPersonaEditInput = Schema.Struct({
 });
 export type AgentPersonaEditInput = typeof AgentPersonaEditInput.Type;
 
-/** The full definition as stored; the catalog omits instructions to keep lists small. */
+/** Read view with a legacy two-model summary; `models` retains the complete ordered list. */
 export const AgentPersonaDefinitionView = Schema.Struct({
   id: AgentPersonaId,
   version: PositiveInt,
@@ -201,14 +215,13 @@ export const AgentPersonaDefinitionView = Schema.Struct({
   description: TrimmedNonEmptyString,
   instructions: AgentPersonaInstructions,
   acceptedInput: Schema.optional(TrimmedNonEmptyString),
-  artifacts: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
-  inputArtifacts: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
-  outputArtifact: Schema.optional(TrimmedNonEmptyString),
   authority: Schema.Struct({
     defaultPolicy: AgentPersonaReportedAuthorityPolicy,
     allowedPolicies: Schema.Array(AgentPersonaReportedAuthorityPolicy),
   }),
   modelRoute: Schema.Tuple([AgentPersonaModelTarget, AgentPersonaModelTarget]),
+  models: Schema.optional(Schema.NonEmptyArray(AgentPersonaModelEntry)),
+  access: Schema.optional(AgentPersonaAccess),
 });
 export type AgentPersonaDefinitionView = typeof AgentPersonaDefinitionView.Type;
 
@@ -245,6 +258,8 @@ export const OrchestrationV2AgentPersonaCatalogEntry = Schema.Struct({
   displayName: TrimmedNonEmptyString,
   description: TrimmedNonEmptyString,
   acceptedInput: Schema.optional(TrimmedNonEmptyString),
+  access: Schema.optional(AgentPersonaAccess),
+  models: Schema.optional(Schema.NonEmptyArray(AgentPersonaModelEntry)),
   defaultAuthorityPolicy: AgentPersonaReportedAuthorityPolicy,
   allowedAuthorityPolicies: Schema.Array(AgentPersonaReportedAuthorityPolicy),
   availability: OrchestrationV2AgentPersonaAvailability,

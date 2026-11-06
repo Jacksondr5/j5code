@@ -1,6 +1,8 @@
 import {
   BUILT_IN_AGENT_PERSONA_IDS,
   AgentPersonaAuthorityPolicy,
+  AgentPersonaAccess,
+  AgentPersonaModelEntry,
   AgentPersonaId,
   AgentPersonaModelTarget,
   TrimmedNonEmptyString,
@@ -69,48 +71,88 @@ export const AgentPersonaDefinition = Schema.Struct({
   displayName: NonEmpty,
   description: NonEmpty,
   acceptedInput: Schema.optional(NonEmpty),
-  /**
-   * Legacy handoff fields: accepted and ignored. They stay in the schema because they are part of
-   * `definitionDigest`, which stored snapshots are verified against.
-   */
-  artifacts: Schema.optional(Schema.Array(NonEmpty)),
-  inputArtifacts: Schema.optional(Schema.Array(NonEmpty)),
-  outputArtifact: Schema.optional(NonEmpty),
+  // Retained only for stored-definition identity; their values never affect behavior.
+  artifacts: Schema.optional(Schema.Unknown),
+  inputArtifacts: Schema.optional(Schema.Unknown),
+  outputArtifact: Schema.optional(Schema.Unknown),
+  authority: Schema.optional(
+    Schema.Struct({
+      defaultPolicy: AgentPersonaAuthorityPolicy,
+      allowedPolicies: Schema.Array(AgentPersonaAuthorityPolicy),
+    }),
+  ),
+  access: Schema.optional(AgentPersonaAccess),
+  modelRoute: Schema.NonEmptyArray(AgentPersonaModelEntry),
+  instructions: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(32768)),
+});
+export type AgentPersonaDefinition = typeof AgentPersonaDefinition.Type;
+
+const LegacyAgentPersonaDefinition = Schema.Struct({
+  ...AgentPersonaDefinition.fields,
   authority: Schema.Struct({
     defaultPolicy: AgentPersonaAuthorityPolicy,
     allowedPolicies: Schema.Array(AgentPersonaAuthorityPolicy),
   }),
   modelRoute: Schema.Tuple([AgentModelTarget, AgentModelTarget]),
-  instructions: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(32768)),
 });
-export type AgentPersonaDefinition = typeof AgentPersonaDefinition.Type;
+const decodeLegacyExample = Schema.decodeUnknownSync(LegacyAgentPersonaDefinition);
 
 const decodeDefinition = Schema.decodeUnknownSync(AgentPersonaDefinition);
 
+export function decodeAgentPersonaDefinition(
+  value: typeof LegacyAgentPersonaDefinition.Type,
+): typeof LegacyAgentPersonaDefinition.Type;
+export function decodeAgentPersonaDefinition(value: unknown): AgentPersonaDefinition;
 export function decodeAgentPersonaDefinition(value: unknown): AgentPersonaDefinition {
   const definition = decodeDefinition(value);
-  if (!definition.authority.allowedPolicies.includes(definition.authority.defaultPolicy)) {
+  if ((definition.authority === undefined) === (definition.access === undefined)) {
+    throw new Error("Specify either access or legacy authority, not both.");
+  }
+  if (
+    definition.authority !== undefined &&
+    !definition.authority.allowedPolicies.includes(definition.authority.defaultPolicy)
+  ) {
     throw new Error(`Persona ${definition.id}: default authority must be allowed.`);
   }
   return definition;
 }
 
-/** Bundled examples use exactly the same format and validation as imported definitions. */
-export const BUILT_IN_AGENT_PERSONAS = {
-  scout: decodeAgentPersonaDefinition(scout),
-  navigator: decodeAgentPersonaDefinition(navigator),
-  advocate: decodeAgentPersonaDefinition(advocate),
-  skeptic: decodeAgentPersonaDefinition(skeptic),
-  builder: decodeAgentPersonaDefinition(builder),
-  critic: decodeAgentPersonaDefinition(critic),
-  sentry: decodeAgentPersonaDefinition(sentry),
-  publisher: decodeAgentPersonaDefinition(publisher),
-  investigator: decodeAgentPersonaDefinition(investigator),
-  prosecutor: decodeAgentPersonaDefinition(prosecutor),
-  herald: decodeAgentPersonaDefinition(herald),
+export const mapAgentPersonaPolicy = (policy: AgentPersonaAuthorityPolicy) =>
+  policy === "critic-review" ? "read-only" : policy === "critic-fix" ? "workspace-write" : policy;
+
+export const agentPersonaPolicy = (definition: AgentPersonaDefinition) =>
+  mapAgentPersonaPolicy(definition.access ?? definition.authority!.defaultPolicy);
+
+export const agentPersonaAccess = (definition: AgentPersonaDefinition) => {
+  const policy = agentPersonaPolicy(definition);
+  return policy === "diagnostic" || policy === "publish-only" ? undefined : policy;
 };
 
-export const getBuiltInAgentPersona = (id: string): AgentPersonaDefinition => {
+export const AGENT_PERSONA_ACCESS_REPAIR =
+  "Choose read-only, workspace-write, or full-access instead of diagnostic or publish-only.";
+
+export const agentPersonaLegacyEditable = (definition: AgentPersonaDefinition) =>
+  definition.access === undefined &&
+  definition.authority !== undefined &&
+  definition.modelRoute.length === 2 &&
+  definition.modelRoute.every((target) => "driver" in target);
+
+/** Historical assignments retain their definitions even when their access cannot launch today. */
+export const BUILT_IN_AGENT_PERSONAS = {
+  scout: decodeLegacyExample(scout),
+  navigator: decodeLegacyExample(navigator),
+  advocate: decodeLegacyExample(advocate),
+  skeptic: decodeLegacyExample(skeptic),
+  builder: decodeLegacyExample(builder),
+  critic: decodeLegacyExample(critic),
+  sentry: decodeLegacyExample(sentry),
+  publisher: decodeLegacyExample(publisher),
+  investigator: decodeLegacyExample(investigator),
+  prosecutor: decodeLegacyExample(prosecutor),
+  herald: decodeLegacyExample(herald),
+};
+
+export const getBuiltInAgentPersona = (id: string) => {
   const definition = listBuiltInAgentPersonas().find((candidate) => candidate.id === id);
   if (!definition) throw new Error(`Unknown agent persona: ${id}.`);
   return definition;
@@ -119,5 +161,4 @@ export const getBuiltInAgentPersona = (id: string): AgentPersonaDefinition => {
 export const getAgentAuthorityRules = (id: AgentAuthorityPolicyId): AgentAuthorityRules =>
   AGENT_AUTHORITY_RULES[id];
 
-export const listBuiltInAgentPersonas = (): ReadonlyArray<AgentPersonaDefinition> =>
-  Object.values(BUILT_IN_AGENT_PERSONAS);
+export const listBuiltInAgentPersonas = () => Object.values(BUILT_IN_AGENT_PERSONAS);

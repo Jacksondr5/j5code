@@ -96,6 +96,11 @@ import { crewSeatRequestKey, lifecycleId, spawnThreadId } from "./spawnIds.ts";
 import { CREW_PROPOSAL_SESSION } from "./crewSeatIds.ts";
 import { ParticipantId, LedgerProjectId } from "./contracts.ts";
 
+const launchablePersonas = Object.values(BUILT_IN_AGENT_PERSONAS).filter(
+  ({ authority }) =>
+    authority.defaultPolicy !== "diagnostic" && authority.defaultPolicy !== "publish-only",
+);
+
 const projectId = LedgerProjectId.make("ledger:crew-proposal");
 const captainThread = ThreadId.make("thread:captain");
 const captainId = ParticipantId.make("agent:j5:a2a:thread:captain");
@@ -513,9 +518,7 @@ const fixtureWithDatabase = Effect.fn("test.crewProposal.fixture")(function* (
     ),
     Layer.provideMerge(playbookStoreLayer),
     Layer.provideMerge(Layer.succeedContext(context)),
-    Layer.provideMerge(
-      personaLibraryLayer("j5-crew-proposal-", Object.values(BUILT_IN_AGENT_PERSONAS)),
-    ),
+    Layer.provideMerge(personaLibraryLayer("j5-crew-proposal-", launchablePersonas)),
     Layer.provideMerge(NodeServices.layer),
   );
   return {

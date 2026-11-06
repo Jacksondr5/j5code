@@ -269,16 +269,19 @@ function OwnerAgentLibrarySettingsScreen() {
   async function duplicatePersona(personaId: string) {
     if (busy) return;
     setBusy(true);
-    const read = await settlePromise(() => readDefinition(personaId));
+    const draft = await settlePromise(async () => {
+      const read = await readDefinition(personaId);
+      return agentPersonaDuplicateDraft(read.definition);
+    });
     setBusy(false);
-    if (read._tag === "Failure") {
-      setNotification(failureNotice("Persona action failed", read));
+    if (draft._tag === "Failure") {
+      setNotification(failureNotice("Persona action failed", draft));
       return;
     }
     if (effectiveEnvironmentId === null) return;
     navigation.navigate("SettingsPersonaNew", {
       environmentId: effectiveEnvironmentId,
-      initial: agentPersonaDuplicateDraft(read.value.definition),
+      initial: draft.value,
     });
   }
   async function exportPersona(personaId: string) {
@@ -354,7 +357,7 @@ function OwnerAgentLibrarySettingsScreen() {
           <SettingsSection title="Library errors">
             {catalog.data.diagnostics.map((diagnostic, index) => (
               <InfoRow
-                key={diagnostic.path}
+                key={`${diagnostic.path}:${diagnostic.message}`}
                 borderTop={index > 0}
                 tone="danger"
                 text={`Invalid persona file: ${diagnostic.path}: ${diagnostic.message}`}

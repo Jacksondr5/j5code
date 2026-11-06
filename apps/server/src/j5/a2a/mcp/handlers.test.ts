@@ -105,6 +105,11 @@ import {
 } from "./tools.ts";
 import { noDocumentTextLayer } from "../../test-support/documentText.ts";
 
+const launchablePersonas = Object.values(BUILT_IN_AGENT_PERSONAS).filter(
+  ({ authority }) =>
+    authority.defaultPolicy !== "diagnostic" && authority.defaultPolicy !== "publish-only",
+);
+
 const decodeJ5ListParticipantsResult = Schema.decodeUnknownEffect(J5ListParticipantsResult);
 const hasKey = (value: unknown, key: string): boolean => {
   if (Array.isArray(value)) return value.some((item) => hasKey(item, key));
@@ -1727,7 +1732,7 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
             deletedAt: null,
           }),
       }),
-      personaLibraryLayer("j5-mcp-spawn-persona-", Object.values(BUILT_IN_AGENT_PERSONAS)),
+      personaLibraryLayer("j5-mcp-spawn-persona-", launchablePersonas),
     ).pipe(Layer.provideMerge(NodeServices.layer));
     const layer = J5ToolkitHandlersLive.pipe(
       Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
@@ -2189,7 +2194,7 @@ it.effect("lists saved agents with purpose, policy, availability, and route", ()
       Layer.mock(ArchiveCrewService)({}),
       Layer.mock(CrewStopService)({}),
       Layer.mock(CrewProposalService)({}),
-      personaLibraryLayer("j5-mcp-list-agents-", Object.values(BUILT_IN_AGENT_PERSONAS)),
+      personaLibraryLayer("j5-mcp-list-agents-", launchablePersonas),
     ).pipe(Layer.provideMerge(NodeServices.layer));
     const layer = J5ToolkitHandlersLive.pipe(
       Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
@@ -2233,15 +2238,13 @@ it.effect("lists saved agents with purpose, policy, availability, and route", ()
           readonly route: string | null;
         }>;
       };
-      assert.lengthOf(personas, 11);
+      assert.lengthOf(personas, launchablePersonas.length);
       const scout = personas.find((persona) => persona.id === "scout");
       assert.deepStrictEqual(
         [scout?.runtime_policy, scout?.availability, scout?.route],
         ["read-only", "available", "codex · gpt-5.6-terra · high"],
       );
-      // Publisher's publish-only policy has no enforceable provider yet, so it cannot start.
-      const publisher = personas.find((persona) => persona.id === "publisher");
-      assert.deepStrictEqual([publisher?.availability, publisher?.route], ["blocked", null]);
+      assert.isUndefined(personas.find((persona) => persona.id === "publisher"));
     }).pipe(Effect.provide(layer));
   }),
 );

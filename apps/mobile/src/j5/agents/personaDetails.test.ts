@@ -1,4 +1,4 @@
-import type { AgentPersonaModelTarget } from "@t3tools/contracts";
+import { ProviderInstanceId, type AgentPersonaModelTarget } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import { personaDetailRows } from "./personaDetails";
@@ -39,6 +39,53 @@ describe("personaDetailRows", () => {
       ["Primary model", "Codex · gpt-6-luna · low"],
       ["Fallback model", "Claude · haiku · low"],
       ["Description", "Reviews changes."],
+    ]);
+  });
+
+  it("shows one canonical model without a duplicate fallback", () => {
+    const only = target("codex", "only-model", "high");
+    const rows = personaDetailRows(
+      persona,
+      { status: "loaded", route: [only, only], models: [only] },
+      null,
+    );
+    expect(rows.filter(({ label }) => label.startsWith("Model "))).toEqual([
+      { label: "Model 1", value: "Codex · only-model · high" },
+    ]);
+    expect(rows.map(({ label }) => label)).not.toContain("Fallback model");
+  });
+
+  it("shows every canonical instance and option beyond the legacy summary", () => {
+    const legacy = target("codex", "first", "high");
+    const rows = personaDetailRows(
+      persona,
+      {
+        status: "loaded",
+        route: [legacy, legacy],
+        models: [
+          {
+            instanceId: ProviderInstanceId.make("remote-codex"),
+            model: "first",
+            options: [{ id: "reasoningEffort", value: "high" }],
+          },
+          {
+            instanceId: ProviderInstanceId.make("claudeAgent"),
+            model: "second",
+            options: [{ id: "effort", value: "medium" }],
+          },
+          {
+            instanceId: ProviderInstanceId.make("remote-codex"),
+            model: "third",
+            options: [{ id: "fastMode", value: true }],
+          },
+        ],
+      },
+      null,
+    );
+    expect(rows.filter(({ label }) => label.startsWith("Model "))).toEqual([
+      { label: "Model 1", value: "remote-codex · first · reasoningEffort: high" },
+      { label: "Model 2", value: "claudeAgent · second · effort: medium" },
+      { label: "Model 3", value: "remote-codex · third · fastMode: true" },
     ]);
   });
 

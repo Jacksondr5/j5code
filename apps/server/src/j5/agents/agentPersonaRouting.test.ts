@@ -1,6 +1,15 @@
+import * as Schema from "effect/Schema";
+import { stringify as yaml } from "yaml";
+import {
+  buildAgentPersonaAssignment,
+  validateAgentPersonaAssignment,
+} from "./agentPersonaAssignment.ts";
 import { assert, describe, it } from "@effect/vitest";
 import {
   ProviderDriverKind,
+  AgentPersonaDefinitionView,
+  AgentPersonaModelTarget,
+  J5AgentPersonaRpcSchemas,
   ProviderInstanceId,
   type ServerProvider,
   type ServerProviderModel,
@@ -8,11 +17,19 @@ import {
 
 import {
   agentPersonaModelSelection,
+  agentPersonaDefinitionView,
   buildAgentPersonaCatalog,
   resolveAgentPersonaRoute,
 } from "./agentPersonaRouting.ts";
 import { providerCanEnforceAgentPersonaAuthority } from "./agentPersonaProviderPolicy.ts";
-import { listBuiltInAgentPersonas, type AgentModelTarget } from "./agentPersonas.ts";
+import {
+  decodeAgentPersonaDefinition,
+  listBuiltInAgentPersonas,
+  type AgentModelTarget,
+} from "./agentPersonas.ts";
+
+const decodePersonaRead = Schema.decodeSync(J5AgentPersonaRpcSchemas.readAgentPersona.output);
+const decodeDefinitionView = Schema.decodeSync(AgentPersonaDefinitionView);
 
 function model(
   slug: string,
@@ -477,4 +494,116 @@ it("presents imported definitions without transmitting their instruction bodies"
   assert.equal(catalog.personas[0]?.availability.status, "available");
   assert.notProperty(catalog.personas[0], "instructions");
   assert.deepEqual(buildAgentPersonaCatalog([], []), { personas: [] });
+});
+
+it("projects a new list for old readers while keeping its complete instance entries", () => {
+  const { authority: _authority, ...legacy } = listBuiltInAgentPersonas()[0]!;
+  const definition = decodeAgentPersonaDefinition({
+    ...legacy,
+    access: "read-only",
+    artifacts: false,
+    inputArtifacts: 42,
+    outputArtifact: {},
+    modelRoute: [
+      { instanceId: "missing", model: "first" },
+      { instanceId: "codex", model: "second", options: [{ id: "reasoningEffort", value: "high" }] },
+      { instanceId: "codex", model: "third" },
+    ],
+  });
+  const providers = [
+    provider({
+      instanceId: "codex",
+      driver: "codex",
+      models: [model("second", "reasoningEffort"), model("third", "reasoningEffort")],
+    }),
+  ];
+  const view = agentPersonaDefinitionView(definition, providers);
+  const oldDefinition = Schema.Struct({
+    id: Schema.String,
+    version: Schema.Number,
+    displayName: Schema.String,
+    description: Schema.String,
+    instructions: Schema.String,
+    authority: Schema.Struct({
+      defaultPolicy: Schema.String,
+      allowedPolicies: Schema.Array(Schema.String),
+    }),
+    modelRoute: Schema.Tuple([AgentPersonaModelTarget, AgentPersonaModelTarget]),
+  });
+  const old = Schema.decodeSync(oldDefinition)(view);
+  assert.deepEqual(
+    old.modelRoute.map(({ model }) => model),
+    ["first", "second"],
+  );
+  assert.equal(old.authority.defaultPolicy, "read-only");
+  assert.equal(view.modelRoute[0].driver, "unconfigured");
+  const response = decodePersonaRead({
+    definition: view,
+    fileName: "agent.yaml",
+    yaml: yaml(definition),
+  });
+  assert.lengthOf(response.definition.models!, 3);
+  assert.include(response.yaml, "instanceId: missing");
+  assert.isFalse("artifacts" in response.definition);
+  assert.isFalse("outputArtifact" in response.definition);
+  assert.deepEqual(decodeDefinitionView(old).modelRoute, old.modelRoute);
+  const resolution = resolveAgentPersonaRoute({ personaId: definition.id, definition, providers });
+  assert.equal(resolution.status, "available");
+  if (resolution.status !== "available") return;
+  const built = buildAgentPersonaAssignment({ resolution, definition });
+  assert.equal(built.status, "assigned");
+  if (built.status !== "assigned") return;
+  assert.equal(built.assignment.resolvedRouteIndex, 1);
+  assert.equal(built.assignment.resolvedModelSelection.model, "second");
+  assert.isUndefined(validateAgentPersonaAssignment(built.assignment, definition));
+});
+
+it("repeats a single model only in the legacy read summary", () => {
+  const { authority: _authority, ...legacy } = listBuiltInAgentPersonas()[0]!;
+  const definition = decodeAgentPersonaDefinition({
+    ...legacy,
+    access: "full-access",
+    modelRoute: [{ instanceId: "unconfigured", model: "only" }],
+  });
+  const view = agentPersonaDefinitionView(definition, []);
+  assert.lengthOf(view.models!, 1);
+  assert.deepEqual(view.modelRoute[0], view.modelRoute[1]);
+});
+
+it("retains the third entry index when new-format candidates fail before it", () => {
+  const { authority: _authority, ...legacy } = listBuiltInAgentPersonas()[0]!;
+  const definition = decodeAgentPersonaDefinition({
+    ...legacy,
+    access: "workspace-write",
+    modelRoute: [
+      { instanceId: "codex", model: "missing" },
+      { instanceId: "claudeAgent", model: "claude" },
+      { instanceId: "codex", model: "available" },
+    ],
+  });
+  const providers = [
+    provider({
+      instanceId: "codex",
+      driver: "codex",
+      models: [model("available", "reasoningEffort")],
+    }),
+    provider({
+      instanceId: "claudeAgent",
+      driver: "claudeAgent",
+      models: [model("claude", "effort")],
+    }),
+  ];
+  const resolution = resolveAgentPersonaRoute({ personaId: definition.id, definition, providers });
+  assert.equal(resolution.status, "available");
+  if (resolution.status !== "available") return;
+  const result = buildAgentPersonaAssignment({ resolution, definition });
+  assert.equal(result.status, "assigned");
+  if (result.status !== "assigned") return;
+  assert.equal(result.assignment.resolvedRouteIndex, 2);
+  assert.equal(result.assignment.resolvedModelSelection.model, "available");
+  assert.isUndefined(validateAgentPersonaAssignment(result.assignment, definition));
+  assert.deepEqual(
+    resolution.rejectedTargets.map(({ failures }) => failures[0]?.code),
+    ["model-not-advertised", "authority-not-enforceable"],
+  );
 });

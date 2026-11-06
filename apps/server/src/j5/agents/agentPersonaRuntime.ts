@@ -39,14 +39,11 @@ export const resolveAgentPersonaRuntime = Effect.fn("resolveAgentPersonaRuntime"
   } else {
     const definition = yield* library.readSnapshot(assignment);
     if (
-      !definition.authority.allowedPolicies.some(
-        (policy) => policy === assignment.authorityPolicy,
-      ) ||
-      (assignment.runtimeModeOverride === undefined &&
-        !providerCanEnforceAgentPersonaAuthority(
-          assignment.resolvedDriver,
-          assignment.authorityPolicy,
-        ))
+      assignment.runtimeModeOverride === undefined &&
+      !providerCanEnforceAgentPersonaAuthority(
+        assignment.resolvedDriver,
+        assignment.authorityPolicy,
+      )
     ) {
       return yield* new AgentPersonaLibraryError({
         message: "The assigned persona runtime permissions are unsupported.",

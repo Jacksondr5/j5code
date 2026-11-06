@@ -180,20 +180,6 @@ it.effect("launches one persona directly without requiring workflow sequencing",
         `Persona thread ${launched.threadId} has an immutable model route.`,
       );
 
-      const publisherError = yield* launches
-        .launch({
-          ...launchInput({
-            command: "command:launch:publisher-blocked",
-            thread: "thread:launch:publisher-blocked",
-          }),
-          agentPersona: { personaId: "publisher" },
-        })
-        .pipe(Effect.flip);
-      assert.equal(
-        publisherError.message,
-        "Persona publisher is blocked because neither route can enforce its authority policy.",
-      );
-
       const invalidAuthorityError = yield* launches
         .launch({
           ...launchInput({
@@ -211,10 +197,7 @@ it.effect("launches one persona directly without requiring workflow sequencing",
       Effect.provide(
         harness.layer.pipe(
           Layer.provideMerge(
-            personaLibraryLayer("j5-direct-persona-", [
-              BUILT_IN_AGENT_PERSONAS.scout,
-              BUILT_IN_AGENT_PERSONAS.publisher,
-            ]),
+            personaLibraryLayer("j5-direct-persona-", [BUILT_IN_AGENT_PERSONAS.scout]),
           ),
         ),
       ),

@@ -29,23 +29,23 @@ describe("agent persona assignment", () => {
     assert.deepEqual(result.assignment, {
       personaId: "critic",
       definitionVersion: 1,
-      authorityPolicy: "critic-review",
+      authorityPolicy: "read-only",
       resolvedRoute: "primary",
       resolvedDriver: ProviderDriverKind.make("claudeAgent"),
       resolvedModelSelection: criticRoute.modelSelection,
     });
   });
 
-  it("blocks Critic Fix Mode on a provider that cannot enforce workspace authority", () => {
+  it("rejects Critic Fix Mode for new reviewer assignments", () => {
     const result = buildAgentPersonaAssignment({
       resolution: criticRoute,
       authorityPolicy: "critic-fix",
     });
     assert.deepEqual(result, {
-      status: "authority-not-enforceable",
+      status: "invalid-authority-policy",
       personaId: "critic",
       requestedPolicy: "critic-fix",
-      driver: ProviderDriverKind.make("claudeAgent"),
+      allowedPolicies: ["read-only"],
     });
   });
 
@@ -58,7 +58,7 @@ describe("agent persona assignment", () => {
       status: "invalid-authority-policy",
       personaId: "critic",
       requestedPolicy: "workspace-write",
-      allowedPolicies: ["critic-review", "critic-fix"],
+      allowedPolicies: ["read-only"],
     });
   });
 

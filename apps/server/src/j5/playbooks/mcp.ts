@@ -6,7 +6,7 @@ import {
   PlaybookSaveRequest,
   PlaybookSaveResponse,
 } from "@t3tools/contracts/j5";
-import { OrchestratorMcpFailure } from "@t3tools/contracts";
+import { isAgentPersonaAuthorityPolicy, OrchestratorMcpFailure } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { Tool } from "effect/ai";
@@ -16,6 +16,7 @@ import { ThreadManagementService } from "../../orchestration-v2/ThreadManagement
 import { ProjectService } from "../../project/ProjectService.ts";
 import { PlaybookCrewRelay } from "./PlaybookCrewRelay.ts";
 import { PlaybookStore, playbookError, type PlaybookMutation } from "./PlaybookStore.ts";
+import { mapAgentPersonaPolicy } from "../agents/agentPersonas.ts";
 import { readCaller } from "../../mcp/threadAccess.ts";
 import { playbookWorkspaceRoot } from "./workspace.ts";
 
@@ -173,12 +174,16 @@ export const playbookHandlers = {
       yield* ownerScope;
       const caller = yield* readCaller();
       const assignment = caller.caller?.agentPersonaAssignment;
+      const authorityPolicy =
+        assignment && isAgentPersonaAuthorityPolicy(assignment.authorityPolicy)
+          ? mapAgentPersonaPolicy(assignment.authorityPolicy)
+          : undefined;
       if (
         caller.limits.interactionMode === "plan" ||
         (assignment &&
           assignment.runtimeModeOverride !== "full-access" &&
-          assignment.authorityPolicy !== "workspace-write" &&
-          assignment.authorityPolicy !== "full-access")
+          authorityPolicy !== "workspace-write" &&
+          authorityPolicy !== "full-access")
       )
         return yield* playbookError(
           "capability_denied",
