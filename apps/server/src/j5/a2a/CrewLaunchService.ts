@@ -77,7 +77,8 @@ import {
 /**
  * One approved seat: who fills it, why, and any wiring text its brief carries verbatim. A null
  * agent is a custom seat: the human can override its runtime; an omitted model selection inherits
- * the Captain's, and omitted access is Full access.
+ * the Captain's. Omitted access is Full access on a roster the person approves, and the Captain's
+ * own access on an auto-approved one.
  */
 export interface CrewLaunchSeat {
   readonly name: string;
