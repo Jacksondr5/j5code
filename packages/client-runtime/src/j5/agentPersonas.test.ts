@@ -117,7 +117,7 @@ describe("agent persona catalog presentation", () => {
       }),
     ).toMatchObject({
       routeLabel: "Claude · claude-opus-5 · high",
-      switchNote: "Switched from its launch model by a person.",
+      switchNote: "A person changed its model or reasoning since launch.",
     });
     expect(
       presentAgentPersonaAssignment({
