@@ -678,6 +678,8 @@ it.effect(
         assert.isTrue(draftAsk.startsWith("Save release-notes?\n\n"));
         assert.include(draftAsk, "a new persona, release-notes");
         assert.include(draftAsk, `(draft ${draftId})`);
+        // It must open its own exchange, so it never lands on another ask's.
+        assert.isTrue((yield* Ref.get(sends)).at(-1)!.freshAsk);
       }).pipe(Effect.provide(layer));
     }),
 );

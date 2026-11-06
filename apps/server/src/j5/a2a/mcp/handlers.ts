@@ -477,7 +477,8 @@ const handlers = {
           ...(input.intent == null ? {} : { intent: input.intent }),
           ...(input.urgency == null ? {} : { urgency: input.urgency }),
           // An escalation is its own ask: it never joins one already open with the person.
-          ...(escalationId === undefined ? {} : { freshAsk: true }),
+          // An Owner action needs its own exchange, so it never lands on another ask's.
+          ...(escalationId === undefined && personaDraftId === undefined ? {} : { freshAsk: true }),
           ...(mode === "queue" ? {} : { mode }),
           ...(modeLimit === undefined ? {} : { modeLimit }),
           ...(claimed === undefined ? {} : { attachments: claimed }),
