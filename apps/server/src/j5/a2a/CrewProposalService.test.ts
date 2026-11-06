@@ -781,6 +781,23 @@ it.effect("gates new rosters on the human and adds members directly with the sea
         .pipe(Effect.flip);
       assert.include(unknown.message, 'names persona "nobody"');
 
+      const unreviewable = yield* gate
+        .requestMember({
+          requestKey: "add-reviews-unknown",
+          captain,
+          crewInstanceId: instance.id,
+          seat: {
+            workspace: { type: "shared" as const },
+            seat: "second-critic",
+            agentId: "critic",
+            reason: "Reviews the builder",
+            reviews: ["builder", "ghost"],
+          },
+          brief: null,
+        })
+        .pipe(Effect.flip);
+      assert.include(unreviewable.message, 'reviews "ghost", which is not a seat on this crew');
+
       // A custom seat has nothing but its instructions to run on, so it cannot be filed without them.
       const bare = yield* gate
         .requestMember({

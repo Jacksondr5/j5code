@@ -16,6 +16,7 @@ import { Pressable, View } from "react-native";
 
 import { AppText as Text } from "../../components/ui/AppText";
 import { Menu } from "../../components/ui/Menu";
+import { ThemedSwitch } from "../../components/ui/ThemedSwitch";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
 import { agentPersonaEnvironment } from "./agentPersonaAtoms";
@@ -23,9 +24,10 @@ import { agentPersonaEnvironment } from "./agentPersonaAtoms";
 export interface AgentRoutePolicyValue {
   readonly access: AgentPersonaAccess;
   readonly modelRoute: ReadonlyArray<AgentPersonaModelEntry>;
+  readonly independentReviewer?: boolean | undefined;
 }
 
-/** Access level and ordered model entries, shared by the create and edit modals. */
+/** Access level, ordered model entries and the reviewer flag, shared by the create and edit modals. */
 export function AgentRoutePolicyFields(props: {
   environmentId: EnvironmentId;
   value: AgentRoutePolicyValue;
@@ -264,6 +266,20 @@ export function AgentRoutePolicyFields(props: {
       <Text className="text-xs text-foreground-muted">
         Model availability and access level support are checked for each launch.
       </Text>
+      <View className="flex-row items-center justify-between gap-3">
+        <View className="flex-1 gap-0.5">
+          <Text className="text-sm font-t3-medium">Independent reviewer</Text>
+          <Text className="text-xs text-foreground-muted">
+            Prefers a model that didn't write the work it reviews. Never blocks a launch.
+          </Text>
+        </View>
+        <ThemedSwitch
+          value={value.independentReviewer === true}
+          disabled={disabled}
+          accessibilityLabel="Independent reviewer"
+          onValueChange={(independentReviewer) => props.onChange({ ...value, independentReviewer })}
+        />
+      </View>
     </>
   );
 }

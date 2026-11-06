@@ -42,6 +42,10 @@ import {
   type AgentPersonaPickCaller,
   type AgentPersonaPickSourceKind,
 } from "../agents/agentPersonaPick.ts";
+import {
+  withReviewIndependenceNote,
+  type ReviewAuthorsRequest,
+} from "../agents/agentPersonaReviewIndependence.ts";
 
 import { preflightSpawnCaller, stateError } from "./AgentCaller.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
@@ -155,28 +159,37 @@ const selectSpawnModel = Effect.fn("j5.a2a.mcp.selectSpawnModel")(function* (
 });
 
 /**
- * A persona spawn keeps the explicit provider, model and reasoning pick, which must be one of the
- * persona's entries, and the persona's access becomes the agent's. Who picked sets the limits: a
+ * A persona spawn runs on an entry the server chooses from the persona's list, or on the one the
+ * spawner pinned, and the persona's access becomes the agent's. Who picked sets the limits: a
  * person's pick (the turn's @persona mention) runs as saved; an agent's is held to the project's
  * Models for custom members and to the caller's own access.
  */
 const prepareSpawnPersona = Effect.fn("j5.a2a.mcp.prepareSpawnPersona")(function* (
   input: {
     readonly persona: string;
-    readonly model: string;
+    readonly model?: string | undefined;
     readonly reasoning?: string | undefined;
   },
-  selected: ModelSelection,
+  selected: ModelSelection | undefined,
   pick: {
     readonly source: AgentPersonaPickSourceKind;
     readonly caller: AgentPersonaPickCaller;
     readonly projectId: ProjectId;
+    readonly reviewAuthors: ReviewAuthorsRequest;
   },
 ) {
   const { assignment, runtimeMode } = yield* pickAgentPersona({
     personaId: input.persona,
     ...pick,
-    pinned: { instanceId: selected.instanceId, model: input.model, reasoning: input.reasoning },
+    ...(selected === undefined || input.model === undefined
+      ? {}
+      : {
+          pinned: {
+            instanceId: selected.instanceId,
+            model: input.model,
+            reasoning: input.reasoning,
+          },
+        }),
   }).pipe(
     Effect.mapError((error) =>
       stateError(
@@ -187,7 +200,9 @@ const prepareSpawnPersona = Effect.fn("j5.a2a.mcp.prepareSpawnPersona")(function
             : `Use a persona within your access (j5_list_personas shows each one's), omit persona, or ask the person to pick it themselves with @persona:${input.persona}.`
           : error.constraint === "model-not-eligible"
             ? `Retry j5_spawn_agent with another of the persona's entries that Models for custom members checks, or ask the person to pick it themselves with @persona:${input.persona}.`
-            : "Call orchestrator_capabilities, then retry j5_spawn_agent with a provider, model, and reasoning from that persona's ordered model entries, or omit persona for a plain Peer Agent.",
+            : selected === undefined
+              ? "Retry j5_spawn_agent once one of the persona's entries can run (j5_list_personas shows why each cannot), or omit persona for a plain Peer Agent."
+              : "Call orchestrator_capabilities, then retry j5_spawn_agent with a provider, model, and reasoning from that persona's ordered model entries, omit them to let the server choose, or omit persona for a plain Peer Agent.",
       ),
     ),
   );
@@ -377,8 +392,32 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
       ),
     );
   }
-  const selected = existing?.modelSelection ?? (yield* selectSpawnModel(scope, input));
   const personaId = input.persona;
+  // A persona's entries are a model list of their own, so with one the model may be left to the server.
+  if ((input.provider === undefined) !== (input.model === undefined))
+    return yield* stateError(
+      "provider and model go together: give both, or (with persona) neither.",
+      "Retry j5_spawn_agent with both provider and model, or with persona and neither.",
+    );
+  if (input.model === undefined && input.reasoning !== undefined)
+    return yield* stateError(
+      "reasoning applies to a model you choose, and none was given.",
+      "Retry j5_spawn_agent without reasoning, or with provider and model too.",
+    );
+  if (personaId === undefined && input.model === undefined)
+    return yield* stateError(
+      "A Peer Agent without a persona needs a provider and model.",
+      "Call orchestrator_capabilities, then retry j5_spawn_agent with provider and model, or name a persona.",
+    );
+  const selected =
+    existing?.modelSelection ??
+    (input.provider === undefined || input.model === undefined
+      ? undefined
+      : yield* selectSpawnModel(scope, {
+          provider: input.provider,
+          model: input.model,
+          reasoning: input.reasoning,
+        }));
   // A persona's policy sets its permissions. Without one the agent gets the caller's modes,
   // or the ones the caller chose, which upstream's rule keeps within the caller's own.
   if (personaId !== undefined && input.runtime_mode !== undefined) {
@@ -491,8 +530,16 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
           caller:
             home === undefined ? { approvedLevel: limits.runtimeMode } : { thread: home.thread },
           projectId: target,
+          // An outside agent has no thread of its own, so with none named its authors are unknown.
+          reviewAuthors:
+            input.author_threads === undefined
+              ? { threads: home === undefined ? [] : [{ threadId: home.thread.id }] }
+              : {
+                  threads: input.author_threads.map((threadId) => ({ threadId, named: true })),
+                },
         });
-  const modelSelection = existing?.modelSelection ?? persona?.modelSelection ?? selected;
+  // A plain agent's selection is required above, and a persona's comes from its pick.
+  const modelSelection = existing?.modelSelection ?? persona?.modelSelection ?? selected!;
   // With no mode chosen the agent gets the caller's: its thread's, or its approved level.
   const runtimeMode =
     existing?.runtimeMode ??
@@ -714,7 +761,7 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
             title: spawnTitle(input.title),
             messageId: spawnMessageId(stableInput),
             text: spawnFirstTurnText({
-              brief: input.brief,
+              brief: withReviewIndependenceNote(input.brief, child.thread.agentPersonaAssignment),
               participantId: facts.home.participantId,
               projectId: facts.home.projectId,
               projectTitle: targetProject.title,

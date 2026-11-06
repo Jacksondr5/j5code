@@ -52,6 +52,7 @@ export function agentPersonaDefinitionView(
     modelRoute: [summary(primary), summary(secondary ?? primary)],
     access: agentPersonaAccess(definition),
     models: definition.modelRoute,
+    ...(definition.independentReviewer === true ? { independentReviewer: true } : {}),
   };
 }
 
@@ -218,6 +219,8 @@ export function resolveAgentPersonaRoute(input: {
   readonly authorityPolicy?: AgentPersonaAuthorityPolicy;
   readonly now: number;
   readonly eligible?: AgentPersonaEntryEligibility | undefined;
+  /** Model ids to use only when no other entry can run: an independent reviewer's authors'. */
+  readonly avoidModels?: ReadonlySet<string> | undefined;
 }): AgentPersonaRouteResolution {
   const definition = input.definition ?? getBuiltInAgentPersona(input.personaId);
   const authority = input.authorityPolicy ?? agentPersonaPolicy(definition);
@@ -248,7 +251,12 @@ export function resolveAgentPersonaRoute(input: {
     }
     return { route, entryIndex, target, failures };
   });
-  const chosen = entries.find((entry) => entry.modelSelection !== undefined);
+  const runnable = entries.filter((entry) => entry.modelSelection !== undefined);
+  const avoid = input.avoidModels;
+  const chosen =
+    (avoid === undefined
+      ? undefined
+      : runnable.find((entry) => !avoid.has(entry.modelSelection!.model))) ?? runnable[0];
   if (chosen?.modelSelection !== undefined) {
     const provider = input.providers.find(
       ({ instanceId }) => instanceId === chosen.modelSelection!.instanceId,
@@ -261,7 +269,9 @@ export function resolveAgentPersonaRoute(input: {
       entryIndex: chosen.entryIndex,
       driver: provider.driver,
       modelSelection: chosen.modelSelection,
-      rejectedTargets: entries.slice(0, chosen.entryIndex),
+      rejectedTargets: entries
+        .slice(0, chosen.entryIndex)
+        .filter((entry) => entry.modelSelection === undefined),
       entries,
     };
   }
@@ -298,6 +308,7 @@ export function buildAgentPersonaCatalog(
           : { acceptedInput: definition.acceptedInput }),
         access: agentPersonaAccess(definition),
         models: definition.modelRoute,
+        ...(definition.independentReviewer === true ? { independentReviewer: true } : {}),
         defaultAuthorityPolicy: agentPersonaPolicy(definition),
         allowedAuthorityPolicies: [agentPersonaPolicy(definition)],
         modelEntries: entries.map((entry) => ({
