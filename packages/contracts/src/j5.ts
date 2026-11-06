@@ -316,7 +316,6 @@ export const CrewMembershipsResponse = Schema.Struct({
   entries: Schema.Array(CrewMembershipEntry),
 });
 
-/** One agent placed directly under a visible thread, with its Crew seat when it has one. */
 /**
  * A member its Captain replaced: a plain agent now, no longer a seat, kept readable with the seat
  * it held and the member that took its place.
@@ -329,6 +328,7 @@ export const ReplacedCrewSeat = Schema.Struct({
 });
 export type ReplacedCrewSeat = typeof ReplacedCrewSeat.Type;
 
+/** One agent placed directly under a visible thread, with its Crew seat when it has one. */
 export const SpawnedChild = Schema.Struct({
   threadId: ThreadId,
   participantId: Schema.String,

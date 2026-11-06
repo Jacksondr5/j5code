@@ -719,7 +719,7 @@ export function FleetRowItem(
           {agent.replaced === undefined ? null : (
             <Tooltip>
               <TooltipTrigger
-                render={<span className="shrink-0 truncate text-xs text-muted-foreground" />}
+                render={<span className="min-w-0 truncate text-xs text-muted-foreground" />}
               >
                 Replaced by {agent.replaced.replacedBy}
               </TooltipTrigger>
