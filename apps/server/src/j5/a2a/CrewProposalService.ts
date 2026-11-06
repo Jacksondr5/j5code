@@ -617,6 +617,7 @@ export const layer = Layer.effect(
       seats: ReadonlyArray<CrewProposalSeat>,
       resolvedSeats: ReadonlyArray<ResolvedCrewLaunchSeat>,
       playbook: CrewLaunchPlaybook | null,
+      pick: CrewSeatPick,
     ) {
       const launchSeats = seats.map(launchSeatOf);
       if (proposal.kind === "roster") {
@@ -627,6 +628,7 @@ export const layer = Layer.effect(
           displayName: proposal.displayName,
           seats: launchSeats,
           resolvedSeats,
+          pick,
           brief: proposal.brief,
           playbook,
           // The launch report finds its Crew through this link, so a lost write fails the
@@ -664,6 +666,7 @@ export const layer = Layer.effect(
         instance,
         seats: launchSeats,
         resolvedSeats,
+        pick,
         brief: proposal.brief,
         playbook,
         onReserved: () => recordApproval(proposal, seats),
@@ -998,7 +1001,8 @@ export const layer = Layer.effect(
       const seats = input.seats ?? proposal.requestedSeats;
       const { plan, definition } = yield* validateProposalSeats(proposal, seats);
       const captain = yield* captainFor(proposal);
-      const resolved = yield* resolveRuntime(captain, seats, automatic ? "agent" : "person");
+      const pick = automatic ? "agent" : "person";
+      const resolved = yield* resolveRuntime(captain, seats, pick);
       if (
         !automatic &&
         input.approvalToken !==
@@ -1021,6 +1025,7 @@ export const layer = Layer.effect(
         ),
         resolved,
         launchPlaybook(proposal.playbook, definition),
+        pick,
       ).pipe(
         // The member store is authoritative when concurrent additions claim the same step.
         Effect.catchTags({

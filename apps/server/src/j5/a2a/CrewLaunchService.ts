@@ -138,8 +138,8 @@ export interface CrewLaunchInput {
   readonly displayName: string;
   readonly seats: ReadonlyArray<CrewLaunchSeat>;
   readonly resolvedSeats?: ReadonlyArray<ResolvedCrewLaunchSeat>;
-  /** Who chose the seats, when they are resolved here; an agent unless a person approved them. */
-  readonly pick?: CrewSeatPick;
+  /** Who chose the seats: the person, on a card they approved, or an agent. */
+  readonly pick: CrewSeatPick;
   readonly brief: string;
   readonly playbook?: CrewLaunchPlaybook | null | undefined;
   /**
@@ -159,8 +159,8 @@ export interface CrewAddSeatsInput {
   readonly instance: AgentCrewInstance;
   readonly seats: ReadonlyArray<CrewLaunchSeat>;
   readonly resolvedSeats?: ReadonlyArray<ResolvedCrewLaunchSeat>;
-  /** Who chose the seats, when they are resolved here; an agent unless a person approved them. */
-  readonly pick?: CrewSeatPick;
+  /** Who chose the seats: the person, on a card they approved, or an agent. */
+  readonly pick: CrewSeatPick;
   /** The brief the new seats start on; defaults to the Crew's original brief. */
   readonly brief?: string | undefined;
   /** The Crew's playbook with live titles, for the new seats' briefs. */
@@ -966,8 +966,7 @@ export const layer = Layer.effect(
     const launch: CrewLaunchServiceShape["launch"] = Effect.fn("j5.a2a.crewLaunch.launch")(
       function* (input) {
         const resolved =
-          input.resolvedSeats ??
-          (yield* resolveSeats(input.captain, input.seats, input.pick ?? "agent"));
+          input.resolvedSeats ?? (yield* resolveSeats(input.captain, input.seats, input.pick));
         const planned = plan(input.providerSessionId, input.requestKey, resolved);
         const recordError = (phase: string) => (cause: unknown) =>
           new CrewLaunchOperationError({ phase, seatName: null, createdSeats: [], cause });
@@ -1042,8 +1041,7 @@ export const layer = Layer.effect(
     const addSeats: CrewLaunchServiceShape["addSeats"] = Effect.fn("j5.a2a.crewLaunch.addSeats")(
       function* (input) {
         const resolved =
-          input.resolvedSeats ??
-          (yield* resolveSeats(input.captain, input.seats, input.pick ?? "agent"));
+          input.resolvedSeats ?? (yield* resolveSeats(input.captain, input.seats, input.pick));
         const planned = plan(input.providerSessionId, input.requestKey, resolved);
         // Reserve the seats before anything spawns: the store decides the cap and the version in
         // one transaction, so two approvals landing together cannot both pass.
