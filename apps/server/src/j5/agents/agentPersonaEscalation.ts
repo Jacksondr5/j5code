@@ -75,6 +75,14 @@ export const allowedOnceReply = (grant: {
 }) =>
   `Allowed once: ${grant.personaId} past ${CONSTRAINT_TEXT[grant.constraint]}. Only ${grant.callerParticipantId}, whose launch was refused, can use it: it retries that launch with allow_once: ${grant.escalationId}. If you asked on a Crew member's behalf, send it this id.`;
 
+/** J5's own account of a block, which the person reads apart from the agent's words. */
+const recordText = (row: EscalationRow) =>
+  `${row.summary} ${
+    row.waivable === null
+      ? "No single exception lets it run, so the cause has to be fixed."
+      : `Allow this once would let one launch attempt past ${CONSTRAINT_TEXT[row.waivable]}.`
+  }`;
+
 interface EscalationRow {
   readonly id: string;
   readonly caller_participant_id: string;
@@ -98,13 +106,13 @@ export class AgentPersonaEscalations extends Context.Service<
       readonly waivable: AgentPersonaPickConstraint | null;
     }) => Effect.Effect<string, SqlError>;
     /**
-     * The trusted text an ask about this escalation carries. The asker is the caller it was
-     * recorded for, or that caller's Captain; only an open escalation is asked about.
+     * Whether this asker may ask about this escalation: the caller it was recorded for, or that
+     * caller's Captain, and only while it is open.
      */
-    readonly askSummary: (input: {
+    readonly authorizeAsk: (input: {
       readonly escalationId: string;
       readonly askerParticipantId: string;
-    }) => Effect.Effect<string, AgentPersonaEscalationError | SqlError>;
+    }) => Effect.Effect<void, AgentPersonaEscalationError | SqlError>;
     /** Link the ask that carries the escalation, so the person's Inbox can offer the grant. */
     readonly linkAsk: (input: {
       readonly escalationId: string;
@@ -176,8 +184,8 @@ export const layer = Layer.effect(
       return id;
     });
 
-    const askSummary: AgentPersonaEscalations["Service"]["askSummary"] = Effect.fn(
-      "j5.agents.escalations.askSummary",
+    const authorizeAsk: AgentPersonaEscalations["Service"]["authorizeAsk"] = Effect.fn(
+      "j5.agents.escalations.authorizeAsk",
     )(function* (input) {
       const row = yield* read(input.escalationId);
       if (row.caller_participant_id !== input.askerParticipantId) {
@@ -194,12 +202,6 @@ export const layer = Layer.effect(
         return yield* refuse(
           `Escalation ${input.escalationId} is already ${row.status === "granted" ? "allowed once: retry the launch with allow_once" : "used"}.`,
         );
-      return [
-        `J5 recorded this blocked launch (escalation ${row.id}, ${row.code}): ${row.summary}`,
-        row.waivable === null
-          ? "No single exception lets it run; fixing the cause or replying in text are the options."
-          : `An Owner can allow it once past ${CONSTRAINT_TEXT[row.waivable]}.`,
-      ].join(" ");
     });
 
     const linkAsk: AgentPersonaEscalations["Service"]["linkAsk"] = (input) =>
@@ -223,6 +225,7 @@ export const layer = Layer.effect(
             personaId: row.persona_id,
             waivable: row.waivable,
             status: row.status,
+            summary: recordText(row),
           },
         ]),
       );
@@ -304,7 +307,7 @@ export const layer = Layer.effect(
 
     return AgentPersonaEscalations.of({
       record,
-      askSummary,
+      authorizeAsk,
       linkAsk,
       forExchanges,
       grantable,

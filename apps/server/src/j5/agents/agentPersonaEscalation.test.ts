@@ -37,21 +37,15 @@ const record = (waivable: "model-not-eligible" | null) =>
   });
 
 it.layer(agentPersonaEscalationsTestLayer(crews))("persona escalations", (it) => {
-  it.effect("an ask carries the server's record, from the caller or its Captain only", () =>
+  it.effect("the caller or its Captain may ask, and the ask carries J5's own record", () =>
     Effect.gen(function* () {
       const escalations = yield* AgentPersonaEscalations;
       const id = yield* record("model-not-eligible");
-      const own = yield* escalations.askSummary({ escalationId: id, askerParticipantId: member });
-      assert.include(own, `escalation ${id}, models_exhausted`);
-      assert.include(own, "An Owner can allow it once");
-      // The Captain asks the person on its member's behalf.
-      assert.equal(
-        yield* escalations.askSummary({ escalationId: id, askerParticipantId: captain }),
-        own,
-      );
-      // Another Crew's Captain cannot.
+      yield* escalations.authorizeAsk({ escalationId: id, askerParticipantId: member });
+      // The Captain asks the person on its member's behalf; another Crew's Captain cannot.
+      yield* escalations.authorizeAsk({ escalationId: id, askerParticipantId: captain });
       const refused = yield* escalations
-        .askSummary({ escalationId: id, askerParticipantId: otherCaptain })
+        .authorizeAsk({ escalationId: id, askerParticipantId: otherCaptain })
         .pipe(Effect.flip);
       assert.include(refused.message, "is another agent's");
 
@@ -61,6 +55,8 @@ it.layer(agentPersonaEscalationsTestLayer(crews))("persona escalations", (it) =>
         personaId: "reviewer",
         waivable: "model-not-eligible",
         status: "open",
+        summary:
+          "Persona reviewer is blocked because none of its model entries can run. Allow this once would let one launch attempt past a model Models for custom members doesn't check.",
       });
     }),
   );

@@ -100,6 +100,8 @@ export const AgentPersonaEscalationView = Schema.Struct({
   personaId: Schema.String,
   waivable: Schema.NullOr(AgentPersonaPickConstraint),
   status: Schema.Literals(["open", "granted", "used"]),
+  /** J5's own account of the block, shown apart from the agent's words so they can't alter it. */
+  summary: Schema.String,
 });
 export type AgentPersonaEscalationView = typeof AgentPersonaEscalationView.Type;
 

@@ -115,7 +115,7 @@ export const J5SendMessageInput = Schema.Struct({
     Schema.NullOr(
       Schema.String.check(Schema.isNonEmpty()).annotate({
         description:
-          "Only on an ask to a person about a refused persona launch: the escalation_id from the refusal (yours, or as a Captain, your Crew member's). The server adds its own record of the block to the ask, and for a limit an Owner can lift, the person can answer with Allow this once.",
+          "Only on an ask to a person about a refused persona launch: the escalation_id from the refusal (yours, or as a Captain, your Crew member's). The person's Inbox shows J5's own record of the block beside your ask, and for a limit an Owner can lift, an Allow this once button. It must be a fresh ask: clear or settle any ask already open with them first.",
       }),
     ),
   ),

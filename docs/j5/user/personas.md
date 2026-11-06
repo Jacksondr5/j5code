@@ -68,7 +68,7 @@ An agent can also start a persona as a peer with its own top-level task by namin
 
 A persona that can't start stays blocked: the agent never recreates it as a plain or custom agent to get around its limits. The refusal says why: the library is empty or can't be read, there's no persona by that name, it's turned off, its definition is invalid (with what to fix), or none of its models can run, with a reason for each one.
 
-The agent then asks you, so the request reaches your Inbox. In a crew, a member tells its Captain, and the Captain asks you; the request also appears above the Captain's composer. J5 adds its own record of what blocked the launch to the request.
+The agent then asks you, so the request reaches your Inbox. In a crew, a member tells its Captain, and the Captain asks you; the request also appears above the Captain's composer. The request shows J5's own record of what blocked the launch in a panel of its own, apart from the agent's words, so nothing the agent writes can change it.
 
 When one limit stood in the way, either a model **Models for custom members** doesn't check or broader access than the asking agent runs with, an Owner sees **Allow this once** on the request. It answers the request and lets one launch attempt past that limit; the agent then retries it. If that attempt fails, the agent asks you again. It never changes the persona, and the next launch meets the usual limits again. A provider that can't enforce the persona's access is never allowed, even once. Collaborators see the request and can reply in words, which allows nothing. **Allow this once** is on the web and desktop apps; the mobile app shows the request without it.
 

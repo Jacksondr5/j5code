@@ -30,6 +30,7 @@ import {
   useAnswerAttachments,
 } from "./AnswerAttachments";
 import { AllowPersonaOnceButton } from "./AllowPersonaOnceButton";
+import { J5RecordPanel } from "./J5RecordPanel";
 import { answerHumanExchange, type HumanInboxItem } from "./humanInboxClient";
 import { notifyHumanInboxChanged } from "./humanInboxRefresh";
 
@@ -165,6 +166,9 @@ export function AdjudicationDock(props: {
           <h3 className="text-sm font-semibold leading-snug text-foreground">{shown.intent}</h3>
           <div className="max-h-[50vh] space-y-2 overflow-y-auto">
             {questionText(shown.message)}
+            {shown.escalation === undefined ? null : (
+              <J5RecordPanel text={shown.escalation.summary} />
+            )}
             {shown.followUps?.map((followUp) => (
               <div className="flex flex-col gap-1" key={followUp.messageId}>
                 <p className="text-xs font-medium text-muted-foreground">Follow-up</p>

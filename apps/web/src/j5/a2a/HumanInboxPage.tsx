@@ -53,6 +53,7 @@ import {
 } from "./AnswerAttachments";
 import { answerHumanExchange } from "./humanInboxClient";
 import { AllowPersonaOnceButton } from "./AllowPersonaOnceButton";
+import { J5RecordPanel } from "./J5RecordPanel";
 import { useScopedParticipantLabels } from "./ParticipantIdentitiesClient";
 import { presentParticipantIdentity } from "@t3tools/client-runtime/j5/participant-identity";
 import { CrewRuntimeRequestsSection } from "../crew/CrewRuntimeRequestsSection";
@@ -322,6 +323,11 @@ function OpenInboxItem({
         </summary>
         <div className="border-t border-border/50 px-1 pb-5 pt-4 sm:ms-24 sm:px-0 sm:pe-1">
           <InboxMessage item={item} />
+          {item.escalation === undefined ? null : (
+            <div className="mt-3">
+              <J5RecordPanel text={item.escalation.summary} />
+            </div>
+          )}
           <div className="mt-4 flex flex-col gap-3">
             <Textarea
               aria-label={`Answer ${item.intent}`}
