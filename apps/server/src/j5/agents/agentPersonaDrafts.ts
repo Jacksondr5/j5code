@@ -190,6 +190,13 @@ const fieldsOf = (definition: AgentPersonaDefinition, access: AgentPersonaAccess
     : { independentReviewer: definition.independentReviewer }),
 });
 
+/** A fenced block that the text inside can't close: the Inbox renders an ask as markdown. */
+const fenced = (language: string, text: string) => {
+  const longest = Math.max(2, ...(text.match(/`+/g) ?? []).map((run) => run.length));
+  const fence = "`".repeat(longest + 1);
+  return `${fence}${language}\n${text}\n${fence}`;
+};
+
 const changedFields = (before: AgentPersonaDraftFields, after: AgentPersonaDraftFields) => {
   const lines: Array<string> = [];
   if (before.displayName !== after.displayName)
@@ -205,12 +212,10 @@ const changedFields = (before: AgentPersonaDraftFields, after: AgentPersonaDraft
     lines.push(
       `- Independent reviewer: ${flagText(before.independentReviewer)} → ${flagText(after.independentReviewer)}`,
     );
-  if (before.instructions !== after.instructions)
-    lines.push(
-      "- Instructions:",
-      ...lineDiff(before.instructions, after.instructions).map((line) => `    ${line}`),
-    );
-  return lines;
+  if (before.instructions !== after.instructions) lines.push("- Instructions, line by line below");
+  return before.instructions === after.instructions
+    ? lines
+    : [...lines, fenced("diff", lineDiff(before.instructions, after.instructions).join("\n"))];
 };
 
 export interface AgentPersonaDraftsShape {
@@ -311,7 +316,7 @@ export const makeAgentPersonaDrafts = Effect.fn("j5.agents.personaDrafts.make")(
         fields = { ...draft.fields };
         lines.push(
           `J5 recorded this persona draft: a new persona, ${draft.personaId}, for this server's library. Its full definition:`,
-          definitionYaml(created).trimEnd(),
+          fenced("yaml", definitionYaml(created).trimEnd()),
         );
       } else {
         const original = current.definitions.find(({ id }) => id === draft.personaId);
@@ -345,9 +350,13 @@ export const makeAgentPersonaDrafts = Effect.fn("j5.agents.personaDrafts.make")(
         targetKind = current.importedIds.includes(draft.personaId) ? "imported" : "folder";
         baseDigest = draft.expectedDigest;
         const folderPath = current.sourcePaths.get(draft.personaId);
+        const [list, diff] = [
+          changes.filter((line) => line.startsWith("- ")),
+          changes.filter((line) => !line.startsWith("- ")),
+        ];
         lines.push(
-          `J5 recorded this persona draft: an edit of ${draft.personaId} ("${original.displayName}"). Changed fields:`,
-          ...changes,
+          `J5 recorded this persona draft: an edit of ${draft.personaId} ("${original.displayName}"). Changed fields:\n\n${list.join("\n")}`,
+          ...diff,
         );
         if (targetKind === "folder" && folderPath !== undefined)
           warnings.push(...folderOverrideWarnings(folderPath));
@@ -356,7 +365,7 @@ export const makeAgentPersonaDrafts = Effect.fn("j5.agents.personaDrafts.make")(
         ...lines,
         ...warnings,
         "Saving takes an Owner's Save persona button on this ask; a typed reply asks for changes and saves nothing.",
-      ].join("\n");
+      ].join("\n\n");
       const draftId = `persona-draft-${NodeCrypto.randomUUID()}`;
       yield* sql`
           INSERT INTO j5_persona_draft (
@@ -388,7 +397,7 @@ export const makeAgentPersonaDrafts = Effect.fn("j5.agents.personaDrafts.make")(
     }
     if (row.status === "saved")
       return yield* refuse(`Persona draft ${input.draftId} is already saved.`);
-    return `${row.summary}\n(draft ${row.id})`;
+    return `${row.summary} (draft ${row.id})`;
   });
 
   const linkAsk: AgentPersonaDraftsShape["linkAsk"] = (input) =>
