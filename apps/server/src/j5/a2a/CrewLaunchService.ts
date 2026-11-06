@@ -52,6 +52,7 @@ import {
   AgentCrewInstanceService,
   CrewStepAlreadyOwnedError,
   replacementProblem,
+  stepOwnershipConflict,
   type AgentCrewInstance,
 } from "./AgentCrewInstanceService.ts";
 import { j5AnalyticsRecorder } from "../analytics/recorder.ts";
@@ -74,6 +75,7 @@ import type { ParticipantId, LedgerProjectId } from "./contracts.ts";
 import {
   crewSeatRequestKey,
   spawnCrewInstanceId,
+  lifecycleCommandId,
   spawnFirstTurnText,
   spawnHomeCommandId,
   spawnPlacementCommandId,
@@ -1164,30 +1166,39 @@ export const layer = Layer.effect(
         .pipe(Effect.mapError(failed("reading the crew")));
       if (current === null)
         return yield* failed("replacing a seat")(`crew ${input.instance.id} no longer exists`);
+      // Refusals, as the request's own checks would have refused it: nothing has spawned yet.
+      const refused = (detail: string) =>
+        new CrewLaunchSeatUnavailableError({
+          seatName: requested.seat.name,
+          agentId: requested.seat.agentId ?? "custom seat",
+          detail,
+        });
       const problem = replacementProblem(current, replacement.seatName, requested.seat.name);
-      if (problem !== null) return yield* failed("replacing a seat")(problem);
+      if (problem !== null) return yield* refused(problem);
       const old = current.members.find(({ seatName }) => seatName === replacement.seatName)!;
       const movedStepIds = yield* replacement.unfinishedSteps(current);
-      // Its brief lists the steps it takes over beside any it claimed itself.
-      const steps = [
-        ...new Set([
-          ...(requested.seat.steps ?? []),
-          ...(old.playbookStepIds ?? []).filter((id) => movedStepIds.includes(id)),
-        ]),
-      ];
+      // Its brief and its row list the steps it takes over beside any it claimed itself.
+      const steps = [...new Set([...(requested.seat.steps ?? []), ...movedStepIds])];
       const member = { ...requested, seat: { ...requested.seat, steps } };
-      const oldThread = yield* getThreadRecordsIfPresent(threadManagement, old.threadId, []).pipe(
-        Effect.orElseSucceed(() => null),
-      );
-      if (input.onReserved !== undefined) yield* input.onReserved(current);
       const newMember = {
         seatName: member.seat.name,
         agentId: member.seat.agentId,
         participantId: member.participantId,
         threadId: member.threadId,
         reason: member.seat.reason,
-        playbookStepIds: member.seat.steps,
+        playbookStepIds: steps,
       };
+      // A step another addition claimed since the request was checked refuses it before it spawns.
+      const owned = stepOwnershipConflict(
+        current.id,
+        current.members.filter(({ seatName }) => seatName !== old.seatName),
+        [newMember],
+      );
+      if (owned !== null) return yield* owned;
+      const oldThread = yield* getThreadRecordsIfPresent(threadManagement, old.threadId, []).pipe(
+        Effect.orElseSucceed(() => null),
+      );
+      if (input.onReserved !== undefined) yield* input.onReserved(current);
       // The brief's roster reads as it will once the swap lands.
       const briefed = {
         ...current,
@@ -1210,8 +1221,33 @@ export const layer = Layer.effect(
         true,
         false,
       );
-      if (launched.seats.some((seat) => seat.kind !== "created"))
+      if (launched.seats.some((seat) => seat.kind !== "created")) {
+        // A thread that exists without its home is no member and takes no message; it is archived
+        // so nothing is left beside the seat it failed to replace.
+        if (launched.seats.some((seat) => seat.kind === "not_started"))
+          yield* threadManagement
+            .dispatch({
+              type: "thread.archive",
+              commandId: lifecycleCommandId({
+                ...member.stableInput,
+                operation: "replacement-not-started",
+              }),
+              threadId: member.threadId,
+            })
+            .pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning(
+                  "J5 crew replacement could not archive a seat that didn't start",
+                  {
+                    crewInstanceId: current.id,
+                    threadId: member.threadId,
+                    cause,
+                  },
+                ),
+              ),
+            );
         return { instance: current, seats: launched.seats } satisfies CrewLaunchResult;
+      }
       const swapped = yield* crews
         .replaceMember(current.id, {
           seatName: old.seatName,
