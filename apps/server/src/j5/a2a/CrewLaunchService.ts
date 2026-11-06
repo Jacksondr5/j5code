@@ -621,14 +621,20 @@ export const layer = Layer.effect(
             pickSource: { kind: pick },
           };
         }).pipe(
+          // The lists refuse a persona's own entries as they refuse a model chosen on the card.
           Effect.mapError((error) =>
             error._tag === "CrewLaunchModelNotEligibleError"
               ? error
-              : new CrewLaunchSeatUnavailableError({
-                  seatName: seat.name,
-                  agentId,
-                  detail: error.message,
-                }),
+              : error._tag === "AgentPersonaPickError" && error.constraint === "model-not-eligible"
+                ? new CrewLaunchModelNotEligibleError({
+                    seatName: seat.name,
+                    detail: error.message,
+                  })
+                : new CrewLaunchSeatUnavailableError({
+                    seatName: seat.name,
+                    agentId,
+                    detail: error.message,
+                  }),
           ),
         );
         // The person's edited text runs instead of the persona's, never beside it: the seat's

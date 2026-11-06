@@ -2894,6 +2894,16 @@ it.effect(
         assert.deepStrictEqual(personPick!.assignment?.pickSource, { kind: "person" });
       }).pipe(Effect.provide(listed.layer));
 
+      // With none of its entries checked, the seat is refused the way a card's unchecked model is.
+      const bare = yield* eligibilityFixture({ providers, settings: { crewMemberModels: [] } });
+      yield* Effect.gen(function* () {
+        const refused = yield* (yield* CrewLaunchService)
+          .resolveSeats(bare.captain, [scout], "agent")
+          .pipe(Effect.flip);
+        assert.equal(refused._tag, "CrewLaunchModelNotEligibleError");
+        assert.include(refused.message, "is not checked in Models for custom members");
+      }).pipe(Effect.provide(bare.layer));
+
       const open = yield* eligibilityFixture({ providers });
       const supervised = {
         ...open.captain,
