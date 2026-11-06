@@ -1,4 +1,4 @@
-import type { ModelSelection, ProjectId } from "@t3tools/contracts";
+import type { ModelSelection, ProjectId, ServerProvider } from "@t3tools/contracts";
 import {
   crewMemberModelRefusal,
   crewMemberReasoningRefusal,
@@ -77,6 +77,10 @@ export class CrewMemberModels extends Context.Service<
       void,
       CrewMemberModelNotEligibleError | CrewMemberReasoningNotEligibleError
     >;
+    /** The same rule as a pure check per resolved selection, for routing an agent's persona pick. */
+    readonly eligibility: (
+      projectId: ProjectId,
+    ) => Effect.Effect<(selection: ModelSelection, provider: ServerProvider) => boolean>;
   }
 >()("t3/j5/agents/crewMemberModels") {}
 
@@ -92,13 +96,31 @@ export const layer = Layer.effect(
         Effect.map(Option.getOrElse(() => projectId as string)),
         Effect.orElseSucceed(() => projectId as string),
       );
-    const assertEligible: CrewMemberModels["Service"]["assertEligible"] = Effect.fn(
-      "j5.crewMemberModels.assertEligible",
-    )(function* ({ projectId, selection }) {
-      const resolved = yield* settings.getSettings.pipe(
+    const listsFor = (projectId: ProjectId) =>
+      settings.getSettings.pipe(
         Effect.map((all) => resolveProjectSettings(all, projectId).settings),
         Effect.orDie,
       );
+    const eligibility: CrewMemberModels["Service"]["eligibility"] = Effect.fn(
+      "j5.crewMemberModels.eligibility",
+    )(function* (projectId) {
+      const { crewMemberModels: models, crewMemberReasoning: levels } = yield* listsFor(projectId);
+      return (selection, provider) => {
+        if (!isCrewMemberModelChecked(models, selection)) return false;
+        const level = crewMemberSelectionLevel(
+          provider.models.find((model) => model.slug === selection.model),
+          selection.options,
+        );
+        return (
+          level === null ||
+          isCrewMemberLevelChecked(levels, { instanceId: provider.instanceId, level })
+        );
+      };
+    });
+    const assertEligible: CrewMemberModels["Service"]["assertEligible"] = Effect.fn(
+      "j5.crewMemberModels.assertEligible",
+    )(function* ({ projectId, selection }) {
+      const resolved = yield* listsFor(projectId);
       const list = resolved.crewMemberModels;
       if (!isCrewMemberModelChecked(list, selection)) {
         return yield* new CrewMemberModelNotEligibleError({
@@ -130,6 +152,6 @@ export const layer = Layer.effect(
         eligible: eligibleCrewMemberLevelsForModel(levels, provider, selection.model),
       });
     });
-    return CrewMemberModels.of({ assertEligible });
+    return CrewMemberModels.of({ assertEligible, eligibility });
   }),
 );

@@ -26,6 +26,17 @@ export function detectAgentMention(token: string, start: number, end: number) {
   );
 }
 
+// Code, `>` quotes and double-quoted text name a persona without asking for it.
+const QUOTED_TEXT =
+  /```[\s\S]*?(?:```|(?![\s\S]))|`[^`\n]*`|^[ \t]*>.*$|"[^"\n]*"|\u201c[^\u201d\n]*\u201d/gmu;
+const PERSONA_MENTION = /(?<=^|\s)@persona:([a-z][a-z0-9]*(?:-[a-z0-9]+)*)(?![a-z0-9-])/gu;
+
+/** Persona ids a message asks for with an unquoted `@persona:ID`, in order, without repeats. */
+export function mentionedPersonaIds(text: string): ReadonlyArray<string> {
+  const unquoted = text.replace(QUOTED_TEXT, " ");
+  return [...new Set(Array.from(unquoted.matchAll(PERSONA_MENTION), (match) => match[1]!))];
+}
+
 /** An unquoted `@persona:` or `@playbook:` token is a mention, never a file chip. */
 export const isJ5MentionPath = (path: string) =>
   path.startsWith("persona:") || path.startsWith("playbook:");

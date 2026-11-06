@@ -245,6 +245,7 @@ const ROUTE_FAILURE_TEXT: Readonly<Record<AgentPersonaRouteFailureCode, string>>
   "authority-not-enforceable": "access level is not enforceable on this provider yet",
   "usage-limit": "provider is at its usage limit",
   "option-not-advertised": "model options are not offered by this provider",
+  "model-not-eligible": "model or reasoning level is not checked in Models for custom members",
 };
 
 /** "Primary · Codex gpt-5.6-terra: model is not offered…" for each rejected route. */

@@ -4,7 +4,11 @@ import type { OrchestrationV2AgentPersonaRequest, ServerProvider } from "@t3tool
 import * as Effect from "effect/Effect";
 import { buildAgentPersonaAssignment } from "./agentPersonaAssignment.ts";
 import { AgentPersonaLibraryError, type createAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
-import { resolveAgentPersonaRoute, type AgentPersonaRouteAttempt } from "./agentPersonaRouting.ts";
+import {
+  resolveAgentPersonaRoute,
+  type AgentPersonaEntryEligibility,
+  type AgentPersonaRouteAttempt,
+} from "./agentPersonaRouting.ts";
 
 const routeFailurePhrase = (
   target: AgentPersonaRouteAttempt["target"],
@@ -34,6 +38,8 @@ const routeFailurePhrase = (
       return `${provider} does not support the requested model options`;
     case "authority-not-enforceable":
       return `${provider} cannot enforce the persona's authority policy`;
+    case "model-not-eligible":
+      return `${target.model} on ${provider} is not checked in Models for custom members`;
   }
 };
 
@@ -58,6 +64,7 @@ export const prepareAgentPersonaLaunch = Effect.fn("prepareAgentPersonaLaunch")(
   request: OrchestrationV2AgentPersonaRequest,
   providers: ReadonlyArray<ServerProvider>,
   library: ReturnType<typeof createAgentPersonaLibrary>,
+  eligible?: AgentPersonaEntryEligibility,
 ) {
   const catalog = yield* library.catalog();
   if (catalog.disabledIds.includes(request.personaId))
@@ -86,10 +93,16 @@ export const prepareAgentPersonaLaunch = Effect.fn("prepareAgentPersonaLaunch")(
     ...authority,
     definition,
     providers,
+    eligible,
   });
   if (resolution.status === "unavailable") {
+    // An entry refused as not eligible passed every other check, so only that limit stood in the way.
+    const notEligible = resolution.attempts.some(({ failures }) =>
+      failures.some(({ code }) => code === "model-not-eligible"),
+    );
     return yield* new AgentPersonaLibraryError({
       message: `Persona ${request.personaId} is blocked because its ordered model entries are unavailable: ${describeRouteAttempts(resolution.attempts)}.`,
+      ...(notEligible ? { constraint: "model-not-eligible" as const } : {}),
     });
   }
   const result = buildAgentPersonaAssignment({ ...authority, definition, resolution });

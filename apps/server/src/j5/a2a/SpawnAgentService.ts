@@ -1,6 +1,5 @@
 import * as SpawnCompositionService from "./SpawnCompositionService.ts";
 import * as AgentCrewInstanceService from "./AgentCrewInstanceService.ts";
-import * as ProviderRegistry from "../../provider/ProviderRegistry.ts";
 import * as ProjectService from "../../project/ProjectService.ts";
 import * as ManagedProjectFolders from "../../project/ManagedProjectFolders.ts";
 import * as ThreadManagementService from "../../orchestration-v2/ThreadManagementService.ts";
@@ -36,16 +35,18 @@ import {
   exceededDispatchModeLimit,
 } from "../../orchestration-v2/DispatchModeLimit.ts";
 
-import { makeAgentPersonaLibrary } from "../agents/agentPersonaLibrary.ts";
 import { CrewMemberModels } from "../agents/crewMemberModels.ts";
-import { translateAgentPersonaProviderPolicy } from "../agents/agentPersonaProviderPolicy.ts";
-import { prepareAgentPersonaPeerSpawn } from "../agents/agentPersonaSpawn.ts";
+import {
+  pickAgentPersona,
+  turnPickSource,
+  type AgentPersonaPickCaller,
+  type AgentPersonaPickSourceKind,
+} from "../agents/agentPersonaPick.ts";
 
 import { preflightSpawnCaller, stateError } from "./AgentCaller.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
 import { outsideAgentParticipantId, LedgerProjectId } from "./contracts.ts";
 import {
-  assertPersonaWithinApprovedLevel,
   outsideAgentCaller,
   outsideSpawnHasNoCheckout,
   outsideSpawnNeedsProject,
@@ -154,48 +155,43 @@ const selectSpawnModel = Effect.fn("j5.a2a.mcp.selectSpawnModel")(function* (
 });
 
 /**
- * A Role-ful spawn keeps the explicit provider, model and reasoning pick; the saved agent's routes
- * constrain it and its authority policy becomes the child's runtime mode. Permissions come from the
- * child's saved agent or the human's approval, never the parent: a parent-child ceiling would be
- * one message to a trusting peer from bypass, and every door would need it.
+ * A persona spawn keeps the explicit provider, model and reasoning pick, which must be one of the
+ * persona's entries, and the persona's access becomes the agent's. Who picked sets the limits: a
+ * person's pick (the turn's @persona mention) runs as saved; an agent's is held to the project's
+ * Models for custom members and to the caller's own access.
  */
 const prepareSpawnPersona = Effect.fn("j5.a2a.mcp.prepareSpawnPersona")(function* (
   input: {
     readonly persona: string;
-    readonly provider: string;
     readonly model: string;
     readonly reasoning?: string | undefined;
   },
-  modelSelection: ModelSelection,
+  selected: ModelSelection,
+  pick: {
+    readonly source: AgentPersonaPickSourceKind;
+    readonly caller: AgentPersonaPickCaller;
+    readonly projectId: ProjectId;
+  },
 ) {
-  const library = yield* makeAgentPersonaLibrary;
-  const providers = yield* (yield* ProviderRegistry.ProviderRegistry).getProviders;
-  const assignment = yield* prepareAgentPersonaPeerSpawn(
-    {
-      personaId: input.persona,
-      provider: providers.find((candidate) => candidate.instanceId === modelSelection.instanceId),
-      instanceId: modelSelection.instanceId,
-      model: input.model,
-      reasoning: input.reasoning,
-    },
-    library,
-  ).pipe(
+  const { assignment, runtimeMode } = yield* pickAgentPersona({
+    personaId: input.persona,
+    ...pick,
+    pinned: { instanceId: selected.instanceId, model: input.model, reasoning: input.reasoning },
+  }).pipe(
     Effect.mapError((error) =>
       stateError(
         `Persona ${input.persona} cannot be spawned as requested: ${error.message}`,
-        "Call orchestrator_capabilities, then retry j5_spawn_agent with a provider, model, and reasoning from that persona's ordered model entries, or omit persona for a plain Peer Agent.",
+        error.constraint === "access-above-caller"
+          ? "approvedLevel" in pick.caller
+            ? "Retry j5_spawn_agent with a persona within that level (j5_list_personas shows each one's access level) or without a persona, or sign in again and have the person approve a higher level."
+            : `Use a persona within your access (j5_list_personas shows each one's), omit persona, or ask the person to pick it themselves with @persona:${input.persona}.`
+          : error.constraint === "model-not-eligible"
+            ? `Retry j5_spawn_agent with another of the persona's entries that Models for custom members checks, or ask the person to pick it themselves with @persona:${input.persona}.`
+            : "Call orchestrator_capabilities, then retry j5_spawn_agent with a provider, model, and reasoning from that persona's ordered model entries, or omit persona for a plain Peer Agent.",
       ),
     ),
   );
-  const policy = translateAgentPersonaProviderPolicy(
-    assignment.authorityPolicy,
-    assignment.resolvedDriver,
-  );
-  return {
-    assignment,
-    modelSelection: assignment.resolvedModelSelection,
-    runtimeMode: policy.runtimeMode,
-  };
+  return { assignment, modelSelection: assignment.resolvedModelSelection, runtimeMode };
 });
 
 /**
@@ -383,11 +379,6 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
   }
   const selected = existing?.modelSelection ?? (yield* selectSpawnModel(scope, input));
   const personaId = input.persona;
-  const persona =
-    personaId === undefined || existing !== null
-      ? undefined
-      : yield* prepareSpawnPersona({ ...input, persona: personaId }, selected);
-  const modelSelection = existing?.modelSelection ?? persona?.modelSelection ?? selected;
   // A persona's policy sets its permissions. Without one the agent gets the caller's modes,
   // or the ones the caller chose, which upstream's rule keeps within the caller's own.
   if (personaId !== undefined && input.runtime_mode !== undefined) {
@@ -397,17 +388,6 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
     );
   }
   const { limits } = yield* loadCaller();
-  // An outside persona's replay is capped against the existing thread's modes below.
-  if (persona !== undefined && personaId !== undefined && outside !== undefined) {
-    yield* assertPersonaWithinApprovedLevel(outside, personaId, persona.runtimeMode);
-  }
-  // With no mode chosen the agent gets the caller's: its thread's, or its approved level.
-  const runtimeMode =
-    existing?.runtimeMode ??
-    input.runtime_mode ??
-    persona?.runtimeMode ??
-    home?.thread.runtimeMode ??
-    limits.runtimeMode;
   const interactionMode =
     existing?.interactionMode ??
     input.interaction_mode ??
@@ -422,7 +402,7 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
     });
     if (exceeded !== undefined) {
       return yield* stateError(
-        `The ${exceeded === "runtime" ? `permission mode ${runtimeMode}` : `interaction mode ${interactionMode}`} is broader than your own.`,
+        `The ${exceeded === "runtime" ? `permission mode ${input.runtime_mode}` : `interaction mode ${interactionMode}`} is broader than your own.`,
         "Retry j5_spawn_agent with a mode no broader than yours, or omit it to give the agent your own.",
       );
     }
@@ -495,10 +475,34 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
             }),
           ),
         );
-  // A persona runs on its own model. A plain agent runs on a model and level the project's
-  // lists allow, and a retry finishes the agent its first attempt created, so only a first
-  // attempt is held to them.
-  if (persona === undefined && firstAttempt)
+  // A retry finishes the agent its first attempt created, so only a first attempt is picked.
+  const persona =
+    personaId === undefined || existing !== null
+      ? undefined
+      : yield* prepareSpawnPersona({ ...input, persona: personaId }, selected, {
+          source:
+            home === undefined
+              ? "agent"
+              : yield* turnPickSource(home.thread.id, personaId).pipe(
+                  Effect.mapError((error) =>
+                    stateError(error.message, "Retry j5_spawn_agent once the thread is readable."),
+                  ),
+                ),
+          caller:
+            home === undefined ? { approvedLevel: limits.runtimeMode } : { thread: home.thread },
+          projectId: target,
+        });
+  const modelSelection = existing?.modelSelection ?? persona?.modelSelection ?? selected;
+  // With no mode chosen the agent gets the caller's: its thread's, or its approved level.
+  const runtimeMode =
+    existing?.runtimeMode ??
+    input.runtime_mode ??
+    persona?.runtimeMode ??
+    home?.thread.runtimeMode ??
+    limits.runtimeMode;
+  // A plain agent runs on a model and level the project's lists allow; a persona's pick has
+  // already applied them when an agent picked it.
+  if (personaId === undefined && firstAttempt)
     yield* (yield* CrewMemberModels)
       .assertEligible({ projectId: target, selection: modelSelection })
       .pipe(

@@ -73,6 +73,24 @@ export const OrchestrationV2AgentPersonaRequest = Schema.Struct({
 });
 export type OrchestrationV2AgentPersonaRequest = typeof OrchestrationV2AgentPersonaRequest.Type;
 
+/** A limit on agent-picked personas that an "Allow this once" exception can waive. */
+export const AgentPersonaPickConstraint = Schema.Literals([
+  "model-not-eligible",
+  "access-above-caller",
+]);
+export type AgentPersonaPickConstraint = typeof AgentPersonaPickConstraint.Type;
+
+/**
+ * Who picked the persona, which sets its limits: a person's pick runs on its own models with its
+ * saved access; an agent's is held to Models for custom members and the caller's access.
+ */
+export const AgentPersonaPickSource = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("person") }),
+  Schema.Struct({ kind: Schema.Literal("agent") }),
+  Schema.Struct({ kind: Schema.Literal("allow-once"), waived: AgentPersonaPickConstraint }),
+]);
+export type AgentPersonaPickSource = typeof AgentPersonaPickSource.Type;
+
 /** Immutable launch-time provenance; definitionDigest references an environment-owned snapshot. */
 export const OrchestrationV2AgentPersonaAssignment = Schema.Struct({
   personaId: AgentPersonaId,
@@ -88,6 +106,8 @@ export const OrchestrationV2AgentPersonaAssignment = Schema.Struct({
   runtimeModeOverride: Schema.optional(RuntimeMode),
   /** The snapshot carries instructions the person edited at launch, so it never matches the library's. */
   instructionsEdited: Schema.optional(Schema.Boolean),
+  /** Absent on assignments made before pick sources were recorded. */
+  pickSource: Schema.optional(AgentPersonaPickSource),
 });
 export type OrchestrationV2AgentPersonaAssignment =
   typeof OrchestrationV2AgentPersonaAssignment.Type;
@@ -113,6 +133,8 @@ export const AgentPersonaRouteFailureCode = Schema.Literals([
   "authority-not-enforceable",
   "usage-limit",
   "option-not-advertised",
+  /** Outside Models for custom members; only an agent's pick reports it, never the catalog. */
+  "model-not-eligible",
 ]);
 export type AgentPersonaRouteFailureCode = typeof AgentPersonaRouteFailureCode.Type;
 

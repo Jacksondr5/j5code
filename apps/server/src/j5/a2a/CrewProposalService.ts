@@ -35,6 +35,7 @@ import {
   type CrewLaunchError,
   type CrewLaunchPlaybook,
   type CrewLaunchSeat,
+  type CrewSeatPick,
   type ResolvedCrewLaunchSeat,
 } from "./CrewLaunchService.ts";
 import { planCrewPlaybook, withPersonaSwaps, type CrewPlaybookPlan } from "./crewPlaybookPlan.ts";
@@ -726,7 +727,7 @@ export const layer = Layer.effect(
             yield* pinSeats(input.captain, input.seats),
             plan.swapsBySeat,
           );
-          if (automatic) yield* resolveRuntime(input.captain, seats);
+          if (automatic) yield* resolveRuntime(input.captain, seats, "agent");
           const proposal = yield* proposals
             .create({
               ...request,
@@ -813,7 +814,7 @@ export const layer = Layer.effect(
             yield* pinSeats(input.captain, [input.seat]),
             plan.swapsBySeat,
           );
-          yield* resolveRuntime(input.captain, seats);
+          yield* resolveRuntime(input.captain, seats, "agent");
           const admitted = yield* proposals
             .admit(
               {
@@ -857,8 +858,12 @@ export const layer = Layer.effect(
         .pipe(Effect.mapError(operationError("retiring the unlaunched crew")));
     });
 
-    const resolveRuntime = (captain: CrewCaptain, seats: ReadonlyArray<CrewProposalSeat>) =>
-      launcher.resolveSeats(captain, seats.map(launchSeatOf));
+    /** Seats on a card the person approves are their pick; seats approved automatically are the Captain's. */
+    const resolveRuntime = (
+      captain: CrewCaptain,
+      seats: ReadonlyArray<CrewProposalSeat>,
+      pick: CrewSeatPick,
+    ) => launcher.resolveSeats(captain, seats.map(launchSeatOf), pick);
 
     /** Saves each new worktree's commit on its seat before a proposal is stored; refuses a base that has none. */
     const pinSeats = (captain: CrewCaptain, seats: ReadonlyArray<CrewProposalSeat>) =>
@@ -928,7 +933,8 @@ export const layer = Layer.effect(
         const seats = input.seats ?? proposal.requestedSeats;
         const { plan } = yield* validateProposalSeats(proposal, seats);
         const captain = yield* captainFor(proposal);
-        const resolved = yield* resolveRuntime(captain, seats);
+        // Only a card the person is about to approve is previewed.
+        const resolved = yield* resolveRuntime(captain, seats, "person");
         return {
           proposalId: proposal.id,
           workspaceOptions: yield* launcher.workspaceOptions(captain),
@@ -992,7 +998,7 @@ export const layer = Layer.effect(
       const seats = input.seats ?? proposal.requestedSeats;
       const { plan, definition } = yield* validateProposalSeats(proposal, seats);
       const captain = yield* captainFor(proposal);
-      const resolved = yield* resolveRuntime(captain, seats);
+      const resolved = yield* resolveRuntime(captain, seats, automatic ? "agent" : "person");
       if (
         !automatic &&
         input.approvalToken !==

@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 import { detectComposerTrigger } from "../composerTrigger.ts";
 import { collectComposerInlineTokens } from "../composerInlineTokens.ts";
-import { agentMentionReplacement, detectAgentMention } from "./agentMention.ts";
+import {
+  agentMentionReplacement,
+  detectAgentMention,
+  mentionedPersonaIds,
+} from "./agentMention.ts";
 
 describe("agent mention syntax", () => {
   it("recognizes the same stable persona token anywhere in a prompt", () => {
@@ -65,5 +69,23 @@ describe("agent mention syntax", () => {
       rangeStart: 0,
       rangeEnd: replacement.length - 1,
     });
+  });
+  it("finds the personas a message asks for, but not ones it quotes", () => {
+    expect(
+      mentionedPersonaIds("@persona:reviewer, then @persona:builder. @persona:reviewer"),
+    ).toEqual(["reviewer", "builder"]);
+    expect(
+      mentionedPersonaIds(
+        [
+          "Run `@persona:inline` and",
+          "```",
+          "@persona:fenced",
+          "```",
+          "> @persona:quoted",
+          'He said "@persona:said" here',
+          "me@persona:email",
+        ].join("\n"),
+      ),
+    ).toEqual([]);
   });
 });

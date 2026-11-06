@@ -8,6 +8,7 @@ import {
   type OrchestrationV2AppThread,
   type OrchestrationV2ServerCommand,
   type OrchestrationV2ThreadProjection,
+  type RuntimeMode,
   type ServerProvider,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -1834,6 +1835,7 @@ const playbookFixtureWithSettings = (
     const barrier = yield* Ref.make<Deferred.Deferred<void> | null>(null);
     const arrivals = yield* Ref.make(0);
     const providers = yield* Ref.make<ReadonlyArray<ServerProvider>>([codex]);
+    const captainRuntimeMode = yield* Ref.make<RuntimeMode>("full-access");
     // One settings layer object, so a test's settings change reaches the launcher's model check.
     const settingsLayer = ServerSettings.layerTest(overrides);
     const layer = crewProposalLayer.pipe(
@@ -1851,7 +1853,18 @@ const playbookFixtureWithSettings = (
       Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: { isRepo: true, refName: "main" } })),
       Layer.provideMerge(
         Layer.mock(ThreadManagementService)({
-          getThreadRecords: (threadId) => Effect.succeed({ thread: thread(threadId) } as never),
+          getThreadRecords: (threadId) =>
+            Ref.get(captainRuntimeMode).pipe(
+              Effect.map(
+                (runtimeMode) =>
+                  ({
+                    thread:
+                      threadId === captainThread
+                        ? { ...thread(threadId), runtimeMode }
+                        : thread(threadId),
+                  }) as never,
+              ),
+            ),
           dispatch: (command) =>
             Ref.update(commands, (items) => [...items, command]).pipe(
               Effect.as({ events: [], effects: [] } as never),
@@ -1897,7 +1910,15 @@ const playbookFixtureWithSettings = (
       yield* Ref.set(arrivals, 0);
       yield* Ref.set(barrier, yield* Deferred.make<void>());
     });
-    return { layer, workspaceRoot, writePlaybook, commands, armBarrier, providers };
+    return {
+      layer,
+      workspaceRoot,
+      writePlaybook,
+      commands,
+      armBarrier,
+      providers,
+      captainRuntimeMode,
+    };
   }).pipe(Effect.provide(NodeServices.layer));
 const playbookFixture = playbookFixtureWithSettings();
 
@@ -3420,6 +3441,82 @@ it.effect("turning on auto-approval leaves an existing human proposal open on re
       assert.isNull(replay.instance);
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "holds an automatic roster's and an addition's custom seats to the Captain's access, not a card the person approves",
+  () =>
+    Effect.gen(function* () {
+      const { layer, commands, captainRuntimeMode } = yield* playbookFixtureWithSettings({
+        crewAutoApprove: true,
+      });
+      yield* Effect.gen(function* () {
+        const gate = withPreview(yield* CrewProposalService);
+        const supervised = {
+          ...captain,
+          thread: { ...captain.thread, runtimeMode: "approval-required" as const },
+        };
+        yield* Ref.set(captainRuntimeMode, "approval-required");
+        const created = (seat: string) =>
+          Ref.get(commands).pipe(
+            Effect.map((all) =>
+              all
+                .flatMap((command) => (command.type === "thread.create" ? [command] : []))
+                .find((command) => command.title === seat),
+            ),
+          );
+        const aboveCaptain =
+          "would run with Full access, which is broader than the Supervised its caller runs with.";
+
+        const above = yield* gate
+          .propose({
+            requestKey: "capped-roster",
+            captain: supervised,
+            displayName: "Capped",
+            brief: "Inspect",
+            seats: [{ ...custom("scribe"), runtimeMode: "full-access" as const }],
+          })
+          .pipe(Effect.flip);
+        assert.include(above.message, `Custom seat scribe ${aboveCaptain}`);
+
+        // With no access named, the seat gets the Captain's.
+        const launched = yield* gate.propose({
+          requestKey: "capped-default",
+          captain: supervised,
+          displayName: "Default",
+          brief: "Inspect",
+          seats: [custom("scribe")],
+        });
+        assert.equal(launched.proposal.status, "approved");
+        assert.equal((yield* created("scribe"))?.runtimeMode, "approval-required");
+
+        const addition = yield* gate
+          .requestMember({
+            requestKey: "capped-addition",
+            captain: supervised,
+            crewInstanceId: launched.instance!.id,
+            seat: { ...custom("helper"), runtimeMode: "full-access" as const },
+            brief: null,
+          })
+          .pipe(Effect.flip);
+        assert.include(addition.message, `Custom seat helper ${aboveCaptain}`);
+
+        // A roster the person approves keeps today's Full access default.
+        yield* (yield* ServerSettings.ServerSettingsService).updateSettings({
+          crewAutoApprove: false,
+        });
+        const asked = yield* gate.propose({
+          requestKey: "card-roster",
+          captain: supervised,
+          displayName: "Card",
+          brief: "Inspect",
+          seats: [custom("notes")],
+        });
+        assert.equal(asked.proposal.status, "open");
+        yield* gate.resolve({ proposalId: asked.proposal.id, decision: "approve" });
+        assert.equal((yield* created("notes"))?.runtimeMode, "full-access");
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
 );
 
 it.effect("refuses a signed-out provider before recording an automatic launch or addition", () =>
