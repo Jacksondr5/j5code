@@ -85,23 +85,39 @@ describe("agent persona catalog presentation", () => {
     expect(current?.availability).toBe("available");
   });
 
-  it("presents a durable assignment with its immutable provider route", () => {
-    expect(
-      presentAgentPersonaAssignment({
-        personaId: "critic",
-        definitionVersion: 1,
-        authorityPolicy: "critic-fix",
-        resolvedRoute: "fallback",
-        resolvedDriver: ProviderDriverKind.make("codex"),
-        resolvedModelSelection: {
-          instanceId: ProviderInstanceId.make("remote-codex"),
-          model: "gpt-5.6-terra",
-          options: [{ id: "reasoningEffort", value: "high" }],
-        },
-      }),
-    ).toEqual({
+  it("presents a durable assignment with the model it runs on now", () => {
+    const critic = {
+      personaId: "critic",
+      definitionVersion: 1,
+      authorityPolicy: "critic-fix",
+      resolvedRoute: "fallback",
+      resolvedDriver: ProviderDriverKind.make("codex"),
+      resolvedModelSelection: {
+        instanceId: ProviderInstanceId.make("remote-codex"),
+        model: "gpt-5.6-terra",
+        options: [{ id: "reasoningEffort", value: "high" }],
+      },
+    } as const;
+    expect(presentAgentPersonaAssignment(critic)).toEqual({
       personaLabel: "Critic · Fix",
       routeLabel: "Codex · gpt-5.6-terra · high",
+      switchNote: null,
+    });
+    expect(
+      presentAgentPersonaAssignment({
+        ...critic,
+        resolvedRoute: "override",
+        resolvedDriver: ProviderDriverKind.make("claudeAgent"),
+        resolvedModelSelection: {
+          instanceId: ProviderInstanceId.make("claudeAgent"),
+          model: "claude-opus-5",
+          options: [{ id: "effort", value: "high" }],
+        },
+        modelSwitchedBy: "person",
+      }),
+    ).toMatchObject({
+      routeLabel: "Claude · claude-opus-5 · high",
+      switchNote: "Switched from its launch model by a person.",
     });
     expect(
       presentAgentPersonaAssignment({

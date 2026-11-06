@@ -1104,7 +1104,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         }),
       );
       return {
-        ...event,
+        ...(yield* mapDispatchError(command)(personaGuards.followModelSelection(event))),
         id: eventId,
       } as Event;
     });
@@ -1210,7 +1210,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         threadId: event.threadId,
       });
       return {
-        ...event,
+        ...(yield* personaGuards.followModelSelection(event)),
         id: eventId,
       } as Event;
     });
@@ -3003,7 +3003,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         cause: `Thread ${command.threadId} is not pinned and cannot be reordered.`,
       });
     }
-    yield* personaGuards.routeLocked(thread, command);
+    yield* personaGuards.modelChange(thread, command);
     if (
       command.type === "thread.active.reorder" &&
       (thread.pinnedAt != null || thread.settledOverride === "settled")

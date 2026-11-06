@@ -15,7 +15,9 @@ import { type PersonLevel, levelReaches } from "@t3tools/contracts/j5";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
 import type { CrewSeatArchiveGuard } from "../a2a/crewSeatArchiveGuard.ts";
+import { AgentPersonaModelSwitch } from "../agents/agentPersonaOrchestration.ts";
 import { claimPersonQueuedEdit, releaseQueuedEditClaim } from "../a2a/queuedEdits.ts";
 import {
   PersonAccess,
@@ -173,9 +175,10 @@ export const makeCommandAdmission = Effect.fn("j5.sharing.commandAdmission.makeC
   ): Effect.fn.Return<
     CommandAdmission,
     never,
-    PersonAccess | SharedConversation | SqlClient.SqlClient
+    PersonAccess | SharedConversation | SqlClient.SqlClient | ProviderRegistry
   > {
     const sql = yield* SqlClient.SqlClient;
+    const providers = (yield* ProviderRegistry).getProviders;
     const access = yield* PersonAccess;
     const conversation = yield* SharedConversation;
     const reach = yield* access.sessionReach(session).pipe(
@@ -260,6 +263,11 @@ export const makeCommandAdmission = Effect.fn("j5.sharing.commandAdmission.makeC
     });
 
     const person = reachPersonId(reach);
+    // Only a person may switch a persona worker's model; the orchestrator checks the switch.
+    const asPerson = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+      person === null
+        ? effect
+        : effect.pipe(Effect.provideService(AgentPersonaModelSwitch, { providers }));
 
     // A person's edit of a queued agent message is recorded in the ledger under their name
     // (`queuedEdits.ts`). A failure to claim it names no one and does not stop the edit.
@@ -287,7 +295,7 @@ export const makeCommandAdmission = Effect.fn("j5.sharing.commandAdmission.makeC
           conversation.dispatch(person, admitted, (stamped) =>
             Effect.gen(function* () {
               const claimed = yield* claimEdit(stamped);
-              return yield* dispatch(stamped).pipe(
+              return yield* asPerson(dispatch(stamped)).pipe(
                 Effect.tapError(() => (claimed ? releaseEdit(stamped) : Effect.void)),
               );
             }),
@@ -308,7 +316,7 @@ export const makeCommandAdmission = Effect.fn("j5.sharing.commandAdmission.makeC
           ? { kind: "thread", threadId: input.threadId }
           : { kind: "project", projectId: input.projectId };
       yield* requireLevel(scope, "collaborator");
-      return yield* conversation.launch(person, input, launch);
+      return yield* conversation.launch(person, input, (admitted) => asPerson(launch(admitted)));
     });
 
     const upsertScheduledTask: CommandAdmission["upsertScheduledTask"] = (input, upsert) => {

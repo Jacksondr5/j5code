@@ -125,11 +125,20 @@ The ordinary command receipt remains the replay boundary. A replay reuses its st
 
 Backups and environment migration must preserve snapshots together with the event database. Projection rebuild preserves the assignment references without reading source folders. Pre-library built-in assignments without a digest remain readable through the version-1 compatibility path. This compatibility path does not accept arbitrary custom definitions.
 
+## Switching a worker's model
+
+A person can switch a persona worker's model; an agent can't. A worker that hit a usage limit, or that a person wants elsewhere, moves instead of being started over (Bastian's question on 28 Oct; [#783](https://github.com/Jacksondr5/j5code/issues/783)). An agent that wants another model replaces the worker: it starts a new one, or a Captain adds a member ([#784](https://github.com/Jacksondr5/j5code/issues/784)).
+
+- **Who.** A switch is a person's only when it arrives through a client's command path from a session that names a person (`CommandAdmission`, which marks the dispatch with `AgentPersonaModelSwitch`). Anyone that path lets send a model change on the thread may switch. Everything else is refused with a message to replace the worker: `t3_thread_configure`, an agent's message carrying a model, MCP and scheduled paths, and service sessions.
+- **What is checked.** The same checks as a launch, run again: a signed-in provider offers the model and its options, and that provider enforces the persona's access. Any offered model passes, inside the persona's list or not; Models for custom members doesn't apply, because the pick is a person's. A reviewer may be switched onto its author's model. A refusal names its reason, and the worker stays on its model.
+- **The record.** The assignment's model fields follow the thread's selection in the same event: `resolvedModelSelection`, `resolvedDriver`, `resolvedRoute` (`override`), `resolvedEntryIndex` when the new model matches a list entry, and `modelSwitchedBy: "person"`. The snapshot, digest, instructions, access, pick source and review independence don't change. Every client and the per-turn runtime check read the switched assignment, so a later turn on a provider that can no longer enforce the access is still refused.
+- **How it runs.** A switch is upstream's model or provider change. A message carrying a new model applies it the way upstream applies any message's selection, including when a queued message starts; moving to another provider takes upstream's `provider.switch` handoff.
+
 ## Clients and activation
 
 Settings → Agent Setup displays the selected environment's persona library, including empty, error, available, and blocked states. Web and mobile use shared presentation logic; desktop inherits web. Clients neither load server-local files nor resolve models. Local, remote, relay, and tunnel clients use the same authenticated catalog RPC.
 
-Activation continues through the existing orchestrator launch contract. New tasks can select a persona, and Agent Setup edits its ordered model entries. A launched task shows its snapshotted display name and fixed route. Runtime activity for launched provider children stays in upstream's Lineage section and subagent cards, separate from the persona library.
+Activation continues through the existing orchestrator launch contract. New tasks can select a persona, and Agent Setup edits its ordered model entries. A launched task shows its snapshotted display name and the model it runs on now, with the composer's model picker for switching it. Runtime activity for launched provider children stays in upstream's Lineage section and subagent cards, separate from the persona library.
 
 Agents can also launch a persona as a Peer Agent: `j5_spawn_agent` accepts an optional `persona` id and refuses any provider, model, and reasoning pick outside that persona's ordered model entries. When the entry declares a reasoning level, the spawn must match it. Otherwise a model with a reasoning control accepts the explicitly requested level; a model with no reasoning control omits it. The resulting thread carries the same immutable assignment as a composer launch. See [agent tools](../a2a/agent-tools.md).
 
@@ -148,3 +157,4 @@ Follow-up work: in-app git commit/push/pull (status nudges and open-in-editor sh
 
 - 2026-11-03 — ordered model editing, per-entry eligibility and quota-aware new launches ([#778](https://github.com/Jacksondr5/j5code/issues/778)).
 - 2026-11-06 — independent reviewer personas prefer a model their authors didn't run on, never blocking ([#782](https://github.com/Jacksondr5/j5code/issues/782)).
+- 2026-11-06 — people can switch a persona worker's model; the launch route is no longer fixed for the task's life ([#783](https://github.com/Jacksondr5/j5code/issues/783)).

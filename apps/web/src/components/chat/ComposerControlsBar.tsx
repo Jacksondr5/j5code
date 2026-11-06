@@ -81,6 +81,8 @@ export function ComposerControlsBar(props: {
   getModelDisabledReason: ChatComposerProps["getModelDisabledReason"];
   /** J5 (D18): the saved-agent picker a draft shows ahead of the model picker. */
   draftAgentPicker?: ReactNode;
+  /** J5: a persona thread's access sets its modes, so only its model and reasoning are offered. */
+  modelOnly?: boolean;
 }) {
   const {
     environmentId,
@@ -131,6 +133,7 @@ export function ComposerControlsBar(props: {
     modelPickerIconClassName,
     getModelDisabledReason,
     draftAgentPicker,
+    modelOnly,
   } = props;
   const providerTraitsMenuContent = renderProviderTraitsMenuContent({
     provider: selectedProvider,
@@ -251,6 +254,19 @@ export function ComposerControlsBar(props: {
       onOpenProviderSetup={onOpenProviderSetup}
     />
   );
+  if (modelOnly && !showProviderUnavailable) {
+    return (
+      <>
+        {draftAgentPicker}
+        {composerModelPicker}
+        {renderProviderTraitsPicker({
+          ...providerTraitsPickerInput,
+          size: composerControlsCollapsed ? "xs" : "sm",
+          hidden: composerControlsHidden,
+        })}
+      </>
+    );
+  }
   return showProviderUnavailable ? (
     <ComposerControl
       type="button"
