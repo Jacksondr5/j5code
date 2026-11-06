@@ -478,7 +478,8 @@ export const layer = Layer.effect(
           detail: "Seat names must be unique within a crew.",
           nextStep: "Rename the duplicate seats and retry.",
         });
-      // The person's card may rename a seat a reviewer names; that name is dropped at launch.
+      // The person's card may rename a seat a reviewer names; that name is dropped at launch, and
+      // a reviewer left with none reviews the default authors.
       if (!humanReview)
         for (const seat of seats) {
           const unknown = seat.reviews?.find(

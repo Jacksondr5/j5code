@@ -23,6 +23,7 @@ import * as Ref from "effect/Ref";
 
 import { makeAgentPersonaLibrary } from "../agents/agentPersonaLibrary.ts";
 import { BUILT_IN_AGENT_PERSONAS, type AgentPersonaDefinition } from "../agents/agentPersonas.ts";
+import { withReviewIndependenceNote } from "../agents/agentPersonaReviewIndependence.ts";
 import { stringify as toYaml } from "yaml";
 import { resolveAgentPersonaRuntime } from "../agents/agentPersonaRuntime.ts";
 import { guardAgentPersonaThreadCreate } from "../agents/agentPersonaOrchestration.ts";
@@ -1441,6 +1442,13 @@ it.effect(
           "person",
         );
         assert.equal(modelOf(narrowed), "gpt-5.6-sol");
+        // A name the person renamed away on the card is dropped; with none left, the default.
+        const renamed = yield* launcher.resolveSeats(
+          captain,
+          [builder, helper, { ...review, reviews: ["gone"] }],
+          "person",
+        );
+        assert.equal(modelOf(renamed), "gpt-5.6-luna");
 
         // A model the person set on the card is used as is, and noted.
         const edited = yield* launcher.resolveSeats(
@@ -1461,6 +1469,10 @@ it.effect(
         assert.equal(modelOf(edited), "gpt-5.6-terra");
         assert.equal(edited[1]!.assignment!.reviewIndependence?.outcome, "same-model-as-author");
         assert.equal(edited[1]!.assignment!.reviewIndependence?.modelChosenBy, "person");
+        assert.include(
+          withReviewIndependenceNote("Review it.", edited[1]!.assignment),
+          "(gpt-5.6-terra), because it was set on the roster card.",
+        );
 
         // An addition reviews the Crew's members, read from their threads.
         const member = ThreadId.make("thread:builder");

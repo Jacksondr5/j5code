@@ -206,6 +206,9 @@ function candidatesForTarget(
     .map(({ provider }) => provider);
 }
 
+/** A model id without a provider prefix, so `anthropic/claude-opus-5-5` matches `claude-opus-5-5`. */
+export const sameModelKey = (model: string) => model.slice(model.lastIndexOf("/") + 1);
+
 /** Whether an agent may pick this resolved selection; a person's pick passes none. */
 export type AgentPersonaEntryEligibility = (
   selection: ModelSelection,
@@ -252,11 +255,13 @@ export function resolveAgentPersonaRoute(input: {
     return { route, entryIndex, target, failures };
   });
   const runnable = entries.filter((entry) => entry.modelSelection !== undefined);
-  const avoid = input.avoidModels;
+  const avoid =
+    input.avoidModels === undefined ? undefined : new Set([...input.avoidModels].map(sameModelKey));
   const chosen =
     (avoid === undefined
       ? undefined
-      : runnable.find((entry) => !avoid.has(entry.modelSelection!.model))) ?? runnable[0];
+      : runnable.find((entry) => !avoid.has(sameModelKey(entry.modelSelection!.model)))) ??
+    runnable[0];
   if (chosen?.modelSelection !== undefined) {
     const provider = input.providers.find(
       ({ instanceId }) => instanceId === chosen.modelSelection!.instanceId,

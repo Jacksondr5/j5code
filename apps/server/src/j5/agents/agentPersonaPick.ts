@@ -24,7 +24,7 @@ import { translateAgentPersonaProviderPolicy } from "./agentPersonaProviderPolic
 import { resolveAgentPersonaRuntime } from "./agentPersonaRuntime.ts";
 import type { AgentPersonaEntryEligibility } from "./agentPersonaRouting.ts";
 import { prepareAgentPersonaPeerSpawn } from "./agentPersonaSpawn.ts";
-import type { AgentPersonaId } from "./agentPersonas.ts";
+import type { AgentPersonaDefinition, AgentPersonaId } from "./agentPersonas.ts";
 import { CrewMemberModels } from "./crewMemberModels.ts";
 import {
   resolveReviewAuthors,
@@ -130,24 +130,31 @@ const libraryRefusal = (error: {
 
 /**
  * The authors of the work an independent reviewer reviews; undefined for any other persona, whose
- * launch reads no threads. A named author thread that does not exist is refused as bad input.
+ * launch reads no threads, and for a disabled or unknown one, which the launch refuses for that.
+ * A named author thread that does not exist, or is in another project, is refused as bad input.
  */
 const reviewAuthorsFor = Effect.fn("j5.agents.reviewAuthorsFor")(function* (
   personaId: AgentPersonaId,
   request: ReviewAuthorsRequest | undefined,
-  library: Library,
+  catalog: {
+    readonly definitions: ReadonlyArray<AgentPersonaDefinition>;
+    readonly disabledIds: ReadonlyArray<string>;
+  },
+  projectId: ProjectId,
 ) {
-  if (request === undefined) return undefined;
-  const catalog = yield* library.catalog().pipe(Effect.mapError(libraryRefusal));
-  if (catalog.definitions.find(({ id }) => id === personaId)?.independentReviewer !== true)
+  if (
+    request === undefined ||
+    catalog.disabledIds.includes(personaId) ||
+    catalog.definitions.find(({ id }) => id === personaId)?.independentReviewer !== true
+  )
     return undefined;
-  return yield* resolveReviewAuthors(request).pipe(
+  return yield* resolveReviewAuthors({ ...request, projectId }).pipe(
     Effect.mapError(
       (error) =>
         new AgentPersonaPickError({
           message:
-            error._tag === "ReviewAuthorThreadMissingError"
-              ? `${error.message} Name author threads that exist, or omit them to review your own work.`
+            error._tag === "ReviewAuthorThreadRefusedError"
+              ? `${error.message} Name author threads in this project that exist, or omit them to review your own work.`
               : `The authors of the work under review could not be read: ${error.message}`,
           constraint: null,
         }),
@@ -178,9 +185,17 @@ export const pickAgentPersona = Effect.fn("j5.agents.pickAgentPersona")(function
   /** Whose work an independent reviewer reviews; read only when the persona is flagged as one. */
   readonly reviewAuthors?: ReviewAuthorsRequest | undefined;
 }) {
-  const library = yield* makeAgentPersonaLibrary;
+  const sources = yield* makeAgentPersonaLibrary;
+  const catalog = yield* sources.catalog().pipe(Effect.mapError(libraryRefusal));
+  // One read serves the reviewer flag and the launch, so an edit between them can't split them.
+  const library: Library = { ...sources, catalog: () => Effect.succeed(catalog) };
   const providers = yield* (yield* ProviderRegistry).getProviders;
-  const authors = yield* reviewAuthorsFor(input.personaId, input.reviewAuthors, library);
+  const authors = yield* reviewAuthorsFor(
+    input.personaId,
+    input.reviewAuthors,
+    catalog,
+    input.projectId,
+  );
   const agentPick = input.source === "agent";
   const eligible = agentPick
     ? (input.eligible ?? (yield* (yield* CrewMemberModels).eligibility(input.projectId)))

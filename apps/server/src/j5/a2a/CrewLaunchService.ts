@@ -423,11 +423,12 @@ export const layer = Layer.effect(
         ? new Set(
             (yield* agents.catalog().pipe(
               Effect.mapError(
-                (error) =>
-                  new CrewLaunchSeatUnavailableError({
-                    seatName: seats[0]!.name,
-                    agentId: seats[0]!.agentId ?? "custom seat",
-                    detail: error.message,
+                (cause) =>
+                  new CrewLaunchOperationError({
+                    phase: "reading the persona library",
+                    seatName: null,
+                    createdSeats: [],
+                    cause,
                   }),
               ),
             )).definitions.flatMap(({ id, independentReviewer }) =>
@@ -440,17 +441,24 @@ export const layer = Layer.effect(
       // A reviewer's authors are the seats and members it reviews; by default every one that is
       // not a reviewer itself. Seats on this roster resolve first, so their models are known.
       const reviewAuthors = (seat: CrewLaunchSeat): ReviewAuthorsRequest => {
+        // A name the person renamed or removed on the card is dropped; with none left, the default.
+        const named = seat.reviews?.filter(
+          (name) =>
+            seats.some((other) => other.name === name) ||
+            (crew?.members ?? []).some((member) => member.seatName === name),
+        );
+        const reviews = named === undefined || named.length === 0 ? undefined : named;
         const reviewed = (name: string) =>
-          name !== seat.name && (seat.reviews === undefined || seat.reviews.includes(name));
+          name !== seat.name && (reviews === undefined || reviews.includes(name));
         const rosterSeats = seats.filter(
-          (other) => reviewed(other.name) && (seat.reviews !== undefined || !isReviewer(other)),
+          (other) => reviewed(other.name) && (reviews !== undefined || !isReviewer(other)),
         );
         return {
           threads: (crew?.members ?? [])
             .filter((member) => reviewed(member.seatName))
             .map((member) => ({
               threadId: member.threadId,
-              skipReviewer: seat.reviews === undefined,
+              skipReviewer: reviews === undefined,
             })),
           models: rosterSeats.flatMap(
             (other) => resolved.get(other.name)?.modelSelection.model ?? [],
@@ -578,7 +586,7 @@ export const layer = Layer.effect(
               projectId: captain.thread.projectId,
               runtimeMode: seat.runtimeMode,
               eligible,
-              reviewAuthors: reviewAuthors(seat),
+              ...(isReviewer(seat) ? { reviewAuthors: reviewAuthors(seat) } : {}),
             });
             return {
               ...prepared,
