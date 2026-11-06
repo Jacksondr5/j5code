@@ -2563,7 +2563,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           <AgentDraftPicker
             environmentId={environmentId}
             draftKey={draftAgent.draftKey}
-            draftTarget={composerDraftTarget}
             size={composerControlsCollapsed ? "xs" : "sm"}
           />
         ) : null

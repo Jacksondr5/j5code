@@ -1,5 +1,6 @@
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import {
+  DEFAULT_UNIFIED_SETTINGS,
   EnvironmentId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -10,7 +11,8 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { resolveComposerProviderSelection } from "../../components/ChatView.logic";
 import { deriveProviderInstanceEntries } from "../../providerInstances";
-import { useComposerDraftStore } from "../../composerDraftStore";
+import { deriveEffectiveComposerModelState, useComposerDraftStore } from "../../composerDraftStore";
+import { draftAgentPersonaLaunch, finishDraftAgentSend, selectDraftAgent } from "./agentDraftState";
 import { composerProviderCandidates, personaRouteToFollow } from "./personaComposerSelection";
 
 describe("composerProviderCandidates", () => {
@@ -86,9 +88,63 @@ describe("personaRouteToFollow", () => {
     // The picker's choice is explicit, so the composer sends it and the server checks the switch.
     store.setModelSelection(thread, claude, { explicit: true, replaceOptions: true });
     expect(followed()).toBeUndefined();
+  });
 
-    // Choosing a persona drops a pick made before it (AgentDraftPicker).
+  it("starts a launched persona's composer from its model, not the draft's sticky one", () => {
+    const store = useComposerDraftStore.getState();
+    const thread = scopeThreadRef(
+      EnvironmentId.make("environment:persona-launch"),
+      ThreadId.make("thread:persona-launch"),
+    );
+    const draftKey = scopedThreadKey(thread);
+    const codex = ProviderInstanceId.make("codex");
+    const codexProvider = {
+      driver: ProviderDriverKind.make("codex"),
+      instanceId: codex,
+      enabled: true,
+      installed: true,
+      status: "ready",
+      auth: { status: "authenticated" },
+      version: null,
+      checkedAt: "2026-11-06T00:00:00.000Z",
+      models: ["gpt-5", "gpt-6-luna"].map((slug) => ({
+        slug,
+        name: slug,
+        isCustom: false,
+        capabilities: null,
+      })),
+      slashCommands: [],
+      skills: [],
+    } satisfies ServerProvider;
+    const shown = () =>
+      deriveEffectiveComposerModelState({
+        draft: store.getComposerDraft(thread),
+        providers: [codexProvider],
+        selectedProvider: ProviderDriverKind.make("codex"),
+        selectedInstanceId: codex,
+        threadModelSelection: assignment.resolvedModelSelection,
+        projectModelSelection: null,
+        settings: DEFAULT_UNIFIED_SETTINGS,
+      }).selectedModel;
+
+    // The draft remembers gpt-5 on the persona's own provider; the persona launches on gpt-6-luna.
+    store.setStickyModelSelection({ instanceId: codex, model: "gpt-5" });
     store.applyStickyState(thread);
-    expect(followed()).toBe(assignment);
+    selectDraftAgent(draftKey, "scout");
+    expect(shown()).toBe("gpt-5");
+
+    finishDraftAgentSend(draftKey, thread);
+    expect(shown()).toBe("gpt-6-luna");
+    expect(draftAgentPersonaLaunch(draftKey)).toEqual({});
+
+    // Changing only the effort is a pick on the model the worker runs on.
+    store.setProviderModelOptions(
+      thread,
+      ProviderDriverKind.make("codex"),
+      [{ id: "reasoningEffort", value: "low" }],
+      { instanceId: codex, model: "gpt-6-luna" },
+    );
+    expect(personaRouteToFollow(assignment, store.getComposerDraft(thread))).toBeUndefined();
+    expect(shown()).toBe("gpt-6-luna");
   });
 });
