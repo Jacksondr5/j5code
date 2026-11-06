@@ -27,6 +27,7 @@ import { CrewStopNotFoundError, CrewStopService, type StopCrewInput } from "./Cr
 import { CrewWorktrees } from "./CrewWorktrees.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { A2AHumanInbox } from "./HumanInboxService.ts";
+import { A2AExchangeAlreadyAnsweredError } from "./SendService.ts";
 
 const seat = (name: string) => ParticipantId.make(`agent:j5:a2a:thread:${name}`);
 
@@ -56,6 +57,8 @@ const calls = () => ({
   responses: [] as Array<RespondToCrewRuntimeRequestInput>,
   answerCommandIds: [] as Array<string>,
   answerMessages: [] as Array<string>,
+  // The command that answered each exchange: a replay of it succeeds, any other is refused.
+  answeredBy: new Map<string, string>(),
   notified: 0,
 });
 
@@ -160,6 +163,12 @@ const serviceWith = (seen: ReturnType<typeof calls>) =>
         }),
         Layer.mock(A2AHumanInbox)({
           answer: (input, _beforeReply, claimAttachments) => {
+            const answeredBy = seen.answeredBy.get(input.exchangeId);
+            if (answeredBy !== undefined && answeredBy !== input.commandId)
+              return Effect.fail(
+                new A2AExchangeAlreadyAnsweredError({ exchangeId: input.exchangeId }),
+              );
+            seen.answeredBy.set(input.exchangeId, input.commandId);
             seen.answerCommandIds.push(input.commandId);
             seen.answerMessages.push(input.message);
             const claim =
@@ -363,7 +372,7 @@ it.effect(
         clientRequestId: "allow-1",
       });
       assert.deepStrictEqual(seen.answerMessages, [
-        `Allowed once: reviewer past broader access than its caller runs with. Retry the launch with allow_once: ${escalationId}.`,
+        `Allowed once: reviewer past broader access than its caller runs with. Only agent:j5:a2a:thread:asker, whose launch was refused, can use it: it retries that launch with allow_once: ${escalationId}. If you asked on a Crew member's behalf, send it this id.`,
       ]);
       assert.equal(
         yield* escalations.grantedWaiver({
@@ -373,7 +382,13 @@ it.effect(
         }),
         "access-above-caller",
       );
-      // A second press, or one on an ask no single waiver helps, answers nothing.
+      // A retry whose reply was lost replays the same answer and succeeds; another press is
+      // refused by the answered ask, and one on an ask no single waiver helps answers nothing.
+      yield* actions.allowPersonaOnce({
+        personId: owner,
+        exchangeId: "exchange:blocked",
+        clientRequestId: "allow-1",
+      });
       const again = yield* actions
         .allowPersonaOnce({
           personId: owner,
@@ -381,7 +396,7 @@ it.effect(
           clientRequestId: "allow-2",
         })
         .pipe(Effect.flip);
-      assert.include(again.message, "already allowed once");
+      assert.equal(again._tag, "A2AExchangeAlreadyAnsweredError");
       yield* file("exchange:stuck", null);
       const stuck = yield* actions
         .allowPersonaOnce({
@@ -391,7 +406,7 @@ it.effect(
         })
         .pipe(Effect.flip);
       assert.include(stuck.message, "can't be allowed once");
-      assert.lengthOf(seen.answerMessages, 1);
+      assert.lengthOf(new Set(seen.answerCommandIds), 1);
     }).pipe(Effect.provide(serviceWith(seen)));
   },
 );

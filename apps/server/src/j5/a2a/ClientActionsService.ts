@@ -303,7 +303,7 @@ const make = Effect.gen(function* () {
             ),
             personId: input.personId,
             exchangeId: ExchangeId.make(input.exchangeId),
-            message: allowedOnceReply(grant.personaId, grant.constraint, grant.escalationId),
+            message: allowedOnceReply(grant),
             acceptedAt,
           },
           beforeReply,

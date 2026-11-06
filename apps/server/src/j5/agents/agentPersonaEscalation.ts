@@ -67,12 +67,13 @@ export const personaBlockText = (block: {
   ].join(" ");
 
 /** The fixed reply "Allow this once" answers an ask with. */
-export const allowedOnceReply = (
-  personaId: string,
-  constraint: AgentPersonaPickConstraint,
-  escalationId: string,
-) =>
-  `Allowed once: ${personaId} past ${CONSTRAINT_TEXT[constraint]}. Retry the launch with allow_once: ${escalationId}.`;
+export const allowedOnceReply = (grant: {
+  readonly personaId: string;
+  readonly constraint: AgentPersonaPickConstraint;
+  readonly escalationId: string;
+  readonly callerParticipantId: string;
+}) =>
+  `Allowed once: ${grant.personaId} past ${CONSTRAINT_TEXT[grant.constraint]}. Only ${grant.callerParticipantId}, whose launch was refused, can use it: it retries that launch with allow_once: ${grant.escalationId}. If you asked on a Crew member's behalf, send it this id.`;
 
 interface EscalationRow {
   readonly id: string;
@@ -114,11 +115,13 @@ export class AgentPersonaEscalations extends Context.Service<
       exchangeIds: ReadonlyArray<string>,
     ) => Effect.Effect<ReadonlyMap<string, AgentPersonaEscalationView>, SqlError>;
     /** The ask's waivable escalation, open and ready for the Owner's "Allow this once". */
+    /** Granted already is fine: a retried grant replays its answer and grants nothing new. */
     readonly grantable: (exchangeId: string) => Effect.Effect<
       {
         readonly escalationId: string;
         readonly personaId: string;
         readonly constraint: AgentPersonaPickConstraint;
+        readonly callerParticipantId: string;
       },
       AgentPersonaEscalationError | SqlError
     >;
@@ -237,9 +240,14 @@ export const layer = Layer.effect(
         return yield* refuse(
           `No single exception lets ${row.persona_id} run, so it can't be allowed once.`,
         );
-      if (row.status !== "open")
+      if (row.status === "used")
         return yield* refuse(`${row.persona_id} was already allowed once for this request.`);
-      return { escalationId: row.id, personaId: row.persona_id, constraint: row.waivable };
+      return {
+        escalationId: row.id,
+        personaId: row.persona_id,
+        constraint: row.waivable,
+        callerParticipantId: row.caller_participant_id,
+      };
     });
 
     const markGranted: AgentPersonaEscalations["Service"]["markGranted"] = Effect.fn(
@@ -251,7 +259,9 @@ export const layer = Layer.effect(
         WHERE id = ${input.escalationId} AND status = 'open'
         RETURNING id
       `;
-      if (updated.length === 0)
+      if (updated.length > 0) return;
+      // A replayed grant finds it granted already, which is the outcome it asked for.
+      if ((yield* read(input.escalationId)).status !== "granted")
         return yield* refuse(`Escalation ${input.escalationId} was already allowed once.`);
     });
 
