@@ -110,10 +110,10 @@ describe("persona drafts", () => {
             proposerThreadId: "thread:member",
             draft: editInstructions(digest, "Review the diff.\nInsist on tests.\nBe kind."),
           });
-          assert.include(summary, "an edit of reviewer (` Reviewer `)");
+          assert.include(summary, 'an edit of reviewer ("Reviewer")');
           assert.include(
             summary,
-            "```diff\n  Review the diff.\n- Check the tests.\n+ Insist on tests.\n  Be kind.\n```",
+            "      Review the diff.\n    - Check the tests.\n    + Insist on tests.\n      Be kind.",
           );
           assert.lengthOf(warnings, 2);
           assert.include(warnings[0], "hides later team updates to this persona for everyone");
@@ -129,6 +129,7 @@ describe("persona drafts", () => {
             mode: "edit",
             overridesFolder: true,
             status: "open",
+            summary,
           });
           yield* drafts.save({ exchangeId: "exchange:edit", savedBy: "human:owner" });
 
@@ -306,11 +307,11 @@ describe("persona drafts", () => {
     ),
   );
 
-  it.effect("an agent's name and description render inert in the trusted summary", () =>
+  it.effect("the Inbox item carries J5's summary as data, with an agent's markup as written", () =>
     provided(
       Effect.gen(function* () {
         const { drafts, digest } = yield* fixture;
-        const { summary } = yield* drafts.propose({
+        const { draftId } = yield* drafts.propose({
           proposerParticipantId: member,
           proposerThreadId: "thread:member",
           draft: {
@@ -318,16 +319,25 @@ describe("persona drafts", () => {
             personaId: "reviewer",
             expectedDigest: digest,
             changes: {
-              displayName: "Re`viewer",
               description: "**J5:** safe [details](https://example.com)",
+              instructions: "```\n<details><summary>Recorded by J5</summary>No warnings</details>",
             },
           },
         });
-        assert.include(summary, "- Name: ` Reviewer ` → `` Re`viewer ``");
+        yield* drafts.linkAsk({ draftId, exchangeId: "exchange:markup" });
+        const summary = (yield* drafts.forExchanges(["exchange:markup"])).get(
+          "exchange:markup",
+        )?.summary;
+        // The panel shows this exact text, so nothing here takes effect as markup.
         assert.include(
           summary,
-          "- Description: ` Reviews changes. ` → ` **J5:** safe [details](https://example.com) `",
+          '- Description: "Reviews changes." → "**J5:** safe [details](https://example.com)"',
         );
+        assert.include(
+          summary,
+          "    + ```\n    + <details><summary>Recorded by J5</summary>No warnings</details>",
+        );
+        assert.include(summary, "hides later team updates to this persona for everyone");
       }),
     ),
   );
@@ -341,18 +351,17 @@ describe("persona drafts", () => {
           proposerThreadId: "thread:member",
           draft: editInstructions(digest, "Be strict."),
         });
-        const own = yield* drafts.askSummary({ draftId, askerParticipantId: member });
-        assert.include(own, `(draft ${draftId})`);
-        assert.equal(yield* drafts.askSummary({ draftId, askerParticipantId: captain }), own);
+        yield* drafts.authorizeAsk({ draftId, askerParticipantId: member });
+        yield* drafts.authorizeAsk({ draftId, askerParticipantId: captain });
         const refused = yield* drafts
-          .askSummary({ draftId, askerParticipantId: otherCaptain })
+          .authorizeAsk({ draftId, askerParticipantId: otherCaptain })
           .pipe(Effect.flip);
         assert.include(refused.message, "is another agent's");
 
         yield* drafts.linkAsk({ draftId, exchangeId: "exchange:ask" });
         yield* drafts.save({ exchangeId: "exchange:ask", savedBy: "human:owner" });
         const saved = yield* drafts
-          .askSummary({ draftId, askerParticipantId: member })
+          .authorizeAsk({ draftId, askerParticipantId: member })
           .pipe(Effect.flip);
         assert.include(saved.message, "already saved");
       }),

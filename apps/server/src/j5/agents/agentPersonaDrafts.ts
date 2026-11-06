@@ -190,23 +190,15 @@ const fieldsOf = (definition: AgentPersonaDefinition, access: AgentPersonaAccess
     : { independentReviewer: definition.independentReviewer }),
 });
 
-/** A fenced block that the text inside can't close: the Inbox renders an ask as markdown. */
-const fenced = (language: string, text: string) => {
-  const longest = Math.max(2, ...(text.match(/`+/g) ?? []).map((run) => run.length));
-  const fence = "`".repeat(longest + 1);
-  return `${fence}${language}\n${text}\n${fence}`;
-};
+/** A block of text set off by indentation; the Inbox shows the summary as plain text. */
+const indented = (text: string) =>
+  text
+    .split("\n")
+    .map((line) => `    ${line}`)
+    .join("\n");
 
-/**
- * An agent's value as inline code in the trusted summary, so Markdown in it can't style or forge
- * the summary. Line breaks are flattened: a blank line would end the code span.
- */
-const inline = (text: string) => {
-  const flat = text.replace(/[\r\n\u2028\u2029]+/g, " ");
-  const longest = Math.max(0, ...(flat.match(/`+/g) ?? []).map((run) => run.length));
-  const tick = "`".repeat(longest + 1);
-  return `${tick} ${flat} ${tick}`;
-};
+/** An agent's value, quoted so its own quotes and spacing are visible as written. */
+const quoted = (text: string) => JSON.stringify(text);
 
 const LINE_BREAK = /[\r\n\u2028\u2029]/;
 
@@ -232,13 +224,13 @@ const sameFields = (
 const changedFields = (before: AgentPersonaDraftFields, after: AgentPersonaDraftFields) => {
   const lines: Array<string> = [];
   if (before.displayName !== after.displayName)
-    lines.push(`- Name: ${inline(before.displayName)} → ${inline(after.displayName)}`);
+    lines.push(`- Name: ${quoted(before.displayName)} → ${quoted(after.displayName)}`);
   if (before.description !== after.description)
-    lines.push(`- Description: ${inline(before.description)} → ${inline(after.description)}`);
+    lines.push(`- Description: ${quoted(before.description)} → ${quoted(after.description)}`);
   if (before.access !== after.access) lines.push(`- Access: ${before.access} → ${after.access}`);
   if (modelsText(before.modelRoute) !== modelsText(after.modelRoute))
     lines.push(
-      `- Models, in order: ${inline(modelsText(before.modelRoute))} → ${inline(modelsText(after.modelRoute))}`,
+      `- Models, in order: ${modelsText(before.modelRoute)} → ${modelsText(after.modelRoute)}`,
     );
   if (flagText(before.independentReviewer) !== flagText(after.independentReviewer))
     lines.push(
@@ -247,7 +239,7 @@ const changedFields = (before: AgentPersonaDraftFields, after: AgentPersonaDraft
   if (before.instructions !== after.instructions) lines.push("- Instructions, line by line below");
   return before.instructions === after.instructions
     ? lines
-    : [...lines, fenced("diff", lineDiff(before.instructions, after.instructions).join("\n"))];
+    : [...lines, indented(lineDiff(before.instructions, after.instructions).join("\n"))];
 };
 
 export interface AgentPersonaDraftsShape {
@@ -265,13 +257,13 @@ export interface AgentPersonaDraftsShape {
     AgentPersonaDraftError | SqlError
   >;
   /**
-   * The trusted text an ask carrying this draft appends. The asker is its proposer, or the
-   * proposer's Captain; a saved draft is not asked about again.
+   * Whether this agent may ask about the draft: its proposer, or the proposer's Captain. A saved
+   * draft is not asked about again.
    */
-  readonly askSummary: (input: {
+  readonly authorizeAsk: (input: {
     readonly draftId: string;
     readonly askerParticipantId: string;
-  }) => Effect.Effect<string, AgentPersonaDraftError | SqlError>;
+  }) => Effect.Effect<void, AgentPersonaDraftError | SqlError>;
   /** Link the ask that carries the draft, so the person's Inbox can offer "Save persona". */
   readonly linkAsk: (input: {
     readonly draftId: string;
@@ -353,7 +345,7 @@ export const makeAgentPersonaDrafts = Effect.fn("j5.agents.personaDrafts.make")(
         fields = { ...draft.fields };
         lines.push(
           `J5 recorded this persona draft: a new persona, ${draft.personaId}, for this server's library. Its full definition:`,
-          fenced("yaml", definitionYaml(created).trimEnd()),
+          indented(definitionYaml(created).trimEnd()),
         );
       } else {
         const original = current.definitions.find(({ id }) => id === draft.personaId);
@@ -392,7 +384,7 @@ export const makeAgentPersonaDrafts = Effect.fn("j5.agents.personaDrafts.make")(
           changes.filter((line) => !line.startsWith("- ")),
         ];
         lines.push(
-          `J5 recorded this persona draft: an edit of ${draft.personaId} (${inline(original.displayName)}). Changed fields:\n\n${list.join("\n")}`,
+          `J5 recorded this persona draft: an edit of ${draft.personaId} (${quoted(original.displayName)}). Changed fields:\n\n${list.join("\n")}`,
           ...diff,
         );
         if (targetKind === "folder" && folderPath !== undefined)
@@ -418,8 +410,8 @@ export const makeAgentPersonaDrafts = Effect.fn("j5.agents.personaDrafts.make")(
     },
   );
 
-  const askSummary: AgentPersonaDraftsShape["askSummary"] = Effect.fn(
-    "j5.agents.personaDrafts.askSummary",
+  const authorizeAsk: AgentPersonaDraftsShape["authorizeAsk"] = Effect.fn(
+    "j5.agents.personaDrafts.authorizeAsk",
   )(function* (input) {
     const row = yield* readDraft(input.draftId);
     if (row.proposer_participant_id !== input.askerParticipantId) {
@@ -434,7 +426,6 @@ export const makeAgentPersonaDrafts = Effect.fn("j5.agents.personaDrafts.make")(
     }
     if (row.status === "saved")
       return yield* refuse(`Persona draft ${input.draftId} is already saved.`);
-    return `${row.summary} (draft ${row.id})`;
   });
 
   const linkAsk: AgentPersonaDraftsShape["linkAsk"] = (input) =>
@@ -458,6 +449,7 @@ export const makeAgentPersonaDrafts = Effect.fn("j5.agents.personaDrafts.make")(
           mode: row.mode,
           overridesFolder: row.target_kind === "folder",
           status: row.status,
+          summary: row.summary,
         },
       ]),
     );
@@ -527,7 +519,7 @@ export const makeAgentPersonaDrafts = Effect.fn("j5.agents.personaDrafts.make")(
     },
   );
 
-  return AgentPersonaDrafts.of({ propose, askSummary, linkAsk, forExchanges, save });
+  return AgentPersonaDrafts.of({ propose, authorizeAsk, linkAsk, forExchanges, save });
 });
 
 export const layer = Layer.effect(

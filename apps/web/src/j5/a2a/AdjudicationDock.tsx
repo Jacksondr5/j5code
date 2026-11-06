@@ -169,6 +169,9 @@ export function AdjudicationDock(props: {
             {shown.escalation === undefined ? null : (
               <J5RecordPanel text={shown.escalation.summary} />
             )}
+            {shown.personaDraft === undefined ? null : (
+              <J5RecordPanel text={shown.personaDraft.summary} />
+            )}
             {shown.followUps?.map((followUp) => (
               <div className="flex flex-col gap-1" key={followUp.messageId}>
                 <p className="text-xs font-medium text-muted-foreground">Follow-up</p>

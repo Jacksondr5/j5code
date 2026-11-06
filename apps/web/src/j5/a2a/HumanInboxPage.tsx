@@ -217,6 +217,7 @@ function InboxMessage({ item }: { readonly item: HumanInboxItem }) {
     <div className="flex flex-col gap-4">
       {markdown(item.message)}
       {item.escalation === undefined ? null : <J5RecordPanel text={item.escalation.summary} />}
+      {item.personaDraft === undefined ? null : <J5RecordPanel text={item.personaDraft.summary} />}
       {item.followUps?.map((followUp) => (
         <div className="flex flex-col gap-1" key={followUp.messageId}>
           <p className="text-xs font-medium text-muted-foreground">Follow-up</p>
