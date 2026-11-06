@@ -138,7 +138,7 @@ export function presentAgentPersonaAssignment(
       .join(" · "),
     switchNote:
       assignment.modelSwitchedBy === "person"
-        ? "Switched from its launch model by a person."
+        ? "A person changed its model or reasoning since launch."
         : null,
   };
 }
