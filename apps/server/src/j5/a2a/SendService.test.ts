@@ -190,6 +190,38 @@ it.effect("opens once per sender-receiver pair, joins follow-ups, and one reply 
   }).pipe(Effect.provide(testLayer)),
 );
 
+it.effect("refuses a fresh ask that would join an ask already open, writing nothing", () =>
+  Effect.gen(function* () {
+    const projectId = yield* setupSameProject();
+    yield* registerPerson();
+    const service = yield* A2ASendService;
+    const sql = yield* SqlClient.SqlClient;
+    const ask = (id: string, freshAsk: boolean) =>
+      service.send({
+        commandId: CommCommandId.make(`command:fresh-ask:${id}`),
+        senderThreadId: sender.threadId,
+        to: person.id,
+        message: `Ask ${id}`,
+        expectReply: true,
+        intent: `Ask ${id}`,
+        urgency: "soon",
+        ...(freshAsk ? { freshAsk } : {}),
+        acceptedAt: timestamp,
+      });
+    const open = yield* ask("open", false);
+    const events = () =>
+      sql<{ readonly count: number }>`
+        SELECT COUNT(*) AS count FROM j5_a2a_comm_event WHERE project_id = ${projectId}
+      `.pipe(Effect.map((rows) => rows[0]!.count));
+    const before = yield* events();
+    const refused = yield* ask("escalation", true).pipe(Effect.flip);
+    assert.equal(refused._tag, "A2AOpenAskExistsError");
+    assert.include(refused.message, `exchange ${open.exchangeId}`);
+    assert.include(refused.message, "j5_clear_own_ask");
+    assert.equal(yield* events(), before);
+  }).pipe(Effect.provide(testLayer)),
+);
+
 it.effect("refuses a second reply when an accepted reply exists on an open exchange", () =>
   Effect.gen(function* () {
     yield* setupSameProject();
