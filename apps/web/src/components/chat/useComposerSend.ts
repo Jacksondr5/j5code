@@ -139,7 +139,7 @@ import type { useTimelineFollow } from "./useTimelineFollow";
 import type { useUsageLimitsPanel } from "./useUsageLimitsPanel";
 import type { useWorktreeSetup } from "./useWorktreeSetup";
 import { expandPlaybookPrompt } from "@t3tools/client-runtime/j5/playbooks";
-import { clearDraftAgent, draftAgentPersonaLaunch } from "../../j5/agents/agentDraftState";
+import { draftAgentPersonaLaunch, finishDraftAgentSend } from "../../j5/agents/agentDraftState";
 
 const ENVIRONMENT_UNAVAILABLE_SEND_TOAST_TRAIL_SIZE = 3;
 
@@ -1344,7 +1344,7 @@ export function useComposerSend(input: ComposerSendInput) {
         turnStartSucceeded = true;
         setKeepFullHistory(routeThreadKey, false);
         clearUsageLimitsFor(routeThreadKey);
-        clearDraftAgent(routeThreadKey);
+        finishDraftAgentSend(routeThreadKey, composerDraftTarget);
         if (turnUsesAttachmentUploads) {
           releaseDraftAttachments(composerAttachmentsSnapshot);
         }
