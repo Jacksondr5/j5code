@@ -1,4 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { AgentPersonaEscalations } from "../agents/agentPersonaEscalation.ts";
+import { agentPersonaEscalationsTestLayer } from "../test-support/agentPersonaEscalations.ts";
 import { ChatAttachmentId, RuntimeRequestId, ThreadId } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -53,6 +55,7 @@ const calls = () => ({
   archives: [] as Array<ArchiveCrewInput>,
   responses: [] as Array<RespondToCrewRuntimeRequestInput>,
   answerCommandIds: [] as Array<string>,
+  answerMessages: [] as Array<string>,
   notified: 0,
 });
 
@@ -158,6 +161,7 @@ const serviceWith = (seen: ReturnType<typeof calls>) =>
         Layer.mock(A2AHumanInbox)({
           answer: (input, _beforeReply, claimAttachments) => {
             seen.answerCommandIds.push(input.commandId);
+            seen.answerMessages.push(input.message);
             const claim =
               input.attachments === undefined || claimAttachments === undefined
                 ? Effect.void
@@ -182,6 +186,8 @@ const serviceWith = (seen: ReturnType<typeof calls>) =>
         noDocumentTextLayer,
       ),
     ),
+    // Exposed too, so a test files the escalation an ask carries.
+    Layer.provideMerge(agentPersonaEscalationsTestLayer()),
     Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "j5-client-actions-" })),
     Layer.provide(NodeServices.layer),
   );
@@ -328,6 +334,64 @@ it.effect(
         `command:j5:a2a:human:${encodeURIComponent(personId)}:${encodeURIComponent(second)}:${encodeURIComponent(clientRequestId)}`,
       ]);
       assert.equal(seen.notified, 2);
+    }).pipe(Effect.provide(serviceWith(seen)));
+  },
+);
+
+it.effect(
+  "allows a blocked persona once: the fixed reply answers the ask, then it is granted",
+  () => {
+    const seen = calls();
+    return Effect.gen(function* () {
+      const actions = yield* ClientActionsService;
+      const escalations = yield* AgentPersonaEscalations;
+      const owner = ParticipantId.make("human:owner");
+      const file = (exchangeId: string, waivable: "access-above-caller" | null) =>
+        escalations
+          .record({
+            callerParticipantId: "agent:j5:a2a:thread:asker",
+            personaId: "reviewer",
+            code: "models_exhausted",
+            summary: "Persona reviewer is blocked.",
+            waivable,
+          })
+          .pipe(Effect.tap((escalationId) => escalations.linkAsk({ escalationId, exchangeId })));
+      const escalationId = yield* file("exchange:blocked", "access-above-caller");
+      yield* actions.allowPersonaOnce({
+        personId: owner,
+        exchangeId: "exchange:blocked",
+        clientRequestId: "allow-1",
+      });
+      assert.deepStrictEqual(seen.answerMessages, [
+        `Allowed once: reviewer past broader access than its caller runs with. Retry the launch with allow_once: ${escalationId}.`,
+      ]);
+      assert.equal(
+        yield* escalations.grantedWaiver({
+          escalationId,
+          callerParticipantId: "agent:j5:a2a:thread:asker",
+          personaId: "reviewer",
+        }),
+        "access-above-caller",
+      );
+      // A second press, or one on an ask no single waiver helps, answers nothing.
+      const again = yield* actions
+        .allowPersonaOnce({
+          personId: owner,
+          exchangeId: "exchange:blocked",
+          clientRequestId: "allow-2",
+        })
+        .pipe(Effect.flip);
+      assert.include(again.message, "already allowed once");
+      yield* file("exchange:stuck", null);
+      const stuck = yield* actions
+        .allowPersonaOnce({
+          personId: owner,
+          exchangeId: "exchange:stuck",
+          clientRequestId: "allow-3",
+        })
+        .pipe(Effect.flip);
+      assert.include(stuck.message, "can't be allowed once");
+      assert.lengthOf(seen.answerMessages, 1);
     }).pipe(Effect.provide(serviceWith(seen)));
   },
 );

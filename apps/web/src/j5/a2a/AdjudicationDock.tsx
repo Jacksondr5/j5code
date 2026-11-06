@@ -29,6 +29,7 @@ import {
   useAnswerAttachmentSupport,
   useAnswerAttachments,
 } from "./AnswerAttachments";
+import { AllowPersonaOnceButton } from "./AllowPersonaOnceButton";
 import { answerHumanExchange, type HumanInboxItem } from "./humanInboxClient";
 import { notifyHumanInboxChanged } from "./humanInboxRefresh";
 
@@ -207,6 +208,15 @@ export function AdjudicationDock(props: {
                 onFiles={addFiles}
               />
             )}
+            {isOpen ? (
+              <AllowPersonaOnceButton
+                disabled={pending}
+                environmentId={environmentId}
+                item={shown}
+                onAllowed={query.refresh}
+                size="sm"
+              />
+            ) : null}
             {isOpen ? (
               <Button
                 disabled={pending || message === "" || waitingOn !== null}

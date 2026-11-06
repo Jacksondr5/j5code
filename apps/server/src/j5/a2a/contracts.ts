@@ -1,4 +1,10 @@
-import { ChatAttachment, ProviderInteractionMode, RuntimeMode, ThreadId } from "@t3tools/contracts";
+import {
+  AgentPersonaEscalationView,
+  ChatAttachment,
+  ProviderInteractionMode,
+  RuntimeMode,
+  ThreadId,
+} from "@t3tools/contracts";
 import { PeerSenderLabel } from "@t3tools/contracts/j5";
 import * as Schema from "effect/Schema";
 
@@ -540,6 +546,8 @@ export const HumanInboxItem = Schema.Struct({
   forEveryone: Schema.optionalKey(Schema.Boolean),
   /** Who answered an ask to everyone that is closed, by the name they had then (Inbox AC16). */
   answeredBy: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  /** A refused persona launch this ask escalates, as the server recorded it. */
+  escalation: Schema.optionalKey(AgentPersonaEscalationView),
 });
 export type HumanInboxItem = typeof HumanInboxItem.Type;
 

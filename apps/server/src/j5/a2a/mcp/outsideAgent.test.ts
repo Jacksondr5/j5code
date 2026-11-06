@@ -1,4 +1,5 @@
 import { assert, it } from "@effect/vitest";
+import { agentPersonaEscalationsTestLayer } from "../../test-support/agentPersonaEscalations.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   type AuthMcpClientAccess,
@@ -161,6 +162,7 @@ const makeLayer = (stops: Ref.Ref<ReadonlyArray<Stop>>) => {
     Layer.mock(SpawnCompositionService)({}),
     Layer.mock(OrchestratorMcpService)({}),
     Layer.mock(AgentCrewInstanceService)({ findMembership: () => Effect.succeed(null) }),
+    agentPersonaEscalationsTestLayer(),
     Layer.mock(ArchiveCrewService)({}),
     Layer.mock(CrewStopService)({}),
     Layer.mock(CrewProposalService)({}),

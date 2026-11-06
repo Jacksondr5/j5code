@@ -80,6 +80,29 @@ export const AgentPersonaPickConstraint = Schema.Literals([
 ]);
 export type AgentPersonaPickConstraint = typeof AgentPersonaPickConstraint.Type;
 
+/** Why a persona launch was refused, the same on every launch path. */
+export const AgentPersonaBlockCode = Schema.Literals([
+  "library_empty",
+  "persona_not_found",
+  "persona_disabled",
+  "persona_invalid",
+  "models_exhausted",
+  "library_unreadable",
+]);
+export type AgentPersonaBlockCode = typeof AgentPersonaBlockCode.Type;
+
+/**
+ * A refused persona launch, as an ask to the person shows it. `waivable` is the one limit that
+ * "Allow this once" would lift for one launch; null when no single waiver lets it run.
+ */
+export const AgentPersonaEscalationView = Schema.Struct({
+  escalationId: Schema.String,
+  personaId: Schema.String,
+  waivable: Schema.NullOr(AgentPersonaPickConstraint),
+  status: Schema.Literals(["open", "granted", "used"]),
+});
+export type AgentPersonaEscalationView = typeof AgentPersonaEscalationView.Type;
+
 /**
  * Who picked the persona, which sets its limits: a person's pick runs on its own models with its
  * saved access; an agent's is held to Models for custom members and the caller's access.
@@ -158,6 +181,8 @@ export const AgentPersonaRouteFailureCode = Schema.Literals([
   "option-not-advertised",
   /** Outside Models for custom members; only an agent's pick reports it, never the catalog. */
   "model-not-eligible",
+  /** Broader access on this driver than the agent picking it runs with; only an agent's pick. */
+  "access-above-caller",
 ]);
 export type AgentPersonaRouteFailureCode = typeof AgentPersonaRouteFailureCode.Type;
 

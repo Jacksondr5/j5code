@@ -93,6 +93,15 @@ A second review is worth more on a model that didn't write the work, so a person
 
 Personas without the flag are unaffected: nothing is reordered, recorded, or added to their brief. A definition without the key keeps its content fingerprint, and an edit that leaves the flag out keeps the stored value, so an older client can't clear it.
 
+## Blocked personas
+
+A persona that can't launch stays blocked; it is never recreated as a custom worker to get around its limits (Bryant, 2026-11-06; [#785](https://github.com/Jacksondr5/j5code/issues/785)).
+
+- **Codes.** Every launch path (`delegate_task`, `j5_spawn_agent`, Crew seats and additions, the composer) refuses with the same code and text for the same block: `library_empty`, `persona_not_found`, `persona_disabled`, `persona_invalid` (with the definition's repair message), `models_exhausted` (one reason per entry, including an agent pick's model and access limits), and `library_unreadable`. J5's own tools return the code as the failure code; `delegate_task`'s failure codes are upstream's, so there the code leads the message as `[code]`. "No persona fits" is the agent's judgment from `j5_list_personas`, not a code.
+- **Escalation.** A refused launch an agent made records an escalation, and the refusal carries its `escalation_id`. A Crew member tells its Captain; the Captain, or any agent outside a Crew, asks the person with `j5_send_message` (`expect_reply`, `escalation_id`), which takes the caller's own escalations and, for a Captain, its members'. The server appends its own record of the block to the ask. An outside agent can't ask, so its refusals record none and tell it to tell the person.
+- **Allow this once.** When lifting one limit, `model-not-eligible` or `access-above-caller`, lets some entry run, the ask offers an Owner **Allow this once** on web and desktop. It answers the ask with a fixed reply and grants the escalation; a text reply grants nothing. The caller retries the same persona with `allow_once`, which is accepted once, for that caller and persona, and only when the launch passes with that one limit lifted. The assignment records `pickSource: { kind: "allow-once", waived }`. The persona is never edited, a later launch meets the limits again, and a grant never lets a persona onto a provider that can't enforce its access.
+- **Pins.** A pinned model is a list of one: when it can't run, the launch escalates and never falls back to another entry.
+
 ## Deliverables
 
 A persona says how to work, not what to produce. The assignment, a brief or a Playbook step, names the deliverable; a file it asks for is written with `j5_write_artifact` and shows up on the Artifacts page like any other requested work. A run owes no file: the server appends no artifact instructions, checks nothing at the end of a run, and sends no reminder. A Crew member's finish notice carries how the run ended and the member's reply.
@@ -158,3 +167,4 @@ Follow-up work: in-app git commit/push/pull (status nudges and open-in-editor sh
 - 2026-11-03 — ordered model editing, per-entry eligibility and quota-aware new launches ([#778](https://github.com/Jacksondr5/j5code/issues/778)).
 - 2026-11-06 — independent reviewer personas prefer a model their authors didn't run on, never blocking ([#782](https://github.com/Jacksondr5/j5code/issues/782)).
 - 2026-11-06 — people can switch a persona worker's model; the launch route is no longer fixed for the task's life ([#783](https://github.com/Jacksondr5/j5code/issues/783)).
+- 2026-11-06 — a blocked persona refuses with one of six codes and escalates, and an Owner can allow one launch past one limit ([#785](https://github.com/Jacksondr5/j5code/issues/785)).

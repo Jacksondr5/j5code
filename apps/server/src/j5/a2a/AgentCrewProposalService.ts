@@ -52,6 +52,8 @@ export const CrewProposalSeat = Schema.Struct({
   ),
   /** Set only by a Captain's addition: the live seat this one takes over. */
   replaces: Schema.optionalKey(bounded(CREW_NAME_MAX_CHARS)),
+  /** Set only by a Captain: a granted escalation this persona seat retries with. */
+  allowOnce: Schema.optionalKey(bounded(CREW_NAME_MAX_CHARS)),
   /**
    * Where the seat works, as the Captain or the person chose it. Required at every door that
    * files or approves a seat. A stored one this version can't read, such as one written by another
