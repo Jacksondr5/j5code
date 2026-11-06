@@ -250,6 +250,8 @@ export class CrewLaunchSeatUnavailableError extends Data.TaggedError(
 class CrewLaunchModelNotEligibleError extends Data.TaggedError("CrewLaunchModelNotEligibleError")<{
   readonly seatName: string;
   readonly detail: string;
+  /** For a persona seat, the code its other launch paths give the same block. */
+  readonly blockCode?: AgentPersonaBlockCode | undefined;
 }> {
   override get message(): string {
     return `Seat ${this.seatName}: ${this.detail} Nothing was spawned.`;
@@ -748,24 +750,19 @@ export const layer = Layer.effect(
             error._tag === "CrewLaunchModelNotEligibleError" ||
             error._tag === "CrewLaunchSeatUnavailableError"
               ? error
-              : error._tag === "AgentPersonaPickError" && error.code !== undefined
-                ? // A blocked persona keeps the code every launch path gives it.
-                  new CrewLaunchSeatUnavailableError({
+              : // A blocked persona keeps the code every launch path gives it.
+                error._tag === "AgentPersonaPickError" && error.constraint === "model-not-eligible"
+                ? new CrewLaunchModelNotEligibleError({
                     seatName: seat.name,
-                    agentId,
                     detail: error.message,
                     blockCode: error.code,
                   })
-                : error._tag === "AgentPersonaPickError" && error.constraint === "model-not-eligible"
-                  ? new CrewLaunchModelNotEligibleError({
-                      seatName: seat.name,
-                      detail: error.message,
-                    })
-                  : new CrewLaunchSeatUnavailableError({
-                      seatName: seat.name,
-                      agentId,
-                      detail: error.message,
-                    }),
+                : new CrewLaunchSeatUnavailableError({
+                    seatName: seat.name,
+                    agentId,
+                    detail: error.message,
+                    blockCode: "code" in error ? error.code : undefined,
+                  }),
           ),
         );
         // The person's edited text runs instead of the persona's, never beside it: the seat's

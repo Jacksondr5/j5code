@@ -319,7 +319,8 @@ const pickWithin = Effect.fn("j5.agents.pickWithin")(function* (
     limit === undefined
       ? undefined
       : {
-          eligible: input.eligible ?? (yield* (yield* CrewMemberModels).eligibility(input.projectId)),
+          eligible:
+            input.eligible ?? (yield* (yield* CrewMemberModels).eligibility(input.projectId)),
           accessAbove: (authority, driver) => {
             const child = accessOn(authority, driver);
             return withinAccess(child, limit)
