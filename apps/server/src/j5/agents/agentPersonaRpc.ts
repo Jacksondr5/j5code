@@ -11,9 +11,12 @@ import {
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
-import { stringify as toYaml } from "yaml";
 
-import { definitionDigest, makeAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
+import {
+  definitionDigest,
+  definitionYaml,
+  makeAgentPersonaLibrary,
+} from "./agentPersonaLibrary.ts";
 import { makeAgentHandoffStore } from "./agentHandoffStore.ts";
 import { agentPersonaFolderGitStatus } from "./agentPersonaLibraryGit.ts";
 import { agentPersonaPolicyEnforcement } from "./agentPersonaProviderPolicy.ts";
@@ -172,7 +175,7 @@ export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHand
           return {
             definition: view,
             fileName: `${definition.id}.yaml`,
-            yaml: toYaml(definition, { lineWidth: 0 }),
+            yaml: definitionYaml(definition),
           };
         },
       ),

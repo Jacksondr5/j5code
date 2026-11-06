@@ -1,4 +1,8 @@
-import { AgentPersonaModelEntryStatus } from "@t3tools/contracts";
+import {
+  AgentPersonaAccess,
+  AgentPersonaModelEntry,
+  AgentPersonaModelEntryStatus,
+} from "@t3tools/contracts";
 import * as SpawnAgentService from "../SpawnAgentService.ts";
 import * as RequestReplayService from "../RequestReplayService.ts";
 import { Tool, Toolkit } from "effect/ai";
@@ -36,6 +40,7 @@ import {
   AllowOnceInput,
   BLOCKED_PERSONA_TOOL_TEXT,
 } from "../../agents/agentPersonaEscalation.ts";
+import { AgentPersonaDrafts } from "../../agents/agentPersonaDrafts.ts";
 import { CrewMemberModels } from "../../agents/crewMemberModels.ts";
 import { AgentCrewInstanceService } from "../AgentCrewInstanceService.ts";
 import { ArchiveCrewService } from "../ArchiveCrewService.ts";
@@ -108,6 +113,14 @@ export const J5SendMessageInput = Schema.Struct({
       Schema.String.check(Schema.isNonEmpty()).annotate({
         description:
           "Only on an ask to a person about a refused persona launch: the escalation_id from the refusal (yours, or as a Captain, your Crew member's). The person's Inbox shows J5's own record of the block beside your ask, and for a limit an Owner can lift, an Allow this once button. It must be a fresh ask: clear or settle any ask already open with them first.",
+      }),
+    ),
+  ),
+  persona_draft_id: Schema.optional(
+    Schema.NullOr(
+      Schema.String.check(Schema.isNonEmpty()).annotate({
+        description:
+          "Only on an ask to a person about a persona draft: the draft_id from j5_propose_persona (yours, or as a Captain, your Crew member's). The server adds the draft's summary and any warnings to the ask, and an Owner can save it with Save persona. Never together with escalation_id.",
       }),
     ),
   ),
@@ -381,6 +394,56 @@ export const J5SpawnAgentResult = Schema.Struct({
   }),
 });
 
+export const J5ReadPersonaInput = Schema.Struct({
+  persona_id: AgentPersonaId.annotate({ description: "Persona id from j5_list_personas." }),
+});
+
+export const J5ReadPersonaResult = Schema.Struct({
+  id: AgentPersonaId,
+  yaml: Schema.String,
+  digest: Schema.String,
+  origin: Schema.Literals(["folder", "imported"]),
+  folder_file: Schema.NullOr(Schema.String),
+  overrides_folder: Schema.Boolean,
+  disabled: Schema.Boolean,
+});
+
+const DraftText = (description: string) =>
+  Schema.optional(Schema.String.check(Schema.isNonEmpty()).annotate({ description }));
+
+export const J5ProposePersonaInput = Schema.Struct({
+  mode: Schema.Literals(["create", "edit"]).annotate({
+    description:
+      "create: a new persona, with every field below. edit: a persona you read with j5_read_persona, with expected_digest and only the fields that change.",
+  }),
+  persona_id: AgentPersonaId.annotate({
+    description:
+      "The new persona's id (lowercase letters, digits and hyphens), or the id of the one you edit; an edit never changes it.",
+  }),
+  expected_digest: DraftText("Edit only: the digest j5_read_persona returned."),
+  display_name: DraftText("Name shown in Settings and rosters."),
+  description: DraftText("One line on what the persona is for."),
+  instructions: DraftText("The persona's full instructions."),
+  access: Schema.optional(AgentPersonaAccess),
+  models: Schema.optional(
+    Schema.Array(AgentPersonaModelEntry).annotate({
+      description:
+        "The ordered model entries, in the form j5_read_persona's modelRoute uses; the first that can run is used.",
+    }),
+  ),
+  independent_reviewer: Schema.optional(
+    Schema.Boolean.annotate({
+      description: "A reviewer that prefers a model that didn't write the work it reviews.",
+    }),
+  ),
+});
+
+export const J5ProposePersonaResult = Schema.Struct({
+  draft_id: Schema.String,
+  summary: Schema.String,
+  warnings: Schema.Array(Schema.String),
+});
+
 export const J5ListAgentsResult = Schema.Struct({
   diagnostics: Schema.Array(Schema.Struct({ path: Schema.String, message: Schema.String })),
   personas: Schema.Array(
@@ -635,6 +698,12 @@ export const J5_SPAWN_AGENT_DESCRIPTION =
 const J5_LIST_AGENTS_DESCRIPTION =
   "List the personas in this environment: id, purpose, access level, whether each can start now, and its ordered entries (provider instance, model, options, rejection codes) with the selected entry index. Legacy entries also report the effective instance when available. Read this before choosing a persona for delegate_task, a crew roster, or j5_spawn_agent so the choice fits the task and the user's budget. independent_reviewer marks a reviewer that prefers a model that didn't write the work it reviews. Read-only.";
 
+const J5_READ_PERSONA_DESCRIPTION =
+  "Read one persona's full definition before drafting an edit: its YAML (the same as Settings' Export YAML), the digest an edit through j5_propose_persona needs, where it comes from (a team folder, or this server's own library), whether it overrides a folder persona, and whether it is turned off. Read-only.";
+
+const J5_PROPOSE_PERSONA_DESCRIPTION =
+  "Draft a persona for an Owner of this server to save: a new one (mode create, every field) or an edit of one you read with j5_read_persona (mode edit, its expected_digest, and only the fields that change; the id stays fixed). It covers what Settings → Agent Setup edits: name, description, instructions, access, ordered models and the independent-reviewer flag. The server checks the draft as Settings does and returns a draft_id, the summary the person will see, and any warnings. It saves nothing. To save it, ask the person with j5_send_message (expect_reply=true, persona_draft_id): an Owner saves it with a Save persona button on that ask, and a typed reply asks for changes, which you draft again. A Crew member sends the draft_id to its Captain, who asks. The library belongs to the server, so a saved persona is what everyone on it runs. An edit of a team (folder) persona saves as an environment override: it hides later team updates to that persona for everyone on this server, and getting the team version back takes removing the override, then restoring the team persona, in Settings. Say so in your ask; the server adds both warnings too. Removing, restoring, turning personas on or off, and folders stay in Settings. Sharing with the team is Export YAML from Settings, added to the team folder through that repo's review.";
+
 export const J5_PROPOSE_CREW_DESCRIPTION =
   "Put members on a Crew, the second of the two ways to get help (the first is a subagent). Propose the crew you need for the brief you were given. Use it when the user asks for a crew, or when the work needs workers who must respond to each other, such as a builder and reviewers iterating on a change; independent assignments go to subagents instead. Mix saved personas and custom seats in the same roster: call j5_list_personas when choosing a saved persona, or leave persona unset for a custom seat with its own instructions (required) and the brief. Custom seats inherit your harness, model, and reasoning by default and, unless you set runtime_mode, run with full-access on a roster the user approves and with your own access when it is auto-approved; to choose different ones, set model_selection (instanceId, model, options) and/or runtime_mode using orchestrator_capabilities. A custom seat's model and reasoning level, yours included, must be ones the project's Models for custom members lists allow; an ineligible one is refused with the eligible ones. Saved personas are proposed with their own configuration; only the human may override their runtime before approval. A persona seat marked independent_reviewer prefers a model none of the seats it reviews runs on: every seat that is not a reviewer, unless reviews names some. When a roster is auto-approved, no seat may have more access than you run with, and persona seats use only their models checked in Models for custom members. " +
   BLOCKED_PERSONA_TOOL_TEXT +
@@ -672,6 +741,8 @@ const sendDependencies = [
   PeerRegistryService,
   // An ask about a refused persona carries the escalation's trusted summary.
   AgentPersonaEscalations,
+  // An ask carrying a persona draft carries its trusted summary.
+  AgentPersonaDrafts,
 ];
 
 const placementDependencies = [
@@ -731,6 +802,13 @@ const crewProposalDependencies = [
 ];
 
 const listAgentsDependencies = [McpInvocationContext.McpInvocationContext, ProviderRegistry];
+
+const proposePersonaDependencies = [
+  McpInvocationContext.McpInvocationContext,
+  ThreadManagementService,
+  A2AHomeRegistrar,
+  AgentPersonaDrafts,
+];
 
 const stopDependencies = [
   McpInvocationContext.McpInvocationContext,
@@ -842,6 +920,34 @@ const J5ListAgentsTool = Tool.make("j5_list_personas", {
   .annotate(Tool.Idempotent, true)
   .annotate(Tool.OpenWorld, false);
 
+const J5ReadPersonaTool = Tool.make("j5_read_persona", {
+  description: J5_READ_PERSONA_DESCRIPTION,
+  parameters: J5ReadPersonaInput,
+  success: J5ReadPersonaResult,
+  failure: J5McpFailure,
+  failureMode: "return",
+  dependencies: [McpInvocationContext.McpInvocationContext],
+})
+  .annotate(Tool.Title, "Read a persona")
+  .annotate(Tool.Readonly, true)
+  .annotate(Tool.Destructive, false)
+  .annotate(Tool.Idempotent, true)
+  .annotate(Tool.OpenWorld, false);
+
+const J5ProposePersonaTool = Tool.make("j5_propose_persona", {
+  description: J5_PROPOSE_PERSONA_DESCRIPTION,
+  parameters: J5ProposePersonaInput,
+  success: J5ProposePersonaResult,
+  failure: J5McpFailure,
+  failureMode: "return",
+  dependencies: proposePersonaDependencies,
+})
+  .annotate(Tool.Title, "Draft a persona")
+  .annotate(Tool.Readonly, false)
+  .annotate(Tool.Destructive, false)
+  .annotate(Tool.Idempotent, false)
+  .annotate(Tool.OpenWorld, false);
+
 export const J5StopAgentTool = Tool.make("j5_stop_agent", {
   description: J5_STOP_AGENT_DESCRIPTION,
   parameters: J5StopAgentInput,
@@ -910,6 +1016,8 @@ export const J5Toolkit = Toolkit.make(
   J5ListParticipantsTool,
   J5SpawnAgentTool,
   J5ListAgentsTool,
+  J5ReadPersonaTool,
+  J5ProposePersonaTool,
   J5ProposeCrewTool,
   J5RequestCrewMemberTool,
   J5StopAgentTool,

@@ -180,6 +180,16 @@ const clientFor = (scopes: ReadonlyArray<AuthEnvironmentScope>) =>
               durableAtSeq: 1,
             },
           }),
+        savePersonaDraft: (input) =>
+          reached("save-persona", {
+            result: {
+              messageId: LedgerMessageId.make("message:save-persona"),
+              exchangeId: ExchangeId.make(input.exchangeId),
+              exchangeState: "closed" as const,
+              joinedExistingExchange: false,
+              durableAtSeq: 1,
+            },
+          }),
         answerCrewWorktreeCleanup: ({ itemId }) =>
           reached("cleanup", {
             item: {
@@ -330,6 +340,9 @@ const callEach = (client: Effect.Success<ReturnType<typeof clientFor>>["client"]
     [ACTIONS.allowPersonaOnce]: outcome(
       client[ACTIONS.allowPersonaOnce]({ exchangeId: "ask:1", clientRequestId: "allow-1" }),
     ),
+    [ACTIONS.savePersonaDraft]: outcome(
+      client[ACTIONS.savePersonaDraft]({ exchangeId: "ask:1", clientRequestId: "save-1" }),
+    ),
     [ACTIONS.answerCrewWorktreeCleanup]: outcome(
       client[ACTIONS.answerCrewWorktreeCleanup]({ itemId: "cleanup:1", removePaths: [] }),
     ),
@@ -440,7 +453,8 @@ describe("J5 client action RPC scopes", () => {
                   : method.startsWith("j5.playbooks.") ||
                       method === ACTIONS.archiveCrew ||
                       method === ACTIONS.answerCrewWorktreeCleanup ||
-                      method === ACTIONS.allowPersonaOnce
+                      method === ACTIONS.allowPersonaOnce ||
+                      method === ACTIONS.savePersonaDraft
                     ? AuthSettingsWriteScope
                     : AuthOrchestrationOperateScope,
               },
@@ -529,7 +543,14 @@ describe("J5 client action RPC handlers", () => {
         { deleted: true },
       );
       assert.deepStrictEqual(handled, ["resolve", "stop", "respond", "answer", "delete artifact"]);
-      assert.deepStrictEqual(owner.handled, ["archive", "cleanup", "allow-once"]);
+      assert.equal(
+        (yield* owner.client[ACTIONS.savePersonaDraft]({
+          exchangeId: "ask:1",
+          clientRequestId: "save-1",
+        })).result.exchangeState,
+        "closed",
+      );
+      assert.deepStrictEqual(owner.handled, ["archive", "cleanup", "allow-once", "save-persona"]);
     }).pipe(Effect.scoped),
   );
 

@@ -1,4 +1,5 @@
 import {
+  AgentPersonaDraftView,
   AgentPersonaEscalationView,
   ChatAttachment,
   ProviderInteractionMode,
@@ -550,6 +551,8 @@ export const HumanInboxItem = Schema.Struct({
   answeredBy: Schema.optionalKey(Schema.NullOr(Schema.String)),
   /** A refused persona launch this ask escalates, as the server recorded it. */
   escalation: Schema.optionalKey(AgentPersonaEscalationView),
+  /** A persona draft this ask carries for the Owner's "Save persona"; never with `escalation`. */
+  personaDraft: Schema.optionalKey(AgentPersonaDraftView),
 });
 export type HumanInboxItem = typeof HumanInboxItem.Type;
 

@@ -15,6 +15,7 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 
+import { AgentPersonaDrafts } from "../agents/agentPersonaDrafts.ts";
 import { AgentPersonaEscalations } from "../agents/agentPersonaEscalation.ts";
 import { PlaybookCrewRelay } from "../playbooks/PlaybookCrewRelay.ts";
 import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
@@ -297,11 +298,13 @@ export const layer: Layer.Layer<
   | ArchiveCrewService
   | CrewWorktrees
   | AgentPersonaEscalations
+  | AgentPersonaDrafts
 > = Layer.effect(
   ClientReadsService,
   Effect.gen(function* () {
     const inbox = yield* A2AHumanInbox;
     const escalations = yield* AgentPersonaEscalations;
+    const drafts = yield* AgentPersonaDrafts;
     const sql = yield* SqlClient.SqlClient;
     const proposals = yield* AgentCrewProposalService;
     const projectProposal = projectCrewProposal(yield* PlaybookStore);
@@ -389,17 +392,26 @@ export const layer: Layer.Layer<
         return inbox.resolvePersonId(input.personId).pipe(
           Effect.flatMap((personId) =>
             inbox.list(personId, input.status).pipe(
-              // An ask that escalates a refused persona carries it, for "Allow this once".
+              // An ask carries at most one Owner action: an escalation for "Allow this once", or
+              // a persona draft for "Save persona".
               Effect.flatMap((items) =>
-                escalations.forExchanges(items.map(({ exchangeId }) => exchangeId)).pipe(
-                  Effect.map((byExchange) => ({
+                Effect.gen(function* () {
+                  const exchangeIds = items.map(({ exchangeId }) => exchangeId);
+                  const escalationFor = yield* escalations.forExchanges(exchangeIds);
+                  const draftFor = yield* drafts.forExchanges(exchangeIds);
+                  return {
                     personId,
                     items: items.map((item) => {
-                      const escalation = byExchange.get(item.exchangeId);
-                      return escalation === undefined ? item : { ...item, escalation };
+                      const escalation = escalationFor.get(item.exchangeId);
+                      const personaDraft = draftFor.get(item.exchangeId);
+                      return {
+                        ...item,
+                        ...(escalation === undefined ? {} : { escalation }),
+                        ...(personaDraft === undefined ? {} : { personaDraft }),
+                      };
                     }),
-                  })),
-                ),
+                  };
+                }),
               ),
             ),
           ),

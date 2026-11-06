@@ -21,6 +21,9 @@ export const J5_PREAPPROVED_TOOLS: ReadonlyArray<string> = [
   "j5_list_participants",
   "j5_spawn_agent",
   "j5_list_personas",
+  "j5_read_persona",
+  // Writes only a draft; saving it takes an Owner's button on the ask.
+  "j5_propose_persona",
   "j5_propose_crew",
   "j5_request_crew_member",
   // Files a brief or Playbook step asks for are written by the seat into application storage.
@@ -53,6 +56,7 @@ export const J5_PREAPPROVED_TOOLS: ReadonlyArray<string> = [
 export const J5_COORDINATION_TOOLS: ReadonlyArray<string> = [
   "j5_send_message",
   "j5_clear_own_ask",
+  "j5_propose_persona",
   "j5_propose_crew",
   "j5_request_crew_member",
   "j5_playbook_start",

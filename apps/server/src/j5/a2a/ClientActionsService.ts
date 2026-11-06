@@ -8,6 +8,7 @@ import {
 import type {
   AllowPersonaOnceRequest,
   AnswerHumanExchangeRequest,
+  SavePersonaDraftRequest,
   AnswerHumanExchangeResponse,
   CrewArchiveRequest,
   CrewArchiveResponse,
@@ -37,6 +38,11 @@ import {
   AgentPersonaEscalations,
   allowedOnceReply,
 } from "../agents/agentPersonaEscalation.ts";
+import {
+  AgentPersonaDraftError,
+  AgentPersonaDrafts,
+  savedPersonaReply,
+} from "../agents/agentPersonaDrafts.ts";
 import {
   AttachmentClaimError,
   attachmentIsPendingUpload,
@@ -133,6 +139,17 @@ export class ClientActionsService extends Context.Service<
       typeof AnswerHumanExchangeResponse.Type,
       Failure<A2AHumanInbox["Service"]["answer"]> | AgentPersonaEscalationError | SqlError
     >;
+    /**
+     * The Owner's "Save persona": writes the ask's persona draft to the library, then answers the
+     * ask with the fixed reply. A retry of the same request replays the answer.
+     */
+    readonly savePersonaDraft: (
+      input: SavePersonaDraftRequest & { readonly personId: ParticipantId },
+      beforeReply?: Parameters<A2AHumanInbox["Service"]["answer"]>[1],
+    ) => Effect.Effect<
+      typeof AnswerHumanExchangeResponse.Type,
+      Failure<A2AHumanInbox["Service"]["answer"]> | AgentPersonaDraftError | SqlError
+    >;
     /** Decide the worktree cleanup an archive filed in the Inbox; refused once decided. */
     readonly answerCrewWorktreeCleanup: (
       input: CrewWorktreeCleanupAnswerRequest,
@@ -166,6 +183,7 @@ const make = Effect.gen(function* () {
   const worker = yield* A2ADeliveryWorker;
   const worktrees = yield* CrewWorktrees;
   const escalations = yield* AgentPersonaEscalations;
+  const drafts = yield* AgentPersonaDrafts;
   // A random source that fails is the host's fault, not a refusal a client can act on.
   const freshId = (yield* Crypto.Crypto).randomUUIDv4().pipe(Effect.orDie);
   const projectProposal = projectCrewProposal(yield* PlaybookStore);
@@ -314,6 +332,42 @@ const make = Effect.gen(function* () {
           escalationId: grant.escalationId,
           grantedBy: input.personId,
         });
+        yield* worker.notify;
+        return { result };
+      },
+    ),
+    savePersonaDraft: Effect.fn("j5.a2a.clientActions.savePersonaDraft")(
+      function* (input, beforeReply) {
+        const draft = (yield* drafts.forExchanges([input.exchangeId])).get(input.exchangeId);
+        if (draft === undefined)
+          return yield* new AgentPersonaDraftError({
+            message: "This ask doesn't carry a persona draft.",
+          });
+        // A typed reply or a cleared ask closes it, and that decides the draft: nothing saves.
+        if (
+          draft.status === "open" &&
+          !(yield* inbox.list(input.personId, "open")).some(
+            (item) => item.exchangeId === input.exchangeId,
+          )
+        )
+          return yield* new AgentPersonaDraftError({
+            message: "This ask is already answered, so its draft can't be saved.",
+          });
+        // Saved before the reply, so a stale draft never answers the ask with "Saved".
+        const saved = yield* drafts.save({ exchangeId: input.exchangeId, savedBy: input.personId });
+        const result = yield* inbox.answer(
+          {
+            commandId: CommCommandId.make(
+              `command:j5:a2a:human:${encodeURIComponent(input.personId)}:${encodeURIComponent(input.exchangeId)}:${encodeURIComponent(input.clientRequestId)}`,
+            ),
+            personId: input.personId,
+            exchangeId: ExchangeId.make(input.exchangeId),
+            message: savedPersonaReply(saved),
+            acceptedAt: DateTime.formatIso(yield* DateTime.now),
+          },
+          beforeReply,
+          claimAnswerAttachments,
+        );
         yield* worker.notify;
         return { result };
       },

@@ -27,6 +27,7 @@ import { A2AHomeRegistrar } from "../HomeRegistrar.ts";
 import { AgentCrewInstanceService } from "../AgentCrewInstanceService.ts";
 import { ArchiveCrewService } from "../ArchiveCrewService.ts";
 import { CrewProposalService } from "../CrewProposalService.ts";
+import { AgentPersonaDrafts } from "../../agents/agentPersonaDrafts.ts";
 import { AgentPersonaEscalations } from "../../agents/agentPersonaEscalation.ts";
 import { CrewMemberModels } from "../../agents/crewMemberModels.ts";
 import { CrewStopService } from "../CrewStopService.ts";
@@ -104,6 +105,7 @@ const layerStubServices = Layer.mergeAll(
   Layer.mock(CrewProposalService)({}),
   Layer.mock(CrewMemberModels)({}),
   Layer.mock(AgentPersonaEscalations)({}),
+  Layer.mock(AgentPersonaDrafts)({}),
   Layer.mock(CrewStopService)({}),
   Layer.mock(PeerRegistryService)({}),
   Layer.mock(PlaybookCrewRelay)({}),
@@ -299,7 +301,9 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         "j5_playbook_save",
         "j5_playbook_start",
         "j5_propose_crew",
+        "j5_propose_persona",
         "j5_read_artifact",
+        "j5_read_persona",
         "j5_request_crew_member",
         "j5_send_message",
         "j5_spawn_agent",
@@ -433,7 +437,7 @@ it.effect("production mcp layer lists worktree tools over http", () =>
       // J5's tools were renamed with a `j5_` prefix and kept no aliases. An agent resumed from
       // before the rename may still call an old name; it gets the unknown-tool error by name.
       const j5ToolNames = toolNames.filter((name) => name.startsWith("j5_"));
-      expect(j5ToolNames).toHaveLength(23);
+      expect(j5ToolNames).toHaveLength(25);
       for (const [index, name] of j5ToolNames.map((name) => name.slice("j5_".length)).entries()) {
         expect(toolNames).not.toContain(name);
         const response = yield* httpClient.post("/mcp", {
