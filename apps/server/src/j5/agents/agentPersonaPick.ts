@@ -12,6 +12,7 @@ import { mentionedPersonaIds } from "@t3tools/shared/j5/agentMention";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
+import { exceededDispatchModeLimit } from "../../orchestration-v2/DispatchModeLimit.ts";
 import {
   latestActiveRun,
   ThreadManagementService,
@@ -49,12 +50,12 @@ export class AgentPersonaPickError extends Schema.TaggedError<AgentPersonaPickEr
   },
 ) {}
 
-const RUNTIME_MODE_RANK: Record<RuntimeMode, number> = {
-  "approval-required": 0,
-  "auto-accept-edits": 1,
-  auto: 2,
-  "full-access": 3,
-};
+// Upstream's dispatch limit owns the ordering of runtime modes; compare at equal interaction modes.
+const broaderThan = (child: RuntimeMode, limit: RuntimeMode) =>
+  exceededDispatchModeLimit(
+    { runtimeMode: limit, interactionMode: "default" },
+    { runtimeMode: child, interactionMode: "default" },
+  ) !== undefined;
 
 const RUNTIME_MODE_LABEL: Record<RuntimeMode, string> = {
   "approval-required": "Supervised",
@@ -97,10 +98,7 @@ export const assertWithinCallerAccess = Effect.fn("j5.agents.assertWithinCallerA
 ) {
   const library = yield* makeAgentPersonaLibrary;
   const limit = yield* callerAccess(caller, library);
-  if (
-    RUNTIME_MODE_RANK[child.runtimeMode] <= RUNTIME_MODE_RANK[limit.runtimeMode] &&
-    (!limit.readOnly || child.readOnly)
-  )
+  if (!broaderThan(child.runtimeMode, limit.runtimeMode) && (!limit.readOnly || child.readOnly))
     return;
   return yield* new AgentPersonaPickError({
     constraint: "access-above-caller",
