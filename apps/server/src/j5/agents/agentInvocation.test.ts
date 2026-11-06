@@ -112,27 +112,37 @@ const fixture = Effect.gen(function* () {
     }),
   };
   const calls: Array<Parameters<OrchestratorMcpService["Service"]["delegateTask"]>[1]> = [];
-  // The message that started the parent's running turn, and the models agents may pick.
+  type TurnMessage = {
+    createdBy: "user" | "agent";
+    creationSource: "web" | "mobile" | "mcp";
+    text: string;
+  };
+  // The message that started the parent's running turn, one steered into it later, and the
+  // models agents may pick.
   const turn: {
-    message?: {
-      createdBy: "user" | "agent";
-      creationSource: "web" | "mobile" | "mcp";
-      text: string;
-    };
+    message?: TurnMessage;
+    steered?: TurnMessage;
     eligible: (selection: ModelSelection) => boolean;
   } = { eligible: () => true };
-  const records = (fields: ReadonlyArray<string>) => {
+  const records = (
+    fields: ReadonlyArray<string>,
+    filter?: { readonly messageIds?: ReadonlyArray<string> },
+  ) => {
     const message = turn.message;
     if (message === undefined) return parent;
-    const messageId = MessageId.make("turn-message");
+    const started = MessageId.make("turn-message");
+    const messages = [
+      { id: started, role: "user", ...message },
+      ...(turn.steered === undefined
+        ? []
+        : [{ id: MessageId.make("steered-message"), role: "user", ...turn.steered }]),
+    ].filter(({ id }) => filter?.messageIds === undefined || filter.messageIds.includes(id));
     return {
       ...parent,
       runs: fields.includes("runs")
-        ? [{ id: "run", ordinal: 1, status: "running", userMessageId: messageId } as never]
+        ? [{ id: "run", ordinal: 1, status: "running", userMessageId: started } as never]
         : [],
-      messages: fields.includes("messages")
-        ? [{ id: messageId, role: "user", ...message } as never]
-        : [],
+      messages: fields.includes("messages") ? (messages as never) : [],
     };
   };
   const invoke = (id = definition.id, available = providers, driver = "codex", authorized = true) =>
@@ -152,7 +162,8 @@ const fixture = Effect.gen(function* () {
       Effect.provide(
         Layer.mergeAll(
           Layer.mock(ThreadManagementService)({
-            getThreadRecords: (_, fields) => Effect.succeed(records(fields) as never),
+            getThreadRecords: (_, fields, filter) =>
+              Effect.succeed(records(fields, filter) as never),
           }),
           Layer.mock(CrewMemberModels)({
             eligibility: () => Effect.succeed((selection) => turn.eligible(selection)),
@@ -408,6 +419,17 @@ describe("saved agent subagent invocation", () => {
           text: "Don't run `@persona:team-operator`",
         };
         assert.isTrue((yield* invoke("team-operator"))._tag === "Failure");
+        // A mention the person steers into the running turn is not the message that started it.
+        turn.message = { createdBy: "user", creationSource: "web", text: "Fix the build." };
+        turn.steered = {
+          createdBy: "user",
+          creationSource: "web",
+          text: "Use @persona:team-operator for it.",
+        };
+        const steered = yield* invoke("team-operator");
+        assert.isTrue(steered._tag === "Failure");
+        assert.include(String(steered), "broader than the Supervised its caller runs with");
+        turn.steered = undefined;
         assert.lengthOf(calls, 0);
 
         // The person typed the mention: the child gets its saved access.
