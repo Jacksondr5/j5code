@@ -35,14 +35,12 @@ export function AllowPersonaOnceButton(props: {
   if (!mayAllow || escalation?.status !== "open" || escalation.waivable === null) return null;
 
   const allow = async () => {
-    requestId.current ??= randomUUID();
+    const clientRequestId = requestId.current ?? randomUUID();
+    requestId.current = clientRequestId;
     setPending(true);
     setError(null);
     try {
-      await allowPersonaOnce(environmentId, {
-        exchangeId: item.exchangeId,
-        clientRequestId: requestId.current,
-      });
+      await allowPersonaOnce(environmentId, { exchangeId: item.exchangeId, clientRequestId });
       requestId.current = null;
       notifyHumanInboxChanged(environmentId);
       props.onAllowed?.();
