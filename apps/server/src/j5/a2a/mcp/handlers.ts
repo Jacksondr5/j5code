@@ -446,6 +446,8 @@ const handlers = {
           ...(input.exchange_id == null ? {} : { exchangeId: input.exchange_id }),
           ...(input.intent == null ? {} : { intent: input.intent }),
           ...(input.urgency == null ? {} : { urgency: input.urgency }),
+          // An escalation is its own ask: it never joins one already open with the person.
+          ...(escalationId === undefined ? {} : { freshAsk: true }),
           ...(mode === "queue" ? {} : { mode }),
           ...(modeLimit === undefined ? {} : { modeLimit }),
           ...(claimed === undefined ? {} : { attachments: claimed }),
