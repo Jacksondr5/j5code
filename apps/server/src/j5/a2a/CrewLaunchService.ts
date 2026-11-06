@@ -494,8 +494,11 @@ export const layer = Layer.effect(
             return yield* new CrewLaunchSeatUnavailableError({
               seatName: seat.name,
               agentId: "custom seat",
+              // Without the card, Full access is allowed only when the Captain runs with it.
               detail:
-                "This ACP harness cannot enforce the selected access mode. Choose Supervised or Full access.",
+                limit === undefined || limit.runtimeMode === "full-access"
+                  ? "This ACP harness cannot enforce the selected access mode. Choose Supervised or Full access."
+                  : "This ACP harness cannot enforce the selected access mode, and Full access is broader than the Captain's. Set runtime_mode to approval-required (Supervised).",
             });
           // Custom seats carry the selected access mode, without a persona sandbox assignment.
           const workspace = yield* resolveWorkspace(seat);
