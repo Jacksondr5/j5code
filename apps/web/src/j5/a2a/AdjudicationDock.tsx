@@ -165,6 +165,9 @@ export function AdjudicationDock(props: {
           {shown.escalation === undefined ? null : (
             <J5RecordPanel text={shown.escalation.summary} />
           )}
+          {shown.personaDraft === undefined ? null : (
+            <J5RecordPanel text={shown.personaDraft.summary} />
+          )}
           {hasMoreThanExcerpt(shown.message) ? (
             <Button
               className="w-fit"

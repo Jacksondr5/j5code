@@ -116,6 +116,8 @@ export const AgentPersonaDraftView = Schema.Struct({
   /** An edit of a folder persona, which saves as an environment override. */
   overridesFolder: Schema.Boolean,
   status: Schema.Literals(["open", "saved"]),
+  /** J5's own account of the draft, shown apart from the agent's words. */
+  summary: Schema.String,
 });
 export type AgentPersonaDraftView = typeof AgentPersonaDraftView.Type;
 

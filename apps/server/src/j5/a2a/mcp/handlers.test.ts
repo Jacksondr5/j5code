@@ -674,12 +674,11 @@ it.effect(
         assert.isTrue(both.isFailure);
         assert.include(JSON.stringify(both.encodedResult), "not both");
         assert.isFalse((yield* call({ ...personAsk, persona_draft_id: draftId })).isFailure);
-        const draftAsk = (yield* Ref.get(sends)).at(-1)!.message;
-        assert.isTrue(draftAsk.startsWith("Save release-notes?\n\n"));
-        assert.include(draftAsk, "a new persona, release-notes");
-        assert.include(draftAsk, `(draft ${draftId})`);
-        // It must open its own exchange, so it never lands on another ask's.
-        assert.isTrue((yield* Ref.get(sends)).at(-1)!.freshAsk);
+        // J5's summary rides on the Inbox item, not in the agent's words, and the ask must open
+        // its own exchange so it never lands on another ask's.
+        const draftAsk = (yield* Ref.get(sends)).at(-1)!;
+        assert.equal(draftAsk.message, "Save release-notes?");
+        assert.isTrue(draftAsk.freshAsk);
       }).pipe(Effect.provide(layer));
     }),
 );
@@ -2692,7 +2691,7 @@ it.effect("reads a team persona and drafts an edit of it without touching the li
         readonly summary: string;
         readonly warnings: ReadonlyArray<string>;
       };
-      assert.include(draft.summary, "- Description: ` ");
+      assert.include(draft.summary, '- Description: "');
       assert.lengthOf(draft.warnings, 2);
       // Only the Owner's Save persona writes the library; the folder file is never written.
       const library = yield* makeAgentPersonaLibrary;

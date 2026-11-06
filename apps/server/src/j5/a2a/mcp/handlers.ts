@@ -367,24 +367,20 @@ const handlers = {
           "An ask carries escalation_id or persona_draft_id, not both.",
           "Send one ask per decision: retry with only one of them.",
         );
-      const draftNote =
-        personaDraftId === undefined
-          ? undefined
-          : input.expect_reply !== true || !isHumanParticipantId(input.to)
-            ? yield* stateError(
-                "persona_draft_id goes only on an ask to a person.",
-                "Retry j5_send_message to the person with expect_reply=true, intent and urgency, or, as a Crew member, tell your Captain the draft_id in an ordinary message.",
-              )
-            : yield* (yield* AgentPersonaDrafts)
-                .askSummary({ draftId: personaDraftId, askerParticipantId: callerParticipantId })
-                .pipe(
-                  Effect.mapError((error) =>
-                    stateError(
-                      error.message,
-                      "Check the draft_id from j5_propose_persona and retry.",
-                    ),
-                  ),
-                );
+      if (personaDraftId !== undefined) {
+        if (input.expect_reply !== true || !isHumanParticipantId(input.to))
+          return yield* stateError(
+            "persona_draft_id goes only on an ask to a person.",
+            "Retry j5_send_message to the person with expect_reply=true, intent and urgency, or, as a Crew member, tell your Captain the draft_id in an ordinary message.",
+          );
+        yield* (yield* AgentPersonaDrafts)
+          .authorizeAsk({ draftId: personaDraftId, askerParticipantId: callerParticipantId })
+          .pipe(
+            Effect.mapError((error) =>
+              stateError(error.message, "Check the draft_id from j5_propose_persona and retry."),
+            ),
+          );
+      }
       const crypto = yield* Crypto.Crypto;
       const service = yield* A2ASendService;
       const worker = yield* A2ADeliveryWorker;
@@ -471,7 +467,7 @@ const handlers = {
           }),
           senderThreadId: scope.thread.threadId,
           to: input.to,
-          message: draftNote === undefined ? input.message : `${input.message}\n\n${draftNote}`,
+          message: input.message,
           ...(input.expect_reply == null ? {} : { expectReply: input.expect_reply }),
           ...(input.exchange_id == null ? {} : { exchangeId: input.exchange_id }),
           ...(input.intent == null ? {} : { intent: input.intent }),
