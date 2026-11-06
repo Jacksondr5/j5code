@@ -249,7 +249,9 @@ const crewProposalNextStep = (error: CrewProposalError) =>
 
 /** A refused persona seat keeps its code, as on every other persona launch path. */
 const crewProposalRefusal = (error: CrewProposalError) =>
-  error._tag === "CrewLaunchSeatUnavailableError" && error.blockCode !== undefined
+  (error._tag === "CrewLaunchSeatUnavailableError" ||
+    error._tag === "CrewLaunchModelNotEligibleError") &&
+  error.blockCode !== undefined
     ? new J5PersonaBlockedError({
         code: error.blockCode,
         state: error.message,

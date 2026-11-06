@@ -3196,8 +3196,9 @@ it.effect("a Captain's blocked persona seat escalates, and its grant launches th
       const launcher = yield* CrewLaunchService;
       const escalations = yield* AgentPersonaEscalations;
       const refused = yield* launcher.resolveSeats(captain, [scout], "agent").pipe(Effect.flip);
-      assert.equal(refused._tag, "CrewLaunchSeatUnavailableError");
-      if (refused._tag !== "CrewLaunchSeatUnavailableError") return;
+      // Refused as a card's unchecked model is, with the code its other launch paths give.
+      assert.equal(refused._tag, "CrewLaunchModelNotEligibleError");
+      if (refused._tag !== "CrewLaunchModelNotEligibleError") return;
       assert.equal(refused.blockCode, "models_exhausted");
       const escalationId = /escalation_id: (escalation-[0-9a-f-]+)/.exec(refused.message)![1]!;
       // The person's card has no limits to lift and escalates nothing.
