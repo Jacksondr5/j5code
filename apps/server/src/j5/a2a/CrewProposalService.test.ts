@@ -14,6 +14,7 @@ import {
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -1887,6 +1888,25 @@ const playbookFixtureWithSettings = (
     const captainRuntimeMode = yield* Ref.make<RuntimeMode>("full-access");
     // Set, a seat's home can't be recorded, so its launch fails after its thread exists.
     const factsFault = yield* Ref.make(false);
+    // Runs before each orchestrator command lands, so a test can hold or fail one.
+    const dispatchHook = yield* Ref.make<
+      (command: OrchestrationV2ServerCommand) => Effect.Effect<void, OrchestratorDispatchError>
+    >(() => Effect.void);
+    // Runs as each unit step asks for a Crew's lock, before it waits for it.
+    const lockHook = yield* Ref.make<(id: string) => Effect.Effect<void>>(() => Effect.void);
+    const storedCrews = Context.get(context, AgentCrewInstanceService);
+    const services = Context.add(
+      context,
+      AgentCrewInstanceService,
+      AgentCrewInstanceService.of({
+        ...storedCrews,
+        serialize: <A, E, R>(id: string, effect: Effect.Effect<A, E, R>) =>
+          Ref.get(lockHook).pipe(
+            Effect.flatMap((hook) => hook(id)),
+            Effect.andThen(storedCrews.serialize(id, effect)),
+          ),
+      }),
+    );
     // One settings layer object, so a test's settings change reaches the launcher's model check.
     const settingsLayer = ServerSettings.layerTest(overrides);
     const layer = crewProposalLayer.pipe(
@@ -1917,7 +1937,9 @@ const playbookFixtureWithSettings = (
               ),
             ),
           dispatch: (command) =>
-            Ref.update(commands, (items) => [...items, command]).pipe(
+            Ref.get(dispatchHook).pipe(
+              Effect.flatMap((hook) => hook(command)),
+              Effect.andThen(Ref.update(commands, (items) => [...items, command])),
               Effect.as({ events: [], effects: [] } as never),
             ),
         }),
@@ -1963,7 +1985,7 @@ const playbookFixtureWithSettings = (
           }),
         }),
       ),
-      Layer.provideMerge(Layer.succeedContext(context)),
+      Layer.provideMerge(Layer.succeedContext(services)),
       Layer.provideMerge(
         ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-playbook-state-" }),
       ),
@@ -1982,6 +2004,8 @@ const playbookFixtureWithSettings = (
       providers,
       captainRuntimeMode,
       factsFault,
+      dispatchHook,
+      lockHook,
     };
   }).pipe(Effect.provide(NodeServices.layer));
 const playbookFixture = playbookFixtureWithSettings();
@@ -4327,6 +4351,176 @@ it.effect("a replacement on a Crew without a playbook is an addition and a stop"
         ),
         [old.threadId],
       );
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect("a replacement takes the steps unfinished when it gets the Crew, not when it asked", () =>
+  Effect.gen(function* () {
+    const { layer, workspaceRoot, dispatchHook, lockHook } = yield* playbookFixture;
+    yield* Effect.gen(function* () {
+      const gate = withPreview(yield* CrewProposalService);
+      const relay = yield* makePlaybookCrewRelay;
+      const opened = yield* gate.propose({
+        requestKey: "racing-crew",
+        captain,
+        displayName: "Release Crew",
+        brief: "Ship the change.",
+        playbook: { name: "release", workspaceRoot },
+        seats: [custom("planner", ["plan", "review"]), custom("builder", ["build"])],
+      });
+      const approved = yield* gate.resolve({ proposalId: opened.proposal.id, decision: "approve" });
+      const crewId = approved.instance!.id;
+      const planner = approved.instance!.members.find(({ seatName }) => seatName === "planner")!;
+      const toPlanner = (command: OrchestrationV2ServerCommand) =>
+        command.type === "message.dispatch" && command.threadId === planner.threadId;
+      // plan's hand-off fails once, so the next move hands it off before it moves the run.
+      yield* Ref.set(dispatchHook, (command) =>
+        toPlanner(command)
+          ? Effect.fail(
+              new OrchestratorDispatchError({
+                commandId: command.commandId,
+                commandType: command.type,
+              }),
+            )
+          : Effect.void,
+      );
+      const run = yield* relay.start({
+        owner: captainThread,
+        root: workspaceRoot,
+        name: "release",
+        key: "run-1",
+        crewInstanceId: crewId,
+      });
+      assert.equal(run.delivery?.state, "pending");
+      // The move holds the Crew while that hand-off is held open, with the run still at plan.
+      const entered = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      yield* Ref.set(dispatchHook, (command) =>
+        toPlanner(command)
+          ? Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)))
+          : Effect.void,
+      );
+      const move = yield* relay
+        .mutate(captainThread, {
+          runId: run.runId,
+          operation: "next",
+          expectedStepId: "plan",
+          client_request_id: "next-1",
+        })
+        .pipe(Effect.forkChild);
+      yield* Deferred.await(entered);
+      // The replacement asks while the run is at plan, then waits for the Crew.
+      const asked = yield* Deferred.make<void>();
+      yield* Ref.set(lockHook, (id) =>
+        id === crewId ? Deferred.succeed(asked, undefined).pipe(Effect.asVoid) : Effect.void,
+      );
+      const replacing = yield* gate
+        .requestMember({
+          requestKey: "replace-planner",
+          captain,
+          crewInstanceId: crewId,
+          seat: { ...custom("planner-2"), replaces: "planner" },
+          brief: null,
+        })
+        .pipe(Effect.forkChild);
+      yield* Deferred.await(asked);
+      yield* Deferred.succeed(release, undefined);
+      yield* Fiber.join(move);
+      const replaced = (yield* Fiber.join(replacing)).instance!;
+      // plan finished while the replacement waited, so it stays on the replaced member.
+      assert.deepStrictEqual(
+        replaced.members.map(({ seatName, playbookStepIds }) => [seatName, playbookStepIds]),
+        [
+          ["planner-2", ["review"]],
+          ["builder", ["build"]],
+        ],
+      );
+      assert.deepStrictEqual(replaced.replaced?.[0]?.playbookStepIds, ["plan"]);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect("a retry after a replacement's stop failed finishes the stop and hand-off once", () =>
+  Effect.gen(function* () {
+    const { layer, workspaceRoot, commands, dispatchHook } = yield* playbookFixture;
+    yield* Effect.gen(function* () {
+      const gate = withPreview(yield* CrewProposalService);
+      const crews = yield* AgentCrewInstanceService;
+      const relay = yield* makePlaybookCrewRelay;
+      const opened = yield* gate.propose({
+        requestKey: "retry-crew",
+        captain,
+        displayName: "Release Crew",
+        brief: "Ship the change.",
+        playbook: { name: "release", workspaceRoot },
+        seats: [custom("planner", ["plan"]), custom("builder", ["build"])],
+      });
+      const approved = yield* gate.resolve({ proposalId: opened.proposal.id, decision: "approve" });
+      const crewId = approved.instance!.id;
+      const oldBuilder = approved.instance!.members.find(({ seatName }) => seatName === "builder")!;
+      const run = yield* relay.start({
+        owner: captainThread,
+        root: workspaceRoot,
+        name: "release",
+        key: "run-1",
+        crewInstanceId: crewId,
+      });
+      yield* relay.mutate(captainThread, {
+        runId: run.runId,
+        operation: "next",
+        expectedStepId: "plan",
+        client_request_id: "next-1",
+      });
+      const sent = (threadId: ThreadId, type: "message.dispatch" | "thread.stop") =>
+        Ref.get(commands).pipe(
+          Effect.map(
+            (all) =>
+              all.filter((command) => command.type === type && command.threadId === threadId)
+                .length,
+          ),
+        );
+      // The swap lands, then stopping the old builder fails.
+      yield* Ref.set(dispatchHook, (command) =>
+        command.type === "thread.stop"
+          ? Effect.fail(
+              new OrchestratorDispatchError({
+                commandId: command.commandId,
+                commandType: command.type,
+              }),
+            )
+          : Effect.void,
+      );
+      const request = gate.requestMember({
+        requestKey: "replace-builder",
+        captain,
+        crewInstanceId: crewId,
+        seat: { ...custom("builder"), replaces: "builder" },
+        brief: null,
+      });
+      yield* request.pipe(Effect.flip);
+      const swapped = (yield* crews.read(crewId))!;
+      const newBuilder = swapped.members.find(({ seatName }) => seatName === "builder")!;
+      assert.notEqual(newBuilder.participantId, oldBuilder.participantId);
+      assert.equal(yield* sent(oldBuilder.threadId, "thread.stop"), 0);
+      assert.equal(yield* sent(newBuilder.threadId, "message.dispatch"), 0);
+
+      // The same call again stops the old builder and hands build over, once, with no second swap.
+      yield* Ref.set(dispatchHook, () => Effect.void);
+      yield* request;
+      yield* request;
+      const after = (yield* crews.read(crewId))!;
+      assert.equal(after.version, swapped.version);
+      assert.lengthOf(after.replaced ?? [], 1);
+      // Each retry repeats the stop under one command id, which the orchestrator's receipts replay.
+      const stops = (yield* Ref.get(commands)).flatMap((command) =>
+        command.type === "thread.stop" && command.threadId === oldBuilder.threadId
+          ? [command.commandId]
+          : [],
+      );
+      assert.isAbove(stops.length, 0);
+      assert.equal(new Set(stops).size, 1);
+      assert.equal(yield* sent(newBuilder.threadId, "message.dispatch"), 1);
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
 );

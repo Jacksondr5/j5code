@@ -190,8 +190,16 @@ export interface CrewAddSeatsInput {
 
 export interface CrewSeatReplacement {
   readonly seatName: string;
-  /** The replaced seat's steps that move: the run's current step and every later one it owns. */
-  readonly movedStepIds: ReadonlyArray<string>;
+  /**
+   * The replaced seat's steps that move: the run's current step and every later one it owns.
+   * Read under the Crew's lock, where no step call can move the run; a failure refuses the seat.
+   */
+  readonly unfinishedSteps: (
+    crew: AgentCrewInstance,
+  ) => Effect.Effect<
+    ReadonlyArray<string>,
+    CrewLaunchSeatUnavailableError | CrewLaunchOperationError
+  >;
 }
 
 /** The line a replacement's first turn carries about the seat it takes over. */
@@ -1159,11 +1167,12 @@ export const layer = Layer.effect(
       const problem = replacementProblem(current, replacement.seatName, requested.seat.name);
       if (problem !== null) return yield* failed("replacing a seat")(problem);
       const old = current.members.find(({ seatName }) => seatName === replacement.seatName)!;
+      const movedStepIds = yield* replacement.unfinishedSteps(current);
       // Its brief lists the steps it takes over beside any it claimed itself.
       const steps = [
         ...new Set([
           ...(requested.seat.steps ?? []),
-          ...(old.playbookStepIds ?? []).filter((id) => replacement.movedStepIds.includes(id)),
+          ...(old.playbookStepIds ?? []).filter((id) => movedStepIds.includes(id)),
         ]),
       ];
       const member = { ...requested, seat: { ...requested.seat, steps } };
@@ -1208,7 +1217,7 @@ export const layer = Layer.effect(
           seatName: old.seatName,
           participantId: old.participantId,
           member: newMember,
-          movedStepIds: replacement.movedStepIds,
+          movedStepIds,
           replacedAt: DateTime.formatIso(yield* DateTime.now),
         })
         .pipe(Effect.mapError(unlessStepOwned(failed("swapping in the replacement"))));
