@@ -197,16 +197,29 @@ const fenced = (language: string, text: string) => {
   return `${fence}${language}\n${text}\n${fence}`;
 };
 
+/**
+ * An agent's value as inline code in the trusted summary, so Markdown in it can't style or forge
+ * the summary. Line breaks are flattened: a blank line would end the code span.
+ */
+const inline = (text: string) => {
+  const flat = text.replace(/[\r\n\u2028\u2029]+/g, " ");
+  const longest = Math.max(0, ...(flat.match(/`+/g) ?? []).map((run) => run.length));
+  const tick = "`".repeat(longest + 1);
+  return `${tick} ${flat} ${tick}`;
+};
+
+const LINE_BREAK = /[\r\n\u2028\u2029]/;
+
 const changedFields = (before: AgentPersonaDraftFields, after: AgentPersonaDraftFields) => {
   const lines: Array<string> = [];
   if (before.displayName !== after.displayName)
-    lines.push(`- Name: "${before.displayName}" → "${after.displayName}"`);
+    lines.push(`- Name: ${inline(before.displayName)} → ${inline(after.displayName)}`);
   if (before.description !== after.description)
-    lines.push(`- Description: "${before.description}" → "${after.description}"`);
+    lines.push(`- Description: ${inline(before.description)} → ${inline(after.description)}`);
   if (before.access !== after.access) lines.push(`- Access: ${before.access} → ${after.access}`);
   if (modelsText(before.modelRoute) !== modelsText(after.modelRoute))
     lines.push(
-      `- Models, in order: ${modelsText(before.modelRoute)} → ${modelsText(after.modelRoute)}`,
+      `- Models, in order: ${inline(modelsText(before.modelRoute))} → ${inline(modelsText(after.modelRoute))}`,
     );
   if (flagText(before.independentReviewer) !== flagText(after.independentReviewer))
     lines.push(
@@ -292,6 +305,11 @@ export const makeAgentPersonaDrafts = Effect.fn("j5.agents.personaDrafts.make")(
   const propose: AgentPersonaDraftsShape["propose"] = Effect.fn("j5.agents.personaDrafts.propose")(
     function* (input) {
       const { draft } = input;
+      const named = draft.mode === "create" ? draft.fields : draft.changes;
+      if ([named.displayName, named.description].some((text) => text && LINE_BREAK.test(text)))
+        return yield* refuse(
+          "A persona's name and description are one line each; only its instructions take line breaks.",
+        );
       const current = yield* readCatalog;
       const invalid = (cause: unknown) =>
         refuse(
@@ -355,7 +373,7 @@ export const makeAgentPersonaDrafts = Effect.fn("j5.agents.personaDrafts.make")(
           changes.filter((line) => !line.startsWith("- ")),
         ];
         lines.push(
-          `J5 recorded this persona draft: an edit of ${draft.personaId} ("${original.displayName}"). Changed fields:\n\n${list.join("\n")}`,
+          `J5 recorded this persona draft: an edit of ${draft.personaId} (${inline(original.displayName)}). Changed fields:\n\n${list.join("\n")}`,
           ...diff,
         );
         if (targetKind === "folder" && folderPath !== undefined)
