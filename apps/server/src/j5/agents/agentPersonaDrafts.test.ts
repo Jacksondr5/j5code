@@ -111,7 +111,10 @@ describe("persona drafts", () => {
             draft: editInstructions(digest, "Review the diff.\nInsist on tests.\nBe kind."),
           });
           assert.include(summary, `an edit of reviewer ("Reviewer")`);
-          assert.include(summary, "    - Check the tests.\n    + Insist on tests.");
+          assert.include(
+            summary,
+            "```diff\n  Review the diff.\n- Check the tests.\n+ Insist on tests.\n  Be kind.\n```",
+          );
           assert.lengthOf(warnings, 2);
           assert.include(warnings[0], "hides later team updates to this persona for everyone");
           assert.include(warnings[1], "remove the override, then restore the team persona");
