@@ -85,60 +85,58 @@ interface EscalationRow {
   readonly status: "open" | "granted" | "used";
 }
 
-export interface AgentPersonaEscalationsShape {
-  /** Record a refused launch; returns its id. */
-  readonly record: (input: {
-    readonly callerParticipantId: string;
-    readonly personaId: string;
-    readonly code: AgentPersonaBlockCode;
-    readonly summary: string;
-    readonly waivable: AgentPersonaPickConstraint | null;
-  }) => Effect.Effect<string, SqlError>;
-  /**
-   * The trusted text an ask about this escalation carries. The asker is the caller it was
-   * recorded for, or that caller's Captain; only an open escalation is asked about.
-   */
-  readonly askSummary: (input: {
-    readonly escalationId: string;
-    readonly askerParticipantId: string;
-  }) => Effect.Effect<string, AgentPersonaEscalationError | SqlError>;
-  /** Link the ask that carries the escalation, so the person's Inbox can offer the grant. */
-  readonly linkAsk: (input: {
-    readonly escalationId: string;
-    readonly exchangeId: string;
-  }) => Effect.Effect<void, SqlError>;
-  /** The escalation each of these asks carries, keyed by exchange id. */
-  readonly forExchanges: (
-    exchangeIds: ReadonlyArray<string>,
-  ) => Effect.Effect<ReadonlyMap<string, AgentPersonaEscalationView>, SqlError>;
-  /** The ask's waivable escalation, open and ready for the Owner's "Allow this once". */
-  readonly grantable: (exchangeId: string) => Effect.Effect<
-    {
-      readonly escalationId: string;
-      readonly personaId: string;
-      readonly constraint: AgentPersonaPickConstraint;
-    },
-    AgentPersonaEscalationError | SqlError
-  >;
-  readonly markGranted: (input: {
-    readonly escalationId: string;
-    readonly grantedBy: string;
-  }) => Effect.Effect<void, AgentPersonaEscalationError | SqlError>;
-  /** The limit a retry may waive: the grant must be unused and for this caller and persona. */
-  readonly grantedWaiver: (input: {
-    readonly escalationId: string;
-    readonly callerParticipantId: string | undefined;
-    readonly personaId: string;
-  }) => Effect.Effect<AgentPersonaPickConstraint, AgentPersonaEscalationError | SqlError>;
-  /** Spend a grant on the launch it allowed; a second launch is refused. */
-  readonly use: (
-    escalationId: string,
-  ) => Effect.Effect<void, AgentPersonaEscalationError | SqlError>;
-}
-
 export class AgentPersonaEscalations extends Context.Service<
   AgentPersonaEscalations,
-  AgentPersonaEscalationsShape
+  {
+    /** Record a refused launch; returns its id. */
+    readonly record: (input: {
+      readonly callerParticipantId: string;
+      readonly personaId: string;
+      readonly code: AgentPersonaBlockCode;
+      readonly summary: string;
+      readonly waivable: AgentPersonaPickConstraint | null;
+    }) => Effect.Effect<string, SqlError>;
+    /**
+     * The trusted text an ask about this escalation carries. The asker is the caller it was
+     * recorded for, or that caller's Captain; only an open escalation is asked about.
+     */
+    readonly askSummary: (input: {
+      readonly escalationId: string;
+      readonly askerParticipantId: string;
+    }) => Effect.Effect<string, AgentPersonaEscalationError | SqlError>;
+    /** Link the ask that carries the escalation, so the person's Inbox can offer the grant. */
+    readonly linkAsk: (input: {
+      readonly escalationId: string;
+      readonly exchangeId: string;
+    }) => Effect.Effect<void, SqlError>;
+    /** The escalation each of these asks carries, keyed by exchange id. */
+    readonly forExchanges: (
+      exchangeIds: ReadonlyArray<string>,
+    ) => Effect.Effect<ReadonlyMap<string, AgentPersonaEscalationView>, SqlError>;
+    /** The ask's waivable escalation, open and ready for the Owner's "Allow this once". */
+    readonly grantable: (exchangeId: string) => Effect.Effect<
+      {
+        readonly escalationId: string;
+        readonly personaId: string;
+        readonly constraint: AgentPersonaPickConstraint;
+      },
+      AgentPersonaEscalationError | SqlError
+    >;
+    readonly markGranted: (input: {
+      readonly escalationId: string;
+      readonly grantedBy: string;
+    }) => Effect.Effect<void, AgentPersonaEscalationError | SqlError>;
+    /** The limit a retry may waive: the grant must be unused and for this caller and persona. */
+    readonly grantedWaiver: (input: {
+      readonly escalationId: string;
+      readonly callerParticipantId: string | undefined;
+      readonly personaId: string;
+    }) => Effect.Effect<AgentPersonaPickConstraint, AgentPersonaEscalationError | SqlError>;
+    /** Spend a grant on the launch it allowed; a second launch is refused. */
+    readonly use: (
+      escalationId: string,
+    ) => Effect.Effect<void, AgentPersonaEscalationError | SqlError>;
+  }
 >()("t3/j5/agents/agentPersonaEscalation/AgentPersonaEscalations") {}
 
 const refuse = (message: string) => new AgentPersonaEscalationError({ message });
@@ -160,7 +158,7 @@ export const layer = Layer.effect(
       return row;
     });
 
-    const record: AgentPersonaEscalationsShape["record"] = Effect.fn(
+    const record: AgentPersonaEscalations["Service"]["record"] = Effect.fn(
       "j5.agents.escalations.record",
     )(function* (input) {
       const id = `escalation-${NodeCrypto.randomUUID()}`;
@@ -175,7 +173,7 @@ export const layer = Layer.effect(
       return id;
     });
 
-    const askSummary: AgentPersonaEscalationsShape["askSummary"] = Effect.fn(
+    const askSummary: AgentPersonaEscalations["Service"]["askSummary"] = Effect.fn(
       "j5.agents.escalations.askSummary",
     )(function* (input) {
       const row = yield* read(input.escalationId);
@@ -201,13 +199,13 @@ export const layer = Layer.effect(
       ].join(" ");
     });
 
-    const linkAsk: AgentPersonaEscalationsShape["linkAsk"] = (input) =>
+    const linkAsk: AgentPersonaEscalations["Service"]["linkAsk"] = (input) =>
       sql`
         UPDATE j5_persona_escalation SET exchange_id = ${input.exchangeId}
         WHERE id = ${input.escalationId}
       `.pipe(Effect.asVoid);
 
-    const forExchanges: AgentPersonaEscalationsShape["forExchanges"] = Effect.fn(
+    const forExchanges: AgentPersonaEscalations["Service"]["forExchanges"] = Effect.fn(
       "j5.agents.escalations.forExchanges",
     )(function* (exchangeIds) {
       if (exchangeIds.length === 0) return new Map();
@@ -227,7 +225,7 @@ export const layer = Layer.effect(
       );
     });
 
-    const grantable: AgentPersonaEscalationsShape["grantable"] = Effect.fn(
+    const grantable: AgentPersonaEscalations["Service"]["grantable"] = Effect.fn(
       "j5.agents.escalations.grantable",
     )(function* (exchangeId) {
       const rows = yield* sql<EscalationRow>`
@@ -244,7 +242,7 @@ export const layer = Layer.effect(
       return { escalationId: row.id, personaId: row.persona_id, constraint: row.waivable };
     });
 
-    const markGranted: AgentPersonaEscalationsShape["markGranted"] = Effect.fn(
+    const markGranted: AgentPersonaEscalations["Service"]["markGranted"] = Effect.fn(
       "j5.agents.escalations.markGranted",
     )(function* (input) {
       const updated = yield* sql<{ readonly id: string }>`
@@ -257,7 +255,7 @@ export const layer = Layer.effect(
         return yield* refuse(`Escalation ${input.escalationId} was already allowed once.`);
     });
 
-    const grantedWaiver: AgentPersonaEscalationsShape["grantedWaiver"] = Effect.fn(
+    const grantedWaiver: AgentPersonaEscalations["Service"]["grantedWaiver"] = Effect.fn(
       "j5.agents.escalations.grantedWaiver",
     )(function* (input) {
       const row = yield* read(input.escalationId);
@@ -280,7 +278,7 @@ export const layer = Layer.effect(
       return row.waivable;
     });
 
-    const use: AgentPersonaEscalationsShape["use"] = Effect.fn("j5.agents.escalations.use")(
+    const use: AgentPersonaEscalations["Service"]["use"] = Effect.fn("j5.agents.escalations.use")(
       function* (escalationId) {
         const updated = yield* sql<{ readonly id: string }>`
           UPDATE j5_persona_escalation SET status = 'used', used_at = ${yield* now}
