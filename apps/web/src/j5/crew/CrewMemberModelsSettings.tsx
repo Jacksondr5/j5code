@@ -203,9 +203,9 @@ function ProviderModels(props: {
 }
 
 /**
- * Which models and reasoning levels custom Crew members, and plain agents started without a
- * persona, may use. Personas keep their own model and level, and native subagents are outside the
- * lists on every provider (docs/j5/product/crews.md).
+ * Which models and reasoning levels custom Crew members, plain agents started without a persona,
+ * and personas an agent picks may use. Personas a person picks keep their own model and level, and
+ * native subagents are outside the lists on every provider (docs/j5/product/crews.md).
  */
 export function CrewMemberModelsSettings() {
   const settings = useScopedSettings();
@@ -307,7 +307,7 @@ export function CrewMemberModelsSettings() {
             </p>
           ) : null}
           <p className="text-xs text-muted-foreground">
-            Personas keep their own model and level.
+            Personas you pick can run on their own models.
             {offList.length > 0
               ? ` ${offList.join(", ")} ${offList.length === 1 ? "uses" : "use"} an unchecked one.`
               : ""}{" "}

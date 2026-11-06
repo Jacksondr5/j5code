@@ -138,6 +138,7 @@ it.effect("launches one persona directly without requiring workflow sequencing",
           model: "gpt-5.6-terra",
           options: [{ id: "reasoningEffort", value: "high" }],
         },
+        pickSource: { kind: "person" },
       } as const;
       assert.deepEqual(launched.projection.thread.agentPersonaAssignment, expectedAssignment);
       assert.deepEqual(

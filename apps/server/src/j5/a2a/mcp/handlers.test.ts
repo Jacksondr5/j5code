@@ -15,6 +15,7 @@ import {
 import {
   EnvironmentId,
   EventId,
+  MessageId,
   type ModelSelection,
   type OrchestrationV2ThreadShell,
   type RuntimeMode,
@@ -1582,6 +1583,8 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
   Effect.gen(function* () {
     const ledgerProjectId = LedgerProjectId.make("project:j5:mcp-spawn-persona");
     const personaCallerRuntimeMode = yield* Ref.make<RuntimeMode>("full-access");
+    // What a person typed to start the caller's running turn, if anything.
+    const personTurn = yield* Ref.make<string | null>(null);
     const callerParticipantId = ParticipantId.make("agent:j5:mcp-spawn-persona-caller");
     const childParticipantId = ParticipantId.make("agent:j5:mcp-spawn-persona-child");
     const commands = yield* Ref.make<ReadonlyArray<OrchestrationV2ServerCommand>>([]);
@@ -1657,17 +1660,49 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
       }),
       threadManagementMock({
         getThreadRecords: (threadId) =>
-          Ref.get(commands).pipe(
-            Effect.map((all) => {
+          Effect.all([
+            Ref.get(commands),
+            Ref.get(personaCallerRuntimeMode),
+            Ref.get(personTurn),
+          ]).pipe(
+            Effect.map(([all, runtimeMode, typed]) => {
               const create = all.find(
                 (command) => command.type === "thread.create" && command.threadId === threadId,
               );
-              return create?.type === "thread.create"
-                ? {
-                    ...projection(threadId),
-                    thread: { ...projection(threadId).thread, ...create, id: threadId },
-                  }
-                : projection(threadId);
+              if (create?.type === "thread.create")
+                return {
+                  ...projection(threadId),
+                  thread: { ...projection(threadId).thread, ...create, id: threadId },
+                };
+              if (threadId !== invocation.threadId) return projection(threadId);
+              const messageId = MessageId.make("caller-turn-message");
+              return {
+                ...projection(threadId),
+                thread: { ...projection(threadId).thread, runtimeMode },
+                runs:
+                  typed === null
+                    ? []
+                    : [
+                        {
+                          id: "caller-run",
+                          ordinal: 1,
+                          status: "running",
+                          userMessageId: messageId,
+                        },
+                      ],
+                messages:
+                  typed === null
+                    ? []
+                    : [
+                        {
+                          id: messageId,
+                          role: "user",
+                          createdBy: "user",
+                          creationSource: "web",
+                          text: typed,
+                        },
+                      ],
+              } as never;
             }),
           ),
         getThreadShell: (threadId) =>
@@ -1919,9 +1954,26 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
       assert.notProperty(operatorPolicy, "sandboxPolicy");
       assert.notProperty(operatorPolicy, "approvalPolicy");
 
-      // A persona's policy sets its permission mode, above the caller's own if it says so. The
-      // caller may still choose a narrower interaction mode, and may not choose the permissions.
+      // An agent may not pick a persona with more access than it runs with itself.
       yield* Ref.set(personaCallerRuntimeMode, "approval-required");
+      const createdBeforeAgentPick = (yield* createdThreads()).length;
+      const agentPick = yield* call({
+        ...scout,
+        persona: "operator",
+        client_request_id: "spawn-persona-agent-pick",
+      });
+      assert.isTrue(agentPick.isFailure);
+      assert.include(
+        failureMessage(agentPick),
+        "Persona operator would run with Full access, which is broader than the Supervised its caller runs with.",
+      );
+      assert.include(failureMessage(agentPick), "@persona:operator");
+      assert.lengthOf(yield* createdThreads(), createdBeforeAgentPick);
+
+      // A persona the person picked with @persona sets its permission mode, above the caller's
+      // own if it says so. The caller may still choose a narrower interaction mode, and may not
+      // choose the permissions.
+      yield* Ref.set(personTurn, "Spawn @persona:operator to fix the build.");
       const planned = yield* call({
         ...scout,
         persona: "operator",
@@ -1932,6 +1984,8 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
       const plannedCreate = (yield* createdThreads()).at(-1)!;
       assert.equal(plannedCreate.runtimeMode, "full-access");
       assert.equal(plannedCreate.interactionMode, "plan");
+      assert.deepStrictEqual(plannedCreate.agentPersonaAssignment?.pickSource, { kind: "person" });
+      yield* Ref.set(personTurn, null);
       const chosen = yield* call({
         ...scout,
         persona: "operator",
@@ -1964,7 +2018,7 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
       assert.isTrue(above.isFailure);
       assert.include(
         failureMessage(above),
-        "Persona operator runs in permission mode full-access, which is broader than the level this MCP client was approved for (approval-required).",
+        "Persona operator would run with Full access, which is broader than the Supervised its caller runs with.",
       );
       assert.include(failureMessage(above), "a persona within that level");
       assert.include(failureMessage(above), "sign in again");
