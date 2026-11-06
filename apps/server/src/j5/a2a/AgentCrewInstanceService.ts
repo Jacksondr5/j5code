@@ -102,6 +102,31 @@ export type AddMembersOutcome =
   | { readonly status: "archived"; readonly instance: AgentCrewInstance }
   | { readonly status: "missing"; readonly instance: null };
 
+/**
+ * Every thread a Crew's archive takes with it: its seats, then the members its Captain replaced.
+ * A replaced member goes under "<seat> (replaced)", numbered from the second, which no seat name
+ * can take, so a seat and the member it replaced never share a label or a command id.
+ */
+export const crewArchiveThreads = (instance: Pick<AgentCrewInstance, "members" | "replaced">) => {
+  const seen = new Map<string, number>();
+  return [
+    ...instance.members.map(({ seatName, participantId, threadId }) => ({
+      seatName,
+      participantId,
+      threadId,
+    })),
+    ...(instance.replaced ?? []).map(({ seatName, participantId, threadId }) => {
+      const count = (seen.get(seatName) ?? 0) + 1;
+      seen.set(seatName, count);
+      return {
+        seatName: count === 1 ? `${seatName} (replaced)` : `${seatName} (replaced ${count})`,
+        participantId,
+        threadId,
+      };
+    }),
+  ];
+};
+
 export interface ReplaceMemberInput {
   readonly seatName: string;
   readonly participantId: ParticipantId;

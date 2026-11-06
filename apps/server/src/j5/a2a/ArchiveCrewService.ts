@@ -15,7 +15,11 @@ import {
 } from "../../auth/utils.ts";
 import type { CrewArchiveWorktree } from "@t3tools/contracts/j5";
 import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
-import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
+import {
+  AgentCrewInstanceService,
+  crewArchiveThreads,
+  type AgentCrewInstance,
+} from "./AgentCrewInstanceService.ts";
 import {
   ArchiveAgentService,
   type ArchiveAgentConsequenceFacts,
@@ -209,19 +213,11 @@ const payloadFor = (input: ArchiveCrewInput, facts: ArchiveCrewConsequenceFacts)
   })),
 });
 
-/**
- * The worktrees an archive looks at: each seat whose thread exists (one that never came to exist
- * has none), and each member the Captain replaced, whose worktree was made for this Crew too.
- */
-const cleanupSeats = (instance: AgentCrewInstance, facts: ArchiveCrewConsequenceFacts) => [
-  ...facts.members
+/** The seats whose threads exist; a seat that never came to exist has no worktree to look at. */
+const createdSeats = (facts: ArchiveCrewConsequenceFacts) =>
+  facts.members
     .filter((member) => !member.neverCreated)
-    .map((member) => ({ seatName: member.seatName, threadId: member.threadId })),
-  ...(instance.replaced ?? []).map((member) => ({
-    seatName: member.seatName,
-    threadId: member.threadId,
-  })),
-];
+    .map((member) => ({ seatName: member.seatName, threadId: member.threadId }));
 
 /** Who the worktree approval is filed for. */
 const approvalCrew = (instance: AgentCrewInstance, archivedAt: string) => ({
@@ -345,7 +341,8 @@ export const layer = Layer.effect(
       instance: AgentCrewInstance,
     ) {
       const members: Array<ArchiveCrewMemberFacts> = [];
-      for (const member of instance.members) {
+      // A member the Captain replaced retires with the Crew its worktree was made for.
+      for (const member of crewArchiveThreads(instance)) {
         const state = yield* archiveAgent
           .readFacts({
             projectId: instance.projectId,
@@ -423,7 +420,7 @@ export const layer = Layer.effect(
                 ? ("never_created" as const)
                 : ("already_archived" as const),
             })),
-            seats: cleanupSeats(instance, facts),
+            seats: createdSeats(facts),
             crew: approvalCrew(instance, input.archivedAt),
             sessions: [] as ReadonlyArray<CrewSeatSession>,
           };
@@ -510,7 +507,7 @@ export const layer = Layer.effect(
         return {
           status: "archived" as const,
           members: results,
-          seats: cleanupSeats(instance, facts),
+          seats: createdSeats(facts),
           crew: approvalCrew(instance, input.archivedAt),
           sessions,
         };
