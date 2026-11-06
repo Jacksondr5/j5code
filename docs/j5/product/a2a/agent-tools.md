@@ -307,12 +307,12 @@ wrote the work it will review, set replaces to that member's seat: the new membe
 name, and once it launches it takes over the seat's unfinished steps, gets any current step already
 handed to the old member, and is told where the old member's thread is. The replaced member is
 stopped and leaves the Crew, and its thread stays readable. If the new member fails to launch,
-nothing changes. The result returns the updated roster or refuses the seat with its name and reason;
-creation is reported separately here. The new member waits for its first assignment; send it with
-j5_send_message when the work is ready. Each member's configured access still controls tool
-approvals. Captain-only: a member sends the concern to its Captain with j5_send_message. Reuse
-client_request_id to retry safely; a changed request is refused, so use a fresh one for new work.
-Works under every approval policy, including approval policy never."
+nothing changes, except that an allow_once it used is spent. The result returns the updated roster
+or refuses the seat with its name and reason; creation is reported separately here. The new member
+waits for its first assignment; send it with j5_send_message when the work is ready. Each member's
+configured access still controls tool approvals. Captain-only: a member sends the concern to its
+Captain with j5_send_message. Reuse client_request_id to retry safely; a changed request is refused,
+so use a fresh one for new work. Works under every approval policy, including approval policy never."
 
 | Input                             | Type           | Required | Meaning                                                                    |
 | --------------------------------- | -------------- | -------- | -------------------------------------------------------------------------- |
