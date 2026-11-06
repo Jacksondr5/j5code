@@ -471,7 +471,7 @@ export const layer = Layer.effect(
           if (agentPick)
             yield* assertWithinCallerAccess(
               `Custom seat ${seat.name}`,
-              { runtimeMode, readOnly: false },
+              { runtimeMode },
               caller,
             ).pipe(Effect.mapError(pickRefused));
           if (
@@ -585,7 +585,7 @@ export const layer = Layer.effect(
                       provider.driver,
                     ),
                   )
-                : { runtimeMode: seat.runtimeMode, readOnly: false },
+                : { runtimeMode: seat.runtimeMode },
               caller,
             );
           const definitionDigest = yield* agents.snapshot(definition);

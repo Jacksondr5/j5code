@@ -587,7 +587,7 @@ it.effect(
           .pipe(Effect.flip);
         assert.include(
           above.message,
-          "Custom seat scribe would run with Full access, which is broader than the Auto-accept edits its caller runs with.",
+          "Custom seat scribe would run with Full access, which is broader than the Repository write its caller runs with.",
         );
         // A read-only Captain cannot have a custom seat at all, since every one can write.
         const readOnlyCaptain = {
@@ -2914,7 +2914,7 @@ it.effect(
           .pipe(Effect.flip);
         assert.include(
           refused.message,
-          "Persona builder would run with Auto-accept edits, which is broader than the Supervised its caller runs with.",
+          "Persona builder would run with Repository write, which is broader than the Supervised its caller runs with.",
         );
         const raised = yield* launcher
           .resolveSeats(supervised, [{ ...scout, runtimeMode: "full-access" }], "agent")
