@@ -62,6 +62,8 @@ export interface AgentPersonaCatalogRow {
   /** Absent from older servers; present entries say where the definition in effect came from. */
   readonly origin: AgentPersonaOrigin | null;
   readonly originLabel: string | null;
+  /** The folder file an imported copy overrides, for everyone on its server. */
+  readonly overridesFolder: string | null;
   readonly displayName: string;
   readonly description: string;
   readonly acceptedInput: string | undefined;
@@ -175,7 +177,10 @@ export function presentAgentPersonaCatalog(
             }
           : null,
       origin: persona.origin ?? null,
-      originLabel: persona.origin ? agentPersonaOriginLabel(persona.origin) : null,
+      originLabel: persona.origin
+        ? agentPersonaOriginLabel(persona.origin, persona.overridesFolder)
+        : null,
+      overridesFolder: persona.overridesFolder ?? null,
       displayName: persona.displayName,
       description: persona.description,
       acceptedInput: persona.acceptedInput,
@@ -645,20 +650,38 @@ export function agentPersonaDrift(
 export const AGENT_PERSONA_DRIFT_MESSAGE =
   "This persona's definition changed after this task launched. The task keeps the definition it started with; start a new task to use the current one.";
 
-/** Short origin for a catalog row; folder origins name the file's parent folder only. */
-export function agentPersonaOriginLabel(origin: AgentPersonaOrigin): string {
+const parentFolder = (path: string) =>
+  path
+    .split(/[\\/]+/)
+    .filter((segment) => segment !== "")
+    .at(-2);
+
+/**
+ * Short origin for a catalog row; folder origins name the file's parent folder only. An imported
+ * copy that overrides a folder persona names that folder instead of reading "Personal".
+ */
+export function agentPersonaOriginLabel(
+  origin: AgentPersonaOrigin,
+  overridesFolder?: string,
+): string {
   switch (origin.kind) {
     case "bundled":
       return "Bundled example";
-    case "imported":
-      return "Personal";
+    case "imported": {
+      if (overridesFolder === undefined) return "Personal";
+      const folder = parentFolder(overridesFolder);
+      return folder === undefined ? "Overrides folder" : `Overrides ${folder}`;
+    }
     case "folder": {
-      const segments = origin.path.split(/[\\/]+/).filter((segment) => segment !== "");
-      const folder = segments.at(-2);
+      const folder = parentFolder(origin.path);
       return folder === undefined ? "Folder" : `Folder · ${folder}`;
     }
   }
 }
+
+/** What an override means, wherever its badge is explained. */
+export const AGENT_PERSONA_OVERRIDE_NOTE =
+  "Hides the team version for everyone on this server. To get it back, Remove this persona, then Restore the team one.";
 
 const compactCount = (value: number): string =>
   value >= 1_000_000

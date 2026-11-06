@@ -24,6 +24,7 @@ import {
   Undo2Icon,
 } from "lucide-react";
 import {
+  AGENT_PERSONA_OVERRIDE_NOTE,
   agentPersonaFolderNudges,
   agentPersonaFolderStatusLabel,
   agentPersonaUsageById,
@@ -499,7 +500,14 @@ function MemberAgentLibrarySettings() {
                     {persona.originLabel ? (
                       <>
                         <span aria-hidden="true">·</span>
-                        {persona.origin?.kind === "folder" ? (
+                        {persona.overridesFolder !== null ? (
+                          <Tooltip>
+                            <TooltipTrigger render={<span>{persona.originLabel}</span>} />
+                            <TooltipPopup>
+                              {AGENT_PERSONA_OVERRIDE_NOTE} Team file: {persona.overridesFolder}
+                            </TooltipPopup>
+                          </Tooltip>
+                        ) : persona.origin?.kind === "folder" ? (
                           <Tooltip>
                             <TooltipTrigger render={<span>{persona.originLabel}</span>} />
                             <TooltipPopup variant="code">{persona.origin.path}</TooltipPopup>
