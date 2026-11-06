@@ -516,7 +516,7 @@ export function useComposerSend(input: ComposerSendInput) {
       );
       return;
     }
-    // J5: a saved-agent draft launches on the persona's immutable route, so it cannot fan out
+    // J5: a saved-agent draft launches on one route the server resolves, so it cannot fan out
     // across models; the persona control hides the model picker, this covers a stale selection.
     if (
       multipleModelSelections !== null &&

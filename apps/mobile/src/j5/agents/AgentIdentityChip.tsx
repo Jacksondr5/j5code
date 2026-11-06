@@ -15,7 +15,7 @@ export function AgentIdentityChip(props: {
   const presentation = presentAgentPersonaAssignment(props.assignment);
   return (
     <View
-      accessibilityLabel={`Persona ${presentation.personaLabel}, ${presentation.routeLabel}`}
+      accessibilityLabel={`Persona ${presentation.personaLabel}, ${presentation.routeLabel}${presentation.switchNote === null ? "" : `. ${presentation.switchNote}`}`}
       className="mt-1 flex-row items-center gap-1 self-start rounded-full border border-border px-2 py-0.5"
       style={props.inset ? { marginLeft: props.inset } : undefined}
     >
