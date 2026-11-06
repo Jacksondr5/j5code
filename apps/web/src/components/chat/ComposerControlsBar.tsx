@@ -254,20 +254,7 @@ export function ComposerControlsBar(props: {
       onOpenProviderSetup={onOpenProviderSetup}
     />
   );
-  if (modelOnly && !showProviderUnavailable) {
-    return (
-      <>
-        {draftAgentPicker}
-        {composerModelPicker}
-        {renderProviderTraitsPicker({
-          ...providerTraitsPickerInput,
-          size: composerControlsCollapsed ? "xs" : "sm",
-          hidden: composerControlsHidden,
-        })}
-      </>
-    );
-  }
-  return showProviderUnavailable ? (
+  const providerUnavailableControl = (
     <ComposerControl
       type="button"
       disabled={!providerSetupInstanceId}
@@ -282,6 +269,28 @@ export function ComposerControlsBar(props: {
       <CircleAlertIcon className="size-4" />
       {providerSetupInstanceId ? "Open provider settings" : "No provider available"}
     </ComposerControl>
+  );
+  if (modelOnly) {
+    return (
+      <>
+        {draftAgentPicker}
+        {showProviderUnavailable ? (
+          providerUnavailableControl
+        ) : (
+          <>
+            {composerModelPicker}
+            {renderProviderTraitsPicker({
+              ...providerTraitsPickerInput,
+              size: composerControlsCollapsed ? "xs" : "sm",
+              hidden: composerControlsHidden,
+            })}
+          </>
+        )}
+      </>
+    );
+  }
+  return showProviderUnavailable ? (
+    providerUnavailableControl
   ) : (
     <>
       {showLeadingSeparator ? (
