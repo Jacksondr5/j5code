@@ -82,12 +82,12 @@ it.layer(agentPersonaEscalationsTestLayer(crews))("persona escalations", (it) =>
         escalationId: id,
         personaId: "reviewer",
         constraint: "model-not-eligible",
+        callerParticipantId: member,
       });
       yield* escalations.markGranted({ escalationId: id, grantedBy: "human:owner" });
-      assert.include(
-        (yield* escalations.grantable("exchange:grant").pipe(Effect.flip)).message,
-        "already allowed once",
-      );
+      // A replayed grant still finds it grantable and grants nothing new.
+      assert.deepEqual(yield* escalations.grantable("exchange:grant"), grant);
+      yield* escalations.markGranted({ escalationId: id, grantedBy: "human:owner" });
 
       // Bound to the caller and the persona it was granted for.
       assert.include(
@@ -110,6 +110,10 @@ it.layer(agentPersonaEscalationsTestLayer(crews))("persona escalations", (it) =>
         "already used",
       );
       assert.include((yield* escalations.use(id).pipe(Effect.flip)).message, "already used");
+      assert.include(
+        (yield* escalations.grantable("exchange:grant").pipe(Effect.flip)).message,
+        "already allowed once",
+      );
     }),
   );
 
