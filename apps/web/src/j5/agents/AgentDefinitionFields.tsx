@@ -9,12 +9,9 @@ import {
   agentPersonaModelGroups,
   agentPersonaPolicyDrivers,
   agentPersonaPolicyNote,
+  agentPersonaEntryDriver,
 } from "@t3tools/client-runtime/j5/agent-personas";
-import type {
-  AgentPersonaAuthorityPolicy,
-  AgentPersonaModelEntry,
-  EnvironmentId,
-} from "@t3tools/contracts";
+import type { AgentPersonaAccess, AgentPersonaModelEntry, EnvironmentId } from "@t3tools/contracts";
 import { ChevronDownIcon } from "lucide-react";
 
 import { Button } from "../../components/ui/button";
@@ -41,11 +38,11 @@ import { serverEnvironment } from "../../state/server";
 import { agentPersonaEnvironment } from "./agentPersonaAtoms";
 
 export interface AgentRoutePolicyValue {
-  readonly authorityPolicy: AgentPersonaAuthorityPolicy;
+  readonly access: AgentPersonaAccess;
   readonly modelRoute: ReadonlyArray<AgentPersonaModelEntry>;
 }
 
-/** Runtime policy and ordered model entries, shared by the create and edit dialogs. */
+/** Access level and ordered model entries, shared by the create and edit dialogs. */
 export function AgentRoutePolicyFields(props: {
   environmentId: EnvironmentId;
   value: AgentRoutePolicyValue;
@@ -63,30 +60,28 @@ export function AgentRoutePolicyFields(props: {
   const catalog = useEnvironmentQuery(
     agentPersonaEnvironment.catalog({ environmentId: props.environmentId, input: {} }),
   );
+  const drivers = agentPersonaPolicyDrivers(catalog.data, value.access);
   const policyNote = agentPersonaPolicyNote(
-    agentPersonaPolicyDrivers(catalog.data, value.authorityPolicy),
+    drivers,
     value.modelRoute,
-    value.authorityPolicy,
+    value.access,
     providers ?? [],
   );
   return (
     <>
       <div className="grid gap-1.5 text-sm">
-        <span>Runtime policy</span>
+        <span>Access level</span>
         <Select
-          value={value.authorityPolicy}
+          value={value.access}
           disabled={disabled}
           onValueChange={(next) => {
             const policy = AGENT_PERSONA_POLICY_OPTIONS.find((item) => item.value === next);
-            if (policy) props.onChange({ ...value, authorityPolicy: policy.value });
+            if (policy) props.onChange({ ...value, access: policy.value });
           }}
         >
-          <SelectTrigger aria-label="Runtime policy">
+          <SelectTrigger aria-label="Access level">
             <SelectValue>
-              {
-                AGENT_PERSONA_POLICY_OPTIONS.find((item) => item.value === value.authorityPolicy)
-                  ?.label
-              }
+              {AGENT_PERSONA_POLICY_OPTIONS.find((item) => item.value === value.access)?.label}
             </SelectValue>
           </SelectTrigger>
           <SelectPopup>
@@ -104,6 +99,8 @@ export function AgentRoutePolicyFields(props: {
       {value.modelRoute.map((target, index) => {
         const label = `Model ${index + 1}`;
         const effort = agentPersonaEntryReasoning(target);
+        const driver = agentPersonaEntryDriver(target, providers ?? []);
+        const unsupported = drivers && driver && !drivers.includes(driver);
         const selected = choices.find(({ id }) => id === agentPersonaModelChoiceId(target));
         const updateTarget = (next: AgentPersonaModelEntry) =>
           props.onChange({
@@ -158,6 +155,11 @@ export function AgentRoutePolicyFields(props: {
                 </Button>
               </div>
             </div>
+            {unsupported ? (
+              <span className="text-xs text-muted-foreground">
+                This provider cannot enforce {value.access}.
+              </span>
+            ) : null}
             <div className="grid grid-cols-[minmax(0,1fr)_7rem] items-center gap-2">
               <Menu>
                 <MenuTrigger
@@ -241,9 +243,9 @@ export function AgentRoutePolicyFields(props: {
       <Button
         type="button"
         variant="outline"
-        disabled={disabled || !nextAgentPersonaModelChoice(choices, value.modelRoute)}
+        disabled={disabled || !nextAgentPersonaModelChoice(choices, value.modelRoute, drivers)}
         onClick={() => {
-          const choice = nextAgentPersonaModelChoice(choices, value.modelRoute);
+          const choice = nextAgentPersonaModelChoice(choices, value.modelRoute, drivers);
           if (choice)
             props.onChange({ ...value, modelRoute: [...value.modelRoute, choice.target] });
         }}
@@ -251,7 +253,7 @@ export function AgentRoutePolicyFields(props: {
         Add model
       </Button>
       <p className="text-xs text-muted-foreground">
-        Model availability and runtime policy support are checked for each launch.
+        Model availability and access level support are checked for each launch.
       </p>
     </>
   );

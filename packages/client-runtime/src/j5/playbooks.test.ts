@@ -147,7 +147,7 @@ describe("saved Playbook Author instructions", () => {
       displayName: "Author",
       description: "Author",
       instructions: original,
-      authorityPolicy: "workspace-write",
+      access: "workspace-write",
       modelRoute: [
         {
           instanceId: "remote-codex",
@@ -192,7 +192,6 @@ describe("saved Playbook Author instructions", () => {
       expect(edits[0]).toMatchObject({
         expectedDigest: "a".repeat(64),
         displayName: author.displayName,
-        modelRouteFormat: "ordered",
         modelRoute,
       });
     else expect(instructions).toBe(original);
@@ -219,7 +218,7 @@ describe("Playbook Author installation", () => {
     expect(definitions).toHaveLength(1);
     expect(definitions[0]).toMatchObject({
       id: "playbook-author",
-      authorityPolicy: "workspace-write",
+      access: "workspace-write",
       modelRoute: [
         {
           instanceId: "remote-codex",

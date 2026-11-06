@@ -128,7 +128,7 @@ export const assertPersonaWithinApprovedLevel = Effect.fn(
   return yield* new J5OutsideAgentToolError({
     state: `Persona ${persona} runs in permission mode ${runtimeMode}, which is broader than the level this MCP client was approved for (${caller.client.access}).`,
     nextCommand:
-      "Retry j5_spawn_agent with a persona within that level (j5_list_personas shows each one's runtime policy) or without a persona, or sign in again and have the person approve a higher level.",
+      "Retry j5_spawn_agent with a persona within that level (j5_list_personas shows each one's access level) or without a persona, or sign in again and have the person approve a higher level.",
   });
 });
 

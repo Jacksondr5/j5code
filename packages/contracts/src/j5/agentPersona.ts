@@ -225,9 +225,8 @@ export const AgentPersonaEditInput = Schema.Struct({
   displayName: TrimmedNonEmptyString.check(Schema.isMaxLength(65536)),
   description: TrimmedNonEmptyString.check(Schema.isMaxLength(65536)),
   instructions: AgentPersonaInstructions,
-  authorityPolicy: AgentPersonaAuthorityPolicy,
+  access: AgentPersonaAccess,
   modelRoute: AgentPersonaModelRoute,
-  modelRouteFormat: Schema.optional(Schema.Literal("ordered")),
 });
 export type AgentPersonaEditInput = typeof AgentPersonaEditInput.Type;
 
@@ -255,7 +254,7 @@ export const AgentPersonaCreateInput = Schema.Struct({
   displayName: TrimmedNonEmptyString.check(Schema.isMaxLength(65536)),
   description: TrimmedNonEmptyString.check(Schema.isMaxLength(65536)),
   instructions: AgentPersonaInstructions,
-  authorityPolicy: AgentPersonaAuthorityPolicy,
+  access: AgentPersonaAccess,
   modelRoute: AgentPersonaModelRoute,
 });
 export type AgentPersonaCreateInput = typeof AgentPersonaCreateInput.Type;
@@ -278,12 +277,6 @@ export const OrchestrationV2AgentPersonaCatalogEntry = Schema.Struct({
   removed: Schema.optional(Schema.Boolean),
   /** Content digest of the current definition; compared with launch snapshots to show drift. */
   definitionDigest: Schema.optional(Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/))),
-  editable: Schema.optional(
-    Schema.Struct({
-      definitionDigest: AgentPersonaEditableDetails.fields.definitionDigest,
-      modelRoute: Schema.Tuple([AgentPersonaModelTarget, AgentPersonaModelTarget]),
-    }),
-  ),
   orderedEditable: Schema.optional(AgentPersonaEditableDetails),
   definitionVersion: PositiveInt,
   displayName: TrimmedNonEmptyString,

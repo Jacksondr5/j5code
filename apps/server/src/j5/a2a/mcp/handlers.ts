@@ -827,7 +827,7 @@ const handlers = {
             id: persona.personaId,
             display_name: persona.displayName,
             description: persona.description,
-            runtime_policy: persona.defaultAuthorityPolicy,
+            access: persona.defaultAuthorityPolicy,
             availability: isDisabled
               ? ("disabled" as const)
               : available

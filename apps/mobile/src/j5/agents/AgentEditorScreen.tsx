@@ -119,7 +119,7 @@ export function AgentEditorScreen() {
           onChangeText={setInstructions}
         />
         <Text className="text-xs text-foreground-muted">
-          Markdown. Instructions describe behavior; the runtime policy below is what is enforced.
+          Markdown. Instructions describe behavior; the access level below is what is enforced.
         </Text>
       </View>
       <AgentRoutePolicyFields

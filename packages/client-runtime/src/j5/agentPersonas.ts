@@ -12,6 +12,7 @@ import {
 import type {
   AgentHandoff,
   AgentPersonaAuthorityPolicy,
+  AgentPersonaAccess,
   AgentPersonaFolderGitStatus,
   AgentPersonaLibraryFolder,
   AgentPersonaOrigin,
@@ -146,7 +147,7 @@ export function presentAgentPersonaCatalog(
     const removed =
       persona.availability.status === "unavailable" && persona.availability.reason === "removed";
     const policy = persona.access ?? persona.defaultAuthorityPolicy;
-    const editable = persona.orderedEditable ?? persona.editable;
+    const editable = persona.orderedEditable;
     const unsupported = !isAgentPersonaAuthorityPolicy(policy);
     return {
       personaId: persona.personaId,
@@ -154,15 +155,14 @@ export function presentAgentPersonaCatalog(
       removed,
       enabled: !disabled && !removed,
       edit:
-        persona.imported && editable && isAgentPersonaAuthorityPolicy(policy)
+        persona.imported && editable && persona.access !== undefined
           ? {
               personaId: persona.personaId,
               expectedDigest: editable.definitionDigest,
               displayName: persona.displayName,
               description: persona.description,
-              authorityPolicy: policy,
+              access: persona.access,
               modelRoute: editable.modelRoute,
-              modelRouteFormat: "ordered" as const,
             }
           : null,
       origin: persona.origin ?? null,
@@ -180,7 +180,7 @@ export function presentAgentPersonaCatalog(
       )
         .map(
           (policy) =>
-            `${authorityLabel(policy)}${policy === persona.defaultAuthorityPolicy ? " (default)" : ""}`,
+            `${authorityLabel(policy)}${persona.access === undefined && policy === persona.defaultAuthorityPolicy ? " (default)" : ""}`,
         )
         .join(", "),
       // Unsupported wins over Removed and Disabled: those states can be undone, and the row must
@@ -242,7 +242,7 @@ const ROUTE_FAILURE_TEXT: Readonly<Record<AgentPersonaRouteFailureCode, string>>
   "provider-unauthenticated": "provider is not signed in",
   "model-not-advertised": "model is not offered by the signed-in provider",
   "reasoning-effort-not-advertised": "reasoning effort is not offered for this model",
-  "authority-not-enforceable": "runtime policy is not enforceable on this provider yet",
+  "authority-not-enforceable": "access level is not enforceable on this provider yet",
   "usage-limit": "provider is at its usage limit",
   "option-not-advertised": "model options are not offered by this provider",
 };
@@ -293,12 +293,8 @@ export async function prepareAgentPersonaImport(
 export const AGENT_PERSONA_POLICY_OPTIONS = [
   { value: "read-only", label: "Read only" },
   { value: "workspace-write", label: "Workspace write" },
-  { value: "critic-review", label: "Review only" },
-  { value: "critic-fix", label: "Targeted fixes" },
-  { value: "diagnostic", label: "Diagnostic writes (not yet supported)" },
-  { value: "publish-only", label: "Publish only (not yet supported)" },
   { value: "full-access", label: "Full access (unsandboxed)" },
-] as const satisfies ReadonlyArray<{ value: AgentPersonaAuthorityPolicy; label: string }>;
+] as const satisfies ReadonlyArray<{ value: AgentPersonaAccess; label: string }>;
 
 export const agentPersonaModelChoiceId = (target: AgentPersonaModelEntry) =>
   JSON.stringify([
@@ -436,10 +432,13 @@ export function agentPersonaModelChoices(
 export const nextAgentPersonaModelChoice = (
   choices: ReturnType<typeof agentPersonaModelChoices>,
   current: ReadonlyArray<AgentPersonaModelEntry>,
+  enforcingDrivers: ReadonlyArray<ProviderDriverKind> | undefined,
 ) =>
   choices.find(
     (choice) =>
       choice.available &&
+      choice.driver !== undefined &&
+      enforcingDrivers?.includes(choice.driver) &&
       !current.some(
         (entry) =>
           entry.model === choice.target.model &&
@@ -531,6 +530,14 @@ export function agentPersonaPolicyDrivers(
   return catalog?.policyEnforcement?.find((entry) => entry.policy === policy)?.drivers;
 }
 
+export const agentPersonaEntryDriver = (
+  target: AgentPersonaModelEntry,
+  providers: ReadonlyArray<Pick<ServerProvider, "instanceId" | "driver">>,
+) =>
+  "driver" in target
+    ? target.driver
+    : providers.find(({ instanceId }) => instanceId === target.instanceId)?.driver;
+
 function listLabels(drivers: ReadonlyArray<ProviderDriverKind>): string {
   const labels = drivers.map(providerLabel);
   return labels.length < 2
@@ -549,16 +556,13 @@ export function agentPersonaPolicyNote(
   const unsandboxed = policy === "full-access";
   if (drivers.length === 0) {
     return unsandboxed
-      ? "No provider supports this policy yet, so it won't launch."
-      : "No provider can sandbox this policy yet, so it won't launch.";
+      ? "No provider supports this access level yet, so it won't launch."
+      : "No provider can sandbox this access level yet, so it won't launch.";
   }
   const outside = [
     ...new Set(
       modelRoute.flatMap((target) => {
-        const driver =
-          "driver" in target
-            ? target.driver
-            : providers.find(({ instanceId }) => instanceId === target.instanceId)?.driver;
+        const driver = agentPersonaEntryDriver(target, providers);
         return driver === undefined ? [] : [driver];
       }),
     ),
@@ -568,7 +572,7 @@ export function agentPersonaPolicyNote(
     : `Sandboxed on ${listLabels(drivers)}.`;
   return outside.length === 0
     ? where
-    : `${where} ${listLabels(outside)} routes won't launch with this policy.`;
+    : `${where} ${listLabels(outside)} routes won't launch with this access level.`;
 }
 
 export interface AgentPersonaCreateDraft {
@@ -576,7 +580,7 @@ export interface AgentPersonaCreateDraft {
   readonly id: string;
   readonly description: string;
   readonly instructions: string;
-  readonly authorityPolicy: AgentPersonaAuthorityPolicy;
+  readonly access: AgentPersonaAccess;
   readonly modelRoute: ReadonlyArray<AgentPersonaModelEntry>;
 }
 
@@ -584,15 +588,15 @@ export interface AgentPersonaCreateDraft {
 export function agentPersonaDuplicateDraft(
   definition: AgentPersonaDefinitionView,
 ): AgentPersonaCreateDraft {
-  const authorityPolicy = definition.access ?? definition.authority.defaultPolicy;
-  if (!isAgentPersonaAuthorityPolicy(authorityPolicy))
-    throw new Error(unsupportedPolicyReason(authorityPolicy));
+  const access = definition.access;
+  if (access === undefined)
+    throw new Error("Update the environment to duplicate this persona with its access level.");
   return {
     displayName: `${definition.displayName} copy`,
     id: agentPersonaIdFromName(`${definition.id}-copy`),
     description: definition.description,
     instructions: definition.instructions,
-    authorityPolicy,
+    access,
     modelRoute: definition.models ?? definition.modelRoute,
   };
 }

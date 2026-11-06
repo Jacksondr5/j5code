@@ -26,6 +26,32 @@ const runtimePolicy = (authorityPolicy: AgentPersonaAuthorityPolicy, driver = "c
 });
 
 describe("agent persona provider policy", () => {
+  it("reports exactly the three access levels and their enforcing drivers", () => {
+    assert.deepEqual(
+      agentPersonaPolicyEnforcement().map(({ policy, drivers }) => ({
+        policy,
+        drivers: drivers.map(String),
+      })),
+      [
+        { policy: "read-only", drivers: ["codex", "claudeAgent"] },
+        { policy: "workspace-write", drivers: ["codex"] },
+        {
+          policy: "full-access",
+          drivers: [
+            "codex",
+            "claudeAgent",
+            "cursor",
+            "opencode",
+            "grok",
+            "antigravity",
+            "pi",
+            "acpRegistry",
+          ],
+        },
+      ],
+    );
+  });
+
   it("translates inspection policies to non-interactive read-only access", () => {
     for (const authorityPolicy of ["read-only", "critic-review"] as const) {
       assert.deepEqual(

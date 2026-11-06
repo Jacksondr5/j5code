@@ -2409,7 +2409,7 @@ it.effect(
             displayName: id,
             description: `The ${id} persona.`,
             instructions: `You are ${id}.`,
-            authorityPolicy: "read-only",
+            access: "read-only",
             modelRoute: [
               {
                 driver: ProviderDriverKind.make("codex"),
@@ -3693,7 +3693,7 @@ it.effect(
           displayName: "Surveyor",
           description: "Looks around.",
           instructions: "Survey the whole repository.",
-          authorityPolicy: "read-only",
+          access: "read-only",
           modelRoute: [
             {
               driver: ProviderDriverKind.make("codex"),

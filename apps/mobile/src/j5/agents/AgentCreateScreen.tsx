@@ -6,7 +6,7 @@ import {
   defaultAgentPersonaModelRoute,
 } from "@t3tools/client-runtime/j5/agent-personas";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import type { AgentPersonaAuthorityPolicy, AgentPersonaModelEntry } from "@t3tools/contracts";
+import type { AgentPersonaAccess, AgentPersonaModelEntry } from "@t3tools/contracts";
 import { useState } from "react";
 import { Pressable, View } from "react-native";
 
@@ -28,7 +28,7 @@ type PersonaDraft = {
   idEdited: boolean;
   description: string;
   instructions: string;
-  authorityPolicy: AgentPersonaAuthorityPolicy;
+  access: AgentPersonaAccess;
   modelRoute: ReadonlyArray<AgentPersonaModelEntry> | null;
 };
 
@@ -53,7 +53,7 @@ export function AgentCreateScreen() {
           idEdited: false,
           description: "",
           instructions: "",
-          authorityPolicy: "read-only",
+          access: "read-only",
           modelRoute: null,
         },
   );
@@ -92,7 +92,7 @@ export function AgentCreateScreen() {
         displayName: draft.displayName.trim(),
         description: draft.description.trim(),
         instructions: draft.instructions,
-        authorityPolicy: draft.authorityPolicy,
+        access: draft.access,
         modelRoute,
       },
     });
@@ -170,7 +170,7 @@ export function AgentCreateScreen() {
           onChangeText={(instructions) => setDraft({ ...draft, instructions })}
         />
         <Text className="text-xs text-foreground-muted">
-          Markdown. Instructions describe behavior; the runtime policy below is what is enforced.
+          Markdown. Instructions describe behavior; the access level below is what is enforced.
         </Text>
       </View>
       {modelRoute === null ? (
@@ -180,7 +180,7 @@ export function AgentCreateScreen() {
       ) : (
         <AgentRoutePolicyFields
           environmentId={props.environmentId}
-          value={{ authorityPolicy: draft.authorityPolicy, modelRoute }}
+          value={{ access: draft.access, modelRoute }}
           disabled={saving}
           onChange={(next) => setDraft({ ...draft, ...next })}
         />

@@ -126,7 +126,7 @@ export function AgentEditorDialog(props: {
                 />
               </div>
               <span className="text-xs text-muted-foreground">
-                Markdown. Instructions describe behavior; the runtime policy below is what is
+                Markdown. Instructions describe behavior; the access level below is what is
                 enforced.
               </span>
             </label>

@@ -4,6 +4,7 @@ import * as Schema from "effect/Schema";
 import { OrchestrationV2Command, OrchestrationV2PublicCommand } from "../orchestrationV2.ts";
 import {
   AgentPersonaCreateInput,
+  AgentPersonaEditInput,
   AgentPersonaId,
   OrchestrationV2AgentPersonaAssignment,
   OrchestrationV2AgentPersonaRequest,
@@ -15,6 +16,7 @@ const decodePersonaId = Schema.decodeUnknownSync(AgentPersonaId);
 const decodePersonaAssignment = Schema.decodeUnknownSync(OrchestrationV2AgentPersonaAssignment);
 const decodePersonaRequest = Schema.decodeUnknownSync(OrchestrationV2AgentPersonaRequest);
 const decodePersonaCreate = Schema.decodeUnknownSync(AgentPersonaCreateInput);
+const decodePersonaEdit = Schema.decodeUnknownSync(AgentPersonaEditInput);
 
 describe("agent persona contracts", () => {
   it("accepts one or many ordered instance entries and rejects an empty list", () => {
@@ -23,7 +25,7 @@ describe("agent persona contracts", () => {
       displayName: "Ordered",
       description: "Ordered models",
       instructions: "Work",
-      authorityPolicy: "read-only",
+      access: "read-only",
       modelRoute: [
         {
           instanceId: "codex",
@@ -145,16 +147,14 @@ describe("agent persona contracts", () => {
       displayName: "Operator",
       description: "Runs things.",
       instructions: "Run things.",
-      authorityPolicy: "root-access",
+      access: "root-access",
       modelRoute: [
         { driver: "codex", model: "gpt-5.6-terra", reasoningEffort: "high" },
         { driver: "codex", model: "gpt-5.6-terra", reasoningEffort: "high" },
       ],
     };
     expect(() => decodePersonaCreate(create)).toThrow();
-    expect(decodePersonaCreate({ ...create, authorityPolicy: "full-access" }).authorityPolicy).toBe(
-      "full-access",
-    );
+    expect(decodePersonaCreate({ ...create, access: "full-access" }).access).toBe("full-access");
   });
 
   it("keeps server-issued command assignments on known policies", () => {
@@ -230,4 +230,40 @@ it("keeps indexed assignments readable by the legacy assignment schema", () => {
   const oldReader = Schema.Struct(legacyFields);
   expect(Schema.decodeUnknownSync(oldReader)(raw).resolvedRoute).toBe("fallback");
   expect(decodePersonaAssignment(raw).resolvedEntryIndex).toBe(2);
+});
+
+it("accepts only three access levels for new persona writes", () => {
+  const details = {
+    id: "reviewer",
+    personaId: "reviewer",
+    expectedDigest: "a".repeat(64),
+    displayName: "Reviewer",
+    description: "Review changes",
+    instructions: "Review",
+    modelRoute: [{ instanceId: "codex", model: "review-model" }],
+  };
+  for (const schema of [AgentPersonaCreateInput, AgentPersonaEditInput]) {
+    const decode = Schema.decodeUnknownSync(schema);
+    for (const access of ["read-only", "workspace-write", "full-access"])
+      expect(decode({ ...details, access }).access).toBe(access);
+    for (const access of [undefined, "critic-review", "critic-fix", "diagnostic", "publish-only"])
+      expect(() => decode({ ...details, access, authorityPolicy: "read-only" })).toThrow();
+  }
+});
+
+it("rejects an old-client edit without access during decoding", () => {
+  expect(() =>
+    decodePersonaEdit({
+      personaId: "reviewer",
+      expectedDigest: "a".repeat(64),
+      displayName: "Reviewer",
+      description: "Review changes",
+      instructions: "Review",
+      authorityPolicy: "read-only",
+      modelRoute: [
+        { driver: "codex", model: "first", reasoningEffort: "high" },
+        { driver: "codex", model: "second", reasoningEffort: "high" },
+      ],
+    }),
+  ).toThrow(/access/);
 });
