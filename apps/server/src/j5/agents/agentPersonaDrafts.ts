@@ -210,6 +210,25 @@ const inline = (text: string) => {
 
 const LINE_BREAK = /[\r\n\u2028\u2029]/;
 
+/** Whether a persona already has every field a draft would save. */
+const sameFields = (
+  a: {
+    readonly displayName: string;
+    readonly description: string;
+    readonly instructions: string;
+    readonly access: string;
+    readonly modelRoute: ReadonlyArray<unknown>;
+    readonly independentReviewer?: boolean | undefined;
+  },
+  b: typeof a,
+) =>
+  a.displayName === b.displayName &&
+  a.description === b.description &&
+  a.instructions === b.instructions &&
+  a.access === b.access &&
+  JSON.stringify(a.modelRoute) === JSON.stringify(b.modelRoute) &&
+  (a.independentReviewer === true) === (b.independentReviewer === true);
+
 const changedFields = (before: AgentPersonaDraftFields, after: AgentPersonaDraftFields) => {
   const lines: Array<string> = [];
   if (before.displayName !== after.displayName)
@@ -457,6 +476,25 @@ export const makeAgentPersonaDrafts = Effect.fn("j5.agents.personaDrafts.make")(
         Effect.mapError(() => refuse(`Persona draft ${row.id} can't be read.`)),
       );
       const current = yield* readCatalog;
+      const markSaved = Effect.gen(function* () {
+        yield* sql`
+          UPDATE j5_persona_draft
+          SET status = 'saved', saved_by = ${input.savedBy}, saved_at = ${yield* now}
+          WHERE id = ${row.id}
+        `;
+        return saved;
+      });
+      // A save that wrote the library but died before marking the draft: its retry finds the
+      // persona already in effect with exactly these fields, and finishes instead of refusing.
+      const inEffect = current.definitions.find(({ id }) => id === row.persona_id);
+      const inEffectAccess = inEffect === undefined ? undefined : agentPersonaAccess(inEffect);
+      if (
+        inEffect !== undefined &&
+        inEffectAccess !== undefined &&
+        current.importedIds.includes(row.persona_id) &&
+        sameFields(fieldsOf(inEffect, inEffectAccess), fields)
+      )
+        return yield* markSaved;
       const stale = (why: string) =>
         refuse(
           `${row.persona_id} ${why} since the agent drafted this, so nothing was saved. Ask the agent to read it again and draft the change anew.`,
@@ -485,12 +523,7 @@ export const makeAgentPersonaDrafts = Effect.fn("j5.agents.personaDrafts.make")(
           kind === "imported" ? library.editImported(decoded) : library.overrideSource(decoded)
         ).pipe(Effect.mapError(libraryRefusal));
       }
-      yield* sql`
-          UPDATE j5_persona_draft
-          SET status = 'saved', saved_by = ${input.savedBy}, saved_at = ${yield* now}
-          WHERE id = ${row.id}
-        `;
-      return saved;
+      return yield* markSaved;
     },
   );
 
