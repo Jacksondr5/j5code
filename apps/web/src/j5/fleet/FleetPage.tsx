@@ -375,7 +375,11 @@ function FleetNodeRows(
         const thread = threadFor(props.threadsByKey, environmentId, agent);
         const displayName = thread?.title ?? agent.displayName;
         return {
-          seat: agent.crew?.seat ?? agent.participantId,
+          seat:
+            agent.crew?.seat ??
+            (agent.replaced === undefined
+              ? agent.participantId
+              : `${agent.replaced.seat} (replaced)`),
           participant:
             displayName === null
               ? { displayName: "Unnamed participant", tooltipParticipantId: agent.participantId }
@@ -485,7 +489,15 @@ function FleetNodeRows(
                         onClick={(event) => {
                           event.preventDefault();
                           event.stopPropagation();
-                          void archive(crew, seats);
+                          // Members the Captain replaced retire with the Crew they left.
+                          void archive(crew, [
+                            ...seats,
+                            ...node.children
+                              .map((child) => child.row)
+                              .filter(
+                                (row) => row.agent.replaced?.crewInstanceId === crew.crewInstanceId,
+                              ),
+                          ]);
                         }}
                         size="xs"
                         variant="ghost"

@@ -616,32 +616,57 @@ it.effect("a failed archive removes nothing", () =>
   }),
 );
 
-it.effect("looks at a replaced member's worktree too, without archiving its thread", () =>
+it.effect("archives a replaced member with its Crew and cleans up its worktree like a seat's", () =>
   Effect.gen(function* () {
-    const { layer, input, replaced, archived, cleanedSeats } = yield* fixture;
-    const oldCritic = ThreadId.make("t:old-critic");
+    const { layer, input, facts, replaced, archived, cleanedSeats } = yield* fixture;
+    const oldCritic = ParticipantId.make("agent:j5:a2a:thread:old-critic");
+    const oldCriticThread = ThreadId.make("t:old-critic");
     yield* Ref.set(replaced, [
       {
         seatName: "critic",
         agentId: "critic",
-        participantId: ParticipantId.make("agent:j5:a2a:thread:old-critic"),
-        threadId: oldCritic,
+        participantId: oldCritic,
+        threadId: oldCriticThread,
         playbookStepIds: [],
         replacedBySeat: "critic",
         replacedByParticipantId: critic,
         replacedAt: "2026-09-09T16:30:00.000Z",
       },
     ]);
+    // It is still running a turn as a plain agent, so the archive interrupts it like a seat.
+    yield* Ref.update(facts, (current) => ({
+      ...current,
+      [oldCritic]: {
+        facts: {
+          openExchanges: [],
+          runningTurn: { runId: RunId.make("run:old"), status: "running" as const },
+        },
+        threadArchived: false,
+        retired: false,
+      },
+    }));
     yield* Effect.gen(function* () {
       const service = yield* ArchiveCrewService;
+      // The Captain's confirmation lists it beside the seats, under a label no seat can take.
+      const refusal = yield* service.archive(input()).pipe(Effect.flip);
+      assert.equal(refusal._tag, "ArchiveCrewConfirmationRequiredError");
+      if (refusal._tag !== "ArchiveCrewConfirmationRequiredError") return;
+      assert.deepStrictEqual(
+        refusal.facts.members.map(({ seatName }) => seatName),
+        ["builder", "critic", "critic (replaced)"],
+      );
       yield* service.archive(input({ callerParticipantId: null, confirmationSatisfied: true }));
-      assert.deepStrictEqual(yield* Ref.get(cleanedSeats), [
-        [ThreadId.make("t:b"), ThreadId.make("t:c"), oldCritic],
-      ]);
+      const oldArchive = (yield* Ref.get(archived)).find(
+        ({ target }) => target.threadId === oldCriticThread,
+      );
+      assert.equal(String(oldArchive?.interruptCommandId), "interrupt:critic (replaced)");
       assert.deepStrictEqual(
         (yield* Ref.get(archived)).map(({ target }) => target.threadId),
-        [ThreadId.make("t:b"), ThreadId.make("t:c")],
+        [ThreadId.make("t:b"), ThreadId.make("t:c"), oldCriticThread],
       );
+      assert.deepStrictEqual(yield* Ref.get(cleanedSeats), [
+        [ThreadId.make("t:b"), ThreadId.make("t:c"), oldCriticThread],
+      ]);
     }).pipe(Effect.provide(layer));
   }),
 );
