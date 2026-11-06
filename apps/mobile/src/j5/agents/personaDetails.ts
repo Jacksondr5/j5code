@@ -1,25 +1,14 @@
-import type { AgentPersonaCatalogRow } from "@t3tools/client-runtime/j5/agent-personas";
 import {
-  PROVIDER_DISPLAY_NAMES,
-  type AgentPersonaModelTarget,
-  type AgentPersonaModelEntry,
-} from "@t3tools/contracts";
+  agentPersonaEntryLabel,
+  type AgentPersonaCatalogRow,
+} from "@t3tools/client-runtime/j5/agent-personas";
+import type { ServerProvider, AgentPersonaModelEntry } from "@t3tools/contracts";
 
 export interface PersonaDetailRow {
   readonly label: string;
   readonly value: string;
   readonly tone?: "danger";
 }
-
-const modelLabel = (target: AgentPersonaModelEntry) =>
-  ("driver" in target
-    ? [PROVIDER_DISPLAY_NAMES[target.driver] ?? target.driver, target.model, target.reasoningEffort]
-    : [
-        target.instanceId,
-        target.model,
-        ...(target.options ?? []).map(({ id, value }) => `${id}: ${value}`),
-      ]
-  ).join(" · ");
 
 /**
  * What the read-only sheet shows for a persona the person can't edit. Models come from the
@@ -41,10 +30,11 @@ export function personaDetailRows(
     | { readonly status: "failed" }
     | {
         readonly status: "loaded";
-        readonly route: readonly [AgentPersonaModelTarget, AgentPersonaModelTarget];
-        readonly models?: ReadonlyArray<AgentPersonaModelEntry> | undefined;
+        readonly route: ReadonlyArray<AgentPersonaModelEntry>;
+        readonly models?: ReadonlyArray<AgentPersonaModelEntry>;
       },
   usageLine: string | null,
+  providers: ReadonlyArray<ServerProvider> = [],
 ): ReadonlyArray<PersonaDetailRow> {
   const source = persona.origin?.kind === "folder" ? persona.origin.path : persona.originLabel;
   return [
@@ -57,15 +47,15 @@ export function personaDetailRows(
     ...(source === null ? [] : [{ label: "Source", value: source }]),
     { label: "Access", value: persona.authority },
     ...(models.status === "loaded"
-      ? models.models === undefined
-        ? [
-            { label: "Primary model", value: modelLabel(models.route[0]) },
-            { label: "Fallback model", value: modelLabel(models.route[1]) },
-          ]
-        : models.models.map((target, index) => ({
+      ? (models.models ?? models.route).map((entry, index) => {
+          const label = agentPersonaEntryLabel(entry, providers);
+          return {
             label: `Model ${index + 1}`,
-            value: modelLabel(target),
-          }))
+            value: [label.provider, entry.model, label.reasoning]
+              .filter((part) => part !== undefined)
+              .join(" · "),
+          };
+        })
       : [{ label: "Model", value: models.status === "loading" ? "Loading…" : persona.route }]),
     { label: "Description", value: persona.description },
     ...(usageLine === null ? [] : [{ label: "Usage", value: usageLine }]),

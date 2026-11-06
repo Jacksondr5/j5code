@@ -1,12 +1,11 @@
-import { modelSelectionsEqual } from "@t3tools/shared/model";
 import { agentPersonaPolicy } from "../agents/agentPersonas.ts";
-import { agentPersonaTargets } from "../agents/agentPersonaRouting.ts";
-import { CrewSeatWorkspace, crewMemberSelectionLevel } from "@t3tools/contracts/j5";
+import { CrewSeatWorkspace } from "@t3tools/contracts/j5";
 import {
-  describeCrewSeatRuntime,
-  materializeCrewModelSelection,
-  crewModelSelectionProblem,
-} from "./crewRuntimePreview.ts";
+  agentPersonaEntryMatches,
+  agentPersonaTargetUnavailableReason,
+} from "../agents/agentPersonaRouting.ts";
+import { crewModelSelectionProblem } from "../agents/agentModelSelection.ts";
+import { describeCrewSeatRuntime, materializeCrewModelSelection } from "./crewRuntimePreview.ts";
 import type { CrewProposalSeatRuntime, CrewWorkspaceOptions } from "@t3tools/contracts/j5";
 import { isProviderAvailable } from "@t3tools/contracts";
 import type {
@@ -15,6 +14,7 @@ import type {
   OrchestrationV2AppThread,
   RuntimeMode,
 } from "@t3tools/contracts";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
@@ -350,6 +350,7 @@ export const layer = Layer.effect(
       seats: ReadonlyArray<CrewLaunchSeat>,
     ) {
       const providers = yield* registry.getProviders;
+      const now = yield* Clock.currentTimeMillis;
       // Every seat's workspace resolves against one read of the Captain's repository, here at
       // preview, so the approval token binds what each seat will get. Shared seats need none.
       const checkout = yield* inspectWorkspaces(captain, seats);
@@ -369,14 +370,6 @@ export const layer = Layer.effect(
           ),
         );
       const resolved: Array<ResolvedCrewLaunchSeat> = [];
-      // The reasoning level a selection runs at on its model, explicit or the model's default.
-      const levelOf = (selection: ModelSelection) =>
-        crewMemberSelectionLevel(
-          providers
-            .find((candidate) => candidate.instanceId === selection.instanceId)
-            ?.models.find((model) => model.slug === selection.model),
-          selection.options,
-        );
       // `custom` seats run on whatever the project's lists of models and reasoning levels for
       // custom members allow. A persona seat that keeps its persona's own model and level is not
       // custom and skips the lists.
@@ -494,18 +487,20 @@ export const layer = Layer.effect(
           // time. A seat counts as keeping the persona's model and level by matching either route,
           // never by its absence.
           const frozen = seat.modelSelection;
-          const frozenDriver = providers.find(
+          const frozenProvider = providers.find(
             (candidate) => candidate.instanceId === frozen.instanceId,
-          )?.driver;
-          const keepsPersonaModel =
-            (definition === undefined ? [] : agentPersonaTargets(definition, providers)).some(
+          );
+          const matchingIndex =
+            definition?.modelRoute.findIndex(
               (target) =>
-                target.selection === undefined
-                  ? target.driver === frozenDriver &&
-                    target.model === frozen.model &&
-                    target.reasoningEffort === levelOf(frozen)
-                  : modelSelectionsEqual(target.selection, frozen),
-            ) ?? false;
+                frozenProvider !== undefined &&
+                agentPersonaEntryMatches(
+                  target,
+                  materializeCrewModelSelection(frozen, frozenProvider),
+                  frozenProvider.driver,
+                ),
+            ) ?? -1;
+          const keepsPersonaModel = matchingIndex >= 0;
           const { modelSelection, provider } = yield* resolveSelection(
             seat,
             seat.modelSelection,
@@ -530,6 +525,16 @@ export const layer = Layer.effect(
               detail:
                 "This harness cannot enforce the persona's default access. Select an explicit access mode.",
             });
+          const declared = definition.modelRoute[matchingIndex];
+          if (declared !== undefined) {
+            const unavailable = agentPersonaTargetUnavailableReason(provider, declared, now);
+            if (unavailable !== undefined)
+              return yield* new CrewLaunchSeatUnavailableError({
+                seatName: seat.name,
+                agentId,
+                detail: `Persona entry ${matchingIndex + 1} is unavailable: ${unavailable}.`,
+              });
+          }
           const definitionDigest = yield* agents.snapshot(definition);
           return {
             personaId: agentId,
@@ -537,7 +542,12 @@ export const layer = Layer.effect(
             definitionDigest,
             displayName: definition.displayName,
             authorityPolicy: agentPersonaPolicy(definition),
-            resolvedRoute: "override" as const,
+            resolvedRoute: keepsPersonaModel
+              ? matchingIndex === 0
+                ? ("primary" as const)
+                : ("fallback" as const)
+              : ("override" as const),
+            ...(keepsPersonaModel ? { resolvedEntryIndex: matchingIndex } : {}),
             resolvedDriver: provider.driver,
             resolvedModelSelection: modelSelection,
             ...(seat.runtimeMode === undefined ? {} : { runtimeModeOverride: seat.runtimeMode }),

@@ -131,6 +131,7 @@ it.effect("launches one persona directly without requiring workflow sequencing",
         displayName: "Scout",
         authorityPolicy: "read-only",
         resolvedRoute: "primary",
+        resolvedEntryIndex: 0,
         resolvedDriver: ProviderDriverKind.make("codex"),
         resolvedModelSelection: {
           instanceId: ProviderInstanceId.make("codex"),
@@ -229,7 +230,7 @@ it.effect("blocks a direct persona launch when both declared model routes are un
       );
       assert.include(
         error.message,
-        "Persona scout is blocked because its primary and fallback models are unavailable: ",
+        "Persona scout is blocked because its ordered model entries are unavailable: ",
       );
     }).pipe(
       Effect.provide(

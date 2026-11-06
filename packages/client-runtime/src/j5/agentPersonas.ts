@@ -23,7 +23,7 @@ import type {
   AgentPersonaImportConflict,
   AgentPersonaDefinitionView,
   AgentPersonaEditInput,
-  AgentPersonaModelTarget,
+  AgentPersonaModelEntry,
   ProviderDriverKind,
   ServerProvider,
   AgentPersonaId,
@@ -83,6 +83,32 @@ function providerLabel(driver: ProviderDriverKind): string {
   return PROVIDER_DISPLAY_NAMES[driver] ?? driver;
 }
 
+export function agentPersonaEntryLabel(
+  target: {
+    readonly driver?: ProviderDriverKind | undefined;
+    readonly instanceId?: ModelSelection["instanceId"] | undefined;
+    readonly reasoningEffort?: string | undefined;
+    readonly options?: ModelSelection["options"];
+  },
+  providers: ReadonlyArray<ServerProvider>,
+) {
+  const provider = providers.find(({ instanceId }) => instanceId === target.instanceId);
+  const label =
+    target.driver !== undefined
+      ? providerLabel(target.driver)
+      : provider === undefined
+        ? (target.instanceId ?? "Provider")
+        : providers.filter(({ driver }) => driver === provider.driver).length > 1
+          ? `${providerLabel(provider.driver)} · ${provider.instanceId}`
+          : providerLabel(provider.driver);
+  return {
+    provider: label,
+    reasoning:
+      target.reasoningEffort ??
+      target.options?.find(({ id }) => isAgentPersonaReasoningOptionId(id))?.value,
+  };
+}
+
 export function presentAgentPersonaAssignment(
   assignment: OrchestrationV2AgentPersonaAssignment,
 ): AgentPersonaAssignmentPresentation {
@@ -111,6 +137,7 @@ export function presentAgentPersonaAssignment(
 
 export function presentAgentPersonaCatalog(
   catalog: OrchestrationV2AgentPersonaCatalog,
+  providers: ReadonlyArray<ServerProvider> = [],
 ): ReadonlyArray<AgentPersonaCatalogRow> {
   return catalog.personas.map((persona) => {
     const available = persona.availability.status === "available";
@@ -119,6 +146,7 @@ export function presentAgentPersonaCatalog(
     const removed =
       persona.availability.status === "unavailable" && persona.availability.reason === "removed";
     const policy = persona.access ?? persona.defaultAuthorityPolicy;
+    const editable = persona.orderedEditable ?? persona.editable;
     const unsupported = !isAgentPersonaAuthorityPolicy(policy);
     return {
       personaId: persona.personaId,
@@ -126,14 +154,15 @@ export function presentAgentPersonaCatalog(
       removed,
       enabled: !disabled && !removed,
       edit:
-        persona.imported && persona.editable && isAgentPersonaAuthorityPolicy(policy)
+        persona.imported && editable && isAgentPersonaAuthorityPolicy(policy)
           ? {
               personaId: persona.personaId,
-              expectedDigest: persona.editable.definitionDigest,
+              expectedDigest: editable.definitionDigest,
               displayName: persona.displayName,
               description: persona.description,
               authorityPolicy: policy,
-              modelRoute: persona.editable.modelRoute,
+              modelRoute: editable.modelRoute,
+              modelRouteFormat: "ordered" as const,
             }
           : null,
       origin: persona.origin ?? null,
@@ -179,17 +208,27 @@ export function presentAgentPersonaCatalog(
         : disabled || removed
           ? []
           : persona.availability.status === "unavailable"
-            ? agentPersonaBlockedReasons(persona.availability.attempts ?? [])
+            ? agentPersonaBlockedReasons(
+                persona.modelEntries === undefined
+                  ? (persona.availability.attempts ?? [])
+                  : persona.modelEntries.map(({ index, target, failures }) => ({
+                      route: index === 0 ? "primary" : "fallback",
+                      entryIndex: index,
+                      ...target,
+                      failures,
+                    })),
+                providers,
+              )
             : [],
       route: available
-        ? `${providerLabel(persona.availability.resolvedDriver)} · ${persona.availability.resolvedModelSelection.model} · ${persona.availability.resolvedRoute}`
+        ? `${providerLabel(persona.availability.resolvedDriver)} · ${persona.availability.resolvedModelSelection.model} · entry ${1 + (persona.availability.resolvedEntryIndex ?? (persona.availability.resolvedRoute === "primary" ? 0 : 1))}`
         : persona.availability.reason === "authority-not-enforceable"
           ? "Required authority is not yet enforceable"
           : removed
             ? "Removed from this library"
             : disabled
               ? "Disabled for new launches"
-              : "Primary and fallback models unavailable",
+              : "Ordered model entries unavailable",
     };
   });
 }
@@ -204,16 +243,27 @@ const ROUTE_FAILURE_TEXT: Readonly<Record<AgentPersonaRouteFailureCode, string>>
   "model-not-advertised": "model is not offered by the signed-in provider",
   "reasoning-effort-not-advertised": "reasoning effort is not offered for this model",
   "authority-not-enforceable": "runtime policy is not enforceable on this provider yet",
+  "usage-limit": "provider is at its usage limit",
+  "option-not-advertised": "model options are not offered by this provider",
 };
 
 /** "Primary · Codex gpt-5.6-terra: model is not offered…" for each rejected route. */
 function agentPersonaBlockedReasons(
-  attempts: ReadonlyArray<AgentPersonaRouteAttempt>,
+  attempts: ReadonlyArray<
+    AgentPersonaRouteAttempt & { readonly options?: ModelSelection["options"] }
+  >,
+  providers: ReadonlyArray<ServerProvider>,
 ): ReadonlyArray<string> {
   return attempts.map((attempt) => {
-    const label = attempt.route === "primary" ? "Primary" : "Fallback";
+    const label =
+      attempt.entryIndex === undefined
+        ? attempt.route === "primary"
+          ? "Primary"
+          : "Fallback"
+        : `Entry ${attempt.entryIndex + 1}`;
     const reasons = attempt.failures.map((code) => ROUTE_FAILURE_TEXT[code]).join("; ");
-    return `${label} · ${providerLabel(attempt.driver)} ${attempt.model} (${attempt.reasoningEffort}): ${reasons === "" ? "unavailable" : reasons}`;
+    const entry = agentPersonaEntryLabel(attempt, providers);
+    return `${label} · ${entry.provider} ${attempt.model}${entry.reasoning === undefined ? "" : ` (${entry.reasoning})`}: ${reasons === "" ? "unavailable" : reasons}`;
   });
 }
 
@@ -250,25 +300,54 @@ export const AGENT_PERSONA_POLICY_OPTIONS = [
   { value: "full-access", label: "Full access (unsandboxed)" },
 ] as const satisfies ReadonlyArray<{ value: AgentPersonaAuthorityPolicy; label: string }>;
 
-export const agentPersonaModelChoiceId = (target: AgentPersonaModelTarget) =>
-  JSON.stringify([target.driver, target.model]);
+export const agentPersonaModelChoiceId = (target: AgentPersonaModelEntry) =>
+  JSON.stringify([
+    "driver" in target ? target.driver : target.instanceId,
+    target.model,
+    "driver" in target ? "legacy" : "instance",
+  ]);
 
-/** Signed-in harnesses with their selectable models, in picker order. */
-export function agentPersonaModelGroups(choices: ReturnType<typeof agentPersonaModelChoices>) {
-  const groups = new Map<ProviderDriverKind, typeof choices>();
-  for (const choice of choices) {
-    if (!choice.available) continue;
-    groups.set(choice.target.driver, [...(groups.get(choice.target.driver) ?? []), choice]);
-  }
-  return [...groups]
-    .map(([driver, models]) => ({ driver, label: providerLabel(driver), models }))
-    .sort((a, b) => a.label.localeCompare(b.label));
+export const agentPersonaEntryReasoning = (target: AgentPersonaModelEntry) =>
+  "reasoningEffort" in target
+    ? target.reasoningEffort
+    : target.options?.find(({ id }) => isAgentPersonaReasoningOptionId(id))?.value;
+
+export function withAgentPersonaReasoning(
+  target: AgentPersonaModelEntry,
+  effort: string,
+  optionId?: string,
+): AgentPersonaModelEntry {
+  if ("driver" in target) return { ...target, reasoningEffort: effort };
+  const id = optionId ?? target.options?.find(({ id }) => isAgentPersonaReasoningOptionId(id))?.id;
+  if (id === undefined) return target;
+  return {
+    ...target,
+    options: [
+      ...(target.options ?? []).filter((option) => option.id !== id),
+      { id, value: effort },
+    ],
+  };
 }
 
-/** Retain configured models while limiting new selections to supported reasoning levels. */
+export function agentPersonaModelGroups(choices: ReturnType<typeof agentPersonaModelChoices>) {
+  const groups = new Map<string, { driver: string; label: string; models: typeof choices }>();
+  for (const choice of choices) {
+    if (!choice.available || choice.driver === undefined || "driver" in choice.target) continue;
+    const key = choice.target.instanceId;
+    const group = groups.get(key) ?? {
+      driver: key,
+      label: choice.instanceLabel,
+      models: [],
+    };
+    group.models.push(choice);
+    groups.set(key, group);
+  }
+  return [...groups.values()].sort((a, b) => a.label.localeCompare(b.label));
+}
+
 export function agentPersonaModelChoices(
   providers: ReadonlyArray<ServerProvider>,
-  current: ReadonlyArray<AgentPersonaModelTarget>,
+  current: ReadonlyArray<AgentPersonaModelEntry>,
 ) {
   const choices = new Map<
     string,
@@ -276,53 +355,99 @@ export function agentPersonaModelChoices(
       id: string;
       label: string;
       modelLabel: string;
+      instanceLabel: string;
       available: boolean;
-      target: AgentPersonaModelTarget;
+      target: AgentPersonaModelEntry;
+      driver: ProviderDriverKind | undefined;
       efforts: string[];
+      reasoningOptionId?: string;
     }
   >();
   for (const provider of providers) {
     if (!provider.enabled || !provider.installed || provider.auth.status !== "authenticated")
       continue;
-    const driver = provider.driver;
+    const label = agentPersonaEntryLabel({ instanceId: provider.instanceId }, providers).provider;
     for (const model of provider.models) {
       const descriptor = agentPersonaReasoningDescriptor(model);
-      if (descriptor === undefined || descriptor.options.length === 0) continue;
-      const efforts = descriptor.options.map(({ id }) => id);
-      const target = {
-        driver,
+      const efforts = descriptor?.options.map(({ id }) => id) ?? [];
+      const effort = efforts.includes("high") ? "high" : efforts[0];
+      const target: AgentPersonaModelEntry = {
+        instanceId: provider.instanceId,
         model: model.slug,
-        reasoningEffort: efforts.includes("high") ? "high" : efforts[0]!,
-      } satisfies AgentPersonaModelTarget;
+        ...(descriptor === undefined || effort === undefined
+          ? {}
+          : { options: [{ id: descriptor.id, value: effort }] }),
+      };
       const id = agentPersonaModelChoiceId(target);
-      const previous = choices.get(id);
       choices.set(id, {
         id,
-        label: `${providerLabel(driver)} · ${model.slug}`,
+        label: `${label} · ${model.slug}`,
+        instanceLabel: label,
         modelLabel: model.slug,
         available: true,
         target,
-        efforts: [...new Set([...(previous?.efforts ?? []), ...efforts])],
+        driver: provider.driver,
+        efforts,
+        ...(descriptor === undefined ? {} : { reasoningOptionId: descriptor.id }),
       });
     }
   }
-  const advertisedIds = new Set(choices.keys());
   for (const target of current) {
     const id = agentPersonaModelChoiceId(target);
-    if (advertisedIds.has(id)) continue;
     const previous = choices.get(id);
-    const efforts = [...new Set([...(previous?.efforts ?? []), target.reasoningEffort])];
+    if (previous) {
+      const effort = agentPersonaEntryReasoning(target);
+      if (!previous.available && typeof effort === "string") {
+        previous.efforts = [...new Set([...previous.efforts, effort])];
+        previous.target = target;
+      }
+      continue;
+    }
+    const provider = providers.find((provider) =>
+      "driver" in target
+        ? provider.driver === target.driver
+        : provider.instanceId === target.instanceId,
+    );
+    const model = provider?.models.find((model) => model.slug === target.model);
+    const descriptor = agentPersonaReasoningDescriptor(model);
+    const configuredEffort = agentPersonaEntryReasoning(target);
+    const efforts = [
+      ...new Set([
+        ...(descriptor?.options.map(({ id }) => id) ?? []),
+        ...(typeof configuredEffort === "string" ? [configuredEffort] : []),
+      ]),
+    ];
+    const entryLabel = agentPersonaEntryLabel(target, providers).provider;
     choices.set(id, {
       id,
-      label: `${providerLabel(target.driver)} · ${target.model} (not advertised)`,
-      modelLabel: `${target.model} (not advertised)`,
+      label: `${entryLabel} · ${target.model}${model ? "" : " (not advertised)"}`,
+      instanceLabel: entryLabel,
+      modelLabel: target.model,
       available: false,
       target,
+      driver: "driver" in target ? target.driver : provider?.driver,
       efforts,
+      ...(descriptor === undefined ? {} : { reasoningOptionId: descriptor.id }),
     });
   }
   return [...choices.values()].sort((a, b) => a.label.localeCompare(b.label));
 }
+
+export const nextAgentPersonaModelChoice = (
+  choices: ReturnType<typeof agentPersonaModelChoices>,
+  current: ReadonlyArray<AgentPersonaModelEntry>,
+) =>
+  choices.find(
+    (choice) =>
+      choice.available &&
+      !current.some(
+        (entry) =>
+          entry.model === choice.target.model &&
+          ("driver" in entry
+            ? entry.driver === choice.driver
+            : "instanceId" in choice.target && entry.instanceId === choice.target.instanceId),
+      ),
+  );
 
 const isImportConflict = Schema.is(AgentPersonaImportConflictError);
 
@@ -389,15 +514,13 @@ export function agentPersonaIdError(id: string): string | null {
 export function defaultAgentPersonaModelRoute(
   providers: ReadonlyArray<ServerProvider>,
   enforcingDrivers: ReadonlyArray<ProviderDriverKind> = [],
-): [AgentPersonaModelTarget, AgentPersonaModelTarget] | null {
+): ReadonlyArray<AgentPersonaModelEntry> | null {
   const choices = agentPersonaModelChoices(providers, []).filter(({ available }) => available);
-  const enforceable = choices.filter(({ target }) => enforcingDrivers.includes(target.driver));
-  const available = enforceable.length > 0 ? enforceable : choices;
-  const primary = available[0];
-  if (primary === undefined) return null;
-  const fallback =
-    available.find(({ target }) => target.driver !== primary.target.driver) ?? primary;
-  return [primary.target, fallback.target];
+  const enforceable = choices.filter(
+    ({ driver }) => driver !== undefined && enforcingDrivers.includes(driver),
+  );
+  const first = (enforceable.length > 0 ? enforceable : choices)[0];
+  return first === undefined ? null : [first.target];
 }
 
 /** Drivers the server says sandbox `policy`; undefined when the server predates the field. */
@@ -418,8 +541,9 @@ function listLabels(drivers: ReadonlyArray<ProviderDriverKind>): string {
 /** The editor's line under Runtime policy: where it is sandboxed and which chosen routes won't launch. */
 export function agentPersonaPolicyNote(
   drivers: ReadonlyArray<ProviderDriverKind> | undefined,
-  modelRoute: ReadonlyArray<AgentPersonaModelTarget>,
+  modelRoute: ReadonlyArray<AgentPersonaModelEntry>,
   policy?: AgentPersonaAuthorityPolicy,
+  providers: ReadonlyArray<ServerProvider> = [],
 ): string | null {
   if (drivers === undefined) return null;
   const unsandboxed = policy === "full-access";
@@ -428,9 +552,17 @@ export function agentPersonaPolicyNote(
       ? "No provider supports this policy yet, so it won't launch."
       : "No provider can sandbox this policy yet, so it won't launch.";
   }
-  const outside = [...new Set(modelRoute.map(({ driver }) => driver))].filter(
-    (driver) => !drivers.includes(driver),
-  );
+  const outside = [
+    ...new Set(
+      modelRoute.flatMap((target) => {
+        const driver =
+          "driver" in target
+            ? target.driver
+            : providers.find(({ instanceId }) => instanceId === target.instanceId)?.driver;
+        return driver === undefined ? [] : [driver];
+      }),
+    ),
+  ].filter((driver) => !drivers.includes(driver));
   const where = unsandboxed
     ? `Unsandboxed: runs with full access on ${listLabels(drivers)}.`
     : `Sandboxed on ${listLabels(drivers)}.`;
@@ -445,19 +577,13 @@ export interface AgentPersonaCreateDraft {
   readonly description: string;
   readonly instructions: string;
   readonly authorityPolicy: AgentPersonaAuthorityPolicy;
-  readonly modelRoute: readonly [AgentPersonaModelTarget, AgentPersonaModelTarget];
+  readonly modelRoute: ReadonlyArray<AgentPersonaModelEntry>;
 }
 
 /** Prefill the create dialog from any listed agent; the copy gets its own name and ID. */
 export function agentPersonaDuplicateDraft(
   definition: AgentPersonaDefinitionView,
 ): AgentPersonaCreateDraft {
-  if (
-    definition.models !== undefined &&
-    (definition.models.length !== 2 || definition.models.some((entry) => !("driver" in entry)))
-  ) {
-    throw new Error("Export YAML to copy this persona without losing its model list or options.");
-  }
   const authorityPolicy = definition.access ?? definition.authority.defaultPolicy;
   if (!isAgentPersonaAuthorityPolicy(authorityPolicy))
     throw new Error(unsupportedPolicyReason(authorityPolicy));
@@ -467,7 +593,7 @@ export function agentPersonaDuplicateDraft(
     description: definition.description,
     instructions: definition.instructions,
     authorityPolicy,
-    modelRoute: definition.modelRoute,
+    modelRoute: definition.models ?? definition.modelRoute,
   };
 }
 
@@ -610,6 +736,9 @@ export function draftAgentAssignmentPreview(
     displayName: persona.displayName,
     authorityPolicy: persona.defaultAuthorityPolicy,
     resolvedRoute: persona.availability.resolvedRoute,
+    ...(persona.availability.resolvedEntryIndex === undefined
+      ? {}
+      : { resolvedEntryIndex: persona.availability.resolvedEntryIndex }),
     resolvedDriver: persona.availability.resolvedDriver,
     resolvedModelSelection: persona.availability.resolvedModelSelection,
   };

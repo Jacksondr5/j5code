@@ -1,3 +1,6 @@
+import { Atom } from "effect/reactivity";
+import type { ServerProvider } from "@t3tools/contracts";
+import { serverEnvironment } from "../../state/server";
 import { useAtomValue } from "@effect/atom-react";
 import { presentAgentPersonaCatalog } from "@t3tools/client-runtime/j5/agent-personas";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
@@ -21,6 +24,8 @@ import { useCrewMemberModels, useCrewMemberReasoning } from "./useCrewMemberMode
 import { useCrewProposalPreview } from "./useCrewProposalPreview";
 import { ComposerBanner } from "../../components/chat/ComposerBanner";
 import { useCanOperateThread } from "../sharing/access";
+
+const noProvidersAtom = Atom.make<ReadonlyArray<ServerProvider>>([]);
 
 function CaptainLabel(props: { environmentId: EnvironmentId; participantId: string }) {
   const labels = useParticipantLabels(props.environmentId, [props.participantId]);
@@ -88,6 +93,11 @@ export function CrewProposalCard(props: {
   );
   const addButton = useRef<HTMLButtonElement>(null);
   const editorTrigger = useRef<HTMLButtonElement | null>(null);
+  const providers = useAtomValue(
+    props.environmentId === null
+      ? noProvidersAtom
+      : serverEnvironment.providersValueAtom(props.environmentId),
+  );
   const catalog = useEnvironmentQuery(
     props.environmentId === null
       ? null
@@ -96,7 +106,7 @@ export function CrewProposalCard(props: {
   const agents =
     catalog.data == null
       ? []
-      : presentAgentPersonaCatalog(catalog.data).filter(
+      : presentAgentPersonaCatalog(catalog.data, providers ?? []).filter(
           (agent) => agent.availability === "available",
         );
   const roster = crewProposalRoster(rows);

@@ -81,7 +81,7 @@ export const OrchestrationV2AgentPersonaAssignment = Schema.Struct({
   displayName: Schema.optional(TrimmedNonEmptyString),
   authorityPolicy: AgentPersonaReportedAuthorityPolicy,
   resolvedRoute: Schema.Literals(["primary", "fallback", "override"]),
-  resolvedRouteIndex: Schema.optional(NonNegativeInt),
+  resolvedEntryIndex: Schema.optional(NonNegativeInt),
   resolvedDriver: ProviderDriverKind,
   resolvedModelSelection: ModelSelection,
   /** Human-approved crew access, independent of the persona behavior instructions. */
@@ -111,15 +111,19 @@ export const AgentPersonaRouteFailureCode = Schema.Literals([
   "model-not-advertised",
   "reasoning-effort-not-advertised",
   "authority-not-enforceable",
+  "usage-limit",
+  "option-not-advertised",
 ]);
 export type AgentPersonaRouteFailureCode = typeof AgentPersonaRouteFailureCode.Type;
 
 /** One rejected route with the reasons every candidate provider gave. */
 export const AgentPersonaRouteAttempt = Schema.Struct({
   route: Schema.Literals(["primary", "fallback"]),
-  driver: ProviderDriverKind,
+  entryIndex: Schema.optional(NonNegativeInt),
+  instanceId: Schema.optional(ProviderInstanceId),
+  driver: Schema.optional(ProviderDriverKind),
   model: TrimmedNonEmptyString,
-  reasoningEffort: TrimmedNonEmptyString,
+  reasoningEffort: Schema.optional(TrimmedNonEmptyString),
   failures: Schema.Array(AgentPersonaRouteFailureCode),
 });
 export type AgentPersonaRouteAttempt = typeof AgentPersonaRouteAttempt.Type;
@@ -128,6 +132,7 @@ export const OrchestrationV2AgentPersonaAvailability = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("available"),
     resolvedRoute: Schema.Literals(["primary", "fallback"]),
+    resolvedEntryIndex: Schema.optional(NonNegativeInt),
     resolvedDriver: ProviderDriverKind,
     resolvedModelSelection: ModelSelection,
   }),
@@ -154,15 +159,33 @@ export const AgentPersonaModelTarget = Schema.Struct({
 });
 export type AgentPersonaModelTarget = typeof AgentPersonaModelTarget.Type;
 
+/** Legacy targets stay intact so immutable snapshot digests do not change. */
 export const AgentPersonaModelEntry = Schema.Union([
   AgentPersonaModelTarget,
   Schema.Struct({
     instanceId: ProviderInstanceId,
     model: TrimmedNonEmptyString,
     options: Schema.optionalKey(ProviderOptionSelections),
-  }),
+    reasoningEffort: Schema.optionalKey(Schema.Never),
+  }).check(
+    Schema.makeFilter((selection) => {
+      const ids = (selection.options ?? []).map(({ id }) => id);
+      return new Set(ids).size === ids.length;
+    }),
+  ),
 ]);
 export type AgentPersonaModelEntry = typeof AgentPersonaModelEntry.Type;
+export const AgentPersonaModelRoute = Schema.Array(AgentPersonaModelEntry).check(
+  Schema.isMinLength(1),
+);
+
+export const AgentPersonaModelEntryStatus = Schema.Struct({
+  index: NonNegativeInt,
+  target: AgentPersonaModelEntry,
+  modelSelection: Schema.optional(ModelSelection),
+  failures: Schema.Array(AgentPersonaRouteFailureCode),
+});
+export type AgentPersonaModelEntryStatus = typeof AgentPersonaModelEntryStatus.Type;
 
 /**
  * The select option that carries a model's reasoning level. Providers name it differently:
@@ -189,7 +212,7 @@ export const isAgentPersonaReasoningOptionId = (id: string) =>
   AGENT_PERSONA_REASONING_OPTION_IDS.has(id);
 export const AgentPersonaEditableDetails = Schema.Struct({
   definitionDigest: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
-  modelRoute: Schema.Tuple([AgentPersonaModelTarget, AgentPersonaModelTarget]),
+  modelRoute: AgentPersonaModelRoute,
 });
 export const AGENT_PERSONA_INSTRUCTIONS_MAX_LENGTH = 32768;
 const AgentPersonaInstructions = Schema.String.check(
@@ -203,7 +226,8 @@ export const AgentPersonaEditInput = Schema.Struct({
   description: TrimmedNonEmptyString.check(Schema.isMaxLength(65536)),
   instructions: AgentPersonaInstructions,
   authorityPolicy: AgentPersonaAuthorityPolicy,
-  modelRoute: Schema.Tuple([AgentPersonaModelTarget, AgentPersonaModelTarget]),
+  modelRoute: AgentPersonaModelRoute,
+  modelRouteFormat: Schema.optional(Schema.Literal("ordered")),
 });
 export type AgentPersonaEditInput = typeof AgentPersonaEditInput.Type;
 
@@ -232,7 +256,7 @@ export const AgentPersonaCreateInput = Schema.Struct({
   description: TrimmedNonEmptyString.check(Schema.isMaxLength(65536)),
   instructions: AgentPersonaInstructions,
   authorityPolicy: AgentPersonaAuthorityPolicy,
-  modelRoute: Schema.Tuple([AgentPersonaModelTarget, AgentPersonaModelTarget]),
+  modelRoute: AgentPersonaModelRoute,
 });
 export type AgentPersonaCreateInput = typeof AgentPersonaCreateInput.Type;
 
@@ -246,6 +270,7 @@ export type AgentPersonaOrigin = typeof AgentPersonaOrigin.Type;
 
 /** Environment-specific, presentation-safe view of one library persona. */
 export const OrchestrationV2AgentPersonaCatalogEntry = Schema.Struct({
+  modelEntries: Schema.optional(Schema.Array(AgentPersonaModelEntryStatus)),
   personaId: AgentPersonaId,
   imported: Schema.optional(Schema.Boolean),
   origin: Schema.optional(AgentPersonaOrigin),
@@ -253,7 +278,13 @@ export const OrchestrationV2AgentPersonaCatalogEntry = Schema.Struct({
   removed: Schema.optional(Schema.Boolean),
   /** Content digest of the current definition; compared with launch snapshots to show drift. */
   definitionDigest: Schema.optional(Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/))),
-  editable: Schema.optional(AgentPersonaEditableDetails),
+  editable: Schema.optional(
+    Schema.Struct({
+      definitionDigest: AgentPersonaEditableDetails.fields.definitionDigest,
+      modelRoute: Schema.Tuple([AgentPersonaModelTarget, AgentPersonaModelTarget]),
+    }),
+  ),
+  orderedEditable: Schema.optional(AgentPersonaEditableDetails),
   definitionVersion: PositiveInt,
   displayName: TrimmedNonEmptyString,
   description: TrimmedNonEmptyString,

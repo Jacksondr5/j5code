@@ -1,3 +1,4 @@
+import * as Clock from "effect/Clock";
 import * as Layer from "effect/Layer";
 import * as SpawnAgentService from "../SpawnAgentService.ts";
 import { stateError, preflightSpawnCaller, resolveCallerMembership } from "../AgentCaller.ts";
@@ -812,7 +813,11 @@ const handlers = {
         );
       const providers = yield* (yield* ProviderRegistry).getProviders;
       const disabled = new Set(current.disabledIds);
-      const catalog = buildAgentPersonaCatalog(providers, current.definitions);
+      const catalog = buildAgentPersonaCatalog(
+        providers,
+        current.definitions,
+        yield* Clock.currentTimeMillis,
+      );
       return {
         diagnostics: current.diagnostics,
         personas: catalog.personas.map((persona) => {
@@ -828,13 +833,11 @@ const handlers = {
               : available
                 ? ("available" as const)
                 : ("blocked" as const),
-            route:
+            entries: persona.modelEntries ?? [],
+            selected_entry_index:
               persona.availability.status === "available" && !isDisabled
-                ? `${persona.availability.resolvedDriver} · ${persona.availability.resolvedModelSelection.model}${
-                    persona.availability.resolvedModelSelection.options?.[0]?.value === undefined
-                      ? ""
-                      : ` · ${persona.availability.resolvedModelSelection.options[0].value}`
-                  }`
+                ? (persona.availability.resolvedEntryIndex ??
+                  (persona.availability.resolvedRoute === "primary" ? 0 : 1))
                 : null,
           };
         }),

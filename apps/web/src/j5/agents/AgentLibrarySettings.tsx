@@ -1,3 +1,6 @@
+import { Atom } from "effect/reactivity";
+import type { ServerProvider } from "@t3tools/contracts";
+import { serverEnvironment } from "../../state/server";
 import { useAtomValue } from "@effect/atom-react";
 import { toastManager } from "../../components/ui/toast";
 import { requestConfirmDialog } from "../../confirmDialog";
@@ -71,6 +74,8 @@ import {
   SettingsUnavailableGroup,
 } from "../../components/settings/settingsLayout";
 
+const noProvidersAtom = Atom.make<ReadonlyArray<ServerProvider>>([]);
+
 /** Outside the component: the React Compiler cannot compile `try`/`finally` or `throw` inside `try`. */
 async function runPersonaAction(failureTitle: string, action: () => Promise<void>) {
   try {
@@ -121,6 +126,11 @@ function MemberAgentLibrarySettings() {
         : null;
   const selectedEnvironment = orderedEnvironments.find(
     (environment) => environment.environmentId === effectiveEnvironmentId,
+  );
+  const providers = useAtomValue(
+    effectiveEnvironmentId === null
+      ? noProvidersAtom
+      : serverEnvironment.providersValueAtom(effectiveEnvironmentId),
   );
   const catalog = useEnvironmentQuery(
     effectiveEnvironmentId === null
@@ -363,7 +373,7 @@ function MemberAgentLibrarySettings() {
   const personas =
     catalog.data === null || catalog.data === undefined
       ? []
-      : presentAgentPersonaCatalog(catalog.data);
+      : presentAgentPersonaCatalog(catalog.data, providers ?? []);
 
   if (libraryEnvironments.length > 1)
     return (
@@ -518,7 +528,7 @@ function MemberAgentLibrarySettings() {
                       )
                     ) : null}
                     {persona.availability === "unsupported" ? (
-                      <span className="basis-full">{persona.blockedReasons[0]}</span>
+                      <span className="basis-full">{persona.blockedReasons.join("; ")}</span>
                     ) : persona.edit === null && !persona.removed ? (
                       <span className="basis-full">Duplicate this persona to edit a copy</span>
                     ) : null}

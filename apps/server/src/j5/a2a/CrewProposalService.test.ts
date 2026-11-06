@@ -2433,7 +2433,7 @@ it.effect(
           [["persona_disabled", "review"]],
         );
         const current = yield* library.catalog();
-        const catalog = buildAgentPersonaCatalog([codex], current.definitions);
+        const catalog = buildAgentPersonaCatalog([codex], current.definitions, 0);
         const usable = (id: string) =>
           !current.disabledIds.includes(id) &&
           catalog.personas.find(({ personaId }) => personaId === id)?.availability.status ===

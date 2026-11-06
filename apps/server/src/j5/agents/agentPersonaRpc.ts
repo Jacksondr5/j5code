@@ -1,3 +1,4 @@
+import * as Clock from "effect/Clock";
 import {
   AgentPersonaCatalogError,
   AgentPersonaImportConflictError,
@@ -70,7 +71,8 @@ export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHand
       )(function* (_input: Input<"getAgentPersonaCatalog">) {
         const current = yield* library.catalog().pipe(Effect.mapError(catalogError));
         const providers = yield* deps.providers;
-        const catalog = buildAgentPersonaCatalog(providers, current.definitions);
+        const now = yield* Clock.currentTimeMillis;
+        const catalog = buildAgentPersonaCatalog(providers, current.definitions, now);
         const importedIds = new Set(current.importedIds);
         const digests = new Map(
           [...current.definitions, ...current.removedSources].map((definition) => [
@@ -92,6 +94,17 @@ export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHand
               },
             ]),
         );
+        const orderedEditable = new Map(
+          current.definitions
+            .filter(({ id }) => importedIds.has(id))
+            .map((definition) => [
+              definition.id,
+              {
+                definitionDigest: definitionDigest(definition),
+                modelRoute: definition.modelRoute,
+              },
+            ]),
+        );
         const disabledIds = new Set(current.disabledIds);
         const origin = (personaId: string) => {
           const path = current.sourcePaths.get(personaId);
@@ -101,7 +114,7 @@ export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHand
               ? { kind: "bundled" as const }
               : { kind: "folder" as const, path };
         };
-        const removed = buildAgentPersonaCatalog(yield* deps.providers, current.removedSources);
+        const removed = buildAgentPersonaCatalog(providers, current.removedSources, now);
         return {
           diagnostics: current.diagnostics,
           personas: [
@@ -112,6 +125,9 @@ export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHand
               definitionDigest: digests.get(persona.personaId)!,
               ...(editable.has(persona.personaId)
                 ? { editable: editable.get(persona.personaId)! }
+                : {}),
+              ...(orderedEditable.has(persona.personaId)
+                ? { orderedEditable: orderedEditable.get(persona.personaId)! }
                 : {}),
               availability: disabledIds.has(persona.personaId)
                 ? { status: "unavailable" as const, reason: "disabled" as const }

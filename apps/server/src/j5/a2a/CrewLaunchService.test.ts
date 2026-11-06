@@ -2943,3 +2943,116 @@ it.effect("a persona keeps its own level off the list, until its level is change
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
 );
+
+it.effect(
+  "launches an indexed persona entry through Crew defaults and the thread-create guard",
+  () =>
+    Effect.gen(function* () {
+      const { context, commands, captain } = yield* fixture;
+      const basic = provider("codex", "codex", [{ slug: "ordered-crew", options: ["high"] }]);
+      const advertised: ServerProvider = {
+        ...basic,
+        models: basic.models.map((model) => ({
+          ...model,
+          capabilities: {
+            ...model.capabilities,
+            optionDescriptors: [
+              ...(model.capabilities?.optionDescriptors ?? []),
+              { id: "fastMode", label: "Fast", type: "boolean" as const, currentValue: false },
+            ],
+          },
+        })),
+      };
+      const limited: ServerProvider = {
+        ...advertised,
+        instanceId: ProviderInstanceId.make("limited"),
+        usageLimits: {
+          checkedAt: "2026-11-03T12:00:00Z",
+          windows: [
+            {
+              id: "primary",
+              kind: "session",
+              label: "Session",
+              usedPercent: 100,
+              resetsAt: "2099-11-03T13:00:00Z",
+            },
+          ],
+        },
+      };
+      const layer = crewLaunchLayer.pipe(
+        Layer.provideMerge(dependencies(commands, [limited, advertised])),
+        Layer.provideMerge(Layer.succeedContext(context)),
+        Layer.provideMerge(
+          personaLibraryLayer("j5-ordered-crew-", [BUILT_IN_AGENT_PERSONAS.scout]),
+        ),
+        Layer.provideMerge(NodeServices.layer),
+      );
+      yield* Effect.gen(function* () {
+        const launcher = yield* CrewLaunchService;
+        const library = yield* makeAgentPersonaLibrary;
+        const chosen = {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "ordered-crew",
+          options: [{ id: "reasoningEffort", value: "high" }],
+        };
+        yield* library.importFiles({
+          files: [
+            {
+              name: "ordered.yaml",
+              content: toYaml({
+                ...BUILT_IN_AGENT_PERSONAS.scout,
+                id: "ordered",
+                modelRoute: [
+                  { instanceId: "limited", model: chosen.model },
+                  { instanceId: chosen.instanceId, model: "not-offered" },
+                  chosen,
+                ],
+              }),
+            },
+          ],
+          replaceExisting: false,
+        });
+        const seat = {
+          name: "ordered",
+          agentId: "ordered",
+          reason: "Review",
+          workspace: { type: "shared" as const },
+        };
+        for (const request of [seat, { ...seat, modelSelection: chosen }]) {
+          const resolvedSeats = yield* launcher.resolveSeats(captain, [
+            request,
+            { ...request, name: "ordered-second" },
+          ]);
+          assert.deepStrictEqual(
+            resolvedSeats.map((seat) => seat.assignment?.resolvedEntryIndex),
+            [2, 2],
+          );
+          const resolved = resolvedSeats[0];
+          assert.equal(resolved!.assignment?.resolvedEntryIndex, 2);
+          assert.deepStrictEqual(resolved!.modelSelection.options, [
+            ...chosen.options,
+            { id: "fastMode", value: false },
+          ]);
+          yield* guardAgentPersonaThreadCreate(
+            {
+              type: "thread.create",
+              createdBy: "agent",
+              creationSource: "mcp",
+              commandId: CommandId.make("ordered-create"),
+              threadId: ThreadId.make("ordered-thread"),
+              projectId: captain.thread.projectId,
+              title: "Ordered",
+              modelSelection: resolved!.modelSelection,
+              runtimeMode: resolved!.runtimeMode,
+              interactionMode: "default",
+              agentPersonaAssignment: resolved!.assignment!,
+              branch: null,
+              worktreePath: null,
+            },
+            library,
+            () => Effect.succeed("codex"),
+          );
+        }
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
+);

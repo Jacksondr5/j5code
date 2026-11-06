@@ -1,4 +1,5 @@
-// @effect-diagnostics nodeBuiltinImport:off - FileSystem cannot create a FIFO.
+// @effect-diagnostics nodeBuiltinImport:off - deterministic legacy hashes and FIFO fixture subprocesses.
+import * as NodeCrypto from "node:crypto";
 import * as NodeChildProcess from "node:child_process";
 
 import { assert, describe, it } from "@effect/vitest";
@@ -19,7 +20,7 @@ import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import { stringify as yaml } from "yaml";
 
-import { prepareAgentPersonaLaunch } from "./agentPersonaLaunch.ts";
+import { prepareAgentPersonaLaunch as prepareLaunch } from "./agentPersonaLaunch.ts";
 import {
   AgentPersonaLibraryError,
   definitionDigest,
@@ -28,6 +29,8 @@ import {
 import { BUILT_IN_AGENT_PERSONAS, decodeAgentPersonaDefinition } from "./agentPersonas.ts";
 import { validateAgentPersonaAssignment } from "./agentPersonaAssignment.ts";
 import { resolveAgentPersonaRuntime } from "./agentPersonaRuntime.ts";
+
+const prepareAgentPersonaLaunch = prepareLaunch;
 
 const isImportConflict = Schema.is(AgentPersonaImportConflictError);
 const isLibraryError = Schema.is(AgentPersonaLibraryError);
@@ -69,7 +72,7 @@ const assignmentFor = (digest: string | undefined): OrchestrationV2AgentPersonaA
   resolvedDriver: ProviderDriverKind.make("codex"),
   resolvedModelSelection: {
     instanceId: ProviderInstanceId.make("codex"),
-    model: custom.modelRoute[0].model,
+    model: custom.modelRoute[0]!.model,
     options: [{ id: "reasoningEffort", value: "high" }],
   },
 });
@@ -313,9 +316,14 @@ describe("folder-backed persona library", () => {
     "resumes from the snapshot after source edits and removal, including same-version edits",
     () =>
       Effect.gen(function* () {
-        const { library, write, fs, folder } = yield* fixture;
+        const { library, write, fs, folder, path, stateDir } = yield* fixture;
         yield* write("researcher.yaml", custom);
-        const assignment = assignmentFor(yield* library.snapshot(custom));
+        const stored = JSON.stringify(custom);
+        const digest = NodeCrypto.createHash("sha256").update(stored).digest("hex");
+        const snapshotPath = path.join(stateDir, "agent-persona-snapshots", `${digest}.json`);
+        yield* fs.makeDirectory(path.dirname(snapshotPath), { recursive: true });
+        yield* fs.writeFileString(snapshotPath, stored);
+        const assignment = assignmentFor(digest);
         assert.isDefined(assignment.definitionDigest);
         yield* write("researcher.yaml", { ...custom, instructions: "Changed behavior" });
         assert.equal((yield* library.load())[0]?.instructions, "Changed behavior");
@@ -587,6 +595,20 @@ describe("folder-backed persona library", () => {
       assert.include(String(error), "Update J5");
       assert.equal(yield* fs.readFileString(file), before);
       assert.lengthOf((yield* library.load())[0]!.modelRoute, 3);
+      yield* library.editImported({
+        personaId: custom.id,
+        expectedDigest: definitionDigest(definition),
+        displayName: "Edited ordered persona",
+        description: definition.description,
+        instructions: definition.instructions,
+        authorityPolicy: "read-only",
+        modelRouteFormat: "ordered",
+        modelRoute: [...definition.modelRoute].reverse(),
+      });
+      const edited = yield* library.read(custom.id);
+      assert.deepEqual([...edited.modelRoute], [...definition.modelRoute].reverse());
+      assert.equal(edited.access, "read-only");
+      assert.isUndefined(edited.authority);
       const assignment = {
         ...assignmentFor(yield* library.snapshot(definition)),
         authorityPolicy: "critic-review" as const,
@@ -1040,21 +1062,24 @@ describe("editing imported agents", () => {
               model: "team-model",
               reasoningEffort: "medium",
             },
-            custom.modelRoute[1],
+            custom.modelRoute[1]!,
           ],
         };
         yield* library.editImported(update);
         const restarted = createAgentPersonaLibrary({ fs, path, stateDir });
         const catalog = yield* restarted.catalog();
         const changed = catalog.definitions.find(({ id }) => id === custom.id)!;
-        assert.deepEqual(changed, {
-          ...custom,
-          displayName: update.displayName,
-          description: update.description,
-          version: custom.version + 1,
-          authority: { defaultPolicy: "workspace-write", allowedPolicies: ["workspace-write"] },
-          modelRoute: update.modelRoute,
-        });
+        assert.deepEqual(
+          changed,
+          decodeAgentPersonaDefinition({
+            ...custom,
+            displayName: update.displayName,
+            description: update.description,
+            version: custom.version + 1,
+            authority: { defaultPolicy: "workspace-write", allowedPolicies: ["workspace-write"] },
+            modelRoute: update.modelRoute,
+          }),
+        );
         assert.include(catalog.disabledIds, custom.id);
         assert.equal(yield* fs.readFileString(path.join(folder, "agent.yaml")), yaml(custom));
         assert.deepEqual(yield* restarted.readSnapshot(assignment), custom);

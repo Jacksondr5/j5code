@@ -1,10 +1,8 @@
+import { useAtomValue } from "@effect/atom-react";
+import { serverEnvironment } from "../../state/server";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import type { AgentPersonaCatalogRow } from "@t3tools/client-runtime/j5/agent-personas";
-import type {
-  AgentPersonaModelTarget,
-  AgentPersonaModelEntry,
-  EnvironmentId,
-} from "@t3tools/contracts";
+import type { AgentPersonaModelEntry, EnvironmentId } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
 import { Modal, Pressable, ScrollView, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -29,8 +27,7 @@ export function AgentDetailsModal(props: {
     | { readonly status: "failed" }
     | {
         readonly status: "loaded";
-        readonly route: readonly [AgentPersonaModelTarget, AgentPersonaModelTarget];
-        readonly models?: ReadonlyArray<AgentPersonaModelEntry> | undefined;
+        readonly route: ReadonlyArray<AgentPersonaModelEntry>;
       }
   >({ status: "loading" });
   const read = useAtomCommand(agentPersonaEnvironment.readAgentPersona, { reportFailure: false });
@@ -44,8 +41,7 @@ export function AgentDetailsModal(props: {
         if (result._tag === "Failure") throw squashAtomCommandFailure(result);
         setModels({
           status: "loaded",
-          route: result.value.definition.modelRoute,
-          models: result.value.definition.models,
+          route: result.value.definition.models ?? result.value.definition.modelRoute,
         });
       })
       .catch(() => {
@@ -55,7 +51,8 @@ export function AgentDetailsModal(props: {
       cancelled = true;
     };
   }, [props.environmentId, personaId, read]);
-  const rows = personaDetailRows(props.persona, models, props.usageLine);
+  const providers = useAtomValue(serverEnvironment.providersValueAtom(props.environmentId));
+  const rows = personaDetailRows(props.persona, models, props.usageLine, providers ?? []);
   return (
     <Modal
       visible

@@ -26,6 +26,7 @@ import { ServerConfig } from "../../config.ts";
 import {
   decodeAgentPersonaDefinition,
   agentPersonaAccess,
+  mapAgentPersonaPolicy,
   AGENT_PERSONA_ACCESS_REPAIR,
   agentPersonaLegacyEditable,
   getBuiltInAgentPersona,
@@ -615,7 +616,7 @@ export function createAgentPersonaLibrary(storage?: {
         message: "Imported agent no longer exists. Refresh the library.",
       });
     const original = yield* Effect.try(() => decodeAgentPersonaDefinition(current));
-    if (!agentPersonaLegacyEditable(original))
+    if (input.modelRouteFormat !== "ordered" && !agentPersonaLegacyEditable(original))
       return yield* new AgentPersonaLibraryError({
         message: "Update J5 to edit this persona without losing its model list or access settings.",
       });
@@ -631,13 +632,17 @@ export function createAgentPersonaLibrary(storage?: {
         displayName: input.displayName,
         description: input.description,
         instructions: input.instructions,
-        authority:
-          input.authorityPolicy === original.authority!.defaultPolicy
-            ? original.authority
-            : {
-                defaultPolicy: input.authorityPolicy,
-                allowedPolicies: [input.authorityPolicy],
-              },
+        ...(original.access === undefined
+          ? {
+              authority:
+                input.authorityPolicy === original.authority!.defaultPolicy
+                  ? original.authority
+                  : {
+                      defaultPolicy: input.authorityPolicy,
+                      allowedPolicies: [input.authorityPolicy],
+                    },
+            }
+          : { access: mapAgentPersonaPolicy(input.authorityPolicy) }),
         modelRoute: input.modelRoute,
       }),
     ).pipe(

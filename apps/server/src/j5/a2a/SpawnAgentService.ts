@@ -183,7 +183,7 @@ const prepareSpawnPersona = Effect.fn("j5.a2a.mcp.prepareSpawnPersona")(function
     Effect.mapError((error) =>
       stateError(
         `Persona ${input.persona} cannot be spawned as requested: ${error.message}`,
-        "Call orchestrator_capabilities, then retry j5_spawn_agent with a provider, model, and reasoning from that persona's declared routes, or omit persona for a plain Peer Agent.",
+        "Call orchestrator_capabilities, then retry j5_spawn_agent with a provider, model, and reasoning from that persona's ordered model entries, or omit persona for a plain Peer Agent.",
       ),
     ),
   );

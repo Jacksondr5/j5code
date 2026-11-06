@@ -6,7 +6,7 @@ import {
   defaultAgentPersonaModelRoute,
 } from "@t3tools/client-runtime/j5/agent-personas";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import type { AgentPersonaAuthorityPolicy, AgentPersonaModelTarget } from "@t3tools/contracts";
+import type { AgentPersonaAuthorityPolicy, AgentPersonaModelEntry } from "@t3tools/contracts";
 import { useState } from "react";
 import { Pressable, View } from "react-native";
 
@@ -29,7 +29,7 @@ type PersonaDraft = {
   description: string;
   instructions: string;
   authorityPolicy: AgentPersonaAuthorityPolicy;
-  modelRoute: readonly [AgentPersonaModelTarget, AgentPersonaModelTarget] | null;
+  modelRoute: ReadonlyArray<AgentPersonaModelEntry> | null;
 };
 
 /** Author a personal agent; it is stored as an imported definition of this environment. */
@@ -93,7 +93,7 @@ export function AgentCreateScreen() {
         description: draft.description.trim(),
         instructions: draft.instructions,
         authorityPolicy: draft.authorityPolicy,
-        modelRoute: [modelRoute[0], modelRoute[1]],
+        modelRoute,
       },
     });
     setSaving(false);
