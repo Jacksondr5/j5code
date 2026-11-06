@@ -639,7 +639,7 @@ describe("independent reviewer subagents", () => {
           ),
         ),
       );
-    return { thread, child, calls, invoke };
+    return { thread, child, calls, invoke, library };
   });
 
   it.effect("prefers a model no author ran on, skipping earlier reviewers, and says so", () =>
@@ -729,9 +729,9 @@ describe("independent reviewer subagents", () => {
     }).pipe(Effect.provide(testLayer)),
   );
 
-  it.effect("reviews only the named author threads, and refuses one that does not exist", () =>
+  it.effect("reviews only the named author threads, and refuses a missing or foreign one", () =>
     Effect.gen(function* () {
-      const { thread, calls, invoke } = yield* reviewerFixture;
+      const { thread, calls, invoke, library } = yield* reviewerFixture;
       thread("parent", "claude-opus-5-5");
       thread("builder", "gpt-6.1-sol");
       yield* invoke(reviewer.id, { authorThreads: ["builder"] });
@@ -745,6 +745,16 @@ describe("independent reviewer subagents", () => {
       const refused = yield* invoke(reviewer.id, { authorThreads: ["missing"] }).pipe(Effect.flip);
       assert.equal(refused.code, "invalid_request");
       assert.include(refused.message, "Author thread missing does not exist.");
+      thread("elsewhere", "gpt-6.1-sol", { projectId: ProjectId.make("other-project") });
+      const foreign = yield* invoke(reviewer.id, { authorThreads: ["elsewhere"] }).pipe(
+        Effect.flip,
+      );
+      assert.include(foreign.message, "Author thread elsewhere is in another project.");
+      // A disabled reviewer says so before any author thread is looked at.
+      yield* library.setImportedEnabled(reviewer.id, false);
+      const disabled = yield* invoke(reviewer.id, { authorThreads: ["missing"] }).pipe(Effect.flip);
+      assert.include(disabled.message, "disabled");
+      assert.notInclude(disabled.message, "Author thread");
       assert.lengthOf(calls, 1);
     }).pipe(Effect.provide(testLayer)),
   );
