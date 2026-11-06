@@ -110,6 +110,9 @@ export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHand
               ...persona,
               imported: importedIds.has(persona.personaId),
               origin: origin(persona.personaId),
+              ...(importedIds.has(persona.personaId) && current.sourcePaths.has(persona.personaId)
+                ? { overridesFolder: current.sourcePaths.get(persona.personaId)! }
+                : {}),
               definitionDigest: digests.get(persona.personaId)!,
               ...(orderedEditable.has(persona.personaId)
                 ? { orderedEditable: orderedEditable.get(persona.personaId)! }
