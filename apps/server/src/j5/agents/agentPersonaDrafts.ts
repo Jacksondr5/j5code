@@ -401,7 +401,7 @@ export const makeAgentPersonaDrafts = Effect.fn("j5.agents.personaDrafts.make")(
       const summary = [
         ...lines,
         ...warnings,
-        "Saving takes an Owner's Save persona button on this ask; a typed reply asks for changes and saves nothing.",
+        "Saving takes an Owner's Save persona button on this ask, in the web or desktop app; a typed reply asks for changes and saves nothing.",
       ].join("\n\n");
       const draftId = `persona-draft-${NodeCrypto.randomUUID()}`;
       yield* sql`
