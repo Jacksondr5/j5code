@@ -35,17 +35,18 @@ Crew composition, Playbook steps, workflow gates, and lifecycle automation remai
 
 Each definition has:
 
-| Field                                                  | Meaning                                                                                                                                                      |
-| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `id`                                                   | Stable lowercase slug, such as `team-researcher`. Custom ids require no code changes.                                                                        |
-| `version`                                              | Positive integer chosen by the author. Changing it communicates a revision; content is also fingerprinted, so same-version edits are detected at launch.     |
-| `displayName`, `description`                           | Human-facing identity and a concise purpose.                                                                                                                 |
-| `instructions`                                         | Nonempty markdown identity and operating principles, at most 32,768 characters. The spawner supplies the task brief separately.                              |
-| `acceptedInput`                                        | Optional human-readable input summary; ordinary prompts and supporting evidence are allowed.                                                                 |
-| `inputArtifacts`, `outputArtifact`, `artifacts`        | Retired. A definition that still carries them loads, and they are ignored; they stay part of the content fingerprint so stored snapshots keep their digests. |
-| `access`                                               | One of `read-only`, `workspace-write`, or `full-access`. Mutually exclusive with legacy `authority`.                                                         |
-| `authority.defaultPolicy`, `authority.allowedPolicies` | Legacy storage. New launches map the default to one access level; the former allowed list grants no additional access.                                       |
-| `modelRoute`                                           | A nonempty ordered list. Entries accept legacy `driver`/`model`/`reasoningEffort` or `instanceId`/`model`/`options`.                                         |
+| Field                                                  | Meaning                                                                                                                                                       |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                                                   | Stable lowercase slug, such as `team-researcher`. Custom ids require no code changes.                                                                         |
+| `version`                                              | Positive integer chosen by the author. Changing it communicates a revision; content is also fingerprinted, so same-version edits are detected at launch.      |
+| `displayName`, `description`                           | Human-facing identity and a concise purpose.                                                                                                                  |
+| `instructions`                                         | Nonempty markdown identity and operating principles, at most 32,768 characters. The spawner supplies the task brief separately.                               |
+| `acceptedInput`                                        | Optional human-readable input summary; ordinary prompts and supporting evidence are allowed.                                                                  |
+| `inputArtifacts`, `outputArtifact`, `artifacts`        | Retired. A definition that still carries them loads, and they are ignored; they stay part of the content fingerprint so stored snapshots keep their digests.  |
+| `access`                                               | One of `read-only`, `workspace-write`, or `full-access`. Mutually exclusive with legacy `authority`.                                                          |
+| `authority.defaultPolicy`, `authority.allowedPolicies` | Legacy storage. New launches map the default to one access level; the former allowed list grants no additional access.                                        |
+| `modelRoute`                                           | A nonempty ordered list. Entries accept legacy `driver`/`model`/`reasoningEffort` or `instanceId`/`model`/`options`.                                          |
+| `independentReviewer`                                  | Optional `true` for a reviewer that should run on a model the work's authors didn't use (see [Independent reviewers](#independent-reviewers)). Absent is off. |
 
 Files are limited to 64 KiB. Reading a definition never rewrites it. Legacy artifact values remain in stored identity but do not affect behavior. Snapshot digests are checked against their stored JSON bytes before decoding, so upgrades preserve running workers without migrating their snapshots.
 
@@ -81,6 +82,16 @@ These examples document historical assignments and are not selectable unless a u
 Declared option values must match. Options left unspecified may use provider defaults or an explicit spawn or human-approved Crew choice; the assignment retains the effective selection.
 
 No model spelling is silently rewritten. Persona threads keep their selected provider/model; later provider/model mutations are rejected. Importing a definition does not copy credentials or rewrite account identities for another environment. Legacy definitions and snapshots retain their stored shape; the decoder does not rewrite library files.
+
+## Independent reviewers
+
+A second review is worth more on a model that didn't write the work, so a persona flagged `independentReviewer` prefers one. It is a preference, never a block: no launch fails or waits on a person because of it (Bryant, revising proposal decision 3 after Bastian's comment; [#782](https://github.com/Jacksondr5/j5code/issues/782)).
+
+- **Authors.** A launch can name the work's authors: `author_threads` on `j5_spawn_agent`, `authorThreads` on `delegate_task`, and `reviews` (seat or member names) on Crew seats and additions. Without them, a subagent or Peer Agent reviews its caller's thread, and a Crew seat reviews every other seat and member that isn't itself a reviewer. An author thread contributes its own models and those of its `delegate_task` children: the thread's current model, every run's, and its persona assignment's. A provider-native subagent's model isn't recorded, so its work makes the authors partly unknown. A named thread that doesn't exist, or a `reviews` name that isn't on the Crew, is refused as a bad request.
+- **Selection.** When the server chooses the model, entries on an author's model, matched by model id alone, move to the end of the list before every other check runs, so the first entry that can run on another model wins, and an author's model is used only when nothing else can run. That holds whoever picked the persona, an `@persona` mention or a roster card approved unchanged included. A model someone chose is kept: one the person set on the roster card, or one an agent pinned on `j5_spawn_agent`.
+- **Record and brief.** The assignment's `reviewIndependence` records the outcome (`different-model`, `same-model-as-author`, or `unknown-authors`), the author models and threads, whether some authors are unknown, and who chose the model. The reviewer's first turn carries one line saying the same, so it knows when its review isn't independent. Both are decided once, at creation; reuse and later hand-offs don't revisit them.
+
+Personas without the flag are unaffected: nothing is reordered, recorded, or added to their brief. A definition without the key keeps its content fingerprint, and an edit that leaves the flag out keeps the stored value, so an older client can't clear it.
 
 ## Deliverables
 
@@ -136,3 +147,4 @@ Follow-up work: in-app git commit/push/pull (status nudges and open-in-editor sh
 - 2026-10-03 — a runtime policy means only what the provider's sandbox enforces (Jackson, [#439](https://github.com/Jacksondr5/j5code/issues/439)).
 
 - 2026-11-03 — ordered model editing, per-entry eligibility and quota-aware new launches ([#778](https://github.com/Jacksondr5/j5code/issues/778)).
+- 2026-11-06 — independent reviewer personas prefer a model their authors didn't run on, never blocking ([#782](https://github.com/Jacksondr5/j5code/issues/782)).

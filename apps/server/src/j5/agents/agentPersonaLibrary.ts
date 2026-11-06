@@ -122,6 +122,9 @@ const decodeLibraryConfig = Schema.decodeUnknownEffect(Schema.fromJsonString(Lib
 const encodeLibraryConfig = Schema.encodeEffect(Schema.fromJsonString(LibraryConfig));
 const DEFAULT_FOLDER = "personas";
 const MAX_FOLDER_DEPTH = 16;
+/** Only a set flag is stored: an unflagged definition keeps the digest it had before the flag existed. */
+const reviewerFlag = (flag: boolean | undefined) =>
+  flag === true ? { independentReviewer: true } : {};
 export const definitionDigest = (definition: AgentPersonaDefinition): string =>
   NodeCrypto.createHash("sha256").update(serializeDefinition(definition)).digest("hex");
 
@@ -625,9 +628,11 @@ export function createAgentPersonaLibrary(storage?: {
         message:
           "This agent changed in another session. Close the editor, refresh the library, and try again.",
       });
+    const { independentReviewer: storedFlag, ...kept } = original;
     const updated = yield* Effect.try(() =>
       decodeAgentPersonaDefinition({
-        ...original,
+        ...kept,
+        ...reviewerFlag(input.independentReviewer ?? storedFlag),
         version: original.version + 1,
         displayName: input.displayName,
         description: input.description,
@@ -683,6 +688,7 @@ export function createAgentPersonaLibrary(storage?: {
         instructions: input.instructions,
         access: input.access,
         modelRoute: input.modelRoute,
+        ...reviewerFlag(input.independentReviewer),
       }),
     ).pipe(
       Effect.mapError(

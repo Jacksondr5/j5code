@@ -72,6 +72,7 @@ const launchSeatOf = (seat: CrewProposalSeat): CrewLaunchSeat => {
     modelSelection: seat.modelSelection,
     runtimeMode: seat.runtimeMode,
     steps: seat.steps,
+    reviews: seat.reviews,
     workspace: seat.workspace,
   };
 };
@@ -477,6 +478,20 @@ export const layer = Layer.effect(
           detail: "Seat names must be unique within a crew.",
           nextStep: "Rename the duplicate seats and retry.",
         });
+      // The person's card may rename a seat a reviewer names; that name is dropped at launch.
+      if (!humanReview)
+        for (const seat of seats) {
+          const unknown = seat.reviews?.find(
+            (name) =>
+              name === seat.seat ||
+              !(seats.some((other) => other.seat === name) || existingSeatNames?.includes(name)),
+          );
+          if (unknown !== undefined)
+            return yield* new CrewProposalRequestError({
+              detail: `Seat ${seat.seat} reviews "${unknown}", which is not ${unknown === seat.seat ? "another seat" : "a seat on this crew"}.`,
+              nextStep: "Name other seats or members of this crew in reviews, or omit it.",
+            });
+        }
       const taken = seats.find((seat) => existingSeatNames?.includes(seat.seat));
       if (taken !== undefined)
         return yield* new CrewProposalRequestError({
@@ -817,7 +832,7 @@ export const layer = Layer.effect(
             yield* pinSeats(input.captain, [input.seat]),
             plan.swapsBySeat,
           );
-          yield* resolveRuntime(input.captain, seats, "agent");
+          yield* resolveRuntime(input.captain, seats, "agent", instance);
           const admitted = yield* proposals
             .admit(
               {
@@ -866,7 +881,8 @@ export const layer = Layer.effect(
       captain: CrewCaptain,
       seats: ReadonlyArray<CrewProposalSeat>,
       pick: CrewSeatPick,
-    ) => launcher.resolveSeats(captain, seats.map(launchSeatOf), pick);
+      crew: AgentCrewInstance | null = null,
+    ) => launcher.resolveSeats(captain, seats.map(launchSeatOf), pick, crew);
 
     /** Saves each new worktree's commit on its seat before a proposal is stored; refuses a base that has none. */
     const pinSeats = (captain: CrewCaptain, seats: ReadonlyArray<CrewProposalSeat>) =>
@@ -918,7 +934,7 @@ export const layer = Layer.effect(
           seats.length,
           "approval",
         );
-      return { plan, definition };
+      return { plan, definition, existingCrew };
     });
 
     const preview: CrewProposalServiceShape["preview"] = Effect.fn("j5.a2a.crewProposal.preview")(
@@ -934,10 +950,10 @@ export const layer = Layer.effect(
             status: proposal.status,
           });
         const seats = input.seats ?? proposal.requestedSeats;
-        const { plan } = yield* validateProposalSeats(proposal, seats);
+        const { plan, existingCrew } = yield* validateProposalSeats(proposal, seats);
         const captain = yield* captainFor(proposal);
         // Only a card the person is about to approve is previewed.
-        const resolved = yield* resolveRuntime(captain, seats, "person");
+        const resolved = yield* resolveRuntime(captain, seats, "person", existingCrew);
         return {
           proposalId: proposal.id,
           workspaceOptions: yield* launcher.workspaceOptions(captain),
@@ -999,10 +1015,10 @@ export const layer = Layer.effect(
         return { proposal: declined, instance: null } satisfies CrewProposalOutcome;
       }
       const seats = input.seats ?? proposal.requestedSeats;
-      const { plan, definition } = yield* validateProposalSeats(proposal, seats);
+      const { plan, definition, existingCrew } = yield* validateProposalSeats(proposal, seats);
       const captain = yield* captainFor(proposal);
       const pick = automatic ? "agent" : "person";
-      const resolved = yield* resolveRuntime(captain, seats, pick);
+      const resolved = yield* resolveRuntime(captain, seats, pick, existingCrew);
       if (
         !automatic &&
         input.approvalToken !==

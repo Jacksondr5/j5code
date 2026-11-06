@@ -276,6 +276,7 @@ export const crewSeatFromInput = (seat: J5ProposeCrewInput["seats"][number]) => 
   ...(seat.model_selection === undefined ? {} : { modelSelection: seat.model_selection }),
   ...(seat.runtime_mode === undefined ? {} : { runtimeMode: seat.runtime_mode }),
   ...(seat.steps === undefined ? {} : { steps: seat.steps }),
+  ...(seat.reviews === undefined ? {} : { reviews: seat.reviews }),
   workspace: spawnWorkspaceFromInput(seat.workspace),
 });
 
@@ -791,6 +792,7 @@ const handlers = {
                 : { modelSelection: input.model_selection }),
               ...(input.runtime_mode === undefined ? {} : { runtimeMode: input.runtime_mode }),
               ...(input.steps === undefined ? {} : { steps: input.steps }),
+              ...(input.reviews === undefined ? {} : { reviews: input.reviews }),
               workspace: spawnWorkspaceFromInput(input.workspace),
             },
             brief: input.brief ?? null,
@@ -829,6 +831,7 @@ const handlers = {
             display_name: persona.displayName,
             description: persona.description,
             access: persona.defaultAuthorityPolicy,
+            independent_reviewer: persona.independentReviewer === true,
             availability: isDisabled
               ? ("disabled" as const)
               : available

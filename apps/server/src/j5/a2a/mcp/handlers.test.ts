@@ -189,7 +189,10 @@ const projection = (threadId: ThreadId): OrchestrationV2ThreadProjection =>
       branch: null,
       worktreePath: null,
       createdAt,
+      deletedAt: null,
     },
+    runs: [],
+    subagents: [],
   }) as unknown as OrchestrationV2ThreadProjection;
 
 const missingProjectId = ProjectId.make("project:j5:mcp-directory:gone");
@@ -2060,6 +2063,85 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
       assert.deepStrictEqual(unpinnedCreate.modelSelection.options, [
         { id: "reasoningEffort", value: "high" },
       ]);
+
+      // An independent reviewer left to the server avoids its caller's model, and one pinned to
+      // the caller's model keeps it and says so. An outside agent naming no threads has no authors.
+      yield* library.importFiles({
+        files: [
+          {
+            name: "reviewer.yaml",
+            content: toYaml({
+              ...BUILT_IN_AGENT_PERSONAS.scout,
+              id: "reviewer",
+              independentReviewer: true,
+              modelRoute: ["gpt-5.6-sol", "gpt-5.6-terra"].map((model) => ({
+                instanceId: "codex",
+                model,
+                options: [{ id: "reasoningEffort", value: "high" }],
+              })),
+            }),
+          },
+        ],
+        replaceExisting: false,
+      });
+      const { provider: _provider, model: _model, reasoning: _level, ...unmodeled } = scout;
+      const lastBrief = () => briefs().pipe(Effect.map((items) => items.at(-1)!.text));
+      const review = yield* call({
+        ...unmodeled,
+        persona: "reviewer",
+        client_request_id: "spawn-reviewer",
+      });
+      assert.isFalse(review.isFailure, failureMessage(review));
+      const reviewCreate = (yield* createdThreads()).at(-1)!;
+      assert.equal(reviewCreate.modelSelection.model, "gpt-5.6-terra");
+      assert.deepStrictEqual(reviewCreate.agentPersonaAssignment?.reviewIndependence, {
+        outcome: "different-model",
+        authorModels: ["gpt-5.6-sol"],
+        authorThreadIds: [invocation.threadId],
+        partlyUnknown: false,
+        modelChosenBy: "server",
+      });
+      assert.include(
+        yield* lastBrief(),
+        "Review independence: you run on gpt-5.6-terra; the authors ran on gpt-5.6-sol.",
+      );
+      const pinnedReview = yield* call({
+        ...scout,
+        persona: "reviewer",
+        model: "gpt-5.6-sol",
+        client_request_id: "spawn-reviewer-pinned",
+      });
+      assert.isFalse(pinnedReview.isFailure, failureMessage(pinnedReview));
+      const pinnedCreate = (yield* createdThreads()).at(-1)!;
+      assert.equal(pinnedCreate.modelSelection.model, "gpt-5.6-sol");
+      assert.equal(
+        pinnedCreate.agentPersonaAssignment?.reviewIndependence?.outcome,
+        "same-model-as-author",
+      );
+      assert.include(
+        yield* lastBrief(),
+        "you run on the same model as the author (gpt-5.6-sol), because it was chosen explicitly.",
+      );
+      const outsideReview = yield* call(
+        { ...unmodeled, ...elsewhere, persona: "reviewer", client_request_id: "outside-reviewer" },
+        outside,
+      );
+      assert.isFalse(outsideReview.isFailure, failureMessage(outsideReview));
+      const outsideCreate = (yield* createdThreads()).at(-1)!;
+      assert.equal(outsideCreate.modelSelection.model, "gpt-5.6-sol");
+      assert.equal(
+        outsideCreate.agentPersonaAssignment?.reviewIndependence?.outcome,
+        "unknown-authors",
+      );
+      assert.include(yield* lastBrief(), "the authors of this work are unknown.");
+      const plainUnmodeled = yield* call({
+        workspace: { type: "shared" as const },
+        brief: "No persona and no model.",
+        title: "Plain agent",
+        client_request_id: "spawn-plain-no-model",
+      });
+      assert.isTrue(plainUnmodeled.isFailure);
+      assert.include(failureMessage(plainUnmodeled), "needs a provider and model");
 
       yield* library.importFiles({
         files: [

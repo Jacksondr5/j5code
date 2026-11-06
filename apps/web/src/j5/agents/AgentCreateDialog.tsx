@@ -57,6 +57,7 @@ export function AgentCreateDialog(props: {
     instructions: string;
     access: AgentPersonaAccess;
     modelRoute: ReadonlyArray<AgentPersonaModelEntry> | null;
+    independentReviewer: boolean;
   }>(
     props.initial
       ? { ...props.initial, idEdited: true }
@@ -68,6 +69,7 @@ export function AgentCreateDialog(props: {
           instructions: "",
           access: "read-only",
           modelRoute: null,
+          independentReviewer: false,
         },
   );
   const [saving, setSaving] = useState(false);
@@ -97,6 +99,7 @@ export function AgentCreateDialog(props: {
         instructions: draft.instructions,
         access: draft.access,
         modelRoute,
+        independentReviewer: draft.independentReviewer,
       },
     });
     if (result._tag === "Failure") {
@@ -196,9 +199,19 @@ export function AgentCreateDialog(props: {
             ) : (
               <AgentRoutePolicyFields
                 environmentId={props.environmentId}
-                value={{ access: draft.access, modelRoute }}
+                value={{
+                  access: draft.access,
+                  modelRoute,
+                  independentReviewer: draft.independentReviewer,
+                }}
                 disabled={saving}
-                onChange={(next) => setDraft({ ...draft, ...next })}
+                onChange={(next) =>
+                  setDraft({
+                    ...draft,
+                    ...next,
+                    independentReviewer: next.independentReviewer === true,
+                  })
+                }
               />
             )}
             {error ? (
