@@ -145,4 +145,12 @@ it("tells an outside agent to tell the person, and everyone else how to escalate
   assert.include(inside, "escalation_id: escalation-1.");
   assert.include(inside, "tells its Captain");
   assert.notInclude(inside, "allow_once");
+  const waivable = personaBlockText({
+    ...block,
+    code: "models_exhausted",
+    escalationId: "escalation-1",
+    waivable: "access-above-caller",
+  });
+  assert.include(waivable, "with a button on your ask; a typed reply never allows it");
+  assert.include(waivable, "retry the same launch with allow_once");
 });
