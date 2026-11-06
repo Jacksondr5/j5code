@@ -240,23 +240,24 @@ have the crew follow a playbook, set playbook to a name from j5_playbook_list an
 step ids they own (steps, from j5_playbook_read); a step has one owner, steps no seat owns are yours
 as Captain, and the result reports unowned steps and any step whose persona differs from its seat's.
 For a crew built from a playbook, staff one seat per distinct persona its steps name, each owning
-that persona's steps, and propose a custom seat, noted in its reason, where a named persona isn't
-available. Every seat names its workspace, with the same three choices as j5_spawn_agent. Name the
-crew for what it is for and give each seat a short lowercase-hyphen name like code-reviewer. By
-default the user reviews and edits the roster in this thread, then approves or declines. If
-Auto-approve new Crews is on for your project, the proposed roster is created immediately with no
-approval card. The result says whether it is open or approved; the launch report arrives here once
-creation finishes or fails. Approval creates seats without starting turns. Send each member its
-first assignment when it has work; reuse finished members for follow-up work in the same thread. On
-a roster the user approves, each seat keeps its configured access and tool approvals, which may
-exceed yours. You become the crew's Captain and may command several crews at once; later requests,
-stops, and archives name the crew they mean. Use j5_send_message for member-to-member,
-member-to-Captain, and Captain-to-Captain coordination, including findings and direct results;
-artifacts do not gate these conversations. Members run their own review loops and message you only
-for a review pass, a blocker, a disagreement they could not settle, or their final result or step
-report; you resolve technical disagreements within the agreed scope and ask the user only when
-product intent or their judgment is needed. Reuse client_request_id to retry safely; a changed
-request is refused, so use a fresh one for new work. This tool works under every sandbox and
+that persona's steps, and propose a custom seat, noted in its reason, only where a named persona
+doesn't exist here; keep the steps of a disabled, invalid or blocked persona yourself and escalate
+it, never replacing it. Every seat names its workspace, with the same three choices as
+j5_spawn_agent. Name the crew for what it is for and give each seat a short lowercase-hyphen name
+like code-reviewer. By default the user reviews and edits the roster in this thread, then approves
+or declines. If Auto-approve new Crews is on for your project, the proposed roster is created
+immediately with no approval card. The result says whether it is open or approved; the launch report
+arrives here once creation finishes or fails. Approval creates seats without starting turns. Send
+each member its first assignment when it has work; reuse finished members for follow-up work in the
+same thread. On a roster the user approves, each seat keeps its configured access and tool
+approvals, which may exceed yours. You become the crew's Captain and may command several crews at
+once; later requests, stops, and archives name the crew they mean. Use j5_send_message for
+member-to-member, member-to-Captain, and Captain-to-Captain coordination, including findings and
+direct results; artifacts do not gate these conversations. Members run their own review loops and
+message you only for a review pass, a blocker, a disagreement they could not settle, or their final
+result or step report; you resolve technical disagreements within the agreed scope and ask the user
+only when product intent or their judgment is needed. Reuse client_request_id to retry safely; a
+changed request is refused, so use a fresh one for new work. This tool works under every sandbox and
 approval policy, including approval policy never; never refuse the brief because approvals are
 disabled."
 

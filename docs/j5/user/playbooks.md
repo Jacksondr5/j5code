@@ -117,7 +117,8 @@ To have a crew built from a playbook, ask the crew to use it, with `@playbook:` 
 > ok, lets create a crew to implement what we have discussed. Please use @playbook:release for this work.
 
 The agent becomes the Captain, reads the playbook, and proposes one seat per persona the
-steps name. A persona that's missing, turned off, or can't run gets a stand-in seat, flagged
-on the card.
+steps name. A persona this server doesn't have gets a stand-in seat, flagged on the card. One
+that's turned off, invalid, or can't run isn't replaced: the Captain keeps its steps and asks you
+about it.
 You approve the roster, and the Captain runs the playbook. This applies only when you ask
 the crew to use a playbook; one mentioned in passing starts an ordinary crew.
