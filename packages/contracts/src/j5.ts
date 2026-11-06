@@ -317,6 +317,18 @@ export const CrewMembershipsResponse = Schema.Struct({
 });
 
 /** One agent placed directly under a visible thread, with its Crew seat when it has one. */
+/**
+ * A member its Captain replaced: a plain agent now, no longer a seat, kept readable with the seat
+ * it held and the member that took its place.
+ */
+export const ReplacedCrewSeat = Schema.Struct({
+  crewInstanceId: Schema.String,
+  crewName: Schema.String,
+  seat: Schema.String,
+  replacedBy: Schema.String,
+});
+export type ReplacedCrewSeat = typeof ReplacedCrewSeat.Type;
+
 export const SpawnedChild = Schema.Struct({
   threadId: ThreadId,
   participantId: Schema.String,
@@ -328,6 +340,7 @@ export const SpawnedChild = Schema.Struct({
       notStarted: Schema.optionalKey(Schema.Boolean),
     }),
   ),
+  replaced: Schema.optionalKey(ReplacedCrewSeat),
 });
 export type SpawnedChild = typeof SpawnedChild.Type;
 export const SpawnedChildrenEntry = Schema.Struct({
@@ -416,6 +429,8 @@ export const FleetAgent = Schema.Struct({
       captainParticipantId: Schema.String,
     }),
   ),
+  /** Set when its Captain replaced it on a live Crew; `crew` is then null. */
+  replaced: Schema.optionalKey(ReplacedCrewSeat),
   /** Open Exchanges this agent owes a reply on. */
   openAsks: Schema.Number,
   /** Absent on older environments; clients must show unknown, never healthy. */
