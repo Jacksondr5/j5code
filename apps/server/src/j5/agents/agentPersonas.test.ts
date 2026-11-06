@@ -27,7 +27,6 @@ describe("built-in agent persona catalog", () => {
 
   it("preserves the settled Phase 1 decisions", () => {
     assert.equal(BUILT_IN_AGENT_PERSONAS.skeptic.modelRoute[1].model, "gpt-5.6-terra");
-    assert.equal(BUILT_IN_AGENT_PERSONAS.publisher.outputArtifact, "PublicationReceipt");
     assert.deepEqual(BUILT_IN_AGENT_PERSONAS.investigator.authority, {
       defaultPolicy: "diagnostic",
       allowedPolicies: ["diagnostic"],
@@ -86,12 +85,9 @@ it("accepts a personal agent without handoff artifact fields", () => {
   });
   assert.equal(definition.outputArtifact, undefined);
   assert.equal(definition.inputArtifacts, undefined);
-  assert.throws(
-    () =>
-      decodeAgentPersonaDefinition({
-        ...definition,
-        outputArtifact: "Undeclared",
-      }),
-    /undefined artifact Undeclared/,
+  // Old definitions still declare handoff artifacts; the fields are ignored, never rejected.
+  assert.equal(
+    decodeAgentPersonaDefinition({ ...definition, outputArtifact: "Undeclared" }).outputArtifact,
+    "Undeclared",
   );
 });

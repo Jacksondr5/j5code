@@ -3,7 +3,7 @@ const field = (value: string) => value.replace(/\s+/g, " ").trim();
 
 /**
  * The prompt must not be able to end its block and continue as platform voice, nor open a
- * header of its own, the same way `CrewSeatFinishNotifier` guards handoff bodies.
+ * header of its own, the same way `CrewSeatFinishNotifier` guards seat replies.
  */
 const promptBody = (prompt: string) =>
   prompt

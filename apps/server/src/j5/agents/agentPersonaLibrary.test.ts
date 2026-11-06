@@ -8,6 +8,7 @@ import {
   AgentPersonaImportConflictError,
   ProviderDriverKind,
   ProviderInstanceId,
+  ThreadId,
   type OrchestrationV2AgentPersonaAssignment,
 } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -186,12 +187,6 @@ describe("folder-backed persona library", () => {
       reason: "Invalid persona definition",
       location: false,
     },
-    {
-      name: "artifact reference",
-      content: yaml({ ...custom, outputArtifact: diagnosticCanary }),
-      reason: "Invalid persona definition",
-      location: false,
-    },
   ])("keeps source contents out of $name diagnostics", ({ content, reason, location }) =>
     Effect.gen(function* () {
       const { library, write, fs, path, folder } = yield* fixture;
@@ -285,7 +280,7 @@ describe("folder-backed persona library", () => {
   it.effect("reports invalid files, invalid configuration, and missing configured folders", () =>
     Effect.gen(function* () {
       const { library, write, fs, path, stateDir } = yield* fixture;
-      yield* write("invalid.yaml", { ...custom, outputArtifact: "UndefinedArtifact" });
+      yield* write("invalid.yaml", { ...custom, version: "one" });
       yield* write("valid.yaml", custom);
       yield* fs.writeFileString(path.join(stateDir, "personas", "syntax.yaml"), "id: [");
       const catalog = yield* library.catalog();
@@ -333,10 +328,13 @@ describe("folder-backed persona library", () => {
         });
         const restored = yield* freshLibrary.readSnapshot(assignment);
         assert.isUndefined(validateAgentPersonaAssignment(assignment, restored));
-        const policy = yield* resolveAgentPersonaRuntime(
-          { agentPersonaAssignment: assignment, runtimeMode: "full-access" },
-          freshLibrary,
-        );
+        // A thread with an id is what used to get the artifact section appended.
+        const thread = {
+          id: ThreadId.make("thread:persona-run"),
+          agentPersonaAssignment: assignment,
+          runtimeMode: "full-access" as const,
+        };
+        const policy = yield* resolveAgentPersonaRuntime(thread, freshLibrary);
         assert.include(
           "agentPersonaInstructions" in policy ? policy.agentPersonaInstructions : "",
           custom.instructions,
@@ -345,7 +343,50 @@ describe("folder-backed persona library", () => {
           "agentPersonaInstructions" in policy ? policy.agentPersonaInstructions : "",
           "Changed behavior",
         );
+        // `custom` still declares a TeamBrief, and the run owes no file for it.
+        assert.notInclude(
+          "agentPersonaInstructions" in policy ? policy.agentPersonaInstructions : "",
+          "TeamBrief",
+        );
         assert.equal(policy.runtimeMode, "approval-required");
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect(
+    "loads a snapshot that still carries retired handoff fields, under the same digest",
+    () =>
+      Effect.gen(function* () {
+        const { library, fs, path, stateDir } = yield* fixture;
+        // The digest is the one this definition had before the handoff fields were retired.
+        const legacy = {
+          id: "legacy-handoff",
+          version: 2,
+          displayName: "Legacy Handoff",
+          description: "Declared handoff artifacts before they were retired.",
+          artifacts: ["TeamBrief"],
+          inputArtifacts: ["ContextBrief"],
+          outputArtifact: "TeamBrief",
+          authority: { defaultPolicy: "read-only", allowedPolicies: ["read-only"] },
+          modelRoute: [
+            { driver: "codex", model: "gpt-5.6-terra", reasoningEffort: "high" },
+            { driver: "claudeAgent", model: "claude-opus-5", reasoningEffort: "high" },
+          ],
+          instructions: "# Identity\nLegacy.",
+        };
+        const digest = "b997f65bdec8e4a3aebe4fc1a51e3138d3cf21fd7c7a9cbef7c87b24faa162f9";
+        assert.equal(yield* library.snapshot(decodeAgentPersonaDefinition(legacy)), digest);
+        yield* fs.writeFileString(
+          path.join(stateDir, "agent-persona-snapshots", `${digest}.json`),
+          json(legacy),
+        );
+        const assignment = {
+          ...assignmentFor(digest),
+          personaId: legacy.id,
+          definitionVersion: legacy.version,
+          displayName: legacy.displayName,
+        };
+        const loaded = yield* library.readSnapshot(assignment);
+        assert.equal(loaded.outputArtifact, "TeamBrief");
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
@@ -370,7 +411,6 @@ describe("folder-backed persona library", () => {
 
   it("validates structured references, identifiers, and authority choices", () => {
     assert.throws(() => decodeAgentPersonaDefinition({ ...custom, id: "../escape" }));
-    assert.throws(() => decodeAgentPersonaDefinition({ ...custom, inputArtifacts: ["Unknown"] }));
     assert.throws(() =>
       decodeAgentPersonaDefinition({
         ...custom,
@@ -1087,7 +1127,6 @@ describe("YAML agent definitions", () => {
         "id: [broken",
         "id: one\nid: two",
         yaml({ ...custom, version: "one" }),
-        yaml({ ...custom, outputArtifact: "UnknownArtifact" }),
         yaml(custom) + "\n---\n" + yaml(custom),
         "id: !custom researcher",
         "id: &name researcher\ndisplayName: *name",

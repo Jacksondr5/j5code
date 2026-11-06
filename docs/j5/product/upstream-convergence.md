@@ -34,7 +34,7 @@ Delegated-question routing is unchanged since it was rechecked on 2026-10-20: up
 Two different things share the word "handoff". J5 docs call upstream's history transfer a **context handoff** and J5's persona document a **handoff artifact**.
 
 - **Upstream:** context handoffs (upstream's "portable handoffs") move a budgeted slice of history (`ContextHandoffBudget`) into a new provider conversation when a thread switches model or provider, is forked, or restarts portably; picking another model now shows the handoff that will happen. A failed native resume still falls back to a fresh conversation without telling the person. New in v0.1.3: the resume fallback keeps the latest turn when an older handoff is pending, on the same lines as J5's patch, which now sits beside it; a forked thread takes its title from the history it inherits.
-- **J5:** persona handoff artifacts under `handoffs/` in project artifacts, with a nudge worker and a composer chip. The native-resume patch refuses a silent context handoff except when the conversation is gone ([divergence D6](upstream.md)).
+- **J5:** handoff artifacts under `handoffs/` in project artifacts, written when an assignment asks for one; older tasks keep their recorded status chip. The native-resume patch refuses a silent context handoff except when the conversation is gone ([divergence D6](upstream.md)).
 - **Watch for:** upstream starting fresh only when the provider reports the conversation gone, and telling the person. That retires D6. The resume-fallback fix that landed in v0.1.3 is not it: it changes which history the fresh start carries, not when one starts.
 
 ## Steering and queues

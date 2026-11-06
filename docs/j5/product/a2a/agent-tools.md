@@ -308,29 +308,23 @@ policy never."
 
 Result: as `j5_propose_crew`. Only the Captain can add a seat. The member is added directly regardless of the auto-approval setting, with the same validation, model and capacity checks as a launch, so a custom seat on a model off the project's list is refused naming the seat, the model and the setting. The result returns the updated roster or a refusal naming the seat and reason; the launch report later records its startup outcome. Retries reuse the original request and cannot add a second copy. A refused automatic request repeats its original reason on retry; a revised request needs a new `client_request_id`. Existing pending addition requests remain human decisions above their Captain's composer, where they can still be approved or declined; additions never appear in the Inbox or its bell count. Member tool approvals remain in the Inbox.
 
-### Handoff artifacts in Crews
+### Seat finish notices
 
-There is no Crew-specific artifact verb. A seat whose definition declares an output artifact writes
-it with the project `j5_write_artifact` tool to the same handoff artifact every persona writes
-(`handoffs/<agent>/<Artifact>-<task>.md`, see the [persona contract](../agent-personas/index.md));
-its first turn carries `<seat_obligation>` naming that exact path. The handoff gate checks for the
-file when a run ends and reminds the seat once. When a seat's run fails, or completes while the seat owes
-no reply, the seat finish notifier posts one platform-composed `<j5_seat_finished>` notice into the
-Captain's thread: the run status (completed or failed, with the run's error when it failed), the
-seat, its Crew, its participant and thread ids, and the handoff artifact as `written`, `missing`, `unavailable`, or `none
-declared` with its path. `missing` means the file was checked and is not there; `unavailable` means
-something is at the path that can never be a handoff (a directory, or a link out of the artifacts
-directory) and carries the reason. Only a real read failure sends nothing, and the next finish or the
-boot sweep retries. A written handoff artifact up
-to 4,000 characters rides inline with its size and digest; longer ones name the path for the
-project `j5_read_artifact` tool, and one over the artifact read limit is still `written`, named by path. A notice posts the first time a seat finishes and again only when
-its facts changed, and a notice that arrives while the Captain's turn runs folds into the one
-queued behind it. Interrupted and cancelled runs are not finishes: `j5_stop_crew` interrupts seats so
-they can be briefed again, and nothing is reported then. Ids
-derive from the run, so a redelivered event cannot post twice. Read-only Codex and Claude personas have `j5_write_artifact` pre-approved for this reason, and `delegate_task` with `task_status` and `task_cancel` beside it, because a Crew member refused `j5_spawn_agent` is sent to provider-native Subagents and a verb the sandbox then rejects is no way out:
-handoff artifacts live in application storage, never in the sandboxed workspace. (Withdrawn on 2026-09-14:
-the 2026-09-10 `deliver_artifact` verb, its ledger table, and the crew-only `read_artifact` and
-`list_artifacts` of that time, which collided with the project artifact toolkit's names.)
+There is no Crew-specific artifact verb, and a seat owes no file. When a seat's run fails, or
+completes while the seat owes no reply, the seat finish notifier posts one platform-composed
+`<j5_seat_finished>` notice into the Captain's thread: the run status (completed or failed, with
+the run's error when it failed), the seat, its Crew, and its participant and thread ids. The
+seat's reply, its last finished assistant message of that run, follows in `<seat_reply>`, cut at
+4,000 characters with a line saying so. A notice posts the first time a seat finishes and again
+only when its facts changed, and a notice that arrives while the Captain's turn runs folds into
+the one queued behind it. Interrupted and cancelled runs are not finishes: `j5_stop_crew`
+interrupts seats so they can be briefed again, and nothing is reported then. Ids derive from the
+run, so a redelivered event cannot post twice; a failed dispatch is retried by the next finish or
+the boot sweep. Read-only Codex and Claude personas have `j5_write_artifact` pre-approved so a
+seat can write a file its assignment asks for, and `delegate_task` with `task_status` and
+`task_cancel` beside it, because a Crew member refused `j5_spawn_agent` is sent to
+provider-native Subagents and a verb the sandbox then rejects is no way out: artifacts live in
+application storage, never in the sandboxed workspace.
 
 ### `j5_stop_crew`
 
@@ -432,7 +426,7 @@ run; `j5_stop_crew` doesn't, and unarchiving doesn't restart it.
 5. A `j5_send_message` to the caller itself is refused with an error naming the caller's own id.
 6. `j5_list_participants` marks the caller's row `self`, reports a person's row as unable to receive a plain message and able to be asked, and omits provider Subagents.
 7. `j5_spawn_agent` refuses a call that omits provider or model, refuses one that omits reasoning for a model with a reasoning option or passes it for a model without one, naming the options, accepts one that omits it for a model without one, refuses a choice outside the Role's allowlist with an error naming the Role, and refuses a caller that sits in a Crew with an error naming escalation to its Captain.
-8. A spawned agent's first turn contains its own participant id and project. A Crew seat receives its approved instructions, shared brief, current roster with responsibilities and participant ids, and any playbook or handoff obligation on its first assignment; the assignment keeps its own envelope and reply obligation. Later assignments reuse the same thread without repeating that introduction, unless the provider conversation was replaced, which sends it again. Started members receive net roster changes at the top of their next delivery, including a message steered into a running turn, without a separate turn.
+8. A spawned agent's first turn contains its own participant id and project. A Crew seat receives its approved instructions, shared brief, current roster with responsibilities and participant ids, and any playbook on its first assignment; the assignment keeps its own envelope and reply obligation. Later assignments reuse the same thread without repeating that introduction, unless the provider conversation was replaced, which sends it again. Started members receive net roster changes at the top of their next delivery, including a message steered into a running turn, without a separate turn.
 9. `j5_stop_agent` and `t3_thread_organize` act on one target; neither cascades. `j5_stop_agent` reaches an agent in any project on this server, and refuses a target that runs with broader permission modes than the caller unless the caller is that seat's Captain. A stopped run is never resumed after a server restart, even when restart continuation is enabled.
 10. `t3_thread_organize` archives and restores any thread in the environment that upstream's access check lets the caller act on. Archive closes Exchanges through the shared reactor without a confirmation-token exchange or interrupting an existing run; human archive warnings remain.
 11. `j5_clear_own_ask` closes only an Exchange the caller opened and records the closure as sender-cleared.

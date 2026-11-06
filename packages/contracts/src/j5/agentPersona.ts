@@ -64,21 +64,6 @@ export const isAgentPersonaAuthorityPolicy = Schema.is(AgentPersonaAuthorityPoli
 export const AgentPersonaReportedAuthorityPolicy = Schema.String;
 export type AgentPersonaReportedAuthorityPolicy = typeof AgentPersonaReportedAuthorityPolicy.Type;
 
-export const BUILT_IN_AGENT_ARTIFACT_IDS = [
-  "ContextBrief",
-  "PlanHandoff",
-  "PlanCritique",
-  "CodeCompleteHandoff",
-  "ReviewHandoff",
-  "PublicationReceipt",
-  "DiagnosisHandoff",
-  "DiagnosisCritique",
-  "ReviewInbox",
-] as const;
-
-export const BuiltInAgentArtifactId = Schema.Literals(BUILT_IN_AGENT_ARTIFACT_IDS);
-export type BuiltInAgentArtifactId = typeof BuiltInAgentArtifactId.Type;
-
 export const OrchestrationV2AgentPersonaRequest = Schema.Struct({
   personaId: AgentPersonaId,
   authorityPolicy: Schema.optional(AgentPersonaAuthorityPolicy),
@@ -260,7 +245,6 @@ export const OrchestrationV2AgentPersonaCatalogEntry = Schema.Struct({
   displayName: TrimmedNonEmptyString,
   description: TrimmedNonEmptyString,
   acceptedInput: Schema.optional(TrimmedNonEmptyString),
-  outputArtifact: Schema.optional(TrimmedNonEmptyString),
   defaultAuthorityPolicy: AgentPersonaReportedAuthorityPolicy,
   allowedAuthorityPolicies: Schema.Array(AgentPersonaReportedAuthorityPolicy),
   availability: OrchestrationV2AgentPersonaAvailability,
@@ -434,7 +418,6 @@ export const J5_AGENT_PERSONA_WS_METHODS = {
   setAgentPersonaLibraryFolders: "j5.agentPersonas.setLibraryFolders",
   setAgentPersonaEnabled: "j5.agentPersonas.setEnabled",
   getAgentHandoffs: "j5.agentPersonas.getHandoffs",
-  subscribeAgentHandoffRefreshes: "j5.agentPersonas.subscribeHandoffRefreshes",
 } as const;
 
 export const J5AgentPersonaRpcSchemas = {
@@ -526,11 +509,6 @@ export const J5AgentPersonaRpcSchemas = {
       threadIds: Schema.optional(Schema.Array(ThreadId).check(Schema.isMaxLength(200))),
     }),
     output: Schema.Struct({ handoffs: Schema.Array(AgentHandoff) }),
-  },
-  /** Emits a revision after every handoff row write; clients refetch `getAgentHandoffs` on it. */
-  subscribeAgentHandoffRefreshes: {
-    input: Schema.Struct({}),
-    output: NonNegativeInt,
   },
 } as const;
 
@@ -660,16 +638,6 @@ const WsJ5GetAgentHandoffsRpc = Rpc.make(J5_AGENT_PERSONA_WS_METHODS.getAgentHan
   error: catalogErrors,
 });
 
-const WsJ5SubscribeAgentHandoffRefreshesRpc = Rpc.make(
-  J5_AGENT_PERSONA_WS_METHODS.subscribeAgentHandoffRefreshes,
-  {
-    payload: J5AgentPersonaRpcSchemas.subscribeAgentHandoffRefreshes.input,
-    success: J5AgentPersonaRpcSchemas.subscribeAgentHandoffRefreshes.output,
-    error: EnvironmentAuthorizationError,
-    stream: true,
-  },
-);
-
 /** Merged into `WsRpcGroup` by one appended call; no other upstream registration exists. */
 export const J5AgentPersonaRpcGroup = RpcGroup.make(
   WsJ5GetAgentPersonaCatalogRpc,
@@ -689,5 +657,4 @@ export const J5AgentPersonaRpcGroup = RpcGroup.make(
   WsJ5SetAgentPersonaLibraryFoldersRpc,
   WsJ5SetAgentPersonaEnabledRpc,
   WsJ5GetAgentHandoffsRpc,
-  WsJ5SubscribeAgentHandoffRefreshesRpc,
 );

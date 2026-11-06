@@ -13,7 +13,6 @@ import * as SqlClient from "effect/sql/SqlClient";
 import { stringify as toYaml } from "yaml";
 
 import { definitionDigest, makeAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
-import { AgentHandoffRefreshes, agentHandoffRefreshChanges } from "./agentHandoffRefreshes.ts";
 import { makeAgentHandoffStore } from "./agentHandoffStore.ts";
 import { agentPersonaFolderGitStatus } from "./agentPersonaLibraryGit.ts";
 import { agentPersonaPolicyEnforcement } from "./agentPersonaProviderPolicy.ts";
@@ -46,7 +45,6 @@ export const AGENT_PERSONA_RPC_SCOPES = {
   [METHODS.setAgentPersonaLibraryFolders]: AuthSettingsWriteScope,
   [METHODS.setAgentPersonaEnabled]: AuthSettingsWriteScope,
   [METHODS.getAgentHandoffs]: AuthOrchestrationReadScope,
-  [METHODS.subscribeAgentHandoffRefreshes]: AuthOrchestrationReadScope,
 } as const;
 
 type Input<K extends keyof typeof J5AgentPersonaRpcSchemas> =
@@ -59,8 +57,6 @@ const catalogError = (cause: unknown) => new AgentPersonaCatalogError({ message:
 export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHandlers")(
   function* (deps: { readonly providers: Effect.Effect<ReadonlyArray<ServerProvider>> }) {
     const library = yield* makeAgentPersonaLibrary;
-    // Bumped by the run-finalization observer; the same layer instance server.ts gives it.
-    const handoffRefreshes = yield* AgentHandoffRefreshes;
     // Usage reads the projections through the session's SqlClient, captured once here.
     const sql = yield* SqlClient.SqlClient;
     const usage = () => agentPersonaUsage().pipe(Effect.provideService(SqlClient.SqlClient, sql));
@@ -191,8 +187,6 @@ export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHand
           Effect.map((list) => ({ handoffs: list })),
           Effect.mapError(catalogError),
         ),
-      [METHODS.subscribeAgentHandoffRefreshes]: (_input: Input<"subscribeAgentHandoffRefreshes">) =>
-        agentHandoffRefreshChanges(handoffRefreshes),
       [METHODS.setAgentPersonaEnabled]: (input: Input<"setAgentPersonaEnabled">) =>
         library.setEnabled(input.personaId, input.enabled).pipe(Effect.mapError(catalogError)),
       [METHODS.setAgentPersonaLibraryFolders]: (input: Input<"setAgentPersonaLibraryFolders">) =>

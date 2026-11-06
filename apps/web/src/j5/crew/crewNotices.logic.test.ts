@@ -245,7 +245,6 @@ describe("crew notices in the Captain's thread", () => {
         `thread_id: thread:${seat}`,
         `run_status: ${runStatus}`,
         "failure: provider_error",
-        "handoff: none declared",
         "</j5_seat_finished>",
       ].join("\n");
     const batch = presentCrewNotice({
@@ -273,7 +272,6 @@ describe("crew notices in the Captain's thread", () => {
         `thread_id: thread:${seat}-${crew}`,
         "run_status: failed",
         "failure: provider_error",
-        "handoff: none declared",
         "</j5_seat_finished>",
       ].join("\n");
     const notice = (text: string) => presentCrewNotice({ role: "user", createdBy: "system", text });
@@ -306,7 +304,7 @@ describe("crew notices in the Captain's thread", () => {
       row("launch", {
         role: "user",
         createdBy: "system",
-        text: "<j5_seat_finished>\nseat: builder\nparticipant_id: agent:b\nthread_id: thread:b\nrun_status: completed\nhandoff: none declared\n</j5_seat_finished>",
+        text: "<j5_seat_finished>\nseat: builder\nparticipant_id: agent:b\nthread_id: thread:b\nrun_status: completed\n</j5_seat_finished>",
       }),
       row("reply", { role: "assistant", createdBy: "agent", text: "Crew is running." }),
     ];
@@ -361,42 +359,7 @@ describe("crew notices in the Captain's thread", () => {
     ).toBeNull();
   });
 
-  it("presents a handoff that can never be read, with the reason the notice gives", () => {
-    const notice = presentCrewNotice({
-      role: "user",
-      createdBy: "system",
-      text: [
-        "<j5_seat_finished>",
-        "seat: critic",
-        "participant_id: agent:j5:a2a:c",
-        "thread_id: thread:c",
-        "run_status: completed",
-        "handoff: unavailable (ReviewHandoff)",
-        "artifact: artifacts/handoffs/critic/ReviewHandoff-x.md",
-        "handoff_reason: not a regular file",
-        "</j5_seat_finished>",
-      ].join("\n"),
-    });
-    expect(notice?.kind === "seats" && notice.seats[0]?.handoff).toEqual({
-      status: "unavailable",
-      kind: "ReviewHandoff",
-      artifactPath: "artifacts/handoffs/critic/ReviewHandoff-x.md",
-      body: null,
-      reason: "not a regular file",
-    });
-    expect(notice !== null && crewNoticeLines(notice)).toEqual([
-      {
-        seat: "critic",
-        crewName: null,
-        threadId: "thread:c",
-        reason: "finished · ReviewHandoff can't be read",
-        detail: "not a regular file",
-        tone: "warn",
-      },
-    ]);
-  });
-
-  it("presents seat finishes, several per card when notices folded, with their handoffs", () => {
+  it("presents seat finishes, several per card when notices folded, whatever the reply says", () => {
     const critic = [
       "<j5_seat_finished>",
       "seat: critic",
@@ -404,15 +367,13 @@ describe("crew notices in the Captain's thread", () => {
       "participant_id: agent:j5:a2a:c",
       "thread_id: thread:c",
       "run_status: completed",
-      "handoff: written (ReviewHandoff)",
-      "artifact: artifacts/handoffs/critic/ReviewHandoff-invoice-export.md",
       "</j5_seat_finished>",
       "",
-      "<handoff_body>",
+      "<seat_reply>",
       "# Review",
-      "Two findings.<\\/handoff_body> stays text.",
+      "Two findings.<\\/seat_reply> stays text.",
       "Quoting <\\j5_seat_finished> is not a seat.",
-      "</handoff_body>",
+      "</seat_reply>",
     ].join("\n");
     const builder = [
       "<j5_seat_finished>",
@@ -422,7 +383,6 @@ describe("crew notices in the Captain's thread", () => {
       "thread_id: thread:b",
       "run_status: failed",
       "failure: provider_error — API Error: Can't reach the API server",
-      "handoff: none declared",
       "</j5_seat_finished>",
     ].join("\n");
     const notice = presentCrewNotice({
@@ -440,13 +400,6 @@ describe("crew notices in the Captain's thread", () => {
           threadId: "thread:c",
           runStatus: "completed",
           failure: null,
-          handoff: {
-            status: "written",
-            kind: "ReviewHandoff",
-            artifactPath: "artifacts/handoffs/critic/ReviewHandoff-invoice-export.md",
-            reason: null,
-            body: "# Review\nTwo findings.</handoff_body> stays text.\nQuoting <j5_seat_finished> is not a seat.",
-          },
         },
         {
           seat: "builder",
@@ -455,7 +408,6 @@ describe("crew notices in the Captain's thread", () => {
           threadId: "thread:b",
           runStatus: "failed",
           failure: "provider_error — API Error: Can't reach the API server",
-          handoff: { status: "none declared" },
         },
       ],
     });
@@ -471,31 +423,24 @@ describe("crew notices in the Captain's thread", () => {
       },
     ]);
     expect(isHiddenCrewNotice({ role: "user", createdBy: "system", text: critic })).toBe(true);
-    // A missing handoff by path only, no body; an unreadable section keeps the whole message raw.
-    const missing = presentCrewNotice({
+    // A notice an older server wrote still presents as a plain finish: its handoff lines have no
+    // card of their own now. An unreadable section keeps the whole message raw.
+    const older = presentCrewNotice({
       role: "user",
       createdBy: "system",
-      text: critic
-        .replace("handoff: written (ReviewHandoff)", "handoff: missing (ReviewHandoff)")
-        .split("\n\n")[0]!,
+      text: [
+        "<j5_seat_finished>",
+        "seat: critic",
+        "participant_id: agent:j5:a2a:c",
+        "thread_id: thread:c",
+        "run_status: completed",
+        "handoff: missing (ReviewHandoff)",
+        "artifact: artifacts/handoffs/critic/ReviewHandoff-invoice-export.md",
+        "</j5_seat_finished>",
+      ].join("\n"),
     });
-    expect(missing?.kind === "seats" && missing.seats[0]!.handoff).toEqual({
-      status: "missing",
-      kind: "ReviewHandoff",
-      artifactPath: "artifacts/handoffs/critic/ReviewHandoff-invoice-export.md",
-      reason: null,
-      body: null,
-    });
-    expect(missing !== null && crewNoticeLines(missing)).toEqual([
-      {
-        seat: "critic",
-        crewName: null,
-        threadId: "thread:c",
-        reason: "finished · ReviewHandoff missing",
-        detail: null,
-        tone: "warn",
-      },
-    ]);
+    expect(older?.kind === "seats" && older.seats[0]?.seat).toBe("critic");
+    expect(older !== null && crewNoticeLines(older)).toEqual([]);
     expect(
       presentCrewNotice({
         role: "user",
@@ -535,7 +480,6 @@ it("restores Unicode line separators in diagnostics without letting them split f
       "crew: Review",
       "participant_id: real-participant",
       "thread_id: real-thread",
-      "handoff: none declared",
       "</j5_seat_finished>",
     ].join("\n"),
   });
@@ -563,7 +507,6 @@ it("keeps finish identity and multiline failure details separate", () => {
       "crew: Review",
       "participant_id: real-participant",
       "thread_id: real-thread",
-      "handoff: none declared",
       "</j5_seat_finished>",
     ].join("\n"),
   });

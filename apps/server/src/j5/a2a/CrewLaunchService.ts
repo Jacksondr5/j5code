@@ -25,7 +25,6 @@ import { ThreadManagementService } from "../../orchestration-v2/ThreadManagement
 import { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
 import { CrewMemberModels } from "../agents/crewMemberModels.ts";
 import { prepareAgentPersonaLaunch } from "../agents/agentPersonaLaunch.ts";
-import { agentHandoffArtifactPath } from "../agents/agentPersonaArtifacts.ts";
 import {
   AgentPersonaLibraryError,
   makeAgentPersonaLibrary,
@@ -117,7 +116,6 @@ export interface ResolvedCrewLaunchSeat {
   readonly assignment: OrchestrationV2AgentPersonaCommandAssignment | null;
   readonly modelSelection: ModelSelection;
   readonly runtimeMode: RuntimeMode;
-  readonly outputArtifact: string | null;
   readonly agentDisplayName: string;
   readonly workspace: ResolvedSpawnWorkspace;
   readonly runtime: CrewProposalSeatRuntime;
@@ -465,7 +463,6 @@ export const layer = Layer.effect(
               workspace,
             },
             runtimeMode,
-            outputArtifact: null,
             agentDisplayName: "custom",
           });
           continue;
@@ -595,9 +592,8 @@ export const layer = Layer.effect(
             detail:
               "This ACP harness cannot enforce the selected access mode. Choose Supervised or Full access.",
           });
-        // The obligation is read from the same immutable snapshot the seat will run on, so a
-        // later library edit cannot change what a running seat owes.
-        const definition = yield* agents.readSnapshot(assignment).pipe(
+        // A snapshot that cannot be read fails the seat here, before it launches.
+        yield* agents.readSnapshot(assignment).pipe(
           Effect.mapError(
             (error) =>
               new CrewLaunchSeatUnavailableError({
@@ -626,7 +622,6 @@ export const layer = Layer.effect(
             workspace,
           },
           runtimeMode,
-          outputArtifact: definition.outputArtifact ?? null,
           agentDisplayName: assignment.displayName ?? agentId,
         });
       }
@@ -786,17 +781,6 @@ export const layer = Layer.effect(
             seatName: member.seat.name,
             seatInstructions: member.seat.instructions,
             captainParticipantId: captain.participantId,
-            obligation:
-              member.outputArtifact === null || member.assignment === null
-                ? undefined
-                : {
-                    kind: member.outputArtifact,
-                    path: agentHandoffArtifactPath({
-                      personaId: member.assignment.personaId,
-                      artifact: member.outputArtifact,
-                      threadId: member.threadId,
-                    }),
-                  },
             roster,
             playbook:
               playbook === null

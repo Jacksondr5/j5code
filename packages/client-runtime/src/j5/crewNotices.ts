@@ -29,19 +29,6 @@ export interface SeatStartFailure {
   readonly detail: string;
 }
 
-export type SeatHandoff =
-  | { readonly status: "none declared" }
-  | {
-      readonly status: "written" | "missing" | "unavailable";
-      readonly kind: string;
-      /** The logical path the notice names, `artifacts/handoffs/...`. */
-      readonly artifactPath: string | null;
-      /** The handoff text when the notice carried it inline. */
-      readonly body: string | null;
-      /** Why an unavailable handoff can never be read, as the notice words it. */
-      readonly reason: string | null;
-    };
-
 export interface FinishedSeat {
   readonly seat: string;
   readonly crewName: string | null;
@@ -50,7 +37,6 @@ export interface FinishedSeat {
   readonly runStatus: string;
   /** The run's recorded error when it failed, as the notice carried it. */
   readonly failure: string | null;
-  readonly handoff: SeatHandoff;
 }
 
 export type CrewNoticePresentation =
@@ -185,8 +171,6 @@ const parseGate = (text: string): CrewNoticePresentation | null => {
 
 const SEAT_OPEN = "<j5_seat_finished>";
 const SEAT_BLOCK = /^<j5_seat_finished>\n([\s\S]*?)\n<\/j5_seat_finished>([\s\S]*)$/;
-const HANDOFF_BODY = /<handoff_body>\n([\s\S]*?)\n<\/handoff_body>/;
-const HANDOFF_FIELD = /^(written|missing|unavailable) \((.+)\)$/;
 
 const parseSeatSection = (section: string): FinishedSeat | null => {
   const match = SEAT_BLOCK.exec(section);
@@ -196,29 +180,8 @@ const parseSeatSection = (section: string): FinishedSeat | null => {
   const participantId = field(block, "participant_id");
   const threadId = field(block, "thread_id");
   const runStatus = field(block, "run_status");
-  const handoffField = field(block, "handoff");
   if (seat === null || participantId === null || threadId === null || runStatus === null)
     return null;
-  let handoff: SeatHandoff;
-  if (handoffField === null || handoffField === "none declared") {
-    handoff = { status: "none declared" };
-  } else {
-    const parsed = HANDOFF_FIELD.exec(handoffField);
-    if (parsed === null) return null;
-    const bodyMatch = HANDOFF_BODY.exec(match[2]!);
-    handoff = {
-      status: parsed[1] as "written" | "missing" | "unavailable",
-      kind: parsed[2]!,
-      artifactPath: field(block, "artifact"),
-      reason: field(block, "handoff_reason"),
-      body:
-        bodyMatch === null
-          ? null
-          : bodyMatch[1]!
-              .replace(/<\\\/handoff_body>/g, "</handoff_body>")
-              .replace(/<\\j5_seat_finished>/g, "<j5_seat_finished>"),
-    };
-  }
   return {
     seat,
     crewName: field(block, "crew"),
@@ -226,7 +189,6 @@ const parseSeatSection = (section: string): FinishedSeat | null => {
     threadId,
     runStatus,
     failure: field(block, "failure") === null ? null : decodeFailureField(field(block, "failure")!),
-    handoff,
   };
 };
 
@@ -297,29 +259,6 @@ export interface CrewNoticeLine {
   readonly tone: "bad" | "warn";
 }
 
-const handoffLine = (seat: FinishedSeat, crewName: string | null): CrewNoticeLine | null => {
-  const handoff = seat.handoff;
-  if (handoff.status === "missing")
-    return {
-      seat: seat.seat,
-      crewName,
-      threadId: seat.threadId,
-      reason: `finished · ${handoff.kind} missing`,
-      detail: null,
-      tone: "warn",
-    };
-  if (handoff.status === "unavailable")
-    return {
-      seat: seat.seat,
-      crewName,
-      threadId: seat.threadId,
-      reason: `finished · ${handoff.kind} can't be read`,
-      detail: handoff.reason,
-      tone: "warn",
-    };
-  return null;
-};
-
 /**
  * What the person would act on in a notice, one line per seat: a seat that didn't start, or a run
  * that didn't end clean. A seat that started or finished cleanly has no line; its row on the Fleet
@@ -361,10 +300,7 @@ export const crewNoticeLines = (notice: CrewNoticePresentation): ReadonlyArray<C
   const severalCrews = new Set(notice.seats.map((seat) => seat.crewName)).size > 1;
   return notice.seats.flatMap((seat): ReadonlyArray<CrewNoticeLine> => {
     const crewName = severalCrews ? seat.crewName : null;
-    if (seat.runStatus === "completed") {
-      const line = handoffLine(seat, crewName);
-      return line === null ? [] : [line];
-    }
+    if (seat.runStatus === "completed") return [];
     const ended =
       seat.runStatus === "failed" || seat.runStatus === "errored"
         ? "run failed"

@@ -195,9 +195,6 @@ export function buildAgentPersonaCatalog(
         ...(definition.acceptedInput === undefined
           ? {}
           : { acceptedInput: definition.acceptedInput }),
-        ...(definition.outputArtifact === undefined
-          ? {}
-          : { outputArtifact: definition.outputArtifact }),
         defaultAuthorityPolicy: definition.authority.defaultPolicy,
         allowedAuthorityPolicies: [...definition.authority.allowedPolicies],
         availability:

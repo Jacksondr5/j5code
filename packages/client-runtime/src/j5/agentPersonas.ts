@@ -63,7 +63,6 @@ export interface AgentPersonaCatalogRow {
   readonly displayName: string;
   readonly description: string;
   readonly acceptedInput: string | undefined;
-  readonly outputArtifact: string | undefined;
   readonly authority: string;
   /** The persona can run unsandboxed, so library rows flag it wherever it comes from. */
   readonly unsandboxed: boolean;
@@ -143,7 +142,6 @@ export function presentAgentPersonaCatalog(
       displayName: persona.displayName,
       description: persona.description,
       acceptedInput: persona.acceptedInput,
-      outputArtifact: persona.outputArtifact,
       unsandboxed: persona.allowedAuthorityPolicies.includes("full-access"),
       authority: persona.allowedAuthorityPolicies
         .map(
@@ -638,7 +636,7 @@ export function presentAgentHandoff(handoff: AgentHandoff): AgentHandoffPresenta
     case "nudged":
       return {
         label: `${handoff.artifact} pending`,
-        detail: `The run ended without ${handoff.artifact}; the agent was asked once to write ${logicalPath}.`,
+        detail: `The run ended without ${handoff.artifact} at ${logicalPath}.`,
         tone: "warning",
         logicalPath,
       };
