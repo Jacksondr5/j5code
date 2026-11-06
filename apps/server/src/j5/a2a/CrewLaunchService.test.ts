@@ -337,6 +337,7 @@ it.effect("creates approved seats and additions without starting turns", () =>
         .launch({
           providerSessionId: "session",
           requestKey: "launch-1",
+          pick: "person",
           captain,
           displayName: "Release Crew",
           seats: [
@@ -362,6 +363,7 @@ it.effect("creates approved seats and additions without starting turns", () =>
       const { instance } = yield* launcher.launch({
         providerSessionId: "session",
         requestKey: "launch-1",
+        pick: "person",
         captain,
         displayName: "Review Pair",
         seats: [
@@ -412,6 +414,7 @@ it.effect("creates approved seats and additions without starting turns", () =>
       const { instance: grown } = yield* launcher.addSeats({
         providerSessionId: "session",
         requestKey: "add-1",
+        pick: "person",
         captain,
         instance,
         seats: [
@@ -477,6 +480,7 @@ it.effect(
         const { instance } = yield* launcher.launch({
           providerSessionId: "session",
           requestKey: "launch-custom",
+          pick: "person",
           captain,
           displayName: "Notes Crew",
           seats: [
@@ -630,6 +634,7 @@ it.effect(
           .launch({
             providerSessionId: "session",
             requestKey: "signed-out-1",
+            pick: "person",
             captain,
             displayName: "Signed Out",
             seats: [
@@ -672,6 +677,7 @@ it.effect("custom seats refuse unavailable providers before recording or spawnin
           .launch({
             providerSessionId: "session",
             requestKey: "unavailable-custom",
+            pick: "person",
             captain,
             displayName: "Notes",
             seats: [
@@ -762,6 +768,7 @@ it.effect(
         const input = {
           providerSessionId: "session",
           requestKey: "runtime-pinned",
+          pick: "person" as const,
           captain,
           displayName: "Notes",
           seats,
@@ -922,6 +929,7 @@ it.effect(
         const { instance } = yield* launcher.launch({
           providerSessionId: "session",
           requestKey: "custom-override",
+          pick: "person",
           captain,
           displayName: "Review",
           seats: [custom],
@@ -942,6 +950,7 @@ it.effect(
         yield* launcher.addSeats({
           providerSessionId: "session",
           requestKey: "custom-override-add",
+          pick: "person",
           captain,
           instance,
           seats: [additional],
@@ -1015,6 +1024,7 @@ it.effect(
         yield* launcher.addSeats({
           providerSessionId: "session",
           requestKey: "saved-override-add",
+          pick: "person",
           captain,
           instance,
           seats: [personaSeat],
@@ -1531,6 +1541,7 @@ const unitFixture = Effect.gen(function* () {
     const { instance } = yield* launcher.launch({
       providerSessionId: "session",
       requestKey: "unit-1",
+      pick: "person",
       captain,
       displayName: "Review Pair",
       seats: [
@@ -1551,6 +1562,7 @@ const unitFixture = Effect.gen(function* () {
       const { instance: grown } = yield* launcher.addSeats({
         providerSessionId: "session",
         requestKey: "add-sentry",
+        pick: "person",
         captain,
         instance,
         seats: [
@@ -1602,6 +1614,7 @@ it.effect(
         const launched = yield* launcher.launch({
           providerSessionId: "session",
           requestKey: "trio",
+          pick: "person",
           captain: unit.captain,
           displayName: "Trio",
           seats: [
@@ -1792,6 +1805,7 @@ it.effect(
         const added = yield* launcher.addSeats({
           providerSessionId: "session",
           requestKey: "add-sentry",
+          pick: "person",
           captain: unit.captain,
           instance,
           seats: [
@@ -1864,6 +1878,7 @@ it.effect(
           .addSeats({
             providerSessionId: "session",
             requestKey: "add-sentry",
+            pick: "person",
             captain: unit.captain,
             instance,
             seats: [
@@ -1928,6 +1943,7 @@ it.effect("records a playbook Crew's step owners and surfaces a taken step unwra
       const { instance } = yield* launcher.launch({
         providerSessionId: "session",
         requestKey: "playbook-crew",
+        pick: "person",
         captain,
         displayName: "Release Crew",
         seats: [custom("planner", ["plan"]), custom("helper")],
@@ -1957,6 +1973,7 @@ it.effect("records a playbook Crew's step owners and surfaces a taken step unwra
         .addSeats({
           providerSessionId: "session",
           requestKey: "rival",
+          pick: "person",
           captain,
           instance,
           seats: [custom("rival", ["plan"])],
@@ -1989,6 +2006,7 @@ it.effect("a relaunch after a failed link stores the re-approved seat's steps", 
       const input = {
         providerSessionId: "session",
         requestKey: "relaunch",
+        pick: "person" as const,
         captain,
         displayName: "Release Crew",
         brief: "Ship it.",
@@ -2079,6 +2097,7 @@ it.effect("launches each seat in the workspace it names, and refuses one git can
         .launch({
           providerSessionId: "session",
           requestKey: "no-repo",
+          pick: "person",
           captain,
           displayName: "Trio",
           seats,
@@ -2141,6 +2160,7 @@ it.effect("launches each seat in the workspace it names, and refuses one git can
       yield* launcher.launch({
         providerSessionId: "session",
         requestKey: "trio",
+        pick: "person",
         captain,
         displayName: "Trio",
         seats,
@@ -2602,6 +2622,7 @@ it.effect("a saved list holds a custom seat to its checked models and names what
         .launch({
           providerSessionId: "session",
           requestKey: "launch-ineligible",
+          pick: "person",
           captain,
           displayName: "Crew",
           seats: [customSeat("explicit", terra)],
@@ -3038,6 +3059,7 @@ it.effect(
           .launch({
             providerSessionId: "session",
             requestKey: "launch-ineligible-level",
+            pick: "person",
             captain,
             displayName: "Crew",
             seats: [customSeat("medium", solAt("medium"))],
