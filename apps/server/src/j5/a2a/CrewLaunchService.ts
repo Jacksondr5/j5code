@@ -31,8 +31,8 @@ import {
   agentAccessOf,
   AgentPersonaPickError,
   assertWithinCallerAccess,
-  callerRuntimeMode,
   pickAgentPersona,
+  resolveCallerAccess,
 } from "../agents/agentPersonaPick.ts";
 import {
   AgentPersonaLibraryError,
@@ -369,7 +369,24 @@ export const layer = Layer.effect(
       pick: CrewSeatPick,
     ) {
       const agentPick = pick === "agent";
-      const caller = { thread: captain.thread };
+      // Read once: an agent's seats are held to the Captain's access and the project's lists.
+      const limit = agentPick
+        ? yield* resolveCallerAccess({ thread: captain.thread }).pipe(
+            Effect.mapError(
+              (cause) =>
+                new CrewLaunchOperationError({
+                  phase: "reading the Captain's access",
+                  seatName: null,
+                  createdSeats: [],
+                  cause,
+                }),
+            ),
+          )
+        : undefined;
+      const caller = limit === undefined ? { thread: captain.thread } : { access: limit };
+      const eligible = agentPick
+        ? yield* memberModels.eligibility(captain.thread.projectId)
+        : undefined;
       const providers = yield* registry.getProviders;
       const now = yield* Clock.currentTimeMillis;
       // Every seat's workspace resolves against one read of the Captain's repository, here at
@@ -463,11 +480,7 @@ export const layer = Layer.effect(
           // On a card the person approves, a seat nobody configured runs in Full access, so it
           // never stops for approvals in a thread the person is not watching; they see and can
           // change it there. Without the card, a seat gets no more than its Captain runs with.
-          const runtimeMode =
-            seat.runtimeMode ??
-            (agentPick
-              ? yield* callerRuntimeMode(caller).pipe(Effect.mapError(pickRefused))
-              : "full-access");
+          const runtimeMode = seat.runtimeMode ?? limit?.runtimeMode ?? "full-access";
           if (agentPick)
             yield* assertWithinCallerAccess(
               `Custom seat ${seat.name}`,
@@ -508,6 +521,7 @@ export const layer = Layer.effect(
               caller,
               projectId: captain.thread.projectId,
               runtimeMode: seat.runtimeMode,
+              eligible,
             });
             return {
               ...prepared,
