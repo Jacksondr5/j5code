@@ -269,9 +269,16 @@ function FoldedMessageHeader(props: {
     >
       <Icon className="size-4 shrink-0 stroke-2 text-muted-foreground" />
       {props.label ? (
-        <span className="max-w-1/2 shrink-0 truncate text-muted-foreground">{props.label}</span>
+        <span
+          className={cn(
+            "truncate text-muted-foreground",
+            props.summary ? "max-w-1/2 shrink-0" : "min-w-0 flex-1",
+          )}
+        >
+          {props.label}
+        </span>
       ) : null}
-      <span className="min-w-0 flex-1 truncate">{props.summary}</span>
+      {props.summary ? <span className="min-w-0 flex-1 truncate">{props.summary}</span> : null}
       <ChevronDownIcon
         className={cn(
           "size-3.5 shrink-0 text-muted-foreground transition-transform",
@@ -372,6 +379,8 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
       .split(/\r?\n/)
       .find((line) => line.trim().length > 0)
       ?.trim() ?? "";
+  // J5: a Crew seat's brief previews the task, but its body opens with the Crew's facts.
+  const foldHeaderSummary = userMessage.preview ?? foldSummary;
   const contextClipboardFragment =
     resolvedContext.records.length === 0
       ? null
@@ -509,8 +518,8 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
         {folded ? (
           <FoldedMessageHeader
             icon={MessagesSquareIcon}
-            label={userMessage.j5 ? "" : senderLabel}
-            summary={userMessage.preview ?? foldSummary}
+            label={userMessage.j5 && !expanded ? "" : (userMessage.authorName ?? senderLabel)}
+            summary={expanded && foldHeaderSummary === foldSummary ? "" : foldHeaderSummary}
             expanded={expanded}
             onToggle={() => setExpanded((value) => !value)}
           />

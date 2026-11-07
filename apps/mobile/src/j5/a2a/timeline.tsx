@@ -22,7 +22,7 @@ import {
   type J5Timeline,
 } from "./timelinePresentation";
 
-export { resolveJ5FeedMessage, type J5Timeline } from "./timelinePresentation";
+export { j5FoldHeader, resolveJ5FeedMessage, type J5Timeline } from "./timelinePresentation";
 
 /** Silence lines and raw cards in place of upstream's row (`presentJ5TimelineNotice`). */
 export function renderJ5TimelineNotice(input: {

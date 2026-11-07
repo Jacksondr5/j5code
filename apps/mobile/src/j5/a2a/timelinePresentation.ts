@@ -1,6 +1,7 @@
 import { presentCrewContext } from "@t3tools/client-runtime/j5/crew-notices";
 import type { ParticipantIdentities } from "@t3tools/client-runtime/j5/participant-identity";
 import {
+  firstLine,
   isJ5DeliveryMessage,
   presentJ5UserMessage,
   resolveJ5UserMessagePresentation,
@@ -43,6 +44,27 @@ export function resolveJ5FeedMessage(message: J5UserMessageInput, timeline: J5Ti
 }
 
 export type J5FeedMessagePresentation = ReturnType<typeof resolveJ5FeedMessage>;
+
+/**
+ * The fold header for a message J5 read. Folded, it has no label, since the identity line above
+ * names the sender. Open, it names the sender (or leaves upstream's sender-thread title) and drops
+ * the summary when the body already opens with it; a Crew seat's brief keeps it, because its body
+ * opens with the Crew's facts.
+ */
+export function j5FoldHeader(
+  presentation: J5FeedMessagePresentation,
+  timeline: J5Timeline,
+  expanded: boolean,
+  summary: string,
+): { readonly label?: string; readonly summary: string } {
+  const j5 = presentation.j5;
+  if (j5 === null) return { summary };
+  if (!expanded) return { label: "", summary };
+  const name =
+    j5.group === "participant" && j5.senderId !== null ? timeline.labels.get(j5.senderId) : null;
+  const openSummary = summary === firstLine(presentation.text) ? "" : summary;
+  return name ? { label: name, summary: openSummary } : { summary: openSummary };
+}
 
 /**
  * J5's platform notices that upstream's row would draw as the reader's own message: a silence,
