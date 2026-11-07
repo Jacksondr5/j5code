@@ -201,15 +201,26 @@ function InboxMessage({ item }: { readonly item: HumanInboxItem }) {
         worktreePath: thread?.worktreePath ?? null,
       })
     : undefined;
-  return (
+  const markdown = (text: string) => (
     <ChatMarkdown
       className="max-w-[72ch] text-sm text-foreground/90"
       cwd={cwd}
       environmentId={item.environmentId}
-      lineBreaks={shouldPreserveAssistantLineBreaks(item.message)}
-      text={item.message}
+      lineBreaks={shouldPreserveAssistantLineBreaks(text)}
+      text={text}
       threadRef={threadRef ?? undefined}
     />
+  );
+  return (
+    <div className="flex flex-col gap-4">
+      {markdown(item.message)}
+      {item.followUps?.map((followUp) => (
+        <div className="flex flex-col gap-1" key={followUp.messageId}>
+          <p className="text-xs font-medium text-muted-foreground">Follow-up</p>
+          {markdown(followUp.message)}
+        </div>
+      ))}
+    </div>
   );
 }
 

@@ -53,7 +53,7 @@ it("renders the versioned peer envelope with exact reply semantics", () => {
     message: "Please verify the worker.",
   });
 
-  assert.equal(A2A_ENVELOPE_VERSION, 28);
+  assert.equal(A2A_ENVELOPE_VERSION, 29);
   assert.include(rendered, "Cross-agent message");
   assert.notMatch(rendered, /\b(?:J5|A2A)\b/);
   assert.include(rendered, "agent:sender");
@@ -134,6 +134,19 @@ it("renders reply closures without another reply instruction for either channel"
   assert.notInclude(human, "This person is not watching this chat");
 });
 
+it("says which ask a person's reply answers, on one line after the reply", () => {
+  const rendered = formatClosedHumanEnvelope({
+    senderId: ParticipantId.make("human:replying-person"),
+    senderLabel: "Jackson",
+    answeredAsk: { exchangeId: ExchangeId.make("exchange:one"), intent: "Merge\n  now?" },
+    message: "Yes.",
+  });
+  assert.equal(
+    rendered,
+    '[Message from Jackson (human:replying-person)]\n\nYes.\n\nThis answers your ask "Merge now?" (exchange:one).\n\nThe platform closed this exchange when this reply was sent. No further reply is required.',
+  );
+});
+
 it("labels platform-authored silence without internal product branding", () => {
   const rendered = formatSilenceNoticeEnvelope({
     noticeType: "peer unavailable",
@@ -175,7 +188,7 @@ it("renders the receiver backlog notice with its measured counts", () => {
 it("keeps the tool descriptions on their documented contracts", () => {
   assert.equal(
     A2A_SEND_TOOL_DESCRIPTION,
-    "Send one durable message. To another agent, three uses: a **plain send** when you don't need a reply; an **ask** — set expect_reply=true with a one-line intent, opening an exchange the receiver owes a reply to; a **reply** — include the exchange_id from the ask you are answering, which closes that exchange. To the human, only an ask: a plain send to a person is refused — if nobody needs to act, say it in your own thread instead. Set urgency only when asking the human. Use this tool only for participants already returned by j5_list_participants; when creating a Peer Agent, put any reply expectation in j5_spawn_agent's brief instead of sending a follow-up ask. Returns once the message is committed; delivery continues asynchronously — carry on with your work, and the reply arrives later as an incoming message. An agent that is busy may handle each message as its own turn after its current one ends, so put related updates in one message rather than sending them one by one; the result's deliveryNotice says when your message will wait behind the receiver's current turn. To interrupt an agent that is busy, set mode: mode=steer puts your message into the turn it is running now, and mode=restart stops that turn and starts it again on your message. Without mode the message is delivered the ordinary way, whatever its text or its intent says: Claude and Codex GPT 6 agents take it into the turn they are running, and other agents take it after their current turn ends. intent only labels an ask. Leave mode out for updates and replies. A Claude agent takes a steer once its running tool calls finish, and on other agents a steer can cancel the tool calls in flight, so keep it for a correction the receiver must see now, not for an update. An idle receiver starts a turn on your message whichever mode you set. Attach files for an agent on this server with attachments: pending uploads from t3_attachment_prepare_upload, or files its thread already holds. A provider Subagent is not a participant and is refused. Reuse client_request_id to retry the same send safely.",
+    "Send one durable message. To another agent, three uses: a **plain send** when you don't need a reply; an **ask** — set expect_reply=true with a one-line intent, opening an exchange the receiver owes a reply to; a **reply** — include the exchange_id from the ask you are answering, which closes that exchange. To the human, only an ask: a plain send to a person is refused — if nobody needs to act, say it in your own thread instead. Set urgency only when asking the human. You may hold several asks with the human at once, and each new ask opens its own exchange; to add to an ask the human has not answered, set regarding to its exchange id instead, without intent or urgency, and the message appears beneath that ask. Use this tool only for participants already returned by j5_list_participants; when creating a Peer Agent, put any reply expectation in j5_spawn_agent's brief instead of sending a follow-up ask. Returns once the message is committed; delivery continues asynchronously — carry on with your work, and the reply arrives later as an incoming message. An agent that is busy may handle each message as its own turn after its current one ends, so put related updates in one message rather than sending them one by one; the result's deliveryNotice says when your message will wait behind the receiver's current turn. To interrupt an agent that is busy, set mode: mode=steer puts your message into the turn it is running now, and mode=restart stops that turn and starts it again on your message. Without mode the message is delivered the ordinary way, whatever its text or its intent says: Claude and Codex GPT 6 agents take it into the turn they are running, and other agents take it after their current turn ends. intent only labels an ask. Leave mode out for updates and replies. A Claude agent takes a steer once its running tool calls finish, and on other agents a steer can cancel the tool calls in flight, so keep it for a correction the receiver must see now, not for an update. An idle receiver starts a turn on your message whichever mode you set. Attach files for an agent on this server with attachments: pending uploads from t3_attachment_prepare_upload, or files its thread already holds. A provider Subagent is not a participant and is refused. Reuse client_request_id to retry the same send safely.",
   );
   assert.include(
     A2A_SEND_TOOL_DESCRIPTION,

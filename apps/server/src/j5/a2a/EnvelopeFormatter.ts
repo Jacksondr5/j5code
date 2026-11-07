@@ -111,20 +111,29 @@ export const formatClosedHumanEnvelope = (input: {
   readonly senderLabel?: string | undefined;
   /** A shared conversation's note the reply carries, at its very top, as a message carries one. */
   readonly note?: string | null | undefined;
+  /** An agent can hold several asks with a person, so a reply says which one it answers. */
+  readonly answeredAsk?: { readonly exchangeId: ExchangeId; readonly intent: string } | undefined;
   readonly message: string;
 }): string => {
   const label = input.senderLabel?.replace(/[\]\s]+/g, " ").trim() ?? "";
+  const message =
+    input.answeredAsk === undefined
+      ? input.message
+      : `${input.message}\n\n${render(config.answeredAskLine, {
+          intent: input.answeredAsk.intent.replace(/\s+/g, " ").trim(),
+          exchangeId: input.answeredAsk.exchangeId,
+        })}`;
   const envelope =
     label.length === 0
       ? render(config.humanClosedMessage, {
           senderId: input.senderId,
-          message: input.message,
+          message,
           closedExchangeInstruction: config.closedExchangeInstruction,
         })
       : render(config.humanNamedClosedMessage, {
           senderLabel: label,
           senderId: input.senderId,
-          message: input.message,
+          message,
           closedExchangeInstruction: config.closedExchangeInstruction,
         });
   return input.note == null ? envelope : `${input.note}\n${envelope}`;

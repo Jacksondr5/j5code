@@ -81,6 +81,12 @@ export type A2AHumanInboxError =
   | A2AAskAnsweredError
   | A2AAskNotYoursError;
 
+const decodeFollowUps = Schema.decodeSync(
+  Schema.fromJsonString(
+    Schema.Array(Schema.Struct({ messageId: Schema.String, message: Schema.String })),
+  ),
+);
+
 interface InboxRow {
   readonly person_id: string;
   readonly project_id: string;
@@ -91,6 +97,8 @@ interface InboxRow {
   readonly intent: string;
   readonly urgency: "blocking" | "soon" | "fyi";
   readonly message: string;
+  /** A JSON array of the follow-ups, oldest first. */
+  readonly follow_ups: string;
   readonly opened_at: string;
   readonly status: "open" | "answered";
   readonly terminal_at: string | null;
@@ -216,6 +224,21 @@ export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlC
               exchange.intent,
               exchange.urgency,
               inbox.latest_message AS message,
+              (
+                SELECT json_group_array(json_object('messageId', message_id, 'message', payload)) FROM (
+                  -- CROSS JOIN keeps the small person-message table first, so a lookup
+                  -- reads that project's messages to people, not all its deliveries.
+                  SELECT data.message_id, data.payload
+                  FROM j5_a2a_human_inbox_data AS data
+                  CROSS JOIN j5_a2a_delivery AS delivery
+                    ON delivery.project_id = data.origin_project_id
+                   AND delivery.message_id = data.message_id
+                  WHERE data.origin_project_id = inbox.project_id
+                    AND data.exchange_id = inbox.exchange_id
+                    AND delivery.exchange_role = 'followup'
+                  ORDER BY delivery.sent_seq
+                )
+              ) AS follow_ups,
               inbox.opened_at,
               inbox.status,
               inbox.terminal_at,
@@ -259,27 +282,28 @@ export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlC
             projectId: row.project_id,
           }),
         );
-        return visible.map(
-          (row) =>
-            ({
-              personId,
-              projectId: LedgerProjectId.make(row.project_id),
-              projectTitle: row.project_title,
-              exchangeId: ExchangeId.make(row.exchange_id),
-              senderId: ParticipantId.make(row.sender_id),
-              senderThreadId:
-                row.sender_thread_id === null ? null : ThreadId.make(row.sender_thread_id),
-              intent: row.intent,
-              urgency: row.urgency,
-              message: row.message,
-              openedAt: row.opened_at,
-              status: row.status,
-              terminalAt: row.terminal_at,
-              ...(row.person_id === EVERYONE_HERE_PERSON_ID
-                ? { forEveryone: true, answeredBy: row.answered_by }
-                : {}),
-            }) satisfies HumanInboxItem,
-        );
+        return visible.map((row) => {
+          const followUps = decodeFollowUps(row.follow_ups);
+          return {
+            personId,
+            projectId: LedgerProjectId.make(row.project_id),
+            projectTitle: row.project_title,
+            exchangeId: ExchangeId.make(row.exchange_id),
+            senderId: ParticipantId.make(row.sender_id),
+            senderThreadId:
+              row.sender_thread_id === null ? null : ThreadId.make(row.sender_thread_id),
+            intent: row.intent,
+            urgency: row.urgency,
+            message: row.message,
+            ...(followUps.length === 0 ? {} : { followUps }),
+            openedAt: row.opened_at,
+            status: row.status,
+            terminalAt: row.terminal_at,
+            ...(row.person_id === EVERYONE_HERE_PERSON_ID
+              ? { forEveryone: true, answeredBy: row.answered_by }
+              : {}),
+          } satisfies HumanInboxItem;
+        });
       });
 
       const answer: A2AHumanInboxShape["answer"] = Effect.fn("j5.a2a.humanInbox.answer")(

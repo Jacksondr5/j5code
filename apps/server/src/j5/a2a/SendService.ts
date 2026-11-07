@@ -33,7 +33,6 @@ import {
   type SendMessageResult,
   participantId,
 } from "./contracts.ts";
-import { CREW_ALERT_EXCHANGE_PREFIX } from "./crewFailureAlert.ts";
 import { type A2AHomeRegistrationError, resolveThreadHome } from "./HomeRegistrar.ts";
 import {
   selfContainedLayer as threadRegistrationLayer,
@@ -191,7 +190,7 @@ export class A2AHumanAskOrReplyRequiredError extends Schema.TaggedError<A2AHuman
   { participantId: Schema.String },
 ) {
   override get message(): string {
-    return `A plain send to human participant ${this.participantId} is refused. To the human, use an ask with expect_reply=true, intent, and urgency=blocking|soon|fyi, or a reply with exchange_id. If nobody needs to act, say it in your own thread instead.`;
+    return `A plain send to human participant ${this.participantId} is refused. To the human, use an ask with expect_reply=true, intent, and urgency=blocking|soon|fyi, or regarding=<exchange id> to add to an ask you have open. If nobody needs to act, say it in your own thread instead.`;
   }
 }
 
@@ -210,12 +209,31 @@ export class A2AEveryoneHereNotSharedError extends Schema.TaggedError<A2AEveryon
   }
 }
 
-export class A2AHumanFollowupNotAllowedError extends Schema.TaggedError<A2AHumanFollowupNotAllowedError>()(
-  "A2AHumanFollowupNotAllowedError",
+export class A2AReplyToOwnAskError extends Schema.TaggedError<A2AReplyToOwnAskError>()(
+  "A2AReplyToOwnAskError",
   { participantId: Schema.String },
 ) {
   override get message(): string {
-    return `A follow-up to human participant ${this.participantId} is refused. To the human, use an ask with expect_reply=true, intent, and urgency=blocking|soon|fyi, or a reply with exchange_id; after an ask is open, wait for its reply, or j5_clear_own_ask on the open exchange and re-ask with the combined content. If nobody needs to act, say it in your own thread instead.`;
+    return `exchange_id names the exchange a reply closes, and human participant ${this.participantId} owes the reply on your own ask, so this send is refused. To add to that ask, retry with regarding=<exchange id> in place of exchange_id.`;
+  }
+}
+
+export class A2ARegardingNotAllowedError extends Schema.TaggedError<A2ARegardingNotAllowedError>()(
+  "A2ARegardingNotAllowedError",
+  {
+    participantId: Schema.String,
+    reason: Schema.Literals(["not-a-person", "with-exchange-id", "with-ask-fields"]),
+  },
+) {
+  override get message(): string {
+    switch (this.reason) {
+      case "not-a-person":
+        return `regarding follows up an ask to a person, and ${this.participantId} is not one. Between agents, a further ask with expect_reply=true joins the open exchange.`;
+      case "with-exchange-id":
+        return "regarding adds to your own ask and exchange_id replies to someone else's, so one send cannot carry both. Retry with the one you mean.";
+      case "with-ask-fields":
+        return "regarding joins an open ask, which keeps its own intent and urgency. Retry without intent and urgency.";
+    }
   }
 }
 
@@ -224,7 +242,7 @@ export class A2AExchangeNotOpenError extends Schema.TaggedError<A2AExchangeNotOp
   { exchangeId: Schema.String },
 ) {
   override get message(): string {
-    return `Exchange ${this.exchangeId} is not open. Call j5_send_message without exchange_id to start a new message or exchange.`;
+    return `Exchange ${this.exchangeId} is not open. Call j5_send_message without exchange_id or regarding to start a new message or exchange.`;
   }
 }
 
@@ -361,7 +379,8 @@ export type A2ASendError =
   | A2AUrgencyRequiresExchangeError
   | A2AHumanAskOrReplyRequiredError
   | A2AEveryoneHereNotSharedError
-  | A2AHumanFollowupNotAllowedError
+  | A2AReplyToOwnAskError
+  | A2ARegardingNotAllowedError
   | A2AExchangeNotOpenError
   | A2AExchangeAlreadyAnsweredError
   | A2AExchangeParticipantMismatchError
@@ -397,7 +416,8 @@ export const isSendRefusal = Schema.is(
     A2AUrgencyRequiresExchangeError,
     A2AHumanAskOrReplyRequiredError,
     A2AEveryoneHereNotSharedError,
-    A2AHumanFollowupNotAllowedError,
+    A2AReplyToOwnAskError,
+    A2ARegardingNotAllowedError,
     A2AExchangeNotOpenError,
     A2AExchangeAlreadyAnsweredError,
     A2AExchangeParticipantMismatchError,
@@ -1006,9 +1026,10 @@ const rawLayer: Layer.Layer<
 
       const receiver = yield* participantMembership(input.to, sender.projectId, remote);
       const receiverId = receiver.participantId;
+      const namedExchangeId = input.regarding ?? input.exchangeId;
       // An agent asks only someone who can write to its thread, or everyone here where more
-      // than one person can (Inbox AC14, AC15).
-      if (receiver.kind === "human" && input.exchangeId === undefined) {
+      // than one person can (Inbox AC14, AC15). A follow-up joins an ask that passed this.
+      if (receiver.kind === "human" && namedExchangeId === undefined) {
         const senderThread = yield* sql<{ readonly thread_id: string | null }>`
           SELECT thread_id FROM j5_a2a_membership
           WHERE project_id = ${sender.projectId} AND participant_id = ${sender.participantId}
@@ -1032,10 +1053,28 @@ const rawLayer: Layer.Layer<
           if (!writes) return yield* new A2AParticipantNotFoundError({ participantId: receiverId });
         }
       }
+      if (input.regarding !== undefined && receiver.kind !== "human") {
+        return yield* new A2ARegardingNotAllowedError({
+          participantId: receiverId,
+          reason: "not-a-person",
+        });
+      }
+      if (input.regarding !== undefined && input.exchangeId !== undefined) {
+        return yield* new A2ARegardingNotAllowedError({
+          participantId: receiverId,
+          reason: "with-exchange-id",
+        });
+      }
+      if (input.regarding !== undefined && (input.intent ?? input.urgency) !== undefined) {
+        return yield* new A2ARegardingNotAllowedError({
+          participantId: receiverId,
+          reason: "with-ask-fields",
+        });
+      }
       if (
         receiver.kind === "human" &&
         input.expectReply !== true &&
-        input.exchangeId === undefined
+        namedExchangeId === undefined
       ) {
         return yield* new A2AHumanAskOrReplyRequiredError({ participantId: receiverId });
       }
@@ -1048,19 +1087,19 @@ const rawLayer: Layer.Layer<
       // The ledger that opened the Exchange records its closure; an ask from another ledger is closed there.
       let closeProjectId = sender.projectId;
 
-      if (input.exchangeId !== undefined) {
+      if (namedExchangeId !== undefined) {
         if (input.urgency !== undefined) {
           return yield* new A2AUrgencyRequiresExchangeError();
         }
         const rows = yield* sql<ExchangeRow>`
               SELECT project_id, exchange_id, sender_id, receiver_id, status
               FROM j5_a2a_exchange
-              WHERE exchange_id = ${input.exchangeId}
+              WHERE exchange_id = ${namedExchangeId}
               LIMIT 2
             `;
         const exchange = rows.length === 1 ? rows[0] : undefined;
         if (exchange === undefined || exchange.status !== "open") {
-          return yield* new A2AExchangeNotOpenError({ exchangeId: input.exchangeId });
+          return yield* new A2AExchangeNotOpenError({ exchangeId: namedExchangeId });
         }
         const isFollowup =
           exchange.sender_id === sender.participantId && exchange.receiver_id === receiverId;
@@ -1068,12 +1107,12 @@ const rawLayer: Layer.Layer<
           exchange.receiver_id === sender.participantId && exchange.sender_id === receiverId;
         if (!isFollowup && !isReply) {
           return yield* new A2AExchangeParticipantMismatchError({
-            exchangeId: input.exchangeId,
+            exchangeId: namedExchangeId,
             senderId: sender.participantId,
             receiverId,
           });
         }
-        exchangeId = input.exchangeId;
+        exchangeId = namedExchangeId;
         joinedExistingExchange = isFollowup;
         if (isReply) {
           const acceptedReplies = yield* sql<{ readonly count: number }>`
@@ -1101,14 +1140,17 @@ const rawLayer: Layer.Layer<
           exchangeState = "open";
         }
       } else if (input.expectReply === true) {
-        const existing = yield* sql<ExchangeRow>`
+        // Asks to a person stay distinct, each its own inbox item; only agents coalesce.
+        const existing =
+          receiver.kind === "human"
+            ? []
+            : yield* sql<ExchangeRow>`
               SELECT project_id, exchange_id, sender_id, receiver_id, status
               FROM j5_a2a_exchange
               WHERE project_id = ${sender.projectId}
                 AND sender_id = ${sender.participantId}
                 AND receiver_id = ${receiverId}
                 AND status = 'open'
-                AND substr(exchange_id, 1, ${CREW_ALERT_EXCHANGE_PREFIX.length}) <> ${CREW_ALERT_EXCHANGE_PREFIX}
               LIMIT 1
             `;
         if (existing[0] !== undefined) {
@@ -1143,8 +1185,12 @@ const rawLayer: Layer.Layer<
         return yield* new A2AUrgencyRequiresExchangeError();
       }
 
-      if (receiver.kind === "human" && exchangeRole === "followup") {
-        return yield* new A2AHumanFollowupNotAllowedError({ participantId: receiverId });
+      if (
+        receiver.kind === "human" &&
+        exchangeRole === "followup" &&
+        input.regarding === undefined
+      ) {
+        return yield* new A2AReplyToOwnAskError({ participantId: receiverId });
       }
 
       // A receiver on a peer server is sent to only while that server is still a

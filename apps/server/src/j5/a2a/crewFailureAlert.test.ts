@@ -187,9 +187,9 @@ it.effect(
         const alertItem = review[0]!;
         assert.equal(alertItem.urgency, "blocking");
         assert.include(alertItem.message, 'seat "critic"');
-        assert.include(alertItem.message, 'seat "builder"');
-        // The replayed run appended nothing.
-        assert.equal(alertItem.message.split('seat "critic"').length, 2);
+        // The later failure is a follow-up beneath it; the replayed run appended nothing.
+        assert.lengthOf(alertItem.followUps ?? [], 1);
+        assert.include(alertItem.followUps?.[0]?.message, 'seat "builder"');
         assert.isTrue(items.some((item) => item.message.includes('Crew "Release"')));
 
         yield* inbox.answer({

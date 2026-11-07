@@ -107,7 +107,7 @@ Notices follow native-question updates and relevant run changes; there is no sta
 
 ## Envelopes
 
-Every delivered message is wrapped in an **envelope**: the platform's wrapper that tells the receiving agent who sent this and from which project — and, for a sender on a peer server, which server — and what it now owes and how to discharge it. A machine participant's envelope says that the sender is automated and cannot receive a reply, so the agent acts on the message directly and takes any question to a person or a peer. An outside agent's envelope names it by its label and its id, names no project, and says that `j5_send_message` cannot reply to it. Envelope wording is versioned configuration rendered from one place, so the channels never drift, and it is written in plain words for an agent reading it in the middle of its work. People reading the app see the letter, not the envelope.
+Every delivered message is wrapped in an **envelope**: the platform's wrapper that tells the receiving agent who sent this and from which project — and, for a sender on a peer server, which server — and what it now owes and how to discharge it. A machine participant's envelope says that the sender is automated and cannot receive a reply, so the agent acts on the message directly and takes any question to a person or a peer. An outside agent's envelope names it by its label and its id, names no project, and says that `j5_send_message` cannot reply to it. Envelope wording is versioned configuration rendered from one place, so the channels never drift, and it is written in plain words for an agent reading it in the middle of its work. A person's reply also names the ask it answers, by its intent and id, because an agent may hold several asks with that person. People reading the app see the letter, not the envelope.
 
 ## Vocabulary this definition owns
 
@@ -143,7 +143,7 @@ message, ask, reply, plain message, Exchange, intent, urgency, obligation, envel
 
 16. An agent-to-person send that is not an ask is refused with an error naming the legal move; a person cannot open an ask through the platform.
 17. An ask to a person appears in that person's inbox regardless of which project it came from.
-18. A person's answer to an ask is delivered to the asker exactly as written, as the reply that closes the Exchange.
+18. A person's answer to an ask is delivered to the asker exactly as written, as the reply that closes the Exchange, and its envelope names the ask it answers by intent and id.
 19. No silence notice is ever written about a person.
 
 ### Silence
@@ -226,3 +226,4 @@ message, ask, reply, plain message, Exchange, intent, urgency, obligation, envel
 - 2026-10-19 — a not-delivered notice names its message by the id the send returned, and an ask by its intent too, so a sender with several messages out can tell which one it is about (Jackson, [#670](https://github.com/Jacksondr5/j5code/issues/670)).
 - 2026-10-20 — native-question answering retains upstream permission checks and unattributed response records; placed agents receive notices without raw thread waiting ([#674](https://github.com/Jacksondr5/j5code/pull/674), [#281](https://github.com/Jacksondr5/j5code/issues/281), [existing access decision](https://github.com/Jacksondr5/j5code/issues/345#issuecomment-6092125478)).
 - 2026-10-27 — upstream's pending-request tools are one `t3_pending_request` tool since its stable v0.1.3.
+- 2026-11-04 — a person's reply names the ask it answers in its envelope, now that several can be open; AC18 ([#111](https://github.com/Jacksondr5/j5code/issues/111)).
