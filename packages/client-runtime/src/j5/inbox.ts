@@ -8,12 +8,6 @@ import {
 
 import type { J5ReadSource, J5ReadSources } from "./readSources.ts";
 
-/** Said on a folded item, so a follow-up to a question already read is not missed. */
-export const followUpCountLabel = (item: Pick<ScopedHumanInboxItem, "followUps">) => {
-  const count = item.followUps?.length ?? 0;
-  return count === 0 ? null : count === 1 ? "1 follow-up" : `${count} follow-ups`;
-};
-
 export type PresentedHumanInboxItem = ScopedHumanInboxItem & {
   readonly environmentLabel: string;
   readonly connected: boolean;

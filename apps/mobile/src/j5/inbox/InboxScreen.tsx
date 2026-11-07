@@ -2,7 +2,6 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   answeredByLine,
   closedLine,
-  followUpCountLabel,
   j5SourceNotice,
   mergeHumanInboxSources,
   type PresentedHumanInboxItem,
@@ -249,14 +248,7 @@ function InboxItem(props: {
           item={item}
           labels={props.labels}
           showEnvironment={props.showEnvironment}
-          trailing={
-            [
-              props.closed === undefined ? `open ${relativeTime(item.openedAt)}` : null,
-              followUpCountLabel(item),
-            ]
-              .filter((part) => part !== null)
-              .join(" · ") || null
-          }
+          trailing={props.closed === undefined ? `open ${relativeTime(item.openedAt)}` : null}
         />
       </Pressable>
       {expanded ? (

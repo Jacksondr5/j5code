@@ -7,7 +7,6 @@ import {
   closedLine,
   compareInboxItems,
   type HumanInboxAnswerAttempt,
-  followUpCountLabel,
   j5SourceNotice,
   keepForPersonScopes,
   mergeHumanInboxSources,
@@ -276,7 +275,6 @@ function OpenInboxItem({
           attachments.add(itemKey, item.environmentId, support.maxFileBytes, files);
   const readiness = attachments.ready(itemKey, item.environmentId);
   const waitingOn = "blocked" in readiness ? readiness.blocked : null;
-  const followUps = followUpCountLabel(item);
   return (
     <li className="border-b border-border/70 last:border-b-0">
       <details className="group/details">
@@ -311,12 +309,6 @@ function OpenInboxItem({
                   </time>
                 </>
               ) : null}
-              {followUps === null ? null : (
-                <>
-                  <span aria-hidden>·</span>
-                  <span>{followUps}</span>
-                </>
-              )}
             </div>
             <h2 className="mt-1 break-words text-pretty text-base font-semibold leading-snug text-foreground">
               {item.intent}
