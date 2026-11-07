@@ -1,5 +1,5 @@
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off - builds throwaway directory layouts to exercise the path guards.
-import { assert, describe, it } from "@effect/vitest";
+import { assert, describe, expect, it } from "@effect/vitest";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -21,6 +21,7 @@ import {
   baseEnvironment,
   baseProgress,
   listsPeer,
+  preservePeerSetup,
   peerRepairCommand,
   peerSteps,
   isOwnMapping,
@@ -1032,6 +1033,45 @@ describe("formatInstructions", () => {
     assert.notInclude(skills, "Skills writes are prohibited");
   });
 
+  it("reports preserved unhealthy peer records without claiming direct delivery", async () => {
+    const list = (side: "local" | "remote") =>
+      JSON.stringify({
+        peers: [
+          {
+            environmentId: side === "local" ? "remote-id" : "local-id",
+            label: side === "local" ? "Remote" : "Local",
+            lastError: "connection refused",
+          },
+        ],
+      });
+    let issued = 0;
+    const justPeered = await preservePeerSetup({
+      localId: "local-id",
+      remoteId: "remote-id",
+      list,
+      setup: async () => {
+        issued++;
+      },
+    });
+    assert.isFalse(justPeered);
+    const output = formatInstructions({
+      paths,
+      manifest: { ...built, mode: "peer" },
+      facts,
+      pairingUrl: undefined,
+      remote: {
+        facts,
+        ownerName: "Remote owner",
+        addToBrowserUrl: undefined,
+        peered:
+          justPeered || (listsPeer(list("local"), "Remote") && listsPeer(list("remote"), "Local")),
+      },
+    });
+    assert.equal(issued, 0);
+    assert.include(output, "The two are NOT peered yet");
+    assert.notInclude(output, "send to each other directly");
+  });
+
   it("names each server's owner in a peer build", () => {
     const output = formatInstructions({
       paths,
@@ -1427,5 +1467,116 @@ describe("formatUpgrade", () => {
       "J5 Code live-test server: RUNNING",
       "  Runs          Base's home, upgraded to 7b09506fbc with this worktree's uncommitted changes",
     ]);
+  });
+});
+
+describe("preservePeerSetup", () => {
+  it("keeps credentials and localhost origins despite a transient peer error", async () => {
+    const records = {
+      local: [
+        { environmentId: "remote-id", origin: "http://127.0.0.1:4002", credential: "fixture-a" },
+      ],
+      remote: [
+        {
+          environmentId: "local-id",
+          origin: "http://localhost:4001",
+          credential: "fixture-b",
+          lastError: "connection refused",
+        },
+      ],
+    };
+    const before = JSON.stringify(records);
+    let issued = 0;
+    await preservePeerSetup({
+      localId: "local-id",
+      remoteId: "remote-id",
+      list: (side) => JSON.stringify({ peers: records[side] }),
+      setup: async () => {
+        issued++;
+        records.remote[0]!.credential = "replaced";
+      },
+    });
+    assert.equal(issued, 0);
+    assert.equal(JSON.stringify(records), before);
+  });
+
+  it("preserves asymmetric store/poll records without issuing again", async () => {
+    let issued = 0;
+    await preservePeerSetup({
+      localId: "local-id",
+      remoteId: "remote-id",
+      list: (side) =>
+        JSON.stringify({
+          peers: [
+            {
+              environmentId: side === "local" ? "remote-id" : "local-id",
+              linkMode: side === "local" ? "store" : "poll",
+              origin: side === "local" ? null : "http://localhost:4001",
+              lastError: "temporarily unreachable",
+            },
+          ],
+        }),
+      setup: async () => {
+        issued++;
+      },
+    });
+    assert.equal(issued, 0);
+  });
+
+  it("finishes first setup and incomplete direct or poll setup", async () => {
+    for (const local of [[], [{ environmentId: "remote-id", linkMode: "store" }]]) {
+      let issued = 0;
+      await preservePeerSetup({
+        localId: "local-id",
+        remoteId: "remote-id",
+        list: (side) => JSON.stringify({ peers: side === "local" ? local : [] }),
+        setup: async () => {
+          issued++;
+        },
+      });
+      assert.equal(issued, 1);
+    }
+  });
+
+  it("reads Remote before repairing a missing Local record", async () => {
+    for (const remote of [
+      () => {
+        throw new Error("peer list unavailable");
+      },
+      () => "not json",
+    ]) {
+      const reads: Array<string> = [];
+      let issued = 0;
+      await expect(
+        preservePeerSetup({
+          localId: "local-id",
+          remoteId: "remote-id",
+          list: (side) => {
+            reads.push(side);
+            return side === "local" ? JSON.stringify({ peers: [] }) : remote();
+          },
+          setup: async () => {
+            issued++;
+          },
+        }),
+      ).rejects.toThrow();
+      assert.deepEqual(reads, ["local", "remote"]);
+      assert.equal(issued, 0);
+    }
+  });
+
+  it("refuses an unreadable list without issuing credentials", async () => {
+    let issued = 0;
+    await expect(
+      preservePeerSetup({
+        localId: "local-id",
+        remoteId: "remote-id",
+        list: () => "not json",
+        setup: async () => {
+          issued++;
+        },
+      }),
+    ).rejects.toThrow();
+    assert.equal(issued, 0);
   });
 });
