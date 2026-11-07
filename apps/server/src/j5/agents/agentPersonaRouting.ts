@@ -205,12 +205,19 @@ function candidatesForTarget(
     .map(({ provider }) => provider);
 }
 
+/** Whether an agent may pick this resolved selection; a person's pick passes none. */
+export type AgentPersonaEntryEligibility = (
+  selection: ModelSelection,
+  provider: ServerProvider,
+) => boolean;
+
 export function resolveAgentPersonaRoute(input: {
   readonly personaId: AgentPersonaId;
   readonly definition?: AgentPersonaDefinition;
   readonly providers: ReadonlyArray<ServerProvider>;
   readonly authorityPolicy?: AgentPersonaAuthorityPolicy;
   readonly now: number;
+  readonly eligible?: AgentPersonaEntryEligibility | undefined;
 }): AgentPersonaRouteResolution {
   const definition = input.definition ?? getBuiltInAgentPersona(input.personaId);
   const authority = input.authorityPolicy ?? agentPersonaPolicy(definition);
@@ -232,13 +239,12 @@ export function resolveAgentPersonaRoute(input: {
         failures.push({ code: reason, instanceId: provider.instanceId });
         continue;
       }
-      return {
-        route,
-        entryIndex,
-        target,
-        modelSelection: agentPersonaModelSelection(provider, target),
-        failures: [],
-      };
+      const modelSelection = agentPersonaModelSelection(provider, target);
+      if (input.eligible !== undefined && !input.eligible(modelSelection, provider)) {
+        failures.push({ code: "model-not-eligible", instanceId: provider.instanceId });
+        continue;
+      }
+      return { route, entryIndex, target, modelSelection, failures: [] };
     }
     return { route, entryIndex, target, failures };
   });

@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 import { detectComposerTrigger } from "../composerTrigger.ts";
 import { collectComposerInlineTokens } from "../composerInlineTokens.ts";
-import { agentMentionReplacement, detectAgentMention } from "./agentMention.ts";
+import {
+  agentMentionReplacement,
+  detectAgentMention,
+  mentionedPersonaIds,
+} from "./agentMention.ts";
 
 describe("agent mention syntax", () => {
   it("recognizes the same stable persona token anywhere in a prompt", () => {
@@ -65,5 +69,48 @@ describe("agent mention syntax", () => {
       rangeStart: 0,
       rangeEnd: replacement.length - 1,
     });
+  });
+  it("finds the personas a message asks for, but not ones it quotes", () => {
+    expect(
+      mentionedPersonaIds("@persona:reviewer, then @persona:builder. @persona:reviewer"),
+    ).toEqual(["reviewer", "builder"]);
+    expect(
+      mentionedPersonaIds(
+        [
+          "Run `@persona:inline` and",
+          "```",
+          "@persona:fenced",
+          "```",
+          "> @persona:quoted",
+          'He said "@persona:said" here',
+          "me@persona:email",
+          "foo@persona:identifier",
+          "He said 'run @persona:single' earlier",
+          "Then \u2018@persona:curly\u2019 too",
+        ].join("\n"),
+      ),
+    ).toEqual([]);
+  });
+  it("treats every CommonMark code block as quoted", () => {
+    const quoted = [
+      "Explain this example:\n~~~text\n@persona:tilde\n~~~",
+      "````md\n```\n@persona:inner\n```\n````",
+      "Here:\n\n    @persona:indented\n\tand @persona:tabbed",
+      "~~~~\n@persona:unclosed\n~~~\nstill code",
+      "Spans: ``@persona:double`` and `` `@persona:padded` ``",
+    ];
+    for (const text of quoted) expect(mentionedPersonaIds(text)).toEqual([]);
+    expect(mentionedPersonaIds("~~~\n@persona:fenced\n~~~\nNow run @persona:after.")).toEqual([
+      "after",
+    ]);
+    // A list item's continuation and a line right after prose are not indented code.
+    expect(mentionedPersonaIds("Steps:\n    @persona:continued")).toEqual(["continued"]);
+  });
+  it("finds a mention after opening punctuation and beside apostrophes", () => {
+    expect(
+      mentionedPersonaIds(
+        "Please use (@persona:scout), [@persona:builder] or {@persona:critic}. Don't skip @persona:sentry, it's Bryant's call.",
+      ),
+    ).toEqual(["scout", "builder", "critic", "sentry"]);
   });
 });

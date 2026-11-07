@@ -1,6 +1,8 @@
 import { assert, describe, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
+  MessageId,
+  type ModelSelection,
   NodeId,
   EnvironmentId,
   ThreadId,
@@ -27,6 +29,7 @@ import { makeAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
 import { BUILT_IN_AGENT_PERSONAS } from "./agentPersonas.ts";
 import { resolveAgentPersonaRuntime } from "./agentPersonaRuntime.ts";
 import { validateAgentPersonaSubagent } from "./agentPersonaSubagent.ts";
+import { CrewMemberModels } from "./crewMemberModels.ts";
 
 const definition = {
   ...BUILT_IN_AGENT_PERSONAS.scout,
@@ -109,6 +112,39 @@ const fixture = Effect.gen(function* () {
     }),
   };
   const calls: Array<Parameters<OrchestratorMcpService["Service"]["delegateTask"]>[1]> = [];
+  type TurnMessage = {
+    createdBy: "user" | "agent";
+    creationSource: "web" | "mobile" | "mcp";
+    text: string;
+  };
+  // The message that started the parent's running turn, one steered into it later, and the
+  // models agents may pick.
+  const turn: {
+    message?: TurnMessage;
+    steered?: TurnMessage | undefined;
+    eligible: (selection: ModelSelection) => boolean;
+  } = { eligible: () => true };
+  const records = (
+    fields: ReadonlyArray<string>,
+    filter?: { readonly messageIds?: ReadonlyArray<string> },
+  ) => {
+    const message = turn.message;
+    if (message === undefined) return parent;
+    const started = MessageId.make("turn-message");
+    const messages = [
+      { id: started, role: "user", ...message },
+      ...(turn.steered === undefined
+        ? []
+        : [{ id: MessageId.make("steered-message"), role: "user", ...turn.steered }]),
+    ].filter(({ id }) => filter?.messageIds === undefined || filter.messageIds.includes(id));
+    return {
+      ...parent,
+      runs: fields.includes("runs")
+        ? [{ id: "run", ordinal: 1, status: "running", userMessageId: started } as never]
+        : [],
+      messages: fields.includes("messages") ? (messages as never) : [],
+    };
+  };
   const invoke = (id = definition.id, available = providers, driver = "codex", authorized = true) =>
     invokeAgent({ personaId: id, task: "Review the API", clientRequestId: "request" }).pipe(
       Effect.provideService(McpInvocationContext, {
@@ -126,7 +162,11 @@ const fixture = Effect.gen(function* () {
       Effect.provide(
         Layer.mergeAll(
           Layer.mock(ThreadManagementService)({
-            getThreadRecords: () => Effect.succeed(parent),
+            getThreadRecords: (_, fields, filter) =>
+              Effect.succeed(records(fields, filter) as never),
+          }),
+          Layer.mock(CrewMemberModels)({
+            eligibility: () => Effect.succeed((selection) => turn.eligible(selection)),
           }),
           Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed(available) }),
           Layer.mock(OrchestratorMcpService)({
@@ -162,7 +202,7 @@ const fixture = Effect.gen(function* () {
       ),
       Effect.exit,
     );
-  return { library, parent, calls, invoke };
+  return { library, parent, calls, invoke, turn };
 });
 const testLayer = ServerConfig.layerTest(process.cwd(), { prefix: "j5-agent-invocation-" }).pipe(
   Layer.provideMerge(NodeServices.layer),
@@ -338,6 +378,105 @@ describe("saved agent subagent invocation", () => {
         assert.isTrue((yield* invoke("team-operator"))._tag === "Failure");
         assert.lengthOf(calls, 0);
       }).pipe(Effect.provide(testLayer)),
+  );
+  it.effect(
+    "holds an agent's pick to the caller's access but lets a person's @persona mention lift it",
+    () =>
+      Effect.gen(function* () {
+        const { library, calls, invoke, parent, turn } = yield* fixture;
+        yield* library.importFiles({
+          files: [
+            {
+              name: "operator.yaml",
+              content: yaml({
+                ...definition,
+                id: "team-operator",
+                authority: { defaultPolicy: "full-access", allowedPolicies: ["full-access"] },
+              }),
+            },
+          ],
+          replaceExisting: false,
+        });
+        parent.thread = { ...parent.thread, runtimeMode: "approval-required" };
+
+        // No mention: the Supervised parent's own pick is refused, naming both levels.
+        const refused = yield* invoke("team-operator");
+        assert.isTrue(refused._tag === "Failure");
+        assert.include(
+          String(refused),
+          "Persona team-operator would run with Full access, which is broader than the Supervised its caller runs with.",
+        );
+        // A mention relayed by an agent, or a quoted one, is still the agent's pick.
+        turn.message = {
+          createdBy: "agent",
+          creationSource: "mcp",
+          text: "Run @persona:team-operator",
+        };
+        assert.isTrue((yield* invoke("team-operator"))._tag === "Failure");
+        turn.message = {
+          createdBy: "user",
+          creationSource: "web",
+          text: "Don't run `@persona:team-operator`",
+        };
+        assert.isTrue((yield* invoke("team-operator"))._tag === "Failure");
+        // A mention the person steers into the running turn is not the message that started it.
+        turn.message = { createdBy: "user", creationSource: "web", text: "Fix the build." };
+        turn.steered = {
+          createdBy: "user",
+          creationSource: "web",
+          text: "Use @persona:team-operator for it.",
+        };
+        const steered = yield* invoke("team-operator");
+        assert.isTrue(steered._tag === "Failure");
+        assert.include(String(steered), "broader than the Supervised its caller runs with");
+        turn.steered = undefined;
+        assert.lengthOf(calls, 0);
+
+        // The person typed the mention: the child gets its saved access.
+        turn.message = {
+          createdBy: "user",
+          creationSource: "web",
+          text: "@persona:team-operator fix the build",
+        };
+        assert.isTrue((yield* invoke("team-operator"))._tag === "Success");
+        const child = calls[0]!;
+        assert.deepEqual(child.agentPersonaAssignment?.pickSource, { kind: "person" });
+        assert.equal(child.runtimeMode, "inherit");
+        const runtime = yield* resolveAgentPersonaRuntime(
+          {
+            agentPersonaAssignment: child.agentPersonaAssignment!,
+            runtimeMode: "approval-required",
+          },
+          library,
+        );
+        assert.equal(runtime.runtimeMode, "full-access");
+      }).pipe(Effect.provide(testLayer)),
+  );
+  it.effect("skips an unchecked model for an agent's pick and uses it for a person's", () =>
+    Effect.gen(function* () {
+      const { calls, invoke, turn } = yield* fixture;
+      turn.eligible = (selection) => selection.instanceId !== "codex";
+      yield* invoke();
+      assert.equal(calls[0]?.agentPersonaAssignment?.resolvedDriver, "claudeAgent");
+      assert.deepEqual(calls[0]?.agentPersonaAssignment?.pickSource, { kind: "agent" });
+
+      // With no checked entry left, the refusal gives the reason for each entry.
+      turn.eligible = () => false;
+      const refused = yield* invoke();
+      assert.isTrue(refused._tag === "Failure");
+      assert.include(String(refused), "entry 1");
+      assert.include(String(refused), "entry 2");
+      assert.include(String(refused), "is not checked in Models for custom members");
+
+      turn.message = {
+        createdBy: "user",
+        creationSource: "mobile",
+        text: `Ask @persona:${definition.id}.`,
+      };
+      yield* invoke();
+      assert.equal(calls[1]?.agentPersonaAssignment?.resolvedDriver, "codex");
+      assert.deepEqual(calls[1]?.agentPersonaAssignment?.pickSource, { kind: "person" });
+    }).pipe(Effect.provide(testLayer)),
   );
   it("drops a caller-provided runtime mode before delegating", () => {
     const decoded = decodeInvokeAgentInput({

@@ -10,6 +10,7 @@ import { CrewMemberModels, layer } from "../agents/crewMemberModels.ts";
 /** For tests of other behavior: every model is eligible, as when no list was ever saved. */
 export const permissiveCrewMemberModels = Layer.mock(CrewMemberModels)({
   assertEligible: () => Effect.void,
+  eligibility: () => Effect.succeed(() => true),
 });
 
 /**

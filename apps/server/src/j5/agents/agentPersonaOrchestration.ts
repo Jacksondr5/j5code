@@ -113,14 +113,15 @@ export const resolveAgentPersonaLaunch = Effect.fn("j5.resolveAgentPersonaLaunch
     });
   }
   if (options.replay) return requested;
-  const agentPersonaAssignment = yield* prepareAgentPersonaLaunch(
+  const prepared = yield* prepareAgentPersonaLaunch(
     input.agentPersona,
     yield* options.providers,
     options.library,
   );
+  // The composer's persona launch is always a person's pick, which has no limits to apply.
   const resolved: AgentPersonaLaunch = {
-    modelSelection: agentPersonaAssignment.resolvedModelSelection,
-    agentPersonaAssignment,
+    modelSelection: prepared.resolvedModelSelection,
+    agentPersonaAssignment: { ...prepared, pickSource: { kind: "person" } },
   };
   return resolved;
 });
