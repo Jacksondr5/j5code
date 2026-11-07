@@ -1058,6 +1058,8 @@ function AgentMessageFoldHeader(props: {
   /** J5 names the sender in the line above the row instead. */
   readonly label?: string;
   readonly summary: string;
+  /** J5: the body already opens with the summary, so it shows only while folded. */
+  readonly summaryWhileFolded?: boolean;
   readonly expanded: boolean;
   readonly onToggle: () => void;
   readonly iconSubtleColor: ColorValue;
@@ -1094,9 +1096,11 @@ function AgentMessageFoldHeader(props: {
           {label}
         </Text>
       ) : null}
-      <Text numberOfLines={1} className="min-w-0 shrink text-sm text-user-bubble-foreground">
-        {props.summary}
-      </Text>
+      {props.expanded && props.summaryWhileFolded ? null : (
+        <Text numberOfLines={1} className="min-w-0 shrink text-sm text-user-bubble-foreground">
+          {props.summary}
+        </Text>
+      )}
       <ThreadDisclosureChevron
         expanded={props.expanded}
         collapsedDirection="down"
@@ -1598,7 +1602,7 @@ function renderFeedEntry(
               <AgentMessageFoldHeader
                 environmentId={props.environmentId}
                 senderThreadId={message.senderThreadId}
-                {...(presentation.j5 ? { label: "" } : {})}
+                {...(presentation.j5 ? { label: "", summaryWhileFolded: true } : {})}
                 summary={
                   presentation.preview ??
                   replaceComposerContextReferences(presentation.text, (ref) => ref.label)
