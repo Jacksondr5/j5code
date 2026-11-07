@@ -20,9 +20,17 @@ import {
   ThreadManagementService,
 } from "../../orchestration-v2/ThreadManagementService.ts";
 import { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
-import { AgentPersonaEscalations, personaBlockText } from "./agentPersonaEscalation.ts";
+import {
+  AgentPersonaEscalations,
+  AgentPersonaWaiverScope,
+  personaBlockText,
+} from "./agentPersonaEscalation.ts";
 import { prepareAgentPersonaLaunch } from "./agentPersonaLaunch.ts";
-import { makeAgentPersonaLibrary, type createAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
+import {
+  definitionDigest,
+  makeAgentPersonaLibrary,
+  type createAgentPersonaLibrary,
+} from "./agentPersonaLibrary.ts";
 import { translateAgentPersonaProviderPolicy } from "./agentPersonaProviderPolicy.ts";
 import { resolveAgentPersonaRuntime } from "./agentPersonaRuntime.ts";
 import {
@@ -31,7 +39,11 @@ import {
   type AgentPersonaPickLimits,
 } from "./agentPersonaRouting.ts";
 import { prepareAgentPersonaPeerSpawn } from "./agentPersonaSpawn.ts";
-import type { AgentPersonaDefinition, AgentPersonaId } from "./agentPersonas.ts";
+import {
+  agentPersonaPolicy,
+  type AgentPersonaDefinition,
+  type AgentPersonaId,
+} from "./agentPersonas.ts";
 import { CrewMemberModels } from "./crewMemberModels.ts";
 import {
   resolveReviewAuthors,
@@ -68,6 +80,8 @@ export class AgentPersonaPickError extends Schema.TaggedError<AgentPersonaPickEr
     code: Schema.optional(AgentPersonaBlockCode),
     /** The escalation recorded for the refusal; absent for an outside agent, which can't ask. */
     escalationId: Schema.optional(Schema.String),
+    /** With `constraint`: the launch a grant of it would allow. */
+    scope: Schema.optional(AgentPersonaWaiverScope),
   },
 ) {}
 
@@ -213,7 +227,7 @@ export const pickAgentPersona = Effect.fn("j5.agents.pickAgentPersona")(function
   const escalations = yield* AgentPersonaEscalations;
   const agentPick = input.source === "agent";
   // A person's pick has no limits to lift, so it neither checks nor spends a grant.
-  const waived =
+  const grant =
     input.allowOnce === undefined || !agentPick
       ? undefined
       : yield* escalations
@@ -233,6 +247,12 @@ export const pickAgentPersona = Effect.fn("j5.agents.pickAgentPersona")(function
   ) {
     if (error.code === undefined) return yield* error;
     const code = error.code;
+    // A waiver is offered only for a launch whose scope can be recorded.
+    const waivable = error.scope === undefined ? null : error.constraint;
+    const unspent =
+      grant === undefined
+        ? ""
+        : ` allow_once ${input.allowOnce} covers only ${describeScope(grant.scope)}, so it stays unspent for that.`;
     const escalationId =
       input.escalateFor === undefined
         ? null
@@ -242,7 +262,8 @@ export const pickAgentPersona = Effect.fn("j5.agents.pickAgentPersona")(function
               personaId: input.personaId,
               code,
               summary: error.message,
-              waivable: error.constraint,
+              waivable,
+              scope: waivable === null ? null : (error.scope ?? null),
             })
             .pipe(
               Effect.mapError(
@@ -257,18 +278,18 @@ export const pickAgentPersona = Effect.fn("j5.agents.pickAgentPersona")(function
     return yield* new AgentPersonaPickError({
       message: personaBlockText({
         code,
-        detail: error.message,
+        detail: `${error.message}${unspent}`,
         escalationId,
-        waivable: error.constraint,
+        waivable,
       }),
-      constraint: error.constraint,
+      constraint: waivable,
       code,
       ...(escalationId === null ? {} : { escalationId }),
     });
   });
-  return yield* pickWithin(input, waived).pipe(
+  return yield* pickWithin(input, grant).pipe(
     Effect.catchTags({ AgentPersonaPickError: escalate }),
-    Effect.map((picked) =>
+    Effect.map(({ waived, ...picked }) =>
       waived === undefined
         ? picked
         : {
@@ -282,9 +303,16 @@ export const pickAgentPersona = Effect.fn("j5.agents.pickAgentPersona")(function
   );
 });
 
+const describeScope = (scope: AgentPersonaWaiverScope) =>
+  scope.entries
+    .map((entry) => `${entry.instanceId} ${entry.model} at ${accessLabel(entry)}`)
+    .join(" or ");
+
 const pickWithin = Effect.fn("j5.agents.pickWithin")(function* (
   input: AgentPersonaPickInput,
-  waived: AgentPersonaPickConstraint | undefined,
+  grant:
+    | { readonly constraint: AgentPersonaPickConstraint; readonly scope: AgentPersonaWaiverScope }
+    | undefined,
 ) {
   const sources = yield* makeAgentPersonaLibrary;
   const catalog = yield* sources.catalog().pipe(
@@ -299,6 +327,17 @@ const pickWithin = Effect.fn("j5.agents.pickWithin")(function* (
   );
   // One read serves the reviewer flag and the launch, so an edit between them can't split them.
   const library: Library = { ...sources, catalog: () => Effect.succeed(catalog) };
+  const definition = catalog.definitions.find(({ id }) => id === input.personaId);
+  const digest = definition === undefined ? undefined : definitionDigest(definition);
+  if (grant !== undefined && digest !== undefined && digest !== grant.scope.definitionDigest)
+    return yield* new AgentPersonaPickError({
+      message: `allow_once ${input.allowOnce} was granted under an earlier version of persona ${input.personaId}'s definition, so it no longer applies; it stays unspent. Ask the person again.`,
+      constraint: null,
+    });
+  const covers = (selection: { readonly instanceId: string; readonly model: string }) =>
+    grant?.scope.entries.find(
+      (entry) => entry.instanceId === selection.instanceId && entry.model === selection.model,
+    );
   const providers = yield* (yield* ProviderRegistry).getProviders;
   const authors = yield* reviewAuthorsFor(
     input.personaId,
@@ -327,8 +366,55 @@ const pickWithin = Effect.fn("j5.agents.pickWithin")(function* (
               ? undefined
               : `on ${driver} it would run with ${accessLabel(child)}, which is broader than the ${accessLabel(limit)} its caller runs with`;
           },
-          waived,
+          waived:
+            grant === undefined
+              ? undefined
+              : {
+                  constraint: grant.constraint,
+                  covers: (selection) => covers(selection) !== undefined,
+                },
         };
+  // What a refusal waivable by one limit would let run, recorded so a grant allows only that.
+  const scopeOf = (
+    entries: ReadonlyArray<{
+      readonly entryIndex: number;
+      readonly instanceId: string;
+      readonly model: string;
+    }>,
+  ): AgentPersonaWaiverScope | undefined =>
+    definition === undefined || digest === undefined
+      ? undefined
+      : {
+          definitionDigest: digest,
+          entries: entries.flatMap((entry) => {
+            const driver = providers.find(
+              ({ instanceId }) => instanceId === entry.instanceId,
+            )?.driver;
+            return driver === undefined
+              ? []
+              : [{ ...entry, ...accessOn(agentPersonaPolicy(definition), driver) }];
+          }),
+        };
+  const launchRefusal = (error: {
+    readonly message: string;
+    readonly constraint?: AgentPersonaPickConstraint | undefined;
+    readonly code?: AgentPersonaBlockCode | undefined;
+    readonly waiverEntries?:
+      | ReadonlyArray<{
+          readonly entryIndex: number;
+          readonly instanceId: string;
+          readonly model: string;
+        }>
+      | undefined;
+  }) => {
+    const scope = error.waiverEntries === undefined ? undefined : scopeOf(error.waiverEntries);
+    return new AgentPersonaPickError({
+      message: error.message,
+      constraint: error.constraint ?? null,
+      ...(error.code === undefined ? {} : { code: error.code }),
+      ...(scope === undefined ? {} : { scope }),
+    });
+  };
   const pinned = input.pinned;
   const assignment: OrchestrationV2AgentPersonaCommandAssignment =
     pinned === undefined
@@ -338,7 +424,7 @@ const pickWithin = Effect.fn("j5.agents.pickWithin")(function* (
           library,
           limits,
           authors === undefined ? undefined : new Set(authors.models),
-        ).pipe(Effect.mapError(libraryRefusal))
+        ).pipe(Effect.mapError(launchRefusal))
       : yield* prepareAgentPersonaPeerSpawn(
           {
             personaId: input.personaId,
@@ -363,9 +449,20 @@ const pickWithin = Effect.fn("j5.agents.pickWithin")(function* (
     if (failures.length > 0) {
       const level = selection.options?.find(({ id }) => isAgentPersonaReasoningOptionId(id))?.value;
       const subject = `Persona ${input.personaId} on ${selection.instanceId} ${selection.model}${level === undefined ? "" : ` (${String(level)})`}`;
+      const scope =
+        failures.length === 1
+          ? scopeOf([
+              {
+                entryIndex: assignment.resolvedEntryIndex ?? 0,
+                instanceId: selection.instanceId,
+                model: selection.model,
+              },
+            ])
+          : undefined;
       return yield* new AgentPersonaPickError({
         code: "models_exhausted",
         constraint: failures.length === 1 ? failures[0]!.code : null,
+        ...(scope === undefined ? {} : { scope }),
         message: `${subject} is blocked: ${failures
           .map(({ code, detail }) =>
             code === "model-not-eligible"
@@ -376,7 +473,15 @@ const pickWithin = Effect.fn("j5.agents.pickWithin")(function* (
       });
     }
   }
+  // A grant lets through only the candidate it covered, at no more than the access recorded.
+  const covered = covers(selection);
+  if (covered !== undefined && !withinAccess(access, covered))
+    return yield* new AgentPersonaPickError({
+      message: `allow_once ${input.allowOnce} covered persona ${input.personaId} on ${covered.instanceId} ${covered.model} at ${accessLabel(covered)}; this launch asks for ${accessLabel(access)}, so the allowance stays unspent. Ask the person again for that.`,
+      constraint: null,
+    });
   return {
+    waived: covered === undefined ? undefined : grant?.constraint,
     assignment: {
       ...assignment,
       pickSource: { kind: input.source },

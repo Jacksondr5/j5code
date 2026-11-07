@@ -44,6 +44,16 @@ export class AgentPersonaLibraryError extends Schema.TaggedError<AgentPersonaLib
     code: Schema.optional(AgentPersonaBlockCode),
     /** The persona a definition that fails to decode names, so a launch can say it is invalid. */
     personaId: Schema.optional(Schema.String),
+    /** With `constraint`: each candidate waiving it alone would let run. */
+    waiverEntries: Schema.optional(
+      Schema.Array(
+        Schema.Struct({
+          entryIndex: Schema.Number,
+          instanceId: Schema.String,
+          model: Schema.String,
+        }),
+      ),
+    ),
   },
 ) {}
 

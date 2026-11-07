@@ -272,7 +272,10 @@ describe("agent persona routing", () => {
         limits: {
           eligible: () => limits.eligible,
           accessAbove: () => (limits.within ? undefined : "broader than its caller"),
-          waived: limits.waived,
+          waived:
+            limits.waived === undefined
+              ? undefined
+              : { constraint: limits.waived, covers: () => true },
         },
       });
     const unchecked = route({ eligible: false, within: true });
@@ -309,7 +312,11 @@ describe("agent persona routing", () => {
         now: 0,
         personaId: "investigator",
         providers,
-        limits: { eligible: () => true, accessAbove: () => undefined, waived },
+        limits: {
+          eligible: () => true,
+          accessAbove: () => undefined,
+          waived: { constraint: waived, covers: () => true },
+        },
       });
       assert.equal(resolution.status, "unavailable", waived);
       if (resolution.status === "available") continue;

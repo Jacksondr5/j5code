@@ -14,6 +14,7 @@ import { ServerConfig } from "../../config.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
 import { agentPersonaEscalationsTestLayer } from "../test-support/agentPersonaEscalations.ts";
+import { AgentPersonaEscalations } from "./agentPersonaEscalation.ts";
 import { makeAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
 import { pickAgentPersona } from "./agentPersonaPick.ts";
 import { BUILT_IN_AGENT_PERSONAS } from "./agentPersonas.ts";
@@ -50,14 +51,20 @@ const providers = definition.modelRoute.map(
     }) as unknown as ServerProvider,
 );
 
+const lists = { unchecked: [primary.driver] as Array<string> };
+const [, secondary] = definition.modelRoute;
+const pinOf = (entry: typeof primary) => ({
+  instanceId: ProviderInstanceId.make(entry.driver),
+  model: entry.model,
+  reasoning: entry.reasoningEffort,
+});
+
 const testLayer = Layer.mergeAll(
   Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed(providers) }),
-  // The project's list checks every model but the primary's.
+  // By default the project's list checks every model but the primary's.
   Layer.mock(CrewMemberModels)({
     eligibility: () =>
-      Effect.succeed(
-        (selection) => selection.instanceId !== ProviderInstanceId.make(primary.driver),
-      ),
+      Effect.succeed((selection) => !lists.unchecked.includes(String(selection.instanceId))),
   }),
   Layer.mock(ThreadManagementService)({}),
   agentPersonaEscalationsTestLayer(),
@@ -68,6 +75,7 @@ const testLayer = Layer.mergeAll(
 
 it.effect("a pinned entry that can't run escalates instead of falling back", () =>
   Effect.gen(function* () {
+    lists.unchecked = [primary.driver];
     yield* (yield* makeAgentPersonaLibrary).importFiles({
       files: [{ name: "researcher.yaml", content: yaml(definition) }],
       replaceExisting: false,
@@ -99,5 +107,88 @@ it.effect("a pinned entry that can't run escalates instead of falling back", () 
     assert.isDefined(refused.escalationId);
     assert.include(refused.message, `escalation_id: ${refused.escalationId}`);
     assert.include(refused.message, "is not checked in Models for custom members");
+  }).pipe(Effect.provide(testLayer)),
+);
+
+const importDefinition = (content: typeof definition) =>
+  Effect.gen(function* () {
+    yield* (yield* makeAgentPersonaLibrary).importFiles({
+      files: [{ name: "researcher.yaml", content: yaml(content) }],
+      replaceExisting: true,
+    });
+  });
+const agentPick = (extra: Partial<Parameters<typeof pickAgentPersona>[0]>) =>
+  pickAgentPersona({
+    personaId: definition.id,
+    source: "agent",
+    caller: { approvedLevel: "full-access" },
+    projectId: ProjectId.make("project"),
+    escalateFor: "agent:j5:a2a:thread:caller",
+    ...extra,
+  });
+const grant = (escalationId: string | undefined) =>
+  Effect.gen(function* () {
+    yield* (yield* AgentPersonaEscalations).markGranted({
+      escalationId: escalationId!,
+      grantedBy: "human:owner",
+    });
+    return escalationId!;
+  });
+
+it.effect("an allowance covers only the model the person was shown", () =>
+  Effect.gen(function* () {
+    lists.unchecked = [primary.driver, secondary!.driver];
+    yield* importDefinition(definition);
+    const refused = yield* agentPick({ pinned: pinOf(primary) }).pipe(Effect.flip);
+    const allowOnce = yield* grant(refused.escalationId);
+
+    // The cheap entry was allowed; the expensive one is refused, and the allowance stays.
+    const other = yield* agentPick({ pinned: pinOf(secondary!), allowOnce }).pipe(Effect.flip);
+    assert.equal(other.code, "models_exhausted");
+    assert.include(other.message, `allow_once ${allowOnce} covers only`);
+    const allowed = yield* agentPick({ pinned: pinOf(primary), allowOnce });
+    assert.deepEqual(allowed.assignment.pickSource, {
+      kind: "allow-once",
+      waived: "model-not-eligible",
+    });
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("an allowance never covers broader access than the refusal showed", () =>
+  Effect.gen(function* () {
+    lists.unchecked = [];
+    yield* importDefinition(definition);
+    // A Crew seat's own access, above its Supervised Captain.
+    const seat = (runtimeMode: "auto-accept-edits" | "full-access", allowOnce?: string) =>
+      agentPick({
+        caller: { approvedLevel: "approval-required" },
+        runtimeMode,
+        ...(allowOnce === undefined ? {} : { allowOnce }),
+      });
+    const refused = yield* seat("auto-accept-edits").pipe(Effect.flip);
+    assert.equal(refused.constraint, "access-above-caller");
+    const allowOnce = yield* grant(refused.escalationId);
+
+    const broader = yield* seat("full-access", allowOnce).pipe(Effect.flip);
+    assert.include(broader.message, "at Auto-accept edits; this launch asks for Full access");
+    assert.isUndefined(broader.code);
+    const allowed = yield* seat("auto-accept-edits", allowOnce);
+    assert.deepEqual(allowed.assignment.pickSource, {
+      kind: "allow-once",
+      waived: "access-above-caller",
+    });
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("an allowance ends when the persona's definition changes", () =>
+  Effect.gen(function* () {
+    lists.unchecked = [primary.driver, secondary!.driver];
+    yield* importDefinition(definition);
+    const refused = yield* agentPick({ pinned: pinOf(primary) }).pipe(Effect.flip);
+    const allowOnce = yield* grant(refused.escalationId);
+    yield* importDefinition({ ...definition, instructions: "Edited after the person allowed it." });
+    const stale = yield* agentPick({ pinned: pinOf(primary), allowOnce }).pipe(Effect.flip);
+    assert.include(stale.message, "earlier version of persona team-researcher's definition");
+    assert.isUndefined(stale.code);
   }).pipe(Effect.provide(testLayer)),
 );

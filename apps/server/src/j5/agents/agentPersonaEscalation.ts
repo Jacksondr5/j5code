@@ -1,9 +1,10 @@
 // @effect-diagnostics nodeBuiltinImport:off - a random id; no Crypto service is wired into this layer.
 import * as NodeCrypto from "node:crypto";
-import type {
-  AgentPersonaBlockCode,
-  AgentPersonaEscalationView,
-  AgentPersonaPickConstraint,
+import {
+  RuntimeMode,
+  type AgentPersonaBlockCode,
+  type AgentPersonaEscalationView,
+  type AgentPersonaPickConstraint,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -15,6 +16,26 @@ import type { SqlError } from "effect/sql/SqlError";
 
 import { AgentCrewInstanceService } from "../a2a/AgentCrewInstanceService.ts";
 import { ParticipantId } from "../a2a/contracts.ts";
+
+/**
+ * What a refusal showed the person, which bounds the one launch a grant allows: the definition
+ * it was refused under, and each candidate the waiver lets run, with the access it would get.
+ */
+export const AgentPersonaWaiverScope = Schema.Struct({
+  definitionDigest: Schema.String,
+  entries: Schema.Array(
+    Schema.Struct({
+      entryIndex: Schema.Number,
+      instanceId: Schema.String,
+      model: Schema.String,
+      runtimeMode: RuntimeMode,
+      sandbox: Schema.optional(Schema.Literals(["readOnly", "workspaceWrite"])),
+    }),
+  ),
+});
+export type AgentPersonaWaiverScope = typeof AgentPersonaWaiverScope.Type;
+const decodeScope = Schema.decodeUnknownEffect(Schema.fromJsonString(AgentPersonaWaiverScope));
+const encodeScope = Schema.encodeEffect(Schema.fromJsonString(AgentPersonaWaiverScope));
 
 /** The rule every persona launch tool states, in the same words. */
 export const BLOCKED_PERSONA_TOOL_TEXT =
@@ -90,6 +111,7 @@ interface EscalationRow {
   readonly code: string;
   readonly summary: string;
   readonly waivable: AgentPersonaPickConstraint | null;
+  readonly scope_json: string | null;
   readonly exchange_id: string | null;
   readonly status: "open" | "granted" | "used";
 }
@@ -104,7 +126,9 @@ export class AgentPersonaEscalations extends Context.Service<
       readonly code: AgentPersonaBlockCode;
       readonly summary: string;
       readonly waivable: AgentPersonaPickConstraint | null;
-    }) => Effect.Effect<string, SqlError>;
+      /** Required with a waivable limit: what a grant may let run. */
+      readonly scope: AgentPersonaWaiverScope | null;
+    }) => Effect.Effect<string, SqlError | Schema.SchemaError>;
     /**
      * Whether this asker may ask about this escalation: the caller it was recorded for, or that
      * caller's Captain, and only while it is open.
@@ -142,7 +166,10 @@ export class AgentPersonaEscalations extends Context.Service<
       readonly escalationId: string;
       readonly callerParticipantId: string | undefined;
       readonly personaId: string;
-    }) => Effect.Effect<AgentPersonaPickConstraint, AgentPersonaEscalationError | SqlError>;
+    }) => Effect.Effect<
+      { readonly constraint: AgentPersonaPickConstraint; readonly scope: AgentPersonaWaiverScope },
+      AgentPersonaEscalationError | SqlError
+    >;
     /** Spend a grant on the launch it allowed; a second launch is refused. */
     readonly use: (
       escalationId: string,
@@ -175,10 +202,12 @@ export const layer = Layer.effect(
       const id = `escalation-${NodeCrypto.randomUUID()}`;
       yield* sql`
         INSERT INTO j5_persona_escalation (
-          id, caller_participant_id, persona_id, code, summary, waivable, status, created_at
+          id, caller_participant_id, persona_id, code, summary, waivable, scope_json, status,
+          created_at
         ) VALUES (
           ${id}, ${input.callerParticipantId}, ${input.personaId}, ${input.code},
-          ${input.summary}, ${input.waivable}, 'open', ${yield* now}
+          ${input.summary}, ${input.waivable},
+          ${input.scope === null ? null : yield* encodeScope(input.scope)}, 'open', ${yield* now}
         )
       `;
       return id;
@@ -284,11 +313,16 @@ export const layer = Layer.effect(
         return yield* refuse(
           `allow_once ${input.escalationId} was already used; each allowance covers one launch.`,
         );
-      if (row.status !== "granted" || row.waivable === null)
+      if (row.status !== "granted" || row.waivable === null || row.scope_json === null)
         return yield* refuse(
           `allow_once ${input.escalationId} has not been allowed: only an Owner's "Allow this once" on the ask grants it, never a text reply.`,
         );
-      return row.waivable;
+      const scope = yield* decodeScope(row.scope_json).pipe(
+        Effect.mapError(() =>
+          refuse(`allow_once ${input.escalationId} can't be read; ask the person again.`),
+        ),
+      );
+      return { constraint: row.waivable, scope };
     });
 
     const use: AgentPersonaEscalations["Service"]["use"] = Effect.fn("j5.agents.escalations.use")(

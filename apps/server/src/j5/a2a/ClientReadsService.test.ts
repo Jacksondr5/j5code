@@ -570,6 +570,12 @@ it.effect("puts an escalation only on the ask that carries it", () =>
       code: "models_exhausted",
       summary: "Persona reviewer is blocked.",
       waivable: "access-above-caller",
+      scope: {
+        definitionDigest: "digest",
+        entries: [
+          { entryIndex: 0, instanceId: "codex", model: "gpt-6", runtimeMode: "full-access" },
+        ],
+      },
     });
     yield* escalations.linkAsk({ escalationId, exchangeId: blocked });
 

@@ -33,6 +33,15 @@ const record = (waivable: "model-not-eligible" | null) =>
       code: "models_exhausted",
       summary: "Persona reviewer is blocked because none of its model entries can run.",
       waivable,
+      scope:
+        waivable === null
+          ? null
+          : {
+              definitionDigest: "digest",
+              entries: [
+                { entryIndex: 0, instanceId: "codex", model: "gpt-6", runtimeMode: "full-access" },
+              ],
+            },
     });
   });
 
@@ -97,7 +106,7 @@ it.layer(agentPersonaEscalationsTestLayer(crews))("persona escalations", (it) =>
           .message,
         "is for persona reviewer",
       );
-      assert.equal(yield* escalations.grantedWaiver(waiver), "model-not-eligible");
+      assert.equal((yield* escalations.grantedWaiver(waiver)).constraint, "model-not-eligible");
 
       // One launch spends it; the next is refused.
       yield* escalations.use(id);
