@@ -373,6 +373,7 @@ it.effect(
                         entryIndex: 0,
                         instanceId: "codex",
                         model: "gpt-6",
+                        options: [],
                         runtimeMode: "full-access",
                       },
                     ],

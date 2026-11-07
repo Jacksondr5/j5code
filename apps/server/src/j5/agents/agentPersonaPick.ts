@@ -3,6 +3,7 @@ import {
   AgentPersonaPickConstraint,
   isAgentPersonaReasoningOptionId,
   type ProviderDriverKind,
+  type ProviderOptionSelection,
   type OrchestrationV2AgentPersonaCommandAssignment,
   type OrchestrationV2AppThread,
   type ProjectId,
@@ -303,6 +304,12 @@ export const pickAgentPersona = Effect.fn("j5.agents.pickAgentPersona")(function
   );
 });
 
+const optionsKey = (options: ReadonlyArray<ProviderOptionSelection>) =>
+  options
+    .map(({ id, value }) => `${id}=${String(value)}`)
+    .sort()
+    .join(",");
+
 const describeScope = (scope: AgentPersonaWaiverScope) =>
   scope.entries
     .map((entry) => `${entry.instanceId} ${entry.model} at ${accessLabel(entry)}`)
@@ -334,9 +341,18 @@ const pickWithin = Effect.fn("j5.agents.pickWithin")(function* (
       message: `allow_once ${input.allowOnce} was granted under an earlier version of persona ${input.personaId}'s definition, so it no longer applies; it stays unspent. Ask the person again.`,
       constraint: null,
     });
-  const covers = (selection: { readonly instanceId: string; readonly model: string }) =>
+  // The exact candidate the person was shown: the same instance, model and options, so the
+  // same model at another reasoning level is not covered.
+  const covers = (selection: {
+    readonly instanceId: string;
+    readonly model: string;
+    readonly options?: ReadonlyArray<ProviderOptionSelection> | undefined;
+  }) =>
     grant?.scope.entries.find(
-      (entry) => entry.instanceId === selection.instanceId && entry.model === selection.model,
+      (entry) =>
+        entry.instanceId === selection.instanceId &&
+        entry.model === selection.model &&
+        optionsKey(entry.options) === optionsKey(selection.options ?? []),
     );
   const providers = yield* (yield* ProviderRegistry).getProviders;
   const authors = yield* reviewAuthorsFor(
@@ -380,6 +396,7 @@ const pickWithin = Effect.fn("j5.agents.pickWithin")(function* (
       readonly entryIndex: number;
       readonly instanceId: string;
       readonly model: string;
+      readonly options: ReadonlyArray<ProviderOptionSelection>;
     }>,
   ): AgentPersonaWaiverScope | undefined =>
     definition === undefined || digest === undefined
@@ -404,6 +421,7 @@ const pickWithin = Effect.fn("j5.agents.pickWithin")(function* (
           readonly entryIndex: number;
           readonly instanceId: string;
           readonly model: string;
+          readonly options: ReadonlyArray<ProviderOptionSelection>;
         }>
       | undefined;
   }) => {
@@ -456,6 +474,8 @@ const pickWithin = Effect.fn("j5.agents.pickWithin")(function* (
                 entryIndex: assignment.resolvedEntryIndex ?? 0,
                 instanceId: selection.instanceId,
                 model: selection.model,
+                // The level the pin asked for, even where the entry leaves it to the spawner.
+                options: selection.options ?? [],
               },
             ])
           : undefined;

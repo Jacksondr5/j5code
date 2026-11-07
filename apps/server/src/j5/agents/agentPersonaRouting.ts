@@ -63,6 +63,8 @@ export interface AgentPersonaRouteFailure {
   readonly instanceId?: ProviderInstanceId;
   /** Words for a limit that the code alone can't say, such as the two access levels. */
   readonly detail?: string;
+  /** For a limit, the selection the candidate would have run with. */
+  readonly selection?: ModelSelection;
 }
 export interface AgentPersonaRouteAttempt {
   readonly route: "primary" | "fallback";
@@ -261,6 +263,8 @@ export interface AgentPersonaWaiverEntry {
   readonly entryIndex: number;
   readonly instanceId: ProviderInstanceId;
   readonly model: string;
+  /** The options the candidate runs with, its reasoning level among them. */
+  readonly options: NonNullable<ModelSelection["options"]>;
 }
 
 /**
@@ -276,15 +280,27 @@ export const singleWaiver = (
 } | null => {
   const found: Array<AgentPersonaWaiverEntry & { constraint: AgentPersonaPickConstraint }> = [];
   for (const { entryIndex, target, failures } of attempts) {
-    const byCandidate = new Map<ProviderInstanceId, Set<AgentPersonaRouteFailureCode>>();
-    for (const { code, instanceId } of failures) {
+    const byCandidate = new Map<
+      ProviderInstanceId,
+      { codes: Set<AgentPersonaRouteFailureCode>; selection?: ModelSelection }
+    >();
+    for (const { code, instanceId, selection } of failures) {
       if (instanceId === undefined) continue;
-      byCandidate.set(instanceId, (byCandidate.get(instanceId) ?? new Set()).add(code));
+      const candidate = byCandidate.get(instanceId) ?? { codes: new Set() };
+      candidate.codes.add(code);
+      if (selection !== undefined) candidate.selection = selection;
+      byCandidate.set(instanceId, candidate);
     }
-    for (const [instanceId, codes] of byCandidate) {
+    for (const [instanceId, { codes, selection }] of byCandidate) {
       const [only] = codes;
       if (codes.size === 1 && (only === "model-not-eligible" || only === "access-above-caller"))
-        found.push({ constraint: only, entryIndex, instanceId, model: target.model });
+        found.push({
+          constraint: only,
+          entryIndex,
+          instanceId,
+          model: target.model,
+          options: selection?.options ?? [],
+        });
     }
   }
   const constraint = found[0]?.constraint;
@@ -293,7 +309,7 @@ export const singleWaiver = (
     constraint,
     entries: found
       .filter((entry) => entry.constraint === constraint)
-      .map(({ entryIndex, instanceId, model }) => ({ entryIndex, instanceId, model })),
+      .map(({ constraint: _constraint, ...entry }) => entry),
   };
 };
 
@@ -336,7 +352,11 @@ export function resolveAgentPersonaRoute(input: {
       const limited = agentPersonaLimitFailures(input.limits, authority, modelSelection, provider);
       if (limited.length > 0) {
         failures.push(
-          ...limited.map((failure) => ({ ...failure, instanceId: provider.instanceId })),
+          ...limited.map((failure) => ({
+            ...failure,
+            instanceId: provider.instanceId,
+            selection: modelSelection,
+          })),
         );
         continue;
       }

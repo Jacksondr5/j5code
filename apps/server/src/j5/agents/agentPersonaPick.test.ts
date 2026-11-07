@@ -42,7 +42,11 @@ const providers = definition.modelRoute.map(
                 id: target.driver === "codex" ? "reasoningEffort" : "effort",
                 label: "Reasoning",
                 type: "select",
-                options: [{ id: target.reasoningEffort, label: "High" }],
+                // The primary's model also offers a second level, for a persona listing both.
+                options: [
+                  { id: target.reasoningEffort, label: "High" },
+                  ...(target === primary ? [{ id: "medium", label: "Medium" }] : []),
+                ],
               },
             ],
           },
@@ -110,7 +114,7 @@ it.effect("a pinned entry that can't run escalates instead of falling back", () 
   }).pipe(Effect.provide(testLayer)),
 );
 
-const importDefinition = (content: typeof definition) =>
+const importDefinition = (content: object) =>
   Effect.gen(function* () {
     yield* (yield* makeAgentPersonaLibrary).importFiles({
       files: [{ name: "researcher.yaml", content: yaml(content) }],
@@ -190,5 +194,34 @@ it.effect("an allowance ends when the persona's definition changes", () =>
     const stale = yield* agentPick({ pinned: pinOf(primary), allowOnce }).pipe(Effect.flip);
     assert.include(stale.message, "earlier version of persona team-researcher's definition");
     assert.isUndefined(stale.code);
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("an allowance covers only the reasoning level the person was shown", () =>
+  Effect.gen(function* () {
+    lists.unchecked = [primary.driver];
+    const leveled = {
+      ...definition,
+      modelRoute: [
+        { ...primary, reasoningEffort: "medium" },
+        { ...primary, reasoningEffort: primary.reasoningEffort },
+      ],
+    };
+    yield* importDefinition(leveled);
+    const at = (reasoningEffort: string, allowOnce?: string) =>
+      agentPick({
+        pinned: pinOf({ ...primary, reasoningEffort }),
+        ...(allowOnce === undefined ? {} : { allowOnce }),
+      });
+    const refused = yield* at("medium").pipe(Effect.flip);
+    const allowOnce = yield* grant(refused.escalationId);
+
+    const higher = yield* at(primary.reasoningEffort, allowOnce).pipe(Effect.flip);
+    assert.include(higher.message, `allow_once ${allowOnce} covers only`);
+    const allowed = yield* at("medium", allowOnce);
+    assert.deepEqual(allowed.assignment.pickSource, {
+      kind: "allow-once",
+      waived: "model-not-eligible",
+    });
   }).pipe(Effect.provide(testLayer)),
 );
