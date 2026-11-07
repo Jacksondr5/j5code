@@ -140,6 +140,10 @@ export class AgentPersonaEscalations extends Context.Service<
       readonly escalationId: string;
       readonly askerParticipantId: string;
     }) => Effect.Effect<void, AgentPersonaEscalationError | SqlError>;
+    /** The ask the escalation is linked to, if any. */
+    readonly linkedAsk: (
+      escalationId: string,
+    ) => Effect.Effect<string | null, AgentPersonaEscalationError | SqlError>;
     /** Link the ask that carries the escalation, so the person's Inbox can offer the grant. */
     readonly linkAsk: (input: {
       readonly escalationId: string;
@@ -189,6 +193,11 @@ export const layer = Layer.effect(
     const crews = yield* AgentCrewInstanceService;
     const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
 
+    const exchangeIsOpen = (exchangeId: string) =>
+      sql`
+        SELECT 1 FROM j5_a2a_exchange WHERE exchange_id = ${exchangeId} AND status = 'open' LIMIT 1
+      `.pipe(Effect.map((rows) => rows.length > 0));
+
     const read = Effect.fn("j5.agents.escalations.read")(function* (escalationId: string) {
       const rows = yield* sql<EscalationRow>`
         SELECT * FROM j5_persona_escalation WHERE id = ${escalationId}
@@ -234,7 +243,15 @@ export const layer = Layer.effect(
         return yield* refuse(
           `Escalation ${input.escalationId} is already ${row.status === "granted" ? "allowed once: retry the launch with allow_once" : "used"}.`,
         );
+      // J5's record stays on the ask that opened the Inbox item while that ask is open.
+      if (row.exchange_id !== null && (yield* exchangeIsOpen(row.exchange_id)))
+        return yield* refuse(
+          `Escalation ${input.escalationId} is already on open ask ${row.exchange_id}. Follow up there with regarding=${row.exchange_id} and without escalation_id, or clear it with j5_clear_own_ask, then ask again.`,
+        );
     });
+
+    const linkedAsk: AgentPersonaEscalations["Service"]["linkedAsk"] = (escalationId) =>
+      read(escalationId).pipe(Effect.map((row) => row.exchange_id));
 
     const linkAsk: AgentPersonaEscalations["Service"]["linkAsk"] = (input) =>
       sql`
@@ -345,6 +362,7 @@ export const layer = Layer.effect(
     return AgentPersonaEscalations.of({
       record,
       authorizeAsk,
+      linkedAsk,
       linkAsk,
       forExchanges,
       grantable,

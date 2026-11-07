@@ -337,18 +337,29 @@ const handlers = {
         );
       }
       // An ask about a refused persona launch; the Inbox shows J5's record of it apart from the text.
-      const escalationId = input.escalation_id ?? undefined;
+      let escalationId = input.escalation_id ?? undefined;
+      // J5's record stays on the ask that opened the Inbox item: a follow-up to that ask already
+      // has it, so the id is dropped, and any other follow-up is refused.
+      if (escalationId !== undefined && input.regarding != null) {
+        const linked = yield* (yield* AgentPersonaEscalations)
+          .linkedAsk(escalationId)
+          .pipe(
+            Effect.mapError((error) =>
+              stateError(error.message, "Check the escalation_id from the refusal and retry."),
+            ),
+          );
+        if (linked !== input.regarding)
+          return yield* stateError(
+            "escalation_id opens its own Inbox item, so it can't go on a regarding follow-up to another ask.",
+            "Retry without regarding: send a new ask to the person with expect_reply=true, intent, urgency and escalation_id.",
+          );
+        escalationId = undefined;
+      }
       if (escalationId !== undefined) {
         if (input.expect_reply !== true || !isHumanParticipantId(input.to))
           return yield* stateError(
             "escalation_id goes only on an ask to a person.",
             "Retry j5_send_message to the person with expect_reply=true, intent and urgency, or, as a Crew member, tell your Captain the escalation_id in an ordinary message.",
-          );
-        // J5's record stays on the ask that opened the Inbox item, so it never rides a follow-up.
-        if (input.regarding != null)
-          return yield* stateError(
-            "escalation_id opens its own Inbox item, so it can't go on a regarding follow-up.",
-            "Retry without regarding: send a new ask to the person with expect_reply=true, intent, urgency and escalation_id.",
           );
         yield* (yield* AgentPersonaEscalations)
           .authorizeAsk({ escalationId, askerParticipantId: callerParticipantId })

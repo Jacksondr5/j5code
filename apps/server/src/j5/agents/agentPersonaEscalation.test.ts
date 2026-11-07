@@ -1,13 +1,15 @@
 import { assert, it } from "@effect/vitest";
+import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import {
   AgentCrewInstanceService,
   type AgentCrewInstance,
 } from "../a2a/AgentCrewInstanceService.ts";
-import { agentPersonaEscalationsTestLayer } from "../test-support/agentPersonaEscalations.ts";
-import { AgentPersonaEscalations, personaBlockText } from "./agentPersonaEscalation.ts";
+import { runJ5A2AMigrations } from "../a2a/Migrations.ts";
+import { AgentPersonaEscalations, layer, personaBlockText } from "./agentPersonaEscalation.ts";
 
 const member = "agent:j5:a2a:thread:member";
 const captain = "agent:j5:a2a:thread:captain";
@@ -51,7 +53,18 @@ const record = (waivable: "model-not-eligible" | null) =>
     });
   });
 
-it.layer(agentPersonaEscalationsTestLayer(crews))("persona escalations", (it) => {
+// The store on a migrated database the tests can also read and write, for the asks it links.
+const escalations = layer.pipe(
+  Layer.provideMerge(
+    Layer.effectDiscard(runJ5A2AMigrations()).pipe(
+      Layer.provideMerge(NodeSqliteClient.layer({ filename: ":memory:" })),
+    ),
+  ),
+  Layer.provide(crews),
+  Layer.orDie,
+);
+
+it.layer(escalations)("persona escalations", (it) => {
   it.effect("the caller or its Captain may ask, and the ask carries J5's own record", () =>
     Effect.gen(function* () {
       const escalations = yield* AgentPersonaEscalations;
@@ -73,6 +86,33 @@ it.layer(agentPersonaEscalationsTestLayer(crews))("persona escalations", (it) =>
         summary:
           "Persona reviewer is blocked because none of its model entries can run. Allow this once would let one launch attempt past a model Models for custom members doesn't check.",
       });
+    }),
+  );
+
+  it.effect("an escalation on an open ask can't go on another until that ask closes", () =>
+    Effect.gen(function* () {
+      const escalations = yield* AgentPersonaEscalations;
+      const sql = yield* SqlClient.SqlClient;
+      const id = yield* record("model-not-eligible");
+      yield* sql`INSERT INTO j5_a2a_project_ledger (project_id, created_at)
+        VALUES ('p', '2026-11-07T00:00:00.000Z')`;
+      yield* sql`INSERT INTO j5_a2a_exchange (
+        project_id, exchange_id, sender_id, receiver_id, status, intent, opened_seq, created_at,
+        updated_at
+      ) VALUES ('p', 'exchange:first', ${member}, 'human:owner', 'open', 'May reviewer run?', 1,
+        '2026-11-07T00:00:00.000Z', '2026-11-07T00:00:00.000Z')`;
+      yield* escalations.linkAsk({ escalationId: id, exchangeId: "exchange:first" });
+
+      const refused = yield* escalations
+        .authorizeAsk({ escalationId: id, askerParticipantId: member })
+        .pipe(Effect.flip);
+      assert.include(refused.message, "already on open ask exchange:first");
+      assert.include(refused.message, "regarding=exchange:first and without escalation_id");
+      assert.include(refused.message, "j5_clear_own_ask");
+
+      // Answered in words or cleared, the ask is closed, and a new ask may carry it.
+      yield* sql`UPDATE j5_a2a_exchange SET status = 'closed' WHERE exchange_id = 'exchange:first'`;
+      yield* escalations.authorizeAsk({ escalationId: id, askerParticipantId: member });
     }),
   );
 
