@@ -1230,7 +1230,7 @@ export async function mobileOpen(paths: LiveTestPaths): Promise<void> {
 Take a screenshot: the app should list the project "${"project" in manifest ? manifest.project.title : "the test project"}".
 If it does not, run mobile-open again.${
     record.platform === "android"
-      ? '\nOn a first launch Android may show "Could not import shared content"; press Retry.'
+      ? '\nIf Android shows "Could not import shared content", that is unexpected now. Capture the dialog text, logcat and metro.log first, tell whoever runs your test so #837 can be reopened, then press Retry.'
       : ""
   }`);
 }
