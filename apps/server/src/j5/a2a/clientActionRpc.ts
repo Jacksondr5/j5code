@@ -8,6 +8,7 @@ import {
   J5ActionError,
   J5_CLIENT_ACTION_WS_METHODS,
   type AddPeerRequest,
+  type AllowPersonaOnceRequest,
   type AnswerHumanExchangeRequest,
   type ChangePeerOriginRequest,
   type CrewArchiveRequest,
@@ -47,6 +48,7 @@ export const CLIENT_ACTION_RPC_SCOPES = {
   [METHODS.archiveCrew]: AuthSettingsWriteScope,
   [METHODS.respondCrewRuntimeRequest]: AuthOrchestrationOperateScope,
   [METHODS.answerHumanExchange]: AuthOrchestrationOperateScope,
+  [METHODS.allowPersonaOnce]: AuthSettingsWriteScope,
   [METHODS.answerCrewWorktreeCleanup]: AuthSettingsWriteScope,
   [METHODS.issuePeerCredential]: AuthAccessWriteScope,
   [METHODS.addPeer]: AuthAccessWriteScope,
@@ -176,6 +178,30 @@ export const makeClientActionRpcHandlers = Effect.fn("j5.makeClientActionRpcHand
               conversation.recordReply(personId, reply),
             )
             .pipe(Effect.catch(failAsJ5ActionError({ failed: "Human inbox operation failed." }))),
+        ),
+      ),
+    // Letting a blocked persona past its limit is the Owner's call; anyone may still reply in text.
+    [METHODS.allowPersonaOnce]: (input: AllowPersonaOnceRequest) =>
+      services(requireOwner(session, "allows a blocked persona once")).pipe(
+        Effect.andThen(personOf),
+        Effect.flatMap((personId) =>
+          actions.allowPersonaOnce({ ...input, personId }, (reply) =>
+            conversation.recordReply(personId, reply),
+          ),
+        ),
+        Effect.catch(
+          failAsJ5ActionError({
+            refusals: [
+              // requireOwner's refusal.
+              "J5ActionError",
+              "AgentPersonaEscalationError",
+              "A2AExchangeNotOpenError",
+              "A2AExchangeAlreadyAnsweredError",
+              "A2AAskAnsweredError",
+              "A2AAskNotYoursError",
+            ],
+            failed: "Allowing the persona once failed.",
+          }),
         ),
       ),
     // Removing worktrees is the Owner's call, like archiving the Crew that left them.

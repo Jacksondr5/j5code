@@ -1,4 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { AgentPersonaEscalations } from "../agents/agentPersonaEscalation.ts";
+import { agentPersonaEscalationsTestLayer } from "../test-support/agentPersonaEscalations.ts";
 import { ChatAttachmentId, RuntimeRequestId, ThreadId } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -25,6 +27,7 @@ import { CrewStopNotFoundError, CrewStopService, type StopCrewInput } from "./Cr
 import { CrewWorktrees } from "./CrewWorktrees.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { A2AHumanInbox } from "./HumanInboxService.ts";
+import { A2AExchangeAlreadyAnsweredError } from "./SendService.ts";
 
 const seat = (name: string) => ParticipantId.make(`agent:j5:a2a:thread:${name}`);
 
@@ -53,6 +56,9 @@ const calls = () => ({
   archives: [] as Array<ArchiveCrewInput>,
   responses: [] as Array<RespondToCrewRuntimeRequestInput>,
   answerCommandIds: [] as Array<string>,
+  answerMessages: [] as Array<string>,
+  // The command that answered each exchange: a replay of it succeeds, any other is refused.
+  answeredBy: new Map<string, string>(),
   notified: 0,
 });
 
@@ -157,7 +163,14 @@ const serviceWith = (seen: ReturnType<typeof calls>) =>
         }),
         Layer.mock(A2AHumanInbox)({
           answer: (input, _beforeReply, claimAttachments) => {
+            const answeredBy = seen.answeredBy.get(input.exchangeId);
+            if (answeredBy !== undefined && answeredBy !== input.commandId)
+              return Effect.fail(
+                new A2AExchangeAlreadyAnsweredError({ exchangeId: input.exchangeId }),
+              );
+            seen.answeredBy.set(input.exchangeId, input.commandId);
             seen.answerCommandIds.push(input.commandId);
+            seen.answerMessages.push(input.message);
             const claim =
               input.attachments === undefined || claimAttachments === undefined
                 ? Effect.void
@@ -182,6 +195,8 @@ const serviceWith = (seen: ReturnType<typeof calls>) =>
         noDocumentTextLayer,
       ),
     ),
+    // Exposed too, so a test files the escalation an ask carries.
+    Layer.provideMerge(agentPersonaEscalationsTestLayer()),
     Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "j5-client-actions-" })),
     Layer.provide(NodeServices.layer),
   );
@@ -328,6 +343,85 @@ it.effect(
         `command:j5:a2a:human:${encodeURIComponent(personId)}:${encodeURIComponent(second)}:${encodeURIComponent(clientRequestId)}`,
       ]);
       assert.equal(seen.notified, 2);
+    }).pipe(Effect.provide(serviceWith(seen)));
+  },
+);
+
+it.effect(
+  "allows a blocked persona once: the fixed reply answers the ask, then it is granted",
+  () => {
+    const seen = calls();
+    return Effect.gen(function* () {
+      const actions = yield* ClientActionsService;
+      const escalations = yield* AgentPersonaEscalations;
+      const owner = ParticipantId.make("human:owner");
+      const file = (exchangeId: string, waivable: "access-above-caller" | null) =>
+        escalations
+          .record({
+            callerParticipantId: "agent:j5:a2a:thread:asker",
+            personaId: "reviewer",
+            code: "models_exhausted",
+            summary: "Persona reviewer is blocked.",
+            waivable,
+            scope:
+              waivable === null
+                ? null
+                : {
+                    definitionDigest: "digest",
+                    entries: [
+                      {
+                        entryIndex: 0,
+                        instanceId: "codex",
+                        model: "gpt-6",
+                        options: [],
+                        runtimeMode: "full-access",
+                      },
+                    ],
+                  },
+          })
+          .pipe(Effect.tap((escalationId) => escalations.linkAsk({ escalationId, exchangeId })));
+      const escalationId = yield* file("exchange:blocked", "access-above-caller");
+      yield* actions.allowPersonaOnce({
+        personId: owner,
+        exchangeId: "exchange:blocked",
+        clientRequestId: "allow-1",
+      });
+      assert.deepStrictEqual(seen.answerMessages, [
+        `Allowed once: reviewer past broader access than its caller runs with. Only agent:j5:a2a:thread:asker, whose launch was refused, can use it: it retries that launch with allow_once: ${escalationId}. If you asked on a Crew member's behalf, send it this id.`,
+      ]);
+      assert.equal(
+        (yield* escalations.grantedWaiver({
+          escalationId,
+          callerParticipantId: "agent:j5:a2a:thread:asker",
+          personaId: "reviewer",
+        })).constraint,
+        "access-above-caller",
+      );
+      // A retry whose reply was lost replays the same answer and succeeds; another press is
+      // refused by the answered ask, and one on an ask no single waiver helps answers nothing.
+      yield* actions.allowPersonaOnce({
+        personId: owner,
+        exchangeId: "exchange:blocked",
+        clientRequestId: "allow-1",
+      });
+      const again = yield* actions
+        .allowPersonaOnce({
+          personId: owner,
+          exchangeId: "exchange:blocked",
+          clientRequestId: "allow-2",
+        })
+        .pipe(Effect.flip);
+      assert.equal(again._tag, "A2AExchangeAlreadyAnsweredError");
+      yield* file("exchange:stuck", null);
+      const stuck = yield* actions
+        .allowPersonaOnce({
+          personId: owner,
+          exchangeId: "exchange:stuck",
+          clientRequestId: "allow-3",
+        })
+        .pipe(Effect.flip);
+      assert.include(stuck.message, "can't be allowed once");
+      assert.lengthOf(new Set(seen.answerCommandIds), 1);
     }).pipe(Effect.provide(serviceWith(seen)));
   },
 );

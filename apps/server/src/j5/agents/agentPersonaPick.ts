@@ -1,6 +1,9 @@
 import {
+  AgentPersonaBlockCode,
   AgentPersonaPickConstraint,
   isAgentPersonaReasoningOptionId,
+  type ProviderDriverKind,
+  type ProviderOptionSelection,
   type OrchestrationV2AgentPersonaCommandAssignment,
   type OrchestrationV2AppThread,
   type ProjectId,
@@ -18,13 +21,30 @@ import {
   ThreadManagementService,
 } from "../../orchestration-v2/ThreadManagementService.ts";
 import { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
+import {
+  AgentPersonaEscalations,
+  AgentPersonaWaiverScope,
+  personaBlockText,
+} from "./agentPersonaEscalation.ts";
 import { prepareAgentPersonaLaunch } from "./agentPersonaLaunch.ts";
-import { makeAgentPersonaLibrary, type createAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
+import {
+  definitionDigest,
+  makeAgentPersonaLibrary,
+  type createAgentPersonaLibrary,
+} from "./agentPersonaLibrary.ts";
 import { translateAgentPersonaProviderPolicy } from "./agentPersonaProviderPolicy.ts";
 import { resolveAgentPersonaRuntime } from "./agentPersonaRuntime.ts";
-import type { AgentPersonaEntryEligibility } from "./agentPersonaRouting.ts";
+import {
+  agentPersonaLimitFailures,
+  type AgentPersonaEntryEligibility,
+  type AgentPersonaPickLimits,
+} from "./agentPersonaRouting.ts";
 import { prepareAgentPersonaPeerSpawn } from "./agentPersonaSpawn.ts";
-import type { AgentPersonaDefinition, AgentPersonaId } from "./agentPersonas.ts";
+import {
+  agentPersonaPolicy,
+  type AgentPersonaDefinition,
+  type AgentPersonaId,
+} from "./agentPersonas.ts";
 import { CrewMemberModels } from "./crewMemberModels.ts";
 import {
   resolveReviewAuthors,
@@ -55,8 +75,14 @@ export class AgentPersonaPickError extends Schema.TaggedError<AgentPersonaPickEr
   "AgentPersonaPickError",
   {
     message: Schema.String,
-    /** The limit that refused the pick, which "Allow this once" could waive; null for any other failure. */
+    /** The one limit "Allow this once" could waive to let the pick run; null for any other failure. */
     constraint: Schema.NullOr(AgentPersonaPickConstraint),
+    /** Why the persona was refused; absent when the failure is not the persona's, such as bad input. */
+    code: Schema.optional(AgentPersonaBlockCode),
+    /** The escalation recorded for the refusal; absent for an outside agent, which can't ask. */
+    escalationId: Schema.optional(Schema.String),
+    /** With `constraint`: the launch a grant of it would allow. */
+    scope: Schema.optional(AgentPersonaWaiverScope),
   },
 ) {}
 
@@ -102,9 +128,14 @@ export const resolveCallerAccess = Effect.fn("j5.agents.resolveCallerAccess")(fu
   );
 });
 
+/** Never more than the caller runs with, and nothing that writes from a read-only caller. */
+const withinAccess = (child: AgentAccess, limit: AgentAccess) =>
+  !broaderThan(child.runtimeMode, limit.runtimeMode) &&
+  (limit.sandbox !== "readOnly" || child.sandbox === "readOnly");
+
 /**
- * The access limit on anything an agent picks: never more than the caller runs with, and nothing
- * that writes from a read-only caller. `subject` names the worker, e.g. "Persona reviewer".
+ * The access limit on anything an agent picks. `subject` names the worker, e.g. "Custom seat
+ * reviewer".
  */
 export const assertWithinCallerAccess = Effect.fn("j5.agents.assertWithinCallerAccess")(function* (
   subject: string,
@@ -112,11 +143,7 @@ export const assertWithinCallerAccess = Effect.fn("j5.agents.assertWithinCallerA
   caller: AgentPersonaPickCaller,
 ) {
   const limit = yield* resolveCallerAccess(caller);
-  if (
-    !broaderThan(child.runtimeMode, limit.runtimeMode) &&
-    (limit.sandbox !== "readOnly" || child.sandbox === "readOnly")
-  )
-    return;
+  if (withinAccess(child, limit)) return;
   return yield* new AgentPersonaPickError({
     constraint: "access-above-caller",
     message: `${subject} would run with ${accessLabel(child)}, which is broader than the ${accessLabel(limit)} its caller runs with. An agent can only start workers within its own access.`,
@@ -126,7 +153,13 @@ export const assertWithinCallerAccess = Effect.fn("j5.agents.assertWithinCallerA
 const libraryRefusal = (error: {
   readonly message: string;
   readonly constraint?: AgentPersonaPickConstraint | undefined;
-}) => new AgentPersonaPickError({ message: error.message, constraint: error.constraint ?? null });
+  readonly code?: AgentPersonaBlockCode | undefined;
+}) =>
+  new AgentPersonaPickError({
+    message: error.message,
+    constraint: error.constraint ?? null,
+    ...(error.code === undefined ? {} : { code: error.code }),
+  });
 
 /**
  * The authors of the work an independent reviewer reviews; undefined for any other persona, whose
@@ -162,13 +195,7 @@ const reviewAuthorsFor = Effect.fn("j5.agents.reviewAuthorsFor")(function* (
   );
 });
 
-/**
- * The one launch check for a persona. A person's pick runs on its own models with its saved
- * access. An agent's pick skips entries outside the project's Models for custom members and is
- * refused when its access is broader than the caller's. A pinned entry (`j5_spawn_agent`) is held
- * to the same limits. The assignment records who picked.
- */
-export const pickAgentPersona = Effect.fn("j5.agents.pickAgentPersona")(function* (input: {
+export interface AgentPersonaPickInput {
   readonly personaId: AgentPersonaId;
   readonly source: AgentPersonaPickSourceKind;
   readonly caller: AgentPersonaPickCaller;
@@ -184,11 +211,149 @@ export const pickAgentPersona = Effect.fn("j5.agents.pickAgentPersona")(function
   readonly eligible?: AgentPersonaEntryEligibility | undefined;
   /** Whose work an independent reviewer reviews; read only when the persona is flagged as one. */
   readonly reviewAuthors?: ReviewAuthorsRequest | undefined;
-}) {
+  /** The participant a refusal escalates for; an outside agent, which can't ask, has none. */
+  readonly escalateFor?: string | undefined;
+  /** A granted escalation of this caller's for this persona. */
+  readonly allowOnce?: string | undefined;
+}
+
+/**
+ * The one launch check for a persona. An agent's pick skips entries outside Models for custom
+ * members or broader than the caller's access; a pin is a list of one. A refusal escalates for
+ * `escalateFor`; a granted `allowOnce` lifts one limit, and the caller spends it on launch.
+ */
+export const pickAgentPersona = Effect.fn("j5.agents.pickAgentPersona")(function* (
+  input: AgentPersonaPickInput,
+) {
+  const escalations = yield* AgentPersonaEscalations;
+  const agentPick = input.source === "agent";
+  // A person's pick has no limits to lift, so it neither checks nor spends a grant.
+  const grant =
+    input.allowOnce === undefined || !agentPick
+      ? undefined
+      : yield* escalations
+          .grantedWaiver({
+            escalationId: input.allowOnce,
+            callerParticipantId: input.escalateFor,
+            personaId: input.personaId,
+          })
+          .pipe(
+            Effect.mapError(
+              (error) => new AgentPersonaPickError({ message: error.message, constraint: null }),
+            ),
+          );
+  // A refusal about the persona is recorded for the caller and told in the one text form.
+  const escalate = Effect.fn("j5.agents.pickAgentPersona.escalate")(function* (
+    error: AgentPersonaPickError,
+  ) {
+    if (error.code === undefined) return yield* error;
+    const code = error.code;
+    // A waiver is offered only for a launch whose scope can be recorded.
+    const waivable = error.scope === undefined ? null : error.constraint;
+    const unspent =
+      grant === undefined
+        ? ""
+        : ` allow_once ${input.allowOnce} covers only ${describeScope(grant.scope)}, so it stays unspent for that.`;
+    const escalationId =
+      input.escalateFor === undefined
+        ? null
+        : yield* escalations
+            .record({
+              callerParticipantId: input.escalateFor,
+              personaId: input.personaId,
+              code,
+              summary: error.message,
+              waivable,
+              scope: waivable === null ? null : (error.scope ?? null),
+            })
+            .pipe(
+              Effect.mapError(
+                (cause) =>
+                  new AgentPersonaPickError({
+                    message: `${error.message} Its escalation could not be recorded: ${cause.message}`,
+                    constraint: null,
+                    code,
+                  }),
+              ),
+            );
+    return yield* new AgentPersonaPickError({
+      message: personaBlockText({
+        code,
+        detail: `${error.message}${unspent}`,
+        escalationId,
+        waivable,
+      }),
+      constraint: waivable,
+      code,
+      ...(escalationId === null ? {} : { escalationId }),
+    });
+  });
+  return yield* pickWithin(input, grant).pipe(
+    Effect.catchTags({ AgentPersonaPickError: escalate }),
+    Effect.map(({ waived, ...picked }) =>
+      waived === undefined
+        ? picked
+        : {
+            ...picked,
+            assignment: {
+              ...picked.assignment,
+              pickSource: { kind: "allow-once" as const, waived },
+            },
+          },
+    ),
+  );
+});
+
+const optionsKey = (options: ReadonlyArray<ProviderOptionSelection>) =>
+  options
+    .map(({ id, value }) => `${id}=${String(value)}`)
+    .sort()
+    .join(",");
+
+const describeScope = (scope: AgentPersonaWaiverScope) =>
+  scope.entries
+    .map((entry) => `${entry.instanceId} ${entry.model} at ${accessLabel(entry)}`)
+    .join(" or ");
+
+const pickWithin = Effect.fn("j5.agents.pickWithin")(function* (
+  input: AgentPersonaPickInput,
+  grant:
+    | { readonly constraint: AgentPersonaPickConstraint; readonly scope: AgentPersonaWaiverScope }
+    | undefined,
+) {
   const sources = yield* makeAgentPersonaLibrary;
-  const catalog = yield* sources.catalog().pipe(Effect.mapError(libraryRefusal));
+  const catalog = yield* sources.catalog().pipe(
+    Effect.mapError(
+      (error) =>
+        new AgentPersonaPickError({
+          code: "library_unreadable",
+          message: `The persona library cannot be read: ${error.message}`,
+          constraint: null,
+        }),
+    ),
+  );
   // One read serves the reviewer flag and the launch, so an edit between them can't split them.
   const library: Library = { ...sources, catalog: () => Effect.succeed(catalog) };
+  const definition = catalog.definitions.find(({ id }) => id === input.personaId);
+  const digest = definition === undefined ? undefined : definitionDigest(definition);
+  if (grant !== undefined && digest !== undefined && digest !== grant.scope.definitionDigest)
+    return yield* new AgentPersonaPickError({
+      message: `allow_once ${input.allowOnce} was granted under an earlier version of persona ${input.personaId}'s definition, so it no longer applies; it stays unspent. Ask the person again.`,
+      constraint: null,
+    });
+  // The exact candidate the person was shown: the same instance, model and options, so the
+  // same model at another reasoning level is not covered.
+  const covers = (selection: {
+    readonly instanceId: string;
+    readonly model: string;
+    readonly options?: ReadonlyArray<ProviderOptionSelection> | undefined;
+  }) =>
+    grant?.scope.entries.find(
+      (entry) =>
+        entry.instanceId === selection.instanceId &&
+        entry.model === selection.model &&
+        optionsKey(entry.options) === optionsKey(selection.options ?? []),
+    );
   const providers = yield* (yield* ProviderRegistry).getProviders;
   const authors = yield* reviewAuthorsFor(
     input.personaId,
@@ -197,9 +362,77 @@ export const pickAgentPersona = Effect.fn("j5.agents.pickAgentPersona")(function
     input.projectId,
   );
   const agentPick = input.source === "agent";
-  const eligible = agentPick
-    ? (input.eligible ?? (yield* (yield* CrewMemberModels).eligibility(input.projectId)))
-    : undefined;
+  const accessOn = (
+    authority: OrchestrationV2AgentPersonaCommandAssignment["authorityPolicy"],
+    driver: ProviderDriverKind,
+  ): AgentAccess =>
+    input.runtimeMode === undefined
+      ? agentAccessOf(translateAgentPersonaProviderPolicy(authority, driver))
+      : { runtimeMode: input.runtimeMode };
+  const limit = agentPick ? yield* resolveCallerAccess(input.caller) : undefined;
+  const limits: AgentPersonaPickLimits | undefined =
+    limit === undefined
+      ? undefined
+      : {
+          eligible:
+            input.eligible ?? (yield* (yield* CrewMemberModels).eligibility(input.projectId)),
+          accessAbove: (authority, driver) => {
+            const child = accessOn(authority, driver);
+            return withinAccess(child, limit)
+              ? undefined
+              : `on ${driver} it would run with ${accessLabel(child)}, which is broader than the ${accessLabel(limit)} its caller runs with`;
+          },
+          waived:
+            grant === undefined
+              ? undefined
+              : {
+                  constraint: grant.constraint,
+                  covers: (selection) => covers(selection) !== undefined,
+                },
+        };
+  // What a refusal waivable by one limit would let run, recorded so a grant allows only that.
+  const scopeOf = (
+    entries: ReadonlyArray<{
+      readonly entryIndex: number;
+      readonly instanceId: string;
+      readonly model: string;
+      readonly options: ReadonlyArray<ProviderOptionSelection>;
+    }>,
+  ): AgentPersonaWaiverScope | undefined =>
+    definition === undefined || digest === undefined
+      ? undefined
+      : {
+          definitionDigest: digest,
+          entries: entries.flatMap((entry) => {
+            const driver = providers.find(
+              ({ instanceId }) => instanceId === entry.instanceId,
+            )?.driver;
+            return driver === undefined
+              ? []
+              : [{ ...entry, ...accessOn(agentPersonaPolicy(definition), driver) }];
+          }),
+        };
+  const launchRefusal = (error: {
+    readonly message: string;
+    readonly constraint?: AgentPersonaPickConstraint | undefined;
+    readonly code?: AgentPersonaBlockCode | undefined;
+    readonly waiverEntries?:
+      | ReadonlyArray<{
+          readonly entryIndex: number;
+          readonly instanceId: string;
+          readonly model: string;
+          readonly options: ReadonlyArray<ProviderOptionSelection>;
+        }>
+      | undefined;
+  }) => {
+    const scope = error.waiverEntries === undefined ? undefined : scopeOf(error.waiverEntries);
+    return new AgentPersonaPickError({
+      message: error.message,
+      constraint: error.constraint ?? null,
+      ...(error.code === undefined ? {} : { code: error.code }),
+      ...(scope === undefined ? {} : { scope }),
+    });
+  };
   const pinned = input.pinned;
   const assignment: OrchestrationV2AgentPersonaCommandAssignment =
     pinned === undefined
@@ -207,9 +440,9 @@ export const pickAgentPersona = Effect.fn("j5.agents.pickAgentPersona")(function
           { personaId: input.personaId },
           providers,
           library,
-          eligible,
+          limits,
           authors === undefined ? undefined : new Set(authors.models),
-        ).pipe(Effect.mapError(libraryRefusal))
+        ).pipe(Effect.mapError(launchRefusal))
       : yield* prepareAgentPersonaPeerSpawn(
           {
             personaId: input.personaId,
@@ -221,28 +454,54 @@ export const pickAgentPersona = Effect.fn("j5.agents.pickAgentPersona")(function
           library,
         ).pipe(Effect.mapError(libraryRefusal));
   const selection = assignment.resolvedModelSelection;
+  const access = accessOn(assignment.authorityPolicy, assignment.resolvedDriver);
   const provider = providers.find(({ instanceId }) => instanceId === selection.instanceId);
-  if (
-    pinned !== undefined &&
-    eligible !== undefined &&
-    provider !== undefined &&
-    !eligible(selection, provider)
-  ) {
-    const level = selection.options?.find(({ id }) => isAgentPersonaReasoningOptionId(id))?.value;
-    return yield* new AgentPersonaPickError({
-      constraint: "model-not-eligible",
-      message: `Persona ${input.personaId} on ${selection.instanceId} ${selection.model}${level === undefined ? "" : ` (${String(level)})`} is not checked in Models for custom members, so an agent cannot pick it there.`,
-    });
+  if (pinned !== undefined && limit !== undefined && provider !== undefined) {
+    // A pin is a list of one: a limit it fails refuses it, and nothing else is tried.
+    const failures = agentPersonaLimitFailures(
+      limits,
+      assignment.authorityPolicy,
+      selection,
+      provider,
+    );
+    if (failures.length > 0) {
+      const level = selection.options?.find(({ id }) => isAgentPersonaReasoningOptionId(id))?.value;
+      const subject = `Persona ${input.personaId} on ${selection.instanceId} ${selection.model}${level === undefined ? "" : ` (${String(level)})`}`;
+      const scope =
+        failures.length === 1
+          ? scopeOf([
+              {
+                entryIndex: assignment.resolvedEntryIndex ?? 0,
+                instanceId: selection.instanceId,
+                model: selection.model,
+                // The level the pin asked for, even where the entry leaves it to the spawner.
+                options: selection.options ?? [],
+              },
+            ])
+          : undefined;
+      return yield* new AgentPersonaPickError({
+        code: "models_exhausted",
+        constraint: failures.length === 1 ? failures[0]!.code : null,
+        ...(scope === undefined ? {} : { scope }),
+        message: `${subject} is blocked: ${failures
+          .map(({ code, detail }) =>
+            code === "model-not-eligible"
+              ? "it is not checked in Models for custom members, so an agent cannot pick it there"
+              : detail,
+          )
+          .join("; ")}.`,
+      });
+    }
   }
-  const policy = translateAgentPersonaProviderPolicy(
-    assignment.authorityPolicy,
-    assignment.resolvedDriver,
-  );
-  const access =
-    input.runtimeMode === undefined ? agentAccessOf(policy) : { runtimeMode: input.runtimeMode };
-  if (agentPick)
-    yield* assertWithinCallerAccess(`Persona ${input.personaId}`, access, input.caller);
+  // A grant lets through only the candidate it covered, at no more than the access recorded.
+  const covered = covers(selection);
+  if (covered !== undefined && !withinAccess(access, covered))
+    return yield* new AgentPersonaPickError({
+      message: `allow_once ${input.allowOnce} covered persona ${input.personaId} on ${covered.instanceId} ${covered.model} at ${accessLabel(covered)}; this launch asks for ${accessLabel(access)}, so the allowance stays unspent. Ask the person again for that.`,
+      constraint: null,
+    });
   return {
+    waived: covered === undefined ? undefined : grant?.constraint,
     assignment: {
       ...assignment,
       pickSource: { kind: input.source },

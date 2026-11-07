@@ -1,4 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
+import { agentPersonaEscalationsTestLayer } from "../test-support/agentPersonaEscalations.ts";
+import { AgentPersonaEscalations } from "./agentPersonaEscalation.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   MessageId,
@@ -149,8 +151,19 @@ const fixture = Effect.gen(function* () {
       messages: fields.includes("messages") ? (messages as never) : [],
     };
   };
-  const invoke = (id = definition.id, available = providers, driver = "codex", authorized = true) =>
-    invokeAgent({ personaId: id, task: "Review the API", clientRequestId: "request" }).pipe(
+  const invoke = (
+    id = definition.id,
+    available = providers,
+    driver = "codex",
+    authorized = true,
+    allowOnce?: string,
+  ) =>
+    invokeAgent({
+      personaId: id,
+      task: "Review the API",
+      clientRequestId: "request",
+      ...(allowOnce === undefined ? {} : { allowOnce }),
+    }).pipe(
       Effect.provideService(McpInvocationContext, {
         environmentId: EnvironmentId.make("remote"),
         requestNamespace: "session",
@@ -208,8 +221,10 @@ const fixture = Effect.gen(function* () {
     );
   return { library, parent, calls, invoke, turn };
 });
+// One escalation store per test, so a refusal, its grant and the retry meet.
 const testLayer = ServerConfig.layerTest(process.cwd(), { prefix: "j5-agent-invocation-" }).pipe(
   Layer.provideMerge(NodeServices.layer),
+  Layer.provideMerge(agentPersonaEscalationsTestLayer()),
 );
 
 describe("saved agent subagent invocation", () => {
@@ -248,6 +263,40 @@ describe("saved agent subagent invocation", () => {
           "codex",
         ).pipe(Effect.flip);
         assert.include(mismatch.message, "must match");
+      }).pipe(Effect.provide(testLayer)),
+  );
+  it.effect(
+    "escalates an agent's blocked pick, and the Owner's grant lets one launch through",
+    () =>
+      Effect.gen(function* () {
+        const { calls, invoke, turn } = yield* fixture;
+        const escalations = yield* AgentPersonaEscalations;
+        turn.eligible = () => false;
+        const refused = String(yield* invoke());
+        assert.include(refused, "[models_exhausted]");
+        assert.include(refused, "An Owner can allow it once past a model");
+        const escalationId = /escalation_id: (escalation-[0-9a-f-]+)/.exec(refused)![1]!;
+
+        // Asking is not granting: the retry waits for the Owner's answer.
+        assert.include(
+          String(yield* invoke(definition.id, providers, "codex", true, escalationId)),
+          "never a text reply",
+        );
+        yield* escalations.markGranted({ escalationId, grantedBy: "human:owner" });
+        yield* invoke(definition.id, providers, "codex", true, escalationId);
+        assert.lengthOf(calls, 1);
+        assert.deepEqual(calls[0]!.agentPersonaAssignment!.pickSource, {
+          kind: "allow-once",
+          waived: "model-not-eligible",
+        });
+
+        // One launch only: the grant is spent, and the next launch meets the limits again.
+        assert.include(
+          String(yield* invoke(definition.id, providers, "codex", true, escalationId)),
+          "already used",
+        );
+        assert.include(String(yield* invoke()), "[models_exhausted]");
+        assert.lengthOf(calls, 1);
       }).pipe(Effect.provide(testLayer)),
   );
   it.effect("uses the declared fallback provider when the primary is unavailable", () =>
@@ -408,7 +457,7 @@ describe("saved agent subagent invocation", () => {
         assert.isTrue(refused._tag === "Failure");
         assert.include(
           String(refused),
-          "Persona team-operator would run with Full access, which is broader than the Supervised its caller runs with.",
+          "it would run with Full access, which is broader than the Supervised its caller runs with",
         );
         // A mention relayed by an agent, or a quoted one, is still the agent's pick.
         turn.message = {
@@ -627,6 +676,7 @@ describe("independent reviewer subagents", () => {
               },
             }),
             Layer.mock(CrewMemberModels)({ eligibility: () => Effect.succeed(() => true) }),
+            agentPersonaEscalationsTestLayer(),
             Layer.mock(ProviderRegistry)({
               getProviders: Effect.succeed(options.providers ?? everyModel),
             }),

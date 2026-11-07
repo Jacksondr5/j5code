@@ -254,6 +254,13 @@ function InboxItem(props: {
       {expanded ? (
         <View className="mt-3 gap-3 border-t border-border-subtle pt-3">
           <InboxMessage markdown={item.message} />
+          {item.escalation === undefined ? null : (
+            // J5's own record, apart from the agent's words; plain text, so they can't alter it.
+            <View className="gap-1 rounded-lg bg-subtle px-3 py-2">
+              <Text className="text-xs font-t3-medium text-foreground-muted">Recorded by J5</Text>
+              <Text className="text-sm">{item.escalation.summary}</Text>
+            </View>
+          )}
           {/* Above the answer box, so it stays in view whenever the box is: iOS scrolls only the
               focused box itself clear of the keyboard. */}
           <View className="flex-row flex-wrap items-center justify-between gap-2">

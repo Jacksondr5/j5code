@@ -1,4 +1,5 @@
 import * as SpawnAgentService from "./SpawnAgentService.ts";
+import { agentPersonaEscalationsTestLayer } from "../test-support/agentPersonaEscalations.ts";
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
@@ -270,6 +271,7 @@ const spawnHarness = (input: {
           );
     const dependencies = Layer.mergeAll(
       input.memberModels ?? permissiveCrewMemberModels,
+      agentPersonaEscalationsTestLayer(),
       noDocumentTextLayer,
       Layer.mock(A2ASendService)({ listParticipants: () => Effect.succeed([callerRow]) }),
       Layer.mock(A2AHomeRegistrar)({

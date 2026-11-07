@@ -15,6 +15,7 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 
+import { AgentPersonaEscalations } from "../agents/agentPersonaEscalation.ts";
 import { PlaybookCrewRelay } from "../playbooks/PlaybookCrewRelay.ts";
 import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
 import { AgentCrewInstanceService } from "./AgentCrewInstanceService.ts";
@@ -229,7 +230,7 @@ export interface ClientReadsShape {
   readonly humanInbox: (input: {
     readonly status: "open" | "answered";
     readonly personId?: ParticipantId;
-  }) => Effect.Effect<HumanInboxResponse, A2AHumanInboxError>;
+  }) => Effect.Effect<HumanInboxResponse, A2AHumanInboxError | SqlError>;
   /** The crew gate: every proposal that awaits the person, as the roster card reads it. */
   readonly crewProposals: Effect.Effect<
     typeof CrewProposalsResponse.Type,
@@ -295,10 +296,12 @@ export const layer: Layer.Layer<
   | A2AArchiveFacts
   | ArchiveCrewService
   | CrewWorktrees
+  | AgentPersonaEscalations
 > = Layer.effect(
   ClientReadsService,
   Effect.gen(function* () {
     const inbox = yield* A2AHumanInbox;
+    const escalations = yield* AgentPersonaEscalations;
     const sql = yield* SqlClient.SqlClient;
     const proposals = yield* AgentCrewProposalService;
     const projectProposal = projectCrewProposal(yield* PlaybookStore);
@@ -383,13 +386,24 @@ export const layer: Layer.Layer<
       participantIdentities,
       openInboxCount,
       humanInbox: Effect.fn("ClientReadsService.humanInbox")(function (input) {
-        return inbox
-          .resolvePersonId(input.personId)
-          .pipe(
-            Effect.flatMap((personId) =>
-              inbox.list(personId, input.status).pipe(Effect.map((items) => ({ personId, items }))),
+        return inbox.resolvePersonId(input.personId).pipe(
+          Effect.flatMap((personId) =>
+            inbox.list(personId, input.status).pipe(
+              // An ask that escalates a refused persona carries it, for "Allow this once".
+              Effect.flatMap((items) =>
+                escalations.forExchanges(items.map(({ exchangeId }) => exchangeId)).pipe(
+                  Effect.map((byExchange) => ({
+                    personId,
+                    items: items.map((item) => {
+                      const escalation = byExchange.get(item.exchangeId);
+                      return escalation === undefined ? item : { ...item, escalation };
+                    }),
+                  })),
+                ),
+              ),
             ),
-          );
+          ),
+        );
       }),
       crewProposals: proposals.listOpen().pipe(
         Effect.map((items) => items.filter((proposal) => proposal.approvalMode !== "automatic")),

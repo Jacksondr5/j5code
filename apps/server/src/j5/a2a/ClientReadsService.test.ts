@@ -1,4 +1,6 @@
 import { assert, it } from "@effect/vitest";
+import { AgentPersonaEscalations } from "../agents/agentPersonaEscalation.ts";
+import { agentPersonaEscalationsTestLayer } from "../test-support/agentPersonaEscalations.ts";
 import { ThreadId, TrimmedNonEmptyString } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -37,6 +39,8 @@ const secondPerson = ParticipantId.make("human:person-two");
 
 const makeTestLayer = () => {
   const database = NodeSqliteClient.layer({ filename: ":memory:" });
+  // One escalation store, read by the service and filed by a test.
+  const escalations = agentPersonaEscalationsTestLayer();
   const ledger = ledgerLayer.pipe(Layer.provide(database));
   const inbox = humanInboxLayer.pipe(Layer.provide(ledger), Layer.provide(database));
   // These tests read identities and the open count; the Crew, Fleet and archive reads the service
@@ -51,6 +55,7 @@ const makeTestLayer = () => {
     Layer.mock(A2AArchiveFacts)({}),
     Layer.mock(ArchiveCrewService)({}),
     Layer.mock(CrewWorktrees)({}),
+    escalations,
   );
   const clientReads = clientReadsLayer.pipe(
     Layer.provide(inbox),
@@ -58,7 +63,7 @@ const makeTestLayer = () => {
     Layer.provide(unreached),
     Layer.provide(database),
   );
-  return Layer.mergeAll(database, ledger, inbox, clientReads);
+  return Layer.mergeAll(database, ledger, inbox, clientReads, escalations);
 };
 
 it.effect("reads total batched identities without participant-id normalization", () =>
@@ -513,4 +518,90 @@ it.effect(
       );
       assert.notMatch(rendered, /TEMP B-TREE/, `the index order is the answer order: ${rendered}`);
     }).pipe(Effect.provide(makeTestLayer())),
+);
+
+it.effect("puts an escalation only on the ask that carries it", () =>
+  Effect.gen(function* () {
+    yield* runMigrations();
+    yield* runJ5A2AMigrations();
+    const reads = yield* ClientReadsService;
+    const escalations = yield* AgentPersonaEscalations;
+    const sql = yield* SqlClient.SqlClient;
+    const projectId = LedgerProjectId.make("project:client-reads:escalation");
+    const createdAt = "2026-11-06T00:00:00.000Z";
+    yield* sql`
+      INSERT INTO j5_a2a_project_ledger (project_id, created_at)
+      VALUES (${projectId}, ${createdAt})
+    `;
+    yield* sql`
+      INSERT INTO j5_a2a_human_person (person_id, is_local_operator, created_at)
+      VALUES (${firstPerson}, 1, ${createdAt})
+    `;
+    const ask = Effect.fn("test.j5.a2a.clientReads.escalationAsk")(function* (id: string) {
+      const exchangeId = `exchange:client-reads:${id}`;
+      yield* sql`
+        INSERT INTO j5_a2a_exchange (
+          project_id, exchange_id, sender_id, receiver_id, status, intent, urgency,
+          opened_seq, closed_seq, created_at, updated_at
+        ) VALUES (
+          ${projectId}, ${exchangeId}, ${`agent:client-reads:${id}`}, ${firstPerson},
+          'open', ${id}, 'soon', 1, NULL, ${createdAt}, ${createdAt}
+        )
+      `;
+      yield* sql`
+        INSERT INTO j5_a2a_human_inbox (
+          person_id, project_id, exchange_id, sender_id, intent, urgency,
+          latest_message_id, latest_message, opened_seq, opened_at, status,
+          terminal_seq, terminal_at, terminal_disposition, terminal_cause,
+          terminal_facts, terminal_notice_message_id
+        ) VALUES (
+          ${firstPerson}, ${projectId}, ${exchangeId}, ${`agent:client-reads:${id}`},
+          ${id}, 'soon', ${`message:client-reads:${id}`}, ${id},
+          1, ${createdAt}, 'open', NULL, NULL, NULL, NULL, NULL, NULL
+        )
+      `;
+      return exchangeId;
+    });
+    const blocked = yield* ask("blocked-persona");
+    yield* ask("ordinary-question");
+    const escalationId = yield* escalations.record({
+      callerParticipantId: "agent:client-reads:blocked-persona",
+      personaId: "reviewer",
+      code: "models_exhausted",
+      summary: "Persona reviewer is blocked.",
+      waivable: "access-above-caller",
+      scope: {
+        definitionDigest: "digest",
+        entries: [
+          {
+            entryIndex: 0,
+            instanceId: "codex",
+            model: "gpt-6",
+            options: [],
+            runtimeMode: "full-access",
+          },
+        ],
+      },
+    });
+    yield* escalations.linkAsk({ escalationId, exchangeId: blocked });
+
+    const { items } = yield* reads.humanInbox({ status: "open", personId: firstPerson });
+    assert.deepStrictEqual(
+      items.map((item) => [item.intent, item.escalation]),
+      [
+        [
+          "blocked-persona",
+          {
+            escalationId,
+            personaId: "reviewer",
+            waivable: "access-above-caller",
+            status: "open",
+            summary:
+              "Persona reviewer is blocked. Allow this once would let one launch attempt past broader access than its caller runs with.",
+          },
+        ],
+        ["ordinary-question", undefined],
+      ],
+    );
+  }).pipe(Effect.provide(makeTestLayer())),
 );

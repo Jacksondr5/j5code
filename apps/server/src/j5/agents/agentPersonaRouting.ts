@@ -6,6 +6,7 @@ import {
   type AgentPersonaAuthorityPolicy,
   type AgentPersonaModelEntry,
   type AgentPersonaDefinitionView,
+  type AgentPersonaPickConstraint,
   ProviderDriverKind,
   type AgentPersonaRouteFailureCode as ContractRouteFailureCode,
   type ModelSelection,
@@ -60,6 +61,10 @@ export type AgentPersonaRouteFailureCode = ContractRouteFailureCode;
 export interface AgentPersonaRouteFailure {
   readonly code: AgentPersonaRouteFailureCode;
   readonly instanceId?: ProviderInstanceId;
+  /** Words for a limit that the code alone can't say, such as the two access levels. */
+  readonly detail?: string;
+  /** For a limit, the selection the candidate would have run with. */
+  readonly selection?: ModelSelection;
 }
 export interface AgentPersonaRouteAttempt {
   readonly route: "primary" | "fallback";
@@ -209,11 +214,109 @@ function candidatesForTarget(
 /** A model id without a provider prefix, so `anthropic/claude-opus-5-5` matches `claude-opus-5-5`. */
 export const sameModelKey = (model: string) => model.slice(model.lastIndexOf("/") + 1);
 
-/** Whether an agent may pick this resolved selection; a person's pick passes none. */
+/** Whether an agent may pick this resolved selection. */
 export type AgentPersonaEntryEligibility = (
   selection: ModelSelection,
   provider: ServerProvider,
 ) => boolean;
+
+/** The limits an agent's pick is held to, per entry; a person's pick passes none. */
+export interface AgentPersonaPickLimits {
+  readonly eligible: AgentPersonaEntryEligibility;
+  /** Why the persona's access on this driver is broader than the caller's; undefined within it. */
+  readonly accessAbove: (
+    authority: AgentPersonaAuthorityPolicy,
+    driver: ProviderDriverKind,
+  ) => string | undefined;
+  /** The one limit a granted "Allow this once" lifts, on the candidates it was granted for. */
+  readonly waived?:
+    | {
+        readonly constraint: AgentPersonaPickConstraint;
+        readonly covers: (selection: ModelSelection) => boolean;
+      }
+    | undefined;
+}
+
+/** A candidate's limit failures; a provider that cannot run at all reports no limit. */
+export const agentPersonaLimitFailures = (
+  limits: AgentPersonaPickLimits | undefined,
+  authority: AgentPersonaAuthorityPolicy,
+  selection: ModelSelection,
+  provider: ServerProvider,
+): ReadonlyArray<{ readonly code: AgentPersonaPickConstraint; readonly detail?: string }> => {
+  if (limits === undefined) return [];
+  const failures: Array<{ code: AgentPersonaPickConstraint; detail?: string }> = [];
+  const waived =
+    limits.waived !== undefined && limits.waived.covers(selection)
+      ? limits.waived.constraint
+      : undefined;
+  if (waived !== "model-not-eligible" && !limits.eligible(selection, provider))
+    failures.push({ code: "model-not-eligible" });
+  const above =
+    waived === "access-above-caller" ? undefined : limits.accessAbove(authority, provider.driver);
+  if (above !== undefined) failures.push({ code: "access-above-caller", detail: above });
+  return failures;
+};
+
+/** A candidate a waiver would let run: its entry, provider instance and model. */
+export interface AgentPersonaWaiverEntry {
+  readonly entryIndex: number;
+  readonly instanceId: ProviderInstanceId;
+  readonly model: string;
+  /** The options the candidate runs with, its reasoning level among them. */
+  readonly options: NonNullable<ModelSelection["options"]>;
+}
+
+/**
+ * The one limit that, lifted alone, lets an entry run, and every candidate it would let run:
+ * each failed on exactly that limit and nothing else. Null when every entry needs more, such
+ * as two limits or a provider fix.
+ */
+export const singleWaiver = (
+  attempts: ReadonlyArray<Pick<AgentPersonaRouteAttempt, "entryIndex" | "target" | "failures">>,
+): {
+  readonly constraint: AgentPersonaPickConstraint;
+  readonly entries: ReadonlyArray<AgentPersonaWaiverEntry>;
+} | null => {
+  const found: Array<AgentPersonaWaiverEntry & { constraint: AgentPersonaPickConstraint }> = [];
+  for (const { entryIndex, target, failures } of attempts) {
+    const byCandidate = new Map<
+      ProviderInstanceId,
+      { codes: Set<AgentPersonaRouteFailureCode>; selection?: ModelSelection }
+    >();
+    for (const { code, instanceId, selection } of failures) {
+      if (instanceId === undefined) continue;
+      const candidate = byCandidate.get(instanceId) ?? { codes: new Set() };
+      candidate.codes.add(code);
+      if (selection !== undefined) candidate.selection = selection;
+      byCandidate.set(instanceId, candidate);
+    }
+    for (const [instanceId, { codes, selection }] of byCandidate) {
+      const [only] = codes;
+      if (codes.size === 1 && (only === "model-not-eligible" || only === "access-above-caller"))
+        found.push({
+          constraint: only,
+          entryIndex,
+          instanceId,
+          model: target.model,
+          options: selection?.options ?? [],
+        });
+    }
+  }
+  const constraint = found[0]?.constraint;
+  if (constraint === undefined) return null;
+  return {
+    constraint,
+    entries: found
+      .filter((entry) => entry.constraint === constraint)
+      .map(({ constraint: _constraint, ...entry }) => entry),
+  };
+};
+
+/** The one limit that, lifted alone, lets an entry run; null when none does. */
+export const singleWaivableConstraint = (
+  attempts: ReadonlyArray<Pick<AgentPersonaRouteAttempt, "entryIndex" | "target" | "failures">>,
+): AgentPersonaPickConstraint | null => singleWaiver(attempts)?.constraint ?? null;
 
 export function resolveAgentPersonaRoute(input: {
   readonly personaId: AgentPersonaId;
@@ -221,7 +324,7 @@ export function resolveAgentPersonaRoute(input: {
   readonly providers: ReadonlyArray<ServerProvider>;
   readonly authorityPolicy?: AgentPersonaAuthorityPolicy;
   readonly now: number;
-  readonly eligible?: AgentPersonaEntryEligibility | undefined;
+  readonly limits?: AgentPersonaPickLimits | undefined;
   /** Model ids to use only when no other entry can run: an independent reviewer's authors'. */
   readonly avoidModels?: ReadonlySet<string> | undefined;
 }): AgentPersonaRouteResolution {
@@ -246,8 +349,15 @@ export function resolveAgentPersonaRoute(input: {
         continue;
       }
       const modelSelection = agentPersonaModelSelection(provider, target);
-      if (input.eligible !== undefined && !input.eligible(modelSelection, provider)) {
-        failures.push({ code: "model-not-eligible", instanceId: provider.instanceId });
+      const limited = agentPersonaLimitFailures(input.limits, authority, modelSelection, provider);
+      if (limited.length > 0) {
+        failures.push(
+          ...limited.map((failure) => ({
+            ...failure,
+            instanceId: provider.instanceId,
+            selection: modelSelection,
+          })),
+        );
         continue;
       }
       return { route, entryIndex, target, modelSelection, failures: [] };

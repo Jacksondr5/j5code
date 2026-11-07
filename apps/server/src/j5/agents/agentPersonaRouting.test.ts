@@ -22,6 +22,7 @@ import {
   agentPersonaTargetUnavailableReason,
   buildAgentPersonaCatalog,
   resolveAgentPersonaRoute,
+  singleWaivableConstraint,
 } from "./agentPersonaRouting.ts";
 import { providerCanEnforceAgentPersonaAuthority } from "./agentPersonaProviderPolicy.ts";
 import {
@@ -169,7 +170,10 @@ describe("agent persona routing", () => {
           modelRoute: [target("unchecked"), target("signed-out"), target("checked")],
         },
         providers: [ready("unchecked"), signedOut, ready("checked")],
-        eligible: (selection) => eligible(selection.instanceId),
+        limits: {
+          eligible: (selection) => eligible(selection.instanceId),
+          accessAbove: () => undefined,
+        },
       });
     const codes = (
       entries: ReadonlyArray<{ readonly failures: ReadonlyArray<{ code: string }> }>,
@@ -241,6 +245,88 @@ describe("agent persona routing", () => {
       picked(["claude-opus-5-5", "gpt-6.1-sol", "gpt-6-sol"]),
       "anthropic/claude-opus-5-5",
     );
+  });
+  it("offers one waiver only where lifting that limit alone lets an entry run", () => {
+    const definition = listBuiltInAgentPersonas()[0]!;
+    const target = (instance: string) => ({
+      instanceId: ProviderInstanceId.make(instance),
+      model: "ordered-model",
+      options: [{ id: "reasoningEffort", value: "high" }],
+    });
+    const route = (limits: {
+      readonly eligible: boolean;
+      readonly within: boolean;
+      readonly waived?: "model-not-eligible" | "access-above-caller";
+    }) =>
+      resolveAgentPersonaRoute({
+        now: 0,
+        personaId: definition.id,
+        definition: { ...definition, modelRoute: [target("only")] },
+        providers: [
+          provider({
+            instanceId: "only",
+            driver: "codex",
+            models: [model("ordered-model", "reasoningEffort")],
+          }),
+        ],
+        limits: {
+          eligible: () => limits.eligible,
+          accessAbove: () => (limits.within ? undefined : "broader than its caller"),
+          waived:
+            limits.waived === undefined
+              ? undefined
+              : { constraint: limits.waived, covers: () => true },
+        },
+      });
+    const unchecked = route({ eligible: false, within: true });
+    assert.equal(unchecked.status, "unavailable");
+    if (unchecked.status !== "unavailable") return;
+    assert.equal(singleWaivableConstraint(unchecked.attempts), "model-not-eligible");
+    assert.equal(
+      route({ eligible: false, within: true, waived: "model-not-eligible" }).status,
+      "available",
+    );
+    // Waiving the other limit doesn't help.
+    assert.equal(
+      route({ eligible: false, within: true, waived: "access-above-caller" }).status,
+      "unavailable",
+    );
+
+    // Needing both limits lifted is no single waiver.
+    const both = route({ eligible: false, within: false });
+    assert.equal(both.status, "unavailable");
+    if (both.status !== "unavailable") return;
+    assert.deepEqual(
+      both.attempts[0]!.failures.map(({ code }) => code),
+      ["model-not-eligible", "access-above-caller"],
+    );
+    assert.isNull(singleWaivableConstraint(both.attempts));
+  });
+
+  it("never lets a grant put a persona on a driver that can't enforce its access", () => {
+    const definition = listBuiltInAgentPersonas().find(({ id }) => id === "investigator")!;
+    const [primary, fallback] = definition.modelRoute;
+    const providers = [providerForTarget(primary), providerForTarget(fallback)];
+    for (const waived of ["model-not-eligible", "access-above-caller"] as const) {
+      const resolution = resolveAgentPersonaRoute({
+        now: 0,
+        personaId: "investigator",
+        providers,
+        limits: {
+          eligible: () => true,
+          accessAbove: () => undefined,
+          waived: { constraint: waived, covers: () => true },
+        },
+      });
+      assert.equal(resolution.status, "unavailable", waived);
+      if (resolution.status === "available") continue;
+      assert.isTrue(
+        resolution.attempts.every(({ failures }) =>
+          failures.some(({ code }) => code === "authority-not-enforceable"),
+        ),
+      );
+      assert.isNull(singleWaivableConstraint(resolution.attempts));
+    }
   });
 
   it("uses every enforceable persona's declared primary route when it is available", () => {

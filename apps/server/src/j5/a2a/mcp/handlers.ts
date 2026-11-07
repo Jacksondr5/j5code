@@ -1,7 +1,12 @@
 import * as Clock from "effect/Clock";
 import * as Layer from "effect/Layer";
 import * as SpawnAgentService from "../SpawnAgentService.ts";
-import { stateError, preflightSpawnCaller, resolveCallerMembership } from "../AgentCaller.ts";
+import {
+  J5PersonaBlockedError,
+  preflightSpawnCaller,
+  resolveCallerMembership,
+  stateError,
+} from "../AgentCaller.ts";
 import { type ChatAttachment, ProjectId } from "@t3tools/contracts";
 import { playbookHandlers } from "../../playbooks/mcp.ts";
 import { playbookWorkspaceRoot } from "../../playbooks/workspace.ts";
@@ -72,10 +77,12 @@ import { spawnWorkspaceFromInput } from "../spawnWorkspace.ts";
 import { crewSeatRequestKey, lifecycleCommandId, stablePart } from "../spawnIds.ts";
 import {
   CommCommandId,
+  isHumanParticipantId,
   LedgerProjectId,
   type ParticipantDirectoryRow,
   type ParticipantId,
 } from "../contracts.ts";
+import { AgentPersonaEscalations } from "../../agents/agentPersonaEscalation.ts";
 import type { ParticipantProvenanceView } from "../placementContracts.ts";
 import {
   J5_LIST_PARTICIPANTS_DEFAULT_LIMIT,
@@ -87,9 +94,11 @@ import {
 
 const failure = (error: unknown): J5McpFailure => ({
   code:
-    typeof error === "object" && error !== null && "_tag" in error
-      ? String(error._tag)
-      : "J5A2AError",
+    error instanceof J5PersonaBlockedError
+      ? error.code
+      : typeof error === "object" && error !== null && "_tag" in error
+        ? String(error._tag)
+        : "J5A2AError",
   message: error instanceof Error ? error.message : String(error),
 });
 
@@ -227,7 +236,7 @@ const crewProposalNextStep = (error: CrewProposalError) =>
   error._tag === "CrewProposalRequestError"
     ? error.nextStep
     : error._tag === "CrewLaunchSeatUnavailableError"
-      ? "Choose a different persona from j5_list_personas or ask the user to fix that persona, then retry."
+      ? "Or choose a different persona from j5_list_personas that fits the work, then retry."
       : error._tag === "CrewLaunchModelNotEligibleError"
         ? "Give that custom member one of the eligible models or levels above, or leave its model unset to use yours if yours is eligible, then retry."
         : error._tag === "CrewLaunchCapError"
@@ -237,6 +246,18 @@ const crewProposalNextStep = (error: CrewProposalError) =>
             : error._tag === "CrewStepAlreadyOwnedError"
               ? "Claim only steps no seat owns yet, then retry."
               : "Retry with the same client_request_id; recovery is forward-only.";
+
+/** A refused persona seat keeps its code, as on every other persona launch path. */
+const crewProposalRefusal = (error: CrewProposalError) =>
+  (error._tag === "CrewLaunchSeatUnavailableError" ||
+    error._tag === "CrewLaunchModelNotEligibleError") &&
+  error.blockCode !== undefined
+    ? new J5PersonaBlockedError({
+        code: error.blockCode,
+        state: error.message,
+        nextCommand: crewProposalNextStep(error),
+      })
+    : stateError(error.message, crewProposalNextStep(error));
 
 const projectCrewProposal = (outcome: CrewProposalOutcome) => ({
   proposal_id: outcome.proposal.id,
@@ -272,6 +293,7 @@ export const crewSeatFromInput = (seat: J5ProposeCrewInput["seats"][number]) => 
   seat: seat.seat,
   agentId: seat.persona ?? null,
   reason: seat.reason,
+  ...(seat.allow_once === undefined ? {} : { allowOnce: seat.allow_once }),
   ...(seat.instructions === undefined ? {} : { instructions: seat.instructions }),
   ...(seat.model_selection === undefined ? {} : { modelSelection: seat.model_selection }),
   ...(seat.runtime_mode === undefined ? {} : { runtimeMode: seat.runtime_mode }),
@@ -313,6 +335,22 @@ const handlers = {
           `j5_send_message cannot target your own participant_id ${callerParticipantId}; self-messaging is not supported.`,
           "Call j5_list_participants to find the intended recipient, or use schedule_task if you need a future trigger for yourself.",
         );
+      }
+      // An ask about a refused persona launch; the Inbox shows J5's record of it apart from the text.
+      const escalationId = input.escalation_id ?? undefined;
+      if (escalationId !== undefined) {
+        if (input.expect_reply !== true || !isHumanParticipantId(input.to))
+          return yield* stateError(
+            "escalation_id goes only on an ask to a person.",
+            "Retry j5_send_message to the person with expect_reply=true, intent and urgency, or, as a Crew member, tell your Captain the escalation_id in an ordinary message.",
+          );
+        yield* (yield* AgentPersonaEscalations)
+          .authorizeAsk({ escalationId, askerParticipantId: callerParticipantId })
+          .pipe(
+            Effect.mapError((error) =>
+              stateError(error.message, "Check the escalation_id from the refusal and retry."),
+            ),
+          );
       }
       const crypto = yield* Crypto.Crypto;
       const service = yield* A2ASendService;
@@ -405,6 +443,8 @@ const handlers = {
           ...(input.exchange_id == null ? {} : { exchangeId: input.exchange_id }),
           ...(input.intent == null ? {} : { intent: input.intent }),
           ...(input.urgency == null ? {} : { urgency: input.urgency }),
+          // An escalation is its own ask: it never joins one already open with the person.
+          ...(escalationId === undefined ? {} : { freshAsk: true }),
           ...(mode === "queue" ? {} : { mode }),
           ...(modeLimit === undefined ? {} : { modeLimit }),
           ...(claimed === undefined ? {} : { attachments: claimed }),
@@ -414,6 +454,11 @@ const handlers = {
         receiverThreadId === undefined || attachments.length === 0
           ? yield* send()
           : yield* sendClaimingAttachments(receiverThreadId, attachments, send);
+      if (escalationId !== undefined && result.exchangeId !== null)
+        yield* (yield* AgentPersonaEscalations).linkAsk({
+          escalationId,
+          exchangeId: result.exchangeId,
+        });
       yield* worker.notify;
       return yield* withDeliveryNotice(result, {
         receiverId: input.to,
@@ -763,7 +808,7 @@ const handlers = {
             ...(playbook === undefined ? {} : { playbook }),
             seats: input.seats.map(crewSeatFromInput),
           })
-          .pipe(Effect.mapError((error) => stateError(error.message, crewProposalNextStep(error))));
+          .pipe(Effect.mapError(crewProposalRefusal));
         return projectCrewProposal(outcome);
       }).pipe(Effect.mapError(failure)),
   ),
@@ -785,6 +830,7 @@ const handlers = {
               seat: input.seat,
               agentId: input.persona ?? null,
               reason: input.reason,
+              ...(input.allow_once === undefined ? {} : { allowOnce: input.allow_once }),
               ...(input.instructions === undefined ? {} : { instructions: input.instructions }),
               ...(input.model_selection === undefined
                 ? {}
@@ -797,7 +843,7 @@ const handlers = {
             },
             brief: input.brief ?? null,
           })
-          .pipe(Effect.mapError((error) => stateError(error.message, crewProposalNextStep(error))));
+          .pipe(Effect.mapError(crewProposalRefusal));
         return projectCrewProposal(outcome);
       }).pipe(Effect.mapError(failure)),
   ),

@@ -52,6 +52,8 @@ import {
   useAnswerAttachments,
 } from "./AnswerAttachments";
 import { answerHumanExchange } from "./humanInboxClient";
+import { AllowPersonaOnceButton } from "./AllowPersonaOnceButton";
+import { J5RecordPanel } from "./J5RecordPanel";
 import { useScopedParticipantLabels } from "./ParticipantIdentitiesClient";
 import { presentParticipantIdentity } from "@t3tools/client-runtime/j5/participant-identity";
 import { CrewRuntimeRequestsSection } from "../crew/CrewRuntimeRequestsSection";
@@ -310,6 +312,11 @@ function OpenInboxItem({
         </summary>
         <div className="border-t border-border/50 px-1 pb-5 pt-4 sm:ms-24 sm:px-0 sm:pe-1">
           <InboxMessage item={item} />
+          {item.escalation === undefined ? null : (
+            <div className="mt-3">
+              <J5RecordPanel text={item.escalation.summary} />
+            </div>
+          )}
           <div className="mt-4 flex flex-col gap-3">
             <Textarea
               aria-label={`Answer ${item.intent}`}
@@ -345,23 +352,31 @@ function OpenInboxItem({
                   {closedText}
                 </p>
               ) : (
-                <Button
-                  disabled={
-                    !canAnswer ||
-                    pendingExchangeId !== null ||
-                    answerText.length === 0 ||
-                    waitingOn !== null
-                  }
-                  title={
-                    canAnswer
-                      ? (waitingOn ?? undefined)
-                      : "This environment is unavailable or this connection is read-only."
-                  }
-                  onClick={() => answer(item)}
-                  type="button"
-                >
-                  {pendingExchangeId === scopedInboxItemKey(item) ? "Delivering…" : "Answer"}
-                </Button>
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <AllowPersonaOnceButton
+                    disabled={!item.sourceReady || pendingExchangeId !== null}
+                    environmentId={item.environmentId}
+                    item={item}
+                    size="default"
+                  />
+                  <Button
+                    disabled={
+                      !canAnswer ||
+                      pendingExchangeId !== null ||
+                      answerText.length === 0 ||
+                      waitingOn !== null
+                    }
+                    title={
+                      canAnswer
+                        ? (waitingOn ?? undefined)
+                        : "This environment is unavailable or this connection is read-only."
+                    }
+                    onClick={() => answer(item)}
+                    type="button"
+                  >
+                    {pendingExchangeId === scopedInboxItemKey(item) ? "Delivering…" : "Answer"}
+                  </Button>
+                </div>
               )}
             </div>
           </div>

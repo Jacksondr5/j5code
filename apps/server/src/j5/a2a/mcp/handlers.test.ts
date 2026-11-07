@@ -1,4 +1,6 @@
 import * as FileSystem from "effect/FileSystem";
+import { AgentPersonaEscalations } from "../../agents/agentPersonaEscalation.ts";
+import { agentPersonaEscalationsTestLayer } from "../../test-support/agentPersonaEscalations.ts";
 import * as Path from "effect/Path";
 import { stringify as toYaml } from "yaml";
 import { makeAgentPersonaLibrary } from "../../agents/agentPersonaLibrary.ts";
@@ -246,6 +248,7 @@ const unusedLifecycleDependencies = Layer.mergeAll(
   serverConfigLayer,
   Layer.mock(PeerRegistryService)({}),
   Layer.mock(ThreadRegistration)({}),
+  agentPersonaEscalationsTestLayer(),
 );
 
 it.effect("namespaces mutating-tool idempotency and sender identity from authenticated scope", () =>
@@ -450,6 +453,7 @@ it.effect(
       });
       const dependencies = Layer.mergeAll(
         noDocumentTextLayer,
+        agentPersonaEscalationsTestLayer(),
         Layer.succeed(
           A2ASendService,
           A2ASendService.of({
@@ -595,6 +599,37 @@ it.effect(
         // The same narrower caller may still send the message to wait its turn.
         assert.isFalse((yield* call({ to: targetParticipantId, message })).isFailure);
         assert.lengthOf(yield* Ref.get(sends), 4);
+
+        // An ask about a refused persona is the agent's words alone; J5's record of the block
+        // travels as data on the Inbox item, where the agent's text can't reach it.
+        const escalationId = yield* (yield* AgentPersonaEscalations).record({
+          callerParticipantId: participantIdForThread(invocation.threadId),
+          personaId: "reviewer",
+          code: "persona_disabled",
+          summary: "Persona reviewer is disabled in this environment.",
+          waivable: null,
+          scope: null,
+        });
+        const notAnAsk = yield* call({
+          to: targetParticipantId,
+          message,
+          escalation_id: escalationId,
+        });
+        assert.isTrue(notAnAsk.isFailure);
+        assert.include(JSON.stringify(notAnAsk.encodedResult), "only on an ask to a person");
+        assert.isFalse(
+          (yield* call({
+            to: personParticipantId,
+            message: "May reviewer run?",
+            expect_reply: true,
+            intent: "Re-enable reviewer?",
+            urgency: "soon",
+            escalation_id: escalationId,
+          })).isFailure,
+        );
+        const ask = (yield* Ref.get(sends)).at(-1)!;
+        assert.equal(ask.message, "May reviewer run?");
+        assert.isTrue(ask.freshAsk);
       }).pipe(Effect.provide(layer));
     }),
 );
@@ -1316,6 +1351,7 @@ it.effect("preflights home before creation and records facts before the one stab
       Layer.mock(ParticipantPlacementService)({}),
       Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed([]) }),
       permissiveCrewMemberModels,
+      agentPersonaEscalationsTestLayer(),
       Layer.mock(AgentCrewInstanceService)({ findMembership: () => Effect.succeed(null) }),
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
       Layer.mock(ArchiveCrewService)({}),
@@ -1484,6 +1520,7 @@ it.effect("refuses spawn before thread creation when the caller is a Subagent", 
       }),
       Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed([]) }),
       permissiveCrewMemberModels,
+      agentPersonaEscalationsTestLayer(),
       Layer.mock(AgentCrewInstanceService)({ findMembership: () => Effect.succeed(null) }),
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
       Layer.mock(ArchiveCrewService)({}),
@@ -1742,6 +1779,7 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
       }),
       Layer.mock(ProviderRegistry)({ getProviders: Ref.get(personaProviders) }),
       permissiveCrewMemberModels,
+      agentPersonaEscalationsTestLayer(),
       Layer.mock(AgentCrewInstanceService)({ findMembership: () => Effect.succeed(null) }),
       Layer.mock(ParticipantPlacementService)({}),
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
@@ -1875,7 +1913,7 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
       assert.isTrue(outOfRoute.isFailure);
       assert.include(failureMessage(outOfRoute), "Agent scout allows only");
       assert.include(failureMessage(outOfRoute), "outside its declared routes");
-      assert.include(failureMessage(outOfRoute), "or omit persona");
+      assert.include(failureMessage(outOfRoute), "omit them to let the server choose");
 
       // A route always names a level, so a persona never runs without one and none is inferred.
       const { reasoning: _reasoning, ...scoutWithoutReasoning } = scout;
@@ -1917,7 +1955,16 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
         client_request_id: "spawn-persona-unknown",
       });
       assert.isTrue(unknown.isFailure);
-      assert.include(failureMessage(unknown), "Unknown agent nobody");
+      // Every persona launch path gives the same code and text for the same block.
+      assert.equal((unknown.result as { readonly code: string }).code, "persona_not_found");
+      assert.include(
+        failureMessage(unknown),
+        "[persona_not_found] Unknown persona nobody in this environment.",
+      );
+      assert.include(
+        failureMessage(unknown),
+        "Never recreate a blocked persona as a custom worker",
+      );
       assert.lengthOf(yield* Ref.get(commands), commandCount);
 
       // A persona that declares full access spawns with the ordinary full-access mode.
@@ -1968,7 +2015,7 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
       assert.isTrue(agentPick.isFailure);
       assert.include(
         failureMessage(agentPick),
-        "Persona operator would run with Full access, which is broader than the Supervised its caller runs with.",
+        "it would run with Full access, which is broader than the Supervised its caller runs with",
       );
       assert.include(failureMessage(agentPick), "@persona:operator");
       assert.lengthOf(yield* createdThreads(), createdBeforeAgentPick);
@@ -2021,7 +2068,7 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
       assert.isTrue(above.isFailure);
       assert.include(
         failureMessage(above),
-        "Persona operator would run with Full access, which is broader than the Supervised its caller runs with.",
+        "it would run with Full access, which is broader than the Supervised its caller runs with",
       );
       assert.include(failureMessage(above), "a persona within that level");
       assert.include(failureMessage(above), "sign in again");
@@ -2198,7 +2245,7 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
         client_request_id: "spawn-limited-entry",
       });
       assert.isTrue(limited.isFailure);
-      assert.include(failureMessage(limited), "usage-limit");
+      assert.include(failureMessage(limited), "is at its usage limit");
       assert.lengthOf(yield* createdThreads(), beforeLimited);
       yield* Ref.set(personaProviders, [codex, claude]);
 
@@ -2275,6 +2322,7 @@ it.effect("archives a crew only as a unit through its captain with one confirmat
       Layer.mock(OrchestratorMcpService)({}),
       Layer.mock(ProviderRegistry)({}),
       permissiveCrewMemberModels,
+      agentPersonaEscalationsTestLayer(),
       Layer.mock(ParticipantPlacementService)({}),
       Layer.mock(AgentCrewInstanceService)({}),
       Layer.mock(CrewProposalService)({}),
@@ -2413,6 +2461,7 @@ it.effect("lists every ordered model entry with structured reasons and chosen in
       Layer.mock(OrchestratorMcpService)({}),
       Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed([codex]) }),
       permissiveCrewMemberModels,
+      agentPersonaEscalationsTestLayer(),
       Layer.mock(AgentCrewInstanceService)({ findMembership: () => Effect.succeed(null) }),
       Layer.mock(ParticipantPlacementService)({}),
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
@@ -2574,6 +2623,7 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
       Layer.mock(OrchestratorMcpService)({}),
       Layer.mock(ProviderRegistry)({}),
       permissiveCrewMemberModels,
+      agentPersonaEscalationsTestLayer(),
       Layer.mock(AgentCrewInstanceService)({
         findMembership: () => Ref.get(membership),
         listForCaptain: () => Effect.succeed([]),

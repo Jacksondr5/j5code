@@ -40,6 +40,7 @@ describe("J5 client RPC permissions", () => {
     for (const method of [
       J5_CLIENT_ACTION_WS_METHODS.archiveCrew,
       J5_CLIENT_ACTION_WS_METHODS.answerCrewWorktreeCleanup,
+      J5_CLIENT_ACTION_WS_METHODS.allowPersonaOnce,
     ]) {
       expect(CLIENT_GUARDED_RPC_SCOPES[method], method).toBe(AuthSettingsWriteScope);
     }

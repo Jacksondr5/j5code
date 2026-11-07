@@ -105,11 +105,13 @@ export const isOwner = Effect.fn("j5.sharing.connectionWriter.isOwner")(function
  */
 export const requireOwner = Effect.fn("j5.sharing.connectionWriter.requireOwner")(function* (
   session: SessionIdentity,
+  /** What only an Owner does, as "Only an Owner of this server <does>". */
+  does = "archives a Crew",
 ) {
   if (!(yield* isOwner(session))) {
     return yield* new J5ActionError({
       code: "OwnersOnly",
-      message: "Only an Owner of this server archives a Crew, for now. Ask an Owner to do it.",
+      message: `Only an Owner of this server ${does}, for now. Ask an Owner to do it.`,
     });
   }
 });

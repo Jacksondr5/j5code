@@ -6,7 +6,8 @@ import { buildAgentPersonaAssignment } from "./agentPersonaAssignment.ts";
 import { AgentPersonaLibraryError, type createAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
 import {
   resolveAgentPersonaRoute,
-  type AgentPersonaEntryEligibility,
+  singleWaiver,
+  type AgentPersonaPickLimits,
   type AgentPersonaRouteAttempt,
 } from "./agentPersonaRouting.ts";
 
@@ -40,6 +41,8 @@ export const routeFailurePhrase = (
       return `${provider} cannot enforce the persona's authority policy`;
     case "model-not-eligible":
       return `${target.model} on ${provider} is not checked in Models for custom members`;
+    case "access-above-caller":
+      return `on ${provider} it would run with broader access than its caller`;
   }
 };
 
@@ -53,30 +56,78 @@ const describeRouteAttempts = (attempts: ReadonlyArray<AgentPersonaRouteAttempt>
       (attempt) =>
         `entry ${attempt.entryIndex + 1} ${attempt.target.model} (${[
           ...new Set(
-            attempt.failures.map((failure) => routeFailurePhrase(attempt.target, failure)),
+            attempt.failures.map(
+              (failure) => failure.detail ?? routeFailurePhrase(attempt.target, failure),
+            ),
           ),
         ].join(", ")})`,
     )
     .join("; ");
+
+/**
+ * The definition a launch names, or why there is none to launch: the library can't be read or is
+ * empty, or the persona is disabled, invalid, or not in it.
+ */
+export const findAgentPersonaDefinition = Effect.fn("j5.agents.findAgentPersonaDefinition")(
+  function* (personaId: string, library: ReturnType<typeof createAgentPersonaLibrary>) {
+    const catalog = yield* library.catalog().pipe(
+      Effect.mapError(
+        (error) =>
+          new AgentPersonaLibraryError({
+            code: "library_unreadable",
+            message: `The persona library cannot be read: ${error.message}`,
+          }),
+      ),
+    );
+    if (catalog.disabledIds.includes(personaId))
+      return yield* new AgentPersonaLibraryError({
+        code: "persona_disabled",
+        message: `Persona ${personaId} is disabled in this environment.`,
+      });
+    const definition = catalog.definitions.find(({ id }) => id === personaId);
+    if (definition !== undefined) return definition;
+    const invalid = catalog.diagnostics.find((diagnostic) => diagnostic.personaId === personaId);
+    if (invalid !== undefined)
+      return yield* new AgentPersonaLibraryError({
+        code: "persona_invalid",
+        message: `Persona ${personaId} has an invalid definition (${invalid.path}): ${invalid.message}`,
+      });
+    return yield* new AgentPersonaLibraryError(
+      catalog.definitions.length === 0
+        ? {
+            code: "library_empty",
+            message: `This environment has no personas, so ${personaId} cannot launch.`,
+          }
+        : {
+            code: "persona_not_found",
+            message: `Unknown persona ${personaId} in this environment.`,
+          },
+    );
+  },
+);
+
+/** The refusal for a persona none of whose entries can run, with each entry's reasons. */
+const modelsExhaustedError = (
+  personaId: string,
+  attempts: ReadonlyArray<AgentPersonaRouteAttempt>,
+) => {
+  const waiver = singleWaiver(attempts);
+  return new AgentPersonaLibraryError({
+    code: "models_exhausted",
+    message: `Persona ${personaId} is blocked because none of its model entries can run: ${describeRouteAttempts(attempts)}.`,
+    ...(waiver === null ? {} : { constraint: waiver.constraint, waiverEntries: waiver.entries }),
+  });
+};
 
 /** Resolve once and save the exact definition before the ordinary durable thread-creation command. */
 export const prepareAgentPersonaLaunch = Effect.fn("prepareAgentPersonaLaunch")(function* (
   request: OrchestrationV2AgentPersonaRequest,
   providers: ReadonlyArray<ServerProvider>,
   library: ReturnType<typeof createAgentPersonaLibrary>,
-  eligible?: AgentPersonaEntryEligibility,
+  limits?: AgentPersonaPickLimits,
   avoidModels?: ReadonlySet<string>,
 ) {
-  const catalog = yield* library.catalog();
-  if (catalog.disabledIds.includes(request.personaId))
-    return yield* new AgentPersonaLibraryError({
-      message: "Persona is disabled in this environment.",
-    });
-  const definition = catalog.definitions.find(({ id }) => id === request.personaId);
-  if (definition === undefined)
-    return yield* new AgentPersonaLibraryError({
-      message: "Unknown persona in this environment.",
-    });
+  const definition = yield* findAgentPersonaDefinition(request.personaId, library);
   if (
     request.authorityPolicy !== undefined &&
     mapAgentPersonaPolicy(request.authorityPolicy) !== agentPersonaPolicy(definition)
@@ -94,19 +145,11 @@ export const prepareAgentPersonaLaunch = Effect.fn("prepareAgentPersonaLaunch")(
     ...authority,
     definition,
     providers,
-    eligible,
+    limits,
     avoidModels,
   });
-  if (resolution.status === "unavailable") {
-    // An entry refused as not eligible passed every other check, so only that limit stood in the way.
-    const notEligible = resolution.attempts.some(({ failures }) =>
-      failures.some(({ code }) => code === "model-not-eligible"),
-    );
-    return yield* new AgentPersonaLibraryError({
-      message: `Persona ${request.personaId} is blocked because its ordered model entries are unavailable: ${describeRouteAttempts(resolution.attempts)}.`,
-      ...(notEligible ? { constraint: "model-not-eligible" as const } : {}),
-    });
-  }
+  if (resolution.status === "unavailable")
+    return yield* modelsExhaustedError(request.personaId, resolution.attempts);
   const result = buildAgentPersonaAssignment({ ...authority, definition, resolution });
   if (result.status !== "assigned")
     return yield* new AgentPersonaLibraryError({

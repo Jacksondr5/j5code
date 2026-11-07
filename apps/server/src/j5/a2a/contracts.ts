@@ -1,4 +1,10 @@
-import { ChatAttachment, ProviderInteractionMode, RuntimeMode, ThreadId } from "@t3tools/contracts";
+import {
+  AgentPersonaEscalationView,
+  ChatAttachment,
+  ProviderInteractionMode,
+  RuntimeMode,
+  ThreadId,
+} from "@t3tools/contracts";
 import { PeerSenderLabel } from "@t3tools/contracts/j5";
 import * as Schema from "effect/Schema";
 
@@ -416,6 +422,8 @@ export const SendMessageInput = Schema.Struct({
   exchangeId: Schema.optional(ExchangeId),
   intent: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
   urgency: Schema.optional(Urgency),
+  /** Refuse, before writing anything, an ask that would join one already open with the receiver. */
+  freshAsk: Schema.optional(Schema.Boolean),
   acceptedAt: Schema.String,
 });
 export type SendMessageInput = typeof SendMessageInput.Type;
@@ -540,6 +548,8 @@ export const HumanInboxItem = Schema.Struct({
   forEveryone: Schema.optionalKey(Schema.Boolean),
   /** Who answered an ask to everyone that is closed, by the name they had then (Inbox AC16). */
   answeredBy: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  /** A refused persona launch this ask escalates, as the server recorded it. */
+  escalation: Schema.optionalKey(AgentPersonaEscalationView),
 });
 export type HumanInboxItem = typeof HumanInboxItem.Type;
 
