@@ -69,7 +69,7 @@ The **first owner** is the person the server's own machine belongs to. The deskt
 
 ### Scopes and levels
 
-A person's access is a level at a scope. A **scope** is the server, a project, or a thread. A thread's scope is the thread and the agents beneath it: the Subagents it ran, the Peer Agents placed under it and their Crew seats, at any depth and in any project. It does not include the thread above it, agents it only exchanged messages with, or a fork of it. A scope covers what is in it now: a thread started in a project, an agent spawned beneath a thread, or a project added to the server appears for everyone whose scope covers it.
+A person's access is a level at a scope. A **scope** is the server, a project, or a thread. A thread's scope is the thread and the agents beneath it: the Subagents and delegates it ran, the Peer Agents placed under it and their Crew seats, at any depth and in any project. It does not include the thread above it, agents it only exchanged messages with, or a fork of it. A scope covers what is in it now: a thread started in a project, an agent spawned beneath a thread, or a project added to the server appears for everyone whose scope covers it.
 
 There are three **levels**:
 
@@ -229,3 +229,4 @@ Set aside on purpose, each tracked where it is linked. An item leaves this list 
 - 2026-10-27 — a link for one person always names who it is for, so the Share dialog and the People page can say who each unused link is for (AC31, AC32; Jackson).
 - 2026-10-31 — the mobile app asks whose device it is, takes its new session when its person's level changes, and keeps Settings an Owner's, as web does, with its own list of the device's pages; managing sharing stays on web and desktop (AC5, AC6, AC17, AC28; Jackson, [#831](https://github.com/Jacksondr5/j5code/issues/831)).
 - 2026-11-01 — on the mobile app the name question has a way out that touches only that server: Remove this server, and for a device the server cannot place, Not now until the app next opens; the first owner, who already holds the server, gets no Not now (AC5, AC6; Jackson at Checkpoint 1, [#870](https://github.com/Jacksondr5/j5code/issues/870)).
+- 2026-11-07 — a thread's scope names the delegates it ran beside its Subagents (the term, [#952](https://github.com/Jacksondr5/j5code/issues/952)).
