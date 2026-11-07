@@ -22,7 +22,8 @@ import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 
 import { makeAgentPersonaLibrary } from "../agents/agentPersonaLibrary.ts";
-import { BUILT_IN_AGENT_PERSONAS } from "../agents/agentPersonas.ts";
+import { BUILT_IN_AGENT_PERSONAS, type AgentPersonaDefinition } from "../agents/agentPersonas.ts";
+import { withReviewIndependenceNote } from "../agents/agentPersonaReviewIndependence.ts";
 import { stringify as toYaml } from "yaml";
 import { resolveAgentPersonaRuntime } from "../agents/agentPersonaRuntime.ts";
 import { guardAgentPersonaThreadCreate } from "../agents/agentPersonaOrchestration.ts";
@@ -219,9 +220,12 @@ const threadManagementFake = (
             )
           : Effect.succeed({
               messages: [],
+              runs: [],
+              subagents: [],
               thread: {
                 ...thread(threadId),
                 archivedAt: archived.has(threadId) ? createdAt : null,
+                deletedAt: null,
               },
             } as unknown as OrchestrationV2ThreadProjection),
     dispatch: (command) =>
@@ -1360,6 +1364,148 @@ it.effect("a persona seat's edited instructions replace the persona's own at lau
       );
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "a reviewer seat avoids its Crew's authors' models unless the person chose its model",
+  () =>
+    Effect.gen(function* () {
+      const { context, commands, captain } = yield* fixture;
+      const models = ["gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.6-luna"];
+      const entry = (model: string) => ({
+        instanceId: ProviderInstanceId.make("codex"),
+        model,
+        options: [{ id: "reasoningEffort", value: "high" }],
+      });
+      const reviewer: AgentPersonaDefinition = {
+        ...BUILT_IN_AGENT_PERSONAS.scout,
+        id: "reviewer",
+        independentReviewer: true,
+        modelRoute: [entry("gpt-5.6-terra"), entry("gpt-5.6-sol"), entry("gpt-5.6-luna")],
+      };
+      const layer = crewLaunchLayer.pipe(
+        Layer.provideMerge(
+          dependencies(commands, [
+            provider(
+              "codex",
+              "codex",
+              models.map((slug) => ({ slug, options: ["high"] })),
+            ),
+          ]),
+        ),
+        Layer.provideMerge(Layer.succeedContext(context)),
+        Layer.provideMerge(
+          personaLibraryLayer("j5-crew-reviewer-", [...launchablePersonas, reviewer]),
+        ),
+        Layer.provideMerge(NodeServices.layer),
+      );
+      yield* Effect.gen(function* () {
+        const launcher = yield* CrewLaunchService;
+        const shared = { type: "shared" as const };
+        const builder = {
+          name: "builder",
+          agentId: null,
+          reason: "Implements",
+          instructions: "Build it.",
+          modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.6-terra" },
+          workspace: shared,
+        };
+        // A custom seat with no model of its own runs on the Captain's, gpt-5.6-sol.
+        const helper = { ...builder, name: "helper", modelSelection: undefined };
+        const review = {
+          name: "review",
+          agentId: "reviewer",
+          reason: "Reviews",
+          workspace: shared,
+        };
+        const modelOf = (seats: ReadonlyArray<{ readonly modelSelection: { model: string } }>) =>
+          seats.at(-1)!.modelSelection.model;
+
+        // The reviewer resolves after the seats it reviews, though it is listed first.
+        const roster = yield* launcher.resolveSeats(captain, [review, builder, helper], "agent");
+        assert.deepStrictEqual(
+          roster.map(({ seat }) => seat.name),
+          ["review", "builder", "helper"],
+        );
+        assert.equal(roster[0]!.modelSelection.model, "gpt-5.6-luna");
+        assert.deepStrictEqual(roster[0]!.assignment!.reviewIndependence, {
+          outcome: "different-model",
+          authorModels: ["gpt-5.6-terra", "gpt-5.6-sol"],
+          authorThreadIds: [],
+          partlyUnknown: false,
+          modelChosenBy: "server",
+        });
+
+        const narrowed = yield* launcher.resolveSeats(
+          captain,
+          [builder, helper, { ...review, reviews: ["builder"] }],
+          "person",
+        );
+        assert.equal(modelOf(narrowed), "gpt-5.6-sol");
+        // A name the person renamed away on the card is dropped; with none left, the default.
+        const renamed = yield* launcher.resolveSeats(
+          captain,
+          [builder, helper, { ...review, reviews: ["gone"] }],
+          "person",
+        );
+        assert.equal(modelOf(renamed), "gpt-5.6-luna");
+
+        // A model the person set on the card is used as is, and noted.
+        const edited = yield* launcher.resolveSeats(
+          captain,
+          [
+            builder,
+            {
+              ...review,
+              modelSelection: {
+                instanceId: ProviderInstanceId.make("codex"),
+                model: "gpt-5.6-terra",
+                options: [{ id: "reasoningEffort", value: "high" }],
+              },
+            },
+          ],
+          "person",
+        );
+        assert.equal(modelOf(edited), "gpt-5.6-terra");
+        assert.equal(edited[1]!.assignment!.reviewIndependence?.outcome, "same-model-as-author");
+        assert.equal(edited[1]!.assignment!.reviewIndependence?.modelChosenBy, "person");
+        assert.include(
+          withReviewIndependenceNote("Review it.", edited[1]!.assignment),
+          "(gpt-5.6-terra), because it was set on the roster card.",
+        );
+
+        // An addition reviews the Crew's members, read from their threads.
+        const member = ThreadId.make("thread:builder");
+        const added = yield* launcher.resolveSeats(captain, [review], "agent", {
+          members: [
+            {
+              seatName: "builder",
+              agentId: null,
+              participantId: participantIdForThread(member),
+              threadId: member,
+              reason: "Implements",
+            } as unknown as AgentCrewInstance["members"][number],
+          ],
+        });
+        assert.equal(modelOf(added), "gpt-5.6-terra");
+        assert.deepStrictEqual(added[0]!.assignment!.reviewIndependence?.authorThreadIds, [member]);
+
+        yield* launcher.launch({
+          providerSessionId: "session",
+          requestKey: "reviewer-launch",
+          captain,
+          pick: "agent",
+          displayName: "Review Pair",
+          seats: [builder, review],
+          brief: "Ship the login fix.",
+        });
+        const briefs = yield* savedBriefs;
+        assert.include(
+          briefs.at(-1)!.first_turn_text,
+          "Ship the login fix.\n\nReview independence: you run on gpt-5.6-sol; the authors ran on gpt-5.6-terra.",
+        );
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
 );
 
 it.effect("refuses persona seats whose effective ACP access the harness cannot enforce", () =>

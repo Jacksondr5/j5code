@@ -22,7 +22,11 @@ import { ServerConfig } from "../../config.ts";
 import { McpInvocationContext } from "../../mcp/McpInvocationContext.ts";
 import { OrchestratorMcpService, resolveRuntimeMode } from "../../mcp/OrchestratorMcpService.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
-import { emptyProjection } from "../../orchestration-v2/ProjectionStore.ts";
+import { OrchestratorProjectionError } from "../../orchestration-v2/Orchestrator.ts";
+import {
+  emptyProjection,
+  ProjectionStoreThreadNotFoundError,
+} from "../../orchestration-v2/ProjectionStore.ts";
 import { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
 import { InvokeAgentInput, invokeAgent } from "./agentInvocation.ts";
 import { makeAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
@@ -507,6 +511,265 @@ describe("saved agent subagent invocation", () => {
           agentPersonaAssignment: calls[0]!.agentPersonaAssignment,
         }),
       );
+    }).pipe(Effect.provide(testLayer)),
+  );
+});
+
+describe("independent reviewer subagents", () => {
+  const reviewer = {
+    id: "code-reviewer",
+    version: 1,
+    displayName: "Code Reviewer",
+    description: "Reviews a change.",
+    access: "read-only",
+    independentReviewer: true,
+    modelRoute: [
+      { instanceId: "claude", model: "claude-opus-5-5" },
+      { instanceId: "codex", model: "gpt-6.1-sol" },
+      { instanceId: "claude", model: "claude-sonnet-5-5" },
+    ],
+    instructions: "Review the change.",
+  };
+  const provider = (
+    instanceId: string,
+    driver: string,
+    models: ReadonlyArray<string>,
+  ): ServerProvider => ({
+    ...providers[0]!,
+    instanceId: ProviderInstanceId.make(instanceId),
+    driver: ProviderDriverKind.make(driver),
+    models: models.map((slug) => ({ slug, name: slug, isCustom: false, capabilities: null })),
+  });
+  const everyModel = [
+    provider("claude", "claudeAgent", ["claude-opus-5-5", "claude-sonnet-5-5"]),
+    provider("codex", "codex", ["gpt-6.1-sol"]),
+  ];
+  const reviewerFixture = Effect.gen(function* () {
+    const { parent } = yield* fixture;
+    const library = yield* makeAgentPersonaLibrary;
+    const { independentReviewer: _flag, ...unflagged } = reviewer;
+    yield* library.importFiles({
+      files: [
+        { name: "reviewer.yaml", content: yaml(reviewer) },
+        { name: "plain.yaml", content: yaml({ ...unflagged, id: "plain-reviewer" }) },
+      ],
+      replaceExisting: false,
+    });
+    const threads = new Map<string, unknown>();
+    const thread = (
+      id: string,
+      model: string,
+      extra: {
+        subagents?: ReadonlyArray<unknown>;
+        runs?: ReadonlyArray<unknown>;
+        messages?: ReadonlyArray<unknown>;
+      } & Record<string, unknown> = {},
+    ) => {
+      const { subagents = [], runs = [], messages = [], ...fields } = extra;
+      threads.set(id, {
+        ...parent,
+        thread: {
+          ...parent.thread,
+          id: ThreadId.make(id),
+          modelSelection: { instanceId: ProviderInstanceId.make("claude"), model },
+          ...fields,
+        },
+        runs,
+        subagents,
+        messages,
+      });
+    };
+    const child = (childThreadId: string | null, origin: "app_owned" | "provider_native") => ({
+      origin,
+      childThreadId: childThreadId === null ? null : ThreadId.make(childThreadId),
+    });
+    const calls: Array<Parameters<OrchestratorMcpService["Service"]["delegateTask"]>[1]> = [];
+    const invoke = (
+      personaId: string,
+      options: {
+        authorThreads?: ReadonlyArray<string>;
+        providers?: ReadonlyArray<ServerProvider>;
+      } = {},
+    ) =>
+      invokeAgent({
+        personaId,
+        task: "Review the API",
+        clientRequestId: "request",
+        ...(options.authorThreads === undefined
+          ? {}
+          : { authorThreads: options.authorThreads.map((id) => ThreadId.make(id)) }),
+      }).pipe(
+        Effect.provideService(McpInvocationContext, {
+          environmentId: EnvironmentId.make("remote"),
+          requestNamespace: "session",
+          thread: {
+            threadId: ThreadId.make("parent"),
+            providerInstanceId: ProviderInstanceId.make("claude"),
+            providerSessionId: "session",
+          },
+          client: undefined,
+          capabilities: new Set(["orchestration" as const]),
+          issuedAt: 1,
+        }),
+        Effect.provide(
+          Layer.mergeAll(
+            Layer.mock(ThreadManagementService)({
+              getThreadRecords: (threadId) => {
+                const records = threads.get(threadId);
+                return records === undefined
+                  ? Effect.fail(
+                      new OrchestratorProjectionError({
+                        threadId,
+                        cause: new ProjectionStoreThreadNotFoundError({ threadId }),
+                      }),
+                    )
+                  : Effect.succeed(records as never);
+              },
+            }),
+            Layer.mock(CrewMemberModels)({ eligibility: () => Effect.succeed(() => true) }),
+            Layer.mock(ProviderRegistry)({
+              getProviders: Effect.succeed(options.providers ?? everyModel),
+            }),
+            Layer.mock(OrchestratorMcpService)({
+              delegateTask: (_, input) => {
+                calls.push(input);
+                return Effect.succeed({ taskId: NodeId.make("task") } as never);
+              },
+            }),
+          ),
+        ),
+      );
+    return { thread, child, calls, invoke, library };
+  });
+
+  it.effect("prefers a model no author ran on, skipping earlier reviewers, and says so", () =>
+    Effect.gen(function* () {
+      const { thread, child, calls, invoke } = yield* reviewerFixture;
+      thread("parent", "claude-opus-5-5", {
+        runs: [{ modelSelection: { instanceId: "claude", model: "claude-opus-5-5" } }],
+        subagents: [child("builder", "app_owned"), child("earlier-review", "app_owned")],
+      });
+      thread("builder", "gpt-6.1-sol");
+      // An earlier reviewer's model is not an author's, so it stays available.
+      thread("earlier-review", "claude-sonnet-5-5", {
+        agentPersonaAssignment: {
+          resolvedModelSelection: { instanceId: "claude", model: "claude-sonnet-5-5" },
+          reviewIndependence: { outcome: "different-model" },
+        },
+      });
+      yield* invoke(reviewer.id);
+      const assignment = calls[0]!.agentPersonaAssignment!;
+      assert.equal(assignment.resolvedModelSelection.model, "claude-sonnet-5-5");
+      assert.equal(assignment.resolvedEntryIndex, 2);
+      assert.deepEqual(assignment.reviewIndependence, {
+        outcome: "different-model",
+        authorModels: ["claude-opus-5-5", "gpt-6.1-sol"],
+        authorThreadIds: [ThreadId.make("parent"), ThreadId.make("builder")],
+        partlyUnknown: false,
+        modelChosenBy: "server",
+      });
+      assert.equal(
+        calls[0]!.task,
+        "Review the API\n\nReview independence: you run on claude-sonnet-5-5; the authors ran on claude-opus-5-5, gpt-6.1-sol.",
+      );
+    }).pipe(Effect.provide(testLayer)),
+  );
+
+  it.effect("launches on the author's model when nothing else can run, and notes it", () =>
+    Effect.gen(function* () {
+      const { thread, calls, invoke } = yield* reviewerFixture;
+      thread("parent", "claude-opus-5-5");
+      yield* invoke(reviewer.id, {
+        providers: [provider("claude", "claudeAgent", ["claude-opus-5-5"])],
+      });
+      const assignment = calls[0]!.agentPersonaAssignment!;
+      assert.equal(assignment.resolvedModelSelection.model, "claude-opus-5-5");
+      assert.equal(assignment.reviewIndependence?.outcome, "same-model-as-author");
+      assert.include(
+        calls[0]!.task,
+        "you run on the same model as the author (claude-opus-5-5), because no other model in your list could run.",
+      );
+    }).pipe(Effect.provide(testLayer)),
+  );
+
+  it.effect("reorders a person's @persona pick and reports native-subagent work as unknown", () =>
+    Effect.gen(function* () {
+      const { thread, child, calls, invoke } = yield* reviewerFixture;
+      thread("parent", "claude-opus-5-5", {
+        runs: [
+          {
+            id: "run",
+            ordinal: 1,
+            status: "running",
+            userMessageId: MessageId.make("turn-message"),
+            modelSelection: { instanceId: "claude", model: "claude-opus-5-5" },
+          },
+        ],
+        messages: [
+          {
+            id: MessageId.make("turn-message"),
+            role: "user",
+            createdBy: "user",
+            creationSource: "web",
+            text: `Ask @persona:${reviewer.id} to look.`,
+          },
+        ],
+        subagents: [child(null, "provider_native")],
+      });
+      yield* invoke(reviewer.id);
+      assert.deepEqual(calls[0]!.agentPersonaAssignment!.pickSource, { kind: "person" });
+      const assignment = calls[0]!.agentPersonaAssignment!;
+      assert.equal(assignment.resolvedModelSelection.model, "gpt-6.1-sol");
+      assert.equal(assignment.reviewIndependence?.outcome, "unknown-authors");
+      assert.isTrue(assignment.reviewIndependence?.partlyUnknown);
+      assert.include(
+        calls[0]!.task,
+        "Some authors are unknown (work done by native subagents), so this is not a verified independent review.",
+      );
+    }).pipe(Effect.provide(testLayer)),
+  );
+
+  it.effect("reviews only the named author threads, and refuses a missing or foreign one", () =>
+    Effect.gen(function* () {
+      const { thread, calls, invoke, library } = yield* reviewerFixture;
+      thread("parent", "claude-opus-5-5");
+      thread("builder", "gpt-6.1-sol");
+      yield* invoke(reviewer.id, { authorThreads: ["builder"] });
+      assert.equal(
+        calls[0]!.agentPersonaAssignment!.resolvedModelSelection.model,
+        "claude-opus-5-5",
+      );
+      assert.deepEqual(calls[0]!.agentPersonaAssignment!.reviewIndependence?.authorThreadIds, [
+        ThreadId.make("builder"),
+      ]);
+      const refused = yield* invoke(reviewer.id, { authorThreads: ["missing"] }).pipe(Effect.flip);
+      assert.equal(refused.code, "invalid_request");
+      assert.include(refused.message, "Author thread missing does not exist.");
+      thread("elsewhere", "gpt-6.1-sol", { projectId: ProjectId.make("other-project") });
+      const foreign = yield* invoke(reviewer.id, { authorThreads: ["elsewhere"] }).pipe(
+        Effect.flip,
+      );
+      assert.include(foreign.message, "Author thread elsewhere is in another project.");
+      // A disabled reviewer says so before any author thread is looked at.
+      yield* library.setImportedEnabled(reviewer.id, false);
+      const disabled = yield* invoke(reviewer.id, { authorThreads: ["missing"] }).pipe(Effect.flip);
+      assert.include(disabled.message, "disabled");
+      assert.notInclude(disabled.message, "Author thread");
+      assert.lengthOf(calls, 1);
+    }).pipe(Effect.provide(testLayer)),
+  );
+
+  it.effect("leaves an unflagged persona's pick, record and task alone", () =>
+    Effect.gen(function* () {
+      const { thread, calls, invoke } = yield* reviewerFixture;
+      thread("parent", "claude-opus-5-5");
+      yield* invoke("plain-reviewer", { authorThreads: ["missing"] });
+      assert.equal(
+        calls[0]!.agentPersonaAssignment!.resolvedModelSelection.model,
+        "claude-opus-5-5",
+      );
+      assert.notProperty(calls[0]!.agentPersonaAssignment!, "reviewIndependence");
+      assert.equal(calls[0]!.task, "Review the API");
     }).pipe(Effect.provide(testLayer)),
   );
 });

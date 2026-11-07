@@ -163,6 +163,7 @@ export function presentAgentPersonaCatalog(
               description: persona.description,
               access: persona.access,
               modelRoute: editable.modelRoute,
+              independentReviewer: persona.independentReviewer === true,
             }
           : null,
       origin: persona.origin ?? null,
@@ -583,6 +584,7 @@ export interface AgentPersonaCreateDraft {
   readonly instructions: string;
   readonly access: AgentPersonaAccess;
   readonly modelRoute: ReadonlyArray<AgentPersonaModelEntry>;
+  readonly independentReviewer: boolean;
 }
 
 /** Prefill the create dialog from any listed agent; the copy gets its own name and ID. */
@@ -599,6 +601,7 @@ export function agentPersonaDuplicateDraft(
     instructions: definition.instructions,
     access,
     modelRoute: definition.models ?? definition.modelRoute,
+    independentReviewer: definition.independentReviewer === true,
   };
 }
 

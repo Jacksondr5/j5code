@@ -35,6 +35,12 @@ import {
   resolveCallerAccess,
 } from "../agents/agentPersonaPick.ts";
 import {
+  resolveReviewAuthors,
+  reviewIndependenceOf,
+  withReviewIndependenceNote,
+  type ReviewAuthorsRequest,
+} from "../agents/agentPersonaReviewIndependence.ts";
+import {
   AgentPersonaLibraryError,
   makeAgentPersonaLibrary,
 } from "../agents/agentPersonaLibrary.ts";
@@ -91,6 +97,8 @@ export interface CrewLaunchSeat {
   readonly runtimeMode?: RuntimeMode | undefined;
   /** Ids of the playbook steps the seat owns; recorded on its member row. */
   readonly steps?: ReadonlyArray<string> | undefined;
+  /** For an independent reviewer: the seats or members it reviews; default every non-reviewer. */
+  readonly reviews?: ReadonlyArray<string> | undefined;
   /** Where the seat works, chosen for every seat. */
   readonly workspace: SpawnWorkspaceChoice;
 }
@@ -273,6 +281,8 @@ export interface CrewLaunchServiceShape {
     captain: CrewCaptain,
     seats: ReadonlyArray<CrewLaunchSeat>,
     pick: CrewSeatPick,
+    /** The Crew the seats join, for an addition: its members are authors a reviewer may review. */
+    crew?: Pick<AgentCrewInstance, "members"> | null,
   ) => Effect.Effect<ReadonlyArray<ResolvedCrewLaunchSeat>, CrewLaunchError>;
   /**
    * Each seat's workspace choice as it should be stored: a new worktree's base resolved to a
@@ -367,6 +377,7 @@ export const layer = Layer.effect(
       captain: CrewCaptain,
       seats: ReadonlyArray<CrewLaunchSeat>,
       pick: CrewSeatPick,
+      crew: Pick<AgentCrewInstance, "members"> | null,
     ) {
       const agentPick = pick === "agent";
       // Read once: an agent's seats are held to the Captain's access and the project's lists.
@@ -407,7 +418,54 @@ export const layer = Layer.effect(
               }),
           ),
         );
-      const resolved: Array<ResolvedCrewLaunchSeat> = [];
+      const resolved = new Map<string, ResolvedCrewLaunchSeat>();
+      const reviewerIds = seats.some(({ agentId }) => agentId !== null)
+        ? new Set(
+            (yield* agents.catalog().pipe(
+              Effect.mapError(
+                (cause) =>
+                  new CrewLaunchOperationError({
+                    phase: "reading the persona library",
+                    seatName: null,
+                    createdSeats: [],
+                    cause,
+                  }),
+              ),
+            )).definitions.flatMap(({ id, independentReviewer }) =>
+              independentReviewer === true ? [id] : [],
+            ),
+          )
+        : new Set<string>();
+      const isReviewer = (seat: CrewLaunchSeat) =>
+        seat.agentId !== null && reviewerIds.has(seat.agentId);
+      // A reviewer's authors are the seats and members it reviews; by default every one that is
+      // not a reviewer itself. Seats on this roster resolve first, so their models are known.
+      const reviewAuthors = (seat: CrewLaunchSeat): ReviewAuthorsRequest => {
+        // A name the person renamed or removed on the card is dropped; with none left, the default.
+        const named = seat.reviews?.filter(
+          (name) =>
+            seats.some((other) => other.name === name) ||
+            (crew?.members ?? []).some((member) => member.seatName === name),
+        );
+        const reviews = named === undefined || named.length === 0 ? undefined : named;
+        const reviewed = (name: string) =>
+          name !== seat.name && (reviews === undefined || reviews.includes(name));
+        const rosterSeats = seats.filter(
+          (other) => reviewed(other.name) && (reviews !== undefined || !isReviewer(other)),
+        );
+        return {
+          threads: (crew?.members ?? [])
+            .filter((member) => reviewed(member.seatName))
+            .map((member) => ({
+              threadId: member.threadId,
+              skipReviewer: reviews === undefined,
+            })),
+          models: rosterSeats.flatMap(
+            (other) => resolved.get(other.name)?.modelSelection.model ?? [],
+          ),
+          partlyUnknown: rosterSeats.some((other) => !resolved.has(other.name)),
+        };
+      };
       // `custom` seats run on whatever the project's lists of models and reasoning levels for
       // custom members allow. A persona seat that keeps its persona's own model and level is not
       // custom and skips the lists.
@@ -466,7 +524,10 @@ export const layer = Layer.effect(
             );
         return { modelSelection, provider: provider! };
       });
-      for (const seat of seats) {
+      for (const seat of [
+        ...seats.filter((seat) => !isReviewer(seat)),
+        ...seats.filter(isReviewer),
+      ]) {
         const agentId = seat.agentId;
         const pickRefused = (error: AgentPersonaPickError) =>
           new CrewLaunchSeatUnavailableError({
@@ -502,7 +563,7 @@ export const layer = Layer.effect(
             });
           // Custom seats carry the selected access mode, without a persona sandbox assignment.
           const workspace = yield* resolveWorkspace(seat);
-          resolved.push({
+          resolved.set(seat.name, {
             seat,
             assignment: null,
             modelSelection,
@@ -525,6 +586,7 @@ export const layer = Layer.effect(
               projectId: captain.thread.projectId,
               runtimeMode: seat.runtimeMode,
               eligible,
+              ...(isReviewer(seat) ? { reviewAuthors: reviewAuthors(seat) } : {}),
             });
             return {
               ...prepared,
@@ -606,6 +668,14 @@ export const layer = Layer.effect(
               caller,
             );
           const definitionDigest = yield* agents.snapshot(definition);
+          // The person chose this model on the card, so it is noted, never reordered.
+          const reviewIndependence = isReviewer(seat)
+            ? reviewIndependenceOf(
+                yield* resolveReviewAuthors(reviewAuthors(seat)),
+                modelSelection.model,
+                "person",
+              )
+            : undefined;
           return {
             personaId: agentId,
             definitionVersion: definition.version,
@@ -622,6 +692,7 @@ export const layer = Layer.effect(
             resolvedModelSelection: modelSelection,
             ...(seat.runtimeMode === undefined ? {} : { runtimeModeOverride: seat.runtimeMode }),
             pickSource: { kind: pick },
+            ...(reviewIndependence === undefined ? {} : { reviewIndependence }),
           };
         }).pipe(
           // The lists refuse a persona's own entries as they refuse a model chosen on the card.
@@ -696,7 +767,7 @@ export const layer = Layer.effect(
           ),
         );
         const workspace = yield* resolveWorkspace(seat);
-        resolved.push({
+        resolved.set(seat.name, {
           seat,
           assignment,
           modelSelection: assignment.resolvedModelSelection,
@@ -717,17 +788,19 @@ export const layer = Layer.effect(
           agentDisplayName: assignment.displayName ?? agentId,
         });
       }
-      return resolved;
+      return seats.map((seat) => resolved.get(seat.name)!);
     });
-    // The pick check reads the same eligibility lists and providers this launcher holds.
+    // The pick check reads the same eligibility lists, providers and threads this launcher holds.
     const resolveSeats = (
       captain: CrewCaptain,
       seats: ReadonlyArray<CrewLaunchSeat>,
       pick: CrewSeatPick,
+      crew: Pick<AgentCrewInstance, "members"> | null = null,
     ) =>
-      resolveSeatsWithPick(captain, seats, pick).pipe(
+      resolveSeatsWithPick(captain, seats, pick, crew).pipe(
         Effect.provideService(CrewMemberModels, memberModels),
         Effect.provideService(ProviderRegistry, registry),
+        Effect.provideService(ThreadManagementService, threadManagement),
       );
 
     const plan = (
@@ -871,7 +944,7 @@ export const layer = Layer.effect(
       }));
       for (const member of planned) {
         const text = spawnFirstTurnText({
-          brief,
+          brief: withReviewIndependenceNote(brief, member.assignment),
           participantId: member.participantId,
           projectId: captain.projectId,
           projectTitle: captain.projectTitle,
@@ -1044,7 +1117,8 @@ export const layer = Layer.effect(
     const addSeats: CrewLaunchServiceShape["addSeats"] = Effect.fn("j5.a2a.crewLaunch.addSeats")(
       function* (input) {
         const resolved =
-          input.resolvedSeats ?? (yield* resolveSeats(input.captain, input.seats, input.pick));
+          input.resolvedSeats ??
+          (yield* resolveSeats(input.captain, input.seats, input.pick, input.instance));
         const planned = plan(input.providerSessionId, input.requestKey, resolved);
         // Reserve the seats before anything spawns: the store decides the cap and the version in
         // one transaction, so two approvals landing together cannot both pass.

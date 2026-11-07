@@ -1022,6 +1022,42 @@ describe("editing imported agents", () => {
     modelRoute: definition.modelRoute,
   });
 
+  it.effect(
+    "keeps the reviewer flag through an edit that leaves it out, and stores no flag when cleared",
+    () =>
+      Effect.gen(function* () {
+        const { library } = yield* fixture;
+        // A definition saved before the flag existed loads with the digest it always had.
+        yield* library.importFiles({
+          files: [{ name: "agent.yaml", content: yaml(custom) }],
+          replaceExisting: false,
+        });
+        const current = () =>
+          library
+            .catalog()
+            .pipe(Effect.map(({ definitions }) => definitions.find(({ id }) => id === custom.id)!));
+        assert.equal(definitionDigest(yield* current()), definitionDigest(custom));
+
+        yield* library.editImported({ ...edit(), independentReviewer: true });
+        const flagged = yield* current();
+        assert.isTrue(flagged.independentReviewer);
+        // A client from before the flag sends no field, which keeps it.
+        yield* library.editImported({
+          ...edit(),
+          expectedDigest: definitionDigest(flagged),
+          displayName: "Renamed",
+        });
+        const renamed = yield* current();
+        assert.isTrue(renamed.independentReviewer);
+        yield* library.editImported({
+          ...edit(),
+          expectedDigest: definitionDigest(renamed),
+          independentReviewer: false,
+        });
+        assert.notProperty(yield* current(), "independentReviewer");
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("rejects unsupported access edits before changing stored bytes", () =>
     Effect.gen(function* () {
       const { library, fs, path, stateDir } = yield* fixture;
