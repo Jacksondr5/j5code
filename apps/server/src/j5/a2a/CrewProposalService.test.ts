@@ -1,4 +1,5 @@
 import { assert, it } from "@effect/vitest";
+import { AgentPersonaEscalations } from "../agents/agentPersonaEscalation.ts";
 import { agentPersonaEscalationsTestLayer } from "../test-support/agentPersonaEscalations.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
@@ -468,6 +469,7 @@ const fixtureWithDatabase = Effect.fn("test.crewProposal.fixture")(function* (
       ),
   });
   const layer = crewProposalLayer.pipe(
+    Layer.provideMerge(agentPersonaEscalationsTestLayer()),
     Layer.provideMerge(ServerSettings.layerTest(options.settings)),
     Layer.provideMerge(flakyStore),
     Layer.provideMerge(fakeLauncher(crews)),
@@ -2934,6 +2936,14 @@ it.effect("a seat naming an invalid persona is told how to repair it, not that i
       assert.equal(refused.blockCode, "persona_invalid");
       assert.include(refused.message, "broken.yaml");
       assert.include(refused.message, AGENT_PERSONA_ACCESS_REPAIR);
+      // The Captain's ask about it carries J5's record, with nothing an Owner could grant.
+      const escalationId = /escalation_id: (escalation-[0-9a-f-]+)/.exec(refused.message)![1]!;
+      const escalations = yield* AgentPersonaEscalations;
+      yield* escalations.linkAsk({ escalationId, exchangeId: "exchange:invalid-persona" });
+      assert.include(
+        (yield* escalations.grantable("exchange:invalid-persona").pipe(Effect.flip)).message,
+        "can't be allowed once",
+      );
     }).pipe(Effect.provide(layer));
   }),
 );
