@@ -1,6 +1,5 @@
 import {
   isAgentPersonaAuthorityPolicy,
-  PROVIDER_DISPLAY_NAMES,
   ProviderDriverKind,
   type CommandId,
   type ModelSelection,
@@ -20,7 +19,11 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import { validateAgentPersonaAssignment } from "./agentPersonaAssignment.ts";
-import { prepareAgentPersonaLaunch, routeFailurePhrase } from "./agentPersonaLaunch.ts";
+import {
+  driverLabel,
+  prepareAgentPersonaLaunch,
+  routeFailurePhrase,
+} from "./agentPersonaLaunch.ts";
 import {
   agentPersonaPolicyEnforcement,
   providerCanEnforceAgentPersonaAuthority,
@@ -91,9 +94,6 @@ const ACCESS_LABELS: Record<string, string> = {
   "workspace-write": "Workspace-write",
   "full-access": "Full-access",
 };
-
-const driverLabel = (driver: string) =>
-  PROVIDER_DISPLAY_NAMES[ProviderDriverKind.make(driver)] ?? driver;
 
 /** Why a person's switch to `selection` is refused, or undefined when it may run. */
 const agentPersonaSwitchRefusal = (

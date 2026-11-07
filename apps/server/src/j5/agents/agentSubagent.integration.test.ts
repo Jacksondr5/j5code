@@ -348,7 +348,7 @@ it.effect("holds a plain delegated child to the list, inherited model included",
     const agentPick = yield* scout("agent-pick").pipe(Effect.flip);
     assert.include(
       agentPick.message,
-      `${modelSelection.model} on codex is not checked in Models for custom members`,
+      `${modelSelection.model} on Codex is not checked in Models for custom members`,
     );
     yield* personTyped("@persona:scout check the evidence");
     const persona = yield* scout("persona");

@@ -1,6 +1,11 @@
 import { agentPersonaPolicy, mapAgentPersonaPolicy } from "./agentPersonas.ts";
 import * as Clock from "effect/Clock";
-import type { OrchestrationV2AgentPersonaRequest, ServerProvider } from "@t3tools/contracts";
+import {
+  PROVIDER_DISPLAY_NAMES,
+  ProviderDriverKind,
+  type OrchestrationV2AgentPersonaRequest,
+  type ServerProvider,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import { buildAgentPersonaAssignment } from "./agentPersonaAssignment.ts";
 import { AgentPersonaLibraryError, type createAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
@@ -11,10 +16,14 @@ import {
   type AgentPersonaRouteAttempt,
 } from "./agentPersonaRouting.ts";
 
+/** A provider driver as the app names it, such as Codex or Claude. */
+export const driverLabel = (driver: string) =>
+  PROVIDER_DISPLAY_NAMES[ProviderDriverKind.make(driver)] ?? driver;
+
 export const routeFailurePhrase = (
   target: AgentPersonaRouteAttempt["target"],
   failure: AgentPersonaRouteAttempt["failures"][number],
-  provider: string = "driver" in target ? target.driver : target.instanceId,
+  provider: string = "driver" in target ? driverLabel(target.driver) : target.instanceId,
 ) => {
   switch (failure.code) {
     case "provider-not-configured":
@@ -50,19 +59,40 @@ export const routeFailurePhrase = (
  * Why each route was refused, so the person who approved a seat (or the agent that asked for one)
  * learns "codex is signed out" rather than "unavailable" (Jackson's dogfood, 2026-09-17).
  */
-const describeRouteAttempts = (attempts: ReadonlyArray<AgentPersonaRouteAttempt>) =>
+const describeRouteAttempts = (
+  attempts: ReadonlyArray<AgentPersonaRouteAttempt>,
+  providers: ReadonlyArray<ServerProvider>,
+) =>
   attempts
     .map(
       (attempt) =>
         `entry ${attempt.entryIndex + 1} ${attempt.target.model} (${[
           ...new Set(
             attempt.failures.map(
-              (failure) => failure.detail ?? routeFailurePhrase(attempt.target, failure),
+              (failure) =>
+                failure.detail ??
+                routeFailurePhrase(
+                  attempt.target,
+                  failure,
+                  providerLabel(attempt.target, providers),
+                ),
             ),
           ),
         ].join(", ")})`,
     )
     .join("; ");
+
+/** An entry's provider as the app names it: its instance's name, else its driver's. */
+const providerLabel = (
+  target: AgentPersonaRouteAttempt["target"],
+  providers: ReadonlyArray<ServerProvider>,
+) => {
+  if ("driver" in target) return driverLabel(target.driver);
+  const provider = providers.find(({ instanceId }) => instanceId === target.instanceId);
+  return provider === undefined
+    ? target.instanceId
+    : (provider.displayName ?? driverLabel(provider.driver));
+};
 
 /**
  * The definition a launch names, or why there is none to launch: the library can't be read or is
@@ -110,11 +140,12 @@ export const findAgentPersonaDefinition = Effect.fn("j5.agents.findAgentPersonaD
 const modelsExhaustedError = (
   personaId: string,
   attempts: ReadonlyArray<AgentPersonaRouteAttempt>,
+  providers: ReadonlyArray<ServerProvider>,
 ) => {
   const waiver = singleWaiver(attempts);
   return new AgentPersonaLibraryError({
     code: "models_exhausted",
-    message: `Persona ${personaId} is blocked because none of its model entries can run: ${describeRouteAttempts(attempts)}.`,
+    message: `Persona ${personaId} is blocked because none of its model entries can run: ${describeRouteAttempts(attempts, providers)}.`,
     ...(waiver === null ? {} : { constraint: waiver.constraint, waiverEntries: waiver.entries }),
   });
 };
@@ -149,7 +180,7 @@ export const prepareAgentPersonaLaunch = Effect.fn("prepareAgentPersonaLaunch")(
     avoidModels,
   });
   if (resolution.status === "unavailable")
-    return yield* modelsExhaustedError(request.personaId, resolution.attempts);
+    return yield* modelsExhaustedError(request.personaId, resolution.attempts, providers);
   const result = buildAgentPersonaAssignment({ ...authority, definition, resolution });
   if (result.status !== "assigned")
     return yield* new AgentPersonaLibraryError({

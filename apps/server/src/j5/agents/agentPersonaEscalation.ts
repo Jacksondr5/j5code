@@ -99,12 +99,17 @@ export const allowedOnceReply = (grant: {
 }) =>
   `Allowed once: ${grant.personaId} past ${CONSTRAINT_TEXT[grant.constraint]}. Only ${grant.callerParticipantId}, whose launch was refused, can use it: it retries that launch with allow_once: ${grant.escalationId}. If you asked on a Crew member's behalf, send it this id.`;
 
+const ALLOW_ONCE_TEXT: Record<AgentPersonaPickConstraint, string> = {
+  "model-not-eligible": "use a model that Models for custom members doesn't allow",
+  "access-above-caller": "run with broader access than the agent that started it",
+};
+
 /** J5's own account of a block, which the person reads apart from the agent's words. */
 const recordText = (row: EscalationRow) =>
   `${row.summary} ${
     row.waivable === null
       ? "No single exception lets it run, so the cause has to be fixed."
-      : `Allow this once would let one launch attempt past ${CONSTRAINT_TEXT[row.waivable]}.`
+      : `Allow this once would let one launch ${ALLOW_ONCE_TEXT[row.waivable]}.`
   }`;
 
 interface EscalationRow {

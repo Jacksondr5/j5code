@@ -26,7 +26,7 @@ import {
   AgentPersonaWaiverScope,
   personaBlockText,
 } from "./agentPersonaEscalation.ts";
-import { prepareAgentPersonaLaunch } from "./agentPersonaLaunch.ts";
+import { driverLabel, prepareAgentPersonaLaunch } from "./agentPersonaLaunch.ts";
 import {
   definitionDigest,
   makeAgentPersonaLibrary,
@@ -380,7 +380,7 @@ const pickWithin = Effect.fn("j5.agents.pickWithin")(function* (
             const child = accessOn(authority, driver);
             return withinAccess(child, limit)
               ? undefined
-              : `on ${driver} it would run with ${accessLabel(child)}, which is broader than the ${accessLabel(limit)} its caller runs with`;
+              : `on ${driverLabel(driver)} it would run with ${accessLabel(child)}, which is broader than the ${accessLabel(limit)} its caller runs with`;
           },
           waived:
             grant === undefined

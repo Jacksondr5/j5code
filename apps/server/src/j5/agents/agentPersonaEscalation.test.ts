@@ -84,7 +84,7 @@ it.layer(escalations)("persona escalations", (it) => {
         waivable: "model-not-eligible",
         status: "open",
         summary:
-          "Persona reviewer is blocked because none of its model entries can run. Allow this once would let one launch attempt past a model Models for custom members doesn't check.",
+          "Persona reviewer is blocked because none of its model entries can run. Allow this once would let one launch use a model that Models for custom members doesn't allow.",
       });
     }),
   );
