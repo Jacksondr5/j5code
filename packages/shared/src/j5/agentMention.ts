@@ -26,16 +26,59 @@ export function detectAgentMention(token: string, start: number, end: number) {
   );
 }
 
-// Code, `>` quotes and quoted text name a persona without asking for it. A single quote opens a
-// quote only where a word can't end before it, so apostrophes ("don't", "Bryant's") stay prose.
+const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})(.*)$/u;
+const FENCE_CLOSE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/u;
+const INDENTED = /^(?: {4}|\t)/u;
+
+/**
+ * Blanks CommonMark's code blocks: backtick and tilde fences, closed by a fence of the same
+ * character at least as long or by the end of the text, and indented code after a blank line.
+ */
+function withoutCodeBlocks(text: string): string {
+  let fence: string | null = null;
+  let indented = false;
+  let afterBlank = true;
+  return text
+    .split("\n")
+    .map((line) => {
+      if (fence !== null) {
+        const close = FENCE_CLOSE.exec(line)?.[1];
+        if (close !== undefined && close[0] === fence[0] && close.length >= fence.length)
+          fence = null;
+        return "";
+      }
+      const open = FENCE_OPEN.exec(line);
+      // A backtick fence's info string can't hold a backtick; that line is inline code instead.
+      if (open !== null && !(open[1]!.startsWith("`") && open[2]!.includes("`"))) {
+        fence = open[1]!;
+        indented = false;
+        afterBlank = false;
+        return "";
+      }
+      const blank = line.trim() === "";
+      if (!blank && INDENTED.test(line) && (afterBlank || indented)) {
+        indented = true;
+        afterBlank = false;
+        return "";
+      }
+      if (!blank) indented = false;
+      afterBlank = blank;
+      return line;
+    })
+    .join("\n");
+}
+
+// Inline code, `>` quotes and quoted text name a persona without asking for it. A single quote
+// opens a quote only where a word can't end before it, so apostrophes ("don't") stay prose.
+const INLINE_CODE = /(`+)[^`\n](?:[^\n]*?[^`\n])??\1(?!`)/gu;
 const QUOTED_TEXT =
-  /```[\s\S]*?(?:```|(?![\s\S]))|`[^`\n]*`|^[ \t]*>.*$|"[^"\n]*"|\u201c[^\u201d\n]*\u201d|(?<=^|[\s([{])(?:'[^'\n]*'|\u2018[^\u2019\n]*\u2019)(?=$|[\s.,;:!?)\]}])/gmu;
+  /^[ \t]*>.*$|"[^"\n]*"|\u201c[^\u201d\n]*\u201d|(?<=^|[\s([{])(?:'[^'\n]*'|\u2018[^\u2019\n]*\u2019)(?=$|[\s.,;:!?)\]}])/gmu;
 // Opening punctuation may precede a mention; a letter or digit (an email, an identifier) may not.
 const PERSONA_MENTION = /(?<=^|[\s([{])@persona:([a-z][a-z0-9]*(?:-[a-z0-9]+)*)(?![a-z0-9-])/gu;
 
 /** Persona ids a message asks for with an unquoted `@persona:ID`, in order, without repeats. */
 export function mentionedPersonaIds(text: string): ReadonlyArray<string> {
-  const unquoted = text.replace(QUOTED_TEXT, " ");
+  const unquoted = withoutCodeBlocks(text).replace(INLINE_CODE, " ").replace(QUOTED_TEXT, " ");
   return [...new Set(Array.from(unquoted.matchAll(PERSONA_MENTION), (match) => match[1]!))];
 }
 

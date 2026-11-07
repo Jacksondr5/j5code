@@ -91,6 +91,21 @@ describe("agent mention syntax", () => {
       ),
     ).toEqual([]);
   });
+  it("treats every CommonMark code block as quoted", () => {
+    const quoted = [
+      "Explain this example:\n~~~text\n@persona:tilde\n~~~",
+      "````md\n```\n@persona:inner\n```\n````",
+      "Here:\n\n    @persona:indented\n\tand @persona:tabbed",
+      "~~~~\n@persona:unclosed\n~~~\nstill code",
+      "Spans: ``@persona:double`` and `` `@persona:padded` ``",
+    ];
+    for (const text of quoted) expect(mentionedPersonaIds(text)).toEqual([]);
+    expect(mentionedPersonaIds("~~~\n@persona:fenced\n~~~\nNow run @persona:after.")).toEqual([
+      "after",
+    ]);
+    // A list item's continuation and a line right after prose are not indented code.
+    expect(mentionedPersonaIds("Steps:\n    @persona:continued")).toEqual(["continued"]);
+  });
   it("finds a mention after opening punctuation and beside apostrophes", () => {
     expect(
       mentionedPersonaIds(
