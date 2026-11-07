@@ -260,16 +260,17 @@ function SpawnedChildGroupRows(
                   </span>
                 </span>
                 <span className="flex items-center gap-1.5 text-2xs text-muted-foreground">
-                  {status === null ? (
+                  {/* A replaced member's last run says nothing about it now; being replaced does. */}
+                  {child.replaced !== undefined ? (
+                    <span>Replaced by {child.replaced.replacedBy}</span>
+                  ) : status === null ? (
                     <span>
-                      {child.replaced !== undefined
-                        ? `Replaced by ${child.replaced.replacedBy}`
-                        : child.seat === null
-                          ? "Idle"
-                          : seatQuietLabel({
-                              notStarted: child.seat.notStarted,
-                              runtime: thread.runtime,
-                            })}
+                      {child.seat === null
+                        ? "Idle"
+                        : seatQuietLabel({
+                            notStarted: child.seat.notStarted,
+                            runtime: thread.runtime,
+                          })}
                     </span>
                   ) : (
                     <>
