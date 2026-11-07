@@ -6,13 +6,14 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as SqlClient from "effect/sql/SqlClient";
 import { stringify as yaml } from "yaml";
 
 import {
   AgentCrewInstanceService,
   type AgentCrewInstance,
 } from "../a2a/AgentCrewInstanceService.ts";
-import createDraftTable from "../a2a/migrations/055_PersonaDrafts.ts";
+import { runJ5A2AMigrations } from "../a2a/Migrations.ts";
 import { lineDiff, makeAgentPersonaDrafts } from "./agentPersonaDrafts.ts";
 import {
   createAgentPersonaLibrary,
@@ -78,7 +79,7 @@ const provided = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
     Effect.scoped,
     Effect.provide(
       Layer.mergeAll(
-        Layer.effectDiscard(createDraftTable).pipe(
+        Layer.effectDiscard(runJ5A2AMigrations()).pipe(
           Layer.provideMerge(NodeSqliteClient.layer({ filename: ":memory:" })),
         ),
         crews,
@@ -358,7 +359,25 @@ describe("persona drafts", () => {
           .pipe(Effect.flip);
         assert.include(refused.message, "is another agent's");
 
+        // While the ask that carries it is open, a second ask can't take it; once closed, it can.
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`INSERT INTO j5_a2a_project_ledger (project_id, created_at)
+          VALUES ('p', '2026-11-07T00:00:00.000Z')`;
+        yield* sql`INSERT INTO j5_a2a_exchange (
+          project_id, exchange_id, sender_id, receiver_id, status, intent, opened_seq, created_at,
+          updated_at
+        ) VALUES ('p', 'exchange:ask', ${member}, 'human:owner', 'open', 'Save reviewer?', 1,
+          '2026-11-07T00:00:00.000Z', '2026-11-07T00:00:00.000Z')`;
         yield* drafts.linkAsk({ draftId, exchangeId: "exchange:ask" });
+        const onOpenAsk = yield* drafts
+          .authorizeAsk({ draftId, askerParticipantId: member })
+          .pipe(Effect.flip);
+        assert.include(onOpenAsk.message, "already on open ask exchange:ask");
+        assert.include(onOpenAsk.message, "regarding=exchange:ask and without persona_draft_id");
+        assert.include(onOpenAsk.message, "j5_clear_own_ask");
+        yield* sql`UPDATE j5_a2a_exchange SET status = 'closed' WHERE exchange_id = 'exchange:ask'`;
+        yield* drafts.authorizeAsk({ draftId, askerParticipantId: member });
+
         yield* drafts.save({ exchangeId: "exchange:ask", savedBy: "human:owner" });
         const saved = yield* drafts
           .authorizeAsk({ draftId, askerParticipantId: member })

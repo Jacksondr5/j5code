@@ -128,7 +128,7 @@ export const J5SendMessageInput = Schema.Struct({
     Schema.NullOr(
       Schema.String.check(Schema.isNonEmpty()).annotate({
         description:
-          "Only on an ask to a person about a persona draft: the draft_id from j5_propose_persona (yours, or as a Captain, your Crew member's). The server adds the draft's summary and any warnings to the ask, and an Owner can save it with Save persona. Never together with escalation_id.",
+          "Only on an ask to a person about a persona draft: the draft_id from j5_propose_persona (yours, or as a Captain, your Crew member's). The server adds the draft's summary and any warnings to the ask, and an Owner can save it with Save persona. It goes on a new ask, never together with escalation_id. While an ask carrying it is open, follow up on that ask with regarding instead: an id already on that ask is ignored, and on a follow-up to any other ask it is refused.",
       }),
     ),
   ),

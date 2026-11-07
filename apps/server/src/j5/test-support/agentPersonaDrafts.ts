@@ -3,11 +3,11 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import { AgentCrewInstanceService } from "../a2a/AgentCrewInstanceService.ts";
-import createDraftTable from "../a2a/migrations/055_PersonaDrafts.ts";
+import { runJ5A2AMigrations } from "../a2a/Migrations.ts";
 import { layer } from "../agents/agentPersonaDrafts.ts";
 
 /**
- * The real drafts store on a database of its own, for tests of other behavior. Its library is the
+ * The real drafts store on a migrated database of its own, for tests of other behavior. Its library is the
  * test's `ServerConfig` state directory, or empty without one. By default nobody is in a Crew.
  */
 export const agentPersonaDraftsTestLayer = (
@@ -19,7 +19,7 @@ export const agentPersonaDraftsTestLayer = (
   layer.pipe(
     Layer.provide(
       Layer.mergeAll(
-        Layer.effectDiscard(createDraftTable).pipe(
+        Layer.effectDiscard(runJ5A2AMigrations()).pipe(
           Layer.provideMerge(NodeSqliteClient.layer({ filename: ":memory:" })),
         ),
         crews,

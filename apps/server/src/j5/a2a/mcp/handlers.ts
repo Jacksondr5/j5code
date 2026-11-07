@@ -346,22 +346,48 @@ const handlers = {
       }
       // An ask about a refused persona launch; the Inbox shows J5's record of it apart from the text.
       let escalationId = input.escalation_id ?? undefined;
+      // An ask carries at most one Owner action.
+      let personaDraftId = input.persona_draft_id ?? undefined;
+      if (escalationId !== undefined && personaDraftId !== undefined)
+        return yield* stateError(
+          "An ask carries escalation_id or persona_draft_id, not both.",
+          "Send one ask per decision: retry with only one of them.",
+        );
       // J5's record stays on the ask that opened the Inbox item: a follow-up to that ask already
       // has it, so the id is dropped, and any other follow-up is refused.
-      if (escalationId !== undefined && input.regarding != null) {
-        const linked = yield* (yield* AgentPersonaEscalations)
-          .linkedAsk(escalationId)
-          .pipe(
-            Effect.mapError((error) =>
-              stateError(error.message, "Check the escalation_id from the refusal and retry."),
-            ),
-          );
+      if (input.regarding != null && (escalationId ?? personaDraftId) !== undefined) {
+        const recordField = escalationId !== undefined ? "escalation_id" : "persona_draft_id";
+        const linked =
+          escalationId !== undefined
+            ? yield* (yield* AgentPersonaEscalations)
+                .linkedAsk(escalationId)
+                .pipe(
+                  Effect.mapError((error) =>
+                    stateError(
+                      error.message,
+                      "Check the escalation_id from the refusal and retry.",
+                    ),
+                  ),
+                )
+            : personaDraftId !== undefined
+              ? yield* (yield* AgentPersonaDrafts)
+                  .linkedAsk(personaDraftId)
+                  .pipe(
+                    Effect.mapError((error) =>
+                      stateError(
+                        error.message,
+                        "Check the draft_id from j5_propose_persona and retry.",
+                      ),
+                    ),
+                  )
+              : null;
         if (linked !== input.regarding)
           return yield* stateError(
-            "escalation_id opens its own Inbox item, so it can't go on a regarding follow-up to another ask.",
-            "Retry without regarding: send a new ask to the person with expect_reply=true, intent, urgency and escalation_id.",
+            `${recordField} opens its own Inbox item, so it can't go on a regarding follow-up to another ask.`,
+            `Retry without regarding: send a new ask to the person with expect_reply=true, intent, urgency and ${recordField}.`,
           );
         escalationId = undefined;
+        personaDraftId = undefined;
       }
       if (escalationId !== undefined) {
         if (input.expect_reply !== true || !isHumanParticipantId(input.to))
@@ -377,13 +403,6 @@ const handlers = {
             ),
           );
       }
-      // An ask carries at most one Owner action.
-      const personaDraftId = input.persona_draft_id ?? undefined;
-      if (escalationId !== undefined && personaDraftId !== undefined)
-        return yield* stateError(
-          "An ask carries escalation_id or persona_draft_id, not both.",
-          "Send one ask per decision: retry with only one of them.",
-        );
       if (personaDraftId !== undefined) {
         if (input.expect_reply !== true || !isHumanParticipantId(input.to))
           return yield* stateError(

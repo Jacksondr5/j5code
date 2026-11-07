@@ -264,6 +264,10 @@ export interface AgentPersonaDraftsShape {
     readonly draftId: string;
     readonly askerParticipantId: string;
   }) => Effect.Effect<void, AgentPersonaDraftError | SqlError>;
+  /** The ask the draft is linked to, if any. */
+  readonly linkedAsk: (
+    draftId: string,
+  ) => Effect.Effect<string | null, AgentPersonaDraftError | SqlError>;
   /** Link the ask that carries the draft, so the person's Inbox can offer "Save persona". */
   readonly linkAsk: (input: {
     readonly draftId: string;
@@ -426,7 +430,20 @@ export const makeAgentPersonaDrafts = Effect.fn("j5.agents.personaDrafts.make")(
     }
     if (row.status === "saved")
       return yield* refuse(`Persona draft ${input.draftId} is already saved.`);
+    // J5's record stays on the ask that opened the Inbox item while that ask is open.
+    if (row.exchange_id !== null && (yield* exchangeIsOpen(row.exchange_id)))
+      return yield* refuse(
+        `Persona draft ${input.draftId} is already on open ask ${row.exchange_id}. Follow up there with regarding=${row.exchange_id} and without persona_draft_id, or clear it with j5_clear_own_ask, then ask again.`,
+      );
   });
+
+  const exchangeIsOpen = (exchangeId: string) =>
+    sql`
+      SELECT 1 FROM j5_a2a_exchange WHERE exchange_id = ${exchangeId} AND status = 'open' LIMIT 1
+    `.pipe(Effect.map((rows) => rows.length > 0));
+
+  const linkedAsk: AgentPersonaDraftsShape["linkedAsk"] = (draftId) =>
+    readDraft(draftId).pipe(Effect.map((row) => row.exchange_id));
 
   const linkAsk: AgentPersonaDraftsShape["linkAsk"] = (input) =>
     sql`
@@ -519,7 +536,7 @@ export const makeAgentPersonaDrafts = Effect.fn("j5.agents.personaDrafts.make")(
     },
   );
 
-  return AgentPersonaDrafts.of({ propose, authorizeAsk, linkAsk, forExchanges, save });
+  return AgentPersonaDrafts.of({ propose, authorizeAsk, linkedAsk, linkAsk, forExchanges, save });
 });
 
 export const layer = Layer.effect(

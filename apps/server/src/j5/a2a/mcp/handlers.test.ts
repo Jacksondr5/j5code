@@ -702,11 +702,35 @@ it.effect(
         assert.isTrue(both.isFailure);
         assert.include(JSON.stringify(both.encodedResult), "not both");
         assert.isFalse((yield* call({ ...personAsk, persona_draft_id: draftId })).isFailure);
-        // J5's summary rides on the Inbox item, not in the agent's words, and the ask must open
-        // its own exchange so it never lands on another ask's.
+        // J5's summary rides on the Inbox item, not in the agent's words.
         const draftAsk = (yield* Ref.get(sends)).at(-1)!;
         assert.equal(draftAsk.message, "Save release-notes?");
-        assert.isTrue(draftAsk.freshAsk);
+        // A draft never rides a follow-up to an ask it isn't on.
+        const draftAskId = ExchangeId.make("exchange:j5:mcp-send-mode:draft-ask");
+        const draftSentBefore = (yield* Ref.get(sends)).length;
+        const draftFollowUp = yield* call({
+          to: personParticipantId,
+          message: "Revised draft attached.",
+          regarding: draftAskId,
+          persona_draft_id: draftId,
+        });
+        assert.isTrue(draftFollowUp.isFailure);
+        assert.include(
+          JSON.stringify(draftFollowUp.encodedResult),
+          "persona_draft_id opens its own Inbox item, so it can't go on a regarding follow-up to another ask",
+        );
+        assert.lengthOf(yield* Ref.get(sends), draftSentBefore);
+        // On a follow-up to the ask it already sits on, the id is dropped and the follow-up goes.
+        yield* (yield* AgentPersonaDrafts).linkAsk({ draftId, exchangeId: draftAskId });
+        assert.isFalse(
+          (yield* call({
+            to: personParticipantId,
+            message: "Any thoughts on the draft?",
+            regarding: draftAskId,
+            persona_draft_id: draftId,
+          })).isFailure,
+        );
+        assert.equal((yield* Ref.get(sends)).at(-1)!.regarding, draftAskId);
       }).pipe(Effect.provide(layer));
     }),
 );
