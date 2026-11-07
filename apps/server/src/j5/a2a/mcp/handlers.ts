@@ -344,6 +344,12 @@ const handlers = {
             "escalation_id goes only on an ask to a person.",
             "Retry j5_send_message to the person with expect_reply=true, intent and urgency, or, as a Crew member, tell your Captain the escalation_id in an ordinary message.",
           );
+        // J5's record stays on the ask that opened the Inbox item, so it never rides a follow-up.
+        if (input.regarding != null)
+          return yield* stateError(
+            "escalation_id opens its own Inbox item, so it can't go on a regarding follow-up.",
+            "Retry without regarding: send a new ask to the person with expect_reply=true, intent, urgency and escalation_id.",
+          );
         yield* (yield* AgentPersonaEscalations)
           .authorizeAsk({ escalationId, askerParticipantId: callerParticipantId })
           .pipe(
@@ -444,8 +450,6 @@ const handlers = {
           ...(input.regarding == null ? {} : { regarding: input.regarding }),
           ...(input.intent == null ? {} : { intent: input.intent }),
           ...(input.urgency == null ? {} : { urgency: input.urgency }),
-          // An escalation is its own ask: it never joins one already open with the person.
-          ...(escalationId === undefined ? {} : { freshAsk: true }),
           ...(mode === "queue" ? {} : { mode }),
           ...(modeLimit === undefined ? {} : { modeLimit }),
           ...(claimed === undefined ? {} : { attachments: claimed }),

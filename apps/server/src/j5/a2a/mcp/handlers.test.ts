@@ -629,7 +629,23 @@ it.effect(
         );
         const ask = (yield* Ref.get(sends)).at(-1)!;
         assert.equal(ask.message, "May reviewer run?");
-        assert.isTrue(ask.freshAsk);
+        // J5's record stays on the ask that opened the Inbox item, so a follow-up can't carry it.
+        const sentBefore = (yield* Ref.get(sends)).length;
+        const followUp = yield* call({
+          to: personParticipantId,
+          message: "Any word on reviewer?",
+          expect_reply: true,
+          regarding: ExchangeId.make("exchange:j5:mcp-send-mode:open-ask"),
+          escalation_id: escalationId,
+        });
+        assert.isTrue(followUp.isFailure);
+        const followUpError = JSON.stringify(followUp.encodedResult);
+        assert.include(followUpError, "can't go on a regarding follow-up");
+        assert.include(
+          followUpError,
+          "new ask to the person with expect_reply=true, intent, urgency",
+        );
+        assert.lengthOf(yield* Ref.get(sends), sentBefore);
       }).pipe(Effect.provide(layer));
     }),
 );

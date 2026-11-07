@@ -237,16 +237,6 @@ export class A2ARegardingNotAllowedError extends Schema.TaggedError<A2ARegarding
   }
 }
 
-/** An ask that must stand alone, such as an escalation, would join one already open. */
-export class A2AOpenAskExistsError extends Schema.TaggedError<A2AOpenAskExistsError>()(
-  "A2AOpenAskExistsError",
-  { participantId: Schema.String, exchangeId: Schema.String },
-) {
-  override get message(): string {
-    return `You already have an open ask with ${this.participantId} (exchange ${this.exchangeId}); clear it with j5_clear_own_ask or wait for its answer, then ask again.`;
-  }
-}
-
 export class A2AExchangeNotOpenError extends Schema.TaggedError<A2AExchangeNotOpenError>()(
   "A2AExchangeNotOpenError",
   { exchangeId: Schema.String },
@@ -388,7 +378,6 @@ export type A2ASendError =
   | A2AUrgencyNotAcceptedError
   | A2AUrgencyRequiresExchangeError
   | A2AHumanAskOrReplyRequiredError
-  | A2AOpenAskExistsError
   | A2AEveryoneHereNotSharedError
   | A2AReplyToOwnAskError
   | A2ARegardingNotAllowedError
@@ -1196,9 +1185,6 @@ const rawLayer: Layer.Layer<
         return yield* new A2AUrgencyRequiresExchangeError();
       }
 
-      if (input.freshAsk === true && exchangeRole === "followup" && exchangeId !== null) {
-        return yield* new A2AOpenAskExistsError({ participantId: receiverId, exchangeId });
-      }
       if (
         receiver.kind === "human" &&
         exchangeRole === "followup" &&

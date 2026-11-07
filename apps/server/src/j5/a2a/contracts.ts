@@ -424,8 +424,6 @@ export const SendMessageInput = Schema.Struct({
   regarding: Schema.optional(ExchangeId),
   intent: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
   urgency: Schema.optional(Urgency),
-  /** Refuse, before writing anything, an ask that would join one already open with the receiver. */
-  freshAsk: Schema.optional(Schema.Boolean),
   acceptedAt: Schema.String,
 });
 export type SendMessageInput = typeof SendMessageInput.Type;

@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
 import { AgentCrewInstanceService } from "../a2a/AgentCrewInstanceService.ts";
-import createEscalationTable from "../a2a/migrations/053_PersonaEscalations.ts";
+import createEscalationTable from "../a2a/migrations/054_PersonaEscalations.ts";
 import { layer } from "../agents/agentPersonaEscalation.ts";
 
 /**
