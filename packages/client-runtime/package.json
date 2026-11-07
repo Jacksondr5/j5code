@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./j5/threadReads": {
+      "types": "./src/j5/threadReads.ts",
+      "default": "./src/j5/threadReads.ts"
+    },
     "./workspace-basename-lookup": {
       "types": "./src/workspaceBasenameLookup.ts",
       "default": "./src/workspaceBasenameLookup.ts"

@@ -53,6 +53,42 @@ function makeHarness(environmentIds: ReadonlyArray<EnvironmentId> = [environment
 }
 
 describe("v2 thread shell lists", () => {
+  it("keeps each person's read marker independent of the shared thread and other people", () => {
+    const { registry, snapshotAtom, catalogValueAtom } = makeHarness();
+    const threadId = v2ThreadShell.id;
+    const before = DateTime.makeUnsafe("2026-01-01T00:00:00.000Z");
+    const after = DateTime.makeUnsafe("2026-01-02T00:00:00.000Z");
+    const alice = Atom.make<ReadonlyMap<ThreadId, DateTime.Utc> | undefined>(
+      new Map([[threadId, before]]),
+    );
+    const bob = Atom.make<ReadonlyMap<ThreadId, DateTime.Utc> | undefined>(new Map());
+    const forPerson = (markers: typeof alice) => {
+      const input = {
+        catalogValueAtom,
+        snapshotAtom,
+        personalReadMarkersAtom: () => markers,
+      };
+      return createEnvironmentThreadShellAtoms(input);
+    };
+    const aliceThreads = forPerson(alice);
+    const bobThreads = forPerson(bob);
+    const ref = { environmentId, threadId };
+    registry.set(snapshotAtom(environmentId), {
+      ...v2ShellSnapshot,
+      threads: [{ ...v2ThreadShell, lastVisitedAt: after }],
+    });
+    expect(registry.get(aliceThreads.threadShellAtom(ref))?.lastVisitedAt).toBe(
+      DateTime.formatIso(before),
+    );
+    expect(registry.get(bobThreads.threadShellAtom(ref))?.lastVisitedAt).toBeNull();
+    registry.set(alice, new Map([[threadId, after]]));
+    expect(registry.get(aliceThreads.threadShellAtom(ref))?.lastVisitedAt).toBe(
+      DateTime.formatIso(after),
+    );
+    expect(registry.get(bobThreads.threadShellAtom(ref))?.lastVisitedAt).toBeNull();
+    registry.dispose();
+  });
+
   it("preserves ordered reference arrays when a middle thread changes", () => {
     const { registry, threads, snapshotAtom } = makeHarness();
     const snapshot = {

@@ -147,7 +147,7 @@ Set aside on purpose, each tracked where it is linked. An item leaves this list 
 
 ### What each level can do
 
-13. A Viewer reads what their scope shows and can change nothing; every request from a Viewer for anything outside their scope, or for a change, is refused by the server.
+13. A Viewer reads what their scope shows and can change their own read markers there. They cannot change shared state; every request for anything outside their scope, or for a shared change, is refused by the server.
 14. A Collaborator can do within their scope everything an Owner can, except configure the server, share it, for now archive or delete a thread, and, at thread scope, start a thread, fork one or merge one back.
 15. An Owner configures the server and shares it.
 16. Each level's upstream permissions are listed by name in one place, and a device holds exactly its person's highest level's set: a Viewer "View environment"; a Collaborator "View environment", "Operate tasks", "Control previews", "View diagnostics and usage", "View terminals", "Use terminals", "Change source control", "Read files", "Write files" and "View relay"; an Owner every permission upstream lets a client be given. J5 never gives upstream more permissions for a request than its device holds.

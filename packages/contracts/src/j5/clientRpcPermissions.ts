@@ -10,6 +10,7 @@ import { J5_AGENT_PERSONA_WS_METHODS } from "./agentPersona.ts";
 import { J5_ARTIFACT_WS_METHODS } from "./artifacts.ts";
 import { J5_ACCESS_WS_METHODS } from "./access.ts";
 import { J5_PEOPLE_WS_METHODS } from "./people.ts";
+import { J5_THREAD_READ_WS_METHODS } from "./threadReads.ts";
 import { J5_PLAYBOOK_WS_METHODS } from "./playbook.ts";
 import { J5_SKILL_CATALOG_WS_METHODS } from "./skillCatalog.ts";
 import { J5_SKILL_LINK_WS_METHODS } from "./skillLinks.ts";
@@ -71,6 +72,8 @@ export const J5_CLIENT_GUARDED_RPC_SCOPES = {
   [J5_ACCESS_WS_METHODS.leave]: AuthOrchestrationReadScope,
   [J5_ACCESS_WS_METHODS.markRetiredLinksSeen]: AuthOrchestrationReadScope,
   [J5_PEOPLE_WS_METHODS.renameSelf]: AuthOrchestrationReadScope,
+  [J5_THREAD_READ_WS_METHODS.visit]: AuthOrchestrationReadScope,
+  [J5_THREAD_READ_WS_METHODS.markUnread]: AuthOrchestrationReadScope,
 
   [J5_PEOPLE_WS_METHODS.setLevel]: AuthAccessWriteScope,
   [J5_PEOPLE_WS_METHODS.removeLevel]: AuthAccessWriteScope,

@@ -4,6 +4,7 @@ import {
   MessageId,
   RunId,
   TurnItemId,
+  type ThreadId,
   type OrchestrationV2ThreadProjection,
   type OrchestrationV2TurnItem,
 } from "@t3tools/contracts";
@@ -97,6 +98,32 @@ describe("sameThreadStructure", () => {
 });
 
 describe("lastVisitedAtAtom", () => {
+  it("uses the person's read marker without changing the quiet conversation", () => {
+    const state = Atom.make(
+      AsyncResult.success({
+        ...EMPTY_ENVIRONMENT_THREAD_STATE,
+        data: Option.some(withItem(assistant)),
+      }),
+    );
+    const markers = Atom.make<ReadonlyMap<ThreadId, DateTime.Utc>>(new Map());
+    const details = createEnvironmentThreadDetailAtoms(
+      () => state,
+      () => markers,
+    );
+    const ref = { environmentId: EnvironmentId.make("env"), threadId: v2ThreadId };
+    const registry = AtomRegistry.make();
+    const release = registry.mount(details.lastVisitedAtAtom(ref));
+    const quiet = registry.get(details.quietThreadAtom(ref));
+    expect(registry.get(details.lastVisitedAtAtom(ref))).toBeNull();
+    registry.set(markers, new Map([[v2ThreadId, later]]));
+    expect(registry.get(details.lastVisitedAtAtom(ref))).toBe(later);
+    expect(registry.get(details.quietThreadAtom(ref))).toBe(quiet);
+    registry.set(markers, new Map());
+    expect(registry.get(details.lastVisitedAtAtom(ref))).toBeNull();
+    release();
+    registry.dispose();
+  });
+
   it("follows a visit mark the quiet thread holds through", () => {
     const projection = withItem(assistant);
     const state = Atom.make(

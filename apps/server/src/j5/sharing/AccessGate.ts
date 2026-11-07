@@ -20,6 +20,7 @@ import {
   J5_CLIENT_ACTION_WS_METHODS,
   J5_CLIENT_READ_WS_METHODS,
   J5_PEOPLE_WS_METHODS,
+  J5_THREAD_READ_WS_METHODS,
   J5_PLAYBOOK_WS_METHODS,
   J5_SHARED_CONVERSATION_WS_METHODS,
   type PersonLevel,
@@ -205,6 +206,9 @@ const ACCESS_RPC_RULES: Partial<Record<WsRpcMethod, AccessRpcRule>> = {
   // A thread and the agents beneath it (AC21). Its commands and its launch are checked command
   // by command (`CommandAdmission`).
   [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: narrowed,
+  [J5_THREAD_READ_WS_METHODS.visit]: onThread("viewer"),
+  [J5_THREAD_READ_WS_METHODS.markUnread]: onThread("viewer"),
+  [J5_THREAD_READ_WS_METHODS.subscribe]: narrowed,
   [ORCHESTRATION_V2_WS_METHODS.launchThread]: narrowed,
   [ORCHESTRATION_V2_WS_METHODS.subscribeThread]: onThread("viewer"),
   [ORCHESTRATION_V2_WS_METHODS.getThreadProjection]: onThread("viewer"),

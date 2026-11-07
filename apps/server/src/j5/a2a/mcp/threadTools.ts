@@ -304,8 +304,11 @@ export const layer = McpToolAccess.toLayer(J5AdaptedThreadToolkit, {
           command = { ...common, type: `thread.${input.action}`, reason: "user" };
           break;
         case "mark_unread":
-          command = { ...common, type: "thread.mark-unread" };
-          break;
+          return yield* new OrchestratorMcpFailure({
+            code: "capability_denied",
+            message:
+              "Read state belongs to a person. Mark this thread unread from your client; an agent has no personal read marker.",
+          });
         default:
           command = { ...common, type: `thread.${input.action}` };
       }

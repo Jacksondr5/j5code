@@ -8,7 +8,9 @@ import type {
 } from "@t3tools/contracts";
 import { isProviderNativeSubagentThread, OrchestrationV2ThreadShell } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
+import * as DateTime from "effect/DateTime";
 import { Atom } from "effect/reactivity";
+import type { PersonalReadMarkersAtom } from "../j5/threadReads.ts";
 
 import type { EnvironmentThreadShell, PendingSubagentRequest } from "./models.ts";
 import { presentThreadShell, threadRuntimeIsActive } from "./models.ts";
@@ -129,6 +131,7 @@ function sameApartFromStreaming(
 }
 
 export function createEnvironmentThreadShellAtoms(input: {
+  readonly personalReadMarkersAtom?: PersonalReadMarkersAtom;
   readonly catalogValueAtom: Atom.Atom<EnvironmentCatalogState>;
   readonly snapshotAtom: (
     environmentId: EnvironmentId,
@@ -160,12 +163,32 @@ export function createEnvironmentThreadShellAtoms(input: {
     return value;
   };
 
-  const environmentThreadsAtom = Atom.family((environmentId: EnvironmentId) =>
-    Atom.make(
-      (get): ReadonlyArray<OrchestrationV2ThreadShell> =>
-        get(input.snapshotAtom(environmentId))?.threads ?? EMPTY_THREADS,
-    ).pipe(Atom.withLabel(`environment-threads:${environmentId}`)),
-  );
+  const environmentThreadsAtom = Atom.family((environmentId: EnvironmentId) => {
+    const adapted = new WeakMap<OrchestrationV2ThreadShell, OrchestrationV2ThreadShell>();
+    return Atom.make((get): ReadonlyArray<OrchestrationV2ThreadShell> => {
+      const threads = get(input.snapshotAtom(environmentId))?.threads ?? EMPTY_THREADS;
+      const markers =
+        input.personalReadMarkersAtom === undefined
+          ? undefined
+          : get(input.personalReadMarkersAtom(environmentId));
+      if (markers === undefined) return threads;
+      return threads.map((thread) => {
+        const lastVisitedAt = markers.get(thread.id) ?? null;
+        const previous = adapted.get(thread);
+        if (
+          previous !== undefined &&
+          (previous.lastVisitedAt == null
+            ? null
+            : DateTime.toEpochMillis(previous.lastVisitedAt)) ===
+            (lastVisitedAt === null ? null : DateTime.toEpochMillis(lastVisitedAt))
+        )
+          return previous;
+        const value = { ...thread, lastVisitedAt };
+        adapted.set(thread, value);
+        return value;
+      });
+    }).pipe(Atom.withLabel(`environment-threads:${environmentId}`));
+  });
 
   const environmentThreadIndexAtom = Atom.family((environmentId: EnvironmentId) =>
     Atom.make((get): ReadonlyMap<ThreadId, OrchestrationV2ThreadShell> => {

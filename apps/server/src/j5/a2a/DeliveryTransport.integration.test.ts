@@ -3297,7 +3297,7 @@ it.effect("organize refuses a Crew seat and applies reversible lifecycle once", 
       });
       yield* startPendingTestTurn(source.threadId);
       const toolkit = yield* J5AdaptedThreadToolkit;
-      const call = (threadId: ThreadId, action: "archive" | "unarchive") =>
+      const call = (threadId: ThreadId, action: "archive" | "unarchive" | "mark_unread") =>
         toolkit.handle("t3_thread_organize", { threadId, action }).pipe(
           Stream.unwrap,
           Stream.run(Sink.last()),
@@ -3315,6 +3315,12 @@ it.effect("organize refuses a Crew seat and applies reversible lifecycle once", 
             issuedAt: 1,
           }),
         );
+      const unread = yield* call(source.threadId, "mark_unread");
+      assert.isTrue(unread.isFailure);
+      assert.include(
+        (unread.result as { message: string }).message,
+        "Read state belongs to a person",
+      );
       const member = yield* seedTarget(
         "organize-member",
         modelSelection.model,

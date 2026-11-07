@@ -12,6 +12,7 @@ import {
   J5_ACCESS_WS_METHODS,
   J5_CLIENT_READ_WS_METHODS,
   J5_PEOPLE_WS_METHODS,
+  J5_THREAD_READ_WS_METHODS,
   J5_PLAYBOOK_WS_METHODS,
   J5_SHARED_CONVERSATION_WS_METHODS,
 } from "@t3tools/contracts/j5";
@@ -57,6 +58,7 @@ export type EnvironmentRpcTag = keyof WsRpcProtocolClient & string;
 type RpcMethod<TTag extends EnvironmentRpcTag> = WsRpcProtocolClient[TTag];
 
 export type EnvironmentSubscriptionRpcTag =
+  | typeof J5_THREAD_READ_WS_METHODS.subscribe
   | typeof WS_METHODS.codexAuthCallbackSubscribe
   | typeof WS_METHODS.providerAuthSubscribe
   | typeof WS_METHODS.providerInstallSubscribe

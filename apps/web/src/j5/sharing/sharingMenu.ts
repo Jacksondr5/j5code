@@ -23,6 +23,7 @@ export interface SharingMenuAccess {
   readonly level: PersonLevel | null;
   readonly holdsThread: boolean;
   readonly startsInProject: boolean;
+  readonly personalThreadReads?: boolean;
 }
 
 // `access.ts`, which owns the connection runtime, hands the read over when it loads; until then
@@ -36,8 +37,7 @@ export function provideSharingMenuAccess(
 }
 
 // Not an Owner's: for now archiving and deleting are for Owners, and project settings are part of
-// Settings, which is theirs (People and access AC14, AC27). A Viewer changes nothing, the read
-// marker included, which is one value for everyone on the thread (Shared conversations AC19).
+// Settings, which is theirs (People and access AC14, AC27).
 const OWNERS_ONLY: ReadonlySet<string> = new Set(["archive", "delete", "project-settings"]);
 const NOT_A_VIEWERS: ReadonlySet<string> = new Set(["mark-unread"]);
 // Upstream offers a new thread to a connection that writes nothing, as local navigation; a person
@@ -75,7 +75,7 @@ export function sharingMenuItems<Id extends string>(
   const removed = (item: ContextMenuItem<Id>) =>
     access !== null &&
     ((!access.owner && OWNERS_ONLY.has(item.id)) ||
-      (access.level === "viewer" && NOT_A_VIEWERS.has(item.id)));
+      (access.level === "viewer" && !access.personalThreadReads && NOT_A_VIEWERS.has(item.id)));
   const kept = items
     .filter((item) => !removed(item))
     .map((item) =>
