@@ -3,6 +3,7 @@ import { EnvironmentId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  j5FoldHeaderLabel,
   presentJ5TimelineNotice,
   resolveJ5FeedMessage,
   type J5Timeline,
@@ -192,5 +193,20 @@ describe("presentJ5TimelineNotice", () => {
         text: "PR merged",
       }),
     ).toBeNull();
+  });
+});
+
+describe("j5FoldHeaderLabel", () => {
+  const named: J5Timeline = { ...timeline(null), labels: new Map([["agent:captain", "Captain"]]) };
+
+  it("names the sender only once the fold is open, where the first line is gone", () => {
+    const row = resolveJ5FeedMessage(delivery("agent", askRaw), named);
+    expect(j5FoldHeaderLabel(row, named, false)).toEqual({ label: "" });
+    expect(j5FoldHeaderLabel(row, named, true)).toEqual({ label: "Captain" });
+  });
+
+  it("leaves an unnamed sender to upstream's sender-thread label", () => {
+    const row = resolveJ5FeedMessage(delivery("agent", askRaw), timeline(null));
+    expect(j5FoldHeaderLabel(row, timeline(null), true)).toEqual({});
   });
 });

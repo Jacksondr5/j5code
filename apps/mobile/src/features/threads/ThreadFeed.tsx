@@ -275,6 +275,7 @@ import { openSettings } from "../settings/settings-navigation";
 import {
   J5MessageAuthorLine,
   J5OpenSenderThread,
+  j5FoldHeaderLabel,
   renderJ5TimelineNotice,
   resolveJ5FeedMessage,
   type J5Timeline,
@@ -1058,8 +1059,6 @@ function AgentMessageFoldHeader(props: {
   /** J5 names the sender in the line above the row instead. */
   readonly label?: string;
   readonly summary: string;
-  /** J5: the body already opens with the summary, so it shows only while folded. */
-  readonly summaryWhileFolded?: boolean;
   readonly expanded: boolean;
   readonly onToggle: () => void;
   readonly iconSubtleColor: ColorValue;
@@ -1071,7 +1070,9 @@ function AgentMessageFoldHeader(props: {
   return (
     <Pressable
       accessibilityRole="button"
-      accessibilityLabel={label ? `${label}: ${props.summary}` : props.summary}
+      accessibilityLabel={
+        props.expanded ? label : label ? `${label}: ${props.summary}` : props.summary
+      }
       accessibilityHint={`Double tap to ${props.expanded ? "hide" : "show"} the message.`}
       accessibilityState={{ expanded: props.expanded }}
       hitSlop={4}
@@ -1091,12 +1092,16 @@ function AgentMessageFoldHeader(props: {
       {label ? (
         <Text
           numberOfLines={1}
-          className="max-w-[50%] shrink-0 font-t3-medium text-sm text-user-bubble-foreground-muted"
+          className={cn(
+            "font-t3-medium text-sm text-user-bubble-foreground-muted",
+            props.expanded ? "min-w-0 flex-1" : "max-w-[50%] shrink-0",
+          )}
         >
           {label}
         </Text>
       ) : null}
-      {props.expanded && props.summaryWhileFolded ? null : (
+      {/* Expanded, the first line is already the top of the body. */}
+      {props.expanded ? null : (
         <Text numberOfLines={1} className="min-w-0 shrink text-sm text-user-bubble-foreground">
           {props.summary}
         </Text>
@@ -1602,7 +1607,7 @@ function renderFeedEntry(
               <AgentMessageFoldHeader
                 environmentId={props.environmentId}
                 senderThreadId={message.senderThreadId}
-                {...(presentation.j5 ? { label: "", summaryWhileFolded: true } : {})}
+                {...j5FoldHeaderLabel(presentation, props.j5Timeline, foldExpanded)}
                 summary={
                   presentation.preview ??
                   replaceComposerContextReferences(presentation.text, (ref) => ref.label)

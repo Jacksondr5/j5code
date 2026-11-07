@@ -170,7 +170,12 @@ function AutomationMessageRow({ row }: { row: Extract<TimelineRow, { kind: "mess
       : null,
   );
   const taskTitle = tasksQuery.data?.tasks.find((task) => task.id === scheduledTaskId)?.title;
-  const summary = j5Prompt?.summary ?? taskTitle ?? text.trim().split(/\r?\n/, 1)[0] ?? "";
+  // Expanded, a J5 prompt's first line is already the top of the body.
+  const summary = j5Prompt
+    ? expanded
+      ? ""
+      : j5Prompt.summary
+    : (taskTitle ?? text.trim().split(/\r?\n/, 1)[0] ?? "");
 
   const revertTurnCount = row.revertTurnCount;
   const promptLink = promptLinkFor(text);
@@ -197,7 +202,6 @@ function AutomationMessageRow({ row }: { row: Extract<TimelineRow, { kind: "mess
           icon={j5Prompt?.icon ?? CalendarClockIcon}
           label={j5Prompt?.label ?? "Automation"}
           summary={summary}
-          summaryWhileFolded={j5Prompt !== null}
           expanded={expanded}
           onToggle={() => setExpanded((value) => !value)}
         />
@@ -256,13 +260,10 @@ function FoldedMessageHeader(props: {
   icon: LucideIcon;
   label: string;
   summary: string;
-  /** J5: the body already opens with the summary, so it shows only while folded. */
-  summaryWhileFolded?: boolean;
   expanded: boolean;
   onToggle: () => void;
 }) {
   const Icon = props.icon;
-  const summaryHidden = props.expanded && props.summaryWhileFolded === true;
   return (
     <button
       type="button"
@@ -273,14 +274,20 @@ function FoldedMessageHeader(props: {
     >
       <Icon className="size-4 shrink-0 stroke-2 text-muted-foreground" />
       {props.label ? (
-        <span className="max-w-1/2 shrink-0 truncate text-muted-foreground">{props.label}</span>
+        <span
+          className={cn(
+            "truncate text-muted-foreground",
+            props.summary ? "max-w-1/2 shrink-0" : "min-w-0 flex-1",
+          )}
+        >
+          {props.label}
+        </span>
       ) : null}
-      <span className={summaryHidden ? "sr-only" : "min-w-0 flex-1 truncate"}>{props.summary}</span>
+      {props.summary ? <span className="min-w-0 flex-1 truncate">{props.summary}</span> : null}
       <ChevronDownIcon
         className={cn(
           "size-3.5 shrink-0 text-muted-foreground transition-transform",
           props.expanded && "rotate-180",
-          summaryHidden && "ms-auto",
         )}
       />
     </button>
@@ -514,9 +521,8 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
         {folded ? (
           <FoldedMessageHeader
             icon={MessagesSquareIcon}
-            label={userMessage.j5 ? "" : senderLabel}
-            summary={userMessage.preview ?? foldSummary}
-            summaryWhileFolded={Boolean(userMessage.j5)}
+            label={userMessage.j5 && !expanded ? "" : (userMessage.authorName ?? senderLabel)}
+            summary={expanded ? "" : (userMessage.preview ?? foldSummary)}
             expanded={expanded}
             onToggle={() => setExpanded((value) => !value)}
           />

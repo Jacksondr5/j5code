@@ -45,6 +45,24 @@ export function resolveJ5FeedMessage(message: J5UserMessageInput, timeline: J5Ti
 export type J5FeedMessagePresentation = ReturnType<typeof resolveJ5FeedMessage>;
 
 /**
+ * The fold header's label for a message J5 read: none while folded, since the identity line above
+ * names the sender, and the sender's name once open, where the first line is gone. An
+ * unnamed sender falls back to upstream's label, the sender thread's title.
+ */
+export function j5FoldHeaderLabel(
+  presentation: J5FeedMessagePresentation,
+  timeline: J5Timeline,
+  expanded: boolean,
+): { readonly label?: string } {
+  const j5 = presentation.j5;
+  if (j5 === null) return {};
+  if (!expanded) return { label: "" };
+  const name =
+    j5.group === "participant" && j5.senderId !== null ? timeline.labels.get(j5.senderId) : null;
+  return name ? { label: name } : {};
+}
+
+/**
  * J5's platform notices that upstream's row would draw as the reader's own message: a silence,
  * which has a plain summary, what a Crew member was told (a card that opens to the text), and a
  * Crew notice or a delivery notice this client cannot read yet, which keep their raw text until
