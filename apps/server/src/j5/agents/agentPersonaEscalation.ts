@@ -1,6 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off - a random id; no Crypto service is wired into this layer.
 import * as NodeCrypto from "node:crypto";
 import {
+  ProviderOptionSelection,
   RuntimeMode,
   type AgentPersonaBlockCode,
   type AgentPersonaEscalationView,
@@ -28,6 +29,8 @@ export const AgentPersonaWaiverScope = Schema.Struct({
       entryIndex: Schema.Number,
       instanceId: Schema.String,
       model: Schema.String,
+      /** The options it runs with, its reasoning level among them; a grant matches them exactly. */
+      options: Schema.Array(ProviderOptionSelection),
       runtimeMode: RuntimeMode,
       sandbox: Schema.optional(Schema.Literals(["readOnly", "workspaceWrite"])),
     }),

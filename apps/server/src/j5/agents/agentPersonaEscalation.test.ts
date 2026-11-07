@@ -39,7 +39,13 @@ const record = (waivable: "model-not-eligible" | null) =>
           : {
               definitionDigest: "digest",
               entries: [
-                { entryIndex: 0, instanceId: "codex", model: "gpt-6", runtimeMode: "full-access" },
+                {
+                  entryIndex: 0,
+                  instanceId: "codex",
+                  model: "gpt-6",
+                  options: [],
+                  runtimeMode: "full-access",
+                },
               ],
             },
     });

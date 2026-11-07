@@ -573,7 +573,13 @@ it.effect("puts an escalation only on the ask that carries it", () =>
       scope: {
         definitionDigest: "digest",
         entries: [
-          { entryIndex: 0, instanceId: "codex", model: "gpt-6", runtimeMode: "full-access" },
+          {
+            entryIndex: 0,
+            instanceId: "codex",
+            model: "gpt-6",
+            options: [],
+            runtimeMode: "full-access",
+          },
         ],
       },
     });
