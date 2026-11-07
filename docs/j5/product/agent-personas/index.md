@@ -179,5 +179,6 @@ Follow-up work: in-app git commit/push/pull (status nudges and open-in-editor sh
 - 2026-11-03 — ordered model editing, per-entry eligibility and quota-aware new launches ([#778](https://github.com/Jacksondr5/j5code/issues/778)).
 - 2026-11-06 — independent reviewer personas prefer a model their authors didn't run on, never blocking ([#782](https://github.com/Jacksondr5/j5code/issues/782)).
 - 2026-11-06 — people can switch a persona worker's model; the launch route is no longer fixed for the task's life (Bastian's question on 28 Oct; [#783](https://github.com/Jacksondr5/j5code/issues/783)).
+- 2026-11-06 — an agent that wants another model replaces the worker, and a Captain can replace a Crew member (Bryant; [#784](https://github.com/Jacksondr5/j5code/issues/784)).
 - 2026-11-06 — a blocked persona refuses with one of six codes and escalates, and an Owner can allow one launch past one limit (Bryant; [#785](https://github.com/Jacksondr5/j5code/issues/785)).
 - 2026-11-06 — agents draft persona creates and edits, and an Owner saves them from the ask; a folder persona's edit saves as an environment override (Bryant; [#786](https://github.com/Jacksondr5/j5code/issues/786)).
