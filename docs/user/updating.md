@@ -22,8 +22,8 @@ restart from the update button when you are ready. A server still restarting
 finishes on its own, and the button keeps showing it after the desktop app
 restarts.
 
-Server updates appear only after that version is released on GitHub
-(`Jacksondr5/j5code`). Remote desktop apps do not wait for the release. The confirmation lists each machine it skips
+Server updates appear only after that version is published to npm. Remote
+desktop apps do not wait for npm. The confirmation lists each machine it skips
 and why, such as a machine that is offline or needs a manual update. Use
 **Settings → Environments** for those.
 
@@ -85,24 +85,18 @@ The offered action depends on how the server runs:
 On the host, run:
 
 ```sh
-j5 update <client-version>
+t3 update <client-version>
 ```
 
 Replace `<client-version>` with the version shown in the notice. The command
 asks before restarting the background service; if you decline, run
-`j5 service restart` when you are ready. For a server you started by hand,
+`t3 service restart` when you are ready. For a server you started by hand,
 stop it and start it again afterwards with your usual options such as `--host`
 or `--tailscale-serve`.
 
-A server installed from npm (`@jacksondr5/j5code` 0.0.43 or earlier) cannot
-update itself to a release archive: **Update server** fails because no newer npm
-version exists. Follow [Migrating to release archives](../j5/user/migrating-to-release-archives.md)
-on that machine once; later updates work from the app and with `j5 update` again.
-
-Occasionally an update changes how the background service starts, and **Update
-server** stops with a message asking you to run `j5 update` on the server's
-machine. Run it there once. The server keeps running its current version until
-you do, and later updates work from the app again.
+If you run the server with `npx` rather than an installed `t3`, there is
+nothing to update on the host: stop the server and relaunch it as
+`npx t3@<client-version>` with the same subcommand and options.
 
 ## If an update fails
 

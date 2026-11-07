@@ -225,11 +225,10 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
   `application/x-t3code-*` drag types, the desktop's `--t3code-preview-passkey-bridge` argument and
   `t3codeWebAuthn` field, and the `app.t3.context-fragment` clipboard type.
 - The GitHub and GitCafe API `user-agent: t3code` headers.
-- Documentation, including `docs/user/`: it keeps upstream's "T3 Code" wording, which marks what
-  is upstream's and what is J5's for the agents that read it. Facts that J5 changes (paths, names,
-  defaults, the `j5` command) are still corrected there, in `t3-connect-troubleshooting.md` too
-  since upstream added it at the 2026-10-24 advance, until
-  [#494](https://github.com/Jacksondr5/j5code/issues/494) settles whether J5 edits upstream's user docs.
+- Upstream's documentation, `docs/user/` included: it stays as upstream wrote it, "T3 Code", the
+  `t3` command and T3 Code's paths and links with it, which marks what is upstream's and what is
+  J5's for the agents that read it. Where J5 differs, `docs/j5/user/t3-code-guides.md` says so, and
+  `docs/j5/user/install.md` and `telemetry.md` replace upstream's pages for J5 users.
 - "T3 Connect" and "T3 Account": upstream's hosted relay and sign-in, named as upstream names
   them wherever they appear, along with `infra/relay`.
 - The `t3-code` MCP server key, its `T3 Code` MCP server `name` (`McpHttpServer.ts`), the Codex

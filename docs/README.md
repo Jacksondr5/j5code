@@ -10,8 +10,6 @@
 - [Source control](./user/source-control.md)
 - [Project settings](./user/project-settings.md)
 - [Appearance and themes](./user/appearance.md)
-- [Personas, crews, and subagent activity](./j5/user/personas.md)
-- [Skills](./j5/user/skills.md)
 - [Keyboard shortcuts](./user/keybindings.md)
 - [SnapShots](./user/snap-shot.md)
 - [Visual replies](./user/html-renders.md)
@@ -19,18 +17,13 @@
 - [Use T3 Code as your default browser](./user/default-browser.md)
 - [Devices](./user/devices.md)
 - [Usage and limits](./user/usage.md)
-- [Planning artifacts](./j5/user/artifacts.md)
-- [Playbooks](./j5/user/playbooks.md)
-- [Connecting two J5 servers](./j5/user/j5-peering.md)
 - [Product usage data](./user/telemetry.md)
 - [Remote access](./user/remote-access.md)
 - [Guest links](./user/guest-links.md)
 - [T3 Connect troubleshooting](./user/t3-connect-troubleshooting.md)
-- [People and sharing](./j5/user/people-and-sharing.md)
 - [Outside agents (MCP)](./user/outside-agents.md)
 - [Running in the background](./user/background-service.md)
 - [Updating T3 Code](./user/updating.md)
-- [Migrating a J5 server to release archives](./j5/user/migrating-to-release-archives.md)
 - Provider guides: [Codex](./user/providers-codex.md) · [Claude](./user/providers-claude.md) · [OpenCode](./user/providers-opencode.md) · [Antigravity](./user/providers-antigravity.md) · [Pi](./user/providers-pi.md) · [Muse Code](./user/providers-muse.md) · [fx](./user/providers-fx.md)
 
 ---
@@ -66,7 +59,6 @@ source alone does not explain. Most code changes do not need an internal documen
 
 ### Runbooks
 
-- [Configure a persona library](./j5/runbooks/persona-library.md)
 - [Development and local builds](./operations/development.md)
 - [T3 Connect setup](./operations/connect-setup.md)
 - [Release](./operations/release.md)
