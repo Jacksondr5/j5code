@@ -195,7 +195,7 @@ import {
 } from "./Sidebar.logic";
 import { archiveWithPreflight } from "../j5/a2a/archiveFlow";
 import { useAgentSpawnedThreadKeys } from "../j5/threads/SpawnedChildrenClient";
-import { isSidebarMember } from "../j5/threads/sidebarMembership";
+import { isSidebarMember, sidebarRowThread } from "../j5/threads/sidebarMembership";
 import { useThreadRowReads } from "../j5/threads/useThreadRowReads";
 import {
   createSidebarCollisionDetection,
@@ -999,6 +999,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           ),
         );
   const threads = useQuietThreadShells();
+  const agentSpawnedThreadKeys = useAgentSpawnedThreadKeys();
   const routeRowThreadKey =
     routeThreadRef === null
       ? null
@@ -1023,7 +1024,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     routeKey: routeRowThreadKey,
     isSearching: isSearchingThreads,
     scopedProjectKeys: chosenScopeProjectKeys,
-    findThread: (key) => threads.find((candidate) => threadShellKey(candidate) === key),
+    // J5 (register D22): a thread with no row of its own never completes its reveal.
+    findThread: (key) =>
+      sidebarRowThread(
+        threads.find((candidate) => threadShellKey(candidate) === key),
+        agentSpawnedThreadKeys.has(key),
+      ),
   });
   const projectScopeKey = revealWidensScope ? null : chosenProjectScopeKey;
   // The widened scope outlives the reveal, so it is written back to the persisted

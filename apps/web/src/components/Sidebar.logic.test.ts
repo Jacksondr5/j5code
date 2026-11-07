@@ -51,6 +51,7 @@ import {
   pendingSidebarRouteReveal,
   resolveSidebarRouteReveal,
 } from "./sidebar/routeReveal";
+import { sidebarRowThread } from "../j5/threads/sidebarMembership";
 
 const localEnvironmentId = EnvironmentId.make("environment-local");
 
@@ -1378,6 +1379,20 @@ describe("resolveSidebarRouteReveal", () => {
       });
     resolve("environment-test:unlisted");
     expect(resolve(hiddenKey)).toEqual({ pendingKey: hiddenKey, widensScope: true });
+  });
+
+  it("never widens for an agent-spawned thread, which has no row of its own", () => {
+    // J5 (register D22): the row never mounts to complete the reveal, so a later
+    // scope change would otherwise be undone by the still-pending reveal.
+    expect(
+      resolveSidebarRouteReveal({
+        reveal: { observedKey: hiddenKey, pendingKey: hiddenKey },
+        routeKey: hiddenKey,
+        isSearching: false,
+        scopedProjectKeys,
+        findThread: (key) => sidebarRowThread(findThread(key), true),
+      }),
+    ).toEqual({ pendingKey: hiddenKey, widensScope: false });
   });
 
   it("holds a pending reveal without widening while searching", () => {
