@@ -4,6 +4,13 @@
  * Summaries and details keep participant ids, named in `participantIds`, for a client to replace
  * with the identity read's labels; nothing else here is an id a reader should see.
  */
+/**
+ * J5's own notices and prompts, which "Up next" hides as upstream hides its notifications. Only J5
+ * queues system-authored messages; upstream writes them as steers. A2A messages are agent-authored.
+ */
+export const isJ5PlatformMessage = (message: { readonly createdBy?: string }) =>
+  message.createdBy === "system";
+
 export interface PlatformNotice {
   readonly summary: string;
   readonly detail: string | null;
