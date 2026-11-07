@@ -44,7 +44,7 @@ import {
   makeAgentPersonaLibrary,
 } from "../agents/agentPersonaLibrary.ts";
 import { resolveAgentPersonaRuntime } from "../agents/agentPersonaRuntime.ts";
-import { BUILT_IN_AGENT_PERSONAS } from "../agents/agentPersonas.ts";
+import { AGENT_PERSONA_ACCESS_REPAIR, BUILT_IN_AGENT_PERSONAS } from "../agents/agentPersonas.ts";
 import { personaLibraryLayer } from "../test-support/personaLibrary.ts";
 import { buildAgentPersonaCatalog } from "../agents/agentPersonaRouting.ts";
 import { playbookTools } from "../playbooks/mcp.ts";
@@ -781,7 +781,7 @@ it.effect("gates new rosters on the human and adds members directly with the sea
           brief: null,
         })
         .pipe(Effect.flip);
-      assert.include(unknown.message, 'names persona "nobody"');
+      assert.include(unknown.message, "[persona_not_found] Unknown persona nobody");
 
       const unreviewable = yield* gate
         .requestMember({
@@ -2893,8 +2893,8 @@ it.effect(
         const fresh = yield* gate
           .propose({ ...input, requestKey: "fresh-persona" })
           .pipe(Effect.flip);
-        assert.equal(fresh._tag, "CrewProposalRequestError");
-        assert.include(fresh.message, "turned off");
+        assert.equal(fresh._tag, "CrewLaunchSeatUnavailableError");
+        assert.include(fresh.message, "[persona_disabled] Persona replay-persona is disabled");
         const corrected = yield* gate.propose({
           ...input,
           requestKey: "fresh-persona",
@@ -2905,6 +2905,37 @@ it.effect(
         assert.include(changed.message, "different request");
       }).pipe(Effect.provide(layer));
     }),
+);
+
+it.effect("a seat naming an invalid persona is told how to repair it, not that it's missing", () =>
+  Effect.gen(function* () {
+    const { layer } = yield* fixture;
+    yield* Effect.gen(function* () {
+      const { stateDir } = yield* ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const folder = path.join(stateDir, "personas");
+      yield* fs.makeDirectory(folder, { recursive: true });
+      yield* fs.writeFileString(
+        path.join(folder, "broken.yaml"),
+        stringify({ ...BUILT_IN_AGENT_PERSONAS.scout, id: "broken-persona", access: "diagnostic" }),
+      );
+      const refused = yield* (yield* CrewProposalService)
+        .propose({
+          requestKey: "invalid-persona",
+          captain,
+          displayName: "Invalid Crew",
+          brief: "Inspect",
+          seats: [{ ...custom("checker"), agentId: "broken-persona" }],
+        })
+        .pipe(Effect.flip);
+      assert.equal(refused._tag, "CrewLaunchSeatUnavailableError");
+      if (refused._tag !== "CrewLaunchSeatUnavailableError") return;
+      assert.equal(refused.blockCode, "persona_invalid");
+      assert.include(refused.message, "broken.yaml");
+      assert.include(refused.message, AGENT_PERSONA_ACCESS_REPAIR);
+    }).pipe(Effect.provide(layer));
+  }),
 );
 
 it.effect(

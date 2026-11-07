@@ -17,7 +17,9 @@ import * as Layer from "effect/Layer";
 
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
-import { makeAgentPersonaLibrary, personaCatalogProblem } from "../agents/agentPersonaLibrary.ts";
+import { personaBlockText } from "../agents/agentPersonaEscalation.ts";
+import { findAgentPersonaDefinition } from "../agents/agentPersonaLaunch.ts";
+import { makeAgentPersonaLibrary } from "../agents/agentPersonaLibrary.ts";
 import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
 import { makePlaybookCrewRelay } from "../playbooks/PlaybookCrewRelay.ts";
 import {
@@ -542,19 +544,26 @@ export const layer = Layer.effect(
       const catalog = yield* agents
         .catalog()
         .pipe(Effect.mapError(operationError("reading the agent library")));
+      // A persona that can't be found is refused here, before anything is filed, with the
+      // same code and text its launch would give (an invalid one with its repair message).
+      const library = { ...agents, catalog: () => Effect.succeed(catalog) };
       for (const seat of seats) {
-        if (seat.agentId === null) continue;
-        const problem = personaCatalogProblem(catalog, seat.agentId);
-        if (problem === "missing")
-          return yield* new CrewProposalRequestError({
-            detail: `Seat ${seat.seat} names persona "${seat.agentId}", which is not in this environment's library.`,
-            nextStep: "Call j5_list_personas and pick a persona id it returns.",
-          });
-        if (problem === "disabled")
-          return yield* new CrewProposalRequestError({
-            detail: `Seat ${seat.seat} names persona "${seat.agentId}", which is turned off.`,
-            nextStep:
-              "Pick an enabled persona from j5_list_personas, or ask the user to turn it on.",
+        const agentId = seat.agentId;
+        if (agentId === null) continue;
+        const refused = yield* findAgentPersonaDefinition(agentId, library).pipe(
+          Effect.match({ onFailure: (error) => error, onSuccess: () => null }),
+        );
+        if (refused !== null)
+          return yield* new CrewLaunchSeatUnavailableError({
+            seatName: seat.seat,
+            agentId,
+            detail: personaBlockText({
+              code: refused.code ?? "persona_not_found",
+              detail: refused.message,
+              escalationId: null,
+              waivable: null,
+            }),
+            blockCode: refused.code ?? "persona_not_found",
           });
       }
       // Reviewers resolve after every other seat, so one can't see another reviewer's model.
