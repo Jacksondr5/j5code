@@ -226,13 +226,15 @@ export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlC
               inbox.latest_message AS message,
               (
                 SELECT json_group_array(json_object('messageId', message_id, 'message', payload)) FROM (
+                  -- CROSS JOIN keeps the small person-message table first, so a lookup
+                  -- reads that project's messages to people, not all its deliveries.
                   SELECT data.message_id, data.payload
-                  FROM j5_a2a_delivery AS delivery
-                  JOIN j5_a2a_human_inbox_data AS data
-                    ON data.origin_project_id = delivery.project_id
-                   AND data.message_id = delivery.message_id
-                  WHERE delivery.project_id = inbox.project_id
-                    AND delivery.exchange_id = inbox.exchange_id
+                  FROM j5_a2a_human_inbox_data AS data
+                  CROSS JOIN j5_a2a_delivery AS delivery
+                    ON delivery.project_id = data.origin_project_id
+                   AND delivery.message_id = data.message_id
+                  WHERE data.origin_project_id = inbox.project_id
+                    AND data.exchange_id = inbox.exchange_id
                     AND delivery.exchange_role = 'followup'
                   ORDER BY delivery.sent_seq
                 )
