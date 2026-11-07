@@ -6,7 +6,7 @@ import { buildAgentPersonaAssignment } from "./agentPersonaAssignment.ts";
 import { AgentPersonaLibraryError, type createAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
 import {
   resolveAgentPersonaRoute,
-  singleWaivableConstraint,
+  singleWaiver,
   type AgentPersonaPickLimits,
   type AgentPersonaRouteAttempt,
 } from "./agentPersonaRouting.ts";
@@ -111,11 +111,11 @@ const modelsExhaustedError = (
   personaId: string,
   attempts: ReadonlyArray<AgentPersonaRouteAttempt>,
 ) => {
-  const constraint = singleWaivableConstraint(attempts);
+  const waiver = singleWaiver(attempts);
   return new AgentPersonaLibraryError({
     code: "models_exhausted",
     message: `Persona ${personaId} is blocked because none of its model entries can run: ${describeRouteAttempts(attempts)}.`,
-    ...(constraint === null ? {} : { constraint }),
+    ...(waiver === null ? {} : { constraint: waiver.constraint, waiverEntries: waiver.entries }),
   });
 };
 

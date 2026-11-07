@@ -226,8 +226,13 @@ export interface AgentPersonaPickLimits {
     authority: AgentPersonaAuthorityPolicy,
     driver: ProviderDriverKind,
   ) => string | undefined;
-  /** The one limit a granted "Allow this once" lifts for this launch. */
-  readonly waived?: AgentPersonaPickConstraint | undefined;
+  /** The one limit a granted "Allow this once" lifts, on the candidates it was granted for. */
+  readonly waived?:
+    | {
+        readonly constraint: AgentPersonaPickConstraint;
+        readonly covers: (selection: ModelSelection) => boolean;
+      }
+    | undefined;
 }
 
 /** A candidate's limit failures; a provider that cannot run at all reports no limit. */
@@ -239,37 +244,63 @@ export const agentPersonaLimitFailures = (
 ): ReadonlyArray<{ readonly code: AgentPersonaPickConstraint; readonly detail?: string }> => {
   if (limits === undefined) return [];
   const failures: Array<{ code: AgentPersonaPickConstraint; detail?: string }> = [];
-  if (limits.waived !== "model-not-eligible" && !limits.eligible(selection, provider))
+  const waived =
+    limits.waived !== undefined && limits.waived.covers(selection)
+      ? limits.waived.constraint
+      : undefined;
+  if (waived !== "model-not-eligible" && !limits.eligible(selection, provider))
     failures.push({ code: "model-not-eligible" });
   const above =
-    limits.waived === "access-above-caller"
-      ? undefined
-      : limits.accessAbove(authority, provider.driver);
+    waived === "access-above-caller" ? undefined : limits.accessAbove(authority, provider.driver);
   if (above !== undefined) failures.push({ code: "access-above-caller", detail: above });
   return failures;
 };
 
+/** A candidate a waiver would let run: its entry, provider instance and model. */
+export interface AgentPersonaWaiverEntry {
+  readonly entryIndex: number;
+  readonly instanceId: ProviderInstanceId;
+  readonly model: string;
+}
+
 /**
- * The one limit that, lifted alone, lets an entry run: some candidate failed on exactly that
- * limit and nothing else. Null when every entry needs more, such as two limits or a provider fix.
+ * The one limit that, lifted alone, lets an entry run, and every candidate it would let run:
+ * each failed on exactly that limit and nothing else. Null when every entry needs more, such
+ * as two limits or a provider fix.
  */
-export const singleWaivableConstraint = (
-  attempts: ReadonlyArray<Pick<AgentPersonaRouteAttempt, "failures">>,
-): AgentPersonaPickConstraint | null => {
-  for (const { failures } of attempts) {
-    const byCandidate = new Map<string, Set<AgentPersonaRouteFailureCode>>();
+export const singleWaiver = (
+  attempts: ReadonlyArray<Pick<AgentPersonaRouteAttempt, "entryIndex" | "target" | "failures">>,
+): {
+  readonly constraint: AgentPersonaPickConstraint;
+  readonly entries: ReadonlyArray<AgentPersonaWaiverEntry>;
+} | null => {
+  const found: Array<AgentPersonaWaiverEntry & { constraint: AgentPersonaPickConstraint }> = [];
+  for (const { entryIndex, target, failures } of attempts) {
+    const byCandidate = new Map<ProviderInstanceId, Set<AgentPersonaRouteFailureCode>>();
     for (const { code, instanceId } of failures) {
       if (instanceId === undefined) continue;
       byCandidate.set(instanceId, (byCandidate.get(instanceId) ?? new Set()).add(code));
     }
-    for (const codes of byCandidate.values()) {
+    for (const [instanceId, codes] of byCandidate) {
       const [only] = codes;
       if (codes.size === 1 && (only === "model-not-eligible" || only === "access-above-caller"))
-        return only;
+        found.push({ constraint: only, entryIndex, instanceId, model: target.model });
     }
   }
-  return null;
+  const constraint = found[0]?.constraint;
+  if (constraint === undefined) return null;
+  return {
+    constraint,
+    entries: found
+      .filter((entry) => entry.constraint === constraint)
+      .map(({ entryIndex, instanceId, model }) => ({ entryIndex, instanceId, model })),
+  };
 };
+
+/** The one limit that, lifted alone, lets an entry run; null when none does. */
+export const singleWaivableConstraint = (
+  attempts: ReadonlyArray<Pick<AgentPersonaRouteAttempt, "entryIndex" | "target" | "failures">>,
+): AgentPersonaPickConstraint | null => singleWaiver(attempts)?.constraint ?? null;
 
 export function resolveAgentPersonaRoute(input: {
   readonly personaId: AgentPersonaId;

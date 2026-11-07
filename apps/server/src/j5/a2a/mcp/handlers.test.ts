@@ -608,6 +608,7 @@ it.effect(
           code: "persona_disabled",
           summary: "Persona reviewer is disabled in this environment.",
           waivable: null,
+          scope: null,
         });
         const notAnAsk = yield* call({
           to: targetParticipantId,

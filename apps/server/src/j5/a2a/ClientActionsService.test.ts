@@ -363,6 +363,20 @@ it.effect(
             code: "models_exhausted",
             summary: "Persona reviewer is blocked.",
             waivable,
+            scope:
+              waivable === null
+                ? null
+                : {
+                    definitionDigest: "digest",
+                    entries: [
+                      {
+                        entryIndex: 0,
+                        instanceId: "codex",
+                        model: "gpt-6",
+                        runtimeMode: "full-access",
+                      },
+                    ],
+                  },
           })
           .pipe(Effect.tap((escalationId) => escalations.linkAsk({ escalationId, exchangeId })));
       const escalationId = yield* file("exchange:blocked", "access-above-caller");
@@ -375,11 +389,11 @@ it.effect(
         `Allowed once: reviewer past broader access than its caller runs with. Only agent:j5:a2a:thread:asker, whose launch was refused, can use it: it retries that launch with allow_once: ${escalationId}. If you asked on a Crew member's behalf, send it this id.`,
       ]);
       assert.equal(
-        yield* escalations.grantedWaiver({
+        (yield* escalations.grantedWaiver({
           escalationId,
           callerParticipantId: "agent:j5:a2a:thread:asker",
           personaId: "reviewer",
-        }),
+        })).constraint,
         "access-above-caller",
       );
       // A retry whose reply was lost replays the same answer and succeeds; another press is
