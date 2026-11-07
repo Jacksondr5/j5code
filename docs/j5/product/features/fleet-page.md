@@ -67,7 +67,7 @@ The Fleet page is **not** the inbox: it never demands a reply. It is **not** a p
 
 8. The rows are every agent participant of the projects read, with no cap on their number; a large fleet is paged or virtualized, never silently truncated.
 9. Rows are arranged as the placement tree, siblings in creation order, and are never reordered by activity or by problems.
-10. People are never rows; a person appears only as the counterparty on an agent's asks. Provider-native Subagents never appear.
+10. People are never rows; a person appears only as the counterparty on an agent's asks. Provider-native Subagents and delegates never appear.
 11. A retired agent is not a row; an agent still live beneath it renders at its project's root.
 12. Rows carry no inline origin tag; placement shows which agent spawned a child. An outside spawner's name is available on hover over the agent's title, using its participant id when no name was recorded. Unknown provenance adds no label.
 13. Retired (see History).
@@ -149,3 +149,4 @@ The Fleet page is **not** the inbox: it never demands a reply. It is **not** a p
 - 2026-10-21 — clarified AC15 and AC21: queued follow-ups preserve the active run's status, only completion-holding background work prevents Idle, and dispatch is overdue only when no other run is in progress ([#360](https://github.com/Jacksondr5/j5code/issues/360); [#662](https://github.com/Jacksondr5/j5code/pull/662)).
 - 2026-10-24 — receiving servers expose later peer delivery alarms through their own Fleet read, and the client attaches them to the remote sender only while both environments are readable; unavailable receivers of open asks leave badge coverage incomplete, with no alarm returned over A2A (Jackson, 2026-10-24; [#662](https://github.com/Jacksondr5/j5code/pull/662)).
 - 2026-11-04 — rows lose their inline origin tag, since placement already shows which agent spawned a child; an outside spawner's name moves to hover on the agent's title, and unknown provenance adds no label; AC12 (Jackson, 2026-11-04; [#291](https://github.com/Jacksondr5/j5code/issues/291)).
+- 2026-11-07 — AC10 names delegates beside provider Subagents: neither is a participant, so neither is a row ([record](../../worklog/2026-11-07-agent-tool-boundary-session.md)).
