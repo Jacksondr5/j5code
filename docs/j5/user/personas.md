@@ -6,9 +6,17 @@ Persona definitions are separate from runtime activity, so only agents that have
 
 ## Starting a task as a persona
 
-In a new task, the composer offers a **Persona** control beside the model picker whenever the selected environment has launchable personas. Choose one and the model and reasoning controls are replaced by the persona's name and its fixed route; use the **×** control to go back to a regular task before sending. On mobile, the chosen persona appears in its own row under the checkout row, and the input row stays free for your message. On send, the server resolves the persona's route and pins it to the thread, so the thread shows the same persona chip afterwards. If the persona's definition changes later, the chip shows **Changed**; the running task keeps the definition it started with, and a new task uses the current one.
+In a new task, the composer offers a **Persona** control beside the model picker whenever the selected environment has launchable personas. Choose one and the model and reasoning controls are replaced by the persona's name and the model it will start on; use the **×** control to go back to a regular task before sending. On mobile, the chosen persona appears in its own row under the checkout row, and the input row stays free for your message. On send, the server resolves the persona's route and pins it to the thread, so the thread shows the same persona chip afterwards. If the persona's definition changes later, the chip shows **Changed**; the running task keeps the definition it started with, and a new task uses the current one.
 
 Threads launched as a persona show the persona beside their home in the thread list, and delegated children show which persona ran them in the Lineage section and on their subagent cards.
+
+## Switching a worker's model
+
+On a started persona task, the composer shows the model picker beside the persona chip; on mobile, tap the persona or its model. Pick another model or provider and send: the next turn runs on it, with the same instructions and access. Anyone who can send messages in the task can switch it.
+
+The switch is checked first: a signed-in provider must offer the model and its options, and that provider must enforce the persona's access level (see the table under [Persona library](#persona-library)). Any model that passes is allowed, even one outside the persona's list, and a reviewer can be moved onto the model that wrote the work. A refused switch says why, and the worker stays on its model. A message you queue while the worker is busy switches it when that message starts. Moving to another provider hands the conversation over as it does on any task. The persona chip's tooltip names the model the worker runs on now, and says when a person changed its model or reasoning.
+
+Agents can't switch a worker's model. An agent that wants another model replaces the worker instead: it starts a new one with the model it wants, or, as a Captain, adds a member.
 
 ## Persona library
 
@@ -30,7 +38,7 @@ Turn on **Independent reviewer** for a persona that reviews other agents' work. 
 
 Restricted personas run on Codex, or on Claude when read-only. Model entries on other providers are marked in the editor and skipped at launch. Full-access adds no J5 sandbox restriction; provider instruction support still applies.
 
-The list can contain one model or several, each with a provider account and its model options. Add model chooses the first unused model whose provider enforces the selected access level; it is unavailable when none remain. Add, remove, or reorder entries to set your preference, and choose each model's reasoning level when it offers one. A launch uses the first entry whose provider is signed in, offers the model and options, and enforces the access level. A provider with a reported exhausted quota and a future reset is skipped. Only known account-wide quota windows count; model-specific windows and missing reset times do not block a launch. Once started, a task keeps its model. If it hits a usage limit, it waits under the usual continuation behavior rather than switching models.
+The list can contain one model or several, each with a provider account and its model options. Add model chooses the first unused model whose provider enforces the selected access level; it is unavailable when none remain. Add, remove, or reorder entries to set your preference, and choose each model's reasoning level when it offers one. A launch uses the first entry whose provider is signed in, offers the model and options, and enforces the access level. A provider with a reported exhausted quota and a future reset is skipped. Only known account-wide quota windows count; model-specific windows and missing reset times do not block a launch. A started task keeps its model unless you switch it (see [Switching a worker's model](#switching-a-workers-model)). If it hits a usage limit, it waits under the usual continuation behavior and never switches models on its own.
 
 To import definitions written as files:
 

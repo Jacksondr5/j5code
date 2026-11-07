@@ -77,7 +77,10 @@ export interface AgentPersonaCatalogRow {
 
 export interface AgentPersonaAssignmentPresentation {
   readonly personaLabel: string;
+  /** The model the worker runs on now. */
   readonly routeLabel: string;
+  /** Present once a person switched the worker off the model it launched on. */
+  readonly switchNote: string | null;
 }
 
 function providerLabel(driver: ProviderDriverKind): string {
@@ -133,6 +136,10 @@ export function presentAgentPersonaAssignment(
     routeLabel: [provider, assignment.resolvedModelSelection.model, effort]
       .filter((part) => part !== undefined)
       .join(" · "),
+    switchNote:
+      assignment.modelSwitchedBy === "person"
+        ? "A person changed its model or reasoning since launch."
+        : null,
   };
 }
 
@@ -753,9 +760,9 @@ export function draftAgentAssignmentPreview(
 }
 
 /**
- * The model a composer presents and sends for a thread or draft. A saved agent always runs on its
- * route: the server rejects a model change on a persona thread ("has an immutable model route")
- * and launches a persona draft on the route whatever the draft remembered.
+ * The model a composer presents and sends for a thread or draft: the persona's current model when
+ * one is given, otherwise the composer's own pick. A remembered pick the person never made on a
+ * persona thread would otherwise switch the worker on the next message.
  */
 export const composerModelSelectionForThread = (
   assignment: OrchestrationV2AgentPersonaAssignment | null | undefined,

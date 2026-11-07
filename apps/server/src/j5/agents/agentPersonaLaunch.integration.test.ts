@@ -7,6 +7,9 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   ThreadId,
+  type ModelSelection,
+  type OrchestrationV2Command,
+  type ServerProvider,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -21,8 +24,17 @@ import * as ThreadLaunch from "../../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
 import { definitionDigest, makeAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
 import { BUILT_IN_AGENT_PERSONAS } from "./agentPersonas.ts";
+import {
+  AGENT_MODEL_SWITCH_REFUSAL,
+  AgentPersonaModelSwitch,
+} from "./agentPersonaOrchestration.ts";
 import { resolveAgentPersonaRuntime } from "./agentPersonaRuntime.ts";
-import { makeHarness, modelSelection, projectId } from "../test-support/threadLaunchHarness.ts";
+import {
+  launchTestAdapter,
+  makeHarness,
+  modelSelection,
+  projectId,
+} from "../test-support/threadLaunchHarness.ts";
 import { personaLibraryLayer } from "../test-support/personaLibrary.ts";
 import { noDocumentTextLayer } from "../test-support/documentText.ts";
 
@@ -158,10 +170,7 @@ it.effect("launches one persona directly without requiring workflow sequencing",
           modelSelection,
         })
         .pipe(Effect.flip);
-      assert.equal(
-        switchError.cause,
-        `Persona thread ${launched.threadId} has an immutable model route.`,
-      );
+      assert.equal(switchError.cause, AGENT_MODEL_SWITCH_REFUSAL);
 
       const messageOverrideError = yield* threads
         .dispatch({
@@ -177,10 +186,7 @@ it.effect("launches one persona directly without requiring workflow sequencing",
           dispatchMode: { type: "start_immediately" },
         })
         .pipe(Effect.flip);
-      assert.equal(
-        messageOverrideError.cause,
-        `Persona thread ${launched.threadId} has an immutable model route.`,
-      );
+      assert.equal(messageOverrideError.cause, AGENT_MODEL_SWITCH_REFUSAL);
 
       const invalidAuthorityError = yield* launches
         .launch({
@@ -245,6 +251,344 @@ it.effect("blocks a direct persona launch when both declared model routes are un
     );
   }),
 );
+
+const reasoning = (...levels: ReadonlyArray<string>) => ({
+  optionDescriptors: [
+    {
+      id: "reasoningEffort",
+      label: "Reasoning",
+      type: "select" as const,
+      options: levels.map((id) => ({ id, label: id })),
+    },
+  ],
+});
+const signedIn = (
+  instanceId: string,
+  driver: string,
+  models: ReadonlyArray<{ readonly slug: string; readonly levels: ReadonlyArray<string> }>,
+): ServerProvider => ({
+  instanceId: ProviderInstanceId.make(instanceId),
+  driver: ProviderDriverKind.make(driver),
+  enabled: true,
+  installed: true,
+  version: null,
+  status: "ready",
+  auth: { status: "authenticated" },
+  checkedAt: "2026-11-06T00:00:00.000Z",
+  availability: "available",
+  slashCommands: [],
+  skills: [],
+  models: models.map(({ slug, levels }) => ({
+    slug,
+    name: slug,
+    isCustom: false,
+    capabilities: reasoning(...levels),
+  })),
+});
+const switchProviders = [
+  signedIn("codex", "codex", [
+    { slug: "gpt-5.6-terra", levels: ["medium", "high"] },
+    { slug: "gpt-5.6-sol", levels: ["high"] },
+  ]),
+  signedIn("claudeAgent", "claudeAgent", [{ slug: "claude-opus-5", levels: ["high"] }]),
+];
+const selection = (instanceId: string, model: string, effort: string): ModelSelection => ({
+  instanceId: ProviderInstanceId.make(instanceId),
+  model,
+  options: [{ id: "reasoningEffort", value: effort }],
+});
+/** As a person's client sends it through `CommandAdmission`. */
+const asPerson = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  effect.pipe(
+    Effect.provideService(AgentPersonaModelSwitch, { providers: Effect.succeed(switchProviders) }),
+  );
+const switchHarness = () =>
+  makeHarness({
+    providers: switchProviders,
+    adapters: [
+      launchTestAdapter(
+        ProviderInstanceId.make("claudeAgent"),
+        ProviderDriverKind.make("claudeAgent"),
+      ),
+    ],
+  });
+const switchLayer = (harness: ReturnType<typeof makeHarness>) =>
+  harness.layer.pipe(
+    Layer.provideMerge(
+      personaLibraryLayer("j5-switch-persona-", [
+        BUILT_IN_AGENT_PERSONAS.scout,
+        BUILT_IN_AGENT_PERSONAS.builder,
+      ]),
+    ),
+  );
+let switchCommand = 0;
+const setModel = (threadId: ThreadId, modelSelection: ModelSelection): OrchestrationV2Command => {
+  switchCommand += 1;
+  return {
+    type: "thread.model-selection.set",
+    commandId: CommandId.make(`command:switch:${switchCommand}`),
+    threadId,
+    modelSelection,
+  };
+};
+
+it.effect("lets a person switch a persona worker's model, and checks the switch again", () => {
+  const harness = switchHarness();
+  return Effect.gen(function* () {
+    const launches = yield* ThreadLaunch.ThreadLaunchService;
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    const library = yield* makeAgentPersonaLibrary;
+    const launched = yield* launches.launch({
+      ...launchInput({ command: "command:switch:scout", thread: "thread:switch:scout" }),
+      agentPersona: { personaId: "scout" },
+    });
+    const launchedAssignment = launched.projection.thread.agentPersonaAssignment!;
+    const launchedRuntime = yield* resolveAgentPersonaRuntime(launched.projection.thread, library);
+
+    // Off the persona's list, on the same provider: allowed, and no entry index.
+    const terraMedium = selection("codex", "gpt-5.6-terra", "medium");
+    yield* asPerson(threads.dispatch(setModel(launched.threadId, terraMedium)));
+    const { resolvedEntryIndex: _entry, ...withoutEntry } = launchedAssignment;
+    assert.deepEqual((yield* threads.getThreadShell(launched.threadId))?.agentPersonaAssignment, {
+      ...withoutEntry,
+      resolvedRoute: "override",
+      resolvedModelSelection: terraMedium,
+      modelSwitchedBy: "person",
+    });
+
+    // Across providers, through a person's message: upstream's provider switch, and the
+    // assignment names the list entry the new model matches.
+    const opus = selection("claudeAgent", "claude-opus-5", "high");
+    yield* asPerson(
+      threads.dispatch({
+        type: "message.dispatch",
+        createdBy: "user",
+        creationSource: "web",
+        commandId: CommandId.make("command:switch:scout:message"),
+        threadId: launched.threadId,
+        messageId: MessageId.make("message:switch:scout"),
+        text: "Carry on on Claude",
+        attachments: [],
+        modelSelection: opus,
+        dispatchMode: { type: "start_immediately" },
+      }),
+    );
+    const projection = yield* threads.getThreadProjection(launched.threadId);
+    assert.deepEqual(projection.thread.modelSelection, opus);
+    assert.deepInclude(projection.thread.agentPersonaAssignment, {
+      definitionDigest: launchedAssignment.definitionDigest,
+      pickSource: { kind: "person" },
+      resolvedRoute: "override",
+      resolvedEntryIndex: 1,
+      resolvedDriver: ProviderDriverKind.make("claudeAgent"),
+      resolvedModelSelection: opus,
+      modelSwitchedBy: "person",
+    });
+    assert.deepEqual(projection.runs.at(-1)?.modelSelection, opus);
+    assert.equal(projection.thread.providerInstanceId, ProviderInstanceId.make("claudeAgent"));
+    // The next turn runs on the new model with the launch snapshot's instructions.
+    const runtime = yield* resolveAgentPersonaRuntime(projection.thread, library);
+    assert.equal(runtime.agentPersonaInstructions, launchedRuntime.agentPersonaInstructions);
+
+    // A model no signed-in provider offers is refused, and the worker stays on its model.
+    const notOffered = yield* asPerson(
+      threads.dispatch(setModel(launched.threadId, selection("codex", "gpt-4-retired", "high"))),
+    ).pipe(Effect.flip);
+    assert.equal(
+      notOffered.cause,
+      "Codex does not advertise gpt-4-retired. The worker stays on its current model.",
+    );
+    const missingProvider = yield* asPerson(
+      threads.dispatch(setModel(launched.threadId, selection("cursor", "composer-2", "high"))),
+    ).pipe(Effect.flip);
+    assert.equal(
+      missingProvider.cause,
+      "No signed-in provider offers composer-2 on cursor. The worker stays on its current model.",
+    );
+
+    // An agent's change, through a thread command or a message's selection, is refused.
+    const agentSet = yield* threads
+      .dispatch(setModel(launched.threadId, terraMedium))
+      .pipe(Effect.flip);
+    assert.equal(agentSet.cause, AGENT_MODEL_SWITCH_REFUSAL);
+    const agentMessage = yield* threads
+      .dispatch({
+        type: "message.dispatch",
+        createdBy: "agent",
+        creationSource: "mcp",
+        commandId: CommandId.make("command:switch:scout:agent-message"),
+        threadId: launched.threadId,
+        messageId: MessageId.make("message:switch:scout:agent"),
+        text: "Move to Codex",
+        attachments: [],
+        modelSelection: terraMedium,
+        dispatchMode: { type: "queue_after_active" },
+      })
+      .pipe(Effect.flip);
+    assert.equal(agentMessage.cause, AGENT_MODEL_SWITCH_REFUSAL);
+    assert.deepEqual(
+      (yield* threads.getThreadShell(launched.threadId))?.agentPersonaAssignment
+        ?.resolvedModelSelection,
+      opus,
+    );
+  }).pipe(Effect.provide(switchLayer(harness)), Effect.scoped);
+});
+
+it.effect("refuses a switch to a provider that can't enforce the persona's access", () => {
+  const harness = switchHarness();
+  return Effect.gen(function* () {
+    const launches = yield* ThreadLaunch.ThreadLaunchService;
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    const launched = yield* launches.launch({
+      ...launchInput({ command: "command:switch:builder", thread: "thread:switch:builder" }),
+      agentPersona: { personaId: "builder" },
+    });
+    const refused = yield* asPerson(
+      threads.dispatch(
+        setModel(launched.threadId, selection("claudeAgent", "claude-opus-5", "high")),
+      ),
+    ).pipe(Effect.flip);
+    assert.equal(
+      refused.cause,
+      "Claude can't enforce Workspace-write access, which this persona runs with. Pick a model on Codex. The worker stays on its current model.",
+    );
+    assert.deepEqual(
+      (yield* threads.getThreadShell(launched.threadId))?.agentPersonaAssignment,
+      launched.projection.thread.agentPersonaAssignment,
+    );
+  }).pipe(Effect.provide(switchLayer(harness)), Effect.scoped);
+});
+
+it.effect("lets a person switch a reviewer onto its author's model, and queues a switch", () => {
+  const harness = switchHarness();
+  return Effect.gen(function* () {
+    const launches = yield* ThreadLaunch.ThreadLaunchService;
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    const launched = yield* launches.launch({
+      ...launchInput({ command: "command:switch:source", thread: "thread:switch:source" }),
+      agentPersona: { personaId: "scout" },
+    });
+    const reviewIndependence = {
+      outcome: "different-model",
+      authorModels: ["claude-opus-5"],
+      authorThreadIds: [],
+      partlyUnknown: false,
+      modelChosenBy: "server",
+    } as const;
+    const reviewer = ThreadId.make("thread:switch:reviewer");
+    const launchedAssignment = launched.projection.thread.agentPersonaAssignment!;
+    yield* threads.dispatch({
+      type: "thread.create",
+      createdBy: "user",
+      creationSource: "web",
+      commandId: CommandId.make("command:switch:reviewer:create"),
+      threadId: reviewer,
+      projectId,
+      title: "Reviewer",
+      modelSelection: launchedAssignment.resolvedModelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      agentPersonaAssignment: {
+        ...launchedAssignment,
+        authorityPolicy: "read-only",
+        reviewIndependence,
+      },
+    });
+    const send = (id: string, modelSelection?: ModelSelection) =>
+      asPerson(
+        threads.dispatch({
+          type: "message.dispatch",
+          createdBy: "user",
+          creationSource: "web",
+          commandId: CommandId.make(`command:switch:reviewer:${id}`),
+          threadId: reviewer,
+          messageId: MessageId.make(`message:switch:reviewer:${id}`),
+          text: id,
+          attachments: [],
+          ...(modelSelection === undefined ? {} : { modelSelection }),
+          dispatchMode: { type: "queue_after_active" },
+        }),
+      );
+    // No provider runs here, so the first run stays active and the switch queues behind it.
+    yield* send("first");
+    const opus = selection("claudeAgent", "claude-opus-5", "high");
+    yield* send("switch", opus);
+    const queued = yield* threads.getThreadProjection(reviewer);
+    assert.deepEqual(
+      queued.thread.agentPersonaAssignment?.resolvedModelSelection,
+      launchedAssignment.resolvedModelSelection,
+    );
+    assert.deepEqual(queued.runs.at(-1)?.status, "queued");
+    assert.deepEqual(queued.runs.at(-1)?.modelSelection, opus);
+
+    // Onto the author's model directly: allowed, and the creation-time check stays as recorded.
+    yield* asPerson(threads.dispatch(setModel(reviewer, opus)));
+    assert.deepInclude((yield* threads.getThreadShell(reviewer))?.agentPersonaAssignment, {
+      resolvedModelSelection: opus,
+      reviewIndependence,
+      modelSwitchedBy: "person",
+    });
+  }).pipe(Effect.provide(switchLayer(harness)), Effect.scoped);
+});
+
+it.effect("follows a queued switch onto the assignment when its run starts", () => {
+  const harness = switchHarness();
+  return Effect.gen(function* () {
+    const launches = yield* ThreadLaunch.ThreadLaunchService;
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    const launched = yield* launches.launch({
+      ...launchInput({ command: "command:switch:queued", thread: "thread:switch:queued" }),
+      agentPersona: { personaId: "scout" },
+    });
+    const threadId = launched.threadId;
+    const send = (id: string, modelSelection?: ModelSelection) =>
+      asPerson(
+        threads.dispatch({
+          type: "message.dispatch",
+          createdBy: "user",
+          creationSource: "web",
+          commandId: CommandId.make(`command:switch:queued:${id}`),
+          threadId,
+          messageId: MessageId.make(`message:switch:queued:${id}`),
+          text: id,
+          attachments: [],
+          ...(modelSelection === undefined ? {} : { modelSelection }),
+          dispatchMode: { type: "queue_after_active" },
+        }),
+      );
+    yield* send("first");
+    const opus = selection("claudeAgent", "claude-opus-5", "high");
+    yield* send("switch", opus);
+    // Stop ends the active run and holds the queue; resuming starts the queued run.
+    yield* threads.dispatch({
+      type: "thread.stop",
+      commandId: CommandId.make("command:switch:queued:stop"),
+      threadId,
+    });
+    yield* threads.dispatch({
+      type: "queue.resume",
+      commandId: CommandId.make("command:switch:queued:resume"),
+      threadId,
+    });
+    const projection = yield* threads.getThreadProjection(threadId);
+    assert.deepEqual(
+      projection.runs.map(({ status, modelSelection }) => [status, modelSelection.model]),
+      [
+        ["interrupted", "gpt-5.6-terra"],
+        ["starting", "claude-opus-5"],
+      ],
+    );
+    assert.deepEqual(projection.thread.modelSelection, opus);
+    assert.deepInclude(projection.thread.agentPersonaAssignment, {
+      resolvedModelSelection: opus,
+      resolvedDriver: ProviderDriverKind.make("claudeAgent"),
+      resolvedEntryIndex: 1,
+      modelSwitchedBy: "person",
+    });
+  }).pipe(Effect.provide(switchLayer(harness)), Effect.scoped);
+});
 
 const yamlPersonaFixture = (value: unknown) => yamlStringify(value);
 

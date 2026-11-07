@@ -4,7 +4,10 @@ import { playbookSelectionText } from "@t3tools/client-runtime/j5/playbooks";
 import { AgentPersonaAssignmentControl } from "../../j5/agents/AgentPersonaAssignmentControl";
 import { AgentDraftPicker } from "../../j5/agents/AgentDraftPicker";
 import { composerModelSelectionForThread } from "@t3tools/client-runtime/j5/agent-personas";
-import { composerProviderCandidates } from "../../j5/agents/personaComposerSelection";
+import {
+  composerProviderCandidates,
+  usePersonaRouteToFollow,
+} from "../../j5/agents/personaComposerSelection";
 import { useDraftAgentAssignment } from "../../j5/agents/useDraftAgentAssignment";
 import { useComposerTypingGuard } from "./useComposerTypingGuard";
 import { insertAttachmentReferencesForDraft } from "./composerAttachmentReferences";
@@ -931,7 +934,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     environmentId,
     props.isLocalDraftThread,
   );
-  const effectiveAgentAssignment = agentPersonaAssignment ?? draftAgent.assignment ?? undefined;
+  const followedAgentAssignment = usePersonaRouteToFollow(
+    agentPersonaAssignment,
+    composerDraftTarget,
+  );
+  const routeAssignment = followedAgentAssignment ?? draftAgent.assignment ?? undefined;
   const {
     providerInstanceEntries,
     selectedProviderEntry,
@@ -952,7 +959,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     projectModelSelection: activeProjectDefaultModelSelection,
     promptInjectionState: getComposerPromptInjectionState(prompt),
     // J5: a saved agent's route picks the provider (see personaComposerSelection).
-    candidateInstanceIds: composerProviderCandidates(effectiveAgentAssignment, [
+    candidateInstanceIds: composerProviderCandidates(routeAssignment, [
       composerDraft.activeProvider ?? null,
       activeThread?.runtime?.providerInstanceId,
       activeThreadModelSelection?.instanceId,
@@ -1018,9 +1025,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     provider: selectedProviderStatus,
     interactionMode: requestedInteractionMode,
   });
-  // J5: a saved-agent thread always sends its immutable launch route (see personaComposerSelection).
+  // J5: a persona thread sends its current model until a person picks another (personaComposerSelection).
   const selectedModelSelection: ModelSelection = composerModelSelectionForThread(
-    agentPersonaAssignment,
+    followedAgentAssignment,
     createModelSelection(selectedInstanceId, selectedModel, selectedModelOptionsForDispatch),
   );
   const selectedModelForPicker = selectedModel;
@@ -2536,18 +2543,23 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const iconOnlyBlockCount = composerControlsCollapsed
     ? restingControlsIconOnlyBlockCount
     : expandedControlsIconOnlyBlockCount;
-  const composerControls = effectiveAgentAssignment ? (
+  const draftPersona = agentPersonaAssignment ? null : draftAgent.assignment;
+  const composerControls = draftPersona ? (
     <AgentPersonaAssignmentControl
-      assignment={effectiveAgentAssignment}
+      assignment={draftPersona}
       environmentId={environmentId}
-      {...(agentPersonaAssignment
-        ? { threadId: props.routeThreadRef.threadId }
-        : { onClear: draftAgent.clear })}
+      onClear={draftAgent.clear}
     />
   ) : (
     <ComposerControlsBar
       draftAgentPicker={
-        draftAgent.enabled ? (
+        agentPersonaAssignment ? (
+          <AgentPersonaAssignmentControl
+            assignment={agentPersonaAssignment}
+            environmentId={environmentId}
+            threadId={props.routeThreadRef.threadId}
+          />
+        ) : draftAgent.enabled ? (
           <AgentDraftPicker
             environmentId={environmentId}
             draftKey={draftAgent.draftKey}
@@ -2555,6 +2567,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           />
         ) : null
       }
+      modelOnly={agentPersonaAssignment !== undefined}
       environmentId={environmentId}
       routeKind={routeKind}
       routeThreadRef={routeThreadRef}

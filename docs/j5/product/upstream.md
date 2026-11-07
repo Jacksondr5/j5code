@@ -220,13 +220,13 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Decided:** Tyler, who owns it, in PR #109 (2026-09-05); Jackson approved it on 2026-09-28. Recorded in FORK.md case 33.
 
-#### D18. `@` offers saved personas first, and persona threads pin their model
+#### D18. `@` offers saved personas first, and persona threads fix their access
 
 **Upstream:** typing `@` in the composer opens a picker for referencing context in the message: files in the workspace and, in V2, other threads. Below the text box, the composer has a row of controls for the thread: the model picker (for example "Claude Opus 5.5"), reasoning effort, access mode (for example "Supervised"), and plan mode.
 
-**J5:** `@` also lists saved personas, first, and picking one runs that persona. In a persona's thread, that whole row of controls is replaced by a chip naming the persona, because the persona fixes its own model, effort, and access, and the server rejects any change.
+**J5:** `@` also lists saved personas, first, and picking one runs that persona. In a persona's thread, the row shows a chip naming the persona, then upstream's model picker and reasoning effort; access mode and plan mode are left out, because the persona's access sets them. A new task started as a persona shows the persona and the model it will start on in place of the whole row.
 
-**Why:** Jackson typed `@scout` expecting a persona and got files (2026-09-13); Bryant made the picker list saved personas (2026-09-14). A persona's route is fixed and enforced by the server, so a thread's model picker would only produce failed sends. No reason is recorded for listing personas ahead of threads.
+**Why:** Jackson typed `@scout` expecting a persona and got files (2026-09-13); Bryant made the picker list saved personas (2026-09-14). A persona's access is enforced by the server, so its mode controls would only lie. Its model was fixed too until 2026-11-06, when people became able to switch it, with the server checking each switch ([#783](https://github.com/Jacksondr5/j5code/issues/783)). No reason is recorded for listing personas ahead of threads.
 
 **Consequences:** the `@` menu and the controls row are edits to upstream's composer, one small addition per client. Each advance checks upstream's mention ordering and its composer controls, and personas route only to Codex and Claude.
 
