@@ -154,10 +154,10 @@ A copy of real data is for a server the developer will use, or for rehearsing a 
   });
   ```
 
-- Upon request, user-visible frontend changes should get one integrated pass in a real client: `test-t3-app` for web, `test-t3-mobile` for mobile. The primary agent does this once after integrating. Subagents do not launch their own dev servers. Ask permission before doing computer use or spinning up browsers.
+- Upon request, user-visible frontend changes should get one integrated pass in a real client: `test-t3-app` for web, the Mobile section of `j5-live-test` for mobile. The primary agent does this once after integrating. Subagents do not launch their own dev servers. Ask permission before doing computer use or spinning up browsers.
 - When you are asked or authorized to live-test, the `j5-live-test` skill sets up a safe server and says what to cover and how to report.
 
-For authorized mobile verification, a missing or outdated native client is an install step, not a blocker. Run `vp run mobile:install <ios|android> [device-id]` on the device host before starting Metro; it targets the only booted simulator or connected Android device when the id is omitted. It installs the dev client for this checkout's native fingerprint from the shared cache in seconds and builds only when no machine has built it yet, so prefer it over `expo run:*`, `xcodebuild`, or `gradlew`, which rebuild from scratch. Its stdout is one JSON line; build output goes to the log it names. See `test-t3-mobile` for the full workflow.
+For authorized mobile verification, follow the Mobile section of `j5-live-test`. A missing or outdated native client is an install step there, not a blocker: its `mobile-open` installs the dev client for this checkout's native fingerprint from the cache, and its `mobile-build` builds one through `mobile:install` when no build is cached. Prefer those over `expo run:*`, `xcodebuild`, or `gradlew`, which rebuild from scratch. `test-t3-mobile` covers driving the device; in J5, pair through `mobile-open`, not its `pair-client.sh`.
 
 ## Evals
 

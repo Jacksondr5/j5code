@@ -1,6 +1,6 @@
 ---
 name: j5-live-test
-description: Live-test a J5 Code change on a real server with real agents. Use when unit tests cannot prove the change, such as UI flows, agent turns, agent-to-agent messages, Crews, Playbooks, peering, first run, or PR screenshots and videos. Covers asking for a test and running one. Sets up a safe test server with one script, then hands the browser steps to test-t3-app.
+description: Live-test a J5 Code change on a real server with real agents. Use when unit tests cannot prove the change, such as UI flows, agent turns, agent-to-agent messages, Crews, Playbooks, peering, first run, the native app on a device, or PR screenshots and videos. Covers asking for a test and running one. Sets up a safe test server with one script, then hands the browser steps to test-t3-app and the device steps to test-t3-mobile.
 ---
 
 # Live-test J5 Code
@@ -148,6 +148,7 @@ A worktree holds one setup at a time. Pass a flag to the first start, or to
 | The same, with Remote polling Local             | `--peer --poll`                      |
 | A base and a head server for before/after shots | `--base <ref>`                       |
 | The head build opening a home Base wrote        | `upgrade`, in a `--base <ref>` build |
+| The native app on a device                      | `--mobile ios`, `android` or `phone` |
 
 - **After any `rebuild`**, a tab that was open before it can stay on the
   pairing form. Press "Reload app" there.
@@ -172,6 +173,120 @@ A worktree holds one setup at a time. Pass a flag to the first start, or to
   with `preview_evaluate`: `indexedDB.deleteDatabase("t3code:connection-runtime")`.
   After `upgrade`, `guest` adds people to the upgraded server; do not run the
   base checkout's own script.
+
+### Mobile
+
+Add `--mobile ios`, `--mobile android` or `--mobile phone` to the first start,
+or to `rebuild`. It starts the usual test server and Metro, claims a test
+device for you, and prints which device to open. iOS runs on this Mac, or on a
+Mac reached over SSH; Android runs on this machine.
+
+Verified live so far: Android on Linux, and iOS on a Mac reached over SSH. Not
+yet run: iOS on the same Mac as the server (#857), and Android on macOS.
+
+#### First-time setup
+
+- **Android on Linux:** the Android SDK with `emulator`, `platform-tools` and
+  `cmdline-tools`, one system image for the machine's ABI (x86_64, or arm64-v8a
+  on an arm64 host), Java for `avdmanager`, and your user in the `kvm` group.
+- **Android on macOS:** the same SDK, with an image for the Mac's ABI (arm64 on
+  Apple silicon, x86_64 on Intel); no KVM.
+- **iOS (a Mac):** Xcode, opened once so it installs its Simulator component,
+  CocoaPods, and the pool's Simulators (`j5-test-1`, `j5-test-2`, ...) created
+  in Xcode.
+- Put the SDK at `ANDROID_HOME` or its usual place, then ask the developer to
+  restart J5 Code (never restart it yourself: it is the app you run in): the
+  server behind the Device panel looks for the SDK only when it starts, so
+  until then `device_list` shows no Android. `adb` need not be on `PATH`.
+
+#### A mobile test
+
+Steps 2 and 5 use J5 Code's device tools (`device_open`, `device_close`,
+`device_screenshot`), the ones `test-t3-mobile` drives. They exist only for an
+agent running inside J5 Code; without them, stop and report.
+
+1. `node scripts/j5/setup-agent-live-test.ts --mobile android` (or `ios`).
+2. When setup has finished and printed the Mobile block (the last part of its
+   output), call `device_open` with the host and device it names. On Android the
+   script has already booted the emulator; on iOS `device_open` boots the
+   Simulator. If setup says the emulator is still booting, run the setup command
+   from step 1 again (not `rebuild`, which deletes the emulator) before calling
+   `device_open`.
+3. Run `node scripts/j5/setup-agent-live-test.ts mobile-open`. It installs the
+   dev client for this checkout, opens it against your Metro, and pairs it as
+   the test owner, so the app lists the test project's threads. The first list
+   can take about 20 seconds: "Loading threads..." with "No threads yet" means
+   it is still loading, so take another screenshot before running it again. Run
+   it again whenever the app needs reloading or pairing again. Do not pair with
+   `test-t3-mobile`'s `pair-client.sh`: it pairs a device that belongs to no
+   one, which J5 shows as an empty app.
+4. Drive the app with the `agent-device` command that `device_open` returned,
+   as [test-t3-mobile](../test-t3-mobile/SKILL.md) describes, and look with
+   `device_screenshot`.
+5. When you finish, run `agent-device close` with the flags `device_open`
+   returned (without `--shutdown`), then call `device_close`, then run `stop`.
+   `device_close` does not end the agent-device session, and a session left
+   open holds the device against the next tester. If you never ran
+   `agent-device` yourself, `agent-device close` prints `SESSION_NOT_FOUND`,
+   which is fine. `stop` resets the device (a Simulator is erased, an Android
+   AVD deleted) and releases it; it can take about 25 seconds and print
+   "killing the group".
+
+Machine settings live in `$XDG_CONFIG_HOME/j5code/mobile-rig.json` (normally
+`~/.config/j5code/mobile-rig.json`), or the file `J5_MOBILE_RIG_CONFIG` names,
+never in the repository. Without the file, the
+defaults serve one machine. Setup names the setting to change when a default
+does not fit. To see the defaults on a machine that has a config, point
+`XDG_CONFIG_HOME` at an empty directory; `J5_MOBILE_RIG_CONFIG` must name a
+file that exists.
+
+| Setting          | What it sets                                     | Default                                                  |
+| ---------------- | ------------------------------------------------ | -------------------------------------------------------- |
+| `ios.host`       | `"local"`, or `{ "ssh", "checkout", "envFile" }` | this Mac on macOS; none elsewhere                        |
+| `ios.simulators` | a list of names: Simulators the rig may erase    | names starting `j5-test-`                                |
+| `ios.maxBooted`  | Simulators booted on the iOS host at once        | 1                                                        |
+| `android.sdk`    | the Android SDK                                  | `ANDROID_HOME`, `ANDROID_SDK_ROOT`, then the usual place |
+| `android.slots`  | emulators at once                                | 2                                                        |
+| `ports`          | `{ "first", "last" }` for the server and Metro   | 20000-29999                                              |
+| `phone.host`     | the address your phone reaches                   | `"tailscale"`                                            |
+
+- Devices come from a pool. When it is taken, setup refuses and names who holds
+  each device; it does not wait. Use only the device you claimed: `stop` erases
+  it. Create the pool's Simulators in Xcode (by default, any name starting
+  `j5-test-`); the rig makes and deletes its own AVDs, named `j5-tester-1`,
+  `j5-tester-2`, ... and shared by the machine's worktrees. A Simulator booted
+  outside the pool counts against `ios.maxBooted`. Claims coordinate the
+  worktrees on one machine, not two machines sharing an iOS host.
+- On Android, open the emulator by the `emulator-<port>` serial the script
+  prints, never by its AVD name: asked to boot an AVD, the Device panel opens
+  whichever emulator already runs, which can be another tester's.
+- When `mobile-open` says there is no dev client for this checkout's native
+  fingerprint (a native dependency changed, or that host has not built it
+  yet), build it with
+  `node scripts/j5/setup-agent-live-test.ts mobile-build android` (or `ios`),
+  in the background: a first build takes 6 to 15 minutes. Then run
+  `mobile-open` again.
+- An iOS host needs Xcode, and CocoaPods for a first build (`pod install`). One
+  reached over SSH also needs git, and node and `vp` in a login shell (or
+  `ios.host.envFile` naming the file that adds them). The rig reaches the
+  test server through an SSH tunnel, builds from your last commit in its own
+  checkout there (commit native changes first), and runs one build at a time.
+  When the host does not answer, setup says "iOS host offline".
+- If `xcrun` on the iOS host prints "Install Failed: Authorization is
+  required", Xcode's Simulator component is out of date, and agent-device
+  cannot build its runner, so taps and snapshots fail. Someone with the Mac's
+  admin password must open Xcode once.
+- The first `device_open` on a Simulator can take a couple of minutes while
+  agent-device builds its test runner.
+- On Android, the first launch can show "Could not import shared content":
+  press Retry. Right after a tap, `snapshot` can return the previous screen:
+  take another before trusting it. On iOS, tap the composer with `click`,
+  then `type`; `fill` can miss it.
+- `--mobile phone` is for your own phone: there is no device to claim, and
+  `mobile-open` prints two links to open on the phone, one for the dev client
+  and one to pair. The phone must already have J5 Code Dev for the fingerprint
+  it prints, and reach `phone.host` on the configured ports. The server
+  listens on every interface in this mode.
 
 ### Live turns
 
