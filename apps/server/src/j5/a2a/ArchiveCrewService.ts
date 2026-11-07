@@ -15,7 +15,11 @@ import {
 } from "../../auth/utils.ts";
 import type { CrewArchiveWorktree } from "@t3tools/contracts/j5";
 import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
-import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
+import {
+  AgentCrewInstanceService,
+  crewArchiveThreads,
+  type AgentCrewInstance,
+} from "./AgentCrewInstanceService.ts";
 import {
   ArchiveAgentService,
   type ArchiveAgentConsequenceFacts,
@@ -337,7 +341,8 @@ export const layer = Layer.effect(
       instance: AgentCrewInstance,
     ) {
       const members: Array<ArchiveCrewMemberFacts> = [];
-      for (const member of instance.members) {
+      // A member the Captain replaced retires with the Crew its worktree was made for.
+      for (const member of crewArchiveThreads(instance)) {
         const state = yield* archiveAgent
           .readFacts({
             projectId: instance.projectId,

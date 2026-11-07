@@ -375,7 +375,11 @@ function FleetNodeRows(
         const thread = threadFor(props.threadsByKey, environmentId, agent);
         const displayName = thread?.title ?? agent.displayName;
         return {
-          seat: agent.crew?.seat ?? agent.participantId,
+          seat:
+            agent.crew?.seat ??
+            (agent.replaced === undefined
+              ? agent.participantId
+              : `${agent.replaced.seat} (replaced)`),
           participant:
             displayName === null
               ? { displayName: "Unnamed participant", tooltipParticipantId: agent.participantId }
@@ -485,7 +489,15 @@ function FleetNodeRows(
                         onClick={(event) => {
                           event.preventDefault();
                           event.stopPropagation();
-                          void archive(crew, seats);
+                          // Members the Captain replaced retire with the Crew they left.
+                          void archive(crew, [
+                            ...seats,
+                            ...node.children
+                              .map((child) => child.row)
+                              .filter(
+                                (row) => row.agent.replaced?.crewInstanceId === crew.crewInstanceId,
+                              ),
+                          ]);
                         }}
                         size="xs"
                         variant="ghost"
@@ -716,6 +728,18 @@ export function FleetRowItem(
           {props.captainOf !== undefined && props.captainOf.length > 0 ? (
             <CaptainMark title={`Commands ${props.captainOf.join(", ")}`} />
           ) : null}
+          {agent.replaced === undefined ? null : (
+            <Tooltip>
+              <TooltipTrigger
+                render={<span className="min-w-0 truncate text-xs text-muted-foreground" />}
+              >
+                Replaced by {agent.replaced.replacedBy}
+              </TooltipTrigger>
+              <TooltipPopup>
+                Was seat {agent.replaced.seat} of crew {agent.replaced.crewName}
+              </TooltipPopup>
+            </Tooltip>
+          )}
         </span>
         {/* A placement tree lives in one project, so only its root names it. */}
         {props.row.depth === 0 ? <ProjectLabel {...props} agent={agent} /> : <span />}
