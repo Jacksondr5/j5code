@@ -28,7 +28,11 @@ import { EnvironmentAuthorizationError } from "./auth.ts";
 import { EnvironmentId, RuntimeRequestId, ThreadId } from "./baseSchemas.ts";
 import { ChatAttachment } from "./chatAttachment.ts";
 import { J5ActionError } from "./j5/actionError.ts";
-import { AgentPersonaEscalationView, AgentPersonaId } from "./j5/agentPersona.ts";
+import {
+  AgentPersonaDraftView,
+  AgentPersonaEscalationView,
+  AgentPersonaId,
+} from "./j5/agentPersona.ts";
 
 export const HumanInboxItem = Schema.Struct({
   personId: Schema.String,
@@ -50,6 +54,8 @@ export const HumanInboxItem = Schema.Struct({
   answeredBy: Schema.optionalKey(Schema.NullOr(Schema.String)),
   /** A refused persona launch this ask escalates, as the server recorded it. */
   escalation: Schema.optionalKey(AgentPersonaEscalationView),
+  /** A persona draft this ask carries for the Owner's "Save persona"; never with `escalation`. */
+  personaDraft: Schema.optionalKey(AgentPersonaDraftView),
 });
 export type HumanInboxItem = typeof HumanInboxItem.Type;
 export type ScopedHumanInboxItem = HumanInboxItem & { readonly environmentId: EnvironmentId };
@@ -91,6 +97,13 @@ export const AllowPersonaOnceRequest = Schema.Struct({
   clientRequestId: Schema.String.check(Schema.isNonEmpty()),
 });
 export type AllowPersonaOnceRequest = typeof AllowPersonaOnceRequest.Type;
+
+/** The Owner's "Save persona" on an ask carrying an agent's persona draft. */
+export const SavePersonaDraftRequest = Schema.Struct({
+  exchangeId: Schema.String.check(Schema.isNonEmpty()),
+  clientRequestId: Schema.String.check(Schema.isNonEmpty()),
+});
+export type SavePersonaDraftRequest = typeof SavePersonaDraftRequest.Type;
 
 export const OpenInboxCountResponse = Schema.Struct({
   personId: Schema.String,
@@ -1171,6 +1184,7 @@ export const J5_CLIENT_ACTION_WS_METHODS = {
   respondCrewRuntimeRequest: "j5.crews.respondRuntimeRequest",
   answerHumanExchange: "j5.inbox.answer",
   allowPersonaOnce: "j5.inbox.allowPersonaOnce",
+  savePersonaDraft: "j5.inbox.savePersonaDraft",
   answerCrewWorktreeCleanup: "j5.crews.answerWorktreeCleanup",
   issuePeerCredential: "j5.peers.issueCredential",
   addPeer: "j5.peers.add",
@@ -1215,6 +1229,11 @@ export const J5ClientActionRpcGroup = RpcGroup.make(
   }),
   Rpc.make(J5_CLIENT_ACTION_WS_METHODS.allowPersonaOnce, {
     payload: AllowPersonaOnceRequest,
+    success: AnswerHumanExchangeResponse,
+    error: clientActionError,
+  }),
+  Rpc.make(J5_CLIENT_ACTION_WS_METHODS.savePersonaDraft, {
+    payload: SavePersonaDraftRequest,
     success: AnswerHumanExchangeResponse,
     error: clientActionError,
   }),

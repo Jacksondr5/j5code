@@ -1076,6 +1076,9 @@ describe("agent usage, origin, and library folders", () => {
     expect(agentPersonaOriginLabel({ kind: "bundled" })).toBe("Bundled example");
     expect(agentPersonaOriginLabel({ kind: "imported" })).toBe("Personal");
     expect(
+      agentPersonaOriginLabel({ kind: "imported" }, "/srv/state/team-library/reviewer.yaml"),
+    ).toBe("Overrides team-library");
+    expect(
       agentPersonaOriginLabel({ kind: "folder", path: "/srv/state/team-library/a.yaml" }),
     ).toBe("Folder · team-library");
     const rows = presentAgentPersonaCatalog({

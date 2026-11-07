@@ -1,5 +1,7 @@
 import * as FileSystem from "effect/FileSystem";
+import { AgentPersonaDrafts } from "../../agents/agentPersonaDrafts.ts";
 import { AgentPersonaEscalations } from "../../agents/agentPersonaEscalation.ts";
+import { agentPersonaDraftsTestLayer } from "../../test-support/agentPersonaDrafts.ts";
 import { agentPersonaEscalationsTestLayer } from "../../test-support/agentPersonaEscalations.ts";
 import * as Path from "effect/Path";
 import { stringify as toYaml } from "yaml";
@@ -249,6 +251,7 @@ const unusedLifecycleDependencies = Layer.mergeAll(
   Layer.mock(PeerRegistryService)({}),
   Layer.mock(ThreadRegistration)({}),
   agentPersonaEscalationsTestLayer(),
+  agentPersonaDraftsTestLayer(),
 );
 
 it.effect("namespaces mutating-tool idempotency and sender identity from authenticated scope", () =>
@@ -269,6 +272,8 @@ it.effect("namespaces mutating-tool idempotency and sender identity from authent
       "j5_playbook_save",
       "j5_playbook_start",
       "j5_propose_crew",
+      "j5_propose_persona",
+      "j5_read_persona",
       "j5_request_crew_member",
       "j5_send_message",
       "j5_spawn_agent",
@@ -454,6 +459,7 @@ it.effect(
       const dependencies = Layer.mergeAll(
         noDocumentTextLayer,
         agentPersonaEscalationsTestLayer(),
+        agentPersonaDraftsTestLayer(),
         Layer.succeed(
           A2ASendService,
           A2ASendService.of({
@@ -630,6 +636,49 @@ it.effect(
         const ask = (yield* Ref.get(sends)).at(-1)!;
         assert.equal(ask.message, "May reviewer run?");
         assert.isTrue(ask.freshAsk);
+
+        // An ask carrying a persona draft carries the draft's trusted summary, and only that.
+        const { draftId } = yield* (yield* AgentPersonaDrafts).propose({
+          proposerParticipantId: participantIdForThread(invocation.threadId),
+          proposerThreadId: invocation.threadId,
+          draft: {
+            mode: "create",
+            personaId: "release-notes",
+            fields: {
+              displayName: "Release Notes",
+              description: "Writes release notes.",
+              instructions: "Summarize the merged changes.",
+              access: "read-only",
+              modelRoute: [
+                {
+                  driver: ProviderDriverKind.make("codex"),
+                  model: "gpt-5",
+                  reasoningEffort: "high",
+                },
+              ],
+            },
+          },
+        });
+        const personAsk = {
+          to: personParticipantId,
+          message: "Save release-notes?",
+          expect_reply: true,
+          intent: "Save the release-notes persona?",
+          urgency: "soon",
+        } as const;
+        const both = yield* call({
+          ...personAsk,
+          escalation_id: escalationId,
+          persona_draft_id: draftId,
+        });
+        assert.isTrue(both.isFailure);
+        assert.include(JSON.stringify(both.encodedResult), "not both");
+        assert.isFalse((yield* call({ ...personAsk, persona_draft_id: draftId })).isFailure);
+        // J5's summary rides on the Inbox item, not in the agent's words, and the ask must open
+        // its own exchange so it never lands on another ask's.
+        const draftAsk = (yield* Ref.get(sends)).at(-1)!;
+        assert.equal(draftAsk.message, "Save release-notes?");
+        assert.isTrue(draftAsk.freshAsk);
       }).pipe(Effect.provide(layer));
     }),
 );
@@ -1352,6 +1401,7 @@ it.effect("preflights home before creation and records facts before the one stab
       Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed([]) }),
       permissiveCrewMemberModels,
       agentPersonaEscalationsTestLayer(),
+      agentPersonaDraftsTestLayer(),
       Layer.mock(AgentCrewInstanceService)({ findMembership: () => Effect.succeed(null) }),
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
       Layer.mock(ArchiveCrewService)({}),
@@ -1521,6 +1571,7 @@ it.effect("refuses spawn before thread creation when the caller is a Subagent", 
       Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed([]) }),
       permissiveCrewMemberModels,
       agentPersonaEscalationsTestLayer(),
+      agentPersonaDraftsTestLayer(),
       Layer.mock(AgentCrewInstanceService)({ findMembership: () => Effect.succeed(null) }),
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
       Layer.mock(ArchiveCrewService)({}),
@@ -1780,6 +1831,7 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
       Layer.mock(ProviderRegistry)({ getProviders: Ref.get(personaProviders) }),
       permissiveCrewMemberModels,
       agentPersonaEscalationsTestLayer(),
+      agentPersonaDraftsTestLayer(),
       Layer.mock(AgentCrewInstanceService)({ findMembership: () => Effect.succeed(null) }),
       Layer.mock(ParticipantPlacementService)({}),
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
@@ -2323,6 +2375,7 @@ it.effect("archives a crew only as a unit through its captain with one confirmat
       Layer.mock(ProviderRegistry)({}),
       permissiveCrewMemberModels,
       agentPersonaEscalationsTestLayer(),
+      agentPersonaDraftsTestLayer(),
       Layer.mock(ParticipantPlacementService)({}),
       Layer.mock(AgentCrewInstanceService)({}),
       Layer.mock(CrewProposalService)({}),
@@ -2462,6 +2515,7 @@ it.effect("lists every ordered model entry with structured reasons and chosen in
       Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed([codex]) }),
       permissiveCrewMemberModels,
       agentPersonaEscalationsTestLayer(),
+      agentPersonaDraftsTestLayer(),
       Layer.mock(AgentCrewInstanceService)({ findMembership: () => Effect.succeed(null) }),
       Layer.mock(ParticipantPlacementService)({}),
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
@@ -2557,6 +2611,107 @@ it.effect("lists every ordered model entry with structured reasons and chosen in
   }),
 );
 
+it.effect("reads a team persona and drafts an edit of it without touching the library", () =>
+  Effect.gen(function* () {
+    const dependencies = Layer.mergeAll(
+      Layer.mock(A2ASendService)({}),
+      Layer.mock(A2AHomeRegistrar)({
+        getHomeForThread: (threadId) => Effect.fail(new A2AHomeNotFoundError({ threadId })),
+      }),
+      Layer.mock(A2ALedger)({}),
+      Layer.mock(SpawnCompositionService)({}),
+      threadManagementMock({}),
+      Layer.mock(OrchestratorMcpService)({}),
+      Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed([]) }),
+      permissiveCrewMemberModels,
+      agentPersonaEscalationsTestLayer(),
+      Layer.mock(AgentCrewInstanceService)({ findMembership: () => Effect.succeed(null) }),
+      Layer.mock(ParticipantPlacementService)({}),
+      Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
+      Layer.mock(ArchiveCrewService)({}),
+      Layer.mock(CrewStopService)({}),
+      Layer.mock(CrewProposalService)({}),
+      personaLibraryLayer("j5-mcp-read-persona-", launchablePersonas),
+    ).pipe(Layer.provideMerge(NodeServices.layer));
+    const layer = J5ToolkitHandlersLive.pipe(
+      Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
+      // The drafts store reads the same library the tools do.
+      Layer.provideMerge(agentPersonaDraftsTestLayer()),
+      Layer.provideMerge(dependencies),
+    );
+    yield* Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const config = yield* ServerConfig;
+      const folder = path.join(config.stateDir, "personas");
+      const file = path.join(folder, "team-reviewer.yaml");
+      yield* fs.makeDirectory(folder, { recursive: true });
+      yield* fs.writeFileString(
+        file,
+        toYaml({
+          ...BUILT_IN_AGENT_PERSONAS.scout,
+          id: "team-reviewer",
+          authority: undefined,
+          access: "read-only",
+        }),
+      );
+      const toolkit = yield* J5Toolkit;
+      const handle = (name: "j5_read_persona" | "j5_propose_persona", params: unknown) =>
+        toolkit
+          .handle(name, params as never)
+          .pipe(
+            Stream.unwrap,
+            Stream.run(Sink.last()),
+            Effect.flatMap(Effect.fromOption),
+            Effect.provideService(McpInvocationContext, scope),
+          );
+      const read = yield* handle("j5_read_persona", { persona_id: "team-reviewer" });
+      assert.isFalse(read.isFailure);
+      const persona = read.result as {
+        readonly yaml: string;
+        readonly digest: string;
+        readonly origin: string;
+        readonly folder_file: string | null;
+        readonly overrides_folder: boolean;
+      };
+      assert.deepStrictEqual(
+        [persona.origin, persona.folder_file, persona.overrides_folder],
+        ["folder", file, false],
+      );
+      assert.include(persona.yaml, "id: team-reviewer");
+
+      const proposed = yield* handle("j5_propose_persona", {
+        mode: "edit",
+        persona_id: "team-reviewer",
+        expected_digest: persona.digest,
+        description: "Reviews changes, strictly.",
+      });
+      assert.isFalse(proposed.isFailure, JSON.stringify(proposed.encodedResult));
+      const draft = proposed.result as {
+        readonly summary: string;
+        readonly warnings: ReadonlyArray<string>;
+      };
+      assert.include(draft.summary, '- Description: "');
+      assert.lengthOf(draft.warnings, 2);
+      // Only the Owner's Save persona writes the library; the folder file is never written.
+      const library = yield* makeAgentPersonaLibrary;
+      assert.notInclude((yield* library.catalog()).importedIds, "team-reviewer");
+      assert.notInclude(yield* fs.readFileString(file), "strictly");
+
+      const incomplete = yield* handle("j5_propose_persona", {
+        mode: "create",
+        persona_id: "release-notes",
+        display_name: "Release Notes",
+      });
+      assert.isTrue(incomplete.isFailure);
+      assert.include(JSON.stringify(incomplete.encodedResult), "needs display_name, description");
+      const unknown = yield* handle("j5_read_persona", { persona_id: "nobody" });
+      assert.isTrue(unknown.isFailure);
+      assert.include(JSON.stringify(unknown.encodedResult), "There is no persona nobody here.");
+    }).pipe(Effect.provide(layer));
+  }),
+);
+
 it.effect("routes crew proposals through a captain that is not itself a crew member", () =>
   Effect.gen(function* () {
     const ledgerProjectId = LedgerProjectId.make("project:j5:mcp-propose");
@@ -2624,6 +2779,7 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
       Layer.mock(ProviderRegistry)({}),
       permissiveCrewMemberModels,
       agentPersonaEscalationsTestLayer(),
+      agentPersonaDraftsTestLayer(),
       Layer.mock(AgentCrewInstanceService)({
         findMembership: () => Ref.get(membership),
         listForCaptain: () => Effect.succeed([]),

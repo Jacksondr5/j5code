@@ -52,8 +52,8 @@ import {
   useAnswerAttachments,
 } from "./AnswerAttachments";
 import { answerHumanExchange } from "./humanInboxClient";
-import { AllowPersonaOnceButton } from "./AllowPersonaOnceButton";
 import { J5RecordPanel } from "./J5RecordPanel";
+import { OwnerAskAction } from "./OwnerAskAction";
 import { useScopedParticipantLabels } from "./ParticipantIdentitiesClient";
 import { presentParticipantIdentity } from "@t3tools/client-runtime/j5/participant-identity";
 import { CrewRuntimeRequestsSection } from "../crew/CrewRuntimeRequestsSection";
@@ -317,6 +317,11 @@ function OpenInboxItem({
               <J5RecordPanel text={item.escalation.summary} />
             </div>
           )}
+          {item.personaDraft === undefined ? null : (
+            <div className="mt-3">
+              <J5RecordPanel text={item.personaDraft.summary} />
+            </div>
+          )}
           <div className="mt-4 flex flex-col gap-3">
             <Textarea
               aria-label={`Answer ${item.intent}`}
@@ -353,7 +358,7 @@ function OpenInboxItem({
                 </p>
               ) : (
                 <div className="flex flex-wrap items-center justify-end gap-2">
-                  <AllowPersonaOnceButton
+                  <OwnerAskAction
                     disabled={!item.sourceReady || pendingExchangeId !== null}
                     environmentId={item.environmentId}
                     item={item}

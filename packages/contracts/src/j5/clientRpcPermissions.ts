@@ -56,6 +56,8 @@ export const J5_CLIENT_GUARDED_RPC_SCOPES = {
   [J5_CLIENT_ACTION_WS_METHODS.answerHumanExchange]: AuthOrchestrationOperateScope,
   // Letting a blocked persona past its limit once is the Owner's call.
   [J5_CLIENT_ACTION_WS_METHODS.allowPersonaOnce]: AuthSettingsWriteScope,
+  // Saving an agent's persona draft changes the library, which is the Owner's.
+  [J5_CLIENT_ACTION_WS_METHODS.savePersonaDraft]: AuthSettingsWriteScope,
   [J5_CLIENT_ACTION_WS_METHODS.answerCrewWorktreeCleanup]: AuthSettingsWriteScope,
 
   [J5_CLIENT_ACTION_WS_METHODS.issuePeerCredential]: AuthAccessWriteScope,

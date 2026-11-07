@@ -54,6 +54,7 @@ it("names exactly the J5 verbs plus the artifact and Subagent verbs", () => {
     [
       "j5_send_message",
       "j5_clear_own_ask",
+      "j5_propose_persona",
       "j5_propose_crew",
       "j5_request_crew_member",
       "j5_playbook_start",

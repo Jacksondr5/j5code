@@ -3,7 +3,10 @@ import { LIBRARY_FOR_OWNERS } from "@t3tools/client-runtime/j5/sharing";
 import { useOwnedEnvironmentIds, useOwnerSomewhere } from "../sharing/guestAccess";
 import { AgentLibraryToast, type AgentLibraryNotification } from "./AgentLibraryToast";
 import { AgentImportConflictModal } from "./AgentImportConflictModal";
-import { agentPersonaDuplicateDraft } from "@t3tools/client-runtime/j5/agent-personas";
+import {
+  AGENT_PERSONA_OVERRIDE_NOTE,
+  agentPersonaDuplicateDraft,
+} from "@t3tools/client-runtime/j5/agent-personas";
 import { AgentDetailsModal } from "./AgentDetailsModal";
 import { AgentFolderPickerModal } from "./AgentFolderPickerModal";
 import { useSettingsFormNavigation } from "./SettingsFormScreen";
@@ -665,6 +668,11 @@ function PersonaRow(props: {
           {persona.displayName}
         </Text>
         {persona.removed ? <Text className="text-sm text-foreground-muted">Removed</Text> : null}
+        {persona.overridesFolder !== null ? (
+          <Text className="text-sm text-foreground-muted">
+            {persona.originLabel}. {AGENT_PERSONA_OVERRIDE_NOTE}
+          </Text>
+        ) : null}
         {unavailable && persona.blockedReasons.join("; ") ? (
           <Text className="text-sm text-danger-foreground">
             {persona.blockedReasons.join("; ")}
