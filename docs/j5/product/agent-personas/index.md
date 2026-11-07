@@ -95,7 +95,7 @@ Personas without the flag are unaffected: nothing is reordered, recorded, or add
 
 ## Blocked personas
 
-A persona that can't launch stays blocked; it is never recreated as a custom worker to get around its limits (Bryant, 2026-11-06; [#785](https://github.com/Jacksondr5/j5code/issues/785)).
+A persona that can't launch stays blocked; it is never recreated as a custom worker to get around its limits.
 
 - **Codes.** Every launch path (`delegate_task`, `j5_spawn_agent`, Crew seats and additions, the composer) refuses with the same code and text for the same block: `library_empty`, `persona_not_found`, `persona_disabled`, `persona_invalid` (with the definition's repair message), `models_exhausted` (one reason per entry, including an agent pick's model and access limits), and `library_unreadable`. J5's own tools return the code as the failure code; `delegate_task`'s failure codes are upstream's, so there the code leads the message as `[code]`. "No persona fits" is the agent's judgment from `j5_list_personas`, not a code.
 - **Escalation.** A refused launch an agent made records an escalation, and the refusal carries its `escalation_id`. A Crew member tells its Captain; the Captain, or any agent outside a Crew, asks the person with `j5_send_message` (`expect_reply`, `escalation_id`), which takes the caller's own escalations and, for a Captain, its members'. The escalation goes on a new ask, which opens its own Inbox item; a second ask carrying it while the first is open is refused, and so is a `regarding` follow-up to another ask, so J5's record stays on the ask that opened the item. On a follow-up to that ask, an id already on it is ignored. Once that ask is answered or cleared, a new ask may carry it. The Inbox item carries the server's own record of the block as data, shown in a panel apart from the agent's words. An outside agent can't ask, so its refusals record none and tell it to tell the person.
@@ -136,7 +136,7 @@ Backups and environment migration must preserve snapshots together with the even
 
 ## Switching a worker's model
 
-A person can switch a persona worker's model; an agent can't. A worker that hit a usage limit, or that a person wants elsewhere, moves instead of being started over (Bastian's question on 28 Oct; [#783](https://github.com/Jacksondr5/j5code/issues/783)). An agent that wants another model replaces the worker: it starts a new one, or a Captain adds a member ([#784](https://github.com/Jacksondr5/j5code/issues/784)).
+A person can switch a persona worker's model; an agent can't. A worker that hit a usage limit, or that a person wants elsewhere, moves instead of being started over. An agent that wants another model replaces the worker: it starts a new one, or a Captain replaces the member on its [Crew](../features/crews.md).
 
 - **Who.** A switch is a person's only when it arrives through a client's command path from a session that names a person (`CommandAdmission`, which marks the dispatch with `AgentPersonaModelSwitch`). Anyone that path lets send a model change on the thread may switch. Everything else is refused with a message to replace the worker: `t3_thread_configure`, an agent's message carrying a model, MCP and scheduled paths, and service sessions.
 - **What is checked.** The same checks as a launch, run again: a signed-in provider offers the model and its options, and that provider enforces the persona's access. Any offered model passes, inside the persona's list or not; Models for custom members doesn't apply, because the pick is a person's. A reviewer may be switched onto its author's model. A refusal names its reason, and the worker stays on its model.
@@ -153,7 +153,7 @@ Agents can also launch a persona as a Peer Agent: `j5_spawn_agent` accepts an op
 
 ## Editing in conversation
 
-Agents draft persona creates and edits, and an Owner saves them from the ask (Bryant, 2026-11-06; [#786](https://github.com/Jacksondr5/j5code/issues/786)). The library belongs to the server, so a saved persona is what everyone on it runs, guests included.
+Agents draft persona creates and edits, and an Owner saves them from the ask. The library belongs to the server, so a saved persona is what everyone on it runs, guests included.
 
 - **Read.** `j5_read_persona` returns the definition as Export YAML writes it, its digest, its origin (`folder` with its file, or `imported`, which includes personal ones), whether it overrides a folder persona, and whether it is turned off. It is read-only.
 - **Draft.** `j5_propose_persona` takes `create` with every Settings field, or `edit` with the read's digest and only the changed fields; the id is fixed on edit. The server validates it with Settings' decoders and limits, stores it, and returns a `draft_id`, the summary the person will see, and any warnings. It writes nothing to the library.
@@ -178,6 +178,6 @@ Follow-up work: in-app git commit/push/pull (status nudges and open-in-editor sh
 
 - 2026-11-03 — ordered model editing, per-entry eligibility and quota-aware new launches ([#778](https://github.com/Jacksondr5/j5code/issues/778)).
 - 2026-11-06 — independent reviewer personas prefer a model their authors didn't run on, never blocking ([#782](https://github.com/Jacksondr5/j5code/issues/782)).
-- 2026-11-06 — people can switch a persona worker's model; the launch route is no longer fixed for the task's life ([#783](https://github.com/Jacksondr5/j5code/issues/783)).
-- 2026-11-06 — a blocked persona refuses with one of six codes and escalates, and an Owner can allow one launch past one limit ([#785](https://github.com/Jacksondr5/j5code/issues/785)).
-- 2026-11-06 — agents draft persona creates and edits, and an Owner saves them from the ask; a folder persona's edit saves as an environment override ([#786](https://github.com/Jacksondr5/j5code/issues/786)).
+- 2026-11-06 — people can switch a persona worker's model; the launch route is no longer fixed for the task's life (Bastian's question on 28 Oct; [#783](https://github.com/Jacksondr5/j5code/issues/783)).
+- 2026-11-06 — a blocked persona refuses with one of six codes and escalates, and an Owner can allow one launch past one limit (Bryant; [#785](https://github.com/Jacksondr5/j5code/issues/785)).
+- 2026-11-06 — agents draft persona creates and edits, and an Owner saves them from the ask; a folder persona's edit saves as an environment override (Bryant; [#786](https://github.com/Jacksondr5/j5code/issues/786)).

@@ -14,9 +14,9 @@ Threads launched as a persona show the persona beside their home in the thread l
 
 On a started persona task, the composer shows the model picker beside the persona chip; on mobile, tap the persona or its model. Pick another model or provider and send: the next turn runs on it, with the same instructions and access. Anyone who can send messages in the task can switch it.
 
-The switch is checked first: a signed-in provider must offer the model and its options, and that provider must enforce the persona's access level (see the table under [Persona library](#persona-library)). Any model that passes is allowed, even one outside the persona's list, and a reviewer can be moved onto the model that wrote the work. A refused switch says why, and the worker stays on its model. A message you queue while the worker is busy switches it when that message starts. Moving to another provider hands the conversation over as it does on any task. The persona chip's tooltip names the model the worker runs on now, and says when a person changed its model or reasoning.
+You can pick a model outside the persona's list. If the persona can't run on the model you pick, the switch is refused with the reason, and the worker stays on its model. A message you queue while the worker is busy switches it when that message starts. The persona chip's tooltip names the model the worker runs on now, and says when a person changed its model or reasoning.
 
-Agents can't switch a worker's model. An agent that wants another model replaces the worker instead: it starts a new one with the model it wants, or, as a Captain, adds a member.
+Agents can't switch a worker's model. An agent that wants another model replaces the worker instead: it starts a new one with the model it wants, or, as a Captain, replaces the member.
 
 ## Persona library
 
@@ -34,7 +34,7 @@ Personas have one access level:
 | Workspace-write | Codex                     |
 | Full-access     | All supported providers   |
 
-Turn on **Independent reviewer** for a persona that reviews other agents' work. It then prefers a model that didn't write that work: by default, the work of the conversation that starts it and that conversation's subagents, or in a crew, the members that aren't reviewers themselves, including members the Captain replaced. If only the author's model can run, the reviewer still starts on it, and its first message says it runs on the same model as the author. If some of the work was done by a provider's own subagents, whose models J5 can't see, it says the authors are partly unknown. It's a preference, never a block: no task waits or fails because of it. A model you choose yourself on a crew's roster card is used as is.
+Turn on **Independent reviewer** for a persona that reviews other agents' work. It then prefers a model that didn't write the work it reviews. If only the author's model can run, the reviewer still starts on it, and its first message says it runs on the same model as the author. If some of the work was done by a provider's own subagents, whose models J5 can't see, it says the authors are partly unknown. It's a preference, never a block: no task waits or fails because of it. A model you choose yourself on a crew's roster card is used as is.
 
 Restricted personas run on Codex, or on Claude when read-only. Model entries on other providers are marked in the editor and skipped at launch. Full-access adds no J5 sandbox restriction; provider instruction support still applies.
 
