@@ -121,7 +121,7 @@ const SEAMS: ReadonlyArray<Seam> = [
       'from "../../j5/a2a/timelineState"',
       "useJ5Timeline(",
       "resolveJ5FeedMessage(entry.message, j5Timeline)",
-      "j5FoldHeaderLabel(presentation, props.j5Timeline, foldExpanded)",
+      "j5FoldHeader(",
     ],
   },
   {

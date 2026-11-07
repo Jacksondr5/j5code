@@ -170,12 +170,7 @@ function AutomationMessageRow({ row }: { row: Extract<TimelineRow, { kind: "mess
       : null,
   );
   const taskTitle = tasksQuery.data?.tasks.find((task) => task.id === scheduledTaskId)?.title;
-  // Expanded, a J5 prompt's first line is already the top of the body.
-  const summary = j5Prompt
-    ? expanded
-      ? ""
-      : j5Prompt.summary
-    : (taskTitle ?? text.trim().split(/\r?\n/, 1)[0] ?? "");
+  const summary = j5Prompt?.summary ?? taskTitle ?? text.trim().split(/\r?\n/, 1)[0] ?? "";
 
   const revertTurnCount = row.revertTurnCount;
   const promptLink = promptLinkFor(text);
@@ -384,6 +379,8 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
       .split(/\r?\n/)
       .find((line) => line.trim().length > 0)
       ?.trim() ?? "";
+  // J5: a Crew seat's brief previews the task, but its body opens with the Crew's facts.
+  const foldHeaderSummary = userMessage.preview ?? foldSummary;
   const contextClipboardFragment =
     resolvedContext.records.length === 0
       ? null
@@ -522,7 +519,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
           <FoldedMessageHeader
             icon={MessagesSquareIcon}
             label={userMessage.j5 && !expanded ? "" : (userMessage.authorName ?? senderLabel)}
-            summary={expanded ? "" : (userMessage.preview ?? foldSummary)}
+            summary={expanded && foldHeaderSummary === foldSummary ? "" : foldHeaderSummary}
             expanded={expanded}
             onToggle={() => setExpanded((value) => !value)}
           />

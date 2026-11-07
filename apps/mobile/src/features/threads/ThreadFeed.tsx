@@ -275,7 +275,7 @@ import { openSettings } from "../settings/settings-navigation";
 import {
   J5MessageAuthorLine,
   J5OpenSenderThread,
-  j5FoldHeaderLabel,
+  j5FoldHeader,
   renderJ5TimelineNotice,
   resolveJ5FeedMessage,
   type J5Timeline,
@@ -1071,7 +1071,7 @@ function AgentMessageFoldHeader(props: {
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={
-        props.expanded ? label : label ? `${label}: ${props.summary}` : props.summary
+        props.summary ? (label ? `${label}: ${props.summary}` : props.summary) : label
       }
       accessibilityHint={`Double tap to ${props.expanded ? "hide" : "show"} the message.`}
       accessibilityState={{ expanded: props.expanded }}
@@ -1094,18 +1094,17 @@ function AgentMessageFoldHeader(props: {
           numberOfLines={1}
           className={cn(
             "font-t3-medium text-sm text-user-bubble-foreground-muted",
-            props.expanded ? "min-w-0 flex-1" : "max-w-[50%] shrink-0",
+            props.summary ? "max-w-[50%] shrink-0" : "min-w-0 flex-1",
           )}
         >
           {label}
         </Text>
       ) : null}
-      {/* Expanded, the first line is already the top of the body. */}
-      {props.expanded ? null : (
+      {props.summary ? (
         <Text numberOfLines={1} className="min-w-0 shrink text-sm text-user-bubble-foreground">
           {props.summary}
         </Text>
-      )}
+      ) : null}
       <ThreadDisclosureChevron
         expanded={props.expanded}
         collapsedDirection="down"
@@ -1607,15 +1606,17 @@ function renderFeedEntry(
               <AgentMessageFoldHeader
                 environmentId={props.environmentId}
                 senderThreadId={message.senderThreadId}
-                {...j5FoldHeaderLabel(presentation, props.j5Timeline, foldExpanded)}
-                summary={
+                {...j5FoldHeader(
+                  presentation,
+                  props.j5Timeline,
+                  foldExpanded,
                   presentation.preview ??
-                  replaceComposerContextReferences(presentation.text, (ref) => ref.label)
-                    .split(/\r?\n/)
-                    .find((line) => line.trim().length > 0)
-                    ?.trim() ??
-                  ""
-                }
+                    replaceComposerContextReferences(presentation.text, (ref) => ref.label)
+                      .split(/\r?\n/)
+                      .find((line) => line.trim().length > 0)
+                      ?.trim() ??
+                    "",
+                )}
                 expanded={foldExpanded}
                 onToggle={() => props.onToggleWorkRow(foldRowId, entry.id)}
                 iconSubtleColor={iconSubtleColor}

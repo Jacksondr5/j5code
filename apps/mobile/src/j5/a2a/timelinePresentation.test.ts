@@ -3,7 +3,7 @@ import { EnvironmentId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  j5FoldHeaderLabel,
+  j5FoldHeader,
   presentJ5TimelineNotice,
   resolveJ5FeedMessage,
   type J5Timeline,
@@ -196,17 +196,33 @@ describe("presentJ5TimelineNotice", () => {
   });
 });
 
-describe("j5FoldHeaderLabel", () => {
+describe("j5FoldHeader", () => {
   const named: J5Timeline = { ...timeline(null), labels: new Map([["agent:captain", "Captain"]]) };
 
-  it("names the sender only once the fold is open, where the first line is gone", () => {
+  it("names the sender once open, and drops the summary the body opens with", () => {
     const row = resolveJ5FeedMessage(delivery("agent", askRaw), named);
-    expect(j5FoldHeaderLabel(row, named, false)).toEqual({ label: "" });
-    expect(j5FoldHeaderLabel(row, named, true)).toEqual({ label: "Captain" });
+    const summary = row.preview ?? "";
+    expect(j5FoldHeader(row, named, false, summary)).toEqual({ label: "", summary });
+    expect(j5FoldHeader(row, named, true, summary)).toEqual({ label: "Captain", summary: "" });
   });
 
   it("leaves an unnamed sender to upstream's sender-thread label", () => {
     const row = resolveJ5FeedMessage(delivery("agent", askRaw), timeline(null));
-    expect(j5FoldHeaderLabel(row, timeline(null), true)).toEqual({});
+    expect(j5FoldHeader(row, timeline(null), true, row.preview ?? "")).toEqual({ summary: "" });
+  });
+
+  it("keeps a Crew seat brief's task in the open header, since its body opens with the Crew", () => {
+    const row = resolveJ5FeedMessage(
+      {
+        id: "message:j5:a2a:mcp:session:spawn-brief:key",
+        role: "user",
+        createdBy: "agent",
+        text: briefRaw,
+      },
+      timeline(null),
+    );
+    expect(j5FoldHeader(row, timeline(null), true, row.preview ?? "")).toEqual({
+      summary: "Build the timeline.",
+    });
   });
 });
