@@ -79,7 +79,8 @@ describe("completion playback integration", () => {
     await helper.playNotificationSound("input", () => true);
     expect(audio.buffers).toEqual([buffer, { duration: 1, bundled: true }]);
     expect(custom.getBuffer).toHaveBeenCalledTimes(1);
-    expect(fetch).toHaveBeenCalledTimes(1);
+    // Upstream's unlock preloads both bundled sounds; playback fetches nothing more.
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
   it("lets a preview wait until gesture unlock has resumed the audio context", async () => {
     let finishResume: (() => void) | undefined;

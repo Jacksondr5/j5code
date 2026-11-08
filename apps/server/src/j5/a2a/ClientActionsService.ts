@@ -24,7 +24,7 @@ import type {
   CrewStopResponse,
 } from "@t3tools/contracts/j5";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -185,7 +185,7 @@ const make = Effect.gen(function* () {
   const escalations = yield* AgentPersonaEscalations;
   const drafts = yield* AgentPersonaDrafts;
   // A random source that fails is the host's fault, not a refusal a client can act on.
-  const freshId = (yield* Crypto.Crypto).randomUUIDv4().pipe(Effect.orDie);
+  const freshId = (yield* SecureRandom.SecureRandom).uuidV4().pipe(Effect.orDie);
   const projectProposal = projectCrewProposal(yield* PlaybookStore);
   const claimContext = yield* Effect.context<FileSystem.FileSystem | ServerConfig | DocumentText>();
   // Only fresh uploads: an attachment id that names a thread would let an answer hand the agent

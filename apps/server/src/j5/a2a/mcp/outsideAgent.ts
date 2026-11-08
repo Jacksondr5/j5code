@@ -1,5 +1,5 @@
 import { type ChatAttachment, OrchestratorMcpFailure } from "@t3tools/contracts";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -38,6 +38,15 @@ export const spawnAndBrief = (task: string) =>
   `Start an agent with j5_spawn_agent and brief it to ${task}.`;
 
 /**
+ * Upstream's `writes`, telling work a fenced link started what J5 refuses it, where upstream's
+ * own refusal names scheduled tasks.
+ */
+export const j5Writes = <P, A, E, R>(handle: (params: P) => Effect.Effect<A, E, R>) =>
+  McpToolAccess.writes(handle, {
+    linkedRefusal: "message, start or stop agents here, which only this environment's own work may",
+  });
+
+/**
  * Declares a tool that acts as the calling thread, so it is refused to an outside agent with a
  * message naming what it can do instead. Every such J5 tool uses this, so none admits an outside
  * agent by a forgotten check. It is `writes` underneath: read-only clients are refused, and callers
@@ -48,7 +57,7 @@ export const actsAsThreadCaller = <P, A, E, R>(
   legalMove: string,
   handle: (params: P, scope: McpThreadInvocationScope) => Effect.Effect<A, E, R>,
 ) =>
-  McpToolAccess.writes((params: P) =>
+  j5Writes((params: P) =>
     threadCaller(tool, legalMove).pipe(Effect.flatMap((scope) => handle(params, scope))),
   );
 
@@ -156,7 +165,8 @@ export const sendAsOutsideAgent = Effect.fn("j5.a2a.mcp.sendAsOutsideAgent")(fun
   const attachments = input.attachments ?? [];
   const acceptedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
   const requestKey =
-    input.client_request_id ?? (yield* (yield* Crypto.Crypto).randomUUIDv4().pipe(Effect.orDie));
+    input.client_request_id ??
+    (yield* (yield* SecureRandom.SecureRandom).uuidV4().pipe(Effect.orDie));
   const send = (claimed?: ReadonlyArray<ChatAttachment>) =>
     service.sendAsOutsideAgent({
       commandId: commandIdFor(requestKey),

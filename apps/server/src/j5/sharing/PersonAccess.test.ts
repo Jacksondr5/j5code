@@ -78,6 +78,11 @@ it.layer(accessLayer)("PersonAccess", (it) => {
         parent: "thread:captain",
         relationship: "fork",
       });
+      const sideChat = yield* thread("thread:side-chat", PROJECT, {
+        parent: "thread:captain",
+        relationship: "fork",
+        sideChat: true,
+      });
       yield* placed("thread:captain", null);
       yield* placed("thread:seat", "thread:captain");
       const other = yield* thread("thread:other");
@@ -91,6 +96,8 @@ it.layer(accessLayer)("PersonAccess", (it) => {
       assert.strictEqual(yield* people.threadLevel(sam.personId, subagent), "collaborator");
       assert.strictEqual(yield* people.threadLevel(sam.personId, seat), "collaborator");
       assert.strictEqual(yield* people.threadLevel(sam.personId, fork), "viewer");
+      // A side chat goes with the thread it answers, as a subagent does.
+      assert.strictEqual(yield* people.threadLevel(sam.personId, sideChat), "collaborator");
       // Elsewhere in the project, the project's level (AC10, AC11).
       assert.strictEqual(yield* people.threadLevel(sam.personId, other), "viewer");
       assert.strictEqual(yield* people.projectLevel(sam.personId, PROJECT), "viewer");

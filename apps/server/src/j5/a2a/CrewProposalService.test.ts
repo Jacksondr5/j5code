@@ -1,6 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import { AgentPersonaEscalations } from "../agents/agentPersonaEscalation.ts";
 import { agentPersonaEscalationsTestLayer } from "../test-support/agentPersonaEscalations.ts";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   ProjectId,
@@ -524,7 +525,7 @@ const fixtureWithDatabase = Effect.fn("test.crewProposal.fixture")(function* (
     Layer.provideMerge(playbookStoreLayer),
     Layer.provideMerge(Layer.succeedContext(context)),
     Layer.provideMerge(personaLibraryLayer("j5-crew-proposal-", launchablePersonas)),
-    Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
   );
   return {
     layer,
@@ -1993,7 +1994,7 @@ const playbookFixtureWithSettings = (
       Layer.provideMerge(
         ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-playbook-state-" }),
       ),
-      Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     );
     const armBarrier = Effect.gen(function* () {
       yield* Ref.set(arrivals, 0);
@@ -2011,7 +2012,7 @@ const playbookFixtureWithSettings = (
       dispatchHook,
       lockHook,
     };
-  }).pipe(Effect.provide(NodeServices.layer));
+  }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
 const playbookFixture = playbookFixtureWithSettings();
 
 /** Proposes the release Crew: planner owns plan, builder owns build, review is left unowned. */
@@ -3148,7 +3149,7 @@ it.effect.each(["roster", "addition"] as const)(
           }).pipe(Effect.provide(layer));
         }),
       );
-    }).pipe(Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
 );
 
 it.effect("validation refusals leave proposal retry keys available for a corrected request", () =>

@@ -32,7 +32,12 @@ export function PlaybookConversationScreen() {
   const navigation = useNavigation();
   const projects = useAtomValue(environmentProjects.projectsAtom);
   const workspaces = playbookWorkspaces(
-    projects.filter((project) => project.environmentId === environmentId),
+    // As upstream's pickers: an archived project is not offered, unless the link named it.
+    projects.filter(
+      (project) =>
+        project.environmentId === environmentId &&
+        (project.archivedAt == null || project.id === projectId),
+    ),
     [],
   );
   const [selected, setSelected] = useState(

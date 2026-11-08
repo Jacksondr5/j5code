@@ -1,5 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Digest from "effect/crypto/Digest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import type * as PlatformError from "effect/PlatformError";
@@ -53,7 +55,7 @@ const scriptSentBy = <A, E>(
   operation: Effect.Effect<
     A,
     E,
-    ChildProcessSpawner.ChildProcessSpawner | NodeServices.NodeServices
+    ChildProcessSpawner.ChildProcessSpawner | NodeServices.NodeServices | Digest.Digest
   >,
 ) =>
   Effect.gen(function* () {
@@ -66,8 +68,9 @@ const scriptSentBy = <A, E>(
     );
     yield* operation.pipe(
       Effect.provide(
-        Layer.merge(
+        Layer.mergeAll(
           NodeServices.layer,
+          NodeCrypto.layer,
           Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner),
         ),
       ),

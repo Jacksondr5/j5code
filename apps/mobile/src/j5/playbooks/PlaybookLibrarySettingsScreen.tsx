@@ -52,10 +52,13 @@ function PlaybookLibrary({
   label: string;
   environments: ReadonlyArray<{ environmentId: EnvironmentId; label: string }>;
 }) {
-  const projects = useAtomValue(environmentProjects.projectsAtom).filter(
-    (project) => project.environmentId === environmentId,
-  );
   const [projectId, setProjectId] = useState<ProjectId | null>(null);
+  // As upstream's pickers: an archived project is not offered, but the chosen one stays listed.
+  const projects = useAtomValue(environmentProjects.projectsAtom).filter(
+    (project) =>
+      project.environmentId === environmentId &&
+      (project.archivedAt == null || project.id === projectId),
+  );
   const project = projects.find((entry) => entry.id === projectId) ?? null;
   // A project's .j5/playbooks files join the list and win over a same-named library copy.
   const scope = project ? { projectId: project.id } : {};

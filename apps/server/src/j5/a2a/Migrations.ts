@@ -56,6 +56,7 @@ import Migration0052 from "./migrations/052_PersonAsksStayDistinct.ts";
 import Migration0053 from "./migrations/053_CrewSeatReplacement.ts";
 import Migration0054 from "./migrations/054_PersonaEscalations.ts";
 import Migration0055 from "./migrations/055_PersonaDrafts.ts";
+import Migration0056 from "./migrations/056_PromptAnswerSettled.ts";
 
 export const J5_A2A_MIGRATIONS_TABLE = "j5_a2a_migrations";
 
@@ -122,6 +123,7 @@ export const migrationEntries = [
   [53, "CrewSeatReplacement", Migration0053],
   [54, "PersonaEscalations", Migration0054],
   [55, "PersonaDrafts", Migration0055],
+  [56, "PromptAnswerSettled", Migration0056],
 ] as const;
 
 const makeMigrationLoader = (throughId?: number) =>

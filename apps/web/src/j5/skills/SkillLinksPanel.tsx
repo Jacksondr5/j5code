@@ -246,7 +246,7 @@ function LinkSkillDialog(
           ...(props.projectId ? { projectId: props.projectId } : {}),
         }
       : null;
-  // oxlint-disable-next-line t3code/react-effect-budget -- previews the link from the server whenever the request changes, and drops a stale answer.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- previews the link from the server whenever the request changes, and drops a stale answer.
   useEffect(() => {
     let active = true;
     if (request && props.connected)
@@ -445,7 +445,7 @@ function UnlinkSkillDialog(
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const running = useRef(false);
-  // oxlint-disable-next-line t3code/react-effect-budget -- inspects the target from the server whenever the request changes, and drops a stale answer.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- inspects the target from the server whenever the request changes, and drops a stale answer.
   useEffect(() => {
     let active = true;
     if (request)

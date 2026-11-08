@@ -541,7 +541,10 @@ const make: Layer.Layer<PersonAccess, never, SqlClient.SqlClient | ReadChanges> 
           SELECT json_extract(thread.payload_json, '$.lineage.parentThreadId')
           FROM orchestration_v2_projection_threads AS thread
           WHERE thread.thread_id = chain.thread_id
-            AND json_extract(thread.payload_json, '$.lineage.relationshipToParent') = 'subagent'
+            AND (
+              json_extract(thread.payload_json, '$.lineage.relationshipToParent') = 'subagent'
+              OR json_extract(thread.payload_json, '$.lineage.sideChat') = 1
+            )
         ),
         (
           SELECT parent.thread_id

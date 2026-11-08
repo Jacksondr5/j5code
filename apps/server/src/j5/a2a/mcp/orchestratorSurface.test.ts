@@ -112,7 +112,7 @@ const TestLayer = McpHttpServer.toolkitRegistration(
       agentPersonaDraftsTestLayer(),
     ),
   ),
-  Layer.provideMerge(McpServer.McpServer.layer),
+  Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
 );
 
 const hasKey = (value: unknown, key: string): boolean => {

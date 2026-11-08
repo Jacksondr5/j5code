@@ -1,3 +1,4 @@
+import * as Arr from "effect/Array";
 import type { ProjectId, ThreadId } from "@t3tools/contracts";
 import { type WriterLevel, levelReaches } from "@t3tools/contracts/j5";
 import * as Context from "effect/Context";
@@ -120,11 +121,11 @@ const make = Effect.gen(function* () {
   const recordShared = Effect.fn("j5.sharing.sharedThreads.recordShared")(function* (
     threadIds: ReadonlyArray<string>,
   ) {
-    if (threadIds.length === 0) return;
+    if (!Arr.isReadonlyArrayNonEmpty(threadIds)) return;
     const at = DateTime.formatIso(yield* DateTime.now);
     yield* sql`
         INSERT INTO j5_a2a_shared_thread ${sql.insert(
-          threadIds.map((thread_id) => ({ thread_id, shared_at: at })),
+          Arr.map(threadIds, (thread_id) => ({ thread_id, shared_at: at })),
         )}
         ON CONFLICT (thread_id) DO NOTHING
       `;
@@ -139,7 +140,10 @@ const make = Effect.gen(function* () {
       FROM tree
       JOIN orchestration_v2_projection_threads AS child
         ON json_extract(child.payload_json, '$.lineage.parentThreadId') = tree.thread_id
-       AND json_extract(child.payload_json, '$.lineage.relationshipToParent') = 'subagent'
+       AND (
+         json_extract(child.payload_json, '$.lineage.relationshipToParent') = 'subagent'
+         OR json_extract(child.payload_json, '$.lineage.sideChat') = 1
+       )
       WHERE tree.depth < ${MAX_DESCENDANT_DEPTH}
       UNION
       SELECT placed.thread_id, tree.depth + 1

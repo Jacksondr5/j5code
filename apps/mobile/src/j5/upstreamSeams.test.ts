@@ -132,9 +132,13 @@ const SEAMS: ReadonlyArray<Seam> = [
   },
   {
     file: "features/threads/ThreadQueueControl.tsx",
-    record: "case 97: Queue-row formatter",
+    record: "case 97: queued delivery sender and letter",
     from: "../../j5/a2a/queuedDelivery",
-    reaches: ["useJ5QueuedDeliveryLabel(", "queuedDeliveryLabel(text) ??"],
+    reaches: [
+      "useJ5QueuedDeliveries(",
+      "j5Queued.preview(message) ??",
+      "j5Queued.sender(message) ??",
+    ],
   },
   {
     file: "features/threads/ThreadQueueControl.tsx",

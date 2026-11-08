@@ -1,7 +1,7 @@
 import type { EnvironmentId } from "@t3tools/contracts";
 
 import { useClientSettings } from "../hooks/useSettings";
-import { selectProjectGroupingSettings } from "../logicalProject";
+import { selectProjectGroupingSettings } from "@t3tools/client-runtime/state/project-grouping";
 import { buildSidebarProjectSnapshots } from "../sidebarProjectGrouping";
 import { useProjects } from "../state/entities";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";

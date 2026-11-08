@@ -7,7 +7,8 @@ import {
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { McpInvocationContext, requireThreadScope } from "../../mcp/McpInvocationContext.ts";
-import { OrchestratorMcpService, resolveRuntimeMode } from "../../mcp/OrchestratorMcpService.ts";
+import { resolveRuntimeMode } from "../../mcp/delegatedTaskModes.ts";
+import { OrchestratorMcpService } from "../../mcp/OrchestratorMcpService.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { participantIdForThread } from "../a2a/HomeRegistrar.ts";
 import { AgentPersonaEscalations } from "./agentPersonaEscalation.ts";

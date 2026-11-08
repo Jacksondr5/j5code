@@ -3,6 +3,7 @@ import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderS
 import { J5ThreadRegistrationLayer } from "./a2a/runtimeLayer.ts";
 // @effect-diagnostics nodeBuiltinImport:off globalTimersInEffect:off globalDateInEffect:off globalConsole:off - Standalone host-side benchmark owns an isolated process and temporary SQLite state.
 
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CommandId,
@@ -324,7 +325,9 @@ const program = Effect.gen(function* () {
 });
 
 try {
-  const result = await Effect.runPromise(Effect.scoped(program.pipe(Effect.provide(HarnessLayer))));
+  const result = await Effect.runPromise(
+    Effect.scoped(program.pipe(Effect.provide(HarnessLayer), Effect.provide(NodeCrypto.layer))),
+  );
   console.log(JSON.stringify(result, null, 2));
 } finally {
   if (!keepState) NodeFS.rmSync(stateRoot, { recursive: true, force: true });

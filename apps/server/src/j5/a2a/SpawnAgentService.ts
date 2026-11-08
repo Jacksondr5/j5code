@@ -11,7 +11,7 @@ import {
   ProjectId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -319,7 +319,7 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
   input: J5SpawnAgentInput,
   scope: McpInvocationScope,
 ) {
-  const crypto = yield* Crypto.Crypto;
+  const crypto = yield* SecureRandom.SecureRandom;
   // An outside agent has no thread, home, project or checkout: it is recorded as the spawner
   // and the new agent sits at the top level of the project it names.
   const outside = yield* outsideAgentCaller;
@@ -334,7 +334,7 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
           outside,
         };
   const { home } = spawner;
-  const requestKey = input.client_request_id ?? (yield* crypto.randomUUIDv4().pipe(Effect.orDie));
+  const requestKey = input.client_request_id ?? (yield* crypto.uuidV4().pipe(Effect.orDie));
   const stableInput = { providerSessionId: spawner.requestNamespace, requestKey };
   const threadId = spawnThreadId(stableInput);
   const threadManagement = yield* ThreadManagementService.ThreadManagementService;

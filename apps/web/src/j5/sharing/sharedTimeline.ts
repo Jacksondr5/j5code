@@ -208,7 +208,7 @@ export function useSharedConversationEntries<Entry extends MessageEntry>(
     return { entries: out, pendingKey: pending.join("|") };
   })();
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- asks once more about a message waiting on its author, in case the change feed is slow.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- asks once more about a message waiting on its author, in case the change feed is slow.
   useEffect(() => {
     if (shown.pendingKey !== "") refresh();
   }, [refresh, shown.pendingKey]);

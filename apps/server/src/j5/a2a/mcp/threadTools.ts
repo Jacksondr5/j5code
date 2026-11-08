@@ -6,7 +6,7 @@ import {
   type RunId,
   ThreadId,
 } from "@t3tools/contracts";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -38,7 +38,7 @@ import { J5ThreadLineageError } from "../ThreadLineage.ts";
 const common = {
   failure: OrchestratorMcpFailure,
   failureMode: "return" as const,
-  dependencies: [McpInvocationContext, ThreadManagementService, Crypto.Crypto],
+  dependencies: [McpInvocationContext, ThreadManagementService, SecureRandom.SecureRandom],
 };
 
 /**

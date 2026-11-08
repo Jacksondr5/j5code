@@ -188,6 +188,31 @@ export function J5MessageAuthorLine({
   readonly presentation: J5UserMessageRowPresentation;
 }) {
   const ctx = use(TimelineRowCtx);
+  return (
+    <J5SenderLine
+      message={message}
+      presentation={presentation}
+      threadRef={ctx.threadRef}
+      participantLabels={ctx.participantLabels}
+    />
+  );
+}
+
+/** The same line, for a message outside the timeline's rows, such as a queued one. */
+export function J5SenderLine({
+  message,
+  presentation,
+  threadRef,
+  participantLabels,
+}: {
+  readonly message: { readonly id: string };
+  readonly presentation: Pick<
+    J5UserMessageRowPresentation,
+    "j5" | "authorName" | "senderThreadRef"
+  >;
+  readonly threadRef: ScopedThreadRef | null;
+  readonly participantLabels: ReadonlyMap<string, string>;
+}) {
   const j5 = presentation.j5;
   if (j5?.group === "person" && j5.viaInbox) {
     return (
@@ -203,7 +228,7 @@ export function J5MessageAuthorLine({
         data-j5-message-author="inbox"
       >
         <PersonAvatar
-          name={j5.senderName ?? ctx.participantLabels.get(j5.senderId) ?? null}
+          name={j5.senderName ?? participantLabels.get(j5.senderId) ?? null}
           size="xs"
         />
         <span className="font-medium text-foreground">{presentation.authorName}</span>
@@ -212,7 +237,7 @@ export function J5MessageAuthorLine({
     );
   }
   if (j5?.group !== "participant") {
-    return <SharedMessageAuthorLine threadRef={ctx.threadRef} message={message} />;
+    return <SharedMessageAuthorLine threadRef={threadRef} message={message} />;
   }
   const name = presentation.authorName ?? "Agent";
   return (

@@ -84,86 +84,86 @@ export class CrewMemberModels extends Context.Service<
   }
 >()("t3/j5/agents/crewMemberModels") {}
 
-export const layer = Layer.effect(
-  CrewMemberModels,
-  Effect.gen(function* () {
-    const settings = yield* ServerSettings.ServerSettingsService;
-    const registry = yield* ProviderRegistry;
-    const projects = yield* ProjectService;
-    const projectTitleOf = (projectId: ProjectId) =>
-      projects.getById(projectId).pipe(
-        Effect.map(Option.map((project) => project.title)),
-        Effect.map(Option.getOrElse(() => projectId as string)),
-        Effect.orElseSucceed(() => projectId as string),
-      );
-    const listsFor = (projectId: ProjectId) =>
-      settings.getSettings.pipe(
-        Effect.map((all) => resolveProjectSettings(all, projectId).settings),
-        Effect.orDie,
-      );
-    /** What keeps a selection off the project's lists, or null; an unknown provider has no level. */
-    const selectionProblem = (
-      lists: Effect.Success<ReturnType<typeof listsFor>>,
-      selection: Pick<ModelSelection, "instanceId" | "model" | "options">,
-      provider: ServerProvider | undefined,
-    ) => {
-      if (!isCrewMemberModelChecked(lists.crewMemberModels, selection))
-        return { kind: "model" } as const;
-      if (provider === undefined) return null;
-      const level = crewMemberSelectionLevel(
-        provider.models.find((model) => model.slug === selection.model),
-        selection.options,
-      );
-      if (
-        level === null ||
-        isCrewMemberLevelChecked(lists.crewMemberReasoning, {
-          instanceId: provider.instanceId,
-          level,
-        })
-      )
-        return null;
-      return { kind: "level", level, provider } as const;
-    };
-    const eligibility: CrewMemberModels["Service"]["eligibility"] = Effect.fn(
-      "j5.crewMemberModels.eligibility",
-    )(function* (projectId) {
-      const lists = yield* listsFor(projectId);
-      return (selection, provider) => selectionProblem(lists, selection, provider) === null;
-    });
-    const assertEligible: CrewMemberModels["Service"]["assertEligible"] = Effect.fn(
-      "j5.crewMemberModels.assertEligible",
-    )(function* ({ projectId, selection }) {
-      const lists = yield* listsFor(projectId);
-      // With no saved level list every level is eligible, so the catalog is not read for one.
-      const provider =
-        lists.crewMemberReasoning === null
-          ? undefined
-          : (yield* registry.getProviders).find(
-              (candidate) => candidate.instanceId === selection.instanceId,
-            );
-      const problem = selectionProblem(lists, selection, provider);
-      if (problem === null) return;
-      if (problem.kind === "model")
-        return yield* new CrewMemberModelNotEligibleError({
-          projectId,
-          projectTitle: yield* projectTitleOf(projectId),
-          instanceId: selection.instanceId,
-          model: selection.model,
-          eligible: eligibleCrewMemberModels(lists.crewMemberModels, yield* registry.getProviders),
-        });
-      return yield* new CrewMemberReasoningNotEligibleError({
+/** The service over the services it reads, for a caller that has them already. */
+export const make = Effect.gen(function* () {
+  const settings = yield* ServerSettings.ServerSettingsService;
+  const registry = yield* ProviderRegistry;
+  const projects = yield* ProjectService;
+  const projectTitleOf = (projectId: ProjectId) =>
+    projects.getById(projectId).pipe(
+      Effect.map(Option.map((project) => project.title)),
+      Effect.map(Option.getOrElse(() => projectId as string)),
+      Effect.orElseSucceed(() => projectId as string),
+    );
+  const listsFor = (projectId: ProjectId) =>
+    settings.getSettings.pipe(
+      Effect.map((all) => resolveProjectSettings(all, projectId).settings),
+      Effect.orDie,
+    );
+  /** What keeps a selection off the project's lists, or null; an unknown provider has no level. */
+  const selectionProblem = (
+    lists: Effect.Success<ReturnType<typeof listsFor>>,
+    selection: Pick<ModelSelection, "instanceId" | "model" | "options">,
+    provider: ServerProvider | undefined,
+  ) => {
+    if (!isCrewMemberModelChecked(lists.crewMemberModels, selection))
+      return { kind: "model" } as const;
+    if (provider === undefined) return null;
+    const level = crewMemberSelectionLevel(
+      provider.models.find((model) => model.slug === selection.model),
+      selection.options,
+    );
+    if (
+      level === null ||
+      isCrewMemberLevelChecked(lists.crewMemberReasoning, {
+        instanceId: provider.instanceId,
+        level,
+      })
+    )
+      return null;
+    return { kind: "level", level, provider } as const;
+  };
+  const eligibility: CrewMemberModels["Service"]["eligibility"] = Effect.fn(
+    "j5.crewMemberModels.eligibility",
+  )(function* (projectId) {
+    const lists = yield* listsFor(projectId);
+    return (selection, provider) => selectionProblem(lists, selection, provider) === null;
+  });
+  const assertEligible: CrewMemberModels["Service"]["assertEligible"] = Effect.fn(
+    "j5.crewMemberModels.assertEligible",
+  )(function* ({ projectId, selection }) {
+    const lists = yield* listsFor(projectId);
+    // With no saved level list every level is eligible, so the catalog is not read for one.
+    const provider =
+      lists.crewMemberReasoning === null
+        ? undefined
+        : (yield* registry.getProviders).find(
+            (candidate) => candidate.instanceId === selection.instanceId,
+          );
+    const problem = selectionProblem(lists, selection, provider);
+    if (problem === null) return;
+    if (problem.kind === "model")
+      return yield* new CrewMemberModelNotEligibleError({
         projectId,
         projectTitle: yield* projectTitleOf(projectId),
         instanceId: selection.instanceId,
         model: selection.model,
-        level: problem.level,
-        eligible: eligibleCrewMemberLevelsForModel(
-          lists.crewMemberReasoning,
-          problem.provider,
-          selection.model,
-        ),
+        eligible: eligibleCrewMemberModels(lists.crewMemberModels, yield* registry.getProviders),
       });
+    return yield* new CrewMemberReasoningNotEligibleError({
+      projectId,
+      projectTitle: yield* projectTitleOf(projectId),
+      instanceId: selection.instanceId,
+      model: selection.model,
+      level: problem.level,
+      eligible: eligibleCrewMemberLevelsForModel(
+        lists.crewMemberReasoning,
+        problem.provider,
+        selection.model,
+      ),
     });
-    return CrewMemberModels.of({ assertEligible, eligibility });
-  }),
-);
+  });
+  return CrewMemberModels.of({ assertEligible, eligibility });
+});
+
+export const layer = Layer.effect(CrewMemberModels, make);

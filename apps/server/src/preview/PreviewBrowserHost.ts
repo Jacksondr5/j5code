@@ -73,7 +73,7 @@ export class PreviewBrowserRootError extends Schema.TaggedError<PreviewBrowserRo
   {},
 ) {
   override get message(): string {
-    return "Chrome will not start its sandbox as root, so J5 Code's browser cannot run while the J5 Code server runs as root. Run the server as a nonroot user (for example `User=` in its systemd service), or set `T3CODE_SERVER_BROWSER_SANDBOX=0` to run the browser unsandboxed as root.";
+    return "The J5 Code server is running as root; Chrome's sandbox cannot start. Run J5 Code as a nonroot user. Otherwise set `T3CODE_SERVER_BROWSER_SANDBOX=0` in the J5 Code server's environment and restart the server; this disables Chrome's sandbox. Manual: `T3CODE_SERVER_BROWSER_SANDBOX=0 j5 serve`. Systemd: add `Environment=T3CODE_SERVER_BROWSER_SANDBOX=0` under `[Service]`, reload systemd, then restart the service. `j5 browser setup` cannot fix root sandboxing.";
   }
 }
 

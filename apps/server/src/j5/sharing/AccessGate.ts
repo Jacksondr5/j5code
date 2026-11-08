@@ -198,9 +198,6 @@ const ACCESS_RPC_RULES: Partial<Record<WsRpcMethod, AccessRpcRule>> = {
   [WS_METHODS.serverProbe]: { ...anyone, unknownToo: true },
   // What a client reports of itself, and the policy it follows in the background.
   [WS_METHODS.serverReportClientActivity]: { ...anyone, unknownToo: true },
-  [WS_METHODS.serverReportHostPowerState]: { ...anyone, unknownToo: true },
-  [WS_METHODS.serverGetBackgroundPolicy]: { ...anyone, unknownToo: true },
-  [WS_METHODS.subscribeBackgroundPolicy]: { ...anyone, unknownToo: true },
 
   // A thread and the agents beneath it (AC21). Its commands and its launch are checked command
   // by command (`CommandAdmission`).
@@ -218,13 +215,14 @@ const ACCESS_RPC_RULES: Partial<Record<WsRpcMethod, AccessRpcRule>> = {
   [ORCHESTRATION_V2_WS_METHODS.subscribeCommandOutput]: onThread("viewer"),
   [ORCHESTRATION_V2_WS_METHODS.getWorkflowScript]: onThread("viewer"),
   [ORCHESTRATION_V2_WS_METHODS.stopWorkflow]: onThread("collaborator"),
+  // Force stop is Stop for an agent that ignores it (`ProviderTurnControlService`).
+  [ORCHESTRATION_V2_WS_METHODS.forceStopThread]: onThread("collaborator"),
   [WS_METHODS.subscribeWorktreeSetup]: onThread("viewer"),
   [WS_METHODS.worktreeSetupCancel]: onThread("collaborator"),
   [WS_METHODS.assetsPersistChatAttachments]: onThread("collaborator"),
   [WS_METHODS.secretsAnswerRequest]: onThread("collaborator"),
   // The scheduled tasks bound to a thread or project the person reaches (`GuestView`), and a
   // Collaborator's changes to them there (AC20).
-  [WS_METHODS.scheduledTasksList]: narrowed,
   [WS_METHODS.scheduledTasksSubscribe]: narrowed,
   [WS_METHODS.scheduledTasksUpsert]: { kind: "scheduledTask" },
   [WS_METHODS.scheduledTasksSetEnabled]: { kind: "scheduledTask" },
@@ -241,10 +239,8 @@ const ACCESS_RPC_RULES: Partial<Record<WsRpcMethod, AccessRpcRule>> = {
   // Its preview tabs. A Viewer reads the list; driving a tab is writing.
   [WS_METHODS.previewList]: onThread("viewer"),
   [WS_METHODS.previewOpen]: onThread("collaborator"),
-  [WS_METHODS.previewNavigate]: onThread("collaborator"),
   [WS_METHODS.previewResize]: onThread("collaborator"),
   [WS_METHODS.previewAdjust]: onThread("collaborator"),
-  [WS_METHODS.previewRefresh]: onThread("collaborator"),
   [WS_METHODS.previewClose]: onThread("collaborator"),
   [WS_METHODS.previewReportStatus]: onThread("collaborator"),
   // Its terminals, by the thread they belong to, in any folder.
@@ -254,7 +250,6 @@ const ACCESS_RPC_RULES: Partial<Record<WsRpcMethod, AccessRpcRule>> = {
   [WS_METHODS.terminalWrite]: onThread("collaborator"),
   [WS_METHODS.terminalResize]: onThread("collaborator"),
   [WS_METHODS.terminalClear]: onThread("collaborator"),
-  [WS_METHODS.terminalRestart]: onThread("collaborator"),
   [WS_METHODS.terminalClose]: onThread("collaborator"),
   [WS_METHODS.deviceOpen]: onThread("collaborator"),
   [WS_METHODS.deviceClose]: onThread("collaborator"),
@@ -285,15 +280,17 @@ const ACCESS_RPC_RULES: Partial<Record<WsRpcMethod, AccessRpcRule>> = {
   [WS_METHODS.gitPreparePullRequestThread]: collaborator,
   [WS_METHODS.reviewGetDiffPreview]: collaborator,
   [WS_METHODS.reviewGetDiffFileContents]: collaborator,
+  [WS_METHODS.reviewGetBranchCommits]: collaborator,
   [WS_METHODS.sourceControlLookupRepository]: collaborator,
   [WS_METHODS.sourceControlPublishRepository]: collaborator,
-  [WS_METHODS.subscribeTerminalEvents]: collaborator,
   [WS_METHODS.subscribeTerminalMetadata]: collaborator,
   [WS_METHODS.subscribePreviewEvents]: collaborator,
   [WS_METHODS.previewClearProfile]: collaborator,
   [WS_METHODS.previewReportProfiles]: collaborator,
   [WS_METHODS.subscribeDiscoveredLocalServers]: collaborator,
+  [WS_METHODS.previewStopLocalServer]: collaborator,
   [WS_METHODS.deviceConfigure]: collaborator,
+  [WS_METHODS.deviceSimlockIdentity]: collaborator,
   [WS_METHODS.deviceList]: collaborator,
   [WS_METHODS.deviceTestHost]: collaborator,
   [WS_METHODS.deviceEasAccount]: collaborator,
@@ -301,7 +298,6 @@ const ACCESS_RPC_RULES: Partial<Record<WsRpcMethod, AccessRpcRule>> = {
   [WS_METHODS.deviceDetail]: collaborator,
   [WS_METHODS.deviceAction]: collaborator,
   [WS_METHODS.subscribeDeviceState]: collaborator,
-  [WS_METHODS.serverGetSettings]: collaborator,
   [WS_METHODS.serverRefreshProviders]: collaborator,
   // The images and files in a reachable thread's messages; the URL it returns is signed for
   // that one asset. A project's favicon, for a project in the person's sidebar, named by its id;
@@ -595,14 +591,6 @@ export const layerGatedEnvironmentAuth = Layer.effect(
           return unbound(access.unbindSession(sessionId), inner.revokeSession(sessionId));
         },
       ),
-      revokeOtherSessionsExcept: Effect.fn(
-        "EnvironmentAuth.EnvironmentAuth.revokeOtherSessionsExcept",
-      )(function (sessionId) {
-        return unbound(
-          access.unbindOtherSessions(sessionId),
-          inner.revokeOtherSessionsExcept(sessionId),
-        );
-      }),
       revokeClientSession: Effect.fn("EnvironmentAuth.EnvironmentAuth.revokeClientSession")(
         function (currentSessionId, targetSessionId) {
           return currentSessionId === targetSessionId

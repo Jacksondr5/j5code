@@ -1,4 +1,4 @@
-import type { OrchestrationV2Command, OrchestrationV2DomainEvent } from "@t3tools/contracts";
+import type { OrchestrationV2Command, OrchestrationV2StoredEvent } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
@@ -22,7 +22,7 @@ export class Upstream extends Context.Service<
   Upstream,
   {
     readonly dispatched: Ref.Ref<ReadonlyArray<OrchestrationV2Command>>;
-    readonly events: PubSub.PubSub<OrchestrationV2DomainEvent>;
+    readonly events: PubSub.PubSub<OrchestrationV2StoredEvent>;
   }
 >()("t3/j5/sharing/test-support/conversationHarness/Upstream") {}
 
@@ -31,7 +31,7 @@ const upstreamLayer = Layer.effect(
   Effect.gen(function* () {
     return Upstream.of({
       dispatched: yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]),
-      events: yield* PubSub.unbounded<OrchestrationV2DomainEvent>(),
+      events: yield* PubSub.unbounded<OrchestrationV2StoredEvent>(),
     });
   }),
 );
@@ -42,7 +42,7 @@ const threadsLayer = Layer.effect(
     ThreadManagementService.of({
       dispatch: (command: OrchestrationV2Command) =>
         Ref.update(upstream.dispatched, (sent) => [...sent, command]).pipe(Effect.as({} as never)),
-      streamDomainEvents: Stream.fromPubSub(upstream.events),
+      streamStoredEvents: Stream.fromPubSub(upstream.events),
     } as unknown as ThreadManagementService["Service"]),
   ),
 );

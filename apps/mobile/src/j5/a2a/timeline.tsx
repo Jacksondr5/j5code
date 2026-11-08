@@ -80,7 +80,7 @@ function CrewContextNotice(props: { readonly title: string; readonly text: strin
   );
 }
 
-function Tag(props: { readonly label: string; readonly tone?: "warning" | "success" }) {
+export function Tag(props: { readonly label: string; readonly tone?: "warning" | "success" }) {
   return (
     <View
       className={cn(

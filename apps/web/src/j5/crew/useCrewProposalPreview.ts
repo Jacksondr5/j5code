@@ -34,7 +34,7 @@ export function useCrewProposalPreview(
 
   const readRequest = useEffectEvent(() => ({ seats, complete: state?.requestKey === requestKey }));
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- asks the server to preview the proposal whenever its seats change, and drops a stale answer.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- asks the server to preview the proposal whenever its seats change, and drops a stale answer.
   useEffect(() => {
     if (environmentId === null || busy || !enabled) return;
     const request = readRequest();

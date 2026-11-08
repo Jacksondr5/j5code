@@ -55,7 +55,7 @@ export function CrewProposalMemberDialog(props: {
   const loadingPersona = !custom && loadedPersona !== personaId;
   const currentDraft = useEffectEvent(() => value);
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- reads the chosen persona from the server whenever the choice changes, and drops a stale answer.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reads the chosen persona from the server whenever the choice changes, and drops a stale answer.
   useEffect(() => {
     if (custom || props.environmentId === null || personaError !== null) return;
     let current = true;

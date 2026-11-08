@@ -1,6 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import { agentPersonaDraftsTestLayer } from "../../test-support/agentPersonaDrafts.ts";
 import { agentPersonaEscalationsTestLayer } from "../../test-support/agentPersonaEscalations.ts";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   type AuthMcpClientAccess,
@@ -95,7 +96,7 @@ const decodeList = Schema.decodeUnknownEffect(J5ListParticipantsResult);
 const decodeSent = Schema.decodeUnknownEffect(Schema.fromJsonString(MessageSentPayload));
 const serverConfigLayer = ServerConfig.layerTest(process.cwd(), {
   prefix: "j5-mcp-outside-",
-}).pipe(Layer.provide(NodeServices.layer));
+}).pipe(Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
 
 interface Stop {
   readonly commandId: string;
@@ -187,7 +188,7 @@ const makeLayer = (stops: Ref.Ref<ReadonlyArray<Stop>>) => {
     peerDirectoryNoneLayer,
     Layer.mock(PeerRegistryService)({}),
     serverConfigLayer,
-    NodeServices.layer,
+    Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
   );
   return J5ToolkitHandlersLive.pipe(
     Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),

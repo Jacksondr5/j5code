@@ -5,11 +5,10 @@ description: Test T3 Code's web and desktop UI through its built-in Browser pane
 
 # Test T3 web and desktop
 
-Use T3's built-in Browser panel for verification. Its browser runs on the
-server, so it works without a desktop app connected. If its tools are absent,
-or `preview_open` itself fails, explain the blocker and stop verification.
-Do not install or switch to another automation system. For native mobile
-testing, use [test-t3-mobile](../test-t3-mobile/SKILL.md).
+Use T3's built-in Browser panel for verification. Follow the recovery steps
+below before declaring it unavailable. Do not install or switch to another
+automation system. For native mobile testing, use
+[test-t3-mobile](../test-t3-mobile/SKILL.md).
 
 ## Start the app
 
@@ -26,6 +25,18 @@ output. Never run against `~/.j5code/userdata` or set `VITE_HTTP_URL` or
 Test with meaningful project and thread data. Read
 [references/sqlite-fixtures.md](references/sqlite-fixtures.md) only when
 inspecting or seeding SQLite. Stop the test server before direct fixture writes.
+
+## Drive agent turns for free
+
+Do not spend a paid model to see a turn render. `vp run dev` registers the
+`Replay (dev)` provider, which replays recorded turns with simulated streaming
+through the real adapter and orchestration. Its models are scenarios:
+`showcase` covers thinking, a plan, tool calls, an approval, and markdown.
+Press `Ctrl+Alt+Shift+R` for a picker (GNOME takes that key for screen
+recording), call `window.t3dev.replay("showcase")`
+with `preview_evaluate`.
+When the test needs real provider behavior, use that provider's cheapest
+model, such as Haiku for Claude or Luna for Codex.
 
 ## Use the Browser panel
 

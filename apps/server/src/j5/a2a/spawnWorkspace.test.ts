@@ -1,6 +1,7 @@
 import * as SpawnAgentService from "./SpawnAgentService.ts";
 import { agentPersonaEscalationsTestLayer } from "../test-support/agentPersonaEscalations.ts";
 import { assert, it } from "@effect/vitest";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   type AuthMcpClientAccess,
@@ -188,7 +189,7 @@ const scratchProjectId = ProjectId.make("project:j5:spawn-workspace-scratch");
 const scratchFolder = "/scratch/2026-10-02-fix-the-login-bug";
 const serverConfigLayer = ServerConfig.layerTest(process.cwd(), {
   prefix: "j5-spawn-workspace-",
-}).pipe(Layer.provide(NodeServices.layer));
+}).pipe(Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
 
 /** The caller works on the project's root checkout, which records no branch or worktree. */
 const callerThread = (threadId: ThreadId, runtimeMode: RuntimeMode = "full-access") =>
@@ -481,7 +482,7 @@ const spawnHarness = (input: {
           ),
       }),
       serverConfigLayer,
-      NodeServices.layer,
+      Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
     );
     const layer = J5ToolkitHandlersLive.pipe(
       Layer.provideMerge(

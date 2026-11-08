@@ -1,4 +1,4 @@
-import { ThreadId } from "@t3tools/contracts";
+import { isListedThreadLineage, ThreadId } from "@t3tools/contracts";
 import type { NativeQuestionInboxItem } from "@t3tools/contracts/j5";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -23,10 +23,7 @@ export const makeNativeQuestionInboxRead = Effect.gen(function* () {
             thread.pendingRuntimeRequest !== null &&
             thread.archivedAt === null &&
             thread.deletedAt === null &&
-            !(
-              thread.lineage.parentThreadId !== null &&
-              thread.lineage.relationshipToParent === "subagent"
-            ),
+            !(thread.lineage.parentThreadId !== null && !isListedThreadLineage(thread.lineage)),
         )
         .map((thread) => thread.id),
     );

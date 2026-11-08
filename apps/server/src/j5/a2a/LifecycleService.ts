@@ -34,6 +34,7 @@ import {
 } from "./ThreadRegistration.ts";
 import { A2ALedger, type A2ALedgerError } from "./LedgerService.ts";
 import { findPeerCounterparty } from "./peerCounterparty.ts";
+import { PROMPT_SETTLED_EVENT, markPromptSettled } from "./promptSettlement.ts";
 
 export class A2ALifecycleParticipantNotFoundError extends Schema.TaggedError<A2ALifecycleParticipantNotFoundError>()(
   "A2ALifecycleParticipantNotFoundError",
@@ -527,6 +528,8 @@ const makeLayer = (daemon: boolean) =>
               AND COALESCE(
                 json_extract(thread.payload_json, '$.lineage.relationshipToParent'), ''
               ) <> 'subagent'
+              AND COALESCE(json_extract(thread.payload_json, '$.lineage.sideChat'), 0) <> 1
+              AND json_extract(thread.payload_json, '$.delegatedFrom') IS NULL
               AND NOT EXISTS (
                 SELECT 1 FROM j5_a2a_comm_event AS joined
                 WHERE joined.kind = 'participant.joined'
@@ -548,6 +551,12 @@ const makeLayer = (daemon: boolean) =>
       const handleStoredEventInternal = Effect.fn("j5.a2a.lifecycle.handleStoredEvent")(function* (
         stored: OrchestrationV2StoredEvent,
       ) {
+        // Read from the cursor, so an answer upstream settled while this server was down is
+        // still marked; upstream prunes the event that shows it.
+        if (stored.event.type === PROMPT_SETTLED_EVENT) {
+          yield* markPromptSettled(stored).pipe(Effect.provideService(SqlClient.SqlClient, sql));
+          return false;
+        }
         // Every way a thread comes to exist writes this event, including the importers that
         // bypass the thread.create command.
         if (stored.event.type === "thread.created") {

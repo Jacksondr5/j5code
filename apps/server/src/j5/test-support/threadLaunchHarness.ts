@@ -1,3 +1,4 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as CrewDeliveryContext from "../a2a/CrewDeliveryContext.ts";
 import * as ProjectCloneTracker from "../../project/ProjectCloneTracker.ts";
 import * as WorktreeSetupTracker from "../../project/WorktreeSetupTracker.ts";
@@ -161,6 +162,9 @@ export function makeHarness(options: HarnessOptions = {}) {
       listShells: Effect.fn("ProjectService.ProjectService.listShells")(function () {
         return Effect.die("unused");
       }),
+      listPage: Effect.fn("ProjectService.ProjectService.listPage")(function () {
+        return Effect.die("unused");
+      }),
     }),
     Layer.mock(GitWorkflow.GitWorkflowService)({
       createWorktree,
@@ -208,13 +212,17 @@ export function makeHarness(options: HarnessOptions = {}) {
               scripts: project.scripts,
               createdAt: project.createdAt,
               updatedAt: project.updatedAt,
+              pinnedAt: null,
+              archivedAt: null,
               deletedAt: project.deletedAt,
             })
           : Option.none(),
       ),
   });
   const titleRegeneration = ThreadTitleRegeneration.layer.pipe(
-    Layer.provide(Layer.mergeAll(threadManagement, projectedProjects, externalServices)),
+    Layer.provide(
+      Layer.mergeAll(threadManagement, projectedProjects, externalServices, NodeServices.layer),
+    ),
   );
   return {
     orchestrator,

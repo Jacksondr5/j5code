@@ -7,11 +7,16 @@ import * as DeviceService from "../../../device/DeviceService.ts";
 import * as ServerConfig from "../../../config.ts";
 import { expect, it } from "@effect/vitest";
 import { NodeHttpServer } from "@effect/platform-node";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import { PeerForwarding } from "../../../peer/PeerForwarding.ts";
+import { PeerLinkRequests } from "../../../peer/PeerLinkRequests.ts";
+import { PeerLinks } from "../../../peer/PeerLinks.ts";
+import { RemoteDelegation } from "../../../peer/RemoteDelegation.ts";
 import * as Schema from "effect/Schema";
 import { HttpBody, HttpClient, HttpRouter } from "effect/http";
 
@@ -165,6 +170,15 @@ it.effect("production mcp layer lists worktree tools over http", () =>
       }).pipe(
         Layer.provideMerge(McpSessionRegistry.layer),
         Layer.provide(McpProviderSessions.layer),
+        Layer.provide(Layer.mock(RemoteDelegation)({})),
+        // Upstream's link tools, admitted by J5 (register D42), stay hidden while links are off.
+        Layer.provide(
+          Layer.mergeAll(
+            Layer.mock(PeerForwarding)({}),
+            Layer.mock(PeerLinkRequests)({}),
+            Layer.mock(PeerLinks)({}),
+          ),
+        ),
         Layer.provide(
           Layer.mock(ServerEnvironment.ServerEnvironment)({
             getEnvironmentId: Effect.succeed("environment-scratch" as never),
@@ -251,8 +265,9 @@ it.effect("production mcp layer lists worktree tools over http", () =>
       expect(toolNames).toContain("schedule_task");
       expect(toolNames).toContain("t3_thread_list");
       expect(toolNames).toContain("t3_thread_read");
-      // Blocking on another thread starves a participant of the notices it waits for.
-      expect(toolNames).not.toContain("t3_thread_wait");
+      // Waiting on and stopping threads are upstream's (register D42).
+      expect(toolNames).toContain("t3_thread_wait");
+      expect(toolNames).toContain("t3_thread_interrupt");
       // J5 re-declares delegate_task with a saved-agent parameter and keeps its status/cancel pair.
       expect(toolNames).toContain("delegate_task");
       expect(toolNames).toContain("task_status");
@@ -265,7 +280,6 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         "t3_thread_send",
         // An agent attaches files with j5_send_message.
         "t3_thread_send_attachments",
-        "t3_thread_interrupt",
       ]) {
         expect(toolNames).not.toContain(excluded);
       }
@@ -311,6 +325,7 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         "j5_stop_crew",
         "j5_write_artifact",
         "link_pull_request",
+        "link_pull_requests",
         "list_scheduled_tasks",
         "list_thread_pull_requests",
         "orchestrator_capabilities",
@@ -345,12 +360,14 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         "t3_project_update",
         "t3_queue",
         "t3_thread_configure",
+        "t3_thread_interrupt",
         "t3_thread_list",
         "t3_thread_organize",
         "t3_thread_read",
         "t3_thread_search",
         "t3_thread_transfer",
         "t3_thread_update",
+        "t3_thread_wait",
         "t3_workflow_stop",
         "t3_worktree_handoff",
         "t3_worktree_list",
@@ -358,6 +375,7 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         "task_cancel",
         "task_status",
         "unlink_pull_request",
+        "unlink_pull_requests",
         "unwatch_pull_request",
         "watch_pull_request",
         "write_pull_request_guides",
@@ -493,9 +511,9 @@ it.effect("production mcp layer lists worktree tools over http", () =>
     Effect.provide(
       Layer.mergeAll(
         NodeHttpServer.layerTest,
-        NodeServices.layer,
+        Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
         ServerConfig.layerTest(process.cwd(), { prefix: "j5-mcp-registration-" }).pipe(
-          Layer.provide(NodeServices.layer),
+          Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
         ),
       ),
     ),
