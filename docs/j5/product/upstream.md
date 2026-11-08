@@ -128,7 +128,7 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Consequences:** one optional input and four lines in `OrchestratorMcpService.ts` (FORK.md case 107), with no change to upstream's behavior when no hook is passed. The reasoning levels are a second setting key beside the models one in `packages/contracts/src/settings.ts`, in the same five places, and need no further upstream edit. Check at each advance that the call still sits after the target resolves and before the command is dispatched. `t3_thread_launch` and `create_threads`, which J5 hides from agents, are not checked. The lists hold when an agent is created and not afterwards: `t3_thread_configure` sets any thread's model and options with only a thread-write check, so a later model or reasoning change is not limited. A delegate sent to a J5 machine from another machine is launched there through upstream's launch tool, by a link session; A delegate aimed at another machine leaves upstream's `delegateTask` before the hook runs, so the sending machine's lists don't apply to it. J5's version of that launch for link sessions holds a plain delegate to the target machine's own lists, and resolves a persona delegate from the target's library against its models. A persona is passed to the other machine through one J5 edit in upstream's remote delegation.
 
-**Decided:** Bryant, 2026-10-27 ([#744](https://github.com/Jacksondr5/j5code/issues/744)); delegates on another J5 machine by Jackson, 2026-11-07 ([record](../worklog/2026-11-07-agent-tool-boundary-session.md)). Recorded in FORK.md cases 107 and 110.
+**Decided:** Bryant, 2026-10-27 ([#744](https://github.com/Jacksondr5/j5code/issues/744)); delegates on another J5 machine by Jackson, 2026-11-07 ([record](../worklog/2026-11-07-agent-tool-boundary-session.md)). Recorded in FORK.md cases 107 and 111.
 
 #### D43. A thread can keep a message the platform wrote without a run
 
@@ -255,6 +255,18 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 **Consequences:** two small edits in upstream's mobile composer files, `NewTaskDraftScreen.tsx` and `ThreadComposer.tsx`, carried at each advance (FORK.md case 100). The menu's anchor is drawn outside its zero-height parent, so check after each advance that a menu item drawn over the draft rows still takes a tap, on iOS and Android.
 
 **Decided:** Jackson, 2026-11-01, at Checkpoint 1 ([#866](https://github.com/Jacksondr5/j5code/issues/866)). Recorded in FORK.md case 100.
+
+#### D45. On mobile, an answered question reads as its question, its answer and who gave it
+
+**Upstream:** a resolved question's work row folds to one truncating label, so a long question hides its answer. Opened, it draws the readable answer, then the raw item as JSON.
+
+**J5:** folded, the answer and who gave it sit after the label, so the question truncates first and both stay visible. Opened, the row stops at the question and its answer. Other work rows, approvals included, keep upstream's detail.
+
+**Why:** Jackson saw a giant JSON blob under an answer, and a folded row that read as only the question, on his iPhone at Checkpoint 2. His direction was to minimize the row to the question, the answer and who answered. Web draws no raw item either.
+
+**Consequences:** a small edit in upstream's mobile `thread-work-log.tsx`, carried at each advance (FORK.md case 99). If upstream stops drawing the raw item, drop J5's half of that edit.
+
+**Decided:** Jackson, 2026-11-01, at Checkpoint 2 ([#891](https://github.com/Jacksondr5/j5code/issues/891)). Recorded in FORK.md case 99.
 
 ### Storage, install, and identity
 
@@ -542,21 +554,13 @@ These already diverge on `j5/main`, but no human ruling is on record. Each lande
 
 ### To be removed
 
-The person ruled against these. They still diverge on `j5/main` until their fix lands, and then move to Retired.
+The person ruled against these. They still diverge on `j5/main` until their fix lands, and then move to Retired. None is waiting now.
+
+### Retired
 
 #### D24. Astra model aliases
 
-**Upstream:** no short aliases for `gpt-6-astra`.
-
-**J5:** `astra`, `gpt-6` and `6` resolve to `gpt-6-astra`.
-
-**Why:** to mirror the Fable aliases that existed at the time, which upstream has since removed.
-
-**Consequences:** D4's GPT 6 exception checks the resolved name, so removing the aliases needs checking against it.
-
-**Status:** introduced in PR #101 (2026-09-04), merged on the Director's authority. To be removed in favor of upstream (#342). Recorded in FORK.md case 32.
-
-### Retired
+`astra`, `gpt-6` and `6` resolved to `gpt-6-astra` in J5's Codex alias map, to mirror the Fable aliases upstream had then (PR #101, 2026-09-04, merged on the Director's authority; ruled against in #342). Retired 2026-11-07 at the advance onto upstream's stable v0.1.7, which has none: J5's map is upstream's again. D4's GPT 6 exception reads resolved names, and no stored selection used an alias.
 
 #### D21. Pair discovery stays inside a worktree
 
@@ -669,6 +673,7 @@ J5 kept a run from resuming after a usage-limit reset when the person had presse
 - 2026-11-01 — D41 added: on mobile, a draft's persona has its own row under the checkout row, and the slash menu covers the draft rows (Jackson, Checkpoint 1; [#866](https://github.com/Jacksondr5/j5code/issues/866)).
 - 2026-10-27 — D1: when the person asked for none, agents choose between working directly, subagents and a Crew from the work, and get help in two ways, a subagent or a Crew member; an explicit request for a Crew, a Peer Agent or a subagent still gets that mechanism; `j5_spawn_agent` is described as for a Peer Agent the user asks for, not as a way to get help (Bryant, with Jackson's 2026-10-31 decision; [#746](https://github.com/Jacksondr5/j5code/issues/746)).
 - 2026-10-31 — D43 added: a thread can keep a message the platform wrote without a run, so a Crew member's introduction and roster changes show in its own thread (Jackson, 2026-10-31).
+- 2026-11-01 — D45 added: on mobile, an answered question reads as its question, its answer and who gave it (Jackson, Checkpoint 2; [#891](https://github.com/Jacksondr5/j5code/issues/891)).
 - 2026-11-02 — D38 now covers J5's platform notices and prompts, built on web ([#698](https://github.com/Jacksondr5/j5code/issues/698)); the raw card is retired. Upstream's platform messages stay on upstream's own rows, since upstream no longer draws them as user messages (Jackson, 2026-10-24 and 2026-10-31; Captain's call on the build, Jackson told).
 - 2026-11-07 — the agent tools after linked environments: D1 names delegates beside subagents, keeps `delegate_task` for what the provider's own subagent can't do (settling #336) and lets a persona be delegated to another J5 machine; D2 admits `t3_thread_wait` and `t3_thread_interrupt`, retires `j5_stop_agent` for interrupt with J5's Captain rule, admits launch for link sessions only, keeps delegates launched from another machine out of the ledger, and replaces the naming rule; D42 holds a delegate on another J5 machine to that machine's lists (Jackson, 2026-11-06 and 2026-11-07; [record](../worklog/2026-11-07-agent-tool-boundary-session.md)).
-- 2026-11-07 — the advance onto upstream's stable v0.1.7: D2 admits the link tools and the pull-request link tools (88 tools), with J5's own refusal to fenced link work; D4 resumes a held queue on any J5 delivery, idle or busy, beside upstream's release of unattended held messages, and a person no longer reorders by hand; D6 names upstream's handoff-budget fresh start as a third deliberate case, with its own notice; D18 follows upstream's merged model control; D19 adds managed policy, the protect drop-in, the compile caches, the pairing app link and j5.codes thread links; D20 keeps the per-desktop track switch (#927 for a fleet switch) and retires the wait for a published release; D22 approved and moved out of Awaiting a decision; D25 points the star prompt at J5's repository; D26 adds the in-app triage; D35's upstream line now has release notes on every track; D36 adds `j5 up`'s hint; D38 gives queued messages their sides and sender on upstream's queue row; D40 hides only the guest-links row in Labs; D42 holds a link session's plain delegate to the target's lists (Jackson, 2026-11-05 to 2026-11-07; FORK.md's pin log).
+- 2026-11-07 — the advance onto upstream's stable v0.1.7: D2 admits the link tools and the pull-request link tools (88 tools), with J5's own refusal to fenced link work; D4 resumes a held queue on any J5 delivery, idle or busy, beside upstream's release of unattended held messages, and a person no longer reorders by hand; D6 names upstream's handoff-budget fresh start as a third deliberate case, with its own notice; D18 follows upstream's merged model control; D19 adds managed policy, the protect drop-in, the compile caches, the pairing app link and j5.codes thread links; D20 keeps the per-desktop track switch (#927 for a fleet switch) and retires the wait for a published release; D22 approved and moved out of Awaiting a decision; D25 points the star prompt at J5's repository; D26 adds the in-app triage; D35's upstream line now has release notes on every track; D36 adds `j5 up`'s hint; D38 gives queued messages their sides and sender on upstream's queue row; D40 hides only the guest-links row in Labs; D42 holds a link session's plain delegate to the target's lists; D24 retired, its aliases removed (Jackson, 2026-11-05 to 2026-11-07; FORK.md's pin log).

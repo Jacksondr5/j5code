@@ -268,6 +268,31 @@ describe("thread workflows", () => {
     ]);
   });
 
+  it("hides J5 platform notices from the visible queue", () => {
+    const state = deriveThreadQueueWorkflowState({
+      thread: { id: "thread", activeProviderThreadId: null },
+      runs: [
+        { id: "seat-finished", status: "queued", userMessageId: "notice", ordinal: 1 },
+        { id: "letter", status: "queued", userMessageId: "letter", ordinal: 2 },
+        { id: "typed", status: "queued", userMessageId: "typed", ordinal: 3 },
+      ],
+      messages: [
+        {
+          id: "notice",
+          text: "<j5_seat_finished>\nseat: reviewer\n</j5_seat_finished>",
+          createdBy: "system",
+        },
+        { id: "letter", text: "A letter from another agent", createdBy: "agent" },
+        { id: "typed", text: "Typed by the person", createdBy: "user" },
+      ],
+      providerTurns: [],
+      providerThreads: [],
+      providerSessions: [],
+    } as never);
+
+    expect(state.queuedRuns.map(({ run }) => run.id)).toEqual(["letter", "typed"]);
+  });
+
   it("removes only the promoted head from the visible queue", () => {
     const state = deriveThreadQueueWorkflowState({
       thread: { id: "thread", activeProviderThreadId: "provider-thread" },
