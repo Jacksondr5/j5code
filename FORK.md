@@ -534,6 +534,8 @@ migrations after upstream migrations.
 
 108.  Device-local notification volume (register D44, Abraham's approval, 2026-10-30). `apps/web/src/threadNotifications.ts` imports J5-owned `connectNotificationSound` and routes each source through its gain node instead of directly to the destination. `components/settings/SettingsPanels.tsx` mounts `NotificationVolumeSettings` beside completion sound controls; `components/settings/settingsSearch.ts` registers its search entry. Storage, gain routing, live updates and the slider live under `apps/web/src/j5/notifications/`. Existing notification modes, gesture unlock, custom sound selection and burst slots remain authoritative. On an advance, keep the gain hook on both completion and input sources and preserve the settings hooks. Web and Electron share the control; mobile and server contracts are untouched. `threadNotifications.test.ts` extends its fake audio graph with gain nodes, source events and the device-local storage boundary, keeping upstream's burst/cancellation assertions unchanged.
 
+109.  J5's platform messages stay out of "Up next" ([#965](https://github.com/Jacksondr5/j5code/issues/965)). `packages/client-runtime/src/state/threadWorkflows.ts` carries one J5 import and one more condition in `getUserQueuedThreadRuns`'s filter: beside upstream's notification and delegated-completion checks, `isJ5PlatformMessage(message)` (J5-owned `packages/client-runtime/src/j5/platformMessages.ts`, `createdBy === "system"`) drops a queued seat notice, Crew notice, Playbook step, native-question link or delivery notice from the queue and its count on web and mobile, as upstream does for its own. The run still starts in order and draws its timeline row then. A2A messages are agent-authored and stay listed (case 24). Upstream writes system-authored messages only as steers, which never queue. `threadWorkflows.test.ts` gains one test beside upstream's completion test. On a pin advance: if upstream renames or splits this filter, keep the J5 condition in whatever decides which queued runs the person sees.
+
 ## Pin and upstream advance runbook
 
 Current pin: `d2c440312e5f39d59827ed466838a623516454d6`, upstream's stable release tag `v0.1.3` on `main` (frozen 2026-10-27). The previous pin was `70d60e03a7a35c6fa131825bbfa05ec893e69912`, upstream's nightly tag `v0.1.1-nightly.20261017.3238`.
@@ -819,6 +821,8 @@ explicitly marked.
 | `apps/web/src/components/settings/SettingsSidebarNav.tsx`                   | N       | 42, 72, 73                                         |
 | `knip.jsonc`                                                                | N       | 95                                                 |
 | `packages/client-runtime/src/state/runtime.test.ts`                         | N       | 42                                                 |
+| `packages/client-runtime/src/state/threadWorkflows.ts`                      | N       | 109                                                |
+| `packages/client-runtime/src/state/threadWorkflows.test.ts`                 | N       | 109                                                |
 | `packages/contracts/src/auth.ts`                                            | N       | 35                                                 |
 | `packages/contracts/src/environmentHttp.ts`                                 | N       | 70                                                 |
 | `apps/server/src/cloud/bootService.test.ts`                                 | A       | H, 50                                              |

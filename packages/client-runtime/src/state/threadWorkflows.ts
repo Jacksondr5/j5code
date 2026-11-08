@@ -5,6 +5,7 @@ import type {
 } from "@t3tools/contracts";
 import { copySorted } from "@t3tools/shared/Array";
 
+import { isJ5PlatformMessage } from "../j5/platformMessages.ts";
 import type { ThreadStructure } from "./models.ts";
 
 type Projection = ThreadStructure;
@@ -115,7 +116,9 @@ export function getUserQueuedThreadRuns(
     projection.messages
       .filter(
         (message) =>
-          message.delegatedCompletion !== undefined || message.notification !== undefined,
+          message.delegatedCompletion !== undefined ||
+          message.notification !== undefined ||
+          isJ5PlatformMessage(message),
       )
       .map((message) => message.id),
   );
