@@ -29,8 +29,8 @@ import {
   useAnswerAttachmentSupport,
   useAnswerAttachments,
 } from "./AnswerAttachments";
-import { AllowPersonaOnceButton } from "./AllowPersonaOnceButton";
 import { J5RecordPanel } from "./J5RecordPanel";
+import { OwnerAskAction } from "./OwnerAskAction";
 import { answerHumanExchange, type HumanInboxItem } from "./humanInboxClient";
 import { notifyHumanInboxChanged } from "./humanInboxRefresh";
 
@@ -169,6 +169,9 @@ export function AdjudicationDock(props: {
             {shown.escalation === undefined ? null : (
               <J5RecordPanel text={shown.escalation.summary} />
             )}
+            {shown.personaDraft === undefined ? null : (
+              <J5RecordPanel text={shown.personaDraft.summary} />
+            )}
             {shown.followUps?.map((followUp) => (
               <div className="flex flex-col gap-1" key={followUp.messageId}>
                 <p className="text-xs font-medium text-muted-foreground">Follow-up</p>
@@ -225,13 +228,13 @@ export function AdjudicationDock(props: {
               />
             )}
             {isOpen ? (
-              <AllowPersonaOnceButton
+              <OwnerAskAction
                 // One instance per ask, so an error or request id never carries to the next.
                 key={shown.exchangeId}
                 disabled={pending}
                 environmentId={environmentId}
                 item={shown}
-                onAllowed={query.refresh}
+                onDone={query.refresh}
                 size="sm"
               />
             ) : null}

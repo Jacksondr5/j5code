@@ -1,5 +1,6 @@
 import { assert, it } from "@effect/vitest";
 import { AgentPersonaEscalations } from "../agents/agentPersonaEscalation.ts";
+import { agentPersonaDraftsTestLayer } from "../test-support/agentPersonaDrafts.ts";
 import { agentPersonaEscalationsTestLayer } from "../test-support/agentPersonaEscalations.ts";
 import { ThreadId, TrimmedNonEmptyString } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -56,6 +57,7 @@ const makeTestLayer = () => {
     Layer.mock(ArchiveCrewService)({}),
     Layer.mock(CrewWorktrees)({}),
     escalations,
+    agentPersonaDraftsTestLayer(),
   );
   const clientReads = clientReadsLayer.pipe(
     Layer.provide(inbox),

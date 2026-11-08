@@ -1,7 +1,14 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { AgentPersonaDrafts } from "../agents/agentPersonaDrafts.ts";
 import { AgentPersonaEscalations } from "../agents/agentPersonaEscalation.ts";
+import { agentPersonaDraftsTestLayer } from "../test-support/agentPersonaDrafts.ts";
 import { agentPersonaEscalationsTestLayer } from "../test-support/agentPersonaEscalations.ts";
-import { ChatAttachmentId, RuntimeRequestId, ThreadId } from "@t3tools/contracts";
+import {
+  ChatAttachmentId,
+  ProviderDriverKind,
+  RuntimeRequestId,
+  ThreadId,
+} from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -16,7 +23,13 @@ import {
   type ArchiveCrewInput,
 } from "./ArchiveCrewService.ts";
 import { ClientActionsService, layer } from "./ClientActionsService.ts";
-import { ExchangeId, LedgerMessageId, LedgerProjectId, ParticipantId } from "./contracts.ts";
+import {
+  ExchangeId,
+  type HumanInboxItem,
+  LedgerMessageId,
+  LedgerProjectId,
+  ParticipantId,
+} from "./contracts.ts";
 import { CrewProposalNotOpenError, CrewProposalService } from "./CrewProposalService.ts";
 import {
   CrewRuntimeRequestConflictError,
@@ -162,6 +175,11 @@ const serviceWith = (seen: ReturnType<typeof calls>) =>
             }),
         }),
         Layer.mock(A2AHumanInbox)({
+          // Only these asks are still open for the person.
+          list: () =>
+            Effect.succeed(
+              ["exchange:save"].map((exchangeId) => ({ exchangeId }) as unknown as HumanInboxItem),
+            ),
           answer: (input, _beforeReply, claimAttachments) => {
             const answeredBy = seen.answeredBy.get(input.exchangeId);
             if (answeredBy !== undefined && answeredBy !== input.commandId)
@@ -195,8 +213,9 @@ const serviceWith = (seen: ReturnType<typeof calls>) =>
         noDocumentTextLayer,
       ),
     ),
-    // Exposed too, so a test files the escalation an ask carries.
+    // Exposed too, so a test files the escalation or persona draft an ask carries.
     Layer.provideMerge(agentPersonaEscalationsTestLayer()),
+    Layer.provideMerge(agentPersonaDraftsTestLayer()),
     Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "j5-client-actions-" })),
     Layer.provide(NodeServices.layer),
   );
@@ -425,6 +444,68 @@ it.effect(
     }).pipe(Effect.provide(serviceWith(seen)));
   },
 );
+
+it.effect("saves a persona draft for the Owner, once, and never on an answered ask", () => {
+  const seen = calls();
+  return Effect.gen(function* () {
+    const actions = yield* ClientActionsService;
+    const drafts = yield* AgentPersonaDrafts;
+    const owner = ParticipantId.make("human:owner");
+    const file = (exchangeId: string, personaId: string) =>
+      drafts
+        .propose({
+          proposerParticipantId: "agent:j5:a2a:thread:asker",
+          proposerThreadId: "thread:asker",
+          draft: {
+            mode: "create",
+            personaId,
+            fields: {
+              displayName: "Release Notes",
+              description: "Writes release notes.",
+              instructions: "Summarize the merged changes.",
+              access: "read-only",
+              modelRoute: [
+                {
+                  driver: ProviderDriverKind.make("codex"),
+                  model: "gpt-5",
+                  reasoningEffort: "high",
+                },
+              ],
+            },
+          },
+        })
+        .pipe(Effect.tap(({ draftId }) => drafts.linkAsk({ draftId, exchangeId })));
+    yield* file("exchange:save", "release-notes");
+    const save = { personId: owner, exchangeId: "exchange:save", clientRequestId: "save-1" };
+    yield* actions.savePersonaDraft(save);
+    assert.deepStrictEqual(seen.answerMessages, [
+      "Saved new persona release-notes to this server's library. Launches from now on can use it.",
+    ]);
+    assert.equal(
+      (yield* drafts.forExchanges(["exchange:save"])).get("exchange:save")?.status,
+      "saved",
+    );
+    // A retry of the same request answers with the same command and saves nothing again.
+    yield* actions.savePersonaDraft(save);
+    assert.equal(seen.answerCommandIds[0], seen.answerCommandIds[1]);
+
+    // A typed reply already closed this ask, so its draft saves nothing.
+    yield* file("exchange:replied", "changelog");
+    const replied = yield* actions
+      .savePersonaDraft({ personId: owner, exchangeId: "exchange:replied", clientRequestId: "s-2" })
+      .pipe(Effect.flip);
+    assert.include(replied.message, "already answered");
+    assert.equal(
+      (yield* drafts.forExchanges(["exchange:replied"])).get("exchange:replied")?.status,
+      "open",
+    );
+    const plain = yield* actions
+      .savePersonaDraft({ personId: owner, exchangeId: "exchange:plain", clientRequestId: "s-3" })
+      .pipe(Effect.flip);
+    assert.include(plain.message, "doesn't carry a persona draft");
+    assert.lengthOf(seen.answerMessages, 2);
+  }).pipe(Effect.provide(serviceWith(seen)));
+});
 
 it.effect("refuses an answer attachment that is not a new upload", () => {
   const seen = calls();

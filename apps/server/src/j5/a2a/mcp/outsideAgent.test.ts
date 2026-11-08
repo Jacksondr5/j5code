@@ -1,4 +1,5 @@
 import { assert, it } from "@effect/vitest";
+import { agentPersonaDraftsTestLayer } from "../../test-support/agentPersonaDrafts.ts";
 import { agentPersonaEscalationsTestLayer } from "../../test-support/agentPersonaEscalations.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
@@ -163,6 +164,7 @@ const makeLayer = (stops: Ref.Ref<ReadonlyArray<Stop>>) => {
     Layer.mock(OrchestratorMcpService)({}),
     Layer.mock(AgentCrewInstanceService)({ findMembership: () => Effect.succeed(null) }),
     agentPersonaEscalationsTestLayer(),
+    agentPersonaDraftsTestLayer(),
     Layer.mock(ArchiveCrewService)({}),
     Layer.mock(CrewStopService)({}),
     Layer.mock(CrewProposalService)({}),
@@ -484,6 +486,12 @@ it.effect("keeps thread-only tools refused for an outside agent, naming what it 
           "j5_clear_own_ask",
           { exchange_id: "exchange:j5:a2a:some-ask", client_request_id: "clear-1" },
           "has no ask to withdraw",
+        ],
+        // Saving a persona is the Owner's, on an ask only a thread agent can send.
+        [
+          "j5_propose_persona",
+          { mode: "edit", persona_id: "reviewer", expected_digest: "0".repeat(64) },
+          "cannot ask the person",
         ],
         [
           "j5_playbook_next",

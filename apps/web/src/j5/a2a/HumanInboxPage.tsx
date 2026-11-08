@@ -52,8 +52,8 @@ import {
   useAnswerAttachments,
 } from "./AnswerAttachments";
 import { answerHumanExchange } from "./humanInboxClient";
-import { AllowPersonaOnceButton } from "./AllowPersonaOnceButton";
 import { J5RecordPanel } from "./J5RecordPanel";
+import { OwnerAskAction } from "./OwnerAskAction";
 import { useScopedParticipantLabels } from "./ParticipantIdentitiesClient";
 import { presentParticipantIdentity } from "@t3tools/client-runtime/j5/participant-identity";
 import { CrewRuntimeRequestsSection } from "../crew/CrewRuntimeRequestsSection";
@@ -217,6 +217,7 @@ function InboxMessage({ item }: { readonly item: HumanInboxItem }) {
     <div className="flex flex-col gap-4">
       {markdown(item.message)}
       {item.escalation === undefined ? null : <J5RecordPanel text={item.escalation.summary} />}
+      {item.personaDraft === undefined ? null : <J5RecordPanel text={item.personaDraft.summary} />}
       {item.followUps?.map((followUp) => (
         <div className="flex flex-col gap-1" key={followUp.messageId}>
           <p className="text-xs font-medium text-muted-foreground">Follow-up</p>
@@ -360,7 +361,7 @@ function OpenInboxItem({
                 </p>
               ) : (
                 <div className="flex flex-wrap items-center justify-end gap-2">
-                  <AllowPersonaOnceButton
+                  <OwnerAskAction
                     disabled={!item.sourceReady || pendingExchangeId !== null}
                     environmentId={item.environmentId}
                     item={item}

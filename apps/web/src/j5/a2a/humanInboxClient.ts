@@ -1,5 +1,9 @@
 import type { EnvironmentId } from "@t3tools/contracts";
-import type { AllowPersonaOnceRequest, AnswerHumanExchangeRequest } from "@t3tools/contracts/j5";
+import type {
+  AllowPersonaOnceRequest,
+  AnswerHumanExchangeRequest,
+  SavePersonaDraftRequest,
+} from "@t3tools/contracts/j5";
 import * as Cause from "effect/Cause";
 
 import { appAtomRegistry } from "../../rpc/atomRegistry";
@@ -29,6 +33,19 @@ export async function allowPersonaOnce(
   input: AllowPersonaOnceRequest,
 ) {
   const result = await j5Environment.allowPersonaOnce.run(appAtomRegistry, {
+    environmentId,
+    input,
+  });
+  if (result._tag === "Failure") throw Cause.squash(result.cause);
+  return result.value;
+}
+
+/** The Owner's "Save persona" on an ask carrying an agent's persona draft. */
+export async function savePersonaDraft(
+  environmentId: EnvironmentId,
+  input: SavePersonaDraftRequest,
+) {
+  const result = await j5Environment.savePersonaDraft.run(appAtomRegistry, {
     environmentId,
     input,
   });

@@ -37,7 +37,11 @@ import {
 
 import { ProjectService } from "../../../project/ProjectService.ts";
 import { ProviderRegistry } from "../../../provider/ProviderRegistry.ts";
-import { makeAgentPersonaLibrary } from "../../agents/agentPersonaLibrary.ts";
+import {
+  definitionDigest,
+  definitionYaml,
+  makeAgentPersonaLibrary,
+} from "../../agents/agentPersonaLibrary.ts";
 import { buildAgentPersonaCatalog } from "../../agents/agentPersonaRouting.ts";
 
 import { AgentCrewInstanceService } from "../AgentCrewInstanceService.ts";
@@ -83,6 +87,10 @@ import {
   type ParticipantId,
 } from "../contracts.ts";
 import { AgentPersonaEscalations } from "../../agents/agentPersonaEscalation.ts";
+import {
+  AgentPersonaDrafts,
+  type AgentPersonaDraftRequest,
+} from "../../agents/agentPersonaDrafts.ts";
 import type { ParticipantProvenanceView } from "../placementContracts.ts";
 import {
   J5_LIST_PARTICIPANTS_DEFAULT_LIMIT,
@@ -338,22 +346,48 @@ const handlers = {
       }
       // An ask about a refused persona launch; the Inbox shows J5's record of it apart from the text.
       let escalationId = input.escalation_id ?? undefined;
+      // An ask carries at most one Owner action.
+      let personaDraftId = input.persona_draft_id ?? undefined;
+      if (escalationId !== undefined && personaDraftId !== undefined)
+        return yield* stateError(
+          "An ask carries escalation_id or persona_draft_id, not both.",
+          "Send one ask per decision: retry with only one of them.",
+        );
       // J5's record stays on the ask that opened the Inbox item: a follow-up to that ask already
       // has it, so the id is dropped, and any other follow-up is refused.
-      if (escalationId !== undefined && input.regarding != null) {
-        const linked = yield* (yield* AgentPersonaEscalations)
-          .linkedAsk(escalationId)
-          .pipe(
-            Effect.mapError((error) =>
-              stateError(error.message, "Check the escalation_id from the refusal and retry."),
-            ),
-          );
+      if (input.regarding != null && (escalationId ?? personaDraftId) !== undefined) {
+        const recordField = escalationId !== undefined ? "escalation_id" : "persona_draft_id";
+        const linked =
+          escalationId !== undefined
+            ? yield* (yield* AgentPersonaEscalations)
+                .linkedAsk(escalationId)
+                .pipe(
+                  Effect.mapError((error) =>
+                    stateError(
+                      error.message,
+                      "Check the escalation_id from the refusal and retry.",
+                    ),
+                  ),
+                )
+            : personaDraftId !== undefined
+              ? yield* (yield* AgentPersonaDrafts)
+                  .linkedAsk(personaDraftId)
+                  .pipe(
+                    Effect.mapError((error) =>
+                      stateError(
+                        error.message,
+                        "Check the draft_id from j5_propose_persona and retry.",
+                      ),
+                    ),
+                  )
+              : null;
         if (linked !== input.regarding)
           return yield* stateError(
-            "escalation_id opens its own Inbox item, so it can't go on a regarding follow-up to another ask.",
-            "Retry without regarding: send a new ask to the person with expect_reply=true, intent, urgency and escalation_id.",
+            `${recordField} opens its own Inbox item, so it can't go on a regarding follow-up to another ask.`,
+            `Retry without regarding: send a new ask to the person with expect_reply=true, intent, urgency and ${recordField}.`,
           );
         escalationId = undefined;
+        personaDraftId = undefined;
       }
       if (escalationId !== undefined) {
         if (input.expect_reply !== true || !isHumanParticipantId(input.to))
@@ -366,6 +400,20 @@ const handlers = {
           .pipe(
             Effect.mapError((error) =>
               stateError(error.message, "Check the escalation_id from the refusal and retry."),
+            ),
+          );
+      }
+      if (personaDraftId !== undefined) {
+        if (input.expect_reply !== true || !isHumanParticipantId(input.to))
+          return yield* stateError(
+            "persona_draft_id goes only on an ask to a person.",
+            "Retry j5_send_message to the person with expect_reply=true, intent and urgency, or, as a Crew member, tell your Captain the draft_id in an ordinary message.",
+          );
+        yield* (yield* AgentPersonaDrafts)
+          .authorizeAsk({ draftId: personaDraftId, askerParticipantId: callerParticipantId })
+          .pipe(
+            Effect.mapError((error) =>
+              stateError(error.message, "Check the draft_id from j5_propose_persona and retry."),
             ),
           );
       }
@@ -473,6 +521,11 @@ const handlers = {
       if (escalationId !== undefined && result.exchangeId !== null)
         yield* (yield* AgentPersonaEscalations).linkAsk({
           escalationId,
+          exchangeId: result.exchangeId,
+        });
+      if (personaDraftId !== undefined && result.exchangeId !== null)
+        yield* (yield* AgentPersonaDrafts).linkAsk({
+          draftId: personaDraftId,
           exchangeId: result.exchangeId,
         });
       yield* worker.notify;
@@ -861,6 +914,104 @@ const handlers = {
           })
           .pipe(Effect.mapError(crewProposalRefusal));
         return projectCrewProposal(outcome);
+      }).pipe(Effect.mapError(failure)),
+  ),
+  j5_read_persona: McpToolAccess.reads((input) =>
+    Effect.gen(function* () {
+      const current = yield* (yield* makeAgentPersonaLibrary)
+        .catalog()
+        .pipe(
+          Effect.mapError((error) =>
+            stateError(
+              `The persona library cannot be read: ${error.message}`,
+              "Ask the user to fix the persona library in Settings → Agent Setup, then retry j5_read_persona.",
+            ),
+          ),
+        );
+      const definition = current.definitions.find(({ id }) => id === input.persona_id);
+      if (definition === undefined)
+        return yield* stateError(
+          current.removedSources.some(({ id }) => id === input.persona_id)
+            ? `${input.persona_id} is removed in this environment.`
+            : `There is no persona ${input.persona_id} here.`,
+          "Check j5_list_personas for the personas you can read; only an Owner restores a removed one, in Settings → Agent Setup.",
+        );
+      const imported = current.importedIds.includes(definition.id);
+      return {
+        id: definition.id,
+        yaml: definitionYaml(definition),
+        digest: definitionDigest(definition),
+        origin: imported ? ("imported" as const) : ("folder" as const),
+        folder_file: current.sourcePaths.get(definition.id) ?? null,
+        overrides_folder: imported && current.sourcePaths.has(definition.id),
+        disabled: current.disabledIds.includes(definition.id),
+      };
+    }).pipe(Effect.mapError(failure)),
+  ),
+  j5_propose_persona: actsAsThreadCaller(
+    "j5_propose_persona",
+    "An outside agent cannot ask the person, so it cannot have a persona draft saved; tell the person what to change in Settings → Agent Setup.",
+    (input, scope) =>
+      Effect.gen(function* () {
+        const proposerParticipantId = yield* (yield* A2AHomeRegistrar)
+          .getHomeForThread(scope.thread.threadId)
+          .pipe(
+            Effect.map((home) => home.participantId),
+            Effect.catchTags({
+              A2AHomeNotFoundError: () =>
+                Effect.succeed(participantIdForThread(scope.thread.threadId)),
+            }),
+          );
+        const fields = {
+          ...(input.display_name === undefined ? {} : { displayName: input.display_name }),
+          ...(input.description === undefined ? {} : { description: input.description }),
+          ...(input.instructions === undefined ? {} : { instructions: input.instructions }),
+          ...(input.access === undefined ? {} : { access: input.access }),
+          ...(input.models === undefined ? {} : { modelRoute: input.models }),
+          ...(input.independent_reviewer === undefined
+            ? {}
+            : { independentReviewer: input.independent_reviewer }),
+        };
+        let draft: AgentPersonaDraftRequest;
+        if (input.mode === "create") {
+          const { displayName, description, instructions, access, modelRoute } = fields;
+          if (
+            displayName === undefined ||
+            description === undefined ||
+            instructions === undefined ||
+            access === undefined ||
+            modelRoute === undefined
+          )
+            return yield* stateError(
+              "A new persona needs display_name, description, instructions, access and models.",
+              "Retry j5_propose_persona with mode create and every one of them.",
+            );
+          draft = {
+            mode: "create",
+            personaId: input.persona_id,
+            fields: { ...fields, displayName, description, instructions, access, modelRoute },
+          };
+        } else {
+          if (input.expected_digest === undefined)
+            return yield* stateError(
+              "An edit needs expected_digest, from the j5_read_persona you drafted it from.",
+              "Call j5_read_persona, then retry j5_propose_persona with its digest.",
+            );
+          draft = {
+            mode: "edit",
+            personaId: input.persona_id,
+            expectedDigest: input.expected_digest,
+            changes: fields,
+          };
+        }
+        const result = yield* (yield* AgentPersonaDrafts)
+          .propose({ proposerParticipantId, proposerThreadId: scope.thread.threadId, draft })
+          .pipe(
+            Effect.mapError((error) =>
+              stateError(error.message, "Fix the draft and retry j5_propose_persona."),
+            ),
+          );
+        return { draft_id: result.draftId, summary: result.summary, warnings: result.warnings };
       }).pipe(Effect.mapError(failure)),
   ),
   j5_list_personas: McpToolAccess.reads(() =>

@@ -106,6 +106,22 @@ export const AgentPersonaEscalationView = Schema.Struct({
 export type AgentPersonaEscalationView = typeof AgentPersonaEscalationView.Type;
 
 /**
+ * A persona create or edit an agent drafted, as an ask to the person shows it. "Save persona"
+ * writes it to the library while it is open; a saved draft is never saved again.
+ */
+export const AgentPersonaDraftView = Schema.Struct({
+  draftId: Schema.String,
+  personaId: Schema.String,
+  mode: Schema.Literals(["create", "edit"]),
+  /** An edit of a folder persona, which saves as an environment override. */
+  overridesFolder: Schema.Boolean,
+  status: Schema.Literals(["open", "saved"]),
+  /** J5's own account of the draft, shown apart from the agent's words. */
+  summary: Schema.String,
+});
+export type AgentPersonaDraftView = typeof AgentPersonaDraftView.Type;
+
+/**
  * Who picked the persona, which sets its limits: a person's pick runs on its own models with its
  * saved access; an agent's is held to Models for custom members and the caller's access.
  */
@@ -349,6 +365,8 @@ export const OrchestrationV2AgentPersonaCatalogEntry = Schema.Struct({
   personaId: AgentPersonaId,
   imported: Schema.optional(Schema.Boolean),
   origin: Schema.optional(AgentPersonaOrigin),
+  /** An imported copy that overrides a folder persona: that folder definition's file. */
+  overridesFolder: Schema.optional(TrimmedNonEmptyString),
   /** A source or bundled definition the user removed; it stays listed so it can be restored. */
   removed: Schema.optional(Schema.Boolean),
   /** Content digest of the current definition; compared with launch snapshots to show drift. */

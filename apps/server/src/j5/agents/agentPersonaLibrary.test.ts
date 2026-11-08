@@ -858,6 +858,36 @@ describe("imported persona library", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("an override of a folder persona is what every launch on the server loads", () =>
+    Effect.gen(function* () {
+      const { library, write, fs, folder, path } = yield* fixture;
+      yield* write("source.yaml", custom);
+      const sourceText = yield* fs.readFileString(path.join(folder, "source.yaml"));
+      const edit: AgentPersonaEditInput = {
+        personaId: custom.id,
+        expectedDigest: definitionDigest(custom),
+        displayName: custom.displayName,
+        description: custom.description,
+        instructions: "Cite two sources.",
+        access: "read-only",
+        modelRoute: custom.modelRoute,
+      };
+      const stale = yield* library
+        .overrideSource({ ...edit, expectedDigest: "0".repeat(64) })
+        .pipe(Effect.flip);
+      assert.include(stale.message, "changed since it was read");
+      yield* library.overrideSource(edit);
+      // The library is the server's, with no per-person view: anyone's launch loads this.
+      const loaded = (yield* library.load()).find(({ id }) => id === custom.id);
+      assert.equal(loaded?.instructions, "Cite two sources.");
+      assert.equal(loaded?.version, custom.version + 1);
+      assert.equal(yield* fs.readFileString(path.join(folder, "source.yaml")), sourceText);
+      // A second override of the same persona is an imported edit, not another override.
+      const again = yield* library.overrideSource(edit).pipe(Effect.flip);
+      assert.include(again.message, "no longer a folder persona");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("preserves disabled state on replacement and clears it on removal", () =>
     Effect.gen(function* () {
       const { library, write } = yield* fixture;
