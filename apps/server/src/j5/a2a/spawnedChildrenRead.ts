@@ -45,7 +45,15 @@ export const projectSpawnedChildren = (
 ): SpawnedChildrenResponse => {
   const seats = new Map<string, NonNullable<typeof SpawnedChild.Type.seat>>();
   const live = crews.filter((crew) => crew.archivedAt === null);
+  const replaced = new Map<string, J5Contracts.ReplacedCrewSeat>();
   for (const crew of live) {
+    for (const member of crew.replaced ?? [])
+      replaced.set(member.participantId, {
+        crewInstanceId: crew.id,
+        crewName: crew.displayName,
+        seat: member.seatName,
+        replacedBy: member.replacedBySeat,
+      });
     for (const member of crew.members)
       seats.set(member.participantId, {
         crewInstanceId: crew.id,
@@ -60,15 +68,16 @@ export const projectSpawnedChildren = (
     const children = rows.flatMap((row) => {
       if (row.placement_parent_id !== parentId) return [];
       const childThreadId = threadIdForParticipant(row.participant_id);
-      return childThreadId === null
-        ? []
-        : [
-            {
-              threadId: childThreadId,
-              participantId: ParticipantId.make(row.participant_id),
-              seat: seats.get(row.participant_id) ?? null,
-            },
-          ];
+      if (childThreadId === null) return [];
+      const replacedSeat = replaced.get(row.participant_id);
+      return [
+        {
+          threadId: childThreadId,
+          participantId: ParticipantId.make(row.participant_id),
+          seat: seats.get(row.participant_id) ?? null,
+          ...(replacedSeat === undefined ? {} : { replaced: replacedSeat }),
+        },
+      ];
     });
     const placed = new Set(children.map((child) => child.participantId as string));
     for (const crew of live) {

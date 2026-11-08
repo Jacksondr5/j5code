@@ -644,3 +644,103 @@ it.effect("archiving the Crew cancels its run for good", () =>
     assert.equal(failureCode(after), "run_terminal");
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );
+
+const replacementThread = ThreadId.make("thread:relay:a2");
+const replaceSeat = (
+  crews: AgentCrewInstanceService["Service"],
+  seatName: string,
+  oldThread: ThreadId,
+  movedStepIds: ReadonlyArray<string>,
+) =>
+  crews.replaceMember(crewId, {
+    seatName,
+    participantId: participantIdForThread(oldThread),
+    member: {
+      seatName,
+      agentId: null,
+      participantId: participantIdForThread(replacementThread),
+      threadId: replacementThread,
+      reason: null,
+      playbookStepIds: [],
+    },
+    movedStepIds,
+    replacedAt: createdAt,
+  });
+
+it.effect("a replacement is handed the step its predecessor already held, once", () =>
+  Effect.gen(function* () {
+    const { start, relay, crews, seats, notices } = yield* fixture;
+    yield* Ref.update(seats, (current) => new Map([...current, [replacementThread, "live"]]));
+    const run = yield* start("start-1");
+    assert.equal(run.delivery?.threadId, seatAThread);
+    assert.equal((yield* replaceSeat(crews, "a", seatAThread, ["inspect"])).status, "replaced");
+    const handed = yield* relay.handOver({
+      crewInstanceId: crewId,
+      fromThreadId: seatAThread,
+      requestKey: "replace-1",
+    });
+    assert.deepStrictEqual(handed?.delivery, {
+      state: "delivered",
+      seat: "a",
+      threadId: replacementThread,
+    });
+    assert.isNull(
+      yield* relay.handOver({
+        crewInstanceId: crewId,
+        fromThreadId: seatAThread,
+        requestKey: "replace-1",
+      }),
+    );
+    assert.deepStrictEqual(
+      (yield* notices).map(({ threadId }) => threadId),
+      [seatAThread, replacementThread],
+    );
+  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);
+
+it.effect("a hand-off still pending toward the replaced member goes to its replacement", () =>
+  Effect.gen(function* () {
+    const { start, relay, crews, seats, notices, dispatchFault, store } = yield* fixture;
+    yield* Ref.update(seats, (current) => new Map([...current, [replacementThread, "live"]]));
+    yield* Ref.set(dispatchFault, "transient");
+    const run = yield* start("start-1");
+    assert.deepStrictEqual(run.delivery, { state: "pending", seat: "a", threadId: seatAThread });
+    yield* replaceSeat(crews, "a", seatAThread, ["inspect"]);
+    yield* Ref.set(dispatchFault, null);
+    const handed = yield* relay.handOver({
+      crewInstanceId: crewId,
+      fromThreadId: seatAThread,
+      requestKey: "replace-1",
+    });
+    assert.equal(handed?.delivery?.threadId, replacementThread);
+    assert.deepStrictEqual(
+      (yield* notices).map(({ threadId }) => threadId),
+      [replacementThread],
+    );
+    assert.lengthOf(yield* store.pendingLandings(null), 0);
+  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);
+
+it.effect(
+  "a replaced seat's step not yet reached goes to the replacement when the run gets there",
+  () =>
+    Effect.gen(function* () {
+      const { start, move, relay, crews, seats, notices } = yield* fixture;
+      yield* Ref.update(seats, (current) => new Map([...current, [replacementThread, "live"]]));
+      const run = yield* start("start-1");
+      yield* replaceSeat(crews, "b", seatBThread, ["review"]);
+      assert.isNull(
+        yield* relay.handOver({
+          crewInstanceId: crewId,
+          fromThreadId: seatBThread,
+          requestKey: "replace-1",
+        }),
+      );
+      const next = yield* move(run.runId, "next", "inspect", "next-1");
+      assert.equal(next.delivery?.threadId, replacementThread);
+      assert.deepStrictEqual(
+        (yield* notices).map(({ threadId }) => threadId),
+        [seatAThread, replacementThread],
+      );
+    }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);

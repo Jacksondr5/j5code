@@ -468,6 +468,61 @@ it.effect("unarchiving a Captain brings back the Crews that retired with it", ()
   }),
 );
 
+it.effect("unarchiving a Captain brings a replaced member's thread back, still replaced", () =>
+  Effect.gen(function* () {
+    const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
+    const oldThread = ThreadId.make("thread:old-builder");
+    const retired: AgentCrewInstance = {
+      ...pair("crew:with-captain", "2026-09-17T08:00:00.000Z"),
+      replaced: [
+        {
+          seatName: "builder",
+          agentId: null,
+          participantId: participantIdForThread(oldThread),
+          threadId: oldThread,
+          playbookStepIds: [],
+          replacedBySeat: "builder",
+          replacedByParticipantId: participantIdForThread(seatThread),
+          replacedAt: "2026-09-17T07:00:00.000Z",
+        },
+      ],
+    };
+    const layer = cascadeLayer.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          noWorktrees,
+          Layer.mock(AgentCrewInstanceService)({
+            listRetiredWithCaptain: () => Effect.succeed([retired]),
+            restoreWithCaptain: () => Effect.succeed(true),
+            serialize: (_id, effect) => effect,
+          }),
+          Layer.mock(ArchiveCrewService)({}),
+          Layer.mock(ThreadManagementService)({
+            getThreadRecords: (threadId) =>
+              Effect.succeed(seatProjection(threadId, { archivedAt: "2026-09-17T08:00:00.000Z" })),
+            dispatch: (command) =>
+              Ref.update(dispatched, (items) => [...items, command]).pipe(
+                Effect.as({ sequence: 1 } as never),
+              ),
+          }),
+        ),
+      ),
+    );
+    yield* Effect.gen(function* () {
+      const cascade = yield* CrewCaptainArchiveCascade;
+      yield* cascade.handleStoredEvent(lifecycleEvent("event:unarchive", "thread.unarchived"));
+      // Its thread is unarchived with the Crew's; the store's restore leaves it off the roster.
+      assert.includeDeepMembers(
+        (yield* Ref.get(dispatched)).map((command) => [
+          command.type,
+          "threadId" in command ? command.threadId : null,
+        ]),
+        [["thread.unarchive", oldThread]],
+      );
+    }).pipe(Effect.provide(layer));
+  }),
+);
+
 it.effect("a Captain archived again after an unarchive retires its Crew again", () =>
   Effect.gen(function* () {
     // The Crew record, its seat thread, and the command ids the orchestrator has already seen.

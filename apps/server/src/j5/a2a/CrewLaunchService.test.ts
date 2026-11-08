@@ -3482,3 +3482,98 @@ it.effect(
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped),
 );
+
+it.effect("a reviewer added after a builder was replaced avoids both builders' models", () =>
+  Effect.gen(function* () {
+    const { context, commands, captain } = yield* fixture;
+    const models = ["gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.6-luna"];
+    const entry = (model: string) => ({
+      instanceId: ProviderInstanceId.make("codex"),
+      model,
+      options: [{ id: "reasoningEffort", value: "high" }],
+    });
+    const reviewer: AgentPersonaDefinition = {
+      ...BUILT_IN_AGENT_PERSONAS.scout,
+      id: "reviewer",
+      independentReviewer: true,
+      modelRoute: [entry("gpt-5.6-terra"), entry("gpt-5.6-sol"), entry("gpt-5.6-luna")],
+    };
+    // The builder ran on terra, and its replacement runs on sol.
+    const oldBuilder = ThreadId.make("thread:builder");
+    const newBuilder = ThreadId.make("thread:builder-2");
+    const modelByThread = new Map<string, string>([
+      [oldBuilder, "gpt-5.6-terra"],
+      [newBuilder, "gpt-5.6-sol"],
+    ]);
+    const authorThreads = Layer.mock(ThreadManagementService)({
+      getThreadRecords: (threadId) =>
+        Effect.succeed({
+          messages: [],
+          runs: [],
+          subagents: [],
+          thread: {
+            ...thread(threadId),
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("codex"),
+              model: modelByThread.get(threadId) ?? "gpt-5.6-sol",
+            },
+            deletedAt: null,
+          },
+        } as unknown as OrchestrationV2ThreadProjection),
+    });
+    const layer = crewLaunchLayer.pipe(
+      Layer.provideMerge(authorThreads),
+      Layer.provideMerge(
+        dependencies(commands, [
+          provider(
+            "codex",
+            "codex",
+            models.map((slug) => ({ slug, options: ["high"] })),
+          ),
+        ]),
+      ),
+      Layer.provideMerge(Layer.succeedContext(context)),
+      Layer.provideMerge(
+        personaLibraryLayer("j5-crew-replaced-", [...launchablePersonas, reviewer]),
+      ),
+      Layer.provideMerge(NodeServices.layer),
+    );
+    yield* Effect.gen(function* () {
+      const launcher = yield* CrewLaunchService;
+      const [added] = yield* launcher.resolveSeats(
+        captain,
+        [{ name: "review", agentId: "reviewer", reason: "Reviews", workspace: { type: "shared" } }],
+        "agent",
+        {
+          members: [
+            {
+              seatName: "builder",
+              agentId: null,
+              participantId: participantIdForThread(newBuilder),
+              threadId: newBuilder,
+              addedVersion: 2,
+              reason: "Implements",
+            },
+          ],
+          replaced: [
+            {
+              seatName: "builder",
+              agentId: null,
+              participantId: participantIdForThread(oldBuilder),
+              threadId: oldBuilder,
+              playbookStepIds: [],
+              replacedBySeat: "builder",
+              replacedByParticipantId: participantIdForThread(newBuilder),
+              replacedAt: DateTime.formatIso(createdAt),
+            },
+          ],
+        },
+      );
+      assert.equal(added!.modelSelection.model, "gpt-5.6-luna");
+      assert.deepStrictEqual(added!.assignment!.reviewIndependence?.authorModels, [
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+      ]);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
