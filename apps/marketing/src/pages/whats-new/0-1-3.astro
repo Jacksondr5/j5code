@@ -13,16 +13,75 @@ interface Group {
   items: ReadonlyArray<Item>;
 }
 
-// Everything J5 Code takes in from upstream T3 Code 0.1.3. Mobile items wait for the rebuilt J5
-// mobile app, and things J5 turned off are left out.
+// Everything J5 Code takes in from upstream T3 Code 0.1.3 to 0.1.7, newest first. The address stays
+// /whats-new/0-1-3, which earlier builds link to. Mobile items wait for the rebuilt J5 mobile app,
+// and things J5 turned off are left out.
 const groups: ReadonlyArray<Group> = [
+  {
+    heading: "New in 0.1.7",
+    intro: "Ask on the side, stop what won't stop, and keep your projects in order.",
+    items: [
+      {
+        title: "Side chats",
+        body: "Ask without derailing. Start a message with /side or /btw to ask about a thread while it keeps working. Bring the answer back when you want it.",
+      },
+      {
+        title: "Pin and archive projects",
+        body: "Pinned projects lead the pickers. Archived projects leave them and keep their threads.",
+      },
+      {
+        title: "Local commits in the Diff pane",
+        body: "Review the commits you haven't pushed yet in the Diff pane.",
+      },
+      {
+        title: "Run a task once",
+        body: "A scheduled task can run once, at a date and time you choose. Agents can schedule one too.",
+      },
+      {
+        title: "Approvals from the parent",
+        body: "Answer a delegated task's approval from the conversation that started it. Crew members and Peer Agents still ask in your Inbox.",
+      },
+      {
+        title: "Force stop",
+        body: "Stop shows Stopping until the turn ends. An agent that ignores it shows Agent not responding, with a Force stop button.",
+      },
+      {
+        title: "Turn into project",
+        body: "A thread with no project can become a project where it stands.",
+      },
+      {
+        title: "Model switches in the timeline",
+        body: "The timeline marks where a thread moved to another model.",
+      },
+      {
+        title: "Project folders",
+        body: "Turn on Boring sidebar in Settings → Labs to group the sidebar into project folders. Agents that other agents started still nest under them.",
+      },
+      {
+        title: "A simpler queue",
+        body: "Each queued message names who sent it and sits on the side it will take once sent, with Send now, edit and remove. Queued messages can no longer be dragged into a new order.",
+      },
+      {
+        title: "Linked environments",
+        body: "In Settings → Labs, link another machine running J5 Code, and agents here can work there by naming it. Messages between agents on different machines still travel by peering.",
+      },
+      {
+        title: "Copy a thread link",
+        body: "Copy thread gives a j5.codes link that opens the thread in the J5 Code app or on your own server, for anyone who can already reach that thread.",
+      },
+      {
+        title: "Fixes and speed",
+        body: "A new thread's first reply no longer needs a reload, commits no longer land on a branch you switched away from, and a cut-off Markdown preview no longer overwrites its file. Idle servers run far fewer background queries, the sidebar opens faster, and the server keeps a much smaller event log.",
+      },
+    ],
+  },
   {
     heading: "A new look",
     intro: "The interface was redesigned, and the new design is on for everyone.",
     items: [
       {
         title: "The new design",
-        body: "A true black dark mode, dimmer read threads and simpler composer controls, with color kept for what means something. Prefer the classic look? Turn off New design in Settings, Appearance.",
+        body: "A true black dark mode, dimmer read threads and simpler composer controls, with color kept for what means something.",
       },
       {
         title: "Settings and Usage over your thread",
@@ -240,17 +299,18 @@ const groups: ReadonlyArray<Group> = [
 ---
 
 <Layout
-  title="What's new in 0.1.3 — J5 Code"
-  description="Search inside your messages, approvals that don't block the composer, idle compaction for Claude, and everything else J5 Code picks up from upstream T3 Code 0.1.3."
+  title="What's new from 0.1.3 to 0.1.7 — J5 Code"
+  description="Side chats, Force stop, project pin and archive, search inside your messages, and everything else J5 Code picks up from upstream T3 Code 0.1.3 to 0.1.7."
 >
   <div class="whats-new">
     <section class="hero">
       <div class="container hero-inner">
-        <p class="eyebrow">What's new · from T3 Code 0.1.3</p>
-        <h1 class="display">Search inside your messages, and much more.</h1>
+        <p class="eyebrow">What's new · from T3 Code 0.1.3 to 0.1.7</p>
+        <h1 class="display">Side chats, search inside your messages, and much more.</h1>
         <p class="lead">
           J5 Code tracks <a href={T3_SITE_URL} target="_blank" rel="noopener noreferrer">T3 Code</a>,
-          and this update brings in upstream's 0.1.3 release. Here is everything it changes for you.
+          and this update brings in upstream's releases from 0.1.3 to 0.1.7. Here is everything they
+          change for you.
         </p>
       </div>
     </section>
