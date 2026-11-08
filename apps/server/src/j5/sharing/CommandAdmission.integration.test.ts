@@ -6,6 +6,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as TestClock from "effect/testing/TestClock";
 
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
+import * as ProviderRegistryMock from "../../provider/testUtils/providerRegistryMock.ts";
 import { humanPersonRegistryLayer } from "../a2a/HumanPersonRegistry.ts";
 import { makeHarness, modelSelection, projectId } from "../test-support/threadLaunchHarness.ts";
 import { makeCommandAdmission } from "./CommandAdmission.ts";
@@ -26,6 +27,7 @@ const layerFor = (harness: ReturnType<typeof makeHarness>) =>
     Layer.provideMerge(PersonAccess.layer),
     Layer.provideMerge(humanPersonRegistryLayer),
     Layer.provideMerge(harness.layer),
+    Layer.provideMerge(ProviderRegistryMock.layer()),
   );
 
 let counter = 0;

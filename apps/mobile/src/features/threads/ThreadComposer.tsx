@@ -780,6 +780,7 @@ export const ThreadComposer = function ThreadComposer(props: ThreadComposerProps
             environmentId={props.environmentId}
             compact={!compactEditor.isExpanded}
             threadId={props.selectedThread.id}
+            onPressModel={openSettings}
           />
         )
       ) : (

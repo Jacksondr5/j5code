@@ -58,13 +58,17 @@ const project = {
   deletedAt: null,
 } as const;
 
-const adapter = {
-  instanceId: modelSelection.instanceId,
-  driver: ProviderDriverKind.make("codex"),
-  getCapabilities: () => Effect.succeed(CodexProviderCapabilitiesV2),
-  planSelectionTransition: () => Effect.succeed({ type: "apply_on_next_turn" as const }),
-  openSession: () => Effect.die("provider execution is disabled in launch tests"),
-} as ProviderAdapter.ProviderAdapterV2["Service"];
+/** A provider adapter that plans selection changes but never runs a turn. */
+export const launchTestAdapter = (instanceId: ProviderInstanceId, driver: ProviderDriverKind) =>
+  ({
+    instanceId,
+    driver,
+    getCapabilities: () => Effect.succeed(CodexProviderCapabilitiesV2),
+    planSelectionTransition: () => Effect.succeed({ type: "apply_on_next_turn" as const }),
+    openSession: () => Effect.die("provider execution is disabled in launch tests"),
+  }) as ProviderAdapter.ProviderAdapterV2["Service"];
+
+const adapter = launchTestAdapter(modelSelection.instanceId, ProviderDriverKind.make("codex"));
 
 export interface HarnessOptions {
   readonly crewDeliveryContext?: boolean;
@@ -76,11 +80,16 @@ export interface HarnessOptions {
   readonly generateBranchName?: TextGeneration.TextGeneration["Service"]["generateBranchName"];
   readonly serverSettings?: Parameters<typeof ServerSettings.layerTest>[0];
   readonly providers?: ReadonlyArray<ServerProvider>;
+  /** Adapters beside the default Codex one, for threads that switch provider. */
+  readonly adapters?: ReadonlyArray<ProviderAdapter.ProviderAdapterV2["Service"]>;
 }
 
 export function makeHarness(options: HarnessOptions = {}) {
   const database = SqlitePersistenceMemory;
-  const registry = ProviderAdapterRegistry.layerFromAdapters([adapter]);
+  const registry = ProviderAdapterRegistry.layerFromAdapters([
+    adapter,
+    ...(options.adapters ?? []),
+  ]);
   const baseOrchestrator = ProviderReplayHarness.layerWithRegistry(
     { name: "thread-launch" },
     registry,

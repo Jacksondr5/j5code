@@ -7,6 +7,7 @@ import * as Context from "effect/Context";
 import * as Stream from "effect/Stream";
 
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
+import * as ProviderRegistryMock from "../../../provider/testUtils/providerRegistryMock.ts";
 import { A2ALifecycleService } from "../../a2a/LifecycleService.ts";
 import * as Access from "../Access.ts";
 import * as SharedConversation from "../SharedConversation.ts";
@@ -63,6 +64,7 @@ export const conversationLayer = SharedConversation.layer.pipe(
   Layer.provide(quietLifecycleLayer),
   Layer.provide(threadsLayer),
   Layer.provideMerge(upstreamLayer),
+  Layer.provideMerge(ProviderRegistryMock.layer()),
   Layer.provideMerge(
     Access.layer.pipe(
       Layer.provide(SharedThreads.accessWriteHookLayer),

@@ -10,11 +10,11 @@ import {
   type AgentPersonaRouteAttempt,
 } from "./agentPersonaRouting.ts";
 
-const routeFailurePhrase = (
+export const routeFailurePhrase = (
   target: AgentPersonaRouteAttempt["target"],
   failure: AgentPersonaRouteAttempt["failures"][number],
+  provider: string = "driver" in target ? target.driver : target.instanceId,
 ) => {
-  const provider = "driver" in target ? target.driver : target.instanceId;
   switch (failure.code) {
     case "provider-not-configured":
       return `no ${provider} provider is configured`;

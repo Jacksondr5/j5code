@@ -107,7 +107,10 @@ export const AgentPersonaReviewIndependence = Schema.Struct({
 });
 export type AgentPersonaReviewIndependence = typeof AgentPersonaReviewIndependence.Type;
 
-/** Immutable launch-time provenance; definitionDigest references an environment-owned snapshot. */
+/**
+ * Launch-time provenance; definitionDigest references an environment-owned snapshot. The model
+ * fields (`resolved*`) follow a person's model switch; everything else is fixed at launch.
+ */
 export const OrchestrationV2AgentPersonaAssignment = Schema.Struct({
   personaId: AgentPersonaId,
   definitionVersion: PositiveInt,
@@ -126,6 +129,8 @@ export const OrchestrationV2AgentPersonaAssignment = Schema.Struct({
   pickSource: Schema.optional(AgentPersonaPickSource),
   /** Present only for a persona flagged as an independent reviewer. */
   reviewIndependence: Schema.optional(AgentPersonaReviewIndependence),
+  /** Present once a person switched the worker off its launch model. */
+  modelSwitchedBy: Schema.optional(Schema.Literal("person")),
 });
 export type OrchestrationV2AgentPersonaAssignment =
   typeof OrchestrationV2AgentPersonaAssignment.Type;
