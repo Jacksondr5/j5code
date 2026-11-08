@@ -701,11 +701,10 @@ export const live: Layer.Layer<
                   }),
                 )
               : Effect.void;
-          // A delivery to an agent with a held queue, idle or busy, resumes the queue and joins
-          // its back, so every message runs in the order it landed, a person's held ones too
-          // (register D4); an accepted one's retry never resumes again. To a thread a usage limit
-          // stopped it waits unsent for the continue, never starting into the limit. After a
-          // failed worktree setup it waits only behind held messages.
+          // Register D4: a delivery to a held queue, idle or busy, resumes it and joins its back, so
+          // messages run in landing order (a person's held ones too); a retry never resumes again.
+          // Under a usage limit it waits unsent for the continue; after a failed worktree setup it
+          // waits behind held messages.
           const heldQueueRun = target.runs.find(
             (run) => run.status === "queued" && run.queueHeld === true,
           );

@@ -716,7 +716,6 @@ it.effect("only the platform sends a context record of its own kind (AC8)", () =
 it.effect("an answer carries its author, and who answered shows once upstream settles it", () =>
   Effect.gen(function* () {
     const owner = yield* jackson;
-    const sql = yield* SqlClient.SqlClient;
     const threadId = yield* thread("thread:answers");
     const priya = yield* personWith("Priya", onThread(threadId));
     const answer = {
