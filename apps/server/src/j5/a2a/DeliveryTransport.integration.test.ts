@@ -689,7 +689,6 @@ const publishCommandExecution = (
 
 it.effect.each([
   "gpt-6-astra",
-  "astra",
   "gpt-6-luna",
   "gpt-6-sol",
   "gpt-6.1-sol",

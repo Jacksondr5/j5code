@@ -441,7 +441,7 @@ it.layer(NodeServices.layer)("boot service install", (it) => {
           : path.join(home, ".config"),
         "systemd",
         "user",
-        "t3code.service",
+        "j5code.service",
       );
       expect(yield* service.status).toMatchObject({ installed: false, unitPath });
       const plan = yield* service.install();
