@@ -9,11 +9,14 @@
   "ignoreFiles": [
     "apps/mobile/src/components/T3Wordmark.tsx",
     "apps/web/src/components/T3Wordmark.tsx",
+    "apps/web/src/components/settings/UpdateTrackSwitchDialog.tsx",
   ],
   "ignoreIssues": {
     "apps/server/src/cli/thread.ts": ["exports"],
-    "apps/web/src/hostedPairing.ts": ["exports"],
-    "apps/web/src/state/npmRelease.ts": ["exports"],
+    // The fleet track switch's dialog, which J5 does not use (decision 5 of the v0.1.7 advance).
+    "apps/web/src/components/sidebar/SidebarUpdatePill.tsx": ["exports"],
+    "apps/web/src/components/sidebar/updateEverything.logic.ts": ["exports"],
+    "apps/web/src/components/sidebar/useUpdateEverything.ts": ["exports"],
     "packages/shared/src/t3ProjectFile.ts": ["exports"],
   },
   "workspaces": {
