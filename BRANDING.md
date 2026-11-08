@@ -275,9 +275,11 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
 - "T3 Connect", "T3 Account" and "T3 Chat": upstream's hosted relay, sign-in and the hosted
   account linked through it, named as upstream names them wherever they appear, along with
   `infra/relay` and the relay's `T3-Mode-Limit` header.
-- "T3 Code for GitHub" (`packages/source-control-github/src/shared/definition.ts` `appName`,
-  `GitHubAppSignIn.ts`): the name of upstream's registered GitHub App, whose client id J5 uses, so
-  the person really does authorize an app by that name.
+- "T3 Code for GitHub" (`packages/source-control-github/src/shared/definition.ts` `appName`):
+  upstream's GitHub App sign-in, which is off in J5. It turns on only when a server is given
+  `T3CODE_GITHUB_APP_CLIENT_ID` (`GitHubAppSignIn.ts`), and no J5 build or workflow sets it, so
+  web's and mobile's source control settings show no row for it. A server pointed at upstream's
+  app has the person authorize upstream's app under that name, so the name stays.
 - The Windows installer's running-app check (`apps/desktop/resources/installer.nsh`
   `customAppRunningMessages`) matches upstream's channel names; J5's never match, so it falls back
   to `${PRODUCT_NAME}`, which is J5's.
