@@ -481,7 +481,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
             devUrl: undefined,
           }).pipe(
             Effect.provideService(HostProcess.HomeDirectory, "/home/dev"),
-            Effect.map((env) => env.T3CODE_HOME),
+            Effect.map((env) => env.J5CODE_HOME),
           );
 
         assert.equal(yield* homeFor("~/t3-dev"), path.join("/home/dev", "t3-dev"));
