@@ -1,5 +1,5 @@
 import type { EnvironmentId } from "@t3tools/contracts";
-import type { AnswerHumanExchangeRequest } from "@t3tools/contracts/j5";
+import type { AllowPersonaOnceRequest, AnswerHumanExchangeRequest } from "@t3tools/contracts/j5";
 import * as Cause from "effect/Cause";
 
 import { appAtomRegistry } from "../../rpc/atomRegistry";
@@ -16,6 +16,19 @@ export async function answerHumanExchange(
   input: AnswerHumanExchangeRequest,
 ) {
   const result = await j5Environment.answerHumanExchange.run(appAtomRegistry, {
+    environmentId,
+    input,
+  });
+  if (result._tag === "Failure") throw Cause.squash(result.cause);
+  return result.value;
+}
+
+/** The Owner's "Allow this once" on an ask escalating a blocked persona. */
+export async function allowPersonaOnce(
+  environmentId: EnvironmentId,
+  input: AllowPersonaOnceRequest,
+) {
+  const result = await j5Environment.allowPersonaOnce.run(appAtomRegistry, {
     environmentId,
     input,
   });

@@ -170,6 +170,16 @@ const clientFor = (scopes: ReadonlyArray<AuthEnvironmentScope>) =>
                 },
               })
             : Effect.fail(new A2AExchangeNotOpenError({ exchangeId: input.exchangeId })),
+        allowPersonaOnce: (input) =>
+          reached("allow-once", {
+            result: {
+              messageId: LedgerMessageId.make("message:allow-once"),
+              exchangeId: ExchangeId.make(input.exchangeId),
+              exchangeState: "closed" as const,
+              joinedExistingExchange: false,
+              durableAtSeq: 1,
+            },
+          }),
         answerCrewWorktreeCleanup: ({ itemId }) =>
           reached("cleanup", {
             item: {
@@ -317,6 +327,9 @@ const callEach = (client: Effect.Success<ReturnType<typeof clientFor>>["client"]
         exchangeId: "ask:1",
       }),
     ),
+    [ACTIONS.allowPersonaOnce]: outcome(
+      client[ACTIONS.allowPersonaOnce]({ exchangeId: "ask:1", clientRequestId: "allow-1" }),
+    ),
     [ACTIONS.answerCrewWorktreeCleanup]: outcome(
       client[ACTIONS.answerCrewWorktreeCleanup]({ itemId: "cleanup:1", removePaths: [] }),
     ),
@@ -426,7 +439,8 @@ describe("J5 client action RPC scopes", () => {
                   ? AuthAccessWriteScope
                   : method.startsWith("j5.playbooks.") ||
                       method === ACTIONS.archiveCrew ||
-                      method === ACTIONS.answerCrewWorktreeCleanup
+                      method === ACTIONS.answerCrewWorktreeCleanup ||
+                      method === ACTIONS.allowPersonaOnce
                     ? AuthSettingsWriteScope
                     : AuthOrchestrationOperateScope,
               },
@@ -490,6 +504,13 @@ describe("J5 client action RPC handlers", () => {
         })).item.status,
         "decided",
       );
+      assert.equal(
+        (yield* owner.client[ACTIONS.allowPersonaOnce]({
+          exchangeId: "ask:1",
+          clientRequestId: "allow-1",
+        })).result.exchangeState,
+        "closed",
+      );
       assert.deepStrictEqual(
         yield* client[ACTIONS.respondCrewRuntimeRequest]({
           threadId,
@@ -508,7 +529,7 @@ describe("J5 client action RPC handlers", () => {
         { deleted: true },
       );
       assert.deepStrictEqual(handled, ["resolve", "stop", "respond", "answer", "delete artifact"]);
-      assert.deepStrictEqual(owner.handled, ["archive", "cleanup"]);
+      assert.deepStrictEqual(owner.handled, ["archive", "cleanup", "allow-once"]);
     }).pipe(Effect.scoped),
   );
 

@@ -80,7 +80,7 @@ it.effect("refuses a former bundled persona when the library is empty", () => {
         agentPersona: { personaId: "scout" },
       })
       .pipe(Effect.flip);
-    assert.equal(error.message, "Unknown persona in this environment.");
+    assert.equal(error.message, "This environment has no personas, so scout cannot launch.");
     assert.isNull(yield* threads.getThreadShell(ThreadId.make(threadId)));
   }).pipe(Effect.provide(harness.layer));
 });
@@ -237,7 +237,7 @@ it.effect("blocks a direct persona launch when both declared model routes are un
       );
       assert.include(
         error.message,
-        "Persona scout is blocked because its ordered model entries are unavailable: ",
+        "Persona scout is blocked because none of its model entries can run: ",
       );
     }).pipe(
       Effect.provide(
@@ -707,7 +707,7 @@ it.effect(
         error._tag === "ThreadLaunchError" ? error.operation : undefined,
         "resolve-agent-persona",
       );
-      assert.include(error.message, "Unknown persona");
+      assert.include(error.message, "has no personas");
     }).pipe(
       Effect.provide(
         harness.layer.pipe(Layer.provideMerge(environment), Layer.provideMerge(NodeServices.layer)),

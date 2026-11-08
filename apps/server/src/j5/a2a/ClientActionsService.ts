@@ -6,6 +6,7 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import type {
+  AllowPersonaOnceRequest,
   AnswerHumanExchangeRequest,
   AnswerHumanExchangeResponse,
   CrewArchiveRequest,
@@ -28,7 +29,14 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 
+import type { SqlError } from "effect/sql/SqlError";
+
 import { ServerConfig } from "../../config.ts";
+import {
+  AgentPersonaEscalationError,
+  AgentPersonaEscalations,
+  allowedOnceReply,
+} from "../agents/agentPersonaEscalation.ts";
 import {
   AttachmentClaimError,
   attachmentIsPendingUpload,
@@ -114,6 +122,17 @@ export class ClientActionsService extends Context.Service<
       typeof AnswerHumanExchangeResponse.Type,
       Failure<A2AHumanInbox["Service"]["answer"]>
     >;
+    /**
+     * The Owner's "Allow this once": answers an ask escalating a refused persona with the fixed
+     * reply, then grants its one waiver for the asking agent's retry.
+     */
+    readonly allowPersonaOnce: (
+      input: AllowPersonaOnceRequest & { readonly personId: ParticipantId },
+      beforeReply?: Parameters<A2AHumanInbox["Service"]["answer"]>[1],
+    ) => Effect.Effect<
+      typeof AnswerHumanExchangeResponse.Type,
+      Failure<A2AHumanInbox["Service"]["answer"]> | AgentPersonaEscalationError | SqlError
+    >;
     /** Decide the worktree cleanup an archive filed in the Inbox; refused once decided. */
     readonly answerCrewWorktreeCleanup: (
       input: CrewWorktreeCleanupAnswerRequest,
@@ -146,6 +165,7 @@ const make = Effect.gen(function* () {
   const inbox = yield* A2AHumanInbox;
   const worker = yield* A2ADeliveryWorker;
   const worktrees = yield* CrewWorktrees;
+  const escalations = yield* AgentPersonaEscalations;
   // A random source that fails is the host's fault, not a refusal a client can act on.
   const freshId = (yield* Crypto.Crypto).randomUUIDv4().pipe(Effect.orDie);
   const projectProposal = projectCrewProposal(yield* PlaybookStore);
@@ -268,6 +288,32 @@ const make = Effect.gen(function* () {
           beforeReply,
           claimAnswerAttachments,
         );
+        yield* worker.notify;
+        return { result };
+      },
+    ),
+    allowPersonaOnce: Effect.fn("j5.a2a.clientActions.allowPersonaOnce")(
+      function* (input, beforeReply) {
+        const grant = yield* escalations.grantable(input.exchangeId);
+        const acceptedAt = DateTime.formatIso(yield* DateTime.now);
+        const result = yield* inbox.answer(
+          {
+            commandId: CommCommandId.make(
+              `command:j5:a2a:human:${encodeURIComponent(input.personId)}:${encodeURIComponent(input.exchangeId)}:${encodeURIComponent(input.clientRequestId)}`,
+            ),
+            personId: input.personId,
+            exchangeId: ExchangeId.make(input.exchangeId),
+            message: allowedOnceReply(grant),
+            acceptedAt,
+          },
+          beforeReply,
+          claimAnswerAttachments,
+        );
+        // Granted once the reply is committed, so an ask someone else answered first grants nothing.
+        yield* escalations.markGranted({
+          escalationId: grant.escalationId,
+          grantedBy: input.personId,
+        });
         yield* worker.notify;
         return { result };
       },

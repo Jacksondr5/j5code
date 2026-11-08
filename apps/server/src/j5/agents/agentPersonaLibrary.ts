@@ -2,7 +2,9 @@
 import * as NodeCrypto from "node:crypto";
 import {
   AgentPersonaId,
+  AgentPersonaBlockCode,
   AgentPersonaPickConstraint,
+  ProviderOptionSelection,
   isAgentPersonaDefinitionFile,
   AgentPersonaImportConflictError,
   AGENT_PERSONA_IMPORT_MAX_BYTES,
@@ -37,8 +39,23 @@ export class AgentPersonaLibraryError extends Schema.TaggedError<AgentPersonaLib
   {
     message: Schema.String,
     cause: Schema.optional(Schema.Defect()),
-    /** The agent-pick limit that refused the launch, which "Allow this once" could waive. */
+    /** The one agent-pick limit that, waived by "Allow this once", lets the launch run. */
     constraint: Schema.optional(AgentPersonaPickConstraint),
+    /** Why a launch was refused; absent for failures that are not about the persona. */
+    code: Schema.optional(AgentPersonaBlockCode),
+    /** The persona a definition that fails to decode names, so a launch can say it is invalid. */
+    personaId: Schema.optional(Schema.String),
+    /** With `constraint`: each candidate waiving it alone would let run. */
+    waiverEntries: Schema.optional(
+      Schema.Array(
+        Schema.Struct({
+          entryIndex: Schema.Number,
+          instanceId: Schema.String,
+          model: Schema.String,
+          options: Schema.Array(ProviderOptionSelection),
+        }),
+      ),
+    ),
   },
 ) {}
 
@@ -76,6 +93,13 @@ const decodeDefinition = Effect.fn("AgentPersonaLibrary.decodeDefinition")(funct
       });
     },
   });
+  const personaId =
+    typeof definition === "object" &&
+    definition !== null &&
+    "id" in definition &&
+    typeof definition.id === "string"
+      ? definition.id
+      : undefined;
   return yield* Effect.try({
     try: () => {
       if (
@@ -91,12 +115,12 @@ const decodeDefinition = Effect.fn("AgentPersonaLibrary.decodeDefinition")(funct
       return decoded;
     },
     catch: (cause) =>
-      isLibraryError(cause)
-        ? cause
-        : new AgentPersonaLibraryError({
-            message: "Invalid persona definition: check field types and access policy.",
-            cause,
-          }),
+      new AgentPersonaLibraryError({
+        ...(isLibraryError(cause)
+          ? { message: cause.message }
+          : { message: "Invalid persona definition: check field types and access policy.", cause }),
+        ...(personaId === undefined ? {} : { personaId }),
+      }),
   });
 });
 const ImportedDefinition = Schema.Struct({
@@ -283,7 +307,7 @@ export function createAgentPersonaLibrary(storage?: {
     const { configured, folders } = yield* resolveFolders();
     const definitions = new Map<string, AgentPersonaDefinition>();
     const paths = new Map<string, string>();
-    const diagnostics: Array<{ path: string; message: string }> = [];
+    const diagnostics: Array<{ path: string; message: string; personaId?: string }> = [];
     for (const folder of folders.map(({ path }) => path)) {
       const files = yield* listDefinitionFiles(folder).pipe(
         Effect.catchIf(
@@ -322,7 +346,12 @@ export function createAgentPersonaLibrary(storage?: {
           return yield* decodeDefinition(text);
         }).pipe(Effect.result);
         if (result._tag === "Failure") {
-          diagnostics.push({ path: file, message: result.failure.message });
+          const { personaId } = result.failure;
+          diagnostics.push({
+            path: file,
+            message: result.failure.message,
+            ...(personaId === undefined ? {} : { personaId }),
+          });
           continue;
         }
         const definition = result.success;
@@ -495,6 +524,7 @@ export function createAgentPersonaLibrary(storage?: {
         diagnostics.push({
           path: storage!.path.join(storage!.stateDir, "imported-agent-personas.json"),
           message: `Persona ${definition.id}: ${AGENT_PERSONA_ACCESS_REPAIR}`,
+          personaId: definition.id,
         });
       } else definitions.set(definition.id, definition);
     }

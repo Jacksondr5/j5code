@@ -1,4 +1,5 @@
 import { expect, it } from "@effect/vitest";
+import { agentPersonaEscalationsTestLayer } from "../../test-support/agentPersonaEscalations.ts";
 import {
   EnvironmentId,
   ProviderDriverKind,
@@ -106,6 +107,7 @@ const TestLayer = McpHttpServer.toolkitRegistration(
       Layer.mock(ThreadManagementService)({}),
       Layer.mock(ProviderRegistry)({}),
       permissiveCrewMemberModels,
+      agentPersonaEscalationsTestLayer(),
     ),
   ),
   Layer.provideMerge(McpServer.McpServer.layer),

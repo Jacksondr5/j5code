@@ -1,4 +1,5 @@
 import { assert, it } from "@effect/vitest";
+import { agentPersonaEscalationsTestLayer } from "../test-support/agentPersonaEscalations.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CommandId,
@@ -125,6 +126,7 @@ const makeTestLayer = (memberModels: Layer.Layer<CrewMemberModels>) =>
     registry,
     mcp,
     memberModels,
+    agentPersonaEscalationsTestLayer(),
     Projections.layer.pipe(Layer.provide(database)),
     NodeServices.layer,
   ).pipe(
@@ -346,7 +348,7 @@ it.effect("holds a plain delegated child to the list, inherited model included",
     const agentPick = yield* scout("agent-pick").pipe(Effect.flip);
     assert.include(
       agentPick.message,
-      `${modelSelection.model} on codex is not checked in Models for custom members`,
+      `${modelSelection.model} on Codex is not checked in Models for custom members`,
     );
     yield* personTyped("@persona:scout check the evidence");
     const persona = yield* scout("persona");

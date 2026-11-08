@@ -5,6 +5,7 @@ import {
   RuntimeRequestId,
   ThreadId,
 } from "@t3tools/contracts";
+import { agentPersonaEscalationsTestLayer } from "../test-support/agentPersonaEscalations.ts";
 import { J5_CLIENT_READ_WS_METHODS, type J5ActionError } from "@t3tools/contracts/j5";
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -112,6 +113,7 @@ const handlersWith = (given: {
           Layer.mock(A2ALedger)({}),
           Layer.mock(ParticipantPlacementService)({}),
           Layer.mock(AgentCrewInstanceService)({}),
+          agentPersonaEscalationsTestLayer(),
           Layer.mock(PlaybookCrewRelay)({}),
           Layer.mock(ArchiveCrewService)({}),
           Layer.mock(CrewWorktrees)({}),

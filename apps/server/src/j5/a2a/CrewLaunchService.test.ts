@@ -1,4 +1,6 @@
 import * as SqlClient from "effect/sql/SqlClient";
+import { AgentPersonaEscalations } from "../agents/agentPersonaEscalation.ts";
+import { agentPersonaEscalationsTestLayer } from "../test-support/agentPersonaEscalations.ts";
 import { assert, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
@@ -267,6 +269,7 @@ const dependencies = (
 ) =>
   Layer.mergeAll(
     memberModels,
+    agentPersonaEscalationsTestLayer(),
     fakeSpawnWorkspaceLayer(workspace).pipe(
       Layer.provideMerge(
         threadManagementFake(
@@ -3108,12 +3111,12 @@ it.effect(
           .pipe(Effect.flip);
         assert.include(
           refused.message,
-          "Persona builder would run with Repository write, which is broader than the Supervised its caller runs with.",
+          "it would run with Repository write, which is broader than the Supervised its caller runs with",
         );
         const raised = yield* launcher
           .resolveSeats(supervised, [{ ...scout, runtimeMode: "full-access" }], "agent")
           .pipe(Effect.flip);
-        assert.include(raised.message, "Persona scout would run with Full access");
+        assert.include(raised.message, "it would run with Full access");
         const [readOnly] = yield* launcher.resolveSeats(supervised, [scout], "agent");
         assert.equal(readOnly!.runtimeMode, "approval-required");
         // The person approving the card gives the seat its saved access.
@@ -3169,6 +3172,59 @@ it.effect("an automatic roster reads the project's lists once, however many seat
       );
       assert.lengthOf(resolved, 4);
       assert.equal(yield* Ref.get(reads), 1);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect("a Captain's blocked persona seat escalates, and its grant launches that seat once", () =>
+  Effect.gen(function* () {
+    const claude = provider("claudeAgent", "claudeAgent", [
+      { slug: "claude-opus-5", options: ["high"] },
+    ]);
+    // Neither of Scout's entries is on the project's list.
+    const { layer, captain, commands } = yield* eligibilityFixture({
+      providers: [codexModels("gpt-5.6-sol", "gpt-5.6-terra"), claude],
+      settings: { crewMemberModels: [sol] },
+    });
+    const scout = {
+      workspace: { type: "shared" as const },
+      name: "scout",
+      agentId: "scout",
+      reason: "Finds evidence",
+    };
+    yield* Effect.gen(function* () {
+      const launcher = yield* CrewLaunchService;
+      const escalations = yield* AgentPersonaEscalations;
+      const refused = yield* launcher.resolveSeats(captain, [scout], "agent").pipe(Effect.flip);
+      // Refused as a card's unchecked model is, with the code its other launch paths give.
+      assert.equal(refused._tag, "CrewLaunchModelNotEligibleError");
+      if (refused._tag !== "CrewLaunchModelNotEligibleError") return;
+      assert.equal(refused.blockCode, "models_exhausted");
+      const escalationId = /escalation_id: (escalation-[0-9a-f-]+)/.exec(refused.message)![1]!;
+      // The person's card has no limits to lift and escalates nothing.
+      yield* launcher.resolveSeats(captain, [scout], "person");
+
+      yield* escalations.markGranted({ escalationId, grantedBy: "human:owner" });
+      const launch = (requestKey: string) =>
+        launcher.launch({
+          providerSessionId: "session",
+          requestKey,
+          captain,
+          pick: "agent",
+          displayName: "Evidence Crew",
+          seats: [{ ...scout, allowOnce: escalationId }],
+          brief: "Find the evidence.",
+        });
+      yield* launch("allowed-once");
+      const created = (yield* Ref.get(commands)).findLast(
+        (command) => command.type === "thread.create" && command.title === "scout",
+      );
+      assert.deepStrictEqual(
+        created?.type === "thread.create" ? created.agentPersonaAssignment?.pickSource : undefined,
+        { kind: "allow-once", waived: "model-not-eligible" },
+      );
+      // Spent on that launch: the same seat again is held to the list.
+      assert.include((yield* launch("allowed-twice").pipe(Effect.flip)).message, "already used");
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
 );

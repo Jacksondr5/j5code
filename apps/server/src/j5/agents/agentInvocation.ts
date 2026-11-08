@@ -9,6 +9,8 @@ import * as Schema from "effect/Schema";
 import { McpInvocationContext, requireThreadScope } from "../../mcp/McpInvocationContext.ts";
 import { OrchestratorMcpService, resolveRuntimeMode } from "../../mcp/OrchestratorMcpService.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
+import { participantIdForThread } from "../a2a/HomeRegistrar.ts";
+import { AgentPersonaEscalations } from "./agentPersonaEscalation.ts";
 import { AgentPersonaPickError, pickAgentPersona, turnPickSource } from "./agentPersonaPick.ts";
 import { withReviewIndependenceNote } from "./agentPersonaReviewIndependence.ts";
 
@@ -23,6 +25,7 @@ export const InvokeAgentInput = Schema.Struct({
   personaId: AgentPersonaId,
   ...delegateFields,
   authorThreads: Schema.optional(Schema.Array(ThreadId)),
+  allowOnce: Schema.optional(Schema.String),
 });
 
 /** Resolve a saved persona at the fork boundary; the upstream engine owns child lifecycle. */
@@ -47,6 +50,7 @@ export const invokeAgent = Effect.fn("j5.invokeAgent")(function* (
           new OrchestratorMcpFailure({ code: "orchestration_error", message: String(error) }),
       ),
     );
+  // Upstream's failure codes are fixed, so a persona's block code rides in the message text.
   const refused = (error: AgentPersonaPickError) =>
     new OrchestratorMcpFailure({
       code:
@@ -66,7 +70,18 @@ export const invokeAgent = Effect.fn("j5.invokeAgent")(function* (
           ? [{ threadId: thread.threadId }]
           : input.authorThreads.map((threadId) => ({ threadId, named: true })),
     },
+    escalateFor: participantIdForThread(thread.threadId),
+    allowOnce: input.allowOnce,
   }).pipe(Effect.mapError(refused));
+  if (assignment.pickSource?.kind === "allow-once")
+    yield* (yield* AgentPersonaEscalations)
+      .use(input.allowOnce!)
+      .pipe(
+        Effect.mapError(
+          (error) =>
+            new OrchestratorMcpFailure({ code: "invalid_request", message: error.message }),
+        ),
+      );
   // delegateTask holds a child to the parent's stored mode. The pick has already judged access,
   // and the child's real permissions come from its persona snapshot, so a broader child inherits.
   const runtimeMode = (yield* resolveRuntimeMode(parent.thread.runtimeMode, childMode).pipe(
@@ -74,7 +89,12 @@ export const invokeAgent = Effect.fn("j5.invokeAgent")(function* (
   ))
     ? "inherit"
     : childMode;
-  const { personaId: _personaId, authorThreads: _authorThreads, ...delegate } = input;
+  const {
+    personaId: _personaId,
+    authorThreads: _authorThreads,
+    allowOnce: _allowOnce,
+    ...delegate
+  } = input;
   return yield* service.delegateTask(scope, {
     ...delegate,
     task: withReviewIndependenceNote(input.task, assignment),

@@ -1,4 +1,5 @@
 import * as SpawnCompositionService from "./SpawnCompositionService.ts";
+import { AgentPersonaEscalations } from "../agents/agentPersonaEscalation.ts";
 import * as AgentCrewInstanceService from "./AgentCrewInstanceService.ts";
 import * as ProjectService from "../../project/ProjectService.ts";
 import * as ManagedProjectFolders from "../../project/ManagedProjectFolders.ts";
@@ -47,7 +48,7 @@ import {
   type ReviewAuthorsRequest,
 } from "../agents/agentPersonaReviewIndependence.ts";
 
-import { preflightSpawnCaller, stateError } from "./AgentCaller.ts";
+import { J5PersonaBlockedError, preflightSpawnCaller, stateError } from "./AgentCaller.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
 import { outsideAgentParticipantId, LedgerProjectId } from "./contracts.ts";
 import {
@@ -169,6 +170,7 @@ const prepareSpawnPersona = Effect.fn("j5.a2a.mcp.prepareSpawnPersona")(function
     readonly persona: string;
     readonly model?: string | undefined;
     readonly reasoning?: string | undefined;
+    readonly allow_once?: string | undefined;
   },
   selected: ModelSelection | undefined,
   pick: {
@@ -176,11 +178,13 @@ const prepareSpawnPersona = Effect.fn("j5.a2a.mcp.prepareSpawnPersona")(function
     readonly caller: AgentPersonaPickCaller;
     readonly projectId: ProjectId;
     readonly reviewAuthors: ReviewAuthorsRequest;
+    readonly escalateFor: string | undefined;
   },
 ) {
   const { assignment, runtimeMode } = yield* pickAgentPersona({
     personaId: input.persona,
     ...pick,
+    allowOnce: input.allow_once,
     ...(selected === undefined || input.model === undefined
       ? {}
       : {
@@ -191,20 +195,24 @@ const prepareSpawnPersona = Effect.fn("j5.a2a.mcp.prepareSpawnPersona")(function
           },
         }),
   }).pipe(
-    Effect.mapError((error) =>
-      stateError(
-        `Persona ${input.persona} cannot be spawned as requested: ${error.message}`,
-        error.constraint === "access-above-caller"
-          ? "approvedLevel" in pick.caller
-            ? "Retry j5_spawn_agent with a persona within that level (j5_list_personas shows each one's access level) or without a persona, or sign in again and have the person approve a higher level."
-            : `Use a persona within your access (j5_list_personas shows each one's), omit persona, or ask the person to pick it themselves with @persona:${input.persona}.`
-          : error.constraint === "model-not-eligible"
-            ? `Retry j5_spawn_agent with another of the persona's entries that Models for custom members checks, or ask the person to pick it themselves with @persona:${input.persona}.`
-            : selected === undefined
-              ? "Retry j5_spawn_agent once one of the persona's entries can run (j5_list_personas shows why each cannot), or omit persona for a plain Peer Agent."
-              : "Call orchestrator_capabilities, then retry j5_spawn_agent with a provider, model, and reasoning from that persona's ordered model entries, omit them to let the server choose, or omit persona for a plain Peer Agent.",
-      ),
-    ),
+    Effect.mapError((error) => {
+      const state = `Persona ${input.persona} cannot be spawned as requested: ${error.message}`;
+      if (error.code === undefined)
+        return stateError(
+          state,
+          selected === undefined
+            ? "Fix the request and retry j5_spawn_agent, or choose another persona from j5_list_personas."
+            : "Call orchestrator_capabilities, then retry j5_spawn_agent with a provider, model, and reasoning from that persona's ordered model entries, or omit them to let the server choose.",
+        );
+      return new J5PersonaBlockedError({
+        code: error.code,
+        state,
+        nextCommand:
+          error.constraint !== null && "approvedLevel" in pick.caller
+            ? "Or retry with a persona within that level, or sign in again and have the person approve a higher one."
+            : `Or choose another persona from j5_list_personas that fits the work, or ask the person to pick this one themselves with @persona:${input.persona}.`,
+      });
+    }),
   );
   return { assignment, modelSelection: assignment.resolvedModelSelection, runtimeMode };
 });
@@ -530,6 +538,8 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
           caller:
             home === undefined ? { approvedLevel: limits.runtimeMode } : { thread: home.thread },
           projectId: target,
+          // An outside agent can't ask the person, so its refusal records no escalation.
+          escalateFor: home === undefined ? undefined : spawner.participantId,
           // An outside agent has no thread of its own, so with none named its authors are unknown.
           reviewAuthors:
             input.author_threads === undefined
@@ -650,6 +660,18 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
                       ),
                   ),
                 };
+        // The allowance is spent on the launch it allowed, once, before the thread exists.
+        if (current === null && persona?.assignment.pickSource?.kind === "allow-once")
+          yield* (yield* AgentPersonaEscalations)
+            .use(input.allow_once!)
+            .pipe(
+              Effect.mapError((error) =>
+                stateError(
+                  `Peer Agent was not created: ${error.message}`,
+                  "Escalate again with j5_send_message if the launch still needs the exception.",
+                ),
+              ),
+            );
         yield* threadManagement
           .dispatch({
             type: "thread.create",
