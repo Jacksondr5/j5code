@@ -326,7 +326,9 @@ const program = Effect.gen(function* () {
 
 try {
   const result = await Effect.runPromise(
-    Effect.scoped(program.pipe(Effect.provide(HarnessLayer), Effect.provide(NodeCrypto.layer))),
+    Effect.scoped(
+      program.pipe(Effect.provide(HarnessLayer.pipe(Layer.provideMerge(NodeCrypto.layer)))),
+    ),
   );
   console.log(JSON.stringify(result, null, 2));
 } finally {
