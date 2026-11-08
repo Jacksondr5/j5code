@@ -175,6 +175,8 @@ export const CrewProposalSeat = Schema.Struct({
   runtimeMode: Schema.optional(RuntimeMode),
   /** Ids of the playbook steps this seat owns; only on a Crew that follows a playbook. */
   steps: Schema.optionalKey(Schema.Array(Schema.String)),
+  /** Seats (or, for an addition, members) whose work this reviewer persona reviews; default: every non-reviewer. */
+  reviews: Schema.optionalKey(Schema.Array(Schema.String)),
   /**
    * Every seat proposed now names one; only seats recorded before workspaces were required, or
    * with one this version can't read, lack it, and the server refuses those until one is chosen.

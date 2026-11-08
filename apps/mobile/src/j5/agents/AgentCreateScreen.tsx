@@ -30,6 +30,7 @@ type PersonaDraft = {
   instructions: string;
   access: AgentPersonaAccess;
   modelRoute: ReadonlyArray<AgentPersonaModelEntry> | null;
+  independentReviewer: boolean;
 };
 
 /** Author a personal agent; it is stored as an imported definition of this environment. */
@@ -55,6 +56,7 @@ export function AgentCreateScreen() {
           instructions: "",
           access: "read-only",
           modelRoute: null,
+          independentReviewer: false,
         },
   );
   const [draft, setDraft] = useState(startingDraft);
@@ -94,6 +96,7 @@ export function AgentCreateScreen() {
         instructions: draft.instructions,
         access: draft.access,
         modelRoute,
+        independentReviewer: draft.independentReviewer,
       },
     });
     setSaving(false);
@@ -180,9 +183,15 @@ export function AgentCreateScreen() {
       ) : (
         <AgentRoutePolicyFields
           environmentId={props.environmentId}
-          value={{ access: draft.access, modelRoute }}
+          value={{
+            access: draft.access,
+            modelRoute,
+            independentReviewer: draft.independentReviewer,
+          }}
           disabled={saving}
-          onChange={(next) => setDraft({ ...draft, ...next })}
+          onChange={(next) =>
+            setDraft({ ...draft, ...next, independentReviewer: next.independentReviewer === true })
+          }
         />
       )}
       {error ? (

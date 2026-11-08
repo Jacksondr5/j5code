@@ -149,6 +149,20 @@ describe("crew member edits", () => {
       steps: ["plan"],
     });
   });
+
+  it("keeps the seats a reviewer reviews when the person edits it", () => {
+    const roster = [
+      { seat: "builder", agentId: "builder", reason: "Builds" },
+      { seat: "review", agentId: "reviewer", reason: "Reviews", reviews: ["builder"] },
+    ];
+    const edited = saveSeat(roster, "review", {
+      seat: "review",
+      agentId: "reviewer",
+      instructions: "Focus on the API.",
+    });
+    expect(edited.error).toBeNull();
+    expect(edited.seats[1]).toMatchObject({ seat: "review", reviews: ["builder"] });
+  });
 });
 
 describe("inline roster drafts", () => {

@@ -211,4 +211,5 @@ export const applyCrewSeatDraft = (
   ...(draft.runtimeMode ? { runtimeMode: draft.runtimeMode } : {}),
   ...(draft.workspace ? { workspace: draft.workspace } : {}),
   ...(seat.steps === undefined ? {} : { steps: seat.steps }),
+  ...(seat.reviews === undefined ? {} : { reviews: seat.reviews }),
 });

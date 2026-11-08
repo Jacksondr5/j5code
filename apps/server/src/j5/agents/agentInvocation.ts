@@ -1,6 +1,7 @@
 import {
   AgentPersonaId,
   OrchestratorMcpDelegateTaskInput,
+  ThreadId,
   OrchestratorMcpFailure,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -9,6 +10,7 @@ import { McpInvocationContext, requireThreadScope } from "../../mcp/McpInvocatio
 import { OrchestratorMcpService, resolveRuntimeMode } from "../../mcp/OrchestratorMcpService.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { AgentPersonaPickError, pickAgentPersona, turnPickSource } from "./agentPersonaPick.ts";
+import { withReviewIndependenceNote } from "./agentPersonaReviewIndependence.ts";
 
 const {
   target: _target,
@@ -20,6 +22,7 @@ const {
 export const InvokeAgentInput = Schema.Struct({
   personaId: AgentPersonaId,
   ...delegateFields,
+  authorThreads: Schema.optional(Schema.Array(ThreadId)),
 });
 
 /** Resolve a saved persona at the fork boundary; the upstream engine owns child lifecycle. */
@@ -57,6 +60,12 @@ export const invokeAgent = Effect.fn("j5.invokeAgent")(function* (
     source: yield* turnPickSource(thread.threadId, input.personaId).pipe(Effect.mapError(refused)),
     caller: { thread: parent.thread },
     projectId: parent.thread.projectId,
+    reviewAuthors: {
+      threads:
+        input.authorThreads === undefined
+          ? [{ threadId: thread.threadId }]
+          : input.authorThreads.map((threadId) => ({ threadId, named: true })),
+    },
   }).pipe(Effect.mapError(refused));
   // delegateTask holds a child to the parent's stored mode. The pick has already judged access,
   // and the child's real permissions come from its persona snapshot, so a broader child inherits.
@@ -65,9 +74,10 @@ export const invokeAgent = Effect.fn("j5.invokeAgent")(function* (
   ))
     ? "inherit"
     : childMode;
-  const { personaId: _personaId, ...delegate } = input;
+  const { personaId: _personaId, authorThreads: _authorThreads, ...delegate } = input;
   return yield* service.delegateTask(scope, {
     ...delegate,
+    task: withReviewIndependenceNote(input.task, assignment),
     title: input.title ?? assignment.displayName ?? input.personaId,
     mode: input.mode ?? "async",
     runtimeMode,

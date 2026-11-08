@@ -194,6 +194,55 @@ describe("agent persona routing", () => {
       ["model-not-eligible"],
     ]);
   });
+  it("moves an author's model to the end, ignoring a provider prefix but not the version", () => {
+    const definition = listBuiltInAgentPersonas()[0]!;
+    const entry = (instanceId: string, slug: string) => ({
+      instanceId: ProviderInstanceId.make(instanceId),
+      model: slug,
+      options: [{ id: "reasoningEffort", value: "high" }],
+    });
+    const route = (avoid: ReadonlyArray<string>) =>
+      resolveAgentPersonaRoute({
+        now: 0,
+        personaId: definition.id,
+        definition: {
+          ...definition,
+          modelRoute: [
+            entry("opencode", "anthropic/claude-opus-5-5"),
+            entry("codex", "gpt-6.1-sol"),
+            entry("codex", "gpt-6-sol"),
+          ],
+        },
+        providers: [
+          provider({
+            instanceId: "opencode",
+            driver: "codex",
+            models: [model("anthropic/claude-opus-5-5", "reasoningEffort")],
+          }),
+          provider({
+            instanceId: "codex",
+            driver: "codex",
+            models: [
+              model("gpt-6.1-sol", "reasoningEffort"),
+              model("gpt-6-sol", "reasoningEffort"),
+            ],
+          }),
+        ],
+        avoidModels: new Set(avoid),
+      });
+    const picked = (avoid: ReadonlyArray<string>) => {
+      const resolution = route(avoid);
+      return resolution.status === "available" ? resolution.modelSelection.model : null;
+    };
+    assert.equal(picked(["claude-opus-5-5"]), "gpt-6.1-sol");
+    assert.equal(picked(["claude-opus-5-5", "gpt-6.1-sol"]), "gpt-6-sol");
+    // Only an author's model left: it still runs, in the persona's own order.
+    assert.equal(
+      picked(["claude-opus-5-5", "gpt-6.1-sol", "gpt-6-sol"]),
+      "anthropic/claude-opus-5-5",
+    );
+  });
+
   it("uses every enforceable persona's declared primary route when it is available", () => {
     for (const definition of listBuiltInAgentPersonas()) {
       const [primary, fallback] = definition.modelRoute;

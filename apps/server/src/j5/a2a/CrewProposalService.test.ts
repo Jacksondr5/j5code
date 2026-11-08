@@ -781,6 +781,55 @@ it.effect("gates new rosters on the human and adds members directly with the sea
         .pipe(Effect.flip);
       assert.include(unknown.message, 'names persona "nobody"');
 
+      const unreviewable = yield* gate
+        .requestMember({
+          requestKey: "add-reviews-unknown",
+          captain,
+          crewInstanceId: instance.id,
+          seat: {
+            workspace: { type: "shared" as const },
+            seat: "second-critic",
+            agentId: "critic",
+            reason: "Reviews the builder",
+            reviews: ["builder", "ghost"],
+          },
+          brief: null,
+        })
+        .pipe(Effect.flip);
+      assert.include(unreviewable.message, 'reviews "ghost", which is not a seat on this crew');
+
+      // A reviewer resolves after the seats it reviews, so it can't review another reviewer.
+      yield* (yield* makeAgentPersonaLibrary).importFiles({
+        files: ["first-reviewer", "second-reviewer"].map((id) => ({
+          name: `${id}.yaml`,
+          content: stringify({ ...BUILT_IN_AGENT_PERSONAS.critic, id, independentReviewer: true }),
+        })),
+        replaceExisting: false,
+      });
+      const reviewerSeat = (seat: string, reviews?: ReadonlyArray<string>) => ({
+        workspace: { type: "shared" as const },
+        seat,
+        agentId: seat,
+        reason: "Reviews",
+        ...(reviews === undefined ? {} : { reviews }),
+      });
+      const chained = yield* gate
+        .propose({
+          requestKey: "reviewer-reviews-reviewer",
+          captain,
+          displayName: "Review Crew",
+          brief: "Review the change.",
+          seats: [
+            reviewerSeat("first-reviewer"),
+            reviewerSeat("second-reviewer", ["first-reviewer"]),
+          ],
+        })
+        .pipe(Effect.flip);
+      assert.include(
+        chained.message,
+        'Seat second-reviewer reviews "first-reviewer", another independent reviewer on this roster',
+      );
+
       // A custom seat has nothing but its instructions to run on, so it cannot be filed without them.
       const bare = yield* gate
         .requestMember({

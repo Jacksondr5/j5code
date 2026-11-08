@@ -49,6 +49,8 @@ export const AgentPersonaDefinition = Schema.Struct({
   access: Schema.optional(AgentPersonaAccess),
   modelRoute: Schema.NonEmptyArray(AgentPersonaModelEntry),
   instructions: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(32768)),
+  // Absent unless set, so a definition saved before the flag keeps its digest.
+  independentReviewer: Schema.optional(Schema.Boolean),
 });
 export type AgentPersonaDefinition = typeof AgentPersonaDefinition.Type;
 

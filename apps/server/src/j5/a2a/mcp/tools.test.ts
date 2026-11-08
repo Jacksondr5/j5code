@@ -92,16 +92,13 @@ it("publishes the ratified single-target lifecycle contracts fail-closed", () =>
     readonly required?: ReadonlyArray<string>;
     readonly properties?: Readonly<Record<string, unknown>>;
   };
-  assert.sameMembers(
-    [...(spawnSchema.required ?? [])],
-    ["brief", "title", "provider", "model", "workspace"],
-  );
+  assert.sameMembers([...(spawnSchema.required ?? [])], ["brief", "title", "workspace"]);
   assert.sameMembers([...(stopSchema.required ?? [])], ["participant_id"]);
   assert.property(spawnSchema.properties ?? {}, "client_request_id");
   assert.property(spawnSchema.properties ?? {}, "persona");
   // No pre-dogfood compatibility spelling: `persona` is the only name the model sees.
   assert.notProperty(spawnSchema.properties ?? {}, "agent");
-  assert.include(J5SpawnAgentTool.description ?? "", "one of that persona's ordered model entries");
+  assert.include(J5SpawnAgentTool.description ?? "", "set them only to pin one of those entries");
   assert.property(stopSchema.properties ?? {}, "client_request_id");
   // Exact on purpose: no tool answers the Inbox's worktree cleanup approval; only a person can.
   assert.sameMembers(Object.keys(J5Toolkit.tools), [

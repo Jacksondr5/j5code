@@ -65,6 +65,7 @@ export const prepareAgentPersonaLaunch = Effect.fn("prepareAgentPersonaLaunch")(
   providers: ReadonlyArray<ServerProvider>,
   library: ReturnType<typeof createAgentPersonaLibrary>,
   eligible?: AgentPersonaEntryEligibility,
+  avoidModels?: ReadonlySet<string>,
 ) {
   const catalog = yield* library.catalog();
   if (catalog.disabledIds.includes(request.personaId))
@@ -94,6 +95,7 @@ export const prepareAgentPersonaLaunch = Effect.fn("prepareAgentPersonaLaunch")(
     definition,
     providers,
     eligible,
+    avoidModels,
   });
   if (resolution.status === "unavailable") {
     // An entry refused as not eligible passed every other check, so only that limit stood in the way.

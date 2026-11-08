@@ -291,6 +291,7 @@ it("offers editing only for imported entries with server-provided editable detai
     description: persona.description,
     access: "read-only",
     modelRoute,
+    independentReviewer: false,
   });
   const choices = agentPersonaModelChoices([], modelRoute);
   expect(choices).toHaveLength(2);
@@ -781,6 +782,7 @@ it("prefills a duplicate with the source content and a fresh name and ID", () =>
         reasoningEffort: "high",
       },
     ],
+    independentReviewer: false,
   });
 });
 

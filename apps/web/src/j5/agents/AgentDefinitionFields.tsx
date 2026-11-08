@@ -15,6 +15,7 @@ import type { AgentPersonaAccess, AgentPersonaModelEntry, EnvironmentId } from "
 import { ChevronDownIcon } from "lucide-react";
 
 import { Button } from "../../components/ui/button";
+import { Switch } from "../../components/ui/switch";
 import {
   Menu,
   MenuItem,
@@ -40,9 +41,10 @@ import { agentPersonaEnvironment } from "./agentPersonaAtoms";
 export interface AgentRoutePolicyValue {
   readonly access: AgentPersonaAccess;
   readonly modelRoute: ReadonlyArray<AgentPersonaModelEntry>;
+  readonly independentReviewer?: boolean | undefined;
 }
 
-/** Access level and ordered model entries, shared by the create and edit dialogs. */
+/** Access level, ordered model entries and the reviewer flag, shared by the create and edit dialogs. */
 export function AgentRoutePolicyFields(props: {
   environmentId: EnvironmentId;
   value: AgentRoutePolicyValue;
@@ -255,6 +257,21 @@ export function AgentRoutePolicyFields(props: {
       <p className="text-xs text-muted-foreground">
         Model availability and access level support are checked for each launch.
       </p>
+      <label className="flex items-start justify-between gap-3 text-sm">
+        <span className="grid gap-0.5">
+          <span>Independent reviewer</span>
+          <span className="text-xs text-muted-foreground">
+            Prefers a model that didn't write the work it reviews. Never blocks a launch.
+          </span>
+        </span>
+        <Switch
+          checked={value.independentReviewer === true}
+          disabled={disabled}
+          onCheckedChange={(independentReviewer) =>
+            props.onChange({ ...value, independentReviewer })
+          }
+        />
+      </label>
     </>
   );
 }

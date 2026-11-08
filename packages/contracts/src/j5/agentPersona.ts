@@ -91,6 +91,22 @@ export const AgentPersonaPickSource = Schema.Union([
 ]);
 export type AgentPersonaPickSource = typeof AgentPersonaPickSource.Type;
 
+/**
+ * How an independent reviewer's model relates to the authors of the work it reviews, decided once
+ * at creation. `same-model-as-author` wins over `unknown-authors`; neither is an independent review.
+ */
+export const AgentPersonaReviewIndependence = Schema.Struct({
+  outcome: Schema.Literals(["different-model", "same-model-as-author", "unknown-authors"]),
+  /** Model ids (slugs) the authors ran on. */
+  authorModels: Schema.Array(TrimmedNonEmptyString),
+  authorThreadIds: Schema.Array(ThreadId),
+  /** Some work was done where J5 cannot see the model, such as a provider-native subagent. */
+  partlyUnknown: Schema.Boolean,
+  /** The server reorders away from the authors; a model a person or an agent chose is kept. */
+  modelChosenBy: Schema.Literals(["server", "person", "agent"]),
+});
+export type AgentPersonaReviewIndependence = typeof AgentPersonaReviewIndependence.Type;
+
 /** Immutable launch-time provenance; definitionDigest references an environment-owned snapshot. */
 export const OrchestrationV2AgentPersonaAssignment = Schema.Struct({
   personaId: AgentPersonaId,
@@ -108,6 +124,8 @@ export const OrchestrationV2AgentPersonaAssignment = Schema.Struct({
   instructionsEdited: Schema.optional(Schema.Boolean),
   /** Absent on assignments made before pick sources were recorded. */
   pickSource: Schema.optional(AgentPersonaPickSource),
+  /** Present only for a persona flagged as an independent reviewer. */
+  reviewIndependence: Schema.optional(AgentPersonaReviewIndependence),
 });
 export type OrchestrationV2AgentPersonaAssignment =
   typeof OrchestrationV2AgentPersonaAssignment.Type;
@@ -249,6 +267,8 @@ export const AgentPersonaEditInput = Schema.Struct({
   instructions: AgentPersonaInstructions,
   access: AgentPersonaAccess,
   modelRoute: AgentPersonaModelRoute,
+  /** Omitted keeps the stored flag, so an older client cannot clear it. */
+  independentReviewer: Schema.optional(Schema.Boolean),
 });
 export type AgentPersonaEditInput = typeof AgentPersonaEditInput.Type;
 
@@ -267,6 +287,7 @@ export const AgentPersonaDefinitionView = Schema.Struct({
   modelRoute: Schema.Tuple([AgentPersonaModelTarget, AgentPersonaModelTarget]),
   models: Schema.optional(Schema.NonEmptyArray(AgentPersonaModelEntry)),
   access: Schema.optional(AgentPersonaAccess),
+  independentReviewer: Schema.optional(Schema.Boolean),
 });
 export type AgentPersonaDefinitionView = typeof AgentPersonaDefinitionView.Type;
 
@@ -278,6 +299,7 @@ export const AgentPersonaCreateInput = Schema.Struct({
   instructions: AgentPersonaInstructions,
   access: AgentPersonaAccess,
   modelRoute: AgentPersonaModelRoute,
+  independentReviewer: Schema.optional(Schema.Boolean),
 });
 export type AgentPersonaCreateInput = typeof AgentPersonaCreateInput.Type;
 
@@ -306,6 +328,8 @@ export const OrchestrationV2AgentPersonaCatalogEntry = Schema.Struct({
   acceptedInput: Schema.optional(TrimmedNonEmptyString),
   access: Schema.optional(AgentPersonaAccess),
   models: Schema.optional(Schema.NonEmptyArray(AgentPersonaModelEntry)),
+  /** Reviewers prefer a model that didn't write the work they review; never a block. */
+  independentReviewer: Schema.optional(Schema.Boolean),
   defaultAuthorityPolicy: AgentPersonaReportedAuthorityPolicy,
   allowedAuthorityPolicies: Schema.Array(AgentPersonaReportedAuthorityPolicy),
   availability: OrchestrationV2AgentPersonaAvailability,
