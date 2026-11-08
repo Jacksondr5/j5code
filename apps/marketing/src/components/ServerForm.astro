@@ -1,0 +1,26 @@
+---
+// The "Open on my server" form of a link page; `wireServerForm` in lib/serverForm.ts runs it.
+interface Props {
+  label: string;
+}
+
+const { label } = Astro.props;
+---
+
+<form class="server" id="server-form" novalidate>
+  <label class="server-label" for="server-address">{label}</label>
+  <div class="server-row">
+    <input
+      class="server-input"
+      id="server-address"
+      type="text"
+      inputmode="url"
+      autocomplete="url"
+      autocapitalize="off"
+      spellcheck="false"
+      placeholder="localhost:3773"
+    />
+    <button class="btn btn-ghost" type="submit">Open on my server</button>
+  </div>
+  <p class="server-error" id="server-error" role="alert" hidden>Enter your server's address, such as localhost:3773 or https://my-server.example.</p>
+</form>
