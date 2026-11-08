@@ -39,10 +39,8 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
 - Release archives and installers (FORK.md case 40): `packages/shared/src/cliRelease.ts`
   (`CLI_RELEASE_REPOSITORY`), `scripts/install.sh`, `scripts/install.ps1` (whose GitHub requests
   send the User-Agent `j5-install`, where upstream's send `t3-install`), and
-  `scripts/smoke-cli-archive.ts` (scratch `J5CODE_HOME`). Update everything
-  (`apps/web/src/components/sidebar/useUpdateEverything.ts`) checks J5's GitHub release through
-  `apps/web/src/j5/updates/releasePublished.ts` and says "J5 Code <version> is not released yet";
-  `updateEverythingRun.tsx` names the app with `APP_BASE_NAME`.
+  `scripts/smoke-cli-archive.ts` (scratch `J5CODE_HOME`). Update everything is upstream's as
+  shipped; `updateEverythingRun.tsx` names the app with `APP_BASE_NAME`.
 - One server per home (FORK.md cases 25 and 84): the one-owner messages in `apps/server/src/serverOwnership.ts`,
   `serviceLauncher.ts`, the desktop dialog in `apps/desktop/src/backend/DesktopBackendPool.ts` and
   the WSL refusal in `apps/desktop/src/wsl/DesktopWslBackend.ts` say J5 Code, J5 home and
