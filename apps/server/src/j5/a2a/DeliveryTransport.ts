@@ -585,9 +585,14 @@ export const live: Layer.Layer<
           const alreadyAccepted = target.messages.some(
             (message) => message.id === deliveryMessageId(input.messageId),
           );
-          const steeringRun = alreadyAccepted
-            ? undefined
-            : peerSteeringRun(target, input.envelopeChannel);
+          const heldQueueRun = target.runs.find(
+            (run) => run.status === "queued" && run.queueHeld === true,
+          );
+          // A held queue keeps landing order: the update joins its back rather than steering.
+          const steeringRun =
+            alreadyAccepted || heldQueueRun !== undefined
+              ? undefined
+              : peerSteeringRun(target, input.envelopeChannel);
           // The header names the sender's project by id, with its title when the sender is on this
           // server. A peer server's project is not one of ours, so it is named by id alone.
           const originProject =
@@ -705,9 +710,6 @@ export const live: Layer.Layer<
           // messages run in landing order (a person's held ones too); a retry never resumes again.
           // Under a usage limit it waits unsent for the continue; after a failed worktree setup it
           // waits behind held messages.
-          const heldQueueRun = target.runs.find(
-            (run) => run.status === "queued" && run.queueHeld === true,
-          );
           const idle = !alreadyAccepted && !target.runs.some(isActiveRun);
           const hold = idle ? idleQueueHold(target) : undefined;
           const queueBehindHeld =

@@ -3505,6 +3505,58 @@ it.effect(
     }),
 );
 
+it.effect("queues a peer update behind a held queue instead of steering a GPT 6 turn", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const target = yield* seedTarget("held-steer", "gpt-6-astra");
+      const threads = yield* ThreadManagementService;
+      const transport = yield* A2ADeliveryTransport;
+      yield* startBusyTurn(target);
+      const earlier = yield* threads.sendToThread({
+        projectId: target.projectId,
+        threadId: target.threadId,
+        commandId: CommandId.make("command:held-steer:earlier"),
+        messageId: MessageId.make("message:held-steer:earlier"),
+        text: "Earlier work",
+        attachments: [],
+        mode: "queue",
+        createdBy: "user",
+        creationSource: "web",
+      });
+      yield* (yield* EventSinkV2).write({
+        events: [
+          {
+            id: EventId.make("event:held-steer:earlier"),
+            type: "run.updated",
+            threadId: target.threadId,
+            runId: earlier.run.id,
+            providerInstanceId: earlier.run.providerInstanceId,
+            occurredAt: yield* DateTime.now,
+            payload: { ...earlier.run, status: "queued", queueHeld: true },
+          },
+        ],
+      });
+      const busy = yield* threads.getThreadProjection(target.threadId);
+      const steerable = peerSteeringRun(busy, "peer");
+      assert.isDefined(steerable);
+
+      yield* transport.deliverAgent(target.delivery);
+
+      const after = yield* threads.getThreadProjection(target.threadId);
+      assert.equal(after.runs.find((run) => run.id === steerable!.id)?.status, steerable!.status);
+      const queued = after.runs
+        .filter((run) => run.status === "queued")
+        .toSorted((left, right) => left.ordinal - right.ordinal);
+      assert.deepStrictEqual(
+        queued.map((run) => run.userMessageId),
+        [earlier.run.userMessageId, deliveryMessageId(target.messageId)],
+      );
+      assert.isTrue(queued.every((run) => run.queueHeld !== true));
+    }).pipe(Effect.provide(makeTestLayer(harness)));
+  }),
+);
+
 /** Leaves a target idle with one held message: its turn ends while its queue is held. */
 const idleWithHeldQueue = Effect.fn("A2AIntegration.idleWithHeldQueue")(function* (
   harness: DeliveryHarness,
