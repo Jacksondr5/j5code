@@ -70,12 +70,13 @@ import {
 } from "../../orchestration-v2/EffectWorker.ts";
 import { EventSinkV2 } from "../../orchestration-v2/EventSink.ts";
 import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";
-import type {
-  ProviderAdapterV2Event,
-  ProviderAdapterV2InterruptInput,
-  ProviderAdapterV2,
-  ProviderAdapterV2SteerInput,
-  ProviderAdapterV2TurnInput,
+import {
+  ProviderAdapterSteerRunError,
+  type ProviderAdapterV2Event,
+  type ProviderAdapterV2InterruptInput,
+  type ProviderAdapterV2,
+  type ProviderAdapterV2SteerInput,
+  type ProviderAdapterV2TurnInput,
 } from "@t3tools/provider-core/server/ProviderAdapter";
 import {
   layerEventSink as OrchestrationV2EventSinkLayerLive,
@@ -245,6 +246,8 @@ interface DeliveryHarness {
   readonly steerInputs: Ref.Ref<ReadonlyArray<ProviderAdapterV2SteerInput>>;
   readonly interruptInputs: Ref.Ref<ReadonlyArray<ProviderAdapterV2InterruptInput>>;
   readonly activeTurns: Ref.Ref<ReadonlyMap<ThreadId, FakeActiveTurn>>;
+  /** Provider turns that ended; a steer into one is refused, as the Claude and Codex adapters do. */
+  readonly endedTurns: Ref.Ref<ReadonlySet<string>>;
 }
 
 const makeOrchestrationAdapter = (harness: DeliveryHarness): ProviderAdapterV2["Service"] => ({
@@ -346,7 +349,18 @@ const makeOrchestrationAdapter = (harness: DeliveryHarness): ProviderAdapterV2["
               },
             });
           }),
-        steerTurn: (input) => Ref.update(harness.steerInputs, (existing) => [...existing, input]),
+        steerTurn: (input) =>
+          Effect.gen(function* () {
+            if ((yield* Ref.get(harness.endedTurns)).has(input.providerTurnId)) {
+              return yield* new ProviderAdapterSteerRunError({
+                driver,
+                providerThreadId: input.providerThread.id,
+                providerTurnId: input.providerTurnId,
+                cause: `Provider turn ${input.providerTurnId} is not active and cannot be steered.`,
+              });
+            }
+            yield* Ref.update(harness.steerInputs, (existing) => [...existing, input]);
+          }),
         interruptTurn: (input) =>
           Ref.update(harness.interruptInputs, (existing) => [...existing, input]),
         respondToRuntimeRequest: () =>
@@ -459,6 +473,7 @@ const makeHarness = Effect.gen(function* () {
     steerInputs: yield* Ref.make<ReadonlyArray<ProviderAdapterV2SteerInput>>([]),
     interruptInputs: yield* Ref.make<ReadonlyArray<ProviderAdapterV2InterruptInput>>([]),
     activeTurns: yield* Ref.make<ReadonlyMap<ThreadId, FakeActiveTurn>>(new Map()),
+    endedTurns: yield* Ref.make<ReadonlySet<string>>(new Set()),
   } satisfies DeliveryHarness;
 });
 
@@ -1812,6 +1827,11 @@ it.effect.each(
             completedAt: yield* DateTime.now,
           },
         });
+        // The run waits on its finalization while the steer runs: upstream's continuing-run check
+        // (pingdotgg/t3code#25611) lets it reach the adapter, which refuses an ended turn.
+        yield* Ref.update(harness.endedTurns, (ended) =>
+          new Set(ended).add(projection.providerTurns[0]!.id),
+        );
         yield* Fiber.join(ended);
         // Drive the real worker's five attempts with controlled time, never sleeps.
         for (const delay of [0, 100, 200, 400, 800]) {

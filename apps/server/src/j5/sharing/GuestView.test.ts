@@ -91,6 +91,8 @@ const layerManagement = Layer.unwrap(
         projections.readShellSnapshot(options).pipe(Effect.map(Effect.orDie), Effect.orDie),
       listActiveSubagentThreadIds: () =>
         projections.listActiveSubagentThreadIds().pipe(Effect.orDie),
+      listActiveShellIndex: () => projections.listActiveShellIndex().pipe(Effect.orDie),
+      getShellSnapshot: (options) => projections.getShellSnapshot(options).pipe(Effect.orDie),
     });
   }),
 );

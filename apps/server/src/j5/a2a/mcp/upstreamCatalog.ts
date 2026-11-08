@@ -80,9 +80,13 @@ export const J5OrchestratorToolkit = Toolkit.make(
   OrchestratorToolkit.tools.t3_thread_update,
   OrchestratorToolkit.tools.t3_workflow_stop,
   OrchestratorToolkit.tools.t3_background_wait,
-  OrchestratorToolkit.tools.t3_thread_wait,
+  OrchestratorToolkit.tools.t3_thread_wait
+    .annotate(Tool.Destructive, false)
+    .annotate(Tool.OpenWorld, false),
   OrchestratorToolkit.tools.t3_thread_interrupt,
-  OrchestratorToolkit.tools.t3_environment_links,
+  OrchestratorToolkit.tools.t3_environment_links
+    .annotate(Tool.Destructive, false)
+    .annotate(Tool.OpenWorld, false),
   OrchestratorToolkit.tools.t3_environment_link,
   OrchestratorToolkit.tools.t3_environment_unlink,
 );
