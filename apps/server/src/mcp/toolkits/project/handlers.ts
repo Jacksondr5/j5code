@@ -261,6 +261,13 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
                 message: error.message,
               });
             }
+            // J5 (FORK.md case 111): a persona or Models refusal names what to change.
+            if (error._tag === "ThreadLaunchError" && error.operation === "resolve-agent-persona") {
+              return new OrchestratorMcpFailure({
+                code: "invalid_request",
+                message: error.message,
+              });
+            }
             // The administrator's ceiling refuses the mode; say so rather than "unavailable".
             if (error._tag === "ThreadLaunchError" && isAboveCeilingError(error.cause)) {
               return new OrchestratorMcpFailure({

@@ -431,9 +431,20 @@ export const serverAuthInvalidRequestReason = (
 
 export class ServerAuthMcpApprovalCodeError extends Schema.TaggedError<ServerAuthMcpApprovalCodeError>()(
   "ServerAuthMcpApprovalCodeError",
-  { reason: Schema.Literals(["unknown_or_used", "not_a_pairing_code", "insufficient_scope"]) },
+  {
+    reason: Schema.Literals([
+      "unknown_or_used",
+      "not_a_pairing_code",
+      "insufficient_scope",
+      // J5 (FORK.md case 70).
+      "not_from_an_owner",
+    ]),
+  },
 ) {
   override get message(): string {
+    if (this.reason === "not_from_an_owner") {
+      return "Only a pairing code from an Owner of this machine can link or approve a client here.";
+    }
     return this.reason === "insufficient_scope"
       ? "That pairing code cannot grant this access. It has not been used, so choose an access level it grants, or create a code with the standard scopes."
       : this.reason === "not_a_pairing_code"
@@ -1383,10 +1394,11 @@ export const make = Effect.gen(function* () {
         j5ApprovesMcpClient(grant, code.trim()).pipe(
           Effect.orElseSucceed(() => false),
           Effect.flatMap((j5Approves) =>
-            !j5Approves ||
-            (grant.method !== "one-time-token" && grant.method !== "reusable-dev-token")
+            grant.method !== "one-time-token" && grant.method !== "reusable-dev-token"
               ? Effect.fail(new ServerAuthMcpApprovalCodeError({ reason: "not_a_pairing_code" }))
-              : Effect.void,
+              : !j5Approves
+                ? Effect.fail(new ServerAuthMcpApprovalCodeError({ reason: "not_from_an_owner" }))
+                : Effect.void,
           ),
         ),
       ),

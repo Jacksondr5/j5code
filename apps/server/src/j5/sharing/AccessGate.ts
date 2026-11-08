@@ -208,6 +208,7 @@ const ACCESS_RPC_RULES: Partial<Record<WsRpcMethod, AccessRpcRule>> = {
   [ORCHESTRATION_V2_WS_METHODS.getTurnDiff]: onThread("viewer"),
   [ORCHESTRATION_V2_WS_METHODS.getFullThreadDiff]: onThread("viewer"),
   [ORCHESTRATION_V2_WS_METHODS.getTurnItem]: onThread("viewer"),
+  [ORCHESTRATION_V2_WS_METHODS.getNativeChildWork]: onThread("viewer"),
   [ORCHESTRATION_V2_WS_METHODS.searchThread]: onThread("viewer"),
   [ORCHESTRATION_V2_WS_METHODS.searchThreadStream]: onThread("viewer"),
   // Cmd+K's message search, held to the threads the person reaches (`GuestView`).

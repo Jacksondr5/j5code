@@ -66,16 +66,14 @@ export function LinkedEnvironmentsSettings({
       {...(isSearchTarget ? { id: search.id } : {})}
       title={environmentLabel === null ? search.title : `${search.title} · ${environmentLabel}`}
       headerAction={canLink ? <LinkEnvironmentAction environmentId={environmentId} /> : null}
+      description="Link another machine running J5 Code, such as a VPS, so agents here can launch and drive threads there."
     >
       {links.error ? (
         <SettingsRow title="Could not load linked environments" description={links.error} />
       ) : !links.data ? (
         <SettingsRow title="Loading linked environments…" role="status" />
       ) : links.data.links.length === 0 ? (
-        <SettingsRow
-          title="No linked environments"
-          description="Link another machine running J5 Code, such as a VPS, so agents here can launch and drive threads there."
-        />
+        <SettingsRow title="No linked environments" />
       ) : (
         links.data.links.map((link) => (
           <LinkedEnvironmentRow

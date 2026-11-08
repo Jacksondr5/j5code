@@ -208,6 +208,7 @@ export function SettingsSection({
   icon,
   titleAction,
   headerAction,
+  description,
   variant = "grouped",
   children,
   className,
@@ -218,6 +219,8 @@ export function SettingsSection({
   icon?: ReactNode;
   titleAction?: ReactNode;
   headerAction?: ReactNode;
+  /** J5 (FORK.md case 112): what the section is for, shown above its rows. */
+  description?: ReactNode;
   variant?: "grouped" | "plain";
   children: ReactNode;
 }) {
@@ -247,6 +250,11 @@ export function SettingsSection({
           <div className="flex min-h-7 min-w-7 items-center justify-end">{headerAction}</div>
         </div>
       )}
+      {description ? (
+        <p className="max-w-2xl px-3 text-balance text-xs leading-normal text-muted-foreground sm:px-4">
+          {description}
+        </p>
+      ) : null}
       <SettingsGroup data-settings-scroll-target={hideTitle ? "" : undefined} variant={variant}>
         {children}
       </SettingsGroup>

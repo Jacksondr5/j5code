@@ -53,6 +53,8 @@ const clientLaunchHarness = (input: {
   readonly hostedAppUrl?: string;
   /** The orchestrator refuses the new thread's mode, as under a managed ceiling. */
   readonly refusedByCeiling?: true;
+  /** J5's launch check refuses the model (FORK.md case 111). */
+  readonly refusedByModels?: string;
 }) => {
   const projectId = ProjectId.make("project:client-target");
   const modelSelection = {
@@ -114,6 +116,16 @@ const clientLaunchHarness = (input: {
       checkWorktreeBase: input.checkWorktreeBase ?? (() => Effect.void),
       launch: (launch) => {
         input.launched.push(launch);
+        if (input.refusedByModels !== undefined) {
+          return Effect.fail(
+            new ThreadLaunch.ThreadLaunchError({
+              operation: "resolve-agent-persona",
+              commandId: launch.commandId,
+              projectId: launch.projectId,
+              cause: input.refusedByModels,
+            }),
+          );
+        }
         if (input.refusedByCeiling) {
           return Effect.fail(
             new ThreadLaunch.ThreadLaunchError({
@@ -189,9 +201,17 @@ it.effect(
           readonly overrideModel?: ModelSelection;
           readonly hostedAppUrl?: string;
           readonly refusedByCeiling?: true;
+          readonly refusedByModels?: string;
         },
       ) {
-        const { targeted, overrideModel, hostedAppUrl, refusedByCeiling, ...input } = params;
+        const {
+          targeted,
+          overrideModel,
+          hostedAppUrl,
+          refusedByCeiling,
+          refusedByModels,
+          ...input
+        } = params;
         const launched: Array<ThreadLaunch.ThreadLaunchInput> = [];
         const { projectId, modelSelection, dependencies } = clientLaunchHarness({
           runtimeModeCeiling,
@@ -200,6 +220,7 @@ it.effect(
           ...(overrideModel === undefined ? {} : { overrideModel }),
           ...(hostedAppUrl === undefined ? {} : { hostedAppUrl }),
           ...(refusedByCeiling === undefined ? {} : { refusedByCeiling }),
+          ...(refusedByModels === undefined ? {} : { refusedByModels }),
         });
         const toolkit = yield* ProjectToolkit.pipe(
           Effect.provide(
@@ -274,6 +295,14 @@ it.effect(
         code: "invalid_request",
         message: "Example Corp limits threads to Supervised.",
       });
+      // So is J5's Models for custom members refusal, which names what the caller may pick.
+      const offList =
+        "claude-opus is not in this project's Models for custom members: claude-haiku.";
+      const refused = yield* launchWith("full-access", "full-access", {
+        title: "Fix",
+        refusedByModels: offList,
+      });
+      expect(refused.result).toMatchObject({ code: "invalid_request", message: offList });
     }),
 );
 

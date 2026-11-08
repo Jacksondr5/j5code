@@ -154,7 +154,6 @@ describe("J5 orchestration instructions", () => {
       "create_threads",
       "t3_thread_start",
       "t3_thread_send",
-      "t3_thread_interrupt",
       "t3_thread_launch",
       "workspace strategy",
       "workspaceStrategy",
@@ -174,10 +173,17 @@ describe("J5 orchestration instructions", () => {
     );
     assert.include(
       J5_ORCHESTRATION_INSTRUCTIONS,
-      "and it finishes in this turn (Claude `Agent` always with `run_in_background:false`; Codex `spawn_agent`, then wait)",
+      "(Claude `Agent` with `run_in_background:false`; Codex `spawn_agent`, then wait)",
     );
     assert.include(J5_ORCHESTRATION_INSTRUCTIONS, 'a separate checkout (`isolation:"worktree"`)');
-    assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "for background work");
+    assert.include(
+      J5_ORCHESTRATION_INSTRUCTIONS,
+      "Background agent: `delegate_task`, never a background `Agent`",
+    );
+    assert.include(
+      J5_ORCHESTRATION_INSTRUCTIONS,
+      "with `task_cancel`, never `t3_thread_interrupt` on a `childThreadId`",
+    );
     assert.include(
       J5_ORCHESTRATION_INSTRUCTIONS,
       "Call `orchestrator_capabilities` once per thread, before the first `delegate_task`",

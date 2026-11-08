@@ -67,9 +67,9 @@ different code depending on it:
 
 - How is J5 Code running on this machine: `j5 serve` in a terminal, the
   background service, or the desktop app?
-- Which surface is the user connecting from: the website (app.t3.codes), the
-  desktop app against a local server, the desktop app against a remote server,
-  or the mobile app?
+- Which surface is the user connecting from: a browser on the server's own web
+  app, the desktop app against a local server, the desktop app against a remote
+  server, or the mobile app?
 
 Then work from evidence, not assumption. In rough order of value:
 

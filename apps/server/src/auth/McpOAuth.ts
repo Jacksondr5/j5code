@@ -581,7 +581,7 @@ export const layerMcpClientAuthenticator = Layer.effect(
     const environmentId = yield* environment.getEnvironmentId;
     const hostedAppUrl = yield* hostedAppUrlConfig.pipe(
       Effect.catch((cause) =>
-        Effect.logWarning("Outside MCP clients get app.t3.codes thread links", { cause }).pipe(
+        Effect.logWarning("Could not read the hosted app URL; using the default", { cause }).pipe(
           Effect.as(DEFAULT_HOSTED_APP_URL),
         ),
       ),

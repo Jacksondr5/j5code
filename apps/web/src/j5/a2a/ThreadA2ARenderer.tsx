@@ -43,10 +43,6 @@ import {
 
 export { J5OpenThread as J5OpenSenderThread } from "./J5NoticeLine";
 export { J5_A2A_DELIVERY_MESSAGE_PREFIX } from "@t3tools/client-runtime/j5/user-message";
-export {
-  formatJ5QueuedDelivery as formatThreadA2AQueuedDelivery,
-  participantIdsForJ5Envelope as participantIdsForThreadA2AEnvelope,
-} from "@t3tools/client-runtime/j5/participant-identity";
 
 export interface ThreadA2ADeliveryCompositionInput {
   readonly message: ChatMessage;

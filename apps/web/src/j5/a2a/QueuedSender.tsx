@@ -71,9 +71,11 @@ export function useJ5QueuedSenders(
       message,
       threadRef,
       presentation,
+      // Only the viewer's own messages sit on the right (register D38).
       side: otherPerson
         ? "left"
-        : (presentation.j5?.side ?? (message.createdBy === "system" ? "left" : "right")),
+        : (presentation.j5?.side ??
+          (presentation.attribution !== null || message.createdBy === "system" ? "left" : "right")),
       text: presentation.j5?.unwrapped ? presentation.text : null,
       identities,
     };

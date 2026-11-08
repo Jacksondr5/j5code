@@ -144,3 +144,58 @@ it("folds a queued peer message under its sender on the left, edits it with its 
     input: { threadId, queuedRunId: "queue-1", targetRunId: "active" },
   });
 });
+
+it("puts queued automation and server messages on the left with the peer's", async () => {
+  fixture.projection = {
+    ...projection,
+    runs: [
+      projection.runs[0],
+      {
+        id: "queue-1",
+        status: "queued",
+        userMessageId: "automation",
+        ordinal: 2,
+        queuePosition: 1,
+      },
+      { id: "queue-2", status: "queued", userMessageId: "server", ordinal: 3, queuePosition: 2 },
+    ],
+    messages: [
+      {
+        id: "automation",
+        role: "user",
+        createdBy: "agent",
+        createdAt,
+        text: "Nightly check",
+        attachments: [],
+        scheduledTaskId: "task-1",
+      },
+      {
+        id: "server",
+        role: "user",
+        createdBy: "agent",
+        creationSource: "server",
+        createdAt,
+        text: "Server notice",
+        attachments: [],
+      },
+    ],
+  } as unknown as OrchestrationV2ThreadProjection;
+  await using screen = await render(
+    <QueuedRunsControl
+      environmentId={environmentId}
+      threadId={threadId}
+      optimisticMessages={[]}
+      editingRunId={null}
+      editBlockedReason={null}
+      onEditQueuedRun={() => {}}
+      onCancelEdit={() => {}}
+      timestampFormat="locale"
+      onOpenThread={() => {}}
+    />,
+  );
+
+  await expect.element(screen.getByText("Automation", { exact: true })).toBeVisible();
+  await expect.element(screen.getByText(/Sent by/)).toBeVisible();
+  const rows = Array.from(screen.container.querySelectorAll("li"));
+  expect(rows.map((row) => getComputedStyle(row).alignItems)).toEqual(["flex-start", "flex-start"]);
+});

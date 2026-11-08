@@ -3835,7 +3835,7 @@ export default function ChatView(props: ChatViewProps) {
                                     : undefined
                                 }
                                 availableEnvironments={logicalProjectEnvironments}
-                                {...(isServerThread
+                                {...(isServerThread || draftAgent.assignment
                                   ? {}
                                   : {
                                       trailing: (
