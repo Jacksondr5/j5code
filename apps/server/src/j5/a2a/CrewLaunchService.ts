@@ -27,7 +27,13 @@ import * as Result from "effect/Result";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
 import { CrewMemberModels } from "../agents/crewMemberModels.ts";
-import { prepareAgentPersonaLaunch } from "../agents/agentPersonaLaunch.ts";
+import {
+  agentAccessOf,
+  AgentPersonaPickError,
+  assertWithinCallerAccess,
+  pickAgentPersona,
+  resolveCallerAccess,
+} from "../agents/agentPersonaPick.ts";
 import {
   AgentPersonaLibraryError,
   makeAgentPersonaLibrary,
@@ -71,7 +77,8 @@ import {
 /**
  * One approved seat: who fills it, why, and any wiring text its brief carries verbatim. A null
  * agent is a custom seat: the human can override its runtime; an omitted model selection inherits
- * the Captain's, and omitted access is Full access.
+ * the Captain's. Omitted access is Full access on a roster the person approves, and the Captain's
+ * own access on an auto-approved one.
  */
 export interface CrewLaunchSeat {
   readonly name: string;
@@ -131,6 +138,8 @@ export interface CrewLaunchInput {
   readonly displayName: string;
   readonly seats: ReadonlyArray<CrewLaunchSeat>;
   readonly resolvedSeats?: ReadonlyArray<ResolvedCrewLaunchSeat>;
+  /** Who chose the seats: the person, on a card they approved, or an agent. */
+  readonly pick: CrewSeatPick;
   readonly brief: string;
   readonly playbook?: CrewLaunchPlaybook | null | undefined;
   /**
@@ -150,6 +159,8 @@ export interface CrewAddSeatsInput {
   readonly instance: AgentCrewInstance;
   readonly seats: ReadonlyArray<CrewLaunchSeat>;
   readonly resolvedSeats?: ReadonlyArray<ResolvedCrewLaunchSeat>;
+  /** Who chose the seats: the person, on a card they approved, or an agent. */
+  readonly pick: CrewSeatPick;
   /** The brief the new seats start on; defaults to the Crew's original brief. */
   readonly brief?: string | undefined;
   /** The Crew's playbook with live titles, for the new seats' briefs. */
@@ -251,10 +262,17 @@ const unlessStepOwned =
   <E>(cause: E): CrewLaunchOperationError | CrewStepAlreadyOwnedError =>
     cause instanceof CrewStepAlreadyOwnedError ? cause : wrap(cause);
 
+/**
+ * Who chose the roster: the person, on a card they approved (edited or not), or an agent, on an
+ * auto-approved roster or addition. An agent's seats are held to the Captain's access.
+ */
+export type CrewSeatPick = "person" | "agent";
+
 export interface CrewLaunchServiceShape {
   readonly resolveSeats: (
     captain: CrewCaptain,
     seats: ReadonlyArray<CrewLaunchSeat>,
+    pick: CrewSeatPick,
   ) => Effect.Effect<ReadonlyArray<ResolvedCrewLaunchSeat>, CrewLaunchError>;
   /**
    * Each seat's workspace choice as it should be stored: a new worktree's base resolved to a
@@ -345,10 +363,30 @@ export const layer = Layer.effect(
     });
 
     // Resolve every seat before creating anything: a Crew launches whole or not at all.
-    const resolveSeats = Effect.fn("j5.a2a.crewLaunch.resolveSeats")(function* (
+    const resolveSeatsWithPick = Effect.fn("j5.a2a.crewLaunch.resolveSeats")(function* (
       captain: CrewCaptain,
       seats: ReadonlyArray<CrewLaunchSeat>,
+      pick: CrewSeatPick,
     ) {
+      const agentPick = pick === "agent";
+      // Read once: an agent's seats are held to the Captain's access and the project's lists.
+      const limit = agentPick
+        ? yield* resolveCallerAccess({ thread: captain.thread }).pipe(
+            Effect.mapError(
+              (cause) =>
+                new CrewLaunchOperationError({
+                  phase: "reading the Captain's access",
+                  seatName: null,
+                  createdSeats: [],
+                  cause,
+                }),
+            ),
+          )
+        : undefined;
+      const caller = limit === undefined ? { thread: captain.thread } : { access: limit };
+      const eligible = agentPick
+        ? yield* memberModels.eligibility(captain.thread.projectId)
+        : undefined;
       const providers = yield* registry.getProviders;
       const now = yield* Clock.currentTimeMillis;
       // Every seat's workspace resolves against one read of the Captain's repository, here at
@@ -430,13 +468,25 @@ export const layer = Layer.effect(
       });
       for (const seat of seats) {
         const agentId = seat.agentId;
+        const pickRefused = (error: AgentPersonaPickError) =>
+          new CrewLaunchSeatUnavailableError({
+            seatName: seat.name,
+            agentId: agentId ?? "custom seat",
+            detail: error.message,
+          });
         if (agentId === null) {
           const selection = seat.modelSelection ?? captain.thread.modelSelection;
           const { modelSelection, provider } = yield* resolveSelection(seat, selection, true);
-          // Access is the one setting a custom seat does not take from its Captain: a seat nobody
-          // configured runs in Full access, so it never stops for approvals in a thread the person
-          // is not watching. The person sees and can change it on the roster card.
-          const runtimeMode = seat.runtimeMode ?? "full-access";
+          // On a card the person approves, a seat nobody configured runs in Full access, so it
+          // never stops for approvals in a thread the person is not watching; they see and can
+          // change it there. Without the card, a seat gets no more than its Captain runs with.
+          const runtimeMode = seat.runtimeMode ?? limit?.runtimeMode ?? "full-access";
+          if (agentPick)
+            yield* assertWithinCallerAccess(
+              `Custom seat ${seat.name}`,
+              { runtimeMode },
+              caller,
+            ).pipe(Effect.mapError(pickRefused));
           if (
             provider!.driver === "acpRegistry" &&
             (runtimeMode === "auto" || runtimeMode === "auto-accept-edits")
@@ -444,8 +494,11 @@ export const layer = Layer.effect(
             return yield* new CrewLaunchSeatUnavailableError({
               seatName: seat.name,
               agentId: "custom seat",
+              // Without the card, Full access is allowed only when the Captain runs with it.
               detail:
-                "This ACP harness cannot enforce the selected access mode. Choose Supervised or Full access.",
+                limit === undefined || limit.runtimeMode === "full-access"
+                  ? "This ACP harness cannot enforce the selected access mode. Choose Supervised or Full access."
+                  : "This ACP harness cannot enforce the selected access mode, and Full access is broader than the Captain's. Set runtime_mode to approval-required (Supervised).",
             });
           // Custom seats carry the selected access mode, without a persona sandbox assignment.
           const workspace = yield* resolveWorkspace(seat);
@@ -465,11 +518,14 @@ export const layer = Layer.effect(
         }
         const prepared = yield* Effect.gen(function* () {
           if (seat.modelSelection === undefined) {
-            const prepared = yield* prepareAgentPersonaLaunch(
-              { personaId: agentId },
-              providers,
-              agents,
-            );
+            const { assignment: prepared } = yield* pickAgentPersona({
+              personaId: agentId,
+              source: pick,
+              caller,
+              projectId: captain.thread.projectId,
+              runtimeMode: seat.runtimeMode,
+              eligible,
+            });
             return {
               ...prepared,
               resolvedModelSelection: (yield* resolveSelection(
@@ -501,10 +557,11 @@ export const layer = Layer.effect(
                 ),
             ) ?? -1;
           const keepsPersonaModel = matchingIndex >= 0;
+          // An agent's pick is held to the lists whichever entry it froze.
           const { modelSelection, provider } = yield* resolveSelection(
             seat,
             seat.modelSelection,
-            !keepsPersonaModel,
+            !keepsPersonaModel || agentPick,
           );
           if (definition === undefined || catalog.disabledIds.includes(agentId))
             return yield* new CrewLaunchSeatUnavailableError({
@@ -535,6 +592,19 @@ export const layer = Layer.effect(
                 detail: `Persona entry ${matchingIndex + 1} is unavailable: ${unavailable}.`,
               });
           }
+          if (agentPick)
+            yield* assertWithinCallerAccess(
+              `Persona ${agentId}`,
+              seat.runtimeMode === undefined
+                ? agentAccessOf(
+                    translateAgentPersonaProviderPolicy(
+                      agentPersonaPolicy(definition),
+                      provider.driver,
+                    ),
+                  )
+                : { runtimeMode: seat.runtimeMode },
+              caller,
+            );
           const definitionDigest = yield* agents.snapshot(definition);
           return {
             personaId: agentId,
@@ -551,16 +621,23 @@ export const layer = Layer.effect(
             resolvedDriver: provider.driver,
             resolvedModelSelection: modelSelection,
             ...(seat.runtimeMode === undefined ? {} : { runtimeModeOverride: seat.runtimeMode }),
+            pickSource: { kind: pick },
           };
         }).pipe(
+          // The lists refuse a persona's own entries as they refuse a model chosen on the card.
           Effect.mapError((error) =>
             error._tag === "CrewLaunchModelNotEligibleError"
               ? error
-              : new CrewLaunchSeatUnavailableError({
-                  seatName: seat.name,
-                  agentId,
-                  detail: error.message,
-                }),
+              : error._tag === "AgentPersonaPickError" && error.constraint === "model-not-eligible"
+                ? new CrewLaunchModelNotEligibleError({
+                    seatName: seat.name,
+                    detail: error.message,
+                  })
+                : new CrewLaunchSeatUnavailableError({
+                    seatName: seat.name,
+                    agentId,
+                    detail: error.message,
+                  }),
           ),
         );
         // The person's edited text runs instead of the persona's, never beside it: the seat's
@@ -642,6 +719,16 @@ export const layer = Layer.effect(
       }
       return resolved;
     });
+    // The pick check reads the same eligibility lists and providers this launcher holds.
+    const resolveSeats = (
+      captain: CrewCaptain,
+      seats: ReadonlyArray<CrewLaunchSeat>,
+      pick: CrewSeatPick,
+    ) =>
+      resolveSeatsWithPick(captain, seats, pick).pipe(
+        Effect.provideService(CrewMemberModels, memberModels),
+        Effect.provideService(ProviderRegistry, registry),
+      );
 
     const plan = (
       providerSessionId: string,
@@ -881,7 +968,8 @@ export const layer = Layer.effect(
 
     const launch: CrewLaunchServiceShape["launch"] = Effect.fn("j5.a2a.crewLaunch.launch")(
       function* (input) {
-        const resolved = input.resolvedSeats ?? (yield* resolveSeats(input.captain, input.seats));
+        const resolved =
+          input.resolvedSeats ?? (yield* resolveSeats(input.captain, input.seats, input.pick));
         const planned = plan(input.providerSessionId, input.requestKey, resolved);
         const recordError = (phase: string) => (cause: unknown) =>
           new CrewLaunchOperationError({ phase, seatName: null, createdSeats: [], cause });
@@ -955,7 +1043,8 @@ export const layer = Layer.effect(
     // One unit step from the reservation through the briefs, like a launch.
     const addSeats: CrewLaunchServiceShape["addSeats"] = Effect.fn("j5.a2a.crewLaunch.addSeats")(
       function* (input) {
-        const resolved = input.resolvedSeats ?? (yield* resolveSeats(input.captain, input.seats));
+        const resolved =
+          input.resolvedSeats ?? (yield* resolveSeats(input.captain, input.seats, input.pick));
         const planned = plan(input.providerSessionId, input.requestKey, resolved);
         // Reserve the seats before anything spawns: the store decides the cap and the version in
         // one transaction, so two approvals landing together cannot both pass.

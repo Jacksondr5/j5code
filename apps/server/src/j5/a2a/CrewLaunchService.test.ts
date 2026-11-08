@@ -337,6 +337,7 @@ it.effect("creates approved seats and additions without starting turns", () =>
         .launch({
           providerSessionId: "session",
           requestKey: "launch-1",
+          pick: "person",
           captain,
           displayName: "Release Crew",
           seats: [
@@ -362,6 +363,7 @@ it.effect("creates approved seats and additions without starting turns", () =>
       const { instance } = yield* launcher.launch({
         providerSessionId: "session",
         requestKey: "launch-1",
+        pick: "person",
         captain,
         displayName: "Review Pair",
         seats: [
@@ -412,6 +414,7 @@ it.effect("creates approved seats and additions without starting turns", () =>
       const { instance: grown } = yield* launcher.addSeats({
         providerSessionId: "session",
         requestKey: "add-1",
+        pick: "person",
         captain,
         instance,
         seats: [
@@ -477,6 +480,7 @@ it.effect(
         const { instance } = yield* launcher.launch({
           providerSessionId: "session",
           requestKey: "launch-custom",
+          pick: "person",
           captain,
           displayName: "Notes Crew",
           seats: [
@@ -527,7 +531,8 @@ it.effect(
         assert.equal(stored?.agent_display_name, "custom");
 
         // A persona Captain runs under its persona's policy (workspace write, auto-accept-edits here)
-        // and has the person supervising it; its custom seat still defaults to Full access.
+        // and has the person supervising it. On a card the person approves, its custom seat still
+        // defaults to Full access.
         const personaCaptain = {
           ...captain,
           thread: {
@@ -547,6 +552,7 @@ it.effect(
           providerSessionId: "session",
           requestKey: "launch-custom-2",
           captain: personaCaptain,
+          pick: "person",
           displayName: "Notes Crew 2",
           seats: [
             {
@@ -567,6 +573,42 @@ it.effect(
           assert.equal(underPersona.runtimeMode, "full-access");
           assert.isUndefined(underPersona.agentPersonaAssignment);
         }
+
+        // Approved automatically, the same seat gets no more than its Captain runs with: the
+        // Captain's effective access when it names none, and a refusal when it names more.
+        const scribe = {
+          workspace: { type: "shared" as const },
+          name: "scribe",
+          agentId: null,
+          reason: "Keeps notes",
+          instructions: "Notes.",
+        };
+        const [automatic] = yield* launcher.resolveSeats(personaCaptain, [scribe], "agent");
+        assert.equal(automatic?.runtimeMode, "auto-accept-edits");
+        assert.isNull(automatic?.assignment ?? null);
+        const above = yield* launcher
+          .resolveSeats(personaCaptain, [{ ...scribe, runtimeMode: "full-access" }], "agent")
+          .pipe(Effect.flip);
+        assert.include(
+          above.message,
+          "Custom seat scribe would run with Full access, which is broader than the Repository write its caller runs with.",
+        );
+        // A read-only Captain cannot have a custom seat at all, since every one can write.
+        const readOnlyCaptain = {
+          ...personaCaptain,
+          thread: {
+            ...personaCaptain.thread,
+            agentPersonaAssignment: {
+              ...personaCaptain.thread.agentPersonaAssignment!,
+              personaId: "scout",
+              authorityPolicy: "read-only",
+            },
+          } as typeof captain.thread,
+        };
+        const readOnly = yield* launcher
+          .resolveSeats(readOnlyCaptain, [scribe], "agent")
+          .pipe(Effect.flip);
+        assert.include(readOnly.message, "broader than the Read only its caller runs with");
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped),
 );
@@ -592,6 +634,7 @@ it.effect(
           .launch({
             providerSessionId: "session",
             requestKey: "signed-out-1",
+            pick: "person",
             captain,
             displayName: "Signed Out",
             seats: [
@@ -634,6 +677,7 @@ it.effect("custom seats refuse unavailable providers before recording or spawnin
           .launch({
             providerSessionId: "session",
             requestKey: "unavailable-custom",
+            pick: "person",
             captain,
             displayName: "Notes",
             seats: [
@@ -703,7 +747,7 @@ it.effect(
             instructions: "Take notes",
           },
         ];
-        const resolvedSeats = yield* launcher.resolveSeats(captain, seats);
+        const resolvedSeats = yield* launcher.resolveSeats(captain, seats, "person");
         assert.deepStrictEqual(resolvedSeats[0]?.runtime, {
           seat: "scribe",
           provider: "OpenAI",
@@ -724,6 +768,7 @@ it.effect(
         const input = {
           providerSessionId: "session",
           requestKey: "runtime-pinned",
+          pick: "person" as const,
           captain,
           displayName: "Notes",
           seats,
@@ -758,26 +803,34 @@ it.effect(
         assert.equal(create?.type, "thread.create");
         if (create?.type === "thread.create")
           assert.deepStrictEqual(create.modelSelection, resolvedSeats[0]?.modelSelection);
-        const saved = yield* launcher.resolveSeats(captain, [
-          {
-            workspace: { type: "shared" as const },
-            name: "builder",
-            agentId: "builder",
-            reason: "Build",
-          },
-        ]);
+        const saved = yield* launcher.resolveSeats(
+          captain,
+          [
+            {
+              workspace: { type: "shared" as const },
+              name: "builder",
+              agentId: "builder",
+              reason: "Build",
+            },
+          ],
+          "person",
+        );
         assert.equal(saved[0]?.assignment?.resolvedDriver, "codex");
         assert.equal(saved[0]?.runtime.harness, "Codex");
         assert.equal(saved[0]?.runtime.access, "Repository write");
-        const accessOnly = (yield* launcher.resolveSeats(captain, [
-          {
-            workspace: { type: "shared" as const },
-            name: "builder",
-            agentId: "builder",
-            reason: "Build",
-            runtimeMode: "full-access",
-          },
-        ]))[0]!;
+        const accessOnly = (yield* launcher.resolveSeats(
+          captain,
+          [
+            {
+              workspace: { type: "shared" as const },
+              name: "builder",
+              agentId: "builder",
+              reason: "Build",
+              runtimeMode: "full-access",
+            },
+          ],
+          "person",
+        ))[0]!;
         assert.deepStrictEqual(accessOnly.modelSelection, saved[0]?.modelSelection);
         assert.equal(accessOnly.assignment?.resolvedRoute, saved[0]?.assignment?.resolvedRoute);
         assert.equal(accessOnly.runtime.access, "Full access");
@@ -864,7 +917,7 @@ it.effect(
           },
           runtimeMode: "approval-required" as const,
         };
-        const resolvedSeats = yield* launcher.resolveSeats(captain, [custom]);
+        const resolvedSeats = yield* launcher.resolveSeats(captain, [custom], "person");
         const resolved = resolvedSeats[0]!;
         assert.deepStrictEqual(resolved.modelSelection, custom.modelSelection);
         assert.equal(resolved.runtimeMode, "approval-required");
@@ -876,6 +929,7 @@ it.effect(
         const { instance } = yield* launcher.launch({
           providerSessionId: "session",
           requestKey: "custom-override",
+          pick: "person",
           captain,
           displayName: "Review",
           seats: [custom],
@@ -892,10 +946,11 @@ it.effect(
           assert.isUndefined(created.agentPersonaAssignment);
         }
         const additional = { ...custom, name: "scribe", runtimeMode: "full-access" as const };
-        const addedResolved = yield* launcher.resolveSeats(captain, [additional]);
+        const addedResolved = yield* launcher.resolveSeats(captain, [additional], "person");
         yield* launcher.addSeats({
           providerSessionId: "session",
           requestKey: "custom-override-add",
+          pick: "person",
           captain,
           instance,
           seats: [additional],
@@ -923,18 +978,22 @@ it.effect(
           },
         ]) {
           const invalid = yield* launcher
-            .resolveSeats(captain, [{ ...custom, modelSelection }])
+            .resolveSeats(captain, [{ ...custom, modelSelection }], "person")
             .pipe(Effect.flip);
           assert.equal(invalid._tag, "CrewLaunchSeatUnavailableError");
         }
         const invalidAccess = yield* launcher
-          .resolveSeats(captain, [
-            {
-              ...custom,
-              modelSelection: { instanceId: ProviderInstanceId.make("acp"), model: "model" },
-              runtimeMode: "auto-accept-edits",
-            },
-          ])
+          .resolveSeats(
+            captain,
+            [
+              {
+                ...custom,
+                modelSelection: { instanceId: ProviderInstanceId.make("acp"), model: "model" },
+                runtimeMode: "auto-accept-edits",
+              },
+            ],
+            "person",
+          )
           .pipe(Effect.flip);
         assert.equal(invalidAccess._tag, "CrewLaunchSeatUnavailableError");
         assert.include(invalidAccess.message, "Choose Supervised or Full access");
@@ -946,7 +1005,7 @@ it.effect(
           agentId: "critic",
           runtimeMode: "full-access" as const,
         };
-        const personaOverride = yield* launcher.resolveSeats(captain, [personaSeat]);
+        const personaOverride = yield* launcher.resolveSeats(captain, [personaSeat], "person");
         const saved = personaOverride[0]!;
         assert.equal(saved.assignment?.resolvedRoute, "override");
         assert.deepStrictEqual(saved.modelSelection, custom.modelSelection);
@@ -965,6 +1024,7 @@ it.effect(
         yield* launcher.addSeats({
           providerSessionId: "session",
           requestKey: "saved-override-add",
+          pick: "person",
           captain,
           instance,
           seats: [personaSeat],
@@ -987,13 +1047,15 @@ it.effect(
           { ...custom.modelSelection, options: [{ id: "effort", value: "unsupported" }] },
         ]) {
           const invalid = yield* launcher
-            .resolveSeats(captain, [{ ...personaSeat, modelSelection: selection }])
+            .resolveSeats(captain, [{ ...personaSeat, modelSelection: selection }], "person")
             .pipe(Effect.flip);
           assert.equal(invalid._tag, "CrewLaunchSeatUnavailableError");
         }
-        const modelOnly = (yield* launcher.resolveSeats(captain, [
-          { ...personaSeat, runtimeMode: undefined },
-        ]))[0]!;
+        const modelOnly = (yield* launcher.resolveSeats(
+          captain,
+          [{ ...personaSeat, runtimeMode: undefined }],
+          "person",
+        ))[0]!;
         const defaultPolicy = yield* resolveAgentPersonaRuntime(
           { agentPersonaAssignment: modelOnly.assignment!, runtimeMode: modelOnly.runtimeMode },
           library,
@@ -1108,6 +1170,7 @@ it.effect(
                 reason: "Build",
               },
             ],
+            "person",
           );
           assert.deepStrictEqual(
             resolved.map((seat) => [seat.seat.name, seat.runtimeMode, seat.runtime.access]),
@@ -1118,10 +1181,14 @@ it.effect(
             ],
           );
         }
-        const explicit = yield* launcher.resolveSeats(captain, [
-          { ...custom, runtimeMode: "approval-required" },
-          { ...acp, runtimeMode: "approval-required" },
-        ]);
+        const explicit = yield* launcher.resolveSeats(
+          captain,
+          [
+            { ...custom, runtimeMode: "approval-required" },
+            { ...acp, runtimeMode: "approval-required" },
+          ],
+          "person",
+        );
         assert.deepStrictEqual(
           explicit.map((seat) => seat.runtimeMode),
           ["approval-required", "approval-required"],
@@ -1129,11 +1196,28 @@ it.effect(
         // An explicit mode the ACP harness cannot enforce is still refused.
         for (const runtimeMode of ["auto", "auto-accept-edits"] as const) {
           const failure = yield* launcher
-            .resolveSeats(captain, [{ ...acp, runtimeMode }])
+            .resolveSeats(captain, [{ ...acp, runtimeMode }], "person")
             .pipe(Effect.flip);
           assert.equal(failure._tag, "CrewLaunchSeatUnavailableError");
           assert.include(failure.message, "cannot enforce the selected access mode");
         }
+        // Approved automatically under an Auto Captain, the seat inherits Auto, which the harness
+        // refuses; Full access would be above the Captain, so the refusal names Supervised.
+        const automatic = yield* launcher
+          .resolveSeats(
+            { ...captain, thread: { ...captain.thread, runtimeMode: "auto" } },
+            [acp],
+            "agent",
+          )
+          .pipe(Effect.flip);
+        assert.include(automatic.message, "Set runtime_mode to approval-required (Supervised).");
+        assert.notInclude(automatic.message, "Choose Supervised or Full access");
+        const [supervised] = yield* launcher.resolveSeats(
+          { ...captain, thread: { ...captain.thread, runtimeMode: "auto" } },
+          [{ ...acp, runtimeMode: "approval-required" }],
+          "agent",
+        );
+        assert.equal(supervised!.runtimeMode, "approval-required");
         assert.lengthOf(yield* Ref.get(commands), 0);
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped),
@@ -1181,7 +1265,7 @@ it.effect("a full-access persona seat runs full access unless the seat overrides
         reason: "Operate",
         workspace: { type: "shared" as const },
       };
-      const [unset] = yield* launcher.resolveSeats(captain, [seat]);
+      const [unset] = yield* launcher.resolveSeats(captain, [seat], "person");
       assert.deepStrictEqual(
         [unset!.runtimeMode, unset!.runtime.access],
         ["full-access", "Full access"],
@@ -1195,9 +1279,11 @@ it.effect("a full-access persona seat runs full access unless the seat overrides
       assert.notProperty(unsetPolicy, "sandboxPolicy");
       assert.notProperty(unsetPolicy, "approvalPolicy");
       // An explicit seat mode still wins over the persona's policy.
-      const [overridden] = yield* launcher.resolveSeats(captain, [
-        { ...seat, runtimeMode: "approval-required" },
-      ]);
+      const [overridden] = yield* launcher.resolveSeats(
+        captain,
+        [{ ...seat, runtimeMode: "approval-required" }],
+        "person",
+      );
       assert.deepStrictEqual(
         [overridden!.runtimeMode, overridden!.runtime.access],
         ["approval-required", "Supervised"],
@@ -1243,10 +1329,12 @@ it.effect("a persona seat's edited instructions replace the persona's own at lau
           { agentPersonaAssignment: resolved.assignment!, runtimeMode: resolved.runtimeMode },
           library,
         ).pipe(Effect.map(({ agentPersonaInstructions }) => agentPersonaInstructions!));
-      const plain = yield* launcher.resolveSeats(captain, [seat]);
-      const edited = yield* launcher.resolveSeats(captain, [
-        { ...seat, personaInstructions: "Only read the README." },
-      ]);
+      const plain = yield* launcher.resolveSeats(captain, [seat], "person");
+      const edited = yield* launcher.resolveSeats(
+        captain,
+        [{ ...seat, personaInstructions: "Only read the README." }],
+        "person",
+      );
       const original = BUILT_IN_AGENT_PERSONAS.scout.instructions;
       assert.include(yield* instructionsOf(plain[0]!), original);
       const replaced = yield* instructionsOf(edited[0]!);
@@ -1260,7 +1348,7 @@ it.effect("a persona seat's edited instructions replace the persona's own at lau
         plain[0]!.assignment!.definitionDigest,
       );
       // A seat with no edit resolves exactly as it always did, so its approval token is unchanged.
-      assert.deepStrictEqual(yield* launcher.resolveSeats(captain, [seat]), plain);
+      assert.deepStrictEqual(yield* launcher.resolveSeats(captain, [seat], "person"), plain);
       const proposal = {
         id: "proposal:edit",
         brief: "Look around.",
@@ -1295,21 +1383,23 @@ it.effect("refuses persona seats whose effective ACP access the harness cannot e
         modelSelection: { instanceId: ProviderInstanceId.make("acp"), model: "model" },
       };
       // A workspace-write persona with no override: the harness cannot enforce its default.
-      const inherited = yield* launcher.resolveSeats(captain, [seat]).pipe(Effect.flip);
+      const inherited = yield* launcher.resolveSeats(captain, [seat], "person").pipe(Effect.flip);
       assert.equal(inherited._tag, "CrewLaunchSeatUnavailableError");
       assert.include(inherited.message, "cannot enforce the persona's default access");
       // An explicit auto mode is refused on the persona branch as it is for custom seats.
       for (const runtimeMode of ["auto", "auto-accept-edits"] as const) {
         const overridden = yield* launcher
-          .resolveSeats(captain, [{ ...seat, runtimeMode }])
+          .resolveSeats(captain, [{ ...seat, runtimeMode }], "person")
           .pipe(Effect.flip);
         assert.equal(overridden._tag, "CrewLaunchSeatUnavailableError");
         assert.include(overridden.message, "cannot enforce the selected access mode");
       }
       // Modes the harness enforces itself pass, and the approval-bound preview records them.
-      const allowed = yield* launcher.resolveSeats(captain, [
-        { ...seat, runtimeMode: "approval-required" },
-      ]);
+      const allowed = yield* launcher.resolveSeats(
+        captain,
+        [{ ...seat, runtimeMode: "approval-required" }],
+        "person",
+      );
       assert.equal(allowed[0]?.runtimeMode, "approval-required");
       assert.lengthOf(yield* Ref.get(commands), 0);
     }).pipe(Effect.provide(layer));
@@ -1354,14 +1444,14 @@ it.effect("pins non-reasoning provider defaults for persona seats without overri
           reason: "Build",
         },
       ];
-      const before = (yield* launcher.resolveSeats(captain, seats))[0]!;
+      const before = (yield* launcher.resolveSeats(captain, seats, "person"))[0]!;
       assert.deepStrictEqual(
         before.modelSelection.options?.find((option) => option.id === "fastMode"),
         { id: "fastMode", value: true },
       );
       assert.deepStrictEqual(before.assignment?.resolvedModelSelection, before.modelSelection);
       providers[0] = configured(false);
-      const after = (yield* launcher.resolveSeats(captain, seats))[0]!;
+      const after = (yield* launcher.resolveSeats(captain, seats, "person"))[0]!;
       assert.equal(before.runtime.reasoning, after.runtime.reasoning);
       assert.deepStrictEqual(
         after.modelSelection.options?.find((option) => option.id === "fastMode"),
@@ -1468,6 +1558,7 @@ const unitFixture = Effect.gen(function* () {
     const { instance } = yield* launcher.launch({
       providerSessionId: "session",
       requestKey: "unit-1",
+      pick: "person",
       captain,
       displayName: "Review Pair",
       seats: [
@@ -1488,6 +1579,7 @@ const unitFixture = Effect.gen(function* () {
       const { instance: grown } = yield* launcher.addSeats({
         providerSessionId: "session",
         requestKey: "add-sentry",
+        pick: "person",
         captain,
         instance,
         seats: [
@@ -1539,6 +1631,7 @@ it.effect(
         const launched = yield* launcher.launch({
           providerSessionId: "session",
           requestKey: "trio",
+          pick: "person",
           captain: unit.captain,
           displayName: "Trio",
           seats: [
@@ -1729,6 +1822,7 @@ it.effect(
         const added = yield* launcher.addSeats({
           providerSessionId: "session",
           requestKey: "add-sentry",
+          pick: "person",
           captain: unit.captain,
           instance,
           seats: [
@@ -1801,6 +1895,7 @@ it.effect(
           .addSeats({
             providerSessionId: "session",
             requestKey: "add-sentry",
+            pick: "person",
             captain: unit.captain,
             instance,
             seats: [
@@ -1865,6 +1960,7 @@ it.effect("records a playbook Crew's step owners and surfaces a taken step unwra
       const { instance } = yield* launcher.launch({
         providerSessionId: "session",
         requestKey: "playbook-crew",
+        pick: "person",
         captain,
         displayName: "Release Crew",
         seats: [custom("planner", ["plan"]), custom("helper")],
@@ -1894,6 +1990,7 @@ it.effect("records a playbook Crew's step owners and surfaces a taken step unwra
         .addSeats({
           providerSessionId: "session",
           requestKey: "rival",
+          pick: "person",
           captain,
           instance,
           seats: [custom("rival", ["plan"])],
@@ -1926,6 +2023,7 @@ it.effect("a relaunch after a failed link stores the re-approved seat's steps", 
       const input = {
         providerSessionId: "session",
         requestKey: "relaunch",
+        pick: "person" as const,
         captain,
         displayName: "Release Crew",
         brief: "Ship it.",
@@ -2016,6 +2114,7 @@ it.effect("launches each seat in the workspace it names, and refuses one git can
         .launch({
           providerSessionId: "session",
           requestKey: "no-repo",
+          pick: "person",
           captain,
           displayName: "Trio",
           seats,
@@ -2042,9 +2141,11 @@ it.effect("launches each seat in the workspace it names, and refuses one git can
       const launcher = yield* CrewLaunchService;
       // A path git doesn't list as a worktree is refused, naming the ones it does.
       const unknown = yield* launcher
-        .resolveSeats(captain, [
-          seat("reviewer", { type: "existing_worktree", worktreePath: "/elsewhere" }),
-        ])
+        .resolveSeats(
+          captain,
+          [seat("reviewer", { type: "existing_worktree", worktreePath: "/elsewhere" })],
+          "person",
+        )
         .pipe(Effect.flip);
       assert.include(unknown.message, "isn't one of this project's worktrees");
       assert.include(unknown.message, "/repo-worktrees/feature");
@@ -2055,7 +2156,7 @@ it.effect("launches each seat in the workspace it names, and refuses one git can
         worktrees: [{ path: "/repo-worktrees/feature", branch: "fix/login" }],
       });
 
-      const resolved = yield* launcher.resolveSeats(captain, seats);
+      const resolved = yield* launcher.resolveSeats(captain, seats, "person");
       assert.deepStrictEqual(
         resolved.map((entry) => entry.runtime.workspace),
         [
@@ -2076,6 +2177,7 @@ it.effect("launches each seat in the workspace it names, and refuses one git can
       yield* launcher.launch({
         providerSessionId: "session",
         requestKey: "trio",
+        pick: "person",
         captain,
         displayName: "Trio",
         seats,
@@ -2163,7 +2265,11 @@ it.effect("binds an existing worktree's live branch, so a stale preview can't ap
     yield* Effect.gen(function* () {
       const launcher = yield* CrewLaunchService;
       // The preview binds the builder's worktree on fix/login and reads the card's lists.
-      const shown = yield* launcher.resolveSeats(captain, [reviewer("/repo-worktrees/builder")]);
+      const shown = yield* launcher.resolveSeats(
+        captain,
+        [reviewer("/repo-worktrees/builder")],
+        "person",
+      );
       yield* launcher.workspaceOptions(captain);
       assert.equal(
         shown[0]?.workspace.type === "existing_worktree" && shown[0].workspace.branch,
@@ -2184,9 +2290,11 @@ it.effect("binds an existing worktree's live branch, so a stale preview can't ap
         { path: "/repo-worktrees/builder", branch: "fix/login" },
       ]);
       // Approval reads the worktree's branch live from the checkout, past the cached snapshot.
-      const approving = yield* launcher.resolveSeats(captain, [
-        reviewer("/repo-worktrees/builder"),
-      ]);
+      const approving = yield* launcher.resolveSeats(
+        captain,
+        [reviewer("/repo-worktrees/builder")],
+        "person",
+      );
       assert.deepStrictEqual(approving[0]?.runtime.workspace, {
         type: "existing_worktree",
         worktreePath: "/repo-worktrees/builder",
@@ -2195,7 +2303,7 @@ it.effect("binds an existing worktree's live branch, so a stale preview can't ap
       // Membership comes from the cached snapshot, so a worktree added inside its window is
       // refused once; retrying after it refreshes finds it.
       const tooNew = yield* launcher
-        .resolveSeats(captain, [reviewer("/repo-worktrees/scout")])
+        .resolveSeats(captain, [reviewer("/repo-worktrees/scout")], "person")
         .pipe(Effect.flip);
       assert.include(tooNew.message, "isn't one of this project's worktrees");
       // The token the stale preview showed no longer matches, so the gate asks for a fresh one.
@@ -2257,13 +2365,19 @@ it.effect("pins a new worktree's base commit, and a moved or renamed branch can'
         refName: "j5/main",
         commits: { release: "2".repeat(40) },
       });
-      assert.equal(baseOf(yield* launcher.resolveSeats(captain, [builder(pinned!)])), release);
+      assert.equal(
+        baseOf(yield* launcher.resolveSeats(captain, [builder(pinned!)], "person")),
+        release,
+      );
       yield* Ref.set(live, { isRepo: true, refName: "j5/main", missingRefs: ["release"] });
-      assert.equal(baseOf(yield* launcher.resolveSeats(captain, [builder(pinned!)])), release);
+      assert.equal(
+        baseOf(yield* launcher.resolveSeats(captain, [builder(pinned!)], "person")),
+        release,
+      );
 
       // A seat saved before pins existed has none, so the ref is read now and shown for approval.
       const legacy = yield* launcher
-        .resolveSeats(captain, [builder({ type: "worktree", baseRef: "release" })])
+        .resolveSeats(captain, [builder({ type: "worktree", baseRef: "release" })], "person")
         .pipe(Effect.flip);
       assert.include(legacy.message, "Base ref 'release' doesn't resolve to a commit");
       assert.include(legacy.message, "builder");
@@ -2274,9 +2388,11 @@ it.effect("pins a new worktree's base commit, and a moved or renamed branch can'
       });
       assert.equal(
         baseOf(
-          yield* launcher.resolveSeats(captain, [
-            builder({ type: "worktree", baseRef: "release" }),
-          ]),
+          yield* launcher.resolveSeats(
+            captain,
+            [builder({ type: "worktree", baseRef: "release" })],
+            "person",
+          ),
         ),
         "3".repeat(40),
       );
@@ -2293,7 +2409,9 @@ it.effect("pins a new worktree's base commit, and a moved or renamed branch can'
 
       // A saved commit that is truly gone fails naming the revision, with no fallback to the ref.
       yield* Ref.set(live, { isRepo: true, refName: "j5/main", missingRefs: [release] });
-      const gone = yield* launcher.resolveSeats(captain, [builder(pinned!)]).pipe(Effect.flip);
+      const gone = yield* launcher
+        .resolveSeats(captain, [builder(pinned!)], "person")
+        .pipe(Effect.flip);
       assert.include(
         gone.message,
         `Base commit ${release.slice(0, 8)} (from 'release') is no longer in this repository.`,
@@ -2351,9 +2469,11 @@ it.effect(
         assert.deepStrictEqual(yield* Ref.get(fetches), ["main"]);
         // Origin moves on; the saved commit is used without another fetch.
         yield* Ref.update(live, (checkout) => ({ ...checkout, origin: { main: "c".repeat(40) } }));
-        const resolved = yield* launcher.resolveSeats(captain, [
-          { ...seat(true), workspace: fromOrigin as never },
-        ]);
+        const resolved = yield* launcher.resolveSeats(
+          captain,
+          [{ ...seat(true), workspace: fromOrigin as never }],
+          "person",
+        );
         assert.equal(
           resolved[0]?.workspace.type === "worktree" && resolved[0].workspace.baseCommit,
           "b".repeat(40),
@@ -2476,10 +2596,11 @@ it.effect("every model is eligible for a custom seat until a list is saved", () 
     });
     yield* Effect.gen(function* () {
       const launcher = yield* CrewLaunchService;
-      const resolved = yield* launcher.resolveSeats(captain, [
-        customSeat("inherits"),
-        customSeat("explicit", terra),
-      ]);
+      const resolved = yield* launcher.resolveSeats(
+        captain,
+        [customSeat("inherits"), customSeat("explicit", terra)],
+        "person",
+      );
       assert.deepStrictEqual(
         resolved.map((seat) => seat.modelSelection.model),
         ["gpt-5.6-sol", "gpt-5.6-terra"],
@@ -2496,13 +2617,14 @@ it.effect("a saved list holds a custom seat to its checked models and names what
     });
     yield* Effect.gen(function* () {
       const launcher = yield* CrewLaunchService;
-      const checked = yield* launcher.resolveSeats(captain, [
-        customSeat("inherits"),
-        customSeat("explicit", sol),
-      ]);
+      const checked = yield* launcher.resolveSeats(
+        captain,
+        [customSeat("inherits"), customSeat("explicit", sol)],
+        "person",
+      );
       assert.lengthOf(checked, 2);
       const refused = yield* launcher
-        .resolveSeats(captain, [customSeat("explicit", terra)])
+        .resolveSeats(captain, [customSeat("explicit", terra)], "person")
         .pipe(Effect.flip);
       assert.equal(refused._tag, "CrewLaunchModelNotEligibleError");
       for (const part of [
@@ -2517,6 +2639,7 @@ it.effect("a saved list holds a custom seat to its checked models and names what
         .launch({
           providerSessionId: "session",
           requestKey: "launch-ineligible",
+          pick: "person",
           captain,
           displayName: "Crew",
           seats: [customSeat("explicit", terra)],
@@ -2538,11 +2661,13 @@ it.effect("a model new to the catalog after the list was saved starts unchecked"
     });
     yield* Effect.gen(function* () {
       const launcher = yield* CrewLaunchService;
-      yield* launcher.resolveSeats(captain, [customSeat("known", terra)]);
+      yield* launcher.resolveSeats(captain, [customSeat("known", terra)], "person");
       const refused = yield* launcher
-        .resolveSeats(captain, [
-          customSeat("fresh", { instanceId: sol.instanceId, model: "gpt-5.7-new" }),
-        ])
+        .resolveSeats(
+          captain,
+          [customSeat("fresh", { instanceId: sol.instanceId, model: "gpt-5.7-new" })],
+          "person",
+        )
         .pipe(Effect.flip);
       assert.equal(refused._tag, "CrewLaunchModelNotEligibleError");
       assert.include(refused.message, "codex/gpt-5.6-sol, codex/gpt-5.6-terra.");
@@ -2560,7 +2685,7 @@ it.effect("a custom seat that inherits the Captain's model is held to the list",
     yield* Effect.gen(function* () {
       const launcher = yield* CrewLaunchService;
       const refused = yield* launcher
-        .resolveSeats(captain, [customSeat("inherits")])
+        .resolveSeats(captain, [customSeat("inherits")], "person")
         .pipe(Effect.flip);
       assert.equal(refused._tag, "CrewLaunchModelNotEligibleError");
       assert.include(refused.message, "Model gpt-5.6-sol on codex");
@@ -2578,7 +2703,7 @@ it.effect("a saved list with nothing checked makes no model eligible", () =>
     yield* Effect.gen(function* () {
       const launcher = yield* CrewLaunchService;
       const refused = yield* launcher
-        .resolveSeats(captain, [customSeat("inherits")])
+        .resolveSeats(captain, [customSeat("inherits")], "person")
         .pipe(Effect.flip);
       assert.equal(refused._tag, "CrewLaunchModelNotEligibleError");
       assert.include(refused.message, "nothing is checked");
@@ -2596,9 +2721,9 @@ it.effect("a stale entry for a model the catalog no longer lists changes nothing
     });
     yield* Effect.gen(function* () {
       const launcher = yield* CrewLaunchService;
-      yield* launcher.resolveSeats(captain, [customSeat("inherits")]);
+      yield* launcher.resolveSeats(captain, [customSeat("inherits")], "person");
       const refused = yield* launcher
-        .resolveSeats(captain, [customSeat("other", terra)])
+        .resolveSeats(captain, [customSeat("other", terra)], "person")
         .pipe(Effect.flip);
       assert.include(refused.message, "Eligible models: codex/gpt-5.6-sol.");
     }).pipe(Effect.provide(layer));
@@ -2616,9 +2741,9 @@ it.effect("a project's own list replaces the environment's", () =>
     });
     yield* Effect.gen(function* () {
       const launcher = yield* CrewLaunchService;
-      yield* launcher.resolveSeats(captain, [customSeat("allowed", terra)]);
+      yield* launcher.resolveSeats(captain, [customSeat("allowed", terra)], "person");
       const refused = yield* launcher
-        .resolveSeats(captain, [customSeat("inherits")])
+        .resolveSeats(captain, [customSeat("inherits")], "person")
         .pipe(Effect.flip);
       assert.equal(refused._tag, "CrewLaunchModelNotEligibleError");
     }).pipe(Effect.provide(layer));
@@ -2636,7 +2761,11 @@ it.effect("a project can override a saved list with every model", () =>
     });
     yield* Effect.gen(function* () {
       const launcher = yield* CrewLaunchService;
-      yield* launcher.resolveSeats(captain, [customSeat("inherits"), customSeat("other", terra)]);
+      yield* launcher.resolveSeats(
+        captain,
+        [customSeat("inherits"), customSeat("other", terra)],
+        "person",
+      );
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
 );
@@ -2655,20 +2784,22 @@ it.effect("a persona keeps its own model off the list, until its model is overri
         agentId: "builder",
         reason: "Builds",
       };
-      const [own] = yield* launcher.resolveSeats(captain, [persona]);
+      const [own] = yield* launcher.resolveSeats(captain, [persona], "person");
       const personaModel = {
         instanceId: own!.modelSelection.instanceId,
         model: own!.modelSelection.model,
       };
       // Editing a field on the roster card freezes the persona's model into the seat; it is the
       // same model and level, so the seat still keeps it.
-      const [frozen] = yield* launcher.resolveSeats(captain, [
-        { ...persona, modelSelection: own!.modelSelection, runtimeMode: "approval-required" },
-      ]);
+      const [frozen] = yield* launcher.resolveSeats(
+        captain,
+        [{ ...persona, modelSelection: own!.modelSelection, runtimeMode: "approval-required" }],
+        "person",
+      );
       assert.equal(frozen!.modelSelection.model, personaModel.model);
       // Naming no reasoning value is not keeping the persona's: it runs at the model's default.
       const bare = yield* launcher
-        .resolveSeats(captain, [{ ...persona, modelSelection: personaModel }])
+        .resolveSeats(captain, [{ ...persona, modelSelection: personaModel }], "person")
         .pipe(Effect.flip);
       assert.equal(bare._tag, "CrewLaunchModelNotEligibleError");
       // A different model on the card makes it a custom choice, held to the list.
@@ -2676,9 +2807,11 @@ it.effect("a persona keeps its own model off the list, until its model is overri
         (model) => model !== personaModel.model,
       )!;
       const refused = yield* launcher
-        .resolveSeats(captain, [
-          { ...persona, modelSelection: { instanceId: personaModel.instanceId, model: other } },
-        ])
+        .resolveSeats(
+          captain,
+          [{ ...persona, modelSelection: { instanceId: personaModel.instanceId, model: other } }],
+          "person",
+        )
         .pipe(Effect.flip);
       assert.equal(refused._tag, "CrewLaunchModelNotEligibleError");
       assert.include(refused.message, `Model ${other} on codex`);
@@ -2713,12 +2846,18 @@ it.effect(
           options: [{ id: "effort", value: "high" }],
         });
         // The primary (Codex) resolves again, but the card froze the fallback (Claude) route.
-        const [fallback] = yield* launcher.resolveSeats(captain, [
-          { ...persona, modelSelection: claude("claude-opus-5") },
-        ]);
+        const [fallback] = yield* launcher.resolveSeats(
+          captain,
+          [{ ...persona, modelSelection: claude("claude-opus-5") }],
+          "person",
+        );
         assert.equal(fallback!.modelSelection.model, "claude-opus-5");
         const refused = yield* launcher
-          .resolveSeats(captain, [{ ...persona, modelSelection: claude("claude-sonnet-5") }])
+          .resolveSeats(
+            captain,
+            [{ ...persona, modelSelection: claude("claude-sonnet-5") }],
+            "person",
+          )
           .pipe(Effect.flip);
         assert.equal(refused._tag, "CrewLaunchModelNotEligibleError");
       }).pipe(Effect.provide(layer));
@@ -2750,10 +2889,140 @@ it.effect("a persona seat on either route's level is unchanged; another level is
           options: [{ id: "effort", value: level }],
         },
       });
-      yield* launcher.resolveSeats(captain, [seat("high")]);
-      const refused = yield* launcher.resolveSeats(captain, [seat("low")]).pipe(Effect.flip);
+      yield* launcher.resolveSeats(captain, [seat("high")], "person");
+      const refused = yield* launcher
+        .resolveSeats(captain, [seat("low")], "person")
+        .pipe(Effect.flip);
       assert.equal(refused._tag, "CrewLaunchModelNotEligibleError");
       assert.include(refused.message, "Reasoning level low");
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "an automatic seat's persona skips unchecked entries and stays within the Captain's access; the person's card does not",
+  () =>
+    Effect.gen(function* () {
+      const claude = provider("claudeAgent", "claudeAgent", [
+        { slug: "claude-opus-5", options: ["high"] },
+      ]);
+      const providers = [codexModels("gpt-5.6-sol", "gpt-5.6-terra"), claude];
+      const listed = yield* eligibilityFixture({
+        providers,
+        settings: {
+          crewMemberModels: [
+            { instanceId: ProviderInstanceId.make("claudeAgent"), model: "claude-opus-5" },
+          ],
+        },
+      });
+      const scout = {
+        workspace: { type: "shared" as const },
+        name: "scout",
+        agentId: "scout",
+        reason: "Finds evidence",
+      };
+      yield* Effect.gen(function* () {
+        const launcher = yield* CrewLaunchService;
+        // Scout's first entry (Codex) is unchecked: the Captain's pick falls to its checked one.
+        const [agentPick] = yield* launcher.resolveSeats(listed.captain, [scout], "agent");
+        assert.equal(agentPick!.modelSelection.model, "claude-opus-5");
+        assert.deepStrictEqual(agentPick!.assignment?.pickSource, { kind: "agent" });
+        const [personPick] = yield* launcher.resolveSeats(listed.captain, [scout], "person");
+        assert.equal(personPick!.modelSelection.model, "gpt-5.6-terra");
+        assert.deepStrictEqual(personPick!.assignment?.pickSource, { kind: "person" });
+      }).pipe(Effect.provide(listed.layer));
+
+      // With none of its entries checked, the seat is refused the way a card's unchecked model is.
+      const bare = yield* eligibilityFixture({ providers, settings: { crewMemberModels: [] } });
+      yield* Effect.gen(function* () {
+        const refused = yield* (yield* CrewLaunchService)
+          .resolveSeats(bare.captain, [scout], "agent")
+          .pipe(Effect.flip);
+        assert.equal(refused._tag, "CrewLaunchModelNotEligibleError");
+        assert.include(refused.message, "is not checked in Models for custom members");
+      }).pipe(Effect.provide(bare.layer));
+
+      const open = yield* eligibilityFixture({ providers });
+      const supervised = {
+        ...open.captain,
+        thread: { ...open.captain.thread, runtimeMode: "approval-required" as const },
+      };
+      const builder = {
+        workspace: { type: "shared" as const },
+        name: "builder",
+        agentId: "builder",
+        reason: "Builds",
+      };
+      yield* Effect.gen(function* () {
+        const launcher = yield* CrewLaunchService;
+        // A Supervised Captain cannot have a workspace-write persona seated without the card,
+        // nor any persona the Captain set a broader access on.
+        const refused = yield* launcher
+          .resolveSeats(supervised, [builder], "agent")
+          .pipe(Effect.flip);
+        assert.include(
+          refused.message,
+          "Persona builder would run with Repository write, which is broader than the Supervised its caller runs with.",
+        );
+        const raised = yield* launcher
+          .resolveSeats(supervised, [{ ...scout, runtimeMode: "full-access" }], "agent")
+          .pipe(Effect.flip);
+        assert.include(raised.message, "Persona scout would run with Full access");
+        const [readOnly] = yield* launcher.resolveSeats(supervised, [scout], "agent");
+        assert.equal(readOnly!.runtimeMode, "approval-required");
+        // The person approving the card gives the seat its saved access.
+        const [approved] = yield* launcher.resolveSeats(supervised, [builder], "person");
+        assert.equal(approved!.runtimeMode, "auto-accept-edits");
+      }).pipe(Effect.provide(open.layer));
+    }).pipe(Effect.scoped),
+);
+
+it.effect("an automatic roster reads the project's lists once, however many seats it has", () =>
+  Effect.gen(function* () {
+    const { context, commands, captain } = yield* fixture;
+    const reads = yield* Ref.make(0);
+    const counted = Layer.mock(CrewMemberModels)({
+      assertEligible: () => Effect.void,
+      eligibility: () => Ref.update(reads, (count) => count + 1).pipe(Effect.as(() => true)),
+    });
+    const providers = [
+      codexModels("gpt-5.6-sol", "gpt-5.6-terra"),
+      provider("claudeAgent", "claudeAgent", [{ slug: "claude-opus-5", options: ["high"] }]),
+    ];
+    const layer = crewLaunchLayer.pipe(
+      Layer.provideMerge(
+        dependencies(
+          commands,
+          providers,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          counted,
+        ),
+      ),
+      Layer.provideMerge(Layer.succeedContext(context)),
+      Layer.provideMerge(personaLibraryLayer("j5-crew-reads-", launchablePersonas)),
+      Layer.provideMerge(NodeServices.layer),
+    );
+    yield* Effect.gen(function* () {
+      const launcher = yield* CrewLaunchService;
+      const seat = (name: string) => ({
+        workspace: { type: "shared" as const },
+        name,
+        agentId: "scout",
+        reason: "Finds evidence",
+      });
+      const resolved = yield* launcher.resolveSeats(
+        captain,
+        [seat("scout-a"), seat("scout-b"), seat("scout-c"), customSeat("notes")],
+        "agent",
+      );
+      assert.lengthOf(resolved, 4);
+      assert.equal(yield* Ref.get(reads), 1);
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
 );
@@ -2780,13 +3049,14 @@ it.effect(
       });
       yield* Effect.gen(function* () {
         const launcher = yield* CrewLaunchService;
-        const checked = yield* launcher.resolveSeats(captain, [
-          customSeat("low", solAt("low")),
-          customSeat("high", solAt("high")),
-        ]);
+        const checked = yield* launcher.resolveSeats(
+          captain,
+          [customSeat("low", solAt("low")), customSeat("high", solAt("high"))],
+          "person",
+        );
         assert.lengthOf(checked, 2);
         const refused = yield* launcher
-          .resolveSeats(captain, [customSeat("medium", solAt("medium"))])
+          .resolveSeats(captain, [customSeat("medium", solAt("medium"))], "person")
           .pipe(Effect.flip);
         assert.equal(refused._tag, "CrewLaunchModelNotEligibleError");
         for (const part of [
@@ -2798,7 +3068,7 @@ it.effect(
           assert.include(refused.message, part);
         // Another model's levels are listed for that model, not this one's.
         const terraRefused = yield* launcher
-          .resolveSeats(captain, [customSeat("terra", terraAt("xhigh"))])
+          .resolveSeats(captain, [customSeat("terra", terraAt("xhigh"))], "person")
           .pipe(Effect.flip);
         assert.include(terraRefused.message, "Eligible levels for gpt-5.6-terra: high.");
         // Approving the roster goes through the same check, and nothing is created.
@@ -2806,6 +3076,7 @@ it.effect(
           .launch({
             providerSessionId: "session",
             requestKey: "launch-ineligible-level",
+            pick: "person",
             captain,
             displayName: "Crew",
             seats: [customSeat("medium", solAt("medium"))],
@@ -2830,7 +3101,7 @@ it.effect(
       yield* Effect.gen(function* () {
         const launcher = yield* CrewLaunchService;
         const refused = yield* launcher
-          .resolveSeats(refusing.captain, [customSeat("inherits")])
+          .resolveSeats(refusing.captain, [customSeat("inherits")], "person")
           .pipe(Effect.flip);
         assert.include(refused.message, "Reasoning level medium of gpt-5.6-sol");
       }).pipe(Effect.provide(refusing.layer));
@@ -2840,7 +3111,7 @@ it.effect(
       });
       yield* Effect.gen(function* () {
         const launcher = yield* CrewLaunchService;
-        yield* launcher.resolveSeats(allowing.captain, [customSeat("inherits")]);
+        yield* launcher.resolveSeats(allowing.captain, [customSeat("inherits")], "person");
       }).pipe(Effect.provide(allowing.layer));
     }).pipe(Effect.scoped),
 );
@@ -2856,12 +3127,14 @@ it.effect(
       yield* Effect.gen(function* () {
         const launcher = yield* CrewLaunchService;
         const refused = yield* launcher
-          .resolveSeats(captain, [customSeat("inherits")])
+          .resolveSeats(captain, [customSeat("inherits")], "person")
           .pipe(Effect.flip);
         assert.include(refused.message, "No reasoning level of gpt-5.6-sol is eligible");
-        yield* launcher.resolveSeats(captain, [
-          customSeat("plain", { instanceId: sol.instanceId, model: "gpt-5.6-luna" }),
-        ]);
+        yield* launcher.resolveSeats(
+          captain,
+          [customSeat("plain", { instanceId: sol.instanceId, model: "gpt-5.6-luna" })],
+          "person",
+        );
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped),
 );
@@ -2881,12 +3154,12 @@ it.effect(
       yield* Effect.gen(function* () {
         const launcher = yield* CrewLaunchService;
         const modelFirst = yield* launcher
-          .resolveSeats(captain, [customSeat("sol", solAt("high"))])
+          .resolveSeats(captain, [customSeat("sol", solAt("high"))], "person")
           .pipe(Effect.flip);
         assert.include(modelFirst.message, "Model gpt-5.6-sol on codex");
-        yield* launcher.resolveSeats(captain, [customSeat("known", terraAt("xhigh"))]);
+        yield* launcher.resolveSeats(captain, [customSeat("known", terraAt("xhigh"))], "person");
         const fresh = yield* launcher
-          .resolveSeats(captain, [customSeat("fresh", terraAt("high"))])
+          .resolveSeats(captain, [customSeat("fresh", terraAt("high"))], "person")
           .pipe(Effect.flip);
         assert.include(fresh.message, "Reasoning level high of gpt-5.6-terra");
       }).pipe(Effect.provide(layer));
@@ -2917,26 +3190,32 @@ it.effect("a persona keeps its own level off the list, until its level is change
         agentId: "builder",
         reason: "Builds",
       };
-      const [own] = yield* launcher.resolveSeats(captain, [persona]);
+      const [own] = yield* launcher.resolveSeats(captain, [persona], "person");
       // The card freezes the persona's whole selection into the seat; unchanged, it is not held.
-      yield* launcher.resolveSeats(captain, [
-        { ...persona, modelSelection: own!.modelSelection, runtimeMode: "approval-required" },
-      ]);
+      yield* launcher.resolveSeats(
+        captain,
+        [{ ...persona, modelSelection: own!.modelSelection, runtimeMode: "approval-required" }],
+        "person",
+      );
       const personaLevel = own!.modelSelection.options?.find(
         (option) => option.id === "reasoningEffort",
       )?.value;
       const otherLevel = levels.find((level) => level !== personaLevel)!;
       const refused = yield* launcher
-        .resolveSeats(captain, [
-          {
-            ...persona,
-            modelSelection: {
-              instanceId: own!.modelSelection.instanceId,
-              model: own!.modelSelection.model,
-              options: [{ id: "reasoningEffort", value: otherLevel }],
+        .resolveSeats(
+          captain,
+          [
+            {
+              ...persona,
+              modelSelection: {
+                instanceId: own!.modelSelection.instanceId,
+                model: own!.modelSelection.model,
+                options: [{ id: "reasoningEffort", value: otherLevel }],
+              },
             },
-          },
-        ])
+          ],
+          "person",
+        )
         .pipe(Effect.flip);
       assert.equal(refused._tag, "CrewLaunchModelNotEligibleError");
       assert.include(refused.message, `Reasoning level ${otherLevel}`);
@@ -3019,10 +3298,11 @@ it.effect(
           workspace: { type: "shared" as const },
         };
         for (const request of [seat, { ...seat, modelSelection: chosen }]) {
-          const resolvedSeats = yield* launcher.resolveSeats(captain, [
-            request,
-            { ...request, name: "ordered-second" },
-          ]);
+          const resolvedSeats = yield* launcher.resolveSeats(
+            captain,
+            [request, { ...request, name: "ordered-second" }],
+            "person",
+          );
           assert.deepStrictEqual(
             resolvedSeats.map((seat) => seat.assignment?.resolvedEntryIndex),
             [2, 2],

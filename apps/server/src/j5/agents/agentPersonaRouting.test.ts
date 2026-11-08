@@ -141,6 +141,59 @@ describe("agent persona routing", () => {
     );
   });
 
+  it("skips entries an agent may not pick and keeps each entry's own reason", () => {
+    const definition = listBuiltInAgentPersonas()[0]!;
+    const target = (instance: string) => ({
+      instanceId: ProviderInstanceId.make(instance),
+      model: "ordered-model",
+      options: [{ id: "reasoningEffort", value: "high" }],
+    });
+    const ready = (instanceId: string) =>
+      provider({
+        instanceId,
+        driver: "codex",
+        models: [model("ordered-model", "reasoningEffort")],
+      });
+    const signedOut = provider({
+      instanceId: "signed-out",
+      driver: "codex",
+      authStatus: "unauthenticated",
+      models: [model("ordered-model", "reasoningEffort")],
+    });
+    const route = (eligible: (instanceId: string) => boolean) =>
+      resolveAgentPersonaRoute({
+        now: 0,
+        personaId: definition.id,
+        definition: {
+          ...definition,
+          modelRoute: [target("unchecked"), target("signed-out"), target("checked")],
+        },
+        providers: [ready("unchecked"), signedOut, ready("checked")],
+        eligible: (selection) => eligible(selection.instanceId),
+      });
+    const codes = (
+      entries: ReadonlyArray<{ readonly failures: ReadonlyArray<{ code: string }> }>,
+    ) => entries.map((entry) => entry.failures.map(({ code }) => code));
+
+    const picked = route((instanceId) => instanceId !== "unchecked");
+    assert.equal(picked.status, "available");
+    if (picked.status !== "available") return;
+    assert.equal(picked.modelSelection.instanceId, "checked");
+    assert.deepEqual(codes(picked.entries!), [
+      ["model-not-eligible"],
+      ["provider-unauthenticated"],
+      [],
+    ]);
+
+    const none = route(() => false);
+    assert.equal(none.status, "unavailable");
+    if (none.status !== "unavailable") return;
+    assert.deepEqual(codes(none.attempts), [
+      ["model-not-eligible"],
+      ["provider-unauthenticated"],
+      ["model-not-eligible"],
+    ]);
+  });
   it("uses every enforceable persona's declared primary route when it is available", () => {
     for (const definition of listBuiltInAgentPersonas()) {
       const [primary, fallback] = definition.modelRoute;

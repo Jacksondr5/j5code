@@ -2,6 +2,7 @@
 import * as NodeCrypto from "node:crypto";
 import {
   AgentPersonaId,
+  AgentPersonaPickConstraint,
   isAgentPersonaDefinitionFile,
   AgentPersonaImportConflictError,
   AGENT_PERSONA_IMPORT_MAX_BYTES,
@@ -33,7 +34,12 @@ import {
 
 export class AgentPersonaLibraryError extends Schema.TaggedError<AgentPersonaLibraryError>()(
   "AgentPersonaLibraryError",
-  { message: Schema.String, cause: Schema.optional(Schema.Defect()) },
+  {
+    message: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+    /** The agent-pick limit that refused the launch, which "Allow this once" could waive. */
+    constraint: Schema.optional(AgentPersonaPickConstraint),
+  },
 ) {}
 
 const isLibraryError = Schema.is(AgentPersonaLibraryError);

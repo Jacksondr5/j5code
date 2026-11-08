@@ -212,7 +212,29 @@ const runningParent = Effect.gen(function* () {
     capabilities: new Set(["orchestration" as const]),
     issuedAt: 1,
   };
-  return { orchestrator, scope, threadId };
+  /** The message that started the running turn, as a person typed it. */
+  const personTyped = (text: string) =>
+    projections.apply({
+      id: EventId.make("parent-message-event"),
+      type: "message.updated",
+      threadId,
+      occurredAt: now,
+      payload: {
+        createdBy: "user",
+        creationSource: "web",
+        id: MessageId.make("parent-message"),
+        threadId,
+        runId,
+        nodeId,
+        role: "user",
+        text,
+        attachments: [],
+        streaming: false,
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+  return { orchestrator, scope, threadId, personTyped };
 });
 
 it.effect("persists the saved persona on a nested child and reuses that child on retry", () =>
@@ -279,7 +301,7 @@ const listedLayer = Layer.merge(
 
 it.effect("holds a plain delegated child to the list, inherited model included", () =>
   Effect.gen(function* () {
-    const { orchestrator, scope } = yield* runningParent;
+    const { orchestrator, scope, personTyped } = yield* runningParent;
     const settings = yield* ServerSettings.ServerSettingsService;
     const asParent = Effect.provideService(McpInvocationContext, scope);
     const plain = (clientRequestId: string, target?: { readonly model: string }) =>
@@ -313,12 +335,21 @@ it.effect("holds a plain delegated child to the list, inherited model included",
     ])
       assert.include(refused.message, part);
 
-    // A persona runs on its own model whatever the list says; an explicit checked target works.
-    const persona = yield* delegateTask({
-      task: "Return a short evidence brief.",
-      persona: "scout",
-      clientRequestId: "persona",
-    }).pipe(asParent);
+    // The agent's own pick of a persona is held to the list too; the person's runs on the
+    // persona's own model whatever the list says. An explicit checked target works.
+    const scout = (clientRequestId: string) =>
+      delegateTask({
+        task: "Return a short evidence brief.",
+        persona: "scout",
+        clientRequestId,
+      }).pipe(asParent);
+    const agentPick = yield* scout("agent-pick").pipe(Effect.flip);
+    assert.include(
+      agentPick.message,
+      `${modelSelection.model} on codex is not checked in Models for custom members`,
+    );
+    yield* personTyped("@persona:scout check the evidence");
+    const persona = yield* scout("persona");
     assert.equal(
       (yield* orchestrator.getThreadProjection(persona.childThreadId)).thread.modelSelection.model,
       modelSelection.model,
@@ -340,7 +371,7 @@ it.effect("holds a plain delegated child to the list, inherited model included",
 
 it.effect("holds a plain delegated child to the level list, an inherited level included", () =>
   Effect.gen(function* () {
-    const { orchestrator, scope } = yield* runningParent;
+    const { orchestrator, scope, personTyped } = yield* runningParent;
     const settings = yield* ServerSettings.ServerSettingsService;
     const asParent = Effect.provideService(McpInvocationContext, scope);
     const plain = (
@@ -377,13 +408,21 @@ it.effect("holds a plain delegated child to the level list, an inherited level i
     ])
       assert.include(refused.message, part);
 
-    // A persona runs on its own level, a model with no reasoning option has nothing to hold, and
-    // an explicit checked level works.
-    const persona = yield* delegateTask({
-      task: "Return a short evidence brief.",
-      persona: "scout",
-      clientRequestId: "persona",
-    }).pipe(asParent);
+    // The agent's own pick of a persona is held to the level list; a persona the person picked
+    // runs on its own level. A model with no reasoning option has nothing to hold, and an
+    // explicit checked level works.
+    const scout = (clientRequestId: string) =>
+      delegateTask({
+        task: "Return a short evidence brief.",
+        persona: "scout",
+        clientRequestId,
+      }).pipe(asParent);
+    assert.include(
+      (yield* scout("agent-pick").pipe(Effect.flip)).message,
+      "is not checked in Models for custom members",
+    );
+    yield* personTyped("Ask @persona:scout for evidence.");
+    const persona = yield* scout("persona");
     assert.equal(
       (yield* orchestrator.getThreadProjection(persona.childThreadId)).thread.modelSelection.model,
       modelSelection.model,

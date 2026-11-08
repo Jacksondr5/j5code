@@ -120,6 +120,28 @@ describe("agent persona contracts", () => {
     expect(decodePersonaAssignment(legacy).definitionDigest).toBeUndefined();
   });
 
+  it("records who picked a persona, and reads assignments made before that", () => {
+    const assignment = {
+      personaId: "operator",
+      definitionVersion: 1,
+      authorityPolicy: "full-access",
+      resolvedRoute: "primary",
+      resolvedDriver: "codex",
+      resolvedModelSelection: { instanceId: "codex", model: "gpt-5.6-terra" },
+    };
+    expect(decodePersonaAssignment(assignment).pickSource).toBeUndefined();
+    for (const pickSource of [
+      { kind: "person" },
+      { kind: "agent" },
+      { kind: "allow-once", waived: "model-not-eligible" },
+      { kind: "allow-once", waived: "access-above-caller" },
+    ])
+      expect(decodePersonaAssignment({ ...assignment, pickSource }).pickSource).toEqual(pickSource);
+    expect(() =>
+      decodePersonaAssignment({ ...assignment, pickSource: { kind: "allow-once" } }),
+    ).toThrow();
+  });
+
   it("reads any reported policy but accepts only known ones from clients", () => {
     const assignment = {
       personaId: "operator",

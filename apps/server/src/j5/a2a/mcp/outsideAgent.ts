@@ -1,4 +1,4 @@
-import { type ChatAttachment, OrchestratorMcpFailure, type RuntimeMode } from "@t3tools/contracts";
+import { type ChatAttachment, OrchestratorMcpFailure } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
@@ -13,7 +13,6 @@ import {
 } from "../../../mcp/McpInvocationContext.ts";
 import * as McpToolAccess from "../../../mcp/McpToolAccess.ts";
 import { assertTargetWithinLimits, loadCaller } from "../../../mcp/threadAccess.ts";
-import { exceededDispatchModeLimit } from "../../../orchestration-v2/DispatchModeLimit.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
 import { type CommCommandId, outsideAgentParticipantId } from "../contracts.ts";
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
@@ -105,31 +104,6 @@ export const outsideSpawnHasNoCheckout = new J5OutsideAgentToolError({
     'workspace {"type":"shared"} is the caller\'s own checkout, and an outside agent has none.',
   nextCommand:
     'Retry j5_spawn_agent with workspace {"type":"root"} for the project\'s main checkout, a new worktree, or one of the project\'s worktrees.',
-});
-
-/**
- * A persona's policy sets the agent's permission mode, and for an outside agent that mode must
- * be within the level its sign-in was approved at. A thread caller's persona spawn has no such
- * ceiling: the approved level is a promise the approval page makes about an agent the person
- * does not watch.
- */
-export const assertPersonaWithinApprovedLevel = Effect.fn(
-  "j5.a2a.mcp.assertPersonaWithinApprovedLevel",
-)(function* (caller: OutsideAgentCaller, persona: string, runtimeMode: RuntimeMode) {
-  const { limits } = yield* loadCaller();
-  if (
-    exceededDispatchModeLimit(limits, {
-      runtimeMode,
-      interactionMode: limits.interactionMode,
-    }) === undefined
-  ) {
-    return;
-  }
-  return yield* new J5OutsideAgentToolError({
-    state: `Persona ${persona} runs in permission mode ${runtimeMode}, which is broader than the level this MCP client was approved for (${caller.client.access}).`,
-    nextCommand:
-      "Retry j5_spawn_agent with a persona within that level (j5_list_personas shows each one's access level) or without a persona, or sign in again and have the person approve a higher level.",
-  });
 });
 
 /**

@@ -246,7 +246,7 @@ describe("J5 orchestration instructions", () => {
     assert.notInclude(J5_ORCHESTRATION_INSTRUCTIONS, "`list_agents`");
     assert.include(
       J5_ORCHESTRATION_INSTRUCTIONS,
-      "Custom seats inherit your harness, model, and reasoning by default and run with full access",
+      "run with full access on a roster the user approves and with your own access otherwise",
     );
     assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "`model_selection` (instanceId, model, options)");
     assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "`runtime_mode`");
