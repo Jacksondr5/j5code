@@ -33,13 +33,16 @@ export function AgentDraftPicker(props: {
             selectDraftAgent(props.draftKey, nativeEvent.event.slice("agent:".length));
         }}
       >
-        <ComposerInlineControl
-          accessibilityLabel="Start this task as a persona"
-          disabled={props.disabled}
-          icon="person.crop.circle"
-          label="Persona"
-          showChevron={false}
-        />
+        {/* The row clips this 44-tall control to 36, so the menu anchors to the visible part. */}
+        <View className="h-[36px] justify-center overflow-hidden">
+          <ComposerInlineControl
+            accessibilityLabel="Start this task as a persona"
+            disabled={props.disabled}
+            icon="person.crop.circle"
+            label="Persona"
+            showChevron={false}
+          />
+        </View>
       </Menu>
     </View>
   );
