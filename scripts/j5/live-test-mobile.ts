@@ -71,25 +71,23 @@ export interface MobileRecord {
   readonly tunnel?: ProcessRecord;
   /** Android only: the emulator this script booted, and its console port (serial `emulator-<port>`). */
   readonly emulator?: ProcessRecord & { readonly port: number };
-  /** Set by a fresh claim until the first boot closes the sessions a gone holder left on the device. */
-  readonly sessionCleanupPending?: true;
 }
 
-const mobileFiles = (paths: Pick<LiveTestPaths, "root">) => ({
+const mobileFiles = (paths: LiveTestPaths) => ({
   record: NodePath.join(paths.root, "mobile.json"),
   metroLog: NodePath.join(paths.root, "metro.log"),
   tunnelLog: NodePath.join(paths.root, "tunnel.log"),
   emulatorLog: NodePath.join(paths.root, "emulator.log"),
 });
 
-export function readMobileRecord(paths: Pick<LiveTestPaths, "root">): MobileRecord | undefined {
+export function readMobileRecord(paths: LiveTestPaths): MobileRecord | undefined {
   const file = mobileFiles(paths).record;
   return NodeFS.existsSync(file)
     ? (JSON.parse(NodeFS.readFileSync(file, "utf8")) as MobileRecord)
     : undefined;
 }
 
-function writeMobileRecord(paths: Pick<LiveTestPaths, "root">, record: MobileRecord): void {
+function writeMobileRecord(paths: LiveTestPaths, record: MobileRecord): void {
   NodeFS.mkdirSync(paths.root, { recursive: true });
   NodeFS.writeFileSync(mobileFiles(paths).record, `${JSON.stringify(record, null, 2)}\n`);
 }
@@ -943,7 +941,6 @@ function claim(
     ...(udid === undefined ? {} : { udid, iosHost: iosHost! }),
     serverPort,
     metroPort,
-    sessionCleanupPending: true,
   };
   writeMobileRecord(paths, record);
   return record;
@@ -1028,7 +1025,6 @@ export async function startMobile(
     await startMetro(paths, record, deadline);
     const facts = await backend;
     await avd;
-    finishSessionCleanup(paths, closeAgentDeviceSessions);
     if (iosHost?.kind === "ssh") await startTunnel(paths, readMobileRecord(paths)!, iosHost);
     console.log(formatMobileServer(paths, facts));
     console.log(formatMobile(paths, readMobileRecord(paths)!));
@@ -1079,7 +1075,7 @@ export function formatMobile(paths: LiveTestPaths, record: MobileRecord): string
 
 Next:
 ${next}
-When you finish: agent-device close (with device_open's flags, no --shutdown), device_close, then
+When you finish: device_close (it ends your agent-device session too), then
 ${selfCommand(paths, "stop")} (it ${record.platform === "ios" ? "shuts down and erases the Simulator" : "shuts down and deletes the AVD"} and releases the slot).
 `;
 }
@@ -1235,86 +1231,6 @@ If it does not, run mobile-open again.${
   }`);
 }
 
-/** The names of the agent-device sessions on `deviceId`, from `agent-device session list` output. */
-export function sessionsOnDevice(listJson: string, deviceId: string): ReadonlyArray<string> {
-  const { sessions } = JSON.parse(listJson) as {
-    readonly sessions?: ReadonlyArray<{ readonly name: string; readonly id?: string }>;
-  };
-  return (sessions ?? [])
-    .filter((session) => session.id === deviceId)
-    .map((session) => session.name);
-}
-
-/**
- * Ends the agent-device sessions that J5 Code's device host holds on this slot's device. `device_close`
- * leaves them open, and a session left open refuses the next holder with DEVICE_IN_USE. The sessions
- * live with the J5 Code the agent runs in; without its device tools there is nothing to close.
- */
-/**
- * A fresh claim is exclusive, so a session already on the device belongs to a holder who is gone.
- * Runs once the device is up (so the emulator is proven the slot's), and only once: a later setup
- * rejoining the claim keeps the tester's own session.
- */
-export function finishSessionCleanup(
-  paths: Pick<LiveTestPaths, "root">,
-  close: (record: MobileRecord) => void,
-): void {
-  const record = readMobileRecord(paths);
-  if (record?.sessionCleanupPending !== true) return;
-  close(record);
-  const { sessionCleanupPending: _done, ...rest } = record;
-  writeMobileRecord(paths, rest);
-}
-
-function closeAgentDeviceSessions(record: MobileRecord): void {
-  const deviceId =
-    record.platform === "ios"
-      ? record.udid
-      : record.platform === "android"
-        ? emulatorSerial(record.slot)
-        : undefined;
-  if (deviceId === undefined) return;
-  const deviceHome = NodePath.join(
-    process.env.J5CODE_HOME?.trim() || NodePath.join(NodeOS.homedir(), ".j5code"),
-    "userdata",
-    "device",
-  );
-  const agentDevice = NodePath.join(deviceHome, "bin", "agent-device");
-  // Only the local device host's config can be named without the database (`agentDeviceConfigPath`
-  // in apps/server/src/device/AgentDeviceTarget.ts). An SSH host's id is in the database, so its
-  // sessions are left to device_close.
-  if (record.platform === "ios" && record.iosHost?.kind === "ssh") {
-    return console.log(
-      `agent-device sessions on ${record.slot} (host "${record.iosHost.ssh}"): not closed here; close yours with agent-device close (device_open's flags), then device_close`,
-    );
-  }
-  const config = NodePath.join(
-    deviceHome,
-    "hosts",
-    `${NodeCrypto.createHash("sha256").update("local").digest("hex").slice(0, 24)}.json`,
-  );
-  if (!NodeFS.existsSync(agentDevice) || !NodeFS.existsSync(config)) return;
-  // The CLI wants a session flag on every call; listing ignores which one.
-  const list = NodeChildProcess.spawnSync(
-    agentDevice,
-    ["session", "list", "--config", config, "--session", "j5-live-test"],
-    { encoding: "utf8", timeout: 15_000 },
-  );
-  if (list.status !== 0) return;
-  for (const session of sessionsOnDevice(list.stdout, deviceId)) {
-    const closed = NodeChildProcess.spawnSync(
-      agentDevice,
-      ["close", "--config", config, "--session", session],
-      { encoding: "utf8", timeout: 30_000 },
-    );
-    console.log(
-      closed.status === 0
-        ? `agent-device session ${session} on ${record.slot}: CLOSED`
-        : `agent-device session ${session} on ${record.slot} could not be closed: ${(closed.stderr || closed.stdout).trim()}`,
-    );
-  }
-}
-
 /**
  * Takes down everything `startMobile` recorded: Metro, the tunnel, the device (reset for the next
  * tester) and the claim. A step that fails keeps the record, so running `stop` again finishes it.
@@ -1331,7 +1247,6 @@ export async function stopMobile(paths: LiveTestPaths): Promise<void> {
     console.log(`${name}: STOPPED`);
   }
   if (record.platform === "phone") return NodeFS.rmSync(mobileFiles(paths).record, { force: true });
-  closeAgentDeviceSessions(record);
   if (record.platform === "ios") {
     const udid = record.udid!;
     const host = record.iosHost;
