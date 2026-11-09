@@ -237,8 +237,9 @@ function OwnerAgentLibrarySettingsScreen() {
   const setAgentEnabled = useAtomCommand(agentPersonaEnvironment.setAgentPersonaEnabled, {
     reportFailure: false,
   });
-  async function toggleAgent(personaId: string, enabled: boolean) {
-    if (effectiveEnvironmentId === null || busy) return;
+  /** Resolves whether the server took the change, so the row can drop its pending value. */
+  async function toggleAgent(personaId: string, enabled: boolean): Promise<boolean> {
+    if (effectiveEnvironmentId === null || busy) return false;
     setBusy(true);
     const result = await setAgentEnabled({
       environmentId: effectiveEnvironmentId,
@@ -247,9 +248,10 @@ function OwnerAgentLibrarySettingsScreen() {
     setBusy(false);
     if (result._tag === "Failure") {
       setNotification(failureNotice("Persona action failed", result));
-      return;
+      return false;
     }
     catalog.refresh();
+    return true;
   }
   async function removePersona(personaId: string) {
     if (effectiveEnvironmentId === null || busy) return;
@@ -506,7 +508,7 @@ function OwnerAgentLibrarySettingsScreen() {
         >
           {effectiveEnvironmentId === null ? (
             <InfoRow text="No connected environments" />
-          ) : catalog.isPending ? (
+          ) : catalog.isPending && catalog.data == null ? (
             <InfoRow text="Loading personas" />
           ) : catalog.error ? (
             <InfoRow tone="danger" text={catalog.error} />
@@ -515,12 +517,13 @@ function OwnerAgentLibrarySettingsScreen() {
           ) : (
             personas.map((persona, index) => (
               <PersonaRow
-                key={persona.personaId}
+                // Per environment too, so a pending switch value never carries across a switch.
+                key={`${effectiveEnvironmentId}:${persona.personaId}`}
                 persona={persona}
                 borderTop={index > 0}
                 locked={locked}
                 busy={busy}
-                onToggle={(enabled) => void toggleAgent(persona.personaId, enabled)}
+                onToggle={(enabled) => toggleAgent(persona.personaId, enabled)}
                 onOpen={() => setViewing(persona.personaId)}
               />
             ))
@@ -554,7 +557,7 @@ function OwnerAgentLibrarySettingsScreen() {
                 : "Folders this environment reads YAML definitions from, on its machine; relative paths resolve from its state directory. Files are read on every catalog request, so edits and git pulls apply without a restart."
             }
           >
-            {librarySources.isPending ? (
+            {librarySources.isPending && librarySources.data == null ? (
               <InfoRow text="Loading folders" />
             ) : librarySources.error ? (
               <InfoRow tone="danger" text={librarySources.error} />
@@ -679,10 +682,15 @@ function PersonaRow(props: {
   readonly borderTop: boolean;
   readonly locked: boolean;
   readonly busy: boolean;
-  readonly onToggle: (enabled: boolean) => void;
+  readonly onToggle: (enabled: boolean) => Promise<boolean>;
   readonly onOpen: () => void;
 }) {
   const { persona } = props;
+  // The tapped value holds until the reread catalog shows it; a controlled Switch otherwise snaps
+  // back to the old value while the toggle saves. A failed toggle drops it, so the row reverts.
+  const [pending, setPending] = useState<boolean | null>(null);
+  const enabled = pending ?? persona.enabled;
+  if (pending !== null && pending === persona.enabled) setPending(null);
   const marker = personaRowMarker({
     removed: persona.removed,
     blocked:
@@ -708,9 +716,7 @@ function PersonaRow(props: {
       >
         <Text
           textRole="body"
-          className={
-            persona.enabled && !persona.removed ? "text-foreground" : "text-foreground-muted"
-          }
+          className={enabled && !persona.removed ? "text-foreground" : "text-foreground-muted"}
           numberOfLines={1}
         >
           {persona.displayName}
@@ -731,10 +737,16 @@ function PersonaRow(props: {
         <ThemedSwitch
           // React Native's Switch sets alignSelf: flex-start, which ignores the row's centring.
           style={{ alignSelf: "center" }}
-          value={persona.enabled}
-          disabled={props.locked}
+          value={enabled}
+          // One change at a time: a second tap before the reread lands would race it.
+          disabled={props.locked || pending !== null}
           accessibilityLabel={`Enable ${persona.displayName}`}
-          onValueChange={props.onToggle}
+          onValueChange={(next) => {
+            setPending(next);
+            void props.onToggle(next).then((saved) => {
+              if (!saved) setPending(null);
+            });
+          }}
         />
       )}
     </View>
