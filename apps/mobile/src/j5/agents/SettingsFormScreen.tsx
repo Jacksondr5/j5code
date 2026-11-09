@@ -9,6 +9,7 @@ import type { AgentPersonaCreateDraft } from "@t3tools/client-runtime/j5/agent-p
 import type { AgentPersonaEditInput, EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { useRef, type ReactNode } from "react";
 import { Platform } from "react-native";
+import { useKeyboardState } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import * as Dialog from "../../components/ui/Dialog";
@@ -91,6 +92,7 @@ export function SettingsFormScreen(props: {
 }) {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
+  const keyboardVisible = useKeyboardState((state) => state.isVisible);
   return (
     <SettingsScreen title={props.title}>
       {Platform.OS === "ios" ? (
@@ -126,7 +128,15 @@ export function SettingsFormScreen(props: {
         contentInsetAdjustmentBehavior="automatic"
         className="flex-1"
         contentContainerClassName="gap-4 px-5 pt-4"
-        contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 18) + 18 }}
+        contentContainerStyle={{
+          // With the keyboard up, iOS already insets by the home indicator area; padding it
+          // again left dead space under Save.
+          paddingBottom: keyboardVisible
+            ? Platform.OS === "ios"
+              ? 0
+              : 18
+            : Math.max(insets.bottom, 18) + 18,
+        }}
       >
         {props.children}
       </ScrollView>
