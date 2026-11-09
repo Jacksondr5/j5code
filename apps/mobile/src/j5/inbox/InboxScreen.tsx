@@ -35,6 +35,7 @@ import { j5Environment } from "../state";
 import { type ClosedItem, useInboxAnswers } from "./inboxAnswers";
 import { AgentQuestionsSection, SeatApprovalsSection } from "./InboxCrewRequests";
 import { WorktreeCleanupsSection } from "./InboxWorktreeCleanups";
+import { J5RecordPanel } from "./J5RecordPanel";
 import {
   answeredInboxQueryAtom,
   answeredInboxSourcesAtom,
@@ -290,13 +291,7 @@ function InboxItem(props: {
         <View className="mt-3 gap-3 border-t border-border-subtle pt-3">
           <InboxMessage markdown={item.message} />
           {[item.escalation?.summary, item.personaDraft?.summary].map((record) =>
-            record === undefined ? null : (
-              // J5's own record, apart from the agent's words; plain text, so they can't alter it.
-              <View key={record} className="gap-1 rounded-lg bg-subtle px-3 py-2">
-                <Text className="text-xs font-t3-medium text-foreground-muted">Recorded by J5</Text>
-                <Text className="text-sm">{record}</Text>
-              </View>
-            ),
+            record === undefined ? null : <J5RecordPanel key={record} text={record} />,
           )}
           {item.followUps?.map((followUp) => (
             <View className="gap-1" key={followUp.messageId}>
