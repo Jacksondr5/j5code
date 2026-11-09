@@ -17,6 +17,10 @@ vi.mock("../../state/threads", () => ({
   threadFamilies: { mountRows: () => () => {} },
 }));
 vi.mock("../../state/atom-registry", () => ({ appAtomRegistry: undefined }));
+// J5 (case 115): the D22 filter reads server connections; this test lists every thread.
+vi.mock("../../j5/crew/spawnedChildren", () => ({
+  useCrewListedThreads: <T,>(threads: T) => threads,
+}));
 
 it("reuses a large thread list across tab renders and updates when its inputs change", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);

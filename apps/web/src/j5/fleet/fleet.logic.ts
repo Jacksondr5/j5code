@@ -2,7 +2,7 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { ThreadId, type EnvironmentId, type ScopedThreadRef } from "@t3tools/contracts";
 import type { J5ReadRevisions } from "@t3tools/contracts/j5";
 
-import type { CrewSeatState } from "../crew/crewState";
+import type { CrewSeatState } from "@t3tools/client-runtime/j5/crew-state";
 import type { FleetAgent, FleetCrew, FleetLedgerProject } from "./fleetClient";
 
 /** One rendered row of the Roster tree. Crew members hang under their Captain as one unit. */
