@@ -7,7 +7,7 @@ import {
   resolveCallerMembership,
   stateError,
 } from "../AgentCaller.ts";
-import { type ChatAttachment, ProjectId } from "@t3tools/contracts";
+import { type ChatAttachment, EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { playbookHandlers } from "../../playbooks/mcp.ts";
 import { playbookWorkspaceRoot } from "../../playbooks/workspace.ts";
 import * as SecureRandom from "effect/crypto/SecureRandom";
@@ -18,8 +18,10 @@ import * as Option from "effect/Option";
 
 import {
   McpInvocationContext,
+  type McpInvocationScope,
   type McpThreadInvocationScope,
   requireThreadScope,
+  threadLinkFor,
 } from "../../../mcp/McpInvocationContext.ts";
 import * as McpToolAccess from "../../../mcp/McpToolAccess.ts";
 
@@ -263,7 +265,7 @@ const crewProposalRefusal = (error: CrewProposalError) =>
       })
     : stateError(error.message, crewProposalNextStep(error));
 
-const projectCrewProposal = (outcome: CrewProposalOutcome) => ({
+const projectCrewProposal = (outcome: CrewProposalOutcome, scope: McpInvocationScope) => ({
   proposal_id: outcome.proposal.id,
   status: outcome.proposal.status,
   approval_mode: outcome.proposal.approvalMode ?? "human",
@@ -273,6 +275,7 @@ const projectCrewProposal = (outcome: CrewProposalOutcome) => ({
     persona_id: member.agentId,
     participant_id: member.participantId,
     thread_id: member.threadId,
+    link: threadLinkFor(scope, member.threadId),
   })),
   ...(outcome.playbook == null
     ? {}
@@ -556,6 +559,7 @@ const handlers = {
   ),
   j5_list_participants: McpToolAccess.reads((input) =>
     Effect.gen(function* () {
+      const scope = yield* McpInvocationContext;
       const outside = yield* outsideAgentCaller;
       const callerThreadId =
         outside === undefined ? (yield* callerScope).thread.threadId : undefined;
@@ -629,6 +633,7 @@ const handlers = {
           can_open_exchange: row.canOpenExchange,
           accepts_urgency: row.acceptsUrgency,
           thread_id: null,
+          link: null,
           provenance: projectProvenance({ kind: "not-applicable" } as const),
           placement_parent_id: null,
           display_name: row.displayName ?? null,
@@ -695,6 +700,11 @@ const handlers = {
               callerThreadId !== undefined && !agent.archived && agent.canReceiveMessage,
             accepts_urgency: false,
             thread_id: agent.threadId,
+            // The thread lives on that server, so its link names that server's environment.
+            link: threadLinkFor(
+              { environmentId: EnvironmentId.make(agent.environmentId), client: scope.client },
+              agent.threadId,
+            ),
             provenance: projectProvenance({ kind: "unrecorded" } as const),
             placement_parent_id: null,
             display_name: agent.displayName,
@@ -785,6 +795,10 @@ const handlers = {
               can_open_exchange: !isSelf && row.canOpenExchange,
               accepts_urgency: row.acceptsUrgency,
               thread_id: row.participant.kind === "agent" ? row.participant.threadId : null,
+              link:
+                row.participant.kind === "agent"
+                  ? threadLinkFor(scope, row.participant.threadId)
+                  : null,
               provenance: projectProvenance(
                 placement?.provenance ??
                   (row.participant.kind !== "agent"
@@ -872,7 +886,7 @@ const handlers = {
             seats: input.seats.map(crewSeatFromInput),
           })
           .pipe(Effect.mapError(crewProposalRefusal));
-        return projectCrewProposal(outcome);
+        return projectCrewProposal(outcome, scope);
       }).pipe(Effect.mapError(failure)),
   ),
   j5_request_crew_member: actsAsThreadCaller(
@@ -906,7 +920,7 @@ const handlers = {
             brief: input.brief ?? null,
           })
           .pipe(Effect.mapError(crewProposalRefusal));
-        return projectCrewProposal(outcome);
+        return projectCrewProposal(outcome, scope);
       }).pipe(Effect.mapError(failure)),
   ),
   j5_read_persona: McpToolAccess.reads((input) =>

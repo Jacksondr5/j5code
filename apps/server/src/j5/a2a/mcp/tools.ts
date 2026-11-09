@@ -196,6 +196,8 @@ export const J5ParticipantDirectoryRow = Schema.Struct({
   can_open_exchange: Schema.Boolean,
   accepts_urgency: Schema.Boolean,
   thread_id: Schema.NullOr(ThreadId),
+  /** The agent's thread link, for mentioning it verbatim; null for a person or a machine. */
+  link: Schema.NullOr(Schema.String),
   provenance: J5ParticipantProvenanceView,
   placement_parent_id: Schema.NullOr(ParticipantId),
   display_name: Schema.NullOr(Schema.String),
@@ -386,6 +388,7 @@ export type J5SpawnAgentInput = typeof J5SpawnAgentInput.Type;
 export const J5SpawnAgentResult = Schema.Struct({
   participant_id: ParticipantId,
   thread_id: ThreadId,
+  link: Schema.String,
   project_id: LedgerProjectId,
   project_title: Schema.String,
   placement: Schema.Struct({
@@ -575,6 +578,7 @@ export const J5CrewProposalResult = Schema.Struct({
       persona_id: Schema.NullOr(AgentPersonaId),
       participant_id: ParticipantId,
       thread_id: ThreadId,
+      link: Schema.String,
     }),
   ),
   /** Present only when the proposal follows a playbook. */

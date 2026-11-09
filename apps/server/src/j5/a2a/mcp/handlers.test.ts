@@ -1074,6 +1074,8 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
         can_open_exchange: false,
         accepts_urgency: false,
         thread_id: invocation.threadId,
+        // The link upstream's tools return: the thread in this environment, ready to mention.
+        link: `<t3-thread://v2/environment:j5:mcp-handler/${invocation.threadId}>`,
         provenance: { kind: "unrecorded" },
         placement_parent_id: null,
         display_name: null,
@@ -1089,6 +1091,7 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
         can_open_exchange: true,
         accepts_urgency: true,
         thread_id: null,
+        link: null,
         provenance: { kind: "not-applicable" },
         placement_parent_id: null,
         display_name: null,
@@ -1104,6 +1107,7 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
         can_open_exchange: true,
         accepts_urgency: false,
         thread_id: archivedThreadId,
+        link: `<t3-thread://v2/environment:j5:mcp-handler/${archivedThreadId}>`,
         provenance: { kind: "unrecorded" },
         placement_parent_id: null,
         display_name: "Archived researcher",
@@ -1119,6 +1123,7 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
         can_open_exchange: true,
         accepts_urgency: false,
         thread_id: activeThreadId,
+        link: `<t3-thread://v2/environment:j5:mcp-handler/${activeThreadId}>`,
         provenance: { kind: "unrecorded" },
         placement_parent_id: null,
         display_name: "Release reviewer",
@@ -1134,6 +1139,7 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
         can_open_exchange: true,
         accepts_urgency: false,
         thread_id: missingThreadId,
+        link: `<t3-thread://v2/environment:j5:mcp-handler/${missingThreadId}>`,
         provenance: { kind: "unrecorded" },
         placement_parent_id: null,
         display_name: null,
@@ -1498,6 +1504,7 @@ it.effect("preflights home before creation and records facts before the one stab
       assert.deepStrictEqual(first.result, {
         participant_id: childParticipantId,
         thread_id: (first.result as { readonly thread_id: ThreadId }).thread_id,
+        link: `<t3-thread://v2/environment:j5:mcp-handler/${(first.result as { readonly thread_id: ThreadId }).thread_id}>`,
         project_id: ledgerProjectId,
         project_title: projectTitle,
         placement: {
@@ -3197,6 +3204,8 @@ it.effect(
         assert.equal(remoteRow.can_open_exchange, true);
         assert.equal(remoteRow.self, false);
         assert.equal(remoteRow.thread_id, "thread:support");
+        // Its thread lives on Home, so its link names Home's environment, not this one.
+        assert.equal(remoteRow.link, "<t3-thread://v2/environment-home/thread:support>");
         assert.deepStrictEqual(remoteRow.provenance, { kind: "unrecorded" });
         assert.isFalse(hasKey(remoteRow, "environment_id"), "a server is named, never its id");
         assert.deepStrictEqual(
