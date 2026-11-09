@@ -87,7 +87,7 @@ export function AdjudicationDock(props: {
   });
   const view = pickShownAsk(asks, picked);
   if (!captain || !mayAnswer || environmentId === undefined || view === null) return null;
-  const { shown, others } = view;
+  const { shown, others, next: nextAsk } = view;
   const isOpen = (query.data?.items ?? []).some((item) => item.exchangeId === shown.exchangeId);
   const message = answers[shown.exchangeId] ?? "";
   const urgency = urgencyBadge[shown.urgency];
@@ -254,10 +254,10 @@ export function AdjudicationDock(props: {
               </p>
             )}
           </div>
-          {others.length > 0 ? (
+          {nextAsk !== null ? (
             <Button
               className="w-full justify-start"
-              onClick={() => setPicked(others[0]!.exchangeId)}
+              onClick={() => setPicked(nextAsk.exchangeId)}
               type="button"
               variant="outline"
             >
@@ -265,7 +265,7 @@ export function AdjudicationDock(props: {
                 {others.length} more {others.length === 1 ? "question" : "questions"}
               </span>
               <span className="min-w-0 flex-1 truncate text-start text-muted-foreground">
-                · {others[0]!.intent}
+                · {nextAsk.intent}
               </span>
               <ChevronRightIcon aria-hidden className="size-3.5 shrink-0" />
             </Button>

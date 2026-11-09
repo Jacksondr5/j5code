@@ -3,7 +3,6 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   adjudicationAsks,
   commandsACrew,
-  hasMoreThanExcerpt,
   pickShownAsk,
 } from "@t3tools/client-runtime/j5/adjudication-dock";
 import { closedLine, mergeHumanInboxSources } from "@t3tools/client-runtime/j5/inbox";
@@ -22,6 +21,9 @@ import { useInboxAnswers } from "../inbox/inboxAnswers";
 import { answeredInboxSourcesAtom, openInboxSourcesAtom } from "../inbox/inboxSources";
 import { j5Sharing } from "../sharing/guestAccess";
 import { j5Environment } from "../state";
+
+/** About three lines of the question while the dock is opened but not in full. */
+const EXCERPT_HEIGHT = 72;
 
 const URGENCY = {
   blocking: { label: "Blocking", className: "text-danger-foreground" },
@@ -50,13 +52,13 @@ function CaptainAsks(props: {
   const { environmentId, threadId } = props;
   const openSources = useAtomValue(openInboxSourcesAtom);
   const answeredSources = useAtomValue(answeredInboxSourcesAtom);
-  const ofThisThread = (items: ReturnType<typeof mergeHumanInboxSources>) =>
+  const ofThisEnvironment = (items: ReturnType<typeof mergeHumanInboxSources>) =>
     items.filter((item) => item.environmentId === environmentId);
   const answers = useInboxAnswers({
     openSources,
-    items: ofThisThread(mergeHumanInboxSources(openSources)),
+    items: ofThisEnvironment(mergeHumanInboxSources(openSources)),
     answeredSources,
-    answered: ofThisThread(mergeHumanInboxSources(answeredSources)),
+    answered: ofThisEnvironment(mergeHumanInboxSources(answeredSources)),
   });
   const mayAnswer = useAtomValue(j5Environment.answerHumanExchange.permissionAtom(environmentId));
   const access = useAtomValue(j5Sharing.connectionAccess(environmentId));
@@ -64,6 +66,8 @@ function CaptainAsks(props: {
   const [open, setOpen] = useState(false);
   const [full, setFull] = useState(false);
   const [picked, setPicked] = useState<string | null>(null);
+  // The ask whose question runs past the excerpt's height.
+  const [overflowing, setOverflowing] = useState<string | null>(null);
 
   // An ask that closed while the person had typed into it stays, with who answered (Inbox AC17).
   const asks = adjudicationAsks({
@@ -74,7 +78,7 @@ function CaptainAsks(props: {
   });
   const view = pickShownAsk(asks, picked);
   if (!mayAnswer || view === null) return null;
-  const { shown, others } = view;
+  const { shown, others, next: nextAsk } = view;
   const urgency = URGENCY[shown.urgency];
   const closed = answers.closedOf(shown);
   const closedText =
@@ -84,11 +88,8 @@ function CaptainAsks(props: {
   const text = answers.answerText(shown);
   const delivering = answers.pendingKey !== null;
   const error = answers.errorFor(shown);
-  const longer =
-    hasMoreThanExcerpt(shown.message) ||
-    (shown.followUps?.length ?? 0) > 0 ||
-    shown.escalation !== undefined ||
-    shown.personaDraft !== undefined;
+  // Measured, not counted: a few short lines can still wrap past the excerpt on a phone.
+  const longer = full || overflowing === shown.exchangeId;
   const markdown = (value: string) => (
     <SelectableMarkdownText markdown={value} textStyle={styles.nativeTextStyle} />
   );
@@ -127,9 +128,12 @@ function CaptainAsks(props: {
         {open ? (
           <View className="gap-2 pb-2">
             <ScrollView
-              style={full ? { maxHeight: 280 } : { maxHeight: 72 }}
+              style={{ maxHeight: full ? 280 : EXCERPT_HEIGHT }}
               scrollEnabled={full}
               nestedScrollEnabled
+              onContentSizeChange={(_width, height) =>
+                setOverflowing(height > EXCERPT_HEIGHT ? shown.exchangeId : null)
+              }
             >
               <View className="gap-2">
                 {markdown(shown.message)}
@@ -192,11 +196,11 @@ function CaptainAsks(props: {
             </View>
           </View>
         ) : null}
-        {others.length > 0 ? (
+        {nextAsk !== null ? (
           <Pressable
             accessibilityRole="button"
             onPress={() => {
-              setPicked(others[0]!.exchangeId);
+              setPicked(nextAsk.exchangeId);
               setFull(false);
             }}
             className="min-h-9 flex-row items-center gap-1 border-t border-border-subtle"
@@ -205,7 +209,7 @@ function CaptainAsks(props: {
               {others.length} more {others.length === 1 ? "question" : "questions"}
             </Text>
             <Text numberOfLines={1} className="min-w-0 flex-1 text-xs text-foreground-muted">
-              · {others[0]!.intent}
+              · {nextAsk.intent}
             </Text>
             <SymbolView name="chevron.right" size={12} tintColorClassName="accent-icon-muted" />
           </Pressable>

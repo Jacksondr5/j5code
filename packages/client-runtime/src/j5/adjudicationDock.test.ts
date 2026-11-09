@@ -65,6 +65,19 @@ it("shows the oldest ask in full, or the one the person picked while it is still
   ]);
   expect(pickShownAsk(asks, "second")?.shown.exchangeId).toBe("second");
   expect(pickShownAsk(asks, "gone")?.shown.exchangeId).toBe("first");
+  expect(pickShownAsk([ask("only")], null)?.next).toBeNull();
+});
+
+it("moves through every pinned ask from the more-questions row, wrapping to the oldest", () => {
+  const asks = [ask("first"), ask("second"), ask("third")];
+  const visited: Array<string> = [];
+  let picked: string | null = null;
+  for (let step = 0; step < 4; step += 1) {
+    const view: ReturnType<typeof pickShownAsk<(typeof asks)[number]>> = pickShownAsk(asks, picked);
+    visited.push(view!.shown.exchangeId);
+    picked = view!.next!.exchangeId;
+  }
+  expect(visited).toEqual(["first", "second", "third", "first"]);
 });
 
 it("offers the full question only for a body longer than the three-line excerpt", () => {
