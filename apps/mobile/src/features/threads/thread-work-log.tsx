@@ -59,7 +59,7 @@ import { useMarkdownCodeHighlight } from "./markdownCodeHighlightState";
 
 import { AppText as Text } from "../../components/ui/AppText";
 import { J5Wordmark } from "../../j5/branding/J5Wordmark";
-import { PromptAnswerTail } from "../../j5/sharing/sharedConversation";
+import { PromptAnsweredBy } from "../../j5/sharing/sharedConversation";
 import { BrowserAppIcon } from "./BrowserAppIcon";
 import { useAppActive, useReduceMotionEnabled } from "../../lib/appState";
 import { cn } from "../../lib/cn";
@@ -1068,6 +1068,10 @@ const ThreadWorkLogRow = function ThreadWorkLogRow(
     : null;
   const answered =
     row.workEntry.questionAnswer !== undefined && hasQuestionAnswer(row.workEntry.questionAnswer);
+  // J5 (case 99): opened, the history below repeats the question, so the header drops it; an
+  // answer recorded before the history carried question text keeps it.
+  const historyHasQuestion =
+    answered && Object.values(row.workEntry.questionAnswer?.questionTextById ?? {}).some(Boolean);
   const accessiblePreview = [previewText, answerPreview].filter(Boolean).join(": ");
   const displayText = row.groupStandIn?.label ?? workEntryRowLabel(row.workEntry, expanded);
   const isSystemNotice = row.projectedItem.item.type === "system_notice";
@@ -1155,16 +1159,16 @@ const ThreadWorkLogRow = function ThreadWorkLogRow(
             <WorkLogLabel
               tone={isUsageLimit ? "warning" : iconIsDestructive ? "danger" : "default"}
             >
-              {displayText}
+              {historyHasQuestion && expanded ? null : displayText}
               {answerPreview && !answered ? (
                 <Text className="text-foreground-subtle">{`  ${answerPreview}`}</Text>
               ) : null}
             </WorkLogLabel>
-            {/* J5 (case 99): the answer and who gave it, outside the label so the question truncates first. */}
-            <PromptAnswerTail
+            {/* J5 (case 99): who answered, outside the label so the question truncates first. */}
+            <PromptAnsweredBy
               environmentId={props.environmentId}
               item={row.projectedItem.item}
-              answer={answered && !expanded ? answerPreview : null}
+              alone={historyHasQuestion && expanded}
             />
           </>
         )}
