@@ -193,6 +193,27 @@ it.effect("keeps a moved child's placement: still under its spawner, still spawn
       read.entries.map((entry) => entry.children.map((row) => row.threadId)),
       [[child.threadId]],
     );
+
+    // Deleting it, in its new project, removes the placement it left behind.
+    yield* ledger.append({
+      commandId: CommCommandId.make("delete:child"),
+      projectId: promoted,
+      acceptedAt: timestamp,
+      event: {
+        kind: "participant.deleted",
+        sender: null,
+        receiver: child.id,
+        exchangeId: null,
+        correlationId: null,
+        payload: { participant: child },
+        createdAt: timestamp,
+      },
+    });
+    const sql = yield* SqlClient.SqlClient;
+    assert.deepStrictEqual(
+      yield* sql`SELECT project_id FROM j5_a2a_participant_placement WHERE participant_id = ${child.id}`,
+      [],
+    );
   }).pipe(Effect.provide(TestLayer)),
 );
 

@@ -396,7 +396,8 @@ export const layer: Layer.Layer<
       }
       if (event.kind === "participant.left" || event.kind === "participant.deleted") {
         if (event.kind === "participant.deleted") {
-          yield* sql`DELETE FROM j5_a2a_participant_placement WHERE project_id = ${event.projectId} AND participant_id = ${id}`;
+          // Its placement stays where it was made when Turn into project moves it, so it goes by id.
+          yield* sql`DELETE FROM j5_a2a_participant_placement WHERE participant_id = ${id}`;
         }
         yield* sql`
           DELETE FROM j5_a2a_membership
