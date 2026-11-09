@@ -73,6 +73,30 @@ export function inboxBellPresentation(input: {
   return { badge, label };
 }
 
+export interface RecordPart {
+  readonly kind: "prose" | "block";
+  readonly text: string;
+}
+
+/**
+ * J5's record split into its prose and the indented blocks it quotes, such as a persona draft's
+ * definition, so a block can keep its layout. Indentation alone decides: four leading spaces.
+ */
+export function splitRecordText(text: string): ReadonlyArray<RecordPart> {
+  const parts: Array<RecordPart> = [];
+  for (const line of text.split("\n")) {
+    const kind = line.startsWith("    ") ? "block" : "prose";
+    const body = kind === "block" ? line.slice(4) : line;
+    const last = parts[parts.length - 1];
+    if (last?.kind === kind) parts[parts.length - 1] = { kind, text: `${last.text}\n${body}` };
+    else parts.push({ kind, text: body });
+  }
+  return parts.flatMap((part) => {
+    const trimmed = part.kind === "prose" ? part.text.replace(/^\n+|\n+$/g, "") : part.text;
+    return trimmed === "" ? [] : [{ kind: part.kind, text: trimmed }];
+  });
+}
+
 export function j5SourceNotice(source: J5ReadSource<unknown>): string | null {
   switch (source.status) {
     case "ready":
