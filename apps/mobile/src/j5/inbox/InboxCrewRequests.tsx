@@ -70,12 +70,13 @@ function SeatApproval(props: {
   const [responding, setResponding] = useState(false);
   return (
     <View className="gap-2">
-      <View className="flex-row flex-wrap items-center gap-x-2">
-        <Text className="text-sm font-t3-semibold">
+      <View className="flex-row items-center justify-between gap-2">
+        <Text className="flex-1 text-sm font-t3-semibold" numberOfLines={1}>
           {request.crewName} · {request.seat}
         </Text>
         <Pressable
           accessibilityRole="link"
+          accessibilityLabel={`Open ${request.threadTitle}`}
           hitSlop={6}
           onPress={() =>
             openLinkedThread({
@@ -84,9 +85,7 @@ function SeatApproval(props: {
             })
           }
         >
-          <Text className="text-sm text-foreground-secondary" numberOfLines={1}>
-            {request.threadTitle}
-          </Text>
+          <Text className="font-t3-medium text-sm text-foreground-secondary">Open thread</Text>
         </Pressable>
       </View>
       <PendingApprovalCard
