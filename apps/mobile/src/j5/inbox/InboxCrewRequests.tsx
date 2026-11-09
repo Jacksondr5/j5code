@@ -32,24 +32,34 @@ function SectionTitle(props: { readonly title: string }) {
 
 /**
  * Crew seats' approvals, answered here with upstream's approval card instead of in the seat's
- * thread (Crews AC9), as web's Inbox answers them.
+ * thread (Crews AC9), as web's Inbox answers them. A refused answer's reason stays above the list,
+ * since a request that another device resolved leaves it.
  */
 export function SeatApprovalsSection(props: {
   readonly requests: ReadonlyArray<ScopedCrewRuntimeRequest>;
 }) {
-  if (props.requests.length === 0) return null;
+  const [error, setError] = useState<string | null>(null);
+  if (props.requests.length === 0 && error === null) return null;
   return (
     <View className="gap-3">
       <SectionTitle title="Crew agent requests" />
+      {error === null ? null : (
+        <Text accessibilityRole="alert" className="text-sm text-danger-foreground">
+          {error}
+        </Text>
+      )}
       {props.requests.map((request) => (
-        <SeatApproval key={requestKey(request)} request={request} />
+        <SeatApproval key={requestKey(request)} request={request} onError={setError} />
       ))}
     </View>
   );
 }
 
-function SeatApproval(props: { readonly request: ScopedCrewRuntimeRequest }) {
-  const { request } = props;
+function SeatApproval(props: {
+  readonly request: ScopedCrewRuntimeRequest;
+  readonly onError: (message: string | null) => void;
+}) {
+  const { request, onError } = props;
   const openLinkedThread = useOpenLinkedThread();
   const canRespond = useAtomValue(
     j5Environment.respondCrewRuntimeRequest.permissionAtom(request.environmentId),
@@ -58,7 +68,6 @@ function SeatApproval(props: { readonly request: ScopedCrewRuntimeRequest }) {
     reportFailure: false,
   });
   const [responding, setResponding] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   return (
     <View className="gap-2">
       <View className="flex-row flex-wrap items-center gap-x-2">
@@ -87,7 +96,7 @@ function SeatApproval(props: { readonly request: ScopedCrewRuntimeRequest }) {
         onRespond={async (requestId, decision) => {
           if (responding) return;
           setResponding(true);
-          setError(null);
+          onError(null);
           const result = await respond({
             environmentId: request.environmentId,
             input: { threadId: request.threadId, requestId, decision },
@@ -96,18 +105,13 @@ function SeatApproval(props: { readonly request: ScopedCrewRuntimeRequest }) {
           // the list is read again so a resolved request leaves.
           if (result._tag === "Failure") {
             const failure = squashAtomCommandFailure(result);
-            setError(failure instanceof Error ? failure.message : "Could not answer the request.");
+            onError(failure instanceof Error ? failure.message : "Could not answer the request.");
           }
           await readCrewRequestSources(request.environmentId);
           setResponding(false);
           return result;
         }}
       />
-      {error === null ? null : (
-        <Text accessibilityRole="alert" className="text-sm text-danger-foreground">
-          {error}
-        </Text>
-      )}
     </View>
   );
 }
