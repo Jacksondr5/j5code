@@ -26,6 +26,7 @@ import { liveThreadShell } from "../../../mcp/McpToolAccess.testkit.ts";
 import { OrchestratorMcpService } from "../../../mcp/OrchestratorMcpService.ts";
 import { OrchestratorToolkit } from "../../../mcp/toolkits/orchestrator/tools.ts";
 import { DispatchModeLimit } from "../../../orchestration-v2/DispatchModeLimit.ts";
+import { OrchestratorDispatchError } from "../../../orchestration-v2/Orchestrator.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
 import { ProviderRegistry } from "../../../provider/ProviderRegistry.ts";
 import { permissiveCrewMemberModels } from "../../test-support/crewMemberModels.ts";
@@ -235,6 +236,8 @@ it.effect(
         ReadonlyArray<{ commandId: string; reason: string | undefined; limited: boolean }>
       >([]);
       const interrupted = yield* Ref.make<ReadonlyArray<{ reason: string | undefined }>>([]);
+      const delegatedStops = yield* Ref.make<ReadonlyArray<string>>([]);
+      const delegatedStopFails = yield* Ref.make(false);
       const upstreamCalls = yield* Ref.make<ReadonlyArray<OrchestratorMcpThreadInterruptInput>>([]);
       const layer = McpHttpServer.toolkitRegistration(
         J5OrchestratorSurface,
@@ -283,6 +286,19 @@ it.effect(
                       },
                     ] as never,
                   }),
+                ),
+              // Delegates on a linked machine have no thread here, so thread.stop leaves them.
+              stopDelegatedTasks: (input) =>
+                Effect.flatMap(Ref.getAndSet(delegatedStopFails, false), (fails) =>
+                  fails
+                    ? Effect.fail(
+                        new OrchestratorDispatchError({
+                          commandId: input.commandId,
+                          commandType: "delegated_task.remote.complete",
+                          cause: "the stop of a remote delegate failed",
+                        }),
+                      )
+                    : Ref.update(delegatedStops, (ids) => [...ids, input.commandId]),
                 ),
               interruptThread: (input) =>
                 Ref.update(interrupted, (items) => [...items, { reason: input.reason }]).pipe(
@@ -360,6 +376,17 @@ it.effect(
         ]);
         // A retry repeats the same command.
         expect(stops[1]?.commandId).toBe(stops[0]?.commandId);
+        // Each Stop also stops the seat's delegates under its command, as upstream's does.
+        expect(yield* Ref.get(delegatedStops)).toEqual([stops[0]?.commandId, stops[0]?.commandId]);
+
+        // A delegate stop that fails fails the call, and the same request retries it.
+        const retried = { ...stop, clientRequestId: "stop-2" };
+        yield* Ref.set(delegatedStopFails, true);
+        expect((yield* call(retried)).isError).toBe(true);
+        expect((yield* call(retried)).isError).toBe(false);
+        const retriedStops = yield* Ref.get(dispatched);
+        expect(retriedStops[3]?.commandId).toBe(retriedStops[2]?.commandId);
+        expect((yield* Ref.get(delegatedStops)).at(-1)).toBe(retriedStops[2]?.commandId);
 
         const turn = yield* call({ threadId: seatThreadId });
         expect(turn.structuredContent).toEqual({

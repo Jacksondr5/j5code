@@ -59,11 +59,17 @@ const captainInterrupt = Effect.fn("j5.mcp.captainInterrupt")(function* (
     });
   const reason = agentStopReason(input.reason);
   if (input.stop === true) {
+    const stopCommandId = commandId("thread-stop");
     const stopped = yield* stopThread(threads, {
-      commandId: commandId("thread-stop"),
+      commandId: stopCommandId,
       threadId: input.threadId,
       reason,
     }).pipe(Effect.mapError(failed));
+    // As upstream does: thread.stop queues this only for delegates with a thread here, and a
+    // retry with the same clientRequestId repeats only the stops that failed.
+    yield* threads
+      .stopDelegatedTasks({ threadId: input.threadId, commandId: stopCommandId, reason })
+      .pipe(Effect.mapError(failed));
     // As upstream reads it: the run this Stop interrupted, from its own events.
     const interrupted = stopped.storedEvents.find(
       ({ event }) =>
