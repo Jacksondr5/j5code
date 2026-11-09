@@ -9,7 +9,7 @@ import type { AgentPersonaCreateDraft } from "@t3tools/client-runtime/j5/agent-p
 import type { AgentPersonaEditInput, EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { useRef, type ReactNode } from "react";
 import { Platform } from "react-native";
-import { useKeyboardState } from "react-native-keyboard-controller";
+import { KeyboardAwareScrollView, useKeyboardState } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import * as Dialog from "../../components/ui/Dialog";
@@ -122,24 +122,40 @@ export function SettingsFormScreen(props: {
           }
         />
       ) : null}
-      <ScrollView
-        automaticallyAdjustKeyboardInsets={Platform.OS === "ios"}
-        keyboardShouldPersistTaps="handled"
-        contentInsetAdjustmentBehavior="automatic"
-        className="flex-1"
-        contentContainerClassName="gap-4 px-5 pt-4"
-        contentContainerStyle={{
-          // With the keyboard up, iOS already insets by the home indicator area; padding it
-          // again left dead space under Save.
-          paddingBottom: keyboardVisible
-            ? Platform.OS === "ios"
-              ? 0
-              : 18
-            : Math.max(insets.bottom, 18) + 18,
-        }}
-      >
-        {props.children}
-      </ScrollView>
+      {/* iOS keeps upstream's scroll view, which registers with the native header and insets for the
+          keyboard; with it up, the home indicator area is already covered, so Save gets no extra
+          padding. Android has no header marker, so keyboard-controller's scroll view lets the form
+          scroll clear of the keyboard, as the Inbox does. */}
+      {Platform.OS === "ios" ? (
+        <ScrollView
+          automaticallyAdjustKeyboardInsets
+          keyboardShouldPersistTaps="handled"
+          contentInsetAdjustmentBehavior="automatic"
+          className="flex-1"
+          contentContainerClassName="gap-4 px-5 pt-4"
+          contentContainerStyle={{
+            paddingBottom: keyboardVisible ? 0 : Math.max(insets.bottom, 18) + 18,
+          }}
+        >
+          {props.children}
+        </ScrollView>
+      ) : (
+        <KeyboardAwareScrollView
+          bottomOffset={80}
+          keyboardShouldPersistTaps="handled"
+          className="flex-1"
+          contentContainerClassName="gap-4 px-5 pt-4"
+          // Android's content width cap, as upstream's ScreenScrollView applies it.
+          contentContainerStyle={{
+            width: "100%",
+            maxWidth: 720,
+            alignSelf: "center",
+            paddingBottom: Math.max(insets.bottom, 18) + 18,
+          }}
+        >
+          {props.children}
+        </KeyboardAwareScrollView>
+      )}
     </SettingsScreen>
   );
 }
