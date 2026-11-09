@@ -222,9 +222,10 @@ describe("J5 orchestration instructions", () => {
     assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "`t3_thread_read` it before you answer about it");
     assert.include(
       J5_ORCHESTRATION_INSTRUCTIONS,
-      "a thread's first mention is its `link` verbatim",
+      "In your reply, mention a thread by its `link`, verbatim.",
     );
-    assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "[title](t3-thread://v1/<exact id>)");
+    // J5's tools return a link too, so no fallback for writing one by hand.
+    assert.notInclude(J5_ORCHESTRATION_INSTRUCTIONS, "t3-thread://v1/");
     assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "call `request_secret` yourself");
     assert.include(J5_ORCHESTRATION_INSTRUCTIONS, '`delivery: "file"`');
     assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "Never ask in chat or invent one");

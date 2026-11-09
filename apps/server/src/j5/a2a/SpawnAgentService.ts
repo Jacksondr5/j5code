@@ -20,6 +20,7 @@ import * as Result from "effect/Result";
 import type { SqlError } from "effect/sql/SqlError";
 import {
   requireThreadScope,
+  threadLinkFor,
   type McpInvocationScope,
   type McpThreadInvocationScope,
 } from "../../mcp/McpInvocationContext.ts";
@@ -808,6 +809,7 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
         return {
           participant_id: facts.home.participantId,
           thread_id: threadId,
+          link: threadLinkFor(scope, threadId),
           project_id: facts.home.projectId,
           project_title: targetProject.title,
           placement: {
