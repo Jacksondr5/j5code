@@ -158,6 +158,7 @@ const SEAMS: ReadonlyArray<Seam> = [
     from: "../../j5/sharing/sharedConversation",
     reaches: [
       "<PromptAnsweredBy",
+      "alone={answered && expanded}",
       "!row.workEntry.questionAnswer",
       "answered && expanded ? null : displayText",
     ],

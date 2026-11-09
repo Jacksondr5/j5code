@@ -141,13 +141,15 @@ export function useSharedConversationFeed(
 export function PromptAnsweredBy(props: {
   readonly environmentId: EnvironmentId;
   readonly item: { readonly threadId: ThreadId };
+  /** Nothing precedes it in the row, so it reads as a sentence rather than a trailing clause. */
+  readonly alone?: boolean;
 }) {
   const { answers } = useThreadAuthorIndex(props.environmentId, props.item.threadId);
   const by = isSettledPrompt(props.item) ? answers.get(props.item.requestId) : undefined;
   if (by === undefined) return null;
   return (
     <Text numberOfLines={1} className="shrink-0 pl-1 pr-1.5 text-sm text-foreground-muted">
-      · answered by {by.you ? "you" : (by.name ?? "someone")}
+      {props.alone ? "Answered by" : "· answered by"} {by.you ? "you" : (by.name ?? "someone")}
     </Text>
   );
 }

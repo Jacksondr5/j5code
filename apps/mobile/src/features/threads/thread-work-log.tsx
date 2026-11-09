@@ -1161,7 +1161,11 @@ const ThreadWorkLogRow = function ThreadWorkLogRow(
               ) : null}
             </WorkLogLabel>
             {/* J5 (case 99): who answered, outside the label so the question truncates first. */}
-            <PromptAnsweredBy environmentId={props.environmentId} item={row.projectedItem.item} />
+            <PromptAnsweredBy
+              environmentId={props.environmentId}
+              item={row.projectedItem.item}
+              alone={answered && expanded}
+            />
           </>
         )}
 
