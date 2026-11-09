@@ -29,8 +29,15 @@ const ROLE_NAME: Record<J5LineageRow["role"], string> = {
   peer: "Peer Agent",
 };
 
-const rowLabel = (row: J5LineageRow) =>
-  row.crew === null ? ROLE_NAME[row.role] : `${row.crew.seat ?? "Captain"} · ${row.crew.crewName}`;
+// The row is narrow beside a persona chip, so it names the role; the tooltip names the Crew.
+const rowLabel = (row: J5LineageRow) => row.crew?.seat ?? ROLE_NAME[row.role];
+
+const rowHint = (row: J5LineageRow) => {
+  if (row.crew === null) return row.role === "peer" ? "Open Peer Agent" : "Open parent agent";
+  return row.crew.seat === null
+    ? `Open the Captain of ${row.crew.crewName}`
+    : `Open the ${row.crew.seat} seat of ${row.crew.crewName}`;
+};
 
 // Keyed per environment so another environment's roster change leaves this panel alone.
 const environmentFleetProjectsAtom = Atom.family((environmentId: EnvironmentId) =>
@@ -97,10 +104,7 @@ function J5LineageRowItem(props: {
             </span>
           </TooltipTrigger>
           <TooltipPopup side="left">
-            <LineageTooltipContent
-              title={title}
-              hint={`Open ${ROLE_NAME[props.row.role].toLowerCase()}`}
-            />
+            <LineageTooltipContent title={title} hint={rowHint(props.row)} />
           </TooltipPopup>
         </Tooltip>
       </div>
