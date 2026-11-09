@@ -596,14 +596,6 @@ export const J5CrewProposalResult = Schema.Struct({
   ),
 });
 
-export const J5StopAgentInput = Schema.Struct({
-  client_request_id: Schema.optional(NonEmptyString),
-  participant_id: ParticipantId,
-});
-export type J5StopAgentInput = typeof J5StopAgentInput.Type;
-
-export const J5StopAgentResult = Schema.Literals(["interrupt_requested", "already_idle"]);
-
 export const J5StopCrewInput = Schema.Struct({
   client_request_id: Schema.optional(NonEmptyString),
   crew_instance_id: NonEmptyString,
@@ -722,9 +714,6 @@ export const J5_REQUEST_CREW_MEMBER_DESCRIPTION =
   BLOCKED_PERSONA_TOOL_TEXT +
   " A persona marked independent_reviewer prefers a model none of the members it reviews runs on: every member that is not a reviewer, unless reviews names some. Optionally give a brief; otherwise the seat gets the Crew's brief. On a playbook Crew, steps may claim only unowned step ids from j5_playbook_read. To put a member's work on a different model, such as a reviewer whose model just wrote the work it will review, set replaces to that member's seat: the new member may reuse the seat name, and once it launches it takes over the seat's unfinished steps, gets any current step already handed to the old member, and is told where the old member's thread is. The replaced member is stopped and leaves the Crew, and its thread stays readable. If the new member fails to launch, nothing changes, except that an allow_once it used is spent. The result returns the updated roster or refuses the seat with its name and reason; creation is reported separately here. The new member waits for its first assignment; send it with j5_send_message when the work is ready. Each member's configured access still controls tool approvals. Captain-only: a member sends the concern to its Captain with j5_send_message. Reuse client_request_id to retry safely; a changed request is refused, so use a fresh one for new work. Works under every approval policy, including approval policy never.";
 
-export const J5_STOP_AGENT_DESCRIPTION =
-  "Stop one Peer Agent the way a user Stop does: its running turn is interrupted now, turns already queued behind it, messages you sent it included, are held until a person resumes its queue or the next message reaches it (that message resumes the queue and runs after them, in order), its pull request watches end, and the tasks it delegated stop too. The agent remains, stays readable, and can be messaged again later: stopping halts work, it retires nothing. It reaches any agent on this server, in any project. Reuse client_request_id to retry safely.";
-
 const J5_ARCHIVE_CREW_DESCRIPTION =
   "Retire a whole Crew you command. Crews archive only as a unit; members are never retired one by one. A clean archive completes immediately; otherwise the call refuses with the facts and a confirmation_token. Before retrying with that token, check with the user. Archiving removes the worktrees J5 created for the Crew's seats when they are clean, committed, merged, used by no other thread or project, and have no open session or terminal, and keeps every branch and pull request. Anything else stays and is listed in the result's worktrees with its reason: uncommitted_changes, unmerged_commits, shared, in_use, unverified (a check could not run), or failed (the removal itself failed). Worktrees from before this existed, the Captain's checkout, and existing worktrees a seat was pointed at are never removed. Ledgers stay readable. Reuse client_request_id to retry safely.";
 
@@ -816,15 +805,6 @@ const proposePersonaDependencies = [
   ThreadManagementService,
   A2AHomeRegistrar,
   AgentPersonaDrafts,
-];
-
-const stopDependencies = [
-  McpInvocationContext.McpInvocationContext,
-  A2ASendService,
-  SecureRandom.SecureRandom,
-  ThreadManagementService,
-  // A Captain stops its own seats whatever their permission modes.
-  AgentCrewInstanceService,
 ];
 
 const stopCrewDependencies = [
@@ -956,20 +936,6 @@ const J5ProposePersonaTool = Tool.make("j5_propose_persona", {
   .annotate(Tool.Idempotent, false)
   .annotate(Tool.OpenWorld, false);
 
-export const J5StopAgentTool = Tool.make("j5_stop_agent", {
-  description: J5_STOP_AGENT_DESCRIPTION,
-  parameters: J5StopAgentInput,
-  success: J5StopAgentResult,
-  failure: J5McpFailure,
-  failureMode: "return",
-  dependencies: stopDependencies,
-})
-  .annotate(Tool.Title, "Stop one Peer Agent")
-  .annotate(Tool.Readonly, false)
-  .annotate(Tool.Destructive, true)
-  .annotate(Tool.Idempotent, false)
-  .annotate(Tool.OpenWorld, false);
-
 const J5StopCrewTool = Tool.make("j5_stop_crew", {
   description: J5_STOP_CREW_DESCRIPTION,
   parameters: J5StopCrewInput,
@@ -1028,7 +994,6 @@ export const J5Toolkit = Toolkit.make(
   J5ProposePersonaTool,
   J5ProposeCrewTool,
   J5RequestCrewMemberTool,
-  J5StopAgentTool,
   J5StopCrewTool,
   J5ArchiveCrewTool,
   J5ClearOwnAskTool,

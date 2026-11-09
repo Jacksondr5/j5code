@@ -80,13 +80,7 @@ import { PlacementCommandId } from "../placementContracts.ts";
 import { J5A2ARuntimeLayer, J5ThreadRegistrationLayer } from "../runtimeLayer.ts";
 import { spawnThreadId } from "../spawnIds.ts";
 import { J5ToolkitHandlersLive } from "./handlers.ts";
-import {
-  type J5SpawnAgentInput,
-  J5SpawnAgentResult,
-  type J5StopAgentInput,
-  J5StopAgentResult,
-  J5Toolkit,
-} from "./tools.ts";
+import { type J5SpawnAgentInput, J5SpawnAgentResult, J5Toolkit } from "./tools.ts";
 import { noDocumentTextLayer } from "../../test-support/documentText.ts";
 
 const orchestrationLayer = RuntimeLayer.layer.pipe(Layer.provideMerge(J5ThreadRegistrationLayer));
@@ -113,7 +107,6 @@ const scope: McpInvocationScope = {
   client: undefined,
 };
 const decodeSpawnResult = Schema.decodeUnknownEffect(J5SpawnAgentResult);
-const decodeStopResult = Schema.decodeUnknownEffect(J5StopAgentResult);
 
 const serverConfigLayer = ServerConfig.layerTest(process.cwd(), {
   prefix: "t3-j5-luna-verb-live-",
@@ -334,23 +327,6 @@ const callSpawn = (input: J5SpawnAgentInput) =>
     return yield* decodeSpawnResult(response.result);
   });
 
-const callStop = (input: J5StopAgentInput) =>
-  Effect.gen(function* () {
-    const toolkit = yield* J5Toolkit;
-    const response = yield* toolkit
-      .handle("j5_stop_agent", input)
-      .pipe(
-        Stream.unwrap,
-        Stream.run(Sink.last()),
-        Effect.flatMap(Effect.fromOption),
-        Effect.provideService(McpInvocationContext, scope),
-      );
-    if (response.isFailure) {
-      return yield* Effect.die(new Error(`Tool j5_stop_agent failed: ${String(response.result)}`));
-    }
-    return yield* decodeStopResult(response.result);
-  });
-
 describe.runIf(process.env.T3_J5_LUNA_LIVE_ORCHESTRATOR === "1")(
   "J5 orchestrator verbs with Codex Luna",
   () => {
@@ -437,11 +413,13 @@ describe.runIf(process.env.T3_J5_LUNA_LIVE_ORCHESTRATOR === "1")(
           assert.equal(spawned.project_id, ledgerProjectId);
           yield* Fiber.join(runningFiber);
 
-          const stopped = yield* callStop({
-            participant_id: spawned.participant_id,
-            client_request_id: "j5-luna-verb-e2e-stop",
-          });
-          assert.equal(stopped, "interrupt_requested");
+          const stopped =
+            yield* (yield* OrchestratorMcpService.OrchestratorMcpService).interruptThread(scope, {
+              threadId: spawned.thread_id,
+              stop: true,
+              clientRequestId: "j5-luna-verb-e2e-stop",
+            });
+          assert.equal(stopped.status, "interrupt_requested");
           const terminal = yield* Fiber.join(terminalFiber);
           assert.equal(terminal.status, "interrupted");
 

@@ -11,11 +11,15 @@ import type { ThreadManagementService } from "../../orchestration-v2/ThreadManag
  */
 export const AGENT_STOP_REASON = "Stopped by an agent";
 
+/** An agent's own reason, worded as upstream's MCP interrupt words it. */
+export const agentStopReason = (reason: string | undefined) =>
+  reason === undefined ? AGENT_STOP_REASON : `${AGENT_STOP_REASON}: ${reason}`;
+
 /**
  * Upstream's Stop for one thread, as its own senders issue it: `thread.stop` interrupts the
  * running turn, holds the queue, ends pull request watches, and stops the thread's delegated
  * tasks. Nothing to stop is an accepted no-op, and a retry with the same `commandId` repeats
- * nothing. `j5_stop_agent`, Crew stop and Crew retirement all stop a thread this way.
+ * nothing. A Captain's `t3_thread_interrupt`, Crew stop and Crew retirement stop a thread this way.
  */
 export const stopThread = (
   threads: Pick<ThreadManagementService["Service"], "dispatch">,
