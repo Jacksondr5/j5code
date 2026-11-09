@@ -533,6 +533,9 @@ function OwnerAgentLibrarySettingsScreen() {
         <SettingsSection title="Playbooks">
           <PlaybookLibrarySettingsSection environmentId={effectiveEnvironmentId} />
         </SettingsSection>
+        <SettingsSection title="Crews">
+          <InfoRow text="Crew settings (auto-approve, member models and reasoning) are in Agent Setup on web and desktop. The phone follows them." />
+        </SettingsSection>
       </ScreenScrollView>
       {notification ? (
         <AgentLibraryToast notification={notification} onDismiss={dismissNotification} />

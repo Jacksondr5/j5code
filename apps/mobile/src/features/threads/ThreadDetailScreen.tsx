@@ -24,6 +24,7 @@ import {
 } from "@t3tools/client-runtime/state/thread-settled";
 import type { WorktreeSetupCardProps } from "./worktree-setup-card";
 import type { ComposerTextPaste } from "../../native/T3ComposerEditor.types";
+import { J5ComposerControls } from "../../j5/composer/J5ComposerControls";
 import { PlaybookComposerControl } from "../../j5/playbooks/PlaybookComposerControl";
 import { type EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
@@ -1602,11 +1603,18 @@ function ThreadDetailBody(
                     {!props.draftMode &&
                       !props.activePendingApproval &&
                       !props.activePendingUserInput && (
-                        <PlaybookComposerControl
-                          key={selectedThreadKey}
-                          environmentId={props.environmentId}
-                          threadId={props.selectedThread.id}
-                        />
+                        <>
+                          <J5ComposerControls
+                            key={`j5:${selectedThreadKey}`}
+                            environmentId={props.environmentId}
+                            threadId={props.selectedThread.id}
+                          />
+                          <PlaybookComposerControl
+                            key={selectedThreadKey}
+                            environmentId={props.environmentId}
+                            threadId={props.selectedThread.id}
+                          />
+                        </>
                       )}
                     {props.queuedRunEdit !== null ? (
                       <Animated.View

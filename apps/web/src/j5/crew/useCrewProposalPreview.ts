@@ -2,6 +2,11 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import type { CrewProposalPreviewResponse, CrewProposalSeat } from "@t3tools/contracts/j5";
 import { useEffect, useEffectEvent, useState } from "react";
 
+import {
+  crewPreviewIsComplete,
+  crewPreviewRuntimeForSeats,
+} from "@t3tools/client-runtime/j5/crew-proposals";
+
 import { previewCrewProposal } from "./crewProposalsClient";
 
 interface PreviewState {
@@ -45,11 +50,7 @@ export function useCrewProposalPreview(
       (data) => {
         if (!current) return;
         // Refuse incomplete previews instead of approving seats with undisclosed settings.
-        const complete =
-          data.proposalId === proposalId &&
-          data.approvalToken.length > 0 &&
-          data.seats.length === seats.length &&
-          seats.every((seat) => data.seats.filter((row) => row.seat === seat.seat).length === 1);
+        const complete = crewPreviewIsComplete(data, proposalId, seats);
         setState((previous) => ({
           scopeKey,
           proposalKey,
@@ -87,23 +88,7 @@ export function useCrewProposalPreview(
   // A previous preview may explain an unchanged runtime, but carries no approval authority.
   const runtimeSeats =
     state?.proposalKey === proposalKey && (!busy || state.scopeKey === scopeKey)
-      ? state.data?.seats.filter((runtime) => {
-          const current = seats.find((seat) => seat.seat === runtime.seat);
-          const previous = state.seats.find((seat) => seat.seat === runtime.seat);
-          const settings = (seat: CrewProposalSeat) =>
-            JSON.stringify([
-              seat.agentId,
-              seat.modelSelection,
-              seat.runtimeMode,
-              seat.workspace,
-              seat.steps,
-            ]);
-          return (
-            current !== undefined &&
-            previous !== undefined &&
-            settings(current) === settings(previous)
-          );
-        })
+      ? crewPreviewRuntimeForSeats(state.data?.seats ?? [], state.seats, seats)
       : undefined;
   return {
     data: enabled ? (active?.data ?? null) : null,
