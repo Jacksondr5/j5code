@@ -28,6 +28,8 @@ export interface J5ReadSource<A> {
   readonly refreshing: boolean;
   /** Set when the source is unsupported because the connection is a guest's, not for the server's age. */
   readonly guest?: true;
+  /** Set when an offline source is retrying after a failure, which upstream calls reconnecting. */
+  readonly reconnecting?: true;
 }
 
 export interface J5ReadSources<A> {
@@ -39,7 +41,7 @@ export function resolveJ5ReadSource<A>(input: {
   readonly environmentId: EnvironmentId;
   readonly environmentLabel: string;
   readonly phase: SupervisorConnectionState["phase"];
-  /** A connection attempt after a failure, which upstream presents as reconnecting. */
+  /** A retry after a failure, or the wait before one, which upstream presents as reconnecting. */
   readonly reconnecting?: boolean;
   readonly supported?: boolean;
   readonly guest?: boolean;
@@ -74,6 +76,7 @@ export function resolveJ5ReadSource<A>(input: {
           : "The environment request failed.",
     refreshing: connected && input.result.waiting,
     ...(input.guest === true ? { guest: true as const } : {}),
+    ...(status === "offline" && input.reconnecting === true ? { reconnecting: true as const } : {}),
   };
 }
 
@@ -118,7 +121,11 @@ export function createJ5ReadSourcesAtom<A>(input: {
           environmentLabel: entry.target.label,
           // Before its supervisor publishes, an enabled server is starting to connect.
           phase: state?.phase ?? "connecting",
-          reconnecting: state !== null && (state.attempt > 1 || state.lastFailure !== null),
+          // Upstream's `presentConnectionState` rule for "Reconnecting".
+          reconnecting:
+            state !== null &&
+            (state.phase === "backoff" ||
+              (state.phase === "connecting" && (state.attempt > 1 || state.lastFailure !== null))),
           ...(supported === undefined ? {} : { supported }),
           guest,
           result:

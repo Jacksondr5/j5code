@@ -53,15 +53,41 @@ it("keeps unsupported, authentication failure, and not-yet-connected states dist
     resolveJ5ReadSource({ ...source, phase: "connecting", result: AsyncResult.initial(false) })
       .status,
   ).toBe("loading");
-  // A retry after a failure is reconnecting, as upstream presents it, not a first load.
+  // A retry after a failure, or the wait before one, is reconnecting, as upstream presents it: not
+  // a first load, and its line uses upstream's word. A client with no network reads offline.
+  const retrying = resolveJ5ReadSource({
+    ...source,
+    phase: "connecting",
+    reconnecting: true,
+    result: AsyncResult.success(["cached-row"]),
+  });
+  expect(retrying).toMatchObject({ status: "offline", data: ["cached-row"] });
+  expect(j5SourceNotice(retrying)).toBe("Remote: reconnecting… (showing saved results).");
   expect(
-    resolveJ5ReadSource({
-      ...source,
-      phase: "connecting",
-      reconnecting: true,
-      result: AsyncResult.initial(false),
-    }).status,
-  ).toBe("offline");
+    j5SourceNotice(
+      resolveJ5ReadSource({
+        ...source,
+        phase: "connecting",
+        reconnecting: true,
+        result: AsyncResult.initial(false),
+      }),
+    ),
+  ).toBe("Remote: reconnecting…");
+  expect(
+    j5SourceNotice(
+      resolveJ5ReadSource({
+        ...source,
+        phase: "backoff",
+        reconnecting: true,
+        result: AsyncResult.initial(false),
+      }),
+    ),
+  ).toBe("Remote: reconnecting…");
+  expect(
+    j5SourceNotice(
+      resolveJ5ReadSource({ ...source, phase: "offline", result: AsyncResult.initial(false) }),
+    ),
+  ).toBe("Remote: offline.");
   // "available" is a server nothing is connecting to, so it is not loading.
   expect(
     resolveJ5ReadSource({ ...source, phase: "available", result: AsyncResult.initial(false) })
@@ -75,6 +101,7 @@ it("leaves out a server the person turned off, and reads only a first connection
   const off = EnvironmentId.make("off");
   const starting = EnvironmentId.make("starting");
   const retrying = EnvironmentId.make("retrying");
+  const waiting = EnvironmentId.make("waiting");
   const reads: Array<EnvironmentId> = [];
   const sources = createJ5ReadSourcesAtom<ReadonlyArray<string>>({
     label: "test:j5-read-sources-disabled",
@@ -86,6 +113,7 @@ it("leaves out a server the person turned off, and reads only a first connection
         [off, { target: { label: "Off" }, enabled: false }],
         [starting, { target: { label: "Starting" }, enabled: true }],
         [retrying, { target: { label: "Retrying" }, enabled: true }],
+        [waiting, { target: { label: "Waiting" }, enabled: true }],
       ]),
     }) as unknown as Input["catalogValueAtom"],
     stateAtom: (id) =>
@@ -96,7 +124,9 @@ it("leaves out a server the person turned off, and reads only a first connection
             ? AsyncResult.success({ phase: "available", desired: false })
             : id === retrying
               ? AsyncResult.success({ phase: "connecting", attempt: 4, lastFailure: {} })
-              : AsyncResult.initial(true),
+              : id === waiting
+                ? AsyncResult.success({ phase: "backoff", attempt: 4, lastFailure: {} })
+                : AsyncResult.initial(true),
       ) as unknown as ReturnType<Input["stateAtom"]>,
     configValueAtom: (id) =>
       Atom.make(
@@ -111,10 +141,13 @@ it("leaves out a server the person turned off, and reads only a first connection
       }),
   });
   const result = AtomRegistry.make().get(sources).sources;
-  expect(result.map((entry) => [entry.environmentLabel, entry.status])).toEqual([
-    ["On", "ready"],
-    ["Starting", "loading"],
-    ["Retrying", "offline"],
+  expect(
+    result.map((entry) => [entry.environmentLabel, entry.status, j5SourceNotice(entry)]),
+  ).toEqual([
+    ["On", "ready", null],
+    ["Starting", "loading", "Starting: loading…"],
+    ["Retrying", "offline", "Retrying: reconnecting…"],
+    ["Waiting", "offline", "Waiting: reconnecting…"],
   ]);
   expect(reads).not.toContain(off);
 });
