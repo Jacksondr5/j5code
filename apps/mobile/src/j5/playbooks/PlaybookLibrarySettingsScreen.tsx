@@ -401,15 +401,24 @@ function PlaybookLibrary({
           {/* SafeAreaView takes no className, so the theme surface and flex go on a View. */}
           <View className="flex-1 bg-sheet">
             <SafeAreaView style={{ flex: 1 }}>
-              <ScrollView contentContainerClassName="gap-3 p-4">
-                <Text className="text-xl font-semibold text-foreground">{detail.title}</Text>
+              {/* The persona sheets' header: the title, and Done at the top. */}
+              <View className="flex-row items-center justify-between gap-3 px-5 py-3">
+                <Text className="min-w-0 shrink text-xl font-t3-semibold" numberOfLines={1}>
+                  {detail.title}
+                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => setDetails(null)}
+                  className="px-3 py-2"
+                >
+                  <Text>Done</Text>
+                </Pressable>
+              </View>
+              <ScrollView contentContainerClassName="gap-3 px-5 pb-6">
                 <Text className="text-foreground-muted">{detail.description}</Text>
                 {detail.steps.map((step, index) => (
                   <Text key={step.id}>{playbookStepLabel(step, index)}</Text>
                 ))}
-                <Pressable accessibilityRole="button" onPress={() => setDetails(null)}>
-                  <Text className="text-primary">Close</Text>
-                </Pressable>
               </ScrollView>
             </SafeAreaView>
           </View>
