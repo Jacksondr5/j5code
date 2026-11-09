@@ -6,7 +6,10 @@ import { ComposerPendingApprovalActions } from "../../components/chat/ComposerPe
 import { Badge } from "../../components/ui/badge";
 import { notifyHumanInboxChanged } from "../a2a/humanInboxRefresh";
 import { j5Environment } from "../state";
-import { toPendingApproval, type ScopedCrewRuntimeRequest } from "./crewRuntimeRequests.logic";
+import {
+  toPendingApproval,
+  type ScopedCrewRuntimeRequest,
+} from "@t3tools/client-runtime/j5/crew-inbox-requests";
 import { refreshCrewRuntimeRequests, respondCrewRuntimeRequest } from "./crewRuntimeRequestsClient";
 
 const itemKey = (request: ScopedCrewRuntimeRequest) =>

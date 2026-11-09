@@ -1,5 +1,9 @@
 import { useAtomValue } from "@effect/atom-react";
 import {
+  mergeCrewRuntimeRequestSources,
+  mergeNativeQuestionInboxSources,
+} from "@t3tools/client-runtime/j5/crew-inbox-requests";
+import {
   answeredByLine,
   closedLine,
   j5SourceNotice,
@@ -28,12 +32,15 @@ import { SelectableMarkdownText } from "../../native/SelectableMarkdownText";
 import { j5Sharing } from "../sharing/guestAccess";
 import { j5Environment } from "../state";
 import { type ClosedItem, useInboxAnswers } from "./inboxAnswers";
+import { AgentQuestionsSection, SeatApprovalsSection } from "./InboxCrewRequests";
 import {
   answeredInboxQueryAtom,
   answeredInboxSourcesAtom,
+  crewRequestSourcesAtom,
   openInboxQueryAtom,
   openInboxSourcesAtom,
   readInboxSources,
+  refreshCrewRequestSources,
   refreshInboxSources,
 } from "./inboxSources";
 import { createPullRefresh } from "./inboxPullRefresh.logic";
@@ -64,18 +71,28 @@ function useOwnName(environmentId: EnvironmentId): string | null {
 function refreshAll() {
   refreshInboxSources(openInboxSourcesAtom, openInboxQueryAtom);
   refreshInboxSources(answeredInboxSourcesAtom, answeredInboxQueryAtom);
+  refreshCrewRequestSources();
 }
 
 /**
  * The person's Inbox: what agents on every connected server have asked them, most urgent first
- * (Inbox AC6), answered in place, and the asks already answered.
+ * (Inbox AC6), answered in place, Crew seats' approvals and agents' questions, and the asks
+ * already answered.
  */
 export function InboxScreen() {
   const openSources = useAtomValue(openInboxSourcesAtom);
   const answeredSources = useAtomValue(answeredInboxSourcesAtom);
   const items = mergeHumanInboxSources(openSources);
   const answered = mergeHumanInboxSources(answeredSources);
-  const showEnvironment = spansMultipleEnvironments([...items, ...answered]);
+  const crewSources = useAtomValue(crewRequestSourcesAtom);
+  const seatApprovals = mergeCrewRuntimeRequestSources(crewSources);
+  const agentQuestions = mergeNativeQuestionInboxSources(crewSources);
+  const showEnvironment = spansMultipleEnvironments([
+    ...items,
+    ...answered,
+    ...seatApprovals,
+    ...agentQuestions,
+  ]);
   const labels = useScopedParticipantLabels(
     [...items, ...answered].map((item) => ({
       environmentId: item.environmentId,
@@ -96,10 +113,12 @@ export function InboxScreen() {
   );
   const notices = [
     ...new Set(
-      [...openSources.sources, ...answeredSources.sources].flatMap((source) => {
-        const notice = j5SourceNotice(source);
-        return notice === null ? [] : [notice];
-      }),
+      [...openSources.sources, ...answeredSources.sources, ...crewSources.sources].flatMap(
+        (source) => {
+          const notice = j5SourceNotice(source);
+          return notice === null ? [] : [notice];
+        },
+      ),
     ),
   ];
   const content = (
@@ -110,8 +129,10 @@ export function InboxScreen() {
           {notice}
         </Text>
       ))}
+      <SeatApprovalsSection requests={seatApprovals} />
+      <AgentQuestionsSection questions={agentQuestions} showEnvironment={showEnvironment} />
       {answers.shownItems.length === 0 ? (
-        loading ? (
+        seatApprovals.length > 0 || agentQuestions.length > 0 ? null : loading ? (
           <Text className="text-foreground-muted">Loading your inbox…</Text>
         ) : (
           <EmptyState

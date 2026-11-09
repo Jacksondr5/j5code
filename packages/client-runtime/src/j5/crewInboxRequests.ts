@@ -1,5 +1,3 @@
-import type { J5ReadSources } from "@t3tools/client-runtime/j5/readSources";
-import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import type { EnvironmentId } from "@t3tools/contracts";
 import type {
   CrewRuntimeRequestItem,
@@ -7,7 +5,9 @@ import type {
   NativeQuestionInboxItem,
 } from "@t3tools/contracts/j5";
 
-import type { PendingApproval } from "../../session-logic";
+import type { EnvironmentThreadShell } from "../state/models.ts";
+import type { ThreadPendingApproval } from "../state/threadRequests.ts";
+import type { J5ReadSources } from "./readSources.ts";
 
 export type ScopedCrewRuntimeRequest = CrewRuntimeRequestItem & {
   readonly environmentId: EnvironmentId;
@@ -42,10 +42,10 @@ export const mergeNativeQuestionInboxSources = (
         connected: source.connected,
       })),
     )
-    .toSorted((a, b) => a.createdAt.localeCompare(b.createdAt));
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 
 /** The composer's approval shape; the server lists only approvals the provider can still take. */
-export const toPendingApproval = (request: CrewRuntimeRequestItem): PendingApproval => ({
+export const toPendingApproval = (request: CrewRuntimeRequestItem): ThreadPendingApproval => ({
   requestId: request.requestId,
   requestKind: request.requestKind,
   createdAt: request.createdAt,
@@ -87,7 +87,7 @@ export const crewApprovalReadPlan = (
       environmentId: shell.environmentId,
       entry: `${shell.environmentId}/${shell.id}/${shell.hasPendingApprovals}/${shell.hasPendingUserInput}/${shell.source?.pendingRuntimeRequest?.id ?? ""}`,
     }))
-    .toSorted((left, right) => left.entry.localeCompare(right.entry));
+    .sort((left, right) => left.entry.localeCompare(right.entry));
   return {
     key: pending.map((shell) => shell.entry).join("\n"),
     environmentIds: [...new Set(pending.map((shell) => shell.environmentId))],
@@ -105,3 +105,24 @@ export const inboxBadgeCount = (
   const crew = crewRuntimeRequests;
   return openAsks === null ? (crew > 0 ? crew : null) : openAsks + crew;
 };
+
+/**
+ * The bell's count and whether it is complete: open asks, plus the seat approvals and agents'
+ * questions read from every server. Web and mobile both count this way.
+ */
+export const inboxBellCount = (
+  asks: { readonly count: number | null; readonly incomplete: boolean },
+  crewSources: J5ReadSources<CrewRuntimeRequestsResponse>,
+): { readonly count: number | null; readonly incomplete: boolean } => ({
+  count: inboxBadgeCount(
+    asks.count,
+    mergeCrewRuntimeRequestSources(crewSources).length +
+      mergeNativeQuestionInboxSources(crewSources).length,
+  ),
+  incomplete:
+    asks.incomplete ||
+    !crewSources.isReady ||
+    crewSources.sources.some(
+      (source) => source.status !== "ready" && source.status !== "unsupported",
+    ),
+});

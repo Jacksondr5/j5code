@@ -1,7 +1,7 @@
 import { EnvironmentId, RuntimeRequestId, ThreadId } from "@t3tools/contracts";
 import { expect, it, vi } from "vite-plus/test";
 
-import type { ScopedCrewRuntimeRequest } from "./crewRuntimeRequests.logic";
+import type { ScopedCrewRuntimeRequest } from "@t3tools/client-runtime/j5/crew-inbox-requests";
 
 const OPERABLE = EnvironmentId.make("env-operate");
 const READ_ONLY = EnvironmentId.make("env-read-only");
