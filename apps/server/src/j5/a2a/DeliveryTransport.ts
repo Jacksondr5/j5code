@@ -452,15 +452,14 @@ export const live: Layer.Layer<
       }
     });
     const sql = yield* SqlClient.SqlClient;
-    // An agent sender is homed in the delivery's origin project, so its thread
-    // is one primary-key read on the (agent-only) membership projection.
+    // An agent sender has one membership, in the project it lives in now, which is not the
+    // delivery's origin once Turn into project has moved it since sending.
     const agentThreadId = Effect.fn("j5.a2a.delivery.agentThreadId")(function* (
-      projectId: LedgerProjectId,
       participantId: ParticipantId,
     ) {
       const rows = yield* sql<{ readonly thread_id: string }>`SELECT thread_id
         FROM j5_a2a_membership
-        WHERE project_id = ${projectId} AND participant_id = ${participantId}`;
+        WHERE participant_id = ${participantId}`;
       return rows[0] === undefined ? undefined : ThreadId.make(rows[0].thread_id);
     });
 
@@ -533,8 +532,7 @@ export const live: Layer.Layer<
           const rows = yield* sql<MembershipRow>`
             SELECT payload
             FROM j5_a2a_membership
-            WHERE project_id = ${input.receiverProjectId}
-              AND participant_id = ${input.receiverId}
+            WHERE participant_id = ${input.receiverId}
               AND archived_at IS NULL
             LIMIT 1
           `;
@@ -677,7 +675,7 @@ export const live: Layer.Layer<
             !isHumanParticipantId(input.senderId) &&
             !isMachineParticipantId(input.senderId) &&
             !isOutsideAgentParticipantId(input.senderId)
-              ? yield* agentThreadId(input.originProjectId, input.senderId)
+              ? yield* agentThreadId(input.senderId)
               : undefined;
           const sendInput = {
             projectId: target.thread.projectId,

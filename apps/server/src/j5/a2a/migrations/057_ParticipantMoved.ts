@@ -2,7 +2,8 @@ import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 
 // An agent moves to another project when upstream moves its thread (Turn into project). The
-// event log is rebuilt to widen its CHECK for that fact, no row changed.
+// event log is rebuilt to widen its CHECK for that fact, no row changed, and the reads that
+// find an agent wherever it now lives get indexes.
 export default Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
 
@@ -59,4 +60,12 @@ export default Effect.gen(function* () {
   for (const index of indexes) {
     yield* sql.unsafe(index.sql);
   }
+  // A thread's home lookup reads its moves as it reads its join, through an index.
+  yield* sql`
+    CREATE INDEX j5_a2a_comm_event_moved_thread_idx
+    ON j5_a2a_comm_event(json_extract(payload, '$.participant.threadId'))
+    WHERE kind = 'participant.moved'
+  `;
+  // A participant has one membership wherever it lives, so delivery finds it by id alone.
+  yield* sql`CREATE INDEX j5_a2a_membership_participant_idx ON j5_a2a_membership(participant_id)`;
 });

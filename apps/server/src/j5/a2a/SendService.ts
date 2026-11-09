@@ -35,7 +35,7 @@ import {
 } from "./contracts.ts";
 import {
   type A2AHomeRegistrationError,
-  isCurrentHomeFact,
+  currentHomeFacts,
   resolveThreadHome,
 } from "./HomeRegistrar.ts";
 import {
@@ -600,11 +600,8 @@ const rawLayer: Layer.Layer<
     ) {
       return yield* sql<RetiredParticipantRow>`
           SELECT home.project_id
-          FROM j5_a2a_comm_event AS home
-          WHERE ${isCurrentHomeFact(sql)}
-            AND json_extract(home.payload, '$.participant.kind') = 'agent'
-            AND json_extract(home.payload, '$.participant.id') = ${id}
-            AND EXISTS (
+          FROM (${currentHomeFacts(sql, { participantId: id })}) AS home
+            WHERE EXISTS (
               SELECT 1
               FROM j5_a2a_comm_event AS retirement
               WHERE retirement.project_id = home.project_id

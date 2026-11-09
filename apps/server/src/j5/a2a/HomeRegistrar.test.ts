@@ -10,6 +10,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import {
   A2AHomeRegistrar,
+  explainThreadHomeStatement,
   participantIdForThread,
   threadIdForParticipant,
   layer as homeRegistrarLayer,
@@ -48,6 +49,18 @@ const countJoined = Effect.fn("test.j5.a2a.countJoined")(function* (threadId: Th
   `;
   return rows[0]?.count ?? 0;
 });
+
+it.effect("finds a thread's home through indexes, never by reading the whole ledger", () =>
+  Effect.gen(function* () {
+    yield* runJ5A2AMigrations();
+    const sql = yield* SqlClient.SqlClient;
+    const plan = yield* explainThreadHomeStatement(sql, ThreadId.make("thread:registrar:plan"));
+    const rendered = plan.map((row) => row.detail).join(" | ");
+    assert.include(rendered, "j5_a2a_comm_event_agent_home_thread_idx");
+    assert.include(rendered, "j5_a2a_comm_event_moved_thread_idx");
+    assert.notMatch(rendered, /\bSCAN\b/);
+  }).pipe(Effect.provide(testLayer)),
+);
 
 it.effect("registers one immutable home with the authoritative creation inputs", () =>
   Effect.gen(function* () {

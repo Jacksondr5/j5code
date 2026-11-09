@@ -139,36 +139,48 @@ export const threadIdForParticipant = (participantId: string) =>
     ? ThreadId.make(participantId.slice(AGENT_PARTICIPANT_PREFIX.length))
     : null;
 
+type HomeFactFilter = { readonly threadId: ThreadId } | { readonly participantId: ParticipantId };
+
+// A thread names an agent, and the join index covers agents only, so the thread filter says so.
+const homeFactFilter = (sql: SqlClient.SqlClient, by: HomeFactFilter) =>
+  "threadId" in by
+    ? sql`json_extract(payload, '$.participant.kind') = 'agent'
+        AND json_extract(payload, '$.participant.threadId') = ${by.threadId}`
+    : sql`json_extract(payload, '$.participant.id') = ${by.participantId}`;
+
 /**
- * Whether the ledger row aliased `home` places an agent in its project now: its join, or the move
- * that brought it there, with no later move out of that ledger. Upstream's Turn into project moves
- * a thread to another project; its agent keeps its id and moves with it.
+ * The ledger rows that place an agent in a project now: its join, or the move that brought it
+ * there, with no later move out of that ledger. Upstream's Turn into project moves a thread to
+ * another project; its agent keeps its id and moves with it. Each branch names its kind so it
+ * reads through its partial index, never the whole log.
  */
-export const isCurrentHomeFact = (sql: SqlClient.SqlClient) => sql`(
-  (
-    home.kind = 'participant.joined'
-    OR (
-      home.kind = 'participant.moved'
-      AND json_extract(home.payload, '$.toProjectId') = home.project_id
-    )
-  )
-  AND NOT EXISTS (
+export const currentHomeFacts = (sql: SqlClient.SqlClient, by: HomeFactFilter) => sql`
+  SELECT project_id, seq, payload FROM (
+    SELECT project_id, seq, payload FROM j5_a2a_comm_event
+    WHERE kind = 'participant.joined'
+      AND ${homeFactFilter(sql, by)}
+    UNION ALL
+    SELECT project_id, seq, payload FROM j5_a2a_comm_event
+    WHERE kind = 'participant.moved'
+      AND json_extract(payload, '$.toProjectId') = project_id
+      AND ${homeFactFilter(sql, by)}
+  ) AS candidate
+  WHERE NOT EXISTS (
     SELECT 1
     FROM j5_a2a_comm_event AS moved_out
-    WHERE moved_out.project_id = home.project_id
-      AND moved_out.seq > home.seq
-      AND moved_out.kind = 'participant.moved'
-      AND json_extract(moved_out.payload, '$.fromProjectId') = home.project_id
-      AND json_extract(moved_out.payload, '$.participant.id') =
-        json_extract(home.payload, '$.participant.id')
+    WHERE moved_out.kind = 'participant.moved'
+      AND json_extract(moved_out.payload, '$.participant.threadId') =
+        json_extract(candidate.payload, '$.participant.threadId')
+      AND moved_out.project_id = candidate.project_id
+      AND moved_out.seq > candidate.seq
+      AND json_extract(moved_out.payload, '$.fromProjectId') = candidate.project_id
   )
-)`;
+`;
 
-export const resolveThreadHome = Effect.fn("j5.a2a.resolveThreadHome")(function* (
+const threadHomeStatement = (
   sql: SqlClient.SqlClient,
   threadId: ThreadId,
-): Effect.fn.Return<ThreadHomeResolution, A2AHomeLookupError> {
-  const rows = yield* sql<HistoricalHomeRow>`
+) => sql<HistoricalHomeRow>`
     SELECT
       home.project_id AS home_project_id,
       json_extract(home.payload, '$.participant.id') AS home_participant_id,
@@ -185,14 +197,23 @@ export const resolveThreadHome = Effect.fn("j5.a2a.resolveThreadHome")(function*
             json_extract(home.payload, '$.participant.id')
           AND json_extract(retirement.payload, '$.participant.threadId') = ${threadId}
       ) AS is_retired
-    FROM j5_a2a_comm_event AS home
+    FROM (${currentHomeFacts(sql, { threadId })}) AS home
     LEFT JOIN j5_a2a_membership AS membership
       ON membership.thread_id = ${threadId}
-    WHERE ${isCurrentHomeFact(sql)}
-      AND json_extract(home.payload, '$.participant.kind') = 'agent'
-      AND json_extract(home.payload, '$.participant.threadId') = ${threadId}
     ORDER BY membership.project_id, membership.participant_id
   `;
+
+/** The query plan of a thread's home lookup, which every send runs, for a test to hold it indexed. */
+export const explainThreadHomeStatement = (sql: SqlClient.SqlClient, threadId: ThreadId) => {
+  const [statement, parameters] = threadHomeStatement(sql, threadId).compile();
+  return sql.unsafe<{ readonly detail: string }>(`EXPLAIN QUERY PLAN ${statement}`, parameters);
+};
+
+export const resolveThreadHome = Effect.fn("j5.a2a.resolveThreadHome")(function* (
+  sql: SqlClient.SqlClient,
+  threadId: ThreadId,
+): Effect.fn.Return<ThreadHomeResolution, A2AHomeLookupError> {
+  const rows = yield* threadHomeStatement(sql, threadId);
   const first = rows[0];
   if (first === undefined) return yield* new A2AHomeNotFoundError({ threadId });
   const activeMemberships = Array.from(

@@ -4643,6 +4643,9 @@ it.effect(
         // Upstream moves only a thread with no work in progress.
         yield* startPendingTestTurn(threadId("first"));
         yield* finishTestTurn(harness, threadId("first"));
+        // Committed before the move and delivered after it: upstream's check sees neither.
+        const queuedTo = yield* sendFrom("second", first, "queued-to");
+        const queuedFrom = yield* sendFrom("first", second, "queued-from");
 
         // Turn into project, as upstream's ScratchThreadPromotion does it.
         const promoted = ProjectId.make("project:no-project:promoted");
@@ -4700,26 +4703,33 @@ it.effect(
         });
         const later = yield* sendFrom("second", first, "later");
         const fresh = yield* sendFrom("first", second, "fresh");
-        assert.deepStrictEqual(
-          (yield* worker.drain).map((milestone) => milestone.state),
-          ["delivered", "delivered", "delivered", "delivered"],
-        );
+        // Messages sent after the move wait behind the two queued before it, as send order holds.
+        yield* worker.drain;
+        assert.deepStrictEqual(yield* sql`SELECT DISTINCT status FROM j5_a2a_delivery`, [
+          { status: "delivered" },
+        ]);
         for (const exchangeId of [owed.exchangeId!, awaited.exchangeId!]) {
           assert.deepStrictEqual(
             yield* sql`SELECT status FROM j5_a2a_exchange WHERE exchange_id = ${exchangeId}`,
             [{ status: "closed" }],
           );
         }
-        const delivered = (to: string, messageId: LedgerMessageId) =>
+        const deliveredMessage = (to: string, messageId: LedgerMessageId) =>
           threads
             .getThreadProjection(threadId(to))
             .pipe(
-              Effect.map(
-                (projection) =>
-                  projection.messages.find((message) => message.id === deliveryMessageId(messageId))
-                    ?.text,
+              Effect.map((projection) =>
+                projection.messages.find((message) => message.id === deliveryMessageId(messageId)),
               ),
             );
+        const delivered = (to: string, messageId: LedgerMessageId) =>
+          deliveredMessage(to, messageId).pipe(Effect.map((message) => message?.text));
+        assert.include(yield* delivered("first", queuedTo.messageId), `${second} in project`);
+        // A message it sent before the move still links to its thread.
+        assert.equal(
+          (yield* deliveredMessage("second", queuedFrom.messageId))?.senderThreadId,
+          threadId("first"),
+        );
         assert.include(
           yield* delivered("second", reply.messageId),
           `${first} in project ${promoted} (Promoted)`,

@@ -30,7 +30,7 @@ import {
 } from "./contracts.ts";
 import {
   type A2AHomeRegistrationError,
-  isCurrentHomeFact,
+  currentHomeFacts,
   resolveThreadHome,
 } from "./HomeRegistrar.ts";
 import {
@@ -255,9 +255,7 @@ const makeLayer = (daemon: boolean) =>
                 AND json_extract(retirement.payload, '$.participant.threadId') =
                   json_extract(home.payload, '$.participant.threadId')
             ) AS retired
-          FROM j5_a2a_comm_event AS home
-          WHERE ${isCurrentHomeFact(sql)}
-            AND json_extract(home.payload, '$.participant.id') = ${participantId}
+          FROM (${currentHomeFacts(sql, { participantId })}) AS home
           ORDER BY home.seq
           LIMIT 2
         `;
