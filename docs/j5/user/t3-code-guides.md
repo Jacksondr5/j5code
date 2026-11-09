@@ -28,8 +28,11 @@ Other environment variables keep T3 Code's names, such as `T3CODE_HOST`, `T3CODE
 
 [Updating](../../user/updating.md) works as described, except:
 
-- A server update appears once that version's release is published on GitHub
-  (`Jacksondr5/j5code`), not on npm.
+- Servers update from releases on GitHub (`Jacksondr5/j5code`), not from npm. **Update
+  everything** asks each server for the app's own version; if that version has no J5 Code
+  release, such as a development build, that server's update fails and says so.
+- The Stable or Nightly track is chosen for each desktop app on its own, and choosing it does not
+  move your servers.
 - A server installed from npm (`@jacksondr5/j5code` 0.0.43 or earlier) cannot update itself to a
   release archive: **Update server** fails because no newer npm version exists. Follow
   [Migrating to release archives](./migrating-to-release-archives.md) on that machine once; later
@@ -38,6 +41,14 @@ Other environment variables keep T3 Code's names, such as `T3CODE_HOST`, `T3CODE
   with a message asking you to run `j5 update` on the server's machine. Run it there once. The
   server keeps running its current version until you do, and later updates work from the app
   again.
+
+### Updating to the release based on T3 Code 0.1.7
+
+- The server starts trimming its event log, as T3 Code 0.1.7 does, keeping recent events. Trimmed
+  events can't be recovered. J5 Code keeps who answered each prompt in a shared conversation in
+  its own records, so those names stay, but if you go back to an earlier J5 Code release, it shows
+  answers whose events were trimmed without who gave them.
+- J5's mobile app needs a new build for this release.
 
 ## Running in the background
 
