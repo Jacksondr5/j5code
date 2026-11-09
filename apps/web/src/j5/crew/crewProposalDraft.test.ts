@@ -1,3 +1,4 @@
+import { removeSeat } from "@t3tools/client-runtime/j5/crew-proposals";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -9,7 +10,6 @@ import {
   newCrewProposalRow,
   addSeat,
   describeSeatAgent,
-  removeSeat,
   saveSeat,
 } from "./crewProposalDraft";
 

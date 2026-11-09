@@ -1,12 +1,9 @@
 import type { CrewProposalSeat } from "@t3tools/contracts/j5";
+import { removeSeat } from "@t3tools/client-runtime/j5/crew-proposals";
 import { applyCrewSeatDraft, crewSeatDraft, type CrewSeatDraft } from "./crewSeatRuntime";
 
 /** The persona choice for a seat that runs without a persona: named and briefed on the card. */
 export const CUSTOM_AGENT = "__custom__";
-
-/** Pure roster edits so the card's behavior is testable without rendering. */
-export const removeSeat = (seats: ReadonlyArray<CrewProposalSeat>, seatName: string) =>
-  seats.filter((seat) => seat.seat !== seatName);
 
 export const addSeat = (
   seats: ReadonlyArray<CrewProposalSeat>,

@@ -234,9 +234,15 @@ const SEAMS: ReadonlyArray<Seam> = [
   },
   {
     file: "Stack.tsx",
-    record: "case 98: artifact routes",
-    from: "./j5/artifacts/routes",
-    reaches: ["...j5ThreadArtifactRoutes(THREAD_LINKING_PREFIX, GLASS_HEADER_OPTIONS)"],
+    record: "cases 98 and 114: J5 thread routes (artifacts, Crew proposal review)",
+    from: "./j5/threadRoutes",
+    reaches: ["...j5ThreadRoutes(THREAD_LINKING_PREFIX, GLASS_HEADER_OPTIONS)"],
+  },
+  {
+    file: "features/threads/ThreadDetailScreen.tsx",
+    record: "case 114: J5 rows above the composer",
+    from: "../../j5/composer/J5ComposerControls",
+    reaches: ["<J5ComposerControls"],
   },
   {
     file: "features/threads/ThreadFeed.tsx",

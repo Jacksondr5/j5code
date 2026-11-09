@@ -50,7 +50,7 @@ import { ownerOnlySettingsRoute } from "./j5/sharing/ownerOnlySettingsRoute";
 import { ConnectOnboardingRouteScreen } from "./features/cloud/ConnectOnboardingRouteScreen";
 import { AttachmentFileScreen } from "./features/files/AttachmentFileScreen";
 import { ThreadFilesTreeScreen, ThreadFileScreen } from "./features/files/ThreadFilesRouteScreen";
-import { j5ThreadArtifactRoutes } from "./j5/artifacts/routes";
+import { j5ThreadRoutes } from "./j5/threadRoutes";
 import { j5SettingsFormRoutes } from "./j5/agents/routes";
 import { j5InboxRoutes } from "./j5/inbox/routes";
 import { AdaptiveWorkspaceLayout } from "./features/layout/AdaptiveWorkspaceLayout";
@@ -873,7 +873,7 @@ const RootStackConfig = createWorkspaceStackNavigator({
       linking: `${THREAD_LINKING_PREFIX}/files/:path*`,
       options: GLASS_HEADER_OPTIONS,
     }),
-    ...j5ThreadArtifactRoutes(THREAD_LINKING_PREFIX, GLASS_HEADER_OPTIONS),
+    ...j5ThreadRoutes(THREAD_LINKING_PREFIX, GLASS_HEADER_OPTIONS),
     ThreadMcpApp: createNativeStackScreen({
       screen: McpAppFullscreenScreen,
       linking: `${THREAD_LINKING_PREFIX}/apps/:itemId`,

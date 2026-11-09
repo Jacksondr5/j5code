@@ -16,7 +16,12 @@ import { agentPersonaEnvironment } from "../agents/agentPersonaAtoms";
 import type { CrewProposal, CrewProposalSeat } from "./crewProposalsClient";
 import { readCrewProposalDraft, saveCrewProposalDraft } from "./crewProposalDraftStore";
 import { crewProposalRows, crewProposalRoster, newCrewProposalRow } from "./crewProposalDraft";
-import { describePersonaSwap, removedSeatSteps, stepTitle, unownedSteps } from "./crewPlaybookPlan";
+import {
+  describePersonaSwap,
+  removedSeatSteps,
+  stepTitle,
+  unownedSteps,
+} from "@t3tools/client-runtime/j5/crew-proposals";
 import { CrewProposalMemberDialog } from "./CrewProposalMemberDialog";
 import type { CrewProposalRow } from "./crewProposalDraft";
 import { CrewProposalMemberRow } from "./CrewProposalMemberRow";
