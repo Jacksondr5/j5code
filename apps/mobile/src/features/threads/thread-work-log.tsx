@@ -1068,6 +1068,10 @@ const ThreadWorkLogRow = function ThreadWorkLogRow(
     : null;
   const answered =
     row.workEntry.questionAnswer !== undefined && hasQuestionAnswer(row.workEntry.questionAnswer);
+  // J5 (case 99): opened, the history below repeats the question, so the header drops it; an
+  // answer recorded before the history carried question text keeps it.
+  const historyHasQuestion =
+    answered && Object.values(row.workEntry.questionAnswer?.questionTextById ?? {}).some(Boolean);
   const accessiblePreview = [previewText, answerPreview].filter(Boolean).join(": ");
   const displayText = row.groupStandIn?.label ?? workEntryRowLabel(row.workEntry, expanded);
   const isSystemNotice = row.projectedItem.item.type === "system_notice";
@@ -1155,7 +1159,7 @@ const ThreadWorkLogRow = function ThreadWorkLogRow(
             <WorkLogLabel
               tone={isUsageLimit ? "warning" : iconIsDestructive ? "danger" : "default"}
             >
-              {answered && expanded ? null : displayText}
+              {historyHasQuestion && expanded ? null : displayText}
               {answerPreview && !answered ? (
                 <Text className="text-foreground-subtle">{`  ${answerPreview}`}</Text>
               ) : null}
@@ -1164,7 +1168,7 @@ const ThreadWorkLogRow = function ThreadWorkLogRow(
             <PromptAnsweredBy
               environmentId={props.environmentId}
               item={row.projectedItem.item}
-              alone={answered && expanded}
+              alone={historyHasQuestion && expanded}
             />
           </>
         )}
