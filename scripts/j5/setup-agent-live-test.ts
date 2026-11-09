@@ -291,6 +291,9 @@ export function liveTestEnvironment(
     // The rig names each home's owner itself, and a `--fresh` home's stays unnamed so the
     // naming question can be tested; the dev runner would otherwise name it "Dev owner".
     J5CODE_DEV_OWNER_NAME: "",
+    // Every server on a host otherwise names itself after the host, so a person paired to several
+    // test servers can't tell them apart.
+    J5CODE_SERVER_NAME: `${NodeOS.hostname()} test (${NodePath.basename(worktree)})`,
     // Every node child here opens SQLite, and each process warns once that it is experimental:
     // dozens of lines that bury what a command prints. Only that kind of warning is silenced.
     NODE_OPTIONS: [rest.NODE_OPTIONS, "--disable-warning=ExperimentalWarning"]
