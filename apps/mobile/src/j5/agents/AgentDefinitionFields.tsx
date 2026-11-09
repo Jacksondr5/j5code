@@ -118,6 +118,8 @@ export function AgentRoutePolicyFields(props: {
                   actions={modelGroups.map((harness) => ({
                     id: harness.driver,
                     title: harness.label,
+                    // iOS shows each provider as a section, avoiding the submenu transition.
+                    displayInline: true,
                     attributes: {
                       disabled: disabled || harness.models.length === 0,
                     },
