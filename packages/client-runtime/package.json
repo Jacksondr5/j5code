@@ -515,6 +515,14 @@
       "types": "./src/j5/crewNotices.ts",
       "default": "./src/j5/crewNotices.ts"
     },
+    "./j5/crew-state": {
+      "types": "./src/j5/crewState.ts",
+      "default": "./src/j5/crewState.ts"
+    },
+    "./j5/spawned-children": {
+      "types": "./src/j5/spawnedChildren.ts",
+      "default": "./src/j5/spawnedChildren.ts"
+    },
     "./pull-request-project-filter": {
       "types": "./src/pullRequestProjectFilter.ts",
       "default": "./src/pullRequestProjectFilter.ts"

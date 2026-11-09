@@ -1,7 +1,4 @@
-import {
-  threadRuntimeIsActive,
-  type ThreadRuntimeSummary,
-} from "@t3tools/client-runtime/state/models";
+import { threadRuntimeIsActive, type ThreadRuntimeSummary } from "../state/models.ts";
 
 /** The seat facts a Crew summary reads; every field is something the client already holds. */
 export interface CrewSeatThread {

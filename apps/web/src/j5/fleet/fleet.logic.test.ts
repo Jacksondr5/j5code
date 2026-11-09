@@ -7,7 +7,7 @@ import {
   formatCrewStateSummary,
   summarizeCrewState,
   type CrewSeatThread,
-} from "../crew/crewState";
+} from "@t3tools/client-runtime/j5/crew-state";
 import {
   buildFleetTree,
   countFleetProjects,

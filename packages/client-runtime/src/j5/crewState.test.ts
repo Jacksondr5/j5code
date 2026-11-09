@@ -8,7 +8,7 @@ import {
   seatRunLabel,
   summarizeCrewState,
   type CrewSeatThread,
-} from "./crewState";
+} from "./crewState.ts";
 
 const seat = (overrides: Partial<CrewSeatThread> = {}): CrewSeatThread => ({
   runtime: { status: "idle" },

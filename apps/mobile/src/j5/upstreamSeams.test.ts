@@ -173,6 +173,18 @@ const SEAMS: ReadonlyArray<Seam> = [
     ],
   },
   {
+    file: "features/threads/thread-list-v2-items.tsx",
+    record: "case 115: spawned agents under their spawner's row",
+    from: "../../j5/crew/CaptainSeats",
+    reaches: ["<CaptainSeatsToggle", "<CaptainSeats", "statusLabels={STATUS_LABEL_BY_STATUS}"],
+  },
+  {
+    file: "features/threads/useThreadListV2.ts",
+    record: "case 115: agent-spawned threads leave the top level",
+    from: "../../j5/crew/spawnedChildren",
+    reaches: ["const threads = useCrewListedThreads(input.threads);"],
+  },
+  {
     file: "features/settings/SettingsAgentsRouteScreen.tsx",
     record: "PR #75–#86 role library: Personas settings",
     from: "../../j5/agents/AgentLibrarySettingsScreen",
