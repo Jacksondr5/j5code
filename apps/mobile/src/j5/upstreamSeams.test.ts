@@ -203,6 +203,12 @@ const SEAMS: ReadonlyArray<Seam> = [
     reaches: ["...j5SettingsFormRoutes(SETTINGS_PAGE_OPTIONS)"],
   },
   {
+    file: "../metro.config.js",
+    record: "case 113: Metro doesn't watch .j5code",
+    from: "",
+    reaches: ["\\.j5code["],
+  },
+  {
     file: "Stack.tsx",
     record: "case 101: the Inbox route",
     from: "./j5/inbox/routes",

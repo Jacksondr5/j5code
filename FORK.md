@@ -547,6 +547,8 @@ migrations after upstream migrations.
 
 112.  A settings section can say what it is for (Jackson's decision 1 of 2026-11-05: one line each in Settings saying what links and peering do). Upstream's `SettingsSection` (`apps/web/src/components/settings/settingsLayout.tsx`) has a title and a header action but no description, so upstream puts its Linked environments explanation in the empty state's row, where it disappears once a machine is linked. J5 adds one optional prop, `description`, rendered as a muted line under the title and above the rows; upstream passes it nowhere, so its sections are unchanged. `LinkedEnvironmentsSettings.tsx` moves upstream's line from its empty row to the section's `description`, and J5's `j5/peering/PeerServersSettings.tsx` does the same for Peer servers. On an advance, keep the prop if upstream's section still has none; if upstream adds its own, move both sections to it and drop J5's.
 
+113.  Metro doesn't watch a worktree's `.j5code` folder ([#964](https://github.com/Jacksondr5/j5code/issues/964)). `apps/mobile/metro.config.js` watches the whole workspace and blocks only upstream's `.t3` state folder. J5's dev and test homes live in `.j5code`, so every server write there reached Metro's watcher and showed React Native's "Refreshing…" banner. One more `blockList` entry, beside upstream's, blocks it. Dev only: release builds have no Metro. On a pin advance: if upstream moves or renames its `.t3` entry, keep `.j5code` beside it.
+
 ## Pin and upstream advance runbook
 
 Current pin: `322f6544dfad0a3c8a0c8cbecf2c7f7874b14268`, upstream's stable release tag `v0.1.7` on `main` (released 2026-11-04, frozen 2026-11-07). The previous pin was `d2c440312e5f39d59827ed466838a623516454d6`, upstream's stable release tag `v0.1.3`.
@@ -758,6 +760,7 @@ explicitly marked.
 | `apps/desktop/src/wsl/DesktopWslEnvironment.ts`                             | N       | 50                                                 |
 | `apps/desktop/src/wsl/DesktopWslServerTree.test.ts`                         | R       | B                                                  |
 | `apps/mobile/app.config.ts`                                                 | A       | B                                                  |
+| `apps/mobile/metro.config.js`                                               | A       | 113                                                |
 | `apps/mobile/package.json`                                                  | A       | B, 45                                              |
 | `apps/mobile/src/features/threads/NewTaskDraftScreen.tsx`                   | A       | 45, 90, 100, Saved-agent mentions                  |
 | `apps/mobile/src/features/threads/ThreadDetailScreen.tsx`                   | A       | 45, 49                                             |

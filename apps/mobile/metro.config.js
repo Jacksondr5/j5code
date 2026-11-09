@@ -29,6 +29,8 @@ config.resolver = {
         ? [config.resolver.blockList]
         : []),
     new RegExp(`${escapedWorkspaceRoot}[/\\\\]\\.t3[/\\\\].*`),
+    // J5: a worktree's test home (FORK.md case 113).
+    new RegExp(`${escapedWorkspaceRoot}[/\\\\]\\.j5code[/\\\\].*`),
   ],
   extraNodeModules: {
     ...config.resolver?.extraNodeModules,
