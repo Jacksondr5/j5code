@@ -184,9 +184,8 @@ it.effect("keeps a moved child's placement: still under its spawner, still spawn
       [spawnedBy(spawner)],
     );
     const spawnedChildren = yield* makeSpawnedChildrenRead.pipe(
-      Effect.provideService(
-        AgentCrewInstanceService,
-        AgentCrewInstanceService.of({ listInvolving: () => Effect.succeed([]) } as never),
+      Effect.provide(
+        Layer.mock(AgentCrewInstanceService)({ listInvolving: () => Effect.succeed([]) }),
       ),
     );
     const read = yield* spawnedChildren([spawner.threadId]);
