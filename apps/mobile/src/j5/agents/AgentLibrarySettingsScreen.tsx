@@ -737,7 +737,8 @@ function PersonaRow(props: {
           // React Native's Switch sets alignSelf: flex-start, which ignores the row's centring.
           style={{ alignSelf: "center" }}
           value={enabled}
-          disabled={props.locked}
+          // One change at a time: a second tap before the reread lands would race it.
+          disabled={props.locked || pending !== null}
           accessibilityLabel={`Enable ${persona.displayName}`}
           onValueChange={(next) => {
             setPending(next);
