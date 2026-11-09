@@ -53,6 +53,56 @@ it("keeps unsupported, authentication failure, and not-yet-connected states dist
     resolveJ5ReadSource({ ...source, phase: "connecting", result: AsyncResult.initial(false) })
       .status,
   ).toBe("loading");
+  // "available" is a server nothing is connecting to, so it is not loading.
+  expect(
+    resolveJ5ReadSource({ ...source, phase: "available", result: AsyncResult.initial(false) })
+      .status,
+  ).toBe("offline");
+});
+
+it("leaves out a server the person turned off, and reads one still starting up as loading", () => {
+  type Input = Parameters<typeof createJ5ReadSourcesAtom<ReadonlyArray<string>>>[0];
+  const on = EnvironmentId.make("on");
+  const off = EnvironmentId.make("off");
+  const starting = EnvironmentId.make("starting");
+  const reads: Array<EnvironmentId> = [];
+  const sources = createJ5ReadSourcesAtom<ReadonlyArray<string>>({
+    label: "test:j5-read-sources-disabled",
+    capability: "j5ProjectLedger",
+    catalogValueAtom: Atom.make({
+      isReady: true,
+      entries: new Map([
+        [on, { target: { label: "On" }, enabled: true }],
+        [off, { target: { label: "Off" }, enabled: false }],
+        [starting, { target: { label: "Starting" }, enabled: true }],
+      ]),
+    }) as unknown as Input["catalogValueAtom"],
+    stateAtom: (id) =>
+      Atom.make(
+        id === on
+          ? AsyncResult.success({ phase: "connected" })
+          : id === off
+            ? AsyncResult.success({ phase: "available", desired: false })
+            : AsyncResult.initial(true),
+      ) as unknown as ReturnType<Input["stateAtom"]>,
+    configValueAtom: (id) =>
+      Atom.make(
+        id === starting ? null : { environment: { capabilities: { j5ProjectLedger: true } } },
+      ) as unknown as ReturnType<Input["configValueAtom"]>,
+    queryAtom: (id) =>
+      Atom.make(() => {
+        reads.push(id);
+        return id === on
+          ? AsyncResult.success<ReadonlyArray<string>, unknown>(["row"])
+          : AsyncResult.initial<ReadonlyArray<string>, unknown>(true);
+      }),
+  });
+  const result = AtomRegistry.make().get(sources).sources;
+  expect(result.map((entry) => [entry.environmentLabel, entry.status])).toEqual([
+    ["On", "ready"],
+    ["Starting", "loading"],
+  ]);
+  expect(reads).not.toContain(off);
 });
 
 it("shows environment labels only once items span more than one environment", () => {
@@ -77,7 +127,7 @@ const readSourceFor = (
     capability: capability as Input["capability"],
     catalogValueAtom: Atom.make({
       isReady: true,
-      entries: new Map([[environmentId, { target: { label: "Remote" } }]]),
+      entries: new Map([[environmentId, { target: { label: "Remote" }, enabled: true }]]),
     }) as unknown as Input["catalogValueAtom"],
     stateAtom: () =>
       Atom.make(AsyncResult.success({ phase: "connected" })) as unknown as ReturnType<
@@ -131,7 +181,7 @@ it("shows nothing from a server once its connection is known to be a guest's", (
     capability: "j5ProjectLedger",
     catalogValueAtom: Atom.make({
       isReady: true,
-      entries: new Map([[source.environmentId, { target: { label: "Remote" } }]]),
+      entries: new Map([[source.environmentId, { target: { label: "Remote" }, enabled: true }]]),
     }) as unknown as Input["catalogValueAtom"],
     stateAtom: () =>
       Atom.make(AsyncResult.success({ phase: "connected" })) as unknown as ReturnType<
