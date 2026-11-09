@@ -775,8 +775,8 @@ export const layer: Layer.Layer<
                 WHERE parent.project_id = m.project_id AND parent.participant_id = p.placement_parent_id)
                 THEN p.placement_parent_id ELSE NULL END AS placement_parent_id
             FROM j5_a2a_membership m
-            LEFT JOIN j5_a2a_participant_placement p
-              ON p.project_id = m.project_id AND p.participant_id = m.participant_id
+            -- A placement stays where it was made when Turn into project moves the agent.
+            LEFT JOIN j5_a2a_participant_placement p ON p.participant_id = m.participant_id
             WHERE m.project_id = ${projectId}
             ORDER BY m.participant_id
           `;

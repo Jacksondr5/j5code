@@ -80,4 +80,11 @@ export default Effect.gen(function* () {
   `;
   // A participant has one membership wherever it lives, so delivery finds it by id alone.
   yield* sql`CREATE INDEX j5_a2a_membership_participant_idx ON j5_a2a_membership(participant_id)`;
+  // Its placement stays where it was made, so it is found by participant too.
+  yield* sql`
+    CREATE INDEX j5_a2a_participant_placement_participant_idx
+    ON j5_a2a_participant_placement(participant_id)
+  `;
+  // An ask joins the pair's open Exchange in whichever ledger holds it.
+  yield* sql`CREATE INDEX j5_a2a_exchange_pair_idx ON j5_a2a_exchange(sender_id, receiver_id, status)`;
 });

@@ -368,9 +368,16 @@ it.effect("an ask the agent made before Turn into project moved it is judged on 
       });
     }
     yield* sql`UPDATE orchestration_v2_projection_threads SET project_id = ${promoted} WHERE thread_id = ${threadId}`;
-    // She still writes to the thread itself, wherever it lives, so her ask stays.
+    // She still writes to the thread itself, wherever it lives, so her ask stays, she sees it
+    // linked to the thread, and she can answer it.
     assert.deepStrictEqual(yield* endUnanswerableAsks(PRIYA), []);
     assert.strictEqual(yield* exchangeStatus(toPriya), "open");
+    assert.deepStrictEqual(
+      (yield* A2AHumanInbox.use((inbox) => inbox.list(PRIYA))).map((item) => item.senderThreadId),
+      [threadId],
+    );
+    yield* answer(PRIYA, toPriya, "Acme first.");
+    assert.strictEqual(yield* exchangeStatus(toPriya), "closed");
   }).pipe(Effect.provide(testLayer)),
 );
 

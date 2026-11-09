@@ -94,6 +94,7 @@ interface InboxRow {
   readonly exchange_id: string;
   readonly sender_id: string;
   readonly sender_thread_id: string | null;
+  readonly sender_project_id: string | null;
   readonly intent: string;
   readonly urgency: "blocking" | "soon" | "fyi";
   readonly message: string;
@@ -221,6 +222,7 @@ export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlC
               exchange.exchange_id,
               exchange.sender_id,
               membership.thread_id AS sender_thread_id,
+              membership.project_id AS sender_project_id,
               exchange.intent,
               exchange.urgency,
               inbox.latest_message AS message,
@@ -249,9 +251,9 @@ export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlC
             JOIN j5_a2a_exchange AS exchange
               ON exchange.project_id = inbox.project_id
              AND exchange.exchange_id = inbox.exchange_id
+            -- The asker has one membership, which Turn into project may have moved since it asked.
             LEFT JOIN j5_a2a_membership AS membership
-              ON membership.project_id = inbox.project_id
-             AND membership.participant_id = inbox.sender_id
+              ON membership.participant_id = inbox.sender_id
             LEFT JOIN j5_a2a_everyone_answer AS everyone
               ON everyone.project_id = inbox.project_id
              AND everyone.exchange_id = inbox.exchange_id
@@ -279,7 +281,7 @@ export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlC
         const visible = yield* Effect.filter(rows, (row) =>
           writesToAsker({
             threadId: row.sender_thread_id,
-            projectId: row.project_id,
+            projectId: row.sender_project_id ?? row.project_id,
           }),
         );
         return visible.map((row) => {
@@ -332,13 +334,18 @@ export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlC
             } satisfies SendMessageResult;
           }
 
-          const exchanges = yield* sql<ExchangeRow & { readonly sender_thread_id: string | null }>`
+          const exchanges = yield* sql<
+            ExchangeRow & {
+              readonly sender_thread_id: string | null;
+              readonly sender_project_id: string | null;
+            }
+          >`
             SELECT exchange.project_id, exchange.exchange_id, exchange.sender_id,
-              exchange.receiver_id, exchange.status, membership.thread_id AS sender_thread_id
+              exchange.receiver_id, exchange.status, membership.thread_id AS sender_thread_id,
+              membership.project_id AS sender_project_id
             FROM j5_a2a_exchange AS exchange
             LEFT JOIN j5_a2a_membership AS membership
-              ON membership.project_id = exchange.project_id
-             AND membership.participant_id = exchange.sender_id
+              ON membership.participant_id = exchange.sender_id
             WHERE exchange.exchange_id = ${input.exchangeId}
               AND exchange.receiver_id IN (${input.personId}, ${EVERYONE_HERE_PERSON_ID})
             LIMIT 2
@@ -350,7 +357,7 @@ export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlC
           if (
             !(yield* (yield* writerOfAskers(input.personId))({
               threadId: exchange.sender_thread_id,
-              projectId: exchange.project_id,
+              projectId: exchange.sender_project_id ?? exchange.project_id,
             }))
           ) {
             return yield* new A2AAskNotYoursError({});
