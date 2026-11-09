@@ -17,7 +17,10 @@ import { useEnvironmentQuery } from "../../state/query";
 import { clearDraftAgent } from "./agentDraftState";
 import { agentPersonaEnvironment } from "./agentPersonaAtoms";
 
-/** Replaces the model control for a persona thread; on a started one, pressing it picks the model. */
+/**
+ * Replaces the model control for a persona thread with the persona's name alone, muted like the
+ * branch picker. On a started thread, pressing it switches the model; screen readers hear the route.
+ */
 export function AgentPersonaAssignmentControls(props: {
   readonly assignment: OrchestrationV2AgentPersonaAssignment;
   /** When known, the current library is compared with the launch snapshot to show drift. */
@@ -54,28 +57,17 @@ export function AgentPersonaAssignmentControls(props: {
       <View className="min-w-0 shrink">
         <ComposerInlineControl
           accessibilityLabel={`Persona: ${presentation.personaLabel}, ${presentation.routeLabel}${presentation.switchNote === null ? "" : `. ${presentation.switchNote}`}`}
-          emphasized
+          {...(props.onPressModel === undefined
+            ? {}
+            : { accessibilityHint: "Switch this worker's model" })}
           icon="person.crop.circle"
           label={presentation.personaLabel}
-          maxWidth={152}
+          maxWidth={200}
           showChevron={false}
           static={props.onPressModel === undefined}
           {...(props.onPressModel === undefined ? {} : { onPress: props.onPressModel })}
         />
       </View>
-      {compact ? null : (
-        <View className="min-w-0 shrink">
-          <ComposerInlineControl
-            accessibilityLabel={`Model: ${presentation.routeLabel}`}
-            {...(props.onPressModel === undefined
-              ? { static: true }
-              : { accessibilityHint: "Switch this worker's model", onPress: props.onPressModel })}
-            label={presentation.routeLabel}
-            maxWidth={200}
-            showChevron={props.onPressModel !== undefined}
-          />
-        </View>
-      )}
       {draftKey !== undefined ? (
         <ComposerInlineControl
           accessibilityLabel="Remove persona"
