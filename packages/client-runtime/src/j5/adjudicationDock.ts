@@ -33,7 +33,8 @@ export function adjudicationAsks<Ask extends AskLike>(input: {
   const kept = input.refused.filter(
     (item) => !openIds.has(item.exchangeId) && input.hasWords(item.exchangeId),
   );
-  return [...open, ...kept].toSorted(
+  // A fresh array, sorted in place: Hermes has no `toSorted`.
+  return [...open, ...kept].sort(
     (left, right) =>
       left.openedAt.localeCompare(right.openedAt) ||
       left.exchangeId.localeCompare(right.exchangeId),

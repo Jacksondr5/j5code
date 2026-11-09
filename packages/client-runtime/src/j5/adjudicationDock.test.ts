@@ -6,7 +6,7 @@ import {
   hasMoreThanExcerpt,
   isAskAlreadyClosed,
   pickShownAsk,
-} from "./adjudicationDock.logic";
+} from "./adjudicationDock.ts";
 
 const ask = (
   exchangeId: string,

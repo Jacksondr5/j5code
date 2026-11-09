@@ -21,7 +21,7 @@ import {
   hasMoreThanExcerpt,
   isAskAlreadyClosed,
   pickShownAsk,
-} from "./adjudicationDock.logic";
+} from "@t3tools/client-runtime/j5/adjudication-dock";
 import {
   AnswerAttachButton,
   AnswerAttachmentList,
