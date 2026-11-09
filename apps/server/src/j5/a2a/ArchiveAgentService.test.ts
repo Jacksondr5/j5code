@@ -14,7 +14,10 @@ import * as Layer from "effect/Layer";
 
 import { ServerSecretStore } from "../../auth/ServerSecretStore.ts";
 import { base64UrlEncode, signPayload } from "../../auth/utils.ts";
-import { OrchestratorProjectionError } from "../../orchestration-v2/Orchestrator.ts";
+import {
+  OrchestratorDispatchError,
+  OrchestratorProjectionError,
+} from "../../orchestration-v2/Orchestrator.ts";
 import {
   ProjectionStoreReadError,
   ProjectionStoreThreadNotFoundError,
@@ -74,6 +77,7 @@ interface HarnessOptions {
   readonly runStatus?: OrchestrationV2RunStatus;
   readonly mismatchParticipantId?: ParticipantId;
   readonly failLifecycleOnce?: boolean;
+  readonly failDelegateStopOnce?: boolean;
 }
 
 const makeHarness = (options: HarnessOptions = {}) => {
@@ -84,6 +88,7 @@ const makeHarness = (options: HarnessOptions = {}) => {
   let lifecycleCalls = 0;
   let archiveCalls = 0;
   let factReads = 0;
+  let delegateStops = 0;
   const owningExchangeProjectId = options.exchangeProjectId ?? ledgerProjectId;
   const order: Array<string> = [];
   const events: Array<StoredCommEvent> = [];
@@ -236,7 +241,18 @@ const makeHarness = (options: HarnessOptions = {}) => {
         }
         return Effect.succeed({ sequence: 1, storedEvents: [] });
       },
-      stopDelegatedTasks: () => Effect.void,
+      stopDelegatedTasks: (input) => {
+        delegateStops += 1;
+        if (options.failDelegateStopOnce === true && delegateStops === 1)
+          return Effect.fail(
+            new OrchestratorDispatchError({
+              commandId: input.commandId,
+              commandType: "delegated_task.remote.complete",
+            }),
+          );
+        order.push("delegates_stopped");
+        return Effect.void;
+      },
     }),
     Layer.mock(A2ALifecycleService)({
       archiveParticipant: () => {
@@ -321,6 +337,7 @@ it.effect("closes cross-project consequences before returning archived", () => {
     const state = harness.snapshot();
     assert.deepStrictEqual(state.order, [
       "interrupt_requested",
+      "delegates_stopped",
       "thread_archive_committed",
       "lifecycle_obligations_committed",
     ]);
@@ -336,6 +353,29 @@ it.effect("closes cross-project consequences before returning archived", () => {
           event.payload.exchangeRole === "terminal_notice",
       ),
     );
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("stops the delegates of a seat its first stop left idle before archiving it", () => {
+  const harness = makeHarness({ runStatus: "running", failDelegateStopOnce: true });
+  return Effect.gen(function* () {
+    const service = yield* ArchiveAgentService;
+    const refusal = yield* Effect.flip(service.archive(archiveInput()));
+    assert.instanceOf(refusal, ArchiveAgentConfirmationRequiredError);
+    if (!(refusal instanceof ArchiveAgentConfirmationRequiredError)) return;
+    // The Stop commits and ends the turn, then stopping the seat's delegates fails.
+    yield* Effect.flip(service.archive(archiveInput(refusal.confirmationToken)));
+    harness.settleRun();
+    assert.isFalse(harness.snapshot().archived);
+    // The retry finds the seat idle, so it needs no token, and still stops its delegates first.
+    assert.equal(yield* service.archive(archiveInput()), "archived");
+    assert.deepStrictEqual(harness.snapshot().order, [
+      "interrupt_requested",
+      "interrupt_requested",
+      "delegates_stopped",
+      "thread_archive_committed",
+      "lifecycle_obligations_committed",
+    ]);
   }).pipe(Effect.provide(harness.layer));
 });
 
