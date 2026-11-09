@@ -497,7 +497,7 @@ function OwnerAgentLibrarySettingsScreen() {
         ) : null}
 
         <SettingsSection
-          title="Agent Setup"
+          title="Personas"
           footer={
             Platform.OS === "web"
               ? "Use Settings → Agent Setup in the web app to import files."
@@ -547,7 +547,7 @@ function OwnerAgentLibrarySettingsScreen() {
 
         {effectiveEnvironmentId !== null ? (
           <SettingsSection
-            title="Library sources"
+            title="Persona library sources"
             footer={
               librarySources.data?.configured === false
                 ? "Folders this environment reads YAML definitions from, on its machine. Bundled examples appear until a folder is configured or the default folder exists. Adding a folder writes agent-personas.json."
