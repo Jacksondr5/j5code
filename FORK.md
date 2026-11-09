@@ -970,7 +970,7 @@ explicitly marked.
 | `packages/shared/src/composerTrigger.ts`                                    | A       | 49, Saved-agent mentions                           |
 | `packages/shared/src/composerInlineTokens.ts`                               | A       | 49, Saved-agent mentions                           |
 | `apps/mobile/src/features/threads/ComposerCommandPopover.tsx`               | A       | 49, Saved-agent mentions                           |
-| `apps/mobile/src/features/threads/ThreadFeed.tsx`                           | N       | 97, 98                                             |
+| `apps/mobile/src/features/threads/ThreadFeed.tsx`                           | N       | 97, 98, 104                                        |
 | `apps/mobile/src/features/threads/ThreadQueueControl.tsx`                   | N       | 97, 99                                             |
 | `apps/mobile/src/lib/filePreview.test.ts`                                   | N       | 97, 99                                             |
 | `apps/mobile/src/features/threads/thread-search-match.tsx`                  | N       | 99                                                 |
