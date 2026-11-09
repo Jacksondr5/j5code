@@ -506,7 +506,7 @@ function OwnerAgentLibrarySettingsScreen() {
         >
           {effectiveEnvironmentId === null ? (
             <InfoRow text="No connected environments" />
-          ) : catalog.isPending ? (
+          ) : catalog.isPending && catalog.data == null ? (
             <InfoRow text="Loading personas" />
           ) : catalog.error ? (
             <InfoRow tone="danger" text={catalog.error} />
@@ -554,7 +554,7 @@ function OwnerAgentLibrarySettingsScreen() {
                 : "Folders this environment reads YAML definitions from, on its machine; relative paths resolve from its state directory. Files are read on every catalog request, so edits and git pulls apply without a restart."
             }
           >
-            {librarySources.isPending ? (
+            {librarySources.isPending && librarySources.data == null ? (
               <InfoRow text="Loading folders" />
             ) : librarySources.error ? (
               <InfoRow tone="danger" text={librarySources.error} />
