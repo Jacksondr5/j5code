@@ -24,6 +24,7 @@ import {
   threadArgument,
   threadListCommand,
   threadShowCommand,
+  ThreadToolFailedError,
   ThreadUsageError,
   type ThreadTools,
   titleFromMessage,
@@ -39,8 +40,8 @@ const SpawnResult = Schema.Struct({
   project_id: Schema.String,
 });
 
-const ThreadRuns = Schema.Struct({
-  recentRuns: Schema.Array(Schema.Struct({ runId: RunId })),
+const FirstMessages = Schema.Struct({
+  items: Schema.Array(Schema.Struct({ type: Schema.String, runId: Schema.NullOr(RunId) })),
 });
 
 interface StartFlags {
@@ -117,17 +118,22 @@ export const startAgent = Effect.fn("j5.cli.thread.startAgent")(function* (
     SpawnResult,
   );
   if (input.wait) {
-    // The brief starts before j5_spawn_agent returns, so the new thread's run is its first.
-    const { recentRuns } = yield* tools.call(
+    // The brief is the thread's first message and starts before j5_spawn_agent returns. Reads go
+    // oldest first, so a message someone sends meanwhile cannot stand in for it.
+    const { items } = yield* tools.call(
       "t3_thread_read",
-      { threadId: spawned.thread_id, limit: 1, runLimit: 1 },
-      ThreadRuns,
+      { threadId: spawned.thread_id, view: "messages", limit: 10, runLimit: 1 },
+      FirstMessages,
     );
-    const runId = recentRuns[0]?.runId;
-    if (runId !== undefined) {
-      if (!input.json) yield* Console.error(`Thread ${spawned.thread_id}`);
-      return yield* finishRun(tools, { threadId: spawned.thread_id, runId, json: input.json });
+    const runId = items.find((item) => item.type === "user_message")?.runId ?? null;
+    if (runId === null) {
+      return yield* new ThreadToolFailedError({
+        tool: "t3_thread_read",
+        detail: `Started thread ${spawned.thread_id}, but its brief's run could not be found to wait for. Follow it with j5 thread show.`,
+      });
     }
+    if (!input.json) yield* Console.error(`Thread ${spawned.thread_id}`);
+    return yield* finishRun(tools, { threadId: spawned.thread_id, runId, json: input.json });
   }
   yield* input.json ? printJson(spawned) : Console.log(spawned.thread_id);
 });
