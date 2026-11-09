@@ -63,7 +63,8 @@ export const J5ProjectToolkit = Toolkit.make(
 
 // Raw send and bulk-create stay out: `j5_send_message` and `j5_spawn_agent` are their doors
 // (register D2). Waiting, interrupting and links are upstream's (D42).
-// `orchestrator_capabilities` and `delegate_task` are J5's (orchestratorSurface.ts).
+// `orchestrator_capabilities`, `delegate_task` and `t3_thread_interrupt` are J5's
+// (orchestratorSurface.ts).
 export const J5OrchestratorToolkit = Toolkit.make(
   OrchestratorToolkit.tools.task_status,
   OrchestratorToolkit.tools.task_cancel,
@@ -83,7 +84,6 @@ export const J5OrchestratorToolkit = Toolkit.make(
   OrchestratorToolkit.tools.t3_thread_wait
     .annotate(Tool.Destructive, false)
     .annotate(Tool.OpenWorld, false),
-  OrchestratorToolkit.tools.t3_thread_interrupt,
   OrchestratorToolkit.tools.t3_environment_links
     .annotate(Tool.Destructive, false)
     .annotate(Tool.OpenWorld, false),
