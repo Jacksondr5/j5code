@@ -8,7 +8,7 @@ import {
   ScheduledTaskError,
   type ScheduledTaskMutationResult,
   type ScheduledTaskUpsertInput,
-  type ThreadId,
+  ThreadId,
   authScopeRequiredResponse,
 } from "@t3tools/contracts";
 import { type PersonLevel, levelReaches } from "@t3tools/contracts/j5";
@@ -121,7 +121,7 @@ const NARROWED_COMMAND_SCOPES: {
   "thread.created.record": onParent,
 };
 
-/** Commands only an Owner sends, for now (AC14). */
+/** Commands only an Owner sends, for now (AC14); a side chat's delete is the exception. */
 const OWNER_ONLY_COMMANDS: ReadonlySet<OrchestrationV2Command["type"]> = new Set([
   "thread.archive",
   "thread.unarchive",
@@ -225,13 +225,35 @@ export const makeCommandAdmission = Effect.fn("j5.sharing.commandAdmission.makeC
       Effect.catchTags({ PersonAccessStorageError: refuseUnreadable }),
     );
 
+    /** The thread a side chat answers, or `null` for any other thread. */
+    const sideChatParent = (threadId: ThreadId) =>
+      sql<{ readonly parent_thread_id: string | null }>`
+        SELECT json_extract(payload_json, '$.lineage.parentThreadId') AS parent_thread_id
+        FROM orchestration_v2_projection_threads
+        WHERE thread_id = ${threadId}
+          AND json_extract(payload_json, '$.lineage.sideChat') = 1
+      `.pipe(
+        Effect.map((rows) => rows[0]?.parent_thread_id ?? null),
+        Effect.mapError(() => refused("Could not read the thread to delete.")),
+      );
+
+    const owner =
+      reach.kind === "service" ||
+      (reach.kind === "person" && levelReaches(reach.serverLevel, "owner"));
+
     const checked = Effect.fn("j5.sharing.commandAdmission.checked")(function* (
       command: OrchestrationV2Command,
     ) {
+      // Whoever can write to a thread may delete its side chats, which upstream also deletes
+      // when an unused one is closed (decision 9 of the v0.1.7 advance).
+      if (command.type === "thread.delete" && !owner) {
+        const parent = yield* sideChatParent(command.threadId);
+        if (parent !== null) {
+          yield* requireLevel({ kind: "thread", threadId: ThreadId.make(parent) }, "collaborator");
+          return command;
+        }
+      }
       if (OWNER_ONLY_COMMANDS.has(command.type)) {
-        const owner =
-          reach.kind === "service" ||
-          (reach.kind === "person" && levelReaches(reach.serverLevel, "owner"));
         if (!owner) return yield* refused(OWNERS_ONLY);
         yield* crewSeatArchiveGuard(command).pipe(
           Effect.mapError(

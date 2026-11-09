@@ -7,6 +7,7 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import type { PersonLevel, PersonScope } from "@t3tools/contracts/j5";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -52,7 +53,7 @@ export const recordsLayer = PairingIntents.peopleLayer.pipe(
   Layer.provideMerge(humanPersonRegistryLayer),
   Layer.provideMerge(sessionStore),
   Layer.provideMerge(SqlitePersistence.layerMemory),
-  Layer.provideMerge(NodeServices.layer),
+  Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
 );
 
 export const accessLayer = Access.layer.pipe(Layer.provideMerge(recordsLayer));
@@ -74,7 +75,11 @@ export const accessLayerWithHook = (hook: Access.AccessWriteHook["Service"]) =>
 export const thread = Effect.fn("test.thread")(function* (
   id: string,
   projectId: ProjectId = PROJECT,
-  lineage: { readonly parent: string; readonly relationship: "subagent" | "fork" } | null = null,
+  lineage: {
+    readonly parent: string;
+    readonly relationship: "subagent" | "fork";
+    readonly sideChat?: boolean;
+  } | null = null,
 ) {
   const sql = yield* SqlClient.SqlClient;
   const payload = encodeJson({
@@ -82,6 +87,7 @@ export const thread = Effect.fn("test.thread")(function* (
       parentThreadId: lineage?.parent ?? null,
       relationshipToParent: lineage?.relationship ?? null,
       rootThreadId: lineage?.parent ?? id,
+      ...(lineage?.sideChat === true ? { sideChat: true } : {}),
     },
   });
   yield* sql`

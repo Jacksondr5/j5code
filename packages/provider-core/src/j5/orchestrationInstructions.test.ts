@@ -4,7 +4,7 @@ import {
   T3_CODE_ORCHESTRATION_INSTRUCTIONS,
   T3_CODE_ORCHESTRATION_SECTIONS,
   t3AcpPromptWithInstructions,
-  t3OrchestrationPromptForFirstRun,
+  t3OrchestrationPrompt,
   t3OrchestrationSystemPrompt,
 } from "../server/orchestrationInstructions.ts";
 import {
@@ -22,10 +22,16 @@ describe("J5 orchestration instructions", () => {
   it("are what upstream's exported constants carry to every harness", () => {
     assert.strictEqual(T3_CODE_ORCHESTRATION_SECTIONS, J5_ORCHESTRATION_SECTIONS);
     assert.strictEqual(T3_CODE_ORCHESTRATION_INSTRUCTIONS, J5_ORCHESTRATION_INSTRUCTIONS);
-    assert.strictEqual(t3OrchestrationSystemPrompt(true), J5_ORCHESTRATION_INSTRUCTIONS);
-    assert.isUndefined(t3OrchestrationSystemPrompt(false));
+    assert.strictEqual(t3OrchestrationSystemPrompt(true, false), J5_ORCHESTRATION_INSTRUCTIONS);
+    assert.isUndefined(t3OrchestrationSystemPrompt(false, false));
     assert.include(
-      t3OrchestrationPromptForFirstRun({ prompt: "Inspect.", runOrdinal: 1, hasT3Mcp: true }),
+      t3OrchestrationPrompt({
+        prompt: "Inspect.",
+        hasT3Mcp: true,
+        hasDeviceTools: false,
+        orchestrationDelivered: false,
+        deviceInstructionsDelivered: false,
+      }),
       J5_ORCHESTRATION_INSTRUCTIONS.trim(),
     );
   });
@@ -67,10 +73,11 @@ describe("J5 orchestration instructions", () => {
     const prompt = "Inspect the repository.";
     const injected = t3AcpPromptWithInstructions({
       prompt,
-      state: { interactionMode: "default", hasT3Mcp: true },
+      state: { interactionMode: "default", hasT3Mcp: true, hasDeviceTools: true },
     });
     assert.include(injected, "J5 Code interaction mode: Default");
     assert.include(injected, "## J5 Code browser");
+    assert.include(injected, "## J5 Code devices");
     assert.include(injected, J5_ORCHESTRATION_INSTRUCTIONS.trim());
     assert.include(injected, J5_ACP_MCP_FALLBACK_INSTRUCTIONS);
     assert.notInclude(injected, "T3 tools");
@@ -78,7 +85,7 @@ describe("J5 orchestration instructions", () => {
     assert.include(
       t3AcpPromptWithInstructions({
         prompt,
-        state: { interactionMode: "plan", hasT3Mcp: false },
+        state: { interactionMode: "plan", hasT3Mcp: false, hasDeviceTools: false },
       }),
       "J5 Code interaction mode: Plan",
     );
@@ -147,7 +154,6 @@ describe("J5 orchestration instructions", () => {
       "create_threads",
       "t3_thread_start",
       "t3_thread_send",
-      "t3_thread_interrupt",
       "t3_thread_launch",
       "workspace strategy",
       "workspaceStrategy",
@@ -167,10 +173,17 @@ describe("J5 orchestration instructions", () => {
     );
     assert.include(
       J5_ORCHESTRATION_INSTRUCTIONS,
-      "and it finishes in this turn (Claude `Agent` always with `run_in_background:false`; Codex `spawn_agent`, then wait)",
+      "(Claude `Agent` with `run_in_background:false`; Codex `spawn_agent`, then wait)",
     );
     assert.include(J5_ORCHESTRATION_INSTRUCTIONS, 'a separate checkout (`isolation:"worktree"`)');
-    assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "for background work");
+    assert.include(
+      J5_ORCHESTRATION_INSTRUCTIONS,
+      "Background agent: `delegate_task`, never a background `Agent`",
+    );
+    assert.include(
+      J5_ORCHESTRATION_INSTRUCTIONS,
+      "with `task_cancel`, never `t3_thread_interrupt` on a `childThreadId`",
+    );
     assert.include(
       J5_ORCHESTRATION_INSTRUCTIONS,
       "Call `orchestrator_capabilities` once per thread, before the first `delegate_task`",
@@ -220,11 +233,15 @@ describe("J5 orchestration instructions", () => {
       "When asked only to schedule, `schedule_task` without running its prompt",
     );
     assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "### Visuals and preview");
-    assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "even unasked");
+    assert.include(
+      J5_ORCHESTRATION_INSTRUCTIONS,
+      "Answer data with a trend or comparison with a chart",
+    );
+    assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "`t3_environment_links` lists linked ones");
     assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "`html_preview`, then `html_render`");
     assert.include(
       J5_ORCHESTRATION_INSTRUCTIONS,
-      "Never use `preview_*` to verify or show your own edit",
+      "Never use `preview_*` unasked to verify or show your own edit",
     );
   });
 

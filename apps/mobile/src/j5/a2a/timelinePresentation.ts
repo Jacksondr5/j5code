@@ -46,6 +46,15 @@ export function resolveJ5FeedMessage(message: J5UserMessageInput, timeline: J5Ti
 export type J5FeedMessagePresentation = ReturnType<typeof resolveJ5FeedMessage>;
 
 /**
+ * A queued message J5 took out of an envelope: who sent it and the letter's first line, for the
+ * queue sheet's row. Null for anything upstream's row already reads as written.
+ */
+export function presentJ5QueuedMessage(message: J5UserMessageInput, timeline: J5Timeline) {
+  const { j5, text } = resolveJ5FeedMessage(message, timeline);
+  return j5?.unwrapped ? { j5, preview: firstLine(text) } : null;
+}
+
+/**
  * The fold header for a message J5 read. Folded, it has no label, since the identity line above
  * names the sender. Open, it names the sender (or leaves upstream's sender-thread title) and drops
  * the summary when the body already opens with it; a Crew seat's brief keeps it, because its body

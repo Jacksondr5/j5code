@@ -15,7 +15,6 @@ import {
   timingSafeEqualBase64Url,
 } from "../../auth/utils.ts";
 import type { ProjectionRecords } from "../../orchestration-v2/ProjectionStore.ts";
-import { ThreadLifecycleService } from "../../orchestration-v2/ThreadLifecycleService.ts";
 import {
   ThreadManagementService,
   latestActiveRun,
@@ -345,7 +344,6 @@ export const layer = Layer.effect(
     const ledger = yield* A2ALedger;
     const lifecycle = yield* A2ALifecycleService;
     const threadManagement = yield* ThreadManagementService;
-    const threadLifecycle = yield* ThreadLifecycleService;
     const secrets = yield* ServerSecretStore;
 
     const secret = secrets
@@ -604,7 +602,8 @@ export const layer = Layer.effect(
 
         if (before.projection.thread.archivedAt === null) {
           const archiveAttempt = yield* Effect.result(
-            threadLifecycle.archive({
+            threadManagement.dispatch({
+              type: "thread.archive",
               commandId: input.archiveCommandId,
               threadId: input.target.threadId,
             }),

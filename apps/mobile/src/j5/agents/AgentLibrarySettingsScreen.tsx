@@ -46,7 +46,7 @@ import { useEnvironmentQuery } from "../../state/query";
 import { useRemoteConnectionStatus } from "../../state/use-remote-environment-registry";
 import { SettingsSection } from "../../features/settings/components/SettingsSection";
 import { SettingsScreen } from "../../features/settings/components/SettingsScreen";
-import { SettingsActionRow } from "../../features/settings/components/SettingsActionRow";
+import { ListActionRow as SettingsActionRow } from "../../components/ui/ListActionRow";
 import { ThemedSwitch } from "../../components/ui/ThemedSwitch";
 import { PlaybookLibrarySettingsSection } from "../playbooks/PlaybookLibrarySettingsScreen";
 
@@ -141,7 +141,7 @@ function OwnerAgentLibrarySettingsScreen() {
     error: AgentPersonaImportConflictError;
     resolve: (selected: ReadonlyArray<AgentPersonaImportConflict> | null) => void;
   } | null>(null);
-  // oxlint-disable-next-line t3code/react-effect-budget -- a replaced or unmounted confirmation resolves its waiting import as cancelled.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- a replaced or unmounted confirmation resolves its waiting import as cancelled.
   useEffect(() => () => confirmation?.resolve(null), [confirmation]);
   const navigation = useSettingsFormNavigation();
   const [notification, setNotification] = useState<AgentLibraryNotification | null>(null);

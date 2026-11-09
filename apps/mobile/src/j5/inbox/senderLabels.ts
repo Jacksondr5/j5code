@@ -31,7 +31,7 @@ export function useScopedParticipantLabels(
   const [labels, setLabels] = useState<ReadonlyMap<EnvironmentId, ReadonlyMap<string, string>>>(
     () => new Map(),
   );
-  // oxlint-disable-next-line t3code/react-effect-budget -- reads names from each server for the senders on screen, and drops a stale answer when they change.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reads names from each server for the senders on screen, and drops a stale answer when they change.
   useEffect(() => {
     const byEnvironment = new Map<EnvironmentId, Array<string>>();
     for (const entry of key === "" ? [] : key.split("\n")) {

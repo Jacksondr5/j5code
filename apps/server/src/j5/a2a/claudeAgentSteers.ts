@@ -1,6 +1,6 @@
 import type { SDKMessage, SDKResultMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import type { ProviderAdapterV2TurnMessage } from "@t3tools/provider-core/server/ProviderAdapter";
-import type * as Crypto from "effect/Crypto";
+import type * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 
 import type { ClaudeAgentSdkQuerySession } from "../../orchestration-v2/Adapters/ClaudeAdapterV2.ts";
@@ -41,10 +41,10 @@ const isSteerUuid = (value: string): value is SteerUuid =>
 /** Spread into the steer's user message in place of upstream's `priority: "now"`. */
 export const j5ClaudeSteerFields = Effect.fnUntraced(function* (
   message: Pick<ProviderAdapterV2TurnMessage, "createdBy">,
-  crypto: Crypto.Crypto,
+  random: SecureRandom.SecureRandom["Service"],
 ) {
   if (message.createdBy === "user") return { priority: "now" } satisfies J5ClaudeSteerFields;
-  const uuid = yield* crypto.randomUUIDv4().pipe(Effect.filterOrFail(isSteerUuid));
+  const uuid = yield* random.uuidV4().pipe(Effect.filterOrFail(isSteerUuid));
   return { priority: "next", uuid } satisfies J5ClaudeSteerFields;
 });
 

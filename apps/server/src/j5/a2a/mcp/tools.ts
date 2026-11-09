@@ -24,7 +24,7 @@ import {
   ThreadId,
   TrimmedNonEmptyString,
 } from "@t3tools/contracts";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as FileSystem from "effect/FileSystem";
 import * as SqlClient from "effect/sql/SqlClient";
 import { ServerConfig } from "../../../config.ts";
@@ -736,7 +736,7 @@ const sendDependencies = [
   A2ASendService,
   A2AHomeRegistrar,
   A2ADeliveryWorker,
-  Crypto.Crypto,
+  SecureRandom.SecureRandom,
   OrchestratorV2,
   // The receiver backlog read behind the send result's deliveryNotice.
   SqlClient.SqlClient,
@@ -769,7 +769,7 @@ const spawnDependencies = [
   SpawnAgentService.SpawnAgentService,
   McpInvocationContext.McpInvocationContext,
   A2ASendService,
-  Crypto.Crypto,
+  SecureRandom.SecureRandom,
   A2AHomeRegistrar,
   ThreadRegistration,
   A2ALedger,
@@ -797,7 +797,7 @@ const spawnDependencies = [
 const crewProposalDependencies = [
   McpInvocationContext.McpInvocationContext,
   A2ASendService,
-  Crypto.Crypto,
+  SecureRandom.SecureRandom,
   A2AHomeRegistrar,
   ThreadRegistration,
   A2ALedger,
@@ -821,7 +821,7 @@ const proposePersonaDependencies = [
 const stopDependencies = [
   McpInvocationContext.McpInvocationContext,
   A2ASendService,
-  Crypto.Crypto,
+  SecureRandom.SecureRandom,
   ThreadManagementService,
   // A Captain stops its own seats whatever their permission modes.
   AgentCrewInstanceService,
@@ -831,7 +831,7 @@ const stopCrewDependencies = [
   McpInvocationContext.McpInvocationContext,
   ThreadManagementService,
   A2ASendService,
-  Crypto.Crypto,
+  SecureRandom.SecureRandom,
   A2ALedger,
   CrewStopService,
 ];
@@ -840,7 +840,7 @@ const archiveCrewDependencies = [
   McpInvocationContext.McpInvocationContext,
   ThreadManagementService,
   A2ASendService,
-  Crypto.Crypto,
+  SecureRandom.SecureRandom,
   A2ALedger,
   ArchiveCrewService,
 ];

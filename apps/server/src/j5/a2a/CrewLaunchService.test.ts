@@ -2,6 +2,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import { AgentPersonaEscalations } from "../agents/agentPersonaEscalation.ts";
 import { agentPersonaEscalationsTestLayer } from "../test-support/agentPersonaEscalations.ts";
 import { assert, it } from "@effect/vitest";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CommandId,
@@ -333,7 +334,7 @@ it.effect("creates approved seats and additions without starting turns", () =>
       Layer.provideMerge(dependencies(commands, [codex])),
       Layer.provideMerge(Layer.succeedContext(context)),
       Layer.provideMerge(personaLibraryLayer("j5-crew-launch-", launchablePersonas)),
-      Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     );
     yield* Effect.gen(function* () {
       const launcher = yield* CrewLaunchService;
@@ -480,7 +481,7 @@ it.effect(
         Layer.provideMerge(dependencies(commands, [codex])),
         Layer.provideMerge(Layer.succeedContext(context)),
         Layer.provideMerge(personaLibraryLayer("j5-crew-custom-", launchablePersonas)),
-        Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
       );
       yield* Effect.gen(function* () {
         const launcher = yield* CrewLaunchService;
@@ -633,7 +634,7 @@ it.effect(
         Layer.provideMerge(dependencies(commands, [signedOut])),
         Layer.provideMerge(Layer.succeedContext(context)),
         Layer.provideMerge(personaLibraryLayer("j5-crew-launch-", launchablePersonas)),
-        Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
       );
       yield* Effect.gen(function* () {
         const launcher = yield* CrewLaunchService;
@@ -676,7 +677,7 @@ it.effect("custom seats refuse unavailable providers before recording or spawnin
         Layer.provideMerge(dependencies(commands, providers)),
         Layer.provideMerge(Layer.succeedContext(context)),
         Layer.provideMerge(personaLibraryLayer("j5-custom-unavailable-", launchablePersonas)),
-        Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
       );
       yield* Effect.gen(function* () {
         const launcher = yield* CrewLaunchService;
@@ -741,7 +742,7 @@ it.effect(
         ),
         Layer.provideMerge(Layer.succeedContext(context)),
         Layer.provideMerge(personaLibraryLayer("j5-preview-runtime-", launchablePersonas)),
-        Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
       );
       yield* Effect.gen(function* () {
         const launcher = yield* CrewLaunchService;
@@ -907,7 +908,7 @@ it.effect(
         ),
         Layer.provideMerge(Layer.succeedContext(context)),
         Layer.provideMerge(personaLibraryLayer("j5-custom-runtime-", launchablePersonas)),
-        Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
       );
       yield* Effect.gen(function* () {
         const launcher = yield* CrewLaunchService;
@@ -1146,7 +1147,7 @@ it.effect(
         ),
         Layer.provideMerge(Layer.succeedContext(context)),
         Layer.provideMerge(personaLibraryLayer("j5-custom-access-", launchablePersonas)),
-        Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
       );
       yield* Effect.gen(function* () {
         const launcher = yield* CrewLaunchService;
@@ -1241,7 +1242,7 @@ it.effect("a full-access persona seat runs full access unless the seat overrides
       ),
       Layer.provideMerge(Layer.succeedContext(context)),
       Layer.provideMerge(personaLibraryLayer("j5-full-access-seat-", launchablePersonas)),
-      Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     );
     yield* Effect.gen(function* () {
       const launcher = yield* CrewLaunchService;
@@ -1320,7 +1321,7 @@ it.effect("a persona seat's edited instructions replace the persona's own at lau
       ),
       Layer.provideMerge(Layer.succeedContext(context)),
       Layer.provideMerge(personaLibraryLayer("j5-edited-persona-", launchablePersonas)),
-      Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     );
     yield* Effect.gen(function* () {
       const launcher = yield* CrewLaunchService;
@@ -1400,7 +1401,7 @@ it.effect(
         Layer.provideMerge(
           personaLibraryLayer("j5-crew-reviewer-", [...launchablePersonas, reviewer]),
         ),
-        Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
       );
       yield* Effect.gen(function* () {
         const launcher = yield* CrewLaunchService;
@@ -1520,7 +1521,7 @@ it.effect("refuses persona seats whose effective ACP access the harness cannot e
       ),
       Layer.provideMerge(Layer.succeedContext(context)),
       Layer.provideMerge(personaLibraryLayer("j5-persona-acp-", launchablePersonas)),
-      Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     );
     yield* Effect.gen(function* () {
       const launcher = yield* CrewLaunchService;
@@ -1581,7 +1582,7 @@ it.effect("pins non-reasoning provider defaults for persona seats without overri
       Layer.provideMerge(dependencies(commands, providers)),
       Layer.provideMerge(Layer.succeedContext(context)),
       Layer.provideMerge(personaLibraryLayer("j5-persona-defaults-", launchablePersonas)),
-      Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     );
     yield* Effect.gen(function* () {
       const launcher = yield* CrewLaunchService;
@@ -1682,7 +1683,7 @@ const unitFixture = Effect.gen(function* () {
     ),
     Layer.provideMerge(Layer.succeedContext(context)),
     Layer.provideMerge(personaLibraryLayer("j5-crew-unit-", launchablePersonas)),
-    Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
   );
   const archiveInput = (crewInstanceId: string) => ({
     providerSessionId: "session",
@@ -2084,7 +2085,7 @@ it.effect("records a playbook Crew's step owners and surfaces a taken step unwra
       Layer.provideMerge(dependencies(commands, [codex])),
       Layer.provideMerge(Layer.succeedContext(context)),
       Layer.provideMerge(personaLibraryLayer("j5-crew-steps-", launchablePersonas)),
-      Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     );
     yield* Effect.gen(function* () {
       const launcher = yield* CrewLaunchService;
@@ -2164,7 +2165,7 @@ it.effect("a relaunch after a failed link stores the re-approved seat's steps", 
       Layer.provideMerge(dependencies(commands, [codex])),
       Layer.provideMerge(Layer.succeedContext(context)),
       Layer.provideMerge(personaLibraryLayer("j5-crew-relaunch-", launchablePersonas)),
-      Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     );
     yield* Effect.gen(function* () {
       const launcher = yield* CrewLaunchService;
@@ -2241,7 +2242,7 @@ it.effect("launches each seat in the workspace it names, and refuses one git can
         ),
         Layer.provideMerge(Layer.succeedContext(context)),
         Layer.provideMerge(personaLibraryLayer("j5-crew-launch-", launchablePersonas)),
-        Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
       );
     const seat = (name: string, workspace: SpawnWorkspaceChoice) => ({
       name,
@@ -2397,7 +2398,7 @@ it.effect("binds an existing worktree's live branch, so a stale preview can't ap
       ),
       Layer.provideMerge(Layer.succeedContext(context)),
       Layer.provideMerge(personaLibraryLayer("j5-crew-launch-", launchablePersonas)),
-      Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     );
     const reviewer = (worktreePath: string) => ({
       name: "reviewer",
@@ -2490,7 +2491,7 @@ it.effect("pins a new worktree's base commit, and a moved or renamed branch can'
       ),
       Layer.provideMerge(Layer.succeedContext(context)),
       Layer.provideMerge(personaLibraryLayer("j5-crew-launch-", launchablePersonas)),
-      Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     );
     const builder = (workspace: SpawnWorkspaceChoice) => ({
       name: "builder",
@@ -2598,7 +2599,7 @@ it.effect(
         ),
         Layer.provideMerge(Layer.succeedContext(context)),
         Layer.provideMerge(personaLibraryLayer("j5-crew-launch-", launchablePersonas)),
-        Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
       );
       const seat = (startFromOrigin: boolean) => ({
         name: "builder",
@@ -2662,7 +2663,7 @@ it.effect(
         ),
         Layer.provideMerge(Layer.succeedContext(context)),
         Layer.provideMerge(personaLibraryLayer("j5-crew-launch-", launchablePersonas)),
-        Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
       );
       const seat = (name: string, startFromOrigin: boolean) => ({
         name,
@@ -2716,7 +2717,7 @@ const eligibilityFixture = (input: {
       ),
       Layer.provideMerge(Layer.succeedContext(context)),
       Layer.provideMerge(personaLibraryLayer("j5-crew-models-", launchablePersonas)),
-      Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     );
     return { layer, captain, commands };
   });
@@ -3155,7 +3156,7 @@ it.effect("an automatic roster reads the project's lists once, however many seat
       ),
       Layer.provideMerge(Layer.succeedContext(context)),
       Layer.provideMerge(personaLibraryLayer("j5-crew-reads-", launchablePersonas)),
-      Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     );
     yield* Effect.gen(function* () {
       const launcher = yield* CrewLaunchService;
@@ -3466,7 +3467,7 @@ it.effect(
         Layer.provideMerge(
           personaLibraryLayer("j5-ordered-crew-", [BUILT_IN_AGENT_PERSONAS.scout]),
         ),
-        Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
       );
       yield* Effect.gen(function* () {
         const launcher = yield* CrewLaunchService;
@@ -3592,7 +3593,7 @@ it.effect("a reviewer added after a builder was replaced avoids both builders' m
       Layer.provideMerge(
         personaLibraryLayer("j5-crew-replaced-", [...launchablePersonas, reviewer]),
       ),
-      Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     );
     yield* Effect.gen(function* () {
       const launcher = yield* CrewLaunchService;

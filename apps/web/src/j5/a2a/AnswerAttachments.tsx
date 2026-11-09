@@ -51,7 +51,7 @@ export function useAnswerAttachmentSupport(environmentId: EnvironmentId | undefi
 export function useAnswerAttachments() {
   const [byKey, setByKey] = useState<Readonly<Record<string, ReadonlyArray<AnswerAttachment>>>>({});
   const staged = useRef(new Map<string, AnswerAttachment>());
-  // oxlint-disable-next-line t3code/react-effect-budget -- releases unsent uploads and previews when the page closes.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- releases unsent uploads and previews when the page closes.
   useEffect(() => {
     const live = staged.current;
     return () => live.forEach(forget);

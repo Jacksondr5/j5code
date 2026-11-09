@@ -22,7 +22,8 @@ import * as Schema from "effect/Schema";
 import { stringify as yaml } from "yaml";
 import { ServerConfig } from "../../config.ts";
 import { McpInvocationContext } from "../../mcp/McpInvocationContext.ts";
-import { OrchestratorMcpService, resolveRuntimeMode } from "../../mcp/OrchestratorMcpService.ts";
+import { resolveRuntimeMode } from "../../mcp/delegatedTaskModes.ts";
+import { OrchestratorMcpService } from "../../mcp/OrchestratorMcpService.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { OrchestratorProjectionError } from "../../orchestration-v2/Orchestrator.ts";
 import {

@@ -233,5 +233,5 @@ if ($interactive) { [Console]::Error.Write("`r$esc[2K") }
 if (($env:PATH -split ";") -notcontains $binDir) {
   Write-Host "  Add $binDir to your PATH, then run ${bold}j5$reset.`n"
 } else {
-  Write-Host "  Run ${bold}j5$reset to get started.`n"
+  Write-Host "  Run ${bold}j5$reset to use J5 Code here, or ${bold}j5 up$reset to use it from your other devices.`n"
 }

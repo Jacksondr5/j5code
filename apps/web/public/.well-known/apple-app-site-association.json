@@ -1,0 +1,14 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": [
+          "46A73QH3S8.codes.jackson.j5code",
+          "46A73QH3S8.codes.jackson.j5code.preview",
+          "46A73QH3S8.codes.jackson.j5code.dev"
+        ],
+        "components": [{ "/": "/threads/*" }]
+      }
+    ]
+  }
+}

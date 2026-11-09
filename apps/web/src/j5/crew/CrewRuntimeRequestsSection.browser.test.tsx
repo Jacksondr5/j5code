@@ -40,10 +40,6 @@ vi.mock(import("../a2a/humanInboxRefresh"), async (importOriginal) => ({
   ...(await importOriginal()),
   notifyHumanInboxChanged: vi.fn(),
 }));
-vi.mock(import("../../components/chat/ComposerPendingApprovalPanel"), async (importOriginal) => ({
-  ...(await importOriginal()),
-  ComposerPendingApprovalPanel: (() => null) as never,
-}));
 vi.mock(import("../../components/chat/ComposerPendingApprovalActions"), async (importOriginal) => ({
   ...(await importOriginal()),
   ComposerPendingApprovalActions: ((props: {

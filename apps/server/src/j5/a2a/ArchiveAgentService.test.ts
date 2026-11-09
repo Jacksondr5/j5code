@@ -19,7 +19,6 @@ import {
   ProjectionStoreReadError,
   ProjectionStoreThreadNotFoundError,
 } from "../../orchestration-v2/ProjectionStore.ts";
-import { ThreadLifecycleService } from "../../orchestration-v2/ThreadLifecycleService.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import {
   ArchiveAgentConfirmationRequiredError,
@@ -228,18 +227,16 @@ const makeHarness = (options: HarnessOptions = {}) => {
     Layer.mock(ThreadManagementService)({
       getThreadRecords: () => Effect.succeed(projection()),
       dispatch: (command) => {
-        order.push(command.type === "thread.stop" ? "interrupt_requested" : command.type);
+        if (command.type === "thread.archive") {
+          archiveCalls += 1;
+          order.push("thread_archive_committed");
+          archived = true;
+        } else {
+          order.push(command.type === "thread.stop" ? "interrupt_requested" : command.type);
+        }
         return Effect.succeed({ sequence: 1, storedEvents: [] });
       },
       stopDelegatedTasks: () => Effect.void,
-    }),
-    Layer.mock(ThreadLifecycleService)({
-      archive: () => {
-        archiveCalls += 1;
-        order.push("thread_archive_committed");
-        archived = true;
-        return Effect.succeed(projection());
-      },
     }),
     Layer.mock(A2ALifecycleService)({
       archiveParticipant: () => {
@@ -494,7 +491,6 @@ const readFactsFor = (home: "none" | "registered", thread: "missing" | "unreadab
                     ),
             }),
             Layer.mock(A2ALedger)({}),
-            Layer.mock(ThreadLifecycleService)({}),
             Layer.mock(A2ALifecycleService)({}),
             Layer.mock(ServerSecretStore)({
               getOrCreateRandom: () => Effect.succeed(signingSecret),

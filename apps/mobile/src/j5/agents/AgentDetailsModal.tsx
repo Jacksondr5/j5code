@@ -32,7 +32,7 @@ export function AgentDetailsModal(props: {
   >({ status: "loading" });
   const read = useAtomCommand(agentPersonaEnvironment.readAgentPersona, { reportFailure: false });
   const personaId = props.persona.personaId;
-  // oxlint-disable-next-line t3code/react-effect-budget -- loads the persona's models once when the sheet opens; the read is a command, not an atom.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- loads the persona's models once when the sheet opens; the read is a command, not an atom.
   useEffect(() => {
     let cancelled = false;
     void read({ environmentId: props.environmentId, input: { personaId } })

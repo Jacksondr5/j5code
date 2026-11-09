@@ -10,6 +10,7 @@ import { resolveAgentPersonaRuntime } from "../../agents/agentPersonaRuntime.ts"
 import { BUILT_IN_AGENT_PERSONAS } from "../../agents/agentPersonas.ts";
 import { personaLibraryLayer } from "../../test-support/personaLibrary.ts";
 import { assert, it } from "@effect/vitest";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as SqlitePersistence from "../../../persistence/Sqlite.ts";
 import {
@@ -203,7 +204,7 @@ const missingProjectId = ProjectId.make("project:j5:mcp-directory:gone");
 /** The send tool claims attachments into the server's attachment store; none of these tests send one. */
 const serverConfigLayer = ServerConfig.layerTest(process.cwd(), {
   prefix: "j5-mcp-handlers-",
-}).pipe(Layer.provide(NodeServices.layer));
+}).pipe(Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
 const unusedLifecycleDependencies = Layer.mergeAll(
   noDocumentTextLayer,
   Layer.mock(A2AHomeRegistrar)({
@@ -328,7 +329,7 @@ it.effect("namespaces mutating-tool idempotency and sender identity from authent
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
       Layer.mock(OrchestratorV2)({}),
       unusedLifecycleDependencies,
-      NodeServices.layer,
+      Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
       SqlitePersistence.layerMemory,
     );
     const layer = J5ToolkitHandlersLive.pipe(
@@ -543,7 +544,7 @@ it.effect(
         Layer.mock(ProjectService)({}),
         serverConfigLayer,
         Layer.mock(ThreadRegistration)({}),
-        NodeServices.layer,
+        Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
         SqlitePersistence.layerMemory,
       );
       const layer = J5ToolkitHandlersLive.pipe(
@@ -833,7 +834,7 @@ it.effect("keeps participant listing placement-read-only", () =>
           Effect.fail(new OrchestratorProjectionError({ threadId: invocation.threadId })),
       }),
       unusedLifecycleDependencies,
-      NodeServices.layer,
+      Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
     );
     const layer = J5ToolkitHandlersLive.pipe(
       Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
@@ -1028,7 +1029,7 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
           }),
           Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
           unusedLifecycleDependencies,
-          NodeServices.layer,
+          Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
         ),
       ),
     );
@@ -1251,7 +1252,7 @@ it.effect("returns null display names when the ambient shell snapshot fails", ()
           }),
           Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
           unusedLifecycleDependencies,
-          NodeServices.layer,
+          Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
         ),
       ),
     );
@@ -1467,7 +1468,7 @@ it.effect("preflights home before creation and records facts before the one stab
       Layer.mock(ManagedProjectFolders)({ namedProjectsRoot: "/tmp/j5-mcp-named-projects" }),
       Layer.mock(ProjectService)({}),
       serverConfigLayer,
-      NodeServices.layer,
+      Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
     );
     const layer = J5ToolkitHandlersLive.pipe(
       Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
@@ -1635,7 +1636,7 @@ it.effect("refuses spawn before thread creation when the caller is a Subagent", 
       Layer.mock(ManagedProjectFolders)({ namedProjectsRoot: "/tmp/j5-mcp-named-projects" }),
       Layer.mock(ProjectService)({}),
       serverConfigLayer,
-      NodeServices.layer,
+      Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
     );
     const layer = J5ToolkitHandlersLive.pipe(
       Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
@@ -1914,7 +1915,7 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
           }),
       }),
       personaLibraryLayer("j5-mcp-spawn-persona-", launchablePersonas),
-    ).pipe(Layer.provideMerge(NodeServices.layer));
+    ).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
     const layer = J5ToolkitHandlersLive.pipe(
       Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
       Layer.provideMerge(dependencies),
@@ -2465,7 +2466,7 @@ it.effect("archives a crew only as a unit through its captain with one confirmat
       }),
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
       Layer.mock(CrewStopService)({}),
-      NodeServices.layer,
+      Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
     );
     const layer = J5ToolkitHandlersLive.pipe(
       Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
@@ -2576,7 +2577,7 @@ it.effect("lists every ordered model entry with structured reasons and chosen in
       Layer.mock(CrewStopService)({}),
       Layer.mock(CrewProposalService)({}),
       personaLibraryLayer("j5-mcp-list-agents-", launchablePersonas),
-    ).pipe(Layer.provideMerge(NodeServices.layer));
+    ).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
     const layer = J5ToolkitHandlersLive.pipe(
       Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
       Layer.provideMerge(dependencies),
@@ -2684,7 +2685,7 @@ it.effect("reads a team persona and drafts an edit of it without touching the li
       Layer.mock(CrewStopService)({}),
       Layer.mock(CrewProposalService)({}),
       personaLibraryLayer("j5-mcp-read-persona-", launchablePersonas),
-    ).pipe(Layer.provideMerge(NodeServices.layer));
+    ).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
     const layer = J5ToolkitHandlersLive.pipe(
       Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
       // The drafts store reads the same library the tools do.
@@ -2890,7 +2891,7 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
       Layer.mock(ProjectService)({}),
       Layer.mock(ManagedProjectFolders)({ namedProjectsRoot: "/tmp/j5-mcp-named-projects" }),
       serverConfigLayer,
-      NodeServices.layer,
+      Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
     );
     const layer = J5ToolkitHandlersLive.pipe(
       Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
@@ -3175,7 +3176,7 @@ it.effect(
         Layer.mock(CrewProposalService)({}),
 
         Layer.mock(ThreadRegistration)({}),
-        NodeServices.layer,
+        Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
       );
       const layer = J5ToolkitHandlersLive.pipe(
         Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
@@ -3351,7 +3352,7 @@ it.effect(
         Layer.mock(CrewProposalService)({}),
         Layer.mock(ProjectService)({}),
         Layer.mock(ThreadRegistration)({}),
-        NodeServices.layer,
+        Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
       );
       const layer = J5ToolkitHandlersLive.pipe(
         Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),

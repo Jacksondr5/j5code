@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { GitVcsDriver } from "../../../vcs/GitVcsDriver.ts";
 import { GitManager } from "../../../git/GitManager.ts";
@@ -19,6 +20,8 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import { RemoteDelegation } from "../../../peer/RemoteDelegation.ts";
+import { PortDiscovery } from "../../../preview/PortScanner.ts";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as Sink from "effect/Sink";
@@ -46,7 +49,7 @@ import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
 import { layerFromProviderInstanceRegistry as providerAdapterRegistryFromInstances } from "../../../orchestration-v2/ProviderAdapterRegistry.ts";
 import * as RuntimeLayer from "../../../orchestration-v2/runtimeLayer.ts";
 import { ThreadLaunchService } from "../../../orchestration-v2/ThreadLaunchService.ts";
-import { layer as threadLifecycleServiceLayer } from "../../../orchestration-v2/ThreadLifecycleService.ts";
+import { layer as threadLifecycleServiceLayer } from "../../test-support/threadLifecycle.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
 import { quietAccessLayer } from "../../sharing/test-support/conversationHarness.ts";
 import * as OrchestrationCommandReceipts from "../../../persistence/OrchestrationCommandReceipts.ts";
@@ -123,7 +126,7 @@ const serverSettingsLayer = ServerSettingsService.layerTest({
 const vcsDriverRegistryLayer = VcsDriverRegistry.layer.pipe(
   Layer.provide(VcsProcess.layer),
   Layer.provide(serverConfigLayer),
-  Layer.provide(NodeServices.layer),
+  Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
 );
 const checkpointStoreLayer = CheckpointStore.layer.pipe(Layer.provide(vcsDriverRegistryLayer));
 const backgroundPolicyLayer = BackgroundPolicy.layer.pipe(
@@ -139,15 +142,15 @@ const providerInstanceRegistryLayer = ProviderInstanceRegistryHydration.layer.pi
       AntigravityInstallation.layer.pipe(
         Layer.provide(serverConfigLayer),
         Layer.provide(FetchHttpClient.layer),
-        Layer.provide(NodeServices.layer),
+        Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
       ),
       ServerSecretStore.layer.pipe(
         Layer.provide(serverConfigLayer),
-        Layer.provide(NodeServices.layer),
+        Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
       ),
       OpenCodeRuntime.layer.pipe(
         Layer.provide(OpenCodeServerLedger.layerTest),
-        Layer.provide(NodeServices.layer),
+        Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
       ),
       Layer.succeed(
         ProviderEventLoggers.ProviderEventLoggers,
@@ -157,7 +160,7 @@ const providerInstanceRegistryLayer = ProviderInstanceRegistryHydration.layer.pi
       CodexInstallation.CodexInstallation.layer.pipe(
         Layer.provide(serverConfigLayer),
         Layer.provide(FetchHttpClient.layer),
-        Layer.provide(NodeServices.layer),
+        Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
       ),
       Layer.succeed(ServerEnvironment.ServerEnvironmentIdentity, {
         getEnvironmentId: Effect.succeed(environmentId),
@@ -168,12 +171,12 @@ const providerInstanceRegistryLayer = ProviderInstanceRegistryHydration.layer.pi
 const providerRegistryLayer = ProviderRegistry.layer.pipe(
   Layer.provide(providerInstanceRegistryLayer),
   Layer.provide(serverConfigLayer),
-  Layer.provide(NodeServices.layer),
+  Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
 );
 const threadLifecycleLayer = threadLifecycleServiceLayer.pipe(Layer.provide(orchestrationLayer));
 const secretStoreLayer = ServerSecretStore.layer.pipe(
   Layer.provide(serverConfigLayer),
-  Layer.provide(NodeServices.layer),
+  Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
 );
 const orchestratorMcpLayer = OrchestratorMcpService.layer.pipe(
   Layer.provide(
@@ -189,7 +192,7 @@ const j5Layer = J5A2ARuntimeLayer.pipe(
   Layer.provideMerge(orchestrationLayer),
   Layer.provide(threadLifecycleLayer),
   Layer.provide(secretStoreLayer),
-  Layer.provide(AnalyticsService.layerTest),
+  Layer.provide(Layer.mock(AnalyticsService)({ record: () => Effect.void })),
   // The peer registry checks which peer sessions are live; this test has no peers.
   Layer.provide(Layer.mock(EnvironmentAuth)({ listSessions: () => Effect.succeed([]) })),
   Layer.provide(
@@ -239,7 +242,14 @@ const liveLayer = Layer.mergeAll(
   j5Layer,
   handlersLayer,
 ).pipe(
-  Layer.provide(quietAccessLayer),
+  Layer.provide(
+    Layer.mergeAll(
+      quietAccessLayer,
+      Layer.mock(RemoteDelegation)({}),
+      Layer.mock(PortDiscovery)({ trackAgent: () => () => undefined }),
+      NodeCrypto.layer,
+    ),
+  ),
   Layer.provide(Layer.mock(GitWorkflow.GitWorkflowService)({})),
   // The project is unreadable here, so every spawn shares the caller's checkout.
   Layer.provide(Layer.mock(ThreadLaunchService)({})),
@@ -276,10 +286,17 @@ const liveLayer = Layer.mergeAll(
       }),
     ),
   ),
-  Layer.provide(NodeServices.layer),
+  Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
 );
 const testLayer = liveLayer.pipe(
-  Layer.provideMerge(Layer.mergeAll(NodeServices.layer, noDocumentTextLayer)),
+  Layer.provideMerge(
+    Layer.mergeAll(
+      NodeServices.layer,
+      NodeCrypto.layer,
+      noDocumentTextLayer,
+      Layer.mock(PortDiscovery)({ trackAgent: () => () => undefined }),
+    ),
+  ),
 );
 
 const runStatus = (threadId: ThreadId, statuses: ReadonlySet<string>) =>

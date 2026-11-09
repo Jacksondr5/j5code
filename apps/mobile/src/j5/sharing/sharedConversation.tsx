@@ -46,7 +46,7 @@ function useThreadPeople(environmentId: EnvironmentId | null, threadId: ThreadId
     target === null ? NO_PEOPLE_CHANGES : j5Sharing.scopePeopleChanges(target),
   );
   const revision = Option.getOrNull(AsyncResult.value(changes))?.revision;
-  // oxlint-disable-next-line t3code/react-effect-budget -- rereads who reaches the thread when the server's change counter moves.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- rereads who reaches the thread when the server's change counter moves.
   useEffect(() => {
     if (revision !== undefined && revision > 0) appAtomRegistry.refresh(query);
   }, [query, revision]);
@@ -104,7 +104,7 @@ export function useSharedConversationFeed(
     target === null ? NO_CHANGES : j5Sharing.threadAuthorsChanges(target),
   );
   const revision = Option.getOrNull(AsyncResult.value(changes))?.revision;
-  // oxlint-disable-next-line t3code/react-effect-budget -- rereads message authors when the server's change counter moves.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- rereads message authors when the server's change counter moves.
   useEffect(() => {
     if (revision !== undefined && revision > 0) appAtomRegistry.refresh(query);
   }, [query, revision]);
@@ -126,7 +126,7 @@ export function useSharedConversationFeed(
     seen,
     people,
   });
-  // oxlint-disable-next-line t3code/react-effect-budget -- asks once more about a message waiting on its author, in case the change feed is slow.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- asks once more about a message waiting on its author, in case the change feed is slow.
   useEffect(() => {
     if (pendingKey !== "") appAtomRegistry.refresh(query);
   }, [pendingKey, query]);

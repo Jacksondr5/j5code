@@ -9,6 +9,7 @@ import {
   RunId,
   RuntimeRequestId,
   type ThreadId,
+  type OrchestrationV2StoredEvent,
 } from "@t3tools/contracts";
 import type { PersonLevel, PersonScope } from "@t3tools/contracts/j5";
 import * as Clock from "effect/Clock";
@@ -23,6 +24,7 @@ import type * as SqlError from "effect/sql/SqlError";
 import * as TestClock from "effect/testing/TestClock";
 
 import type { ParticipantId } from "../a2a/contracts.ts";
+import { markPromptSettled } from "../a2a/promptSettlement.ts";
 import { Access } from "./Access.ts";
 import { PersonAccess } from "./PersonAccess.ts";
 import { makeSearchAuthors } from "./searchAuthors.ts";
@@ -714,7 +716,6 @@ it.effect("only the platform sends a context record of its own kind (AC8)", () =
 it.effect("an answer carries its author, and who answered shows once upstream settles it", () =>
   Effect.gen(function* () {
     const owner = yield* jackson;
-    const sql = yield* SqlClient.SqlClient;
     const threadId = yield* thread("thread:answers");
     const priya = yield* personWith("Priya", onThread(threadId));
     const answer = {
@@ -731,15 +732,17 @@ it.effect("an answer carries its author, and who answered shows once upstream se
     });
     // A claim alone names no one: upstream has not settled the prompt with it.
     assert.deepStrictEqual((yield* authors(threadId, owner)).answers, []);
-    yield* sql`
-      INSERT INTO orchestration_events (
-        event_id, aggregate_kind, stream_id, stream_version, event_type, occurred_at, command_id,
-        actor_kind, payload_json, metadata_json
-      ) VALUES (
-        'event:settled', 'thread', ${threadId}, 0, 'runtime-request.updated', ${AT},
-        'command:answer', 'server', ${JSON.stringify({ id: "request:question" })}, '{}'
-      )
-    `;
+    // Upstream settles the prompt under the answer's command; the settle is marked from its event.
+    yield* markPromptSettled({
+      sequence: 1,
+      commandId: CommandId.make("command:answer"),
+      event: {
+        type: "runtime-request.updated",
+        threadId,
+        occurredAt: DateTime.makeUnsafe(AT),
+        payload: { id: RuntimeRequestId.make("request:question") },
+      },
+    } as unknown as OrchestrationV2StoredEvent);
     assert.deepStrictEqual((yield* authors(threadId, owner)).answers, [
       {
         requestId: "request:question",

@@ -32,7 +32,9 @@ export const layer = Layer.effect(
     const dispatch = Effect.fn("J5ThreadLineage.dispatch")(function* (
       command: OrchestrationV2ServerCommand,
     ) {
-      if (command.type !== "thread.fork") return yield* inner.dispatch(command);
+      // A side chat is not a participant, as a Subagent is not (register decision 8).
+      if (command.type !== "thread.fork" || command.sideChat === true)
+        return yield* inner.dispatch(command);
       const failure = (cause: unknown, phase: "admission" | "registration" = "admission") =>
         new J5ThreadLineageError({
           commandId: command.commandId,

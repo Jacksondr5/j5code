@@ -4,6 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   j5FoldHeader,
+  presentJ5QueuedMessage,
   presentJ5TimelineNotice,
   resolveJ5FeedMessage,
   type J5Timeline,
@@ -143,6 +144,23 @@ describe("resolveJ5FeedMessage", () => {
       preview: null,
       text: unknown.text,
     });
+  });
+});
+
+describe("presentJ5QueuedMessage", () => {
+  it("names a queued delivery's sender and shows its letter, not the envelope", () => {
+    expect(presentJ5QueuedMessage(delivery("agent", askRaw), timeline(null))).toMatchObject({
+      j5: { group: "participant", senderId: "agent:captain", badge: "expects-reply" },
+      preview: "Which schema version do we target?",
+    });
+    expect(
+      presentJ5QueuedMessage(delivery("user", inboxReplyRaw), timeline("human:priya")),
+    ).toMatchObject({ j5: { group: "person", viaInbox: true }, preview: "Target v2." });
+  });
+
+  it("leaves a message typed in the thread to upstream's row", () => {
+    const typed = { id: "message:typed", role: "user", createdBy: "user" as const, text: "Hi" };
+    expect(presentJ5QueuedMessage(typed, timeline(null))).toBeNull();
   });
 });
 

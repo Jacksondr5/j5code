@@ -26,7 +26,7 @@ export function useParticipantIdentities(
       environment.environmentId === environmentId && environment.connectionState === "connected",
   );
   const [result, setResult] = useState({ key: "", identities: NO_IDENTITIES });
-  // oxlint-disable-next-line t3code/react-effect-budget -- reads identities from the server for the ids on screen, and drops a stale answer when they change.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reads identities from the server for the ids on screen, and drops a stale answer when they change.
   useEffect(() => {
     if (idsKey === "" || !connected) return;
     let active = true;

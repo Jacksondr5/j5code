@@ -10,7 +10,7 @@ import {
 import { type ChatAttachment, ProjectId } from "@t3tools/contracts";
 import { playbookHandlers } from "../../playbooks/mcp.ts";
 import { playbookWorkspaceRoot } from "../../playbooks/workspace.ts";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -74,6 +74,7 @@ import {
   sendAsOutsideAgent,
   spawnAndBrief,
   actsAsThreadCaller,
+  j5Writes,
 } from "./outsideAgent.ts";
 
 import { spawnWorkspaceFromInput } from "../spawnWorkspace.ts";
@@ -315,7 +316,7 @@ const handlers = {
   // Declared `writes` so an outside agent is admitted and a read-only client is refused. A thread
   // caller gets the checks `actsAsCaller` gave it, and `writes` also requires the orchestration
   // capability, which every provider session J5 starts carries.
-  j5_send_message: McpToolAccess.writes((input) =>
+  j5_send_message: j5Writes((input) =>
     Effect.gen(function* () {
       const outside = yield* outsideAgentCaller;
       if (outside !== undefined) {
@@ -417,7 +418,7 @@ const handlers = {
             ),
           );
       }
-      const crypto = yield* Crypto.Crypto;
+      const crypto = yield* SecureRandom.SecureRandom;
       const service = yield* A2ASendService;
       const worker = yield* A2ADeliveryWorker;
       const mode = input.mode ?? "queue";
@@ -492,8 +493,7 @@ const handlers = {
         );
       }
       const acceptedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
-      const requestKey =
-        input.client_request_id ?? (yield* crypto.randomUUIDv4().pipe(Effect.orDie));
+      const requestKey = input.client_request_id ?? (yield* crypto.uuidV4().pipe(Effect.orDie));
       const send = (claimed?: ReadonlyArray<ChatAttachment>) =>
         service.send({
           commandId: commandIdForRequest({
@@ -838,7 +838,7 @@ const handlers = {
   // Declared `writes`, as send and stop are, so an outside agent is admitted and a read-only
   // client is refused. The spawn service holds the chosen modes to the caller's limits: a
   // thread's own modes, or the level an outside agent's sign-in was approved at.
-  j5_spawn_agent: McpToolAccess.writes((input) =>
+  j5_spawn_agent: j5Writes((input) =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext;
       return yield* (yield* SpawnAgentService.SpawnAgentService).spawn(input, scope);
@@ -849,10 +849,9 @@ const handlers = {
     spawnAndBrief("propose the Crew"),
     (input, scope) =>
       Effect.gen(function* () {
-        const crypto = yield* Crypto.Crypto;
+        const crypto = yield* SecureRandom.SecureRandom;
         const captain = yield* preflightCrewCaptain(scope, "j5_propose_crew");
-        const requestKey =
-          input.client_request_id ?? (yield* crypto.randomUUIDv4().pipe(Effect.orDie));
+        const requestKey = input.client_request_id ?? (yield* crypto.uuidV4().pipe(Effect.orDie));
         // The Captain's playbooks are the ones its own j5_playbook_list shows.
         const playbook =
           input.playbook === undefined
@@ -886,10 +885,9 @@ const handlers = {
     spawnAndBrief("propose the Crew and ask for the seat"),
     (input, scope) =>
       Effect.gen(function* () {
-        const crypto = yield* Crypto.Crypto;
+        const crypto = yield* SecureRandom.SecureRandom;
         const captain = yield* preflightCrewCaptain(scope, "j5_request_crew_member");
-        const requestKey =
-          input.client_request_id ?? (yield* crypto.randomUUIDv4().pipe(Effect.orDie));
+        const requestKey = input.client_request_id ?? (yield* crypto.uuidV4().pipe(Effect.orDie));
         const outcome = yield* (yield* CrewProposalService)
           .requestMember({
             requestKey: `${scope.thread.providerSessionId}:${requestKey}`,
@@ -1061,12 +1059,12 @@ const handlers = {
       };
     }).pipe(Effect.mapError(failure)),
   ),
-  j5_stop_agent: McpToolAccess.writes((input) =>
+  j5_stop_agent: j5Writes((input) =>
     Effect.gen(function* () {
       const invocation = yield* McpInvocationContext;
       const outside = yield* outsideAgentCaller;
       const scope = outside === undefined ? yield* callerScope : undefined;
-      const crypto = yield* Crypto.Crypto;
+      const crypto = yield* SecureRandom.SecureRandom;
       // An outside agent has no membership, and is never a Captain.
       const callerParticipantId: ParticipantId | undefined =
         scope === undefined ? undefined : (yield* resolveCallerMembership(scope)).participantId;
@@ -1129,8 +1127,7 @@ const handlers = {
           ),
         );
       }
-      const requestKey =
-        input.client_request_id ?? (yield* crypto.randomUUIDv4().pipe(Effect.orDie));
+      const requestKey = input.client_request_id ?? (yield* crypto.uuidV4().pipe(Effect.orDie));
       const commandId = lifecycleCommandId({
         // An outside agent's retry keys are namespaced by its client session.
         providerSessionId: scope?.thread.providerSessionId ?? invocation.requestNamespace,
@@ -1162,10 +1159,9 @@ const handlers = {
     "Only a Crew's Captain stops it: message the Captain with j5_send_message, or stop one agent with j5_stop_agent.",
     (input, scope) =>
       Effect.gen(function* () {
-        const crypto = yield* Crypto.Crypto;
+        const crypto = yield* SecureRandom.SecureRandom;
         const caller = yield* resolveCallerMembership(scope);
-        const requestKey =
-          input.client_request_id ?? (yield* crypto.randomUUIDv4().pipe(Effect.orDie));
+        const requestKey = input.client_request_id ?? (yield* crypto.uuidV4().pipe(Effect.orDie));
         const outcome = yield* (yield* CrewStopService)
           .stop({
             callerParticipantId: caller.participantId,
@@ -1206,10 +1202,9 @@ const handlers = {
     "Only a Crew's Captain archives it: message the Captain with j5_send_message and ask it to.",
     (input, scope) =>
       Effect.gen(function* () {
-        const crypto = yield* Crypto.Crypto;
+        const crypto = yield* SecureRandom.SecureRandom;
         const caller = yield* resolveCallerMembership(scope);
-        const requestKey =
-          input.client_request_id ?? (yield* crypto.randomUUIDv4().pipe(Effect.orDie));
+        const requestKey = input.client_request_id ?? (yield* crypto.uuidV4().pipe(Effect.orDie));
         const archivedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
         const outcome = yield* (yield* ArchiveCrewService).archive({
           providerSessionId: scope.thread.providerSessionId,

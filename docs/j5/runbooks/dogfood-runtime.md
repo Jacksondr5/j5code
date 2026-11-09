@@ -331,6 +331,12 @@ server against the two files at once. Ledger writes made between the snapshot an
 the accepted cost, which is why updates happen at quiet moments. If the bad version never actually
 started (build failure), skip the restore and just rebuild at the previous commit.
 
+Since the release based on T3 Code 0.1.7 the server prunes its event log, keeping about a day of it.
+Pruned events are gone from the live database; only a snapshot taken before the prune still holds
+them. Builds before that release read who answered a prompt in a shared conversation from the log,
+so rolling back to one without restoring a snapshot shows answers whose events were pruned without
+who gave them.
+
 ### Restoring the automatic pre-migration snapshot
 
 Before a new version runs any migration, upstream's or J5's, the server copies the database to

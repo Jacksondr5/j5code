@@ -26,6 +26,7 @@ import * as Option from "effect/Option";
 import * as GitWorkflow from "../../git/GitWorkflowService.ts";
 import * as ProjectService from "../../project/ProjectService.ts";
 import * as Cause from "effect/Cause";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
@@ -69,12 +70,13 @@ import {
 } from "../../orchestration-v2/EffectWorker.ts";
 import { EventSinkV2 } from "../../orchestration-v2/EventSink.ts";
 import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";
-import type {
-  ProviderAdapterV2Event,
-  ProviderAdapterV2InterruptInput,
-  ProviderAdapterV2,
-  ProviderAdapterV2SteerInput,
-  ProviderAdapterV2TurnInput,
+import {
+  ProviderAdapterSteerRunError,
+  type ProviderAdapterV2Event,
+  type ProviderAdapterV2InterruptInput,
+  type ProviderAdapterV2,
+  type ProviderAdapterV2SteerInput,
+  type ProviderAdapterV2TurnInput,
 } from "@t3tools/provider-core/server/ProviderAdapter";
 import {
   layerEventSink as OrchestrationV2EventSinkLayerLive,
@@ -95,7 +97,7 @@ import {
 import {
   ThreadLifecycleService,
   layer as threadLifecycleServiceLayer,
-} from "../../orchestration-v2/ThreadLifecycleService.ts";
+} from "../test-support/threadLifecycle.ts";
 import { layerMemory as SqlitePersistenceMemory } from "../../persistence/Sqlite.ts";
 import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
 import { ProviderInstanceRegistry } from "../../provider/ProviderInstanceRegistry.ts";
@@ -209,7 +211,7 @@ const modelSelection = {
 const vcsDriverRegistryTestLayer = VcsDriverRegistry.layer.pipe(
   Layer.provide(VcsProcess.layer),
   Layer.provide(serverConfigLayer),
-  Layer.provide(NodeServices.layer),
+  Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
 );
 
 const checkpointStoreTestLayer = CheckpointStore.layer.pipe(
@@ -244,6 +246,8 @@ interface DeliveryHarness {
   readonly steerInputs: Ref.Ref<ReadonlyArray<ProviderAdapterV2SteerInput>>;
   readonly interruptInputs: Ref.Ref<ReadonlyArray<ProviderAdapterV2InterruptInput>>;
   readonly activeTurns: Ref.Ref<ReadonlyMap<ThreadId, FakeActiveTurn>>;
+  /** Provider turns that ended; a steer into one is refused, as the Claude and Codex adapters do. */
+  readonly endedTurns: Ref.Ref<ReadonlySet<string>>;
 }
 
 const makeOrchestrationAdapter = (harness: DeliveryHarness): ProviderAdapterV2["Service"] => ({
@@ -345,7 +349,18 @@ const makeOrchestrationAdapter = (harness: DeliveryHarness): ProviderAdapterV2["
               },
             });
           }),
-        steerTurn: (input) => Ref.update(harness.steerInputs, (existing) => [...existing, input]),
+        steerTurn: (input) =>
+          Effect.gen(function* () {
+            if ((yield* Ref.get(harness.endedTurns)).has(input.providerTurnId)) {
+              return yield* new ProviderAdapterSteerRunError({
+                driver,
+                providerThreadId: input.providerThread.id,
+                providerTurnId: input.providerTurnId,
+                cause: `Provider turn ${input.providerTurnId} is not active and cannot be steered.`,
+              });
+            }
+            yield* Ref.update(harness.steerInputs, (existing) => [...existing, input]);
+          }),
         interruptTurn: (input) =>
           Ref.update(harness.interruptInputs, (existing) => [...existing, input]),
         respondToRuntimeRequest: () =>
@@ -406,7 +421,7 @@ const makeTestLayer = (
     Layer.provide(serverConfigLayer),
     Layer.provideMerge(ServerSettingsService.layerTest(settings)),
     Layer.provide(providerInstanceRegistryTestLayer),
-    Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     Layer.provideMerge(SqlitePersistenceMemory),
   );
   const recordingThreadManagement = Layer.effect(
@@ -458,6 +473,7 @@ const makeHarness = Effect.gen(function* () {
     steerInputs: yield* Ref.make<ReadonlyArray<ProviderAdapterV2SteerInput>>([]),
     interruptInputs: yield* Ref.make<ReadonlyArray<ProviderAdapterV2InterruptInput>>([]),
     activeTurns: yield* Ref.make<ReadonlyMap<ThreadId, FakeActiveTurn>>(new Map()),
+    endedTurns: yield* Ref.make<ReadonlySet<string>>(new Set()),
   } satisfies DeliveryHarness;
 });
 
@@ -673,7 +689,6 @@ const publishCommandExecution = (
 
 it.effect.each([
   "gpt-6-astra",
-  "astra",
   "gpt-6-luna",
   "gpt-6-sol",
   "gpt-6.1-sol",
@@ -1811,6 +1826,11 @@ it.effect.each(
             completedAt: yield* DateTime.now,
           },
         });
+        // The run waits on its finalization while the steer runs: upstream's continuing-run check
+        // (pingdotgg/t3code#25611) lets it reach the adapter, which refuses an ended turn.
+        yield* Ref.update(harness.endedTurns, (ended) =>
+          new Set(ended).add(projection.providerTurns[0]!.id),
+        );
         yield* Fiber.join(ended);
         // Drive the real worker's five attempts with controlled time, never sleeps.
         for (const delay of [0, 100, 200, 400, 800]) {
@@ -2299,7 +2319,10 @@ it.effect(
       yield* TestClock.setTime(Date.parse("2026-09-01T12:00:00Z"));
       const harness = yield* makeHarness;
       const base = makeMessageLifecycleLayer(harness, { sidebarAutoSettleAfterDays: 1 });
-      const settlement = ThreadSettlement.layer.pipe(
+      const settlement = Layer.effect(
+        ThreadSettlement.ThreadSettlementServiceV2,
+        ThreadSettlement.make,
+      ).pipe(
         Layer.provide(ProjectionStore.layer),
         Layer.provide(
           Layer.mergeAll(
@@ -2914,7 +2937,7 @@ it.effect(
       const harness = yield* makeHarness;
       const base = makeMessageLifecycleLayer(harness).pipe(
         Layer.provideMerge(serverConfigLayer),
-        Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
         Layer.provideMerge(noDocumentTextLayer),
       );
       const layer = base;
@@ -3051,7 +3074,7 @@ it.effect(
       const harness = yield* makeHarness;
       const base = makeMessageLifecycleLayer(harness).pipe(
         Layer.provideMerge(serverConfigLayer),
-        Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
         Layer.provideMerge(noDocumentTextLayer),
       );
       yield* Effect.gen(function* () {
@@ -3271,7 +3294,7 @@ it.effect("organize refuses a Crew seat and applies reversible lifecycle once", 
     const base = crewInstanceLayer.pipe(
       Layer.provideMerge(makeMessageLifecycleLayer(harness)),
       Layer.provideMerge(serverConfigLayer),
-      Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     );
     yield* Effect.gen(function* () {
       const registrar = yield* A2AHomeRegistrar;
@@ -3443,39 +3466,93 @@ const holdTargetQueue = Effect.fn("A2AIntegration.holdTargetQueue")(function* (t
   });
 });
 
-it.effect("keeps held delivery pending and reuses the same message when the queue resumes", () =>
+it.effect(
+  "resumes a busy receiver's held queue so a person's held message and the delivery run in landing order after the turn",
+  () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const target = yield* seedTarget("held-queue", "gpt-5.4");
+        const threads = yield* ThreadManagementService;
+        const transport = yield* A2ADeliveryTransport;
+        yield* holdTargetQueue(target);
+        const busy = yield* threads.getThreadProjection(target.threadId);
+        const active = busy.runs.find((run) => isActiveRun(run));
+        const personHeld = busy.runs.find((run) => run.queueHeld === true);
+        assert.isDefined(active);
+        assert.isDefined(personHeld);
+
+        yield* transport.deliverAgent(target.delivery);
+        // A retry finds the message it delivered and sends nothing new.
+        yield* transport.deliverAgent(target.delivery);
+
+        const after = yield* threads.getThreadProjection(target.threadId);
+        // The running turn is left alone; both messages wait behind it, unheld, in landing order.
+        assert.equal(after.runs.find((run) => run.id === active!.id)?.status, active!.status);
+        const queued = after.runs
+          .filter((run) => run.status === "queued")
+          .toSorted((left, right) => left.ordinal - right.ordinal);
+        assert.deepStrictEqual(
+          queued.map((run) => run.userMessageId),
+          [personHeld!.userMessageId, deliveryMessageId(target.messageId)],
+        );
+        assert.isTrue(queued.every((run) => run.queueHeld !== true));
+        assert.lengthOf(
+          after.messages.filter((row) => row.id === deliveryMessageId(target.messageId)),
+          1,
+        );
+      }).pipe(Effect.provide(makeTestLayer(harness)));
+    }),
+);
+
+it.effect("queues a peer update behind a held queue instead of steering a GPT 6 turn", () =>
   Effect.gen(function* () {
     const harness = yield* makeHarness;
     yield* Effect.gen(function* () {
-      const target = yield* seedTarget("held-queue", "gpt-5.4");
+      const target = yield* seedTarget("held-steer", "gpt-6-astra");
       const threads = yield* ThreadManagementService;
       const transport = yield* A2ADeliveryTransport;
-      yield* holdTargetQueue(target);
-      for (let retry = 0; retry < 2; retry++) {
-        const error = yield* transport.deliverAgent(target.delivery).pipe(Effect.flip);
-        assert.instanceOf(error, A2ADeliveryHeldError);
-      }
-      const held = yield* threads.getThreadProjection(target.threadId);
-      assert.lengthOf(
-        held.messages.filter((row) => row.id === deliveryMessageId(target.messageId)),
-        1,
-      );
-      assert.isTrue(
-        held.runs.find((row) => row.userMessageId === deliveryMessageId(target.messageId))
-          ?.queueHeld,
-      );
-      yield* threads.dispatch({
-        type: "queue.resume",
-        commandId: CommandId.make("command:held:resume"),
+      yield* startBusyTurn(target);
+      const earlier = yield* threads.sendToThread({
+        projectId: target.projectId,
         threadId: target.threadId,
+        commandId: CommandId.make("command:held-steer:earlier"),
+        messageId: MessageId.make("message:held-steer:earlier"),
+        text: "Earlier work",
+        attachments: [],
+        mode: "queue",
+        createdBy: "user",
+        creationSource: "web",
       });
+      yield* (yield* EventSinkV2).write({
+        events: [
+          {
+            id: EventId.make("event:held-steer:earlier"),
+            type: "run.updated",
+            threadId: target.threadId,
+            runId: earlier.run.id,
+            providerInstanceId: earlier.run.providerInstanceId,
+            occurredAt: yield* DateTime.now,
+            payload: { ...earlier.run, status: "queued", queueHeld: true },
+          },
+        ],
+      });
+      const busy = yield* threads.getThreadProjection(target.threadId);
+      const steerable = peerSteeringRun(busy, "peer");
+      assert.isDefined(steerable);
+
       yield* transport.deliverAgent(target.delivery);
-      assert.lengthOf(
-        (yield* threads.getThreadProjection(target.threadId)).messages.filter(
-          (row) => row.id === deliveryMessageId(target.messageId),
-        ),
-        1,
+
+      const after = yield* threads.getThreadProjection(target.threadId);
+      assert.equal(after.runs.find((run) => run.id === steerable!.id)?.status, steerable!.status);
+      const queued = after.runs
+        .filter((run) => run.status === "queued")
+        .toSorted((left, right) => left.ordinal - right.ordinal);
+      assert.deepStrictEqual(
+        queued.map((run) => run.userMessageId),
+        [earlier.run.userMessageId, deliveryMessageId(target.messageId)],
       );
+      assert.isTrue(queued.every((run) => run.queueHeld !== true));
     }).pipe(Effect.provide(makeTestLayer(harness)));
   }),
 );
@@ -3691,7 +3768,7 @@ const makeWakeTestLayer = (harness: DeliveryHarness) =>
     Layer.provideMerge(crewInstanceLayer),
     Layer.provideMerge(makeLifecycleTestLayer(harness)),
     Layer.provideMerge(serverConfigLayer),
-    Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
   );
 
 /** A person continues a usage-limited target; returns the stored event of the run it started. */
@@ -3955,18 +4032,21 @@ const sendNoticeTo = Effect.fn("A2AIntegration.sendNoticeTo")(function* (
   })).deliveryNotice;
 });
 
-it.effect("tells the sender a busy receiver's held queue keeps its message waiting", () =>
-  Effect.gen(function* () {
-    const harness = yield* makeHarness;
-    yield* Effect.gen(function* () {
-      const target = yield* seedTarget("notice-held-busy");
-      yield* holdTargetQueue(target);
-      assert.equal(
-        yield* sendNoticeTo("notice-held-busy", target),
-        `${target.receiverId}'s queue is on hold, so your message waits until a person resumes it. It will run then, in the order it was sent. Don't send it again.`,
-      );
-    }).pipe(Effect.provide(makeLifecycleTestLayer(harness)));
-  }),
+it.effect(
+  "tells the sender a busy receiver with a held queue takes its message after the turn",
+  () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const target = yield* seedTarget("notice-held-busy");
+        yield* holdTargetQueue(target);
+        // The delivery resumes the held queue, so the message waits only behind the turn.
+        assert.equal(
+          yield* sendNoticeTo("notice-held-busy", target),
+          `${target.receiverId} is in the middle of a turn, with 1 message(s) waiting for it (1 from you). It will handle each one as a separate turn after its current turn ends, so put any further updates for it in one message.`,
+        );
+      }).pipe(Effect.provide(makeLifecycleTestLayer(harness)));
+    }),
 );
 
 it.effect("tells the sender a failed worktree setup keeps its message waiting", () =>
@@ -4045,7 +4125,7 @@ it.effect("adds no notice for an idle receiver whose held queue the delivery res
   }),
 );
 
-it.effect("settles a held peer delivery once after resume without alarming", () =>
+it.effect("delivers a peer message at once to a busy receiver, resuming its held queue", () =>
   Effect.gen(function* () {
     const harness = yield* makeHarness;
     yield* Effect.gen(function* () {
@@ -4066,19 +4146,6 @@ it.effect("settles a held peer delivery once after resume without alarming", () 
         to: target.receiverId,
         message: "Wait behind the held queue",
         acceptedAt: "2026-09-24T00:00:00.000Z",
-      });
-      // Well past the ordinary alarm threshold: a held queue waits for a person.
-      for (let attempt = 1; attempt <= 5; attempt++) {
-        const milestone = yield* worker.runOnce;
-        assert.equal(milestone?.state, "retry_scheduled");
-        assert.equal(milestone?.attempt, attempt);
-        yield* TestClock.adjust(heldQueueRecheckMs(attempt));
-      }
-      assert.lengthOf(yield* worker.listAlarms, 0);
-      yield* threads.dispatch({
-        type: "queue.resume",
-        commandId: CommandId.make("command:held-worker:resume"),
-        threadId: target.threadId,
       });
       assert.equal((yield* worker.runOnce)?.state, "delivered");
       assert.isNull(yield* worker.runOnce);
@@ -4162,6 +4229,26 @@ const registrationFixture = Effect.fn("A2AIntegration.registrationFixture")(func
       parentThreadId: threadId("web"),
       relationshipToParent: "subagent",
       rootThreadId: threadId("web"),
+    },
+  });
+  // Neither registers, as a subagent does not: a side chat, and a task another environment sent.
+  yield* write("side-chat", {
+    ...template,
+    id: threadId("side-chat"),
+    lineage: {
+      parentThreadId: threadId("web"),
+      relationshipToParent: "fork",
+      rootThreadId: threadId("web"),
+      sideChat: true,
+    },
+  });
+  yield* write("delegated-from", {
+    ...template,
+    id: threadId("delegated-from"),
+    delegatedFrom: {
+      environmentId: EnvironmentId.make("environment:other"),
+      threadId: ThreadId.make("thread:elsewhere"),
+      title: "Elsewhere",
     },
   });
   return { projectId, threadId };
@@ -4348,7 +4435,7 @@ it.effect(
         Layer.provideMerge(crewInstanceLayer),
         Layer.provideMerge(makeMessageLifecycleLayer(harness)),
         Layer.provideMerge(serverConfigLayer),
-        Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
         Layer.provideMerge(noDocumentTextLayer),
       );
       yield* Effect.gen(function* () {

@@ -62,6 +62,35 @@ it.layer(conversationLayer)("CommandAdmission", (it) => {
     }),
   );
 
+  it.effect("lets whoever writes to a thread delete its side chats, and only those", () =>
+    Effect.gen(function* () {
+      const parent = yield* thread("thread:side-parent");
+      const sideChat = yield* thread("thread:side-chat", PROJECT, {
+        parent,
+        relationship: "fork",
+        sideChat: true,
+      });
+      const fork = yield* thread("thread:plain-fork", PROJECT, { parent, relationship: "fork" });
+      const writer = yield* deviceOf("Parent writer", [
+        { scope: { kind: "thread", threadId: parent }, level: "collaborator" },
+      ]);
+      const reader = yield* deviceOf("Parent reader", [
+        { scope: { kind: "thread", threadId: parent }, level: "viewer" },
+      ]);
+      const wide = yield* deviceOf("Server collaborator", [
+        { scope: { kind: "server" }, level: "collaborator" },
+      ]);
+      const remove = (threadId: string) => command({ type: "thread.delete", threadId });
+      assert.strictEqual(yield* admitted(writer, remove(sideChat)), "admitted");
+      assert.strictEqual(yield* admitted(wide, remove(sideChat)), "admitted");
+      assert.match(yield* admitted(reader, remove(sideChat)), /^refused/);
+      assert.match(yield* admitted(writer, remove(fork)), /^refused: Only an Owner/);
+      for (const type of ["thread.archive", "thread.unarchive"]) {
+        assert.match(yield* admitted(writer, command({ type, threadId: sideChat })), /^refused/);
+      }
+    }),
+  );
+
   it.effect("holds a narrowed Collaborator's commands to their scope", () =>
     Effect.gen(function* () {
       const mine = yield* thread("thread:mine");

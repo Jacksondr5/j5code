@@ -10,6 +10,7 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import { ServerSettingsService } from "../../serverSettings.ts";
 import * as Stream from "effect/Stream";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
@@ -87,6 +88,7 @@ const testLayer = Layer.mergeAll(
     Layer.provide(projects),
     Layer.provide(providerInstances),
     Layer.provide(database),
+    Layer.provide(ServerSettingsService.layerTest()),
   ),
 );
 

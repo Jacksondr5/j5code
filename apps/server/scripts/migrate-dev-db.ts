@@ -17,7 +17,6 @@ import { Command, Flag } from "effect/cli";
 
 import * as ProjectionStore from "../src/orchestration-v2/ProjectionStore.ts";
 import { rebuildMessageSearch } from "../src/orchestration-v2/messageSearchIndex.ts";
-import { migrationManifest } from "../src/persistence/Migrations.ts";
 import { neutraliseCopiedDatabase } from "../src/j5/persistence/neutraliseCopiedDatabase.ts";
 import { runJ5CompatibleUpstreamMigrations } from "../src/j5/persistence/UpstreamMigrationCompatibility.ts";
 import {
@@ -229,6 +228,7 @@ const CLEARED_TABLES: ReadonlyArray<string> = [
   "provider_session_runtime",
   "auth_sessions",
   "auth_pairing_links",
+  "peer_environment_links",
 ];
 
 const PROVIDER_SESSIONS_TABLE = "orchestration_v2_projection_provider_sessions";
@@ -551,11 +551,9 @@ export const runMigrateDevDb = Effect.fn("runMigrateDevDb")(function* (
       wrapPhase("migrate", snapshotPath),
     );
 
-    // Detect migration slot collisions before replacing the worktree database.
-    yield* Effect.all([
-      verifyMigrationSlots("effect_sql_migrations", migrationManifest),
-      verifyMigrationSlots(J5_A2A_MIGRATIONS_TABLE, migrationEntries),
-    ]).pipe(
+    // J5: detect J5 migration slot collisions before replacing the worktree database. Upstream
+    // dropped its own check (pingdotgg/t3code#24665); the server reports a divergent history.
+    yield* verifyMigrationSlots(J5_A2A_MIGRATIONS_TABLE, migrationEntries).pipe(
       Effect.provide(NodeSqliteClient.layer({ filename: snapshotPath })),
       Effect.catchTags({
         SqlError: (cause) =>

@@ -16,6 +16,7 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import { CodexProviderCapabilitiesV2 } from "../../orchestration-v2/Adapters/CodexAdapterV2.ts";
@@ -30,6 +31,7 @@ import * as PersonAccess from "./PersonAccess.ts";
 import * as SharedConversation from "./SharedConversation.ts";
 import * as SharedThreads from "./SharedThreads.ts";
 import { quietAccessLayer, quietLifecycleLayer } from "./test-support/conversationHarness.ts";
+import { markPromptSettled } from "../a2a/promptSettlement.ts";
 
 /**
  * A shared conversation over upstream's real orchestrator and projections, with no provider, so
@@ -567,6 +569,25 @@ it.effect("a person's approval feedback, written by upstream, is recorded as the
         );
     assert.deepStrictEqual(yield* named(owner), [[written.id, "Priya", false]]);
     assert.deepStrictEqual(yield* named(priya.personId), [[written.id, "Priya", true]]);
+
+    // The settle is marked from the stored event, as LifecycleService's replay from its cursor
+    // does after a restart, and the answer keeps its name once upstream prunes that event.
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`UPDATE j5_a2a_prompt_answer SET settled_at = NULL`;
+    // The stream follows the log live, so it is read for as many events as the log holds now.
+    const [held] = yield* sql<{ readonly count: number }>`
+      SELECT COUNT(*) AS count FROM orchestration_events
+      WHERE stream_id = ${on} AND event_type = 'runtime-request.updated'
+    `;
+    const settling = yield* threads
+      .streamStoredEventsFrom({ threadId: on, eventType: "runtime-request.updated" })
+      .pipe(Stream.take(held!.count), Stream.runCollect);
+    for (const stored of settling) yield* markPromptSettled(stored);
+    yield* sql`DELETE FROM orchestration_events WHERE stream_id = ${on}`;
+    const answered = (yield* conversation.threadAuthors(owner, on)).answers.map(
+      (answer) => [answer.requestId, answer.name] as const,
+    );
+    assert.deepStrictEqual(answered, [[requestId, "Priya"]]);
   }).pipe(Effect.provide(Layer.provideMerge(ProjectionStore.layer, layerFor(harness))));
 });
 

@@ -1,4 +1,5 @@
 import { seedPersonas, seedPlaybookOwners } from "./testFixtures.ts";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
@@ -179,7 +180,7 @@ const makeFixture = (
       Layer.mock(SpawnCompositionService)({}),
       Layer.mock(ArchiveAgentService)({}),
       Layer.mock(ThreadRegistration)({}),
-      NodeServices.layer,
+      Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
     );
     const dependencies = playbookCrewRelayLayer.pipe(
       Layer.provideMerge(agentCrewInstanceLayer),
@@ -207,7 +208,7 @@ const makeFixture = (
 const fixture = makeFixture();
 const TestLayer = Layer.mergeAll(
   NodeSqliteClient.layer({ filename: ":memory:" }),
-  NodeServices.layer,
+  Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
 );
 
 it.effect("runs a scripted three-step sample through the real J5Toolkit handlers", () =>

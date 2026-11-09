@@ -4,6 +4,7 @@ import {
   ChatAttachmentId,
   CommandId,
   MessageId,
+  EnvironmentId,
   ProviderDriverKind,
   ProviderInstanceId,
   ThreadId,
@@ -863,4 +864,32 @@ it.effect("releases claimed uploads when persona resolution refuses a launch", (
     ),
     Effect.scoped,
   );
+});
+
+// Register D42: a plain task another environment delegates here runs only on a model this
+// project's Models for custom members allow; a launch from this server is not held to them.
+it.effect("holds a task delegated from a linked environment to the project's member models", () => {
+  const harness = makeHarness({ serverSettings: { crewMemberModels: [] } });
+  return Effect.gen(function* () {
+    const launches = yield* ThreadLaunch.ThreadLaunchService;
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    const delegatedFrom = {
+      environmentId: EnvironmentId.make("environment:linked"),
+      threadId: ThreadId.make("thread:elsewhere"),
+      title: "Elsewhere",
+    };
+    const refused = yield* launches
+      .launch({
+        ...launchInput({ command: "command:delegated-from:refused", thread: "thread:delegated" }),
+        delegatedFrom,
+      })
+      .pipe(Effect.flip);
+    assert.include(refused.message, "gpt-5.1-codex");
+    assert.isNull(yield* threads.getThreadShell(ThreadId.make("thread:delegated")));
+
+    yield* launches.launch(
+      launchInput({ command: "command:delegated-from:local", thread: "thread:local" }),
+    );
+    assert.isNotNull(yield* threads.getThreadShell(ThreadId.make("thread:local")));
+  }).pipe(Effect.provide(harness.layer));
 });

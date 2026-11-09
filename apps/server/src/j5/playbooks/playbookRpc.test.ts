@@ -1,5 +1,6 @@
 import { ServerConfig } from "../../config.ts";
 import { seedPlaybookOwners } from "./testFixtures.ts";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
@@ -52,7 +53,7 @@ const otherOwner = ThreadId.make("thread:playbook-rpc:other");
 const createdAt = "2026-09-21T09:00:00.000Z";
 const TestLayer = Layer.mergeAll(
   NodeSqliteClient.layer({ filename: ":memory:" }),
-  NodeServices.layer,
+  Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
 );
 
 const definition = (title: string) => ({
