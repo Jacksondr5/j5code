@@ -39,6 +39,8 @@ export function resolveJ5ReadSource<A>(input: {
   readonly environmentId: EnvironmentId;
   readonly environmentLabel: string;
   readonly phase: SupervisorConnectionState["phase"];
+  /** A connection attempt after a failure, which upstream presents as reconnecting. */
+  readonly reconnecting?: boolean;
   readonly supported?: boolean;
   readonly guest?: boolean;
   readonly result: AsyncResult.AsyncResult<A, unknown>;
@@ -50,7 +52,7 @@ export function resolveJ5ReadSource<A>(input: {
   const status = unsupported
     ? "unsupported"
     : !connected
-      ? input.phase === "connecting"
+      ? input.phase === "connecting" && input.reconnecting !== true
         ? "loading"
         : "offline"
       : failure !== null
@@ -116,6 +118,7 @@ export function createJ5ReadSourcesAtom<A>(input: {
           environmentLabel: entry.target.label,
           // Before its supervisor publishes, an enabled server is starting to connect.
           phase: state?.phase ?? "connecting",
+          reconnecting: state !== null && (state.attempt > 1 || state.lastFailure !== null),
           ...(supported === undefined ? {} : { supported }),
           guest,
           result:

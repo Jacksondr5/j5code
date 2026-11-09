@@ -53,6 +53,15 @@ it("keeps unsupported, authentication failure, and not-yet-connected states dist
     resolveJ5ReadSource({ ...source, phase: "connecting", result: AsyncResult.initial(false) })
       .status,
   ).toBe("loading");
+  // A retry after a failure is reconnecting, as upstream presents it, not a first load.
+  expect(
+    resolveJ5ReadSource({
+      ...source,
+      phase: "connecting",
+      reconnecting: true,
+      result: AsyncResult.initial(false),
+    }).status,
+  ).toBe("offline");
   // "available" is a server nothing is connecting to, so it is not loading.
   expect(
     resolveJ5ReadSource({ ...source, phase: "available", result: AsyncResult.initial(false) })
@@ -60,11 +69,12 @@ it("keeps unsupported, authentication failure, and not-yet-connected states dist
   ).toBe("offline");
 });
 
-it("leaves out a server the person turned off, and reads one still starting up as loading", () => {
+it("leaves out a server the person turned off, and reads only a first connection as loading", () => {
   type Input = Parameters<typeof createJ5ReadSourcesAtom<ReadonlyArray<string>>>[0];
   const on = EnvironmentId.make("on");
   const off = EnvironmentId.make("off");
   const starting = EnvironmentId.make("starting");
+  const retrying = EnvironmentId.make("retrying");
   const reads: Array<EnvironmentId> = [];
   const sources = createJ5ReadSourcesAtom<ReadonlyArray<string>>({
     label: "test:j5-read-sources-disabled",
@@ -75,6 +85,7 @@ it("leaves out a server the person turned off, and reads one still starting up a
         [on, { target: { label: "On" }, enabled: true }],
         [off, { target: { label: "Off" }, enabled: false }],
         [starting, { target: { label: "Starting" }, enabled: true }],
+        [retrying, { target: { label: "Retrying" }, enabled: true }],
       ]),
     }) as unknown as Input["catalogValueAtom"],
     stateAtom: (id) =>
@@ -83,7 +94,9 @@ it("leaves out a server the person turned off, and reads one still starting up a
           ? AsyncResult.success({ phase: "connected" })
           : id === off
             ? AsyncResult.success({ phase: "available", desired: false })
-            : AsyncResult.initial(true),
+            : id === retrying
+              ? AsyncResult.success({ phase: "connecting", attempt: 4, lastFailure: {} })
+              : AsyncResult.initial(true),
       ) as unknown as ReturnType<Input["stateAtom"]>,
     configValueAtom: (id) =>
       Atom.make(
@@ -101,6 +114,7 @@ it("leaves out a server the person turned off, and reads one still starting up a
   expect(result.map((entry) => [entry.environmentLabel, entry.status])).toEqual([
     ["On", "ready"],
     ["Starting", "loading"],
+    ["Retrying", "offline"],
   ]);
   expect(reads).not.toContain(off);
 });
