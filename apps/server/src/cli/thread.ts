@@ -46,7 +46,7 @@ export class ThreadServerNotRunningError extends Schema.TaggedError<ThreadServer
 ) {
   override readonly [Runtime.errorReported] = false;
   override get message(): string {
-    return `No running T3 Code server uses ${this.baseDir}. Start T3 Code, then retry.`;
+    return `No running J5 Code server uses ${this.baseDir}. Start J5 Code, then retry.`;
   }
 }
 
@@ -57,7 +57,7 @@ export class ThreadServerUnreachableError extends Schema.TaggedError<ThreadServe
   override readonly [Runtime.errorReported] = false;
   override get message(): string {
     const reason = this.cause instanceof Error ? ` ${this.cause.message}` : "";
-    return `Could not reach the T3 Code server at ${this.origin}.${reason}`;
+    return `Could not reach the J5 Code server at ${this.origin}.${reason}`;
   }
 }
 
@@ -86,7 +86,7 @@ export class ThreadProjectNotFoundError extends Schema.TaggedError<ThreadProject
 ) {
   override readonly [Runtime.errorReported] = false;
   override get message(): string {
-    return `No T3 Code project matches '${this.identifier}'. Pass a project id or a path inside a project.`;
+    return `No J5 Code project matches '${this.identifier}'. Pass a project id or a path inside a project.`;
   }
 }
 
@@ -99,7 +99,7 @@ export class ThreadNeedsInputError extends Schema.TaggedError<ThreadNeedsInputEr
   override readonly [Runtime.errorExitCode] = 2;
 
   override get message(): string {
-    return `Thread ${this.threadId} is waiting for an answer. Open it in T3 Code to respond.`;
+    return `Thread ${this.threadId} is waiting for an answer. Open it in J5 Code to respond.`;
   }
 }
 
@@ -129,7 +129,7 @@ const isThreadCliError = Schema.is(ThreadCliError);
  * These errors are expected outcomes for a script, so they print as one line
  * on stderr instead of the runtime's logged stack trace.
  */
-const reportThreadErrors = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+export const reportThreadErrors = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   effect.pipe(
     Effect.tapError((error) =>
       isThreadCliError(error) ? Console.error(error.message) : Effect.void,
@@ -138,7 +138,7 @@ const reportThreadErrors = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 
 const decodeFailureText = Schema.decodeUnknownOption(Schema.fromJsonString(OrchestratorMcpFailure));
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
-const printJson = (value: unknown) => Console.log(encodeJson(value));
+export const printJson = (value: unknown) => Console.log(encodeJson(value));
 
 const ToolResult = Schema.Struct({
   isError: Schema.optional(Schema.Boolean),
@@ -175,7 +175,7 @@ const makeThreadTools = (session: McpToolSession, origin: string) => {
   const unexpected = (tool: string) =>
     new ThreadToolFailedError({
       tool,
-      detail: `The server sent an unexpected ${tool} result. Update the t3 CLI to match the server.`,
+      detail: `The server sent an unexpected ${tool} result. Update the j5 CLI to match the server.`,
     });
   return {
     call: Effect.fn("cli.thread.callTool")(function* <S extends Schema.Decoder<unknown>>(
@@ -202,7 +202,7 @@ export type ThreadTools = ReturnType<typeof makeThreadTools>;
  * Signs in as a short-lived MCP client of the running server, the same way an
  * outside agent does, and revokes that session when the command ends.
  */
-const withThreadTools = Effect.fn("cli.thread.withThreadTools")(function* <A, E, R>(
+export const withThreadTools = Effect.fn("cli.thread.withThreadTools")(function* <A, E, R>(
   flags: { readonly baseDir: Option.Option<string> },
   run: (tools: ThreadTools) => Effect.Effect<A, E, R>,
 ) {
@@ -217,7 +217,7 @@ const withThreadTools = Effect.fn("cli.thread.withThreadTools")(function* <A, E,
     const environmentAuth = yield* EnvironmentAuth.EnvironmentAuth;
     const issued = yield* Effect.acquireRelease(
       environmentAuth.issueMcpClientSession({
-        label: "t3 thread cli",
+        label: "j5-thread-cli",
         // The CLI runs as the machine's owner. New threads still start at
         // the project's default mode, never at this ceiling by default.
         access: "full-access",
@@ -230,7 +230,7 @@ const withThreadTools = Effect.fn("cli.thread.withThreadTools")(function* <A, E,
     const session = yield* mcpToolSession({
       endpoint: new URL("/mcp", origin).href,
       authorization: `Bearer ${issued.token}`,
-      clientName: "t3-thread-cli",
+      clientName: "j5-thread-cli",
     }).pipe(Effect.mapError((cause) => new ThreadServerUnreachableError({ origin, cause })));
     return yield* run(makeThreadTools(session, origin));
   }).pipe(
@@ -244,7 +244,9 @@ const withThreadTools = Effect.fn("cli.thread.withThreadTools")(function* <A, E,
   );
 });
 
-const readMessageArgument = Effect.fn("cli.thread.readMessage")(function* (argument: string) {
+export const readMessageArgument = Effect.fn("cli.thread.readMessage")(function* (
+  argument: string,
+) {
   const text =
     argument === "-"
       ? yield* Stdio.Stdio.pipe(
@@ -273,7 +275,7 @@ const listAllProjects = Effect.fn("cli.thread.listAllProjects")(function* (tools
 });
 
 /** A project id, or a path inside a project's folder (deepest project wins). */
-const resolveProject = Effect.fn("cli.thread.resolveProject")(function* (
+export const resolveProject = Effect.fn("cli.thread.resolveProject")(function* (
   tools: ThreadTools,
   identifier: string,
 ) {
@@ -472,7 +474,7 @@ export const waitForRun = Effect.fn("cli.thread.waitForRun")(function* (
  * With --json the result always reaches stdout, so a script keeps the thread
  * id even when the run fails.
  */
-const finishRun = Effect.fn("cli.thread.finishRun")(function* (
+export const finishRun = Effect.fn("cli.thread.finishRun")(function* (
   tools: ThreadTools,
   input: {
     readonly threadId: ThreadId;
@@ -537,29 +539,31 @@ const launchWorkspaceStrategy = (input: {
       }),
   });
 
-const jsonFlag = Flag.Boolean("json").pipe(
+export const jsonFlag = Flag.Boolean("json").pipe(
   Flag.withDescription("Print JSON instead of text."),
   Flag.withDefault(false),
 );
-const waitFlag = Flag.Boolean("wait").pipe(
+export const waitFlag = Flag.Boolean("wait").pipe(
   Flag.withDescription(
     "Wait for the agent to finish and print its reply. Exits 1 if the run fails and 2 if it waits for an answer.",
   ),
   Flag.withDefault(false),
 );
-const messageArgument = Argument.String("message").pipe(
+export const messageArgument = Argument.String("message").pipe(
   Argument.withDescription("Message for the agent, or - to read it from stdin."),
 );
-const threadArgument = Argument.String("thread").pipe(Argument.withDescription("Thread id."));
+export const threadArgument = Argument.String("thread").pipe(
+  Argument.withDescription("Thread id."),
+);
 
 const decodeThreadIdValue = Schema.decodeUnknownEffect(ThreadId);
-const decodeTitle = Schema.decodeUnknownEffect(TrimmedNonEmptyString);
-const decodeThreadId = (value: string) =>
+export const decodeTitle = Schema.decodeUnknownEffect(TrimmedNonEmptyString);
+export const decodeThreadId = (value: string) =>
   decodeThreadIdValue(value.trim()).pipe(
     Effect.mapError(() => new ThreadUsageError({ detail: `'${value}' is not a thread id.` })),
   );
 
-const threadListCommand = Command.make("list", {
+export const threadListCommand = Command.make("list", {
   ...projectLocationFlags,
   project: Flag.String("project").pipe(
     Flag.withDescription("Project id or a path inside the project. Defaults to this directory."),
@@ -708,7 +712,7 @@ const threadSendCommand = Command.make("send", {
   ),
 );
 
-const threadShowCommand = Command.make("show", {
+export const threadShowCommand = Command.make("show", {
   ...projectLocationFlags,
   thread: threadArgument,
   messages: Flag.Int("messages").pipe(
