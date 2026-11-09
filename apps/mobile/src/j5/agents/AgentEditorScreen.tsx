@@ -110,7 +110,7 @@ export function AgentEditorScreen() {
         <TextInput
           accessibilityLabel="Instructions"
           multiline
-          autoCapitalize="none"
+          autoCapitalize="sentences"
           autoCorrect={false}
           style={{ minHeight: 160 }}
           placeholder={instructions === null ? "Loading…" : undefined}
