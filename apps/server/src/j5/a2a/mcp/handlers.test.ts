@@ -3000,11 +3000,15 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
       const addedResult = added.result as unknown as {
         status: string;
         crew_instance_id: string;
-        members: unknown[];
+        members: ReadonlyArray<{ readonly link: string }>;
       };
       assert.equal(addedResult.status, "approved");
       assert.equal(addedResult.crew_instance_id, "crew:1");
       assert.lengthOf(addedResult.members, 1);
+      assert.equal(
+        addedResult.members[0]?.link,
+        `<t3-thread://v2/${invocation.environmentId}/thread:new>`,
+      );
       assert.deepStrictEqual(yield* Ref.get(addedSeats), [
         {
           workspace: { type: "shared" as const },
