@@ -1517,7 +1517,8 @@ function ThreadAutomationMessageRow(props: {
         className="min-w-0 rounded-[20px] border border-border"
         style={{
           maxWidth: props.bubbleMaxWidth,
-          ...(props.expanded ? { width: props.bubbleMaxWidth } : null),
+          // J5 (case 97): a J5 prompt's labels are long, so its pill is full width even folded.
+          ...(props.expanded || props.prompt ? { width: props.bubbleMaxWidth } : null),
         }}
       >
         <Pressable
@@ -1539,7 +1540,13 @@ function ThreadAutomationMessageRow(props: {
             tintColorClassName="accent-foreground-muted"
             type="monochrome"
           />
-          <Text numberOfLines={1} className="shrink font-t3-medium text-sm text-foreground-muted">
+          <Text
+            numberOfLines={1}
+            className={cn(
+              "font-t3-medium text-sm text-foreground-muted",
+              props.prompt && "max-w-[55%]",
+            )}
+          >
             {label}
           </Text>
           <Text numberOfLines={1} className="min-w-0 shrink text-sm text-foreground">
