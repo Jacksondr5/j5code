@@ -8,6 +8,7 @@ import { Modal, Pressable, ScrollView, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { AppText as Text } from "../../components/ui/AppText";
+import { ListActionRow } from "../../components/ui/ListActionRow";
 import { ListRowLayout } from "../../components/ui/ListRowLayout";
 import { SettingsSection } from "../../features/settings/components/SettingsSection";
 import { cn } from "../../lib/cn";
@@ -15,11 +16,23 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { agentPersonaEnvironment } from "./agentPersonaAtoms";
 import { personaDetailRows } from "./personaDetails";
 
-/** A persona the person can't edit, such as one from a folder, shown read-only. */
-export function AgentDetailsModal(props: {
+export interface PersonaSheetActionRow {
+  readonly key: string;
+  readonly label: string;
+  readonly tone?: "danger";
+  readonly disabled: boolean;
+  readonly onPress: () => void;
+}
+
+/**
+ * Everything about one persona and what can be done with it, opened by a tap on its row.
+ * Actions are plain rows, not a Menu: Android's Menu can't draw over a Modal.
+ */
+export function PersonaSheet(props: {
   readonly environmentId: EnvironmentId;
   readonly persona: AgentPersonaCatalogRow;
   readonly usageLine: string | null;
+  readonly actions: ReadonlyArray<PersonaSheetActionRow>;
   readonly onClose: () => void;
 }) {
   const [models, setModels] = useState<
@@ -71,7 +84,7 @@ export function AgentDetailsModal(props: {
               <Text>Done</Text>
             </Pressable>
           </View>
-          <ScrollView contentContainerClassName="px-5 pb-6">
+          <ScrollView contentContainerClassName="gap-5 px-5 pb-6">
             <SettingsSection>
               {rows.map((row, index) => (
                 <View
@@ -86,6 +99,23 @@ export function AgentDetailsModal(props: {
                 </View>
               ))}
             </SettingsSection>
+            {props.actions.length === 0 ? null : (
+              <SettingsSection>
+                {props.actions.map((action, index) => (
+                  <View
+                    key={action.key}
+                    className={cn(index > 0 && "border-t border-border-subtle")}
+                  >
+                    <ListActionRow
+                      label={action.label}
+                      disabled={action.disabled}
+                      onPress={action.onPress}
+                      {...(action.tone === undefined ? {} : { tone: action.tone })}
+                    />
+                  </View>
+                ))}
+              </SettingsSection>
+            )}
           </ScrollView>
         </SafeAreaView>
       </View>
