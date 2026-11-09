@@ -4689,6 +4689,11 @@ it.effect(
           ].toSorted(),
         );
 
+        // A further ask to the same agent joins the Exchange it opened before the move.
+        const further = yield* sendFrom("first", ordinary, "further", { expectReply: true });
+        assert.equal(further.exchangeId, awaited.exchangeId);
+        assert.isTrue(further.joinedExistingExchange);
+
         // Both Exchanges still close, and new messages reach it and name its new project.
         const reply = yield* sendFrom("first", second, "reply", { exchangeId: owed.exchangeId! });
         const answer = yield* sendFrom("ordinary", first, "answer", {

@@ -203,10 +203,23 @@ const threadHomeStatement = (
     ORDER BY membership.project_id, membership.participant_id
   `;
 
-/** The query plan of a thread's home lookup, which every send runs, for a test to hold it indexed. */
-export const explainThreadHomeStatement = (sql: SqlClient.SqlClient, threadId: ThreadId) => {
-  const [statement, parameters] = threadHomeStatement(sql, threadId).compile();
-  return sql.unsafe<{ readonly detail: string }>(`EXPLAIN QUERY PLAN ${statement}`, parameters);
+/**
+ * Query plans for a test to hold indexed: a thread's home lookup, which every send runs, and the
+ * participant-id lookup a send to an id with no membership here runs.
+ */
+export const explainHomeStatements = (sql: SqlClient.SqlClient) => {
+  const explain = (statement: {
+    readonly compile: () => readonly [string, ReadonlyArray<unknown>];
+  }) => {
+    const [text, parameters] = statement.compile();
+    return sql.unsafe<{ readonly detail: string }>(`EXPLAIN QUERY PLAN ${text}`, parameters);
+  };
+  return {
+    byThread: explain(threadHomeStatement(sql, "thread:plan" as ThreadId)),
+    byParticipant: explain(
+      currentHomeFacts(sql, { participantId: ParticipantId.make("agent:plan") }),
+    ),
+  };
 };
 
 export const resolveThreadHome = Effect.fn("j5.a2a.resolveThreadHome")(function* (

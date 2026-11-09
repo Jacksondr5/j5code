@@ -759,13 +759,20 @@ const makeLayer = (daemon: boolean) =>
       const endAsksOf: A2ALifecycleServiceShape["endAsksOf"] = (input) =>
         lifecyclePermit.withPermit(
           Effect.gen(function* () {
-            const asks = yield* sql<ExchangeRow & { readonly sender_thread_id: string | null }>`
+            // The asker is judged where its thread lives now, which is not the Exchange's
+            // project once Turn into project has moved it.
+            const asks = yield* sql<
+              ExchangeRow & {
+                readonly sender_thread_id: string | null;
+                readonly sender_project_id: string | null;
+              }
+            >`
               SELECT exchange.project_id, exchange.exchange_id, exchange.sender_id,
-                exchange.receiver_id, membership.thread_id AS sender_thread_id
+                exchange.receiver_id, membership.thread_id AS sender_thread_id,
+                membership.project_id AS sender_project_id
               FROM j5_a2a_exchange AS exchange
               LEFT JOIN j5_a2a_membership AS membership
-                ON membership.project_id = exchange.project_id
-               AND membership.participant_id = exchange.sender_id
+                ON membership.participant_id = exchange.sender_id
               WHERE exchange.status = 'open' AND exchange.receiver_id = ${input.personId}
               ORDER BY exchange.project_id, exchange.opened_seq, exchange.exchange_id
             `;
@@ -773,7 +780,7 @@ const makeLayer = (daemon: boolean) =>
             for (const exchange of asks) {
               const answerable = yield* input.mayAnswer({
                 threadId: exchange.sender_thread_id,
-                projectId: exchange.project_id,
+                projectId: exchange.sender_project_id ?? exchange.project_id,
               });
               if (answerable) continue;
               const disposition = "receiver-retired" as const;

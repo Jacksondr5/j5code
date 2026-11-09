@@ -1141,15 +1141,15 @@ const rawLayer: Layer.Layer<
           exchangeState = "open";
         }
       } else if (input.expectReply === true) {
-        // Asks to a person stay distinct, each its own inbox item; only agents coalesce.
+        // Asks to a person stay distinct, each its own inbox item; only agents coalesce. The open
+        // Exchange may sit in a ledger the sender has since moved out of (Turn into project).
         const existing =
           receiver.kind === "human"
             ? []
             : yield* sql<ExchangeRow>`
               SELECT project_id, exchange_id, sender_id, receiver_id, status
               FROM j5_a2a_exchange
-              WHERE project_id = ${sender.projectId}
-                AND sender_id = ${sender.participantId}
+              WHERE sender_id = ${sender.participantId}
                 AND receiver_id = ${receiverId}
                 AND status = 'open'
               LIMIT 1

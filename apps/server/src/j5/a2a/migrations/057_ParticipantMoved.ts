@@ -66,6 +66,18 @@ export default Effect.gen(function* () {
     ON j5_a2a_comm_event(json_extract(payload, '$.participant.threadId'))
     WHERE kind = 'participant.moved'
   `;
+  // Finding a participant by id, such as a send to one this server has no membership for, reads
+  // its joins and moves through indexes too.
+  yield* sql`
+    CREATE INDEX j5_a2a_comm_event_joined_participant_idx
+    ON j5_a2a_comm_event(json_extract(payload, '$.participant.id'))
+    WHERE kind = 'participant.joined'
+  `;
+  yield* sql`
+    CREATE INDEX j5_a2a_comm_event_moved_participant_idx
+    ON j5_a2a_comm_event(json_extract(payload, '$.participant.id'))
+    WHERE kind = 'participant.moved'
+  `;
   // A participant has one membership wherever it lives, so delivery finds it by id alone.
   yield* sql`CREATE INDEX j5_a2a_membership_participant_idx ON j5_a2a_membership(participant_id)`;
 });

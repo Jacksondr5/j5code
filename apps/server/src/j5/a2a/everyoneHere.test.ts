@@ -338,6 +338,42 @@ it.effect(
     }).pipe(Effect.provide(testLayer)),
 );
 
+it.effect("an ask the agent made before Turn into project moved it is judged on its thread", () =>
+  Effect.gen(function* () {
+    yield* seed;
+    const sql = yield* SqlClient.SqlClient;
+    const ledger = yield* A2ALedger;
+    const toPriya = yield* ask(PRIYA, "priya-before-move");
+    const promoted = LedgerProjectId.make("project:support-promoted");
+    yield* ledger.ensureProject({ projectId: promoted, createdAt: AT });
+    for (const ledgerProjectId of [projectId, promoted]) {
+      yield* ledger.append({
+        commandId: CommCommandId.make(`command:move:support:${ledgerProjectId}`),
+        projectId: ledgerProjectId,
+        acceptedAt: AT,
+        event: {
+          kind: "participant.moved",
+          sender: null,
+          receiver: agent.id,
+          exchangeId: null,
+          correlationId: null,
+          payload: {
+            participant: agent,
+            fromProjectId: projectId,
+            toProjectId: promoted,
+            archivedAt: null,
+          },
+          createdAt: AT,
+        },
+      });
+    }
+    yield* sql`UPDATE orchestration_v2_projection_threads SET project_id = ${promoted} WHERE thread_id = ${threadId}`;
+    // She still writes to the thread itself, wherever it lives, so her ask stays.
+    assert.deepStrictEqual(yield* endUnanswerableAsks(PRIYA), []);
+    assert.strictEqual(yield* exchangeStatus(toPriya), "open");
+  }).pipe(Effect.provide(testLayer)),
+);
+
 it.effect("an ask to someone removed from the server ends", () =>
   Effect.gen(function* () {
     yield* seed;
