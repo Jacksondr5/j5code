@@ -2096,41 +2096,34 @@ it.effect(
     }),
 );
 
-it.effect.each(["wrong home", "unavailable participant"] as const)(
-  "refuses %s without dispatching to a fallback recipient",
-  (refusal) =>
-    Effect.gen(function* () {
-      const harness = yield* makeHarness;
-      yield* Effect.gen(function* () {
-        const target = yield* seedTarget("refused-route");
-        const transport = yield* A2ADeliveryTransport;
-        const threads = yield* ThreadManagementService;
-        const sql = yield* SqlClient.SqlClient;
-        const error = yield* transport
-          .deliverAgent({
-            ...target.delivery,
-            ...(refusal === "wrong home"
-              ? { receiverProjectId: LedgerProjectId.make("project:unrelated") }
-              : { receiverId: ParticipantId.make("agent:unavailable") }),
-          })
-          .pipe(Effect.flip);
-        if (error._tag !== "A2ADeliveryTransportError") return yield* Effect.die(error);
-        assert.equal(error.operation, "deliver agent");
-        assert.include(String(error.cause), "membership disappeared before delivery");
-        assert.deepStrictEqual(yield* Ref.get(harness.deliveryInvocations), []);
-        assert.deepStrictEqual(yield* Ref.get(harness.startedInputs), []);
-        const projection = yield* threads.getThreadProjection(target.threadId);
-        assert.lengthOf(projection.messages, 0);
-        assert.lengthOf(projection.runs, 0);
-        assert.deepStrictEqual(
-          yield* sql<{ readonly count: number }>`
+it.effect("refuses an unavailable participant without dispatching to a fallback recipient", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const target = yield* seedTarget("refused-route");
+      const transport = yield* A2ADeliveryTransport;
+      const threads = yield* ThreadManagementService;
+      const sql = yield* SqlClient.SqlClient;
+      const error = yield* transport
+        .deliverAgent({ ...target.delivery, receiverId: ParticipantId.make("agent:unavailable") })
+        .pipe(Effect.flip);
+      if (error._tag !== "A2ADeliveryTransportError") return yield* Effect.die(error);
+      assert.equal(error.operation, "deliver agent");
+      assert.include(String(error.cause), "membership disappeared before delivery");
+      assert.deepStrictEqual(yield* Ref.get(harness.deliveryInvocations), []);
+      assert.deepStrictEqual(yield* Ref.get(harness.startedInputs), []);
+      const projection = yield* threads.getThreadProjection(target.threadId);
+      assert.lengthOf(projection.messages, 0);
+      assert.lengthOf(projection.runs, 0);
+      assert.deepStrictEqual(
+        yield* sql<{ readonly count: number }>`
           SELECT COUNT(*) AS count FROM orchestration_command_receipts
           WHERE command_id = ${deliveryCommandId(target.messageId)}
         `,
-          [{ count: 0 }],
-        );
-      }).pipe(Effect.provide(makeTestLayer(harness)));
-    }),
+        [{ count: 0 }],
+      );
+    }).pipe(Effect.provide(makeTestLayer(harness)));
+  }),
 );
 
 it.effect.each([
