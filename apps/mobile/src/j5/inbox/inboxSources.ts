@@ -58,6 +58,15 @@ export const inboxCountSourcesAtom = createJ5ReadSourcesAtom({
   queryAtom: inboxCountQueryAtom,
 });
 
+export const worktreeCleanupQueryAtom = (environmentId: EnvironmentId) =>
+  j5Environment.crewWorktreeCleanups({ environmentId, input: { status: "open" } });
+/** The worktree cleanups waiting on an Owner; a server lists them to its Owners only. */
+export const worktreeCleanupSourcesAtom = createJ5ReadSourcesAtom({
+  ...sourcesInput,
+  label: "mobile-j5:worktree-cleanup-sources",
+  queryAtom: worktreeCleanupQueryAtom,
+});
+
 export const crewRequestsQueryAtom = (environmentId: EnvironmentId) =>
   j5Environment.crewRuntimeRequests({ environmentId, input: {} });
 
@@ -150,5 +159,6 @@ export const readInboxSources = () =>
   Promise.all([
     ...readConnectedSources(openInboxSourcesAtom, openInboxQueryAtom),
     ...readConnectedSources(answeredInboxSourcesAtom, answeredInboxQueryAtom),
+    ...readConnectedSources(worktreeCleanupSourcesAtom, worktreeCleanupQueryAtom),
     readCrewRequestSources(),
   ]);

@@ -1,10 +1,11 @@
-import type { J5ReadSources } from "@t3tools/client-runtime/j5/readSources";
 import type { EnvironmentId } from "@t3tools/contracts";
 import type {
   CrewWorktreeCleanupEntry,
   CrewWorktreeCleanupItem,
   CrewWorktreeCleanupListResponse,
 } from "@t3tools/contracts/j5";
+
+import type { J5ReadSources } from "./readSources.ts";
 
 export type ScopedWorktreeCleanup = CrewWorktreeCleanupItem & {
   readonly environmentId: EnvironmentId;
@@ -30,7 +31,7 @@ export function mergeWorktreeCleanupSources(
         sourceReady: source.status === "ready",
       })),
     )
-    .toSorted((left, right) =>
+    .sort((left, right) =>
       left.status === "open"
         ? left.filedAt.localeCompare(right.filedAt)
         : (right.decidedAt ?? "").localeCompare(left.decidedAt ?? ""),
@@ -42,7 +43,7 @@ const WORKTREE_CLEANUP_VISIBLE_ROWS = 5;
 
 /** Uncommitted work first, then commits only; the more of each, the nearer the top. */
 export const orderCleanupRows = (entries: ReadonlyArray<CrewWorktreeCleanupEntry>) =>
-  entries.toSorted(
+  [...entries].sort(
     (left, right) =>
       right.uncommittedFiles - left.uncommittedFiles ||
       (right.commitsAhead ?? 0) - (left.commitsAhead ?? 0),

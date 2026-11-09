@@ -74,7 +74,7 @@ import {
   inboxSummary,
   worktreeCleanupKey,
   type ScopedWorktreeCleanup,
-} from "./crewWorktreeCleanup.logic";
+} from "@t3tools/client-runtime/j5/crew-worktree-cleanup";
 import {
   answeredInboxQueryAtom,
   answeredInboxSourcesAtom,
