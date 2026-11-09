@@ -3,7 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { ThreadId } from "@t3tools/contracts";
 import type { FleetAgent, FleetProject } from "@t3tools/contracts/j5";
 
-import { deriveJ5LineageRows } from "./j5Lineage.logic";
+import { deriveJ5LineageRows, visibleJ5LineageRows } from "./j5Lineage.logic";
 
 const agent = (participantId: string, overrides: Partial<FleetAgent> = {}): FleetAgent => ({
   participantId,
@@ -89,5 +89,30 @@ describe("deriveJ5LineageRows", () => {
   it("shows nothing for a thread outside the roster or with no placement", () => {
     expect(rows(roster, "stranger")).toEqual([]);
     expect(rows([project([agent("solo")])], "solo")).toEqual([]);
+  });
+
+  it("follows upstream's tag filter: hidden rows go, and unloaded commanders go while hiding", () => {
+    const derived = deriveJ5LineageRows(roster, ThreadId.make("t-builder"));
+    const visible = (filter: Parameters<typeof visibleJ5LineageRows>[1]) =>
+      visibleJ5LineageRows(derived, filter).map((row) => row.threadId as string);
+    const nothingLoaded = new Set<ThreadId>();
+    expect(
+      visible({
+        isHidden: (id) => id === "t-reviewer",
+        hidingAnywhere: false,
+        loaded: nothingLoaded,
+      }),
+    ).toEqual(["t-captain"]);
+    // The unloaded Captain may be hidden, so it goes; the unloaded seat follows this thread.
+    expect(visible({ isHidden: () => false, hidingAnywhere: true, loaded: nothingLoaded })).toEqual(
+      ["t-reviewer"],
+    );
+    expect(
+      visible({
+        isHidden: () => false,
+        hidingAnywhere: true,
+        loaded: new Set([ThreadId.make("t-captain")]),
+      }),
+    ).toEqual(["t-captain", "t-reviewer"]);
   });
 });

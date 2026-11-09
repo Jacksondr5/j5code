@@ -14,11 +14,16 @@ import {
   ThreadLineageRowList,
 } from "../../components/chat/ThreadRelationshipsControl";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip";
-import { useHiddenThreadKeys, useQuietThreadShell } from "../../state/entities";
+import {
+  useAnyEnvironmentHiding,
+  useEnvironmentThreadRefs,
+  useHiddenThreadKeys,
+  useQuietThreadShell,
+} from "../../state/entities";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { AgentRowIdentity } from "../agents/AgentIdentityChip";
 import { fleetSourcesAtom } from "../state";
-import { deriveJ5LineageRows, type J5LineageRow } from "./j5Lineage.logic";
+import { deriveJ5LineageRows, visibleJ5LineageRows, type J5LineageRow } from "./j5Lineage.logic";
 
 const EMPTY: ReadonlyArray<FleetProject> = [];
 
@@ -55,9 +60,14 @@ export function useJ5LineageRows(
 ): ReadonlyArray<J5LineageRow> {
   const projects = useAtomValue(environmentFleetProjectsAtom(environmentId));
   const hiddenKeys = useHiddenThreadKeys();
-  return deriveJ5LineageRows(projects, threadId).filter(
-    (row) => !hiddenKeys.has(threadKey({ environmentId, threadId: row.threadId })),
-  );
+  const hidingAnywhere = useAnyEnvironmentHiding();
+  // Read only while hiding: the loaded set matters for nothing else.
+  const loadedRefs = useEnvironmentThreadRefs(hidingAnywhere ? environmentId : null);
+  return visibleJ5LineageRows(deriveJ5LineageRows(projects, threadId), {
+    isHidden: (rowThreadId) => hiddenKeys.has(threadKey({ environmentId, threadId: rowThreadId })),
+    hidingAnywhere,
+    loaded: new Set(loadedRefs.map((ref) => ref.threadId)),
+  });
 }
 
 function J5LineageRowItem(props: {

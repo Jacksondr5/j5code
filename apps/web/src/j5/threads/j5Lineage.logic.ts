@@ -76,3 +76,26 @@ export function deriveJ5LineageRows(
     );
   return rows;
 }
+
+/**
+ * Upstream's tag-filter rule for Lineage: a hidden thread's row goes. While any environment is
+ * hiding, a parent or Captain the shell hasn't loaded may be hidden too, so it goes; seats and
+ * peers stay, since they follow this visible thread.
+ */
+export const visibleJ5LineageRows = (
+  rows: ReadonlyArray<J5LineageRow>,
+  filter: {
+    readonly isHidden: (threadId: ThreadId) => boolean;
+    readonly hidingAnywhere: boolean;
+    readonly loaded: ReadonlySet<ThreadId>;
+  },
+): ReadonlyArray<J5LineageRow> =>
+  rows.filter(
+    (row) =>
+      !filter.isHidden(row.threadId) &&
+      !(
+        filter.hidingAnywhere &&
+        (row.role === "parent" || row.role === "captain") &&
+        !filter.loaded.has(row.threadId)
+      ),
+  );
