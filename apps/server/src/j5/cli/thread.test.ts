@@ -77,20 +77,20 @@ it.effect("start asks for a model choice and maps its flags onto j5_spawn_agent"
   }),
 );
 
-it.effect("start --wait follows the run the agent's brief started, not a newer one", () =>
+it.effect("start --wait follows the run the agent's brief started, not another message's", () =>
   Effect.gen(function* () {
     const { tools, calls } = scriptedTools({
+      // Someone else's message reached the new thread before and after its brief; the spawn
+      // result names the brief's own run.
       j5_spawn_agent: [
-        { participant_id: "agent:j5:a2a:thread:j5:cli", thread_id: threadId, project_id: "p" },
+        {
+          participant_id: "agent:j5:a2a:thread:j5:cli",
+          thread_id: threadId,
+          run_id: runId,
+          project_id: "p",
+        },
       ],
       t3_thread_read: [
-        // Someone else's message has already started a newer run; the brief's is still first.
-        {
-          items: [
-            { type: "user_message", runId },
-            { type: "user_message", runId: RunId.make("run:j5:someone-else") },
-          ],
-        },
         { thread: { pendingRequestCount: 0 }, items: [], hasMore: false, nextPosition: null },
       ],
       t3_thread_wait: [{ threadId, runId, status: "completed", timedOut: false }],
@@ -115,9 +115,13 @@ it.effect("start --wait fails visibly when it cannot find the brief's run", () =
   Effect.gen(function* () {
     const { tools } = scriptedTools({
       j5_spawn_agent: [
-        { participant_id: "agent:j5:a2a:thread:j5:cli", thread_id: threadId, project_id: "p" },
+        {
+          participant_id: "agent:j5:a2a:thread:j5:cli",
+          thread_id: threadId,
+          run_id: null,
+          project_id: "p",
+        },
       ],
-      t3_thread_read: [{ items: [] }],
     });
     const args = { title: "Fix", brief: "Fix", workspace: { type: "root" }, persona: "builder" };
 

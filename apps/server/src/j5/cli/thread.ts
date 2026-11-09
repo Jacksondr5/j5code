@@ -37,11 +37,9 @@ import { participantIdForThread } from "../a2a/HomeRegistrar.ts";
 const SpawnResult = Schema.Struct({
   participant_id: Schema.String,
   thread_id: ThreadId,
+  /** The run the brief started; a message someone else sends the new thread cannot stand in. */
+  run_id: Schema.NullOr(RunId),
   project_id: Schema.String,
-});
-
-const FirstMessages = Schema.Struct({
-  items: Schema.Array(Schema.Struct({ type: Schema.String, runId: Schema.NullOr(RunId) })),
 });
 
 interface StartFlags {
@@ -118,17 +116,10 @@ export const startAgent = Effect.fn("j5.cli.thread.startAgent")(function* (
     SpawnResult,
   );
   if (input.wait) {
-    // The brief is the thread's first message and starts before j5_spawn_agent returns. Reads go
-    // oldest first, so a message someone sends meanwhile cannot stand in for it.
-    const { items } = yield* tools.call(
-      "t3_thread_read",
-      { threadId: spawned.thread_id, view: "messages", limit: 10, runLimit: 1 },
-      FirstMessages,
-    );
-    const runId = items.find((item) => item.type === "user_message")?.runId ?? null;
+    const runId = spawned.run_id;
     if (runId === null) {
       return yield* new ThreadToolFailedError({
-        tool: "t3_thread_read",
+        tool: "j5_spawn_agent",
         detail: `Started thread ${spawned.thread_id}, but its brief's run could not be found to wait for. Follow it with j5 thread show.`,
       });
     }

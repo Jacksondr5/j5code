@@ -389,6 +389,8 @@ export const J5SpawnAgentResult = Schema.Struct({
   participant_id: ParticipantId,
   thread_id: ThreadId,
   link: Schema.String,
+  /** The run the brief started, to wait on; null if it could not be read. */
+  run_id: Schema.NullOr(RunId),
   project_id: LedgerProjectId,
   project_title: Schema.String,
   placement: Schema.Struct({

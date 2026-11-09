@@ -21,6 +21,7 @@ import {
   EnvironmentId,
   EventId,
   MessageId,
+  RunId,
   type ModelSelection,
   type OrchestrationV2ThreadShell,
   type RuntimeMode,
@@ -1381,7 +1382,25 @@ it.effect("preflights home before creation and records facts before the one stab
         ),
     });
     const threadManagement = threadManagementMock({
-      getThreadRecords: (threadId) => Effect.succeed(projection(threadId)),
+      // Someone else's messages reached the new thread before and after its brief.
+      getThreadRecords: (threadId) =>
+        Ref.get(commands).pipe(
+          Effect.map((dispatched) => {
+            const brief = dispatched.find(
+              (command) => command.type === "message.dispatch" && command.threadId === threadId,
+            );
+            return brief?.type !== "message.dispatch"
+              ? projection(threadId)
+              : ({
+                  ...projection(threadId),
+                  runs: [
+                    { id: RunId.make("run:someone-before"), userMessageId: "message:before" },
+                    { id: RunId.make("run:brief"), userMessageId: brief.messageId },
+                    { id: RunId.make("run:someone-after"), userMessageId: "message:after" },
+                  ],
+                } as never);
+          }),
+        ),
       dispatch: (command) =>
         command.type === "thread.create" && String(command.commandId).includes("spawn-rejected")
           ? Effect.fail(
@@ -1505,6 +1524,8 @@ it.effect("preflights home before creation and records facts before the one stab
         participant_id: childParticipantId,
         thread_id: (first.result as { readonly thread_id: ThreadId }).thread_id,
         link: `<t3-thread://v2/environment:j5:mcp-handler/${(first.result as { readonly thread_id: ThreadId }).thread_id}>`,
+        // The brief's own run, found by its message, not the first or the newest.
+        run_id: RunId.make("run:brief"),
         project_id: ledgerProjectId,
         project_title: projectTitle,
         placement: {
