@@ -128,6 +128,8 @@ function CaptainAsks(props: {
         {open ? (
           <View className="gap-2 pb-2">
             <ScrollView
+              // Remounted per ask, so each reports its own content size.
+              key={shown.exchangeId}
               style={{ maxHeight: full ? 280 : EXCERPT_HEIGHT }}
               scrollEnabled={full}
               nestedScrollEnabled
