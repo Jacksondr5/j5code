@@ -324,11 +324,6 @@ function OwnerAgentLibrarySettingsScreen() {
       : presentAgentPersonaCatalog(catalog.data, providers ?? []);
 
   const viewedPersona = personas.find((persona) => persona.personaId === viewing);
-  // Every action closes the sheet first, so its toast, form or confirmation shows on the page.
-  const closeAnd = (run: () => void) => () => {
-    setViewing(null);
-    run();
-  };
   const sheetActions: ReadonlyArray<PersonaSheetActionRow> =
     viewedPersona === undefined
       ? []
@@ -347,13 +342,13 @@ function OwnerAgentLibrarySettingsScreen() {
                   key: action,
                   label: "Edit",
                   disabled: locked,
-                  onPress: closeAnd(() => {
+                  onPress: () => {
                     if (viewedPersona.edit && effectiveEnvironmentId)
                       navigation.navigate("SettingsPersonaEdit", {
                         environmentId: effectiveEnvironmentId,
                         initial: viewedPersona.edit,
                       });
-                  }),
+                  },
                 },
               ];
             case "duplicate":
@@ -362,7 +357,7 @@ function OwnerAgentLibrarySettingsScreen() {
                   key: action,
                   label: "Duplicate as personal persona",
                   disabled: locked || viewedPersona.availability === "unsupported",
-                  onPress: closeAnd(() => void duplicatePersona(id)),
+                  onPress: () => void duplicatePersona(id),
                 },
               ];
             case "export":
@@ -371,7 +366,7 @@ function OwnerAgentLibrarySettingsScreen() {
                   key: action,
                   label: "Export YAML",
                   disabled: busy,
-                  onPress: closeAnd(() => void exportPersona(id)),
+                  onPress: () => void exportPersona(id),
                 },
               ];
             case "copy":
@@ -379,13 +374,11 @@ function OwnerAgentLibrarySettingsScreen() {
                 key: `copy:${environment.environmentId}`,
                 label: `Copy to ${environment.environmentLabel}`,
                 disabled: busy,
-                onPress: closeAnd(
-                  () =>
-                    void copyPersona(id, {
-                      environmentId: environment.environmentId,
-                      label: environment.environmentLabel,
-                    }),
-                ),
+                onPress: () =>
+                  void copyPersona(id, {
+                    environmentId: environment.environmentId,
+                    label: environment.environmentLabel,
+                  }),
               }));
             case "remove":
               return [
@@ -394,7 +387,7 @@ function OwnerAgentLibrarySettingsScreen() {
                   label: "Remove",
                   tone: "danger" as const,
                   disabled: locked,
-                  onPress: closeAnd(() => void removePersona(id)),
+                  onPress: () => void removePersona(id),
                 },
               ];
             case "restore":
@@ -403,7 +396,7 @@ function OwnerAgentLibrarySettingsScreen() {
                   key: action,
                   label: "Restore",
                   disabled: locked,
-                  onPress: closeAnd(() => void restorePersona(id)),
+                  onPress: () => void restorePersona(id),
                 },
               ];
           }
@@ -705,7 +698,9 @@ function PersonaRow(props: {
     >
       <Pressable
         accessibilityRole="button"
-        accessibilityLabel={persona.displayName}
+        accessibilityLabel={
+          marker === null ? persona.displayName : `${persona.displayName}, ${marker.label}`
+        }
         accessibilityHint="Opens its details and actions"
         disabled={props.busy}
         onPress={props.onOpen}

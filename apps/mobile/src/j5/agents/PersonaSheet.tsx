@@ -4,7 +4,7 @@ import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime"
 import type { AgentPersonaCatalogRow } from "@t3tools/client-runtime/j5/agent-personas";
 import type { AgentPersonaModelEntry, EnvironmentId } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
-import { Modal, Pressable, ScrollView, View } from "react-native";
+import { Modal, Platform, Pressable, ScrollView, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { AppText as Text } from "../../components/ui/AppText";
@@ -26,7 +26,8 @@ export interface PersonaSheetActionRow {
 
 /**
  * Everything about one persona and what can be done with it, opened by a tap on its row.
- * Actions are plain rows, not a Menu: Android's Menu can't draw over a Modal.
+ * Actions are plain rows, not a Menu: Android's Menu can't draw over a Modal. Each closes the
+ * sheet first; on iOS it waits for the dismissal, so a share sheet or modal it opens can present.
  */
 export function PersonaSheet(props: {
   readonly environmentId: EnvironmentId;
@@ -64,14 +65,28 @@ export function PersonaSheet(props: {
       cancelled = true;
     };
   }, [props.environmentId, personaId, read]);
+  const [leaving, setLeaving] = useState<(() => void) | null>(null);
+  const leaveThen = (run: () => void) => {
+    if (Platform.OS !== "ios") {
+      props.onClose();
+      run();
+      return;
+    }
+    setLeaving(() => run);
+  };
   const providers = useAtomValue(serverEnvironment.providersValueAtom(props.environmentId));
   const rows = personaDetailRows(props.persona, models, props.usageLine, providers ?? []);
   return (
     <Modal
-      visible
+      visible={leaving === null}
       animationType="slide"
       presentationStyle="pageSheet"
       onRequestClose={props.onClose}
+      onDismiss={() => {
+        if (leaving === null) return;
+        props.onClose();
+        leaving();
+      }}
     >
       {/* SafeAreaView takes no className, so the theme surface and flex go on a View. */}
       <View className="flex-1 bg-sheet">
@@ -109,7 +124,7 @@ export function PersonaSheet(props: {
                     <ListActionRow
                       label={action.label}
                       disabled={action.disabled}
-                      onPress={action.onPress}
+                      onPress={() => leaveThen(action.onPress)}
                       {...(action.tone === undefined ? {} : { tone: action.tone })}
                     />
                   </View>
