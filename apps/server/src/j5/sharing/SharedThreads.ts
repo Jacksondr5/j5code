@@ -148,14 +148,12 @@ const make = Effect.gen(function* () {
       UNION
       SELECT placed.thread_id, tree.depth + 1
       FROM tree
+      -- A placement stays where it was made when Turn into project moves either agent.
       JOIN j5_a2a_membership AS parent ON parent.thread_id = tree.thread_id
       JOIN j5_a2a_participant_placement AS placement
-        ON placement.project_id = parent.project_id
-       AND placement.placement_parent_id = parent.participant_id
+        ON placement.placement_parent_id = parent.participant_id
        AND placement.provenance_kind <> 'forked-from'
-      JOIN j5_a2a_membership AS placed
-        ON placed.project_id = placement.project_id
-       AND placed.participant_id = placement.participant_id
+      JOIN j5_a2a_membership AS placed ON placed.participant_id = placement.participant_id
       WHERE tree.depth < ${MAX_DESCENDANT_DEPTH} AND placed.thread_id IS NOT NULL
     )
     SELECT DISTINCT thread_id FROM tree

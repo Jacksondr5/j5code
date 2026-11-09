@@ -21,6 +21,9 @@ import {
 } from "./PlacementService.ts";
 import { CommCommandId, LedgerProjectId, ParticipantId, type Participant } from "./contracts.ts";
 import { PlacementCommandId, type ParticipantProvenance } from "./placementContracts.ts";
+import { AgentCrewInstanceService } from "./AgentCrewInstanceService.ts";
+import { participantIdForThread } from "./HomeRegistrar.ts";
+import { makeSpawnedChildrenRead } from "./spawnedChildrenRead.ts";
 
 const timestamp = "2026-08-16T16:00:00.000Z";
 const projectId = LedgerProjectId.make("project:placement");
@@ -134,6 +137,82 @@ it.effect("records a spawner from another project and makes its child a root the
         row.placementParentId,
       ]),
       [[child.id, null]],
+    );
+  }).pipe(Effect.provide(TestLayer)),
+);
+
+it.effect("keeps a moved child's placement: still under its spawner, still spawned by it", () =>
+  Effect.gen(function* () {
+    // Thread-derived ids, as the spawned-children read maps them back to threads.
+    const threadAgent = (name: string) => {
+      const threadId = ThreadId.make(`thread:${name}`);
+      return { kind: "agent" as const, id: participantIdForThread(threadId), threadId };
+    };
+    const spawner = threadAgent("move-spawner");
+    const child = threadAgent("move-child");
+    yield* prepare([spawner, child]);
+    yield* record({ index: 1, participant: child, provenance: spawnedBy(spawner) });
+    // Turn into project moves the child's membership; its placement stays where it was made.
+    const ledger = yield* A2ALedger;
+    const promoted = LedgerProjectId.make("project:placement-promoted");
+    yield* ledger.ensureProject({ projectId: promoted, createdAt: timestamp });
+    for (const ledgerProjectId of [projectId, promoted]) {
+      yield* ledger.append({
+        commandId: CommCommandId.make(`move:child:${ledgerProjectId}`),
+        projectId: ledgerProjectId,
+        acceptedAt: timestamp,
+        event: {
+          kind: "participant.moved",
+          sender: null,
+          receiver: child.id,
+          exchangeId: null,
+          correlationId: null,
+          payload: {
+            participant: child,
+            fromProjectId: projectId,
+            toProjectId: promoted,
+            archivedAt: null,
+          },
+          createdAt: timestamp,
+        },
+      });
+    }
+
+    const placements = yield* ParticipantPlacementService;
+    assert.deepStrictEqual(
+      (yield* placements.listParticipants(promoted)).map((row) => row.provenance),
+      [spawnedBy(spawner)],
+    );
+    const spawnedChildren = yield* makeSpawnedChildrenRead.pipe(
+      Effect.provide(
+        Layer.mock(AgentCrewInstanceService)({ listInvolving: () => Effect.succeed([]) }),
+      ),
+    );
+    const read = yield* spawnedChildren([spawner.threadId]);
+    assert.deepStrictEqual(
+      read.entries.map((entry) => entry.children.map((row) => row.threadId)),
+      [[child.threadId]],
+    );
+
+    // Deleting it, in its new project, removes the placement it left behind.
+    yield* ledger.append({
+      commandId: CommCommandId.make("delete:child"),
+      projectId: promoted,
+      acceptedAt: timestamp,
+      event: {
+        kind: "participant.deleted",
+        sender: null,
+        receiver: child.id,
+        exchangeId: null,
+        correlationId: null,
+        payload: { participant: child },
+        createdAt: timestamp,
+      },
+    });
+    const sql = yield* SqlClient.SqlClient;
+    assert.deepStrictEqual(
+      yield* sql`SELECT project_id FROM j5_a2a_participant_placement WHERE participant_id = ${child.id}`,
+      [],
     );
   }).pipe(Effect.provide(TestLayer)),
 );

@@ -223,6 +223,48 @@ it.effect.each(["live", "message"] as const)(
     }),
 );
 
+it.effect("lists a spawned Peer's question once after Turn into project moved it", () =>
+  Effect.gen(function* () {
+    const fixture = yield* setup;
+    const peer = ThreadId.make("thread:inbox-moved-peer");
+    yield* fixture.add(peer, [question("moved-question")]);
+    // Its membership moves; its placement stays in the project it was spawned in.
+    const ledger = Context.get(fixture.context, Ledger.A2ALedger);
+    const promoted = LedgerProjectId.make("project:native-question-promoted");
+    yield* ledger.ensureProject({ projectId: promoted, createdAt: timestamp });
+    const participant = {
+      kind: "agent" as const,
+      id: Homes.participantIdForThread(peer),
+      threadId: peer,
+    };
+    for (const ledgerProjectId of [projectId, promoted]) {
+      yield* ledger.append({
+        commandId: CommCommandId.make(`move:${peer}:${ledgerProjectId}`),
+        projectId: ledgerProjectId,
+        acceptedAt: timestamp,
+        event: {
+          kind: "participant.moved",
+          sender: null,
+          receiver: participant.id,
+          exchangeId: null,
+          correlationId: null,
+          payload: {
+            participant,
+            fromProjectId: projectId,
+            toProjectId: promoted,
+            archivedAt: null,
+          },
+          createdAt: timestamp,
+        },
+      });
+    }
+    assert.deepEqual(
+      (yield* fixture.read).map((item) => [item.threadId, item.projectId]),
+      [[peer, promoted]],
+    );
+  }),
+);
+
 it.effect("loads actual pending questions when the shell summary names an approval", () =>
   Effect.gen(function* () {
     const fixture = yield* setup;

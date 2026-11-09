@@ -2096,41 +2096,34 @@ it.effect(
     }),
 );
 
-it.effect.each(["wrong home", "unavailable participant"] as const)(
-  "refuses %s without dispatching to a fallback recipient",
-  (refusal) =>
-    Effect.gen(function* () {
-      const harness = yield* makeHarness;
-      yield* Effect.gen(function* () {
-        const target = yield* seedTarget("refused-route");
-        const transport = yield* A2ADeliveryTransport;
-        const threads = yield* ThreadManagementService;
-        const sql = yield* SqlClient.SqlClient;
-        const error = yield* transport
-          .deliverAgent({
-            ...target.delivery,
-            ...(refusal === "wrong home"
-              ? { receiverProjectId: LedgerProjectId.make("project:unrelated") }
-              : { receiverId: ParticipantId.make("agent:unavailable") }),
-          })
-          .pipe(Effect.flip);
-        if (error._tag !== "A2ADeliveryTransportError") return yield* Effect.die(error);
-        assert.equal(error.operation, "deliver agent");
-        assert.include(String(error.cause), "membership disappeared before delivery");
-        assert.deepStrictEqual(yield* Ref.get(harness.deliveryInvocations), []);
-        assert.deepStrictEqual(yield* Ref.get(harness.startedInputs), []);
-        const projection = yield* threads.getThreadProjection(target.threadId);
-        assert.lengthOf(projection.messages, 0);
-        assert.lengthOf(projection.runs, 0);
-        assert.deepStrictEqual(
-          yield* sql<{ readonly count: number }>`
+it.effect("refuses an unavailable participant without dispatching to a fallback recipient", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    yield* Effect.gen(function* () {
+      const target = yield* seedTarget("refused-route");
+      const transport = yield* A2ADeliveryTransport;
+      const threads = yield* ThreadManagementService;
+      const sql = yield* SqlClient.SqlClient;
+      const error = yield* transport
+        .deliverAgent({ ...target.delivery, receiverId: ParticipantId.make("agent:unavailable") })
+        .pipe(Effect.flip);
+      if (error._tag !== "A2ADeliveryTransportError") return yield* Effect.die(error);
+      assert.equal(error.operation, "deliver agent");
+      assert.include(String(error.cause), "membership disappeared before delivery");
+      assert.deepStrictEqual(yield* Ref.get(harness.deliveryInvocations), []);
+      assert.deepStrictEqual(yield* Ref.get(harness.startedInputs), []);
+      const projection = yield* threads.getThreadProjection(target.threadId);
+      assert.lengthOf(projection.messages, 0);
+      assert.lengthOf(projection.runs, 0);
+      assert.deepStrictEqual(
+        yield* sql<{ readonly count: number }>`
           SELECT COUNT(*) AS count FROM orchestration_command_receipts
           WHERE command_id = ${deliveryCommandId(target.messageId)}
         `,
-          [{ count: 0 }],
-        );
-      }).pipe(Effect.provide(makeTestLayer(harness)));
-    }),
+        [{ count: 0 }],
+      );
+    }).pipe(Effect.provide(makeTestLayer(harness)));
+  }),
 );
 
 it.effect.each([
@@ -4428,86 +4421,107 @@ it.effect("registers an archived older thread as archived, in one step or not at
   }),
 );
 
+const makeNoProjectLayer = (harness: DeliveryHarness) => {
+  const enrichment = {
+    repositoryIdentity: null,
+    faviconPath: null,
+    repositoryIdentityResolved: true,
+  };
+  const projects = ProjectServiceLayerLive.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        Layer.mock(ProjectEnrichmentService)({
+          getAvailable: () => Effect.succeed(enrichment),
+          peek: () => Effect.succeed(enrichment),
+          invalidate: () => Effect.void,
+        }),
+        Layer.mock(WorkspacePaths)({ normalizeWorkspaceRoot: (root) => Effect.succeed(root) }),
+      ),
+    ),
+    Layer.provide(serverConfigLayer),
+    Layer.provideMerge(makeLifecycleTestLayer(harness)),
+  );
+  return ManagedProjectFolders.layer.pipe(
+    // Upstream offers No project only when its home is outside a Git checkout.
+    Layer.provide(
+      Layer.mock(GitWorkflow.GitWorkflowService)({
+        isRepository: () => Effect.succeed(false),
+      }),
+    ),
+    Layer.provide(Layer.mock(GitVcsDriver)({})),
+    Layer.provide(serverConfigLayer),
+    Layer.provideMerge(projects),
+  );
+};
+
+/** Two threads in No project, each in a folder of its own, and one in an ordinary project. */
+const noProjectFixture = Effect.fn("A2AIntegration.noProjectFixture")(function* () {
+  const scratch = yield* ManagedProjectFolders.ManagedProjectFolders;
+  const orchestrator = yield* OrchestratorV2;
+  const projectService = yield* ProjectService.ProjectService;
+  const filesystem = yield* FileSystem.FileSystem;
+  const { projectId: noProject } = yield* scratch.ensureScratchProject;
+  const ordinaryProject = ProjectId.make("project:no-project:ordinary");
+  yield* projectService.create({
+    commandId: CommandId.make("command:no-project:create-ordinary"),
+    projectId: ordinaryProject,
+    title: "Ordinary",
+    workspaceRoot: yield* filesystem.makeTempDirectoryScoped({
+      prefix: "j5-no-project-ordinary-",
+    }),
+  });
+  const threadId = (name: string) => ThreadId.make(`thread:no-project:${name}`);
+  const create = (name: string, projectId: ProjectId, worktreePath: string | null) =>
+    orchestrator.dispatch({
+      type: "thread.create",
+      createdBy: "user",
+      creationSource: "web",
+      commandId: CommandId.make(`command:no-project:create:${name}`),
+      threadId: threadId(name),
+      projectId,
+      title: `No project ${name}`,
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath,
+    });
+  const folders = new Map<string, string>();
+  for (const name of ["first", "second"]) {
+    const folder = Option.getOrThrow(
+      yield* scratch.folderForThread({
+        projectId: noProject,
+        threadId: threadId(name),
+        text: `Scratch ${name}`,
+      }),
+    );
+    folders.set(name, folder);
+    yield* create(name, noProject, folder);
+  }
+  yield* create("ordinary", ordinaryProject, null);
+  return {
+    noProject,
+    ordinaryProject,
+    threadId,
+    folders,
+    first: participantIdForThread(threadId("first")),
+    second: participantIdForThread(threadId("second")),
+    ordinary: participantIdForThread(threadId("ordinary")),
+  };
+});
+
 it.effect(
   "a thread in upstream's No project project joins, lists, sends and receives like any other",
   () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness;
-      const enrichment = {
-        repositoryIdentity: null,
-        faviconPath: null,
-        repositoryIdentityResolved: true,
-      };
-      const projects = ProjectServiceLayerLive.pipe(
-        Layer.provide(
-          Layer.mergeAll(
-            Layer.mock(ProjectEnrichmentService)({
-              getAvailable: () => Effect.succeed(enrichment),
-              peek: () => Effect.succeed(enrichment),
-              invalidate: () => Effect.void,
-            }),
-            Layer.mock(WorkspacePaths)({ normalizeWorkspaceRoot: (root) => Effect.succeed(root) }),
-          ),
-        ),
-        Layer.provide(serverConfigLayer),
-        Layer.provideMerge(makeLifecycleTestLayer(harness)),
-      );
-      const layer = ManagedProjectFolders.layer.pipe(
-        // Upstream offers No project only when its home is outside a Git checkout.
-        Layer.provide(
-          Layer.mock(GitWorkflow.GitWorkflowService)({
-            isRepository: () => Effect.succeed(false),
-          }),
-        ),
-        Layer.provide(Layer.mock(GitVcsDriver)({})),
-        Layer.provide(serverConfigLayer),
-        Layer.provideMerge(projects),
-      );
       yield* Effect.gen(function* () {
-        const scratch = yield* ManagedProjectFolders.ManagedProjectFolders;
-        const orchestrator = yield* OrchestratorV2;
-        const projectService = yield* ProjectService.ProjectService;
         const registration = yield* ThreadRegistration;
         const send = yield* A2ASendService;
         const worker = yield* A2ADeliveryWorker;
         const threads = yield* ThreadManagementService;
-        const filesystem = yield* FileSystem.FileSystem;
-        const { projectId: noProject } = yield* scratch.ensureScratchProject;
-        const ordinaryProject = ProjectId.make("project:no-project:ordinary");
-        yield* projectService.create({
-          commandId: CommandId.make("command:no-project:create-ordinary"),
-          projectId: ordinaryProject,
-          title: "Ordinary",
-          workspaceRoot: yield* filesystem.makeTempDirectoryScoped({
-            prefix: "j5-no-project-ordinary-",
-          }),
-        });
-        const threadId = (name: string) => ThreadId.make(`thread:no-project:${name}`);
-        const create = (name: string, projectId: ProjectId, worktreePath: string | null) =>
-          orchestrator.dispatch({
-            type: "thread.create",
-            createdBy: "user",
-            creationSource: "web",
-            commandId: CommandId.make(`command:no-project:create:${name}`),
-            threadId: threadId(name),
-            projectId,
-            title: `No project ${name}`,
-            modelSelection,
-            runtimeMode: "full-access",
-            interactionMode: "default",
-            branch: null,
-            worktreePath,
-          });
-        // Upstream gives each thread in No project a folder of its own.
-        for (const name of ["first", "second"]) {
-          const folder = yield* scratch.folderForThread({
-            projectId: noProject,
-            threadId: threadId(name),
-            text: `Scratch ${name}`,
-          });
-          yield* create(name, noProject, Option.getOrThrow(folder));
-        }
-        yield* create("ordinary", ordinaryProject, null);
+        const { noProject, ordinaryProject, threadId, first, second, ordinary } =
+          yield* noProjectFixture();
 
         // Registration: each joins the ledger of the project it was created in.
         yield* replayLifecycleThrough(yield* eventStoreHead());
@@ -4516,9 +4530,6 @@ it.effect(
           { thread_id: threadId("ordinary"), project_id: ordinaryProject, archived: 0 },
           { thread_id: threadId("second"), project_id: noProject, archived: 0 },
         ]);
-        const first = participantIdForThread(threadId("first"));
-        const second = participantIdForThread(threadId("second"));
-        const ordinary = participantIdForThread(threadId("ordinary"));
         assert.deepStrictEqual(yield* registration.ensureRegistered(threadId("first")), {
           projectId: LedgerProjectId.make(noProject),
           participantId: first,
@@ -4580,7 +4591,172 @@ it.effect(
           );
           assert.equal(delivered?.senderThreadId, threadId(from));
         }
-      }).pipe(Effect.provide(layer));
+      }).pipe(Effect.provide(makeNoProjectLayer(harness)));
+    }),
+);
+
+it.effect(
+  "moves an agent whose thread Turn into project moves, keeping its id and its open Exchanges",
+  () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const orchestrator = yield* OrchestratorV2;
+        const projectService = yield* ProjectService.ProjectService;
+        const registration = yield* ThreadRegistration;
+        const send = yield* A2ASendService;
+        const worker = yield* A2ADeliveryWorker;
+        const threads = yield* ThreadManagementService;
+        const threadLifecycle = yield* ThreadLifecycleService;
+        const ledger = yield* A2ALedger;
+        const sql = yield* SqlClient.SqlClient;
+        const { noProject, ordinaryProject, threadId, folders, first, second, ordinary } =
+          yield* noProjectFixture();
+        yield* replayLifecycleThrough(yield* eventStoreHead());
+        const sendFrom = (
+          from: string,
+          to: ParticipantId,
+          name: string,
+          options: { readonly expectReply?: true; readonly exchangeId?: ExchangeId } = {},
+        ) =>
+          send.send({
+            commandId: CommCommandId.make(`command:no-project-move:${name}`),
+            senderThreadId: threadId(from),
+            to,
+            message: `${name} from ${from}`,
+            acceptedAt: "2026-11-09T00:00:00.000Z",
+            ...(options.expectReply ? { expectReply: true, intent: `Answer ${name}` } : {}),
+            ...(options.exchangeId === undefined ? {} : { exchangeId: options.exchangeId }),
+          });
+
+        // Open in both directions before the move: first owes second a reply, and waits on ordinary.
+        const owed = yield* sendFrom("second", first, "owed", { expectReply: true });
+        const awaited = yield* sendFrom("first", ordinary, "awaited", { expectReply: true });
+        yield* worker.drain;
+        // Upstream moves only a thread with no work in progress.
+        yield* startPendingTestTurn(threadId("first"));
+        yield* finishTestTurn(harness, threadId("first"));
+        // Committed before the move and delivered after it: upstream's check sees neither.
+        const queuedTo = yield* sendFrom("second", first, "queued-to");
+        const queuedFrom = yield* sendFrom("first", second, "queued-from");
+
+        // Turn into project, as upstream's ScratchThreadPromotion does it.
+        const promoted = ProjectId.make("project:no-project:promoted");
+        yield* projectService.create({
+          commandId: CommandId.make("command:no-project-move:create-promoted"),
+          projectId: promoted,
+          title: "Promoted",
+          workspaceRoot: folders.get("first")!,
+        });
+        yield* orchestrator.dispatch({
+          type: "thread.project.adopt-folder",
+          commandId: CommandId.make("command:no-project-move:adopt"),
+          threadId: threadId("first"),
+          projectId: promoted,
+        });
+        yield* replayLifecycleThrough(yield* eventStoreHead());
+
+        const memberships = () =>
+          sql<{ readonly project_id: string; readonly archived: number }>`
+            SELECT project_id, archived_at IS NOT NULL AS archived FROM j5_a2a_membership
+            WHERE participant_id = ${first}
+          `;
+        assert.deepStrictEqual(yield* memberships(), [{ project_id: promoted, archived: 0 }]);
+        assert.deepStrictEqual(yield* registration.ensureRegistered(threadId("first")), {
+          projectId: LedgerProjectId.make(promoted),
+          participantId: first,
+        });
+        assert.deepStrictEqual(
+          (yield* ledger.listMembership(LedgerProjectId.make(promoted))).map(
+            (row) => row.participant.id,
+          ),
+          [first],
+        );
+        assert.deepStrictEqual(
+          (yield* ledger.listMembership(LedgerProjectId.make(noProject))).map(
+            (row) => row.participant.id,
+          ),
+          [second],
+        );
+        assert.deepStrictEqual(
+          (yield* send.listParticipants(threadId("ordinary")))
+            .map((row) => [row.projectId, row.participantId, row.canReceiveMessage])
+            .toSorted(),
+          [
+            [LedgerProjectId.make(promoted), first, true],
+            [LedgerProjectId.make(noProject), second, true],
+            [LedgerProjectId.make(ordinaryProject), ordinary, true],
+          ].toSorted(),
+        );
+
+        // A further ask to the same agent joins the Exchange it opened before the move.
+        const further = yield* sendFrom("first", ordinary, "further", { expectReply: true });
+        assert.equal(further.exchangeId, awaited.exchangeId);
+        assert.isTrue(further.joinedExistingExchange);
+
+        // Both Exchanges still close, and new messages reach it and name its new project.
+        const reply = yield* sendFrom("first", second, "reply", { exchangeId: owed.exchangeId! });
+        const answer = yield* sendFrom("ordinary", first, "answer", {
+          exchangeId: awaited.exchangeId!,
+        });
+        const later = yield* sendFrom("second", first, "later");
+        const fresh = yield* sendFrom("first", second, "fresh");
+        // Messages sent after the move wait behind the two queued before it, as send order holds.
+        yield* worker.drain;
+        assert.deepStrictEqual(yield* sql`SELECT DISTINCT status FROM j5_a2a_delivery`, [
+          { status: "delivered" },
+        ]);
+        for (const exchangeId of [owed.exchangeId!, awaited.exchangeId!]) {
+          assert.deepStrictEqual(
+            yield* sql`SELECT status FROM j5_a2a_exchange WHERE exchange_id = ${exchangeId}`,
+            [{ status: "closed" }],
+          );
+        }
+        const deliveredMessage = (to: string, messageId: LedgerMessageId) =>
+          threads
+            .getThreadProjection(threadId(to))
+            .pipe(
+              Effect.map((projection) =>
+                projection.messages.find((message) => message.id === deliveryMessageId(messageId)),
+              ),
+            );
+        const delivered = (to: string, messageId: LedgerMessageId) =>
+          deliveredMessage(to, messageId).pipe(Effect.map((message) => message?.text));
+        assert.include(yield* delivered("first", queuedTo.messageId), `${second} in project`);
+        // A message it sent before the move still links to its thread.
+        assert.equal(
+          (yield* deliveredMessage("second", queuedFrom.messageId))?.senderThreadId,
+          threadId("first"),
+        );
+        assert.include(
+          yield* delivered("second", reply.messageId),
+          `${first} in project ${promoted} (Promoted)`,
+        );
+        assert.include(yield* delivered("first", answer.messageId), `${ordinary} in project`);
+        assert.include(yield* delivered("first", later.messageId), `${second} in project`);
+        assert.include(
+          yield* delivered("second", fresh.messageId),
+          `${first} in project ${promoted} (Promoted)`,
+        );
+
+        // Reading upstream's events again moves nothing twice.
+        const moveFacts = () =>
+          sql`SELECT project_id FROM j5_a2a_comm_event WHERE kind = 'participant.moved' ORDER BY project_id`;
+        const recorded = yield* moveFacts();
+        assert.lengthOf(recorded, 2);
+        yield* sql`UPDATE j5_a2a_lifecycle_cursor SET after_sequence = 0`;
+        yield* replayLifecycleThrough(yield* eventStoreHead());
+        assert.deepStrictEqual(yield* moveFacts(), recorded);
+        assert.deepStrictEqual(yield* memberships(), [{ project_id: promoted, archived: 0 }]);
+
+        // Its lifecycle follows it: archiving the thread archives it in its new project.
+        yield* threadLifecycle.archive({
+          commandId: CommandId.make("command:no-project-move:archive"),
+          threadId: threadId("first"),
+        });
+        yield* replayLifecycleThrough(yield* eventStoreHead());
+        assert.deepStrictEqual(yield* memberships(), [{ project_id: promoted, archived: 1 }]);
+      }).pipe(Effect.provide(makeNoProjectLayer(harness)));
     }),
 );
 

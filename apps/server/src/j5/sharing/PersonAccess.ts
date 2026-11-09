@@ -549,12 +549,11 @@ const make: Layer.Layer<PersonAccess, never, SqlClient.SqlClient | ReadChanges> 
         (
           SELECT parent.thread_id
           FROM j5_a2a_membership AS child
+          -- A placement stays where it was made when Turn into project moves either agent.
           JOIN j5_a2a_participant_placement AS placement
-            ON placement.project_id = child.project_id
-           AND placement.participant_id = child.participant_id
+            ON placement.participant_id = child.participant_id
           JOIN j5_a2a_membership AS parent
-            ON parent.project_id = placement.project_id
-           AND parent.participant_id = placement.placement_parent_id
+            ON parent.participant_id = placement.placement_parent_id
           WHERE child.thread_id = chain.thread_id
             AND placement.provenance_kind <> 'forked-from'
           LIMIT 1
@@ -841,9 +840,8 @@ const make: Layer.Layer<PersonAccess, never, SqlClient.SqlClient | ReadChanges> 
           const receivers = yield* sql<{ readonly thread_id: string }>`
             SELECT DISTINCT member.thread_id
             FROM j5_a2a_delivery AS delivery
-            JOIN j5_a2a_membership AS member
-              ON member.project_id = delivery.receiver_project_id
-             AND member.participant_id = delivery.receiver_id
+            -- The receiver has one membership, which Turn into project may have moved since.
+            JOIN j5_a2a_membership AS member ON member.participant_id = delivery.receiver_id
             WHERE delivery.sender_id = ${participant.participantId}
           `;
           for (const receiver of receivers) {

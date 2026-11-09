@@ -31,8 +31,8 @@ export const makeNativeQuestionInboxRead = Effect.gen(function* () {
     const candidates = yield* sql<{ readonly thread_id: string; readonly project_id: string }>`
       SELECT m.thread_id, m.project_id
       FROM j5_a2a_membership m
-      JOIN j5_a2a_participant_placement p
-        ON p.project_id = m.project_id AND p.participant_id = m.participant_id
+      -- A placement stays where it was made when Turn into project moves the agent.
+      JOIN j5_a2a_participant_placement p ON p.participant_id = m.participant_id
       WHERE m.archived_at IS NULL AND m.thread_id IS NOT NULL
         AND m.thread_id IN ${sql.in([...pending])}
         AND p.provenance_kind = 'spawned-by' AND p.provenance_source = 'j5_spawn'

@@ -30,7 +30,7 @@ it.effect("keeps every ledger event and index while the log learns edits", () =>
     `;
     assert.strictEqual((yield* Effect.exit(event(2, "message.edited")))._tag, "Failure");
 
-    yield* runJ5A2AMigrations();
+    yield* runJ5A2AMigrations({ toMigrationInclusive: 44 });
 
     assert.deepStrictEqual(yield* sql`SELECT * FROM j5_a2a_comm_event ORDER BY seq`, before);
     assert.deepStrictEqual(

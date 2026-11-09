@@ -33,7 +33,11 @@ import {
   type SendMessageResult,
   participantId,
 } from "./contracts.ts";
-import { type A2AHomeRegistrationError, resolveThreadHome } from "./HomeRegistrar.ts";
+import {
+  type A2AHomeRegistrationError,
+  currentHomeFacts,
+  resolveThreadHome,
+} from "./HomeRegistrar.ts";
 import {
   selfContainedLayer as threadRegistrationLayer,
   ThreadRegistration,
@@ -595,23 +599,20 @@ const rawLayer: Layer.Layer<
       id: ParticipantId,
     ) {
       return yield* sql<RetiredParticipantRow>`
-          SELECT joined.project_id
-          FROM j5_a2a_comm_event AS joined
-          WHERE joined.kind = 'participant.joined'
-            AND json_extract(joined.payload, '$.participant.kind') = 'agent'
-            AND json_extract(joined.payload, '$.participant.id') = ${id}
-            AND EXISTS (
+          SELECT home.project_id
+          FROM (${currentHomeFacts(sql, { participantId: id })}) AS home
+            WHERE EXISTS (
               SELECT 1
               FROM j5_a2a_comm_event AS retirement
-              WHERE retirement.project_id = joined.project_id
-                AND retirement.seq > joined.seq
+              WHERE retirement.project_id = home.project_id
+                AND retirement.seq > home.seq
                 AND retirement.kind IN ('participant.left', 'participant.deleted')
                 AND json_extract(retirement.payload, '$.participant.kind') = 'agent'
                 AND json_extract(retirement.payload, '$.participant.id') = ${id}
                 AND json_extract(retirement.payload, '$.participant.threadId') =
-                  json_extract(joined.payload, '$.participant.threadId')
+                  json_extract(home.payload, '$.participant.threadId')
             )
-          ORDER BY joined.seq
+          ORDER BY home.seq
           LIMIT 2
         `;
     });
@@ -1140,15 +1141,15 @@ const rawLayer: Layer.Layer<
           exchangeState = "open";
         }
       } else if (input.expectReply === true) {
-        // Asks to a person stay distinct, each its own inbox item; only agents coalesce.
+        // Asks to a person stay distinct, each its own inbox item; only agents coalesce. The open
+        // Exchange may sit in a ledger the sender has since moved out of (Turn into project).
         const existing =
           receiver.kind === "human"
             ? []
             : yield* sql<ExchangeRow>`
               SELECT project_id, exchange_id, sender_id, receiver_id, status
               FROM j5_a2a_exchange
-              WHERE project_id = ${sender.projectId}
-                AND sender_id = ${sender.participantId}
+              WHERE sender_id = ${sender.participantId}
                 AND receiver_id = ${receiverId}
                 AND status = 'open'
               LIMIT 1

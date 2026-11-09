@@ -411,6 +411,34 @@ it.effect("rebuilds the active membership projection byte-equivalently from the 
       ),
     );
     assert.equal(forbidden._tag, "A2AStorageError");
+
+    // A move leaves one ledger and joins the other, and the agent stays archived.
+    const movedTo = LedgerProjectId.make("project:membership-moved");
+    yield* ledger.ensureProject({ projectId: movedTo, createdAt: timestamp });
+    const moved = {
+      kind: "participant.moved" as const,
+      sender: null,
+      receiver: secondAgent.id,
+      exchangeId: null,
+      correlationId: null,
+      payload: {
+        participant: secondAgent,
+        fromProjectId: projectId,
+        toProjectId: movedTo,
+        archivedAt: timestamp,
+      },
+      createdAt: timestamp,
+    };
+    yield* ledger.append(appendCommand(projectId, 6, moved));
+    yield* ledger.append(appendCommand(movedTo, 1, moved));
+    const homes = () =>
+      sql`SELECT project_id, archived_at FROM j5_a2a_membership WHERE participant_id = ${secondAgent.id}`;
+    const afterMove = yield* homes();
+    assert.deepStrictEqual(afterMove, [{ project_id: movedTo, archived_at: timestamp }]);
+    yield* sql`DELETE FROM j5_a2a_membership`;
+    yield* ledger.rebuildMembership(projectId);
+    yield* ledger.rebuildMembership(movedTo);
+    assert.deepStrictEqual(yield* homes(), afterMove);
   }).pipe(Effect.provide(memoryLedgerLayer())),
 );
 

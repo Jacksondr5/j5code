@@ -161,6 +161,7 @@ export const CommEventKind = Schema.Literals([
   "participant.archived",
   "participant.unarchived",
   "participant.deleted",
+  "participant.moved",
 ]);
 export type CommEventKind = typeof CommEventKind.Type;
 
@@ -236,11 +237,29 @@ const ParticipantMembershipCommEvent = Schema.Struct({
   payload: Schema.Struct({ participant: Participant }),
 });
 
+/**
+ * An agent's membership moving with its thread to another project. Both ledgers record it: the
+ * one it left and the one it joined. It keeps its id and whether it is archived.
+ */
+export const ParticipantMovedPayload = Schema.Struct({
+  participant: Participant,
+  fromProjectId: LedgerProjectId,
+  toProjectId: LedgerProjectId,
+  archivedAt: Schema.NullOr(Schema.String),
+});
+
+const ParticipantMovedCommEvent = Schema.Struct({
+  ...eventAddressFields,
+  kind: Schema.Literal("participant.moved"),
+  payload: ParticipantMovedPayload,
+});
+
 export const CommEvent = Schema.Union([
   NonMembershipCommEvent,
   MessageReceivedCommEvent,
   ParticipantJoinedCommEvent,
   ParticipantMembershipCommEvent,
+  ParticipantMovedCommEvent,
 ]);
 export type CommEvent = typeof CommEvent.Type;
 
@@ -254,6 +273,7 @@ export const StoredCommEvent = Schema.Union([
   Schema.Struct({ ...storedFields, ...MessageReceivedCommEvent.fields }),
   Schema.Struct({ ...storedFields, ...ParticipantJoinedCommEvent.fields }),
   Schema.Struct({ ...storedFields, ...ParticipantMembershipCommEvent.fields }),
+  Schema.Struct({ ...storedFields, ...ParticipantMovedCommEvent.fields }),
 ]);
 export type StoredCommEvent = typeof StoredCommEvent.Type;
 

@@ -289,34 +289,65 @@ const recordLocalAsk = Effect.fn("test.j5.a2a.peer.inbound.recordLocalAsk")(func
   });
 });
 
-it.effect("closes the local agent's open ask when the peer's reply arrives", () =>
-  Effect.gen(function* () {
-    const delivered = yield* Ref.make<Array<AgentDeliveryInput>>([]);
-    yield* Effect.gen(function* () {
-      yield* setup();
-      const inbound = yield* PeerInboundService;
-      const worker = yield* A2ADeliveryWorker;
-      const sql = yield* SqlClient.SqlClient;
-      // The local agent asked the remote one earlier: the Exchange plus the
-      // delivery row that records which peer the ask went to.
-      yield* recordLocalAsk();
+/** Upstream's Turn into project moved triage's thread: its membership follows, its Exchanges stay. */
+const moveTriage = Effect.fn("test.j5.a2a.peer.inbound.moveTriage")(function* () {
+  const ledger = yield* A2ALedger;
+  const promoted = LedgerProjectId.make("project:work-billing-promoted");
+  yield* ledger.ensureProject({ projectId: promoted, createdAt: timestamp });
+  for (const projectId of [localProject, promoted]) {
+    yield* ledger.append({
+      commandId: CommCommandId.make(`command:peer-inbound:move-triage:${projectId}`),
+      projectId,
+      acceptedAt: timestamp,
+      event: {
+        kind: "participant.moved",
+        sender: null,
+        receiver: triage.id,
+        exchangeId: null,
+        correlationId: null,
+        payload: {
+          participant: triage,
+          fromProjectId: localProject,
+          toProjectId: promoted,
+          archivedAt: null,
+        },
+        createdAt: timestamp,
+      },
+    });
+  }
+});
 
-      yield* inbound.receive({
-        ...askWithoutIntent,
-        messageId: "message:j5:a2a:remote-reply",
-        exchangeId: "exchange:j5:a2a:local-ask",
-        correlationId: "correlation:j5:a2a:remote-reply",
-        exchangeRole: "reply",
-        text: "v12.",
-      });
-      const exchange = yield* sql<{ readonly status: string }>`
+it.effect.each([false, true])(
+  "closes the local agent's open ask when the peer's reply arrives (moved since: %s)",
+  (moved) =>
+    Effect.gen(function* () {
+      const delivered = yield* Ref.make<Array<AgentDeliveryInput>>([]);
+      yield* Effect.gen(function* () {
+        yield* setup();
+        const inbound = yield* PeerInboundService;
+        const worker = yield* A2ADeliveryWorker;
+        const sql = yield* SqlClient.SqlClient;
+        // The local agent asked the remote one earlier: the Exchange plus the
+        // delivery row that records which peer the ask went to.
+        yield* recordLocalAsk();
+        if (moved) yield* moveTriage();
+
+        yield* inbound.receive({
+          ...askWithoutIntent,
+          messageId: "message:j5:a2a:remote-reply",
+          exchangeId: "exchange:j5:a2a:local-ask",
+          correlationId: "correlation:j5:a2a:remote-reply",
+          exchangeRole: "reply",
+          text: "v12.",
+        });
+        const exchange = yield* sql<{ readonly status: string }>`
         SELECT status FROM j5_a2a_exchange WHERE exchange_id = 'exchange:j5:a2a:local-ask'
       `;
-      assert.deepStrictEqual(exchange, [{ status: "closed" }]);
-      assert.equal((yield* worker.runOnce)?.state, "delivered");
-      assert.equal((yield* Ref.get(delivered))[0]!.exchangeRole, "reply");
-    }).pipe(Effect.provide(makeTestLayer(delivered)));
-  }),
+        assert.deepStrictEqual(exchange, [{ status: "closed" }]);
+        assert.equal((yield* worker.runOnce)?.state, "delivered");
+        assert.equal((yield* Ref.get(delivered))[0]!.exchangeRole, "reply");
+      }).pipe(Effect.provide(makeTestLayer(delivered)));
+    }),
 );
 
 it.effect(
