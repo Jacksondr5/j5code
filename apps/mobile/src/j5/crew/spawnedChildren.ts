@@ -38,7 +38,7 @@ const store = createScopedThreadReadStore<SpawnedChildrenRow, SpawnedChildrenRow
  * Each catalogued environment's prepared connection, or null while it is not connected or the
  * person reaches less than the whole server, which refuses these reads (web's `useThreadRowReads`).
  */
-const threadReadConnectionsAtom = Atom.make((get) => {
+export const threadReadConnectionsAtom = Atom.make((get) => {
   const connections = new Map<EnvironmentId, PreparedConnection | null>();
   for (const id of get(environmentCatalog.catalogValueAtom).entries.keys()) {
     const state = Option.getOrNull(AsyncResult.value(get(environmentCatalog.stateAtom(id))));
@@ -47,7 +47,7 @@ const threadReadConnectionsAtom = Atom.make((get) => {
     connections.set(id, readable ? Option.getOrNull(prepared) : null);
   }
   return connections;
-}).pipe(Atom.withLabel("mobile-j5:spawned-children-connections"));
+}).pipe(Atom.withLabel("mobile-j5:thread-read-connections"));
 
 /** Each environment's Crew and Fleet revisions; a moved pair means placements may have changed. */
 const placementRevisionsAtom = Atom.make((get) => {
