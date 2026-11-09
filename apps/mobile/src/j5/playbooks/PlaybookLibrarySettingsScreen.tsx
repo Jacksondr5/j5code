@@ -16,7 +16,7 @@ import { useRemoteConnectionStatus } from "../../state/use-remote-environment-re
 import { AgentFolderPickerModal } from "../agents/AgentFolderPickerModal";
 import { useOwnedEnvironmentIds } from "../sharing/guestAccess";
 import { j5Environment } from "../state";
-import { useSettingsFormNavigation } from "../agents/SettingsFormScreen";
+import { useStartPlaybookConversation } from "./startPlaybookConversation";
 
 export function PlaybookLibrarySettingsSection({
   environmentId,
@@ -76,13 +76,9 @@ function PlaybookLibrary({
   const [yaml, setYaml] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const navigation = useSettingsFormNavigation();
+  const startConversation = useStartPlaybookConversation(environmentId);
   const openConversation = (playbook: string | null) =>
-    navigation.navigate("SettingsPlaybookConversation", {
-      environmentId,
-      name: playbook,
-      projectId: project?.id ?? null,
-    });
+    void act(() => startConversation({ playbook, projects, projectId: project?.id ?? null }));
   const [details, setDetails] = useState<string | null>(null);
   const [copyTarget, setCopyTarget] = useState<{
     name: string;

@@ -160,7 +160,10 @@ export const makePlaybookLibrary = Effect.gen(function* () {
     const selected = selectPlaybookSource(yield* sources(workspaceRoot || undefined), stem);
     if (selected.issue) return yield* selected.issue;
     if (!selected.entry)
-      return yield* playbookError("not_found", `No playbook named ${stem}. Use j5_playbook_list.`);
+      return yield* playbookError(
+        "not_found",
+        `No playbook named ${stem} on this server. Use j5_playbook_list.`,
+      );
     return {
       stem,
       source: selected.entry.source,
