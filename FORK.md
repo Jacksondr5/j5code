@@ -939,7 +939,7 @@ explicitly marked.
 | `apps/web/src/routeTree.gen.ts`                                             | R       | generated route registrations for 6/9              |
 | `apps/web/src/components/onboarding/WelcomeWizard.tsx`                      | R       | 39, B                                              |
 | `apps/web/tsconfig.json`                                                    | R       | B                                                  |
-| `packages/client-runtime/package.json`                                      | R       | 7, 23, 34, 45, 69, 70, 75, 101, 114, Role library  |
+| `packages/client-runtime/package.json`                                      | R       | 7,23,34,45,69,70,75,101,114,115, Role library      |
 | `packages/client-runtime/src/connection/compatibility.ts`                   | A       | 56                                                 |
 | `packages/client-runtime/src/operations/commands.ts`                        | R       | Saved-agent mentions                               |
 | `packages/contracts/package.json`                                           | N       | 34                                                 |
