@@ -101,7 +101,7 @@ function SeatsToggle(props: {
   const needsAttention = !isOpen && groups.some((group) => group.needsAttention);
   return (
     // As tall as the provider icon beside it, so the text's taller line box can't grow the row.
-    <View className="h-3.5 justify-center">
+    <View className="h-[14px] justify-center">
       <Pressable
         // Padding cancelled by negative margin grows the touch target, as the PR badge does.
         className="-m-2.5 flex-row items-center p-2.5"
