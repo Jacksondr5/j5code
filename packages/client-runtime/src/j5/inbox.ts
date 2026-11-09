@@ -80,7 +80,9 @@ export function j5SourceNotice(source: J5ReadSource<unknown>): string | null {
     case "loading":
       return `${source.environmentLabel}: loading…`;
     case "offline":
-      return `${source.environmentLabel}: offline${source.data === null ? "" : " (showing saved results)"}.`;
+      return source.reconnecting === true
+        ? `${source.environmentLabel}: reconnecting…${source.data === null ? "" : " (showing saved results)."}`
+        : `${source.environmentLabel}: offline${source.data === null ? "" : " (showing saved results)"}.`;
     case "unsupported":
       return source.guest === true
         ? `${source.environmentLabel}: not shared with you.`
