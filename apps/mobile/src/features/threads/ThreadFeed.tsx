@@ -293,14 +293,17 @@ import {
 } from "./ThreadMarkdownImage";
 import { openSettings } from "../settings/settings-navigation";
 import {
+  J5_PROMPT_ICONS,
   J5MessageAuthorLine,
   J5OpenSenderThread,
   j5FoldHeader,
+  type J5FeedMessagePresentation,
   renderJ5TimelineNotice,
   resolveJ5FeedMessage,
   type J5Timeline,
 } from "../../j5/a2a/timeline";
 import { useJ5Timeline } from "../../j5/a2a/timelineState";
+import { withoutHiddenCrewNotices } from "@t3tools/client-runtime/j5/crew-notices";
 import { useSelectWorkspaceDetail } from "../workspace/useSelectWorkspaceDetail";
 
 const WIDE_MARKDOWN_BLOCK_OPTIONS = {
@@ -1482,10 +1485,11 @@ function ThreadAutomationMessageRow(props: {
   readonly text: string;
   readonly context?: OrchestrationMessageContext;
   readonly scheduledTaskId: ScheduledTaskId | undefined;
+  /** J5's playbook step or native question, which this row draws under J5's own heading. */
+  readonly prompt: J5FeedMessagePresentation["prompt"];
   readonly timestampLabel: string;
   readonly expanded: boolean;
   readonly onToggle: () => void;
-  readonly bubbleColor: ColorValue;
   readonly bubbleMaxWidth: number | "85%";
   readonly contentMaxWidth: number;
   readonly iconSubtleColor: ColorValue;
@@ -1502,21 +1506,23 @@ function ThreadAutomationMessageRow(props: {
       : null,
   );
   const taskTitle = tasks.data?.tasks.find((task) => task.id === props.scheduledTaskId)?.title;
-  const summary = taskTitle ?? props.text.trim().split(/\r?\n/, 1)[0] ?? "";
+  const summary =
+    props.prompt?.preview ?? taskTitle ?? props.text.trim().split(/\r?\n/, 1)[0] ?? "";
+  const label = props.prompt?.label ?? "Automation";
 
+  // J5 (case 97): the platform's prompts sit on the left without a fill, never as the reader's.
   return (
-    <View className="mb-5 items-end">
+    <View className="mb-5 items-start">
       <View
-        className="min-w-0 rounded-[20px]"
+        className="min-w-0 rounded-[20px] border border-border"
         style={{
-          backgroundColor: props.bubbleColor,
           maxWidth: props.bubbleMaxWidth,
           ...(props.expanded ? { width: props.bubbleMaxWidth } : null),
         }}
       >
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel={`Automation: ${summary}`}
+          accessibilityLabel={`${label}: ${summary}`}
           accessibilityHint={`Double tap to ${props.expanded ? "hide" : "show"} the prompt.`}
           accessibilityState={{ expanded: props.expanded }}
           hitSlop={4}
@@ -1527,16 +1533,16 @@ function ThreadAutomationMessageRow(props: {
           }}
         >
           <SymbolView
-            name="calendar.badge.clock"
+            name={props.prompt ? J5_PROMPT_ICONS[props.prompt.kind] : "calendar.badge.clock"}
             size={14}
             weight="medium"
-            tintColorClassName="accent-user-bubble-foreground-muted"
+            tintColorClassName="accent-foreground-muted"
             type="monochrome"
           />
-          <Text className="font-t3-medium text-sm text-user-bubble-foreground-muted">
-            Automation
+          <Text numberOfLines={1} className="shrink font-t3-medium text-sm text-foreground-muted">
+            {label}
           </Text>
-          <Text numberOfLines={1} className="min-w-0 shrink text-sm text-user-bubble-foreground">
+          <Text numberOfLines={1} className="min-w-0 shrink text-sm text-foreground">
             {summary}
           </Text>
           <ThreadDisclosureChevron
@@ -1564,7 +1570,7 @@ function ThreadAutomationMessageRow(props: {
         ) : null}
       </View>
       {props.expanded ? (
-        <View className="mt-1 flex-row items-center justify-end gap-2 pr-0.5">
+        <View className="mt-1 flex-row items-center gap-2 pl-0.5">
           {props.scheduledTaskId ? (
             <Pressable
               accessibilityRole="link"
@@ -1948,7 +1954,11 @@ function renderFeedEntry(
       );
     }
     // J5 (case 97): J5's platform notices draw in place of the row.
-    const j5Notice = renderJ5TimelineNotice({ message, timestampLabel });
+    const j5Notice = renderJ5TimelineNotice({
+      message,
+      timestampLabel,
+      timeline: props.j5Timeline,
+    });
     if (j5Notice !== null) return j5Notice;
     if (isUser && presentation.attribution === "automation") {
       const rowId = `automation:${message.id}`;
@@ -1958,14 +1968,14 @@ function renderFeedEntry(
           text={presentation.text}
           context={message.context}
           scheduledTaskId={presentation.scheduledTaskId}
+          prompt={presentation.prompt}
           timestampLabel={timestampLabel}
           expanded={props.expandedWorkRows[rowId] ?? false}
           onToggle={() => props.onToggleWorkRow(rowId, entry.id)}
-          bubbleColor={userBubbleColor}
           bubbleMaxWidth={props.duoColumns ? "85%" : props.userBubbleMaxWidth}
           contentMaxWidth={props.userBubbleMaxWidth - USER_BUBBLE_HORIZONTAL_PADDING * 2}
           iconSubtleColor={iconSubtleColor}
-          markdownStyles={markdownStyles.user}
+          markdownStyles={markdownStyles.assistant}
           reviewCommentColors={props.reviewCommentColors}
           skills={props.skills}
           linkHandlers={props.markdownLinkHandlers}
@@ -3383,9 +3393,13 @@ export const ThreadFeed = memo(function ThreadFeed({
   const [loadedListKey, setLoadedListKey] = useState<string | null>(null);
   const { jumpToMessageId } = props;
   const jumpReady = !!jumpToMessageId && loadedListKey === `${feedThreadKey}:filled`;
-  const presentedFeed = appendGuestPendingMessages(
-    useThreadFeedPresentation(props, expandedTurnIds, expandedWorkGroups),
-    guestShare,
+  // J5 (case 104): after derivation, so a hidden Crew notice still bounds the turn it started.
+  const presentedFeed = withoutHiddenCrewNotices(
+    appendGuestPendingMessages(
+      useThreadFeedPresentation(props, expandedTurnIds, expandedWorkGroups),
+      guestShare,
+    ),
+    (entry) => (entry.type === "message" ? entry.message : undefined),
   );
   const jumpRunId =
     jumpReady &&
