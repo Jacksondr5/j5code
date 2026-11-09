@@ -6,10 +6,11 @@ import type { CrewRuntimeRequestItem } from "@t3tools/contracts/j5";
 import {
   crewApprovalReadPlan,
   inboxBadgeCount,
+  inboxBellCount,
   mergeCrewRuntimeRequestSources,
   mergeNativeQuestionInboxSources,
   toPendingApproval,
-} from "./crewRuntimeRequests.logic";
+} from "./crewInboxRequests.ts";
 
 const envA = EnvironmentId.make("env:a");
 const envB = EnvironmentId.make("env:b");
@@ -184,4 +185,39 @@ it("reads an async question summary even when presentation keeps the thread work
   expect(
     crewApprovalReadPlan([{ ...row, source: { pendingRuntimeRequest: null } }]).environmentIds,
   ).toEqual([]);
+});
+
+it("counts asks, seat approvals and agents' questions on the bell, marking it while a server can't be read", () => {
+  const question = {
+    threadId: seatThread,
+    requestId: RuntimeRequestId.make("native"),
+    projectId: "project:1",
+    threadTitle: "Builder",
+    responseCapability: "live" as const,
+    createdAt: "2026-10-19T12:00:00Z",
+  };
+  const crew = (status: string, data: unknown) =>
+    ({
+      isReady: true,
+      sources: [{ environmentId: envA, environmentLabel: "A", connected: true, status, data }],
+    }) as never;
+  const read = crew("ready", { requests: [item("a1")], questions: [question] });
+  expect(inboxBellCount({ count: 2, incomplete: false }, read)).toEqual({
+    count: 4,
+    incomplete: false,
+  });
+  // A server without the read adds nothing and leaves the count complete.
+  expect(inboxBellCount({ count: 2, incomplete: false }, crew("unsupported", null))).toEqual({
+    count: 2,
+    incomplete: false,
+  });
+  // A server whose requests could not be read leaves the count last known.
+  expect(inboxBellCount({ count: 2, incomplete: false }, crew("offline", null))).toEqual({
+    count: 2,
+    incomplete: true,
+  });
+  expect(inboxBellCount({ count: null, incomplete: true }, read)).toEqual({
+    count: 2,
+    incomplete: true,
+  });
 });

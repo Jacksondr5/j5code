@@ -57,7 +57,7 @@ import { OwnerAskAction } from "./OwnerAskAction";
 import { useScopedParticipantLabels } from "./ParticipantIdentitiesClient";
 import { presentParticipantIdentity } from "@t3tools/client-runtime/j5/participant-identity";
 import { CrewRuntimeRequestsSection } from "../crew/CrewRuntimeRequestsSection";
-import type { ScopedCrewRuntimeRequest } from "../crew/crewRuntimeRequests.logic";
+import type { ScopedCrewRuntimeRequest } from "@t3tools/client-runtime/j5/crew-inbox-requests";
 import {
   refreshCrewRuntimeRequests,
   useCrewRuntimeRequests,

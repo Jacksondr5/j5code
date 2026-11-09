@@ -15,7 +15,7 @@ import { createVisibleRefreshHook } from "../useVisibleRefresh";
 import {
   mergeCrewRuntimeRequestSources,
   mergeNativeQuestionInboxSources,
-} from "./crewRuntimeRequests.logic";
+} from "@t3tools/client-runtime/j5/crew-inbox-requests";
 
 /** Answer on the environment that holds the thread; the refusal message says why it failed. */
 export async function respondCrewRuntimeRequest(

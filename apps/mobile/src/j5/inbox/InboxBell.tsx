@@ -1,20 +1,25 @@
 import { useAtomValue } from "@effect/atom-react";
+import { inboxBellCount } from "@t3tools/client-runtime/j5/crew-inbox-requests";
 import { inboxBellPresentation, mergeOpenInboxCounts } from "@t3tools/client-runtime/j5/inbox";
 import { useNavigation } from "@react-navigation/native";
 import { Pressable, View } from "react-native";
 
 import { AppText as Text } from "../../components/ui/AppText";
 import { BellGlyph } from "./BellGlyph";
-import { inboxCountSourcesAtom } from "./inboxSources";
+import { crewRequestSourcesAtom, inboxCountSourcesAtom } from "./inboxSources";
 
 /**
- * The Inbox bell in the thread list's header, with the open count across every connected server.
- * It counts open asks only: Crew requests and seat approvals join it with Crews on mobile.
+ * The Inbox bell in the thread list's header, with the open count across every connected server:
+ * open asks, seat approvals and agents' questions, as web's bell counts them.
  */
 export function InboxBell() {
   const navigation = useNavigation();
-  const sources = useAtomValue(inboxCountSourcesAtom);
-  const { badge, label } = inboxBellPresentation(mergeOpenInboxCounts(sources));
+  const { badge, label } = inboxBellPresentation(
+    inboxBellCount(
+      mergeOpenInboxCounts(useAtomValue(inboxCountSourcesAtom)),
+      useAtomValue(crewRequestSourcesAtom),
+    ),
+  );
   return (
     <Pressable
       accessibilityRole="button"
