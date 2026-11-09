@@ -396,7 +396,7 @@ export const layer: Layer.Layer<
           SELECT json_extract(payload, '$.participant.id') AS participant_id
           FROM j5_a2a_comm_event
           WHERE (${anyProject ? 1 : 0} = 1 OR project_id = ${projectId})
-            AND kind = 'participant.joined'
+            AND kind IN ('participant.joined', 'participant.moved')
             AND json_extract(payload, '$.participant.id') = ${participantId}
           LIMIT 1
         `;

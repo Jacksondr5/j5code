@@ -26,13 +26,18 @@ import {
   type LifecycleArchiveResult,
   Participant,
   ParticipantId,
+  type StoredCommEvent,
 } from "./contracts.ts";
-import { type A2AHomeRegistrationError, resolveThreadHome } from "./HomeRegistrar.ts";
+import {
+  type A2AHomeRegistrationError,
+  isCurrentHomeFact,
+  resolveThreadHome,
+} from "./HomeRegistrar.ts";
 import {
   selfContainedLayer as threadRegistrationLayer,
   ThreadRegistration,
 } from "./ThreadRegistration.ts";
-import { A2ALedger, type A2ALedgerError } from "./LedgerService.ts";
+import { A2ALedger, type A2ALedgerError, A2ALedgerTransactionWriter } from "./LedgerService.ts";
 import { findPeerCounterparty } from "./peerCounterparty.ts";
 import { PROMPT_SETTLED_EVENT, markPromptSettled } from "./promptSettlement.ts";
 
@@ -215,6 +220,7 @@ const makeLayer = (daemon: boolean) =>
     A2ALifecycleService,
     Effect.gen(function* () {
       const ledger = yield* A2ALedger;
+      const writer = yield* A2ALedgerTransactionWriter;
       const worker = yield* A2ADeliveryWorker;
       const threads = yield* ThreadManagement.ThreadManagementService;
       const registration = yield* ThreadRegistration;
@@ -236,23 +242,23 @@ const makeLayer = (daemon: boolean) =>
         function* (participantId: ParticipantId) {
           return yield* sql<HistoricalParticipantRow>`
           SELECT
-            joined.project_id,
-            json_extract(joined.payload, '$.participant') AS payload,
+            home.project_id,
+            json_extract(home.payload, '$.participant') AS payload,
             EXISTS (
               SELECT 1
               FROM j5_a2a_comm_event AS retirement
-              WHERE retirement.project_id = joined.project_id
-                AND retirement.seq > joined.seq
+              WHERE retirement.project_id = home.project_id
+                AND retirement.seq > home.seq
                 AND retirement.kind IN ('participant.left', 'participant.deleted')
                 AND json_extract(retirement.payload, '$.participant.kind') = 'agent'
                 AND json_extract(retirement.payload, '$.participant.id') = ${participantId}
                 AND json_extract(retirement.payload, '$.participant.threadId') =
-                  json_extract(joined.payload, '$.participant.threadId')
+                  json_extract(home.payload, '$.participant.threadId')
             ) AS retired
-          FROM j5_a2a_comm_event AS joined
-          WHERE joined.kind = 'participant.joined'
-            AND json_extract(joined.payload, '$.participant.id') = ${participantId}
-          ORDER BY joined.seq
+          FROM j5_a2a_comm_event AS home
+          WHERE ${isCurrentHomeFact(sql)}
+            AND json_extract(home.payload, '$.participant.id') = ${participantId}
+          ORDER BY home.seq
           LIMIT 2
         `;
         },
@@ -519,6 +525,81 @@ const makeLayer = (daemon: boolean) =>
         return (yield* registration.ensureRegistered(threadId)) !== null;
       });
 
+      /**
+       * Moves a thread's agent to the project upstream moved the thread to (Turn into project).
+       * It reads the thread's project now, not the event's, so reading an event again moves
+       * nothing; a thread with no membership has nothing to move.
+       */
+      const followThreadProject = Effect.fn("j5.a2a.lifecycle.followThreadProject")(function* (
+        threadId: ThreadId,
+        movedAt: string,
+      ) {
+        const rows = yield* sql<{
+          readonly project_id: string;
+          readonly payload: string;
+          readonly archived_at: string | null;
+          readonly updated_seq: number;
+          readonly thread_project_id: string;
+        }>`
+          SELECT membership.project_id, membership.payload, membership.archived_at,
+            membership.updated_seq, thread.project_id AS thread_project_id
+          FROM j5_a2a_membership AS membership
+          JOIN orchestration_v2_projection_threads AS thread
+            ON thread.thread_id = membership.thread_id
+          WHERE membership.thread_id = ${threadId} AND thread.deleted_at IS NULL
+        `;
+        const row = rows[0];
+        if (rows.length !== 1 || row === undefined || row.project_id === row.thread_project_id) {
+          return false;
+        }
+        const participant = yield* decodeParticipant(row.payload);
+        const fromProjectId = LedgerProjectId.make(row.project_id);
+        const toProjectId = LedgerProjectId.make(row.thread_project_id);
+        yield* ledger.ensureProject({ projectId: toProjectId, createdAt: movedAt });
+        const moveKey = `command:j5:a2a:lifecycle:move:${stablePart(participant.id)}:${stablePart(fromProjectId)}:${row.updated_seq}`;
+        const committed: Array<StoredCommEvent> = [];
+        yield* writer.withPermit(
+          sql.withTransaction(
+            Effect.forEach(
+              [fromProjectId, toProjectId],
+              (projectId) =>
+                writer
+                  .appendEventsInTransaction({
+                    commandId: CommCommandId.make(`${moveKey}:${stablePart(projectId)}`),
+                    projectId,
+                    acceptedAt: movedAt,
+                    events: [
+                      {
+                        kind: "participant.moved",
+                        sender: null,
+                        receiver: participant.id,
+                        exchangeId: null,
+                        correlationId: null,
+                        payload: {
+                          participant,
+                          fromProjectId,
+                          toProjectId,
+                          archivedAt: row.archived_at,
+                        },
+                        createdAt: movedAt,
+                      },
+                    ],
+                  })
+                  .pipe(
+                    Effect.tap((result) =>
+                      result.committed
+                        ? Effect.sync(() => committed.push(...result.events))
+                        : Effect.void,
+                    ),
+                  ),
+              { discard: true },
+            ),
+          ),
+        );
+        yield* writer.publishCommitted(committed);
+        return true;
+      });
+
       const registerExistingThreadsRaw = Effect.fn("j5.a2a.lifecycle.registerExistingThreads")(
         function* () {
           const unregistered = yield* sql<{ readonly thread_id: string }>`
@@ -561,6 +642,12 @@ const makeLayer = (daemon: boolean) =>
         // bypass the thread.create command.
         if (stored.event.type === "thread.created") {
           return yield* registerThread(stored.event.threadId);
+        }
+        if (stored.event.type === "thread.metadata-updated") {
+          return yield* followThreadProject(
+            stored.event.threadId,
+            DateTime.formatIso(stored.event.occurredAt),
+          );
         }
         if (
           stored.event.type !== "thread.archived" &&

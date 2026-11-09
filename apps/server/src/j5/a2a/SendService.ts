@@ -33,7 +33,11 @@ import {
   type SendMessageResult,
   participantId,
 } from "./contracts.ts";
-import { type A2AHomeRegistrationError, resolveThreadHome } from "./HomeRegistrar.ts";
+import {
+  type A2AHomeRegistrationError,
+  isCurrentHomeFact,
+  resolveThreadHome,
+} from "./HomeRegistrar.ts";
 import {
   selfContainedLayer as threadRegistrationLayer,
   ThreadRegistration,
@@ -595,23 +599,23 @@ const rawLayer: Layer.Layer<
       id: ParticipantId,
     ) {
       return yield* sql<RetiredParticipantRow>`
-          SELECT joined.project_id
-          FROM j5_a2a_comm_event AS joined
-          WHERE joined.kind = 'participant.joined'
-            AND json_extract(joined.payload, '$.participant.kind') = 'agent'
-            AND json_extract(joined.payload, '$.participant.id') = ${id}
+          SELECT home.project_id
+          FROM j5_a2a_comm_event AS home
+          WHERE ${isCurrentHomeFact(sql)}
+            AND json_extract(home.payload, '$.participant.kind') = 'agent'
+            AND json_extract(home.payload, '$.participant.id') = ${id}
             AND EXISTS (
               SELECT 1
               FROM j5_a2a_comm_event AS retirement
-              WHERE retirement.project_id = joined.project_id
-                AND retirement.seq > joined.seq
+              WHERE retirement.project_id = home.project_id
+                AND retirement.seq > home.seq
                 AND retirement.kind IN ('participant.left', 'participant.deleted')
                 AND json_extract(retirement.payload, '$.participant.kind') = 'agent'
                 AND json_extract(retirement.payload, '$.participant.id') = ${id}
                 AND json_extract(retirement.payload, '$.participant.threadId') =
-                  json_extract(joined.payload, '$.participant.threadId')
+                  json_extract(home.payload, '$.participant.threadId')
             )
-          ORDER BY joined.seq
+          ORDER BY home.seq
           LIMIT 2
         `;
     });

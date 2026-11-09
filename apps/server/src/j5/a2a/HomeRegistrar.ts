@@ -139,33 +139,58 @@ export const threadIdForParticipant = (participantId: string) =>
     ? ThreadId.make(participantId.slice(AGENT_PARTICIPANT_PREFIX.length))
     : null;
 
+/**
+ * Whether the ledger row aliased `home` places an agent in its project now: its join, or the move
+ * that brought it there, with no later move out of that ledger. Upstream's Turn into project moves
+ * a thread to another project; its agent keeps its id and moves with it.
+ */
+export const isCurrentHomeFact = (sql: SqlClient.SqlClient) => sql`(
+  (
+    home.kind = 'participant.joined'
+    OR (
+      home.kind = 'participant.moved'
+      AND json_extract(home.payload, '$.toProjectId') = home.project_id
+    )
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM j5_a2a_comm_event AS moved_out
+    WHERE moved_out.project_id = home.project_id
+      AND moved_out.seq > home.seq
+      AND moved_out.kind = 'participant.moved'
+      AND json_extract(moved_out.payload, '$.fromProjectId') = home.project_id
+      AND json_extract(moved_out.payload, '$.participant.id') =
+        json_extract(home.payload, '$.participant.id')
+  )
+)`;
+
 export const resolveThreadHome = Effect.fn("j5.a2a.resolveThreadHome")(function* (
   sql: SqlClient.SqlClient,
   threadId: ThreadId,
 ): Effect.fn.Return<ThreadHomeResolution, A2AHomeLookupError> {
   const rows = yield* sql<HistoricalHomeRow>`
     SELECT
-      event.project_id AS home_project_id,
-      json_extract(event.payload, '$.participant.id') AS home_participant_id,
+      home.project_id AS home_project_id,
+      json_extract(home.payload, '$.participant.id') AS home_participant_id,
       membership.project_id AS active_project_id,
       membership.participant_id AS active_participant_id,
       EXISTS (
         SELECT 1
         FROM j5_a2a_comm_event AS retirement
-        WHERE retirement.project_id = event.project_id
-          AND retirement.seq > event.seq
+        WHERE retirement.project_id = home.project_id
+          AND retirement.seq > home.seq
           AND retirement.kind IN ('participant.left', 'participant.deleted')
           AND json_extract(retirement.payload, '$.participant.kind') = 'agent'
           AND json_extract(retirement.payload, '$.participant.id') =
-            json_extract(event.payload, '$.participant.id')
+            json_extract(home.payload, '$.participant.id')
           AND json_extract(retirement.payload, '$.participant.threadId') = ${threadId}
       ) AS is_retired
-    FROM j5_a2a_comm_event AS event
+    FROM j5_a2a_comm_event AS home
     LEFT JOIN j5_a2a_membership AS membership
       ON membership.thread_id = ${threadId}
-    WHERE event.kind = 'participant.joined'
-      AND json_extract(event.payload, '$.participant.kind') = 'agent'
-      AND json_extract(event.payload, '$.participant.threadId') = ${threadId}
+    WHERE ${isCurrentHomeFact(sql)}
+      AND json_extract(home.payload, '$.participant.kind') = 'agent'
+      AND json_extract(home.payload, '$.participant.threadId') = ${threadId}
     ORDER BY membership.project_id, membership.participant_id
   `;
   const first = rows[0];

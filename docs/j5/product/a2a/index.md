@@ -57,7 +57,7 @@ There are three kinds of message.
 
 ## Participants
 
-A participant is anything that takes part over the ledger: an agent, a person, a machine participant, or an outside agent. Every thread that is not a provider-native Subagent or a delegate is an agent participant in the ledger of its project, from the moment the thread exists. A thread's project is fixed when upstream creates the thread, so a participant never moves between ledgers. People are global — one person id, known across every project on the server — and nothing anywhere may assume there is exactly one of them. Provider-native Subagents and delegates, including a delegate another machine started here, are never participants.
+A participant is anything that takes part over the ledger: an agent, a person, a machine participant, or an outside agent. Every thread that is not a provider-native Subagent or a delegate is an agent participant in the ledger of its project, from the moment the thread exists. When upstream moves a thread to another project (Turn into project), its agent moves to that project's ledger with it. It keeps its id, so whoever holds the id still reaches it. Its past messages and its open Exchanges stay in the ledger where they began, and still close there. Its placement and Crew membership stay where they were. People are global — one person id, known across every project on the server — and nothing anywhere may assume there is exactly one of them. Provider-native Subagents and delegates, including a delegate another machine started here, are never participants.
 
 A **machine participant** is a registered non-agent sender — a scheduled scraper, a watchdog, a shell script — and is how machine events enter the fleet as first-class work sources. Like an agent it belongs to one project, which never changes; it has a server-unique name and, unlike an agent, no thread. It sends plain messages only, and nothing can be delivered to it, so no Exchange is ever open with it and no silence is measured about it. It acts only through a token bound to its own participant id; nothing else can send as it.
 
@@ -186,6 +186,7 @@ message, ask, reply, plain message, Exchange, intent, urgency, obligation, envel
 
 41. A queued message from an agent on the same server that is removed from the receiver's queue before its turn starts is reported to its sender once, in a platform notice naming the receiver and quoting how the message began, and naming who edited it in the queue when that was someone else. A message promoted into the running turn, an ask, and a message that went with an archived receiver produce no such notice.
 42. An agent may edit a queued message only if it sent it. Its new text goes inside the message's envelope, so the sender and header stay as they were; an edit to another participant's message or a person's is refused with an error naming cancel, reorder and promote, which work on any queued message. Every edit to a queued message from an agent, whoever makes it, is recorded in the ledger with the new text and who made it.
+43. When upstream moves a thread to another project, its agent is listed in that project and no longer in the one it left, keeps its id, and can still answer and be answered on every Exchange open when it moved.
 
 ## Scenarios
 
@@ -228,3 +229,4 @@ message, ask, reply, plain message, Exchange, intent, urgency, obligation, envel
 - 2026-10-27 — upstream's pending-request tools are one `t3_pending_request` tool since its stable v0.1.3.
 - 2026-11-04 — a person's reply names the ask it answers in its envelope, now that several can be open; AC18 ([#111](https://github.com/Jacksondr5/j5code/issues/111)).
 - 2026-11-07 — a delegate is never a participant, a delegate another machine started here included; an agent may wait on another thread with `t3_thread_wait`, at the cost of the notices queued behind its turn (Jackson, 2026-11-06 and 2026-11-07; [record](../../worklog/2026-11-07-agent-tool-boundary-session.md)).
+- 2026-11-09 — an agent moves with its thread when upstream's Turn into project moves the thread; its history, open Exchanges, placement and Crew membership stay behind; AC43 (Jackson, [#539](https://github.com/Jacksondr5/j5code/issues/539)).
