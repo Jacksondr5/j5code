@@ -100,28 +100,31 @@ function SeatsToggle(props: {
   const count = spawnedChildrenCountLabel(groups);
   const needsAttention = !isOpen && groups.some((group) => group.needsAttention);
   return (
-    <Pressable
-      // Padding cancelled by negative margin grows the touch target, as the PR badge does.
-      className="-m-2.5 flex-row items-center p-2.5"
-      accessibilityRole="button"
-      accessibilityState={{ expanded: isOpen }}
-      accessibilityLabel={`${count}${needsAttention ? ", an agent needs you" : ""}`}
-      onPress={() => toggle(key)}
-      onLongPress={() => undefined}
-      style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
-    >
-      <SymbolView
-        name={isOpen ? "chevron.down" : "chevron.right"}
-        size={10}
-        tintColorClassName="accent-foreground-muted"
-        type="monochrome"
-        weight="semibold"
-      />
-      <Text className={cn("ml-1 text-xs", props.mutedClassName)} numberOfLines={1}>
-        {count}
-      </Text>
-      {needsAttention ? <View className="ml-1 size-1.5 rounded-full bg-warning" /> : null}
-    </Pressable>
+    // As tall as the provider icon beside it, so the text's taller line box can't grow the row.
+    <View className="h-3.5 justify-center">
+      <Pressable
+        // Padding cancelled by negative margin grows the touch target, as the PR badge does.
+        className="-m-2.5 flex-row items-center p-2.5"
+        accessibilityRole="button"
+        accessibilityState={{ expanded: isOpen }}
+        accessibilityLabel={`${count}${needsAttention ? ", an agent needs you" : ""}`}
+        onPress={() => toggle(key)}
+        onLongPress={() => undefined}
+        style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
+      >
+        <SymbolView
+          name={isOpen ? "chevron.down" : "chevron.right"}
+          size={10}
+          tintColorClassName="accent-foreground-muted"
+          type="monochrome"
+          weight="semibold"
+        />
+        <Text className={cn("ml-1 text-xs", props.mutedClassName)} numberOfLines={1}>
+          {count}
+        </Text>
+        {needsAttention ? <View className="ml-1 size-1.5 rounded-full bg-warning" /> : null}
+      </Pressable>
+    </View>
   );
 }
 
