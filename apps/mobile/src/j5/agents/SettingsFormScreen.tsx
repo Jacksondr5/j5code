@@ -6,7 +6,7 @@ import {
 } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { AgentPersonaCreateDraft } from "@t3tools/client-runtime/j5/agent-personas";
-import type { AgentPersonaEditInput, EnvironmentId, ProjectId } from "@t3tools/contracts";
+import type { AgentPersonaEditInput, EnvironmentId } from "@t3tools/contracts";
 import { useRef, type ReactNode } from "react";
 import { KeyboardAvoidingView, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -26,12 +26,6 @@ export type SettingsFormRoutes = {
   SettingsPersonaEdit: {
     readonly environmentId: EnvironmentId;
     readonly initial: Omit<AgentPersonaEditInput, "instructions">;
-  };
-  SettingsPlaybookConversation: {
-    readonly environmentId: EnvironmentId;
-    readonly name: string | null;
-    /** The project Settings is showing, so a project playbook's chat opens where it lives. */
-    readonly projectId: ProjectId | null;
   };
 };
 

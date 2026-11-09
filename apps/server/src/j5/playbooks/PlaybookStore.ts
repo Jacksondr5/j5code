@@ -459,7 +459,10 @@ export const makePlaybookStore = Effect.gen(function* () {
   const readPath = Effect.fn("PlaybookStore.readPath")(function* (definitionPath: string) {
     const stem = path.basename(definitionPath, ".yaml");
     if (!(yield* fs.exists(definitionPath)))
-      return yield* playbookError("not_found", `No playbook named ${stem}. Use j5_playbook_list.`);
+      return yield* playbookError(
+        "not_found",
+        `No playbook named ${stem} on this server. Use j5_playbook_list.`,
+      );
     const definition = yield* readDefinition(definitionPath);
     return {
       name: stem,
