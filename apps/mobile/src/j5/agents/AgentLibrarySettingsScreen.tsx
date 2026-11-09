@@ -517,7 +517,8 @@ function OwnerAgentLibrarySettingsScreen() {
           ) : (
             personas.map((persona, index) => (
               <PersonaRow
-                key={persona.personaId}
+                // Per environment too, so a pending switch value never carries across a switch.
+                key={`${effectiveEnvironmentId}:${persona.personaId}`}
                 persona={persona}
                 borderTop={index > 0}
                 locked={locked}
