@@ -339,3 +339,35 @@ export const crewNoticeSummary = (notice: CrewNoticePresentation): string | null
   notice.kind === "gate" && notice.decision === "declined"
     ? crewDeclinedSummary(notice)
     : crewApprovalSummary(notice);
+
+/** Completed finishes and successful additions take no row in the timeline. */
+export const isHiddenCrewNotice = (message: CrewNoticeMessage): boolean => {
+  const notice = presentCrewNotice(message);
+  if (notice === null || (notice.kind === "gate" && notice.decision === "declined")) return false;
+  return crewApprovalSummary(notice) === null && crewNoticeLines(notice).length === 0;
+};
+
+const visibleRows = new WeakMap<object, ReadonlyArray<unknown>>();
+
+/**
+ * A timeline's rows without the hidden Crew notices. Run it on rows already derived: every user
+ * message is a turn boundary, so dropping a notice before that would merge the Captain turn it
+ * started into the one before. The result is the input when nothing is hidden and is cached per
+ * input, since a list compares its rows by identity.
+ */
+export const withoutHiddenCrewNotices = <Rows extends ReadonlyArray<unknown>>(
+  rows: Rows,
+  messageOf: (row: Rows[number]) => CrewNoticeMessage | undefined,
+): Rows => {
+  const cached = visibleRows.get(rows);
+  if (cached !== undefined) return cached as Rows;
+  const hidden = (row: Rows[number]) => {
+    const message = messageOf(row);
+    return message !== undefined && isHiddenCrewNotice(message);
+  };
+  const visible = rows.some(hidden)
+    ? (rows.filter((row) => !hidden(row)) as unknown as Rows)
+    : rows;
+  visibleRows.set(rows, visible);
+  return visible;
+};

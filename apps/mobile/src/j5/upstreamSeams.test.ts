@@ -115,7 +115,10 @@ const SEAMS: ReadonlyArray<Seam> = [
     from: "../../j5/a2a/timeline",
     reaches: [
       "resolveJ5FeedMessage(message, props.j5Timeline)",
-      "renderJ5TimelineNotice({ message, timestampLabel })",
+      "renderJ5TimelineNotice({",
+      "timeline: props.j5Timeline,",
+      "prompt={presentation.prompt}",
+      "J5_PROMPT_ICONS[props.prompt.kind]",
       "<J5MessageAuthorLine",
       "<J5OpenSenderThread",
       'from "../../j5/a2a/timelineState"',
@@ -123,6 +126,12 @@ const SEAMS: ReadonlyArray<Seam> = [
       "resolveJ5FeedMessage(entry.message, j5Timeline)",
       "j5FoldHeader(",
     ],
+  },
+  {
+    file: "features/threads/ThreadFeed.tsx",
+    record: "case 104: a Crew notice with nothing for the person takes no row",
+    from: "@t3tools/client-runtime/j5/crew-notices",
+    reaches: ["withoutHiddenCrewNotices(\n    appendGuestPendingMessages("],
   },
   {
     file: "lib/filePreview.test.ts",
