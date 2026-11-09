@@ -25,6 +25,8 @@ import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as GitWorkflow from "../../git/GitWorkflowService.ts";
 import * as ProjectService from "../../project/ProjectService.ts";
+import * as ManagedProjectFolders from "../../project/ManagedProjectFolders.ts";
+import { GitVcsDriver } from "../../vcs/GitVcsDriver.ts";
 import * as Cause from "effect/Cause";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -4424,6 +4426,162 @@ it.effect("registers an archived older thread as archived, in one step or not at
       assert.strictEqual(yield* lifecycle.registerExistingThreads, 0);
     }).pipe(Effect.provide(makeLifecycleTestLayer(harness)));
   }),
+);
+
+it.effect(
+  "a thread in upstream's No project project joins, lists, sends and receives like any other",
+  () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness;
+      const enrichment = {
+        repositoryIdentity: null,
+        faviconPath: null,
+        repositoryIdentityResolved: true,
+      };
+      const projects = ProjectServiceLayerLive.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            Layer.mock(ProjectEnrichmentService)({
+              getAvailable: () => Effect.succeed(enrichment),
+              peek: () => Effect.succeed(enrichment),
+              invalidate: () => Effect.void,
+            }),
+            Layer.mock(WorkspacePaths)({ normalizeWorkspaceRoot: (root) => Effect.succeed(root) }),
+          ),
+        ),
+        Layer.provide(serverConfigLayer),
+        Layer.provideMerge(makeLifecycleTestLayer(harness)),
+      );
+      const layer = ManagedProjectFolders.layer.pipe(
+        // Upstream offers No project only when its home is outside a Git checkout.
+        Layer.provide(
+          Layer.mock(GitWorkflow.GitWorkflowService)({
+            isRepository: () => Effect.succeed(false),
+          }),
+        ),
+        Layer.provide(Layer.mock(GitVcsDriver)({})),
+        Layer.provide(serverConfigLayer),
+        Layer.provideMerge(projects),
+      );
+      yield* Effect.gen(function* () {
+        const scratch = yield* ManagedProjectFolders.ManagedProjectFolders;
+        const orchestrator = yield* OrchestratorV2;
+        const projectService = yield* ProjectService.ProjectService;
+        const registration = yield* ThreadRegistration;
+        const send = yield* A2ASendService;
+        const worker = yield* A2ADeliveryWorker;
+        const threads = yield* ThreadManagementService;
+        const filesystem = yield* FileSystem.FileSystem;
+        const { projectId: noProject } = yield* scratch.ensureScratchProject;
+        const ordinaryProject = ProjectId.make("project:no-project:ordinary");
+        yield* projectService.create({
+          commandId: CommandId.make("command:no-project:create-ordinary"),
+          projectId: ordinaryProject,
+          title: "Ordinary",
+          workspaceRoot: yield* filesystem.makeTempDirectoryScoped({
+            prefix: "j5-no-project-ordinary-",
+          }),
+        });
+        const threadId = (name: string) => ThreadId.make(`thread:no-project:${name}`);
+        const create = (name: string, projectId: ProjectId, worktreePath: string | null) =>
+          orchestrator.dispatch({
+            type: "thread.create",
+            createdBy: "user",
+            creationSource: "web",
+            commandId: CommandId.make(`command:no-project:create:${name}`),
+            threadId: threadId(name),
+            projectId,
+            title: `No project ${name}`,
+            modelSelection,
+            runtimeMode: "full-access",
+            interactionMode: "default",
+            branch: null,
+            worktreePath,
+          });
+        // Upstream gives each thread in No project a folder of its own.
+        for (const name of ["first", "second"]) {
+          const folder = yield* scratch.folderForThread({
+            projectId: noProject,
+            threadId: threadId(name),
+            text: `Scratch ${name}`,
+          });
+          yield* create(name, noProject, Option.getOrThrow(folder));
+        }
+        yield* create("ordinary", ordinaryProject, null);
+
+        // Registration: each joins the ledger of the project it was created in.
+        yield* replayLifecycleThrough(yield* eventStoreHead());
+        assert.deepStrictEqual(yield* registeredProjects(), [
+          { thread_id: threadId("first"), project_id: noProject, archived: 0 },
+          { thread_id: threadId("ordinary"), project_id: ordinaryProject, archived: 0 },
+          { thread_id: threadId("second"), project_id: noProject, archived: 0 },
+        ]);
+        const first = participantIdForThread(threadId("first"));
+        const second = participantIdForThread(threadId("second"));
+        const ordinary = participantIdForThread(threadId("ordinary"));
+        assert.deepStrictEqual(yield* registration.ensureRegistered(threadId("first")), {
+          projectId: LedgerProjectId.make(noProject),
+          participantId: first,
+        });
+
+        // The address book places its agents under the project's title, "No project".
+        const ledgers = yield* (yield* A2ALedger).listProjectLedgers();
+        assert.deepStrictEqual(
+          ledgers.map((ledger) => [ledger.id, ledger.name]).toSorted(),
+          [
+            [LedgerProjectId.make(noProject), "No project"],
+            [LedgerProjectId.make(ordinaryProject), "Ordinary"],
+          ].toSorted(),
+        );
+        for (const caller of ["first", "ordinary"]) {
+          assert.deepStrictEqual(
+            (yield* send.listParticipants(threadId(caller)))
+              .map((row) => [row.projectId, row.participantId, row.canOpenExchange])
+              .toSorted(),
+            [
+              [LedgerProjectId.make(noProject), first, true],
+              [LedgerProjectId.make(noProject), second, true],
+              [LedgerProjectId.make(ordinaryProject), ordinary, true],
+            ].toSorted(),
+          );
+        }
+
+        // Sending: from and to a thread in No project, inside its ledger and across projects.
+        const sendFrom = (from: string, to: ParticipantId, expectReply: boolean) =>
+          send.send({
+            commandId: CommCommandId.make(`command:no-project:send:${from}:${to}`),
+            senderThreadId: threadId(from),
+            to,
+            message: `From ${from}`,
+            acceptedAt: "2026-11-08T00:00:00.000Z",
+            ...(expectReply ? { expectReply, intent: `Answer ${from}` } : {}),
+          });
+        const sent = [
+          { from: "first", to: "second", result: yield* sendFrom("first", second, true) },
+          { from: "first", to: "ordinary", result: yield* sendFrom("first", ordinary, false) },
+          { from: "ordinary", to: "first", result: yield* sendFrom("ordinary", first, true) },
+        ];
+        assert.deepStrictEqual(
+          (yield* worker.drain).map((milestone) => milestone.state),
+          ["delivered", "delivered", "delivered"],
+        );
+
+        // The envelope names the sender's project by id and title, so a sender in No project
+        // reads as one in a project called "No project".
+        for (const { from, to, result } of sent) {
+          const delivered = (yield* threads.getThreadProjection(threadId(to))).messages.find(
+            (message) => message.id === deliveryMessageId(result.messageId),
+          );
+          const origin =
+            from === "ordinary" ? `${ordinaryProject} (Ordinary)` : `${noProject} (No project)`;
+          assert.include(
+            delivered?.text,
+            `[Cross-agent message from ${participantIdForThread(threadId(from))} in project ${origin}]`,
+          );
+          assert.equal(delivered?.senderThreadId, threadId(from));
+        }
+      }).pipe(Effect.provide(layer));
+    }),
 );
 
 it.effect(
