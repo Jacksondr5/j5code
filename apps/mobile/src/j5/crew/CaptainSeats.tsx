@@ -50,8 +50,12 @@ const subscribe = (listener: () => void) => {
     listeners.delete(listener);
   };
 };
-const getExpanded = () => expanded;
 const expansionKey = (thread: EnvironmentThreadShell) => `${thread.environmentId}/${thread.id}`;
+/** One row's expansion, so toggling a row re-renders only that row. */
+const useIsExpanded = (key: string) => {
+  const read = () => expanded.has(key);
+  return useSyncExternalStore(subscribe, read, read);
+};
 const toggle = (key: string) => {
   const next = new Set(expanded);
   if (next.has(key)) next.delete(key);
@@ -91,7 +95,7 @@ function SeatsToggle(props: {
 }) {
   const groups = useGroups(props.thread, props.spawned);
   const key = expansionKey(props.thread);
-  const isOpen = useSyncExternalStore(subscribe, getExpanded, getExpanded).has(key);
+  const isOpen = useIsExpanded(key);
   if (groups.length === 0) return null;
   const count = spawnedChildrenCountLabel(groups);
   const needsAttention = !isOpen && groups.some((group) => group.needsAttention);
@@ -128,9 +132,7 @@ export function CaptainSeats(props: {
   readonly onSelectThread: (thread: EnvironmentThreadShell) => void;
 }) {
   const children = useSpawnedChildren(scopeThreadRef(props.thread.environmentId, props.thread.id));
-  const isOpen = useSyncExternalStore(subscribe, getExpanded, getExpanded).has(
-    expansionKey(props.thread),
-  );
+  const isOpen = useIsExpanded(expansionKey(props.thread));
   if (!isOpen || children.length === 0) return null;
   return <SeatGroups {...props} spawned={children} />;
 }

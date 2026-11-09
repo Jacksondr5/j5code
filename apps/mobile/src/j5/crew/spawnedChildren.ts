@@ -110,23 +110,25 @@ export function useCrewListedThreads<
     requestRows(refs, revisions);
   }, [connections, key, revisions]);
   const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
-  return useMemo(
-    () =>
-      threads.filter((thread) =>
-        isSidebarMember(
-          thread,
-          snapshot.get(scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)))
-            ?.spawnedByAgent === true,
-        ),
+  return useMemo(() => {
+    const listed = threads.filter((thread) =>
+      isSidebarMember(
+        thread,
+        snapshot.get(scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)))
+          ?.spawnedByAgent === true,
       ),
-    [threads, snapshot],
-  );
+    );
+    // The same array when nothing was dropped, so the list's own memos keep their values.
+    return listed.length === threads.length ? threads : listed;
+  }, [threads, snapshot]);
 }
 
 const EMPTY: ReadonlyArray<SpawnedChild> = [];
 
 /** The agents placed under one thread, as last read. */
 export function useSpawnedChildren(ref: ScopedThreadRef): ReadonlyArray<SpawnedChild> {
-  const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot, store.getSnapshot);
-  return snapshot.get(scopedThreadKey(ref))?.children ?? EMPTY;
+  const key = scopedThreadKey(ref);
+  // Per row: a batch keeps untouched rows' values, so other rows' updates skip this one.
+  const read = () => store.getSnapshot().get(key)?.children ?? EMPTY;
+  return useSyncExternalStore(store.subscribe, read, read);
 }
