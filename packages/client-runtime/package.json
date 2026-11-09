@@ -507,6 +507,10 @@
       "types": "./src/j5/crewInboxRequests.ts",
       "default": "./src/j5/crewInboxRequests.ts"
     },
+    "./j5/crew-worktree-cleanup": {
+      "types": "./src/j5/crewWorktreeCleanup.ts",
+      "default": "./src/j5/crewWorktreeCleanup.ts"
+    },
     "./j5/crew-notices": {
       "types": "./src/j5/crewNotices.ts",
       "default": "./src/j5/crewNotices.ts"

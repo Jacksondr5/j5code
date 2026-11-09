@@ -15,7 +15,7 @@ import {
   pullRequestLabel,
   sliceCleanupRows,
   toggleCleanupPath,
-} from "./crewWorktreeCleanup.logic";
+} from "./crewWorktreeCleanup.ts";
 
 const entry = (
   name: string,

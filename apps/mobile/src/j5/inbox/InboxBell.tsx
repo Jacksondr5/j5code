@@ -10,7 +10,8 @@ import { crewRequestSourcesAtom, inboxCountSourcesAtom } from "./inboxSources";
 
 /**
  * The Inbox bell in the thread list's header, with the open count across every connected server:
- * open asks, seat approvals and agents' questions, as web's bell counts them.
+ * open asks and an Owner's worktree cleanups (the server's count), seat approvals and agents'
+ * questions, as web's bell counts them.
  */
 export function InboxBell() {
   const navigation = useNavigation();

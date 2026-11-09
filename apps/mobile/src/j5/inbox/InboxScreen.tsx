@@ -3,6 +3,7 @@ import {
   mergeCrewRuntimeRequestSources,
   mergeNativeQuestionInboxSources,
 } from "@t3tools/client-runtime/j5/crew-inbox-requests";
+import { mergeWorktreeCleanupSources } from "@t3tools/client-runtime/j5/crew-worktree-cleanup";
 import {
   answeredByLine,
   closedLine,
@@ -33,6 +34,7 @@ import { j5Sharing } from "../sharing/guestAccess";
 import { j5Environment } from "../state";
 import { type ClosedItem, useInboxAnswers } from "./inboxAnswers";
 import { AgentQuestionsSection, SeatApprovalsSection } from "./InboxCrewRequests";
+import { WorktreeCleanupsSection } from "./InboxWorktreeCleanups";
 import {
   answeredInboxQueryAtom,
   answeredInboxSourcesAtom,
@@ -42,6 +44,8 @@ import {
   readInboxSources,
   refreshCrewRequestSources,
   refreshInboxSources,
+  worktreeCleanupQueryAtom,
+  worktreeCleanupSourcesAtom,
 } from "./inboxSources";
 import { createPullRefresh } from "./inboxPullRefresh.logic";
 import { useScopedParticipantLabels } from "./senderLabels";
@@ -71,13 +75,14 @@ function useOwnName(environmentId: EnvironmentId): string | null {
 function refreshAll() {
   refreshInboxSources(openInboxSourcesAtom, openInboxQueryAtom);
   refreshInboxSources(answeredInboxSourcesAtom, answeredInboxQueryAtom);
+  refreshInboxSources(worktreeCleanupSourcesAtom, worktreeCleanupQueryAtom);
   refreshCrewRequestSources();
 }
 
 /**
  * The person's Inbox: what agents on every connected server have asked them, most urgent first
- * (Inbox AC6), answered in place, Crew seats' approvals and agents' questions, and the asks
- * already answered.
+ * (Inbox AC6), answered in place, Crew seats' approvals and agents' questions, an Owner's
+ * worktree cleanups, and the asks already answered.
  */
 export function InboxScreen() {
   const openSources = useAtomValue(openInboxSourcesAtom);
@@ -87,11 +92,14 @@ export function InboxScreen() {
   const crewSources = useAtomValue(crewRequestSourcesAtom);
   const seatApprovals = mergeCrewRuntimeRequestSources(crewSources);
   const agentQuestions = mergeNativeQuestionInboxSources(crewSources);
+  const cleanupSources = useAtomValue(worktreeCleanupSourcesAtom);
+  const cleanups = mergeWorktreeCleanupSources(cleanupSources);
   const showEnvironment = spansMultipleEnvironments([
     ...items,
     ...answered,
     ...seatApprovals,
     ...agentQuestions,
+    ...cleanups,
   ]);
   const labels = useScopedParticipantLabels(
     [...items, ...answered].map((item) => ({
@@ -113,12 +121,15 @@ export function InboxScreen() {
   );
   const notices = [
     ...new Set(
-      [...openSources.sources, ...answeredSources.sources, ...crewSources.sources].flatMap(
-        (source) => {
-          const notice = j5SourceNotice(source);
-          return notice === null ? [] : [notice];
-        },
-      ),
+      [
+        ...openSources.sources,
+        ...answeredSources.sources,
+        ...crewSources.sources,
+        ...cleanupSources.sources,
+      ].flatMap((source) => {
+        const notice = j5SourceNotice(source);
+        return notice === null ? [] : [notice];
+      }),
     ),
   ];
   const content = (
@@ -132,7 +143,9 @@ export function InboxScreen() {
       <SeatApprovalsSection requests={seatApprovals} />
       <AgentQuestionsSection questions={agentQuestions} showEnvironment={showEnvironment} />
       {answers.shownItems.length === 0 ? (
-        seatApprovals.length > 0 || agentQuestions.length > 0 ? null : loading ? (
+        seatApprovals.length > 0 ||
+        agentQuestions.length > 0 ||
+        cleanups.length > 0 ? null : loading ? (
           <Text className="text-foreground-muted">Loading your inbox…</Text>
         ) : (
           <EmptyState
@@ -163,6 +176,7 @@ export function InboxScreen() {
           })}
         </View>
       )}
+      <WorktreeCleanupsSection items={cleanups} showEnvironment={showEnvironment} />
       <AnsweredShelf items={answered} labels={labels} showEnvironment={showEnvironment} />
     </>
   );
