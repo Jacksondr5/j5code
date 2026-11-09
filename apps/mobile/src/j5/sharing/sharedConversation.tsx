@@ -135,28 +135,19 @@ export function useSharedConversationFeed(
 }
 
 /**
- * The end of a work row for one of the agent's prompts: the answer, then who gave it (AC10). The
- * question truncates before either. Who is drawn only for a prompt someone is recorded as answering.
+ * Who answered one of the agent's prompts, after the prompt's row label: "· answered by Priya"
+ * (AC10). Nothing for a prompt nobody is recorded as answering, or one still open.
  */
-export function PromptAnswerTail(props: {
+export function PromptAnsweredBy(props: {
   readonly environmentId: EnvironmentId;
   readonly item: { readonly threadId: ThreadId };
-  readonly answer: string | null;
 }) {
   const { answers } = useThreadAuthorIndex(props.environmentId, props.item.threadId);
   const by = isSettledPrompt(props.item) ? answers.get(props.item.requestId) : undefined;
+  if (by === undefined) return null;
   return (
-    <>
-      {props.answer === null ? null : (
-        <Text numberOfLines={1} className="max-w-[45%] shrink pl-1 text-sm text-foreground">
-          {props.answer}
-        </Text>
-      )}
-      {by === undefined ? null : (
-        <Text numberOfLines={1} className="shrink-0 pl-1 text-sm text-foreground-subtle">
-          · answered by {by.you ? "you" : (by.name ?? "someone")}
-        </Text>
-      )}
-    </>
+    <Text numberOfLines={1} className="shrink-0 pl-1 pr-1.5 text-sm text-foreground-muted">
+      · answered by {by.you ? "you" : (by.name ?? "someone")}
+    </Text>
   );
 }
