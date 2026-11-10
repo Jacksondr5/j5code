@@ -1,7 +1,7 @@
 name: J5 Signed macOS Build
 
 # Run by hand on a branch, it builds that branch at the version its manifests
-# commit (docs/j5/runbooks/macos-packaging.md). Called by J5 Nightly, it builds
+# commit (docs/j5/runbooks/macos-packaging.md). Called by J5 Release, it builds
 # `ref` and stamps `version` into the manifests first, so nothing is committed.
 on:
   workflow_dispatch:
