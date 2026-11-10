@@ -166,6 +166,32 @@ describe("resolveLiveTestPaths with a homes root in the personal config", () => 
     NodeFS.rmSync(layout.base, { recursive: true, force: true });
   });
 
+  it("finds an existing build where it is, whatever the config says now", async () => {
+    const layout = makeLayout();
+    const inside = NodePath.join(layout.worktree, ".j5code", "live-test");
+    const homesRoot = NodePath.join(layout.base, "live-test-homes");
+    const environment = configure(layout, { homesRoot });
+    // A build made inside before the config was set stays where it is.
+    NodeFS.mkdirSync(inside, { recursive: true });
+    NodeFS.writeFileSync(NodePath.join(inside, "server.json"), "{}");
+    assert.equal((await resolveWith(layout, environment)).root, inside);
+    NodeFS.rmSync(inside, { recursive: true });
+    // A build made outside is found after the config is gone, through the worktree's record.
+    const outside = (await resolveWith(layout, environment)).root;
+    NodeFS.writeFileSync(NodePath.join(layout.worktree, ".j5code", "live-test-root"), outside);
+    assert.equal((await resolveWith(layout, { J5CODE_HOME: layout.liveHome })).root, outside);
+    // The record names only a root of this worktree's own.
+    NodeFS.writeFileSync(
+      NodePath.join(layout.worktree, ".j5code", "live-test-root"),
+      NodePath.join(homesRoot, "someone-else-12345678"),
+    );
+    assert.include(
+      await refusal(resolveWith(layout, { J5CODE_HOME: layout.liveHome })),
+      "is not this worktree's",
+    );
+    NodeFS.rmSync(layout.base, { recursive: true, force: true });
+  });
+
   it("refuses a homes root that is the live home, inside its state, relative or linked out", async () => {
     for (const [name, homesRoot, expected] of [
       [
@@ -1052,6 +1078,7 @@ describe("formatInstructions", () => {
   const paths = {
     ...server("/w/.j5code/live-test"),
     root: "/w/.j5code/live-test",
+    rootRecord: "/w/.j5code/live-test-root",
     manifest: "/w/.j5code/live-test/manifest.json",
     base: "/w/.j5code/live-test/base",
     remote: { ...server("/w/.j5code/live-test/remote"), root: "/w/.j5code/live-test/remote" },
@@ -1448,6 +1475,7 @@ describe("formatUpgrade", () => {
   const paths = {
     ...server("/w/.j5code/live-test"),
     root: "/w/.j5code/live-test",
+    rootRecord: "/w/.j5code/live-test-root",
     manifest: "/w/.j5code/live-test/manifest.json",
     base: "/w/.j5code/live-test/base",
     remote: { ...server("/w/.j5code/live-test/remote"), root: "/w/.j5code/live-test/remote" },

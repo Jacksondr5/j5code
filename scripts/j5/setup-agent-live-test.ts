@@ -110,6 +110,8 @@ export interface ServerPaths {
  */
 export interface LiveTestPaths extends ServerPaths {
   readonly root: string;
+  /** The worktree's record of a root built under a homes root, so every later command finds it. */
+  readonly rootRecord: string;
   readonly manifest: string;
   /** In base mode, a git worktree of this repository at the base ref. */
   readonly base: string;
@@ -209,22 +211,35 @@ export async function resolveLiveTestPaths(input: {
       `${worktree} contains a space or a shell character. Use a worktree whose path has only letters, digits and @%+=:,./_-`,
     );
   }
-  const homesRoot = configuredHomesRoot(input.environment, input.homeDirectory);
-  // Named for the worktree, so it is this worktree's and every command finds it again.
+  // An existing build is found where it is; the config only places a new one.
+  const insideRoot = NodePath.join(worktree, ".j5code", "live-test");
+  const rootRecord = NodePath.join(worktree, ".j5code", "live-test-root");
+  const ownName = `${NodePath.basename(worktree)}-${NodeCrypto.createHash("sha256").update(worktree).digest("hex").slice(0, 8)}`;
+  const recorded = NodeFS.existsSync(rootRecord)
+    ? NodeFS.readFileSync(rootRecord, "utf8").trim()
+    : undefined;
+  const builtInside = ["manifest.json", "server.json"].some((file) =>
+    NodeFS.existsSync(NodePath.join(insideRoot, file)),
+  );
+  const homesRoot =
+    recorded !== undefined || builtInside
+      ? undefined
+      : configuredHomesRoot(input.environment, input.homeDirectory);
   const root =
-    homesRoot === undefined
-      ? NodePath.join(worktree, ".j5code", "live-test")
-      : NodePath.join(
-          homesRoot,
-          `${NodePath.basename(worktree)}-${NodeCrypto.createHash("sha256").update(worktree).digest("hex").slice(0, 8)}`,
-        );
+    recorded ?? (homesRoot === undefined ? insideRoot : NodePath.join(homesRoot, ownName));
   if (!/^[\w@%+=:,./-]+$/.test(root)) {
     throw new LiveTestRefusal(
       `${root} contains a space or a shell character. Use a homes root whose path has only letters, digits and @%+=:,./_-`,
     );
   }
   const canonicalRoot = canonicalPath(root);
-  if (homesRoot === undefined) {
+  if (recorded !== undefined) {
+    if (!NodePath.isAbsolute(recorded) || NodePath.basename(canonicalRoot) !== ownName) {
+      throw new LiveTestRefusal(
+        `${rootRecord} names ${recorded}, which is not this worktree's live-test root (${ownName}). Remove the file.`,
+      );
+    }
+  } else if (homesRoot === undefined) {
     if (!isInside(canonicalRoot, NodePath.join(NodeFS.realpathSync(worktree), ".j5code"))) {
       throw new LiveTestRefusal(
         `${root} resolves to ${canonicalRoot}, outside this worktree's .j5code. Remove the symlink; the test home must live inside the worktree.`,
@@ -312,6 +327,7 @@ export async function resolveLiveTestPaths(input: {
   return {
     worktree,
     root,
+    rootRecord,
     home,
     testRepo,
     manifest: NodePath.join(root, "manifest.json"),
@@ -929,6 +945,10 @@ function buildHome(paths: LiveTestPaths, mode: LiveTestMode, base: BaseTarget | 
     throw new LiveTestRefusal(
       `${paths.root} exists but holds no finished build. Start over with: ${rebuild}`,
     );
+  }
+  if (!isInside(paths.root, paths.worktree)) {
+    NodeFS.mkdirSync(NodePath.dirname(paths.rootRecord), { recursive: true });
+    NodeFS.writeFileSync(paths.rootRecord, `${paths.root}\n`);
   }
   if (mode === "fresh") {
     NodeFS.mkdirSync(paths.home, { recursive: true });
@@ -2914,6 +2934,7 @@ async function main(): Promise<void> {
     await stop(paths, true);
     removeBaseCheckout(paths);
     NodeFS.rmSync(paths.root, { recursive: true, force: true });
+    NodeFS.rmSync(paths.rootRecord, { force: true });
     return console.log(`Removed ${paths.root}`);
   }
   if (command === "upgrade") return upgrade(paths);

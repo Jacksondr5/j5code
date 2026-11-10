@@ -92,12 +92,13 @@ home points at a real repository or at the developer's data. Then use
 
 Upstream offers threads in "No project" only to a home outside a Git checkout,
 so a home in your worktree has none. When the machine's personal
-`~/.config/j5code/live-test.json` sets `homesRoot` to an absolute directory, the
-script builds the home there instead, in a directory named for your worktree,
-and every command finds it there. It outlives your worktree, so run `remove`
-when you finish. Don't edit that file; for one test, put your
-own `j5code/live-test.json` under a directory you pass as `XDG_CONFIG_HOME` to
-every command, `stop` included.
+`~/.config/j5code/live-test.json` sets `homesRoot` to an absolute directory
+outside any checkout, the script builds a new home there instead, in a
+directory named for your worktree. A home already built stays where it is, and
+every command finds it. Such a home outlives your worktree, a `--for-dev` copy
+of real data included, so run `remove` when you finish. Don't edit that file;
+for one test, put your own `j5code/live-test.json` under a directory you pass
+as `XDG_CONFIG_HOME` to the first start.
 
 Each tab you open has its own storage, so it is one signed-in person and
 nothing else can sign it out. Do not pass a `profileId`, except for "PR
