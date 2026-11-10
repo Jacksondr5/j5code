@@ -1,11 +1,11 @@
 // @effect-diagnostics nodeBuiltinImport:off globalConsole:off globalDate:off globalFetch:off globalTimers:off - a standalone Node CLI that manages one child process group and prints instructions.
 /**
- * One command for an agent that needs to live-test J5 Code (see `USAGE` and the `j5-live-test`
- * skill). Its test repository and home live in this worktree's gitignored `.j5code/live-test`,
- * apart from the developer's data and the live install. It signals only the process group it
- * spawned, after confirming the leader's pid, start time and worktree; never a process by name.
+ * One command for an agent that live-tests J5 Code (see `USAGE` and the `j5-live-test` skill). Its
+ * home lives in this worktree's `.j5code/live-test`, or under a configured homes root, apart from
+ * real data. It signals only the process group it spawned, after confirming its leader; never by name.
  */
 import * as NodeChildProcess from "node:child_process";
+import * as NodeCrypto from "node:crypto";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -20,6 +20,7 @@ const COMMANDS = [
   "restart",
   "stop",
   "rebuild",
+  "remove",
   "upgrade",
   "mobile-open",
 ] as const;
@@ -145,10 +146,41 @@ const canonicalPath = (target: string): string => {
   );
 };
 
+/** Set by a base's head, so the base's own copy of this script keeps its home where `upgrade` reads it. */
+const HOME_INSIDE_ENV = "J5_LIVE_TEST_HOME_INSIDE";
+
+/**
+ * The directory a personal config (`$XDG_CONFIG_HOME/j5code/live-test.json`, `{"homesRoot": "/abs"}`)
+ * puts every worktree's live-test state under, or undefined to keep it in the worktree's `.j5code`.
+ * Upstream offers No project only to a home outside a Git checkout.
+ */
+function configuredHomesRoot(environment: NodeJS.ProcessEnv, homeDirectory: string) {
+  if (environment[HOME_INSIDE_ENV] === "1") return undefined;
+  const configHome = environment.XDG_CONFIG_HOME?.trim() || NodePath.join(homeDirectory, ".config");
+  const path = NodePath.join(configHome, "j5code", "live-test.json");
+  if (!NodeFS.existsSync(path)) return undefined;
+  let config: unknown;
+  try {
+    config = JSON.parse(NodeFS.readFileSync(path, "utf8"));
+  } catch {
+    throw new LiveTestRefusal(`${path} is not valid JSON.`);
+  }
+  const homesRoot =
+    typeof config === "object" && config !== null && "homesRoot" in config
+      ? config.homesRoot
+      : undefined;
+  if (homesRoot === undefined) return undefined;
+  if (typeof homesRoot !== "string" || !NodePath.isAbsolute(homesRoot)) {
+    throw new LiveTestRefusal(`homesRoot in ${path} must be an absolute path.`);
+  }
+  return homesRoot;
+}
+
 /**
  * Where the live-test state for `checkout` lives, or a refusal. `checkout`
- * must be the root of a linked git worktree, and its `.j5code/live-test` must
- * really be inside it and must not be a live home's state.
+ * must be the root of a linked git worktree. Its state is its own
+ * `.j5code/live-test`, or a directory named for it under a configured homes
+ * root, and must really be there and must not be a live home's state.
  */
 export async function resolveLiveTestPaths(input: {
   readonly checkout: string;
@@ -177,11 +209,30 @@ export async function resolveLiveTestPaths(input: {
       `${worktree} contains a space or a shell character. Use a worktree whose path has only letters, digits and @%+=:,./_-`,
     );
   }
-  const root = NodePath.join(worktree, ".j5code", "live-test");
-  const canonicalRoot = canonicalPath(root);
-  if (!isInside(canonicalRoot, NodePath.join(NodeFS.realpathSync(worktree), ".j5code"))) {
+  const homesRoot = configuredHomesRoot(input.environment, input.homeDirectory);
+  // Named for the worktree, so it is this worktree's and every command finds it again.
+  const root =
+    homesRoot === undefined
+      ? NodePath.join(worktree, ".j5code", "live-test")
+      : NodePath.join(
+          homesRoot,
+          `${NodePath.basename(worktree)}-${NodeCrypto.createHash("sha256").update(worktree).digest("hex").slice(0, 8)}`,
+        );
+  if (!/^[\w@%+=:,./-]+$/.test(root)) {
     throw new LiveTestRefusal(
-      `${root} resolves to ${canonicalRoot}, outside this worktree's .j5code. Remove the symlink; the test home must live inside the worktree.`,
+      `${root} contains a space or a shell character. Use a homes root whose path has only letters, digits and @%+=:,./_-`,
+    );
+  }
+  const canonicalRoot = canonicalPath(root);
+  if (homesRoot === undefined) {
+    if (!isInside(canonicalRoot, NodePath.join(NodeFS.realpathSync(worktree), ".j5code"))) {
+      throw new LiveTestRefusal(
+        `${root} resolves to ${canonicalRoot}, outside this worktree's .j5code. Remove the symlink; the test home must live inside the worktree.`,
+      );
+    }
+  } else if (NodePath.dirname(canonicalRoot) !== canonicalPath(homesRoot)) {
+    throw new LiveTestRefusal(
+      `${root} resolves to ${canonicalRoot}, outside ${homesRoot}. Remove the symlink; the test home must live in the homes root.`,
     );
   }
   const liveHomes = [
@@ -686,6 +737,7 @@ Commands:
                                       --peer or --peer --poll for two peered servers,
                                       --for-dev for a server the developer uses,
                                       --base <ref> for a second server at that ref)
+  ${selfCommand(paths, "remove")}    stop, then delete ${paths.root}
 
 How to test is in .agents/skills/j5-live-test/SKILL.md.
 `;
@@ -999,6 +1051,7 @@ Commands:
   ${selfCommand(paths, "restart")}   stop, then start and share on the same home
   ${selfCommand(paths, "stop")}      stop the server and remove its tailnet mapping
   ${selfCommand(paths, "rebuild --for-dev")}   stop, delete ${paths.root}, copy the data again and start
+  ${selfCommand(paths, "remove")}    stop, then delete ${paths.root}
 `;
 }
 
@@ -1755,6 +1808,7 @@ export function baseEnvironment(
 ): NodeJS.ProcessEnv {
   return {
     ...liveTestEnvironment(environment, worktree),
+    [HOME_INSIDE_ENV]: "1",
     ...(manifest.baseClock === undefined ? {} : { J5_LIVE_TEST_NOW: String(manifest.baseClock) }),
   };
 }
@@ -2222,6 +2276,7 @@ Commands:
                                       (flags: --thread <id> or --project <id>, --level view|collaborate)
   ${selfCommand(paths, "rebuild")}   stop, delete ${paths.root} and the base checkout, build and start again
                                       (flags as for a first start)
+  ${selfCommand(paths, "remove")}    stop, then delete ${paths.root} and the base checkout
 
 How to test is in .agents/skills/j5-live-test/SKILL.md.
 `;
@@ -2766,13 +2821,13 @@ function guest(paths: LiveTestPaths, request: GuestRequest): void {
 
 const USAGE = `Usage: node scripts/j5/setup-agent-live-test.ts [--skills | --fresh | --peer [--poll] | --for-dev | --base <ref> | --mobile ios|android|phone]
        node scripts/j5/setup-agent-live-test.ts rebuild [--skills | --fresh | --peer [--poll] | --for-dev | --base <ref> | --mobile ios|android|phone]
-       node scripts/j5/setup-agent-live-test.ts status | restart | stop | upgrade | mobile-open
+       node scripts/j5/setup-agent-live-test.ts status | restart | stop | remove | upgrade | mobile-open
        node scripts/j5/setup-agent-live-test.ts mobile-build ios|android
        ${GUEST_USAGE.slice("Usage: ".length)}`;
 
 /**
  * The command and, for a start or `rebuild`, the mode its flags ask for.
- * `status`, `restart`, `stop` and `upgrade` act on whatever is built and take no flags.
+ * `status`, `restart`, `stop`, `remove` and `upgrade` act on whatever is built and take no flags.
  */
 export function parseCommand(args: ReadonlyArray<string>): {
   readonly command: LiveTestCommand;
@@ -2854,6 +2909,13 @@ async function main(): Promise<void> {
   const { command, mode, baseRef } = parsed;
   if (command === "status") return status(paths);
   if (command === "stop") return stop(paths);
+  if (command === "remove") {
+    // A home under a homes root outlives its worktree, so finishing deletes it here.
+    await stop(paths, true);
+    removeBaseCheckout(paths);
+    NodeFS.rmSync(paths.root, { recursive: true, force: true });
+    return console.log(`Removed ${paths.root}`);
+  }
   if (command === "upgrade") return upgrade(paths);
   if (command === "mobile-open") return (await import("./live-test-mobile.ts")).mobileOpen(paths);
   // A start or restart without --mobile keeps a recorded device set up and reconnects the
@@ -2866,7 +2928,7 @@ async function main(): Promise<void> {
   if (command === "restart" || command === "rebuild") {
     await stop(paths, command === "rebuild", command === "restart");
   }
-  // resolveLiveTestPaths has confirmed this directory is inside the worktree's own .j5code.
+  // resolveLiveTestPaths has confirmed this directory is this worktree's live-test root.
   // Refuse an unusable base before a rebuild deletes the build that is there.
   if (command === "rebuild" && baseRef !== undefined) resolveBase(paths, baseRef);
   if (command === "rebuild") {
