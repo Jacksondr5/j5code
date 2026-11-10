@@ -37,7 +37,7 @@ concurrency:
 jobs:
   build:
     name: Signed and notarized Apple Silicon DMG
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 60
     env:
       T3CODE_DESKTOP_UPDATE_REPOSITORY: Jacksondr5/j5code
