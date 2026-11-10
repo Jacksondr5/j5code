@@ -251,7 +251,7 @@ jobs:
           - platform: mac
             arch: arm64
             key: darwin-arm64
-            runner: macos-14
+            runner: macos-15
           - platform: linux
             arch: x64
             key: linux-x64

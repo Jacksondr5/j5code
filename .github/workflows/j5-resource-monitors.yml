@@ -22,11 +22,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-14
+          - runner: macos-15
             target: aarch64-apple-darwin
             platform: darwin-arm64
             binary: t3-resource-monitor
-          - runner: macos-14
+          - runner: macos-15
             target: x86_64-apple-darwin
             platform: darwin-x64
             binary: t3-resource-monitor
