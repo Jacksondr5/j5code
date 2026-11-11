@@ -6,6 +6,7 @@ import {
 import { mergeWorktreeCleanupSources } from "@t3tools/client-runtime/j5/crew-worktree-cleanup";
 import {
   answeredByLine,
+  askWaitsForServerLine,
   closedLine,
   j5SourceNotice,
   mergeHumanInboxSources,
@@ -299,35 +300,44 @@ function InboxItem(props: {
               <InboxMessage markdown={followUp.message} />
             </View>
           ))}
-          {/* Above the answer box, so it stays in view whenever the box is: iOS scrolls only the
-              focused box itself clear of the keyboard. */}
-          <View className="flex-row flex-wrap items-center justify-between gap-2">
-            <OpenSenderThread item={item} />
-            {closedText !== null ? (
-              <Text className="text-sm text-foreground-muted">{closedText}</Text>
-            ) : (
-              <Button
-                label={props.delivering ? "Delivering…" : "Answer"}
-                tone="primary"
-                loading={props.delivering}
-                disabled={!canAnswer || props.anyDelivering || props.answerText.length === 0}
-                accessibilityHint={
-                  canAnswer
-                    ? undefined
-                    : "This server is unavailable or this connection is read-only."
-                }
-                onPress={props.onAnswer}
+          {closedText === null && !item.connected ? (
+            // Read-only until its server is back; words typed earlier are kept for then.
+            <Text className="text-sm text-foreground-muted">
+              {askWaitsForServerLine(item.environmentLabel)}
+            </Text>
+          ) : (
+            <>
+              {/* Above the answer box, so it stays in view whenever the box is: iOS scrolls only
+                  the focused box itself clear of the keyboard. */}
+              <View className="flex-row flex-wrap items-center justify-between gap-2">
+                <OpenSenderThread item={item} />
+                {closedText !== null ? (
+                  <Text className="text-sm text-foreground-muted">{closedText}</Text>
+                ) : (
+                  <Button
+                    label={props.delivering ? "Delivering…" : "Answer"}
+                    tone="primary"
+                    loading={props.delivering}
+                    disabled={!canAnswer || props.anyDelivering || props.answerText.length === 0}
+                    accessibilityHint={
+                      canAnswer
+                        ? undefined
+                        : "This server is unavailable or this connection is read-only."
+                    }
+                    onPress={props.onAnswer}
+                  />
+                )}
+              </View>
+              <TextInput
+                accessibilityLabel={`Answer ${item.intent}`}
+                multiline
+                placeholder="Type the answer exactly as it should be delivered"
+                value={props.answerText}
+                onChangeText={props.onChangeAnswer}
+                style={{ minHeight: 96, textAlignVertical: "top" }}
               />
-            )}
-          </View>
-          <TextInput
-            accessibilityLabel={`Answer ${item.intent}`}
-            multiline
-            placeholder="Type the answer exactly as it should be delivered"
-            value={props.answerText}
-            onChangeText={props.onChangeAnswer}
-            style={{ minHeight: 96, textAlignVertical: "top" }}
-          />
+            </>
+          )}
           {props.error === null ? null : (
             <Text accessibilityRole="alert" className="text-sm text-danger-foreground">
               {props.error}
