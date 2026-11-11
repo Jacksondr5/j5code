@@ -324,8 +324,11 @@ function PlaybookLibrary({
             <Text className="text-sm text-foreground-muted">{playbook.description}</Text>
             <Text className="text-xs text-foreground-muted">
               {playbook.stepCount} {playbook.stepCount === 1 ? "step" : "steps"}
-              {source.kind === "folder" ? " · From source folder" : ""}
-              {source.kind === "workspace" ? ` · From ${project?.title ?? "project"}` : ""}
+              {source.kind === "folder" ? ` · From source folder on ${label}` : ""}
+              {source.kind === "workspace"
+                ? ` · From ${project?.title ?? "project"} on ${label}`
+                : ""}
+              {source.kind === "environment" ? ` · Library on ${label}` : ""}
               {playbook.overridesLibrary ? " · Overrides library copy" : ""}
             </Text>
             {playbook.issue ? (

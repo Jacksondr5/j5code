@@ -14,9 +14,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import * as Dialog from "../../components/ui/Dialog";
 import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
-import { withNativeGlassHeaderItem } from "../../features/layout/native-glass-header-items";
 import { SettingsScreen } from "../../features/settings/components/SettingsScreen";
-import { NativeStackScreenOptions } from "../../native/StackHeader";
 
 export type SettingsFormRoutes = {
   SettingsPersonaNew: {
@@ -46,8 +44,8 @@ export function useSettingsFormExit(options: {
   const navigation = useNavigation();
   // Set once the save lands, so the removal guard lets the form close.
   const saved = useRef(false);
-  const guarded = options.hasChanges || options.saving;
-  usePreventRemove(guarded, ({ data }) => {
+  // Native stack also cancels iOS's native Back and swipe while this holds, so one back button guards.
+  usePreventRemove(options.hasChanges || options.saving, ({ data }) => {
     if (saved.current) {
       navigation.dispatch(data.action);
       return;
@@ -66,7 +64,6 @@ export function useSettingsFormExit(options: {
     ]);
   });
   return {
-    guarded,
     /** For a form that leaves by its own navigation action. */
     allowLeaving: () => {
       saved.current = true;
@@ -81,41 +78,12 @@ export function useSettingsFormExit(options: {
 /** A pushed settings page, because Android's Menu can't draw over an RN Modal or Sheet. */
 export function SettingsFormScreen(props: {
   readonly title: string;
-  readonly guarded: boolean;
   readonly children: ReactNode;
 }) {
-  const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const keyboardVisible = useKeyboardState((state) => state.isVisible);
   return (
     <SettingsScreen title={props.title}>
-      {Platform.OS === "ios" ? (
-        <NativeStackScreenOptions
-          // A custom back item also turns off iOS's swipe back, so it stays only while guarded.
-          options={
-            props.guarded
-              ? {
-                  headerBackVisible: false,
-                  gestureEnabled: false,
-                  // Native Back pops before removal guards; a bar action lets the guard run first.
-                  unstable_headerLeftItems: () => [
-                    withNativeGlassHeaderItem({
-                      type: "button",
-                      label: "",
-                      accessibilityLabel: "Back",
-                      icon: { type: "sfSymbol", name: "chevron.backward" },
-                      onPress: () => navigation.goBack(),
-                    }),
-                  ],
-                }
-              : {
-                  headerBackVisible: true,
-                  gestureEnabled: true,
-                  unstable_headerLeftItems: undefined,
-                }
-          }
-        />
-      ) : null}
       {/* iOS keeps upstream's scroll view, which registers with the native header and insets for the
           keyboard; with it up, the home indicator area is already covered, so Save gets no extra
           padding. Android has no header marker, so keyboard-controller's scroll view lets the form

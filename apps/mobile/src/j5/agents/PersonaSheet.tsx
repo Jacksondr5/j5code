@@ -31,6 +31,7 @@ export interface PersonaSheetActionRow {
  */
 export function PersonaSheet(props: {
   readonly environmentId: EnvironmentId;
+  readonly environmentLabel: string;
   readonly persona: AgentPersonaCatalogRow;
   readonly usageLine: string | null;
   readonly actions: ReadonlyArray<PersonaSheetActionRow>;
@@ -75,7 +76,13 @@ export function PersonaSheet(props: {
     setLeaving(() => run);
   };
   const providers = useAtomValue(serverEnvironment.providersValueAtom(props.environmentId));
-  const rows = personaDetailRows(props.persona, models, props.usageLine, providers ?? []);
+  const rows = personaDetailRows(
+    props.persona,
+    models,
+    props.usageLine,
+    providers ?? [],
+    props.environmentLabel,
+  );
   return (
     <Modal
       visible={leaving === null}
