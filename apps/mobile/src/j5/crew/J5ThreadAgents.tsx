@@ -58,12 +58,8 @@ const childCountsAtom = Atom.family((key: string) => {
   }).pipe(Atom.withLabel(`mobile-j5:spawned-child-counts:${key}`));
 });
 
-/** Upstream's Agents pill segment, counting the Crew seats and Peer Agents the thread spawned. */
-export function useJ5AgentsPillSegment(
-  ref: ScopedThreadRef | null,
-  turn: ThreadTurnSubagents | null,
-  upstream: SubagentPillSegment | null,
-): SubagentPillSegment | null {
+/** How many of the thread's spawned agents the sheet lists, and how many of those are running. */
+function useJ5AgentCounts(ref: ScopedThreadRef | null) {
   const children = useThreadSpawnedChildren(ref);
   const counts = useAtomValue(
     childCountsAtom(
@@ -74,12 +70,21 @@ export function useJ5AgentsPillSegment(
     ),
   );
   const [running = 0, total = 0] = counts.split("/").map(Number);
-  return j5AgentsPillSegment(turn, upstream, { running, total });
+  return { running, total };
+}
+
+/** Upstream's Agents pill segment, counting the Crew seats and Peer Agents the thread spawned. */
+export function useJ5AgentsPillSegment(
+  ref: ScopedThreadRef | null,
+  turn: ThreadTurnSubagents | null,
+  upstream: SubagentPillSegment | null,
+): SubagentPillSegment | null {
+  return j5AgentsPillSegment(turn, upstream, useJ5AgentCounts(ref));
 }
 
 /** Whether the sheet lists spawned agents, so upstream's empty text stays only for an empty sheet. */
 export function useHasJ5Agents(ref: ScopedThreadRef): boolean {
-  return useThreadSpawnedChildren(ref).length > 0;
+  return useJ5AgentCounts(ref).total > 0;
 }
 
 /**

@@ -29,10 +29,10 @@ describe("the Agents pill with spawned agents", () => {
       label: "2/5",
       accessibilityLabel: "2 of 5 agents working",
     });
-    // An idle Crew keeps the pill between turns, when upstream's segment is gone.
+    // An idle Crew keeps the pill between turns, counting an older turn's subagents the sheet lists.
     expect(j5AgentsPillSegment(turn(0, 2), null, { running: 0, total: 3 })).toEqual({
-      label: "3 agents",
-      accessibilityLabel: "3 agents, none working",
+      label: "5 agents",
+      accessibilityLabel: "5 agents, none working",
     });
     expect(j5AgentsPillSegment(null, null, { running: 0, total: 1 })?.label).toBe("1 agent");
   });

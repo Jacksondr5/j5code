@@ -196,8 +196,9 @@ export const j5AgentsPillSegment = (
   children: { readonly running: number; readonly total: number },
 ): SubagentPillSegment | null => {
   if (children.total === 0) return upstream;
-  const live = (upstream === null || turn === null ? 0 : turn.liveCount) + children.running;
-  const total = (upstream === null || turn === null ? 0 : turn.subagents.length) + children.total;
+  // The sheet lists every subagent of the turn, even one upstream's pill no longer counts.
+  const live = (turn?.liveCount ?? 0) + children.running;
+  const total = (turn?.subagents.length ?? 0) + children.total;
   if (live > 0)
     return { label: `${live}/${total}`, accessibilityLabel: `${live} of ${total} agents working` };
   const agents = `${total} ${total === 1 ? "agent" : "agents"}`;
