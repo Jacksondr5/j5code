@@ -73,27 +73,42 @@ export function inboxBellPresentation(input: {
   return { badge, label };
 }
 
-export interface RecordPart {
-  readonly kind: "prose" | "block";
+export interface RecordLine {
+  readonly indent: string;
   readonly text: string;
 }
 
+export type RecordPart =
+  | { readonly kind: "prose"; readonly text: string }
+  | { readonly kind: "block"; readonly lines: ReadonlyArray<RecordLine> };
+
 /**
  * J5's record split into its prose and the indented blocks it quotes, such as a persona draft's
- * definition, so a block can keep its layout. Indentation alone decides: four leading spaces.
+ * definition. Indentation alone decides: four leading spaces. A block's lines keep their own
+ * indent apart from their words, so a long line can wrap under itself.
  */
 export function splitRecordText(text: string): ReadonlyArray<RecordPart> {
-  const parts: Array<RecordPart> = [];
+  const runs: Array<{ kind: RecordPart["kind"]; lines: Array<string> }> = [];
   for (const line of text.split("\n")) {
     const kind = line.startsWith("    ") ? "block" : "prose";
     const body = kind === "block" ? line.slice(4) : line;
-    const last = parts[parts.length - 1];
-    if (last?.kind === kind) parts[parts.length - 1] = { kind, text: `${last.text}\n${body}` };
-    else parts.push({ kind, text: body });
+    const last = runs[runs.length - 1];
+    if (last?.kind === kind) last.lines.push(body);
+    else runs.push({ kind, lines: [body] });
   }
-  return parts.flatMap((part) => {
-    const trimmed = part.kind === "prose" ? part.text.replace(/^\n+|\n+$/g, "") : part.text;
-    return trimmed === "" ? [] : [{ kind: part.kind, text: trimmed }];
+  return runs.flatMap((run): Array<RecordPart> => {
+    if (run.kind === "block")
+      return [
+        {
+          kind: "block",
+          lines: run.lines.map((line) => {
+            const indent = /^ */.exec(line)![0];
+            return { indent: line.trim() === "" ? "" : indent, text: line.slice(indent.length) };
+          }),
+        },
+      ];
+    const prose = run.lines.join("\n").replace(/^\n+|\n+$/g, "");
+    return prose === "" ? [] : [{ kind: "prose", text: prose }];
   });
 }
 
