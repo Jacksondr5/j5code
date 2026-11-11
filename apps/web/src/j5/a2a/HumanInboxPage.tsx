@@ -5,6 +5,7 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   answeredByLine,
   closedLine,
+  askWaitsForServerLine,
   compareInboxItems,
   type HumanInboxAnswerAttempt,
   j5SourceNotice,
@@ -325,69 +326,81 @@ function OpenInboxItem({
         </summary>
         <div className="border-t border-border/50 px-1 pb-5 pt-4 sm:ms-24 sm:px-0 sm:pe-1">
           <InboxMessage item={item} />
-          <div className="mt-4 flex flex-col gap-3">
-            <Textarea
-              aria-label={`Answer ${item.intent}`}
-              className="min-h-24 resize-y"
-              id={answerId}
-              onChange={(event) => captureHumanInboxAnswer(event, itemKey, setAnswers)}
-              placeholder="Type the answer exactly as it should be delivered"
-              value={answerText}
-              {...(addFiles === null ? {} : answerAttachmentInputHandlers(addFiles))}
-            />
-            <AnswerAttachmentList
-              attachments={attachments.list(itemKey)}
-              environmentId={item.environmentId}
-              error={attachments.error(itemKey)}
-              onRemove={pendingExchangeId === null ? (id) => attachments.remove(itemKey, id) : null}
-            />
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex items-center gap-1">
-                <OpenThreadButton
-                  environmentAvailable={item.connected}
-                  item={item}
-                  onOpen={onOpenThread}
-                />
-                {addFiles === null || !canAnswer ? null : (
-                  <AnswerAttachButton
-                    focusAnswer={() => document.getElementById(answerId)?.focus()}
-                    onFiles={addFiles}
+          {closedText === null && !item.connected ? (
+            // Read-only until its server is back; words typed earlier are kept for then.
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+              <OpenThreadButton environmentAvailable={false} item={item} onOpen={onOpenThread} />
+              <p className="text-sm text-muted-foreground">
+                {askWaitsForServerLine(item.environmentLabel)}
+              </p>
+            </div>
+          ) : (
+            <div className="mt-4 flex flex-col gap-3">
+              <Textarea
+                aria-label={`Answer ${item.intent}`}
+                className="min-h-24 resize-y"
+                id={answerId}
+                onChange={(event) => captureHumanInboxAnswer(event, itemKey, setAnswers)}
+                placeholder="Type the answer exactly as it should be delivered"
+                value={answerText}
+                {...(addFiles === null ? {} : answerAttachmentInputHandlers(addFiles))}
+              />
+              <AnswerAttachmentList
+                attachments={attachments.list(itemKey)}
+                environmentId={item.environmentId}
+                error={attachments.error(itemKey)}
+                onRemove={
+                  pendingExchangeId === null ? (id) => attachments.remove(itemKey, id) : null
+                }
+              />
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-1">
+                  <OpenThreadButton
+                    environmentAvailable={item.connected}
+                    item={item}
+                    onOpen={onOpenThread}
                   />
+                  {addFiles === null || !canAnswer ? null : (
+                    <AnswerAttachButton
+                      focusAnswer={() => document.getElementById(answerId)?.focus()}
+                      onFiles={addFiles}
+                    />
+                  )}
+                </div>
+                {closedText !== null ? (
+                  <p className="text-sm text-muted-foreground" data-j5-inbox="closed">
+                    {closedText}
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <OwnerAskAction
+                      disabled={!item.sourceReady || pendingExchangeId !== null}
+                      environmentId={item.environmentId}
+                      item={item}
+                      size="default"
+                    />
+                    <Button
+                      disabled={
+                        !canAnswer ||
+                        pendingExchangeId !== null ||
+                        answerText.length === 0 ||
+                        waitingOn !== null
+                      }
+                      title={
+                        canAnswer
+                          ? (waitingOn ?? undefined)
+                          : "This environment is unavailable or this connection is read-only."
+                      }
+                      onClick={() => answer(item)}
+                      type="button"
+                    >
+                      {pendingExchangeId === scopedInboxItemKey(item) ? "Delivering…" : "Answer"}
+                    </Button>
+                  </div>
                 )}
               </div>
-              {closedText !== null ? (
-                <p className="text-sm text-muted-foreground" data-j5-inbox="closed">
-                  {closedText}
-                </p>
-              ) : (
-                <div className="flex flex-wrap items-center justify-end gap-2">
-                  <OwnerAskAction
-                    disabled={!item.sourceReady || pendingExchangeId !== null}
-                    environmentId={item.environmentId}
-                    item={item}
-                    size="default"
-                  />
-                  <Button
-                    disabled={
-                      !canAnswer ||
-                      pendingExchangeId !== null ||
-                      answerText.length === 0 ||
-                      waitingOn !== null
-                    }
-                    title={
-                      canAnswer
-                        ? (waitingOn ?? undefined)
-                        : "This environment is unavailable or this connection is read-only."
-                    }
-                    onClick={() => answer(item)}
-                    type="button"
-                  >
-                    {pendingExchangeId === scopedInboxItemKey(item) ? "Delivering…" : "Answer"}
-                  </Button>
-                </div>
-              )}
             </div>
-          </div>
+          )}
         </div>
       </details>
     </li>

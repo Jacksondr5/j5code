@@ -97,6 +97,10 @@ export function splitRecordText(text: string): ReadonlyArray<RecordPart> {
   });
 }
 
+/** What an open ask says in place of its answer box while its server isn't connected. */
+export const askWaitsForServerLine = (environmentLabel: string) =>
+  `${environmentLabel} isn't connected. You can answer when it's back.`;
+
 export function j5SourceNotice(source: J5ReadSource<unknown>): string | null {
   switch (source.status) {
     case "ready":
