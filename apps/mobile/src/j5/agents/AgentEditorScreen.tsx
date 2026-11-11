@@ -81,7 +81,7 @@ export function AgentEditorScreen() {
     exit.leaveAfterSave();
   }
   return (
-    <SettingsFormScreen title={"Edit persona"}>
+    <SettingsFormScreen title={"Edit persona"} guarded={exit.guarded}>
       <Text className="text-sm text-foreground-muted">
         Changes apply to this imported copy and future launches. The original file and existing
         tasks stay unchanged.

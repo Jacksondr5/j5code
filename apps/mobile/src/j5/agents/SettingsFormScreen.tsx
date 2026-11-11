@@ -15,6 +15,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Dialog from "../../components/ui/Dialog";
 import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
 import { SettingsScreen } from "../../features/settings/components/SettingsScreen";
+import { NativeStackScreenOptions } from "../../native/StackHeader";
 
 export type SettingsFormRoutes = {
   SettingsPersonaNew: {
@@ -44,8 +45,9 @@ export function useSettingsFormExit(options: {
   const navigation = useNavigation();
   // Set once the save lands, so the removal guard lets the form close.
   const saved = useRef(false);
-  // Native stack also cancels iOS's native Back and swipe while this holds, so one back button guards.
-  usePreventRemove(options.hasChanges || options.saving, ({ data }) => {
+  const guarded = options.hasChanges || options.saving;
+  // Native stack also cancels iOS's native Back while this holds, so one back button guards.
+  usePreventRemove(guarded, ({ data }) => {
     if (saved.current) {
       navigation.dispatch(data.action);
       return;
@@ -64,6 +66,7 @@ export function useSettingsFormExit(options: {
     ]);
   });
   return {
+    guarded,
     /** For a form that leaves by its own navigation action. */
     allowLeaving: () => {
       saved.current = true;
@@ -78,12 +81,17 @@ export function useSettingsFormExit(options: {
 /** A pushed settings page, because Android's Menu can't draw over an RN Modal or Sheet. */
 export function SettingsFormScreen(props: {
   readonly title: string;
+  readonly guarded: boolean;
   readonly children: ReactNode;
 }) {
   const insets = useSafeAreaInsets();
   const keyboardVisible = useKeyboardState((state) => state.isVisible);
   return (
     <SettingsScreen title={props.title}>
+      {/* A refused swipe drops and restores the keyboard under the dialog, so a guarded form takes none. */}
+      {Platform.OS === "ios" ? (
+        <NativeStackScreenOptions options={{ gestureEnabled: !props.guarded }} />
+      ) : null}
       {/* iOS keeps upstream's scroll view, which registers with the native header and insets for the
           keyboard; with it up, the home indicator area is already covered, so Save gets no extra
           padding. Android has no header marker, so keyboard-controller's scroll view lets the form
