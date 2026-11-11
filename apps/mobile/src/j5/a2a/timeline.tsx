@@ -386,17 +386,39 @@ function ParticipantAuthorLine(props: {
   readonly j5: Extract<J5UserMessagePresentation, { group: "participant" }>;
 }) {
   const { j5 } = props;
+  const openLinkedThread = useOpenLinkedThread();
   const sender = useSenderThread(props.message, props.presentation, props.timeline);
   const name = j5MessageAuthorName({
     presentation: j5,
     participantLabels: props.timeline.labels,
     senderThreadTitle: sender.title,
   });
+  const { ref } = sender;
   return (
     <View className="mb-1 max-w-[85%] flex-row items-center gap-1.5 pl-1">
-      <Text className="shrink font-t3-medium text-xs text-foreground" numberOfLines={1}>
-        {name}
-      </Text>
+      {/* The sender's name opens its thread where the reader can see it, as web's link does. */}
+      {ref === null ? (
+        <Text className="shrink font-t3-medium text-xs text-foreground" numberOfLines={1}>
+          {name}
+        </Text>
+      ) : (
+        <Pressable
+          accessibilityRole="link"
+          accessibilityHint="Opens the sender's thread"
+          hitSlop={6}
+          className="shrink"
+          onPress={() =>
+            openLinkedThread({
+              environmentId: String(ref.environmentId),
+              threadId: String(ref.threadId),
+            })
+          }
+        >
+          <Text className="font-t3-medium text-xs text-foreground" numberOfLines={1}>
+            {name}
+          </Text>
+        </Pressable>
+      )}
       {j5.tag === "brief" ? (
         <Text className="shrink-0 text-xs text-foreground-muted">· brief</Text>
       ) : null}
