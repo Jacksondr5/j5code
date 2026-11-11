@@ -32,6 +32,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import type * as Statement from "effect/sql/Statement";
 import type * as SqlError from "effect/sql/SqlError";
 
+import type { EventSinkV2 } from "../../orchestration-v2/EventSink.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import type { LedgerMessageId, ParticipantId } from "../a2a/contracts.ts";
 import { deliveryMessageId } from "../a2a/DeliveryTransport.ts";
@@ -54,6 +55,7 @@ import {
   typedByFirstOwner,
 } from "./messageStamps.ts";
 import { scheduledLine } from "./scheduledRuns.ts";
+import { readEventStoreHighWater } from "../a2a/eventStoreHighWater.ts";
 import { PROMPT_SETTLED_EVENT, markPromptSettled } from "../a2a/promptSettlement.ts";
 
 /**
@@ -900,27 +902,32 @@ const make = Effect.gen(function* () {
   );
 
   // Who answered a prompt shows once upstream settles it; each settling moves its thread's
-  // authors. Upstream's live tail, from now: a client reads the authors when it subscribes. The
-  // answer is marked before its thread moves; LifecycleService marks those settled while down.
+  // authors. Upstream's live tail from its head, never its history: LifecycleService marks the
+  // settles from before, from its cursor. The answer is marked before its thread moves.
   yield* Effect.forkScoped(
-    Effect.forever(
-      threads.streamStoredEvents.pipe(
-        Stream.filter((stored) => stored.event.type === PROMPT_SETTLED_EVENT),
-        Stream.runForEach((stored) =>
-          markPromptSettled(stored).pipe(
-            Effect.provideService(SqlClient.SqlClient, sql),
-            Effect.andThen(touch(stored.event.threadId)),
+    Effect.gen(function* () {
+      let afterSequence = yield* readEventStoreHighWater("J5 shared conversation");
+      return yield* Effect.forever(
+        Stream.suspend(() =>
+          threads.streamStoredEventsFrom({ afterSequence, eventType: PROMPT_SETTLED_EVENT }),
+        ).pipe(
+          Stream.runForEach((stored) =>
+            markPromptSettled(stored).pipe(
+              Effect.provideService(SqlClient.SqlClient, sql),
+              Effect.andThen(touch(stored.event.threadId)),
+              Effect.tap(() => Effect.sync(() => (afterSequence = stored.sequence))),
+            ),
           ),
+          Effect.catchCause((cause) =>
+            Effect.logWarning("J5 shared conversation's prompt stream failed; resuming", {
+              cause,
+            }),
+          ),
+          // A pause before each resumption, whether the stream failed or ended, so it never spins.
+          Effect.andThen(Effect.sleep(Duration.seconds(1))),
         ),
-        Effect.catchCause((cause) =>
-          Effect.logWarning("J5 shared conversation's prompt stream failed; resuming", {
-            cause,
-          }),
-        ),
-        // A pause before each resumption, whether the stream failed or ended, so it never spins.
-        Effect.andThen(Effect.sleep(Duration.seconds(1))),
-      ),
-    ),
+      );
+    }),
   );
 
   return SharedConversation.of({
@@ -999,5 +1006,10 @@ const editorName = (editor: Author) =>
 export const layer: Layer.Layer<
   SharedConversation,
   never,
-  SqlClient.SqlClient | SharedThreads | ThreadManagementService | Access | A2ALifecycleService
+  | SqlClient.SqlClient
+  | SharedThreads
+  | ThreadManagementService
+  | EventSinkV2
+  | Access
+  | A2ALifecycleService
 > = Layer.effect(SharedConversation, make).pipe(Layer.provide(personAccessLayer));
