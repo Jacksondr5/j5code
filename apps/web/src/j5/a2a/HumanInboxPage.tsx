@@ -328,12 +328,9 @@ function OpenInboxItem({
           <InboxMessage item={item} />
           {closedText === null && !item.connected ? (
             // Read-only until its server is back; words typed earlier are kept for then.
-            <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
-              <OpenThreadButton environmentAvailable={false} item={item} onOpen={onOpenThread} />
-              <p className="text-sm text-muted-foreground">
-                {askWaitsForServerLine(item.environmentLabel)}
-              </p>
-            </div>
+            <p className="mt-4 text-sm text-muted-foreground">
+              {askWaitsForServerLine(item.environmentLabel)}
+            </p>
           ) : (
             <div className="mt-4 flex flex-col gap-3">
               <Textarea

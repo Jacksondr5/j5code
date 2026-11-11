@@ -302,12 +302,9 @@ function InboxItem(props: {
           ))}
           {closedText === null && !item.connected ? (
             // Read-only until its server is back; words typed earlier are kept for then.
-            <View className="gap-2">
-              <OpenSenderThread item={item} />
-              <Text className="text-sm text-foreground-muted">
-                {askWaitsForServerLine(item.environmentLabel)}
-              </Text>
-            </View>
+            <Text className="text-sm text-foreground-muted">
+              {askWaitsForServerLine(item.environmentLabel)}
+            </Text>
           ) : (
             <>
               {/* Above the answer box, so it stays in view whenever the box is: iOS scrolls only
