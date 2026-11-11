@@ -82,8 +82,8 @@ const requestRows = (refs: ReadonlyArray<ScopedThreadRef>, revisions: string) =>
 };
 
 /**
- * The list's threads without the ones an agent spawned (register D22): those show under their
- * spawner's row unless pinned. Also keeps the spawned-children read current for every thread.
+ * The list's threads without the ones an agent spawned (register D22): those show in their
+ * spawner's Agents sheet unless pinned. Also keeps the spawned-children read current for every thread.
  */
 export function useCrewListedThreads<
   T extends {
@@ -125,10 +125,35 @@ export function useCrewListedThreads<
 
 const EMPTY: ReadonlyArray<SpawnedChild> = [];
 
-/** The agents placed under one thread, as last read. */
-export function useSpawnedChildren(ref: ScopedThreadRef): ReadonlyArray<SpawnedChild> {
-  const key = scopedThreadKey(ref);
-  // Per row: a batch keeps untouched rows' values, so other rows' updates skip this one.
-  const read = () => store.getSnapshot().get(key)?.children ?? EMPTY;
+/**
+ * The agents placed under one open thread. It is read on open and again when placements change,
+ * so it stays current even when no list has the thread on screen.
+ */
+export function useThreadSpawnedChildren(ref: ScopedThreadRef | null): ReadonlyArray<SpawnedChild> {
+  const environmentId = ref?.environmentId;
+  const threadId = ref?.threadId;
+  // Subscribed here rather than read in render, so a revision on any server doesn't re-render
+  // the thread screen; only this thread's server's placements re-read it.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- asks the thread's server for the agents under it, again when its connection or placements change.
+  useEffect(() => {
+    if (environmentId === undefined || threadId === undefined) return;
+    const target = scopeThreadRef(environmentId, threadId);
+    const read = () => {
+      store.setConnections(appAtomRegistry.get(threadReadConnectionsAtom));
+      store.request([target], true);
+    };
+    read();
+    const offConnections = appAtomRegistry.subscribe(threadReadConnectionsAtom, read);
+    const offPlacements = appAtomRegistry.subscribe(
+      j5Environment.rereadOn("crew", "fleet")({ environmentId }),
+      read,
+    );
+    return () => {
+      offConnections();
+      offPlacements();
+    };
+  }, [environmentId, threadId]);
+  const key = ref === null ? null : scopedThreadKey(ref);
+  const read = () => (key === null ? EMPTY : (store.getSnapshot().get(key)?.children ?? EMPTY));
   return useSyncExternalStore(store.subscribe, read, read);
 }

@@ -187,10 +187,16 @@ const SEAMS: ReadonlyArray<Seam> = [
     ],
   },
   {
-    file: "features/threads/thread-list-v2-items.tsx",
-    record: "case 115: spawned agents under their spawner's row",
-    from: "../../j5/crew/CaptainSeats",
-    reaches: ["<CaptainSeatsToggle", "<CaptainSeats", "statusLabels={STATUS_LABEL_BY_STATUS}"],
+    file: "features/threads/ThreadAgentsSheet.tsx",
+    record: "case 115: spawned agents in the Agents sheet",
+    from: "../../j5/crew/J5ThreadAgents",
+    reaches: ["<J5ThreadAgents", "subagents.length === 0 && !hasJ5Agents"],
+  },
+  {
+    file: "features/threads/ThreadDetailScreen.tsx",
+    record: "case 115: the Agents pill counts spawned agents",
+    from: "../../j5/crew/J5ThreadAgents",
+    reaches: ["useJ5AgentsPillSegment("],
   },
   {
     file: "features/threads/useThreadListV2.ts",
