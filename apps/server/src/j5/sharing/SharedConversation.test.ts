@@ -17,6 +17,7 @@ import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
+import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -31,7 +32,11 @@ import { makeSearchAuthors } from "./searchAuthors.ts";
 import { SharedConversation } from "./SharedConversation.ts";
 import { NOTE_OPEN } from "./sharedConversationNotes.ts";
 import { PROJECT, thread } from "./test-support/accessHarness.ts";
-import { Upstream, conversationLayer } from "./test-support/conversationHarness.ts";
+import {
+  Upstream,
+  conversationLayer,
+  conversationLayerWith,
+} from "./test-support/conversationHarness.ts";
 
 const AT = "2026-10-18T00:00:00.000Z";
 
@@ -759,6 +764,35 @@ it.effect("an answer carries its author, and who answered shows once upstream se
       pick: [`${answered!.storedPrefix}A`],
     });
   }).pipe(Effect.provide(conversationLayer)),
+);
+
+/** Upstream's log settling a prompt on the thread. */
+const promptSettled = (threadId: ThreadId, sequence: number) =>
+  ({
+    sequence,
+    commandId: null,
+    event: {
+      type: "runtime-request.updated",
+      threadId,
+      occurredAt: DateTime.makeUnsafe(AT),
+      payload: { id: RuntimeRequestId.make(`request:${sequence}`) },
+    },
+  }) as unknown as OrchestrationV2StoredEvent;
+
+it.effect("who answered follows upstream's log from its head, not its history", () =>
+  Effect.gen(function* () {
+    const upstream = yield* Upstream;
+    const threadId = yield* thread("thread:settled-live");
+    const moved = yield* (yield* SharedConversation)
+      .authorsChanges(threadId)
+      .pipe(Stream.take(2), Stream.runDrain, Effect.forkChild({ startImmediately: true }));
+    yield* Queue.offer(upstream.live, promptSettled(threadId, 2));
+    yield* Fiber.join(moved);
+    // The settle before the server started is LifecycleService's, from its cursor.
+    assert.strictEqual(yield* Ref.get(upstream.historyRead), 0);
+  }).pipe(
+    Effect.provide(conversationLayerWith([promptSettled("thread:settled-before" as ThreadId, 1)])),
+  ),
 );
 
 /**
