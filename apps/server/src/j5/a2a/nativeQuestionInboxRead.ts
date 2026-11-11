@@ -56,33 +56,36 @@ export const makeNativeQuestionInboxRead = Effect.gen(function* () {
           if (seats.length > 0 && crew === undefined) return [];
           const records = yield* threads.getThreadRecords(threadId, ["runtimeRequests"]);
           if (records.thread.archivedAt !== null || records.thread.deletedAt !== null) return [];
-          return records.runtimeRequests.flatMap((request): Array<NativeQuestionInboxItem> => {
-            if (
-              request.kind !== "user_input" ||
-              request.status !== "pending" ||
-              (request.responseCapability.type !== "live" &&
-                request.responseCapability.type !== "message")
-            )
-              return [];
-            return [
-              {
-                threadId,
-                requestId: request.id,
-                projectId: row.project_id,
-                threadTitle: records.thread.title,
-                createdAt: DateTime.formatIso(request.createdAt),
-                responseCapability: request.responseCapability.type,
-                ...(crew === undefined
-                  ? {}
-                  : {
-                      crew: {
-                        name: crew.displayName,
-                        seat: crew.members.find((member) => member.threadId === threadId)!.seatName,
-                      },
-                    }),
-              },
-            ];
-          });
+          const questions = records.runtimeRequests.filter(
+            (request) =>
+              request.kind === "user_input" &&
+              request.status === "pending" &&
+              (request.responseCapability.type === "live" ||
+                request.responseCapability.type === "message"),
+          );
+          // One row per thread: it links to the thread, which shows one question at a time. A
+          // restart leaves the old question answerable by message and the resumed turn asks again.
+          const request =
+            questions.findLast((candidate) => candidate.responseCapability.type === "live") ??
+            questions.at(-1);
+          if (request === undefined) return [];
+          const item: NativeQuestionInboxItem = {
+            threadId,
+            requestId: request.id,
+            projectId: row.project_id,
+            threadTitle: records.thread.title,
+            createdAt: DateTime.formatIso(request.createdAt),
+            responseCapability: request.responseCapability.type === "live" ? "live" : "message",
+            ...(crew === undefined
+              ? {}
+              : {
+                  crew: {
+                    name: crew.displayName,
+                    seat: crew.members.find((member) => member.threadId === threadId)!.seatName,
+                  },
+                }),
+          };
+          return [item];
         }),
       { concurrency: 8 },
     );
