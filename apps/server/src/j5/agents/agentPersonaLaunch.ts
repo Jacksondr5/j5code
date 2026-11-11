@@ -1,36 +1,57 @@
-import type { OrchestrationV2AgentPersonaRequest, ServerProvider } from "@t3tools/contracts";
+import { agentPersonaPolicy, mapAgentPersonaPolicy } from "./agentPersonas.ts";
+import * as Clock from "effect/Clock";
+import {
+  PROVIDER_DISPLAY_NAMES,
+  ProviderDriverKind,
+  type OrchestrationV2AgentPersonaRequest,
+  type ServerProvider,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import { buildAgentPersonaAssignment } from "./agentPersonaAssignment.ts";
 import { AgentPersonaLibraryError, type createAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
 import {
   resolveAgentPersonaRoute,
-  unavailableAgentPersonaReason,
+  singleWaiver,
+  type AgentPersonaPickLimits,
   type AgentPersonaRouteAttempt,
 } from "./agentPersonaRouting.ts";
 
-const routeFailurePhrase = (
+/** A provider driver as the app names it, such as Codex or Claude. */
+export const driverLabel = (driver: string) =>
+  PROVIDER_DISPLAY_NAMES[ProviderDriverKind.make(driver)] ?? driver;
+
+export const routeFailurePhrase = (
   target: AgentPersonaRouteAttempt["target"],
   failure: AgentPersonaRouteAttempt["failures"][number],
+  provider: string = "driver" in target ? driverLabel(target.driver) : target.instanceId,
 ) => {
   switch (failure.code) {
     case "provider-not-configured":
-      return `no ${target.driver} provider is configured`;
+      return `no ${provider} provider is configured`;
     case "provider-unavailable":
-      return `${target.driver} is unavailable`;
+      return `${provider} is unavailable`;
     case "provider-disabled":
-      return `${target.driver} is disabled`;
+      return `${provider} is disabled`;
     case "provider-not-installed":
-      return `${target.driver} is not installed`;
+      return `${provider} is not installed`;
     case "provider-error":
-      return `${target.driver} reports an error`;
+      return `${provider} reports an error`;
     case "provider-unauthenticated":
-      return `${target.driver} is signed out`;
+      return `${provider} is signed out`;
     case "model-not-advertised":
-      return `${target.driver} does not advertise ${target.model}`;
+      return `${provider} does not advertise ${target.model}`;
     case "reasoning-effort-not-advertised":
-      return `${target.driver} does not advertise reasoning effort ${target.reasoningEffort} for ${target.model}`;
+      return `${provider} does not advertise reasoning effort ${"reasoningEffort" in target ? target.reasoningEffort : "requested"} for ${target.model}`;
+    case "usage-limit":
+      return `${provider} is at its usage limit`;
+    case "option-not-advertised":
+      return `${provider} does not support the requested model options`;
     case "authority-not-enforceable":
-      return `${target.driver} cannot enforce the persona's authority policy`;
+      return `${provider} cannot enforce the persona's authority policy`;
+    case "model-not-eligible":
+      return `${target.model} on ${provider} is not checked in Models for custom members`;
+    case "access-above-caller":
+      return `on ${provider} it would run with broader access than its caller`;
   }
 };
 
@@ -38,37 +59,109 @@ const routeFailurePhrase = (
  * Why each route was refused, so the person who approved a seat (or the agent that asked for one)
  * learns "codex is signed out" rather than "unavailable" (Jackson's dogfood, 2026-09-17).
  */
-const describeRouteAttempts = (attempts: ReadonlyArray<AgentPersonaRouteAttempt>) =>
+const describeRouteAttempts = (
+  attempts: ReadonlyArray<AgentPersonaRouteAttempt>,
+  providers: ReadonlyArray<ServerProvider>,
+) =>
   attempts
     .map(
       (attempt) =>
-        `${attempt.route} ${attempt.target.model} (${[
+        `entry ${attempt.entryIndex + 1} ${attempt.target.model} (${[
           ...new Set(
-            attempt.failures.map((failure) => routeFailurePhrase(attempt.target, failure)),
+            attempt.failures.map(
+              (failure) =>
+                failure.detail ??
+                routeFailurePhrase(
+                  attempt.target,
+                  failure,
+                  providerLabel(attempt.target, providers),
+                ),
+            ),
           ),
         ].join(", ")})`,
     )
     .join("; ");
+
+/** An entry's provider as the app names it: its instance's name, else its driver's. */
+const providerLabel = (
+  target: AgentPersonaRouteAttempt["target"],
+  providers: ReadonlyArray<ServerProvider>,
+) => {
+  if ("driver" in target) return driverLabel(target.driver);
+  const provider = providers.find(({ instanceId }) => instanceId === target.instanceId);
+  return provider === undefined
+    ? target.instanceId
+    : (provider.displayName ?? driverLabel(provider.driver));
+};
+
+/**
+ * The definition a launch names, or why there is none to launch: the library can't be read or is
+ * empty, or the persona is disabled, invalid, or not in it.
+ */
+export const findAgentPersonaDefinition = Effect.fn("j5.agents.findAgentPersonaDefinition")(
+  function* (personaId: string, library: ReturnType<typeof createAgentPersonaLibrary>) {
+    const catalog = yield* library.catalog().pipe(
+      Effect.mapError(
+        (error) =>
+          new AgentPersonaLibraryError({
+            code: "library_unreadable",
+            message: `The persona library cannot be read: ${error.message}`,
+          }),
+      ),
+    );
+    if (catalog.disabledIds.includes(personaId))
+      return yield* new AgentPersonaLibraryError({
+        code: "persona_disabled",
+        message: `Persona ${personaId} is disabled in this environment.`,
+      });
+    const definition = catalog.definitions.find(({ id }) => id === personaId);
+    if (definition !== undefined) return definition;
+    const invalid = catalog.diagnostics.find((diagnostic) => diagnostic.personaId === personaId);
+    if (invalid !== undefined)
+      return yield* new AgentPersonaLibraryError({
+        code: "persona_invalid",
+        message: `Persona ${personaId} has an invalid definition (${invalid.path}): ${invalid.message}`,
+      });
+    return yield* new AgentPersonaLibraryError(
+      catalog.definitions.length === 0
+        ? {
+            code: "library_empty",
+            message: `This environment has no personas, so ${personaId} cannot launch.`,
+          }
+        : {
+            code: "persona_not_found",
+            message: `Unknown persona ${personaId} in this environment.`,
+          },
+    );
+  },
+);
+
+/** The refusal for a persona none of whose entries can run, with each entry's reasons. */
+const modelsExhaustedError = (
+  personaId: string,
+  attempts: ReadonlyArray<AgentPersonaRouteAttempt>,
+  providers: ReadonlyArray<ServerProvider>,
+) => {
+  const waiver = singleWaiver(attempts);
+  return new AgentPersonaLibraryError({
+    code: "models_exhausted",
+    message: `Persona ${personaId} is blocked because none of its model entries can run: ${describeRouteAttempts(attempts, providers)}.`,
+    ...(waiver === null ? {} : { constraint: waiver.constraint, waiverEntries: waiver.entries }),
+  });
+};
 
 /** Resolve once and save the exact definition before the ordinary durable thread-creation command. */
 export const prepareAgentPersonaLaunch = Effect.fn("prepareAgentPersonaLaunch")(function* (
   request: OrchestrationV2AgentPersonaRequest,
   providers: ReadonlyArray<ServerProvider>,
   library: ReturnType<typeof createAgentPersonaLibrary>,
+  limits?: AgentPersonaPickLimits,
+  avoidModels?: ReadonlySet<string>,
 ) {
-  const catalog = yield* library.catalog();
-  if (catalog.disabledIds.includes(request.personaId))
-    return yield* new AgentPersonaLibraryError({
-      message: "Persona is disabled in this environment.",
-    });
-  const definition = catalog.definitions.find(({ id }) => id === request.personaId);
-  if (definition === undefined)
-    return yield* new AgentPersonaLibraryError({
-      message: "Unknown persona in this environment.",
-    });
+  const definition = yield* findAgentPersonaDefinition(request.personaId, library);
   if (
     request.authorityPolicy !== undefined &&
-    !definition.authority.allowedPolicies.includes(request.authorityPolicy)
+    mapAgentPersonaPolicy(request.authorityPolicy) !== agentPersonaPolicy(definition)
   ) {
     return yield* new AgentPersonaLibraryError({
       message: `Authority policy ${request.authorityPolicy} is not allowed for ${request.personaId}.`,
@@ -76,20 +169,18 @@ export const prepareAgentPersonaLaunch = Effect.fn("prepareAgentPersonaLaunch")(
   }
   const authority =
     request.authorityPolicy === undefined ? {} : { authorityPolicy: request.authorityPolicy };
+  const now = yield* Clock.currentTimeMillis;
   const resolution = resolveAgentPersonaRoute({
+    now,
     personaId: request.personaId,
     ...authority,
     definition,
     providers,
+    limits,
+    avoidModels,
   });
-  if (resolution.status === "unavailable") {
-    return yield* new AgentPersonaLibraryError({
-      message:
-        unavailableAgentPersonaReason(resolution) === "authority-not-enforceable"
-          ? `Persona ${request.personaId} is blocked because neither route can enforce its authority policy.`
-          : `Persona ${request.personaId} is blocked because its primary and fallback models are unavailable: ${describeRouteAttempts(resolution.attempts)}.`,
-    });
-  }
+  if (resolution.status === "unavailable")
+    return yield* modelsExhaustedError(request.personaId, resolution.attempts, providers);
   const result = buildAgentPersonaAssignment({ ...authority, definition, resolution });
   if (result.status !== "assigned")
     return yield* new AgentPersonaLibraryError({

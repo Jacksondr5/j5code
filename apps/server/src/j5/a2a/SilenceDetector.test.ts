@@ -11,7 +11,7 @@ import {
   RunId,
   ThreadId,
 } from "@t3tools/contracts";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
@@ -811,7 +811,10 @@ it.effect.each([
       thread.messages.push({ id: threadMessageId, runId: carrierRunId });
       const query = {} as ClaudeAgentSdkQuerySession;
       const providerTurnId = `provider-turn:silence:${status}`;
-      const steer = yield* j5ClaudeSteerFields({ createdBy: "agent" }, yield* Crypto.Crypto);
+      const steer = yield* j5ClaudeSteerFields(
+        { createdBy: "agent" },
+        yield* SecureRandom.SecureRandom,
+      );
       yield* j5OfferClaudeSteer({
         query,
         providerTurnId,

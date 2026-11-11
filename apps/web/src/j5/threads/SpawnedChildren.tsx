@@ -21,19 +21,18 @@ import { useThreadShells } from "../../state/entities";
 import { environmentServerConfigsAtom } from "../../state/server";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { RelativeAge } from "../RelativeAge";
-import { seatQuietLabel } from "../crew/crewState";
+import { seatQuietLabel } from "@t3tools/client-runtime/j5/crew-state";
 import { stopCrew } from "../crew/crewStopClient";
 import { j5Environment } from "../state";
 import { useSpawnedChildren, type SpawnedChild } from "./SpawnedChildrenClient";
 import {
   groupSpawnedChildren,
-  readExpandedSpawnParents,
   selectSpawnedChildRows,
   spawnedGroupExpansionKey,
   stoppableCrew,
-  writeExpandedSpawnParents,
   type SpawnedChildGroup,
-} from "./spawnedChildren.logic";
+} from "@t3tools/client-runtime/j5/spawned-children";
+import { readExpandedSpawnParents, writeExpandedSpawnParents } from "./spawnedChildren.logic";
 
 // One process-wide expansion set, mirrored to localStorage, shared by every card.
 const expansionListeners = new Set<() => void>();
@@ -260,7 +259,10 @@ function SpawnedChildGroupRows(
                   </span>
                 </span>
                 <span className="flex items-center gap-1.5 text-2xs text-muted-foreground">
-                  {status === null ? (
+                  {/* A replaced member's last run says nothing about it now; being replaced does. */}
+                  {child.replaced !== undefined ? (
+                    <span>Replaced by {child.replaced.replacedBy}</span>
+                  ) : status === null ? (
                     <span>
                       {child.seat === null
                         ? "Idle"

@@ -277,7 +277,7 @@ it.effect("refuses mark unread without a completed run", () =>
   }).pipe(Effect.provide(layer(false))),
 );
 
-it.effect("upgrades migration 51 and migrates existing markers only to the first owner", () =>
+it.effect("upgrades migration 57 and migrates existing markers only to the first owner", () =>
   Effect.gen(function* () {
     yield* seed;
     yield* viewer("Alice");
@@ -293,17 +293,17 @@ it.effect("upgrades migration 51 and migrates existing markers only to the first
     const sql = yield* SqlClient.SqlClient;
     yield* sql`DROP TABLE j5_thread_read`;
     yield* sql`DROP TABLE j5_thread_read_command`;
-    yield* sql`DELETE FROM j5_a2a_migrations WHERE migration_id = 52`;
+    yield* sql`DELETE FROM j5_a2a_migrations WHERE migration_id = 58`;
     const before = yield* sql<{
       readonly migration_id: number;
       readonly name: string;
     }>`SELECT migration_id, name FROM j5_a2a_migrations ORDER BY migration_id`;
-    assert.equal(before.at(-1)?.migration_id, 51);
+    assert.equal(before.at(-1)?.migration_id, 57);
     yield* runJ5A2AMigrations();
     yield* runJ5A2AMigrations();
     assert.deepEqual(
       yield* sql`SELECT migration_id, name FROM j5_a2a_migrations ORDER BY migration_id`,
-      [...before, { migration_id: 52, name: "PersonalThreadReads" }],
+      [...before, { migration_id: 58, name: "PersonalThreadReads" }],
     );
     assert.deepEqual(yield* sql`SELECT * FROM j5_thread_read`, [
       { person_id: reach.person.personId, thread_id: threadId, last_visited_at: readAt },

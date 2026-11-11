@@ -2,12 +2,13 @@ import {
   isAgentPersonaAuthorityPolicy,
   ProviderDriverKind,
   type AgentPersonaAuthorityPolicy,
+  type AgentPersonaAccess,
   type AgentPersonaPolicyEnforcement,
   type AgentPersonaReportedAuthorityPolicy,
   type RuntimeMode,
 } from "@t3tools/contracts";
 
-import { getAgentAuthorityRules } from "./agentPersonas.ts";
+import { mapAgentPersonaPolicy } from "./agentPersonas.ts";
 
 /** A restricted policy asks the provider for an explicit sandbox; full access adds no J5 restriction. */
 export type AgentPersonaProviderPolicy =
@@ -60,23 +61,21 @@ const FULL_ACCESS_DRIVERS = [
 /** Drivers whose sandbox enforces each policy's workspace boundary; nothing else is promised. */
 const ENFORCING_DRIVERS = {
   "read-only": ["codex", "claudeAgent"],
-  "critic-review": ["codex", "claudeAgent"],
   "workspace-write": ["codex"],
-  "critic-fix": ["codex"],
-  diagnostic: [],
-  "publish-only": [],
-  // Each driver honors the ordinary full-access runtime mode (see agentPersonaProviderPolicy.test.ts).
   "full-access": FULL_ACCESS_DRIVERS,
-} as const satisfies Record<AgentPersonaAuthorityPolicy, ReadonlyArray<string>>;
+} as const satisfies Record<AgentPersonaAccess, ReadonlyArray<string>>;
 
 /** Policies this server does not know (persisted by a newer one) are never enforceable. */
 export function providerCanEnforceAgentPersonaAuthority(
   driver: string,
   authorityPolicy: AgentPersonaReportedAuthorityPolicy,
 ): boolean {
+  if (!isAgentPersonaAuthorityPolicy(authorityPolicy)) return false;
+  const access = mapAgentPersonaPolicy(authorityPolicy);
   return (
-    isAgentPersonaAuthorityPolicy(authorityPolicy) &&
-    (ENFORCING_DRIVERS[authorityPolicy] as ReadonlyArray<string>).includes(driver)
+    access !== "diagnostic" &&
+    access !== "publish-only" &&
+    (ENFORCING_DRIVERS[access] as ReadonlyArray<string>).includes(driver)
   );
 }
 
@@ -99,15 +98,12 @@ export function translateAgentPersonaProviderPolicy(
     return READ_ONLY_POLICY;
   }
 
-  switch (getAgentAuthorityRules(authorityPolicy).workspace) {
-    case "read-only":
-      return READ_ONLY_POLICY;
-    case "write":
-    case "diagnostic-write":
+  switch (mapAgentPersonaPolicy(authorityPolicy)) {
+    case "workspace-write":
       return WORKSPACE_WRITE_POLICY;
-    case "publication-only":
-      return READ_ONLY_POLICY;
-    case "unrestricted":
+    case "full-access":
       return FULL_ACCESS_POLICY;
+    default:
+      return READ_ONLY_POLICY;
   }
 }

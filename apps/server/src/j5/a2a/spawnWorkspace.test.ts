@@ -1,5 +1,7 @@
 import * as SpawnAgentService from "./SpawnAgentService.ts";
+import { agentPersonaEscalationsTestLayer } from "../test-support/agentPersonaEscalations.ts";
 import { assert, it } from "@effect/vitest";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   type AuthMcpClientAccess,
@@ -187,7 +189,7 @@ const scratchProjectId = ProjectId.make("project:j5:spawn-workspace-scratch");
 const scratchFolder = "/scratch/2026-10-02-fix-the-login-bug";
 const serverConfigLayer = ServerConfig.layerTest(process.cwd(), {
   prefix: "j5-spawn-workspace-",
-}).pipe(Layer.provide(NodeServices.layer));
+}).pipe(Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
 
 /** The caller works on the project's root checkout, which records no branch or worktree. */
 const callerThread = (threadId: ThreadId, runtimeMode: RuntimeMode = "full-access") =>
@@ -203,6 +205,7 @@ const callerThread = (threadId: ThreadId, runtimeMode: RuntimeMode = "full-acces
       worktreePath: null,
       createdAt,
     },
+    runs: [],
   }) as unknown as OrchestrationV2ThreadProjection;
 
 const spawnHarness = (input: {
@@ -270,6 +273,7 @@ const spawnHarness = (input: {
           );
     const dependencies = Layer.mergeAll(
       input.memberModels ?? permissiveCrewMemberModels,
+      agentPersonaEscalationsTestLayer(),
       noDocumentTextLayer,
       Layer.mock(A2ASendService)({ listParticipants: () => Effect.succeed([callerRow]) }),
       Layer.mock(A2AHomeRegistrar)({
@@ -479,7 +483,7 @@ const spawnHarness = (input: {
           ),
       }),
       serverConfigLayer,
-      NodeServices.layer,
+      Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
     );
     const layer = J5ToolkitHandlersLive.pipe(
       Layer.provideMerge(
@@ -609,6 +613,8 @@ it.effect("spawns into another project's main checkout, as a root of that projec
       assert.deepStrictEqual(spawned.result, {
         participant_id: childParticipantId,
         thread_id: result.thread_id,
+        link: `<t3-thread://v2/environment:j5:spawn-workspace/${result.thread_id}>`,
+        run_id: null,
         project_id: LedgerProjectId.make(otherProjectId),
         project_title: "Other project",
         placement: {
@@ -1141,6 +1147,8 @@ it.effect("an outside agent starts a top-level agent in the project it names", (
       assert.deepStrictEqual(spawned.result, {
         participant_id: childParticipantId,
         thread_id: result.thread_id,
+        link: `<t3-thread://v2/environment:j5:spawn-workspace/${result.thread_id}>`,
+        run_id: null,
         project_id: LedgerProjectId.make(otherProjectId),
         project_title: "Other project",
         placement: {
@@ -1581,6 +1589,8 @@ it.effect("spawns into a new worktree from base_ref, keeping home, placement, an
       assert.deepStrictEqual(spawned.result, {
         participant_id: childParticipantId,
         thread_id: result.thread_id,
+        link: `<t3-thread://v2/environment:j5:spawn-workspace/${result.thread_id}>`,
+        run_id: null,
         project_id: ledgerProjectId,
         project_title: "Workspace",
         placement: {

@@ -36,7 +36,7 @@ export function SidebarHighlightsButton() {
   const popover = useHighlightsPopover();
   const showingNew = popover.open && popover.mode === "new";
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- dismissing the last unseen entry removes the button, and with it the list's anchor.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- dismissing the last unseen entry removes the button, and with it the list's anchor.
   useEffect(() => {
     if (showingNew && unseen.length === 0) closeHighlights();
   }, [showingNew, unseen.length]);

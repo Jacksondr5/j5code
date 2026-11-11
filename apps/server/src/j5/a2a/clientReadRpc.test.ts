@@ -5,8 +5,11 @@ import {
   RuntimeRequestId,
   ThreadId,
 } from "@t3tools/contracts";
+import { agentPersonaDraftsTestLayer } from "../test-support/agentPersonaDrafts.ts";
+import { agentPersonaEscalationsTestLayer } from "../test-support/agentPersonaEscalations.ts";
 import { J5_CLIENT_READ_WS_METHODS, type J5ActionError } from "@t3tools/contracts/j5";
 import { assert, it } from "@effect/vitest";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as Effect from "effect/Effect";
@@ -112,6 +115,8 @@ const handlersWith = (given: {
           Layer.mock(A2ALedger)({}),
           Layer.mock(ParticipantPlacementService)({}),
           Layer.mock(AgentCrewInstanceService)({}),
+          agentPersonaEscalationsTestLayer(),
+          agentPersonaDraftsTestLayer(),
           Layer.mock(PlaybookCrewRelay)({}),
           Layer.mock(ArchiveCrewService)({}),
           Layer.mock(CrewWorktrees)({}),
@@ -331,7 +336,7 @@ it.effect(
         }),
         playbooks: playbookStoreLayer.pipe(
           Layer.provide(database),
-          Layer.provide(NodeServices.layer),
+          Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
         ),
       });
       const { proposals } = yield* handlers[METHODS.listCrewProposals]();
@@ -351,7 +356,7 @@ it.effect(
       assert.include(proposals[2]?.playbook?.issue, "Step ship is no longer in the playbook");
       assert.deepStrictEqual(proposals[3]?.playbook?.steps, []);
       assert.include(proposals[3]?.playbook?.issue, "No playbook named gone");
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
 );
 
 it.effect("lists a live Crew seat's approvals", () =>

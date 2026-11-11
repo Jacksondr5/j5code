@@ -3,18 +3,20 @@ import type { ProviderApprovalDecision } from "@t3tools/contracts";
 import { useState } from "react";
 
 import { ComposerPendingApprovalActions } from "../../components/chat/ComposerPendingApprovalActions";
-import { ComposerPendingApprovalPanel } from "../../components/chat/ComposerPendingApprovalPanel";
 import { Badge } from "../../components/ui/badge";
 import { notifyHumanInboxChanged } from "../a2a/humanInboxRefresh";
 import { j5Environment } from "../state";
-import { toPendingApproval, type ScopedCrewRuntimeRequest } from "./crewRuntimeRequests.logic";
+import {
+  toPendingApproval,
+  type ScopedCrewRuntimeRequest,
+} from "@t3tools/client-runtime/j5/crew-inbox-requests";
 import { refreshCrewRuntimeRequests, respondCrewRuntimeRequest } from "./crewRuntimeRequestsClient";
 
 const itemKey = (request: ScopedCrewRuntimeRequest) =>
   `${request.environmentId}:${request.threadId}:${request.requestId}`;
 
 /**
- * Provider approvals from Crew seats, answered here with the composer's own approval UI instead of
+ * Provider approvals from Crew seats, answered here with upstream's approval buttons instead of
  * in the seat's thread (Crews AC9); the Captain's requests stay in its thread. An answer that lost
  * a race with another device is refused by the server and the message says so; either way the
  * item re-reads and leaves once it has resolved.
@@ -80,6 +82,7 @@ function CrewRuntimeRequestRow(props: {
   ) => Promise<void>;
 }) {
   const { request } = props;
+  const approval = toPendingApproval(request);
   const canRespond = useAtomValue(
     j5Environment.respondCrewRuntimeRequest.permissionAtom(request.environmentId),
   );
@@ -98,17 +101,25 @@ function CrewRuntimeRequestRow(props: {
           {request.threadTitle}
         </button>
       </div>
-      <div className="mt-2 flex flex-wrap items-end gap-2">
-        <ComposerPendingApprovalPanel approval={toPendingApproval(request)} pendingCount={1} />
-        <div className="flex shrink-0 items-center gap-2">
-          <ComposerPendingApprovalActions
-            requestId={request.requestId}
-            isResponding={props.responding}
-            canRespond={canRespond}
-            options={request.options}
-            onRespondToApproval={(_requestId, decision) => props.onRespond(request, decision)}
-          />
-        </div>
+      {/* Shaped like upstream's approval from a child thread (ChildThreadApprovals). */}
+      <pre
+        aria-label={`${approval.requestKind} approval`}
+        className="mt-2 max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-xs"
+      >
+        {approval.detail || approval.requestKind}
+      </pre>
+      {approval.appName ? (
+        <p className="mt-2 text-xs text-muted-foreground">{approval.appName}</p>
+      ) : null}
+      <div className="mt-2 flex flex-wrap gap-2 text-xs">
+        <ComposerPendingApprovalActions
+          presentation="inline"
+          requestId={request.requestId}
+          isResponding={props.responding}
+          canRespond={canRespond}
+          options={request.options}
+          onRespondToApproval={(_requestId, decision) => props.onRespond(request, decision)}
+        />
       </div>
     </li>
   );

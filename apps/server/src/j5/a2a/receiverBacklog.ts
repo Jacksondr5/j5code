@@ -137,9 +137,8 @@ export const readReceiverBacklog = Effect.fn("j5.a2a.readReceiverBacklog")(
         : requestedSteeringRun(target, "peer", mode)) !== undefined
     )
       return undefined;
-    // A held queue drains only when someone resumes the thread, not when its turn ends.
-    if (target.runs.some((run) => run.status === "queued" && run.queueHeld === true))
-      return { type: "queue_held" } as const;
+    // A busy receiver's held queue is resumed by the delivery, so the message waits only behind
+    // the queue it joins (register D4).
     const callerId = (yield* sql<{ readonly sender_id: string }>`
       SELECT sender_id FROM j5_a2a_delivery WHERE message_id = ${input.sentMessageId} LIMIT 1
     `)[0]?.sender_id;

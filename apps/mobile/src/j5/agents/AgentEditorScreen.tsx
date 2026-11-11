@@ -41,7 +41,7 @@ export function AgentEditorScreen() {
   const read = useAtomCommand(agentPersonaEnvironment.readAgentPersona, {
     reportFailure: false,
   });
-  // oxlint-disable-next-line t3code/react-effect-budget -- loads the persona's instructions once when the editor opens; the read is a command, not an atom.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- loads the persona's instructions once when the editor opens; the read is a command, not an atom.
   useEffect(() => {
     let cancelled = false;
     void read({ environmentId: props.environmentId, input: { personaId: props.initial.personaId } })
@@ -110,7 +110,7 @@ export function AgentEditorScreen() {
         <TextInput
           accessibilityLabel="Instructions"
           multiline
-          autoCapitalize="none"
+          autoCapitalize="sentences"
           autoCorrect={false}
           style={{ minHeight: 160 }}
           placeholder={instructions === null ? "Loading…" : undefined}
@@ -119,7 +119,7 @@ export function AgentEditorScreen() {
           onChangeText={setInstructions}
         />
         <Text className="text-xs text-foreground-muted">
-          Markdown. Instructions describe behavior; the runtime policy below is what is enforced.
+          Markdown. Instructions describe behavior; the access level below is what is enforced.
         </Text>
       </View>
       <AgentRoutePolicyFields

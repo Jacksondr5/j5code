@@ -7,7 +7,7 @@ import {
 import { J5_THREAD_READ_WS_METHODS, type PersonalThreadReadChange } from "@t3tools/contracts/j5";
 import type * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
@@ -87,7 +87,7 @@ export function createPersonalThreadReadAtoms<R, E>(
 }
 
 export function createPersonalThreadReadCommands<R, E>(
-  runtime: Atom.AtomRuntime<EnvironmentRegistry | Crypto.Crypto | R, E>,
+  runtime: Atom.AtomRuntime<EnvironmentRegistry | SecureRandom.SecureRandom | R, E>,
 ) {
   const scheduler = createAtomCommandScheduler();
   const concurrency = {
@@ -124,7 +124,7 @@ export function createPersonalThreadReadCommands<R, E>(
             return yield* visitThread(input).pipe(Effect.asVoid);
           const commandId =
             input.commandId ??
-            CommandId.make(yield* (yield* Crypto.Crypto).randomUUIDv4().pipe(Effect.orDie));
+            CommandId.make(yield* (yield* SecureRandom.SecureRandom).randomUUIDv4().pipe(Effect.orDie));
           const result = yield* Effect.promise(() =>
             visit.run(registry, { environmentId, input: { ...input, commandId } }),
           );
@@ -148,7 +148,7 @@ export function createPersonalThreadReadCommands<R, E>(
             return yield* markThreadUnread(input).pipe(Effect.asVoid);
           const commandId =
             input.commandId ??
-            CommandId.make(yield* (yield* Crypto.Crypto).randomUUIDv4().pipe(Effect.orDie));
+            CommandId.make(yield* (yield* SecureRandom.SecureRandom).randomUUIDv4().pipe(Effect.orDie));
           const result = yield* Effect.promise(() =>
             markUnread.run(registry, { environmentId, input: { ...input, commandId } }),
           );

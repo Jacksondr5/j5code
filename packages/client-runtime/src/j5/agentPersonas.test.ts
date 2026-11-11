@@ -32,8 +32,11 @@ import {
   agentPersonaPolicyDrivers,
   AGENT_PERSONA_POLICY_OPTIONS,
   agentPersonaPolicyNote,
+  agentPersonaEntryDriver,
   defaultAgentPersonaModelRoute,
   agentPersonaModelChoices,
+  withAgentPersonaReasoning,
+  nextAgentPersonaModelChoice,
   agentPersonaModelGroups,
   presentAgentPersonaAssignment,
   presentAgentPersonaCatalog,
@@ -46,7 +49,6 @@ const catalog: OrchestrationV2AgentPersonaCatalog = {
     displayName: personaId,
     description: `${personaId} description`,
     acceptedInput: `${personaId} input`,
-    outputArtifact: "ContextBrief",
     defaultAuthorityPolicy: "read-only",
     allowedAuthorityPolicies: ["read-only"],
     availability:
@@ -65,23 +67,57 @@ const catalog: OrchestrationV2AgentPersonaCatalog = {
 };
 
 describe("agent persona catalog presentation", () => {
-  it("presents a durable assignment with its immutable provider route", () => {
-    expect(
-      presentAgentPersonaAssignment({
-        personaId: "critic",
-        definitionVersion: 1,
-        authorityPolicy: "critic-fix",
-        resolvedRoute: "fallback",
-        resolvedDriver: ProviderDriverKind.make("codex"),
-        resolvedModelSelection: {
-          instanceId: ProviderInstanceId.make("remote-codex"),
-          model: "gpt-5.6-terra",
-          options: [{ id: "reasoningEffort", value: "high" }],
+  it("prefers new access while retaining old-server presentation and read-only new definitions", () => {
+    const old = presentAgentPersonaCatalog(catalog)[0]!;
+    const [current] = presentAgentPersonaCatalog({
+      personas: [
+        {
+          ...catalog.personas[0]!,
+          access: "workspace-write",
+          models: [{ instanceId: ProviderInstanceId.make("codex"), model: "new-model" }],
         },
-      }),
-    ).toEqual({
+      ],
+    });
+    expect(old.authority).toBe("Read only (default)");
+    expect(current?.authority).toBe("Workspace write");
+    expect(current?.edit).toBeNull();
+    expect(current?.route).toBe(old.route);
+    expect(current?.availability).toBe("available");
+  });
+
+  it("presents a durable assignment with the model it runs on now", () => {
+    const critic = {
+      personaId: "critic",
+      definitionVersion: 1,
+      authorityPolicy: "critic-fix",
+      resolvedRoute: "fallback",
+      resolvedDriver: ProviderDriverKind.make("codex"),
+      resolvedModelSelection: {
+        instanceId: ProviderInstanceId.make("remote-codex"),
+        model: "gpt-5.6-terra",
+        options: [{ id: "reasoningEffort", value: "high" }],
+      },
+    } as const;
+    expect(presentAgentPersonaAssignment(critic)).toEqual({
       personaLabel: "Critic · Fix",
       routeLabel: "Codex · gpt-5.6-terra · high",
+      switchNote: null,
+    });
+    expect(
+      presentAgentPersonaAssignment({
+        ...critic,
+        resolvedRoute: "override",
+        resolvedDriver: ProviderDriverKind.make("claudeAgent"),
+        resolvedModelSelection: {
+          instanceId: ProviderInstanceId.make("claudeAgent"),
+          model: "claude-opus-5",
+          options: [{ id: "effort", value: "high" }],
+        },
+        modelSwitchedBy: "person",
+      }),
+    ).toMatchObject({
+      routeLabel: "Claude · claude-opus-5 · high",
+      switchNote: "A person changed its model or reasoning since launch.",
     });
     expect(
       presentAgentPersonaAssignment({
@@ -110,7 +146,7 @@ describe("agent persona catalog presentation", () => {
     expect(presentAgentPersonaCatalog(catalog)[0]).toMatchObject({
       availability: "available",
       availabilityLabel: "Available",
-      route: "Codex · server-selected-model · fallback",
+      route: "Codex · server-selected-model · entry 2",
     });
   });
 
@@ -118,7 +154,7 @@ describe("agent persona catalog presentation", () => {
     expect(presentAgentPersonaCatalog(catalog)[1]).toMatchObject({
       availability: "blocked",
       availabilityLabel: "Blocked",
-      route: "Primary and fallback models unavailable",
+      route: "Ordered model entries unavailable",
     });
   });
 
@@ -146,12 +182,10 @@ it("presents custom library ids and immutable display names on every client", ()
     ...catalog.personas[0]!,
     personaId: "team-researcher",
     displayName: "Team Researcher",
-    outputArtifact: "TeamBrief",
   };
   expect(presentAgentPersonaCatalog({ personas: [custom] })[0]).toMatchObject({
     personaId: "team-researcher",
     displayName: "Team Researcher",
-    outputArtifact: "TeamBrief",
   });
   expect(
     presentAgentPersonaAssignment({
@@ -258,7 +292,12 @@ it("offers editing only for imported entries with server-provided editable detai
   expect(
     presentAgentPersonaCatalog({
       personas: [
-        { ...persona, imported: true, editable: { definitionDigest: "a".repeat(64), modelRoute } },
+        {
+          ...persona,
+          access: "read-only",
+          imported: true,
+          orderedEditable: { definitionDigest: "a".repeat(64), modelRoute },
+        },
       ],
     })[0]?.edit,
   ).toEqual({
@@ -266,16 +305,19 @@ it("offers editing only for imported entries with server-provided editable detai
     expectedDigest: "a".repeat(64),
     displayName: persona.displayName,
     description: persona.description,
-    authorityPolicy: persona.defaultAuthorityPolicy,
+    access: "read-only",
     modelRoute,
+    independentReviewer: false,
   });
   const choices = agentPersonaModelChoices([], modelRoute);
   expect(choices).toHaveLength(2);
-  expect(choices.find(({ target }) => target.driver === "codex")?.efforts).toEqual(["high"]);
+  expect(
+    choices.find(({ target }) => "driver" in target && target.driver === "codex")?.efforts,
+  ).toEqual(["high"]);
   expect(choices.every(({ label }) => label.includes("not advertised"))).toBe(true);
 });
 
-it("uses the selected environment's advertised models and reasoning options without duplicating instances", () => {
+it("uses the selected environment's advertised models and reasoning options without merging provider instances", () => {
   const provider: ServerProvider = {
     instanceId: ProviderInstanceId.make("remote-codex"),
     driver: ProviderDriverKind.make("codex"),
@@ -327,14 +369,18 @@ it("uses the selected environment's advertised models and reasoning options with
     expect(configured).toHaveLength(1);
     expect(configured[0]?.available).toBe(false);
   }
-  expect(choices).toHaveLength(1);
-  expect(choices[0]).toMatchObject({
-    available: true,
-    label: "Codex · team-model",
+  expect(choices).toHaveLength(3);
+  const available = choices.filter(({ available }) => available);
+  expect(available).toHaveLength(2);
+  expect(
+    available.map(({ target }) => ("instanceId" in target ? target.instanceId : null)),
+  ).toEqual(["remote-codex", "second-codex"]);
+  expect(available[0]).toMatchObject({
+    label: "Codex · remote-codex · team-model",
     target: {
-      driver: ProviderDriverKind.make("codex"),
+      instanceId: "remote-codex",
       model: "team-model",
-      reasoningEffort: "high",
+      options: [{ id: "reasoningEffort", value: "high" }],
     },
     efforts: ["xhigh", "high", "medium", "minimal", "max"],
   });
@@ -382,13 +428,20 @@ it("offers every signed-in harness with its own reasoning option", () => {
     ],
   };
   const choices = agentPersonaModelChoices([cursor], []);
-  expect(choices).toMatchObject([
-    {
-      label: "Cursor · gpt-5.5",
-      target: { driver: "cursor", model: "gpt-5.5", reasoningEffort: "high" },
-      efforts: ["low", "high"],
+  expect(choices).toHaveLength(2);
+  expect(choices.find(({ target }) => target.model === "gpt-5.5")).toMatchObject({
+    label: "Cursor · gpt-5.5",
+    target: {
+      instanceId: "cursor",
+      model: "gpt-5.5",
+      options: [{ id: "reasoning", value: "high" }],
     },
-  ]);
+    efforts: ["low", "high"],
+  });
+  expect(choices.find(({ target }) => target.model === "composer-2")).toMatchObject({
+    available: true,
+    efforts: [],
+  });
   expect(agentPersonaModelGroups(choices)).toMatchObject([{ driver: "cursor", label: "Cursor" }]);
 });
 
@@ -629,35 +682,31 @@ describe("personal agent authoring", () => {
     expect(agentPersonaIdError("-lead")).toMatch(/starting with a letter/);
   });
 
-  it("picks a launchable default route and prefers a second harness for the fallback", () => {
+  it("starts with a single launchable instance entry and prefers enforceable providers", () => {
     expect(defaultAgentPersonaModelRoute([])).toBeNull();
     const providers = [
       provider("codex", "codex", ["gpt-5.6-terra"], "reasoningEffort"),
       provider("claudeAgent", "claude", ["claude-opus-5"], "effort"),
     ];
     expect(defaultAgentPersonaModelRoute(providers)).toEqual([
-      {
-        driver: ProviderDriverKind.make("claudeAgent"),
-        model: "claude-opus-5",
-        reasoningEffort: "high",
-      },
-      { driver: ProviderDriverKind.make("codex"), model: "gpt-5.6-terra", reasoningEffort: "high" },
+      { instanceId: "claude", model: "claude-opus-5", options: [{ id: "effort", value: "high" }] },
     ]);
-    const single = defaultAgentPersonaModelRoute([providers[0]!]);
-    expect(single?.[0]).toEqual(single?.[1]);
+    expect(defaultAgentPersonaModelRoute([providers[0]!])).toHaveLength(1);
     const cursor = provider("cursor", "cursor", ["composer-2"], "reasoning");
     const withCursor = defaultAgentPersonaModelRoute(
       [cursor, providers[0]!],
       [ProviderDriverKind.make("codex")],
     );
-    expect(withCursor?.map(({ driver }) => String(driver))).toEqual(["codex", "codex"]);
+    expect(
+      withCursor?.map((target) => String("driver" in target ? target.driver : target.instanceId)),
+    ).toEqual(["codex"]);
     // With no sandboxing driver signed in, any advertised model still makes a starting route.
     expect(
       defaultAgentPersonaModelRoute([cursor], [ProviderDriverKind.make("codex")])?.[0],
     ).toEqual({
-      driver: ProviderDriverKind.make("cursor"),
+      instanceId: ProviderInstanceId.make("cursor"),
       model: "composer-2",
-      reasoningEffort: "high",
+      options: [{ id: "reasoning", value: "high" }],
     });
   });
 
@@ -682,11 +731,11 @@ describe("personal agent authoring", () => {
       "Sandboxed on Codex and Claude.",
     );
     expect(agentPersonaPolicyNote(readOnly, [target("cursor"), target("codex")])).toBe(
-      "Sandboxed on Codex and Claude. Cursor routes won't launch with this policy.",
+      "Sandboxed on Codex and Claude. Cursor routes won't launch with this access level.",
     );
     expect(
       agentPersonaPolicyNote(agentPersonaPolicyDrivers(catalog, "publish-only"), [target("codex")]),
-    ).toBe("No provider can sandbox this policy yet, so it won't launch.");
+    ).toBe("No provider can sandbox this access level yet, so it won't launch.");
     const fullAccess = agentPersonaPolicyDrivers(
       {
         personas: [],
@@ -703,7 +752,7 @@ describe("personal agent authoring", () => {
       "Unsandboxed: runs with full access on Codex and Cursor.",
     );
     expect(agentPersonaPolicyNote(fullAccess, [target("claudeAgent")], "full-access")).toBe(
-      "Unsandboxed: runs with full access on Codex and Cursor. Claude routes won't launch with this policy.",
+      "Unsandboxed: runs with full access on Codex and Cursor. Claude routes won't launch with this access level.",
     );
     // An older server sends no table; the editor says nothing rather than guessing.
     expect(
@@ -720,6 +769,7 @@ it("prefills a duplicate with the source content and a fresh name and ID", () =>
       displayName: "Scout",
       description: "Collects evidence.",
       instructions: "# Scout",
+      access: "read-only",
       authority: { defaultPolicy: "read-only", allowedPolicies: ["read-only", "critic-review"] },
       modelRoute: [
         {
@@ -739,7 +789,7 @@ it("prefills a duplicate with the source content and a fresh name and ID", () =>
     id: "scout-copy",
     description: "Collects evidence.",
     instructions: "# Scout",
-    authorityPolicy: "read-only",
+    access: "read-only",
     modelRoute: [
       { driver: ProviderDriverKind.make("codex"), model: "gpt-5.6-terra", reasoningEffort: "high" },
       {
@@ -748,6 +798,7 @@ it("prefills a duplicate with the source content and a fresh name and ID", () =>
         reasoningEffort: "high",
       },
     ],
+    independentReviewer: false,
   });
 });
 
@@ -775,12 +826,13 @@ it("labels the full-access policy and offers it in the editor", () => {
       displayName: "Operator",
       description: "Operates.",
       instructions: "# Operator",
+      access: "full-access",
       authority: { defaultPolicy: "full-access", allowedPolicies: ["full-access"] },
       modelRoute: [
         { driver: ProviderDriverKind.make("codex"), model: "m", reasoningEffort: "high" },
         { driver: ProviderDriverKind.make("cursor"), model: "m", reasoningEffort: "high" },
       ],
-    }).authorityPolicy,
+    }).access,
   ).toBe("full-access");
 });
 
@@ -802,7 +854,7 @@ describe("a policy this app does not know", () => {
   const entry = (personaId: string, defaultAuthorityPolicy: string) => ({
     personaId,
     imported: true,
-    editable: {
+    orderedEditable: {
       definitionDigest: "a".repeat(64),
       modelRoute: [
         { driver: "codex", model: "gpt-5.6-terra", reasoningEffort: "high" },
@@ -858,7 +910,10 @@ describe("a policy this app does not know", () => {
 
   it("costs one unsupported row, not the catalog or the shell snapshot", () => {
     const decoded = decodeCatalogJson({
-      personas: [entry("scout", "read-only"), entry("future", invented)],
+      personas: [
+        { ...entry("scout", "read-only"), access: "read-only" },
+        entry("future", invented),
+      ],
       policyEnforcement: [
         { policy: "read-only", drivers: ["codex"] },
         { policy: invented, drivers: ["codex"] },
@@ -866,7 +921,7 @@ describe("a policy this app does not know", () => {
     });
     const [known, future] = presentAgentPersonaCatalog(decoded);
     expect(known).toMatchObject({ availability: "available", blockedReasons: [] });
-    expect(known?.edit?.authorityPolicy).toBe("read-only");
+    expect(known?.edit?.access).toBe("read-only");
     expect(future).toMatchObject({
       availability: "unsupported",
       availabilityLabel: "Unsupported",
@@ -954,7 +1009,7 @@ describe("a policy this app does not know", () => {
         authority: { defaultPolicy: invented, allowedPolicies: [invented] },
         modelRoute,
       }),
-    ).toThrow(`Runtime policy "${invented}" is not supported by this app version.`);
+    ).toThrow("Update the environment to duplicate this persona with its access level.");
   });
 });
 
@@ -1020,6 +1075,9 @@ describe("agent usage, origin, and library folders", () => {
   it("labels origins by kind and names only the parent folder of a source file", () => {
     expect(agentPersonaOriginLabel({ kind: "bundled" })).toBe("Bundled example");
     expect(agentPersonaOriginLabel({ kind: "imported" })).toBe("Personal");
+    expect(
+      agentPersonaOriginLabel({ kind: "imported" }, "/srv/state/team-library/reviewer.yaml"),
+    ).toBe("Overrides team-library");
     expect(
       agentPersonaOriginLabel({ kind: "folder", path: "/srv/state/team-library/a.yaml" }),
     ).toBe("Folder · team-library");
@@ -1122,8 +1180,8 @@ describe("blocked reasons and folder status", () => {
   });
 });
 
-describe("handoff artifacts", () => {
-  it("presents written, pending, and missing handoffs with the logical artifact path", () => {
+describe("handoffs recorded by older runs", () => {
+  it("still presents a stored written, pending or missing handoff with its logical artifact path", () => {
     const base = {
       threadId: "8f3a2c1d-0000-4000-8000-000000000000",
       projectId: "project",
@@ -1173,4 +1231,277 @@ describe("composerModelSelectionForThread", () => {
     expect(composerModelSelectionForThread(undefined, draftPick)).toBe(draftPick);
     expect(composerModelSelectionForThread(null, draftPick)).toBe(draftPick);
   });
+});
+
+it("changes reasoning without discarding other declared model options", () => {
+  const entry = {
+    instanceId: ProviderInstanceId.make("remote"),
+    model: "model",
+    options: [
+      { id: "fastMode", value: true },
+      { id: "effort", value: "low" },
+    ],
+  };
+  expect(withAgentPersonaReasoning(entry, "high")).toEqual({
+    ...entry,
+    options: [
+      { id: "fastMode", value: true },
+      { id: "effort", value: "high" },
+    ],
+  });
+  expect(entry.options[1]?.value).toBe("low");
+});
+
+it("edits and duplicates the complete ordered list without using the legacy summary", () => {
+  const persona = catalog.personas[0]!;
+  const models = [
+    { instanceId: ProviderInstanceId.make("remote"), model: "first" },
+    { instanceId: ProviderInstanceId.make("codex"), model: "second" },
+    {
+      instanceId: ProviderInstanceId.make("remote"),
+      model: "third",
+      options: [{ id: "fastMode", value: true }],
+    },
+  ] as const;
+  const row = presentAgentPersonaCatalog({
+    personas: [
+      {
+        ...persona,
+        imported: true,
+        access: "read-only",
+        orderedEditable: { definitionDigest: "a".repeat(64), modelRoute: models },
+      },
+    ],
+  })[0]!;
+  expect(row.edit?.modelRoute).toEqual(models);
+  const definition = {
+    id: persona.personaId,
+    version: 1,
+    displayName: persona.displayName,
+    description: persona.description,
+    instructions: "Review",
+    access: "read-only" as const,
+    authority: { defaultPolicy: "read-only", allowedPolicies: ["read-only"] },
+    modelRoute: [
+      { driver: ProviderDriverKind.make("codex"), model: "summary", reasoningEffort: "high" },
+      { driver: ProviderDriverKind.make("codex"), model: "summary", reasoningEffort: "high" },
+    ] as const,
+    models,
+  };
+  expect(agentPersonaDuplicateDraft(definition).modelRoute).toEqual(models);
+});
+
+it("labels unique drivers without instance IDs and adds each model only once", () => {
+  const provider: ServerProvider = {
+    instanceId: ProviderInstanceId.make("claudeAgent"),
+    driver: ProviderDriverKind.make("claudeAgent"),
+    enabled: true,
+    installed: true,
+    version: null,
+    status: "ready",
+    auth: { status: "authenticated" },
+    checkedAt: "2026-11-05T00:00:00Z",
+    models: ["a", "b"].map((slug) => ({ slug, name: slug, isCustom: false, capabilities: {} })),
+    slashCommands: [],
+    skills: [],
+  };
+  const missing = { instanceId: provider.instanceId, model: "missing" };
+  const single = agentPersonaModelChoices([provider], [missing]);
+  expect(single.map(({ label }) => label)).toEqual([
+    "Claude · a",
+    "Claude · b",
+    "Claude · missing (not advertised)",
+  ]);
+  expect(agentPersonaModelGroups(single).map(({ label }) => label)).toEqual(["Claude"]);
+  const multi = agentPersonaModelChoices(
+    [provider, { ...provider, instanceId: ProviderInstanceId.make("remote") }],
+    [missing],
+  );
+  expect(
+    multi.some(({ label }) => label === "Claude · claudeAgent · missing (not advertised)"),
+  ).toBe(true);
+  expect(agentPersonaModelGroups(multi).map(({ label }) => label)).toEqual([
+    "Claude · claudeAgent",
+    "Claude · remote",
+  ]);
+  const first = nextAgentPersonaModelChoice(single, [], [provider.driver])!;
+  const second = nextAgentPersonaModelChoice(single, [first.target], [provider.driver])!;
+  expect(first.target.model).toBe("a");
+  expect(second.target.model).toBe("b");
+  expect(
+    nextAgentPersonaModelChoice(single, [first.target, second.target], [provider.driver]),
+  ).toBeUndefined();
+  expect(
+    nextAgentPersonaModelChoice(
+      single,
+      [{ driver: provider.driver, model: "a", reasoningEffort: "high" }],
+      [provider.driver],
+    )?.target.model,
+  ).toBe("b");
+});
+
+it("shows blocked entry diagnostics without legacy availability attempts", () => {
+  const row = presentAgentPersonaCatalog({
+    personas: [
+      {
+        ...catalog.personas[0]!,
+        availability: { status: "unavailable", reason: "routes-unavailable" },
+        modelEntries: [
+          {
+            index: 2,
+            target: { instanceId: ProviderInstanceId.make("remote"), model: "limited" },
+            failures: ["usage-limit"],
+          },
+        ],
+      },
+    ],
+  })[0]!;
+  expect(row.blockedReasons).toEqual(["Entry 3 · remote limited: provider is at its usage limit"]);
+});
+
+it("labels driver-format entries without an instance when a non-default instance is first", () => {
+  const remote: ServerProvider = {
+    instanceId: ProviderInstanceId.make("remote"),
+    driver: ProviderDriverKind.make("codex"),
+    enabled: true,
+    installed: true,
+    version: null,
+    status: "ready",
+    auth: { status: "authenticated" },
+    checkedAt: "2026-11-05T00:00:00Z",
+    models: [{ slug: "model", name: "Model", isCustom: false, capabilities: {} }],
+    slashCommands: [],
+    skills: [],
+  };
+  const providers = [remote, { ...remote, instanceId: ProviderInstanceId.make("codex") }];
+  const entries = ["model", "missing"].map((model) => ({
+    driver: remote.driver,
+    model,
+    reasoningEffort: "high",
+  }));
+  const retained = agentPersonaModelChoices(providers, entries).filter(
+    ({ target }) => "driver" in target,
+  );
+  expect(retained.map(({ label, instanceLabel }) => ({ label, instanceLabel }))).toEqual([
+    { label: "Codex · missing (not advertised)", instanceLabel: "Codex" },
+    { label: "Codex · model", instanceLabel: "Codex" },
+  ]);
+});
+
+it("labels blocked entries with provider names, ambiguous instance IDs and reasoning values", () => {
+  const provider: ServerProvider = {
+    instanceId: ProviderInstanceId.make("claudeAgent"),
+    driver: ProviderDriverKind.make("claudeAgent"),
+    enabled: true,
+    installed: true,
+    version: null,
+    status: "ready",
+    auth: { status: "authenticated" },
+    checkedAt: "2026-11-05T00:00:00Z",
+    models: [],
+    slashCommands: [],
+    skills: [],
+  };
+  const target = {
+    instanceId: provider.instanceId,
+    model: "limited",
+    options: [{ id: "effort", value: "low" }],
+  };
+  for (const [providers, expected] of [
+    [[provider], "Claude"],
+    [
+      [{ ...provider, instanceId: ProviderInstanceId.make("remote") }, provider],
+      "Claude · claudeAgent",
+    ],
+    [[], "claudeAgent"],
+  ] as const) {
+    const row = presentAgentPersonaCatalog(
+      {
+        personas: [
+          {
+            ...catalog.personas[0]!,
+            availability: { status: "unavailable", reason: "routes-unavailable" },
+            modelEntries: [{ index: 0, target, failures: ["usage-limit"] }],
+          },
+        ],
+      },
+      providers,
+    )[0]!;
+    expect(row.blockedReasons).toEqual([
+      `Entry 1 · ${expected} limited (low): provider is at its usage limit`,
+    ]);
+  }
+  const row = presentAgentPersonaCatalog(
+    {
+      personas: [
+        {
+          ...catalog.personas[0]!,
+          availability: { status: "unavailable", reason: "routes-unavailable" },
+          modelEntries: [
+            {
+              index: 0,
+              target: { driver: provider.driver, model: "limited", reasoningEffort: "low" },
+              failures: ["usage-limit"],
+            },
+          ],
+        },
+      ],
+    },
+    [{ ...provider, instanceId: ProviderInstanceId.make("remote") }, provider],
+  )[0]!;
+  expect(row.blockedReasons).toEqual([
+    "Entry 1 · Claude limited (low): provider is at its usage limit",
+  ]);
+});
+
+it("offers only three access levels and resolves each model entry's enforcing driver", () => {
+  expect(AGENT_PERSONA_POLICY_OPTIONS.map(({ value }) => value)).toEqual([
+    "read-only",
+    "workspace-write",
+    "full-access",
+  ]);
+  const provider = {
+    instanceId: ProviderInstanceId.make("claude-account"),
+    driver: ProviderDriverKind.make("claudeAgent"),
+  };
+  expect(agentPersonaEntryDriver({ instanceId: provider.instanceId, model: "m" }, [provider])).toBe(
+    "claudeAgent",
+  );
+  expect(
+    agentPersonaEntryDriver({ instanceId: ProviderInstanceId.make("missing"), model: "m" }, []),
+  ).toBeUndefined();
+  expect(
+    agentPersonaEntryDriver(
+      { driver: ProviderDriverKind.make("codex"), model: "m", reasoningEffort: "high" },
+      [],
+    ),
+  ).toBe("codex");
+});
+
+it("adds only an unused model whose driver enforces the selected access", () => {
+  const providers = ["claudeAgent", "codex", "cursor"].map((driver): ServerProvider => ({
+    instanceId: ProviderInstanceId.make(driver),
+    driver: ProviderDriverKind.make(driver),
+    enabled: true,
+    installed: true,
+    version: null,
+    status: "ready",
+    auth: { status: "authenticated" },
+    checkedAt: "2026-11-05T00:00:00Z",
+    models: [{ slug: "model", name: "Model", isCustom: false, capabilities: {} }],
+    slashCommands: [],
+    skills: [],
+  }));
+  const choices = agentPersonaModelChoices(providers, []);
+  const codex = ProviderDriverKind.make("codex");
+  const claude = ProviderDriverKind.make("claudeAgent");
+  const readOnly = nextAgentPersonaModelChoice(choices, [], [codex, claude]);
+  expect(readOnly?.driver).toBe(claude);
+  const writable = nextAgentPersonaModelChoice(choices, [], [codex]);
+  expect(writable?.driver).toBe(codex);
+  expect(nextAgentPersonaModelChoice(choices, [writable!.target], [codex])).toBeUndefined();
+  expect(nextAgentPersonaModelChoice(choices, [], [])).toBeUndefined();
+  expect(nextAgentPersonaModelChoice(choices, [], undefined)).toBeUndefined();
+  const fullAccess = providers.map(({ driver }) => driver);
+  expect(nextAgentPersonaModelChoice(choices, [], fullAccess)?.driver).toBe(claude);
 });

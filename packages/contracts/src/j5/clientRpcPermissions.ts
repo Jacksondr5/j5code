@@ -51,10 +51,14 @@ export const J5_CLIENT_GUARDED_RPC_SCOPES = {
 
   [J5_CLIENT_ACTION_WS_METHODS.resolveCrewProposal]: AuthOrchestrationOperateScope,
   [J5_CLIENT_ACTION_WS_METHODS.stopCrew]: AuthOrchestrationOperateScope,
-  [J5_CLIENT_ACTION_WS_METHODS.archiveCrew]: AuthOrchestrationOperateScope,
+  // Archiving a Crew is the Owner's call, and so is removing the worktrees its archive kept.
+  [J5_CLIENT_ACTION_WS_METHODS.archiveCrew]: AuthSettingsWriteScope,
   [J5_CLIENT_ACTION_WS_METHODS.respondCrewRuntimeRequest]: AuthOrchestrationOperateScope,
   [J5_CLIENT_ACTION_WS_METHODS.answerHumanExchange]: AuthOrchestrationOperateScope,
-  // Removing the worktrees a Crew's archive kept is the Owner's call, as is archiving the Crew.
+  // Letting a blocked persona past its limit once is the Owner's call.
+  [J5_CLIENT_ACTION_WS_METHODS.allowPersonaOnce]: AuthSettingsWriteScope,
+  // Saving an agent's persona draft changes the library, which is the Owner's.
+  [J5_CLIENT_ACTION_WS_METHODS.savePersonaDraft]: AuthSettingsWriteScope,
   [J5_CLIENT_ACTION_WS_METHODS.answerCrewWorktreeCleanup]: AuthSettingsWriteScope,
 
   [J5_CLIENT_ACTION_WS_METHODS.issuePeerCredential]: AuthAccessWriteScope,

@@ -69,12 +69,12 @@ The **first owner** is the person the server's own machine belongs to. The deskt
 
 ### Scopes and levels
 
-A person's access is a level at a scope. A **scope** is the server, a project, or a thread. A thread's scope is the thread and the agents beneath it: the Subagents it ran, the Peer Agents placed under it and their Crew seats, at any depth and in any project. It does not include the thread above it, agents it only exchanged messages with, or a fork of it. A scope covers what is in it now: a thread started in a project, an agent spawned beneath a thread, or a project added to the server appears for everyone whose scope covers it.
+A person's access is a level at a scope. A **scope** is the server, a project, or a thread. A thread's scope is the thread and the agents beneath it: the Subagents and delegates it ran, its side chats (whoever started them), the Peer Agents placed under it and their Crew seats, at any depth and in any project. It does not include the thread above it, agents it only exchanged messages with, or a fork of it other than a side chat. A scope covers what is in it now: a thread started in a project, an agent spawned beneath a thread, or a project added to the server appears for everyone whose scope covers it.
 
 There are three **levels**:
 
 - **Viewer** reads what their scope shows.
-- **Collaborator** does everything a person can do within their scope except configure the server or share it, and, for now, archive or delete a thread: writes to agents, answers their prompts, steers and stops them, edits a Crew's seats, uses terminals, files, git and previews.
+- **Collaborator** does everything a person can do within their scope except configure the server or share it, and, for now, archive or delete a thread, though they may delete a side chat of a thread they can write to: writes to agents, answers their prompts, steers and stops them, edits a Crew's seats, uses terminals, files, git and previews.
 - **Owner**, at server scope only, also configures the server and shares it. A server can have several Owners.
 
 A person can hold different levels at different scopes; where two cover the same thing, the higher applies.
@@ -148,7 +148,7 @@ Set aside on purpose, each tracked where it is linked. An item leaves this list 
 ### What each level can do
 
 13. A Viewer reads what their scope shows and can change their own read markers there. They cannot change shared state; every request for anything outside their scope, or for a shared change, is refused by the server.
-14. A Collaborator can do within their scope everything an Owner can, except configure the server, share it, for now archive or delete a thread, and, at thread scope, start a thread, fork one or merge one back.
+14. A Collaborator can do within their scope everything an Owner can, except configure the server, share it, for now archive or delete a thread, and, at thread scope, start a thread, fork one or merge one back; the one thread they may delete is a side chat of a thread they can write to, including when closing an unused side chat deletes it.
 15. An Owner configures the server and shares it.
 16. Each level's upstream permissions are listed by name in one place, and a device holds exactly its person's highest level's set: a Viewer "View environment"; a Collaborator "View environment", "Operate tasks", "Control previews", "View diagnostics and usage", "View terminals", "Use terminals", "Change source control", "Read files", "Write files" and "View relay"; an Owner every permission upstream lets a client be given. J5 never gives upstream more permissions for a request than its device holds.
 17. When a person's level changes, each device paired as them is given a new session holding the new level's permissions in place of the old one, and reconnects once. A lowered level takes effect at once, on open connections too. A device that is offline gets its new session when it next connects, while its old one is within its lifetime; after that it is paired again by hand.
@@ -229,3 +229,5 @@ Set aside on purpose, each tracked where it is linked. An item leaves this list 
 - 2026-10-27 — a link for one person always names who it is for, so the Share dialog and the People page can say who each unused link is for (AC31, AC32; Jackson).
 - 2026-10-31 — the mobile app asks whose device it is, takes its new session when its person's level changes, and keeps Settings an Owner's, as web does, with its own list of the device's pages; managing sharing stays on web and desktop (AC5, AC6, AC17, AC28; Jackson, [#831](https://github.com/Jacksondr5/j5code/issues/831)).
 - 2026-11-01 — on the mobile app the name question has a way out that touches only that server: Remove this server, and for a device the server cannot place, Not now until the app next opens; the first owner, who already holds the server, gets no Not now (AC5, AC6; Jackson at Checkpoint 1, [#870](https://github.com/Jacksondr5/j5code/issues/870)).
+- 2026-11-07 — a thread's scope names the delegates it ran beside its Subagents (the term, [#952](https://github.com/Jacksondr5/j5code/issues/952)).
+- 2026-11-07 — upstream's side chats (v0.1.7) are in their parent thread's scope, as Subagents are, and anyone who can write to the parent may delete one (AC14; Jackson's decisions 8 and 9 of 2026-11-05, at the advance onto upstream's stable v0.1.7).

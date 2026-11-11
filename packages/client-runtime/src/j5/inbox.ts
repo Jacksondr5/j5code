@@ -1,4 +1,4 @@
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { ChatAttachment, EnvironmentId } from "@t3tools/contracts";
 import {
   type ConnectionAccess,
   type HumanInboxResponse,
@@ -73,6 +73,30 @@ export function inboxBellPresentation(input: {
   return { badge, label };
 }
 
+export interface RecordPart {
+  readonly kind: "prose" | "block";
+  readonly text: string;
+}
+
+/**
+ * J5's record split into its prose and the indented blocks it quotes, such as a persona draft's
+ * definition, so a block can keep its layout. Indentation alone decides: four leading spaces.
+ */
+export function splitRecordText(text: string): ReadonlyArray<RecordPart> {
+  const parts: Array<RecordPart> = [];
+  for (const line of text.split("\n")) {
+    const kind = line.startsWith("    ") ? "block" : "prose";
+    const body = kind === "block" ? line.slice(4) : line;
+    const last = parts[parts.length - 1];
+    if (last?.kind === kind) parts[parts.length - 1] = { kind, text: `${last.text}\n${body}` };
+    else parts.push({ kind, text: body });
+  }
+  return parts.flatMap((part) => {
+    const trimmed = part.kind === "prose" ? part.text.replace(/^\n+|\n+$/g, "") : part.text;
+    return trimmed === "" ? [] : [{ kind: part.kind, text: trimmed }];
+  });
+}
+
 export function j5SourceNotice(source: J5ReadSource<unknown>): string | null {
   switch (source.status) {
     case "ready":
@@ -80,7 +104,9 @@ export function j5SourceNotice(source: J5ReadSource<unknown>): string | null {
     case "loading":
       return `${source.environmentLabel}: loading…`;
     case "offline":
-      return `${source.environmentLabel}: offline${source.data === null ? "" : " (showing saved results)"}.`;
+      return source.reconnecting === true
+        ? `${source.environmentLabel}: reconnecting…${source.data === null ? "" : " (showing saved results)."}`
+        : `${source.environmentLabel}: offline${source.data === null ? "" : " (showing saved results)"}.`;
     case "unsupported":
       return source.guest === true
         ? `${source.environmentLabel}: not shared with you.`
@@ -157,12 +183,15 @@ export function closedLine(input: {
 /** One answer being delivered: a retry with the same words reuses its `clientRequestId`. */
 export interface HumanInboxAnswerAttempt {
   readonly message: string;
+  /** The attachment ids sent with it; a retry reuses the request id only for the same ones. */
+  readonly attachmentIds?: string;
   readonly clientRequestId: string;
 }
 
 export async function submitHumanInboxAnswer(input: {
   readonly item: ScopedHumanInboxItem;
   readonly message: string;
+  readonly attachments?: ReadonlyArray<ChatAttachment>;
   readonly attempts: Map<string, HumanInboxAnswerAttempt>;
   readonly randomUUID: () => string;
   readonly send: (
@@ -170,6 +199,7 @@ export async function submitHumanInboxAnswer(input: {
     request: {
       readonly exchangeId: string;
       readonly message: string;
+      readonly attachments?: ReadonlyArray<ChatAttachment>;
       readonly clientRequestId: string;
     },
   ) => Promise<unknown>;
@@ -184,16 +214,20 @@ export async function submitHumanInboxAnswer(input: {
   input.setError(null);
   try {
     try {
+      const attachments = input.attachments ?? [];
+      const attachmentIds = attachments.map((attachment) => attachment.id).join("\n");
       const previousAttempt = input.attempts.get(itemKey);
       const attempt =
-        previousAttempt?.message === input.message
+        previousAttempt?.message === input.message &&
+        (previousAttempt.attachmentIds ?? "") === attachmentIds
           ? previousAttempt
-          : { message: input.message, clientRequestId: input.randomUUID() };
+          : { message: input.message, attachmentIds, clientRequestId: input.randomUUID() };
       input.attempts.set(itemKey, attempt);
       // The server answers as the connection's own person; the request names no one.
       await input.send(input.item.environmentId, {
         exchangeId: input.item.exchangeId,
         message: input.message,
+        ...(attachments.length === 0 ? {} : { attachments }),
         clientRequestId: attempt.clientRequestId,
       });
     } catch (cause) {

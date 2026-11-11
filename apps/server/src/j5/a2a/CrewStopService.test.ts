@@ -11,7 +11,10 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 
-import { OrchestratorProjectionError } from "../../orchestration-v2/Orchestrator.ts";
+import {
+  OrchestratorDispatchError,
+  OrchestratorProjectionError,
+} from "../../orchestration-v2/Orchestrator.ts";
 import {
   ProjectionStoreReadError,
   ProjectionStoreThreadNotFoundError,
@@ -93,6 +96,7 @@ it.effect("stops every live seat, for the Captain or a person, and nobody else",
       ],
     });
     const interrupts = yield* Ref.make<ReadonlyArray<string>>([]);
+    const delegatedStopFails = yield* Ref.make(false);
     const layer = crewStopLayer.pipe(
       Layer.provideMerge(
         Layer.mock(ThreadManagementService)({
@@ -104,7 +108,21 @@ it.effect("stops every live seat, for the Captain or a person, and nobody else",
                 ? `${command.type}:${command.threadId}:${command.commandId}:${command.reason ?? "no reason"}`
                 : command.type,
             ]).pipe(Effect.as({ sequence: 1, storedEvents: [] })),
-          stopDelegatedTasks: () => Effect.void,
+          // A delegate on a linked machine has no thread here, so thread.stop leaves it to this.
+          stopDelegatedTasks: (input) =>
+            Effect.flatMap(Ref.getAndSet(delegatedStopFails, false), (fails) =>
+              fails
+                ? Effect.fail(
+                    new OrchestratorDispatchError({
+                      commandId: input.commandId,
+                      commandType: "delegated_task.remote.complete",
+                    }),
+                  )
+                : Ref.update(interrupts, (items) => [
+                    ...items,
+                    `delegates:${input.threadId}:${input.commandId}`,
+                  ]),
+            ),
         }),
       ),
       // Every seat here has a thread, so no home is read.
@@ -136,7 +154,9 @@ it.effect("stops every live seat, for the Captain or a person, and nobody else",
       // The Captain's Stop reads as an agent's; without a reason the timeline says "Stopped by user".
       assert.deepStrictEqual(yield* Ref.get(interrupts), [
         `thread.stop:${builderThread}:stop:builder:Stopped by an agent`,
+        `delegates:${builderThread}:stop:builder`,
         `thread.stop:${criticThread}:stop:critic:Stopped by an agent`,
+        `delegates:${criticThread}:stop:critic`,
       ]);
 
       // A person stops the same Crew without a participant id, and the Stop stays theirs.
@@ -147,9 +167,36 @@ it.effect("stops every live seat, for the Captain or a person, and nobody else",
         commandIds,
       });
       assert.lengthOf(byHuman.members, 3);
-      assert.deepStrictEqual((yield* Ref.get(interrupts)).slice(2), [
+      assert.deepStrictEqual((yield* Ref.get(interrupts)).slice(4), [
         `thread.stop:${builderThread}:stop:builder:no reason`,
+        `delegates:${builderThread}:stop:builder`,
         `thread.stop:${criticThread}:stop:critic:no reason`,
+        `delegates:${criticThread}:stop:critic`,
+      ]);
+
+      // A delegate stop that fails fails the Crew stop, and a retry under the same ids repeats it.
+      yield* Ref.set(delegatedStopFails, true);
+      const failed = yield* Effect.result(
+        service.stop({
+          callerParticipantId: captain,
+          projectId,
+          crewInstanceId: "crew:stop",
+          commandIds,
+        }),
+      );
+      assert.isTrue(failed._tag === "Failure");
+      yield* service.stop({
+        callerParticipantId: captain,
+        projectId,
+        crewInstanceId: "crew:stop",
+        commandIds,
+      });
+      assert.deepStrictEqual((yield* Ref.get(interrupts)).slice(8), [
+        `thread.stop:${builderThread}:stop:builder:Stopped by an agent`,
+        `thread.stop:${builderThread}:stop:builder:Stopped by an agent`,
+        `delegates:${builderThread}:stop:builder`,
+        `thread.stop:${criticThread}:stop:critic:Stopped by an agent`,
+        `delegates:${criticThread}:stop:critic`,
       ]);
 
       // A member, or any other agent, is refused and pointed at the Captain.

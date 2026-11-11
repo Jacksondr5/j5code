@@ -21,7 +21,6 @@ import {
   stripPairingTokenFromUrl,
   submitServerAuthCredential,
 } from "../../environments/primary";
-import { APP_DISPLAY_NAME } from "../../branding";
 import { describeLink } from "./describeLink";
 import { NAME_NOT_USABLE } from "./shareLink.logic";
 import {
@@ -70,7 +69,7 @@ export function JoinLinkPairingSurface(props: ComponentProps<typeof PairingRoute
     token: peekPairingTokenFromUrl(),
     marked: isMarkedShareLink(window.location.href),
   }));
-  // oxlint-disable-next-line t3code/react-effect-budget -- follows the URL fragment, which a pasted link changes without a navigation.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- follows the URL fragment, which a pasted link changes without a navigation.
   useEffect(() => {
     const onHashChange = () => {
       const token = peekPairingTokenFromUrl();
@@ -95,7 +94,7 @@ function LinkSurface({
     token === null || !marked ? { kind: "upstream" } : null,
   );
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- asks the server what a marked link opens, and drops a stale answer when the link changes.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- asks the server what a marked link opens, and drops a stale answer when the link changes.
   useEffect(() => {
     if (token === null || !marked) return;
     let cancelled = false;
@@ -122,9 +121,8 @@ function LinkSurface({
 
 function DeadLink() {
   return (
-    <StandalonePage tone="pairing">
+    <StandalonePage>
       <StandalonePageHeader
-        eyebrow={APP_DISPLAY_NAME}
         title="This link does not work"
         description="It may have been used, expired or revoked. Ask whoever sent it for a new one."
       />
@@ -238,9 +236,8 @@ function JoinSurface({
   if (dead) return <DeadLink />;
   if (view.kind === "someone-elses" || view.kind === "already-yours") {
     return (
-      <StandalonePage tone="pairing">
+      <StandalonePage>
         <StandalonePageHeader
-          eyebrow={APP_DISPLAY_NAME}
           title={title}
           description={view.kind === "already-yours" ? ALREADY_YOURS : someoneElsesWords(view.name)}
         />
@@ -249,9 +246,8 @@ function JoinSurface({
   }
 
   return (
-    <StandalonePage tone="pairing">
+    <StandalonePage>
       <StandalonePageHeader
-        eyebrow={APP_DISPLAY_NAME}
         title={title}
         description={
           view.kind === "as-yourself" ? (

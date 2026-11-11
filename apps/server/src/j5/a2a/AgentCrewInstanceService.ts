@@ -28,6 +28,19 @@ export interface AgentCrewMember {
 
 export type NewAgentCrewMember = Omit<AgentCrewMember, "addedVersion">;
 
+/** A member the Captain replaced: off the live roster, a plain agent, its finished steps kept. */
+export interface AgentCrewReplacedMember {
+  readonly seatName: string;
+  readonly agentId: string | null;
+  readonly participantId: ParticipantId;
+  readonly threadId: ThreadId;
+  /** The steps it finished before it was replaced; the rest moved to its replacement. */
+  readonly playbookStepIds: ReadonlyArray<string>;
+  readonly replacedBySeat: string;
+  readonly replacedByParticipantId: ParticipantId;
+  readonly replacedAt: string;
+}
+
 /** Wrote nothing: a new seat claims a playbook step another seat of the Crew already owns. */
 export class CrewStepAlreadyOwnedError extends Data.TaggedError("CrewStepAlreadyOwnedError")<{
   readonly crewInstanceId: string;
@@ -53,6 +66,8 @@ export interface AgentCrewInstance {
   /** Set at approval and never changed afterwards; the store always sets it, null when none. */
   readonly playbook?: CrewPlaybookRef | null | undefined;
   readonly members: ReadonlyArray<AgentCrewMember>;
+  /** Members the Captain replaced, oldest first; the store always sets it. */
+  readonly replaced?: ReadonlyArray<AgentCrewReplacedMember> | undefined;
 }
 
 export interface RecordAgentCrewInput {
@@ -87,6 +102,66 @@ export type AddMembersOutcome =
   | { readonly status: "archived"; readonly instance: AgentCrewInstance }
   | { readonly status: "missing"; readonly instance: null };
 
+/**
+ * Every thread a Crew's archive takes with it: its seats, then the members its Captain replaced.
+ * A replaced member goes under "<seat> (replaced)", numbered from the second, which no seat name
+ * can take, so a seat and the member it replaced never share a label or a command id.
+ */
+export const crewArchiveThreads = (instance: Pick<AgentCrewInstance, "members" | "replaced">) => {
+  const seen = new Map<string, number>();
+  return [
+    ...instance.members.map(({ seatName, participantId, threadId }) => ({
+      seatName,
+      participantId,
+      threadId,
+    })),
+    ...(instance.replaced ?? []).map(({ seatName, participantId, threadId }) => {
+      const count = (seen.get(seatName) ?? 0) + 1;
+      seen.set(seatName, count);
+      return {
+        seatName: count === 1 ? `${seatName} (replaced)` : `${seatName} (replaced ${count})`,
+        participantId,
+        threadId,
+      };
+    }),
+  ];
+};
+
+export interface ReplaceMemberInput {
+  readonly seatName: string;
+  readonly participantId: ParticipantId;
+  /** The new member; its steps are the ones it claims itself, beside those it takes over. */
+  readonly member: NewAgentCrewMember;
+  /** The replaced seat's steps that move; any it owns outside this list stay its finished record. */
+  readonly movedStepIds: ReadonlyArray<string>;
+  readonly replacedAt: string;
+}
+
+export type ReplaceMemberOutcome =
+  | { readonly status: "replaced"; readonly instance: AgentCrewInstance }
+  /** Wrote nothing: the replacement is no longer possible; `detail` says why. */
+  | { readonly status: "refused"; readonly instance: AgentCrewInstance; readonly detail: string }
+  | { readonly status: "missing"; readonly instance: null };
+
+/**
+ * Why a member can't replace this seat of a live Crew, or null. The new member may take the
+ * replaced seat's name, since the swap frees it in the same write.
+ */
+export const replacementProblem = (
+  instance: Pick<AgentCrewInstance, "id" | "archivedAt" | "members" | "replaced">,
+  replacedSeat: string,
+  newSeat: string,
+): string | null => {
+  if (instance.archivedAt !== null) return `Crew ${instance.id} is retired.`;
+  if (!instance.members.some((member) => member.seatName === replacedSeat))
+    return (instance.replaced ?? []).some((member) => member.seatName === replacedSeat)
+      ? `Seat ${replacedSeat} was already replaced.`
+      : `Crew ${instance.id} has no seat named ${replacedSeat}.`;
+  if (newSeat !== replacedSeat && instance.members.some((member) => member.seatName === newSeat))
+    return `The crew already has a seat named ${newSeat}.`;
+  return null;
+};
+
 export interface AgentCrewInstanceServiceShape {
   /**
    * Idempotent by instance id: a launch retry with the same request key records nothing new. A
@@ -117,6 +192,15 @@ export interface AgentCrewInstanceServiceShape {
     id: string,
     seatNames: ReadonlyArray<string>,
   ) => Effect.Effect<ReadonlyArray<string>, SqlError>;
+  /**
+   * Swap a launched member in for a live seat in one write: the new member takes the seat's place
+   * and the moved steps, and the old one leaves the roster with its finished steps, so every step
+   * keeps one owner. Idempotent per pair; a replay reports `replaced` and writes nothing.
+   */
+  readonly replaceMember: (
+    id: string,
+    input: ReplaceMemberInput,
+  ) => Effect.Effect<ReplaceMemberOutcome, SqlError | CrewStepAlreadyOwnedError>;
   /** Which live Crew a participant sits in, if any; a retired Crew's seat is a plain agent again. */
   readonly findMembership: (
     participantId: ParticipantId,
@@ -181,6 +265,18 @@ interface InstanceRow {
   readonly playbook_definition_path: string | null;
 }
 
+interface ReplacedRow {
+  readonly crew_instance_id: string;
+  readonly participant_id: string;
+  readonly seat_name: string;
+  readonly agent_id: string | null;
+  readonly thread_id: string;
+  readonly playbook_step_ids: string | null;
+  readonly replaced_by_seat: string;
+  readonly replaced_by_participant_id: string;
+  readonly replaced_at: string;
+}
+
 interface MemberRow {
   readonly crew_instance_id: string;
   readonly not_started: number | null;
@@ -204,7 +300,7 @@ const encodeStepIds = Schema.encodeSync(StepIds);
  * write stores an incoming seat's steps even over its existing row: ownership is always the plan
  * the person approved last.
  */
-const stepOwnershipConflict = (
+export const stepOwnershipConflict = (
   crewInstanceId: string,
   existing: ReadonlyArray<AgentCrewMember>,
   incoming: ReadonlyArray<NewAgentCrewMember>,
@@ -239,9 +335,24 @@ const memberFromRow = (row: MemberRow): AgentCrewMember => ({
   playbookStepIds: row.playbook_step_ids === null ? [] : decodeStepIds(row.playbook_step_ids),
 });
 
+const replacedFromRow = (row: ReplacedRow): AgentCrewReplacedMember => ({
+  seatName: row.seat_name,
+  agentId: row.agent_id,
+  participantId: ParticipantId.make(row.participant_id),
+  threadId: ThreadId.make(row.thread_id),
+  playbookStepIds: row.playbook_step_ids === null ? [] : decodeStepIds(row.playbook_step_ids),
+  replacedBySeat: row.replaced_by_seat,
+  replacedByParticipantId: ParticipantId.make(row.replaced_by_participant_id),
+  replacedAt: row.replaced_at,
+});
+
+const encodeOptionalStepIds = (stepIds: ReadonlyArray<string> | undefined) =>
+  stepIds === undefined || stepIds.length === 0 ? null : encodeStepIds(stepIds);
+
 const instanceFromRows = (
   row: InstanceRow,
   members: ReadonlyArray<MemberRow>,
+  replaced: ReadonlyArray<ReplacedRow>,
 ): AgentCrewInstance => ({
   id: row.id,
   projectId: row.project_id as LedgerProjectId,
@@ -260,6 +371,10 @@ const instanceFromRows = (
     .filter((member) => member.crew_instance_id === row.id)
     .toSorted((left, right) => left.ordinal - right.ordinal)
     .map(memberFromRow),
+  replaced: replaced
+    .filter((member) => member.crew_instance_id === row.id)
+    .toSorted((left, right) => left.replaced_at.localeCompare(right.replaced_at))
+    .map(replacedFromRow),
 });
 
 export const layer: Layer.Layer<AgentCrewInstanceService, never, SqlClient.SqlClient> =
@@ -279,7 +394,11 @@ export const layer: Layer.Layer<AgentCrewInstanceService, never, SqlClient.SqlCl
           LEFT JOIN j5_crew_seat_context AS context ON context.thread_id = member.thread_id
           WHERE crew_instance_id IN ${sql.in(rows.map(({ id }) => id))}
         `;
-        return rows.map((row) => instanceFromRows(row, members));
+        const replaced = yield* sql<ReplacedRow>`
+          SELECT * FROM j5_agent_crew_replaced_member
+          WHERE crew_instance_id IN ${sql.in(rows.map(({ id }) => id))}
+        `;
+        return rows.map((row) => instanceFromRows(row, members, replaced));
       });
 
       const read = Effect.fn("j5.a2a.agentCrewInstances.read")(function* (id: string) {
@@ -303,11 +422,7 @@ export const layer: Layer.Layer<AgentCrewInstanceService, never, SqlClient.SqlCl
             ) VALUES (
               ${id}, ${member.seatName}, ${member.agentId}, ${member.participantId},
               ${member.threadId}, ${firstOrdinal + index}, ${version}, ${member.reason},
-              ${
-                member.playbookStepIds === undefined || member.playbookStepIds.length === 0
-                  ? null
-                  : encodeStepIds(member.playbookStepIds)
-              }
+              ${encodeOptionalStepIds(member.playbookStepIds)}
             )
             ON CONFLICT (crew_instance_id, seat_name)
             DO UPDATE SET playbook_step_ids = excluded.playbook_step_ids
@@ -403,6 +518,76 @@ export const layer: Layer.Layer<AgentCrewInstanceService, never, SqlClient.SqlCl
           if (outcome !== null) return outcome;
         }
         return yield* Effect.die(new Error(`crew ${id} version kept moving during addMembers`));
+      });
+
+      const replaceMember = Effect.fn("j5.a2a.agentCrewInstances.replaceMember")(function* (
+        id: string,
+        input: ReplaceMemberInput,
+      ) {
+        const attempt = sql.withTransaction(
+          Effect.gen(function* () {
+            const current = yield* read(id);
+            if (current === null) return { status: "missing", instance: null } as const;
+            if (
+              (current.replaced ?? []).some(
+                (member) =>
+                  member.participantId === input.participantId &&
+                  member.replacedByParticipantId === input.member.participantId,
+              )
+            )
+              return { status: "replaced", instance: current } as const;
+            const problem = replacementProblem(current, input.seatName, input.member.seatName);
+            const old = current.members.find((member) => member.seatName === input.seatName);
+            if (problem !== null || old === undefined || old.participantId !== input.participantId)
+              return {
+                status: "refused",
+                instance: current,
+                detail: problem ?? `Seat ${input.seatName} is now held by another member.`,
+              } as const;
+            const oldSteps = old.playbookStepIds ?? [];
+            const moved = oldSteps.filter((stepId) => input.movedStepIds.includes(stepId));
+            const kept = oldSteps.filter((stepId) => !moved.includes(stepId));
+            const incoming = {
+              ...input.member,
+              playbookStepIds: [...new Set([...(input.member.playbookStepIds ?? []), ...moved])],
+            };
+            const owned = stepOwnershipConflict(
+              id,
+              current.members.filter((member) => member.seatName !== old.seatName),
+              [incoming],
+            );
+            if (owned !== null) return yield* owned;
+            const version = current.version + 1;
+            const bumped = yield* sql<{ readonly id: string }>`
+              UPDATE j5_agent_crew_instance SET version = ${version}
+              WHERE id = ${id} AND version = ${current.version}
+              RETURNING id
+            `;
+            if (bumped.length === 0) return null;
+            const [ordinal] = yield* sql<{ readonly ordinal: number }>`
+              DELETE FROM j5_agent_crew_member
+              WHERE crew_instance_id = ${id} AND seat_name = ${old.seatName}
+              RETURNING ordinal
+            `;
+            yield* sql`
+              INSERT INTO j5_agent_crew_replaced_member (
+                crew_instance_id, participant_id, seat_name, agent_id, thread_id, added_version,
+                reason, playbook_step_ids, replaced_by_seat, replaced_by_participant_id, replaced_at
+              ) VALUES (
+                ${id}, ${old.participantId}, ${old.seatName}, ${old.agentId}, ${old.threadId},
+                ${old.addedVersion}, ${old.reason}, ${encodeOptionalStepIds(kept)},
+                ${incoming.seatName}, ${incoming.participantId}, ${input.replacedAt}
+              )
+            `;
+            yield* insertMembers(id, [incoming], version, Number(ordinal?.ordinal ?? 0));
+            return { status: "replaced", instance: (yield* read(id))! } as const;
+          }),
+        );
+        for (let tries = 0; tries < 4; tries += 1) {
+          const outcome = yield* attempt;
+          if (outcome !== null) return outcome;
+        }
+        return yield* Effect.die(new Error(`crew ${id} version kept moving during replaceMember`));
       });
 
       const findMembership = Effect.fn("j5.a2a.agentCrewInstances.findMembership")(function* (
@@ -543,6 +728,7 @@ export const layer: Layer.Layer<AgentCrewInstanceService, never, SqlClient.SqlCl
         read,
         findMembership,
         removeMembers,
+        replaceMember,
         listForCaptain,
         listForProject,
         listLive,
@@ -578,6 +764,11 @@ export const layerNotifying = Layer.effect(
         return store
           .removeMembers(id, seatNames)
           .pipe(Effect.tap((removed) => (removed.length > 0 ? changed : Effect.void)));
+      }),
+      replaceMember: Effect.fn("AgentCrewInstanceService.replaceMember")(function (id, input) {
+        return store
+          .replaceMember(id, input)
+          .pipe(Effect.tap((outcome) => (outcome.status === "replaced" ? changed : Effect.void)));
       }),
       markArchived: Effect.fn("AgentCrewInstanceService.markArchived")(
         function (id, archivedAt, options) {

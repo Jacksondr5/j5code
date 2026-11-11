@@ -1,7 +1,7 @@
 import { EffectOutboxV2 } from "../../orchestration-v2/EffectOutbox.ts";
 import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";
 import { assert, it } from "@effect/vitest";
-import { ThreadId } from "@t3tools/contracts";
+import { ChatAttachmentId, ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
@@ -29,6 +29,7 @@ import {
   LedgerProjectId,
   ParticipantId,
   type AgentParticipant,
+  type SendMessageInput,
   type HumanParticipant,
 } from "./contracts.ts";
 
@@ -442,6 +443,95 @@ it.effect(
 
 // A Captain's adjudication ask is an ordinary ask to the person, so the one answer path serves the
 // Inbox and the Captain's thread alike: the thread finds its asks by `senderThreadId`.
+it.effect("shows follow-ups beneath the ask they join, and an answer closes only its own ask", () =>
+  Effect.gen(function* () {
+    const deliveries = yield* Ref.make<ReadonlyArray<AgentDeliveryInput>>([]);
+    yield* Effect.gen(function* () {
+      yield* runMigrations();
+      yield* runJ5A2AMigrations();
+      const ledger = yield* A2ALedger;
+      const send = yield* A2ASendService;
+      const inbox = yield* A2AHumanInbox;
+      const worker = yield* A2ADeliveryWorker;
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`
+        INSERT INTO j5_a2a_human_person (person_id, is_local_operator, created_at)
+        VALUES (${firstPerson.id}, 1, '2026-08-23T00:00:00.000Z')
+      `;
+      yield* sql`
+        INSERT INTO j5_a2a_person_level (person_id, scope_kind, scope_id, level, created_at, updated_at)
+        VALUES (${firstPerson.id}, 'server', '', 'owner', '2026-08-23T00:00:00.000Z', '2026-08-23T00:00:00.000Z')
+      `;
+      const projectId = LedgerProjectId.make("project:several-asks");
+      const agent: AgentParticipant = {
+        kind: "agent",
+        id: ParticipantId.make("agent:several-asks"),
+        threadId: ThreadId.make("thread:several-asks"),
+      };
+      yield* ledger.ensureProject({ projectId, createdAt: "2026-08-23T00:00:00.000Z" });
+      yield* ledger.appendEvents({
+        commandId: CommCommandId.make("command:several-asks:setup"),
+        projectId,
+        acceptedAt: "2026-08-23T00:00:00.000Z",
+        events: [
+          {
+            kind: "participant.joined",
+            sender: null,
+            receiver: agent.id,
+            exchangeId: null,
+            correlationId: null,
+            payload: { participant: agent },
+            createdAt: "2026-08-23T00:00:00.000Z",
+          },
+        ],
+      });
+      const message = (suffix: string, fields: Partial<SendMessageInput>) =>
+        send.send({
+          commandId: CommCommandId.make(`command:several-asks:${suffix}`),
+          senderThreadId: agent.threadId,
+          to: firstPerson.id,
+          message: suffix,
+          acceptedAt: "2026-08-23T01:00:00.000Z",
+          ...fields,
+        });
+      const asking = { expectReply: true, urgency: "soon" } as const;
+      const merge = yield* message("Merge now?", { ...asking, intent: "Merge timing" });
+      const branch = yield* message("Delete the branch?", { ...asking, intent: "Old branch" });
+      yield* worker.drain;
+      yield* message("The audit finished.", { regarding: merge.exchangeId! });
+      yield* message("CI is green too.", { regarding: merge.exchangeId! });
+      yield* worker.drain;
+
+      const open = yield* inbox.list(firstPerson.id);
+      const mergeItem = open.find((item) => item.exchangeId === merge.exchangeId);
+      const branchItem = open.find((item) => item.exchangeId === branch.exchangeId);
+      assert.lengthOf(open, 2);
+      assert.equal(mergeItem?.message, "Merge now?");
+      assert.deepStrictEqual(
+        mergeItem?.followUps?.map((followUp) => followUp.message),
+        ["The audit finished.", "CI is green too."],
+      );
+      assert.equal(branchItem?.message, "Delete the branch?");
+      assert.notProperty(branchItem, "followUps");
+
+      yield* inbox.answer({
+        commandId: CommCommandId.make("command:several-asks:answer"),
+        personId: firstPerson.id,
+        exchangeId: merge.exchangeId!,
+        message: "Merge it.",
+        acceptedAt: "2026-08-23T02:00:00.000Z",
+      });
+      const stillOpen = yield* inbox.list(firstPerson.id);
+      assert.deepStrictEqual(
+        stillOpen.map((item) => item.exchangeId),
+        [branch.exchangeId],
+      );
+      const late = yield* Effect.flip(message("Too late.", { regarding: merge.exchangeId! }));
+      assert.equal(late._tag, "A2AExchangeNotOpenError");
+    }).pipe(Effect.provide(makeTestLayer(deliveries)));
+  }),
+);
+
 it.effect("answers a Captain's ask once from either view and drops a withdrawn ask from both", () =>
   Effect.gen(function* () {
     const deliveries = yield* Ref.make<ReadonlyArray<AgentDeliveryInput>>([]);
@@ -552,4 +642,99 @@ it.effect("answers a Captain's ask once from either view and drops a withdrawn a
       );
     }).pipe(Effect.provide(makeTestLayer(deliveries)));
   }),
+);
+
+it.effect(
+  "an answer's files are claimed into the asking agent's thread and delivered with it",
+  () =>
+    Effect.gen(function* () {
+      const deliveries = yield* Ref.make<ReadonlyArray<AgentDeliveryInput>>([]);
+      yield* Effect.gen(function* () {
+        yield* runMigrations();
+        yield* runJ5A2AMigrations();
+        const at = "2026-11-05T00:00:00.000Z";
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`
+        INSERT INTO j5_a2a_human_person (person_id, is_local_operator, created_at)
+        VALUES (${firstPerson.id}, 1, ${at})
+      `;
+        yield* sql`
+        INSERT INTO j5_a2a_person_level (person_id, scope_kind, scope_id, level, created_at, updated_at)
+        VALUES (${firstPerson.id}, 'server', '', 'owner', ${at}, ${at})
+      `;
+        const ledger = yield* A2ALedger;
+        const worker = yield* A2ADeliveryWorker;
+        const projectId = LedgerProjectId.make("project:human-inbox:files");
+        const agent: AgentParticipant = {
+          kind: "agent",
+          id: ParticipantId.make("agent:human-inbox:files"),
+          threadId: ThreadId.make("thread:human-inbox:files"),
+        };
+        yield* ledger.ensureProject({ projectId, createdAt: at });
+        yield* ledger.appendEvents({
+          commandId: CommCommandId.make("command:human-inbox:join:files"),
+          projectId,
+          acceptedAt: at,
+          events: [
+            {
+              kind: "participant.joined",
+              sender: null,
+              receiver: agent.id,
+              exchangeId: null,
+              correlationId: null,
+              payload: { participant: agent },
+              createdAt: at,
+            },
+          ],
+        });
+        const asked = yield* (yield* A2ASendService).send({
+          commandId: CommCommandId.make("command:human-inbox:ask:files"),
+          senderThreadId: agent.threadId,
+          to: firstPerson.id,
+          message: "Which layout looks right?",
+          expectReply: true,
+          intent: "Pick a layout",
+          urgency: "soon",
+          acceptedAt: at,
+        });
+        yield* worker.drain;
+
+        const upload = {
+          type: "image" as const,
+          id: ChatAttachmentId.make("pending-00000000-0000-4000-8000-000000000000"),
+          name: "layout.png",
+          mimeType: "image/png",
+          sizeBytes: 3,
+        };
+        const claimed = { ...upload, id: ChatAttachmentId.make("claimed-layout") };
+        const claimedFor: Array<ThreadId> = [];
+        yield* (yield* A2AHumanInbox).answer(
+          {
+            commandId: CommCommandId.make("command:human-inbox:answer:files"),
+            personId: firstPerson.id,
+            exchangeId: asked.exchangeId!,
+            message: "The second one.",
+            attachments: [upload],
+            acceptedAt: at,
+          },
+          undefined,
+          (threadId, attachments) =>
+            Effect.sync(() => {
+              claimedFor.push(threadId);
+              assert.deepStrictEqual(attachments, [upload]);
+              return [claimed];
+            }),
+        );
+        yield* worker.drain;
+
+        assert.deepStrictEqual(claimedFor, [agent.threadId]);
+        const replies = (yield* Ref.get(deliveries)).filter(
+          (delivery) => delivery.exchangeRole === "reply",
+        );
+        assert.deepStrictEqual(
+          replies.map((delivery) => delivery.attachments),
+          [[claimed]],
+        );
+      }).pipe(Effect.provide(makeTestLayer(deliveries)));
+    }),
 );

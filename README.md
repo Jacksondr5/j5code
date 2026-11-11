@@ -38,7 +38,7 @@ curl -fsSL https://j5.codes/install.sh | sh
 
 Then run `j5` to start the server and open the web app. `j5 service install` keeps it running in the background, `j5 update` moves to a newer release, and `j5 --help` has the full reference. Data lives in `~/.j5code` (override with `J5CODE_HOME`).
 
-Intel Macs, Linux on ARM, and Windows have no build yet. The [install guide](./docs/user/install.md#other-platforms) covers running a server from source there.
+Intel Macs, Linux on ARM, and Windows have no build yet. The [install guide](./docs/j5/user/install.md#other-platforms) covers running a server from source there.
 
 ### Desktop app
 
@@ -52,17 +52,18 @@ There is no public J5 Code mobile app yet. iOS builds go to TestFlight testers; 
 
 For using J5 Code:
 
+- [Install J5 Code](./docs/j5/user/install.md)
+- [Using T3 Code's guides](./docs/j5/user/t3-code-guides.md): where J5 Code differs from the guides below
 - [FAQ](./docs/user/faq.md)
-- [Install and first run](./docs/user/install.md)
 - [Working with threads](./docs/user/thread-sidebar.md)
 - [Permission modes](./docs/user/permission-modes.md)
 - [Remote access from a phone or another machine](./docs/user/remote-access.md)
 - [Running as a background service](./docs/user/background-service.md)
 - [Updating](./docs/user/updating.md)
 - [Personas](./docs/j5/user/personas.md), [playbooks](./docs/j5/user/playbooks.md), and [messages between agents](./docs/j5/user/j5-peer-messages.md)
-- [Everything else](./docs/user), one page per feature
+- [Everything else](./docs/user), one page per feature, and [J5's own guides](./docs/j5/user)
 
-These guides are mostly upstream's and say "T3 Code"; they apply to J5 Code unless they say otherwise.
+The guides in `docs/user/` are T3 Code's, kept as upstream wrote them: they say "T3 Code" and the `t3` command. [Using T3 Code's guides](./docs/j5/user/t3-code-guides.md) lists what is different in J5 Code.
 
 For understanding J5:
 

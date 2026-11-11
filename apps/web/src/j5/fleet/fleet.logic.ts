@@ -2,7 +2,7 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { ThreadId, type EnvironmentId, type ScopedThreadRef } from "@t3tools/contracts";
 import type { J5ReadRevisions } from "@t3tools/contracts/j5";
 
-import type { CrewSeatState } from "../crew/crewState";
+import type { CrewSeatState } from "@t3tools/client-runtime/j5/crew-state";
 import type { FleetAgent, FleetCrew, FleetLedgerProject } from "./fleetClient";
 
 /** One rendered row of the Roster tree. Crew members hang under their Captain as one unit. */
@@ -278,20 +278,6 @@ export function countFleetProjects<
     ),
   ).size;
 }
-
-/**
- * Origin copy for the Roster row; unknown renders as `?` rather than a plausible guess. An
- * outside agent that started the agent is named by the label it signed in with, and by its id
- * when it registered none: it has no thread, so the row is the only place it is named.
- */
-export const originLabel = (agent: Pick<FleetAgent, "origin" | "outsideSpawner">) =>
-  agent.outsideSpawner !== undefined
-    ? `${agent.outsideSpawner.name ?? agent.outsideSpawner.participantId} (outside agent)`
-    : agent.origin === "human"
-      ? "Human-created"
-      : agent.origin === "agent"
-        ? "Agent-spawned"
-        : "?";
 
 /**
  * Every seat, every Captain a seat names, and every agent with a placed child: the rows re-read on

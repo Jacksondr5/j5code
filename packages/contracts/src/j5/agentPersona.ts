@@ -11,10 +11,10 @@ import {
   ThreadId,
   TrimmedNonEmptyString,
 } from "../baseSchemas.ts";
-import type { SelectProviderOptionDescriptor } from "../model.ts";
+import { ProviderOptionSelections, type SelectProviderOptionDescriptor } from "../model.ts";
 import { ModelSelection } from "../modelSelection.ts";
 import { RuntimeMode } from "../providerPolicy.ts";
-import { ProviderDriverKind } from "../providerInstance.ts";
+import { ProviderDriverKind, ProviderInstanceId } from "../providerInstance.ts";
 import type { ServerProviderModel } from "../server.ts";
 
 /**
@@ -44,6 +44,9 @@ export type AgentPersonaId = typeof AgentPersonaId.Type;
 export const BuiltInAgentPersonaId = Schema.Literals(BUILT_IN_AGENT_PERSONA_IDS);
 export type BuiltInAgentPersonaId = typeof BuiltInAgentPersonaId.Type;
 
+export const AgentPersonaAccess = Schema.Literals(["read-only", "workspace-write", "full-access"]);
+export type AgentPersonaAccess = typeof AgentPersonaAccess.Type;
+
 export const AgentPersonaAuthorityPolicy = Schema.Literals([
   "read-only",
   "workspace-write",
@@ -64,28 +67,91 @@ export const isAgentPersonaAuthorityPolicy = Schema.is(AgentPersonaAuthorityPoli
 export const AgentPersonaReportedAuthorityPolicy = Schema.String;
 export type AgentPersonaReportedAuthorityPolicy = typeof AgentPersonaReportedAuthorityPolicy.Type;
 
-export const BUILT_IN_AGENT_ARTIFACT_IDS = [
-  "ContextBrief",
-  "PlanHandoff",
-  "PlanCritique",
-  "CodeCompleteHandoff",
-  "ReviewHandoff",
-  "PublicationReceipt",
-  "DiagnosisHandoff",
-  "DiagnosisCritique",
-  "ReviewInbox",
-] as const;
-
-export const BuiltInAgentArtifactId = Schema.Literals(BUILT_IN_AGENT_ARTIFACT_IDS);
-export type BuiltInAgentArtifactId = typeof BuiltInAgentArtifactId.Type;
-
 export const OrchestrationV2AgentPersonaRequest = Schema.Struct({
   personaId: AgentPersonaId,
   authorityPolicy: Schema.optional(AgentPersonaAuthorityPolicy),
 });
 export type OrchestrationV2AgentPersonaRequest = typeof OrchestrationV2AgentPersonaRequest.Type;
 
-/** Immutable launch-time provenance; definitionDigest references an environment-owned snapshot. */
+/** A limit on agent-picked personas that an "Allow this once" exception can waive. */
+export const AgentPersonaPickConstraint = Schema.Literals([
+  "model-not-eligible",
+  "access-above-caller",
+]);
+export type AgentPersonaPickConstraint = typeof AgentPersonaPickConstraint.Type;
+
+/** Why a persona launch was refused, the same on every launch path. */
+export const AgentPersonaBlockCode = Schema.Literals([
+  "library_empty",
+  "persona_not_found",
+  "persona_disabled",
+  "persona_invalid",
+  "models_exhausted",
+  "library_unreadable",
+]);
+export type AgentPersonaBlockCode = typeof AgentPersonaBlockCode.Type;
+
+/**
+ * A refused persona launch, as an ask to the person shows it. `waivable` is the one limit that
+ * "Allow this once" would lift for one launch; null when no single waiver lets it run.
+ */
+export const AgentPersonaEscalationView = Schema.Struct({
+  escalationId: Schema.String,
+  personaId: Schema.String,
+  waivable: Schema.NullOr(AgentPersonaPickConstraint),
+  status: Schema.Literals(["open", "granted", "used"]),
+  /** J5's own account of the block, shown apart from the agent's words so they can't alter it. */
+  summary: Schema.String,
+});
+export type AgentPersonaEscalationView = typeof AgentPersonaEscalationView.Type;
+
+/**
+ * A persona create or edit an agent drafted, as an ask to the person shows it. "Save persona"
+ * writes it to the library while it is open; a saved draft is never saved again.
+ */
+export const AgentPersonaDraftView = Schema.Struct({
+  draftId: Schema.String,
+  personaId: Schema.String,
+  mode: Schema.Literals(["create", "edit"]),
+  /** An edit of a folder persona, which saves as an environment override. */
+  overridesFolder: Schema.Boolean,
+  status: Schema.Literals(["open", "saved"]),
+  /** J5's own account of the draft, shown apart from the agent's words. */
+  summary: Schema.String,
+});
+export type AgentPersonaDraftView = typeof AgentPersonaDraftView.Type;
+
+/**
+ * Who picked the persona, which sets its limits: a person's pick runs on its own models with its
+ * saved access; an agent's is held to Models for custom members and the caller's access.
+ */
+export const AgentPersonaPickSource = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("person") }),
+  Schema.Struct({ kind: Schema.Literal("agent") }),
+  Schema.Struct({ kind: Schema.Literal("allow-once"), waived: AgentPersonaPickConstraint }),
+]);
+export type AgentPersonaPickSource = typeof AgentPersonaPickSource.Type;
+
+/**
+ * How an independent reviewer's model relates to the authors of the work it reviews, decided once
+ * at creation. `same-model-as-author` wins over `unknown-authors`; neither is an independent review.
+ */
+export const AgentPersonaReviewIndependence = Schema.Struct({
+  outcome: Schema.Literals(["different-model", "same-model-as-author", "unknown-authors"]),
+  /** Model ids (slugs) the authors ran on. */
+  authorModels: Schema.Array(TrimmedNonEmptyString),
+  authorThreadIds: Schema.Array(ThreadId),
+  /** Some work was done where J5 cannot see the model, such as a provider-native subagent. */
+  partlyUnknown: Schema.Boolean,
+  /** The server reorders away from the authors; a model a person or an agent chose is kept. */
+  modelChosenBy: Schema.Literals(["server", "person", "agent"]),
+});
+export type AgentPersonaReviewIndependence = typeof AgentPersonaReviewIndependence.Type;
+
+/**
+ * Launch-time provenance; definitionDigest references an environment-owned snapshot. The model
+ * fields (`resolved*`) follow a person's model switch; everything else is fixed at launch.
+ */
 export const OrchestrationV2AgentPersonaAssignment = Schema.Struct({
   personaId: AgentPersonaId,
   definitionVersion: PositiveInt,
@@ -93,12 +159,19 @@ export const OrchestrationV2AgentPersonaAssignment = Schema.Struct({
   displayName: Schema.optional(TrimmedNonEmptyString),
   authorityPolicy: AgentPersonaReportedAuthorityPolicy,
   resolvedRoute: Schema.Literals(["primary", "fallback", "override"]),
+  resolvedEntryIndex: Schema.optional(NonNegativeInt),
   resolvedDriver: ProviderDriverKind,
   resolvedModelSelection: ModelSelection,
   /** Human-approved crew access, independent of the persona behavior instructions. */
   runtimeModeOverride: Schema.optional(RuntimeMode),
   /** The snapshot carries instructions the person edited at launch, so it never matches the library's. */
   instructionsEdited: Schema.optional(Schema.Boolean),
+  /** Absent on assignments made before pick sources were recorded. */
+  pickSource: Schema.optional(AgentPersonaPickSource),
+  /** Present only for a persona flagged as an independent reviewer. */
+  reviewIndependence: Schema.optional(AgentPersonaReviewIndependence),
+  /** Present once a person switched the worker off its launch model. */
+  modelSwitchedBy: Schema.optional(Schema.Literal("person")),
 });
 export type OrchestrationV2AgentPersonaAssignment =
   typeof OrchestrationV2AgentPersonaAssignment.Type;
@@ -122,15 +195,23 @@ export const AgentPersonaRouteFailureCode = Schema.Literals([
   "model-not-advertised",
   "reasoning-effort-not-advertised",
   "authority-not-enforceable",
+  "usage-limit",
+  "option-not-advertised",
+  /** Outside Models for custom members; only an agent's pick reports it, never the catalog. */
+  "model-not-eligible",
+  /** Broader access on this driver than the agent picking it runs with; only an agent's pick. */
+  "access-above-caller",
 ]);
 export type AgentPersonaRouteFailureCode = typeof AgentPersonaRouteFailureCode.Type;
 
 /** One rejected route with the reasons every candidate provider gave. */
 export const AgentPersonaRouteAttempt = Schema.Struct({
   route: Schema.Literals(["primary", "fallback"]),
-  driver: ProviderDriverKind,
+  entryIndex: Schema.optional(NonNegativeInt),
+  instanceId: Schema.optional(ProviderInstanceId),
+  driver: Schema.optional(ProviderDriverKind),
   model: TrimmedNonEmptyString,
-  reasoningEffort: TrimmedNonEmptyString,
+  reasoningEffort: Schema.optional(TrimmedNonEmptyString),
   failures: Schema.Array(AgentPersonaRouteFailureCode),
 });
 export type AgentPersonaRouteAttempt = typeof AgentPersonaRouteAttempt.Type;
@@ -139,6 +220,7 @@ export const OrchestrationV2AgentPersonaAvailability = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("available"),
     resolvedRoute: Schema.Literals(["primary", "fallback"]),
+    resolvedEntryIndex: Schema.optional(NonNegativeInt),
     resolvedDriver: ProviderDriverKind,
     resolvedModelSelection: ModelSelection,
   }),
@@ -165,6 +247,34 @@ export const AgentPersonaModelTarget = Schema.Struct({
 });
 export type AgentPersonaModelTarget = typeof AgentPersonaModelTarget.Type;
 
+/** Legacy targets stay intact so immutable snapshot digests do not change. */
+export const AgentPersonaModelEntry = Schema.Union([
+  AgentPersonaModelTarget,
+  Schema.Struct({
+    instanceId: ProviderInstanceId,
+    model: TrimmedNonEmptyString,
+    options: Schema.optionalKey(ProviderOptionSelections),
+    reasoningEffort: Schema.optionalKey(Schema.Never),
+  }).check(
+    Schema.makeFilter((selection) => {
+      const ids = (selection.options ?? []).map(({ id }) => id);
+      return new Set(ids).size === ids.length;
+    }),
+  ),
+]);
+export type AgentPersonaModelEntry = typeof AgentPersonaModelEntry.Type;
+export const AgentPersonaModelRoute = Schema.Array(AgentPersonaModelEntry).check(
+  Schema.isMinLength(1),
+);
+
+export const AgentPersonaModelEntryStatus = Schema.Struct({
+  index: NonNegativeInt,
+  target: AgentPersonaModelEntry,
+  modelSelection: Schema.optional(ModelSelection),
+  failures: Schema.Array(AgentPersonaRouteFailureCode),
+});
+export type AgentPersonaModelEntryStatus = typeof AgentPersonaModelEntryStatus.Type;
+
 /**
  * The select option that carries a model's reasoning level. Providers name it differently:
  * Codex and Grok `reasoningEffort`, Claude and Cursor `effort` or `reasoning`, OpenCode
@@ -190,7 +300,7 @@ export const isAgentPersonaReasoningOptionId = (id: string) =>
   AGENT_PERSONA_REASONING_OPTION_IDS.has(id);
 export const AgentPersonaEditableDetails = Schema.Struct({
   definitionDigest: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
-  modelRoute: Schema.Tuple([AgentPersonaModelTarget, AgentPersonaModelTarget]),
+  modelRoute: AgentPersonaModelRoute,
 });
 export const AGENT_PERSONA_INSTRUCTIONS_MAX_LENGTH = 32768;
 const AgentPersonaInstructions = Schema.String.check(
@@ -203,12 +313,14 @@ export const AgentPersonaEditInput = Schema.Struct({
   displayName: TrimmedNonEmptyString.check(Schema.isMaxLength(65536)),
   description: TrimmedNonEmptyString.check(Schema.isMaxLength(65536)),
   instructions: AgentPersonaInstructions,
-  authorityPolicy: AgentPersonaAuthorityPolicy,
-  modelRoute: Schema.Tuple([AgentPersonaModelTarget, AgentPersonaModelTarget]),
+  access: AgentPersonaAccess,
+  modelRoute: AgentPersonaModelRoute,
+  /** Omitted keeps the stored flag, so an older client cannot clear it. */
+  independentReviewer: Schema.optional(Schema.Boolean),
 });
 export type AgentPersonaEditInput = typeof AgentPersonaEditInput.Type;
 
-/** The full definition as stored; the catalog omits instructions to keep lists small. */
+/** Read view with a legacy two-model summary; `models` retains the complete ordered list. */
 export const AgentPersonaDefinitionView = Schema.Struct({
   id: AgentPersonaId,
   version: PositiveInt,
@@ -216,14 +328,14 @@ export const AgentPersonaDefinitionView = Schema.Struct({
   description: TrimmedNonEmptyString,
   instructions: AgentPersonaInstructions,
   acceptedInput: Schema.optional(TrimmedNonEmptyString),
-  artifacts: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
-  inputArtifacts: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
-  outputArtifact: Schema.optional(TrimmedNonEmptyString),
   authority: Schema.Struct({
     defaultPolicy: AgentPersonaReportedAuthorityPolicy,
     allowedPolicies: Schema.Array(AgentPersonaReportedAuthorityPolicy),
   }),
   modelRoute: Schema.Tuple([AgentPersonaModelTarget, AgentPersonaModelTarget]),
+  models: Schema.optional(Schema.NonEmptyArray(AgentPersonaModelEntry)),
+  access: Schema.optional(AgentPersonaAccess),
+  independentReviewer: Schema.optional(Schema.Boolean),
 });
 export type AgentPersonaDefinitionView = typeof AgentPersonaDefinitionView.Type;
 
@@ -233,8 +345,9 @@ export const AgentPersonaCreateInput = Schema.Struct({
   displayName: TrimmedNonEmptyString.check(Schema.isMaxLength(65536)),
   description: TrimmedNonEmptyString.check(Schema.isMaxLength(65536)),
   instructions: AgentPersonaInstructions,
-  authorityPolicy: AgentPersonaAuthorityPolicy,
-  modelRoute: Schema.Tuple([AgentPersonaModelTarget, AgentPersonaModelTarget]),
+  access: AgentPersonaAccess,
+  modelRoute: AgentPersonaModelRoute,
+  independentReviewer: Schema.optional(Schema.Boolean),
 });
 export type AgentPersonaCreateInput = typeof AgentPersonaCreateInput.Type;
 
@@ -248,19 +361,25 @@ export type AgentPersonaOrigin = typeof AgentPersonaOrigin.Type;
 
 /** Environment-specific, presentation-safe view of one library persona. */
 export const OrchestrationV2AgentPersonaCatalogEntry = Schema.Struct({
+  modelEntries: Schema.optional(Schema.Array(AgentPersonaModelEntryStatus)),
   personaId: AgentPersonaId,
   imported: Schema.optional(Schema.Boolean),
   origin: Schema.optional(AgentPersonaOrigin),
+  /** An imported copy that overrides a folder persona: that folder definition's file. */
+  overridesFolder: Schema.optional(TrimmedNonEmptyString),
   /** A source or bundled definition the user removed; it stays listed so it can be restored. */
   removed: Schema.optional(Schema.Boolean),
   /** Content digest of the current definition; compared with launch snapshots to show drift. */
   definitionDigest: Schema.optional(Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/))),
-  editable: Schema.optional(AgentPersonaEditableDetails),
+  orderedEditable: Schema.optional(AgentPersonaEditableDetails),
   definitionVersion: PositiveInt,
   displayName: TrimmedNonEmptyString,
   description: TrimmedNonEmptyString,
   acceptedInput: Schema.optional(TrimmedNonEmptyString),
-  outputArtifact: Schema.optional(TrimmedNonEmptyString),
+  access: Schema.optional(AgentPersonaAccess),
+  models: Schema.optional(Schema.NonEmptyArray(AgentPersonaModelEntry)),
+  /** Reviewers prefer a model that didn't write the work they review; never a block. */
+  independentReviewer: Schema.optional(Schema.Boolean),
   defaultAuthorityPolicy: AgentPersonaReportedAuthorityPolicy,
   allowedAuthorityPolicies: Schema.Array(AgentPersonaReportedAuthorityPolicy),
   availability: OrchestrationV2AgentPersonaAvailability,
@@ -434,7 +553,6 @@ export const J5_AGENT_PERSONA_WS_METHODS = {
   setAgentPersonaLibraryFolders: "j5.agentPersonas.setLibraryFolders",
   setAgentPersonaEnabled: "j5.agentPersonas.setEnabled",
   getAgentHandoffs: "j5.agentPersonas.getHandoffs",
-  subscribeAgentHandoffRefreshes: "j5.agentPersonas.subscribeHandoffRefreshes",
 } as const;
 
 export const J5AgentPersonaRpcSchemas = {
@@ -526,11 +644,6 @@ export const J5AgentPersonaRpcSchemas = {
       threadIds: Schema.optional(Schema.Array(ThreadId).check(Schema.isMaxLength(200))),
     }),
     output: Schema.Struct({ handoffs: Schema.Array(AgentHandoff) }),
-  },
-  /** Emits a revision after every handoff row write; clients refetch `getAgentHandoffs` on it. */
-  subscribeAgentHandoffRefreshes: {
-    input: Schema.Struct({}),
-    output: NonNegativeInt,
   },
 } as const;
 
@@ -660,16 +773,6 @@ const WsJ5GetAgentHandoffsRpc = Rpc.make(J5_AGENT_PERSONA_WS_METHODS.getAgentHan
   error: catalogErrors,
 });
 
-const WsJ5SubscribeAgentHandoffRefreshesRpc = Rpc.make(
-  J5_AGENT_PERSONA_WS_METHODS.subscribeAgentHandoffRefreshes,
-  {
-    payload: J5AgentPersonaRpcSchemas.subscribeAgentHandoffRefreshes.input,
-    success: J5AgentPersonaRpcSchemas.subscribeAgentHandoffRefreshes.output,
-    error: EnvironmentAuthorizationError,
-    stream: true,
-  },
-);
-
 /** Merged into `WsRpcGroup` by one appended call; no other upstream registration exists. */
 export const J5AgentPersonaRpcGroup = RpcGroup.make(
   WsJ5GetAgentPersonaCatalogRpc,
@@ -689,5 +792,4 @@ export const J5AgentPersonaRpcGroup = RpcGroup.make(
   WsJ5SetAgentPersonaLibraryFoldersRpc,
   WsJ5SetAgentPersonaEnabledRpc,
   WsJ5GetAgentHandoffsRpc,
-  WsJ5SubscribeAgentHandoffRefreshesRpc,
 );

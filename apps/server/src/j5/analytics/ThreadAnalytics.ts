@@ -109,7 +109,8 @@ const makeLayer = (daemon: boolean) =>
 
       const handleStoredEvent: ThreadAnalytics["Service"]["handleStoredEvent"] = (stored) => {
         const recorded =
-          stored.event.type === "thread.created"
+          // A side chat is part of its parent's conversation, not a thread of its own.
+          stored.event.type === "thread.created" && stored.event.payload.lineage.sideChat !== true
             ? recordThread(stored.event.payload)
             : stored.event.type === "run.created"
               ? recordTurn(stored.event.payload)

@@ -1,7 +1,14 @@
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
-import { CommandId, type RuntimeRequestId, type ThreadId } from "@t3tools/contracts";
+import {
+  type ChatAttachment,
+  CommandId,
+  type RuntimeRequestId,
+  type ThreadId,
+} from "@t3tools/contracts";
 import type {
+  AllowPersonaOnceRequest,
   AnswerHumanExchangeRequest,
+  SavePersonaDraftRequest,
   AnswerHumanExchangeResponse,
   CrewArchiveRequest,
   CrewArchiveResponse,
@@ -17,11 +24,31 @@ import type {
   CrewStopResponse,
 } from "@t3tools/contracts/j5";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 
+import type { SqlError } from "effect/sql/SqlError";
+
+import { ServerConfig } from "../../config.ts";
+import {
+  AgentPersonaEscalationError,
+  AgentPersonaEscalations,
+  allowedOnceReply,
+} from "../agents/agentPersonaEscalation.ts";
+import {
+  AgentPersonaDraftError,
+  AgentPersonaDrafts,
+  savedPersonaReply,
+} from "../agents/agentPersonaDrafts.ts";
+import {
+  AttachmentClaimError,
+  attachmentIsPendingUpload,
+  claimPendingAttachments,
+} from "../../orchestration-v2/AttachmentClaims.ts";
+import { DocumentText } from "../../provider/DocumentText.ts";
 import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
 import { ArchiveCrewService } from "./ArchiveCrewService.ts";
 import { CommCommandId, ExchangeId, ParticipantId } from "./contracts.ts";
@@ -101,6 +128,28 @@ export class ClientActionsService extends Context.Service<
       typeof AnswerHumanExchangeResponse.Type,
       Failure<A2AHumanInbox["Service"]["answer"]>
     >;
+    /**
+     * The Owner's "Allow this once": answers an ask escalating a refused persona with the fixed
+     * reply, then grants its one waiver for the asking agent's retry.
+     */
+    readonly allowPersonaOnce: (
+      input: AllowPersonaOnceRequest & { readonly personId: ParticipantId },
+      beforeReply?: Parameters<A2AHumanInbox["Service"]["answer"]>[1],
+    ) => Effect.Effect<
+      typeof AnswerHumanExchangeResponse.Type,
+      Failure<A2AHumanInbox["Service"]["answer"]> | AgentPersonaEscalationError | SqlError
+    >;
+    /**
+     * The Owner's "Save persona": writes the ask's persona draft to the library, then answers the
+     * ask with the fixed reply. A retry of the same request replays the answer.
+     */
+    readonly savePersonaDraft: (
+      input: SavePersonaDraftRequest & { readonly personId: ParticipantId },
+      beforeReply?: Parameters<A2AHumanInbox["Service"]["answer"]>[1],
+    ) => Effect.Effect<
+      typeof AnswerHumanExchangeResponse.Type,
+      Failure<A2AHumanInbox["Service"]["answer"]> | AgentPersonaDraftError | SqlError
+    >;
     /** Decide the worktree cleanup an archive filed in the Inbox; refused once decided. */
     readonly answerCrewWorktreeCleanup: (
       input: CrewWorktreeCleanupAnswerRequest,
@@ -133,9 +182,26 @@ const make = Effect.gen(function* () {
   const inbox = yield* A2AHumanInbox;
   const worker = yield* A2ADeliveryWorker;
   const worktrees = yield* CrewWorktrees;
+  const escalations = yield* AgentPersonaEscalations;
+  const drafts = yield* AgentPersonaDrafts;
   // A random source that fails is the host's fault, not a refusal a client can act on.
-  const freshId = (yield* Crypto.Crypto).randomUUIDv4().pipe(Effect.orDie);
+  const freshId = (yield* SecureRandom.SecureRandom).uuidV4().pipe(Effect.orDie);
   const projectProposal = projectCrewProposal(yield* PlaybookStore);
+  const claimContext = yield* Effect.context<FileSystem.FileSystem | ServerConfig | DocumentText>();
+  // Only fresh uploads: an attachment id that names a thread would let an answer hand the agent
+  // a file from a thread the person may not read.
+  const claimAnswerAttachments = (
+    threadId: ThreadId,
+    attachments: ReadonlyArray<ChatAttachment>,
+  ) =>
+    attachments.every(attachmentIsPendingUpload)
+      ? claimPendingAttachments({ threadId, attachments }).pipe(
+          Effect.map((claimed) => claimed.attachments),
+          Effect.provideContext(claimContext),
+        )
+      : Effect.fail(
+          new AttachmentClaimError({ message: "An answer can only attach new uploads." }),
+        );
 
   return ClientActionsService.of({
     previewCrewProposal: Effect.fn("ClientActionsService.previewCrewProposal")(function (input) {
@@ -234,9 +300,73 @@ const make = Effect.gen(function* () {
             personId: input.personId,
             exchangeId: ExchangeId.make(input.exchangeId),
             message: input.message,
+            ...(input.attachments === undefined ? {} : { attachments: input.attachments }),
             acceptedAt,
           },
           beforeReply,
+          claimAnswerAttachments,
+        );
+        yield* worker.notify;
+        return { result };
+      },
+    ),
+    allowPersonaOnce: Effect.fn("j5.a2a.clientActions.allowPersonaOnce")(
+      function* (input, beforeReply) {
+        const grant = yield* escalations.grantable(input.exchangeId);
+        const acceptedAt = DateTime.formatIso(yield* DateTime.now);
+        const result = yield* inbox.answer(
+          {
+            commandId: CommCommandId.make(
+              `command:j5:a2a:human:${encodeURIComponent(input.personId)}:${encodeURIComponent(input.exchangeId)}:${encodeURIComponent(input.clientRequestId)}`,
+            ),
+            personId: input.personId,
+            exchangeId: ExchangeId.make(input.exchangeId),
+            message: allowedOnceReply(grant),
+            acceptedAt,
+          },
+          beforeReply,
+          claimAnswerAttachments,
+        );
+        // Granted once the reply is committed, so an ask someone else answered first grants nothing.
+        yield* escalations.markGranted({
+          escalationId: grant.escalationId,
+          grantedBy: input.personId,
+        });
+        yield* worker.notify;
+        return { result };
+      },
+    ),
+    savePersonaDraft: Effect.fn("j5.a2a.clientActions.savePersonaDraft")(
+      function* (input, beforeReply) {
+        const draft = (yield* drafts.forExchanges([input.exchangeId])).get(input.exchangeId);
+        if (draft === undefined)
+          return yield* new AgentPersonaDraftError({
+            message: "This ask doesn't carry a persona draft.",
+          });
+        // A typed reply or a cleared ask closes it, and that decides the draft: nothing saves.
+        if (
+          draft.status === "open" &&
+          !(yield* inbox.list(input.personId, "open")).some(
+            (item) => item.exchangeId === input.exchangeId,
+          )
+        )
+          return yield* new AgentPersonaDraftError({
+            message: "This ask is already answered, so its draft can't be saved.",
+          });
+        // Saved before the reply, so a stale draft never answers the ask with "Saved".
+        const saved = yield* drafts.save({ exchangeId: input.exchangeId, savedBy: input.personId });
+        const result = yield* inbox.answer(
+          {
+            commandId: CommCommandId.make(
+              `command:j5:a2a:human:${encodeURIComponent(input.personId)}:${encodeURIComponent(input.exchangeId)}:${encodeURIComponent(input.clientRequestId)}`,
+            ),
+            personId: input.personId,
+            exchangeId: ExchangeId.make(input.exchangeId),
+            message: savedPersonaReply(saved),
+            acceptedAt: DateTime.formatIso(yield* DateTime.now),
+          },
+          beforeReply,
+          claimAnswerAttachments,
         );
         yield* worker.notify;
         return { result };

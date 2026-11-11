@@ -321,6 +321,7 @@ it.layer(testLayer)("access gate", (it) => {
       for (const method of [
         ORCHESTRATION_V2_WS_METHODS.subscribeThread,
         ORCHESTRATION_V2_WS_METHODS.getTurnDiff,
+        ORCHESTRATION_V2_WS_METHODS.getNativeChildWork,
         WS_METHODS.previewList,
       ]) {
         assert.strictEqual(yield* call(session, method, { threadId: mine }), "ran", method);

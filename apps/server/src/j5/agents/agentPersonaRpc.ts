@@ -1,3 +1,4 @@
+import * as Clock from "effect/Clock";
 import {
   AgentPersonaCatalogError,
   AgentPersonaImportConflictError,
@@ -10,14 +11,16 @@ import {
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
-import { stringify as toYaml } from "yaml";
 
-import { definitionDigest, makeAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
-import { AgentHandoffRefreshes, agentHandoffRefreshChanges } from "./agentHandoffRefreshes.ts";
+import {
+  definitionDigest,
+  definitionYaml,
+  makeAgentPersonaLibrary,
+} from "./agentPersonaLibrary.ts";
 import { makeAgentHandoffStore } from "./agentHandoffStore.ts";
 import { agentPersonaFolderGitStatus } from "./agentPersonaLibraryGit.ts";
 import { agentPersonaPolicyEnforcement } from "./agentPersonaProviderPolicy.ts";
-import { buildAgentPersonaCatalog } from "./agentPersonaRouting.ts";
+import { buildAgentPersonaCatalog, agentPersonaDefinitionView } from "./agentPersonaRouting.ts";
 import { agentPersonaUsage } from "./agentPersonaUsage.ts";
 
 const METHODS = J5_AGENT_PERSONA_WS_METHODS;
@@ -46,7 +49,6 @@ export const AGENT_PERSONA_RPC_SCOPES = {
   [METHODS.setAgentPersonaLibraryFolders]: AuthSettingsWriteScope,
   [METHODS.setAgentPersonaEnabled]: AuthSettingsWriteScope,
   [METHODS.getAgentHandoffs]: AuthOrchestrationReadScope,
-  [METHODS.subscribeAgentHandoffRefreshes]: AuthOrchestrationReadScope,
 } as const;
 
 type Input<K extends keyof typeof J5AgentPersonaRpcSchemas> =
@@ -59,8 +61,6 @@ const catalogError = (cause: unknown) => new AgentPersonaCatalogError({ message:
 export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHandlers")(
   function* (deps: { readonly providers: Effect.Effect<ReadonlyArray<ServerProvider>> }) {
     const library = yield* makeAgentPersonaLibrary;
-    // Bumped by the run-finalization observer; the same layer instance server.ts gives it.
-    const handoffRefreshes = yield* AgentHandoffRefreshes;
     // Usage reads the projections through the session's SqlClient, captured once here.
     const sql = yield* SqlClient.SqlClient;
     const usage = () => agentPersonaUsage().pipe(Effect.provideService(SqlClient.SqlClient, sql));
@@ -72,7 +72,9 @@ export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHand
         "j5.agents.agentPersonaRpc.getAgentPersonaCatalog",
       )(function* (_input: Input<"getAgentPersonaCatalog">) {
         const current = yield* library.catalog().pipe(Effect.mapError(catalogError));
-        const catalog = buildAgentPersonaCatalog(yield* deps.providers, current.definitions);
+        const providers = yield* deps.providers;
+        const now = yield* Clock.currentTimeMillis;
+        const catalog = buildAgentPersonaCatalog(providers, current.definitions, now);
         const importedIds = new Set(current.importedIds);
         const digests = new Map(
           [...current.definitions, ...current.removedSources].map((definition) => [
@@ -80,7 +82,7 @@ export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHand
             definitionDigest(definition),
           ]),
         );
-        const editable = new Map(
+        const orderedEditable = new Map(
           current.definitions
             .filter(({ id }) => importedIds.has(id))
             .map((definition) => [
@@ -100,17 +102,20 @@ export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHand
               ? { kind: "bundled" as const }
               : { kind: "folder" as const, path };
         };
-        const removed = buildAgentPersonaCatalog(yield* deps.providers, current.removedSources);
+        const removed = buildAgentPersonaCatalog(providers, current.removedSources, now);
         return {
-          diagnostics: current.diagnostics,
+          diagnostics: current.diagnostics.map(({ path, message }) => ({ path, message })),
           personas: [
             ...catalog.personas.map((persona) => ({
               ...persona,
               imported: importedIds.has(persona.personaId),
               origin: origin(persona.personaId),
+              ...(importedIds.has(persona.personaId) && current.sourcePaths.has(persona.personaId)
+                ? { overridesFolder: current.sourcePaths.get(persona.personaId)! }
+                : {}),
               definitionDigest: digests.get(persona.personaId)!,
-              ...(editable.has(persona.personaId)
-                ? { editable: editable.get(persona.personaId)! }
+              ...(orderedEditable.has(persona.personaId)
+                ? { orderedEditable: orderedEditable.get(persona.personaId)! }
                 : {}),
               availability: disabledIds.has(persona.personaId)
                 ? { status: "unavailable" as const, reason: "disabled" as const }
@@ -160,16 +165,23 @@ export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHand
         library.restoreSource(input.personaId).pipe(Effect.mapError(catalogError)),
       [METHODS.createAgentPersona]: (input: Input<"createAgentPersona">) =>
         library.createPersona(input).pipe(Effect.mapError(catalogError)),
-      [METHODS.readAgentPersona]: (input: Input<"readAgentPersona">) =>
-        library.read(input.personaId).pipe(
-          Effect.map((definition) => ({
-            definition,
+      [METHODS.readAgentPersona]: Effect.fn("j5.agents.agentPersonaRpc.readAgentPersona")(
+        function* (input: Input<"readAgentPersona">) {
+          const definition = yield* library
+            .read(input.personaId)
+            .pipe(Effect.mapError(catalogError));
+          const providers = yield* deps.providers;
+          const view = yield* Effect.try({
+            try: () => agentPersonaDefinitionView(definition, providers),
+            catch: catalogError,
+          });
+          return {
+            definition: view,
             fileName: `${definition.id}.yaml`,
-            // Block scalars keep multiline instructions readable; the import parser accepts the result.
-            yaml: toYaml(definition, { lineWidth: 0 }),
-          })),
-          Effect.mapError(catalogError),
-        ),
+            yaml: definitionYaml(definition),
+          };
+        },
+      ),
       [METHODS.getAgentPersonaUsage]: (_input: Input<"getAgentPersonaUsage">) =>
         usage().pipe(Effect.mapError(catalogError)),
       [METHODS.getAgentPersonaLibrarySources]: Effect.fn(
@@ -191,8 +203,6 @@ export const makeAgentPersonaRpcHandlers = Effect.fn("j5.makeAgentPersonaRpcHand
           Effect.map((list) => ({ handoffs: list })),
           Effect.mapError(catalogError),
         ),
-      [METHODS.subscribeAgentHandoffRefreshes]: (_input: Input<"subscribeAgentHandoffRefreshes">) =>
-        agentHandoffRefreshChanges(handoffRefreshes),
       [METHODS.setAgentPersonaEnabled]: (input: Input<"setAgentPersonaEnabled">) =>
         library.setEnabled(input.personaId, input.enabled).pipe(Effect.mapError(catalogError)),
       [METHODS.setAgentPersonaLibraryFolders]: (input: Input<"setAgentPersonaLibraryFolders">) =>

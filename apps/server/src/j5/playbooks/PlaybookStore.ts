@@ -17,7 +17,7 @@ import {
   type PlaybookFoldersInput,
 } from "@t3tools/contracts/j5";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -157,7 +157,7 @@ export const makePlaybookStore = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const crypto = yield* Crypto.Crypto;
+  const crypto = yield* SecureRandom.SecureRandom;
   const personas = yield* makeAgentPersonaLibrary;
   const library = yield* makePlaybookLibrary;
   const revision = yield* SubscriptionRef.make(0);
@@ -459,7 +459,10 @@ export const makePlaybookStore = Effect.gen(function* () {
   const readPath = Effect.fn("PlaybookStore.readPath")(function* (definitionPath: string) {
     const stem = path.basename(definitionPath, ".yaml");
     if (!(yield* fs.exists(definitionPath)))
-      return yield* playbookError("not_found", `No playbook named ${stem}. Use j5_playbook_list.`);
+      return yield* playbookError(
+        "not_found",
+        `No playbook named ${stem} on this server. Use j5_playbook_list.`,
+      );
     const definition = yield* readDefinition(definitionPath);
     return {
       name: stem,
@@ -607,7 +610,7 @@ export const makePlaybookStore = Effect.gen(function* () {
             );
           const timestamp = yield* now;
           const run: PlaybookRun = {
-            runId: yield* crypto.randomUUIDv4().pipe(Effect.orDie),
+            runId: yield* crypto.uuidV4().pipe(Effect.orDie),
             ownerThreadId: owner,
             definitionPath,
             currentStepId: definition.steps[0]!.id,

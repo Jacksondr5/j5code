@@ -31,7 +31,7 @@ import {
 const incompleteDeliveryReason =
   "Delivery problems may be missing because an environment is unavailable or does not provide complete delivery facts.";
 
-export function FleetFactHint({
+function FleetFactHint({
   reason,
   children,
   className,

@@ -1,4 +1,7 @@
 import { assert, it } from "@effect/vitest";
+import { AgentPersonaEscalations } from "../agents/agentPersonaEscalation.ts";
+import { agentPersonaEscalationsTestLayer } from "../test-support/agentPersonaEscalations.ts";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   ProjectId,
@@ -8,11 +11,13 @@ import {
   type OrchestrationV2AppThread,
   type OrchestrationV2ServerCommand,
   type OrchestrationV2ThreadProjection,
+  type RuntimeMode,
   type ServerProvider,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -41,7 +46,7 @@ import {
   makeAgentPersonaLibrary,
 } from "../agents/agentPersonaLibrary.ts";
 import { resolveAgentPersonaRuntime } from "../agents/agentPersonaRuntime.ts";
-import { BUILT_IN_AGENT_PERSONAS } from "../agents/agentPersonas.ts";
+import { AGENT_PERSONA_ACCESS_REPAIR, BUILT_IN_AGENT_PERSONAS } from "../agents/agentPersonas.ts";
 import { personaLibraryLayer } from "../test-support/personaLibrary.ts";
 import { buildAgentPersonaCatalog } from "../agents/agentPersonaRouting.ts";
 import { playbookTools } from "../playbooks/mcp.ts";
@@ -82,7 +87,7 @@ import {
 } from "./CrewProposalService.ts";
 import * as ServerSettings from "../../serverSettings.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
-import { participantIdForThread } from "./HomeRegistrar.ts";
+import { A2AHomeConflictError, participantIdForThread } from "./HomeRegistrar.ts";
 import { runMigrations } from "../../persistence/Migrations.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { SpawnCompositionService } from "./SpawnCompositionService.ts";
@@ -95,6 +100,11 @@ import { fakeSpawnWorkspaceLayer } from "./test-support/spawnWorkspaceFakes.ts";
 import { crewSeatRequestKey, lifecycleId, spawnThreadId } from "./spawnIds.ts";
 import { CREW_PROPOSAL_SESSION } from "./crewSeatIds.ts";
 import { ParticipantId, LedgerProjectId } from "./contracts.ts";
+
+const launchablePersonas = Object.values(BUILT_IN_AGENT_PERSONAS).filter(
+  ({ authority }) =>
+    authority.defaultPolicy !== "diagnostic" && authority.defaultPolicy !== "publish-only",
+);
 
 const projectId = LedgerProjectId.make("ledger:crew-proposal");
 const captainThread = ThreadId.make("thread:captain");
@@ -211,7 +221,6 @@ const fakeLauncher = (crews: AgentCrewInstanceService["Service"]) =>
               assignment: null,
               modelSelection: seat.modelSelection ?? captain.thread.modelSelection,
               runtimeMode: seat.runtimeMode ?? captain.thread.runtimeMode,
-              outputArtifact: null,
               agentDisplayName: seat.agentId ?? "custom",
               workspace: fakeWorkspace(seat),
               runtime: {
@@ -461,6 +470,7 @@ const fixtureWithDatabase = Effect.fn("test.crewProposal.fixture")(function* (
       ),
   });
   const layer = crewProposalLayer.pipe(
+    Layer.provideMerge(agentPersonaEscalationsTestLayer()),
     Layer.provideMerge(ServerSettings.layerTest(options.settings)),
     Layer.provideMerge(flakyStore),
     Layer.provideMerge(fakeLauncher(crews)),
@@ -514,10 +524,8 @@ const fixtureWithDatabase = Effect.fn("test.crewProposal.fixture")(function* (
     ),
     Layer.provideMerge(playbookStoreLayer),
     Layer.provideMerge(Layer.succeedContext(context)),
-    Layer.provideMerge(
-      personaLibraryLayer("j5-crew-proposal-", Object.values(BUILT_IN_AGENT_PERSONAS)),
-    ),
-    Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(personaLibraryLayer("j5-crew-proposal-", launchablePersonas)),
+    Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
   );
   return {
     layer,
@@ -776,7 +784,56 @@ it.effect("gates new rosters on the human and adds members directly with the sea
           brief: null,
         })
         .pipe(Effect.flip);
-      assert.include(unknown.message, 'names persona "nobody"');
+      assert.include(unknown.message, "[persona_not_found] Unknown persona nobody");
+
+      const unreviewable = yield* gate
+        .requestMember({
+          requestKey: "add-reviews-unknown",
+          captain,
+          crewInstanceId: instance.id,
+          seat: {
+            workspace: { type: "shared" as const },
+            seat: "second-critic",
+            agentId: "critic",
+            reason: "Reviews the builder",
+            reviews: ["builder", "ghost"],
+          },
+          brief: null,
+        })
+        .pipe(Effect.flip);
+      assert.include(unreviewable.message, 'reviews "ghost", which is not a seat on this crew');
+
+      // A reviewer resolves after the seats it reviews, so it can't review another reviewer.
+      yield* (yield* makeAgentPersonaLibrary).importFiles({
+        files: ["first-reviewer", "second-reviewer"].map((id) => ({
+          name: `${id}.yaml`,
+          content: stringify({ ...BUILT_IN_AGENT_PERSONAS.critic, id, independentReviewer: true }),
+        })),
+        replaceExisting: false,
+      });
+      const reviewerSeat = (seat: string, reviews?: ReadonlyArray<string>) => ({
+        workspace: { type: "shared" as const },
+        seat,
+        agentId: seat,
+        reason: "Reviews",
+        ...(reviews === undefined ? {} : { reviews }),
+      });
+      const chained = yield* gate
+        .propose({
+          requestKey: "reviewer-reviews-reviewer",
+          captain,
+          displayName: "Review Crew",
+          brief: "Review the change.",
+          seats: [
+            reviewerSeat("first-reviewer"),
+            reviewerSeat("second-reviewer", ["first-reviewer"]),
+          ],
+        })
+        .pipe(Effect.flip);
+      assert.include(
+        chained.message,
+        'Seat second-reviewer reviews "first-reviewer", another independent reviewer on this roster',
+      );
 
       // A custom seat has nothing but its instructions to run on, so it cannot be filed without them.
       const bare = yield* gate
@@ -1832,11 +1889,34 @@ const playbookFixtureWithSettings = (
     const barrier = yield* Ref.make<Deferred.Deferred<void> | null>(null);
     const arrivals = yield* Ref.make(0);
     const providers = yield* Ref.make<ReadonlyArray<ServerProvider>>([codex]);
+    const captainRuntimeMode = yield* Ref.make<RuntimeMode>("full-access");
+    // Set, a seat's home can't be recorded, so its launch fails after its thread exists.
+    const factsFault = yield* Ref.make(false);
+    // Runs before each orchestrator command lands, so a test can hold or fail one.
+    const dispatchHook = yield* Ref.make<
+      (command: OrchestrationV2ServerCommand) => Effect.Effect<void, OrchestratorDispatchError>
+    >(() => Effect.void);
+    // Runs as each unit step asks for a Crew's lock, before it waits for it.
+    const lockHook = yield* Ref.make<(id: string) => Effect.Effect<void>>(() => Effect.void);
+    const storedCrews = Context.get(context, AgentCrewInstanceService);
+    const services = Context.add(
+      context,
+      AgentCrewInstanceService,
+      AgentCrewInstanceService.of({
+        ...storedCrews,
+        serialize: <A, E, R>(id: string, effect: Effect.Effect<A, E, R>) =>
+          Ref.get(lockHook).pipe(
+            Effect.flatMap((hook) => hook(id)),
+            Effect.andThen(storedCrews.serialize(id, effect)),
+          ),
+      }),
+    );
     // One settings layer object, so a test's settings change reaches the launcher's model check.
     const settingsLayer = ServerSettings.layerTest(overrides);
     const layer = crewProposalLayer.pipe(
       Layer.provideMerge(settingsLayer),
       Layer.provideMerge(crewLaunchLayer),
+      Layer.provideMerge(agentPersonaEscalationsTestLayer()),
       Layer.provideMerge(
         crewMemberModelsLayer({
           providers: [codex],
@@ -1849,27 +1929,53 @@ const playbookFixtureWithSettings = (
       Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: { isRepo: true, refName: "main" } })),
       Layer.provideMerge(
         Layer.mock(ThreadManagementService)({
-          getThreadRecords: (threadId) => Effect.succeed({ thread: thread(threadId) } as never),
+          getThreadRecords: (threadId) =>
+            Ref.get(captainRuntimeMode).pipe(
+              Effect.map(
+                (runtimeMode) =>
+                  ({
+                    thread:
+                      threadId === captainThread
+                        ? { ...thread(threadId), runtimeMode }
+                        : thread(threadId),
+                  }) as never,
+              ),
+            ),
           dispatch: (command) =>
-            Ref.update(commands, (items) => [...items, command]).pipe(
+            Ref.get(dispatchHook).pipe(
+              Effect.flatMap((hook) => hook(command)),
+              Effect.andThen(Ref.update(commands, (items) => [...items, command])),
               Effect.as({ events: [], effects: [] } as never),
             ),
+          stopDelegatedTasks: () => Effect.void,
         }),
       ),
       Layer.provideMerge(
         Layer.mock(SpawnCompositionService)({
           recordFacts: (input) =>
-            Effect.succeed({
-              home: { projectId, participantId: participantIdForThread(input.threadId) },
-              placement: {
-                projectId,
-                participantId: participantIdForThread(input.threadId),
-                provenance: input.provenance,
-                placementParentId: captainId,
-                createdEventSeq: 1,
-                updatedEventSeq: 1,
-              },
-            }),
+            Ref.get(factsFault).pipe(
+              Effect.flatMap((fault) =>
+                fault
+                  ? Effect.fail(
+                      new A2AHomeConflictError({
+                        threadId: input.threadId,
+                        existingProjectId: "project:elsewhere",
+                        requestedProjectId: input.projectId,
+                      }),
+                    )
+                  : Effect.succeed({
+                      home: { projectId, participantId: participantIdForThread(input.threadId) },
+                      placement: {
+                        projectId,
+                        participantId: participantIdForThread(input.threadId),
+                        provenance: input.provenance,
+                        placementParentId: captainId,
+                        createdEventSeq: 1,
+                        updatedEventSeq: 1,
+                      },
+                    }),
+              ),
+            ),
         }),
       ),
       Layer.provideMerge(
@@ -1885,18 +1991,29 @@ const playbookFixtureWithSettings = (
           }),
         }),
       ),
-      Layer.provideMerge(Layer.succeedContext(context)),
+      Layer.provideMerge(Layer.succeedContext(services)),
       Layer.provideMerge(
         ServerConfig.layerTest(process.cwd(), { prefix: "j5-crew-playbook-state-" }),
       ),
-      Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     );
     const armBarrier = Effect.gen(function* () {
       yield* Ref.set(arrivals, 0);
       yield* Ref.set(barrier, yield* Deferred.make<void>());
     });
-    return { layer, workspaceRoot, writePlaybook, commands, armBarrier, providers };
-  }).pipe(Effect.provide(NodeServices.layer));
+    return {
+      layer,
+      workspaceRoot,
+      writePlaybook,
+      commands,
+      armBarrier,
+      providers,
+      captainRuntimeMode,
+      factsFault,
+      dispatchHook,
+      lockHook,
+    };
+  }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
 const playbookFixture = playbookFixtureWithSettings();
 
 /** Proposes the release Crew: planner owns plan, builder owns build, review is left unowned. */
@@ -2407,7 +2524,7 @@ it.effect(
             displayName: id,
             description: `The ${id} persona.`,
             instructions: `You are ${id}.`,
-            authorityPolicy: "read-only",
+            access: "read-only",
             modelRoute: [
               {
                 driver: ProviderDriverKind.make("codex"),
@@ -2431,7 +2548,7 @@ it.effect(
           [["persona_disabled", "review"]],
         );
         const current = yield* library.catalog();
-        const catalog = buildAgentPersonaCatalog([codex], current.definitions);
+        const catalog = buildAgentPersonaCatalog([codex], current.definitions, 0);
         const usable = (id: string) =>
           !current.disabledIds.includes(id) &&
           catalog.personas.find(({ personaId }) => personaId === id)?.availability.status ===
@@ -2780,8 +2897,8 @@ it.effect(
         const fresh = yield* gate
           .propose({ ...input, requestKey: "fresh-persona" })
           .pipe(Effect.flip);
-        assert.equal(fresh._tag, "CrewProposalRequestError");
-        assert.include(fresh.message, "turned off");
+        assert.equal(fresh._tag, "CrewLaunchSeatUnavailableError");
+        assert.include(fresh.message, "[persona_disabled] Persona replay-persona is disabled");
         const corrected = yield* gate.propose({
           ...input,
           requestKey: "fresh-persona",
@@ -2792,6 +2909,45 @@ it.effect(
         assert.include(changed.message, "different request");
       }).pipe(Effect.provide(layer));
     }),
+);
+
+it.effect("a seat naming an invalid persona is told how to repair it, not that it's missing", () =>
+  Effect.gen(function* () {
+    const { layer } = yield* fixture;
+    yield* Effect.gen(function* () {
+      const { stateDir } = yield* ServerConfig;
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const folder = path.join(stateDir, "personas");
+      yield* fs.makeDirectory(folder, { recursive: true });
+      yield* fs.writeFileString(
+        path.join(folder, "broken.yaml"),
+        stringify({ ...BUILT_IN_AGENT_PERSONAS.scout, id: "broken-persona", access: "diagnostic" }),
+      );
+      const refused = yield* (yield* CrewProposalService)
+        .propose({
+          requestKey: "invalid-persona",
+          captain,
+          displayName: "Invalid Crew",
+          brief: "Inspect",
+          seats: [{ ...custom("checker"), agentId: "broken-persona" }],
+        })
+        .pipe(Effect.flip);
+      assert.equal(refused._tag, "CrewLaunchSeatUnavailableError");
+      if (refused._tag !== "CrewLaunchSeatUnavailableError") return;
+      assert.equal(refused.blockCode, "persona_invalid");
+      assert.include(refused.message, "broken.yaml");
+      assert.include(refused.message, AGENT_PERSONA_ACCESS_REPAIR);
+      // The Captain's ask about it carries J5's record, with nothing an Owner could grant.
+      const escalationId = /escalation_id: (escalation-[0-9a-f-]+)/.exec(refused.message)![1]!;
+      const escalations = yield* AgentPersonaEscalations;
+      yield* escalations.linkAsk({ escalationId, exchangeId: "exchange:invalid-persona" });
+      assert.include(
+        (yield* escalations.grantable("exchange:invalid-persona").pipe(Effect.flip)).message,
+        "can't be allowed once",
+      );
+    }).pipe(Effect.provide(layer));
+  }),
 );
 
 it.effect(
@@ -2994,7 +3150,7 @@ it.effect.each(["roster", "addition"] as const)(
           }).pipe(Effect.provide(layer));
         }),
       );
-    }).pipe(Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
 );
 
 it.effect("validation refusals leave proposal retry keys available for a corrected request", () =>
@@ -3420,6 +3576,82 @@ it.effect("turning on auto-approval leaves an existing human proposal open on re
   }).pipe(Effect.scoped),
 );
 
+it.effect(
+  "holds an automatic roster's and an addition's custom seats to the Captain's access, not a card the person approves",
+  () =>
+    Effect.gen(function* () {
+      const { layer, commands, captainRuntimeMode } = yield* playbookFixtureWithSettings({
+        crewAutoApprove: true,
+      });
+      yield* Effect.gen(function* () {
+        const gate = withPreview(yield* CrewProposalService);
+        const supervised = {
+          ...captain,
+          thread: { ...captain.thread, runtimeMode: "approval-required" as const },
+        };
+        yield* Ref.set(captainRuntimeMode, "approval-required");
+        const created = (seat: string) =>
+          Ref.get(commands).pipe(
+            Effect.map((all) =>
+              all
+                .flatMap((command) => (command.type === "thread.create" ? [command] : []))
+                .find((command) => command.title === seat),
+            ),
+          );
+        const aboveCaptain =
+          "would run with Full access, which is broader than the Supervised its caller runs with";
+
+        const above = yield* gate
+          .propose({
+            requestKey: "capped-roster",
+            captain: supervised,
+            displayName: "Capped",
+            brief: "Inspect",
+            seats: [{ ...custom("scribe"), runtimeMode: "full-access" as const }],
+          })
+          .pipe(Effect.flip);
+        assert.include(above.message, `Custom seat scribe ${aboveCaptain}`);
+
+        // With no access named, the seat gets the Captain's.
+        const launched = yield* gate.propose({
+          requestKey: "capped-default",
+          captain: supervised,
+          displayName: "Default",
+          brief: "Inspect",
+          seats: [custom("scribe")],
+        });
+        assert.equal(launched.proposal.status, "approved");
+        assert.equal((yield* created("scribe"))?.runtimeMode, "approval-required");
+
+        const addition = yield* gate
+          .requestMember({
+            requestKey: "capped-addition",
+            captain: supervised,
+            crewInstanceId: launched.instance!.id,
+            seat: { ...custom("helper"), runtimeMode: "full-access" as const },
+            brief: null,
+          })
+          .pipe(Effect.flip);
+        assert.include(addition.message, `Custom seat helper ${aboveCaptain}`);
+
+        // A roster the person approves keeps today's Full access default.
+        yield* (yield* ServerSettings.ServerSettingsService).updateSettings({
+          crewAutoApprove: false,
+        });
+        const asked = yield* gate.propose({
+          requestKey: "card-roster",
+          captain: supervised,
+          displayName: "Card",
+          brief: "Inspect",
+          seats: [custom("notes")],
+        });
+        assert.equal(asked.proposal.status, "open");
+        yield* gate.resolve({ proposalId: asked.proposal.id, decision: "approve" });
+        assert.equal((yield* created("notes"))?.runtimeMode, "full-access");
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
+);
+
 it.effect("refuses a signed-out provider before recording an automatic launch or addition", () =>
   Effect.gen(function* () {
     const { layer, providers, commands } = yield* playbookFixtureWithSettings({
@@ -3691,7 +3923,7 @@ it.effect(
           displayName: "Surveyor",
           description: "Looks around.",
           instructions: "Survey the whole repository.",
-          authorityPolicy: "read-only",
+          access: "read-only",
           modelRoute: [
             {
               driver: ProviderDriverKind.make("codex"),
@@ -3989,6 +4221,478 @@ it.effect("an open proposal from before pins is pinned by its first preview, nev
       const refused = yield* gate.preview({ proposalId: stale.id }).pipe(Effect.flip);
       assert.equal(refused._tag, "CrewLaunchSeatUnavailableError");
       assert.include(refused.message, "builder");
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "a Captain replaces a seat: its unfinished steps, its current step and its turn move to the new member",
+  () =>
+    Effect.gen(function* () {
+      const { layer, workspaceRoot, commands, factsFault, captainRuntimeMode } =
+        yield* playbookFixture;
+      yield* Effect.gen(function* () {
+        const gate = withPreview(yield* CrewProposalService);
+        const crews = yield* AgentCrewInstanceService;
+        const relay = yield* makePlaybookCrewRelay;
+        const sql = yield* SqlClient.SqlClient;
+        const opened = yield* gate.propose({
+          requestKey: "replace-crew",
+          captain,
+          displayName: "Release Crew",
+          brief: "Ship the change.",
+          playbook: { name: "release", workspaceRoot },
+          seats: [custom("planner", ["plan", "review"]), custom("builder", ["build"])],
+        });
+        const approved = yield* gate.resolve({
+          proposalId: opened.proposal.id,
+          decision: "approve",
+        });
+        const crewId = approved.instance!.id;
+        const run = yield* relay.start({
+          owner: captainThread,
+          root: workspaceRoot,
+          name: "release",
+          key: "run-1",
+          crewInstanceId: crewId,
+        });
+        // plan is finished; the run is at build, which builder already holds.
+        yield* relay.mutate(captainThread, {
+          runId: run.runId,
+          operation: "next",
+          expectedStepId: "plan",
+          client_request_id: "next-1",
+        });
+        const before = (yield* crews.read(crewId))!;
+        const seatOf = (name: string, crew = before) =>
+          crew.members.find(({ seatName }) => seatName === name)!;
+        const oldPlanner = seatOf("planner");
+        const oldBuilder = seatOf("builder");
+        const request = (requestKey: string, seat: CrewProposalSeat) =>
+          gate.requestMember({ requestKey, captain, crewInstanceId: crewId, seat, brief: null });
+        const sentTo = (threadId: ThreadId, type: "message.dispatch" | "thread.stop") =>
+          Ref.get(commands).pipe(
+            Effect.map(
+              (all) =>
+                all.filter((command) => command.type === type && command.threadId === threadId)
+                  .length,
+            ),
+          );
+
+        const unknown = yield* request("ghost", { ...custom("helper"), replaces: "ghost" }).pipe(
+          Effect.flip,
+        );
+        assert.include(unknown.message, `Crew ${crewId} has no seat named ghost.`);
+        const own = yield* request("own", { ...custom("helper"), replaces: "captain" }).pipe(
+          Effect.flip,
+        );
+        assert.include(own.message, "a Captain can't replace itself");
+        // Held to the Captain's access like any addition, and nothing moves.
+        yield* Ref.set(captainRuntimeMode, "approval-required");
+        const above = yield* request("above", {
+          ...custom("planner-2"),
+          runtimeMode: "full-access",
+          replaces: "planner",
+        }).pipe(Effect.flip);
+        assert.include(above.message, "broader than the Supervised its caller runs with");
+        yield* Ref.set(captainRuntimeMode, "full-access");
+        // A launch that fails moves nothing, and the original keeps its steps and its turn.
+        yield* Ref.set(factsFault, true);
+        yield* request("fails", { ...custom("planner-2"), replaces: "planner" });
+        yield* Ref.set(factsFault, false);
+        assert.deepStrictEqual((yield* crews.read(crewId))!.members, before.members);
+        assert.equal(yield* sentTo(oldPlanner.threadId, "thread.stop"), 0);
+        // The thread that never got its home is archived, so nothing is left beside the seat.
+        const halfStarted = (yield* Ref.get(commands)).flatMap((command) =>
+          command.type === "thread.create" && command.title === "planner-2" ? [command] : [],
+        )[0]!;
+        assert.isTrue(
+          (yield* Ref.get(commands)).some(
+            (command) =>
+              command.type === "thread.archive" && command.threadId === halfStarted.threadId,
+          ),
+        );
+
+        // Only planner's unfinished review moves; the finished plan stays its record.
+        const replaced = yield* request("replace-planner", {
+          ...custom("planner-2"),
+          replaces: "planner",
+        });
+        const afterPlanner = replaced.instance!;
+        assert.deepStrictEqual(
+          afterPlanner.members.map(({ seatName, playbookStepIds }) => [seatName, playbookStepIds]),
+          [
+            ["planner-2", ["review"]],
+            ["builder", ["build"]],
+          ],
+        );
+        assert.deepStrictEqual(
+          afterPlanner.replaced?.map(({ seatName, playbookStepIds, replacedBySeat }) => [
+            seatName,
+            playbookStepIds,
+            replacedBySeat,
+          ]),
+          [["planner", ["plan"], "planner-2"]],
+        );
+        assert.equal(yield* sentTo(oldPlanner.threadId, "thread.stop"), 1);
+        const newPlanner = seatOf("planner-2", afterPlanner);
+        assert.equal(yield* sentTo(newPlanner.threadId, "message.dispatch"), 0);
+        const [brief] = yield* sql<{ first_turn_text: string }>`
+          SELECT first_turn_text FROM j5_crew_seat_context WHERE thread_id = ${newPlanner.threadId}
+        `;
+        assert.include(
+          brief!.first_turn_text,
+          `You replace seat planner, which ran on gpt-5.6-sol. Its thread is ${oldPlanner.threadId}; read it with t3_thread_read before continuing.`,
+        );
+        assert.include(brief!.first_turn_text, "your_steps:\n- review: Review\n");
+        const again = yield* request("again", { ...custom("planner-3"), replaces: "planner" }).pipe(
+          Effect.flip,
+        );
+        assert.include(again.message, "Seat planner was already replaced.");
+
+        // A replacement may keep the name; the step builder already held is handed to it again.
+        const swapped = yield* request("replace-builder", {
+          ...custom("builder"),
+          replaces: "builder",
+        });
+        const newBuilder = seatOf("builder", swapped.instance!);
+        assert.notEqual(newBuilder.participantId, oldBuilder.participantId);
+        assert.deepStrictEqual(newBuilder.playbookStepIds, ["build"]);
+        assert.equal(yield* sentTo(oldBuilder.threadId, "thread.stop"), 1);
+        assert.equal(yield* sentTo(newBuilder.threadId, "message.dispatch"), 1);
+        const current = yield* relay.current(captainThread, run.runId);
+        assert.deepStrictEqual(current.delivery, {
+          state: "delivered",
+          seat: "builder",
+          threadId: newBuilder.threadId,
+        });
+        // A retry of the same call repeats nothing.
+        yield* request("replace-builder", { ...custom("builder"), replaces: "builder" });
+        assert.equal(yield* sentTo(newBuilder.threadId, "message.dispatch"), 1);
+        assert.isNull(yield* crews.findMembership(oldBuilder.participantId));
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
+);
+
+it.effect("a replacement on a Crew without a playbook is an addition and a stop", () =>
+  Effect.gen(function* () {
+    const { layer, commands } = yield* playbookFixture;
+    yield* Effect.gen(function* () {
+      const gate = withPreview(yield* CrewProposalService);
+      const opened = yield* gate.propose({
+        requestKey: "plain-crew",
+        captain,
+        displayName: "Pair",
+        brief: "Fix it.",
+        seats: [custom("builder"), custom("critic")],
+      });
+      const approved = yield* gate.resolve({ proposalId: opened.proposal.id, decision: "approve" });
+      const old = approved.instance!.members.find(({ seatName }) => seatName === "critic")!;
+      const replaced = yield* gate.requestMember({
+        requestKey: "replace-critic",
+        captain,
+        crewInstanceId: approved.instance!.id,
+        seat: { ...custom("critic"), replaces: "critic" },
+        brief: null,
+      });
+      assert.deepStrictEqual(
+        replaced.instance!.members.map(({ seatName }) => seatName),
+        ["builder", "critic"],
+      );
+      assert.notEqual(replaced.instance!.members[1]!.participantId, old.participantId);
+      assert.deepStrictEqual(
+        (yield* Ref.get(commands)).flatMap((command) =>
+          command.type === "thread.stop" ? [command.threadId] : [],
+        ),
+        [old.threadId],
+      );
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect("a replacement takes the steps unfinished when it gets the Crew, not when it asked", () =>
+  Effect.gen(function* () {
+    const { layer, workspaceRoot, dispatchHook, lockHook } = yield* playbookFixture;
+    yield* Effect.gen(function* () {
+      const gate = withPreview(yield* CrewProposalService);
+      const relay = yield* makePlaybookCrewRelay;
+      const opened = yield* gate.propose({
+        requestKey: "racing-crew",
+        captain,
+        displayName: "Release Crew",
+        brief: "Ship the change.",
+        playbook: { name: "release", workspaceRoot },
+        seats: [custom("planner", ["plan", "review"]), custom("builder", ["build"])],
+      });
+      const approved = yield* gate.resolve({ proposalId: opened.proposal.id, decision: "approve" });
+      const crewId = approved.instance!.id;
+      const planner = approved.instance!.members.find(({ seatName }) => seatName === "planner")!;
+      const toPlanner = (command: OrchestrationV2ServerCommand) =>
+        command.type === "message.dispatch" && command.threadId === planner.threadId;
+      // plan's hand-off fails once, so the next move hands it off before it moves the run.
+      yield* Ref.set(dispatchHook, (command) =>
+        toPlanner(command)
+          ? Effect.fail(
+              new OrchestratorDispatchError({
+                commandId: command.commandId,
+                commandType: command.type,
+              }),
+            )
+          : Effect.void,
+      );
+      const run = yield* relay.start({
+        owner: captainThread,
+        root: workspaceRoot,
+        name: "release",
+        key: "run-1",
+        crewInstanceId: crewId,
+      });
+      assert.equal(run.delivery?.state, "pending");
+      // The move holds the Crew while that hand-off is held open, with the run still at plan.
+      const entered = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      yield* Ref.set(dispatchHook, (command) =>
+        toPlanner(command)
+          ? Deferred.succeed(entered, undefined).pipe(Effect.andThen(Deferred.await(release)))
+          : Effect.void,
+      );
+      const move = yield* relay
+        .mutate(captainThread, {
+          runId: run.runId,
+          operation: "next",
+          expectedStepId: "plan",
+          client_request_id: "next-1",
+        })
+        .pipe(Effect.forkChild);
+      yield* Deferred.await(entered);
+      // The replacement asks while the run is at plan, then waits for the Crew.
+      const asked = yield* Deferred.make<void>();
+      yield* Ref.set(lockHook, (id) =>
+        id === crewId ? Deferred.succeed(asked, undefined).pipe(Effect.asVoid) : Effect.void,
+      );
+      const replacing = yield* gate
+        .requestMember({
+          requestKey: "replace-planner",
+          captain,
+          crewInstanceId: crewId,
+          seat: { ...custom("planner-2"), replaces: "planner" },
+          brief: null,
+        })
+        .pipe(Effect.forkChild);
+      yield* Deferred.await(asked);
+      yield* Deferred.succeed(release, undefined);
+      yield* Fiber.join(move);
+      const replaced = (yield* Fiber.join(replacing)).instance!;
+      // plan finished while the replacement waited, so it stays on the replaced member.
+      assert.deepStrictEqual(
+        replaced.members.map(({ seatName, playbookStepIds }) => [seatName, playbookStepIds]),
+        [
+          ["planner-2", ["review"]],
+          ["builder", ["build"]],
+        ],
+      );
+      assert.deepStrictEqual(replaced.replaced?.[0]?.playbookStepIds, ["plan"]);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect("a retry after a replacement's stop failed finishes the stop and hand-off once", () =>
+  Effect.gen(function* () {
+    const { layer, workspaceRoot, commands, dispatchHook } = yield* playbookFixture;
+    yield* Effect.gen(function* () {
+      const gate = withPreview(yield* CrewProposalService);
+      const crews = yield* AgentCrewInstanceService;
+      const relay = yield* makePlaybookCrewRelay;
+      const opened = yield* gate.propose({
+        requestKey: "retry-crew",
+        captain,
+        displayName: "Release Crew",
+        brief: "Ship the change.",
+        playbook: { name: "release", workspaceRoot },
+        seats: [custom("planner", ["plan"]), custom("builder", ["build"])],
+      });
+      const approved = yield* gate.resolve({ proposalId: opened.proposal.id, decision: "approve" });
+      const crewId = approved.instance!.id;
+      const oldBuilder = approved.instance!.members.find(({ seatName }) => seatName === "builder")!;
+      const run = yield* relay.start({
+        owner: captainThread,
+        root: workspaceRoot,
+        name: "release",
+        key: "run-1",
+        crewInstanceId: crewId,
+      });
+      yield* relay.mutate(captainThread, {
+        runId: run.runId,
+        operation: "next",
+        expectedStepId: "plan",
+        client_request_id: "next-1",
+      });
+      const sent = (threadId: ThreadId, type: "message.dispatch" | "thread.stop") =>
+        Ref.get(commands).pipe(
+          Effect.map(
+            (all) =>
+              all.filter((command) => command.type === type && command.threadId === threadId)
+                .length,
+          ),
+        );
+      // The swap lands, then stopping the old builder fails.
+      yield* Ref.set(dispatchHook, (command) =>
+        command.type === "thread.stop"
+          ? Effect.fail(
+              new OrchestratorDispatchError({
+                commandId: command.commandId,
+                commandType: command.type,
+              }),
+            )
+          : Effect.void,
+      );
+      const request = gate.requestMember({
+        requestKey: "replace-builder",
+        captain,
+        crewInstanceId: crewId,
+        seat: { ...custom("builder"), replaces: "builder" },
+        brief: null,
+      });
+      yield* request.pipe(Effect.flip);
+      const swapped = (yield* crews.read(crewId))!;
+      const newBuilder = swapped.members.find(({ seatName }) => seatName === "builder")!;
+      assert.notEqual(newBuilder.participantId, oldBuilder.participantId);
+      assert.equal(yield* sent(oldBuilder.threadId, "thread.stop"), 0);
+      assert.equal(yield* sent(newBuilder.threadId, "message.dispatch"), 0);
+
+      // The same call again stops the old builder and hands build over, once, with no second swap.
+      yield* Ref.set(dispatchHook, () => Effect.void);
+      yield* request;
+      yield* request;
+      const after = (yield* crews.read(crewId))!;
+      assert.equal(after.version, swapped.version);
+      assert.lengthOf(after.replaced ?? [], 1);
+      // Each retry repeats the stop under one command id, which the orchestrator's receipts replay.
+      const stops = (yield* Ref.get(commands)).flatMap((command) =>
+        command.type === "thread.stop" && command.threadId === oldBuilder.threadId
+          ? [command.commandId]
+          : [],
+      );
+      assert.isAbove(stops.length, 0);
+      assert.equal(new Set(stops).size, 1);
+      assert.equal(yield* sent(newBuilder.threadId, "message.dispatch"), 1);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect("of two replacements of one seat, the second is refused and its request declined", () =>
+  Effect.gen(function* () {
+    const { layer, lockHook } = yield* playbookFixture;
+    yield* Effect.gen(function* () {
+      const gate = withPreview(yield* CrewProposalService);
+      const proposals = yield* AgentCrewProposalService;
+      const opened = yield* gate.propose({
+        requestKey: "twice-crew",
+        captain,
+        displayName: "Pair",
+        brief: "Fix it.",
+        seats: [custom("builder"), custom("reviewer")],
+      });
+      const approved = yield* gate.resolve({ proposalId: opened.proposal.id, decision: "approve" });
+      const crewId = approved.instance!.id;
+      const replace = (requestKey: string, seat: string) =>
+        gate.requestMember({
+          requestKey,
+          captain,
+          crewInstanceId: crewId,
+          seat: { ...custom(seat), replaces: "reviewer" },
+          brief: null,
+        });
+      // Both pass their checks; the first takes the Crew while the second waits for it.
+      yield* Ref.set(lockHook, (id) =>
+        id === crewId
+          ? Ref.set(lockHook, () => Effect.void).pipe(
+              Effect.andThen(replace("first", "reviewer-a")),
+              Effect.orDie,
+              Effect.asVoid,
+            )
+          : Effect.void,
+      );
+      const second = yield* replace("second", "reviewer-b").pipe(Effect.flip);
+      assert.include(second.message, "Seat reviewer was already replaced.");
+      const declined = (yield* proposals.listForCaptain(captainId)).filter(
+        (proposal) => proposal.status === "open",
+      );
+      assert.lengthOf(declined, 0);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect("a step claimed while a replacement waits for the Crew refuses it before it spawns", () =>
+  Effect.gen(function* () {
+    const { layer, workspaceRoot, commands, lockHook } = yield* playbookFixture;
+    yield* Effect.gen(function* () {
+      const gate = withPreview(yield* CrewProposalService);
+      const opened = yield* proposeRelease(gate, workspaceRoot, "claim-crew");
+      const approved = yield* gate.resolve({ proposalId: opened.proposal.id, decision: "approve" });
+      const crewId = approved.instance!.id;
+      const request = (requestKey: string, seat: CrewProposalSeat) =>
+        gate.requestMember({ requestKey, captain, crewInstanceId: crewId, seat, brief: null });
+      // review is unowned when the replacement is checked, then a scribe claims it.
+      yield* Ref.set(lockHook, (id) =>
+        id === crewId
+          ? Ref.set(lockHook, () => Effect.void).pipe(
+              Effect.andThen(request("scribe", custom("scribe", ["review"]))),
+              Effect.orDie,
+              Effect.asVoid,
+            )
+          : Effect.void,
+      );
+      const refused = yield* request("replace-planner", {
+        ...custom("planner-2", ["review"]),
+        replaces: "planner",
+      }).pipe(Effect.flip);
+      assert.include(refused.message, "Step review is already owned by seat scribe");
+      assert.isFalse(
+        (yield* Ref.get(commands)).some(
+          (command) => command.type === "thread.create" && command.title === "planner-2",
+        ),
+      );
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect("two replacements on a full Crew both go through", () =>
+  Effect.gen(function* () {
+    const { layer, lockHook } = yield* playbookFixture;
+    yield* Effect.gen(function* () {
+      const gate = withPreview(yield* CrewProposalService);
+      const opened = yield* gate.propose({
+        requestKey: "full-crew",
+        captain,
+        displayName: "Full",
+        brief: "Fix it.",
+        seats: Array.from({ length: CREW_SEAT_CAP }, (_, index) => custom(`seat-${index}`)),
+      });
+      const approved = yield* gate.resolve({ proposalId: opened.proposal.id, decision: "approve" });
+      const crewId = approved.instance!.id;
+      const replace = (requestKey: string, seat: string, replaces: string) =>
+        gate.requestMember({
+          requestKey,
+          captain,
+          crewInstanceId: crewId,
+          seat: { ...custom(seat), replaces },
+          brief: null,
+        });
+      // The first is still an open request when the second is filed.
+      yield* Ref.set(lockHook, (id) =>
+        id === crewId
+          ? Ref.set(lockHook, () => Effect.void).pipe(
+              Effect.andThen(replace("second", "seat-1b", "seat-1")),
+              Effect.orDie,
+              Effect.asVoid,
+            )
+          : Effect.void,
+      );
+      const first = yield* replace("first", "seat-0b", "seat-0");
+      const names = first.instance!.members.map(({ seatName }) => seatName);
+      assert.lengthOf(names, CREW_SEAT_CAP);
+      assert.includeMembers(names, ["seat-0b", "seat-1b"]);
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.scoped),
 );

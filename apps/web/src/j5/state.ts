@@ -15,7 +15,10 @@ import { appAtomRegistry } from "../rpc/atomRegistry";
 import { serverEnvironment } from "../state/server";
 import { environmentThreadShells } from "../state/threads";
 import { createSharingEnvironmentAtoms } from "@t3tools/client-runtime/j5/sharing";
-import { crewApprovalReadPlan, type CrewApprovalReadPlan } from "./crew/crewRuntimeRequests.logic";
+import {
+  crewApprovalReadPlan,
+  type CrewApprovalReadPlan,
+} from "@t3tools/client-runtime/j5/crew-inbox-requests";
 
 export const j5Environment = createJ5EnvironmentAtoms(connectionAtomRuntime);
 

@@ -1,12 +1,9 @@
 import type { CrewProposalSeat } from "@t3tools/contracts/j5";
+import { removeSeat } from "@t3tools/client-runtime/j5/crew-proposals";
 import { applyCrewSeatDraft, crewSeatDraft, type CrewSeatDraft } from "./crewSeatRuntime";
 
 /** The persona choice for a seat that runs without a persona: named and briefed on the card. */
 export const CUSTOM_AGENT = "__custom__";
-
-/** Pure roster edits so the card's behavior is testable without rendering. */
-export const removeSeat = (seats: ReadonlyArray<CrewProposalSeat>, seatName: string) =>
-  seats.filter((seat) => seat.seat !== seatName);
 
 export const addSeat = (
   seats: ReadonlyArray<CrewProposalSeat>,
@@ -61,7 +58,7 @@ export const saveSeat = (
   if (!current) return { seats, error: "This seat is no longer in the roster." };
   const validated = addSeat(removeSeat(seats, seatName), draft);
   if (validated.error !== null) return { seats, error: validated.error };
-  // The card cannot reassign playbook steps, so an edited seat keeps the ones it owns.
+  // The card cannot reassign playbook steps or whom a reviewer reviews, so an edit keeps both.
   // An edit keeps the seat's own workspace, or its lack of one; only a new seat defaults.
   const { workspace: _defaulted, ...edited } = validated.seats[validated.seats.length - 1]!;
   const updated = {
@@ -70,6 +67,7 @@ export const saveSeat = (
     reason: current.reason,
     ...(current.personaSwaps === undefined ? {} : { personaSwaps: current.personaSwaps }),
     ...(current.steps === undefined ? {} : { steps: current.steps }),
+    ...(current.reviews === undefined ? {} : { reviews: current.reviews }),
   };
   return {
     seats: seats.map((seat) => (seat.seat === seatName ? updated : seat)),

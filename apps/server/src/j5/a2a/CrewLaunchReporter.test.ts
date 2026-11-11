@@ -1,5 +1,6 @@
 import * as SqlClient from "effect/sql/SqlClient";
 import { assert, it } from "@effect/vitest";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   EventId,
@@ -391,7 +392,7 @@ const makeFixture = Effect.fn("test.j5.crewLaunchReporter.fixture")(function* (
     ),
     Layer.provideMerge(playbookStoreLayer),
     Layer.provideMerge(Layer.succeedContext(context)),
-    Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     Layer.provideMerge(Layer.mock(A2ADeliveryWorker)({ notify: Effect.void })),
   );
 
@@ -1064,7 +1065,7 @@ it.effect(
         Layer.provideMerge(Layer.mock(CrewCaptainArchiveCascade)({})),
         Layer.provideMerge(Layer.mock(ArtifactWorkspace)({})),
         Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-launch-notice-" })),
-        Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
         Layer.provideMerge(Layer.mock(A2ADeliveryWorker)({ notify: Effect.void })),
       );
       yield* Effect.gen(function* () {

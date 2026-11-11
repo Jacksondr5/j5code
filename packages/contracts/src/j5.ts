@@ -27,8 +27,13 @@ import {
 } from "./providerPolicy.ts";
 import { EnvironmentAuthorizationError } from "./auth.ts";
 import { EnvironmentId, RuntimeRequestId, ThreadId } from "./baseSchemas.ts";
+import { ChatAttachment } from "./chatAttachment.ts";
 import { J5ActionError } from "./j5/actionError.ts";
-import { AgentPersonaId } from "./j5/agentPersona.ts";
+import {
+  AgentPersonaDraftView,
+  AgentPersonaEscalationView,
+  AgentPersonaId,
+} from "./j5/agentPersona.ts";
 
 export const HumanInboxItem = Schema.Struct({
   personId: Schema.String,
@@ -41,6 +46,10 @@ export const HumanInboxItem = Schema.Struct({
   intent: Schema.String,
   urgency: Schema.Literals(["blocking", "soon", "fyi"]),
   message: Schema.String,
+  /** What the agent added to this ask, oldest first; absent when it added nothing. */
+  followUps: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ messageId: Schema.String, message: Schema.String })),
+  ),
   openedAt: Schema.String,
   status: Schema.Literals(["open", "answered"]),
   terminalAt: Schema.NullOr(Schema.String),
@@ -48,6 +57,10 @@ export const HumanInboxItem = Schema.Struct({
   forEveryone: Schema.optionalKey(Schema.Boolean),
   /** Who answered an ask that is closed, by the name they had then (Inbox AC16). */
   answeredBy: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  /** A refused persona launch this ask escalates, as the server recorded it. */
+  escalation: Schema.optionalKey(AgentPersonaEscalationView),
+  /** A persona draft this ask carries for the Owner's "Save persona"; never with `escalation`. */
+  personaDraft: Schema.optionalKey(AgentPersonaDraftView),
 });
 export type HumanInboxItem = typeof HumanInboxItem.Type;
 export type ScopedHumanInboxItem = HumanInboxItem & { readonly environmentId: EnvironmentId };
@@ -65,6 +78,8 @@ export type HumanInboxResponse = typeof HumanInboxResponse.Type;
 export const AnswerHumanExchangeRequest = Schema.Struct({
   exchangeId: Schema.String.check(Schema.isNonEmpty()),
   message: Schema.String.check(Schema.isNonEmpty()),
+  /** Pending uploads, claimed into the asking agent's thread with the answer. */
+  attachments: Schema.optional(Schema.Array(ChatAttachment)),
   clientRequestId: Schema.String.check(Schema.isNonEmpty()),
 });
 export type AnswerHumanExchangeRequest = typeof AnswerHumanExchangeRequest.Type;
@@ -77,6 +92,23 @@ export const AnswerHumanExchangeResponse = Schema.Struct({
     durableAtSeq: Schema.Number,
   }),
 });
+
+/**
+ * The Owner's "Allow this once" on an ask escalating a refused persona launch: it answers the
+ * ask with a fixed reply and lets the asking agent retry that one launch past its one limit.
+ */
+export const AllowPersonaOnceRequest = Schema.Struct({
+  exchangeId: Schema.String.check(Schema.isNonEmpty()),
+  clientRequestId: Schema.String.check(Schema.isNonEmpty()),
+});
+export type AllowPersonaOnceRequest = typeof AllowPersonaOnceRequest.Type;
+
+/** The Owner's "Save persona" on an ask carrying an agent's persona draft. */
+export const SavePersonaDraftRequest = Schema.Struct({
+  exchangeId: Schema.String.check(Schema.isNonEmpty()),
+  clientRequestId: Schema.String.check(Schema.isNonEmpty()),
+});
+export type SavePersonaDraftRequest = typeof SavePersonaDraftRequest.Type;
 
 export const OpenInboxCountResponse = Schema.Struct({
   personId: Schema.String,
@@ -169,6 +201,8 @@ export const CrewProposalSeat = Schema.Struct({
   runtimeMode: Schema.optional(RuntimeMode),
   /** Ids of the playbook steps this seat owns; only on a Crew that follows a playbook. */
   steps: Schema.optionalKey(Schema.Array(Schema.String)),
+  /** Seats (or, for an addition, members) whose work this reviewer persona reviews; default: every non-reviewer. */
+  reviews: Schema.optionalKey(Schema.Array(Schema.String)),
   /**
    * Every seat proposed now names one; only seats recorded before workspaces were required, or
    * with one this version can't read, lack it, and the server refuses those until one is chosen.
@@ -312,6 +346,18 @@ export const CrewMembershipsResponse = Schema.Struct({
   entries: Schema.Array(CrewMembershipEntry),
 });
 
+/**
+ * A member its Captain replaced: a plain agent now, no longer a seat, kept readable with the seat
+ * it held and the member that took its place.
+ */
+export const ReplacedCrewSeat = Schema.Struct({
+  crewInstanceId: Schema.String,
+  crewName: Schema.String,
+  seat: Schema.String,
+  replacedBy: Schema.String,
+});
+export type ReplacedCrewSeat = typeof ReplacedCrewSeat.Type;
+
 /** One agent placed directly under a visible thread, with its Crew seat when it has one. */
 export const SpawnedChild = Schema.Struct({
   threadId: ThreadId,
@@ -324,6 +370,7 @@ export const SpawnedChild = Schema.Struct({
       notStarted: Schema.optionalKey(Schema.Boolean),
     }),
   ),
+  replaced: Schema.optionalKey(ReplacedCrewSeat),
 });
 export type SpawnedChild = typeof SpawnedChild.Type;
 export const SpawnedChildrenEntry = Schema.Struct({
@@ -412,6 +459,8 @@ export const FleetAgent = Schema.Struct({
       captainParticipantId: Schema.String,
     }),
   ),
+  /** Set when its Captain replaced it on a live Crew; `crew` is then null. */
+  replaced: Schema.optionalKey(ReplacedCrewSeat),
   /** Open Exchanges this agent owes a reply on. */
   openAsks: Schema.Number,
   /** Absent on older environments; clients must show unknown, never healthy. */
@@ -1140,6 +1189,8 @@ export const J5_CLIENT_ACTION_WS_METHODS = {
   archiveCrew: "j5.crews.archive",
   respondCrewRuntimeRequest: "j5.crews.respondRuntimeRequest",
   answerHumanExchange: "j5.inbox.answer",
+  allowPersonaOnce: "j5.inbox.allowPersonaOnce",
+  savePersonaDraft: "j5.inbox.savePersonaDraft",
   answerCrewWorktreeCleanup: "j5.crews.answerWorktreeCleanup",
   issuePeerCredential: "j5.peers.issueCredential",
   addPeer: "j5.peers.add",
@@ -1179,6 +1230,16 @@ export const J5ClientActionRpcGroup = RpcGroup.make(
   }),
   Rpc.make(J5_CLIENT_ACTION_WS_METHODS.answerHumanExchange, {
     payload: AnswerHumanExchangeRequest,
+    success: AnswerHumanExchangeResponse,
+    error: clientActionError,
+  }),
+  Rpc.make(J5_CLIENT_ACTION_WS_METHODS.allowPersonaOnce, {
+    payload: AllowPersonaOnceRequest,
+    success: AnswerHumanExchangeResponse,
+    error: clientActionError,
+  }),
+  Rpc.make(J5_CLIENT_ACTION_WS_METHODS.savePersonaDraft, {
+    payload: SavePersonaDraftRequest,
     success: AnswerHumanExchangeResponse,
     error: clientActionError,
   }),

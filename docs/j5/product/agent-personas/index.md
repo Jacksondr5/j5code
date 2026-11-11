@@ -18,8 +18,8 @@ Crew composition, Playbook steps, workflow gates, and lifecycle automation remai
 
 ## User-authored library
 
-- Settings → Agent Setup offers **Create persona**, which authors a personal persona (name, stable ID, description, markdown instructions, runtime policy, primary and fallback models) and stores it as an imported definition of the selected environment; the server supplies the remaining contract fields. It also offers one **Import** menu with **Persona file** (one YAML definition) and **Folder** (all YAML definitions, including subfolders). The selected files are copied into the selected environment, so the same flow works remotely. Up to 50 files of 64 KiB each are validated as one atomic batch.
-- Imported agents can be edited in Settings: name, description, instructions, runtime policy, and primary/fallback models with reasoning settings. Any listed agent, including removed folder sources, can be duplicated into a personal agent or exported as YAML. Changes apply only to the imported copy and future launches, preserve enabled state, and reject stale concurrent edits.
+- Settings → Agent Setup offers **Create persona**, which authors a personal persona (name, stable ID, description, markdown instructions, access level, an ordered model list) and stores it as an imported definition of the selected environment; the server supplies the remaining contract fields. It also offers one **Import** menu with **Persona file** (one YAML definition) and **Folder** (all YAML definitions, including subfolders). The selected files are copied into the selected environment, so the same flow works remotely. Up to 50 files of 64 KiB each are validated as one atomic batch.
+- Imported agents can be edited in Settings: name, description, instructions, access level, ordered model entries with reasoning settings, and the independent-reviewer flag. Agents edit them, and folder agents, through an Owner-approved draft ([Editing in conversation](#editing-in-conversation)). Any listed agent, including removed folder sources, can be duplicated into a personal agent or exported as YAML. Changes apply only to the imported copy and future launches, preserve enabled state, and reject stale concurrent edits.
 - Every listed agent has an environment-local **On/Off** setting, including folder definitions. New imports start enabled; disabling prevents new launches and keeps the entry visible. Replacement imports preserve the setting; removing an import clears it. Source ids are disabled through a separate state file that never touches their files. Running tasks retain their snapshots.
 - UI imports show a confirmation for existing IDs: each conflicting agent has a replacement toggle. Cancel imports nothing; Import selected imports new agents and overwrites only the selected existing definitions, including local edits, while preserving enabled state and saved tasks. Toggled-off agents are skipped throughout the import. New or changed conflicts require fresh confirmation. Duplicate IDs within a selection fail the batch. The trash action removes the imported copy and excludes any underlying source definition, without altering running tasks. Removed source definitions stay listed as **Removed** with a **Restore** action, so removal from Settings is reversible without any file. Source edits require reimporting unless the server reads that folder directly through configuration.
 - A library combines imported copies with optional source folders on the selected environment's filesystem. Definitions are plain YAML files with markdown instruction content, editable and shareable through ordinary editors and git. Git is optional. Loading never clones, pulls, pushes, or executes a file.
@@ -35,161 +35,96 @@ Crew composition, Playbook steps, workflow gates, and lifecycle automation remai
 
 Each definition has:
 
-| Field                                                  | Meaning                                                                                                                                                                           |
-| ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id`                                                   | Stable lowercase slug, such as `team-researcher`. Custom ids require no code changes.                                                                                             |
-| `version`                                              | Positive integer chosen by the author. Changing it communicates a revision; content is also fingerprinted, so same-version edits are detected at launch.                          |
-| `displayName`, `description`                           | Human-facing identity and a concise purpose.                                                                                                                                      |
-| `instructions`                                         | Nonempty markdown identity and operating principles, at most 32,768 characters. The spawner supplies the task brief separately.                                                   |
-| `acceptedInput`                                        | Optional human-readable input summary; ordinary prompts and supporting evidence are allowed.                                                                                      |
-| `inputArtifacts`, `outputArtifact`                     | Optional structured handoff artifact names for pipeline roles. Every reference must name a standard artifact below or one declared by this definition. Personal agents omit them. |
-| `artifacts`                                            | Optional names for user-defined artifacts. These declare references, not executable validators.                                                                                   |
-| `authority.defaultPolicy`, `authority.allowedPolicies` | A default and allowed selection from the runtime-policy vocabulary below. The default must be allowed.                                                                            |
-| `modelRoute`                                           | Ordered primary and fallback targets. Each names `driver`, exact `model`, and `reasoningEffort`.                                                                                  |
+| Field                                                  | Meaning                                                                                                                                                       |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `id`                                                   | Stable lowercase slug, such as `team-researcher`. Custom ids require no code changes.                                                                         |
+| `version`                                              | Positive integer chosen by the author. Changing it communicates a revision; content is also fingerprinted, so same-version edits are detected at launch.      |
+| `displayName`, `description`                           | Human-facing identity and a concise purpose.                                                                                                                  |
+| `instructions`                                         | Nonempty markdown identity and operating principles, at most 32,768 characters. The spawner supplies the task brief separately.                               |
+| `acceptedInput`                                        | Optional human-readable input summary; ordinary prompts and supporting evidence are allowed.                                                                  |
+| `inputArtifacts`, `outputArtifact`, `artifacts`        | Retired. A definition that still carries them loads, and they are ignored; they stay part of the content fingerprint so stored snapshots keep their digests.  |
+| `access`                                               | One of `read-only`, `workspace-write`, or `full-access`. Mutually exclusive with legacy `authority`.                                                          |
+| `authority.defaultPolicy`, `authority.allowedPolicies` | Legacy storage. New launches map the default to one access level; the former allowed list grants no additional access.                                        |
+| `modelRoute`                                           | A nonempty ordered list. Entries accept legacy `driver`/`model`/`reasoningEffort` or `instanceId`/`model`/`options`.                                          |
+| `independentReviewer`                                  | Optional `true` for a reviewer that should run on a model the work's authors didn't use (see [Independent reviewers](#independent-reviewers)). Absent is off. |
 
-Files are limited to 64 KiB. This slice retains exactly two route targets. A target may name any provider, and the reasoning value uses whichever option the model advertises for it (`reasoningEffort`, `effort`, `reasoning`, `variant`, or `thinking`). Activation still requires a provider that can enforce the persona's runtime policy, currently Codex and Claude; other providers stay Blocked until their adapter policies are supported. Broader ordered model allowlists belong to a later Role-library revision; none of these limits fixes the persona's name or model choices to the starter examples.
+Files are limited to 64 KiB. Reading a definition never rewrites it. Legacy artifact values remain in stored identity but do not affect behavior. Snapshot digests are checked against their stored JSON bytes before decoding, so upgrades preserve running workers without migrating their snapshots.
+
+New launches map `critic-review` to read-only and `critic-fix` to workspace-write; diagnostic and publication-only defaults are invalid, with a repair message naming the three supported levels. An unsupported policy only in the retired allowed list is ignored. Existing assignments retain their saved policy and human-approved runtime override. A legacy reviewer with an allowed fix policy therefore remains read-only for new launches, while its existing fix workers continue with their saved workspace access.
+
+Read responses keep legacy authority and two-target summaries alongside the complete model list and access. A one-entry list repeats its entry only in that summary. Unavailable catalog entries omit legacy attempts; current clients read per-entry diagnostics from additive modelEntries. Older clients can read personas and continue tasks, but receive no legacy edit metadata. Create and edit requests require access, so an older client's edit is rejected during decoding before it can truncate a definition. Current editors receive the complete ordered model list. The legacy summary labels an absent provider as unconfigured and an unspecified reasoning option as Provider default; these labels are never execution selections. The full YAML export preserves the stored definition.
 
 ## Historical examples
 
 These examples document historical assignments and are not selectable unless a user authors or imports a definition. Their operating instructions describe intended behavior, including no-commit or no-merge expectations; those words do not themselves enforce permissions.
 
-| ID             | Display name | Description                                                         | Accepted input                                            | Required output       | Authority                       | Primary route            | Secondary route           |
-| -------------- | ------------ | ------------------------------------------------------------------- | --------------------------------------------------------- | --------------------- | ------------------------------- | ------------------------ | ------------------------- |
-| `scout`        | Scout        | Collects cited evidence into a Context Brief. Read-only.            | Evidence request or prompt                                | `ContextBrief`        | `read-only`                     | `gpt-5.6-terra`, high    | `claude-opus-5`, high     |
-| `navigator`    | Navigator    | Turns a Context Brief into an implementation plan. Read-only.       | `ContextBrief`                                            | `PlanHandoff`         | `read-only`                     | `gpt-5.6-sol`, high      | `claude-fable-5-1`, high  |
-| `advocate`     | Advocate     | Checks a plan against product and design requirements.              | `PlanHandoff` plus Jira, Confluence, or Figma evidence    | `PlanCritique`        | `read-only`                     | `claude-sonnet-5`, high  | `gpt-5.6-terra`, high     |
-| `skeptic`      | Skeptic      | Stress-tests a plan for feasibility, risk, and hidden scope.        | `PlanHandoff` plus repository evidence                    | `PlanCritique`        | `read-only`                     | `claude-opus-5`, high    | `gpt-5.6-terra`, high     |
-| `builder`      | Builder      | Implements an approved handoff. Never commits or pushes.            | `PlanHandoff`, `DiagnosisHandoff`, or `ReviewInbox`       | `CodeCompleteHandoff` | `workspace-write`               | `gpt-5.6-sol`, high      | `claude-opus-5`, high     |
-| `critic`       | Critic       | Reviews implementation; Fix Mode may apply targeted fixes.          | `CodeCompleteHandoff` plus governing handoff and diff     | `ReviewHandoff`       | `critic-review` or `critic-fix` | `claude-opus-5`, high    | `gpt-5.6-terra`, high     |
-| `sentry`       | Sentry       | Reviews a diff for security, authorization, secrets, and PII risks. | `CodeCompleteHandoff` plus diff and relevant architecture | `ReviewHandoff`       | `read-only`                     | `claude-fable-5-1`, high | `gpt-5.6-terra`, high     |
-| `publisher`    | Publisher    | Commits, pushes, and opens or updates a PR. Never merges.           | `CodeCompleteHandoff` plus resolved review findings       | `PublicationReceipt`  | `publish-only`                  | `gpt-5.6-terra`, medium  | `claude-sonnet-5`, medium |
-| `investigator` | Investigator | Reproduces and diagnoses bugs without landing a fix.                | Bug report, Jira issue, or diagnostic prompt              | `DiagnosisHandoff`    | `diagnostic`                    | `gpt-5.6-sol`, high      | `claude-fable-5-1`, high  |
-| `prosecutor`   | Prosecutor   | Challenges a diagnosis, its evidence, and proposed repair.          | `DiagnosisHandoff` plus available evidence                | `DiagnosisCritique`   | `read-only`                     | `claude-opus-5`, high    | `gpt-5.6-terra`, high     |
-| `herald`       | Herald       | Reads and classifies GitHub review feedback.                        | Pull request target and review state                      | `ReviewInbox`         | `read-only`                     | `gpt-5.6-terra`, high    | `claude-sonnet-5`, high   |
+| ID             | Display name | Description                                                         | Accepted input                                            | Authority                       | Primary route            | Secondary route           |
+| -------------- | ------------ | ------------------------------------------------------------------- | --------------------------------------------------------- | ------------------------------- | ------------------------ | ------------------------- |
+| `scout`        | Scout        | Collects cited evidence into a Context Brief. Read-only.            | Evidence request or prompt                                | `read-only`                     | `gpt-5.6-terra`, high    | `claude-opus-5`, high     |
+| `navigator`    | Navigator    | Turns a Context Brief into an implementation plan. Read-only.       | `ContextBrief`                                            | `read-only`                     | `gpt-5.6-sol`, high      | `claude-fable-5-1`, high  |
+| `advocate`     | Advocate     | Checks a plan against product and design requirements.              | `PlanHandoff` plus Jira, Confluence, or Figma evidence    | `read-only`                     | `claude-sonnet-5`, high  | `gpt-5.6-terra`, high     |
+| `skeptic`      | Skeptic      | Stress-tests a plan for feasibility, risk, and hidden scope.        | `PlanHandoff` plus repository evidence                    | `read-only`                     | `claude-opus-5`, high    | `gpt-5.6-terra`, high     |
+| `builder`      | Builder      | Implements an approved handoff. Never commits or pushes.            | `PlanHandoff`, `DiagnosisHandoff`, or `ReviewInbox`       | `workspace-write`               | `gpt-5.6-sol`, high      | `claude-opus-5`, high     |
+| `critic`       | Critic       | Reviews implementation; Fix Mode may apply targeted fixes.          | `CodeCompleteHandoff` plus governing handoff and diff     | `critic-review` or `critic-fix` | `claude-opus-5`, high    | `gpt-5.6-terra`, high     |
+| `sentry`       | Sentry       | Reviews a diff for security, authorization, secrets, and PII risks. | `CodeCompleteHandoff` plus diff and relevant architecture | `read-only`                     | `claude-fable-5-1`, high | `gpt-5.6-terra`, high     |
+| `publisher`    | Publisher    | Commits, pushes, and opens or updates a PR. Never merges.           | `CodeCompleteHandoff` plus resolved review findings       | `publish-only`                  | `gpt-5.6-terra`, medium  | `claude-sonnet-5`, medium |
+| `investigator` | Investigator | Reproduces and diagnoses bugs without landing a fix.                | Bug report, Jira issue, or diagnostic prompt              | `diagnostic`                    | `gpt-5.6-sol`, high      | `claude-fable-5-1`, high  |
+| `prosecutor`   | Prosecutor   | Challenges a diagnosis, its evidence, and proposed repair.          | `DiagnosisHandoff` plus available evidence                | `read-only`                     | `claude-opus-5`, high    | `gpt-5.6-terra`, high     |
+| `herald`       | Herald       | Reads and classifies GitHub review feedback.                        | Pull request target and review state                      | `read-only`                     | `gpt-5.6-terra`, high    | `claude-sonnet-5`, high   |
 
 ## Model routing
 
-1. Evaluate primary, then fallback, against the selected environment's current provider snapshots. No project-default or third route is inferred.
-2. Require supported runtime permissions before selecting a target. For matching instances, prefer the canonical default instance, then configured order.
-3. Require an available driver, enabled and installed instance, no error/disabled state, no unauthenticated state, and the exact advertised model and reasoning option.
-4. Return a canonical environment-local `ModelSelection`, with the provider-specific reasoning option, or typed rejection reasons.
+1. Evaluate entries in declared order against the selected environment's provider snapshots, and select the first eligible entry. A new entry binds its exact provider instance; legacy driver entries prefer the canonical default instance, then configured order.
+2. Require enforceable runtime permissions, an available/enabled/installed provider, an authenticated provider when authentication is reported, and the exact advertised model and supported declared options.
+3. Skip observed quota exhaustion with a future reset. Only known account-wide windows count; model-scoped windows do not block unrelated model entries. Missing/no-reset/unsupported telemetry is unknown; retained exhausted observations from a failed probe still apply until their reset.
+4. Report each entry with its rejection codes and effective selection when available. Exhaustion fails visibly with per-entry reasons. Each new assignment records the selected entry index; legacy route labels remain on the wire for older clients.
 
-No model spelling is silently rewritten. Persona threads keep their selected provider/model; later provider/model mutations are rejected. Importing a definition does not copy credentials or environment-local provider ids.
+Declared option values must match. Options left unspecified may use provider defaults or an explicit spawn or human-approved Crew choice; the assignment retains the effective selection.
 
-## Artifact contracts
+No model spelling is silently rewritten. Persona threads keep their selected provider/model; later provider/model mutations are rejected. Importing a definition does not copy credentials or rewrite account identities for another environment. Legacy definitions and snapshots retain their stored shape; the decoder does not rewrite library files.
 
-Handoff artifacts are files in the project's shared artifacts (see the Artifacts feature), not transcript prose. A definition's `outputArtifact` is written by the agent with `j5_write_artifact` to `handoffs/<agent id>/<Artifact>-<task>.md`; the persona instructions name that exact path and the checklist below, and declared `inputArtifacts` are read with `j5_list_artifacts` and `j5_read_artifact` from the same folder. A rewritten handoff artifact adds a version to the top of the same file rather than replacing it; every other artifact path keeps upstream's overwrite. At the end of each completed run the server checks for the file and records the task's handoff artifact as written, or asks once and then records it missing; the reminder is a follow-up run in the child's own thread and does not gate the parent, which has already been told the child finished. The status shows on the task's persona control and, for a delegated child, on its persona chip beside its row in the parent's Lineage section and beside its subagent card in the conversation; the chip opens the artifact. The lists below are the minimum contents the instructions demand. They are prompt templates: the server verifies that the file exists, not what it says. Only `inputArtifacts` and `outputArtifact` are structured references; `acceptedInput`, ordinary prompts, evidence, and prose counterpart references are not parsed as artifacts. A Crew seat writes the same file: its first turn names the path, the handoff gate reminds it once, and each time the seat finishes its Captain is told in its thread whether the handoff artifact was written, missing, or never declared (see [Crews](../features/crews.md)).
+## Independent reviewers
 
-### `ContextBrief`
+A second review is worth more on a model that didn't write the work, so a persona flagged `independentReviewer` prefers one. It is a preference, never a block: no launch fails or waits on a person because of it.
 
-- Request and bounded scope.
-- Sources consulted, with stable citations or paths.
-- Relevant facts separated from inference.
-- Conflicts, missing evidence, and access limitations.
-- Concise findings suitable for planning.
+- **Authors.** A launch can name the work's authors: `author_threads` on `j5_spawn_agent`, `authorThreads` on `delegate_task`, and `reviews` (seat or member names) on Crew seats and additions. Without them, a subagent or Peer Agent reviews its caller's thread, and a Crew seat reviews every other seat and member that isn't itself a reviewer. An author thread contributes its own models and those of its `delegate_task` children: the thread's current model, every run's, and its persona assignment's. A provider-native subagent's model isn't recorded, so its work makes the authors partly unknown. A named thread that doesn't exist or is in another project, a `reviews` name that isn't on the Crew, or one naming another reviewer seat on the same roster (whose model is chosen only after the seats it reviews) is refused as a bad request.
+- **Selection.** When the server chooses the model, entries on an author's model, matched by model id alone (a provider prefix such as `anthropic/` is ignored), move to the end of the list before every other check runs, so the first entry that can run on another model wins, and an author's model is used only when nothing else can run. That holds whoever picked the persona, an `@persona` mention or a roster card approved unchanged included. A model someone chose is kept: one the person set on the roster card, or one an agent pinned on `j5_spawn_agent`.
+- **Record and brief.** The assignment's `reviewIndependence` records the outcome (`different-model`, `same-model-as-author`, or `unknown-authors`), the author models and threads, whether some authors are unknown, and who chose the model. The reviewer's first turn carries one line saying the same, so it knows when its review isn't independent. Both are decided once, at creation; reuse and later hand-offs don't revisit them.
 
-### `PlanHandoff`
+Personas without the flag are unaffected: nothing is reordered, recorded, or added to their brief. A definition without the key keeps its content fingerprint, and an edit that leaves the flag out keeps the stored value, so an older client can't clear it.
 
-- Objective, scope, and explicit non-goals.
-- Product-sliced delivery tracks.
-- Dependencies and sequencing constraints.
-- Expected files or architectural boundaries.
-- Validation strategy, risks, and unresolved decisions.
+## Blocked personas
 
-### `PlanCritique`
+A persona that can't launch stays blocked; it is never recreated as a custom worker to get around its limits.
 
-- Reviewer lens: `advocate` or `skeptic`.
-- Finding list with evidence and severity.
-- Covered, partial, missing, or contested items where applicable.
-- Required revisions and non-blocking observations.
-- Verdict: `accept`, `revise`, or `blocked`.
+- **Codes.** Every launch path (`delegate_task`, `j5_spawn_agent`, Crew seats and additions, the composer) refuses with the same code and text for the same block: `library_empty`, `persona_not_found`, `persona_disabled`, `persona_invalid` (with the definition's repair message), `models_exhausted` (one reason per entry, including an agent pick's model and access limits), and `library_unreadable`. J5's own tools return the code as the failure code; `delegate_task`'s failure codes are upstream's, so there the code leads the message as `[code]`. "No persona fits" is the agent's judgment from `j5_list_personas`, not a code.
+- **Escalation.** A refused launch an agent made records an escalation, and the refusal carries its `escalation_id`. A Crew member tells its Captain; the Captain, or any agent outside a Crew, asks the person with `j5_send_message` (`expect_reply`, `escalation_id`), which takes the caller's own escalations and, for a Captain, its members'. The escalation goes on a new ask, which opens its own Inbox item; a second ask carrying it while the first is open is refused, and so is a `regarding` follow-up to another ask, so J5's record stays on the ask that opened the item. On a follow-up to that ask, an id already on it is ignored. Once that ask is answered or cleared, a new ask may carry it. The Inbox item carries the server's own record of the block as data, shown in a panel apart from the agent's words. An outside agent can't ask, so its refusals record none and tell it to tell the person.
+- **Allow this once.** When lifting one limit, `model-not-eligible` or `access-above-caller`, lets some entry run, the ask offers an Owner **Allow this once** on web and desktop. It answers the ask with a fixed reply and grants the escalation; a text reply grants nothing. The caller retries the same persona with `allow_once`, which is accepted once, for that caller and persona, and only when the launch passes with that one limit lifted. The grant is spent just before the worker is created, so it covers one launch attempt; if that attempt fails, the caller escalates again. The assignment records `pickSource: { kind: "allow-once", waived }`. The persona is never edited, a later launch meets the limits again, and a grant never lets a persona onto a provider that can't enforce its access.
+- **Pins.** A pinned model is a list of one: when it can't run, the launch escalates and never falls back to another entry.
 
-### `CodeCompleteHandoff`
+## Deliverables
 
-- Governing handoff and implemented scope.
-- Changed paths and behavior summary.
-- Tests and checks run with results.
-- Known limitations, residual risks, and unverified areas.
-- Review-ready diff identity when available.
-- Explicit statement that no commit or push was performed.
+A persona says how to work, not what to produce. The assignment, a brief or a Playbook step, names the deliverable; a file it asks for is written with `j5_write_artifact` and shows up on the Artifacts page like any other requested work. A run owes no file: the server appends no artifact instructions, checks nothing at the end of a run, and sends no reminder. A Crew member's finish notice carries how the run ended and the member's reply.
 
-### `ReviewHandoff`
-
-- Review lens: functional or security.
-- Findings with severity, evidence, and affected paths.
-- Validation performed.
-- Fixes applied, only when the activation authorized them.
-- Remaining findings and verdict.
-- Explicit statement that no commit was performed.
-
-### `PublicationReceipt`
-
-`PublicationReceipt` is the canonical name for Publisher's output.
-
-- Branch and commit SHA or ordered commit SHAs.
-- Conventional commit subjects.
-- Push target and result.
-- Pull request number and URL.
-- Whether the pull request was opened or updated.
-- Checks or publication failures observed before handoff.
-- Explicit `merged: false` assertion.
-
-### `DiagnosisHandoff`
-
-- Expected and observed behavior.
-- Deterministic reproduction or the strongest bounded attempt.
-- Failing boundary and causal mechanism supported by evidence.
-- Alternatives considered and ruled out.
-- Minimal fix sketch, without landing the fix.
-- Confidence, limitations, and recommended validation.
-
-### `DiagnosisCritique`
-
-- Reproduction gaps or contradictions.
-- Root-cause challenges and viable alternatives.
-- Evidence quality and missing proof.
-- Over-broad or unsafe repair concerns.
-- Verdict: `accept`, `revise`, or `blocked`.
-
-### `ReviewInbox`
-
-- Review source and stable comment or thread identity.
-- Blocking request, actionable non-blocker, or nit classification.
-- Requested change mapped to relevant paths or lines when known.
-- Duplicate, superseded, resolved, or still-open state.
-- Ambiguities requiring human clarification.
+Tasks that ran before this keep the handoff status they recorded, read-only, on the persona control and chip. Nothing recomputes it.
 
 ## Behavioral instructions and runtime permissions
 
-A Role guides behavior. Its text does not grant permissions or guarantee compliance. A runtime policy means only what the provider's sandbox enforces (Jackson, 2026-10-03). The matrix below records what each policy is for; anything beyond the enforced control in the second table, such as no commit, no push, targeted edits only, or no merge, belongs in the persona's own instructions.
+A persona's instructions guide behavior; its one access level controls only the provider sandbox. New definitions and create/edit requests use `access`: `read-only`, `workspace-write`, or `full-access`. No allowed-policy list is written. Legacy definitions remain readable; their default maps to an access level while their allowed list grants no alternative launch mode.
 
-| Policy            | Workspace                                              | Commands and tests                                                            | Git                             | Pull requests                     | External systems                       |
-| ----------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------- | ------------------------------- | --------------------------------- | -------------------------------------- |
-| `read-only`       | Read only                                              | Inspection and read-only retrieval only                                       | Inspect only                    | Read only                         | Read only                              |
-| `workspace-write` | May edit product and test files                        | May build, test, lint, and inspect                                            | Inspect only; no commit or push | Read only                         | Read only unless separately authorized |
-| `critic-review`   | Read only                                              | Inspection and focused validation                                             | Inspect only                    | Read only                         | Read only                              |
-| `critic-fix`      | May edit only to address requested review findings     | May run focused validation                                                    | Inspect only; no commit or push | Read only                         | Read only                              |
-| `diagnostic`      | Product source must be unchanged at handoff            | May reproduce, build, test, debug, and create disposable diagnostic artifacts | Inspect only; no commit or push | Read only                         | Read only                              |
-| `publish-only`    | May read completed work; may not implement or refactor | Publication checks only                                                       | May commit and push             | May open or update; may not merge | Writes limited to publication actions  |
-| `full-access`     | No J5 restriction                                      | No J5 restriction                                                             | No J5 restriction               | No J5 restriction                 | No J5 restriction                      |
+| Access            | Enforcing providers     | Control                                                                                                            |
+| ----------------- | ----------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `read-only`       | Codex, Claude           | Codex read-only sandbox with network disabled; Claude restricted read-only tools with non-interactive permissions. |
+| `workspace-write` | Codex                   | Workspace-write sandbox with network disabled and no approval-based escalation.                                    |
+| `full-access`     | All supported providers | Ordinary full-access runtime mode with no additional J5 restriction.                                               |
 
-J5 does not append policy rules to a persona's instructions; they would be hidden from the person who wrote the persona and could override it. It adds only a note that platform tools stay available under any sandbox and, for a persona that declares handoff artifacts, the section naming the exact artifact path (see Handoff artifacts above). The persona editor shows which providers sandbox the selected policy, from the table the server sends with the catalog.
-
-| Runtime policy                  | Supported provider                                                   | Enforced control / activation status                                                                                                                                                                                                                                                                                                                                                                      |
-| ------------------------------- | -------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `read-only`, `critic-review`    | Codex                                                                | Non-interactive read-only sandbox; network disabled.                                                                                                                                                                                                                                                                                                                                                      |
-| `read-only`, `critic-review`    | Claude                                                               | Restricted read-only tool list with non-interactive permissions.                                                                                                                                                                                                                                                                                                                                          |
-| `workspace-write`, `critic-fix` | Codex                                                                | Workspace-write sandbox, network disabled, no approval-based escalation. No-commit and targeted-fix behavior remain instructions.                                                                                                                                                                                                                                                                         |
-| `workspace-write`, `critic-fix` | Others                                                               | Activation unavailable.                                                                                                                                                                                                                                                                                                                                                                                   |
-| `diagnostic`                    | None yet                                                             | Unavailable pending a completion mechanism for the clean-product-source requirement.                                                                                                                                                                                                                                                                                                                      |
-| `publish-only`                  | None yet                                                             | Unavailable pending restricted publication operations. Never translated into unrestricted access.                                                                                                                                                                                                                                                                                                         |
-| `full-access`                   | Codex, Claude, Cursor, OpenCode, Grok, Antigravity, Pi, ACP registry | The ordinary full-access runtime mode with no J5 restriction: each provider applies its own native full-access behavior (Codex approvals off with an unsandboxed workspace, Claude bypassed permissions, Cursor without its sandbox, OpenCode allowing every permission, Grok always-approve, Antigravity `yolo`, Pi and ACP registry harnesses running without prompts). Unknown providers stay blocked. |
+Restricted personas therefore require Codex, or Claude for read-only. Other model entries are marked in the editor and skipped at launch. Provider instruction-delivery support is a separate requirement. J5 adds no policy rules to persona instructions, only the note that platform tools remain available under every sandbox. Behavioral limits such as no commit, no push, targeted edits, or no merge belong in the visible instructions.
 
 `full-access` is the absence of a J5 restriction, not authorization to push, merge, or write external systems; whatever the persona's instructions forbid stays an instruction. It is also the only policy under which the provider may reach the network, because the other policies disable it where the provider can (Codex). A Crew seat's explicit access choice still overrides it; a persona can delegate a subagent only to a persona whose permissions do not exceed its own. A Peer Agent started with `j5_spawn_agent` is not bounded by the caller's runtime policy, so a read-only persona's containment covers its own session, not the agents it spawns. Because any agent that can spawn (Crew members cannot) can start a persona, a persona that declares Full access can be started that way with no human step whenever the caller's harness does not ask before `j5_spawn_agent`: Claude callers in every mode, and Codex callers running with approvals off (a Full access thread, or any persona's runtime policy, read-only included). An ordinary Codex thread in an interactive mode such as Supervised still gets the harness's approval prompt for `j5_spawn_agent`, and other harnesses keep their own prompting. That is why the library marks Full access personas visibly. Crew seats still need the roster approval.
 
 Routing and launch reject unsupported runtime policies. Resume also rejects unsupported policies on new snapshotted assignments. Historical assignments without snapshots retain the prior conservative read-only fallback where applicable. Ordinary threads without personas keep their existing runtime-mode behavior.
 
-Critic's example defaults to `critic-review`; `critic-fix` must be explicitly requested and allowed by the definition. Investigator's clean-source handoff and Publisher's publication-only scope are retained requirements for their eventual supported operations, not claims that a generic shell enforces them.
+Critic's historical example defaults to `critic-review`; its former `critic-fix` choice does not widen new launches. Legacy diagnostic and publish-only definitions stay invalid until their author chooses one of the three access levels.
 
 ## Durable assignment and replay
 
@@ -199,19 +134,40 @@ The ordinary command receipt remains the replay boundary. A replay reuses its st
 
 Backups and environment migration must preserve snapshots together with the event database. Projection rebuild preserves the assignment references without reading source folders. Pre-library built-in assignments without a digest remain readable through the version-1 compatibility path. This compatibility path does not accept arbitrary custom definitions.
 
+## Switching a worker's model
+
+A person can switch a persona worker's model; an agent can't. A worker that hit a usage limit, or that a person wants elsewhere, moves instead of being started over. An agent that wants another model replaces the worker: it starts a new one, or a Captain replaces the member on its [Crew](../features/crews.md).
+
+- **Who.** A switch is a person's only when it arrives through a client's command path from a session that names a person (`CommandAdmission`, which marks the dispatch with `AgentPersonaModelSwitch`). Anyone that path lets send a model change on the thread may switch. Everything else is refused with a message to replace the worker: `t3_thread_configure`, an agent's message carrying a model, MCP and scheduled paths, and service sessions.
+- **What is checked.** The same checks as a launch, run again: a signed-in provider offers the model and its options, and that provider enforces the persona's access. Any offered model passes, inside the persona's list or not; Models for custom members doesn't apply, because the pick is a person's. A reviewer may be switched onto its author's model. A refusal names its reason, and the worker stays on its model.
+- **The record.** The assignment's model fields follow the thread's selection in the same event: `resolvedModelSelection`, `resolvedDriver`, `resolvedRoute` (`override`), `resolvedEntryIndex` when the new model matches a list entry, and `modelSwitchedBy: "person"`. The snapshot, digest, instructions, access, pick source and review independence don't change. Every client and the per-turn runtime check read the switched assignment, so a later turn on a provider that can no longer enforce the access is still refused.
+- **How it runs.** A switch is upstream's model or provider change. A message carrying a new model applies it the way upstream applies any message's selection, including when a queued message starts; moving to another provider takes upstream's `provider.switch` handoff.
+
 ## Clients and activation
 
 Settings → Agent Setup displays the selected environment's persona library, including empty, error, available, and blocked states. Web and mobile use shared presentation logic; desktop inherits web. Clients neither load server-local files nor resolve models. Local, remote, relay, and tunnel clients use the same authenticated catalog RPC.
 
-Activation continues through the existing orchestrator launch contract. No direct persona picker or editor is added in this slice. A launched task shows its snapshotted display name and fixed route. Runtime activity for launched provider children stays in upstream's Lineage section and subagent cards, separate from the persona library.
+Activation continues through the existing orchestrator launch contract. New tasks can select a persona, and Agent Setup edits its ordered model entries. A launched task shows its snapshotted display name and the model it runs on now, with the composer's model picker for switching it. Runtime activity for launched provider children stays in upstream's Lineage section and subagent cards, separate from the persona library.
 
-Agents can also launch a persona as a Peer Agent: `j5_spawn_agent` accepts an optional `persona` id and refuses any provider, model, and reasoning pick outside that persona's declared routes. A route always names a level, so a persona spawn always gives one. The resulting thread carries the same immutable assignment as a composer launch. See [agent tools](../a2a/agent-tools.md).
+Agents can also launch a persona as a Peer Agent: `j5_spawn_agent` accepts an optional `persona` id and refuses any provider, model, and reasoning pick outside that persona's ordered model entries. When the entry declares a reasoning level, the spawn must match it. Otherwise a model with a reasoning control accepts the explicitly requested level; a model with no reasoning control omits it. The resulting thread carries the same immutable assignment as a composer launch. See [agent tools](../a2a/agent-tools.md).
+
+## Editing in conversation
+
+Agents draft persona creates and edits, and an Owner saves them from the ask. The library belongs to the server, so a saved persona is what everyone on it runs, guests included.
+
+- **Read.** `j5_read_persona` returns the definition as Export YAML writes it, its digest, its origin (`folder` with its file, or `imported`, which includes personal ones), whether it overrides a folder persona, and whether it is turned off. It is read-only.
+- **Draft.** `j5_propose_persona` takes `create` with every Settings field, or `edit` with the read's digest and only the changed fields; the id is fixed on edit. The server validates it with Settings' decoders and limits, stores it, and returns a `draft_id`, the summary the person will see, and any warnings. It writes nothing to the library.
+- **Ask.** The proposer, or as a Captain a member's proposer, asks the person with `j5_send_message` (`expect_reply`, `persona_draft_id`). The draft goes on a new ask, which opens its own Inbox item, and a revised draft goes as another new ask. A second ask carrying the same draft while the first is open is refused, and so is a `regarding` follow-up to another ask, so J5's record stays on the ask that opened the item; on a follow-up to that ask, an id already on it is ignored. J5's summary rides on the Inbox item, not in the agent's words, and shows as plain text in a **Recorded by J5** panel: for an edit, each changed field with a line diff of the instructions; for a create, the full definition; for a folder target, both override warnings. A drafted name or description with a line break is refused, so it can't fake a line of the summary. An ask carries `persona_draft_id` or `escalation_id`, never both.
+- **Save.** **Save persona** is Owner-only (`j5.inbox.savePersonaDraft`, `settings:write`), on web and desktop. It refuses an ask already answered. An imported or personal target saves through the digest-checked Settings edit. A folder target saves as an environment override: an imported copy with the same id, on or off as the folder persona was, after checking the folder definition's digest; the folder file is never written. A create needs its id still free. A stale draft is refused with the reason, and the agent drafts again. Each draft saves once; a retry of the same request answers the ask again and writes nothing.
+- **Overrides.** Saving over a folder persona hides later team updates to it for everyone on this server. Removing the override, then restoring the folder persona, brings the team version back.
+- **Out of reach for agents.** Remove, restore, on/off, and library folders stay in Settings. Sharing is Export YAML, added to the team folder through its repository's review.
+- **Save suggestions.** When the same kind of custom worker keeps coming up, the agent suggests saving it as a persona, without blocking its work and, in a Crew, through the Captain. Nothing saves without the ask, and nothing watches for repeats.
 
 ## Verification and remaining work
 
-Focused verification covers imported ids and custom artifacts, malformed and missing sources, duplicates, route eligibility, unsupported policies, snapshot integrity, source edits/removal, launch receipts, compatibility with old assignments, and shared client presentation. Server, contracts, and affected client typechecks accompany the focused tests. Browser and simulator verification require an explicit request.
+Focused verification covers imported ids, malformed and missing sources, duplicates, route eligibility, unsupported policies, snapshot integrity, source edits/removal, launch receipts, compatibility with old assignments, and shared client presentation. Server, contracts, and affected client typechecks accompany the focused tests. Browser and simulator verification require an explicit request.
 
-Follow-up work: in-app git commit/push/pull (status nudges and open-in-editor ship; write operations are deliberately out of scope), skill allowlists and ordered model allowlists beyond a persona's two routes, posture visibility, validation of handoff artifact contents beyond existence, and supported diagnostic/publication operations. None is marked complete by this contract. A project's [Models for custom members](../features/crews.md) list is not a persona allowlist: a persona always runs on its own configured route, even on a model that list leaves out.
+Follow-up work: in-app git commit/push/pull (status nudges and open-in-editor ship; write operations are deliberately out of scope), skill allowlists, access-level editing (#779), and posture visibility. None is marked complete by this contract. A project's [Models for custom members](../features/crews.md) list is not a persona allowlist: a persona always runs on its own configured route, even on a model that list leaves out.
 
 ## History
 
@@ -219,3 +175,10 @@ Follow-up work: in-app git commit/push/pull (status nudges and open-in-editor sh
 - 2026-09-24 — upstream removed the Agents right panel in the V2 advance (PR #262); handoff status and persona identity for delegated children moved to the chip beside their Lineage rows and subagent cards.
 - 2026-09-24 — the J5 document is named "handoff artifact" to distinguish it from upstream's context handoffs.
 - 2026-10-03 — a runtime policy means only what the provider's sandbox enforces (Jackson, [#439](https://github.com/Jacksondr5/j5code/issues/439)).
+
+- 2026-11-03 — ordered model editing, per-entry eligibility and quota-aware new launches ([#778](https://github.com/Jacksondr5/j5code/issues/778)).
+- 2026-11-06 — independent reviewer personas prefer a model their authors didn't run on, never blocking ([#782](https://github.com/Jacksondr5/j5code/issues/782)).
+- 2026-11-06 — people can switch a persona worker's model; the launch route is no longer fixed for the task's life (Bastian's question on 28 Oct; [#783](https://github.com/Jacksondr5/j5code/issues/783)).
+- 2026-11-06 — an agent that wants another model replaces the worker, and a Captain can replace a Crew member (Bryant; [#784](https://github.com/Jacksondr5/j5code/issues/784)).
+- 2026-11-06 — a blocked persona refuses with one of six codes and escalates, and an Owner can allow one launch past one limit (Bryant; [#785](https://github.com/Jacksondr5/j5code/issues/785)).
+- 2026-11-06 — agents draft persona creates and edits, and an Owner saves them from the ask; a folder persona's edit saves as an environment override (Bryant; [#786](https://github.com/Jacksondr5/j5code/issues/786)).

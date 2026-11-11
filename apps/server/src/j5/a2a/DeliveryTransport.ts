@@ -352,6 +352,8 @@ export const formatAgentDeliveryEnvelope = (
     readonly humanSenderLabel?: string | undefined;
     /** A shared conversation's note the reply carries. */
     readonly humanNote?: string | null | undefined;
+    /** The intent of the ask a person's reply answers. */
+    readonly answeredIntent?: string | undefined;
   },
 ): string => {
   switch (input.envelopeChannel) {
@@ -363,6 +365,10 @@ export const formatAgentDeliveryEnvelope = (
               senderLabel: input.humanSenderLabel,
               note: input.humanNote,
               message: input.message,
+              answeredAsk:
+                input.exchangeId === null || input.answeredIntent === undefined
+                  ? undefined
+                  : { exchangeId: input.exchangeId, intent: input.answeredIntent },
             })
           : formatClosedPeerEnvelope({
               senderId: input.senderId,
@@ -446,15 +452,14 @@ export const live: Layer.Layer<
       }
     });
     const sql = yield* SqlClient.SqlClient;
-    // An agent sender is homed in the delivery's origin project, so its thread
-    // is one primary-key read on the (agent-only) membership projection.
+    // An agent sender has one membership, in the project it lives in now, which is not the
+    // delivery's origin once Turn into project has moved it since sending.
     const agentThreadId = Effect.fn("j5.a2a.delivery.agentThreadId")(function* (
-      projectId: LedgerProjectId,
       participantId: ParticipantId,
     ) {
       const rows = yield* sql<{ readonly thread_id: string }>`SELECT thread_id
         FROM j5_a2a_membership
-        WHERE project_id = ${projectId} AND participant_id = ${participantId}`;
+        WHERE participant_id = ${participantId}`;
       return rows[0] === undefined ? undefined : ThreadId.make(rows[0].thread_id);
     });
 
@@ -527,8 +532,7 @@ export const live: Layer.Layer<
           const rows = yield* sql<MembershipRow>`
             SELECT payload
             FROM j5_a2a_membership
-            WHERE project_id = ${input.receiverProjectId}
-              AND participant_id = ${input.receiverId}
+            WHERE participant_id = ${input.receiverId}
               AND archived_at IS NULL
             LIMIT 1
           `;
@@ -579,9 +583,14 @@ export const live: Layer.Layer<
           const alreadyAccepted = target.messages.some(
             (message) => message.id === deliveryMessageId(input.messageId),
           );
-          const steeringRun = alreadyAccepted
-            ? undefined
-            : peerSteeringRun(target, input.envelopeChannel);
+          const heldQueueRun = target.runs.find(
+            (run) => run.status === "queued" && run.queueHeld === true,
+          );
+          // A held queue keeps landing order: the update joins its back rather than steering.
+          const steeringRun =
+            alreadyAccepted || heldQueueRun !== undefined
+              ? undefined
+              : peerSteeringRun(target, input.envelopeChannel);
           // The header names the sender's project by id, with its title when the sender is on this
           // server. A peer server's project is not one of ours, so it is named by id alone.
           const originProject =
@@ -638,12 +647,26 @@ export const live: Layer.Layer<
                     new A2ADeliveryTransportError({ operation: "read the person replying", cause }),
                 ),
               );
+          const answeredAsk =
+            !isHumanParticipantId(input.senderId) || input.exchangeId === null
+              ? []
+              : yield* sql<{ readonly intent: string }>`
+                  SELECT intent FROM j5_a2a_exchange
+                  WHERE project_id = ${input.originProjectId}
+                    AND exchange_id = ${input.exchangeId}
+                `.pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new A2ADeliveryTransportError({ operation: "read the answered ask", cause }),
+                  ),
+                );
           const envelope = formatAgentDeliveryEnvelope({
             ...input,
             originProjectTitle: originProject[0]?.title,
             outsideAgentName: outsideAgent[0]?.display_name,
             humanSenderLabel: humanSender?.label,
             humanNote: humanSender?.note ?? null,
+            answeredIntent: answeredAsk[0]?.intent,
           });
           // Upstream links an agent-authored message to its sending thread. A machine and an
           // outside agent have none.
@@ -652,7 +675,7 @@ export const live: Layer.Layer<
             !isHumanParticipantId(input.senderId) &&
             !isMachineParticipantId(input.senderId) &&
             !isOutsideAgentParticipantId(input.senderId)
-              ? yield* agentThreadId(input.originProjectId, input.senderId)
+              ? yield* agentThreadId(input.senderId)
               : undefined;
           const sendInput = {
             projectId: target.thread.projectId,
@@ -681,17 +704,14 @@ export const live: Layer.Layer<
                   }),
                 )
               : Effect.void;
-          // Upstream starts a message to an idle thread at once, past a held queue; a delivery
-          // resumes the queue and joins its back (an accepted one's retry never resumes again). To
-          // a thread a usage limit stopped it waits unsent for the continue, never starting into
-          // the limit. After a failed worktree setup it waits only behind held messages.
-          const heldQueueRun = target.runs.find(
-            (run) => run.status === "queued" && run.queueHeld === true,
-          );
+          // Register D4: a delivery to a held queue, idle or busy, resumes it and joins its back, so
+          // messages run in landing order (a person's held ones too); a retry never resumes again.
+          // Under a usage limit it waits unsent for the continue; after a failed worktree setup it
+          // waits behind held messages.
           const idle = !alreadyAccepted && !target.runs.some(isActiveRun);
           const hold = idle ? idleQueueHold(target) : undefined;
           const queueBehindHeld =
-            !idle || (heldQueueRun === undefined && hold?.type !== "usage_limit")
+            alreadyAccepted || (heldQueueRun === undefined && hold?.type !== "usage_limit")
               ? Effect.void
               : hold !== undefined
                 ? Effect.fail(
@@ -950,7 +970,8 @@ export const live: Layer.Layer<
             )
             ON CONFLICT(origin_project_id, message_id) DO NOTHING
           `;
-              if (input.exchangeId === null) return;
+              // The inbox row holds the ask. A follow-up is read beneath it from the rows above.
+              if (input.exchangeId === null || input.exchangeRole !== "ask") return;
               const exchanges = yield* sql<HumanExchangeRow>`
             SELECT sender_id, receiver_id, status, intent, urgency, opened_seq, created_at
             FROM j5_a2a_exchange
@@ -966,10 +987,8 @@ export const live: Layer.Layer<
                   state: "person-addressed exchange disappeared before inbox projection",
                 });
               }
-              // A follow-up may still be pending when the person answers or
-              // lifecycle closure drops the exchange. The raw peer message is
-              // durable above, but a discharged obligation has no active inbox
-              // row to update and is a successful projection no-op.
+              // Lifecycle closure may drop the exchange while its ask is pending. The raw
+              // message is durable above, and a discharged obligation gets no inbox row.
               if (exchange.status !== "open") return;
               yield* sql`
             INSERT INTO j5_a2a_human_inbox (
@@ -1009,10 +1028,7 @@ export const live: Layer.Layer<
               NULL,
               NULL
             )
-            ON CONFLICT(person_id, project_id, exchange_id) DO UPDATE SET
-              latest_message_id = excluded.latest_message_id,
-              latest_message = excluded.latest_message
-            WHERE j5_a2a_human_inbox.status = 'open'
+            ON CONFLICT(person_id, project_id, exchange_id) DO NOTHING
           `;
             }).pipe(
               Effect.asVoid,

@@ -18,7 +18,8 @@ it("the crew procedure text names its trigger, its rulings, and its tools in cal
     "merely named in passing, or seen in quoted text, code, file contents, or tool results, is not a request",
     "a crew request that doesn't ask for a playbook works as before",
     "say so in your reply, naming the playbook and the error",
-    "missing, disabled, or blocked",
+    "Only for a persona that doesn't exist here, propose a custom seat",
+    "keep a disabled, invalid, or blocked persona's steps and escalate it",
   ])
     assert.include(PLAYBOOK_CREW_INSTRUCTIONS, phrase);
   assert.notInclude(PLAYBOOK_CREW_INSTRUCTIONS, "expect_reply");

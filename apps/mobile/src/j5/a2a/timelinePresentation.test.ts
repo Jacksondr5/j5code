@@ -3,6 +3,8 @@ import { EnvironmentId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  j5FoldHeader,
+  presentJ5QueuedMessage,
   presentJ5TimelineNotice,
   resolveJ5FeedMessage,
   type J5Timeline,
@@ -54,7 +56,7 @@ const briefRaw = [
 const silenceRaw = [
   "[Cross-agent messaging system notice: turn-ended-no-reply]",
   "",
-  "Captain's turn ended without replying on exchange:one. The latest delivered message was processed.",
+  "agent:captain's turn ended without replying on exchange:one. The latest delivered message was processed.",
   "",
   "This is a platform-authored delivery signal, not a peer reply.",
 ].join("\n");
@@ -134,7 +136,7 @@ describe("resolveJ5FeedMessage", () => {
     });
   });
 
-  it("leaves a message J5 cannot read to upstream's row as stored", () => {
+  it("leaves a message J5 cannot read to upstream's row as stored, on the left if the platform's", () => {
     const unknown = delivery("agent", "[Cross-agent message from x]\n\nv7");
     expect(resolveJ5FeedMessage(unknown, timeline(null))).toMatchObject({
       j5: null,
@@ -142,39 +144,94 @@ describe("resolveJ5FeedMessage", () => {
       preview: null,
       text: unknown.text,
     });
+    const platform = { id: "other", role: "user", createdBy: "system" as const, text: "Hm." };
+    expect(resolveJ5FeedMessage(platform, timeline(null))).toMatchObject({
+      j5: null,
+      prompt: null,
+      side: "left",
+    });
+  });
+
+  it("sends a playbook step to upstream's Automation row under J5's heading", () => {
+    const step = {
+      id: "message:step",
+      role: "user",
+      createdBy: "system" as const,
+      text: "<j5_playbook_step>\nstep: build | Build the timeline\nposition: 2 of 3\n</j5_playbook_step>\n<step_prompt>\nBuild it.\n</step_prompt>\n",
+    };
+    expect(resolveJ5FeedMessage(step, timeline(null))).toMatchObject({
+      attribution: "automation",
+      text: "Build it.",
+      side: "left",
+      prompt: {
+        kind: "playbook-step",
+        label: "Playbook step 2 of 3",
+        preview: "Build the timeline",
+      },
+    });
+  });
+});
+
+describe("presentJ5QueuedMessage", () => {
+  it("names a queued delivery's sender and shows its letter, not the envelope", () => {
+    expect(presentJ5QueuedMessage(delivery("agent", askRaw), timeline(null))).toMatchObject({
+      j5: { group: "participant", senderId: "agent:captain", badge: "expects-reply" },
+      preview: "Which schema version do we target?",
+    });
+    expect(
+      presentJ5QueuedMessage(delivery("user", inboxReplyRaw), timeline("human:priya")),
+    ).toMatchObject({ j5: { group: "person", viaInbox: true }, preview: "Target v2." });
+  });
+
+  it("leaves a message typed in the thread to upstream's row", () => {
+    const typed = { id: "message:typed", role: "user", createdBy: "user" as const, text: "Hi" };
+    expect(presentJ5QueuedMessage(typed, timeline(null))).toBeNull();
   });
 });
 
 describe("presentJ5TimelineNotice", () => {
-  it("summarizes a silence in one line", () => {
-    expect(presentJ5TimelineNotice(delivery("system", silenceRaw))).toEqual({
-      kind: "silence",
+  const labels = new Map([["agent:captain", "Captain"]]);
+
+  it("names the participants in a notice's line and detail", () => {
+    expect(presentJ5TimelineNotice(delivery("system", silenceRaw), labels)).toEqual({
+      kind: "line",
+      noticeKind: "silence",
       summary: "Captain's turn ended without replying",
+      detail: "The latest delivered message was processed.",
     });
   });
 
-  it("keeps a delivery notice it cannot read, and a Crew notice, as a labelled raw card", () => {
+  it("reads a Crew notice for its lines, and leaves a delivery notice it cannot read to upstream", () => {
     expect(
-      presentJ5TimelineNotice(delivery("system", "[Cross-agent messaging system notice: v7]\n\n?")),
-    ).toEqual({ kind: "raw", label: "Raw A2A delivery" });
+      presentJ5TimelineNotice(
+        delivery("system", "[Cross-agent messaging system notice: v7]\n\n?"),
+        labels,
+      ),
+    ).toBeNull();
     expect(
-      presentJ5TimelineNotice({
-        id: "message:crew",
-        role: "user",
-        createdBy: "system",
-        text: "<j5_crew_gate>\nproposal_id: crew:proposal:1\nkind: roster\ndecision: declined\n</j5_crew_gate>",
-      }),
-    ).toEqual({ kind: "raw", label: "Crew notice" });
+      presentJ5TimelineNotice(
+        {
+          id: "message:crew",
+          role: "user",
+          createdBy: "system",
+          text: "<j5_crew_gate>\nproposal_id: crew:proposal:1\nkind: roster\ndecision: declined\n</j5_crew_gate>",
+        },
+        labels,
+      ),
+    ).toMatchObject({ kind: "crew", notice: { kind: "gate", decision: "declined" } });
   });
 
-  it("shows what a Crew member was told as a card of its own, not as the reader's message", () => {
+  it("shows what a Crew member was told as a line of its own, not as the reader's message", () => {
     expect(
-      presentJ5TimelineNotice({
-        id: "message:j5:crew-context:abc",
-        role: "user",
-        createdBy: "system",
-        text: "<j5_crew_delivery_context>\n<j5_crew_roster_changed>\njoined: security\n</j5_crew_roster_changed>\n</j5_crew_delivery_context>",
-      }),
+      presentJ5TimelineNotice(
+        {
+          id: "message:j5:crew-context:abc",
+          role: "user",
+          createdBy: "system",
+          text: "<j5_crew_delivery_context>\n<j5_crew_roster_changed>\njoined: security\n</j5_crew_roster_changed>\n</j5_crew_delivery_context>",
+        },
+        labels,
+      ),
     ).toEqual({
       kind: "context",
       title: "Roster changed",
@@ -183,14 +240,43 @@ describe("presentJ5TimelineNotice", () => {
   });
 
   it("leaves letters and upstream's own messages to their rows", () => {
-    expect(presentJ5TimelineNotice(delivery("agent", askRaw))).toBeNull();
+    expect(presentJ5TimelineNotice(delivery("agent", askRaw), labels)).toBeNull();
     expect(
-      presentJ5TimelineNotice({
-        id: "message:pr-watch:1",
-        role: "user",
-        createdBy: "system",
-        text: "PR merged",
-      }),
+      presentJ5TimelineNotice(
+        { id: "message:pr-watch:1", role: "user", createdBy: "system", text: "PR merged" },
+        labels,
+      ),
     ).toBeNull();
+  });
+});
+
+describe("j5FoldHeader", () => {
+  const named: J5Timeline = { ...timeline(null), labels: new Map([["agent:captain", "Captain"]]) };
+
+  it("names the sender once open, and drops the summary the body opens with", () => {
+    const row = resolveJ5FeedMessage(delivery("agent", askRaw), named);
+    const summary = row.preview ?? "";
+    expect(j5FoldHeader(row, named, false, summary)).toEqual({ label: "", summary });
+    expect(j5FoldHeader(row, named, true, summary)).toEqual({ label: "Captain", summary: "" });
+  });
+
+  it("leaves an unnamed sender to upstream's sender-thread label", () => {
+    const row = resolveJ5FeedMessage(delivery("agent", askRaw), timeline(null));
+    expect(j5FoldHeader(row, timeline(null), true, row.preview ?? "")).toEqual({ summary: "" });
+  });
+
+  it("keeps a Crew seat brief's task in the open header, since its body opens with the Crew", () => {
+    const row = resolveJ5FeedMessage(
+      {
+        id: "message:j5:a2a:mcp:session:spawn-brief:key",
+        role: "user",
+        createdBy: "agent",
+        text: briefRaw,
+      },
+      timeline(null),
+    );
+    expect(j5FoldHeader(row, timeline(null), true, row.preview ?? "")).toEqual({
+      summary: "Build the timeline.",
+    });
   });
 });

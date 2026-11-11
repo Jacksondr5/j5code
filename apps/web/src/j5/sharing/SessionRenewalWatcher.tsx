@@ -15,7 +15,7 @@ const ATTEMPTS_PER_DROP = 2;
 export function SessionRenewalWatcher() {
   const phase = usePrimaryEnvironment()?.connection.phase ?? null;
   const attempts = useRef<number | null>(null);
-  // oxlint-disable-next-line t3code/react-effect-budget -- renews the session in response to the connection dropping, which no handler here causes.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- renews the session in response to the connection dropping, which no handler here causes.
   useEffect(() => {
     if (phase === "connected") {
       attempts.current = 0;

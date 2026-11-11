@@ -29,12 +29,10 @@ import {
   J5SendMessageTool,
   J5SpawnAgentInput,
   J5SpawnAgentTool,
-  J5StopAgentTool,
   J5Toolkit,
   J5_PROPOSE_CREW_DESCRIPTION,
   J5_REQUEST_CREW_MEMBER_DESCRIPTION,
   J5_SPAWN_AGENT_DESCRIPTION,
-  J5_STOP_AGENT_DESCRIPTION,
 } from "./tools.ts";
 
 const decodeProposeCrew = Schema.decodeUnknownSync(J5ProposeCrewInput);
@@ -77,7 +75,6 @@ it("publishes the ratified single-target lifecycle contracts fail-closed", () =>
     "To the human, only an ask: a plain send to a person is refused",
   );
   assert.equal(J5SpawnAgentTool.description, J5_SPAWN_AGENT_DESCRIPTION);
-  assert.equal(J5StopAgentTool.description, J5_STOP_AGENT_DESCRIPTION);
   const sp4BriefSteering =
     "In your brief, tell the new agent what it should do first and whether it should reply to you.";
   assert.equal(J5SpawnAgentTool.description?.split(sp4BriefSteering).length, 2);
@@ -88,21 +85,12 @@ it("publishes the ratified single-target lifecycle contracts fail-closed", () =>
     readonly required?: ReadonlyArray<string>;
     readonly properties?: Readonly<Record<string, unknown>>;
   };
-  const stopSchema = Tool.getJsonSchema(J5StopAgentTool) as {
-    readonly required?: ReadonlyArray<string>;
-    readonly properties?: Readonly<Record<string, unknown>>;
-  };
-  assert.sameMembers(
-    [...(spawnSchema.required ?? [])],
-    ["brief", "title", "provider", "model", "workspace"],
-  );
-  assert.sameMembers([...(stopSchema.required ?? [])], ["participant_id"]);
+  assert.sameMembers([...(spawnSchema.required ?? [])], ["brief", "title", "workspace"]);
   assert.property(spawnSchema.properties ?? {}, "client_request_id");
   assert.property(spawnSchema.properties ?? {}, "persona");
   // No pre-dogfood compatibility spelling: `persona` is the only name the model sees.
   assert.notProperty(spawnSchema.properties ?? {}, "agent");
-  assert.include(J5SpawnAgentTool.description ?? "", "one of that persona's declared routes");
-  assert.property(stopSchema.properties ?? {}, "client_request_id");
+  assert.include(J5SpawnAgentTool.description ?? "", "set them only to pin one of those entries");
   // Exact on purpose: no tool answers the Inbox's worktree cleanup approval; only a person can.
   assert.sameMembers(Object.keys(J5Toolkit.tools), [
     "j5_playbook_back",
@@ -117,11 +105,12 @@ it("publishes the ratified single-target lifecycle contracts fail-closed", () =>
     "j5_playbook_start",
     "j5_send_message",
     "j5_list_personas",
+    "j5_read_persona",
+    "j5_propose_persona",
     "j5_list_participants",
     "j5_propose_crew",
     "j5_request_crew_member",
     "j5_spawn_agent",
-    "j5_stop_agent",
     "j5_stop_crew",
     "j5_archive_crew",
     "j5_clear_own_ask",
@@ -145,10 +134,10 @@ it("publishes the ratified single-target lifecycle contracts fail-closed", () =>
       "mcp__t3-code__delegate_task",
       "mcp__t3-code__task_status",
       "mcp__t3-code__task_cancel",
+      "mcp__t3-code__t3_thread_interrupt",
     ],
   );
   assert.isFalse(Context.get(J5SpawnAgentTool.annotations, Tool.Idempotent));
-  assert.isFalse(Context.get(J5StopAgentTool.annotations, Tool.Idempotent));
 });
 
 // These are provider-facing safety hints, independent of J5's pre-approval list. This
@@ -177,6 +166,7 @@ it("publishes closed-world, non-destructive hints for every read-only J5 tool", 
       "t3_project_read",
       "t3_thread_search",
       "j5_list_personas",
+      "j5_read_persona",
       "j5_list_participants",
     ],
   );

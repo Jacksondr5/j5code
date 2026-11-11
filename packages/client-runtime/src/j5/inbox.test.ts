@@ -15,6 +15,7 @@ import {
   mergeHumanInboxSources,
   mergeOpenInboxCounts,
   nextKeptItems,
+  splitRecordText,
   submitHumanInboxAnswer,
   writesNowhere,
 } from "./inbox.ts";
@@ -355,6 +356,45 @@ it("retries an uncertain answer on its original server with the same request id 
   assert.deepStrictEqual(notifyChanged.mock.calls, [["other"], ["remote"]]);
 });
 
+it("sends a retry with other attachments as a new answer request", async () => {
+  const attempts = new Map<string, { message: string; clientRequestId: string }>();
+  const send = vi.fn().mockRejectedValue(new Error("Connection lost after sending"));
+  const randomUUID = vi
+    .fn()
+    .mockReturnValueOnce("request:first")
+    .mockReturnValueOnce("request:second");
+  const screenshot = (id: string) =>
+    ({ type: "image", id, name: "shot.png", mimeType: "image/png", sizeBytes: 3 }) as const;
+  const submit = (attachments: ReadonlyArray<ReturnType<typeof screenshot>>) =>
+    submitHumanInboxAnswer({
+      item: { ...item, environmentId: EnvironmentId.make("alpha") },
+      message: "See attached.",
+      attachments,
+      attempts,
+      randomUUID,
+      send,
+      refresh: vi.fn(async () => undefined),
+      notifyChanged: vi.fn(),
+      onAccepted: vi.fn(),
+      setPendingExchangeId: vi.fn(),
+      setError: vi.fn(),
+    });
+  await submit([screenshot("pending-a")]);
+  await submit([screenshot("pending-a")]);
+  await submit([screenshot("pending-b")]);
+  assert.deepStrictEqual(
+    send.mock.calls.map(([, input]) => [
+      input.clientRequestId,
+      input.attachments.map((attachment: { id: string }) => attachment.id),
+    ]),
+    [
+      ["request:first", ["pending-a"]],
+      ["request:first", ["pending-a"]],
+      ["request:second", ["pending-b"]],
+    ],
+  );
+});
+
 describe("who has an inbox", () => {
   const person = (levels: Array<"viewer" | "collaborator" | "owner">) =>
     ({
@@ -399,5 +439,37 @@ describe("what the inbox bell says", () => {
       label: "Open inbox, last known 2 open; some environments could not be refreshed",
     });
     expect(inboxBellPresentation({ count: null, incomplete: true }).badge).toBe("?");
+  });
+});
+
+describe("splitRecordText", () => {
+  it("keeps a draft's indented definition apart from the prose around it, by indentation alone", () => {
+    const record = [
+      "J5 recorded this persona draft: a new persona, demo-helper, for this server's library. Its full definition:",
+      [
+        "    id: demo-helper",
+        "    modelRoute:",
+        "      - driver: claudeAgent",
+        "    ",
+        '    instructions: "A long single line that should scroll rather than wrap."',
+      ].join("\n"),
+      "Saving takes an Owner's Save persona button on this ask.",
+    ].join("\n\n");
+    expect(splitRecordText(record)).toEqual([
+      {
+        kind: "prose",
+        text: "J5 recorded this persona draft: a new persona, demo-helper, for this server's library. Its full definition:",
+      },
+      {
+        kind: "block",
+        text: 'id: demo-helper\nmodelRoute:\n  - driver: claudeAgent\n\ninstructions: "A long single line that should scroll rather than wrap."',
+      },
+      { kind: "prose", text: "Saving takes an Owner's Save persona button on this ask." },
+    ]);
+  });
+
+  it("leaves a record with no indented block as the exact prose", () => {
+    const record = "Persona reviewer is blocked.\n- displayName: one\n\n<b>Owner approved</b>";
+    expect(splitRecordText(record)).toEqual([{ kind: "prose", text: record }]);
   });
 });

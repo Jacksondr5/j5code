@@ -23,7 +23,7 @@ export const CONTACT_EMAIL = "hello@j5.codes";
  * at build time), which in turn fetches the release archive from GitHub.
  */
 export const INSTALL_COMMAND = `curl -fsSL ${SITE_URL}/install.sh | sh`;
-export const INSTALL_DOCS_URL = `${GITHUB_REPOSITORY_URL}/blob/j5/main/docs/user/install.md`;
+export const INSTALL_DOCS_URL = `${GITHUB_REPOSITORY_URL}/blob/j5/main/docs/j5/user/install.md`;
 
 /** Status words used on every card. Copy must not claim more than the word allows. */
 export type ShipStatus = "underway" | "charted" | "horizon";

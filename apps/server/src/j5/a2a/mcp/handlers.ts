@@ -1,10 +1,16 @@
+import * as Clock from "effect/Clock";
 import * as Layer from "effect/Layer";
 import * as SpawnAgentService from "../SpawnAgentService.ts";
-import { stateError, preflightSpawnCaller, resolveCallerMembership } from "../AgentCaller.ts";
-import { type ChatAttachment, ProjectId } from "@t3tools/contracts";
+import {
+  J5PersonaBlockedError,
+  preflightSpawnCaller,
+  resolveCallerMembership,
+  stateError,
+} from "../AgentCaller.ts";
+import { type ChatAttachment, EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { playbookHandlers } from "../../playbooks/mcp.ts";
 import { playbookWorkspaceRoot } from "../../playbooks/workspace.ts";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -12,8 +18,10 @@ import * as Option from "effect/Option";
 
 import {
   McpInvocationContext,
+  type McpInvocationScope,
   type McpThreadInvocationScope,
   requireThreadScope,
+  threadLinkFor,
 } from "../../../mcp/McpInvocationContext.ts";
 import * as McpToolAccess from "../../../mcp/McpToolAccess.ts";
 
@@ -24,14 +32,15 @@ import {
 } from "../../../mcp/threadAccess.ts";
 
 import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
-import {
-  ThreadManagementService,
-  latestActiveRun,
-} from "../../../orchestration-v2/ThreadManagementService.ts";
+import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
 
 import { ProjectService } from "../../../project/ProjectService.ts";
 import { ProviderRegistry } from "../../../provider/ProviderRegistry.ts";
-import { makeAgentPersonaLibrary } from "../../agents/agentPersonaLibrary.ts";
+import {
+  definitionDigest,
+  definitionYaml,
+  makeAgentPersonaLibrary,
+} from "../../agents/agentPersonaLibrary.ts";
 import { buildAgentPersonaCatalog } from "../../agents/agentPersonaRouting.ts";
 
 import { AgentCrewInstanceService } from "../AgentCrewInstanceService.ts";
@@ -57,13 +66,13 @@ import { PeerRegistryService } from "../PeerRegistryService.ts";
 import { ParticipantPlacementService } from "../PlacementService.ts";
 import { withDeliveryNotice } from "../receiverBacklog.ts";
 import { A2ASendService } from "../SendService.ts";
-import { AGENT_STOP_REASON, stopThread } from "../stopThread.ts";
 import { sendClaimingAttachments } from "./attachments.ts";
 import {
   outsideAgentCaller,
   sendAsOutsideAgent,
   spawnAndBrief,
   actsAsThreadCaller,
+  j5Writes,
 } from "./outsideAgent.ts";
 
 import { spawnWorkspaceFromInput } from "../spawnWorkspace.ts";
@@ -71,10 +80,15 @@ import { spawnWorkspaceFromInput } from "../spawnWorkspace.ts";
 import { crewSeatRequestKey, lifecycleCommandId, stablePart } from "../spawnIds.ts";
 import {
   CommCommandId,
+  isHumanParticipantId,
   LedgerProjectId,
   type ParticipantDirectoryRow,
-  type ParticipantId,
 } from "../contracts.ts";
+import { AgentPersonaEscalations } from "../../agents/agentPersonaEscalation.ts";
+import {
+  AgentPersonaDrafts,
+  type AgentPersonaDraftRequest,
+} from "../../agents/agentPersonaDrafts.ts";
 import type { ParticipantProvenanceView } from "../placementContracts.ts";
 import {
   J5_LIST_PARTICIPANTS_DEFAULT_LIMIT,
@@ -86,9 +100,11 @@ import {
 
 const failure = (error: unknown): J5McpFailure => ({
   code:
-    typeof error === "object" && error !== null && "_tag" in error
-      ? String(error._tag)
-      : "J5A2AError",
+    error instanceof J5PersonaBlockedError
+      ? error.code
+      : typeof error === "object" && error !== null && "_tag" in error
+        ? String(error._tag)
+        : "J5A2AError",
   message: error instanceof Error ? error.message : String(error),
 });
 
@@ -226,7 +242,7 @@ const crewProposalNextStep = (error: CrewProposalError) =>
   error._tag === "CrewProposalRequestError"
     ? error.nextStep
     : error._tag === "CrewLaunchSeatUnavailableError"
-      ? "Choose a different persona from j5_list_personas or ask the user to fix that persona, then retry."
+      ? "Or choose a different persona from j5_list_personas that fits the work, then retry."
       : error._tag === "CrewLaunchModelNotEligibleError"
         ? "Give that custom member one of the eligible models or levels above, or leave its model unset to use yours if yours is eligible, then retry."
         : error._tag === "CrewLaunchCapError"
@@ -237,7 +253,19 @@ const crewProposalNextStep = (error: CrewProposalError) =>
               ? "Claim only steps no seat owns yet, then retry."
               : "Retry with the same client_request_id; recovery is forward-only.";
 
-const projectCrewProposal = (outcome: CrewProposalOutcome) => ({
+/** A refused persona seat keeps its code, as on every other persona launch path. */
+const crewProposalRefusal = (error: CrewProposalError) =>
+  (error._tag === "CrewLaunchSeatUnavailableError" ||
+    error._tag === "CrewLaunchModelNotEligibleError") &&
+  error.blockCode !== undefined
+    ? new J5PersonaBlockedError({
+        code: error.blockCode,
+        state: error.message,
+        nextCommand: crewProposalNextStep(error),
+      })
+    : stateError(error.message, crewProposalNextStep(error));
+
+const projectCrewProposal = (outcome: CrewProposalOutcome, scope: McpInvocationScope) => ({
   proposal_id: outcome.proposal.id,
   status: outcome.proposal.status,
   approval_mode: outcome.proposal.approvalMode ?? "human",
@@ -247,6 +275,7 @@ const projectCrewProposal = (outcome: CrewProposalOutcome) => ({
     persona_id: member.agentId,
     participant_id: member.participantId,
     thread_id: member.threadId,
+    link: threadLinkFor(scope, member.threadId),
   })),
   ...(outcome.playbook == null
     ? {}
@@ -271,10 +300,12 @@ export const crewSeatFromInput = (seat: J5ProposeCrewInput["seats"][number]) => 
   seat: seat.seat,
   agentId: seat.persona ?? null,
   reason: seat.reason,
+  ...(seat.allow_once === undefined ? {} : { allowOnce: seat.allow_once }),
   ...(seat.instructions === undefined ? {} : { instructions: seat.instructions }),
   ...(seat.model_selection === undefined ? {} : { modelSelection: seat.model_selection }),
   ...(seat.runtime_mode === undefined ? {} : { runtimeMode: seat.runtime_mode }),
   ...(seat.steps === undefined ? {} : { steps: seat.steps }),
+  ...(seat.reviews === undefined ? {} : { reviews: seat.reviews }),
   workspace: spawnWorkspaceFromInput(seat.workspace),
 });
 
@@ -283,7 +314,7 @@ const handlers = {
   // Declared `writes` so an outside agent is admitted and a read-only client is refused. A thread
   // caller gets the checks `actsAsCaller` gave it, and `writes` also requires the orchestration
   // capability, which every provider session J5 starts carries.
-  j5_send_message: McpToolAccess.writes((input) =>
+  j5_send_message: j5Writes((input) =>
     Effect.gen(function* () {
       const outside = yield* outsideAgentCaller;
       if (outside !== undefined) {
@@ -312,7 +343,80 @@ const handlers = {
           "Call j5_list_participants to find the intended recipient, or use schedule_task if you need a future trigger for yourself.",
         );
       }
-      const crypto = yield* Crypto.Crypto;
+      // An ask about a refused persona launch; the Inbox shows J5's record of it apart from the text.
+      let escalationId = input.escalation_id ?? undefined;
+      // An ask carries at most one Owner action.
+      let personaDraftId = input.persona_draft_id ?? undefined;
+      if (escalationId !== undefined && personaDraftId !== undefined)
+        return yield* stateError(
+          "An ask carries escalation_id or persona_draft_id, not both.",
+          "Send one ask per decision: retry with only one of them.",
+        );
+      // J5's record stays on the ask that opened the Inbox item: a follow-up to that ask already
+      // has it, so the id is dropped, and any other follow-up is refused.
+      if (input.regarding != null && (escalationId ?? personaDraftId) !== undefined) {
+        const recordField = escalationId !== undefined ? "escalation_id" : "persona_draft_id";
+        const linked =
+          escalationId !== undefined
+            ? yield* (yield* AgentPersonaEscalations)
+                .linkedAsk(escalationId)
+                .pipe(
+                  Effect.mapError((error) =>
+                    stateError(
+                      error.message,
+                      "Check the escalation_id from the refusal and retry.",
+                    ),
+                  ),
+                )
+            : personaDraftId !== undefined
+              ? yield* (yield* AgentPersonaDrafts)
+                  .linkedAsk(personaDraftId)
+                  .pipe(
+                    Effect.mapError((error) =>
+                      stateError(
+                        error.message,
+                        "Check the draft_id from j5_propose_persona and retry.",
+                      ),
+                    ),
+                  )
+              : null;
+        if (linked !== input.regarding)
+          return yield* stateError(
+            `${recordField} opens its own Inbox item, so it can't go on a regarding follow-up to another ask.`,
+            `Retry without regarding: send a new ask to the person with expect_reply=true, intent, urgency and ${recordField}.`,
+          );
+        escalationId = undefined;
+        personaDraftId = undefined;
+      }
+      if (escalationId !== undefined) {
+        if (input.expect_reply !== true || !isHumanParticipantId(input.to))
+          return yield* stateError(
+            "escalation_id goes only on an ask to a person.",
+            "Retry j5_send_message to the person with expect_reply=true, intent and urgency, or, as a Crew member, tell your Captain the escalation_id in an ordinary message.",
+          );
+        yield* (yield* AgentPersonaEscalations)
+          .authorizeAsk({ escalationId, askerParticipantId: callerParticipantId })
+          .pipe(
+            Effect.mapError((error) =>
+              stateError(error.message, "Check the escalation_id from the refusal and retry."),
+            ),
+          );
+      }
+      if (personaDraftId !== undefined) {
+        if (input.expect_reply !== true || !isHumanParticipantId(input.to))
+          return yield* stateError(
+            "persona_draft_id goes only on an ask to a person.",
+            "Retry j5_send_message to the person with expect_reply=true, intent and urgency, or, as a Crew member, tell your Captain the draft_id in an ordinary message.",
+          );
+        yield* (yield* AgentPersonaDrafts)
+          .authorizeAsk({ draftId: personaDraftId, askerParticipantId: callerParticipantId })
+          .pipe(
+            Effect.mapError((error) =>
+              stateError(error.message, "Check the draft_id from j5_propose_persona and retry."),
+            ),
+          );
+      }
+      const crypto = yield* SecureRandom.SecureRandom;
       const service = yield* A2ASendService;
       const worker = yield* A2ADeliveryWorker;
       const mode = input.mode ?? "queue";
@@ -387,8 +491,7 @@ const handlers = {
         );
       }
       const acceptedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
-      const requestKey =
-        input.client_request_id ?? (yield* crypto.randomUUIDv4().pipe(Effect.orDie));
+      const requestKey = input.client_request_id ?? (yield* crypto.uuidV4().pipe(Effect.orDie));
       const send = (claimed?: ReadonlyArray<ChatAttachment>) =>
         service.send({
           commandId: commandIdForRequest({
@@ -401,6 +504,7 @@ const handlers = {
           message: input.message,
           ...(input.expect_reply == null ? {} : { expectReply: input.expect_reply }),
           ...(input.exchange_id == null ? {} : { exchangeId: input.exchange_id }),
+          ...(input.regarding == null ? {} : { regarding: input.regarding }),
           ...(input.intent == null ? {} : { intent: input.intent }),
           ...(input.urgency == null ? {} : { urgency: input.urgency }),
           ...(mode === "queue" ? {} : { mode }),
@@ -412,6 +516,16 @@ const handlers = {
         receiverThreadId === undefined || attachments.length === 0
           ? yield* send()
           : yield* sendClaimingAttachments(receiverThreadId, attachments, send);
+      if (escalationId !== undefined && result.exchangeId !== null)
+        yield* (yield* AgentPersonaEscalations).linkAsk({
+          escalationId,
+          exchangeId: result.exchangeId,
+        });
+      if (personaDraftId !== undefined && result.exchangeId !== null)
+        yield* (yield* AgentPersonaDrafts).linkAsk({
+          draftId: personaDraftId,
+          exchangeId: result.exchangeId,
+        });
       yield* worker.notify;
       return yield* withDeliveryNotice(result, {
         receiverId: input.to,
@@ -445,6 +559,7 @@ const handlers = {
   ),
   j5_list_participants: McpToolAccess.reads((input) =>
     Effect.gen(function* () {
+      const scope = yield* McpInvocationContext;
       const outside = yield* outsideAgentCaller;
       const callerThreadId =
         outside === undefined ? (yield* callerScope).thread.threadId : undefined;
@@ -518,6 +633,7 @@ const handlers = {
           can_open_exchange: row.canOpenExchange,
           accepts_urgency: row.acceptsUrgency,
           thread_id: null,
+          link: null,
           provenance: projectProvenance({ kind: "not-applicable" } as const),
           placement_parent_id: null,
           display_name: row.displayName ?? null,
@@ -584,6 +700,11 @@ const handlers = {
               callerThreadId !== undefined && !agent.archived && agent.canReceiveMessage,
             accepts_urgency: false,
             thread_id: agent.threadId,
+            // The thread lives on that server, so its link names that server's environment.
+            link: threadLinkFor(
+              { environmentId: EnvironmentId.make(agent.environmentId), client: scope.client },
+              agent.threadId,
+            ),
             provenance: projectProvenance({ kind: "unrecorded" } as const),
             placement_parent_id: null,
             display_name: agent.displayName,
@@ -674,6 +795,10 @@ const handlers = {
               can_open_exchange: !isSelf && row.canOpenExchange,
               accepts_urgency: row.acceptsUrgency,
               thread_id: row.participant.kind === "agent" ? row.participant.threadId : null,
+              link:
+                row.participant.kind === "agent"
+                  ? threadLinkFor(scope, row.participant.threadId)
+                  : null,
               provenance: projectProvenance(
                 placement?.provenance ??
                   (row.participant.kind !== "agent"
@@ -722,7 +847,7 @@ const handlers = {
   // Declared `writes`, as send and stop are, so an outside agent is admitted and a read-only
   // client is refused. The spawn service holds the chosen modes to the caller's limits: a
   // thread's own modes, or the level an outside agent's sign-in was approved at.
-  j5_spawn_agent: McpToolAccess.writes((input) =>
+  j5_spawn_agent: j5Writes((input) =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext;
       return yield* (yield* SpawnAgentService.SpawnAgentService).spawn(input, scope);
@@ -733,10 +858,9 @@ const handlers = {
     spawnAndBrief("propose the Crew"),
     (input, scope) =>
       Effect.gen(function* () {
-        const crypto = yield* Crypto.Crypto;
+        const crypto = yield* SecureRandom.SecureRandom;
         const captain = yield* preflightCrewCaptain(scope, "j5_propose_crew");
-        const requestKey =
-          input.client_request_id ?? (yield* crypto.randomUUIDv4().pipe(Effect.orDie));
+        const requestKey = input.client_request_id ?? (yield* crypto.uuidV4().pipe(Effect.orDie));
         // The Captain's playbooks are the ones its own j5_playbook_list shows.
         const playbook =
           input.playbook === undefined
@@ -761,8 +885,8 @@ const handlers = {
             ...(playbook === undefined ? {} : { playbook }),
             seats: input.seats.map(crewSeatFromInput),
           })
-          .pipe(Effect.mapError((error) => stateError(error.message, crewProposalNextStep(error))));
-        return projectCrewProposal(outcome);
+          .pipe(Effect.mapError(crewProposalRefusal));
+        return projectCrewProposal(outcome, scope);
       }).pipe(Effect.mapError(failure)),
   ),
   j5_request_crew_member: actsAsThreadCaller(
@@ -770,10 +894,9 @@ const handlers = {
     spawnAndBrief("propose the Crew and ask for the seat"),
     (input, scope) =>
       Effect.gen(function* () {
-        const crypto = yield* Crypto.Crypto;
+        const crypto = yield* SecureRandom.SecureRandom;
         const captain = yield* preflightCrewCaptain(scope, "j5_request_crew_member");
-        const requestKey =
-          input.client_request_id ?? (yield* crypto.randomUUIDv4().pipe(Effect.orDie));
+        const requestKey = input.client_request_id ?? (yield* crypto.uuidV4().pipe(Effect.orDie));
         const outcome = yield* (yield* CrewProposalService)
           .requestMember({
             requestKey: `${scope.thread.providerSessionId}:${requestKey}`,
@@ -783,18 +906,119 @@ const handlers = {
               seat: input.seat,
               agentId: input.persona ?? null,
               reason: input.reason,
+              ...(input.allow_once === undefined ? {} : { allowOnce: input.allow_once }),
               ...(input.instructions === undefined ? {} : { instructions: input.instructions }),
               ...(input.model_selection === undefined
                 ? {}
                 : { modelSelection: input.model_selection }),
               ...(input.runtime_mode === undefined ? {} : { runtimeMode: input.runtime_mode }),
               ...(input.steps === undefined ? {} : { steps: input.steps }),
+              ...(input.reviews === undefined ? {} : { reviews: input.reviews }),
+              ...(input.replaces === undefined ? {} : { replaces: input.replaces }),
               workspace: spawnWorkspaceFromInput(input.workspace),
             },
             brief: input.brief ?? null,
           })
-          .pipe(Effect.mapError((error) => stateError(error.message, crewProposalNextStep(error))));
-        return projectCrewProposal(outcome);
+          .pipe(Effect.mapError(crewProposalRefusal));
+        return projectCrewProposal(outcome, scope);
+      }).pipe(Effect.mapError(failure)),
+  ),
+  j5_read_persona: McpToolAccess.reads((input) =>
+    Effect.gen(function* () {
+      const current = yield* (yield* makeAgentPersonaLibrary)
+        .catalog()
+        .pipe(
+          Effect.mapError((error) =>
+            stateError(
+              `The persona library cannot be read: ${error.message}`,
+              "Ask the user to fix the persona library in Settings → Agent Setup, then retry j5_read_persona.",
+            ),
+          ),
+        );
+      const definition = current.definitions.find(({ id }) => id === input.persona_id);
+      if (definition === undefined)
+        return yield* stateError(
+          current.removedSources.some(({ id }) => id === input.persona_id)
+            ? `${input.persona_id} is removed in this environment.`
+            : `There is no persona ${input.persona_id} here.`,
+          "Check j5_list_personas for the personas you can read; only an Owner restores a removed one, in Settings → Agent Setup.",
+        );
+      const imported = current.importedIds.includes(definition.id);
+      return {
+        id: definition.id,
+        yaml: definitionYaml(definition),
+        digest: definitionDigest(definition),
+        origin: imported ? ("imported" as const) : ("folder" as const),
+        folder_file: current.sourcePaths.get(definition.id) ?? null,
+        overrides_folder: imported && current.sourcePaths.has(definition.id),
+        disabled: current.disabledIds.includes(definition.id),
+      };
+    }).pipe(Effect.mapError(failure)),
+  ),
+  j5_propose_persona: actsAsThreadCaller(
+    "j5_propose_persona",
+    "An outside agent cannot ask the person, so it cannot have a persona draft saved; tell the person what to change in Settings → Agent Setup.",
+    (input, scope) =>
+      Effect.gen(function* () {
+        const proposerParticipantId = yield* (yield* A2AHomeRegistrar)
+          .getHomeForThread(scope.thread.threadId)
+          .pipe(
+            Effect.map((home) => home.participantId),
+            Effect.catchTags({
+              A2AHomeNotFoundError: () =>
+                Effect.succeed(participantIdForThread(scope.thread.threadId)),
+            }),
+          );
+        const fields = {
+          ...(input.display_name === undefined ? {} : { displayName: input.display_name }),
+          ...(input.description === undefined ? {} : { description: input.description }),
+          ...(input.instructions === undefined ? {} : { instructions: input.instructions }),
+          ...(input.access === undefined ? {} : { access: input.access }),
+          ...(input.models === undefined ? {} : { modelRoute: input.models }),
+          ...(input.independent_reviewer === undefined
+            ? {}
+            : { independentReviewer: input.independent_reviewer }),
+        };
+        let draft: AgentPersonaDraftRequest;
+        if (input.mode === "create") {
+          const { displayName, description, instructions, access, modelRoute } = fields;
+          if (
+            displayName === undefined ||
+            description === undefined ||
+            instructions === undefined ||
+            access === undefined ||
+            modelRoute === undefined
+          )
+            return yield* stateError(
+              "A new persona needs display_name, description, instructions, access and models.",
+              "Retry j5_propose_persona with mode create and every one of them.",
+            );
+          draft = {
+            mode: "create",
+            personaId: input.persona_id,
+            fields: { ...fields, displayName, description, instructions, access, modelRoute },
+          };
+        } else {
+          if (input.expected_digest === undefined)
+            return yield* stateError(
+              "An edit needs expected_digest, from the j5_read_persona you drafted it from.",
+              "Call j5_read_persona, then retry j5_propose_persona with its digest.",
+            );
+          draft = {
+            mode: "edit",
+            personaId: input.persona_id,
+            expectedDigest: input.expected_digest,
+            changes: fields,
+          };
+        }
+        const result = yield* (yield* AgentPersonaDrafts)
+          .propose({ proposerParticipantId, proposerThreadId: scope.thread.threadId, draft })
+          .pipe(
+            Effect.mapError((error) =>
+              stateError(error.message, "Fix the draft and retry j5_propose_persona."),
+            ),
+          );
+        return { draft_id: result.draftId, summary: result.summary, warnings: result.warnings };
       }).pipe(Effect.mapError(failure)),
   ),
   j5_list_personas: McpToolAccess.reads(() =>
@@ -812,7 +1036,11 @@ const handlers = {
         );
       const providers = yield* (yield* ProviderRegistry).getProviders;
       const disabled = new Set(current.disabledIds);
-      const catalog = buildAgentPersonaCatalog(providers, current.definitions);
+      const catalog = buildAgentPersonaCatalog(
+        providers,
+        current.definitions,
+        yield* Clock.currentTimeMillis,
+      );
       return {
         diagnostics: current.diagnostics,
         personas: catalog.personas.map((persona) => {
@@ -822,130 +1050,32 @@ const handlers = {
             id: persona.personaId,
             display_name: persona.displayName,
             description: persona.description,
-            runtime_policy: persona.defaultAuthorityPolicy,
+            access: persona.defaultAuthorityPolicy,
+            independent_reviewer: persona.independentReviewer === true,
             availability: isDisabled
               ? ("disabled" as const)
               : available
                 ? ("available" as const)
                 : ("blocked" as const),
-            route:
+            entries: persona.modelEntries ?? [],
+            selected_entry_index:
               persona.availability.status === "available" && !isDisabled
-                ? `${persona.availability.resolvedDriver} · ${persona.availability.resolvedModelSelection.model}${
-                    persona.availability.resolvedModelSelection.options?.[0]?.value === undefined
-                      ? ""
-                      : ` · ${persona.availability.resolvedModelSelection.options[0].value}`
-                  }`
+                ? (persona.availability.resolvedEntryIndex ??
+                  (persona.availability.resolvedRoute === "primary" ? 0 : 1))
                 : null,
           };
         }),
       };
     }).pipe(Effect.mapError(failure)),
   ),
-  j5_stop_agent: McpToolAccess.writes((input) =>
-    Effect.gen(function* () {
-      const invocation = yield* McpInvocationContext;
-      const outside = yield* outsideAgentCaller;
-      const scope = outside === undefined ? yield* callerScope : undefined;
-      const crypto = yield* Crypto.Crypto;
-      // An outside agent has no membership, and is never a Captain.
-      const callerParticipantId: ParticipantId | undefined =
-        scope === undefined ? undefined : (yield* resolveCallerMembership(scope)).participantId;
-      const service = yield* A2ASendService;
-      // Any agent on this server, archived ones included: archiving can leave a run executing.
-      const matches = (yield* (
-        scope === undefined
-          ? service.listParticipantsWithoutCaller({ includeArchived: true })
-          : service.listParticipants(scope.thread.threadId, true)
-      ).pipe(
-        Effect.mapError((error) =>
-          stateError(
-            `This server's participants cannot be read for j5_stop_agent: ${error.message}.`,
-            "Retry j5_stop_agent with the same client_request_id.",
-          ),
-        ),
-      )).filter((row) => row.participantId === input.participant_id);
-      if (matches.length !== 1) {
-        return yield* stateError(
-          `This server has ${matches.length === 0 ? "no" : "an ambiguous"} participant ${input.participant_id}.`,
-          "Call j5_list_participants and retry j5_stop_agent with exactly one listed agent participant_id.",
-        );
-      }
-      const target = matches[0]!.participant;
-      if (target.kind !== "agent") {
-        return yield* stateError(
-          `Participant ${input.participant_id} is not an agent with a thread and cannot be stopped.`,
-          "Call j5_list_participants and retry j5_stop_agent with an agent participant_id.",
-        );
-      }
-      const threadManagement = yield* ThreadManagementService;
-      const targetProjection = yield* threadManagement
-        .getThreadRecords(target.threadId, ["runs"])
-        .pipe(
-          Effect.mapError((error) =>
-            stateError(
-              `Peer Agent thread ${target.threadId} cannot be read for j5_stop_agent: ${error.message}.`,
-              "Call j5_list_participants to confirm the target thread, then retry j5_stop_agent.",
-            ),
-          ),
-        );
-      // Upstream's rule for a write to another thread: it must run within the caller's modes.
-      // A Captain commands its own seats whatever their modes.
-      const crews = yield* AgentCrewInstanceService;
-      const seat = yield* crews.findMembership(input.participant_id);
-      const crew = seat === null ? null : yield* crews.read(seat.crewInstanceId);
-      const limits =
-        callerParticipantId !== undefined &&
-        crew !== null &&
-        crew.captainParticipantId === callerParticipantId
-          ? undefined
-          : (yield* loadCaller()).limits;
-      if (limits !== undefined) {
-        yield* assertTargetWithinLimits(limits, targetProjection.thread).pipe(
-          Effect.mapError((error) =>
-            stateError(
-              `Peer Agent ${input.participant_id} runs with broader permissions than you do: ${error.message}`,
-              "Ask its Captain or the user to stop it; j5_stop_agent reaches only agents within your own permission modes.",
-            ),
-          ),
-        );
-      }
-      const requestKey =
-        input.client_request_id ?? (yield* crypto.randomUUIDv4().pipe(Effect.orDie));
-      const commandId = lifecycleCommandId({
-        // An outside agent's retry keys are namespaced by its client session.
-        providerSessionId: scope?.thread.providerSessionId ?? invocation.requestNamespace,
-        requestKey,
-        operation: "stop-agent",
-      });
-      // Upstream's Stop, delegated tasks included (see stopThread.ts). The limit goes with it:
-      // the target's modes can be raised after the check above, and upstream checks again under
-      // the thread's lock.
-      yield* stopThread(
-        threadManagement,
-        { commandId, threadId: target.threadId, reason: AGENT_STOP_REASON },
-        limits,
-      ).pipe(
-        Effect.mapError((error) =>
-          stateError(
-            `Peer Agent ${input.participant_id} on thread ${target.threadId} could not be stopped: ${error.message}.`,
-            "Call j5_list_participants to confirm the target, then retry j5_stop_agent with the same client_request_id.",
-          ),
-        ),
-      );
-      return latestActiveRun(targetProjection) === undefined
-        ? ("already_idle" as const)
-        : ("interrupt_requested" as const);
-    }).pipe(Effect.mapError(failure)),
-  ),
   j5_stop_crew: actsAsThreadCaller(
     "j5_stop_crew",
-    "Only a Crew's Captain stops it: message the Captain with j5_send_message, or stop one agent with j5_stop_agent.",
+    "Only a Crew's Captain stops it: message the Captain with j5_send_message, or stop one agent with t3_thread_interrupt and stop: true.",
     (input, scope) =>
       Effect.gen(function* () {
-        const crypto = yield* Crypto.Crypto;
+        const crypto = yield* SecureRandom.SecureRandom;
         const caller = yield* resolveCallerMembership(scope);
-        const requestKey =
-          input.client_request_id ?? (yield* crypto.randomUUIDv4().pipe(Effect.orDie));
+        const requestKey = input.client_request_id ?? (yield* crypto.uuidV4().pipe(Effect.orDie));
         const outcome = yield* (yield* CrewStopService)
           .stop({
             callerParticipantId: caller.participantId,
@@ -986,10 +1116,9 @@ const handlers = {
     "Only a Crew's Captain archives it: message the Captain with j5_send_message and ask it to.",
     (input, scope) =>
       Effect.gen(function* () {
-        const crypto = yield* Crypto.Crypto;
+        const crypto = yield* SecureRandom.SecureRandom;
         const caller = yield* resolveCallerMembership(scope);
-        const requestKey =
-          input.client_request_id ?? (yield* crypto.randomUUIDv4().pipe(Effect.orDie));
+        const requestKey = input.client_request_id ?? (yield* crypto.uuidV4().pipe(Effect.orDie));
         const archivedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
         const outcome = yield* (yield* ArchiveCrewService).archive({
           providerSessionId: scope.thread.providerSessionId,

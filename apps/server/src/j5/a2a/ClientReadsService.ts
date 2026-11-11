@@ -15,6 +15,8 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 
+import { AgentPersonaDrafts } from "../agents/agentPersonaDrafts.ts";
+import { AgentPersonaEscalations } from "../agents/agentPersonaEscalation.ts";
 import { PlaybookCrewRelay } from "../playbooks/PlaybookCrewRelay.ts";
 import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
 import { AgentCrewInstanceService } from "./AgentCrewInstanceService.ts";
@@ -229,7 +231,7 @@ export interface ClientReadsShape {
   readonly humanInbox: (input: {
     readonly status: "open" | "answered";
     readonly personId?: ParticipantId;
-  }) => Effect.Effect<HumanInboxResponse, A2AHumanInboxError>;
+  }) => Effect.Effect<HumanInboxResponse, A2AHumanInboxError | SqlError>;
   /** The crew gate: every proposal that awaits the person, as the roster card reads it. */
   readonly crewProposals: Effect.Effect<
     typeof CrewProposalsResponse.Type,
@@ -295,10 +297,14 @@ export const layer: Layer.Layer<
   | A2AArchiveFacts
   | ArchiveCrewService
   | CrewWorktrees
+  | AgentPersonaEscalations
+  | AgentPersonaDrafts
 > = Layer.effect(
   ClientReadsService,
   Effect.gen(function* () {
     const inbox = yield* A2AHumanInbox;
+    const escalations = yield* AgentPersonaEscalations;
+    const drafts = yield* AgentPersonaDrafts;
     const sql = yield* SqlClient.SqlClient;
     const proposals = yield* AgentCrewProposalService;
     const projectProposal = projectCrewProposal(yield* PlaybookStore);
@@ -383,13 +389,33 @@ export const layer: Layer.Layer<
       participantIdentities,
       openInboxCount,
       humanInbox: Effect.fn("ClientReadsService.humanInbox")(function (input) {
-        return inbox
-          .resolvePersonId(input.personId)
-          .pipe(
-            Effect.flatMap((personId) =>
-              inbox.list(personId, input.status).pipe(Effect.map((items) => ({ personId, items }))),
+        return inbox.resolvePersonId(input.personId).pipe(
+          Effect.flatMap((personId) =>
+            inbox.list(personId, input.status).pipe(
+              // An ask carries at most one Owner action: an escalation for "Allow this once", or
+              // a persona draft for "Save persona".
+              Effect.flatMap((items) =>
+                Effect.gen(function* () {
+                  const exchangeIds = items.map(({ exchangeId }) => exchangeId);
+                  const escalationFor = yield* escalations.forExchanges(exchangeIds);
+                  const draftFor = yield* drafts.forExchanges(exchangeIds);
+                  return {
+                    personId,
+                    items: items.map((item) => {
+                      const escalation = escalationFor.get(item.exchangeId);
+                      const personaDraft = draftFor.get(item.exchangeId);
+                      return {
+                        ...item,
+                        ...(escalation === undefined ? {} : { escalation }),
+                        ...(personaDraft === undefined ? {} : { personaDraft }),
+                      };
+                    }),
+                  };
+                }),
+              ),
             ),
-          );
+          ),
+        );
       }),
       crewProposals: proposals.listOpen().pipe(
         Effect.map((items) => items.filter((proposal) => proposal.approvalMode !== "automatic")),

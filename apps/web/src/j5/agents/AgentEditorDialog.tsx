@@ -35,7 +35,7 @@ export function AgentEditorDialog(props: {
   const read = useAtomCommand(agentPersonaEnvironment.readAgentPersona, {
     reportFailure: false,
   });
-  // oxlint-disable-next-line t3code/react-effect-budget -- loads the persona's instructions from the server when the dialog opens.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- loads the persona's instructions from the server when the dialog opens.
   useEffect(() => {
     let cancelled = false;
     void read({ environmentId: props.environmentId, input: { personaId: props.initial.personaId } })
@@ -126,7 +126,7 @@ export function AgentEditorDialog(props: {
                 />
               </div>
               <span className="text-xs text-muted-foreground">
-                Markdown. Instructions describe behavior; the runtime policy below is what is
+                Markdown. Instructions describe behavior; the access level below is what is
                 enforced.
               </span>
             </label>

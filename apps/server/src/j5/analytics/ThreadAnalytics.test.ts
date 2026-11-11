@@ -50,6 +50,7 @@ const thread = Effect.fn(function* (
   options: {
     readonly parent?: { readonly threadId: ThreadId; readonly relationship: "fork" | "subagent" };
     readonly persona?: boolean;
+    readonly sideChat?: boolean;
   } = {},
 ) {
   const store = yield* ProjectionStore.ProjectionStoreV2;
@@ -75,6 +76,7 @@ const thread = Effect.fn(function* (
         parentThreadId: options.parent?.threadId ?? null,
         relationshipToParent: options.parent?.relationship ?? null,
         rootThreadId: options.parent?.threadId ?? threadId,
+        ...(options.sideChat === true ? { sideChat: true } : {}),
       },
       forkedFrom: null,
       createdAt: at,
@@ -300,6 +302,12 @@ it.effect("says what made each thread, and nothing about the thread", () =>
           { parent: { ...parent, relationship: "subagent" } },
         ),
         yield* thread("system", { createdBy: "system", creationSource: "server" }),
+        // A side chat is part of its parent's conversation and is not counted.
+        yield* thread(
+          "side-chat",
+          { createdBy: "user", creationSource: "web" },
+          { parent: { ...parent, relationship: "fork" }, sideChat: true },
+        ),
       ];
       for (const { created: event } of created) yield* threads.handleStoredEvent(event);
     }).pipe(Effect.provide(testLayer(recorded)));

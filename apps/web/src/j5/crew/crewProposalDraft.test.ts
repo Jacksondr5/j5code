@@ -1,3 +1,4 @@
+import { removeSeat } from "@t3tools/client-runtime/j5/crew-proposals";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -9,7 +10,6 @@ import {
   newCrewProposalRow,
   addSeat,
   describeSeatAgent,
-  removeSeat,
   saveSeat,
 } from "./crewProposalDraft";
 
@@ -148,6 +148,20 @@ describe("crew member edits", () => {
       instructions: "Plan carefully.",
       steps: ["plan"],
     });
+  });
+
+  it("keeps the seats a reviewer reviews when the person edits it", () => {
+    const roster = [
+      { seat: "builder", agentId: "builder", reason: "Builds" },
+      { seat: "review", agentId: "reviewer", reason: "Reviews", reviews: ["builder"] },
+    ];
+    const edited = saveSeat(roster, "review", {
+      seat: "review",
+      agentId: "reviewer",
+      instructions: "Focus on the API.",
+    });
+    expect(edited.error).toBeNull();
+    expect(edited.seats[1]).toMatchObject({ seat: "review", reviews: ["builder"] });
   });
 });
 

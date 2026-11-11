@@ -7,7 +7,7 @@ import { notifyHumanInboxChanged } from "../a2a/humanInboxRefresh";
 import { crewProposalsQueryAtom } from "../state";
 import { CrewProposalCard } from "./CrewProposalCard";
 import { clearCrewProposalDraft } from "./crewProposalDraftStore";
-import { rosterGatesForThread } from "./crewProposals.logic";
+import { rosterGatesForThread } from "@t3tools/client-runtime/j5/crew-proposals";
 import {
   refreshCrewProposals,
   resolveCrewProposal,

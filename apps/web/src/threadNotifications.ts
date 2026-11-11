@@ -1,6 +1,7 @@
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import type { ClientSettings } from "@t3tools/contracts/settings";
 
+import { connectNotificationSound } from "./j5/notifications/notificationVolume";
 import { completionSoundManager } from "./j5/notifications/completionSound";
 
 import completionUrl from "./assets/notification-completion.mp3";
@@ -43,7 +44,7 @@ let badgeFavicon: HTMLLinkElement | undefined;
 export function setNotificationBadge(count: number) {
   const bridge = window.desktopBridge;
   let image: string | null = null;
-  if (count > 0 && (!bridge || bridge.getClientPlatform?.() === "win32")) {
+  if (count > 0 && (!bridge || bridge.getClientPlatform() === "win32")) {
     const canvas = document.createElement("canvas");
     canvas.width = canvas.height = 64;
     const context = canvas.getContext("2d");
@@ -79,7 +80,7 @@ export function setNotificationBadge(count: number) {
       originalFavicon = undefined;
     }
   }
-  void bridge?.setNotificationBadge?.({ count, image }).catch(() => undefined);
+  void bridge?.setNotificationBadge({ count, image }).catch(() => undefined);
 }
 
 let audioContext: AudioContext | undefined;
@@ -87,10 +88,33 @@ const buffers = new Map<string, Promise<AudioBuffer>>();
 /** When each sound's current playback ends, on the audio context's clock. */
 const playingUntil = new Map<string, number>();
 
+function loadNotificationBuffer(context: AudioContext, url: string): Promise<AudioBuffer> {
+  let buffer = buffers.get(url);
+  if (!buffer) {
+    buffer = fetch(url)
+      .then((response) => response.arrayBuffer())
+      .then((data) => context.decodeAudioData(data))
+      .catch((error: unknown) => {
+        buffers.delete(url);
+        throw error;
+      });
+    buffers.set(url, buffer);
+  }
+  return buffer;
+}
+
 /** Called from a gesture so browsers allow later background playback. */
 export function unlockNotificationAudio() {
+  const firstUnlock = audioContext === undefined;
   audioContext ??= new AudioContext();
-  return audioContext.resume().catch(() => undefined);
+  // J5 (FORK.md case 87): the completion sound preview awaits the resume.
+  const resumed = audioContext.resume().catch(() => undefined);
+  if (!firstUnlock) return resumed;
+  // Fetch and decode during interaction so the first alert is ready when the thread finishes.
+  for (const url of [completionUrl, inputUrl]) {
+    void loadNotificationBuffer(audioContext, url).catch(() => undefined);
+  }
+  return resumed;
 }
 
 export async function playNotificationSound(
@@ -101,25 +125,21 @@ export async function playNotificationSound(
   const context = audioContext;
   const url = kind === "completion" ? completionUrl : inputUrl;
   try {
-    // J5 (FORK.md case 87): custom bytes share upstream's playback and burst slot.
+    // J5 (FORK.md case 87): custom bytes share upstream's playback and burst slot. The bundled
+    // load is taken first, so a preload still in flight is reused as upstream does.
+    const bundled = loadNotificationBuffer(context, url);
+    bundled.catch(() => undefined);
     const custom = kind === "completion" ? await completionSoundManager.getBuffer(context) : null;
-    let buffer = custom ? Promise.resolve(custom) : buffers.get(url);
-    if (!buffer) {
-      buffer = fetch(url)
-        .then((response) => response.arrayBuffer())
-        .then((data) => context.decodeAudioData(data));
-      buffers.set(url, buffer);
-    }
-    const decoded = await buffer;
+    const decoded = custom ?? (await bundled);
     if (!shouldPlay() || context.state !== "running") return;
     // Coalesce same-sound bursts after decode to avoid clipping; input and completion alerts keep separate slots.
     if (context.currentTime < (playingUntil.get(url) ?? 0)) return;
     const source = context.createBufferSource();
     source.buffer = decoded;
-    source.connect(context.destination);
+    connectNotificationSound(source, context);
     source.start();
     playingUntil.set(url, context.currentTime + decoded.duration);
   } catch {
-    buffers.delete(url);
+    // A failed load is retried on the next alert.
   }
 }

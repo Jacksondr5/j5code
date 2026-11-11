@@ -37,7 +37,7 @@ it("recognizes policies that need the full J5 set to avoid outright rejection", 
 
 // Pinned by name: a server-wide default would also wave through worktree
 // handoff, browser preview, and scheduling for a read-only persona (Sentry S-1, 2026-09-14).
-it("names exactly the J5 verbs plus the artifact and Subagent verbs", () => {
+it("names exactly the J5 verbs plus the artifact, Subagent and interrupt verbs", () => {
   assert.sameMembers(
     [...J5_PREAPPROVED_TOOLS],
     [
@@ -47,6 +47,8 @@ it("names exactly the J5 verbs plus the artifact and Subagent verbs", () => {
       "delegate_task",
       "task_status",
       "task_cancel",
+      // Upstream's tool with the Captain's rule, standing in for the retired j5_stop_agent.
+      "t3_thread_interrupt",
     ],
   );
   assert.sameMembers(
@@ -54,6 +56,7 @@ it("names exactly the J5 verbs plus the artifact and Subagent verbs", () => {
     [
       "j5_send_message",
       "j5_clear_own_ask",
+      "j5_propose_persona",
       "j5_propose_crew",
       "j5_request_crew_member",
       "j5_playbook_start",
@@ -78,7 +81,7 @@ it("pre-approves the full set only under never, coordination otherwise", () => {
     if (!never)
       for (const name of [
         "j5_spawn_agent",
-        "j5_stop_agent",
+        "t3_thread_interrupt",
         "j5_stop_crew",
         "j5_archive_crew",
         "delegate_task",

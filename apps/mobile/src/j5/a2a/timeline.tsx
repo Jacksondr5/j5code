@@ -2,7 +2,15 @@ import {
   j5MessageAuthorName,
   j5SenderThreadRef,
 } from "@t3tools/client-runtime/j5/participant-identity";
+import {
+  crewApprovalSummary,
+  crewDeclinedSummary,
+  crewNoticeLines,
+  type CrewNoticePresentation,
+} from "@t3tools/client-runtime/j5/crew-notices";
 import type {
+  J5NoticeKind,
+  J5PromptKind,
   J5UserMessageInput,
   J5UserMessagePresentation,
 } from "@t3tools/client-runtime/j5/user-message";
@@ -10,6 +18,7 @@ import { isSharedNote } from "@t3tools/client-runtime/j5/shared-conversation";
 import { useState, type ReactNode } from "react";
 import { Pressable, View } from "react-native";
 
+import { SymbolView, type AppSymbolName } from "../../components/ui/AppSymbol";
 import { AppText as Text } from "../../components/ui/AppText";
 import { useOpenLinkedThread } from "../../features/threads/useOpenLinkedThread";
 import { cn } from "../../lib/cn";
@@ -22,65 +31,247 @@ import {
   type J5Timeline,
 } from "./timelinePresentation";
 
-export { resolveJ5FeedMessage, type J5Timeline } from "./timelinePresentation";
+export {
+  j5FoldHeader,
+  resolveJ5FeedMessage,
+  type J5FeedMessagePresentation,
+  type J5Timeline,
+} from "./timelinePresentation";
 
-/** Silence lines and raw cards in place of upstream's row (`presentJ5TimelineNotice`). */
+/**
+ * J5's platform notices in place of upstream's row, each one grey line on the left that opens
+ * to its detail (web's `J5NoticeLine`): a shared conversation's note, what a Crew member was told,
+ * a Crew notice's lines, and every notice the classifier has a summary for.
+ */
 export function renderJ5TimelineNotice(input: {
   readonly message: J5UserMessageInput;
   readonly timestampLabel: string;
+  readonly timeline: J5Timeline;
 }) {
   if (isSharedNote(input.message)) {
     return <SharedConversationNote message={input.message} timestampLabel={input.timestampLabel} />;
   }
-  const notice = presentJ5TimelineNotice(input.message);
+  const notice = presentJ5TimelineNotice(input.message, input.timeline.labels);
   if (notice === null) return null;
-  if (notice.kind === "silence") {
+  if (notice.kind === "crew") {
     return (
-      <View className="mb-5 items-start px-1">
-        <Text className="text-xs text-foreground-muted">
-          ⚠ {notice.summary}
-          {input.timestampLabel ? ` · ${input.timestampLabel}` : null}
-        </Text>
-      </View>
+      <CrewNotice
+        notice={notice.notice}
+        timestampLabel={input.timestampLabel}
+        environmentId={String(input.timeline.environmentId)}
+      />
     );
   }
-  if (notice.kind === "context") {
-    return <CrewContextNotice title={notice.title} text={notice.text} />;
-  }
   return (
-    <View className="mb-5 gap-1.5 rounded-xl border border-border bg-card p-3">
-      <Text className="font-t3-medium text-xs text-foreground-muted">{notice.label}</Text>
-      <Text selectable className="font-mono text-xs leading-relaxed text-foreground">
-        {input.message.text}
-      </Text>
+    <View className="mb-5 items-start px-1">
+      {notice.kind === "context" ? (
+        // What the model read, long and not written for the person, so it opens on request.
+        <J5NoticeLine
+          icon="person.2"
+          summary={`${notice.title} from J5`}
+          timestampLabel={input.timestampLabel}
+        >
+          <Text selectable className="font-mono text-xs leading-relaxed text-foreground-muted">
+            {notice.text}
+          </Text>
+        </J5NoticeLine>
+      ) : (
+        <J5NoticeLine
+          icon={NOTICE_ICONS[notice.noticeKind] ?? "bell.badge"}
+          summary={notice.summary}
+          timestampLabel={input.timestampLabel}
+        >
+          {notice.detail === null ? null : <J5NoticeDetailText text={notice.detail} />}
+        </J5NoticeLine>
+      )}
     </View>
   );
 }
 
-/** What the platform told a Crew member: its title, and the model's own reading once opened. */
-function CrewContextNotice(props: { readonly title: string; readonly text: string }) {
+const NOTICE_ICONS: Partial<Record<J5NoticeKind, AppSymbolName>> = {
+  silence: "bubble.left",
+  "not-delivered": "exclamationmark.circle",
+  "exchange-dropped": "slash.circle",
+  "exchange-withdrawn": "arrow.uturn.backward",
+};
+
+/** The icon for each of J5's prompts in upstream's Automation row. */
+export const J5_PROMPT_ICONS: Record<Exclude<J5PromptKind, "automation">, AppSymbolName> = {
+  "playbook-step": "list.number",
+  "native-question": "questionmark.bubble",
+};
+
+const TONE_TINT = {
+  bad: "accent-danger-foreground",
+  warn: "accent-warning-foreground",
+  none: "accent-foreground-muted",
+} as const;
+
+/** One grey line with an icon, a summary and the time; with a detail, it opens beneath a rule. */
+function J5NoticeLine(props: {
+  readonly icon: AppSymbolName;
+  readonly tone?: keyof typeof TONE_TINT;
+  readonly summary: string;
+  readonly timestampLabel: string;
+  readonly children?: ReactNode;
+}) {
   const [open, setOpen] = useState(false);
-  return (
-    <View className="mb-5 gap-1.5 rounded-xl border border-border bg-card p-3">
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{ expanded: open }}
-        onPress={() => setOpen((value) => !value)}
+  const hasDetail = props.children !== undefined && props.children !== null;
+  const line = (
+    <>
+      <SymbolView
+        name={props.icon}
+        size={13}
+        tintColorClassName={TONE_TINT[props.tone ?? "none"]}
+        type="monochrome"
+      />
+      <Text
+        numberOfLines={open ? undefined : 1}
+        className="min-w-0 shrink text-xs text-foreground-muted"
       >
-        <Text className="font-t3-medium text-xs text-foreground-muted">
-          {open ? "▾" : "▸"} {props.title} from J5
+        {props.summary}
+      </Text>
+      {props.timestampLabel ? (
+        <Text className="shrink-0 text-xs tabular-nums text-foreground-muted opacity-70">
+          {props.timestampLabel}
         </Text>
-      </Pressable>
-      {open ? (
-        <Text selectable className="font-mono text-xs leading-relaxed text-foreground">
-          {props.text}
-        </Text>
+      ) : null}
+    </>
+  );
+  const lineClass = "max-w-full flex-row items-center gap-1.5 py-0.5";
+  return (
+    <View className="max-w-[85%] items-start gap-1">
+      {hasDetail ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ expanded: open }}
+          hitSlop={6}
+          className={lineClass}
+          onPress={() => setOpen((value) => !value)}
+        >
+          {line}
+          <SymbolView
+            name={open ? "chevron.up" : "chevron.down"}
+            size={11}
+            tintColorClassName="accent-chevron"
+            type="monochrome"
+          />
+        </Pressable>
+      ) : (
+        <View className={lineClass}>{line}</View>
+      )}
+      {hasDetail && open ? (
+        <View className="ml-1.5 max-w-full border-l border-border pl-3">{props.children}</View>
       ) : null}
     </View>
   );
 }
 
-function Tag(props: { readonly label: string; readonly tone?: "warning" | "success" }) {
+function J5NoticeDetailText(props: { readonly text: string }) {
+  return (
+    <Text selectable className="text-xs leading-relaxed text-foreground-muted">
+      {props.text}
+    </Text>
+  );
+}
+
+function OpenSeatThread(props: {
+  readonly environmentId: string;
+  readonly threadId: string;
+  readonly label: string;
+}) {
+  const openLinkedThread = useOpenLinkedThread();
+  return (
+    <Pressable
+      accessibilityRole="link"
+      hitSlop={6}
+      onPress={() =>
+        openLinkedThread({ environmentId: props.environmentId, threadId: props.threadId })
+      }
+    >
+      <Text className="font-t3-medium text-xs text-foreground-secondary">{props.label}</Text>
+    </Pressable>
+  );
+}
+
+/**
+ * A Crew notice in the Captain's thread (web's `renderCrewNotice`): the approval or decline line,
+ * then one line per seat that needs the person. A seat whose thread was never created has no link.
+ */
+function CrewNotice(props: {
+  readonly notice: CrewNoticePresentation;
+  readonly timestampLabel: string;
+  readonly environmentId: string;
+}) {
+  const { notice, timestampLabel, environmentId } = props;
+  if (notice.kind === "gate" && notice.decision === "declined") {
+    const requested = notice.requestedSeats
+      .map((seat) => `${seat.seat} (${seat.agentId})`)
+      .join(", ");
+    return (
+      <View className="mb-5 items-start px-1">
+        <J5NoticeLine
+          icon="person.2"
+          summary={crewDeclinedSummary(notice)}
+          timestampLabel={timestampLabel}
+        >
+          <J5NoticeDetailText
+            text={`${requested.length === 0 ? "" : `Requested: ${requested}\n\n`}The Captain can revise the request and propose again.`}
+          />
+        </J5NoticeLine>
+      </View>
+    );
+  }
+  const summary = crewApprovalSummary(notice);
+  return (
+    <View className="mb-5 items-start gap-1 px-1">
+      {summary === null || notice.kind !== "gate" ? null : (
+        <J5NoticeLine icon="person.2" summary={summary} timestampLabel={timestampLabel}>
+          {notice.changes === null ? null : (
+            <J5NoticeDetailText text={`Changed by the person: ${notice.changes}.`} />
+          )}
+          <View className="mt-1 flex-row flex-wrap items-center gap-3">
+            {notice.roster.map((seat) => (
+              <OpenSeatThread
+                key={seat.threadId}
+                environmentId={environmentId}
+                threadId={seat.threadId}
+                label={seat.seat}
+              />
+            ))}
+          </View>
+        </J5NoticeLine>
+      )}
+      {crewNoticeLines(notice).map((line, index) => (
+        <J5NoticeLine
+          // oxlint-disable-next-line react/no-array-index-key -- a folded notice can repeat a seat with the same reason, so no field is unique.
+          key={`${line.threadId ?? line.seat}:${index}`}
+          icon={line.tone === "bad" ? "exclamationmark.circle" : "exclamationmark.triangle"}
+          tone={line.tone}
+          summary={[line.crewName, line.seat, line.reason].filter(Boolean).join(" ")}
+          timestampLabel={timestampLabel}
+        >
+          {line.detail === null && line.threadId === null ? null : (
+            <>
+              {line.detail === null ? null : <J5NoticeDetailText text={line.detail} />}
+              {line.threadId === null ? null : (
+                <View className="mt-1 flex-row">
+                  <OpenSeatThread
+                    environmentId={environmentId}
+                    threadId={line.threadId}
+                    label="Open seat thread"
+                  />
+                </View>
+              )}
+            </>
+          )}
+        </J5NoticeLine>
+      ))}
+    </View>
+  );
+}
+
+export function Tag(props: { readonly label: string; readonly tone?: "warning" | "success" }) {
   return (
     <View
       className={cn(

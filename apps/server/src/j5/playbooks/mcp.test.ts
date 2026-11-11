@@ -1,4 +1,5 @@
 import { seedPersonas, seedPlaybookOwners } from "./testFixtures.ts";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
@@ -179,7 +180,7 @@ const makeFixture = (
       Layer.mock(SpawnCompositionService)({}),
       Layer.mock(ArchiveAgentService)({}),
       Layer.mock(ThreadRegistration)({}),
-      NodeServices.layer,
+      Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
     );
     const dependencies = playbookCrewRelayLayer.pipe(
       Layer.provideMerge(agentCrewInstanceLayer),
@@ -207,7 +208,7 @@ const makeFixture = (
 const fixture = makeFixture();
 const TestLayer = Layer.mergeAll(
   NodeSqliteClient.layer({ filename: ":memory:" }),
-  NodeServices.layer,
+  Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
 );
 
 it.effect("runs a scripted three-step sample through the real J5Toolkit handlers", () =>
@@ -485,7 +486,7 @@ it.effect(
     ),
 );
 
-it.effect("refuses definition writes from plan-mode and read-only persona callers", () =>
+it.effect("maps stored persona policies before permitting playbook definition writes", () =>
   Effect.gen(function* () {
     const { fs, path } = yield* fixture;
     const { stateDir } = yield* ServerConfig;
@@ -499,49 +500,61 @@ it.effect("refuses definition writes from plan-mode and read-only persona caller
     });
     assert.isTrue(denied.isFailure);
     assert.equal((yield* decodeFailureCode(denied.result)).code, "capability_denied");
-    const readOnly = yield* makeFixture((threadId) => ({
-      ...liveThreadShell(threadId),
-      agentPersonaAssignment: {
-        personaId: "reader",
-        definitionVersion: 1,
-        authorityPolicy: "read-only",
-        resolvedRoute: "primary",
-        resolvedDriver: ProviderDriverKind.make("codex"),
-        resolvedModelSelection: {
-          instanceId: ProviderInstanceId.make("codex"),
-          model: "test-model",
+    for (const authorityPolicy of [
+      "read-only",
+      "critic-review",
+      "diagnostic",
+      "publish-only",
+      "future-policy",
+    ]) {
+      const readOnly = yield* makeFixture((threadId) => ({
+        ...liveThreadShell(threadId),
+        agentPersonaAssignment: {
+          personaId: "reader",
+          definitionVersion: 1,
+          authorityPolicy,
+          resolvedRoute: "primary",
+          resolvedDriver: ProviderDriverKind.make("codex"),
+          resolvedModelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "test-model",
+          },
         },
-      },
-    }));
-    assert.isTrue(
-      (yield* readOnly.call("j5_playbook_save", {
-        name: "denied",
-        yaml: stringify(sample("Denied")),
-      })).isFailure,
-    );
+      }));
+      assert.isTrue(
+        (yield* readOnly.call("j5_playbook_save", {
+          name: "denied",
+          yaml: stringify(sample("Denied")),
+        })).isFailure,
+      );
+    }
     assert.isFalse(yield* fs.exists(path.join(stateDir, "playbooks/denied.yaml")));
-    const writer = yield* makeFixture((threadId) => ({
-      ...liveThreadShell(threadId),
-      runtimeMode: "auto-accept-edits",
-      agentPersonaAssignment: {
-        personaId: "playbook-author",
-        definitionVersion: 1,
-        authorityPolicy: "workspace-write",
-        resolvedRoute: "primary",
-        resolvedDriver: ProviderDriverKind.make("codex"),
-        resolvedModelSelection: {
-          instanceId: ProviderInstanceId.make("codex"),
-          model: "test-model",
+    for (const authorityPolicy of ["workspace-write", "critic-fix", "full-access"]) {
+      const writer = yield* makeFixture((threadId) => ({
+        ...liveThreadShell(threadId),
+        runtimeMode: "auto-accept-edits",
+        agentPersonaAssignment: {
+          personaId: "playbook-author",
+          definitionVersion: 1,
+          authorityPolicy,
+          resolvedRoute: "primary",
+          resolvedDriver: ProviderDriverKind.make("codex"),
+          resolvedModelSelection: {
+            instanceId: ProviderInstanceId.make("codex"),
+            model: "test-model",
+          },
         },
-      },
-    }));
-    assert.isFalse(
-      (yield* writer.call("j5_playbook_save", {
-        name: "authored",
-        yaml: stringify(sample("Authored")),
-      })).isFailure,
-    );
-    assert.isTrue(yield* fs.exists(path.join(stateDir, "playbooks/authored.yaml")));
+      }));
+      assert.isFalse(
+        (yield* writer.call("j5_playbook_save", {
+          name: `authored-${authorityPolicy}`,
+          yaml: stringify(sample("Authored")),
+        })).isFailure,
+      );
+      assert.isTrue(
+        yield* fs.exists(path.join(stateDir, `playbooks/authored-${authorityPolicy}.yaml`)),
+      );
+    }
   }).pipe(
     Effect.scoped,
     Effect.provide(

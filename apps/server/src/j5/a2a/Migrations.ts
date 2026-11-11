@@ -52,7 +52,13 @@ import Migration0048 from "./migrations/048_CrewApprovalMode.ts";
 import Migration0049 from "./migrations/049_CrewSeatActivation.ts";
 import Migration0050 from "./migrations/050_CrewWorktrees.ts";
 import Migration0051 from "./migrations/051_CrewWorktreeCleanup.ts";
-import Migration0052 from "./migrations/052_PersonalThreadReads.ts";
+import Migration0052 from "./migrations/052_PersonAsksStayDistinct.ts";
+import Migration0053 from "./migrations/053_CrewSeatReplacement.ts";
+import Migration0054 from "./migrations/054_PersonaEscalations.ts";
+import Migration0055 from "./migrations/055_PersonaDrafts.ts";
+import Migration0056 from "./migrations/056_PromptAnswerSettled.ts";
+import Migration0057 from "./migrations/057_ParticipantMoved.ts";
+import Migration0058 from "./migrations/058_PersonalThreadReads.ts";
 
 export const J5_A2A_MIGRATIONS_TABLE = "j5_a2a_migrations";
 
@@ -115,7 +121,13 @@ export const migrationEntries = [
   [49, "CrewSeatActivation", Migration0049],
   [50, "CrewWorktrees", Migration0050],
   [51, "CrewWorktreeCleanup", Migration0051],
-  [52, "PersonalThreadReads", Migration0052],
+  [52, "PersonAsksStayDistinct", Migration0052],
+  [53, "CrewSeatReplacement", Migration0053],
+  [54, "PersonaEscalations", Migration0054],
+  [55, "PersonaDrafts", Migration0055],
+  [56, "PromptAnswerSettled", Migration0056],
+  [57, "ParticipantMoved", Migration0057],
+  [58, "PersonalThreadReads", Migration0058],
 ] as const;
 
 const makeMigrationLoader = (throughId?: number) =>

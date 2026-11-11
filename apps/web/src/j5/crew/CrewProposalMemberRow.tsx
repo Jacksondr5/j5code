@@ -10,7 +10,10 @@ import { Button } from "../../components/ui/button";
 import { serverEnvironment } from "../../state/server";
 import { deriveProviderInstanceEntries } from "../../providerInstances";
 import { CUSTOM_AGENT, crewProposalRowChange, type CrewProposalRow } from "./crewProposalDraft";
-import { crewSeatStopsForApprovals, describeCrewSeatWorkspace } from "./crewSeatRuntime";
+import {
+  crewSeatStopsForApprovals,
+  describeCrewSeatWorkspace,
+} from "@t3tools/client-runtime/j5/crew-proposals";
 
 /** Where the member works; a new worktree's line carries the commit it starts from, in full on hover. */
 function MemberWorkspace(props: { workspace: CrewSeatWorkspace }) {

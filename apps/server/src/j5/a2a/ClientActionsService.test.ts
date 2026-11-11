@@ -1,10 +1,21 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { RuntimeRequestId, ThreadId } from "@t3tools/contracts";
+import { AgentPersonaDrafts } from "../agents/agentPersonaDrafts.ts";
+import { AgentPersonaEscalations } from "../agents/agentPersonaEscalation.ts";
+import { agentPersonaDraftsTestLayer } from "../test-support/agentPersonaDrafts.ts";
+import { agentPersonaEscalationsTestLayer } from "../test-support/agentPersonaEscalations.ts";
+import {
+  ChatAttachmentId,
+  ProviderDriverKind,
+  RuntimeRequestId,
+  ThreadId,
+} from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
+import * as ServerConfig from "../../config.ts";
 import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
+import { noDocumentTextLayer } from "../test-support/documentText.ts";
 import type { CrewProposal } from "./AgentCrewProposalService.ts";
 import {
   ArchiveCrewNotFoundError,
@@ -12,7 +23,13 @@ import {
   type ArchiveCrewInput,
 } from "./ArchiveCrewService.ts";
 import { ClientActionsService, layer } from "./ClientActionsService.ts";
-import { ExchangeId, LedgerMessageId, LedgerProjectId, ParticipantId } from "./contracts.ts";
+import {
+  ExchangeId,
+  type HumanInboxItem,
+  LedgerMessageId,
+  LedgerProjectId,
+  ParticipantId,
+} from "./contracts.ts";
 import { CrewProposalNotOpenError, CrewProposalService } from "./CrewProposalService.ts";
 import {
   CrewRuntimeRequestConflictError,
@@ -23,6 +40,7 @@ import { CrewStopNotFoundError, CrewStopService, type StopCrewInput } from "./Cr
 import { CrewWorktrees } from "./CrewWorktrees.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { A2AHumanInbox } from "./HumanInboxService.ts";
+import { A2AExchangeAlreadyAnsweredError } from "./SendService.ts";
 
 const seat = (name: string) => ParticipantId.make(`agent:j5:a2a:thread:${name}`);
 
@@ -51,6 +69,9 @@ const calls = () => ({
   archives: [] as Array<ArchiveCrewInput>,
   responses: [] as Array<RespondToCrewRuntimeRequestInput>,
   answerCommandIds: [] as Array<string>,
+  answerMessages: [] as Array<string>,
+  // The command that answered each exchange: a replay of it succeeds, any other is refused.
+  answeredBy: new Map<string, string>(),
   notified: 0,
 });
 
@@ -154,15 +175,33 @@ const serviceWith = (seen: ReturnType<typeof calls>) =>
             }),
         }),
         Layer.mock(A2AHumanInbox)({
-          answer: (input) => {
+          // Only these asks are still open for the person.
+          list: () =>
+            Effect.succeed(
+              ["exchange:save"].map((exchangeId) => ({ exchangeId }) as unknown as HumanInboxItem),
+            ),
+          answer: (input, _beforeReply, claimAttachments) => {
+            const answeredBy = seen.answeredBy.get(input.exchangeId);
+            if (answeredBy !== undefined && answeredBy !== input.commandId)
+              return Effect.fail(
+                new A2AExchangeAlreadyAnsweredError({ exchangeId: input.exchangeId }),
+              );
+            seen.answeredBy.set(input.exchangeId, input.commandId);
             seen.answerCommandIds.push(input.commandId);
-            return Effect.succeed({
-              messageId: LedgerMessageId.make(`message:test:${input.exchangeId}`),
-              exchangeId: input.exchangeId,
-              exchangeState: "closed" as const,
-              joinedExistingExchange: false,
-              durableAtSeq: 1,
-            });
+            seen.answerMessages.push(input.message);
+            const claim =
+              input.attachments === undefined || claimAttachments === undefined
+                ? Effect.void
+                : claimAttachments(ThreadId.make("thread:asker"), input.attachments);
+            return claim.pipe(
+              Effect.as({
+                messageId: LedgerMessageId.make(`message:test:${input.exchangeId}`),
+                exchangeId: input.exchangeId,
+                exchangeState: "closed" as const,
+                joinedExistingExchange: false,
+                durableAtSeq: 1,
+              }),
+            );
           },
         }),
         Layer.mock(A2ADeliveryWorker)({
@@ -171,8 +210,13 @@ const serviceWith = (seen: ReturnType<typeof calls>) =>
           }),
         }),
         Layer.mock(CrewWorktrees)({}),
+        noDocumentTextLayer,
       ),
     ),
+    // Exposed too, so a test files the escalation or persona draft an ask carries.
+    Layer.provideMerge(agentPersonaEscalationsTestLayer()),
+    Layer.provideMerge(agentPersonaDraftsTestLayer()),
+    Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "j5-client-actions-" })),
     Layer.provide(NodeServices.layer),
   );
 
@@ -321,3 +365,171 @@ it.effect(
     }).pipe(Effect.provide(serviceWith(seen)));
   },
 );
+
+it.effect(
+  "allows a blocked persona once: the fixed reply answers the ask, then it is granted",
+  () => {
+    const seen = calls();
+    return Effect.gen(function* () {
+      const actions = yield* ClientActionsService;
+      const escalations = yield* AgentPersonaEscalations;
+      const owner = ParticipantId.make("human:owner");
+      const file = (exchangeId: string, waivable: "access-above-caller" | null) =>
+        escalations
+          .record({
+            callerParticipantId: "agent:j5:a2a:thread:asker",
+            personaId: "reviewer",
+            code: "models_exhausted",
+            summary: "Persona reviewer is blocked.",
+            waivable,
+            scope:
+              waivable === null
+                ? null
+                : {
+                    definitionDigest: "digest",
+                    entries: [
+                      {
+                        entryIndex: 0,
+                        instanceId: "codex",
+                        model: "gpt-6",
+                        options: [],
+                        runtimeMode: "full-access",
+                      },
+                    ],
+                  },
+          })
+          .pipe(Effect.tap((escalationId) => escalations.linkAsk({ escalationId, exchangeId })));
+      const escalationId = yield* file("exchange:blocked", "access-above-caller");
+      yield* actions.allowPersonaOnce({
+        personId: owner,
+        exchangeId: "exchange:blocked",
+        clientRequestId: "allow-1",
+      });
+      assert.deepStrictEqual(seen.answerMessages, [
+        `Allowed once: reviewer past broader access than its caller runs with. Only agent:j5:a2a:thread:asker, whose launch was refused, can use it: it retries that launch with allow_once: ${escalationId}. If you asked on a Crew member's behalf, send it this id.`,
+      ]);
+      assert.equal(
+        (yield* escalations.grantedWaiver({
+          escalationId,
+          callerParticipantId: "agent:j5:a2a:thread:asker",
+          personaId: "reviewer",
+        })).constraint,
+        "access-above-caller",
+      );
+      // A retry whose reply was lost replays the same answer and succeeds; another press is
+      // refused by the answered ask, and one on an ask no single waiver helps answers nothing.
+      yield* actions.allowPersonaOnce({
+        personId: owner,
+        exchangeId: "exchange:blocked",
+        clientRequestId: "allow-1",
+      });
+      const again = yield* actions
+        .allowPersonaOnce({
+          personId: owner,
+          exchangeId: "exchange:blocked",
+          clientRequestId: "allow-2",
+        })
+        .pipe(Effect.flip);
+      assert.equal(again._tag, "A2AExchangeAlreadyAnsweredError");
+      yield* file("exchange:stuck", null);
+      const stuck = yield* actions
+        .allowPersonaOnce({
+          personId: owner,
+          exchangeId: "exchange:stuck",
+          clientRequestId: "allow-3",
+        })
+        .pipe(Effect.flip);
+      assert.include(stuck.message, "can't be allowed once");
+      assert.lengthOf(new Set(seen.answerCommandIds), 1);
+    }).pipe(Effect.provide(serviceWith(seen)));
+  },
+);
+
+it.effect("saves a persona draft for the Owner, once, and never on an answered ask", () => {
+  const seen = calls();
+  return Effect.gen(function* () {
+    const actions = yield* ClientActionsService;
+    const drafts = yield* AgentPersonaDrafts;
+    const owner = ParticipantId.make("human:owner");
+    const file = (exchangeId: string, personaId: string) =>
+      drafts
+        .propose({
+          proposerParticipantId: "agent:j5:a2a:thread:asker",
+          proposerThreadId: "thread:asker",
+          draft: {
+            mode: "create",
+            personaId,
+            fields: {
+              displayName: "Release Notes",
+              description: "Writes release notes.",
+              instructions: "Summarize the merged changes.",
+              access: "read-only",
+              modelRoute: [
+                {
+                  driver: ProviderDriverKind.make("codex"),
+                  model: "gpt-5",
+                  reasoningEffort: "high",
+                },
+              ],
+            },
+          },
+        })
+        .pipe(Effect.tap(({ draftId }) => drafts.linkAsk({ draftId, exchangeId })));
+    yield* file("exchange:save", "release-notes");
+    const save = { personId: owner, exchangeId: "exchange:save", clientRequestId: "save-1" };
+    yield* actions.savePersonaDraft(save);
+    assert.deepStrictEqual(seen.answerMessages, [
+      "Saved new persona release-notes to this server's library. Launches from now on can use it.",
+    ]);
+    assert.equal(
+      (yield* drafts.forExchanges(["exchange:save"])).get("exchange:save")?.status,
+      "saved",
+    );
+    // A retry of the same request answers with the same command and saves nothing again.
+    yield* actions.savePersonaDraft(save);
+    assert.equal(seen.answerCommandIds[0], seen.answerCommandIds[1]);
+
+    // A typed reply already closed this ask, so its draft saves nothing.
+    yield* file("exchange:replied", "changelog");
+    const replied = yield* actions
+      .savePersonaDraft({ personId: owner, exchangeId: "exchange:replied", clientRequestId: "s-2" })
+      .pipe(Effect.flip);
+    assert.include(replied.message, "already answered");
+    assert.equal(
+      (yield* drafts.forExchanges(["exchange:replied"])).get("exchange:replied")?.status,
+      "open",
+    );
+    const plain = yield* actions
+      .savePersonaDraft({ personId: owner, exchangeId: "exchange:plain", clientRequestId: "s-3" })
+      .pipe(Effect.flip);
+    assert.include(plain.message, "doesn't carry a persona draft");
+    assert.lengthOf(seen.answerMessages, 2);
+  }).pipe(Effect.provide(serviceWith(seen)));
+});
+
+it.effect("refuses an answer attachment that is not a new upload", () => {
+  const seen = calls();
+  return Effect.gen(function* () {
+    const actions = yield* ClientActionsService;
+    const refused = yield* actions
+      .answerHumanExchange({
+        personId: ParticipantId.make("human:local-operator"),
+        exchangeId: ExchangeId.make("exchange:with-file"),
+        message: "See the screenshot.",
+        // A file stored on another thread, named by its id.
+        attachments: [
+          {
+            type: "image",
+            id: ChatAttachmentId.make("thread-other-00000000-0000-4000-8000-000000000000"),
+            name: "secret.png",
+            mimeType: "image/png",
+            sizeBytes: 10,
+          },
+        ],
+        clientRequestId: "with-file",
+      })
+      .pipe(Effect.flip);
+    assert.equal(refused._tag, "AttachmentClaimError");
+    assert.equal(seen.notified, 0);
+  }).pipe(Effect.provide(serviceWith(seen)));
+});

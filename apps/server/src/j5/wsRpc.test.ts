@@ -171,6 +171,26 @@ const clientFor = (scopes: ReadonlyArray<AuthEnvironmentScope>) =>
                 },
               })
             : Effect.fail(new A2AExchangeNotOpenError({ exchangeId: input.exchangeId })),
+        allowPersonaOnce: (input) =>
+          reached("allow-once", {
+            result: {
+              messageId: LedgerMessageId.make("message:allow-once"),
+              exchangeId: ExchangeId.make(input.exchangeId),
+              exchangeState: "closed" as const,
+              joinedExistingExchange: false,
+              durableAtSeq: 1,
+            },
+          }),
+        savePersonaDraft: (input) =>
+          reached("save-persona", {
+            result: {
+              messageId: LedgerMessageId.make("message:save-persona"),
+              exchangeId: ExchangeId.make(input.exchangeId),
+              exchangeState: "closed" as const,
+              joinedExistingExchange: false,
+              durableAtSeq: 1,
+            },
+          }),
         answerCrewWorktreeCleanup: ({ itemId }) =>
           reached("cleanup", {
             item: {
@@ -318,6 +338,12 @@ const callEach = (client: Effect.Success<ReturnType<typeof clientFor>>["client"]
         exchangeId: "ask:1",
       }),
     ),
+    [ACTIONS.allowPersonaOnce]: outcome(
+      client[ACTIONS.allowPersonaOnce]({ exchangeId: "ask:1", clientRequestId: "allow-1" }),
+    ),
+    [ACTIONS.savePersonaDraft]: outcome(
+      client[ACTIONS.savePersonaDraft]({ exchangeId: "ask:1", clientRequestId: "save-1" }),
+    ),
     [ACTIONS.answerCrewWorktreeCleanup]: outcome(
       client[ACTIONS.answerCrewWorktreeCleanup]({ itemId: "cleanup:1", removePaths: [] }),
     ),
@@ -428,7 +454,10 @@ describe("J5 client action RPC scopes", () => {
                 requiredPermission: method.startsWith("j5.peers.")
                   ? AuthAccessWriteScope
                   : method.startsWith("j5.playbooks.") ||
-                      method === ACTIONS.answerCrewWorktreeCleanup
+                      method === ACTIONS.archiveCrew ||
+                      method === ACTIONS.answerCrewWorktreeCleanup ||
+                      method === ACTIONS.allowPersonaOnce ||
+                      method === ACTIONS.savePersonaDraft
                     ? AuthSettingsWriteScope
                     : AuthOrchestrationOperateScope,
               },
@@ -478,18 +507,26 @@ describe("J5 client action RPC handlers", () => {
         crewInstanceId: "crew:1",
         members: [],
       });
+      // Archiving a Crew and removing the worktrees it kept are an Owner's call, which the
+      // settings scope stands for.
+      const owner = yield* clientFor([...operator, AuthSettingsWriteScope]);
       assert.equal(
-        (yield* client[ACTIONS.archiveCrew]({ crewInstanceId: "crew:1" })).status,
+        (yield* owner.client[ACTIONS.archiveCrew]({ crewInstanceId: "crew:1" })).status,
         "archived",
       );
-      // Removing worktrees is an Owner's call, which the settings scope stands for.
-      const owner = yield* clientFor([...operator, AuthSettingsWriteScope]);
       assert.equal(
         (yield* owner.client[ACTIONS.answerCrewWorktreeCleanup]({
           itemId: "cleanup:1",
           removePaths: [],
         })).item.status,
         "decided",
+      );
+      assert.equal(
+        (yield* owner.client[ACTIONS.allowPersonaOnce]({
+          exchangeId: "ask:1",
+          clientRequestId: "allow-1",
+        })).result.exchangeState,
+        "closed",
       );
       assert.deepStrictEqual(
         yield* client[ACTIONS.respondCrewRuntimeRequest]({
@@ -508,15 +545,15 @@ describe("J5 client action RPC handlers", () => {
         yield* client[J5_ARTIFACT_WS_METHODS.deleteArtifact]({ projectId, path: "plan.md" }),
         { deleted: true },
       );
-      assert.deepStrictEqual(handled, [
-        "resolve",
-        "stop",
-        "archive",
-        "respond",
-        "answer",
-        "delete artifact",
-      ]);
-      assert.deepStrictEqual(owner.handled, ["cleanup"]);
+      assert.deepStrictEqual(handled, ["resolve", "stop", "respond", "answer", "delete artifact"]);
+      assert.equal(
+        (yield* owner.client[ACTIONS.savePersonaDraft]({
+          exchangeId: "ask:1",
+          clientRequestId: "save-1",
+        })).result.exchangeState,
+        "closed",
+      );
+      assert.deepStrictEqual(owner.handled, ["archive", "cleanup", "allow-once", "save-persona"]);
     }).pipe(Effect.scoped),
   );
 
@@ -568,7 +605,11 @@ describe("J5 client action RPC handlers", () => {
 
   it.effect("tells a server-side failure in the action's general words, never its cause", () =>
     Effect.gen(function* () {
-      const { client } = yield* clientFor([...operator, AuthAccessWriteScope]);
+      const { client } = yield* clientFor([
+        ...operator,
+        AuthAccessWriteScope,
+        AuthSettingsWriteScope,
+      ]);
       assert.deepInclude(
         yield* client[ACTIONS.stopCrew]({ crewInstanceId: "crew:broken" }).pipe(Effect.flip),
         { code: "CrewStopOperationError", message: "Stopping the crew failed." },

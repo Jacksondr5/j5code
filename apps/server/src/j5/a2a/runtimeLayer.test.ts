@@ -10,8 +10,13 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import { FetchHttpClient, HttpClient } from "effect/http";
 import * as Layer from "effect/Layer";
+import { PeerForwarding } from "../../peer/PeerForwarding.ts";
+import { PeerLinkRequests } from "../../peer/PeerLinkRequests.ts";
+import { PeerLinks } from "../../peer/PeerLinks.ts";
+import { RemoteDelegation } from "../../peer/RemoteDelegation.ts";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { NodeHttpServer } from "@effect/platform-node";
 import { EnvironmentId } from "@t3tools/contracts";
@@ -50,7 +55,6 @@ import { j5AuthenticatedRoutesLayer } from "./J5AuthenticatedRoutes.ts";
 import { ServerSecretStore } from "../../auth/ServerSecretStore.ts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { runMigrations } from "../../persistence/Migrations.ts";
-import { ThreadLifecycleService } from "../../orchestration-v2/ThreadLifecycleService.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { quietAccessLayer } from "../sharing/test-support/conversationHarness.ts";
 import { ThreadLaunchService } from "../../orchestration-v2/ThreadLaunchService.ts";
@@ -72,14 +76,16 @@ import { makeJ5A2ARuntimeLayer, peerHttpClient } from "./runtimeLayer.ts";
 import { noDocumentTextLayer } from "../test-support/documentText.ts";
 
 const archiveDependencies = Layer.mergeAll(
+  // Upstream's orchestrator tools delegate to linked environments, and link them, through these.
+  Layer.mock(RemoteDelegation)({}),
+  Layer.mock(PeerForwarding)({}),
+  Layer.mock(PeerLinkRequests)({}),
+  Layer.mock(PeerLinks)({}),
   // j5_spawn_agent and Crew seats prepare worktrees through upstream's launch and receipts.
   Layer.mock(ThreadLaunchService)({}),
   Layer.mock(OrchestrationCommandReceiptRepository)({}),
   Layer.mock(ServerSecretStore)({
     getOrCreateRandom: () => Effect.succeed(new Uint8Array(32).fill(7)),
-  }),
-  Layer.mock(ThreadLifecycleService)({
-    archive: () => Effect.die("unused archive in runtime topology test"),
   }),
 );
 
@@ -120,14 +126,14 @@ const measureNestedRuntimeBuilds = (nested: "http" | "mcp") =>
         ).pipe(
           Layer.provide(runtime),
           Layer.provide(ServerSettingsService.layerTest()),
-          Layer.provide(quietAccessLayer),
+          Layer.provide(Layer.mergeAll(quietAccessLayer, noDocumentTextLayer)),
           Layer.provide(threadManagement),
           Layer.provide(emptyEventStore),
           Layer.provide(Layer.mock(ProviderRegistry)({})),
           Layer.provide(Layer.mock(OrchestratorV2)({})),
           Layer.provide(Layer.mock(EffectOutboxV2)({ listByCommandId: () => Effect.succeed([]) })),
           Layer.provide(archiveDependencies),
-          Layer.provide(AnalyticsService.layerTest),
+          Layer.provide(Layer.mock(AnalyticsService)({ record: () => Effect.void })),
           Layer.provide(Layer.mock(ProjectService)({})),
           Layer.provide(Layer.mock(GitWorkflowService)({})),
           Layer.provide(Layer.mock(GitVcsDriver)({})),
@@ -146,12 +152,12 @@ const measureNestedRuntimeBuilds = (nested: "http" | "mcp") =>
           ),
           Layer.provide(
             ServerConfig.layerTest(process.cwd(), { prefix: "j5-a2a-runtime-layer-" }).pipe(
-              Layer.provide(NodeServices.layer),
+              Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
             ),
           ),
           Layer.provide(database),
           // The crew artifact writer reaches the project artifacts directory through the file system.
-          Layer.provide(NodeServices.layer),
+          Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
         ),
       );
       return ledgers.size;
@@ -294,11 +300,11 @@ it.effect("shares one runtime and outbox across the production HTTP and MCP regi
               ),
             ),
             Layer.provide(archiveDependencies),
-            Layer.provide(AnalyticsService.layerTest),
+            Layer.provide(Layer.mock(AnalyticsService)({ record: () => Effect.void })),
             Layer.provide(
               ServerConfig.layerTest(process.cwd(), {
                 prefix: "j5-a2a-production-runtime-",
-              }).pipe(Layer.provide(NodeServices.layer)),
+              }).pipe(Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
             ),
             Layer.provide(database),
           ),
@@ -313,7 +319,7 @@ it.effect("shares one runtime and outbox across the production HTTP and MCP regi
             }),
           ),
           Layer.provide(NodeHttpServer.layerTest),
-          Layer.provide(NodeServices.layer),
+          Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
         ),
       );
 

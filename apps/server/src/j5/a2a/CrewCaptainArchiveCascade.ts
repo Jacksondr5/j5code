@@ -12,7 +12,11 @@ import * as Result from "effect/Result";
 
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { isAutoSettlementCandidate } from "../../orchestration-v2/ThreadSettlementService.ts";
-import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
+import {
+  AgentCrewInstanceService,
+  crewArchiveThreads,
+  type AgentCrewInstance,
+} from "./AgentCrewInstanceService.ts";
 import { ArchiveCrewService } from "./ArchiveCrewService.ts";
 import { CrewWorktrees } from "./CrewWorktrees.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
@@ -192,7 +196,8 @@ export const layer = Layer.effect(
       yield* crews.serialize(
         instance.id,
         Effect.gen(function* () {
-          for (const member of instance.members) {
+          // Replaced members' threads come back too; they stay replaced, off the roster.
+          for (const member of crewArchiveThreads(instance)) {
             const seat = yield* getThreadRecordsIfPresent(threads, member.threadId, []);
             if (seat === null || seat.thread.archivedAt === null) continue;
             yield* threads.dispatch({

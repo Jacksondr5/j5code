@@ -8,14 +8,16 @@ import {
   ScheduledTaskError,
   type ScheduledTaskMutationResult,
   type ScheduledTaskUpsertInput,
-  type ThreadId,
+  ThreadId,
   authScopeRequiredResponse,
 } from "@t3tools/contracts";
 import { type PersonLevel, levelReaches } from "@t3tools/contracts/j5";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
 import type { CrewSeatArchiveGuard } from "../a2a/crewSeatArchiveGuard.ts";
+import { AgentPersonaModelSwitch } from "../agents/agentPersonaOrchestration.ts";
 import { claimPersonQueuedEdit, releaseQueuedEditClaim } from "../a2a/queuedEdits.ts";
 import {
   PersonAccess,
@@ -119,7 +121,7 @@ const NARROWED_COMMAND_SCOPES: {
   "thread.created.record": onParent,
 };
 
-/** Commands only an Owner sends, for now (AC14). */
+/** Commands only an Owner sends, for now (AC14); a side chat's delete is the exception. */
 const OWNER_ONLY_COMMANDS: ReadonlySet<OrchestrationV2Command["type"]> = new Set([
   "thread.archive",
   "thread.unarchive",
@@ -173,9 +175,10 @@ export const makeCommandAdmission = Effect.fn("j5.sharing.commandAdmission.makeC
   ): Effect.fn.Return<
     CommandAdmission,
     never,
-    PersonAccess | SharedConversation | SqlClient.SqlClient
+    PersonAccess | SharedConversation | SqlClient.SqlClient | ProviderRegistry
   > {
     const sql = yield* SqlClient.SqlClient;
+    const providers = (yield* ProviderRegistry).getProviders;
     const access = yield* PersonAccess;
     const conversation = yield* SharedConversation;
     const reach = yield* access.sessionReach(session).pipe(
@@ -222,13 +225,35 @@ export const makeCommandAdmission = Effect.fn("j5.sharing.commandAdmission.makeC
       Effect.catchTags({ PersonAccessStorageError: refuseUnreadable }),
     );
 
+    /** The thread a side chat answers, or `null` for any other thread. */
+    const sideChatParent = (threadId: ThreadId) =>
+      sql<{ readonly parent_thread_id: string | null }>`
+        SELECT json_extract(payload_json, '$.lineage.parentThreadId') AS parent_thread_id
+        FROM orchestration_v2_projection_threads
+        WHERE thread_id = ${threadId}
+          AND json_extract(payload_json, '$.lineage.sideChat') = 1
+      `.pipe(
+        Effect.map((rows) => rows[0]?.parent_thread_id ?? null),
+        Effect.mapError(() => refused("Could not read the thread to delete.")),
+      );
+
+    const owner =
+      reach.kind === "service" ||
+      (reach.kind === "person" && levelReaches(reach.serverLevel, "owner"));
+
     const checked = Effect.fn("j5.sharing.commandAdmission.checked")(function* (
       command: OrchestrationV2Command,
     ) {
+      // Whoever can write to a thread may delete its side chats, which upstream also deletes
+      // when an unused one is closed (decision 9 of the v0.1.7 advance).
+      if (command.type === "thread.delete" && !owner) {
+        const parent = yield* sideChatParent(command.threadId);
+        if (parent !== null) {
+          yield* requireLevel({ kind: "thread", threadId: ThreadId.make(parent) }, "collaborator");
+          return command;
+        }
+      }
       if (OWNER_ONLY_COMMANDS.has(command.type)) {
-        const owner =
-          reach.kind === "service" ||
-          (reach.kind === "person" && levelReaches(reach.serverLevel, "owner"));
         if (!owner) return yield* refused(OWNERS_ONLY);
         yield* crewSeatArchiveGuard(command).pipe(
           Effect.mapError(
@@ -260,6 +285,11 @@ export const makeCommandAdmission = Effect.fn("j5.sharing.commandAdmission.makeC
     });
 
     const person = reachPersonId(reach);
+    // Only a person may switch a persona worker's model; the orchestrator checks the switch.
+    const asPerson = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+      person === null
+        ? effect
+        : effect.pipe(Effect.provideService(AgentPersonaModelSwitch, { providers }));
 
     // A person's edit of a queued agent message is recorded in the ledger under their name
     // (`queuedEdits.ts`). A failure to claim it names no one and does not stop the edit.
@@ -287,7 +317,7 @@ export const makeCommandAdmission = Effect.fn("j5.sharing.commandAdmission.makeC
           conversation.dispatch(person, admitted, (stamped) =>
             Effect.gen(function* () {
               const claimed = yield* claimEdit(stamped);
-              return yield* dispatch(stamped).pipe(
+              return yield* asPerson(dispatch(stamped)).pipe(
                 Effect.tapError(() => (claimed ? releaseEdit(stamped) : Effect.void)),
               );
             }),
@@ -308,7 +338,7 @@ export const makeCommandAdmission = Effect.fn("j5.sharing.commandAdmission.makeC
           ? { kind: "thread", threadId: input.threadId }
           : { kind: "project", projectId: input.projectId };
       yield* requireLevel(scope, "collaborator");
-      return yield* conversation.launch(person, input, launch);
+      return yield* conversation.launch(person, input, (admitted) => asPerson(launch(admitted)));
     });
 
     const upsertScheduledTask: CommandAdmission["upsertScheduledTask"] = (input, upsert) => {

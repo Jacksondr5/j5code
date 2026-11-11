@@ -12,7 +12,12 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 
-import { CREW_NAME_MAX_CHARS, CREW_REASON_MAX_CHARS, CREW_TEXT_MAX_CHARS } from "./crewLimits.ts";
+import {
+  CREW_NAME_MAX_CHARS,
+  CREW_REASON_MAX_CHARS,
+  CREW_SEAT_CAP,
+  CREW_TEXT_MAX_CHARS,
+} from "./crewLimits.ts";
 import { ParticipantId, LedgerProjectId } from "./contracts.ts";
 import { ReadChanges } from "./ReadChanges.ts";
 import { SpawnWorkspaceChoice } from "./spawnWorkspace.ts";
@@ -41,6 +46,14 @@ export const CrewProposalSeat = Schema.Struct({
       Schema.isMaxLength(PLAYBOOK_MAX_STEPS),
     ),
   ),
+  /** For an independent reviewer: the seats or members whose work it reviews. */
+  reviews: Schema.optionalKey(
+    Schema.Array(bounded(CREW_NAME_MAX_CHARS)).check(Schema.isMaxLength(CREW_SEAT_CAP)),
+  ),
+  /** Set only by a Captain's addition: the live seat this one takes over. */
+  replaces: Schema.optionalKey(bounded(CREW_NAME_MAX_CHARS)),
+  /** Set only by a Captain: a granted escalation this persona seat retries with. */
+  allowOnce: Schema.optionalKey(bounded(CREW_NAME_MAX_CHARS)),
   /**
    * Where the seat works, as the Captain or the person chose it. Required at every door that
    * files or approves a seat. A stored one this version can't read, such as one written by another

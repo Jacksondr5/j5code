@@ -17,7 +17,10 @@ import { useEnvironmentQuery } from "../../state/query";
 import { clearDraftAgent } from "./agentDraftState";
 import { agentPersonaEnvironment } from "./agentPersonaAtoms";
 
-/** Replaces the model control for a persona thread: the launch route is fixed. */
+/**
+ * Replaces the model control for a persona thread with the persona's name alone, muted like the
+ * branch picker. On a started thread, pressing it switches the model; screen readers hear the route.
+ */
 export function AgentPersonaAssignmentControls(props: {
   readonly assignment: OrchestrationV2AgentPersonaAssignment;
   /** When known, the current library is compared with the launch snapshot to show drift. */
@@ -28,12 +31,14 @@ export function AgentPersonaAssignmentControls(props: {
   readonly threadId?: ThreadId;
   /** The one-line composer: only the persona and its remove action, as upstream shows only the model icon. */
   readonly compact?: boolean;
+  /** A started thread's model can be switched: opens the thread's settings, as upstream's model control does. */
+  readonly onPressModel?: () => void;
 }) {
   const presentation = presentAgentPersonaAssignment(props.assignment);
   const handoffs = useEnvironmentQuery(
     props.environmentId === undefined || props.threadId === undefined
       ? null
-      : // Environment-wide and shared with every other handoff reader; refreshed by the server signal.
+      : // Environment-wide and shared with every other handoff reader; rows from older runs only.
         agentPersonaEnvironment.handoffs({ environmentId: props.environmentId, input: {} }),
   );
   const handoff = handoffs.data?.handoffs.find((entry) => entry.threadId === props.threadId);
@@ -51,26 +56,18 @@ export function AgentPersonaAssignmentControls(props: {
     <View className="min-w-0 shrink flex-row items-center">
       <View className="min-w-0 shrink">
         <ComposerInlineControl
-          accessibilityLabel={`Persona: ${presentation.personaLabel}, ${presentation.routeLabel}`}
-          emphasized
+          accessibilityLabel={`Persona: ${presentation.personaLabel}, ${presentation.routeLabel}${presentation.switchNote === null ? "" : `. ${presentation.switchNote}`}`}
+          {...(props.onPressModel === undefined
+            ? {}
+            : { accessibilityHint: "Switch this worker's model" })}
           icon="person.crop.circle"
           label={presentation.personaLabel}
-          maxWidth={152}
+          maxWidth={200}
           showChevron={false}
-          static
+          static={props.onPressModel === undefined}
+          {...(props.onPressModel === undefined ? {} : { onPress: props.onPressModel })}
         />
       </View>
-      {compact ? null : (
-        <View className="min-w-0 shrink">
-          <ComposerInlineControl
-            accessibilityLabel={`Assigned model: ${presentation.routeLabel}`}
-            label={presentation.routeLabel}
-            maxWidth={200}
-            showChevron={false}
-            static
-          />
-        </View>
-      )}
       {draftKey !== undefined ? (
         <ComposerInlineControl
           accessibilityLabel="Remove persona"

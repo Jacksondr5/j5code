@@ -1,22 +1,32 @@
+import * as Clock from "effect/Clock";
+import {
+  isAgentPersonaReasoningOptionId,
+  agentPersonaReasoningDescriptor,
+} from "@t3tools/contracts";
 import type {
   OrchestrationV2AgentPersonaCommandAssignment,
   ProviderInstanceId,
   ServerProvider,
+  AgentPersonaModelEntry,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 
 import { buildAgentPersonaAssignment } from "./agentPersonaAssignment.ts";
 import { AgentPersonaLibraryError, type createAgentPersonaLibrary } from "./agentPersonaLibrary.ts";
+import { findAgentPersonaDefinition, routeFailurePhrase } from "./agentPersonaLaunch.ts";
 import {
   agentPersonaModelSelection,
+  agentPersonaEntryMatches,
   agentPersonaTargetUnavailableReason,
 } from "./agentPersonaRouting.ts";
-import type { AgentModelTarget, AgentPersonaId } from "./agentPersonas.ts";
+import { agentPersonaPolicy, type AgentPersonaId } from "./agentPersonas.ts";
 
 type Library = ReturnType<typeof createAgentPersonaLibrary>;
 
-const describeTarget = (target: AgentModelTarget) =>
-  `${target.driver} ${target.model} (${target.reasoningEffort})`;
+const describeTarget = (target: AgentPersonaModelEntry) =>
+  "driver" in target
+    ? `${target.driver} ${target.model} (${target.reasoningEffort})`
+    : `${target.instanceId} ${target.model}`;
 
 export interface AgentPersonaPeerSpawnRequest {
   readonly personaId: AgentPersonaId;
@@ -24,7 +34,7 @@ export interface AgentPersonaPeerSpawnRequest {
   readonly provider: ServerProvider | undefined;
   readonly instanceId: ProviderInstanceId;
   readonly model: string;
-  /** Left out for a model with no reasoning option. A route always names a level, so none matches. */
+  /** Left out for a model with no reasoning option. Entries without a declared reasoning option accept an explicit supported level. */
   readonly reasoning?: string | undefined;
 }
 
@@ -38,30 +48,44 @@ export const prepareAgentPersonaPeerSpawn = Effect.fn("j5.prepareAgentPersonaPee
   request: AgentPersonaPeerSpawnRequest,
   library: Library,
 ) {
-  const catalog = yield* library.catalog();
-  if (catalog.disabledIds.includes(request.personaId)) {
-    return yield* new AgentPersonaLibraryError({
-      message: `Agent ${request.personaId} is disabled in this environment.`,
+  const definition = yield* findAgentPersonaDefinition(request.personaId, library);
+  // A pin is a list of one: when it cannot run, the launch is refused rather than moved.
+  const pinBlocked = (reason: string) =>
+    new AgentPersonaLibraryError({
+      code: "models_exhausted",
+      message: `Persona ${request.personaId} is blocked because its pinned entry cannot run: ${reason}.`,
     });
-  }
-  const definition = catalog.definitions.find(({ id }) => id === request.personaId);
-  if (definition === undefined) {
-    return yield* new AgentPersonaLibraryError({
-      message: `Unknown agent ${request.personaId} in this environment.`,
-    });
-  }
   const provider = request.provider;
   if (provider === undefined) {
-    return yield* new AgentPersonaLibraryError({
-      message: `Provider ${request.instanceId} is not configured in this environment.`,
-    });
+    return yield* pinBlocked(
+      `provider ${request.instanceId} is not configured in this environment`,
+    );
   }
-  const index = definition.modelRoute.findIndex(
-    (target) =>
-      target.driver === provider.driver &&
-      target.model === request.model &&
-      target.reasoningEffort === request.reasoning,
+  const reasoningDescriptor = agentPersonaReasoningDescriptor(
+    provider.models.find(({ slug }) => slug === request.model),
   );
+  const index = definition.modelRoute.findIndex((target) => {
+    const options = "options" in target ? (target.options ?? []) : [];
+    const reasoning = options.find(({ id }) => id === reasoningDescriptor?.id);
+    if ("instanceId" in target)
+      return (
+        target.instanceId === request.instanceId &&
+        target.model === request.model &&
+        (reasoning === undefined || reasoning.value === request.reasoning)
+      );
+    return agentPersonaEntryMatches(
+      target,
+      {
+        instanceId: request.instanceId,
+        model: request.model,
+        options:
+          request.reasoning === undefined
+            ? []
+            : [{ id: "reasoningEffort", value: request.reasoning }],
+      },
+      provider.driver,
+    );
+  });
   const target = definition.modelRoute[index];
   if (target === undefined) {
     return yield* new AgentPersonaLibraryError({
@@ -72,13 +96,42 @@ export const prepareAgentPersonaPeerSpawn = Effect.fn("j5.prepareAgentPersonaPee
         )}; ${provider.driver} ${request.model} (${request.reasoning ?? "no reasoning"}) is outside its declared routes.`,
     });
   }
-  const unavailable = agentPersonaTargetUnavailableReason(provider, target);
+  const unavailable = agentPersonaTargetUnavailableReason(
+    provider,
+    target,
+    yield* Clock.currentTimeMillis,
+  );
   if (unavailable !== undefined) {
-    return yield* new AgentPersonaLibraryError({
-      message: `Agent ${request.personaId} route ${describeTarget(target)} is unavailable on provider ${request.instanceId}: ${unavailable}.`,
-    });
+    return yield* pinBlocked(
+      `entry ${index + 1} ${describeTarget(target)}: ${routeFailurePhrase(target, { code: unavailable }, request.instanceId)}`,
+    );
   }
-  const modelSelection = agentPersonaModelSelection(provider, target);
+  const declaredSelection = agentPersonaModelSelection(provider, target);
+  const descriptor = agentPersonaReasoningDescriptor(
+    provider.models.find(({ slug }) => slug === request.model),
+  );
+  const modelSelection =
+    "instanceId" in target &&
+    request.reasoning !== undefined &&
+    descriptor !== undefined &&
+    !declaredSelection.options?.some(({ id }) => isAgentPersonaReasoningOptionId(id))
+      ? {
+          ...declaredSelection,
+          options: [
+            ...(declaredSelection.options ?? []),
+            { id: descriptor.id, value: request.reasoning },
+          ],
+        }
+      : declaredSelection;
+  const selectionProblem = agentPersonaTargetUnavailableReason(
+    provider,
+    modelSelection,
+    yield* Clock.currentTimeMillis,
+  );
+  if (selectionProblem !== undefined)
+    return yield* pinBlocked(
+      `entry ${index + 1} ${describeTarget(target)}: ${routeFailurePhrase(target, { code: selectionProblem }, request.instanceId)}`,
+    );
   const result = buildAgentPersonaAssignment({
     definition,
     resolution: {
@@ -86,15 +139,16 @@ export const prepareAgentPersonaPeerSpawn = Effect.fn("j5.prepareAgentPersonaPee
       personaId: definition.id,
       definitionVersion: definition.version,
       route: index === 0 ? "primary" : "fallback",
-      driver: target.driver,
+      entryIndex: index,
+      driver: provider.driver,
       modelSelection,
       rejectedTargets: [],
     },
   });
   if (result.status !== "assigned") {
-    return yield* new AgentPersonaLibraryError({
-      message: `Agent ${request.personaId} cannot enforce its ${definition.authority.defaultPolicy} permissions on ${target.driver}.`,
-    });
+    return yield* pinBlocked(
+      `the persona cannot enforce its ${agentPersonaPolicy(definition)} permissions on ${provider.driver}`,
+    );
   }
   const definitionDigest = yield* library.snapshot(definition);
   const assignment: OrchestrationV2AgentPersonaCommandAssignment = {

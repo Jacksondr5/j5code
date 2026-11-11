@@ -45,6 +45,8 @@ const groups: SidebarProjectSnapshot[] = [
     allRemoteMembersAreDesktopLocal: false,
     allRemoteMembersAreWsl: false,
     remoteEnvironmentLabels: [],
+    pinned: false,
+    archived: false,
   },
 ];
 

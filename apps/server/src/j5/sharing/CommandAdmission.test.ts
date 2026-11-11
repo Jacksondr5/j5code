@@ -8,6 +8,7 @@ import { LEVEL_PERMISSIONS } from "@t3tools/contracts/j5";
 import * as Effect from "effect/Effect";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import { AgentPersonaModelSwitch } from "../agents/agentPersonaOrchestration.ts";
 import { makeCommandAdmission } from "./CommandAdmission.ts";
 import { OTHER_PROJECT, PROJECT, device, person, thread } from "./test-support/accessHarness.ts";
 import { conversationLayer } from "./test-support/conversationHarness.ts";
@@ -58,6 +59,35 @@ it.layer(conversationLayer)("CommandAdmission", (it) => {
         yield* admitted(collaborator, command({ type: "thread.settle", threadId })),
         "admitted",
       );
+    }),
+  );
+
+  it.effect("lets whoever writes to a thread delete its side chats, and only those", () =>
+    Effect.gen(function* () {
+      const parent = yield* thread("thread:side-parent");
+      const sideChat = yield* thread("thread:side-chat", PROJECT, {
+        parent,
+        relationship: "fork",
+        sideChat: true,
+      });
+      const fork = yield* thread("thread:plain-fork", PROJECT, { parent, relationship: "fork" });
+      const writer = yield* deviceOf("Parent writer", [
+        { scope: { kind: "thread", threadId: parent }, level: "collaborator" },
+      ]);
+      const reader = yield* deviceOf("Parent reader", [
+        { scope: { kind: "thread", threadId: parent }, level: "viewer" },
+      ]);
+      const wide = yield* deviceOf("Server collaborator", [
+        { scope: { kind: "server" }, level: "collaborator" },
+      ]);
+      const remove = (threadId: string) => command({ type: "thread.delete", threadId });
+      assert.strictEqual(yield* admitted(writer, remove(sideChat)), "admitted");
+      assert.strictEqual(yield* admitted(wide, remove(sideChat)), "admitted");
+      assert.match(yield* admitted(reader, remove(sideChat)), /^refused/);
+      assert.match(yield* admitted(writer, remove(fork)), /^refused: Only an Owner/);
+      for (const type of ["thread.archive", "thread.unarchive"]) {
+        assert.match(yield* admitted(writer, command({ type, threadId: sideChat })), /^refused/);
+      }
     }),
   );
 
@@ -131,6 +161,27 @@ it.layer(conversationLayer)("CommandAdmission", (it) => {
         ),
         /^refused/,
       );
+    }),
+  );
+
+  it.effect("marks only a person's commands as theirs, for a persona model switch", () =>
+    Effect.gen(function* () {
+      const threadId = yield* thread("thread:persona-switch");
+      const sent = command({ type: "thread.model-selection.set", threadId });
+      const markedFor = (session: { readonly sessionId: string; readonly subject: string }) =>
+        makeCommandAdmission(() => Effect.void, session as never).pipe(
+          Effect.flatMap((admission) =>
+            admission.dispatchCommand(sent, () =>
+              Effect.map(AgentPersonaModelSwitch, (mark) => mark !== undefined),
+            ),
+          ),
+        );
+      const owner = yield* deviceOf("Switching owner", [
+        { scope: { kind: "server" }, level: "owner" },
+      ]);
+      assert.isTrue(yield* markedFor(owner));
+      // A service session names no person, so an agent or tool behind it can't switch.
+      assert.isFalse(yield* markedFor({ sessionId: "session:service", subject: "mcp-client" }));
     }),
   );
 

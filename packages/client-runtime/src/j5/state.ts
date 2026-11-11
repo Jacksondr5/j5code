@@ -318,6 +318,16 @@ export function createJ5EnvironmentAtoms<R, E>(
       "j5:answer-exchange",
       J5_CLIENT_ACTION_WS_METHODS.answerHumanExchange,
     ),
+    allowPersonaOnce: createJ5ActionCommand(
+      runtime,
+      "j5:allow-persona-once",
+      J5_CLIENT_ACTION_WS_METHODS.allowPersonaOnce,
+    ),
+    savePersonaDraft: createJ5ActionCommand(
+      runtime,
+      "j5:save-persona-draft",
+      J5_CLIENT_ACTION_WS_METHODS.savePersonaDraft,
+    ),
     // Polls, backlogs and errors change while Connections stays open; each moves the `peers`
     // revision. A polling peer's heartbeat moves it well inside the two-minute online window.
     peers: createEnvironmentQueryAtomFamily(runtime, {

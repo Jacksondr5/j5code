@@ -530,6 +530,77 @@ it.effect("replays archive then delete from its cursor without duplicating closu
   }),
 );
 
+it.effect(
+  "keeps who answered a prompt settled while the server was down, after the log is pruned",
+  () =>
+    Effect.gen(function* () {
+      const notices = yield* Ref.make<ReadonlyArray<DeliveredNotice>>([]);
+      const threadId = ThreadId.make("thread:lifecycle:answers");
+      const settle = (sequence: number, commandId: string, requestId: string) =>
+        ({
+          sequence,
+          commandId,
+          event: {
+            id: EventId.make(`event:lifecycle:settle:${sequence}`),
+            type: "runtime-request.updated",
+            threadId,
+            occurredAt: DateTime.makeUnsafe(`2026-11-07T00:00:0${sequence}.000Z`),
+            payload: { id: requestId },
+          },
+        }) as unknown as OrchestrationV2StoredEvent;
+      // The log as a restarted server finds it: one settle before its saved cursor, one after.
+      const log = yield* Ref.make([
+        settle(3, "command:before", "request:before"),
+        settle(5, "command:after", "request:after"),
+      ]);
+      const storedEvents = Stream.unwrap(Ref.get(log).pipe(Effect.map(Stream.fromIterable)));
+      yield* Effect.gen(function* () {
+        yield* runMigrations();
+        yield* runJ5A2AMigrations();
+        const sql = yield* SqlClient.SqlClient;
+        yield* sql`UPDATE j5_a2a_lifecycle_cursor SET after_sequence = 4 WHERE singleton = 1`;
+        for (const [commandId, requestId] of [
+          ["command:before", "request:before"],
+          ["command:after", "request:after"],
+        ]) {
+          yield* sql`
+          INSERT INTO j5_a2a_prompt_answer (
+            thread_id, request_id, command_id, person_id, display_name, level, stored_prefix,
+            answered_at
+          )
+          VALUES (
+            ${threadId}, ${requestId}, ${commandId}, 'person:priya', 'Priya', 'collaborator', '',
+            '2026-11-07T00:00:00.000Z'
+          )
+        `;
+        }
+
+        const lifecycle = yield* A2ALifecycleService;
+        yield* lifecycle.replayCommittedEvents;
+        // Upstream prunes the settling events; the answer keeps its author all the same.
+        yield* Ref.set(log, []);
+        yield* lifecycle.replayCommittedEvents;
+
+        const answers = yield* sql<{
+          readonly request_id: string;
+          readonly display_name: string;
+          readonly settled_at: string | null;
+        }>`
+        SELECT request_id, display_name, settled_at FROM j5_a2a_prompt_answer
+        ORDER BY request_id
+      `;
+        assert.deepStrictEqual(answers, [
+          {
+            request_id: "request:after",
+            display_name: "Priya",
+            settled_at: "2026-11-07T00:00:05.000Z",
+          },
+          { request_id: "request:before", display_name: "Priya", settled_at: null },
+        ]);
+      }).pipe(Effect.provide(makeTestLayer(notices, storedEvents)));
+    }),
+);
+
 it.effect("drops a reply-owing participant exactly once from committed thread deletion", () =>
   Effect.gen(function* () {
     const notices = yield* Ref.make<ReadonlyArray<DeliveredNotice>>([]);

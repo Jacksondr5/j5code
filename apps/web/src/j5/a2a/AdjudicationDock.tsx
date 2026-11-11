@@ -21,7 +21,16 @@ import {
   hasMoreThanExcerpt,
   isAskAlreadyClosed,
   pickShownAsk,
-} from "./adjudicationDock.logic";
+} from "@t3tools/client-runtime/j5/adjudication-dock";
+import {
+  AnswerAttachButton,
+  AnswerAttachmentList,
+  answerAttachmentInputHandlers,
+  useAnswerAttachmentSupport,
+  useAnswerAttachments,
+} from "./AnswerAttachments";
+import { J5RecordPanel } from "./J5RecordPanel";
+import { OwnerAskAction } from "./OwnerAskAction";
 import { answerHumanExchange, type HumanInboxItem } from "./humanInboxClient";
 import { notifyHumanInboxChanged } from "./humanInboxRefresh";
 
@@ -61,9 +70,14 @@ export function AdjudicationDock(props: {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refused, setRefused] = useState<ReadonlyArray<HumanInboxItem>>([]);
-  const attempt = useRef<{ exchangeId: string; message: string; clientRequestId: string } | null>(
-    null,
-  );
+  const attempt = useRef<{
+    exchangeId: string;
+    message: string;
+    attachmentIds: string;
+    clientRequestId: string;
+  } | null>(null);
+  const attachments = useAnswerAttachments();
+  const support = useAnswerAttachmentSupport(environmentId);
 
   const asks = adjudicationAsks({
     items: query.data?.items ?? [],
@@ -73,26 +87,44 @@ export function AdjudicationDock(props: {
   });
   const view = pickShownAsk(asks, picked);
   if (!captain || !mayAnswer || environmentId === undefined || view === null) return null;
-  const { shown, others } = view;
+  const { shown, others, next: nextAsk } = view;
   const isOpen = (query.data?.items ?? []).some((item) => item.exchangeId === shown.exchangeId);
   const message = answers[shown.exchangeId] ?? "";
   const urgency = urgencyBadge[shown.urgency];
   const openFor = formatElapsedDurationLabel(shown.openedAt);
   const threadRef = threadId == null ? undefined : scopeThreadRef(environmentId, threadId);
 
+  const readiness = attachments.ready(shown.exchangeId, environmentId);
+  const waitingOn = "blocked" in readiness ? readiness.blocked : null;
+  const addFiles =
+    support === null || !isOpen || pending
+      ? null
+      : (files: ReadonlyArray<File>) =>
+          attachments.add(shown.exchangeId, environmentId, support.maxFileBytes, files);
+  const answerId = `adjudication-answer-${encodeURIComponent(shown.exchangeId)}`;
+
   const answer = async () => {
-    if (message === "") return;
-    // A retry of the same words reuses its request id, so a lost reply cannot answer twice.
+    if (message === "" || "blocked" in readiness) return;
+    const attachmentIds = readiness.attachments.map((attachment) => attachment.id).join("\n");
+    // A retry of the same words and files reuses its request id, so a lost reply cannot answer twice.
     const request =
-      attempt.current?.exchangeId === shown.exchangeId && attempt.current.message === message
+      attempt.current?.exchangeId === shown.exchangeId &&
+      attempt.current.message === message &&
+      attempt.current.attachmentIds === attachmentIds
         ? attempt.current
-        : { exchangeId: shown.exchangeId, message, clientRequestId: randomUUID() };
+        : { exchangeId: shown.exchangeId, message, attachmentIds, clientRequestId: randomUUID() };
     attempt.current = request;
     setPending(true);
     setError(null);
     try {
-      await answerHumanExchange(environmentId, request);
+      await answerHumanExchange(environmentId, {
+        exchangeId: request.exchangeId,
+        message: request.message,
+        ...(readiness.attachments.length === 0 ? {} : { attachments: readiness.attachments }),
+        clientRequestId: request.clientRequestId,
+      });
       attempt.current = null;
+      attachments.delivered(shown.exchangeId);
       notifyHumanInboxChanged(environmentId);
       setAnswers((current) =>
         Object.fromEntries(Object.entries(current).filter(([id]) => id !== shown.exchangeId)),
@@ -109,6 +141,17 @@ export function AdjudicationDock(props: {
     setPending(false);
   };
 
+  const questionText = (text: string) => (
+    <div className={expanded.has(shown.exchangeId) ? "text-sm" : "line-clamp-3 text-sm"}>
+      <ChatMarkdown
+        cwd={undefined}
+        environmentId={environmentId}
+        lineBreaks={shouldPreserveAssistantLineBreaks(text)}
+        text={text}
+        threadRef={threadRef}
+      />
+    </div>
+  );
   return (
     <ComposerBanner.Attachment>
       <ComposerBanner.Root density="comfortable" data-testid="adjudication-dock">
@@ -121,16 +164,23 @@ export function AdjudicationDock(props: {
             </Badge>
           </div>
           <h3 className="text-sm font-semibold leading-snug text-foreground">{shown.intent}</h3>
-          <div className={expanded.has(shown.exchangeId) ? "text-sm" : "line-clamp-3 text-sm"}>
-            <ChatMarkdown
-              cwd={undefined}
-              environmentId={environmentId}
-              lineBreaks={shouldPreserveAssistantLineBreaks(shown.message)}
-              text={shown.message}
-              threadRef={threadRef}
-            />
+          <div className="max-h-[50vh] space-y-2 overflow-y-auto">
+            {questionText(shown.message)}
+            {shown.escalation === undefined ? null : (
+              <J5RecordPanel text={shown.escalation.summary} />
+            )}
+            {shown.personaDraft === undefined ? null : (
+              <J5RecordPanel text={shown.personaDraft.summary} />
+            )}
+            {shown.followUps?.map((followUp) => (
+              <div className="flex flex-col gap-1" key={followUp.messageId}>
+                <p className="text-xs font-medium text-muted-foreground">Follow-up</p>
+                {questionText(followUp.message)}
+              </div>
+            ))}
           </div>
-          {hasMoreThanExcerpt(shown.message) ? (
+          {hasMoreThanExcerpt(shown.message) ||
+          shown.followUps?.some((followUp) => hasMoreThanExcerpt(followUp.message)) ? (
             <Button
               className="w-fit"
               onClick={() =>
@@ -150,12 +200,20 @@ export function AdjudicationDock(props: {
           <Textarea
             aria-label={`Answer ${shown.intent}`}
             className="min-h-9"
+            id={answerId}
             onChange={(event) => {
               const value = event.currentTarget.value;
               setAnswers((current) => ({ ...current, [shown.exchangeId]: value }));
             }}
             placeholder="Type the answer exactly as it should be delivered"
             value={message}
+            {...(addFiles === null ? {} : answerAttachmentInputHandlers(addFiles))}
+          />
+          <AnswerAttachmentList
+            attachments={attachments.list(shown.exchangeId)}
+            environmentId={environmentId}
+            error={attachments.error(shown.exchangeId)}
+            onRemove={pending ? null : (id) => attachments.remove(shown.exchangeId, id)}
           />
           {error ? (
             <p className="text-sm text-destructive" role="alert">
@@ -163,11 +221,29 @@ export function AdjudicationDock(props: {
             </p>
           ) : null}
           <div className="flex items-center justify-end gap-2">
+            {addFiles === null ? null : (
+              <AnswerAttachButton
+                focusAnswer={() => document.getElementById(answerId)?.focus()}
+                onFiles={addFiles}
+              />
+            )}
+            {isOpen ? (
+              <OwnerAskAction
+                // One instance per ask, so an error or request id never carries to the next.
+                key={shown.exchangeId}
+                disabled={pending}
+                environmentId={environmentId}
+                item={shown}
+                onDone={query.refresh}
+                size="sm"
+              />
+            ) : null}
             {isOpen ? (
               <Button
-                disabled={pending || message === ""}
+                disabled={pending || message === "" || waitingOn !== null}
                 onClick={() => void answer()}
                 size="sm"
+                title={waitingOn ?? undefined}
                 type="button"
               >
                 {pending ? "Delivering…" : "Answer"}
@@ -178,10 +254,10 @@ export function AdjudicationDock(props: {
               </p>
             )}
           </div>
-          {others.length > 0 ? (
+          {nextAsk !== null ? (
             <Button
               className="w-full justify-start"
-              onClick={() => setPicked(others[0]!.exchangeId)}
+              onClick={() => setPicked(nextAsk.exchangeId)}
               type="button"
               variant="outline"
             >
@@ -189,7 +265,7 @@ export function AdjudicationDock(props: {
                 {others.length} more {others.length === 1 ? "question" : "questions"}
               </span>
               <span className="min-w-0 flex-1 truncate text-start text-muted-foreground">
-                · {others[0]!.intent}
+                · {nextAsk.intent}
               </span>
               <ChevronRightIcon aria-hidden className="size-3.5 shrink-0" />
             </Button>

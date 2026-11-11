@@ -1,5 +1,7 @@
 import { doctorCommand } from "./cli/doctor.ts";
+import { policyCommand } from "./cli/policy.ts";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -10,9 +12,9 @@ import * as NetService from "@t3tools/shared/Net";
 import packageJson from "../package.json" with { type: "json" };
 import { acpMcpBridgeCommand, acpMcpCallCommand } from "./cli/acpMcpBridge.ts";
 import { authCommand } from "./cli/auth.ts";
+import { environmentCommand } from "./cli/environment.ts";
 import { appCommand } from "./cli/app.ts";
 import { browserCommand } from "./cli/browser.ts";
-import { connectCommand } from "./cli/connect.ts";
 import { pairCommand } from "./cli/pair.ts";
 import { hasCloudPublicConfig } from "./cloud/publicConfig.ts";
 import { extendConnectionAttemptTimeout, keepOutboundFetchOnHttp1 } from "./outboundHttp.ts";
@@ -29,9 +31,11 @@ import { servicePreflightCommand } from "./cli/servicePreflight.ts";
 import { themeCommand } from "./cli/theme.ts";
 import { traceCommand } from "./cli/trace.ts";
 import { a2aCommand } from "./j5/cli/a2a.ts";
+import { j5ThreadCommand } from "./j5/cli/thread.ts";
 import { triageCommand } from "./cli/triage.ts";
+import { connectCommand, statusCommand, upCommand } from "./cli/up.ts";
 
-const layerCliRuntime = Layer.mergeAll(NodeServices.layer, NetService.layer);
+const layerCliRuntime = Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NetService.layer);
 
 const connectPublicConfigMissingMessage =
   "T3 Connect commands are unavailable: this build is missing T3 Connect public configuration.";
@@ -59,7 +63,9 @@ const connectUnavailableCommand = Command.make("connect", {
 
 export const makeCli = ({ cloudEnabled = hasCloudPublicConfig } = {}) =>
   Command.make("j5", { ...sharedServerCommandFlags }).pipe(
-    Command.withDescription("Run the J5 Code server."),
+    Command.withDescription(
+      "Run J5 Code in this terminal and open it in your browser. To use it from your other devices, run `j5 up`.",
+    ),
     Command.withHandler(runDefaultServerCommand),
     Command.withSubcommands([
       Command.make("help").pipe(
@@ -75,10 +81,13 @@ export const makeCli = ({ cloudEnabled = hasCloudPublicConfig } = {}) =>
       appCommand,
       pairCommand,
       authCommand,
+      environmentCommand,
       browserCommand,
       projectCommand,
-      // J5: upstream's `thread` subcommand is not registered; agents launch and message
-      // threads through J5's own tools (decision 3, 2026-10-24 advance).
+      // J5 (FORK.md case 82): `thread` is J5's, on its own spawn and send tools.
+      j5ThreadCommand,
+      upCommand,
+      statusCommand,
       serviceCommand,
       updateCommand,
       uninstallCommand,
@@ -90,6 +99,7 @@ export const makeCli = ({ cloudEnabled = hasCloudPublicConfig } = {}) =>
       themeCommand,
       traceCommand,
       doctorCommand,
+      policyCommand,
       triageCommand,
       a2aCommand,
       cloudEnabled ? connectCommand : connectUnavailableCommand,

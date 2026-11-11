@@ -2,7 +2,7 @@ import { EnvironmentId, ThreadId, type ScopedThreadRef } from "@t3tools/contract
 import type { ParticipantIdentitiesResponse } from "@t3tools/contracts/j5";
 
 import { scopeThreadRef } from "../environment/scoped.ts";
-import { parseJ5AgentEnvelope, type J5UserMessagePresentation } from "./userMessagePresentation.ts";
+import type { J5UserMessagePresentation } from "./userMessagePresentation.ts";
 
 export interface ParticipantIdentities {
   readonly labels: ReadonlyMap<string, string>;
@@ -71,29 +71,6 @@ export function nameJ5NoticeParticipants(
         ),
       text,
     );
-}
-
-/** A queued delivery's row in "Up next": `From <sender>: <first line>`. Null for anything else. */
-export function formatJ5QueuedDelivery(
-  text: string,
-  participantLabels: ReadonlyMap<string, string>,
-): { readonly label: string; readonly tooltipParticipantId: string | null } | null {
-  const envelope = parseJ5AgentEnvelope(text);
-  if (envelope === null) return null;
-  const sender = presentParticipantIdentity({
-    participantId: envelope.senderId,
-    participantLabels,
-  });
-  const firstLine = envelope.letter.split("\n")[0]?.trim() ?? "";
-  return {
-    label: `From ${sender.label}: ${firstLine || "Message content unavailable"}`,
-    tooltipParticipantId: sender.tooltipParticipantId,
-  };
-}
-
-export function participantIdsForJ5Envelope(text: string): ReadonlyArray<string> {
-  const envelope = parseJ5AgentEnvelope(text);
-  return envelope === null ? [] : [envelope.senderId];
 }
 
 /**

@@ -12,8 +12,8 @@ const J5_DEFINITION_WRITE_TOOLS: ReadonlyArray<string> = ["j5_playbook_save"];
 /**
  * The t3-code tools Codex and Claude pre-approve, so the roster gate stays the only human step.
  * Harnesses prompt for MCP tools not annotated read-only, and approval policy `never` (full access,
- * every saved-agent policy) rejects them. Pre-approved: the J5 verbs, whose handlers authorize each
- * call, `j5_write_artifact` for handoffs, and the Subagent verbs Crew members use.
+ * every saved-agent policy) rejects them. Pre-approved: the J5 verbs and `t3_thread_interrupt`,
+ * whose handlers authorize each call, `j5_write_artifact`, and the Subagent verbs.
  */
 export const J5_PREAPPROVED_TOOLS: ReadonlyArray<string> = [
   ...J5_DEFINITION_WRITE_TOOLS,
@@ -21,15 +21,18 @@ export const J5_PREAPPROVED_TOOLS: ReadonlyArray<string> = [
   "j5_list_participants",
   "j5_spawn_agent",
   "j5_list_personas",
+  "j5_read_persona",
+  // Writes only a draft; saving it takes an Owner's button on the ask.
+  "j5_propose_persona",
   "j5_propose_crew",
   "j5_request_crew_member",
-  // Declared handoffs are files the seat writes itself into application storage.
+  // Files a brief or Playbook step asks for are written by the seat into application storage.
   "j5_write_artifact",
   // Provider-native Subagents: the one way a Crew member gets more hands.
   "delegate_task",
   "task_status",
   "task_cancel",
-  "j5_stop_agent",
+  "t3_thread_interrupt",
   "j5_stop_crew",
   "j5_archive_crew",
   "j5_clear_own_ask",
@@ -53,6 +56,7 @@ export const J5_PREAPPROVED_TOOLS: ReadonlyArray<string> = [
 export const J5_COORDINATION_TOOLS: ReadonlyArray<string> = [
   "j5_send_message",
   "j5_clear_own_ask",
+  "j5_propose_persona",
   "j5_propose_crew",
   "j5_request_crew_member",
   "j5_playbook_start",

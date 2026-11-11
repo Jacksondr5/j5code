@@ -1,4 +1,6 @@
 import { assert, it } from "@effect/vitest";
+import { agentPersonaEscalationsTestLayer } from "../test-support/agentPersonaEscalations.ts";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CommandId,
@@ -16,6 +18,7 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import { RemoteDelegation } from "../../peer/RemoteDelegation.ts";
 import { layerMemory as SqlitePersistenceMemory } from "../../persistence/Sqlite.ts";
 import { layerWithRegistry as makeOrchestratorV2ReplayLayerWithRegistry } from "../../orchestration-v2/testkit/ProviderReplayHarness.ts";
 import { layerFromAdapters as makeLayer } from "../../orchestration-v2/ProviderAdapterRegistry.ts";
@@ -115,8 +118,9 @@ const mcp = Mcp.layer.pipe(
   Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
   Layer.provide(Layer.mock(GitVcsDriver)({})),
   Layer.provide(Layer.mock(ThreadLaunchService)({})),
+  Layer.provide(Layer.mock(RemoteDelegation)({})),
   Layer.provide(settings),
-  Layer.provide(NodeServices.layer),
+  Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
 );
 const makeTestLayer = (memberModels: Layer.Layer<CrewMemberModels>) =>
   Layer.mergeAll(
@@ -125,8 +129,9 @@ const makeTestLayer = (memberModels: Layer.Layer<CrewMemberModels>) =>
     registry,
     mcp,
     memberModels,
+    agentPersonaEscalationsTestLayer(),
     Projections.layer.pipe(Layer.provide(database)),
-    NodeServices.layer,
+    Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
   ).pipe(
     Layer.provideMerge(personaLibraryLayer("j5-saved-subagent-", [BUILT_IN_AGENT_PERSONAS.scout])),
   );
@@ -212,8 +217,36 @@ const runningParent = Effect.gen(function* () {
     capabilities: new Set(["orchestration" as const]),
     issuedAt: 1,
   };
-  return { orchestrator, scope, threadId };
+  /** The message that started the running turn, as a person typed it. */
+  const personTyped = (text: string) =>
+    projections.apply({
+      id: EventId.make("parent-message-event"),
+      type: "message.updated",
+      threadId,
+      occurredAt: now,
+      payload: {
+        createdBy: "user",
+        creationSource: "web",
+        id: MessageId.make("parent-message"),
+        threadId,
+        runId,
+        nodeId,
+        role: "user",
+        text,
+        attachments: [],
+        streaming: false,
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+  return { orchestrator, scope, threadId, personTyped };
 });
+
+/** A local delegate's thread; only a task sent to a linked environment has none. */
+const localChild = (result: { readonly childThreadId: ThreadId | null }): ThreadId => {
+  if (result.childThreadId === null) throw new Error("expected a local child thread");
+  return result.childThreadId;
+};
 
 it.effect("persists the saved persona on a nested child and reuses that child on retry", () =>
   Effect.gen(function* () {
@@ -227,7 +260,7 @@ it.effect("persists the saved persona on a nested child and reuses that child on
     const repeated = yield* request;
     assert.equal(first.childThreadId, repeated.childThreadId);
     const parent = yield* orchestrator.getThreadProjection(threadId);
-    const child = yield* orchestrator.getThreadProjection(first.childThreadId);
+    const child = yield* orchestrator.getThreadProjection(localChild(first));
     assert.lengthOf(parent.subagents, 1);
     assert.equal(parent.thread.agentPersonaAssignment, undefined);
     assert.equal(child.thread.lineage.relationshipToParent, "subagent");
@@ -245,7 +278,7 @@ it.effect("persists the saved persona on a nested child and reuses that child on
       clientRequestId: "delegate-request",
     }).pipe(Effect.provideService(McpInvocationContext, scope));
     assert.equal(
-      (yield* orchestrator.getThreadProjection(viaDelegate.childThreadId)).thread
+      (yield* orchestrator.getThreadProjection(localChild(viaDelegate))).thread
         .agentPersonaAssignment?.personaId,
       "scout",
     );
@@ -259,7 +292,7 @@ it.effect("persists the saved persona on a nested child and reuses that child on
     const plain = yield* delegateTask({ task: "Plain child work.", clientRequestId: "plain" }).pipe(
       Effect.provideService(McpInvocationContext, scope),
     );
-    const plainChild = yield* orchestrator.getThreadProjection(plain.childThreadId);
+    const plainChild = yield* orchestrator.getThreadProjection(localChild(plain));
     assert.equal(plainChild.thread.agentPersonaAssignment, undefined);
     assert.equal(plainChild.thread.lineage.relationshipToParent, "subagent");
   }).pipe(Effect.provide(testLayer)),
@@ -279,7 +312,7 @@ const listedLayer = Layer.merge(
 
 it.effect("holds a plain delegated child to the list, inherited model included", () =>
   Effect.gen(function* () {
-    const { orchestrator, scope } = yield* runningParent;
+    const { orchestrator, scope, personTyped } = yield* runningParent;
     const settings = yield* ServerSettings.ServerSettingsService;
     const asParent = Effect.provideService(McpInvocationContext, scope);
     const plain = (clientRequestId: string, target?: { readonly model: string }) =>
@@ -294,7 +327,7 @@ it.effect("holds a plain delegated child to the list, inherited model included",
     // Until a list is saved, the child inherits the parent's model as it always did.
     const free = yield* plain("free");
     assert.equal(
-      (yield* orchestrator.getThreadProjection(free.childThreadId)).thread.modelSelection.model,
+      (yield* orchestrator.getThreadProjection(localChild(free))).thread.modelSelection.model,
       modelSelection.model,
     );
 
@@ -313,19 +346,28 @@ it.effect("holds a plain delegated child to the list, inherited model included",
     ])
       assert.include(refused.message, part);
 
-    // A persona runs on its own model whatever the list says; an explicit checked target works.
-    const persona = yield* delegateTask({
-      task: "Return a short evidence brief.",
-      persona: "scout",
-      clientRequestId: "persona",
-    }).pipe(asParent);
+    // The agent's own pick of a persona is held to the list too; the person's runs on the
+    // persona's own model whatever the list says. An explicit checked target works.
+    const scout = (clientRequestId: string) =>
+      delegateTask({
+        task: "Return a short evidence brief.",
+        persona: "scout",
+        clientRequestId,
+      }).pipe(asParent);
+    const agentPick = yield* scout("agent-pick").pipe(Effect.flip);
+    assert.include(
+      agentPick.message,
+      `${modelSelection.model} on Codex is not checked in Models for custom members`,
+    );
+    yield* personTyped("@persona:scout check the evidence");
+    const persona = yield* scout("persona");
     assert.equal(
-      (yield* orchestrator.getThreadProjection(persona.childThreadId)).thread.modelSelection.model,
+      (yield* orchestrator.getThreadProjection(localChild(persona))).thread.modelSelection.model,
       modelSelection.model,
     );
     const explicit = yield* plain("explicit", { model: otherModel });
     assert.equal(
-      (yield* orchestrator.getThreadProjection(explicit.childThreadId)).thread.modelSelection.model,
+      (yield* orchestrator.getThreadProjection(localChild(explicit))).thread.modelSelection.model,
       otherModel,
     );
 
@@ -340,7 +382,7 @@ it.effect("holds a plain delegated child to the list, inherited model included",
 
 it.effect("holds a plain delegated child to the level list, an inherited level included", () =>
   Effect.gen(function* () {
-    const { orchestrator, scope } = yield* runningParent;
+    const { orchestrator, scope, personTyped } = yield* runningParent;
     const settings = yield* ServerSettings.ServerSettingsService;
     const asParent = Effect.provideService(McpInvocationContext, scope);
     const plain = (
@@ -377,21 +419,29 @@ it.effect("holds a plain delegated child to the level list, an inherited level i
     ])
       assert.include(refused.message, part);
 
-    // A persona runs on its own level, a model with no reasoning option has nothing to hold, and
-    // an explicit checked level works.
-    const persona = yield* delegateTask({
-      task: "Return a short evidence brief.",
-      persona: "scout",
-      clientRequestId: "persona",
-    }).pipe(asParent);
+    // The agent's own pick of a persona is held to the level list; a persona the person picked
+    // runs on its own level. A model with no reasoning option has nothing to hold, and an
+    // explicit checked level works.
+    const scout = (clientRequestId: string) =>
+      delegateTask({
+        task: "Return a short evidence brief.",
+        persona: "scout",
+        clientRequestId,
+      }).pipe(asParent);
+    assert.include(
+      (yield* scout("agent-pick").pipe(Effect.flip)).message,
+      "is not checked in Models for custom members",
+    );
+    yield* personTyped("Ask @persona:scout for evidence.");
+    const persona = yield* scout("persona");
     assert.equal(
-      (yield* orchestrator.getThreadProjection(persona.childThreadId)).thread.modelSelection.model,
+      (yield* orchestrator.getThreadProjection(localChild(persona))).thread.modelSelection.model,
       modelSelection.model,
     );
     yield* plain("plain-model", { model: plainModel });
     const explicit = yield* plain("explicit", { model: otherModel, level: "low" });
     assert.equal(
-      (yield* orchestrator.getThreadProjection(explicit.childThreadId)).thread.modelSelection.model,
+      (yield* orchestrator.getThreadProjection(localChild(explicit))).thread.modelSelection.model,
       otherModel,
     );
     const unchecked = yield* plain("unchecked", { model: otherModel, level: "high" }).pipe(

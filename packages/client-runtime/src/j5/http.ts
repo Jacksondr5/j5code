@@ -8,6 +8,7 @@ import type { PreparedConnection } from "../connection/model.ts";
 import { environmentEndpointUrl } from "../environment/endpoint.ts";
 import { ManagedRelayDpopSigner } from "../relay/managedRelay.ts";
 import { executeAuthenticatedEnvironmentRawHttpRequest } from "../state/environmentHttpAuth.ts";
+import * as HttpMethod from "effect/http/HttpMethod";
 
 const ErrorResponse = Schema.Struct({
   message: Schema.optionalKey(Schema.String),
@@ -47,11 +48,13 @@ export const executeJ5Request = Effect.fn("j5.http.executeRequest")(function* (
     return url.toString();
   };
   let requestUrl = resolveUrl(prepared.httpBaseUrl);
+  // Every J5 request is built with one of HttpClientRequest's method constructors.
+  const method = HttpMethod.isHttpMethod(request.method) ? request.method : "POST";
   const response = yield* executeAuthenticatedEnvironmentRawHttpRequest({
     prepared,
     signer,
     remoteAuthorization,
-    method: request.method,
+    method,
     url: (httpBaseUrl) => (requestUrl = resolveUrl(httpBaseUrl)),
     timeoutMs,
     request: ({ headers }) =>

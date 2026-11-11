@@ -6,9 +6,10 @@ import {
 } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { AgentPersonaCreateDraft } from "@t3tools/client-runtime/j5/agent-personas";
-import type { AgentPersonaEditInput, EnvironmentId, ProjectId } from "@t3tools/contracts";
+import type { AgentPersonaEditInput, EnvironmentId } from "@t3tools/contracts";
 import { useRef, type ReactNode } from "react";
-import { KeyboardAvoidingView, Platform } from "react-native";
+import { Platform } from "react-native";
+import { KeyboardAwareScrollView, useKeyboardState } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import * as Dialog from "../../components/ui/Dialog";
@@ -26,12 +27,6 @@ export type SettingsFormRoutes = {
   SettingsPersonaEdit: {
     readonly environmentId: EnvironmentId;
     readonly initial: Omit<AgentPersonaEditInput, "instructions">;
-  };
-  SettingsPlaybookConversation: {
-    readonly environmentId: EnvironmentId;
-    readonly name: string | null;
-    /** The project Settings is showing, so a project playbook's chat opens where it lives. */
-    readonly projectId: ProjectId | null;
   };
 };
 
@@ -91,6 +86,7 @@ export function SettingsFormScreen(props: {
 }) {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
+  const keyboardVisible = useKeyboardState((state) => state.isVisible);
   return (
     <SettingsScreen title={props.title}>
       {Platform.OS === "ios" ? (
@@ -120,20 +116,40 @@ export function SettingsFormScreen(props: {
           }
         />
       ) : null}
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-      >
+      {/* iOS keeps upstream's scroll view, which registers with the native header and insets for the
+          keyboard; with it up, the home indicator area is already covered, so Save gets no extra
+          padding. Android has no header marker, so keyboard-controller's scroll view lets the form
+          scroll clear of the keyboard, as the Inbox does. */}
+      {Platform.OS === "ios" ? (
         <ScrollView
+          automaticallyAdjustKeyboardInsets
           keyboardShouldPersistTaps="handled"
           contentInsetAdjustmentBehavior="automatic"
           className="flex-1"
           contentContainerClassName="gap-4 px-5 pt-4"
-          contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 18) + 18 }}
+          contentContainerStyle={{
+            paddingBottom: keyboardVisible ? 0 : Math.max(insets.bottom, 18) + 18,
+          }}
         >
           {props.children}
         </ScrollView>
-      </KeyboardAvoidingView>
+      ) : (
+        <KeyboardAwareScrollView
+          bottomOffset={80}
+          keyboardShouldPersistTaps="handled"
+          className="flex-1"
+          contentContainerClassName="gap-4 px-5 pt-4"
+          // Android's content width cap, as upstream's ScreenScrollView applies it.
+          contentContainerStyle={{
+            width: "100%",
+            maxWidth: 720,
+            alignSelf: "center",
+            paddingBottom: Math.max(insets.bottom, 18) + 18,
+          }}
+        >
+          {props.children}
+        </KeyboardAwareScrollView>
+      )}
     </SettingsScreen>
   );
 }

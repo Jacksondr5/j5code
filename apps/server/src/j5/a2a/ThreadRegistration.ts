@@ -36,8 +36,9 @@ export interface ThreadRegistrationShape {
 }
 
 /**
- * The one place a thread becomes an agent-to-agent participant. A thread's home is its project,
- * which upstream fixes when the thread is created, so registration takes only the thread id.
+ * The one place a thread becomes an agent-to-agent participant, in the thread's project, so
+ * registration takes only the thread id. When upstream later moves the thread (Turn into
+ * project), the lifecycle service moves its membership with it.
  */
 export class ThreadRegistration extends Context.Service<
   ThreadRegistration,
@@ -65,6 +66,8 @@ export const layer: Layer.Layer<ThreadRegistration, never, A2AHomeRegistrar | Sq
           WHERE thread_id = ${threadId}
             AND deleted_at IS NULL
             AND COALESCE(json_extract(payload_json, '$.lineage.relationshipToParent'), '') <> 'subagent'
+            AND COALESCE(json_extract(payload_json, '$.lineage.sideChat'), 0) <> 1
+            AND json_extract(payload_json, '$.delegatedFrom') IS NULL
         `.pipe(
           Effect.map((rows) =>
             rows[0] === undefined

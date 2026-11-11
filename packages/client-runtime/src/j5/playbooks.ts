@@ -24,7 +24,10 @@ import { defaultAgentPersonaModelRoute } from "./agentPersonas.ts";
 import type { StartThreadTurnInput } from "../operations/commands.ts";
 import type { EnvironmentProject, EnvironmentThreadShell } from "../state/shell.ts";
 
-const PLAYBOOK_AUTHOR_ID = "playbook-author";
+export const PLAYBOOK_AUTHOR_ID = "playbook-author";
+/** What a person asks Playbook Author first; mobile prefills it in a new chat. */
+export const PLAYBOOK_AUTHOR_PROMPT =
+  "Help me create a playbook, available across all projects and worktrees in this environment. Save the final YAML with j5_playbook_save. Start by asking what I want it to accomplish.";
 const PLAYBOOK_AUTHOR_INSTRUCTIONS = `You are Playbook Author. Help the user turn a repeatable task into a small, clear agent-led playbook shared across this environment.
 
 1. Start by asking what the playbook should accomplish. Clarify the desired result, inputs, constraints, and evidence of success one focused question at a time. Use details already provided instead of asking again.
@@ -74,7 +77,7 @@ export async function ensurePlaybookAuthor(input: {
         displayName: "Playbook Author",
         description: "Helps you design, write, and validate agent-led playbooks.",
         instructions: PLAYBOOK_AUTHOR_INSTRUCTIONS,
-        authorityPolicy: "workspace-write",
+        access: "workspace-write",
         modelRoute,
       });
     } catch (cause) {
@@ -94,17 +97,18 @@ export async function ensurePlaybookAuthor(input: {
     );
   // Saved authors predate environment libraries. Update only the exact stock instructions,
   // using the existing digest guard so a concurrent human edit is never overwritten.
-  if (persona.editable && input.readDefinition && input.editPersona) {
+  const editable = persona.orderedEditable;
+  if (editable && input.readDefinition && input.editPersona) {
     const definition = await input.readDefinition(PLAYBOOK_AUTHOR_ID);
     if (definition.instructions === LEGACY_PLAYBOOK_AUTHOR_INSTRUCTIONS) {
       await input.editPersona({
         personaId: persona.personaId,
-        expectedDigest: persona.editable.definitionDigest,
+        expectedDigest: editable.definitionDigest,
         displayName: definition.displayName,
         description: definition.description,
         instructions: PLAYBOOK_AUTHOR_INSTRUCTIONS,
-        authorityPolicy: "workspace-write",
-        modelRoute: definition.modelRoute,
+        access: "workspace-write",
+        modelRoute: definition.models ?? definition.modelRoute,
       });
     }
   }
@@ -130,7 +134,7 @@ export function playbookAuthorLaunch(input: {
       message: {
         messageId,
         role: "user",
-        text: "Help me create a playbook, available across all projects and worktrees in this environment. Save the final YAML with j5_playbook_save. Start by asking what I want it to accomplish.",
+        text: PLAYBOOK_AUTHOR_PROMPT,
         attachments: [],
       },
       modelSelection,

@@ -43,11 +43,21 @@ import { useProject, useThreadShell } from "../../state/entities";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { RelativeTime } from "../../components/RelativeTime";
 import { RelativeAge } from "../RelativeAge";
+import {
+  AnswerAttachButton,
+  AnswerAttachmentList,
+  type AnswerAttachmentsState,
+  answerAttachmentInputHandlers,
+  useAnswerAttachmentSupport,
+  useAnswerAttachments,
+} from "./AnswerAttachments";
 import { answerHumanExchange } from "./humanInboxClient";
+import { J5RecordPanel } from "./J5RecordPanel";
+import { OwnerAskAction } from "./OwnerAskAction";
 import { useScopedParticipantLabels } from "./ParticipantIdentitiesClient";
 import { presentParticipantIdentity } from "@t3tools/client-runtime/j5/participant-identity";
 import { CrewRuntimeRequestsSection } from "../crew/CrewRuntimeRequestsSection";
-import type { ScopedCrewRuntimeRequest } from "../crew/crewRuntimeRequests.logic";
+import type { ScopedCrewRuntimeRequest } from "@t3tools/client-runtime/j5/crew-inbox-requests";
 import {
   refreshCrewRuntimeRequests,
   useCrewRuntimeRequests,
@@ -64,7 +74,7 @@ import {
   inboxSummary,
   worktreeCleanupKey,
   type ScopedWorktreeCleanup,
-} from "./crewWorktreeCleanup.logic";
+} from "@t3tools/client-runtime/j5/crew-worktree-cleanup";
 import {
   answeredInboxQueryAtom,
   answeredInboxSourcesAtom,
@@ -193,15 +203,28 @@ function InboxMessage({ item }: { readonly item: HumanInboxItem }) {
         worktreePath: thread?.worktreePath ?? null,
       })
     : undefined;
-  return (
+  const markdown = (text: string) => (
     <ChatMarkdown
       className="max-w-[72ch] text-sm text-foreground/90"
       cwd={cwd}
       environmentId={item.environmentId}
-      lineBreaks={shouldPreserveAssistantLineBreaks(item.message)}
-      text={item.message}
+      lineBreaks={shouldPreserveAssistantLineBreaks(text)}
+      text={text}
       threadRef={threadRef ?? undefined}
     />
+  );
+  return (
+    <div className="flex flex-col gap-4">
+      {markdown(item.message)}
+      {item.escalation === undefined ? null : <J5RecordPanel text={item.escalation.summary} />}
+      {item.personaDraft === undefined ? null : <J5RecordPanel text={item.personaDraft.summary} />}
+      {item.followUps?.map((followUp) => (
+        <div className="flex flex-col gap-1" key={followUp.messageId}>
+          <p className="text-xs font-medium text-muted-foreground">Follow-up</p>
+          {markdown(followUp.message)}
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -209,6 +232,7 @@ function OpenInboxItem({
   item,
   answer,
   answerText,
+  attachments,
   pendingExchangeId,
   setAnswers,
   onOpenThread,
@@ -232,6 +256,7 @@ function OpenInboxItem({
   readonly senderLabels: SenderLabels;
   readonly projectNameOf: ProjectNameOf;
   readonly answerText: string;
+  readonly attachments: AnswerAttachmentsState;
   readonly pendingExchangeId: string | null;
   readonly showEnvironment: boolean;
   readonly setAnswers: (update: (current: HumanInboxAnswers) => HumanInboxAnswers) => void;
@@ -244,6 +269,16 @@ function OpenInboxItem({
   const canAnswer = item.sourceReady && mayAnswer;
   const ownName = useOwnName(item.environmentId);
   const closedText = closed === undefined ? null : closedLine({ ...closed, ownName });
+  const itemKey = scopedInboxItemKey(item);
+  const answerId = `inbox-answer-${encodeURIComponent(itemKey)}`;
+  const support = useAnswerAttachmentSupport(item.environmentId);
+  const addFiles =
+    support === null || closedText !== null || pendingExchangeId !== null
+      ? null
+      : (files: ReadonlyArray<File>) =>
+          attachments.add(itemKey, item.environmentId, support.maxFileBytes, files);
+  const readiness = attachments.ready(itemKey, item.environmentId);
+  const waitingOn = "blocked" in readiness ? readiness.blocked : null;
   return (
     <li className="border-b border-border/70 last:border-b-0">
       <details className="group/details">
@@ -294,35 +329,62 @@ function OpenInboxItem({
             <Textarea
               aria-label={`Answer ${item.intent}`}
               className="min-h-24 resize-y"
-              onChange={(event) =>
-                captureHumanInboxAnswer(event, scopedInboxItemKey(item), setAnswers)
-              }
+              id={answerId}
+              onChange={(event) => captureHumanInboxAnswer(event, itemKey, setAnswers)}
               placeholder="Type the answer exactly as it should be delivered"
               value={answerText}
+              {...(addFiles === null ? {} : answerAttachmentInputHandlers(addFiles))}
+            />
+            <AnswerAttachmentList
+              attachments={attachments.list(itemKey)}
+              environmentId={item.environmentId}
+              error={attachments.error(itemKey)}
+              onRemove={pendingExchangeId === null ? (id) => attachments.remove(itemKey, id) : null}
             />
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <OpenThreadButton
-                environmentAvailable={item.connected}
-                item={item}
-                onOpen={onOpenThread}
-              />
+              <div className="flex items-center gap-1">
+                <OpenThreadButton
+                  environmentAvailable={item.connected}
+                  item={item}
+                  onOpen={onOpenThread}
+                />
+                {addFiles === null || !canAnswer ? null : (
+                  <AnswerAttachButton
+                    focusAnswer={() => document.getElementById(answerId)?.focus()}
+                    onFiles={addFiles}
+                  />
+                )}
+              </div>
               {closedText !== null ? (
                 <p className="text-sm text-muted-foreground" data-j5-inbox="closed">
                   {closedText}
                 </p>
               ) : (
-                <Button
-                  disabled={!canAnswer || pendingExchangeId !== null || answerText.length === 0}
-                  title={
-                    canAnswer
-                      ? undefined
-                      : "This environment is unavailable or this connection is read-only."
-                  }
-                  onClick={() => answer(item)}
-                  type="button"
-                >
-                  {pendingExchangeId === scopedInboxItemKey(item) ? "Delivering…" : "Answer"}
-                </Button>
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <OwnerAskAction
+                    disabled={!item.sourceReady || pendingExchangeId !== null}
+                    environmentId={item.environmentId}
+                    item={item}
+                    size="default"
+                  />
+                  <Button
+                    disabled={
+                      !canAnswer ||
+                      pendingExchangeId !== null ||
+                      answerText.length === 0 ||
+                      waitingOn !== null
+                    }
+                    title={
+                      canAnswer
+                        ? (waitingOn ?? undefined)
+                        : "This environment is unavailable or this connection is read-only."
+                    }
+                    onClick={() => answer(item)}
+                    type="button"
+                  >
+                    {pendingExchangeId === scopedInboxItemKey(item) ? "Delivering…" : "Answer"}
+                  </Button>
+                </div>
               )}
             </div>
           </div>
@@ -443,6 +505,7 @@ export function HumanInboxPage() {
   const projectNameOf = (item: HumanInboxItem) =>
     projectOf(item.environmentId, item.projectId)?.displayName ?? item.projectTitle;
   const [answers, setAnswers] = useState<HumanInboxAnswers>({});
+  const answerAttachments = useAnswerAttachments();
   // Removing a connection or changing its person must also discard that inbox's unsent replies.
   const personScopes = JSON.stringify(
     openSources.sources.map((source) => [source.environmentId, source.data?.personId ?? null]),
@@ -503,7 +566,7 @@ export function HumanInboxPage() {
   const nativeQuestions = useNativeQuestionInbox();
   const cleanups = useWorktreeCleanupInbox();
   const previousOpenItems = useRef(new Map<EnvironmentId, ReadonlySet<string>>());
-  // oxlint-disable-next-line t3code/react-effect-budget -- an answered item leaving the open list rereads the answered list; it reacts to data arriving, not to a handler here.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- an answered item leaving the open list rereads the answered list; it reacts to data arriving, not to a handler here.
   useEffect(() => {
     const next = new Map<EnvironmentId, ReadonlySet<string>>();
     for (const source of openSources.sources) {
@@ -556,7 +619,7 @@ export function HumanInboxPage() {
     await refreshHumanInboxes(environmentId, true);
   };
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- prunes answer attempts for scopes this person no longer has; render may not write refs.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- prunes answer attempts for scopes this person no longer has; render may not write refs.
   useEffect(() => {
     const keep = keepForPersonScopes(personScopes);
     for (const key of answerAttempts.current.keys())
@@ -566,21 +629,25 @@ export function HumanInboxPage() {
   const answer = async (item: HumanInboxItem) => {
     const itemKey = scopedInboxItemKey(item);
     const message = answers[itemKey] ?? "";
-    if (message.length === 0 || !item.sourceReady) return;
+    const readiness = answerAttachments.ready(itemKey, item.environmentId);
+    if (message.length === 0 || !item.sourceReady || "blocked" in readiness) return;
     await submitHumanInboxAnswer({
       item,
       message,
+      attachments: readiness.attachments,
       attempts: answerAttempts.current,
       randomUUID,
       send: answerHumanExchange,
       refresh,
       notifyChanged: notifyHumanInboxChanged,
-      onAccepted: () =>
+      onAccepted: () => {
         setAnswers((current) => {
           const next = { ...current };
           delete next[itemKey];
           return next;
-        }),
+        });
+        answerAttachments.delivered(itemKey);
+      },
       setPendingExchangeId,
       setError,
     });
@@ -693,6 +760,7 @@ export function HumanInboxPage() {
                     closed={closedOf(item)}
                     answer={answer}
                     answerText={answers[scopedInboxItemKey(item)] ?? ""}
+                    attachments={answerAttachments}
                     item={item}
                     key={scopedInboxItemKey(item)}
                     onOpenThread={openThread}

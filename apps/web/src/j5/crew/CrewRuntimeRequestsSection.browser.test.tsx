@@ -1,7 +1,7 @@
 import { EnvironmentId, RuntimeRequestId, ThreadId } from "@t3tools/contracts";
 import { expect, it, vi } from "vite-plus/test";
 
-import type { ScopedCrewRuntimeRequest } from "./crewRuntimeRequests.logic";
+import type { ScopedCrewRuntimeRequest } from "@t3tools/client-runtime/j5/crew-inbox-requests";
 
 const OPERABLE = EnvironmentId.make("env-operate");
 const READ_ONLY = EnvironmentId.make("env-read-only");
@@ -39,10 +39,6 @@ vi.mock(import("./crewRuntimeRequestsClient"), async (importOriginal) => ({
 vi.mock(import("../a2a/humanInboxRefresh"), async (importOriginal) => ({
   ...(await importOriginal()),
   notifyHumanInboxChanged: vi.fn(),
-}));
-vi.mock(import("../../components/chat/ComposerPendingApprovalPanel"), async (importOriginal) => ({
-  ...(await importOriginal()),
-  ComposerPendingApprovalPanel: (() => null) as never,
 }));
 vi.mock(import("../../components/chat/ComposerPendingApprovalActions"), async (importOriginal) => ({
   ...(await importOriginal()),

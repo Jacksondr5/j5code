@@ -9,7 +9,7 @@ import {
   type AuthSessionState,
 } from "@t3tools/contracts";
 import { J5_THREAD_READ_WS_METHODS, type PersonalThreadReadChange } from "@t3tools/contracts/j5";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -94,11 +94,8 @@ const setup = Effect.fn("test.personalReads")(function* (personal: boolean) {
         Stream.provideService(stream, EnvironmentSupervisor, supervisor),
     }),
     Layer.succeed(
-      Crypto.Crypto,
-      Crypto.make({
-        randomBytes: (size) => new Uint8Array(size),
-        digest: (_algorithm, data) => Effect.succeed(data),
-      }),
+      SecureRandom.SecureRandom,
+      SecureRandom.make((size) => new Uint8Array(size)),
     ),
   );
   const registry = yield* Effect.acquireRelease(

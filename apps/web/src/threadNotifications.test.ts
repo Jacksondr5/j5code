@@ -16,14 +16,22 @@ class FakeAudioContext {
   decodeAudioData() {
     return Promise.resolve({ duration: SOUND_SECONDS });
   }
-  createBufferSource() {
+  createGain() {
     return {
+      gain: { value: 1 },
+      connect() {},
+      disconnect() {},
+    };
+  }
+  createBufferSource() {
+    return Object.assign(new EventTarget(), {
       buffer: null,
       connect() {},
+      disconnect() {},
       start() {
         audio.started += 1;
       },
-    };
+    });
   }
 }
 
@@ -37,6 +45,12 @@ beforeEach(() => {
   vi.resetModules();
   audio.currentTime = 0;
   audio.started = 0;
+  vi.stubGlobal(
+    "window",
+    Object.assign(new EventTarget(), {
+      localStorage: { getItem: () => null },
+    }),
+  );
   vi.stubGlobal("AudioContext", FakeAudioContext);
   vi.stubGlobal(
     "fetch",
@@ -49,6 +63,31 @@ afterEach(() => {
 });
 
 describe("playNotificationSound", () => {
+  it("preloads both sounds on unlock and reuses them for playback", async () => {
+    const { unlockNotificationAudio, playNotificationSound } = await loadUnlocked();
+    expect(fetch).toHaveBeenCalledTimes(2);
+    unlockNotificationAudio();
+    await playNotificationSound("completion", () => true);
+    await playNotificationSound("input", () => true);
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(audio.started).toBe(2);
+  });
+
+  it("retries failed preloads on an alert rather than every gesture", async () => {
+    vi.mocked(fetch).mockRejectedValue(new Error("offline"));
+    const { unlockNotificationAudio, playNotificationSound } = await loadUnlocked();
+    await playNotificationSound("completion", () => true);
+    expect(fetch).toHaveBeenCalledTimes(2);
+
+    unlockNotificationAudio();
+    expect(fetch).toHaveBeenCalledTimes(2);
+
+    vi.mocked(fetch).mockResolvedValue(new Response(new ArrayBuffer(0)));
+    await playNotificationSound("completion", () => true);
+    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(audio.started).toBe(1);
+  });
+
   it("plays one sound for threads that complete together", async () => {
     const { playNotificationSound } = await loadUnlocked();
 

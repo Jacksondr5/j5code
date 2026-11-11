@@ -1,11 +1,6 @@
-import {
-  EnvironmentId,
-  MessageId,
-  ThreadId,
-  type OrchestrationV2ThreadProjection,
-} from "@t3tools/contracts";
+import { EnvironmentId, ThreadId, type OrchestrationV2ThreadProjection } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import { expect, it, vi } from "vite-plus/test";
-import { userEvent } from "vite-plus/test/browser";
 
 const fixture = vi.hoisted(() => ({
   projection: null as OrchestrationV2ThreadProjection | null,
@@ -17,7 +12,10 @@ vi.mock(import("../../state/entities"), async (importOriginal) => ({
 }));
 vi.mock(import("../../j5/a2a/ParticipantIdentitiesClient"), async (importOriginal) => ({
   ...(await importOriginal()),
-  useParticipantLabels: (() => new Map([["agent:peer", "Morgan"]])) as never,
+  useParticipantIdentities: (() => ({
+    labels: new Map([["agent:peer", "Morgan"]]),
+    threads: new Map(),
+  })) as never,
 }));
 // Shared-conversation authorship (case 80) is not under test; a solo thread shows runs as queued.
 vi.mock(import("../../j5/sharing/sharedTimeline"), async (importOriginal) => ({
@@ -36,11 +34,14 @@ vi.mock(import("../../state/use-atom-command"), async (importOriginal) => ({
     fixture.command(command, input)) as never,
 }));
 
+import "~/index.css";
 import { render } from "../../../test/render";
 import { threadEnvironment } from "../../state/threads";
 import { QueuedRunsControl } from "./QueuedRunsControl";
 
 const environmentId = EnvironmentId.make("remote-queue");
+const deliveryId = "message:j5:a2a:delivery:peer-1";
+const createdAt = DateTime.makeUnsafe("2026-11-07T12:00:00.000Z");
 const threadId = ThreadId.make("queue-thread");
 const peerMessage =
   "[Cross-agent message from agent:peer in project project-one (One)]\n\nReview this change.\n\nNo reply is required. Use j5_send_message without exchange_id only if a new message is needed.";
@@ -61,12 +62,26 @@ const projection = {
       providerThreadId: "provider-thread",
       ordinal: 1,
     },
-    { id: "queue-1", status: "queued", userMessageId: "message-1", ordinal: 2, queuePosition: 1 },
+    { id: "queue-1", status: "queued", userMessageId: deliveryId, ordinal: 2, queuePosition: 1 },
     { id: "queue-2", status: "queued", userMessageId: "message-2", ordinal: 3, queuePosition: 2 },
   ],
   messages: [
-    { id: "message-1", text: peerMessage, attachments: [attachment] },
-    { id: "message-2", text: "Second message", attachments: [] },
+    {
+      id: deliveryId,
+      role: "user",
+      createdBy: "agent",
+      createdAt,
+      text: peerMessage,
+      attachments: [attachment],
+    },
+    {
+      id: "message-2",
+      role: "user",
+      createdBy: "user",
+      createdAt,
+      text: "Second message",
+      attachments: [],
+    },
   ],
   providerThreads: [{ id: "provider-thread", appThreadId: threadId, providerSessionId: "session" }],
   providerSessions: [
@@ -85,52 +100,102 @@ const projection = {
   providerTurns: [{ runAttemptId: "attempt", status: "running" }],
 } as unknown as OrchestrationV2ThreadProjection;
 
-it("labels a queued peer message by its sender, keeps its attachments for editing, and acts on the thread's environment", async () => {
+it("folds a queued peer message under its sender on the left, edits it with its attachments, and acts on the thread's environment", async () => {
   fixture.projection = projection;
   const onEditQueuedRun = vi.fn();
   await using screen = await render(
     <QueuedRunsControl
       environmentId={environmentId}
       threadId={threadId}
-      optimisticMessages={[
-        { id: MessageId.make("message-1"), inputIntent: "queued_turn", text: peerMessage },
-      ]}
+      optimisticMessages={[]}
       editingRunId={null}
       editBlockedReason={null}
       onEditQueuedRun={onEditQueuedRun}
       onCancelEdit={() => {}}
+      timestampFormat="locale"
+      onOpenThread={() => {}}
     />,
   );
 
-  await expect.element(screen.getByText("From Morgan: Review this change.")).toBeVisible();
-  expect(screen.container.querySelectorAll("li")).toHaveLength(2);
+  // D38: the sender is named once, above a fold that previews the letter, not the envelope.
+  await expect.element(screen.getByText("Morgan", { exact: true })).toBeVisible();
+  await expect.element(screen.getByText(/From Morgan/)).not.toBeInTheDocument();
+  const fold = screen.getByRole("button", { name: "Review this change." });
+  await expect.element(fold).toHaveAttribute("aria-expanded", "false");
+  await fold.click();
   await expect.element(screen.getByRole("img", { name: "screenshot.png" })).toBeVisible();
+  await expect.element(screen.getByText(/Cross-agent message/)).not.toBeInTheDocument();
+
+  const [peerRow, personRow] = Array.from(screen.container.querySelectorAll("li"));
+  expect(getComputedStyle(peerRow!).alignItems).toBe("flex-start");
+  expect(getComputedStyle(personRow!).alignItems).toBe("flex-end");
 
   await screen.getByRole("button", { name: "Edit queued message" }).first().click();
   expect(onEditQueuedRun).toHaveBeenCalledWith({
     runId: "queue-1",
-    messageId: "message-1",
+    messageId: deliveryId,
     text: peerMessage,
     attachments: [attachment],
   });
 
-  (
-    screen
-      .getByRole("button", { name: /^Reorder queued/ })
-      .nth(1)
-      .element() as HTMLElement
-  ).focus();
-  await userEvent.keyboard("{ArrowUp}");
-  expect(fixture.command).toHaveBeenLastCalledWith(threadEnvironment.reorderQueuedRun, {
-    environmentId,
-    input: { threadId, runId: "queue-2", beforeRunId: "queue-1" },
-  });
-
-  const steer = screen.getByRole("button", { name: "Steer" }).first();
-  await expect.element(steer).toBeEnabled();
-  await steer.click();
+  await screen.getByRole("button", { name: "Send now" }).first().click();
   expect(fixture.command).toHaveBeenLastCalledWith(threadEnvironment.promoteQueuedRun, {
     environmentId,
     input: { threadId, queuedRunId: "queue-1", targetRunId: "active" },
   });
+});
+
+it("puts queued automation and server messages on the left with the peer's", async () => {
+  fixture.projection = {
+    ...projection,
+    runs: [
+      projection.runs[0],
+      {
+        id: "queue-1",
+        status: "queued",
+        userMessageId: "automation",
+        ordinal: 2,
+        queuePosition: 1,
+      },
+      { id: "queue-2", status: "queued", userMessageId: "server", ordinal: 3, queuePosition: 2 },
+    ],
+    messages: [
+      {
+        id: "automation",
+        role: "user",
+        createdBy: "agent",
+        createdAt,
+        text: "Nightly check",
+        attachments: [],
+        scheduledTaskId: "task-1",
+      },
+      {
+        id: "server",
+        role: "user",
+        createdBy: "agent",
+        creationSource: "server",
+        createdAt,
+        text: "Server notice",
+        attachments: [],
+      },
+    ],
+  } as unknown as OrchestrationV2ThreadProjection;
+  await using screen = await render(
+    <QueuedRunsControl
+      environmentId={environmentId}
+      threadId={threadId}
+      optimisticMessages={[]}
+      editingRunId={null}
+      editBlockedReason={null}
+      onEditQueuedRun={() => {}}
+      onCancelEdit={() => {}}
+      timestampFormat="locale"
+      onOpenThread={() => {}}
+    />,
+  );
+
+  await expect.element(screen.getByText("Automation", { exact: true })).toBeVisible();
+  await expect.element(screen.getByText(/Sent by/)).toBeVisible();
+  const rows = Array.from(screen.container.querySelectorAll("li"));
+  expect(rows.map((row) => getComputedStyle(row).alignItems)).toEqual(["flex-start", "flex-start"]);
 });

@@ -43,13 +43,12 @@ import {
   crewHasRunningSeat,
   seatQuietLabel,
   summarizeCrewState,
-} from "../crew/crewState";
+} from "@t3tools/client-runtime/j5/crew-state";
 import { stopCrew } from "../crew/crewStopClient";
 import {
   countFleetProjects,
   fleetCrewAnchorId,
   orderFleetRowsByProject,
-  originLabel,
   partitionFleet,
   playbookRunHeader,
   retiredCrews,
@@ -73,7 +72,6 @@ import {
   FleetFactCells,
   FleetFactDetails,
   FleetSourceReadout,
-  FleetFactHint,
   FleetCrewSummary,
 } from "./FleetFacts";
 
@@ -340,8 +338,8 @@ function FleetNodeRows(
   const { node, seatBadge, ...rows } = props;
   const { project: ledgerProject } = rows;
   const { environmentId } = ledgerProject;
-  // Stop and Archive need the same grant; either command answers for both.
   const canOperate = useAtomValue(j5Environment.stopCrew.permissionAtom(environmentId));
+  const canArchive = useAtomValue(j5Environment.archiveCrew.permissionAtom(environmentId));
   // "What is the state of this Crew?" from the seats' measured facts, no Playbook required.
   const crewState = (members: ReadonlyArray<FleetRow>) =>
     summarizeCrewState(
@@ -377,7 +375,11 @@ function FleetNodeRows(
         const thread = threadFor(props.threadsByKey, environmentId, agent);
         const displayName = thread?.title ?? agent.displayName;
         return {
-          seat: agent.crew?.seat ?? agent.participantId,
+          seat:
+            agent.crew?.seat ??
+            (agent.replaced === undefined
+              ? agent.participantId
+              : `${agent.replaced.seat} (replaced)`),
           participant:
             displayName === null
               ? { displayName: "Unnamed participant", tooltipParticipantId: agent.participantId }
@@ -483,11 +485,19 @@ function FleetNodeRows(
                       ) : null}
                       <Button
                         aria-label={`Archive crew ${crew.crewName}`}
-                        disabled={!canOperate || busy === crew.crewInstanceId}
+                        disabled={!canArchive || busy === crew.crewInstanceId}
                         onClick={(event) => {
                           event.preventDefault();
                           event.stopPropagation();
-                          void archive(crew, seats);
+                          // Members the Captain replaced retire with the Crew they left.
+                          void archive(crew, [
+                            ...seats,
+                            ...node.children
+                              .map((child) => child.row)
+                              .filter(
+                                (row) => row.agent.replaced?.crewInstanceId === crew.crewInstanceId,
+                              ),
+                          ]);
                         }}
                         size="xs"
                         variant="ghost"
@@ -699,31 +709,16 @@ export function FleetRowItem(
         }}
       >
         <span className="flex min-w-0 items-center gap-2">
-          <span className="truncate">{title}</span>
           {agent.outsideSpawner !== undefined ? (
-            // The label is whatever the client registered, so it yields to the agent's title; the
-            // name comes first so a cut keeps it, and the full text is on hover.
             <Tooltip>
-              <TooltipTrigger
-                render={
-                  <span className="max-w-[50%] shrink-0 truncate text-xs text-muted-foreground" />
-                }
-              >
-                {originLabel(agent)}
-              </TooltipTrigger>
-              <TooltipPopup>{originLabel(agent)}</TooltipPopup>
+              <TooltipTrigger render={<span className="truncate" />}>{title}</TooltipTrigger>
+              <TooltipPopup>
+                Started by {agent.outsideSpawner.name ?? agent.outsideSpawner.participantId}{" "}
+                (outside agent)
+              </TooltipPopup>
             </Tooltip>
-          ) : agent.origin === "human" ? null : (
-            <FleetFactHint
-              className="shrink-0 text-xs text-muted-foreground"
-              reason={
-                agent.origin === "unknown"
-                  ? "This environment has no recorded provenance for this agent."
-                  : undefined
-              }
-            >
-              {originLabel(agent)}
-            </FleetFactHint>
+          ) : (
+            <span className="truncate">{title}</span>
           )}
           {props.badge ? (
             <Badge variant="outline" size="sm" className="shrink-0">
@@ -733,6 +728,18 @@ export function FleetRowItem(
           {props.captainOf !== undefined && props.captainOf.length > 0 ? (
             <CaptainMark title={`Commands ${props.captainOf.join(", ")}`} />
           ) : null}
+          {agent.replaced === undefined ? null : (
+            <Tooltip>
+              <TooltipTrigger
+                render={<span className="min-w-0 truncate text-xs text-muted-foreground" />}
+              >
+                Replaced by {agent.replaced.replacedBy}
+              </TooltipTrigger>
+              <TooltipPopup>
+                Was seat {agent.replaced.seat} of crew {agent.replaced.crewName}
+              </TooltipPopup>
+            </Tooltip>
+          )}
         </span>
         {/* A placement tree lives in one project, so only its root names it. */}
         {props.row.depth === 0 ? <ProjectLabel {...props} agent={agent} /> : <span />}

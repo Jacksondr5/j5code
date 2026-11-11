@@ -89,8 +89,6 @@ export interface CrewBriefContext {
   readonly seatName: string;
   readonly seatInstructions?: string | undefined;
   readonly captainParticipantId: string;
-  /** The handoff this seat's agent definition returns, and the shared artifact file it goes to. */
-  readonly obligation?: { readonly kind: string; readonly path: string } | undefined;
   readonly roster: ReadonlyArray<{
     readonly seat: string;
     readonly participantId: string;
@@ -151,13 +149,6 @@ export const spawnFirstTurnText = (input: {
       ? []
       : [`<seat_instructions>\n${crew.seatInstructions}\n</seat_instructions>`];
   const collaboration = `<crew_collaboration>\nResolve current participants with j5_list_participants and use j5_send_message to coordinate directly with your Captain and other members; do not wait for an artifact or coordination approval.\nYou run your own review loops. When you review a teammate's work, send your findings directly to the teammate who owns it. When you receive findings, fix them and send the fix directly back to the reviewer. Repeat until no finding is unresolved. A round is one message of findings and the fix that answers it; if a loop has not produced a clean pass after three rounds, stop and send it to your Captain as a blocker or a disagreement.\nMessage your Captain only for: a review pass, which names the commit or change you reviewed so the Captain can tell it refers to the current code; a blocker, which names what you need; a disagreement you could not settle with the teammate; or your final result or step report. Send no acknowledgments and no progress updates. When you finish your assigned work, send your Captain your final result, supporting evidence, and any remaining blockers.\nIf the roster lacks expertise needed to address a concern, tell your Captain what is missing and why so they can j5_request_crew_member to add the seat directly. Continue your work and coordination while the Captain handles staffing. A direct result is sufficient unless the user or your persona explicitly requires an artifact.\n</crew_collaboration>`;
-  // A persona's declared deliverable supplements the conversation; it never gates coordination.
-  const obligation =
-    crew.obligation === undefined
-      ? []
-      : [
-          `<seat_obligation>\nYour agent definition returns a ${crew.obligation.kind}. Before you finish, write it with j5_write_artifact to exactly \`${crew.obligation.path}\` as Markdown (your instructions list the required contents); this is in addition to direct messages and must not delay sharing findings or results. Your Captain is told when the file appears; rewrite the same path to revise it.\n</seat_obligation>`,
-        ];
   const playbook =
     crew.playbook === undefined
       ? []
@@ -171,13 +162,7 @@ export const spawnFirstTurnText = (input: {
           }\n</seat_playbook>\nThe Captain runs this playbook and hands you each of your steps when the run reaches it. Wait for that hand-off before starting a step, and report back with j5_send_message when it's done.`,
         ];
   // The web parser needs the crew context first and the brief last, so the playbook sits between.
-  return [
-    identity,
-    crewContext,
-    ...playbook,
-    collaboration,
-    ...seatInstructions,
-    ...obligation,
-    brief,
-  ].join("\n\n");
+  return [identity, crewContext, ...playbook, collaboration, ...seatInstructions, brief].join(
+    "\n\n",
+  );
 };

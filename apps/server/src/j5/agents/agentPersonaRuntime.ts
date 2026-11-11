@@ -11,7 +11,6 @@ import {
   providerCanEnforceAgentPersonaAuthority,
   translateAgentPersonaProviderPolicy,
 } from "./agentPersonaProviderPolicy.ts";
-import { agentPersonaArtifactInstructions } from "./agentPersonaArtifacts.ts";
 import { makeCrewSeatLookup, withCrewSeatQuestions } from "../a2a/crewSeatRuntime.ts";
 
 /**
@@ -24,8 +23,7 @@ const PLATFORM_TOOLS_NOTE =
 
 /** Persona instructions express behavior; the translated sandbox supplies the actual runtime boundary. */
 export const resolveAgentPersonaRuntime = Effect.fn("resolveAgentPersonaRuntime")(function* (
-  thread: Pick<OrchestrationV2AppThread, "agentPersonaAssignment" | "runtimeMode"> &
-    Partial<Pick<OrchestrationV2AppThread, "id">>,
+  thread: Pick<OrchestrationV2AppThread, "agentPersonaAssignment" | "runtimeMode">,
   library: ReturnType<typeof createAgentPersonaLibrary>,
 ) {
   const assignment = thread.agentPersonaAssignment;
@@ -41,14 +39,11 @@ export const resolveAgentPersonaRuntime = Effect.fn("resolveAgentPersonaRuntime"
   } else {
     const definition = yield* library.readSnapshot(assignment);
     if (
-      !definition.authority.allowedPolicies.some(
-        (policy) => policy === assignment.authorityPolicy,
-      ) ||
-      (assignment.runtimeModeOverride === undefined &&
-        !providerCanEnforceAgentPersonaAuthority(
-          assignment.resolvedDriver,
-          assignment.authorityPolicy,
-        ))
+      assignment.runtimeModeOverride === undefined &&
+      !providerCanEnforceAgentPersonaAuthority(
+        assignment.resolvedDriver,
+        assignment.authorityPolicy,
+      )
     ) {
       return yield* new AgentPersonaLibraryError({
         message: "The assigned persona runtime permissions are unsupported.",
@@ -56,10 +51,6 @@ export const resolveAgentPersonaRuntime = Effect.fn("resolveAgentPersonaRuntime"
     }
     // The persona's own text is the whole behavior contract; J5 appends no hidden rules.
     instructions = `${definition.instructions}\n\n${PLATFORM_TOOLS_NOTE}`;
-    // Declared handoffs bind to the shared artifacts system; the section names the exact path.
-    const artifactSection =
-      thread.id === undefined ? undefined : agentPersonaArtifactInstructions(definition, thread.id);
-    if (artifactSection !== undefined) instructions = `${instructions}\n\n${artifactSection}`;
   }
   return {
     ...(assignment.runtimeModeOverride === undefined

@@ -18,6 +18,12 @@ const runtimeVersionPolicy =
 const personalTeamBundleIdentifier = repoEnv.T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID?.trim();
 const IOS_BUNDLE_IDENTIFIER_PATTERN = /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/;
 
+// Compiled into the native project. Without a relay, Observe's native side could dispatch to
+// Expo's own ingest before observe.ts turns it off; `.invalid` never resolves (RFC 6761).
+const observeEndpointUrl = repoEnv.T3CODE_RELAY_URL?.trim()
+  ? new URL("/v1/mobile/observe", repoEnv.T3CODE_RELAY_URL.trim()).toString()
+  : "https://observe.invalid";
+
 const fromRepoRoot = (relativePath: string) => `../../${relativePath}`;
 // Android layers are rendered by scripts/export-android-icons.ts from the Icon Composer sources.
 // Each variant's boat sits inside the adaptive safe zone; its artwork is a full-bleed background.
@@ -101,17 +107,20 @@ function resolveAppVariant(value: string | undefined): AppVariant {
     case "preview":
     case "production":
       return value;
-    default:
+    case undefined:
       return "production";
+    default:
+      throw new Error("APP_VARIANT must be development, preview, or production.");
   }
 }
 
 const variant = VARIANT_CONFIG[APP_VARIANT];
 const associatedDomains = (repoEnv.T3CODE_CLERK_PASSKEY_RP_DOMAINS ?? "")
   .split(",")
-  .map((domain) => domain.trim())
-  .filter((domain) => domain.length > 0)
-  .flatMap((domain) => [`applinks:${domain}`, `webcredentials:${domain}`]);
+  .flatMap((entry) => {
+    const domain = entry.trim();
+    return domain.length > 0 ? [`applinks:${domain}`, `webcredentials:${domain}`] : [];
+  });
 const iosBundleIdentifier = isIosPersonalTeamBuild
   ? personalTeamBundleIdentifier!
   : variant.iosBundleIdentifier;
@@ -225,7 +234,7 @@ const config: ExpoConfig = {
   owner: J5_BRANDING.mobile.expoOwner,
   platforms: ["ios", "android"],
   scheme: variant.scheme,
-  version: repoEnv.T3CODE_MOBILE_VERSION ?? "2.1.0",
+  version: repoEnv.T3CODE_MOBILE_VERSION ?? "2.2.0",
   runtimeVersion: {
     // Skip costly fingerprinting on dev launches; preview and production OTAs require matching native projects.
     policy: runtimeVersionPolicy,
@@ -356,7 +365,7 @@ const config: ExpoConfig = {
       "expo-audio",
       {
         microphonePermission: "Allow J5 Code to use your microphone for voice input.",
-        recordAudioAndroid: false,
+        recordAudioAndroid: true,
         enableBackgroundPlayback: false,
         enableBackgroundRecording: false,
       },
@@ -370,7 +379,14 @@ const config: ExpoConfig = {
         recordAudioAndroid: false,
       },
     ],
-    ["expo-image-picker", { photosPermission: false, microphonePermission: false }],
+    [
+      "expo-image-picker",
+      {
+        photosPermission: false,
+        // `false` makes this plugin add RECORD_AUDIO to blockedPermissions, breaking Android dictation.
+        microphonePermission: "Allow J5 Code to use your microphone for voice input.",
+      },
+    ],
     [
       "expo-splash-screen",
       {
@@ -416,7 +432,7 @@ const config: ExpoConfig = {
     ["expo-sensors", { motionPermission: false }],
     // Mods run in reverse order; expo-widgets must create and wipe the target before assets are added.
     ...(!isIosPersonalTeamBuild ? ["./plugins/withWidgetLogoAsset.cjs", widgetsPlugin] : []),
-    "./plugins/withAndroidCleartextTraffic.cjs",
+    "./plugins/withAndroidNetworkSecurityConfig.cjs",
     "./plugins/withAndroidGradleHeap.cjs",
     "./plugins/withAndroidInputBackground.cjs",
     "./plugins/withAndroidModernPopupMenu.cjs",
@@ -428,6 +444,7 @@ const config: ExpoConfig = {
   extra: {
     eas: {
       projectId: J5_BRANDING.mobile.easProjectId,
+      observe: { endpointUrl: observeEndpointUrl },
     },
     appVariant: APP_VARIANT,
     iosPersonalTeamBuild: isIosPersonalTeamBuild,

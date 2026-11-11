@@ -1,8 +1,10 @@
 import { assert, it } from "@effect/vitest";
+import { mcpClientScopes } from "@t3tools/contracts";
 import { LEVEL_PERMISSIONS } from "@t3tools/contracts/j5";
 import * as Effect from "effect/Effect";
 import * as HttpServerRequest from "effect/http/HttpServerRequest";
 import * as Layer from "effect/Layer";
+import * as Redacted from "effect/Redacted";
 import * as TestClock from "effect/testing/TestClock";
 
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
@@ -10,6 +12,7 @@ import * as McpOAuth from "../../auth/McpOAuth.ts";
 import * as PairingGrantStore from "../../auth/PairingGrantStore.ts";
 import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 import * as SessionStore from "../../auth/SessionStore.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
 import { Access } from "./Access.ts";
 import * as AccessGate from "./AccessGate.ts";
 import { gateMcpOAuth } from "./McpApproval.ts";
@@ -52,7 +55,7 @@ const signIn = Effect.gen(function* () {
         .issue({
           subject: "mcp-client",
           method: "bearer-access-token",
-          scopes: EnvironmentAuth.mcpClientScopes(input.access),
+          scopes: mcpClientScopes(input.access),
         })
         .pipe(Effect.orDie),
   });
@@ -65,6 +68,7 @@ const signIn = Effect.gen(function* () {
             getOrCreateRandom: () => Effect.succeed(new Uint8Array(32).fill(1)),
           }),
         ),
+        Layer.provide(ServerSettingsService.layerTest()),
       ),
     ),
   );
@@ -129,10 +133,10 @@ const signIn = Effect.gen(function* () {
       urls,
       token: {
         grant_type: "authorization_code",
-        code,
+        code: Redacted.make(code),
         redirect_uri: redirectUri,
         client_id: client.clientId,
-        code_verifier: verifier,
+        code_verifier: Redacted.make(verifier),
         resource: urls.resource,
       },
     });

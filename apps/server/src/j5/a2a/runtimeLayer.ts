@@ -17,6 +17,8 @@ import { layerNotifying as agentCrewProposalNotifyingLayer } from "./AgentCrewPr
 import { manualLayer as crewLaunchReporterLayer } from "./CrewLaunchReporter.ts";
 import { layer as crewLaunchLayer } from "./CrewLaunchService.ts";
 import { layer as crewMemberModelsLayer } from "../agents/crewMemberModels.ts";
+import { layer as agentPersonaEscalationsLayer } from "../agents/agentPersonaEscalation.ts";
+import { layer as agentPersonaDraftsLayer } from "../agents/agentPersonaDrafts.ts";
 import { layer as crewProposalLayer } from "./CrewProposalService.ts";
 import { layer as crewSeatFinishNotifierLayer } from "./CrewSeatFinishNotifier.ts";
 import * as NativeQuestionNotifier from "./NativeQuestionNotifier.ts";
@@ -58,10 +60,6 @@ import * as RequestReplayService from "./RequestReplayService.ts";
 import { layer as sharedConversationLayer } from "../sharing/SharedConversation.ts";
 import { layer as threadReadStateLayer } from "../sharing/ThreadReadState.ts";
 import { layer as sharedThreadsLayer } from "../sharing/SharedThreads.ts";
-import { layer as agentHandoffArtifactDeleteLayer } from "../agents/agentHandoffArtifactDelete.ts";
-import { layer as agentHandoffNudgeQueueLayer } from "../agents/agentHandoffNudgeQueue.ts";
-import { layer as agentHandoffNudgeWorkerLayer } from "../agents/agentHandoffNudgeWorker.ts";
-import { layer as agentHandoffRefreshesLayer } from "../agents/agentHandoffRefreshes.ts";
 import { layer as exchangeAnalyticsLayer } from "../analytics/ExchangeAnalytics.ts";
 import { layer as fleetSnapshotLayer } from "../analytics/FleetSnapshot.ts";
 import { layer as threadAnalyticsLayer } from "../analytics/ThreadAnalytics.ts";
@@ -154,11 +152,6 @@ const makeJ5A2AAuxiliaryLayer = (
     Layer.provide(projectionStoreLayer),
     Layer.provide(readChangesLayer),
   );
-  // The saved-agent handoff worker drains the queue the run-finalization observer fills; the
-  // queue layer is the same instance server.ts provides to that observer.
-  const agentHandoffNudgeWorkerProvided = agentHandoffNudgeWorkerLayer.pipe(
-    Layer.provide(agentHandoffNudgeQueueLayer),
-  );
   const archiveAgentProvided = archiveAgentLayer.pipe(
     Layer.provideMerge(lifecycleServiceProvided),
     Layer.provideMerge(archiveFactsProvided),
@@ -181,6 +174,10 @@ const makeJ5A2AAuxiliaryLayer = (
     Layer.provideMerge(agentCrewInstanceLayer),
     Layer.provideMerge(spawnWorkspaceProvided),
     Layer.provideMerge(crewMemberModelsLayer),
+    // Every persona launch records its refusals here, and the Owner's grant is read from here.
+    Layer.provideMerge(agentPersonaEscalationsLayer.pipe(Layer.provide(agentCrewInstanceLayer))),
+    // Agents' persona drafts wait here for the Owner's "Save persona".
+    Layer.provideMerge(agentPersonaDraftsLayer.pipe(Layer.provide(agentCrewInstanceLayer))),
   );
   // The report watches the seats an approval launched and tells the Captain how they started; the
   // finish notifier's stream feeds it, so one stream serves every Crew reaction.
@@ -210,21 +207,15 @@ const makeJ5A2AAuxiliaryLayer = (
     Layer.provideMerge(archiveCrewProvided),
     Layer.provideMerge(agentCrewInstanceLayer),
   );
-  // The finish notifier tells a Captain when a seat's handoff file appears, so it reads the workspace.
   const crewSeatFinishNotifierProvided = crewSeatFinishNotifierLayer.pipe(
     Layer.provideMerge(crewLaunchReporterProvided),
     Layer.provideMerge(captainArchiveCascadeProvided),
     Layer.provideMerge(agentCrewInstanceLayer),
-    Layer.provide(artifactWorkspaceLayer),
   );
   const runtimeWithoutClientReads = Layer.mergeAll(
     CrewSeatPreparation.layer,
     playbookStoreLayer,
     playbookCrewRelayProvided,
-    agentHandoffNudgeWorkerProvided,
-    // Exported to the routes so the J5 WebSocket handler streams the same revision counter the
-    // observer bumps (server.ts provides this layer object to the observer; Effect memoizes it).
-    agentHandoffRefreshesLayer,
     humanPersonRegistryLayer,
     machineParticipantLayer,
     peerDirectoryProvided,
@@ -263,10 +254,8 @@ const makeJ5A2AAuxiliaryLayer = (
     sharedConversationLayer.pipe(Layer.provide(lifecycleServiceProvided)),
     threadReadStateLayer,
   ).pipe(Layer.provideMerge(sharedThreadsLayer), Layer.provideMerge(peerRegistryProvided));
-  // The person's permanent artifact delete, which also marks a handoff that pointed at the file.
+  // The person's permanent artifact delete.
   const artifactDeletionProvided = artifactDeletionLayer.pipe(
-    Layer.provide(agentHandoffArtifactDeleteLayer),
-    Layer.provide(agentHandoffRefreshesLayer),
     Layer.provide(artifactWorkspaceLayer),
   );
   // What clients read and do, over the services above.

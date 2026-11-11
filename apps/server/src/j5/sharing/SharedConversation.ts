@@ -32,6 +32,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import type * as Statement from "effect/sql/Statement";
 import type * as SqlError from "effect/sql/SqlError";
 
+import type { EventSinkV2 } from "../../orchestration-v2/EventSink.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import type { LedgerMessageId, ParticipantId } from "../a2a/contracts.ts";
 import { deliveryMessageId } from "../a2a/DeliveryTransport.ts";
@@ -54,6 +55,8 @@ import {
   typedByFirstOwner,
 } from "./messageStamps.ts";
 import { scheduledLine } from "./scheduledRuns.ts";
+import { readEventStoreHighWater } from "../a2a/eventStoreHighWater.ts";
+import { PROMPT_SETTLED_EVENT, markPromptSettled } from "../a2a/promptSettlement.ts";
 
 /**
  * A shared conversation: a thread more than one person can write to, which stays one. Each
@@ -123,13 +126,6 @@ interface AuthorRow {
   readonly told_json: string | null;
   readonly stored_prefix: string;
 }
-
-/**
- * The event upstream logs when a prompt is answered. Typed against upstream's own event union, so
- * a rename there fails to compile here.
- */
-const PROMPT_SETTLED_EVENT =
-  "runtime-request.updated" satisfies OrchestrationV2StoredEvent["event"]["type"];
 
 /** The event upstream logs when it writes a message, pinned by the integration test. */
 const MESSAGE_WRITTEN_EVENT =
@@ -241,12 +237,17 @@ const make = Effect.gen(function* () {
   const { authorOn, announce, recordAuthor } = yield* makeMessageStamps(touch);
 
   /**
-   * Whether upstream's own log shows the answer's command settled its prompt, as a condition on
-   * `j5_a2a_prompt_answer AS answer`. Upstream re-accepts any command id it already took, so its
-   * "accepted" is no proof; the settling event carries the command id (pinned by
-   * `SharedConversation.integration.test.ts`).
+   * Whether the answer's command settled its prompt, as a condition on
+   * `j5_a2a_prompt_answer AS answer`: marked from upstream's settling event (`markPromptSettled`),
+   * which upstream later prunes.
    */
-  const settledItsPrompt = sql`EXISTS (
+  const settledItsPrompt = sql`answer.settled_at IS NOT NULL`;
+
+  /**
+   * The same fact read from upstream's log, for the moment an answer is taken in: its settling
+   * event is written by the answer's own command, so it is there, well inside what upstream keeps.
+   */
+  const settledInLog = sql`EXISTS (
     SELECT 1 FROM orchestration_events AS event
     WHERE event.command_id = answer.command_id
       AND event.aggregate_kind = 'thread'
@@ -475,7 +476,7 @@ const make = Effect.gen(function* () {
           AND written.event_type = ${MESSAGE_WRITTEN_EVENT}
           AND json_extract(written.payload_json, '$.role') = 'user'
         WHERE answer.thread_id = ${answer.threadId} AND answer.request_id = ${answer.requestId}
-          AND answer.command_id = ${answer.commandId} AND ${settledItsPrompt}
+          AND answer.command_id = ${answer.commandId} AND ${settledInLog}
         ON CONFLICT (thread_id, message_id) DO UPDATE SET
           person_id = excluded.person_id,
           display_name = excluded.display_name,
@@ -901,21 +902,32 @@ const make = Effect.gen(function* () {
   );
 
   // Who answered a prompt shows once upstream settles it; each settling moves its thread's
-  // authors. Upstream's live tail, from now: a client reads the authors when it subscribes.
+  // authors. Upstream's live tail from its head, never its history: LifecycleService marks the
+  // settles from before, from its cursor. The answer is marked before its thread moves.
   yield* Effect.forkScoped(
-    Effect.forever(
-      threads.streamDomainEvents.pipe(
-        Stream.filter((event) => event.type === PROMPT_SETTLED_EVENT),
-        Stream.runForEach((event) => touch(event.threadId)),
-        Effect.catchCause((cause) =>
-          Effect.logWarning("J5 shared conversation's prompt stream failed; resuming", {
-            cause,
-          }),
+    Effect.gen(function* () {
+      let afterSequence = yield* readEventStoreHighWater("J5 shared conversation");
+      return yield* Effect.forever(
+        Stream.suspend(() =>
+          threads.streamStoredEventsFrom({ afterSequence, eventType: PROMPT_SETTLED_EVENT }),
+        ).pipe(
+          Stream.runForEach((stored) =>
+            markPromptSettled(stored).pipe(
+              Effect.provideService(SqlClient.SqlClient, sql),
+              Effect.andThen(touch(stored.event.threadId)),
+              Effect.tap(() => Effect.sync(() => (afterSequence = stored.sequence))),
+            ),
+          ),
+          Effect.catchCause((cause) =>
+            Effect.logWarning("J5 shared conversation's prompt stream failed; resuming", {
+              cause,
+            }),
+          ),
+          // A pause before each resumption, whether the stream failed or ended, so it never spins.
+          Effect.andThen(Effect.sleep(Duration.seconds(1))),
         ),
-        // A pause before each resumption, whether the stream failed or ended, so it never spins.
-        Effect.andThen(Effect.sleep(Duration.seconds(1))),
-      ),
-    ),
+      );
+    }),
   );
 
   return SharedConversation.of({
@@ -994,5 +1006,10 @@ const editorName = (editor: Author) =>
 export const layer: Layer.Layer<
   SharedConversation,
   never,
-  SqlClient.SqlClient | SharedThreads | ThreadManagementService | Access | A2ALifecycleService
+  | SqlClient.SqlClient
+  | SharedThreads
+  | ThreadManagementService
+  | EventSinkV2
+  | Access
+  | A2ALifecycleService
 > = Layer.effect(SharedConversation, make).pipe(Layer.provide(personAccessLayer));

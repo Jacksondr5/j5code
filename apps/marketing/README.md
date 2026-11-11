@@ -7,7 +7,8 @@ are upstream's.
 - `vp run dev:marketing` serves it on port 4173.
 - `vp run build:marketing` writes `dist/`.
 - Deployed by Vercel from this directory; `vercel.ts` carries the install and build commands,
-  the headers for `/install.sh`, and the rewrite that shows thread prompt links on `/new`. The Vercel project needs Root Directory `apps/marketing` with
+  the headers for `/install.sh`, and the rewrites that show thread prompt links on `/new` and
+  copied thread links on `/threads`. The Vercel project needs Root Directory `apps/marketing` with
   files outside the root included, because the build reads `FORK.md` and stages
   `scripts/install.sh` from the repository root.
 

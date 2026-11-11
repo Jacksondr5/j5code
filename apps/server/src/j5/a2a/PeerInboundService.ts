@@ -288,6 +288,7 @@ interface MembershipRow {
 }
 
 interface ExchangeRow {
+  readonly project_id: string;
   readonly exchange_id: string;
   readonly sender_id: string;
   readonly receiver_id: string;
@@ -488,12 +489,14 @@ export const layer: Layer.Layer<PeerInboundService, never, PeerInboundServiceReq
           const exchangeWithPeer = Effect.fn("j5.a2a.peer.inbound.exchangeWithPeer")(function* (
             id: ExchangeId,
           ) {
+            // An Exchange stays in the ledger it opened in, which is not the receiver's own once
+            // Turn into project has moved it since.
             const rows = yield* sql<ExchangeRow>`
-                SELECT exchange_id, sender_id, receiver_id, status
+                SELECT project_id, exchange_id, sender_id, receiver_id, status
                 FROM j5_a2a_exchange
-                WHERE project_id = ${receiver.projectId}
-                  AND exchange_id = ${id}
+                WHERE exchange_id = ${id}
                   AND (sender_id = ${receiverId} OR receiver_id = ${receiverId})
+                ORDER BY project_id = ${receiver.projectId} DESC
                 LIMIT 1
               `;
             const row = rows[0];
@@ -502,7 +505,7 @@ export const layer: Layer.Layer<PeerInboundService, never, PeerInboundServiceReq
               row.sender_id === receiverId ? row.receiver_id : row.sender_id,
             );
             const counterparty = yield* findPeerCounterparty(sql, {
-              projectId: receiver.projectId,
+              projectId: LedgerProjectId.make(row.project_id),
               exchangeId: id,
               participantId: otherParty,
             });
@@ -510,6 +513,15 @@ export const layer: Layer.Layer<PeerInboundService, never, PeerInboundServiceReq
               ? { row, otherParty }
               : null;
           });
+
+          /** An Exchange's closing fact goes to the ledger that holds the Exchange. */
+          let closure:
+            | { readonly projectId: LedgerProjectId; readonly event: CommEvent }
+            | undefined;
+          const endExchange = (row: ExchangeRow, event: CommEvent) => {
+            if (row.project_id === receiver.projectId) events.push(event);
+            else closure = { projectId: LedgerProjectId.make(row.project_id), event };
+          };
 
           if (input.exchangeRole === "reply" && exchangeId !== null) {
             const open = yield* exchangeWithPeer(exchangeId);
@@ -519,7 +531,7 @@ export const layer: Layer.Layer<PeerInboundService, never, PeerInboundServiceReq
               open.row.sender_id === receiverId &&
               open.otherParty === senderId
             ) {
-              events.push({
+              endExchange(open.row, {
                 kind: "exchange.closed",
                 sender: senderId,
                 receiver: receiverId,
@@ -556,7 +568,7 @@ export const layer: Layer.Layer<PeerInboundService, never, PeerInboundServiceReq
               input.terminal.kind === "dropped" &&
               input.terminal.cause.participantId === otherParty
             ) {
-              events.push({
+              endExchange(row, {
                 kind: "exchange.dropped",
                 sender: ParticipantId.make(row.sender_id),
                 receiver: ParticipantId.make(row.receiver_id),
@@ -584,7 +596,7 @@ export const layer: Layer.Layer<PeerInboundService, never, PeerInboundServiceReq
               row.sender_id === otherParty
             ) {
               // The remote asker withdrew its own ask; the local answerer owes nothing more.
-              events.push({
+              endExchange(row, {
                 kind: "exchange.closed",
                 sender: otherParty,
                 receiver: receiverId,
@@ -599,7 +611,7 @@ export const layer: Layer.Layer<PeerInboundService, never, PeerInboundServiceReq
           // The peer is checked in the same write as the record, so a message that
           // arrives as the peer is being removed is either wiped by the removal or,
           // once the removal committed, refused here.
-          const appended = yield* writer.withPermit(
+          const written = yield* writer.withPermit(
             sql.withTransaction(
               Effect.gen(function* () {
                 const recorded = yield* sql`
@@ -610,16 +622,28 @@ export const layer: Layer.Layer<PeerInboundService, never, PeerInboundServiceReq
                     originEnvironmentId: input.originEnvironmentId,
                   });
                 }
-                return yield* writer.appendEventsInTransaction({
+                const record = yield* writer.appendEventsInTransaction({
                   commandId,
                   projectId: receiver.projectId,
                   acceptedAt: receivedAt,
                   events,
                 });
+                const closed =
+                  closure === undefined
+                    ? undefined
+                    : yield* writer.appendEventsInTransaction({
+                        commandId: CommCommandId.make(`${commandId}:closure`),
+                        projectId: closure.projectId,
+                        acceptedAt: receivedAt,
+                        events: [closure.event],
+                      });
+                return { record, closed };
               }),
             ),
           );
+          const { record: appended, closed } = written;
           if (appended.committed) yield* writer.publishCommitted(appended.events);
+          if (closed?.committed) yield* writer.publishCommitted(closed.events);
           const received = appended.events.find((event) => event.kind === "message.received");
           return {
             receivedSeq: received?.seq ?? appended.receipt.resultSeq,

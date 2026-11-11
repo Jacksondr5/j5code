@@ -35,7 +35,7 @@ export const seedPersonas = Effect.fn(function* (
       displayName: id,
       description: `The ${id} persona.`,
       instructions: `You are ${id}.`,
-      authorityPolicy: "read-only",
+      access: "read-only",
       modelRoute: [
         { driver: ProviderDriverKind.make("codex"), model: "gpt-5.5", reasoningEffort: "high" },
         {
