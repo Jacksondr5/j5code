@@ -14,7 +14,7 @@ import {
 import * as Schema from "effect/Schema";
 import * as DateTime from "effect/DateTime";
 import { Atom } from "effect/reactivity";
-import type { PersonalReadMarkersAtom } from "../j5/threadReads.ts";
+import { personalThreadReadMarker, type PersonalReadMarkersAtom } from "../j5/threadReads.ts";
 
 import type { EnvironmentThreadShell, PendingSubagentRequest } from "./models.ts";
 import { presentThreadShell, threadRuntimeIsActive } from "./models.ts";
@@ -249,7 +249,11 @@ export function createEnvironmentThreadShellAtoms(input: {
           : get(input.personalReadMarkersAtom(environmentId));
       if (markers === undefined) return threads;
       return threads.map((thread) => {
-        const lastVisitedAt = markers.get(thread.id) ?? null;
+        const lastVisitedAt = personalThreadReadMarker(
+          markers,
+          thread.id,
+          thread.lastVisitedAt ?? null,
+        );
         const previous = adapted.get(thread);
         if (
           previous !== undefined &&

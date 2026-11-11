@@ -7,7 +7,7 @@ import {
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { AsyncResult, Atom } from "effect/reactivity";
-import type { PersonalReadMarkersAtom } from "../j5/threadReads.ts";
+import { personalThreadReadMarker, type PersonalReadMarkersAtom } from "../j5/threadReads.ts";
 
 import {
   deriveThreadQueueWorkflowState,
@@ -465,10 +465,11 @@ export function createEnvironmentThreadDetailAtoms<E>(
         personalReadMarkersAtom === undefined
           ? undefined
           : get(personalReadMarkersAtom(ref.environmentId));
-      return markers === undefined
-        ? (Option.getOrNull(get(threadStateValueAtomFamily(key)).data)?.thread.lastVisitedAt ??
-            null)
-        : (markers.get(ref.threadId) ?? null);
+      return personalThreadReadMarker(
+        markers,
+        ref.threadId,
+        Option.getOrNull(get(threadStateValueAtomFamily(key)).data)?.thread.lastVisitedAt ?? null,
+      );
     }).pipe(Atom.setIdleTTL(0), Atom.withLabel(`environment-thread-last-visited:${key}`)),
   );
   const updatedAtAtomFamily = Atom.family((key: string) =>

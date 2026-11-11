@@ -24,7 +24,8 @@ export const PersonalThreadReadChange = Schema.Union([
 export type PersonalThreadReadChange = typeof PersonalThreadReadChange.Type;
 
 export const PersonalThreadVisit = Schema.Struct({
-  commandId: CommandId,
+  commandId: CommandId.check(Schema.isMaxLength(128)),
+  issuedAt: IsoDateTime.check(Schema.isMaxLength(32)),
   threadId: ThreadId,
   visitedAt: IsoDateTime,
   opened: Schema.optional(Schema.Boolean),
@@ -32,7 +33,11 @@ export const PersonalThreadVisit = Schema.Struct({
 });
 export type PersonalThreadVisit = typeof PersonalThreadVisit.Type;
 
-export const PersonalThreadMarkUnread = Schema.Struct({ commandId: CommandId, threadId: ThreadId });
+export const PersonalThreadMarkUnread = Schema.Struct({
+  commandId: CommandId.check(Schema.isMaxLength(128)),
+  issuedAt: IsoDateTime.check(Schema.isMaxLength(32)),
+  threadId: ThreadId,
+});
 export type PersonalThreadMarkUnread = typeof PersonalThreadMarkUnread.Type;
 
 const ReadError = Schema.Union([J5ActionError, EnvironmentAuthorizationError]);

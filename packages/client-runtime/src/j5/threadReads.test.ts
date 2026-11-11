@@ -8,8 +8,14 @@ import {
   ORCHESTRATION_V2_WS_METHODS,
   type AuthSessionState,
 } from "@t3tools/contracts";
-import { J5_THREAD_READ_WS_METHODS, type PersonalThreadReadChange } from "@t3tools/contracts/j5";
+import {
+  J5_ACCESS_WS_METHODS,
+  J5_THREAD_READ_WS_METHODS,
+  type PersonalThreadReadChange,
+} from "@t3tools/contracts/j5";
 import * as SecureRandom from "effect/crypto/SecureRandom";
+import * as Clock from "effect/Clock";
+import * as TestClock from "effect/testing/TestClock";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -50,6 +56,7 @@ const grant = (allowed: boolean): AuthSessionState => ({
 });
 
 const setup = Effect.fn("test.personalReads")(function* (personal: boolean) {
+  const person = yield* SubscriptionRef.make("alice");
   const calls: Array<{ tag: string; input: unknown }> = [];
   const changes = yield* SubscriptionRef.make<PersonalThreadReadChange>({
     kind: "snapshot",
@@ -63,6 +70,10 @@ const setup = Effect.fn("test.personalReads")(function* (personal: boolean) {
           environment: { capabilities: { j5PersonalThreadReads: personal } },
         }),
         client: {
+          [J5_ACCESS_WS_METHODS.getConnectionAccess]: () =>
+            SubscriptionRef.get(person).pipe(
+              Effect.map((personId) => ({ kind: "person", personId })),
+            ),
           [J5_THREAD_READ_WS_METHODS.visit]: (input: unknown) =>
             Effect.sync(() => {
               calls.push({ tag: "visit", input });
@@ -84,6 +95,7 @@ const setup = Effect.fn("test.personalReads")(function* (personal: boolean) {
     ),
   } as EnvironmentSupervisor["Service"]);
   const layer = Layer.mergeAll(
+    Layer.succeed(Clock.Clock, yield* Clock.Clock),
     Layer.mock(EnvironmentRegistry)({
       entries: yield* SubscriptionRef.make<ReadonlyMap<EnvironmentId, ConnectionCatalogEntry>>(
         new Map(),
@@ -103,7 +115,14 @@ const setup = Effect.fn("test.personalReads")(function* (personal: boolean) {
     (registry) => Effect.sync(() => registry.dispose()),
   );
   registry.set(sessions(environmentId), AsyncResult.success(grant(true)));
-  return { runtime: Atom.runtime(layer), registry, calls, changes, session: supervisor.session };
+  return {
+    runtime: Atom.runtime(layer),
+    registry,
+    calls,
+    changes,
+    person,
+    session: supervisor.session,
+  };
 });
 
 it.effect(
@@ -114,7 +133,6 @@ it.effect(
       const commands = createPersonalThreadReadCommands(runtime);
       const input = {
         threadId,
-        commandId: CommandId.make("read"),
         visitedAt: DateTime.formatIso(at),
       };
       expect(
@@ -124,11 +142,20 @@ it.effect(
         (yield* Effect.promise(() =>
           commands.markUnread.run(registry, {
             environmentId,
-            input: { threadId, commandId: CommandId.make("unread") },
+            input: {
+              threadId,
+              issuedAt: "1970-01-01T00:00:00.000Z",
+              commandId: CommandId.make("unread"),
+            },
           }),
         ))._tag,
       ).toBe("Success");
       expect(calls.map((call) => call.tag)).toEqual(["visit", "unread"]);
+      expect(calls[0]?.input).toMatchObject({
+        ...input,
+        commandId: expect.any(String),
+        issuedAt: DateTime.formatIso(yield* DateTime.now),
+      });
       registry.set(sessions(environmentId), AsyncResult.success(grant(false)));
       expect(registry.get(commands.visit.permissionAtom(environmentId))).toBe(false);
       expect(
@@ -145,13 +172,22 @@ it.effect("keeps upstream visit and mark-unread commands on servers without pers
     yield* Effect.promise(() =>
       commands.visit.run(registry, {
         environmentId,
-        input: { threadId, commandId: CommandId.make("read"), visitedAt: DateTime.formatIso(at) },
+        input: {
+          threadId,
+          issuedAt: "1970-01-01T00:00:00.000Z",
+          commandId: CommandId.make("read"),
+          visitedAt: DateTime.formatIso(at),
+        },
       }),
     );
     yield* Effect.promise(() =>
       commands.markUnread.run(registry, {
         environmentId,
-        input: { threadId, commandId: CommandId.make("unread") },
+        input: {
+          threadId,
+          issuedAt: "1970-01-01T00:00:00.000Z",
+          commandId: CommandId.make("unread"),
+        },
       }),
     );
     expect(calls).toEqual([
@@ -184,7 +220,7 @@ it.effect("waits for the first connection and restores personal markers after re
     const atom = createPersonalThreadReadAtoms(runtime).markersAtom(environmentId);
     yield* AtomRegistry.mount(registry, atom);
     expect(yield* AtomRegistry.toStream(registry, atom).pipe(Stream.runHead)).toEqual(
-      Option.some(new Map()),
+      Option.some(undefined),
     );
     yield* SubscriptionRef.set(session, connected);
     yield* AtomRegistry.toStream(registry, atom).pipe(
@@ -193,7 +229,7 @@ it.effect("waits for the first connection and restores personal markers after re
     );
     yield* SubscriptionRef.set(session, Option.none());
     yield* AtomRegistry.toStream(registry, atom).pipe(
-      Stream.filter((markers) => markers?.size === 0),
+      Stream.filter((markers) => markers?.get(threadId) === at),
       Stream.runHead,
     );
     yield* SubscriptionRef.set(session, connected);
@@ -238,3 +274,51 @@ it("never imports an unowned browser watermark into personal read state", () => 
   ).toBe(false);
   expect(shouldImportLegacyReadMarkers({ repositoryIdentity: false })).toBe(true);
 });
+
+it.effect("keeps a retry's id and issuance time even after its receipt could expire", () =>
+  Effect.gen(function* () {
+    yield* TestClock.adjust("25 hours");
+    const { runtime, registry, calls } = yield* setup(true);
+    const commands = createPersonalThreadReadCommands(runtime);
+    const input = {
+      threadId,
+      commandId: CommandId.make("retry-unread"),
+      issuedAt: "1970-01-01T00:00:00.000Z",
+    };
+    yield* Effect.promise(() => commands.markUnread.run(registry, { environmentId, input }));
+    yield* Effect.promise(() => commands.markUnread.run(registry, { environmentId, input }));
+    expect(calls.map((call) => call.input)).toEqual([input, input]);
+  }).pipe(Effect.scoped),
+);
+
+it.effect("clears the previous person's cache before a new person's snapshot", () =>
+  Effect.gen(function* () {
+    const { runtime, registry, session, person } = yield* setup(true);
+    const atom = createPersonalThreadReadAtoms(runtime).markersAtom(environmentId);
+    yield* AtomRegistry.mount(registry, atom);
+    yield* AtomRegistry.toStream(registry, atom).pipe(
+      Stream.filter((markers) => markers?.get(threadId) === at),
+      Stream.runHead,
+    );
+    const previous = Option.getOrThrow(yield* SubscriptionRef.get(session));
+    yield* SubscriptionRef.set(session, Option.none());
+    yield* SubscriptionRef.set(person, "bob");
+    yield* SubscriptionRef.set(
+      session,
+      Option.some({
+        ...previous,
+        client: {
+          ...previous.client,
+          [J5_THREAD_READ_WS_METHODS.subscribe]: (() =>
+            Stream.never) as RpcSession["client"][typeof J5_THREAD_READ_WS_METHODS.subscribe],
+        },
+      }),
+    );
+    expect(
+      yield* AtomRegistry.toStream(registry, atom).pipe(
+        Stream.filter((markers) => markers === undefined),
+        Stream.runHead,
+      ),
+    ).toEqual(Option.some(undefined));
+  }).pipe(Effect.scoped),
+);

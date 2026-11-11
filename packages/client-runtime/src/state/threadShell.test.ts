@@ -71,6 +71,7 @@ describe("v2 thread shell lists", () => {
         catalogValueAtom,
         snapshotAtom,
         personalReadMarkersAtom: () => markers,
+        hiddenThreadTagsAtom: () => Atom.make(null),
       };
       return createEnvironmentThreadShellAtoms(input);
     };
@@ -84,12 +85,16 @@ describe("v2 thread shell lists", () => {
     expect(registry.get(aliceThreads.threadShellAtom(ref))?.lastVisitedAt).toBe(
       DateTime.formatIso(before),
     );
-    expect(registry.get(bobThreads.threadShellAtom(ref))?.lastVisitedAt).toBeNull();
+    expect(registry.get(bobThreads.threadShellAtom(ref))?.lastVisitedAt).toBe(
+      "1970-01-01T00:00:00.000Z",
+    );
     registry.set(alice, new Map([[threadId, after]]));
     expect(registry.get(aliceThreads.threadShellAtom(ref))?.lastVisitedAt).toBe(
       DateTime.formatIso(after),
     );
-    expect(registry.get(bobThreads.threadShellAtom(ref))?.lastVisitedAt).toBeNull();
+    expect(registry.get(bobThreads.threadShellAtom(ref))?.lastVisitedAt).toBe(
+      "1970-01-01T00:00:00.000Z",
+    );
     registry.dispose();
   });
 

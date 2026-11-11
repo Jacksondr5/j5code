@@ -19,6 +19,7 @@ import {
   layer as proposalStoreLayer,
 } from "./AgentCrewProposalService.ts";
 import { J5_A2A_MIGRATIONS_TABLE, migrationEntries, runJ5A2AMigrations } from "./Migrations.ts";
+import { ensureLocalOperatorHumanPerson } from "./HumanPersonRegistry.ts";
 import Migration0005 from "./migrations/005_ImmutableThreadHome.ts";
 import Migration0008 from "./migrations/008_LifecycleClosure.ts";
 
@@ -1674,5 +1675,24 @@ it.effect("keeps every recorded peer as one that sends directly when poll mode a
       SELECT name FROM pragma_table_info('j5_a2a_delivery') WHERE name = 'handed_out_at'
     `;
     assert.lengthOf(handedOut, 1);
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+);
+
+it.effect("preserves an upstream V2 visit when J5 creates its first owner after migration", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* runMigrations();
+    const at = "2026-10-31T12:00:00.000Z";
+    yield* sql`INSERT INTO orchestration_v2_projection_threads (
+   thread_id, project_id, title, default_provider, runtime_mode, interaction_mode,
+   active_provider_thread_id, created_at, updated_at, archived_at, deleted_at, payload_json
+  ) VALUES ('legacy-thread', 'project', 'Legacy', 'codex', 'full-access', 'default', NULL,
+   ${at}, ${at}, NULL, NULL, ${JSON.stringify({ lastVisitedAt: at })})`;
+    yield* runJ5A2AMigrations();
+    const owner = yield* ensureLocalOperatorHumanPerson(sql);
+    yield* runJ5A2AMigrations();
+    assert.deepEqual(yield* sql`SELECT person_id, thread_id, last_visited_at FROM j5_thread_read`, [
+      { person_id: owner, thread_id: "legacy-thread", last_visited_at: at },
+    ]);
   }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );

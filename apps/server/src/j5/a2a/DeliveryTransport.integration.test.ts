@@ -175,6 +175,7 @@ import {
 } from "./contracts.ts";
 import { noDocumentTextLayer } from "../test-support/documentText.ts";
 
+const isOrganizeInput = Schema.is(J5AdaptedThreadToolkit.tools.t3_thread_organize.parametersSchema);
 const decodeSentFact = Schema.decodeUnknownEffect(Schema.fromJsonString(MessageSentPayload));
 const decodeToolFailure = Schema.decodeUnknownEffect(
   Schema.Struct({ code: Schema.String, message: Schema.String }),
@@ -3315,7 +3316,7 @@ it.effect("organize refuses a Crew seat and applies reversible lifecycle once", 
       });
       yield* startPendingTestTurn(source.threadId);
       const toolkit = yield* J5AdaptedThreadToolkit;
-      const call = (threadId: ThreadId, action: "archive" | "unarchive" | "mark_unread") =>
+      const call = (threadId: ThreadId, action: "archive" | "unarchive") =>
         toolkit.handle("t3_thread_organize", { threadId, action }).pipe(
           Stream.unwrap,
           Stream.run(Sink.last()),
@@ -3333,12 +3334,7 @@ it.effect("organize refuses a Crew seat and applies reversible lifecycle once", 
             issuedAt: 1,
           }),
         );
-      const unread = yield* call(source.threadId, "mark_unread");
-      assert.isTrue(unread.isFailure);
-      assert.include(
-        (unread.result as { message: string }).message,
-        "Read state belongs to a person",
-      );
+      assert.isFalse(isOrganizeInput({ threadId: source.threadId, action: "mark_unread" }));
       const member = yield* seedTarget(
         "organize-member",
         modelSelection.model,

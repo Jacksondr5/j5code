@@ -1,10 +1,11 @@
 import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { runAtomCommand } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId, type ServerConfig } from "@t3tools/contracts";
 import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
 import { describe, expect, it, vi } from "vite-plus/test";
 
+import { environmentServerConfigsAtom } from "../state/server";
 import { environmentThreadShells } from "../state/threads";
 import { makeThreadFixture } from "../test-fixtures";
 import { startThreadVisitedMigration } from "./useThreadVisitedMigration";
@@ -14,6 +15,10 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock("@t3tools/client-runtime/state/runtime", () => ({ runAtomCommand: vi.fn() }));
+vi.mock("../state/server", async () => {
+  const { Atom } = await import("effect/reactivity");
+  return { environmentServerConfigsAtom: Atom.make(new Map<EnvironmentId, ServerConfig>()) };
+});
 vi.mock("../uiStateStore", () => ({
   useUiStateStore: { getState: () => ({ threadLastVisitedAtById: state.localVisits }) },
 }));
@@ -29,7 +34,11 @@ vi.mock("../state/threads", async () => {
 
 const localVisit = "2026-10-27T10:00:00.000Z";
 
-function setup(threads: ReadonlyArray<EnvironmentThreadShell>, local = localVisit) {
+function setup(
+  threads: ReadonlyArray<EnvironmentThreadShell>,
+  local = localVisit,
+  personal = false,
+) {
   state.localVisits = Object.fromEntries(
     threads.map((thread) => [
       scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
@@ -46,6 +55,17 @@ function setup(threads: ReadonlyArray<EnvironmentThreadShell>, local = localVisi
   });
   const shells = environmentThreadShells.threadShellsAtom;
   if (!Atom.isWritable(shells)) throw new Error("Expected writable test shell state");
+  if (!Atom.isWritable(environmentServerConfigsAtom))
+    throw new Error("Expected writable test config");
+  registry.set(
+    environmentServerConfigsAtom,
+    new Map(
+      threads.map((thread) => [
+        thread.environmentId,
+        { environment: { capabilities: { j5PersonalThreadReads: personal } } } as ServerConfig,
+      ]),
+    ),
+  );
   registry.set(shells, threads);
   const stop = startThreadVisitedMigration(registry);
   return {
@@ -61,6 +81,10 @@ function setup(threads: ReadonlyArray<EnvironmentThreadShell>, local = localVisi
 }
 
 describe("startThreadVisitedMigration", () => {
+  it("does not import a browser's old marks into the current person's account", () => {
+    using _migration = setup([makeThreadFixture({ lastVisitedAt: null })], localVisit, true);
+    expect(runAtomCommand).not.toHaveBeenCalled();
+  });
   it("preserves mark unread when a client with a newer local visit reloads", () => {
     using _migration = setup([makeThreadFixture({ lastVisitedAt: "2026-10-27T09:59:59.999Z" })]);
 

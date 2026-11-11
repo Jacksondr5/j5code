@@ -22,7 +22,7 @@ const refused = failAsJ5ActionError({
 });
 
 export const makeThreadReadRpcHandlers = Effect.fn("ThreadReadState.rpc")(function* (
-  session: SessionIdentity,
+  session: SessionIdentity & { readonly scopes: ReadonlyArray<string> },
 ) {
   const reads = yield* ThreadReadState;
   return {

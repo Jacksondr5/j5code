@@ -4,8 +4,13 @@ import {
   type ThreadId,
   type ExecutionEnvironmentCapabilities,
 } from "@t3tools/contracts";
-import { J5_THREAD_READ_WS_METHODS, type PersonalThreadReadChange } from "@t3tools/contracts/j5";
-import type * as DateTime from "effect/DateTime";
+import {
+  J5ActionError,
+  J5_ACCESS_WS_METHODS,
+  J5_THREAD_READ_WS_METHODS,
+  type PersonalThreadReadChange,
+} from "@t3tools/contracts/j5";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Option from "effect/Option";
@@ -52,21 +57,33 @@ export function createPersonalThreadReadAtoms<R, E>(
       Stream.unwrap(
         Effect.gen(function* () {
           const supervisor = yield* EnvironmentSupervisor;
+          let personId: string | undefined;
           return SubscriptionRef.changes(supervisor.session).pipe(
             Stream.switchMap(
               Option.match({
-                onNone: () => Stream.succeed(EMPTY_MARKERS),
+                onNone: () => Stream.empty,
                 onSome: (session) =>
                   Stream.unwrap(
-                    session.initialConfig.pipe(
-                      Effect.map((config) =>
-                        config.environment.capabilities.j5PersonalThreadReads === true
-                          ? subscribe(J5_THREAD_READ_WS_METHODS.subscribe, {}).pipe(
-                              Stream.scan(() => EMPTY_MARKERS, applyPersonalReadChange),
-                            )
-                          : Stream.succeed(undefined),
-                      ),
-                    ),
+                    Effect.gen(function* () {
+                      const config = yield* session.initialConfig;
+                      if (config.environment.capabilities.j5PersonalThreadReads !== true) {
+                        personId = undefined;
+                        return Stream.succeed(undefined);
+                      }
+                      const access = yield* session.client[
+                        J5_ACCESS_WS_METHODS.getConnectionAccess
+                      ]({});
+                      const nextPerson = access.kind === "person" ? access.personId : undefined;
+                      const changedPerson = nextPerson !== personId || nextPerson === undefined;
+                      personId = nextPerson;
+                      const updates = subscribe(J5_THREAD_READ_WS_METHODS.subscribe, {}).pipe(
+                        Stream.scan(() => EMPTY_MARKERS, applyPersonalReadChange),
+                        Stream.drop(1),
+                      );
+                      return changedPerson
+                        ? Stream.concat(Stream.succeed(undefined), updates)
+                        : updates;
+                    }),
                   ),
               }),
             ),
@@ -79,12 +96,34 @@ export function createPersonalThreadReadAtoms<R, E>(
     Atom.make((get) =>
       Option.getOrElse(
         AsyncResult.value(get(state({ environmentId, input: undefined }))),
-        () => EMPTY_MARKERS,
+        () => undefined,
       ),
     ),
   );
   return { markersAtom };
 }
+
+type ReadCommandIdentity =
+  | { readonly commandId?: never; readonly issuedAt?: never }
+  | { readonly commandId: CommandId; readonly issuedAt: string };
+type ReadCommandInput<T> = Omit<T, "commandId"> & ReadCommandIdentity;
+
+const readCommandIdentity = Effect.fn("PersonalThreadReads.identity")(function* (
+  input: ReadCommandIdentity,
+) {
+  if (input.commandId !== undefined) {
+    if (input.issuedAt === undefined)
+      return yield* new J5ActionError({
+        code: "invalid_request",
+        message: "A retried read command needs its original issuance time.",
+      });
+    return { commandId: input.commandId, issuedAt: input.issuedAt };
+  }
+  return {
+    commandId: CommandId.make(yield* (yield* SecureRandom.SecureRandom).uuidV4()),
+    issuedAt: DateTime.formatIso(yield* DateTime.now),
+  };
+});
 
 export function createPersonalThreadReadCommands<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | SecureRandom.SecureRandom | R, E>,
@@ -115,18 +154,16 @@ export function createPersonalThreadReadCommands<R, E>(
         concurrency,
         label: "environment-data:commands:thread:visit",
         execute: Effect.fn("PersonalThreadReads.visit")(function* (
-          input: VisitThreadInput,
+          input: ReadCommandInput<VisitThreadInput>,
           registry: AtomRegistry.AtomRegistry,
           environmentId: EnvironmentId,
         ) {
           const config = yield* getInitialServerConfig();
           if (config.environment.capabilities.j5PersonalThreadReads !== true)
             return yield* visitThread(input).pipe(Effect.asVoid);
-          const commandId =
-            input.commandId ??
-            CommandId.make(yield* (yield* SecureRandom.SecureRandom).randomUUIDv4().pipe(Effect.orDie));
+          const { commandId, issuedAt } = yield* readCommandIdentity(input);
           const result = yield* Effect.promise(() =>
-            visit.run(registry, { environmentId, input: { ...input, commandId } }),
+            visit.run(registry, { environmentId, input: { ...input, commandId, issuedAt } }),
           );
           if (AsyncResult.isFailure(result)) return yield* Effect.failCause(result.cause);
         }),
@@ -139,18 +176,16 @@ export function createPersonalThreadReadCommands<R, E>(
         concurrency,
         label: "environment-data:commands:thread:mark-unread",
         execute: Effect.fn("PersonalThreadReads.markUnread")(function* (
-          input: MarkThreadUnreadInput,
+          input: ReadCommandInput<MarkThreadUnreadInput>,
           registry: AtomRegistry.AtomRegistry,
           environmentId: EnvironmentId,
         ) {
           const config = yield* getInitialServerConfig();
           if (config.environment.capabilities.j5PersonalThreadReads !== true)
             return yield* markThreadUnread(input).pipe(Effect.asVoid);
-          const commandId =
-            input.commandId ??
-            CommandId.make(yield* (yield* SecureRandom.SecureRandom).randomUUIDv4().pipe(Effect.orDie));
+          const { commandId, issuedAt } = yield* readCommandIdentity(input);
           const result = yield* Effect.promise(() =>
-            markUnread.run(registry, { environmentId, input: { ...input, commandId } }),
+            markUnread.run(registry, { environmentId, input: { ...input, commandId, issuedAt } }),
           );
           if (AsyncResult.isFailure(result)) return yield* Effect.failCause(result.cause);
         }),
@@ -164,4 +199,17 @@ export function shouldImportLegacyReadMarkers(
   capabilities: ExecutionEnvironmentCapabilities | undefined,
 ): boolean {
   return capabilities !== undefined && capabilities.j5PersonalThreadReads !== true;
+}
+
+// Null denotes imported history until upstream seeds a watermark on the first fresh dispatch.
+// Once seeded, a person with no visit must see completions as unread regardless of legacy visits.
+const NEVER_VISITED = DateTime.makeUnsafe(0);
+export function personalThreadReadMarker(
+  markers: PersonalReadMarkers | undefined,
+  threadId: ThreadId,
+  shared: DateTime.Utc | null,
+): DateTime.Utc | null {
+  return markers === undefined
+    ? shared
+    : (markers.get(threadId) ?? (shared === null ? null : NEVER_VISITED));
 }
