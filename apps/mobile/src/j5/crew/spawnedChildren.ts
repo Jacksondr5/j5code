@@ -130,17 +130,29 @@ const EMPTY: ReadonlyArray<SpawnedChild> = [];
  * so it stays current even when no list has the thread on screen.
  */
 export function useThreadSpawnedChildren(ref: ScopedThreadRef | null): ReadonlyArray<SpawnedChild> {
-  const connections = useAtomValue(threadReadConnectionsAtom);
-  const revisions = useAtomValue(placementRevisionsAtom);
   const environmentId = ref?.environmentId;
   const threadId = ref?.threadId;
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- asks the thread's server for the agents under it, again when placements change.
+  // Subscribed here rather than read in render, so a revision on any server doesn't re-render
+  // the thread screen; only this thread's server's placements re-read it.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- asks the thread's server for the agents under it, again when its connection or placements change.
   useEffect(() => {
-    store.setConnections(connections);
-    if (environmentId !== undefined && threadId !== undefined)
-      store.request([scopeThreadRef(environmentId, threadId)], true);
-    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- a moved revision re-reads the thread.
-  }, [connections, revisions, environmentId, threadId]);
+    if (environmentId === undefined || threadId === undefined) return;
+    const target = scopeThreadRef(environmentId, threadId);
+    const read = () => {
+      store.setConnections(appAtomRegistry.get(threadReadConnectionsAtom));
+      store.request([target], true);
+    };
+    read();
+    const offConnections = appAtomRegistry.subscribe(threadReadConnectionsAtom, read);
+    const offPlacements = appAtomRegistry.subscribe(
+      j5Environment.rereadOn("crew", "fleet")({ environmentId }),
+      read,
+    );
+    return () => {
+      offConnections();
+      offPlacements();
+    };
+  }, [environmentId, threadId]);
   const key = ref === null ? null : scopedThreadKey(ref);
   const read = () => (key === null ? EMPTY : (store.getSnapshot().get(key)?.children ?? EMPTY));
   return useSyncExternalStore(store.subscribe, read, read);
