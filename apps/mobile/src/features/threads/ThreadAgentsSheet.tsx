@@ -21,6 +21,7 @@ import { ScreenStack } from "react-native-screens";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AndroidSheetHeader } from "../../components/ui/AndroidScreenHeader";
+import { J5ThreadAgents, useHasJ5Agents } from "../../j5/crew/J5ThreadAgents";
 import { AppText as Text } from "../../components/ui/AppText";
 import { environmentThreadDetails } from "../../state/threads";
 import { NativeStackScreenOptions, nativeHeaderScrollEdgeEffects } from "../../native/StackHeader";
@@ -61,6 +62,8 @@ export function ThreadAgentsSheet({ route }: StaticScreenProps<AgentsTarget>) {
   const turn = useThreadTurnSubagents(target);
   const subagents = turn?.subagents ?? [];
   const hasLiveAgent = (turn?.liveCount ?? 0) > 0;
+  // J5 (case 115): the Crew seats and Peer Agents this thread spawned list above the subagents.
+  const hasJ5Agents = useHasJ5Agents(target);
   const workflowGroups = useMemo(
     () =>
       new Map(
@@ -100,7 +103,12 @@ export function ThreadAgentsSheet({ route }: StaticScreenProps<AgentsTarget>) {
       contentContainerClassName="px-5 pb-6"
       contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 16) + 8 }}
     >
-      {subagents.length === 0 ? (
+      <J5ThreadAgents
+        environmentId={target.environmentId}
+        threadId={target.threadId}
+        onOpen={openChildThread}
+      />
+      {subagents.length === 0 && !hasJ5Agents ? (
         <Text className="pt-6 text-center text-sm text-foreground-muted">
           No agents in this turn.
         </Text>

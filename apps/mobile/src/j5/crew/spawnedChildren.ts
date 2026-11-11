@@ -82,8 +82,8 @@ const requestRows = (refs: ReadonlyArray<ScopedThreadRef>, revisions: string) =>
 };
 
 /**
- * The list's threads without the ones an agent spawned (register D22): those show under their
- * spawner's row unless pinned. Also keeps the spawned-children read current for every thread.
+ * The list's threads without the ones an agent spawned (register D22): those show in their
+ * spawner's Agents sheet unless pinned. Also keeps the spawned-children read current for every thread.
  */
 export function useCrewListedThreads<
   T extends {
@@ -125,10 +125,23 @@ export function useCrewListedThreads<
 
 const EMPTY: ReadonlyArray<SpawnedChild> = [];
 
-/** The agents placed under one thread, as last read. */
-export function useSpawnedChildren(ref: ScopedThreadRef): ReadonlyArray<SpawnedChild> {
-  const key = scopedThreadKey(ref);
-  // Per row: a batch keeps untouched rows' values, so other rows' updates skip this one.
-  const read = () => store.getSnapshot().get(key)?.children ?? EMPTY;
+/**
+ * The agents placed under one open thread. It is read on open and again when placements change,
+ * so it stays current even when no list has the thread on screen.
+ */
+export function useThreadSpawnedChildren(ref: ScopedThreadRef | null): ReadonlyArray<SpawnedChild> {
+  const connections = useAtomValue(threadReadConnectionsAtom);
+  const revisions = useAtomValue(placementRevisionsAtom);
+  const environmentId = ref?.environmentId;
+  const threadId = ref?.threadId;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- asks the thread's server for the agents under it, again when placements change.
+  useEffect(() => {
+    store.setConnections(connections);
+    if (environmentId !== undefined && threadId !== undefined)
+      store.request([scopeThreadRef(environmentId, threadId)], true);
+    // oxlint-disable-next-line react/exhaustive-effect-dependencies -- a moved revision re-reads the thread.
+  }, [connections, revisions, environmentId, threadId]);
+  const key = ref === null ? null : scopedThreadKey(ref);
+  const read = () => (key === null ? EMPTY : (store.getSnapshot().get(key)?.children ?? EMPTY));
   return useSyncExternalStore(store.subscribe, read, read);
 }

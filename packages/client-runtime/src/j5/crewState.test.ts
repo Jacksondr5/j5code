@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   classifyCrewSeat,
+  crewAgentStatus,
   crewHasRunningSeat,
   formatCrewStateSummary,
   seatQuietLabel,
@@ -121,5 +122,39 @@ describe("crew state", () => {
     );
     expect(seatQuietLabel({ notStarted: false })).toBe("Idle");
     expect(seatQuietLabel({})).toBe("Idle");
+  });
+
+  it("gives a spawned agent's row its status, replacement first", () => {
+    const asSeat = { isSeat: true, replacedBy: null };
+    expect(
+      crewAgentStatus(
+        { isSeat: true, replacedBy: "beta" },
+        seat({ runtime: { status: "running" } }),
+      ),
+    ).toEqual({ tone: "stopped", label: "Replaced by beta" });
+    expect(crewAgentStatus(asSeat, seat({ runtime: { status: "running" } }))).toEqual({
+      tone: "working",
+      label: "Working",
+    });
+    expect(crewAgentStatus(asSeat, seat({ notStarted: true }))).toEqual({
+      tone: "stopped",
+      label: "Not started",
+    });
+    expect(crewAgentStatus(asSeat, seat({ runtime: { status: "completed" } }))).toEqual({
+      tone: "completed",
+      label: "Completed",
+    });
+    expect(crewAgentStatus(asSeat, seat({ runtime: { status: "interrupted" } }))).toEqual({
+      tone: "stopped",
+      label: "Interrupted",
+    });
+    expect(crewAgentStatus(asSeat, undefined)).toEqual({ tone: "stopped", label: "Unknown" });
+    // A solo agent's quiet state stays "Idle"; only seats say how their last run ended.
+    expect(
+      crewAgentStatus(
+        { isSeat: false, replacedBy: null },
+        seat({ runtime: { status: "completed" } }),
+      ),
+    ).toEqual({ tone: "stopped", label: "Idle" });
   });
 });

@@ -2,6 +2,7 @@ import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import type { SpawnedChild, SpawnedChildrenEntry } from "@t3tools/contracts/j5";
 
 import { scopedThreadKey, scopeThreadRef } from "../environment/scoped.ts";
+import type { SubagentPillSegment, ThreadTurnSubagents } from "../state/threadSubagents.ts";
 import {
   crewHasRunningSeat,
   formatCrewStateSummary,
@@ -185,18 +186,20 @@ export const stoppableCrew = <T extends SpawnedChildThread>(
     ? group.crew
     : null;
 
-const counted = (count: number, noun: string) => `${count} ${noun}${count === 1 ? "" : "s"}`;
-
-/** The collapsed count on the spawner's own row: "3 seats", "2 agents", "2 seats · 1 agent". */
-export const spawnedChildrenCountLabel = <T extends SpawnedChildThread>(
-  groups: ReadonlyArray<SpawnedChildGroup<T>>,
-) => {
-  let seats = 0;
-  let agents = 0;
-  for (const group of groups)
-    if (group.crew === null) agents += group.rows.length;
-    else seats += group.rows.length;
-  return [seats > 0 ? counted(seats, "seat") : null, agents > 0 ? counted(agents, "agent") : null]
-    .filter((part) => part !== null)
-    .join(" · ");
+/**
+ * Upstream's Agents pill with a thread's spawned agents (Crew seats and Peer Agents) added to its
+ * counts. Without any, upstream's segment stands; with some, the pill shows even between turns.
+ */
+export const j5AgentsPillSegment = (
+  turn: ThreadTurnSubagents | null,
+  upstream: SubagentPillSegment | null,
+  children: { readonly running: number; readonly total: number },
+): SubagentPillSegment | null => {
+  if (children.total === 0) return upstream;
+  const live = (upstream === null || turn === null ? 0 : turn.liveCount) + children.running;
+  const total = (upstream === null || turn === null ? 0 : turn.subagents.length) + children.total;
+  if (live > 0)
+    return { label: `${live}/${total}`, accessibilityLabel: `${live} of ${total} agents working` };
+  const agents = `${total} ${total === 1 ? "agent" : "agents"}`;
+  return { label: agents, accessibilityLabel: `${agents}, none working` };
 };
