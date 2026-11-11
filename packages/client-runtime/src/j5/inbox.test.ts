@@ -451,7 +451,7 @@ describe("splitRecordText", () => {
         "    modelRoute:",
         "      - driver: claudeAgent",
         "    ",
-        '    instructions: "A long single line that should scroll rather than wrap."',
+        '    instructions: "A long single line that should wrap under its own indent."',
       ].join("\n"),
       "Saving takes an Owner's Save persona button on this ask.",
     ].join("\n\n");
@@ -461,8 +461,18 @@ describe("splitRecordText", () => {
         text: "J5 recorded this persona draft: a new persona, demo-helper, for this server's library. Its full definition:",
       },
       {
+        // Each line keeps its indent apart from its words, so a wrapped line stays under its own.
         kind: "block",
-        text: 'id: demo-helper\nmodelRoute:\n  - driver: claudeAgent\n\ninstructions: "A long single line that should scroll rather than wrap."',
+        lines: [
+          { indent: "", text: "id: demo-helper" },
+          { indent: "", text: "modelRoute:" },
+          { indent: "  ", text: "- driver: claudeAgent" },
+          { indent: "", text: "" },
+          {
+            indent: "",
+            text: 'instructions: "A long single line that should wrap under its own indent."',
+          },
+        ],
       },
       { kind: "prose", text: "Saving takes an Owner's Save persona button on this ask." },
     ]);
