@@ -5,7 +5,6 @@ import {
 } from "@t3tools/client-runtime/j5/artifacts";
 import type { ArtifactContent, ArtifactEntry, EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { StackActions, useNavigation, type StaticScreenProps } from "@react-navigation/native";
-import { ThreadId } from "@t3tools/contracts";
 import { RefreshControl, View } from "react-native";
 
 import { AppText } from "../../components/ui/AppText";
@@ -14,27 +13,14 @@ import { EmptyState } from "../../components/ui/EmptyState";
 import { ListRow } from "../../components/ui/ListRow";
 import { ListSection } from "../../components/ui/ListSection";
 import { ScreenScrollView } from "../../components/ui/ScreenScrollView";
-import { useMarkdownPreviewStyles } from "../../features/files/FileMarkdownPreview";
-import {
-  fileRoutePathSegments,
-  resolveWorkspaceRelativeFilePath,
-} from "../../features/files/filePath";
+import { fileRoutePathSegments } from "../../features/files/filePath";
 import { ThreadMarkdownImageView } from "../../features/threads/ThreadMarkdownImage";
-import { resolveMarkdownLinkPresentation } from "../../lib/markdownLinks";
-import { tryOpenExternalUrl } from "../../lib/openExternalUrl";
 import { relativeTime } from "../../lib/time";
-import { SelectableMarkdownText } from "../../native/SelectableMarkdownText";
-import { useMarkdownImageSource } from "../../native/useMarkdownImageSource";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { useThreadSelection } from "../../state/use-thread-selection";
 import { listArtifacts, readArtifact } from "./artifactClient";
-import {
-  artifactLinkContextMenu,
-  onArtifactLinkMenuAction,
-  openArtifactLink,
-  type ArtifactLinkContext,
-} from "./artifactLinks";
 import { useServerRead } from "./serverRead";
+import { WorkspaceMarkdown } from "./WorkspaceMarkdown";
 
 type ThreadArtifactsParams = StaticScreenProps<{
   readonly environmentId: string;
@@ -121,51 +107,6 @@ export function ThreadArtifactsScreen(props: ThreadArtifactsParams) {
   );
 }
 
-/**
- * An artifact's Markdown. Its `artifacts/…` links open the viewer, as on web, and its other links
- * resolve from the workspace root, as web's do.
- */
-function ArtifactMarkdown(props: {
-  readonly markdown: string;
-  readonly links: ArtifactLinkContext & { readonly workspaceRoot: string };
-}) {
-  const navigation = useNavigation();
-  const styles = useMarkdownPreviewStyles();
-  const { links } = props;
-  const resolveImageSource = useMarkdownImageSource({
-    environmentId: links.environmentId as EnvironmentId,
-    threadId: ThreadId.make(links.threadId),
-    workspaceRoot: links.workspaceRoot,
-  });
-  const onLinkPress = (href: string) => {
-    if (openArtifactLink(href, links)) return;
-    const presentation = resolveMarkdownLinkPresentation(href);
-    const relativePath =
-      presentation.kind === "file"
-        ? resolveWorkspaceRelativeFilePath(links.workspaceRoot, presentation.path)
-        : null;
-    if (relativePath !== null) {
-      navigation.navigate("ThreadFile", {
-        environmentId: links.environmentId,
-        threadId: links.threadId,
-        path: fileRoutePathSegments(relativePath),
-      });
-      return;
-    }
-    if (presentation.href) void tryOpenExternalUrl(presentation.href, "markdown-link");
-  };
-  return (
-    <SelectableMarkdownText
-      markdown={props.markdown}
-      textStyle={styles.nativeTextStyle}
-      resolveImageSource={resolveImageSource}
-      onLinkPress={onLinkPress}
-      fileContextMenu={(href) => artifactLinkContextMenu(href, links.workspaceRoot)}
-      onFileContextMenuAction={(href, actionId) => onArtifactLinkMenuAction(href, actionId, links)}
-    />
-  );
-}
-
 function ArtifactBody(props: { readonly content: ArtifactContent }) {
   const { content } = props;
   const kind = artifactPreviewKind(content);
@@ -243,7 +184,7 @@ export function ThreadArtifactScreen(props: ThreadArtifactParams) {
       ) : load.status === "error" ? (
         <EmptyState title="Couldn't open this artifact" detail={load.message} />
       ) : artifactPreviewKind(load.value) === "markdown" && workspaceRoot !== null ? (
-        <ArtifactMarkdown
+        <WorkspaceMarkdown
           markdown={load.value.content}
           links={{ navigation, environmentId, threadId, workspaceRoot }}
         />
