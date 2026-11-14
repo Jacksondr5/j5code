@@ -11,8 +11,12 @@ import { CrewRosterStrip } from "../crew/CrewRosterStrip";
 export function J5ComposerControls(props: {
   environmentId: EnvironmentId;
   threadId: ThreadId;
-  /** The room above the composer, upstream's `pendingUserInputMaxHeight`. */
+  /**
+   * Upstream's `pendingUserInputMaxHeight`, the room for its question card, which takes the
+   * composer's place; J5's rows sit above the composer, so they also need its height.
+   */
   maxHeight: DerivedValue<number>;
+  composerHeight: number;
 }) {
   return (
     <>
@@ -21,6 +25,7 @@ export function J5ComposerControls(props: {
         environmentId={props.environmentId}
         threadId={props.threadId}
         maxHeight={props.maxHeight}
+        composerHeight={props.composerHeight}
       />
     </>
   );

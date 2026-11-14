@@ -1615,6 +1615,7 @@ function ThreadDetailBody(
                             environmentId={props.environmentId}
                             threadId={props.selectedThread.id}
                             maxHeight={pendingUserInputMaxHeight}
+                            composerHeight={composerOverlapHeight - composerBottomInset}
                           />
                           <PlaybookComposerControl
                             key={selectedThreadKey}

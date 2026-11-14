@@ -274,7 +274,11 @@ const SEAMS: ReadonlyArray<Seam> = [
     file: "features/threads/ThreadDetailScreen.tsx",
     record: "case 114: J5 rows above the composer",
     from: "../../j5/composer/J5ComposerControls",
-    reaches: ["<J5ComposerControls", "maxHeight={pendingUserInputMaxHeight}"],
+    reaches: [
+      "<J5ComposerControls",
+      "maxHeight={pendingUserInputMaxHeight}",
+      "composerHeight={composerOverlapHeight - composerBottomInset}",
+    ],
   },
   {
     file: "features/threads/ThreadFeed.tsx",

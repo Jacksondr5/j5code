@@ -48,8 +48,9 @@ const URGENCY = {
 export function AdjudicationDock(props: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
-  /** The room above the composer, as upstream's pending-question card gets it. */
+  /** The room upstream's pending-question card gets, which includes the composer's. */
   readonly maxHeight: DerivedValue<number>;
+  readonly composerHeight: number;
 }) {
   const membership = useCrewMembership(scopeThreadRef(props.environmentId, props.threadId));
   // The Inbox is read only for a Captain's thread.
@@ -60,6 +61,7 @@ function CaptainAsks(props: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
   readonly maxHeight: DerivedValue<number>;
+  readonly composerHeight: number;
 }) {
   const { environmentId, threadId } = props;
   const openSources = useAtomValue(openInboxSourcesAtom);
@@ -80,7 +82,7 @@ function CaptainAsks(props: {
   // Opened, the dock grows with the question up to the room above the composer, which shrinks
   // with the keyboard. The question gets what the rest of the card leaves, measured as the card's
   // height less the question's, rather than left to flex shrink, which Android did not apply.
-  const { maxHeight } = props;
+  const { maxHeight, composerHeight } = props;
   const [heights, setHeights] = useState({ card: 0, question: 0 });
   const measured = (part: keyof typeof heights) => (event: LayoutChangeEvent) => {
     const height = event.nativeEvent.layout.height;
@@ -100,10 +102,10 @@ function CaptainAsks(props: {
     () => ({
       maxHeight: Math.max(
         QUESTION_MIN_HEIGHT,
-        Math.max(DOCK_MIN_HEIGHT, maxHeight.value - OTHER_ROW_HEIGHT) - chrome,
+        Math.max(DOCK_MIN_HEIGHT, maxHeight.value - composerHeight - OTHER_ROW_HEIGHT) - chrome,
       ),
     }),
-    [chrome],
+    [chrome, composerHeight],
   );
   if (!mayAnswer || view === null) return null;
   const { shown, others, next: nextAsk } = view;
