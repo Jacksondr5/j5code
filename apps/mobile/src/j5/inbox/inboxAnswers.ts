@@ -8,7 +8,7 @@ import {
 } from "@t3tools/client-runtime/j5/inbox";
 import type { J5ReadSources } from "@t3tools/client-runtime/j5/readSources";
 import { executeAtomQuery } from "@t3tools/client-runtime/state/runtime";
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { ChatAttachment, EnvironmentId } from "@t3tools/contracts";
 import { type HumanInboxResponse, scopedInboxItemKey } from "@t3tools/contracts/j5";
 import * as Cause from "effect/Cause";
 import { useEffect, useRef, useState } from "react";
@@ -16,6 +16,7 @@ import { useEffect, useRef, useState } from "react";
 import { uuidv4 } from "../../lib/uuid";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { j5Environment } from "../state";
+import { clearAnswerAttachments, readyAnswerAttachments } from "./answerAttachmentDrafts";
 import { answeredInboxQueryAtom, inboxCountQueryAtom, openInboxQueryAtom } from "./inboxSources";
 
 type Sources = J5ReadSources<HumanInboxResponse>;
@@ -31,6 +32,7 @@ async function sendAnswer(
   input: {
     readonly exchangeId: string;
     readonly message: string;
+    readonly attachments?: ReadonlyArray<ChatAttachment>;
     readonly clientRequestId: string;
   },
 ) {
@@ -157,22 +159,30 @@ export function useInboxAnswers(input: {
     const itemKey = scopedInboxItemKey(item);
     const message = answers[itemKey] ?? "";
     if (message.length === 0 || !item.sourceReady) return;
+    const ready = readyAnswerAttachments(item);
+    if ("blocked" in ready) {
+      setError({ key: itemKey, message: ready.blocked });
+      return;
+    }
     const keep = keepForPersonScopes(personScopes);
     for (const key of attempts.current.keys()) if (!keep(key)) attempts.current.delete(key);
     await submitHumanInboxAnswer({
       item,
       message,
+      attachments: ready.attachments,
       attempts: attempts.current,
       randomUUID: uuidv4,
       send: sendAnswer,
       refresh: refreshAfterAnswer,
       notifyChanged: notifyCountChanged,
-      onAccepted: () =>
+      onAccepted: () => {
         setAnswers((current) => {
           const next = { ...current };
           delete next[itemKey];
           return next;
-        }),
+        });
+        clearAnswerAttachments(item);
+      },
       setPendingExchangeId: setPendingKey,
       setError: (message) => setError(message === null ? null : { key: itemKey, message }),
     });

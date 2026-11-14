@@ -37,6 +37,7 @@ import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { SelectableMarkdownText } from "../../native/SelectableMarkdownText";
 import { j5Sharing } from "../sharing/guestAccess";
 import { j5Environment } from "../state";
+import { AnswerAttachButton, AnswerAttachmentStrip, AnswerPasteTarget } from "./AnswerAttachments";
 import { type ClosedItem, useInboxAnswers } from "./inboxAnswers";
 import { AgentQuestionsSection, SeatApprovalsSection } from "./InboxCrewRequests";
 import {
@@ -340,16 +341,25 @@ function InboxItem(props: {
             </Text>
           ) : (
             <>
-              <TextInput
-                accessibilityLabel={`Answer ${item.intent}`}
-                multiline
-                placeholder="Type the answer exactly as it should be delivered"
-                value={props.answerText}
-                onChangeText={props.onChangeAnswer}
-                style={{ minHeight: 96, textAlignVertical: "top" }}
-              />
+              <AnswerPasteTarget target={item} disabled={props.delivering}>
+                <TextInput
+                  accessibilityLabel={`Answer ${item.intent}`}
+                  multiline
+                  placeholder="Type the answer exactly as it should be delivered"
+                  value={props.answerText}
+                  onChangeText={props.onChangeAnswer}
+                  style={{ minHeight: 96, textAlignVertical: "top" }}
+                />
+              </AnswerPasteTarget>
+              <AnswerAttachmentStrip target={item} disabled={props.delivering} />
               <View className="flex-row flex-wrap items-center justify-between gap-2">
-                <OpenSenderThread item={item} />
+                <View className="flex-row items-center gap-1">
+                  <AnswerAttachButton
+                    target={item}
+                    disabled={!canAnswer || props.delivering || closedText !== null}
+                  />
+                  <OpenSenderThread item={item} />
+                </View>
                 {closedText !== null ? (
                   <Text className="text-sm text-foreground-muted">{closedText}</Text>
                 ) : (
