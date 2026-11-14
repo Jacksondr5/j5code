@@ -8,7 +8,7 @@ import {
 import { closedLine, mergeHumanInboxSources } from "@t3tools/client-runtime/j5/inbox";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { useState } from "react";
-import { Pressable, ScrollView, View } from "react-native";
+import { type LayoutChangeEvent, Pressable, View } from "react-native";
 import Animated, { type DerivedValue, useAnimatedStyle } from "react-native-reanimated";
 
 import { SymbolView } from "../../components/ui/AppSymbol";
@@ -30,6 +30,10 @@ import { j5Environment } from "../state";
 const OTHER_ROW_HEIGHT = 64;
 /** Upstream's own floor for its pending-question card. */
 const DOCK_MIN_HEIGHT = 160;
+/** Two lines of the question stay readable however little room is left. */
+const QUESTION_MIN_HEIGHT = 48;
+/** The card's vertical padding, and the gap and padding around the opened body. */
+const DOCK_PADDING = 24;
 
 const URGENCY = {
   blocking: { label: "Blocking", className: "text-danger-foreground" },
@@ -75,11 +79,14 @@ function CaptainAsks(props: {
   const [open, setOpen] = useState(false);
   const [picked, setPicked] = useState<string | null>(null);
   // Opened, the dock grows with the question up to the room above the composer, which shrinks
-  // with the keyboard; the question scrolls inside it.
+  // with the keyboard. The question gets what its row, answer box and switcher leave, measured
+  // rather than left to flex shrink, which Android did not apply inside the capped card.
   const { maxHeight } = props;
-  const cardStyle = useAnimatedStyle(() => ({
-    maxHeight: Math.max(DOCK_MIN_HEIGHT, maxHeight.value - OTHER_ROW_HEIGHT),
-  }));
+  const [heights, setHeights] = useState({ header: 0, controls: 0, switcher: 0 });
+  const measured = (part: keyof typeof heights) => (event: LayoutChangeEvent) => {
+    const height = event.nativeEvent.layout.height;
+    setHeights((current) => (current[part] === height ? current : { ...current, [part]: height }));
+  };
 
   // An ask that closed while the person had typed into it stays, with who answered (Inbox AC17).
   const asks = adjudicationAsks({
@@ -89,6 +96,14 @@ function CaptainAsks(props: {
     hasWords: () => true,
   });
   const view = pickShownAsk(asks, picked);
+  const chrome =
+    heights.header + heights.controls + (view?.next == null ? 0 : heights.switcher) + DOCK_PADDING;
+  const questionStyle = useAnimatedStyle(() => ({
+    maxHeight: Math.max(
+      QUESTION_MIN_HEIGHT,
+      Math.max(DOCK_MIN_HEIGHT, maxHeight.value - OTHER_ROW_HEIGHT) - chrome,
+    ),
+  }));
   if (!mayAnswer || view === null) return null;
   const { shown, others, next: nextAsk } = view;
   const urgency = URGENCY[shown.urgency];
@@ -106,15 +121,13 @@ function CaptainAsks(props: {
 
   return (
     <View className="px-4 pb-2" testID="adjudication-dock">
-      <Animated.View
-        style={cardStyle}
-        className="rounded-[20px] border-continuous bg-card px-3 py-1"
-      >
+      <View className="rounded-[20px] border-continuous bg-card px-3 py-1">
         <Pressable
           accessibilityRole="button"
           accessibilityState={{ expanded: open }}
           accessibilityLabel={`Question for you, ${urgency.label}: ${shown.intent}`}
           onPress={() => setOpen((value) => !value)}
+          onLayout={measured("header")}
           className="min-h-11 shrink-0 flex-row items-center gap-2"
         >
           <SymbolView name="questionmark.bubble" size={14} tintColorClassName="accent-icon-muted" />
@@ -139,8 +152,8 @@ function CaptainAsks(props: {
           />
         </Pressable>
         {open ? (
-          <View className="min-h-0 shrink gap-2 pb-2">
-            <ScrollView key={shown.exchangeId} style={{ flexShrink: 1 }} nestedScrollEnabled>
+          <View className="gap-2 pb-2">
+            <Animated.ScrollView key={shown.exchangeId} style={questionStyle} nestedScrollEnabled>
               <View className="gap-2">
                 {markdown(shown.message)}
                 {[shown.escalation?.summary, shown.personaDraft?.summary].map((record) =>
@@ -161,33 +174,35 @@ function CaptainAsks(props: {
                   </View>
                 ))}
               </View>
-            </ScrollView>
-            <TextInput
-              accessibilityLabel={`Answer ${shown.intent}`}
-              multiline
-              placeholder="Type the answer exactly as it should be delivered"
-              value={text}
-              onChangeText={(value) => answers.setAnswerText(shown, value)}
-              style={{ minHeight: 64, maxHeight: 120, textAlignVertical: "top" }}
-            />
-            {error === null ? null : (
-              <Text accessibilityRole="alert" className="text-sm text-danger-foreground">
-                {error}
-              </Text>
-            )}
-            <View className="shrink-0 flex-row items-center justify-end gap-2">
-              {closedText !== null ? (
-                <Text className="text-sm text-foreground-muted">{closedText}</Text>
-              ) : (
-                <Button
-                  label={delivering ? "Delivering…" : "Answer"}
-                  tone="primary"
-                  size="compact"
-                  loading={delivering}
-                  disabled={!shown.sourceReady || delivering || text.length === 0}
-                  onPress={() => void answers.answer(shown)}
-                />
+            </Animated.ScrollView>
+            <View className="gap-2" onLayout={measured("controls")}>
+              <TextInput
+                accessibilityLabel={`Answer ${shown.intent}`}
+                multiline
+                placeholder="Type the answer exactly as it should be delivered"
+                value={text}
+                onChangeText={(value) => answers.setAnswerText(shown, value)}
+                style={{ minHeight: 64, maxHeight: 120, textAlignVertical: "top" }}
+              />
+              {error === null ? null : (
+                <Text accessibilityRole="alert" className="text-sm text-danger-foreground">
+                  {error}
+                </Text>
               )}
+              <View className="shrink-0 flex-row items-center justify-end gap-2">
+                {closedText !== null ? (
+                  <Text className="text-sm text-foreground-muted">{closedText}</Text>
+                ) : (
+                  <Button
+                    label={delivering ? "Delivering…" : "Answer"}
+                    tone="primary"
+                    size="compact"
+                    loading={delivering}
+                    disabled={!shown.sourceReady || delivering || text.length === 0}
+                    onPress={() => void answers.answer(shown)}
+                  />
+                )}
+              </View>
             </View>
           </View>
         ) : null}
@@ -195,6 +210,7 @@ function CaptainAsks(props: {
           <Pressable
             accessibilityRole="button"
             onPress={() => setPicked(nextAsk.exchangeId)}
+            onLayout={measured("switcher")}
             className="min-h-9 shrink-0 flex-row items-center gap-1 border-t border-border-subtle"
           >
             <Text className="shrink-0 text-xs text-foreground">
@@ -206,7 +222,7 @@ function CaptainAsks(props: {
             <SymbolView name="chevron.right" size={12} tintColorClassName="accent-icon-muted" />
           </Pressable>
         ) : null}
-      </Animated.View>
+      </View>
     </View>
   );
 }
