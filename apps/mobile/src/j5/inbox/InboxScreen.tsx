@@ -307,8 +307,14 @@ function InboxItem(props: {
             </Text>
           ) : (
             <>
-              {/* Above the answer box, so it stays in view whenever the box is: iOS scrolls only
-                  the focused box itself clear of the keyboard. */}
+              <TextInput
+                accessibilityLabel={`Answer ${item.intent}`}
+                multiline
+                placeholder="Type the answer exactly as it should be delivered"
+                value={props.answerText}
+                onChangeText={props.onChangeAnswer}
+                style={{ minHeight: 96, textAlignVertical: "top" }}
+              />
               <View className="flex-row flex-wrap items-center justify-between gap-2">
                 <OpenSenderThread item={item} />
                 {closedText !== null ? (
@@ -328,14 +334,6 @@ function InboxItem(props: {
                   />
                 )}
               </View>
-              <TextInput
-                accessibilityLabel={`Answer ${item.intent}`}
-                multiline
-                placeholder="Type the answer exactly as it should be delivered"
-                value={props.answerText}
-                onChangeText={props.onChangeAnswer}
-                style={{ minHeight: 96, textAlignVertical: "top" }}
-              />
             </>
           )}
           {props.error === null ? null : (
