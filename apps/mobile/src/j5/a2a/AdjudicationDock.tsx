@@ -9,6 +9,7 @@ import { closedLine, mergeHumanInboxSources } from "@t3tools/client-runtime/j5/i
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";
+import Animated, { type DerivedValue, useAnimatedStyle } from "react-native-reanimated";
 
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { AppText as Text, AppTextInput as TextInput } from "../../components/ui/AppText";
@@ -21,9 +22,6 @@ import { useInboxAnswers } from "../inbox/inboxAnswers";
 import { answeredInboxSourcesAtom, openInboxSourcesAtom } from "../inbox/inboxSources";
 import { j5Sharing } from "../sharing/guestAccess";
 import { j5Environment } from "../state";
-
-/** About three lines of the question while the dock is opened but not in full. */
-const EXCERPT_HEIGHT = 72;
 
 const URGENCY = {
   blocking: { label: "Blocking", className: "text-danger-foreground" },
@@ -39,6 +37,8 @@ const URGENCY = {
 export function AdjudicationDock(props: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
+  /** The room above the composer, as upstream's pending-question card gets it. */
+  readonly maxHeight: DerivedValue<number>;
 }) {
   const membership = useCrewMembership(scopeThreadRef(props.environmentId, props.threadId));
   // The Inbox is read only for a Captain's thread.
@@ -48,6 +48,7 @@ export function AdjudicationDock(props: {
 function CaptainAsks(props: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
+  readonly maxHeight: DerivedValue<number>;
 }) {
   const { environmentId, threadId } = props;
   const openSources = useAtomValue(openInboxSourcesAtom);
@@ -64,10 +65,11 @@ function CaptainAsks(props: {
   const access = useAtomValue(j5Sharing.connectionAccess(environmentId));
   const styles = useMarkdownPreviewStyles();
   const [open, setOpen] = useState(false);
-  const [full, setFull] = useState(false);
   const [picked, setPicked] = useState<string | null>(null);
-  // The ask whose question runs past the excerpt's height.
-  const [overflowing, setOverflowing] = useState<string | null>(null);
+  // Opened, the dock grows with the question up to the room above the composer, which shrinks
+  // with the keyboard; the question scrolls inside it.
+  const { maxHeight } = props;
+  const cardStyle = useAnimatedStyle(() => ({ maxHeight: maxHeight.value }));
 
   // An ask that closed while the person had typed into it stays, with who answered (Inbox AC17).
   const asks = adjudicationAsks({
@@ -88,21 +90,22 @@ function CaptainAsks(props: {
   const text = answers.answerText(shown);
   const delivering = answers.pendingKey !== null;
   const error = answers.errorFor(shown);
-  // Measured, not counted: a few short lines can still wrap past the excerpt on a phone.
-  const longer = full || overflowing === shown.exchangeId;
   const markdown = (value: string) => (
     <SelectableMarkdownText markdown={value} textStyle={styles.nativeTextStyle} />
   );
 
   return (
     <View className="px-4 pb-2" testID="adjudication-dock">
-      <View className="rounded-[20px] border-continuous bg-card px-3 py-1">
+      <Animated.View
+        style={cardStyle}
+        className="rounded-[20px] border-continuous bg-card px-3 py-1"
+      >
         <Pressable
           accessibilityRole="button"
           accessibilityState={{ expanded: open }}
           accessibilityLabel={`Question for you, ${urgency.label}: ${shown.intent}`}
           onPress={() => setOpen((value) => !value)}
-          className="min-h-11 flex-row items-center gap-2"
+          className="min-h-11 shrink-0 flex-row items-center gap-2"
         >
           <SymbolView name="questionmark.bubble" size={14} tintColorClassName="accent-icon-muted" />
           <View className="min-w-0 flex-1">
@@ -126,17 +129,8 @@ function CaptainAsks(props: {
           />
         </Pressable>
         {open ? (
-          <View className="gap-2 pb-2">
-            <ScrollView
-              // Remounted per ask, so each reports its own content size.
-              key={shown.exchangeId}
-              style={{ maxHeight: full ? 280 : EXCERPT_HEIGHT }}
-              scrollEnabled={full}
-              nestedScrollEnabled
-              onContentSizeChange={(_width, height) =>
-                setOverflowing(height > EXCERPT_HEIGHT ? shown.exchangeId : null)
-              }
-            >
+          <View className="min-h-0 shrink gap-2 pb-2">
+            <ScrollView key={shown.exchangeId} style={{ flexShrink: 1 }} nestedScrollEnabled>
               <View className="gap-2">
                 {markdown(shown.message)}
                 {[shown.escalation?.summary, shown.personaDraft?.summary].map((record) =>
@@ -158,31 +152,20 @@ function CaptainAsks(props: {
                 ))}
               </View>
             </ScrollView>
-            {longer ? (
-              <Pressable
-                accessibilityRole="button"
-                hitSlop={6}
-                onPress={() => setFull((value) => !value)}
-              >
-                <Text className="text-xs font-t3-medium text-foreground-secondary">
-                  {full ? "Show less" : "Show full question"}
-                </Text>
-              </Pressable>
-            ) : null}
             <TextInput
               accessibilityLabel={`Answer ${shown.intent}`}
               multiline
               placeholder="Type the answer exactly as it should be delivered"
               value={text}
               onChangeText={(value) => answers.setAnswerText(shown, value)}
-              style={{ minHeight: 44, maxHeight: 120, textAlignVertical: "top" }}
+              style={{ minHeight: 64, maxHeight: 120, textAlignVertical: "top" }}
             />
             {error === null ? null : (
               <Text accessibilityRole="alert" className="text-sm text-danger-foreground">
                 {error}
               </Text>
             )}
-            <View className="flex-row items-center justify-end gap-2">
+            <View className="shrink-0 flex-row items-center justify-end gap-2">
               {closedText !== null ? (
                 <Text className="text-sm text-foreground-muted">{closedText}</Text>
               ) : (
@@ -201,11 +184,8 @@ function CaptainAsks(props: {
         {nextAsk !== null ? (
           <Pressable
             accessibilityRole="button"
-            onPress={() => {
-              setPicked(nextAsk.exchangeId);
-              setFull(false);
-            }}
-            className="min-h-9 flex-row items-center gap-1 border-t border-border-subtle"
+            onPress={() => setPicked(nextAsk.exchangeId)}
+            className="min-h-9 shrink-0 flex-row items-center gap-1 border-t border-border-subtle"
           >
             <Text className="shrink-0 text-xs text-foreground">
               {others.length} more {others.length === 1 ? "question" : "questions"}
@@ -216,7 +196,7 @@ function CaptainAsks(props: {
             <SymbolView name="chevron.right" size={12} tintColorClassName="accent-icon-muted" />
           </Pressable>
         ) : null}
-      </View>
+      </Animated.View>
     </View>
   );
 }
