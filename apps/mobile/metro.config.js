@@ -29,6 +29,8 @@ config.resolver = {
         ? [config.resolver.blockList]
         : []),
     new RegExp(`${escapedWorkspaceRoot}[/\\\\]\\.t3[/\\\\].*`),
+    // J5: a worktree's test home (FORK.md case 113).
+    new RegExp(`${escapedWorkspaceRoot}[/\\\\]\\.j5code[/\\\\].*`),
   ],
   extraNodeModules: {
     ...config.resolver?.extraNodeModules,
@@ -56,10 +58,6 @@ async function generateMobileThirdPartyLicenses() {
   const manifest = await generateThirdPartyLicenseManifest({
     configFile: path.join(workspaceRoot, "third-party-licenses.config.json"),
     packageManifests: [{ bundle: "mobile", path: path.join(__dirname, "package.json") }],
-    allowMissingGeneratedNotices:
-      process.env.NODE_ENV !== "production" &&
-      process.env.EAS_BUILD !== "true" &&
-      process.env.T3CODE_LICENSES_STRICT !== "1",
   });
 
   await Promise.all([

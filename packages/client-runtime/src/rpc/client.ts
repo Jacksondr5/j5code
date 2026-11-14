@@ -4,7 +4,6 @@ import {
   authScopeRequiredResponse,
   type EnvironmentId,
   type ClientGuardedRpcTag,
-  J5_AGENT_PERSONA_WS_METHODS,
   J5_ARTIFACT_WS_METHODS,
   ORCHESTRATION_V2_WS_METHODS,
   WS_METHODS,
@@ -58,7 +57,6 @@ export type EnvironmentRpcTag = keyof WsRpcProtocolClient & string;
 type RpcMethod<TTag extends EnvironmentRpcTag> = WsRpcProtocolClient[TTag];
 
 export type EnvironmentSubscriptionRpcTag =
-  | typeof WS_METHODS.codexAuthCallbackSubscribe
   | typeof WS_METHODS.providerAuthSubscribe
   | typeof WS_METHODS.providerInstallSubscribe
   | typeof ORCHESTRATION_V2_WS_METHODS.subscribeShell
@@ -71,7 +69,6 @@ export type EnvironmentSubscriptionRpcTag =
   | typeof WS_METHODS.scheduledTasksSubscribe
   | typeof WS_METHODS.serverGetStorageCleanupReport
   | typeof WS_METHODS.serverGetDatabaseStorage
-  | typeof WS_METHODS.subscribeTerminalEvents
   | typeof WS_METHODS.subscribeTerminalMetadata
   | typeof WS_METHODS.subscribePreviewEvents
   | typeof J5_ARTIFACT_WS_METHODS.subscribeArtifactChanges
@@ -86,8 +83,6 @@ export type EnvironmentSubscriptionRpcTag =
   | typeof WS_METHODS.subscribeProjectClones
   | typeof WS_METHODS.terminalAttach
   | typeof WS_METHODS.terminalObserve
-  // J5: saved-agent handoff refresh signal (packages/contracts/src/j5/agentPersona.ts).
-  | typeof J5_AGENT_PERSONA_WS_METHODS.subscribeAgentHandoffRefreshes
   // J5: a person's level on one thread, who reaches a thread or project, and who wrote in a
   // shared conversation (packages/contracts/src/j5/access.ts, people.ts, sharedConversation.ts).
   | typeof J5_ACCESS_WS_METHODS.subscribeThreadLevel

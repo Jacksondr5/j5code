@@ -10,6 +10,7 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import { ServerSettingsService } from "../../serverSettings.ts";
 import * as Stream from "effect/Stream";
 
 import { layerFromProjectStore, RuntimePolicyV2 } from "../../orchestration-v2/RuntimePolicy.ts";
@@ -84,10 +85,13 @@ const TestLayer = layerFromProjectStore.pipe(
           scripts: [],
           createdAt: "2026-06-21T00:00:00.000Z",
           updatedAt: "2026-06-21T00:00:00.000Z",
+          pinnedAt: null,
+          archivedAt: null,
           deletedAt: null,
         }),
     }),
   ),
+  Layer.provide(ServerSettingsService.layerTest()),
 );
 
 it.layer(TestLayer)("agent persona runtime policy", (it) => {

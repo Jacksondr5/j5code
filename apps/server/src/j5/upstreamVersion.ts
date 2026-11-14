@@ -3,4 +3,4 @@
  * (such as `t3CodeRange`), since J5 has its own version line. Set it at every upstream advance:
  * a release tag's version, or for `main` and nightlies the next patch they are stamped with.
  */
-export const J5_UPSTREAM_T3_CODE_VERSION = "0.1.3";
+export const J5_UPSTREAM_T3_CODE_VERSION = "0.1.7";

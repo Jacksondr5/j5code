@@ -35,6 +35,7 @@ export function AgentIdentityChip(props: {
       <TooltipPopup side="top">
         Persona {presentation.personaLabel} · {presentation.routeLabel} ·{" "}
         {props.assignment.authorityPolicy}
+        {presentation.switchNote === null ? null : `. ${presentation.switchNote}`}
       </TooltipPopup>
     </Tooltip>
   );

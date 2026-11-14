@@ -2,6 +2,7 @@
 import * as NodeHttp from "node:http";
 import type * as NodeNet from "node:net";
 
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { peerCredentialRejectedReason, peerPollStoppedError } from "@t3tools/contracts/j5";
@@ -16,7 +17,7 @@ import { afterEach, beforeEach, vi } from "vite-plus/test";
 import { cli } from "../../binCli.ts";
 import { A2A_EXIT_CODES } from "./a2a.ts";
 
-const CliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NetService.layer);
+const CliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NetService.layer);
 const runCli = (args: ReadonlyArray<string>) =>
   Command.runWith(cli, { version: "0.0.0" })(args).pipe(Effect.provide(CliRuntimeLayer));
 

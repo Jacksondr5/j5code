@@ -5,8 +5,11 @@ import {
   RuntimeRequestId,
   ThreadId,
 } from "@t3tools/contracts";
+import { agentPersonaDraftsTestLayer } from "../test-support/agentPersonaDrafts.ts";
+import { agentPersonaEscalationsTestLayer } from "../test-support/agentPersonaEscalations.ts";
 import { J5_CLIENT_READ_WS_METHODS, type J5ActionError } from "@t3tools/contracts/j5";
 import { assert, it } from "@effect/vitest";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as Effect from "effect/Effect";
@@ -25,6 +28,7 @@ import { PlaybookStore, playbookStoreLayer } from "../playbooks/PlaybookStore.ts
 import { AgentCrewInstanceService } from "./AgentCrewInstanceService.ts";
 import { AgentCrewProposalService, type CrewProposal } from "./AgentCrewProposalService.ts";
 import { ArchiveCrewService } from "./ArchiveCrewService.ts";
+import { CrewWorktrees } from "./CrewWorktrees.ts";
 import { A2AArchiveFacts, A2AArchiveFactsError } from "./ArchiveFactsService.ts";
 import { makeClientReadRpcHandlers } from "./clientReadRpc.ts";
 import { ClientReadsService, layer as clientReadsLayer } from "./ClientReadsService.ts";
@@ -48,8 +52,8 @@ const SESSION = {
   subject: "one-time-token",
 };
 
-/** A connection that is the given person's device, or no one's. */
-const connectionOf = (personId: ParticipantId | null) =>
+/** A connection that is the given person's device at a level of the server, or no one's. */
+const connectionOf = (personId: ParticipantId | null, level: "owner" | "collaborator" = "owner") =>
   Layer.mock(PersonAccess)({
     sessionReach: () =>
       Effect.succeed(
@@ -59,8 +63,8 @@ const connectionOf = (personId: ParticipantId | null) =>
               kind: "person" as const,
               person: { personId, displayName: null, firstOwner: true },
               levels: [],
-              serverLevel: "owner" as const,
-              highest: "owner" as const,
+              serverLevel: level,
+              highest: level,
               ceiling: null,
             },
       ),
@@ -73,6 +77,7 @@ const writesEverywhere = Layer.mock(SharedThreads)({});
 const handlersOver = (
   reads: Layer.Layer<ClientReadsService, SqlError>,
   personId: ParticipantId | null = LOCAL_PERSON,
+  level: "owner" | "collaborator" = "owner",
 ) =>
   makeClientReadRpcHandlers(SESSION).pipe(
     Effect.provide(
@@ -80,7 +85,7 @@ const handlersOver = (
         reads,
         Layer.mock(PeerAdminService)({}),
         readChangesLayer,
-        connectionOf(personId),
+        connectionOf(personId, level),
         writesEverywhere,
       ),
     ),
@@ -110,8 +115,11 @@ const handlersWith = (given: {
           Layer.mock(A2ALedger)({}),
           Layer.mock(ParticipantPlacementService)({}),
           Layer.mock(AgentCrewInstanceService)({}),
+          agentPersonaEscalationsTestLayer(),
+          agentPersonaDraftsTestLayer(),
           Layer.mock(PlaybookCrewRelay)({}),
           Layer.mock(ArchiveCrewService)({}),
+          Layer.mock(CrewWorktrees)({}),
           database,
         ),
       ),
@@ -203,6 +211,7 @@ it.effect("keeps identity requests exact, ordered, and total, and drops an id th
           return Effect.succeed({ entries });
         },
         openInboxCount: (personId) => Effect.succeed({ personId: personId ?? alpha, count: 3 }),
+        crewWorktreeCleanups: () => Effect.succeed([]),
       }),
     );
     const identities = handlers[METHODS.readParticipantIdentities];
@@ -220,6 +229,43 @@ it.effect("keeps identity requests exact, ordered, and total, and drops an id th
     assert.deepStrictEqual(yield* handlers[METHODS.readOpenInboxCount]({}), {
       personId: LOCAL_PERSON,
       count: 3,
+    });
+  }),
+);
+
+const openCleanup = {
+  id: "cleanup:1",
+  crewInstanceId: "crew:1",
+  crewName: "Crew One",
+  projectId: "project:gate",
+  captainThreadId: ThreadId.make("thread:captain"),
+  filedAt: "2026-10-27T12:00:00.000Z",
+  status: "open" as const,
+  decidedAt: null,
+  entries: [],
+};
+const cleanupReads = Layer.mock(ClientReadsService)({
+  openInboxCount: (personId) =>
+    Effect.succeed({ personId: personId ?? ParticipantId.make("agent:none"), count: 3 }),
+  crewWorktreeCleanups: () => Effect.succeed([openCleanup]),
+});
+
+it.effect("counts and lists an open worktree cleanup for an Owner, who answers it", () =>
+  Effect.gen(function* () {
+    const handlers = yield* handlersOver(cleanupReads);
+    assert.strictEqual((yield* handlers[METHODS.readOpenInboxCount]({})).count, 4);
+    assert.deepStrictEqual(yield* handlers[METHODS.listCrewWorktreeCleanups]({ status: "open" }), {
+      items: [openCleanup],
+    });
+  }),
+);
+
+it.effect("neither counts nor lists a worktree cleanup for someone who cannot answer it", () =>
+  Effect.gen(function* () {
+    const handlers = yield* handlersOver(cleanupReads, LOCAL_PERSON, "collaborator");
+    assert.strictEqual((yield* handlers[METHODS.readOpenInboxCount]({})).count, 3);
+    assert.deepStrictEqual(yield* handlers[METHODS.listCrewWorktreeCleanups]({ status: "open" }), {
+      items: [],
     });
   }),
 );
@@ -290,7 +336,7 @@ it.effect(
         }),
         playbooks: playbookStoreLayer.pipe(
           Layer.provide(database),
-          Layer.provide(NodeServices.layer),
+          Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
         ),
       });
       const { proposals } = yield* handlers[METHODS.listCrewProposals]();
@@ -310,7 +356,7 @@ it.effect(
       assert.include(proposals[2]?.playbook?.issue, "Step ship is no longer in the playbook");
       assert.deepStrictEqual(proposals[3]?.playbook?.steps, []);
       assert.include(proposals[3]?.playbook?.issue, "No playbook named gone");
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
 );
 
 it.effect("lists a live Crew seat's approvals", () =>

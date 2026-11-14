@@ -1,3 +1,5 @@
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as CrewDeliveryContext from "../a2a/CrewDeliveryContext.ts";
 import * as ProjectCloneTracker from "../../project/ProjectCloneTracker.ts";
 import * as WorktreeSetupTracker from "../../project/WorktreeSetupTracker.ts";
 import * as TerminalManager from "../../terminal/Manager.ts";
@@ -13,6 +15,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 
 import * as GitWorkflow from "../../git/GitWorkflowService.ts";
+import * as GitVcsDriver from "../../vcs/GitVcsDriver.ts";
 import { CodexProviderCapabilitiesV2 } from "../../orchestration-v2/Adapters/CodexAdapterV2.ts";
 import * as CommandReceiptStore from "../../orchestration-v2/CommandReceiptStore.ts";
 import * as EffectOutbox from "../../orchestration-v2/EffectOutbox.ts";
@@ -56,15 +59,20 @@ const project = {
   deletedAt: null,
 } as const;
 
-const adapter = {
-  instanceId: modelSelection.instanceId,
-  driver: ProviderDriverKind.make("codex"),
-  getCapabilities: () => Effect.succeed(CodexProviderCapabilitiesV2),
-  planSelectionTransition: () => Effect.succeed({ type: "apply_on_next_turn" as const }),
-  openSession: () => Effect.die("provider execution is disabled in launch tests"),
-} as ProviderAdapter.ProviderAdapterV2["Service"];
+/** A provider adapter that plans selection changes but never runs a turn. */
+export const launchTestAdapter = (instanceId: ProviderInstanceId, driver: ProviderDriverKind) =>
+  ({
+    instanceId,
+    driver,
+    getCapabilities: () => Effect.succeed(CodexProviderCapabilitiesV2),
+    planSelectionTransition: () => Effect.succeed({ type: "apply_on_next_turn" as const }),
+    openSession: () => Effect.die("provider execution is disabled in launch tests"),
+  }) as ProviderAdapter.ProviderAdapterV2["Service"];
+
+const adapter = launchTestAdapter(modelSelection.instanceId, ProviderDriverKind.make("codex"));
 
 export interface HarnessOptions {
+  readonly crewDeliveryContext?: boolean;
   readonly createWorktree?: GitWorkflow.GitWorkflowService["Service"]["createWorktree"];
   readonly fetchRemote?: GitWorkflow.GitWorkflowService["Service"]["fetchRemote"];
   readonly renameBranch?: GitWorkflow.GitWorkflowService["Service"]["renameBranch"];
@@ -73,17 +81,30 @@ export interface HarnessOptions {
   readonly generateBranchName?: TextGeneration.TextGeneration["Service"]["generateBranchName"];
   readonly serverSettings?: Parameters<typeof ServerSettings.layerTest>[0];
   readonly providers?: ReadonlyArray<ServerProvider>;
+  /** Adapters beside the default Codex one, for threads that switch provider. */
+  readonly adapters?: ReadonlyArray<ProviderAdapter.ProviderAdapterV2["Service"]>;
 }
 
 export function makeHarness(options: HarnessOptions = {}) {
   const database = SqlitePersistenceMemory;
-  const registry = ProviderAdapterRegistry.layerFromAdapters([adapter]);
-  const orchestrator = ProviderReplayHarness.layerWithRegistry(
+  const registry = ProviderAdapterRegistry.layerFromAdapters([
+    adapter,
+    ...(options.adapters ?? []),
+  ]);
+  const baseOrchestrator = ProviderReplayHarness.layerWithRegistry(
     { name: "thread-launch" },
     registry,
     { databaseLayer: database, runEffectWorker: false },
   );
   const receipts = CommandReceiptStore.layer.pipe(Layer.provide(database));
+  const orchestrator =
+    options.crewDeliveryContext === true
+      ? CrewDeliveryContext.layer.pipe(
+          Layer.provideMerge(baseOrchestrator),
+          Layer.provide(receipts),
+          Layer.provide(database),
+        )
+      : baseOrchestrator;
   const threadManagement = ThreadManagement.layer.pipe(
     Layer.provide(orchestrator),
     Layer.provide(ServerSettings.layerTest(options.serverSettings)),
@@ -141,6 +162,9 @@ export function makeHarness(options: HarnessOptions = {}) {
       listShells: Effect.fn("ProjectService.ProjectService.listShells")(function () {
         return Effect.die("unused");
       }),
+      listPage: Effect.fn("ProjectService.ProjectService.listPage")(function () {
+        return Effect.die("unused");
+      }),
     }),
     Layer.mock(GitWorkflow.GitWorkflowService)({
       createWorktree,
@@ -153,6 +177,7 @@ export function makeHarness(options: HarnessOptions = {}) {
       resolveRemoteTrackingCommit: () =>
         Effect.succeed({ commitSha: "remote-main-sha", remoteRefName: "origin/main" }),
     }),
+    Layer.mock(GitVcsDriver.GitVcsDriver)({}),
     Layer.succeed(ProjectSetupScriptRunner.ProjectSetupScriptRunner, {
       runForThread: runSetup,
     }),
@@ -187,15 +212,20 @@ export function makeHarness(options: HarnessOptions = {}) {
               scripts: project.scripts,
               createdAt: project.createdAt,
               updatedAt: project.updatedAt,
+              pinnedAt: null,
+              archivedAt: null,
               deletedAt: project.deletedAt,
             })
           : Option.none(),
       ),
   });
   const titleRegeneration = ThreadTitleRegeneration.layer.pipe(
-    Layer.provide(Layer.mergeAll(threadManagement, projectedProjects, externalServices)),
+    Layer.provide(
+      Layer.mergeAll(threadManagement, projectedProjects, externalServices, NodeServices.layer),
+    ),
   );
   return {
+    orchestrator,
     layer: Layer.mergeAll(launch, threadManagement, titleRegeneration, outbox, database),
     /** The faked project, git, and setup services plus the receipt store ThreadLaunch reads. */
     services: Layer.mergeAll(externalServices, receipts),

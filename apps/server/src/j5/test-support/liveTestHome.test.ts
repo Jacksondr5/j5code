@@ -128,7 +128,7 @@ it.live("builds a home whose only project is the test repository", () =>
           const persona = decodeAgentPersonaDefinition(
             parseYaml(NodeFS.readFileSync(`${stateDir}/personas/${file}`, "utf8")),
           );
-          return [file, persona.id, persona.modelRoute[0].model];
+          return [file, persona.id, persona.modelRoute[0]!.model];
         }),
       [
         ["haiku-helper.yaml", "haiku-helper", "claude-haiku-5-5"],

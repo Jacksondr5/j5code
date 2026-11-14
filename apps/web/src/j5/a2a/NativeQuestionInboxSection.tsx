@@ -1,7 +1,7 @@
 import { ArrowUpRightIcon } from "lucide-react";
 
 import { Button } from "../../components/ui/button";
-import type { ScopedNativeQuestionInboxItem } from "../crew/crewRuntimeRequests.logic";
+import type { ScopedNativeQuestionInboxItem } from "@t3tools/client-runtime/j5/crew-inbox-requests";
 import { useLogicalProjects } from "../logicalProjects";
 
 export function NativeQuestionInboxSection(props: {

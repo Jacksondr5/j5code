@@ -86,23 +86,32 @@ const requireAt =
 export const requireWrites = requireAt("write");
 export const requireReaches = requireAt("read");
 
+/** Whether the connection is an Owner of the server, or a service session, which acts for one. */
+export const isOwner = Effect.fn("j5.sharing.connectionWriter.isOwner")(function* (
+  session: SessionIdentity,
+) {
+  const reach = yield* (yield* PersonAccess)
+    .sessionReach(session)
+    .pipe(Effect.mapError(unreadable));
+  return (
+    reach.kind === "service" ||
+    (reach.kind === "person" && levelReaches(reach.serverLevel, "owner"))
+  );
+});
+
 /**
  * Refuses anyone who is not an Owner of the server, for now, as command admission refuses them
  * archiving or deleting a thread (People and access AC14). A service session passes.
  */
 export const requireOwner = Effect.fn("j5.sharing.connectionWriter.requireOwner")(function* (
   session: SessionIdentity,
+  /** What only an Owner does, as "Only an Owner of this server <does>". */
+  does = "archives a Crew",
 ) {
-  const reach = yield* (yield* PersonAccess)
-    .sessionReach(session)
-    .pipe(Effect.mapError(unreadable));
-  const owner =
-    reach.kind === "service" ||
-    (reach.kind === "person" && levelReaches(reach.serverLevel, "owner"));
-  if (!owner) {
+  if (!(yield* isOwner(session))) {
     return yield* new J5ActionError({
       code: "OwnersOnly",
-      message: "Only an Owner of this server archives a Crew, for now. Ask an Owner to do it.",
+      message: `Only an Owner of this server ${does}, for now. Ask an Owner to do it.`,
     });
   }
 });

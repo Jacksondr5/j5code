@@ -70,6 +70,7 @@ export const readsChangedByLedgerEvent = (
     case "participant.archived":
     case "participant.unarchived":
     case "participant.deleted":
+    case "participant.moved":
       return ["fleet"];
     case "message.received":
     case "message.edited":

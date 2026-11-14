@@ -6,6 +6,7 @@
  * `scripts/j5/setup-agent-live-test.ts`. Nothing in the home points outside `<root>`.
  */
 import { seedLiveTestSkills } from "./liveTestSkills.ts";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   ChatAttachmentId,
@@ -331,7 +332,7 @@ const replayFixture = Effect.fn("liveTestHome.replayFixture")(function* <
   readonly state: ReplayState | undefined;
 }) {
   const read = yield* readProviderReplayTranscript(input.variant.transcriptFile).pipe(
-    Effect.provide(NodeServices.layer),
+    Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
   );
   const recorded = input.state === "question" ? asAsyncQuestion(read) : read;
   const lastLabel = input.variant.transcriptEntriesThroughLabel;
@@ -390,7 +391,7 @@ const replayFixture = Effect.fn("liveTestHome.replayFixture")(function* <
       input.harness,
       {
         databaseLayer: SqlitePersistence.layerFromPath(input.databasePath).pipe(
-          Layer.provide(NodeServices.layer),
+          Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
         ),
         ...(input.variant.runContinuationWorker === true ? { runContinuationWorker: true } : {}),
       },
@@ -463,7 +464,7 @@ const nameOwner = (databasePath: string, ownerName: string) =>
     Effect.provide(
       PersonAccess.layer.pipe(
         Layer.provideMerge(SqlitePersistence.layerFromPath(databasePath)),
-        Layer.provide(NodeServices.layer),
+        Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
       ),
     ),
   );
@@ -493,7 +494,9 @@ export const buildLiveTestHome = Effect.fn("buildLiveTestHome")(function* (input
     }
   }
   // The same rule as the delivery seed: never the shared home or its state.
-  const home = yield* validateIsolatedBaseDir(paths.home).pipe(Effect.provide(NodeServices.layer));
+  const home = yield* validateIsolatedBaseDir(paths.home).pipe(
+    Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+  );
   const root = NodePath.dirname(home);
   const { testRepo, testRepoOrigin, manifest: manifestPath } = liveTestHomePaths(root);
   const databasePath = NodePath.join(home, "userdata", "statev2.sqlite");
@@ -540,7 +543,9 @@ export const buildLiveTestHome = Effect.fn("buildLiveTestHome")(function* (input
   writeSettingsAndPersonas(
     home,
     input.skillsOnly
-      ? yield* seedLiveTestSkills(home).pipe(Effect.provide(NodeServices.layer))
+      ? yield* seedLiveTestSkills(home).pipe(
+          Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+        )
       : { skillCatalogSource: "" },
   );
 

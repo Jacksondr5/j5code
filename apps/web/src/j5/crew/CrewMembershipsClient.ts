@@ -1,7 +1,8 @@
 import type { PreparedConnection } from "@t3tools/client-runtime/connection";
-import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { scopedThreadKey } from "@t3tools/client-runtime/environment";
+import { replaceCrewMemberships } from "@t3tools/client-runtime/j5/crew-memberships";
 import { createScopedThreadReadStore } from "@t3tools/client-runtime/j5/scopedThreadReadStore";
-import type { EnvironmentId, ScopedThreadRef, ThreadId } from "@t3tools/contracts";
+import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 import type { CrewMembershipEntry, ThreadCrewMembership } from "@t3tools/contracts/j5";
 import * as Cause from "effect/Cause";
 import { useSyncExternalStore } from "react";
@@ -34,21 +35,6 @@ export function presentCrewMembership(
     title: `Commands ${membership.crews.map((crew) => crew.crewName).join(", ")}`,
   };
 }
-
-/** The visible rows are the whole truth: a thread that left every Crew loses its chip on the next read. */
-export const replaceCrewMemberships = (
-  previous: ReadonlyMap<string, ThreadCrewMembership>,
-  environmentId: EnvironmentId,
-  requested: ReadonlyArray<ThreadId>,
-  entries: ReadonlyArray<CrewMembershipEntry>,
-) => {
-  const next = new Map(previous);
-  for (const threadId of requested)
-    next.delete(scopedThreadKey(scopeThreadRef(environmentId, threadId)));
-  for (const entry of entries)
-    next.set(scopedThreadKey(scopeThreadRef(environmentId, entry.threadId)), entry.membership);
-  return next;
-};
 
 const store = createScopedThreadReadStore<ThreadCrewMembership, CrewMembershipEntry>({
   load: async (environmentId, threadIds) => {

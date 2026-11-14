@@ -13,8 +13,13 @@ import {
   signPayload,
   timingSafeEqualBase64Url,
 } from "../../auth/utils.ts";
+import type { CrewArchiveWorktree } from "@t3tools/contracts/j5";
 import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
-import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
+import {
+  AgentCrewInstanceService,
+  crewArchiveThreads,
+  type AgentCrewInstance,
+} from "./AgentCrewInstanceService.ts";
 import {
   ArchiveAgentService,
   type ArchiveAgentConsequenceFacts,
@@ -22,6 +27,7 @@ import {
   type ArchiveAgentResult,
 } from "./ArchiveAgentService.ts";
 import { ParticipantId, LedgerProjectId } from "./contracts.ts";
+import { CrewWorktrees, type CrewSeatSession } from "./CrewWorktrees.ts";
 
 const TOKEN_VERSION = "j5-crew-archive-confirmation/v1" as const;
 const TOKEN_SECRET_NAME = "j5-a2a-archive-confirmation-v1";
@@ -78,6 +84,12 @@ export interface ArchiveCrewMemberResult {
 export interface ArchiveCrewOutcome {
   readonly status: ArchiveAgentResult;
   readonly members: ReadonlyArray<ArchiveCrewMemberResult>;
+  /**
+   * What the archive did with each worktree J5 created for the Crew's seats. Cleanup runs after
+   * the archive commits and never fails it, so this reports removals, worktrees kept with the
+   * reason, and removals that failed.
+   */
+  readonly worktrees: ReadonlyArray<CrewArchiveWorktree>;
 }
 
 export class ArchiveCrewNotFoundError extends Data.TaggedError("ArchiveCrewNotFoundError")<{
@@ -201,6 +213,21 @@ const payloadFor = (input: ArchiveCrewInput, facts: ArchiveCrewConsequenceFacts)
   })),
 });
 
+/** The seats whose threads exist; a seat that never came to exist has no worktree to look at. */
+const createdSeats = (facts: ArchiveCrewConsequenceFacts) =>
+  facts.members
+    .filter((member) => !member.neverCreated)
+    .map((member) => ({ seatName: member.seatName, threadId: member.threadId }));
+
+/** Who the worktree approval is filed for. */
+const approvalCrew = (instance: AgentCrewInstance, archivedAt: string) => ({
+  crewInstanceId: instance.id,
+  archivedAt: instance.archivedAt ?? archivedAt,
+  crewName: instance.displayName,
+  projectId: instance.projectId,
+  captainThreadId: instance.captainThreadId,
+});
+
 const hasConsequences = (facts: ArchiveCrewConsequenceFacts) =>
   facts.members.some(
     (member) => member.facts.openExchanges.length > 0 || member.facts.runningTurn !== null,
@@ -265,6 +292,7 @@ export const layer = Layer.effect(
     const archiveAgent = yield* ArchiveAgentService;
     const crews = yield* AgentCrewInstanceService;
     const playbooks = yield* PlaybookStore;
+    const worktrees = yield* CrewWorktrees;
     const secrets = yield* ServerSecretStore;
     const secret = secrets
       .getOrCreateRandom(TOKEN_SECRET_NAME, TOKEN_SECRET_BYTES)
@@ -313,7 +341,8 @@ export const layer = Layer.effect(
       instance: AgentCrewInstance,
     ) {
       const members: Array<ArchiveCrewMemberFacts> = [];
-      for (const member of instance.members) {
+      // A member the Captain replaced retires with the Crew its worktree was made for.
+      for (const member of crewArchiveThreads(instance)) {
         const state = yield* archiveAgent
           .readFacts({
             projectId: instance.projectId,
@@ -346,8 +375,8 @@ export const layer = Layer.effect(
     // The roster is read, confirmed, and retired as one unit step, so an approved launch or
     // addition either lands before the read and retires with the rest, or waits and meets the
     // retired stamp before it reserves a seat.
-    const archive: ArchiveCrewServiceShape["archive"] = Effect.fn("j5.a2a.archiveCrew.archive")(
-      function* (input) {
+    const archiveUnit = Effect.fn("j5.a2a.archiveCrew.archiveUnit")(
+      function* (input: ArchiveCrewInput) {
         const decodedToken =
           input.confirmationToken === undefined
             ? undefined
@@ -391,6 +420,9 @@ export const layer = Layer.effect(
                 ? ("never_created" as const)
                 : ("already_archived" as const),
             })),
+            seats: createdSeats(facts),
+            crew: approvalCrew(instance, input.archivedAt),
+            sessions: [] as ReadonlyArray<CrewSeatSession>,
           };
         }
 
@@ -418,6 +450,7 @@ export const layer = Layer.effect(
         }
 
         const results: Array<ArchiveCrewMemberResult> = [];
+        const sessions: Array<CrewSeatSession> = [];
         for (const member of facts.members) {
           if (member.neverCreated) {
             results.push({
@@ -428,6 +461,12 @@ export const layer = Layer.effect(
             continue;
           }
           const ids = input.commandIds(member.seatName);
+          // Before the archive: committing it removes the binding that names the session.
+          sessions.push(
+            ...(yield* worktrees.liveSessions([
+              { seatName: member.seatName, threadId: member.threadId },
+            ])),
+          );
           const result = yield* archiveAgent
             .archive({
               providerSessionId: input.providerSessionId,
@@ -465,9 +504,28 @@ export const layer = Layer.effect(
         yield* crews
           .markArchived(instance.id, input.archivedAt, { withCaptain: input.withCaptain === true })
           .pipe(Effect.orDie);
-        return { status: "archived" as const, members: results };
+        return {
+          status: "archived" as const,
+          members: results,
+          seats: createdSeats(facts),
+          crew: approvalCrew(instance, input.archivedAt),
+          sessions,
+        };
       },
       (unit, input) => crews.serialize(input.crewInstanceId, unit),
+    );
+
+    // After the unit's step commits and its lock is released, so a slow check or removal holds
+    // nothing. Also on the already-archived replay: a worktree kept because a session was still
+    // open, or because a check failed, gets another look when the archive is asked for again.
+    const archive: ArchiveCrewServiceShape["archive"] = Effect.fn("j5.a2a.archiveCrew.archive")(
+      function* (input) {
+        const { seats, sessions, crew, ...outcome } = yield* archiveUnit(input);
+        // Each seat's session is closed before the cleanup looks for one open in its worktree.
+        yield* worktrees.closeSessions(sessions);
+        const removed = yield* worktrees.cleanup({ seats, crew });
+        return { ...outcome, worktrees: removed };
+      },
     );
 
     const readCaptainFacts: ArchiveCrewServiceShape["readCaptainFacts"] = Effect.fn(

@@ -78,7 +78,7 @@ export function useScopePeople(
     query,
     changes,
   );
-  // oxlint-disable-next-line t3code/react-effect-budget -- rereads who reaches a scope when the server's change counter moves.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- rereads who reaches a scope when the server's change counter moves.
   useEffect(() => {
     if (query !== null && revision !== undefined && revision > 0) appAtomRegistry.refresh(query);
   }, [query, revision]);

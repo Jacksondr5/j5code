@@ -396,7 +396,7 @@ export const layer: Layer.Layer<
           SELECT json_extract(payload, '$.participant.id') AS participant_id
           FROM j5_a2a_comm_event
           WHERE (${anyProject ? 1 : 0} = 1 OR project_id = ${projectId})
-            AND kind = 'participant.joined'
+            AND kind IN ('participant.joined', 'participant.moved')
             AND json_extract(payload, '$.participant.id') = ${participantId}
           LIMIT 1
         `;
@@ -775,8 +775,8 @@ export const layer: Layer.Layer<
                 WHERE parent.project_id = m.project_id AND parent.participant_id = p.placement_parent_id)
                 THEN p.placement_parent_id ELSE NULL END AS placement_parent_id
             FROM j5_a2a_membership m
-            LEFT JOIN j5_a2a_participant_placement p
-              ON p.project_id = m.project_id AND p.participant_id = m.participant_id
+            -- A placement stays where it was made when Turn into project moves the agent.
+            LEFT JOIN j5_a2a_participant_placement p ON p.participant_id = m.participant_id
             WHERE m.project_id = ${projectId}
             ORDER BY m.participant_id
           `;

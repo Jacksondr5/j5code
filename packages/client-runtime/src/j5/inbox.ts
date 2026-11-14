@@ -1,4 +1,4 @@
-import type { EnvironmentId } from "@t3tools/contracts";
+import type { ChatAttachment, EnvironmentId } from "@t3tools/contracts";
 import {
   type ConnectionAccess,
   type HumanInboxResponse,
@@ -73,6 +73,49 @@ export function inboxBellPresentation(input: {
   return { badge, label };
 }
 
+export interface RecordLine {
+  readonly indent: string;
+  readonly text: string;
+}
+
+export type RecordPart =
+  | { readonly kind: "prose"; readonly text: string }
+  | { readonly kind: "block"; readonly lines: ReadonlyArray<RecordLine> };
+
+/**
+ * J5's record split into its prose and the indented blocks it quotes, such as a persona draft's
+ * definition. Indentation alone decides: four leading spaces. A block's lines keep their own
+ * indent apart from their words, so a long line can wrap under itself.
+ */
+export function splitRecordText(text: string): ReadonlyArray<RecordPart> {
+  const runs: Array<{ kind: RecordPart["kind"]; lines: Array<string> }> = [];
+  for (const line of text.split("\n")) {
+    const kind = line.startsWith("    ") ? "block" : "prose";
+    const body = kind === "block" ? line.slice(4) : line;
+    const last = runs[runs.length - 1];
+    if (last?.kind === kind) last.lines.push(body);
+    else runs.push({ kind, lines: [body] });
+  }
+  return runs.flatMap((run): Array<RecordPart> => {
+    if (run.kind === "block")
+      return [
+        {
+          kind: "block",
+          lines: run.lines.map((line) => {
+            const indent = /^ */.exec(line)![0];
+            return { indent: line.trim() === "" ? "" : indent, text: line.slice(indent.length) };
+          }),
+        },
+      ];
+    const prose = run.lines.join("\n").replace(/^\n+|\n+$/g, "");
+    return prose === "" ? [] : [{ kind: "prose", text: prose }];
+  });
+}
+
+/** What an open ask says in place of its answer box while its server isn't connected. */
+export const askWaitsForServerLine = (environmentLabel: string) =>
+  `${environmentLabel} isn't connected. You can answer when it's back.`;
+
 export function j5SourceNotice(source: J5ReadSource<unknown>): string | null {
   switch (source.status) {
     case "ready":
@@ -80,7 +123,9 @@ export function j5SourceNotice(source: J5ReadSource<unknown>): string | null {
     case "loading":
       return `${source.environmentLabel}: loading…`;
     case "offline":
-      return `${source.environmentLabel}: offline${source.data === null ? "" : " (showing saved results)"}.`;
+      return source.reconnecting === true
+        ? `${source.environmentLabel}: reconnecting…${source.data === null ? "" : " (showing saved results)."}`
+        : `${source.environmentLabel}: offline${source.data === null ? "" : " (showing saved results)"}.`;
     case "unsupported":
       return source.guest === true
         ? `${source.environmentLabel}: not shared with you.`
@@ -157,12 +202,15 @@ export function closedLine(input: {
 /** One answer being delivered: a retry with the same words reuses its `clientRequestId`. */
 export interface HumanInboxAnswerAttempt {
   readonly message: string;
+  /** The attachment ids sent with it; a retry reuses the request id only for the same ones. */
+  readonly attachmentIds?: string;
   readonly clientRequestId: string;
 }
 
 export async function submitHumanInboxAnswer(input: {
   readonly item: ScopedHumanInboxItem;
   readonly message: string;
+  readonly attachments?: ReadonlyArray<ChatAttachment>;
   readonly attempts: Map<string, HumanInboxAnswerAttempt>;
   readonly randomUUID: () => string;
   readonly send: (
@@ -170,6 +218,7 @@ export async function submitHumanInboxAnswer(input: {
     request: {
       readonly exchangeId: string;
       readonly message: string;
+      readonly attachments?: ReadonlyArray<ChatAttachment>;
       readonly clientRequestId: string;
     },
   ) => Promise<unknown>;
@@ -184,16 +233,20 @@ export async function submitHumanInboxAnswer(input: {
   input.setError(null);
   try {
     try {
+      const attachments = input.attachments ?? [];
+      const attachmentIds = attachments.map((attachment) => attachment.id).join("\n");
       const previousAttempt = input.attempts.get(itemKey);
       const attempt =
-        previousAttempt?.message === input.message
+        previousAttempt?.message === input.message &&
+        (previousAttempt.attachmentIds ?? "") === attachmentIds
           ? previousAttempt
-          : { message: input.message, clientRequestId: input.randomUUID() };
+          : { message: input.message, attachmentIds, clientRequestId: input.randomUUID() };
       input.attempts.set(itemKey, attempt);
       // The server answers as the connection's own person; the request names no one.
       await input.send(input.item.environmentId, {
         exchangeId: input.item.exchangeId,
         message: input.message,
+        ...(attachments.length === 0 ? {} : { attachments }),
         clientRequestId: attempt.clientRequestId,
       });
     } catch (cause) {

@@ -11,8 +11,8 @@ provided alongside this playbook. Everything machine-specific lives there, not h
 
 ## 1. Ask what went wrong
 
-Your first message to the user: ask them to describe what went wrong, in their own
-words. Ask them to paste screenshots directly into this session if they have any.
+Unless the user already described it, your first message asks what went wrong, in
+their own words. Ask them to paste screenshots directly into this session if they have any.
 Ask follow-up questions when the description is vague. Good repro steps are the most
 valuable thing you can extract from this conversation.
 
@@ -67,9 +67,9 @@ different code depending on it:
 
 - How is J5 Code running on this machine: `j5 serve` in a terminal, the
   background service, or the desktop app?
-- Which surface is the user connecting from: the website (app.t3.codes), the
-  desktop app against a local server, the desktop app against a remote server,
-  or the mobile app?
+- Which surface is the user connecting from: a browser on the server's own web
+  app, the desktop app against a local server, the desktop app against a remote
+  server, or the mobile app?
 
 Then work from evidence, not assumption. In rough order of value:
 
@@ -125,10 +125,16 @@ of `j5/main` for that work, never the tag-pinned diagnosis clone.
 - Show the user the complete final issue text and get an explicit yes before
   posting. Never post without it.
 - Note at the end of the issue which model and agent produced it.
-- If `gh` is not authenticated, offer `gh auth login`, or build a prefilled
-  https://github.com/Jacksondr5/j5code/issues/new URL with title and body query
-  parameters; print the URL, and open it in their browser only after they
-  approve.
+- Post with `gh issue create --repo Jacksondr5/j5code --label via-triage` only
+  if `gh api repos/Jacksondr5/j5code --jq .permissions.triage` prints `true`.
+- Otherwise, or if `gh` is not authenticated, build a prefilled
+  https://github.com/Jacksondr5/j5code/issues/new?template=via-triage.yml URL.
+  The form applies the label whoever submits it. Add `title` plus one
+  URL-encoded query parameter per form field id: `what-happened`, `diagnosis`,
+  `steps`, `version`, `environment`, `evidence`, `related`, `workaround` and
+  `agent`. Keep the full encoded URL below 6,000 characters by shortening any
+  fields as needed. Give the user any omitted text to paste into the form before
+  submitting. Print the URL, and open it in their browser only after they approve.
 - If the user pasted screenshots, remind them to drag the images into the issue
   after it is created; they cannot be attached from here.
 

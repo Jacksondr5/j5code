@@ -1,4 +1,8 @@
+import * as SqlClient from "effect/sql/SqlClient";
+import { AgentPersonaEscalations } from "../agents/agentPersonaEscalation.ts";
+import { agentPersonaEscalationsTestLayer } from "../test-support/agentPersonaEscalations.ts";
 import { assert, it } from "@effect/vitest";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CommandId,
@@ -21,12 +25,18 @@ import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 
 import { makeAgentPersonaLibrary } from "../agents/agentPersonaLibrary.ts";
-import { BUILT_IN_AGENT_PERSONAS } from "../agents/agentPersonas.ts";
+import { BUILT_IN_AGENT_PERSONAS, type AgentPersonaDefinition } from "../agents/agentPersonas.ts";
+import { withReviewIndependenceNote } from "../agents/agentPersonaReviewIndependence.ts";
 import { stringify as toYaml } from "yaml";
 import { resolveAgentPersonaRuntime } from "../agents/agentPersonaRuntime.ts";
 import { guardAgentPersonaThreadCreate } from "../agents/agentPersonaOrchestration.ts";
 import { ServerSecretStore } from "../../auth/ServerSecretStore.ts";
 import { personaLibraryLayer } from "../test-support/personaLibrary.ts";
+import { CrewMemberModels } from "../agents/crewMemberModels.ts";
+import {
+  crewMemberModelsLayer,
+  permissiveCrewMemberModels,
+} from "../test-support/crewMemberModels.ts";
 import { AnalyticsService } from "../../telemetry/AnalyticsService.ts";
 import {
   OrchestratorDispatchError,
@@ -47,6 +57,7 @@ import {
 import { ArchiveAgentService } from "./ArchiveAgentService.ts";
 import { playbookStoreLayer } from "../playbooks/PlaybookStore.ts";
 import { ArchiveCrewService, layer as archiveCrewLayer } from "./ArchiveCrewService.ts";
+import { CrewWorktrees } from "./CrewWorktrees.ts";
 import { crewApprovalToken, describeCrewSeatRuntime } from "./crewRuntimePreview.ts";
 import {
   CrewLaunchOperationError,
@@ -58,10 +69,26 @@ import { crewSeatRequestKey, spawnThreadId } from "./spawnIds.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { SpawnCompositionService } from "./SpawnCompositionService.ts";
-import { type FakeCheckout, fakeSpawnWorkspaceLayer } from "./test-support/spawnWorkspaceFakes.ts";
+import {
+  type FakeCheckout,
+  fakeSha,
+  fakeSpawnWorkspaceLayer,
+} from "./test-support/spawnWorkspaceFakes.ts";
 import type { ThreadLaunchInput } from "../../orchestration-v2/ThreadLaunchService.ts";
-import type { SpawnWorkspaceChoice } from "./spawnWorkspace.ts";
+import type { ResolvedSpawnWorkspace, SpawnWorkspaceChoice } from "./spawnWorkspace.ts";
 import { ParticipantId, LedgerProjectId } from "./contracts.ts";
+
+const launchablePersonas = Object.values(BUILT_IN_AGENT_PERSONAS).filter(
+  ({ authority }) =>
+    authority.defaultPolicy !== "diagnostic" && authority.defaultPolicy !== "publish-only",
+);
+
+const savedBriefs = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  return yield* sql<{ readonly thread_id: string; readonly first_turn_text: string }>`
+    SELECT thread_id, first_turn_text FROM j5_crew_seat_context ORDER BY rowid
+  `;
+});
 
 const projectId = LedgerProjectId.make("ledger:crew-launch");
 const captainThread = ThreadId.make("thread:captain");
@@ -71,7 +98,14 @@ const createdAt = DateTime.makeUnsafe("2026-09-09T16:00:00.000Z");
 const provider = (
   instanceId: string,
   driver: string,
-  models: ReadonlyArray<{ slug: string; options: ReadonlyArray<string> }>,
+  models: ReadonlyArray<{
+    slug: string;
+    options: ReadonlyArray<string>;
+    /** The option the model runs at when a selection names none. */
+    defaultOption?: string;
+    /** A model that advertises no reasoning option at all. */
+    noReasoning?: true;
+  }>,
 ): ServerProvider => ({
   instanceId: ProviderInstanceId.make(instanceId),
   driver: ProviderDriverKind.make(driver),
@@ -89,14 +123,20 @@ const provider = (
     name: model.slug,
     isCustom: false,
     capabilities: {
-      optionDescriptors: [
-        {
-          id: driver === "codex" ? "reasoningEffort" : "effort",
-          label: "Reasoning",
-          type: "select",
-          options: model.options.map((id) => ({ id, label: id })),
-        },
-      ],
+      optionDescriptors: model.noReasoning
+        ? []
+        : [
+            {
+              id: driver === "codex" ? "reasoningEffort" : "effort",
+              label: "Reasoning",
+              type: "select",
+              options: model.options.map((id) => ({
+                id,
+                label: id,
+                ...(id === model.defaultOption ? { isDefault: true } : {}),
+              })),
+            },
+          ],
     },
   })),
 });
@@ -150,7 +190,7 @@ const threadManagementFake = (
   ) => Effect.Effect<void, OrchestratorDispatchError>,
 ) =>
   Layer.mock(ThreadManagementService)({
-    getThreadProjection: (threadId) =>
+    getThreadRecords: (threadId) =>
       realThreads
         ? Ref.get(commands).pipe(
             Effect.flatMap((commands) => {
@@ -183,9 +223,12 @@ const threadManagementFake = (
             )
           : Effect.succeed({
               messages: [],
+              runs: [],
+              subagents: [],
               thread: {
                 ...thread(threadId),
                 archivedAt: archived.has(threadId) ? createdAt : null,
+                deletedAt: null,
               },
             } as unknown as OrchestrationV2ThreadProjection),
     dispatch: (command) =>
@@ -222,8 +265,12 @@ const dependencies = (
   workspace: Parameters<typeof fakeSpawnWorkspaceLayer>[0] = {
     checkout: { isRepo: true, refName: "main" },
   },
+  // Every model is eligible unless a test saves a list.
+  memberModels: Layer.Layer<CrewMemberModels> = permissiveCrewMemberModels,
 ) =>
   Layer.mergeAll(
+    memberModels,
+    agentPersonaEscalationsTestLayer(),
     fakeSpawnWorkspaceLayer(workspace).pipe(
       Layer.provideMerge(
         threadManagementFake(
@@ -264,7 +311,7 @@ const dependencies = (
     Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed(providers) }),
   );
 
-it.effect("launches an approved roster whole, records it, briefs each seat, then adds a seat", () =>
+it.effect("creates approved seats and additions without starting turns", () =>
   Effect.gen(function* () {
     const { context, commands, captain } = yield* fixture;
     const codex = provider("codex", "codex", [
@@ -286,20 +333,19 @@ it.effect("launches an approved roster whole, records it, briefs each seat, then
       ),
       Layer.provideMerge(dependencies(commands, [codex])),
       Layer.provideMerge(Layer.succeedContext(context)),
-      Layer.provideMerge(
-        personaLibraryLayer("j5-crew-launch-", Object.values(BUILT_IN_AGENT_PERSONAS)),
-      ),
-      Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(personaLibraryLayer("j5-crew-launch-", launchablePersonas)),
+      Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     );
     yield* Effect.gen(function* () {
       const launcher = yield* CrewLaunchService;
       const crews = yield* AgentCrewInstanceService;
 
-      // Publisher has no enforceable provider, so a roster containing it launches nothing.
+      // An invalid Publisher is absent from the launchable library, so its roster launches nothing.
       const refused = yield* launcher
         .launch({
           providerSessionId: "session",
           requestKey: "launch-1",
+          pick: "person",
           captain,
           displayName: "Release Crew",
           seats: [
@@ -325,6 +371,7 @@ it.effect("launches an approved roster whole, records it, briefs each seat, then
       const { instance } = yield* launcher.launch({
         providerSessionId: "session",
         requestKey: "launch-1",
+        pick: "person",
         captain,
         displayName: "Review Pair",
         seats: [
@@ -356,9 +403,13 @@ it.effect("launches an approved roster whole, records it, briefs each seat, then
       const captured = yield* Ref.get(commands);
       assert.deepStrictEqual(
         captured.map((command) => command.type),
-        ["thread.create", "thread.create", "message.dispatch", "message.dispatch"],
+        ["thread.create", "thread.create"],
       );
-      const builderBrief = captured[2];
+      const builderBrief = {
+        type: "message.dispatch",
+        text: (yield* savedBriefs)[0]!.first_turn_text,
+      };
+      assert.isTrue(instance.members.every((member) => member.notStarted));
       if (builderBrief?.type === "message.dispatch") {
         assert.include(builderBrief.text, "your_seat: builder");
         assert.include(builderBrief.text, `captain_participant_id: ${captainId}`);
@@ -371,6 +422,7 @@ it.effect("launches an approved roster whole, records it, briefs each seat, then
       const { instance: grown } = yield* launcher.addSeats({
         providerSessionId: "session",
         requestKey: "add-1",
+        pick: "person",
         captain,
         instance,
         seats: [
@@ -391,7 +443,13 @@ it.effect("launches an approved roster whole, records it, briefs each seat, then
           ["sentry", 2],
         ],
       );
-      const sentryBrief = (yield* Ref.get(commands)).at(-1);
+      assert.isTrue(
+        (yield* Ref.get(commands)).every((command) => command.type !== "message.dispatch"),
+      );
+      const sentryBrief = {
+        type: "message.dispatch",
+        text: (yield* savedBriefs).at(-1)!.first_turn_text,
+      };
       if (sentryBrief?.type === "message.dispatch") {
         assert.include(sentryBrief.text, "your_seat: sentry");
         assert.include(sentryBrief.text, "- builder: participant_id=");
@@ -422,16 +480,15 @@ it.effect(
       const layer = crewLaunchLayer.pipe(
         Layer.provideMerge(dependencies(commands, [codex])),
         Layer.provideMerge(Layer.succeedContext(context)),
-        Layer.provideMerge(
-          personaLibraryLayer("j5-crew-custom-", Object.values(BUILT_IN_AGENT_PERSONAS)),
-        ),
-        Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(personaLibraryLayer("j5-crew-custom-", launchablePersonas)),
+        Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
       );
       yield* Effect.gen(function* () {
         const launcher = yield* CrewLaunchService;
         const { instance } = yield* launcher.launch({
           providerSessionId: "session",
           requestKey: "launch-custom",
+          pick: "person",
           captain,
           displayName: "Notes Crew",
           seats: [
@@ -469,19 +526,21 @@ it.effect(
           assert.deepStrictEqual(created.modelSelection, captain.thread.modelSelection);
           assert.equal(created.runtimeMode, "full-access");
         }
-        const brief = captured.find(
-          (command) =>
-            command.type === "message.dispatch" && command.text.includes("your_seat: scribe"),
-        );
-        assert.equal(brief?.type, "message.dispatch");
-        if (brief?.type === "message.dispatch") {
-          assert.include(brief.text, "<seat_instructions>\nWrite the running notes.");
-          assert.notInclude(brief.text, "<seat_obligation>");
-          assert.include(brief.text, "persona=custom");
-        }
+        assert.isFalse(captured.some((command) => command.type === "message.dispatch"));
+        const brief = (yield* savedBriefs).find((row) =>
+          row.first_turn_text.includes("your_seat: scribe"),
+        )!.first_turn_text;
+        assert.include(brief, "<seat_instructions>\nWrite the running notes.");
+        assert.notInclude(brief, "<seat_obligation>");
+        assert.include(brief, "persona=custom");
+        const [stored] = yield* (yield* SqlClient.SqlClient)<{
+          readonly agent_display_name: string | null;
+        }>`SELECT agent_display_name FROM j5_crew_seat_context WHERE first_turn_text LIKE '%your_seat: scribe%'`;
+        assert.equal(stored?.agent_display_name, "custom");
 
         // A persona Captain runs under its persona's policy (workspace write, auto-accept-edits here)
-        // and has the person supervising it; its custom seat still defaults to Full access.
+        // and has the person supervising it. On a card the person approves, its custom seat still
+        // defaults to Full access.
         const personaCaptain = {
           ...captain,
           thread: {
@@ -501,6 +560,7 @@ it.effect(
           providerSessionId: "session",
           requestKey: "launch-custom-2",
           captain: personaCaptain,
+          pick: "person",
           displayName: "Notes Crew 2",
           seats: [
             {
@@ -521,6 +581,42 @@ it.effect(
           assert.equal(underPersona.runtimeMode, "full-access");
           assert.isUndefined(underPersona.agentPersonaAssignment);
         }
+
+        // Approved automatically, the same seat gets no more than its Captain runs with: the
+        // Captain's effective access when it names none, and a refusal when it names more.
+        const scribe = {
+          workspace: { type: "shared" as const },
+          name: "scribe",
+          agentId: null,
+          reason: "Keeps notes",
+          instructions: "Notes.",
+        };
+        const [automatic] = yield* launcher.resolveSeats(personaCaptain, [scribe], "agent");
+        assert.equal(automatic?.runtimeMode, "auto-accept-edits");
+        assert.isNull(automatic?.assignment ?? null);
+        const above = yield* launcher
+          .resolveSeats(personaCaptain, [{ ...scribe, runtimeMode: "full-access" }], "agent")
+          .pipe(Effect.flip);
+        assert.include(
+          above.message,
+          "Custom seat scribe would run with Full access, which is broader than the Repository write its caller runs with.",
+        );
+        // A read-only Captain cannot have a custom seat at all, since every one can write.
+        const readOnlyCaptain = {
+          ...personaCaptain,
+          thread: {
+            ...personaCaptain.thread,
+            agentPersonaAssignment: {
+              ...personaCaptain.thread.agentPersonaAssignment!,
+              personaId: "scout",
+              authorityPolicy: "read-only",
+            },
+          } as typeof captain.thread,
+        };
+        const readOnly = yield* launcher
+          .resolveSeats(readOnlyCaptain, [scribe], "agent")
+          .pipe(Effect.flip);
+        assert.include(readOnly.message, "broader than the Read only its caller runs with");
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped),
 );
@@ -537,10 +633,8 @@ it.effect(
       const layer = crewLaunchLayer.pipe(
         Layer.provideMerge(dependencies(commands, [signedOut])),
         Layer.provideMerge(Layer.succeedContext(context)),
-        Layer.provideMerge(
-          personaLibraryLayer("j5-crew-launch-", Object.values(BUILT_IN_AGENT_PERSONAS)),
-        ),
-        Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(personaLibraryLayer("j5-crew-launch-", launchablePersonas)),
+        Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
       );
       yield* Effect.gen(function* () {
         const launcher = yield* CrewLaunchService;
@@ -548,6 +642,7 @@ it.effect(
           .launch({
             providerSessionId: "session",
             requestKey: "signed-out-1",
+            pick: "person",
             captain,
             displayName: "Signed Out",
             seats: [
@@ -581,10 +676,8 @@ it.effect("custom seats refuse unavailable providers before recording or spawnin
       const testLayer = crewLaunchLayer.pipe(
         Layer.provideMerge(dependencies(commands, providers)),
         Layer.provideMerge(Layer.succeedContext(context)),
-        Layer.provideMerge(
-          personaLibraryLayer("j5-custom-unavailable-", Object.values(BUILT_IN_AGENT_PERSONAS)),
-        ),
-        Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(personaLibraryLayer("j5-custom-unavailable-", launchablePersonas)),
+        Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
       );
       yield* Effect.gen(function* () {
         const launcher = yield* CrewLaunchService;
@@ -592,6 +685,7 @@ it.effect("custom seats refuse unavailable providers before recording or spawnin
           .launch({
             providerSessionId: "session",
             requestKey: "unavailable-custom",
+            pick: "person",
             captain,
             displayName: "Notes",
             seats: [
@@ -647,10 +741,8 @@ it.effect(
           dependencies(commands, providers, new Set(), new Set(), new Set(), true),
         ),
         Layer.provideMerge(Layer.succeedContext(context)),
-        Layer.provideMerge(
-          personaLibraryLayer("j5-preview-runtime-", Object.values(BUILT_IN_AGENT_PERSONAS)),
-        ),
-        Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(personaLibraryLayer("j5-preview-runtime-", launchablePersonas)),
+        Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
       );
       yield* Effect.gen(function* () {
         const launcher = yield* CrewLaunchService;
@@ -663,7 +755,7 @@ it.effect(
             instructions: "Take notes",
           },
         ];
-        const resolvedSeats = yield* launcher.resolveSeats(captain, seats);
+        const resolvedSeats = yield* launcher.resolveSeats(captain, seats, "person");
         assert.deepStrictEqual(resolvedSeats[0]?.runtime, {
           seat: "scribe",
           provider: "OpenAI",
@@ -684,6 +776,7 @@ it.effect(
         const input = {
           providerSessionId: "session",
           requestKey: "runtime-pinned",
+          pick: "person" as const,
           captain,
           displayName: "Notes",
           seats,
@@ -718,26 +811,34 @@ it.effect(
         assert.equal(create?.type, "thread.create");
         if (create?.type === "thread.create")
           assert.deepStrictEqual(create.modelSelection, resolvedSeats[0]?.modelSelection);
-        const saved = yield* launcher.resolveSeats(captain, [
-          {
-            workspace: { type: "shared" as const },
-            name: "builder",
-            agentId: "builder",
-            reason: "Build",
-          },
-        ]);
+        const saved = yield* launcher.resolveSeats(
+          captain,
+          [
+            {
+              workspace: { type: "shared" as const },
+              name: "builder",
+              agentId: "builder",
+              reason: "Build",
+            },
+          ],
+          "person",
+        );
         assert.equal(saved[0]?.assignment?.resolvedDriver, "codex");
         assert.equal(saved[0]?.runtime.harness, "Codex");
         assert.equal(saved[0]?.runtime.access, "Repository write");
-        const accessOnly = (yield* launcher.resolveSeats(captain, [
-          {
-            workspace: { type: "shared" as const },
-            name: "builder",
-            agentId: "builder",
-            reason: "Build",
-            runtimeMode: "full-access",
-          },
-        ]))[0]!;
+        const accessOnly = (yield* launcher.resolveSeats(
+          captain,
+          [
+            {
+              workspace: { type: "shared" as const },
+              name: "builder",
+              agentId: "builder",
+              reason: "Build",
+              runtimeMode: "full-access",
+            },
+          ],
+          "person",
+        ))[0]!;
         assert.deepStrictEqual(accessOnly.modelSelection, saved[0]?.modelSelection);
         assert.equal(accessOnly.assignment?.resolvedRoute, saved[0]?.assignment?.resolvedRoute);
         assert.equal(accessOnly.runtime.access, "Full access");
@@ -806,10 +907,8 @@ it.effect(
           dependencies(commands, providers, new Set(), new Set(), new Set(), true),
         ),
         Layer.provideMerge(Layer.succeedContext(context)),
-        Layer.provideMerge(
-          personaLibraryLayer("j5-custom-runtime-", Object.values(BUILT_IN_AGENT_PERSONAS)),
-        ),
-        Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(personaLibraryLayer("j5-custom-runtime-", launchablePersonas)),
+        Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
       );
       yield* Effect.gen(function* () {
         const launcher = yield* CrewLaunchService;
@@ -826,7 +925,7 @@ it.effect(
           },
           runtimeMode: "approval-required" as const,
         };
-        const resolvedSeats = yield* launcher.resolveSeats(captain, [custom]);
+        const resolvedSeats = yield* launcher.resolveSeats(captain, [custom], "person");
         const resolved = resolvedSeats[0]!;
         assert.deepStrictEqual(resolved.modelSelection, custom.modelSelection);
         assert.equal(resolved.runtimeMode, "approval-required");
@@ -838,6 +937,7 @@ it.effect(
         const { instance } = yield* launcher.launch({
           providerSessionId: "session",
           requestKey: "custom-override",
+          pick: "person",
           captain,
           displayName: "Review",
           seats: [custom],
@@ -854,10 +954,11 @@ it.effect(
           assert.isUndefined(created.agentPersonaAssignment);
         }
         const additional = { ...custom, name: "scribe", runtimeMode: "full-access" as const };
-        const addedResolved = yield* launcher.resolveSeats(captain, [additional]);
+        const addedResolved = yield* launcher.resolveSeats(captain, [additional], "person");
         yield* launcher.addSeats({
           providerSessionId: "session",
           requestKey: "custom-override-add",
+          pick: "person",
           captain,
           instance,
           seats: [additional],
@@ -885,18 +986,22 @@ it.effect(
           },
         ]) {
           const invalid = yield* launcher
-            .resolveSeats(captain, [{ ...custom, modelSelection }])
+            .resolveSeats(captain, [{ ...custom, modelSelection }], "person")
             .pipe(Effect.flip);
           assert.equal(invalid._tag, "CrewLaunchSeatUnavailableError");
         }
         const invalidAccess = yield* launcher
-          .resolveSeats(captain, [
-            {
-              ...custom,
-              modelSelection: { instanceId: ProviderInstanceId.make("acp"), model: "model" },
-              runtimeMode: "auto-accept-edits",
-            },
-          ])
+          .resolveSeats(
+            captain,
+            [
+              {
+                ...custom,
+                modelSelection: { instanceId: ProviderInstanceId.make("acp"), model: "model" },
+                runtimeMode: "auto-accept-edits",
+              },
+            ],
+            "person",
+          )
           .pipe(Effect.flip);
         assert.equal(invalidAccess._tag, "CrewLaunchSeatUnavailableError");
         assert.include(invalidAccess.message, "Choose Supervised or Full access");
@@ -908,7 +1013,7 @@ it.effect(
           agentId: "critic",
           runtimeMode: "full-access" as const,
         };
-        const personaOverride = yield* launcher.resolveSeats(captain, [personaSeat]);
+        const personaOverride = yield* launcher.resolveSeats(captain, [personaSeat], "person");
         const saved = personaOverride[0]!;
         assert.equal(saved.assignment?.resolvedRoute, "override");
         assert.deepStrictEqual(saved.modelSelection, custom.modelSelection);
@@ -927,6 +1032,7 @@ it.effect(
         yield* launcher.addSeats({
           providerSessionId: "session",
           requestKey: "saved-override-add",
+          pick: "person",
           captain,
           instance,
           seats: [personaSeat],
@@ -949,13 +1055,15 @@ it.effect(
           { ...custom.modelSelection, options: [{ id: "effort", value: "unsupported" }] },
         ]) {
           const invalid = yield* launcher
-            .resolveSeats(captain, [{ ...personaSeat, modelSelection: selection }])
+            .resolveSeats(captain, [{ ...personaSeat, modelSelection: selection }], "person")
             .pipe(Effect.flip);
           assert.equal(invalid._tag, "CrewLaunchSeatUnavailableError");
         }
-        const modelOnly = (yield* launcher.resolveSeats(captain, [
-          { ...personaSeat, runtimeMode: undefined },
-        ]))[0]!;
+        const modelOnly = (yield* launcher.resolveSeats(
+          captain,
+          [{ ...personaSeat, runtimeMode: undefined }],
+          "person",
+        ))[0]!;
         const defaultPolicy = yield* resolveAgentPersonaRuntime(
           { agentPersonaAssignment: modelOnly.assignment!, runtimeMode: modelOnly.runtimeMode },
           library,
@@ -1038,10 +1146,8 @@ it.effect(
           ]),
         ),
         Layer.provideMerge(Layer.succeedContext(context)),
-        Layer.provideMerge(
-          personaLibraryLayer("j5-custom-access-", Object.values(BUILT_IN_AGENT_PERSONAS)),
-        ),
-        Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(personaLibraryLayer("j5-custom-access-", launchablePersonas)),
+        Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
       );
       yield* Effect.gen(function* () {
         const launcher = yield* CrewLaunchService;
@@ -1072,6 +1178,7 @@ it.effect(
                 reason: "Build",
               },
             ],
+            "person",
           );
           assert.deepStrictEqual(
             resolved.map((seat) => [seat.seat.name, seat.runtimeMode, seat.runtime.access]),
@@ -1082,10 +1189,14 @@ it.effect(
             ],
           );
         }
-        const explicit = yield* launcher.resolveSeats(captain, [
-          { ...custom, runtimeMode: "approval-required" },
-          { ...acp, runtimeMode: "approval-required" },
-        ]);
+        const explicit = yield* launcher.resolveSeats(
+          captain,
+          [
+            { ...custom, runtimeMode: "approval-required" },
+            { ...acp, runtimeMode: "approval-required" },
+          ],
+          "person",
+        );
         assert.deepStrictEqual(
           explicit.map((seat) => seat.runtimeMode),
           ["approval-required", "approval-required"],
@@ -1093,11 +1204,28 @@ it.effect(
         // An explicit mode the ACP harness cannot enforce is still refused.
         for (const runtimeMode of ["auto", "auto-accept-edits"] as const) {
           const failure = yield* launcher
-            .resolveSeats(captain, [{ ...acp, runtimeMode }])
+            .resolveSeats(captain, [{ ...acp, runtimeMode }], "person")
             .pipe(Effect.flip);
           assert.equal(failure._tag, "CrewLaunchSeatUnavailableError");
           assert.include(failure.message, "cannot enforce the selected access mode");
         }
+        // Approved automatically under an Auto Captain, the seat inherits Auto, which the harness
+        // refuses; Full access would be above the Captain, so the refusal names Supervised.
+        const automatic = yield* launcher
+          .resolveSeats(
+            { ...captain, thread: { ...captain.thread, runtimeMode: "auto" } },
+            [acp],
+            "agent",
+          )
+          .pipe(Effect.flip);
+        assert.include(automatic.message, "Set runtime_mode to approval-required (Supervised).");
+        assert.notInclude(automatic.message, "Choose Supervised or Full access");
+        const [supervised] = yield* launcher.resolveSeats(
+          { ...captain, thread: { ...captain.thread, runtimeMode: "auto" } },
+          [{ ...acp, runtimeMode: "approval-required" }],
+          "agent",
+        );
+        assert.equal(supervised!.runtimeMode, "approval-required");
         assert.lengthOf(yield* Ref.get(commands), 0);
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped),
@@ -1113,10 +1241,8 @@ it.effect("a full-access persona seat runs full access unless the seat overrides
         ]),
       ),
       Layer.provideMerge(Layer.succeedContext(context)),
-      Layer.provideMerge(
-        personaLibraryLayer("j5-full-access-seat-", Object.values(BUILT_IN_AGENT_PERSONAS)),
-      ),
-      Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(personaLibraryLayer("j5-full-access-seat-", launchablePersonas)),
+      Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     );
     yield* Effect.gen(function* () {
       const launcher = yield* CrewLaunchService;
@@ -1147,7 +1273,7 @@ it.effect("a full-access persona seat runs full access unless the seat overrides
         reason: "Operate",
         workspace: { type: "shared" as const },
       };
-      const [unset] = yield* launcher.resolveSeats(captain, [seat]);
+      const [unset] = yield* launcher.resolveSeats(captain, [seat], "person");
       assert.deepStrictEqual(
         [unset!.runtimeMode, unset!.runtime.access],
         ["full-access", "Full access"],
@@ -1161,9 +1287,11 @@ it.effect("a full-access persona seat runs full access unless the seat overrides
       assert.notProperty(unsetPolicy, "sandboxPolicy");
       assert.notProperty(unsetPolicy, "approvalPolicy");
       // An explicit seat mode still wins over the persona's policy.
-      const [overridden] = yield* launcher.resolveSeats(captain, [
-        { ...seat, runtimeMode: "approval-required" },
-      ]);
+      const [overridden] = yield* launcher.resolveSeats(
+        captain,
+        [{ ...seat, runtimeMode: "approval-required" }],
+        "person",
+      );
       assert.deepStrictEqual(
         [overridden!.runtimeMode, overridden!.runtime.access],
         ["approval-required", "Supervised"],
@@ -1182,6 +1310,208 @@ it.effect("a full-access persona seat runs full access unless the seat overrides
   }).pipe(Effect.scoped),
 );
 
+it.effect("a persona seat's edited instructions replace the persona's own at launch", () =>
+  Effect.gen(function* () {
+    const { context, commands, captain } = yield* fixture;
+    const layer = crewLaunchLayer.pipe(
+      Layer.provideMerge(
+        dependencies(commands, [
+          provider("codex", "codex", [{ slug: "gpt-5.6-terra", options: ["high"] }]),
+        ]),
+      ),
+      Layer.provideMerge(Layer.succeedContext(context)),
+      Layer.provideMerge(personaLibraryLayer("j5-edited-persona-", launchablePersonas)),
+      Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+    );
+    yield* Effect.gen(function* () {
+      const launcher = yield* CrewLaunchService;
+      const library = yield* makeAgentPersonaLibrary;
+      const seat = {
+        name: "scout",
+        agentId: "scout",
+        reason: "Look around",
+        workspace: { type: "shared" as const },
+      };
+      const instructionsOf = (resolved: (typeof plain)[number]) =>
+        resolveAgentPersonaRuntime(
+          { agentPersonaAssignment: resolved.assignment!, runtimeMode: resolved.runtimeMode },
+          library,
+        ).pipe(Effect.map(({ agentPersonaInstructions }) => agentPersonaInstructions!));
+      const plain = yield* launcher.resolveSeats(captain, [seat], "person");
+      const edited = yield* launcher.resolveSeats(
+        captain,
+        [{ ...seat, personaInstructions: "Only read the README." }],
+        "person",
+      );
+      const original = BUILT_IN_AGENT_PERSONAS.scout.instructions;
+      assert.include(yield* instructionsOf(plain[0]!), original);
+      const replaced = yield* instructionsOf(edited[0]!);
+      assert.include(replaced, "Only read the README.");
+      assert.notInclude(replaced, original);
+      assert.equal(edited[0]!.assignment!.personaId, plain[0]!.assignment!.personaId);
+      assert.equal(edited[0]!.assignment!.instructionsEdited, true);
+      assert.notProperty(plain[0]!.assignment!, "instructionsEdited");
+      assert.notEqual(
+        edited[0]!.assignment!.definitionDigest,
+        plain[0]!.assignment!.definitionDigest,
+      );
+      // A seat with no edit resolves exactly as it always did, so its approval token is unchanged.
+      assert.deepStrictEqual(yield* launcher.resolveSeats(captain, [seat], "person"), plain);
+      const proposal = {
+        id: "proposal:edit",
+        brief: "Look around.",
+        displayName: "Edit",
+      } as unknown as Parameters<typeof crewApprovalToken>[0];
+      assert.notEqual(
+        crewApprovalToken(proposal, captain, plain),
+        crewApprovalToken(proposal, captain, edited),
+      );
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "a reviewer seat avoids its Crew's authors' models unless the person chose its model",
+  () =>
+    Effect.gen(function* () {
+      const { context, commands, captain } = yield* fixture;
+      const models = ["gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.6-luna"];
+      const entry = (model: string) => ({
+        instanceId: ProviderInstanceId.make("codex"),
+        model,
+        options: [{ id: "reasoningEffort", value: "high" }],
+      });
+      const reviewer: AgentPersonaDefinition = {
+        ...BUILT_IN_AGENT_PERSONAS.scout,
+        id: "reviewer",
+        independentReviewer: true,
+        modelRoute: [entry("gpt-5.6-terra"), entry("gpt-5.6-sol"), entry("gpt-5.6-luna")],
+      };
+      const layer = crewLaunchLayer.pipe(
+        Layer.provideMerge(
+          dependencies(commands, [
+            provider(
+              "codex",
+              "codex",
+              models.map((slug) => ({ slug, options: ["high"] })),
+            ),
+          ]),
+        ),
+        Layer.provideMerge(Layer.succeedContext(context)),
+        Layer.provideMerge(
+          personaLibraryLayer("j5-crew-reviewer-", [...launchablePersonas, reviewer]),
+        ),
+        Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+      );
+      yield* Effect.gen(function* () {
+        const launcher = yield* CrewLaunchService;
+        const shared = { type: "shared" as const };
+        const builder = {
+          name: "builder",
+          agentId: null,
+          reason: "Implements",
+          instructions: "Build it.",
+          modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.6-terra" },
+          workspace: shared,
+        };
+        // A custom seat with no model of its own runs on the Captain's, gpt-5.6-sol.
+        const helper = { ...builder, name: "helper", modelSelection: undefined };
+        const review = {
+          name: "review",
+          agentId: "reviewer",
+          reason: "Reviews",
+          workspace: shared,
+        };
+        const modelOf = (seats: ReadonlyArray<{ readonly modelSelection: { model: string } }>) =>
+          seats.at(-1)!.modelSelection.model;
+
+        // The reviewer resolves after the seats it reviews, though it is listed first.
+        const roster = yield* launcher.resolveSeats(captain, [review, builder, helper], "agent");
+        assert.deepStrictEqual(
+          roster.map(({ seat }) => seat.name),
+          ["review", "builder", "helper"],
+        );
+        assert.equal(roster[0]!.modelSelection.model, "gpt-5.6-luna");
+        assert.deepStrictEqual(roster[0]!.assignment!.reviewIndependence, {
+          outcome: "different-model",
+          authorModels: ["gpt-5.6-terra", "gpt-5.6-sol"],
+          authorThreadIds: [],
+          partlyUnknown: false,
+          modelChosenBy: "server",
+        });
+
+        const narrowed = yield* launcher.resolveSeats(
+          captain,
+          [builder, helper, { ...review, reviews: ["builder"] }],
+          "person",
+        );
+        assert.equal(modelOf(narrowed), "gpt-5.6-sol");
+        // A name the person renamed away on the card is dropped; with none left, the default.
+        const renamed = yield* launcher.resolveSeats(
+          captain,
+          [builder, helper, { ...review, reviews: ["gone"] }],
+          "person",
+        );
+        assert.equal(modelOf(renamed), "gpt-5.6-luna");
+
+        // A model the person set on the card is used as is, and noted.
+        const edited = yield* launcher.resolveSeats(
+          captain,
+          [
+            builder,
+            {
+              ...review,
+              modelSelection: {
+                instanceId: ProviderInstanceId.make("codex"),
+                model: "gpt-5.6-terra",
+                options: [{ id: "reasoningEffort", value: "high" }],
+              },
+            },
+          ],
+          "person",
+        );
+        assert.equal(modelOf(edited), "gpt-5.6-terra");
+        assert.equal(edited[1]!.assignment!.reviewIndependence?.outcome, "same-model-as-author");
+        assert.equal(edited[1]!.assignment!.reviewIndependence?.modelChosenBy, "person");
+        assert.include(
+          withReviewIndependenceNote("Review it.", edited[1]!.assignment),
+          "(gpt-5.6-terra), because it was set on the roster card.",
+        );
+
+        // An addition reviews the Crew's members, read from their threads.
+        const member = ThreadId.make("thread:builder");
+        const added = yield* launcher.resolveSeats(captain, [review], "agent", {
+          members: [
+            {
+              seatName: "builder",
+              agentId: null,
+              participantId: participantIdForThread(member),
+              threadId: member,
+              reason: "Implements",
+            } as unknown as AgentCrewInstance["members"][number],
+          ],
+        });
+        assert.equal(modelOf(added), "gpt-5.6-terra");
+        assert.deepStrictEqual(added[0]!.assignment!.reviewIndependence?.authorThreadIds, [member]);
+
+        yield* launcher.launch({
+          providerSessionId: "session",
+          requestKey: "reviewer-launch",
+          captain,
+          pick: "agent",
+          displayName: "Review Pair",
+          seats: [builder, review],
+          brief: "Ship the login fix.",
+        });
+        const briefs = yield* savedBriefs;
+        assert.include(
+          briefs.at(-1)!.first_turn_text,
+          "Ship the login fix.\n\nReview independence: you run on gpt-5.6-sol; the authors ran on gpt-5.6-terra.",
+        );
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
+);
+
 it.effect("refuses persona seats whose effective ACP access the harness cannot enforce", () =>
   Effect.gen(function* () {
     const { context, commands, captain } = yield* fixture;
@@ -1190,10 +1520,8 @@ it.effect("refuses persona seats whose effective ACP access the harness cannot e
         dependencies(commands, [provider("acp", "acpRegistry", [{ slug: "model", options: [] }])]),
       ),
       Layer.provideMerge(Layer.succeedContext(context)),
-      Layer.provideMerge(
-        personaLibraryLayer("j5-persona-acp-", Object.values(BUILT_IN_AGENT_PERSONAS)),
-      ),
-      Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(personaLibraryLayer("j5-persona-acp-", launchablePersonas)),
+      Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     );
     yield* Effect.gen(function* () {
       const launcher = yield* CrewLaunchService;
@@ -1205,21 +1533,23 @@ it.effect("refuses persona seats whose effective ACP access the harness cannot e
         modelSelection: { instanceId: ProviderInstanceId.make("acp"), model: "model" },
       };
       // A workspace-write persona with no override: the harness cannot enforce its default.
-      const inherited = yield* launcher.resolveSeats(captain, [seat]).pipe(Effect.flip);
+      const inherited = yield* launcher.resolveSeats(captain, [seat], "person").pipe(Effect.flip);
       assert.equal(inherited._tag, "CrewLaunchSeatUnavailableError");
       assert.include(inherited.message, "cannot enforce the persona's default access");
       // An explicit auto mode is refused on the persona branch as it is for custom seats.
       for (const runtimeMode of ["auto", "auto-accept-edits"] as const) {
         const overridden = yield* launcher
-          .resolveSeats(captain, [{ ...seat, runtimeMode }])
+          .resolveSeats(captain, [{ ...seat, runtimeMode }], "person")
           .pipe(Effect.flip);
         assert.equal(overridden._tag, "CrewLaunchSeatUnavailableError");
         assert.include(overridden.message, "cannot enforce the selected access mode");
       }
       // Modes the harness enforces itself pass, and the approval-bound preview records them.
-      const allowed = yield* launcher.resolveSeats(captain, [
-        { ...seat, runtimeMode: "approval-required" },
-      ]);
+      const allowed = yield* launcher.resolveSeats(
+        captain,
+        [{ ...seat, runtimeMode: "approval-required" }],
+        "person",
+      );
       assert.equal(allowed[0]?.runtimeMode, "approval-required");
       assert.lengthOf(yield* Ref.get(commands), 0);
     }).pipe(Effect.provide(layer));
@@ -1251,10 +1581,8 @@ it.effect("pins non-reasoning provider defaults for persona seats without overri
     const layer = crewLaunchLayer.pipe(
       Layer.provideMerge(dependencies(commands, providers)),
       Layer.provideMerge(Layer.succeedContext(context)),
-      Layer.provideMerge(
-        personaLibraryLayer("j5-persona-defaults-", Object.values(BUILT_IN_AGENT_PERSONAS)),
-      ),
-      Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(personaLibraryLayer("j5-persona-defaults-", launchablePersonas)),
+      Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     );
     yield* Effect.gen(function* () {
       const launcher = yield* CrewLaunchService;
@@ -1266,14 +1594,14 @@ it.effect("pins non-reasoning provider defaults for persona seats without overri
           reason: "Build",
         },
       ];
-      const before = (yield* launcher.resolveSeats(captain, seats))[0]!;
+      const before = (yield* launcher.resolveSeats(captain, seats, "person"))[0]!;
       assert.deepStrictEqual(
         before.modelSelection.options?.find((option) => option.id === "fastMode"),
         { id: "fastMode", value: true },
       );
       assert.deepStrictEqual(before.assignment?.resolvedModelSelection, before.modelSelection);
       providers[0] = configured(false);
-      const after = (yield* launcher.resolveSeats(captain, seats))[0]!;
+      const after = (yield* launcher.resolveSeats(captain, seats, "person"))[0]!;
       assert.equal(before.runtime.reasoning, after.runtime.reasoning);
       assert.deepStrictEqual(
         after.modelSelection.options?.find((option) => option.id === "fastMode"),
@@ -1334,6 +1662,13 @@ const unitFixture = Effect.gen(function* () {
       Layer.provide(archiveAgent),
       Layer.provide(playbookStoreLayer),
       Layer.provide(
+        Layer.mock(CrewWorktrees)({
+          cleanup: () => Effect.succeed([]),
+          liveSessions: () => Effect.succeed([]),
+          closeSessions: () => Effect.void,
+        }),
+      ),
+      Layer.provide(
         Layer.mock(ServerSecretStore)({
           getOrCreateRandom: () => Effect.succeed(new Uint8Array(32).fill(7)),
         }),
@@ -1347,10 +1682,8 @@ const unitFixture = Effect.gen(function* () {
       ),
     ),
     Layer.provideMerge(Layer.succeedContext(context)),
-    Layer.provideMerge(
-      personaLibraryLayer("j5-crew-unit-", Object.values(BUILT_IN_AGENT_PERSONAS)),
-    ),
-    Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(personaLibraryLayer("j5-crew-unit-", launchablePersonas)),
+    Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
   );
   const archiveInput = (crewInstanceId: string) => ({
     providerSessionId: "session",
@@ -1375,6 +1708,7 @@ const unitFixture = Effect.gen(function* () {
     const { instance } = yield* launcher.launch({
       providerSessionId: "session",
       requestKey: "unit-1",
+      pick: "person",
       captain,
       displayName: "Review Pair",
       seats: [
@@ -1395,6 +1729,7 @@ const unitFixture = Effect.gen(function* () {
       const { instance: grown } = yield* launcher.addSeats({
         providerSessionId: "session",
         requestKey: "add-sentry",
+        pick: "person",
         captain,
         instance,
         seats: [
@@ -1446,6 +1781,7 @@ it.effect(
         const launched = yield* launcher.launch({
           providerSessionId: "session",
           requestKey: "trio",
+          pick: "person",
           captain: unit.captain,
           displayName: "Trio",
           seats: [
@@ -1487,18 +1823,10 @@ it.effect(
           (yield* crews.read(launched.instance.id))!.members.map((member) => member.seatName),
           ["builder", "sentry"],
         );
-        // Only the seats that exist got a brief, and their roster names only each other.
-        const briefs = (yield* Ref.get(unit.commands)).flatMap((command) =>
-          command.type === "message.dispatch" ? [command] : [],
+        assert.isFalse(
+          (yield* Ref.get(unit.commands)).some((command) => command.type === "message.dispatch"),
         );
-        assert.sameMembers(
-          briefs.map((command) => command.threadId),
-          [unit.seatThread("trio", "builder"), unit.seatThread("trio", "sentry")],
-        );
-        for (const brief of briefs) {
-          assert.include(brief.text, "- builder");
-          assert.notInclude(brief.text, "- critic");
-        }
+        assert.isTrue(launched.instance.members.every((member) => member.notStarted));
       }).pipe(Effect.provide(unit.layer));
     }).pipe(Effect.scoped),
 );
@@ -1644,6 +1972,7 @@ it.effect(
         const added = yield* launcher.addSeats({
           providerSessionId: "session",
           requestKey: "add-sentry",
+          pick: "person",
           captain: unit.captain,
           instance,
           seats: [
@@ -1716,6 +2045,7 @@ it.effect(
           .addSeats({
             providerSessionId: "session",
             requestKey: "add-sentry",
+            pick: "person",
             captain: unit.captain,
             instance,
             seats: [
@@ -1754,10 +2084,8 @@ it.effect("records a playbook Crew's step owners and surfaces a taken step unwra
     const layer = crewLaunchLayer.pipe(
       Layer.provideMerge(dependencies(commands, [codex])),
       Layer.provideMerge(Layer.succeedContext(context)),
-      Layer.provideMerge(
-        personaLibraryLayer("j5-crew-steps-", Object.values(BUILT_IN_AGENT_PERSONAS)),
-      ),
-      Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(personaLibraryLayer("j5-crew-steps-", launchablePersonas)),
+      Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     );
     yield* Effect.gen(function* () {
       const launcher = yield* CrewLaunchService;
@@ -1782,6 +2110,7 @@ it.effect("records a playbook Crew's step owners and surfaces a taken step unwra
       const { instance } = yield* launcher.launch({
         providerSessionId: "session",
         requestKey: "playbook-crew",
+        pick: "person",
         captain,
         displayName: "Release Crew",
         seats: [custom("planner", ["plan"]), custom("helper")],
@@ -1799,8 +2128,9 @@ it.effect("records a playbook Crew's step owners and surfaces a taken step unwra
           ["helper", []],
         ],
       );
-      const briefs = (yield* Ref.get(commands)).flatMap((command) =>
-        command.type === "message.dispatch" ? [command.text] : [],
+      const briefs = (yield* savedBriefs).map((row) => row.first_turn_text);
+      assert.isFalse(
+        (yield* Ref.get(commands)).some((command) => command.type === "message.dispatch"),
       );
       assert.include(briefs[0], "your_steps:\n- plan: Plan the release\n</seat_playbook>");
       assert.include(briefs[1], "your_steps: none\n</seat_playbook>");
@@ -1810,6 +2140,7 @@ it.effect("records a playbook Crew's step owners and surfaces a taken step unwra
         .addSeats({
           providerSessionId: "session",
           requestKey: "rival",
+          pick: "person",
           captain,
           instance,
           seats: [custom("rival", ["plan"])],
@@ -1833,10 +2164,8 @@ it.effect("a relaunch after a failed link stores the re-approved seat's steps", 
     const layer = crewLaunchLayer.pipe(
       Layer.provideMerge(dependencies(commands, [codex])),
       Layer.provideMerge(Layer.succeedContext(context)),
-      Layer.provideMerge(
-        personaLibraryLayer("j5-crew-relaunch-", Object.values(BUILT_IN_AGENT_PERSONAS)),
-      ),
-      Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(personaLibraryLayer("j5-crew-relaunch-", launchablePersonas)),
+      Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     );
     yield* Effect.gen(function* () {
       const launcher = yield* CrewLaunchService;
@@ -1844,6 +2173,7 @@ it.effect("a relaunch after a failed link stores the re-approved seat's steps", 
       const input = {
         providerSessionId: "session",
         requestKey: "relaunch",
+        pick: "person" as const,
         captain,
         displayName: "Release Crew",
         brief: "Ship it.",
@@ -1911,10 +2241,8 @@ it.effect("launches each seat in the workspace it names, and refuses one git can
           ),
         ),
         Layer.provideMerge(Layer.succeedContext(context)),
-        Layer.provideMerge(
-          personaLibraryLayer("j5-crew-launch-", Object.values(BUILT_IN_AGENT_PERSONAS)),
-        ),
-        Layer.provideMerge(NodeServices.layer),
+        Layer.provideMerge(personaLibraryLayer("j5-crew-launch-", launchablePersonas)),
+        Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
       );
     const seat = (name: string, workspace: SpawnWorkspaceChoice) => ({
       name,
@@ -1936,6 +2264,7 @@ it.effect("launches each seat in the workspace it names, and refuses one git can
         .launch({
           providerSessionId: "session",
           requestKey: "no-repo",
+          pick: "person",
           captain,
           displayName: "Trio",
           seats,
@@ -1962,9 +2291,11 @@ it.effect("launches each seat in the workspace it names, and refuses one git can
       const launcher = yield* CrewLaunchService;
       // A path git doesn't list as a worktree is refused, naming the ones it does.
       const unknown = yield* launcher
-        .resolveSeats(captain, [
-          seat("reviewer", { type: "existing_worktree", worktreePath: "/elsewhere" }),
-        ])
+        .resolveSeats(
+          captain,
+          [seat("reviewer", { type: "existing_worktree", worktreePath: "/elsewhere" })],
+          "person",
+        )
         .pipe(Effect.flip);
       assert.include(unknown.message, "isn't one of this project's worktrees");
       assert.include(unknown.message, "/repo-worktrees/feature");
@@ -1975,11 +2306,16 @@ it.effect("launches each seat in the workspace it names, and refuses one git can
         worktrees: [{ path: "/repo-worktrees/feature", branch: "fix/login" }],
       });
 
-      const resolved = yield* launcher.resolveSeats(captain, seats);
+      const resolved = yield* launcher.resolveSeats(captain, seats, "person");
       assert.deepStrictEqual(
         resolved.map((entry) => entry.runtime.workspace),
         [
-          { type: "worktree", baseRef: "j5/main", startFromOrigin: false },
+          {
+            type: "worktree",
+            baseRef: "j5/main",
+            baseCommit: fakeSha(repo, "j5/main"),
+            startFromOrigin: false,
+          },
           {
             type: "existing_worktree",
             worktreePath: "/repo-worktrees/feature",
@@ -1991,6 +2327,7 @@ it.effect("launches each seat in the workspace it names, and refuses one git can
       yield* launcher.launch({
         providerSessionId: "session",
         requestKey: "trio",
+        pick: "person",
         captain,
         displayName: "Trio",
         seats,
@@ -2024,21 +2361,14 @@ it.effect("launches each seat in the workspace it names, and refuses one git can
         assert.equal(scribe.worktreePath, captain.thread.worktreePath);
         assert.equal(scribe.branch, captain.thread.branch);
       }
-      // Only the new worktree waits on ThreadLaunch; the other two briefs start at once.
-      const briefs = captured.filter((command) => command.type === "message.dispatch");
-      assert.sameMembers(
-        briefs.map((command) => command.threadId),
-        [threadOf("reviewer"), threadOf("scribe")],
-      );
-      const [launch] = yield* Ref.get(launches);
-      assert.equal(launch?.threadId, threadOf("builder"));
-      assert.isTrue(launch?.reuseExistingThread);
-      assert.deepStrictEqual(launch?.workspaceStrategy, {
-        type: "worktree",
-        baseRef: "j5/main",
-        startFromOrigin: false,
-      });
-      assert.include(launch?.initialMessage?.text, "your_seat: builder");
+      assert.isFalse(captured.some((command) => command.type === "message.dispatch"));
+      assert.deepStrictEqual(yield* Ref.get(launches), []);
+      const sql = yield* SqlClient.SqlClient;
+      const contexts = yield* sql<{ readonly workspace: string }>`
+        SELECT workspace FROM j5_crew_seat_context WHERE thread_id = ${threadOf("builder")}
+      `;
+      assert.include(contexts[0]!.workspace, '"baseRef":"j5/main"');
+      assert.include(contexts[0]!.workspace, `"baseCommit":"${fakeSha(repo, "j5/main")}"`);
     }).pipe(Effect.provide(layerFor(repo)));
   }),
 );
@@ -2067,10 +2397,8 @@ it.effect("binds an existing worktree's live branch, so a stale preview can't ap
         ),
       ),
       Layer.provideMerge(Layer.succeedContext(context)),
-      Layer.provideMerge(
-        personaLibraryLayer("j5-crew-launch-", Object.values(BUILT_IN_AGENT_PERSONAS)),
-      ),
-      Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(personaLibraryLayer("j5-crew-launch-", launchablePersonas)),
+      Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     );
     const reviewer = (worktreePath: string) => ({
       name: "reviewer",
@@ -2087,7 +2415,11 @@ it.effect("binds an existing worktree's live branch, so a stale preview can't ap
     yield* Effect.gen(function* () {
       const launcher = yield* CrewLaunchService;
       // The preview binds the builder's worktree on fix/login and reads the card's lists.
-      const shown = yield* launcher.resolveSeats(captain, [reviewer("/repo-worktrees/builder")]);
+      const shown = yield* launcher.resolveSeats(
+        captain,
+        [reviewer("/repo-worktrees/builder")],
+        "person",
+      );
       yield* launcher.workspaceOptions(captain);
       assert.equal(
         shown[0]?.workspace.type === "existing_worktree" && shown[0].workspace.branch,
@@ -2108,9 +2440,11 @@ it.effect("binds an existing worktree's live branch, so a stale preview can't ap
         { path: "/repo-worktrees/builder", branch: "fix/login" },
       ]);
       // Approval reads the worktree's branch live from the checkout, past the cached snapshot.
-      const approving = yield* launcher.resolveSeats(captain, [
-        reviewer("/repo-worktrees/builder"),
-      ]);
+      const approving = yield* launcher.resolveSeats(
+        captain,
+        [reviewer("/repo-worktrees/builder")],
+        "person",
+      );
       assert.deepStrictEqual(approving[0]?.runtime.workspace, {
         type: "existing_worktree",
         worktreePath: "/repo-worktrees/builder",
@@ -2119,7 +2453,7 @@ it.effect("binds an existing worktree's live branch, so a stale preview can't ap
       // Membership comes from the cached snapshot, so a worktree added inside its window is
       // refused once; retrying after it refreshes finds it.
       const tooNew = yield* launcher
-        .resolveSeats(captain, [reviewer("/repo-worktrees/scout")])
+        .resolveSeats(captain, [reviewer("/repo-worktrees/scout")], "person")
         .pipe(Effect.flip);
       assert.include(tooNew.message, "isn't one of this project's worktrees");
       // The token the stale preview showed no longer matches, so the gate asks for a fresh one.
@@ -2129,4 +2463,1174 @@ it.effect("binds an existing worktree's live branch, so a stale preview can't ap
       );
     }).pipe(Effect.provide(layer));
   }),
+);
+
+it.effect("pins a new worktree's base commit, and a moved or renamed branch can't change it", () =>
+  Effect.gen(function* () {
+    const { context, commands, captain } = yield* fixture;
+    const codex = provider("codex", "codex", [{ slug: "gpt-5.6-sol", options: ["high"] }]);
+    const release = "1".repeat(40);
+    const live = yield* Ref.make<FakeCheckout>({
+      isRepo: true,
+      refName: "j5/main",
+      commits: { release },
+    });
+    const layer = crewLaunchLayer.pipe(
+      Layer.provideMerge(
+        dependencies(
+          commands,
+          [codex],
+          new Set(),
+          new Set(),
+          new Set(),
+          false,
+          new Set(),
+          () => Effect.void,
+          { checkout: { isRepo: false, refName: null }, liveCheckout: live },
+        ),
+      ),
+      Layer.provideMerge(Layer.succeedContext(context)),
+      Layer.provideMerge(personaLibraryLayer("j5-crew-launch-", launchablePersonas)),
+      Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+    );
+    const builder = (workspace: SpawnWorkspaceChoice) => ({
+      name: "builder",
+      agentId: null,
+      reason: "Builds",
+      instructions: "Build it",
+      workspace,
+    });
+    const baseOf = (seats: ReadonlyArray<{ readonly workspace: ResolvedSpawnWorkspace }>) =>
+      seats[0]?.workspace.type === "worktree" ? seats[0].workspace.baseCommit : undefined;
+    yield* Effect.gen(function* () {
+      const launcher = yield* CrewLaunchService;
+      const [pinned] = yield* launcher.pinWorkspaces(captain, [
+        builder({ type: "worktree", baseRef: "release" }),
+      ]);
+      assert.deepStrictEqual(pinned, { type: "worktree", baseRef: "release", baseCommit: release });
+
+      // The branch moves, then is renamed away: the saved commit still resolves and is what shows.
+      yield* Ref.set(live, {
+        isRepo: true,
+        refName: "j5/main",
+        commits: { release: "2".repeat(40) },
+      });
+      assert.equal(
+        baseOf(yield* launcher.resolveSeats(captain, [builder(pinned!)], "person")),
+        release,
+      );
+      yield* Ref.set(live, { isRepo: true, refName: "j5/main", missingRefs: ["release"] });
+      assert.equal(
+        baseOf(yield* launcher.resolveSeats(captain, [builder(pinned!)], "person")),
+        release,
+      );
+
+      // A seat saved before pins existed has none, so the ref is read now and shown for approval.
+      const legacy = yield* launcher
+        .resolveSeats(captain, [builder({ type: "worktree", baseRef: "release" })], "person")
+        .pipe(Effect.flip);
+      assert.include(legacy.message, "Base ref 'release' doesn't resolve to a commit");
+      assert.include(legacy.message, "builder");
+      yield* Ref.set(live, {
+        isRepo: true,
+        refName: "j5/main",
+        commits: { release: "3".repeat(40) },
+      });
+      assert.equal(
+        baseOf(
+          yield* launcher.resolveSeats(
+            captain,
+            [builder({ type: "worktree", baseRef: "release" })],
+            "person",
+          ),
+        ),
+        "3".repeat(40),
+      );
+
+      // A submitted ref that resolves to nothing is refused naming the seat, so nothing is stored.
+      yield* Ref.set(live, { isRepo: true, refName: "j5/main", missingRefs: ["j5/2969a292"] });
+      const stale = yield* launcher
+        .pinWorkspaces(captain, [builder({ type: "worktree", baseRef: "j5/2969a292" })])
+        .pipe(Effect.flip);
+      assert.equal(
+        stale.detail,
+        `Seat "builder": Base ref 'j5/2969a292' doesn't resolve to a commit in this repository.`,
+      );
+
+      // A saved commit that is truly gone fails naming the revision, with no fallback to the ref.
+      yield* Ref.set(live, { isRepo: true, refName: "j5/main", missingRefs: [release] });
+      const gone = yield* launcher
+        .resolveSeats(captain, [builder(pinned!)], "person")
+        .pipe(Effect.flip);
+      assert.include(
+        gone.message,
+        `Base commit ${release.slice(0, 8)} (from 'release') is no longer in this repository.`,
+      );
+    }).pipe(Effect.provide(layer));
+  }),
+);
+
+it.effect(
+  "start_from_origin pins origin's tip when the base is chosen, and never advances it",
+  () =>
+    Effect.gen(function* () {
+      const { context, commands, captain } = yield* fixture;
+      const codex = provider("codex", "codex", [{ slug: "gpt-5.6-sol", options: ["high"] }]);
+      const fetches = yield* Ref.make<ReadonlyArray<string>>([]);
+      const live = yield* Ref.make<FakeCheckout>({
+        isRepo: true,
+        refName: "j5/main",
+        commits: { main: "a".repeat(40) },
+        origin: { main: "b".repeat(40) },
+      });
+      const layer = crewLaunchLayer.pipe(
+        Layer.provideMerge(
+          dependencies(
+            commands,
+            [codex],
+            new Set(),
+            new Set(),
+            new Set(),
+            false,
+            new Set(),
+            () => Effect.void,
+            { checkout: { isRepo: false, refName: null }, liveCheckout: live, fetches },
+          ),
+        ),
+        Layer.provideMerge(Layer.succeedContext(context)),
+        Layer.provideMerge(personaLibraryLayer("j5-crew-launch-", launchablePersonas)),
+        Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+      );
+      const seat = (startFromOrigin: boolean) => ({
+        name: "builder",
+        agentId: null,
+        reason: "Builds",
+        instructions: "Build it",
+        workspace: { type: "worktree" as const, baseRef: "main", startFromOrigin },
+      });
+      yield* Effect.gen(function* () {
+        const launcher = yield* CrewLaunchService;
+        // Locally the branch is a, origin's is b; from origin the pin is b, fetched first.
+        const [local] = yield* launcher.pinWorkspaces(captain, [seat(false)]);
+        assert.equal(local?.type === "worktree" && local.baseCommit, "a".repeat(40));
+        assert.deepStrictEqual(yield* Ref.get(fetches), []);
+        const [fromOrigin] = yield* launcher.pinWorkspaces(captain, [seat(true)]);
+        assert.equal(fromOrigin?.type === "worktree" && fromOrigin.baseCommit, "b".repeat(40));
+        assert.deepStrictEqual(yield* Ref.get(fetches), ["main"]);
+        // Origin moves on; the saved commit is used without another fetch.
+        yield* Ref.update(live, (checkout) => ({ ...checkout, origin: { main: "c".repeat(40) } }));
+        const resolved = yield* launcher.resolveSeats(
+          captain,
+          [{ ...seat(true), workspace: fromOrigin as never }],
+          "person",
+        );
+        assert.equal(
+          resolved[0]?.workspace.type === "worktree" && resolved[0].workspace.baseCommit,
+          "b".repeat(40),
+        );
+        assert.deepStrictEqual(yield* Ref.get(fetches), ["main"]);
+      }).pipe(Effect.provide(layer));
+    }),
+);
+
+it.effect(
+  "an unreachable origin refuses only the seat that started from it, naming that seat",
+  () =>
+    Effect.gen(function* () {
+      const { context, commands, captain } = yield* fixture;
+      const codex = provider("codex", "codex", [{ slug: "gpt-5.6-sol", options: ["high"] }]);
+      const layer = crewLaunchLayer.pipe(
+        Layer.provideMerge(
+          dependencies(
+            commands,
+            [codex],
+            new Set(),
+            new Set(),
+            new Set(),
+            false,
+            new Set(),
+            () => Effect.void,
+            {
+              checkout: {
+                isRepo: true,
+                refName: "j5/main",
+                commits: { main: "a".repeat(40) },
+                origin: { main: "b".repeat(40) },
+                unreachableOriginBranches: ["main"],
+              },
+            },
+          ),
+        ),
+        Layer.provideMerge(Layer.succeedContext(context)),
+        Layer.provideMerge(personaLibraryLayer("j5-crew-launch-", launchablePersonas)),
+        Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+      );
+      const seat = (name: string, startFromOrigin: boolean) => ({
+        name,
+        agentId: null,
+        reason: "Builds",
+        instructions: "Build it",
+        workspace: { type: "worktree" as const, baseRef: "main", startFromOrigin },
+      });
+      yield* Effect.gen(function* () {
+        const launcher = yield* CrewLaunchService;
+        // The other seats of the roster resolve; the seat from origin is refused by name.
+        const pinned = yield* launcher
+          .pinWorkspaces(captain, [seat("local", false), seat("fresh", true)])
+          .pipe(Effect.flip);
+        assert.include(pinned.detail, 'Seat "fresh":');
+        assert.include(pinned.detail, "could not be fetched");
+        assert.notInclude(pinned.detail, "can't be read");
+        assert.include(pinned.nextStep, "local branch");
+        const [local] = yield* launcher.pinWorkspaces(captain, [seat("local", false)]);
+        assert.equal(local?.type === "worktree" && local.baseCommit, "a".repeat(40));
+      }).pipe(Effect.provide(layer));
+    }),
+);
+
+const captainProjectId = () => ProjectId.make("project:crew-launch");
+
+const eligibilityFixture = (input: {
+  readonly providers: ReadonlyArray<ServerProvider>;
+  readonly settings?: Parameters<typeof crewMemberModelsLayer>[0]["settings"];
+}) =>
+  Effect.gen(function* () {
+    const { context, commands, captain } = yield* fixture;
+    const layer = crewLaunchLayer.pipe(
+      Layer.provideMerge(
+        dependencies(
+          commands,
+          input.providers,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          crewMemberModelsLayer({
+            providers: input.providers,
+            ...(input.settings === undefined ? {} : { settings: input.settings }),
+            projectTitle: "Billing Migration",
+          }),
+        ),
+      ),
+      Layer.provideMerge(Layer.succeedContext(context)),
+      Layer.provideMerge(personaLibraryLayer("j5-crew-models-", launchablePersonas)),
+      Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+    );
+    return { layer, captain, commands };
+  });
+
+const sol = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.6-sol" };
+const terra = { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.6-terra" };
+const codexModels = (...slugs: ReadonlyArray<string>) =>
+  provider(
+    "codex",
+    "codex",
+    slugs.map((slug) => ({ slug, options: ["high"] })),
+  );
+const customSeat = (name: string, modelSelection?: typeof sol) => ({
+  workspace: { type: "shared" as const },
+  name,
+  agentId: null,
+  reason: "Works",
+  instructions: "Do the work.",
+  ...(modelSelection === undefined ? {} : { modelSelection }),
+});
+
+it.effect("every model is eligible for a custom seat until a list is saved", () =>
+  Effect.gen(function* () {
+    const { layer, captain } = yield* eligibilityFixture({
+      providers: [codexModels("gpt-5.6-sol", "gpt-5.6-terra")],
+    });
+    yield* Effect.gen(function* () {
+      const launcher = yield* CrewLaunchService;
+      const resolved = yield* launcher.resolveSeats(
+        captain,
+        [customSeat("inherits"), customSeat("explicit", terra)],
+        "person",
+      );
+      assert.deepStrictEqual(
+        resolved.map((seat) => seat.modelSelection.model),
+        ["gpt-5.6-sol", "gpt-5.6-terra"],
+      );
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect("a saved list holds a custom seat to its checked models and names what to use", () =>
+  Effect.gen(function* () {
+    const { layer, captain, commands } = yield* eligibilityFixture({
+      providers: [codexModels("gpt-5.6-sol", "gpt-5.6-terra")],
+      settings: { crewMemberModels: [sol] },
+    });
+    yield* Effect.gen(function* () {
+      const launcher = yield* CrewLaunchService;
+      const checked = yield* launcher.resolveSeats(
+        captain,
+        [customSeat("inherits"), customSeat("explicit", sol)],
+        "person",
+      );
+      assert.lengthOf(checked, 2);
+      const refused = yield* launcher
+        .resolveSeats(captain, [customSeat("explicit", terra)], "person")
+        .pipe(Effect.flip);
+      assert.equal(refused._tag, "CrewLaunchModelNotEligibleError");
+      for (const part of [
+        "gpt-5.6-terra",
+        "Billing Migration",
+        "Models for custom members in Agent Setup",
+        "codex/gpt-5.6-sol",
+      ])
+        assert.include(refused.message, part);
+      // The refusal covers a launch as it does a preview, and nothing is created.
+      const launched = yield* launcher
+        .launch({
+          providerSessionId: "session",
+          requestKey: "launch-ineligible",
+          pick: "person",
+          captain,
+          displayName: "Crew",
+          seats: [customSeat("explicit", terra)],
+          brief: "Work.",
+        })
+        .pipe(Effect.flip);
+      assert.equal(launched._tag, "CrewLaunchModelNotEligibleError");
+      assert.lengthOf(yield* Ref.get(commands), 0);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect("a model new to the catalog after the list was saved starts unchecked", () =>
+  Effect.gen(function* () {
+    const { layer, captain } = yield* eligibilityFixture({
+      providers: [codexModels("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.7-new")],
+      // Saved when the catalog held two models, and both were checked.
+      settings: { crewMemberModels: [sol, terra] },
+    });
+    yield* Effect.gen(function* () {
+      const launcher = yield* CrewLaunchService;
+      yield* launcher.resolveSeats(captain, [customSeat("known", terra)], "person");
+      const refused = yield* launcher
+        .resolveSeats(
+          captain,
+          [customSeat("fresh", { instanceId: sol.instanceId, model: "gpt-5.7-new" })],
+          "person",
+        )
+        .pipe(Effect.flip);
+      assert.equal(refused._tag, "CrewLaunchModelNotEligibleError");
+      assert.include(refused.message, "codex/gpt-5.6-sol, codex/gpt-5.6-terra.");
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect("a custom seat that inherits the Captain's model is held to the list", () =>
+  Effect.gen(function* () {
+    // The Captain runs on gpt-5.6-sol, which the list leaves out.
+    const { layer, captain } = yield* eligibilityFixture({
+      providers: [codexModels("gpt-5.6-sol", "gpt-5.6-terra")],
+      settings: { crewMemberModels: [terra] },
+    });
+    yield* Effect.gen(function* () {
+      const launcher = yield* CrewLaunchService;
+      const refused = yield* launcher
+        .resolveSeats(captain, [customSeat("inherits")], "person")
+        .pipe(Effect.flip);
+      assert.equal(refused._tag, "CrewLaunchModelNotEligibleError");
+      assert.include(refused.message, "Model gpt-5.6-sol on codex");
+      assert.include(refused.message, "codex/gpt-5.6-terra");
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect("a saved list with nothing checked makes no model eligible", () =>
+  Effect.gen(function* () {
+    const { layer, captain } = yield* eligibilityFixture({
+      providers: [codexModels("gpt-5.6-sol", "gpt-5.6-terra")],
+      settings: { crewMemberModels: [] },
+    });
+    yield* Effect.gen(function* () {
+      const launcher = yield* CrewLaunchService;
+      const refused = yield* launcher
+        .resolveSeats(captain, [customSeat("inherits")], "person")
+        .pipe(Effect.flip);
+      assert.equal(refused._tag, "CrewLaunchModelNotEligibleError");
+      assert.include(refused.message, "nothing is checked");
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect("a stale entry for a model the catalog no longer lists changes nothing", () =>
+  Effect.gen(function* () {
+    const { layer, captain } = yield* eligibilityFixture({
+      providers: [codexModels("gpt-5.6-sol", "gpt-5.6-terra")],
+      settings: {
+        crewMemberModels: [{ instanceId: sol.instanceId, model: "retired-model" }, sol],
+      },
+    });
+    yield* Effect.gen(function* () {
+      const launcher = yield* CrewLaunchService;
+      yield* launcher.resolveSeats(captain, [customSeat("inherits")], "person");
+      const refused = yield* launcher
+        .resolveSeats(captain, [customSeat("other", terra)], "person")
+        .pipe(Effect.flip);
+      assert.include(refused.message, "Eligible models: codex/gpt-5.6-sol.");
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect("a project's own list replaces the environment's", () =>
+  Effect.gen(function* () {
+    const { layer, captain } = yield* eligibilityFixture({
+      providers: [codexModels("gpt-5.6-sol", "gpt-5.6-terra")],
+      settings: {
+        crewMemberModels: [sol],
+        projectSettingsOverrides: { [captainProjectId()]: { crewMemberModels: [terra] } },
+      },
+    });
+    yield* Effect.gen(function* () {
+      const launcher = yield* CrewLaunchService;
+      yield* launcher.resolveSeats(captain, [customSeat("allowed", terra)], "person");
+      const refused = yield* launcher
+        .resolveSeats(captain, [customSeat("inherits")], "person")
+        .pipe(Effect.flip);
+      assert.equal(refused._tag, "CrewLaunchModelNotEligibleError");
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect("a project can override a saved list with every model", () =>
+  Effect.gen(function* () {
+    const { layer, captain } = yield* eligibilityFixture({
+      providers: [codexModels("gpt-5.6-sol", "gpt-5.6-terra")],
+      settings: {
+        crewMemberModels: [],
+        projectSettingsOverrides: { [captainProjectId()]: { crewMemberModels: null } },
+      },
+    });
+    yield* Effect.gen(function* () {
+      const launcher = yield* CrewLaunchService;
+      yield* launcher.resolveSeats(
+        captain,
+        [customSeat("inherits"), customSeat("other", terra)],
+        "person",
+      );
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect("a persona keeps its own model off the list, until its model is overridden", () =>
+  Effect.gen(function* () {
+    const { layer, captain } = yield* eligibilityFixture({
+      providers: [codexModels("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna")],
+      settings: { crewMemberModels: [] },
+    });
+    yield* Effect.gen(function* () {
+      const launcher = yield* CrewLaunchService;
+      const persona = {
+        workspace: { type: "shared" as const },
+        name: "builder",
+        agentId: "builder",
+        reason: "Builds",
+      };
+      const [own] = yield* launcher.resolveSeats(captain, [persona], "person");
+      const personaModel = {
+        instanceId: own!.modelSelection.instanceId,
+        model: own!.modelSelection.model,
+      };
+      // Editing a field on the roster card freezes the persona's model into the seat; it is the
+      // same model and level, so the seat still keeps it.
+      const [frozen] = yield* launcher.resolveSeats(
+        captain,
+        [{ ...persona, modelSelection: own!.modelSelection, runtimeMode: "approval-required" }],
+        "person",
+      );
+      assert.equal(frozen!.modelSelection.model, personaModel.model);
+      // Naming no reasoning value is not keeping the persona's: it runs at the model's default.
+      const bare = yield* launcher
+        .resolveSeats(captain, [{ ...persona, modelSelection: personaModel }], "person")
+        .pipe(Effect.flip);
+      assert.equal(bare._tag, "CrewLaunchModelNotEligibleError");
+      // A different model on the card makes it a custom choice, held to the list.
+      const other = ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"].find(
+        (model) => model !== personaModel.model,
+      )!;
+      const refused = yield* launcher
+        .resolveSeats(
+          captain,
+          [{ ...persona, modelSelection: { instanceId: personaModel.instanceId, model: other } }],
+          "person",
+        )
+        .pipe(Effect.flip);
+      assert.equal(refused._tag, "CrewLaunchModelNotEligibleError");
+      assert.include(refused.message, `Model ${other} on codex`);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "a persona seat frozen on its fallback route is unchanged while the primary is back",
+  () =>
+    Effect.gen(function* () {
+      const claudeModels = provider("claudeAgent", "claudeAgent", [
+        { slug: "claude-opus-5", options: ["high"] },
+        { slug: "claude-sonnet-5", options: ["high"] },
+      ]);
+      const { layer, captain } = yield* eligibilityFixture({
+        providers: [codexModels("gpt-5.6-sol"), claudeModels],
+        settings: { crewMemberModels: [] },
+      });
+      yield* Effect.gen(function* () {
+        const launcher = yield* CrewLaunchService;
+        const persona = {
+          workspace: { type: "shared" as const },
+          name: "builder",
+          agentId: "builder",
+          reason: "Builds",
+          runtimeMode: "approval-required" as const,
+        };
+        const claude = (model: string) => ({
+          instanceId: ProviderInstanceId.make("claudeAgent"),
+          model,
+          options: [{ id: "effort", value: "high" }],
+        });
+        // The primary (Codex) resolves again, but the card froze the fallback (Claude) route.
+        const [fallback] = yield* launcher.resolveSeats(
+          captain,
+          [{ ...persona, modelSelection: claude("claude-opus-5") }],
+          "person",
+        );
+        assert.equal(fallback!.modelSelection.model, "claude-opus-5");
+        const refused = yield* launcher
+          .resolveSeats(
+            captain,
+            [{ ...persona, modelSelection: claude("claude-sonnet-5") }],
+            "person",
+          )
+          .pipe(Effect.flip);
+        assert.equal(refused._tag, "CrewLaunchModelNotEligibleError");
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
+);
+
+it.effect("a persona seat on either route's level is unchanged; another level is checked", () =>
+  Effect.gen(function* () {
+    const { layer, captain } = yield* eligibilityFixture({
+      providers: [
+        codexModels("gpt-5.6-sol"),
+        provider("claudeAgent", "claudeAgent", [
+          { slug: "claude-opus-5", options: ["high", "low"] },
+        ]),
+      ],
+      settings: { crewMemberReasoning: [] },
+    });
+    yield* Effect.gen(function* () {
+      const launcher = yield* CrewLaunchService;
+      const seat = (level: string) => ({
+        workspace: { type: "shared" as const },
+        name: "builder",
+        agentId: "builder",
+        reason: "Builds",
+        runtimeMode: "approval-required" as const,
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("claudeAgent"),
+          model: "claude-opus-5",
+          options: [{ id: "effort", value: level }],
+        },
+      });
+      yield* launcher.resolveSeats(captain, [seat("high")], "person");
+      const refused = yield* launcher
+        .resolveSeats(captain, [seat("low")], "person")
+        .pipe(Effect.flip);
+      assert.equal(refused._tag, "CrewLaunchModelNotEligibleError");
+      assert.include(refused.message, "Reasoning level low");
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "an automatic seat's persona skips unchecked entries and stays within the Captain's access; the person's card does not",
+  () =>
+    Effect.gen(function* () {
+      const claude = provider("claudeAgent", "claudeAgent", [
+        { slug: "claude-opus-5", options: ["high"] },
+      ]);
+      const providers = [codexModels("gpt-5.6-sol", "gpt-5.6-terra"), claude];
+      const listed = yield* eligibilityFixture({
+        providers,
+        settings: {
+          crewMemberModels: [
+            { instanceId: ProviderInstanceId.make("claudeAgent"), model: "claude-opus-5" },
+          ],
+        },
+      });
+      const scout = {
+        workspace: { type: "shared" as const },
+        name: "scout",
+        agentId: "scout",
+        reason: "Finds evidence",
+      };
+      yield* Effect.gen(function* () {
+        const launcher = yield* CrewLaunchService;
+        // Scout's first entry (Codex) is unchecked: the Captain's pick falls to its checked one.
+        const [agentPick] = yield* launcher.resolveSeats(listed.captain, [scout], "agent");
+        assert.equal(agentPick!.modelSelection.model, "claude-opus-5");
+        assert.deepStrictEqual(agentPick!.assignment?.pickSource, { kind: "agent" });
+        const [personPick] = yield* launcher.resolveSeats(listed.captain, [scout], "person");
+        assert.equal(personPick!.modelSelection.model, "gpt-5.6-terra");
+        assert.deepStrictEqual(personPick!.assignment?.pickSource, { kind: "person" });
+      }).pipe(Effect.provide(listed.layer));
+
+      // With none of its entries checked, the seat is refused the way a card's unchecked model is.
+      const bare = yield* eligibilityFixture({ providers, settings: { crewMemberModels: [] } });
+      yield* Effect.gen(function* () {
+        const refused = yield* (yield* CrewLaunchService)
+          .resolveSeats(bare.captain, [scout], "agent")
+          .pipe(Effect.flip);
+        assert.equal(refused._tag, "CrewLaunchModelNotEligibleError");
+        assert.include(refused.message, "is not checked in Models for custom members");
+      }).pipe(Effect.provide(bare.layer));
+
+      const open = yield* eligibilityFixture({ providers });
+      const supervised = {
+        ...open.captain,
+        thread: { ...open.captain.thread, runtimeMode: "approval-required" as const },
+      };
+      const builder = {
+        workspace: { type: "shared" as const },
+        name: "builder",
+        agentId: "builder",
+        reason: "Builds",
+      };
+      yield* Effect.gen(function* () {
+        const launcher = yield* CrewLaunchService;
+        // A Supervised Captain cannot have a workspace-write persona seated without the card,
+        // nor any persona the Captain set a broader access on.
+        const refused = yield* launcher
+          .resolveSeats(supervised, [builder], "agent")
+          .pipe(Effect.flip);
+        assert.include(
+          refused.message,
+          "it would run with Repository write, which is broader than the Supervised its caller runs with",
+        );
+        const raised = yield* launcher
+          .resolveSeats(supervised, [{ ...scout, runtimeMode: "full-access" }], "agent")
+          .pipe(Effect.flip);
+        assert.include(raised.message, "it would run with Full access");
+        const [readOnly] = yield* launcher.resolveSeats(supervised, [scout], "agent");
+        assert.equal(readOnly!.runtimeMode, "approval-required");
+        // The person approving the card gives the seat its saved access.
+        const [approved] = yield* launcher.resolveSeats(supervised, [builder], "person");
+        assert.equal(approved!.runtimeMode, "auto-accept-edits");
+      }).pipe(Effect.provide(open.layer));
+    }).pipe(Effect.scoped),
+);
+
+it.effect("an automatic roster reads the project's lists once, however many seats it has", () =>
+  Effect.gen(function* () {
+    const { context, commands, captain } = yield* fixture;
+    const reads = yield* Ref.make(0);
+    const counted = Layer.mock(CrewMemberModels)({
+      assertEligible: () => Effect.void,
+      eligibility: () => Ref.update(reads, (count) => count + 1).pipe(Effect.as(() => true)),
+    });
+    const providers = [
+      codexModels("gpt-5.6-sol", "gpt-5.6-terra"),
+      provider("claudeAgent", "claudeAgent", [{ slug: "claude-opus-5", options: ["high"] }]),
+    ];
+    const layer = crewLaunchLayer.pipe(
+      Layer.provideMerge(
+        dependencies(
+          commands,
+          providers,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          counted,
+        ),
+      ),
+      Layer.provideMerge(Layer.succeedContext(context)),
+      Layer.provideMerge(personaLibraryLayer("j5-crew-reads-", launchablePersonas)),
+      Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+    );
+    yield* Effect.gen(function* () {
+      const launcher = yield* CrewLaunchService;
+      const seat = (name: string) => ({
+        workspace: { type: "shared" as const },
+        name,
+        agentId: "scout",
+        reason: "Finds evidence",
+      });
+      const resolved = yield* launcher.resolveSeats(
+        captain,
+        [seat("scout-a"), seat("scout-b"), seat("scout-c"), customSeat("notes")],
+        "agent",
+      );
+      assert.lengthOf(resolved, 4);
+      assert.equal(yield* Ref.get(reads), 1);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect("a Captain's blocked persona seat escalates, and its grant launches that seat once", () =>
+  Effect.gen(function* () {
+    const claude = provider("claudeAgent", "claudeAgent", [
+      { slug: "claude-opus-5", options: ["high"] },
+    ]);
+    // Neither of Scout's entries is on the project's list.
+    const { layer, captain, commands } = yield* eligibilityFixture({
+      providers: [codexModels("gpt-5.6-sol", "gpt-5.6-terra"), claude],
+      settings: { crewMemberModels: [sol] },
+    });
+    const scout = {
+      workspace: { type: "shared" as const },
+      name: "scout",
+      agentId: "scout",
+      reason: "Finds evidence",
+    };
+    yield* Effect.gen(function* () {
+      const launcher = yield* CrewLaunchService;
+      const escalations = yield* AgentPersonaEscalations;
+      const refused = yield* launcher.resolveSeats(captain, [scout], "agent").pipe(Effect.flip);
+      // Refused as a card's unchecked model is, with the code its other launch paths give.
+      assert.equal(refused._tag, "CrewLaunchModelNotEligibleError");
+      if (refused._tag !== "CrewLaunchModelNotEligibleError") return;
+      assert.equal(refused.blockCode, "models_exhausted");
+      const escalationId = /escalation_id: (escalation-[0-9a-f-]+)/.exec(refused.message)![1]!;
+      // The person's card has no limits to lift and escalates nothing.
+      yield* launcher.resolveSeats(captain, [scout], "person");
+
+      yield* escalations.markGranted({ escalationId, grantedBy: "human:owner" });
+      const launch = (requestKey: string) =>
+        launcher.launch({
+          providerSessionId: "session",
+          requestKey,
+          captain,
+          pick: "agent",
+          displayName: "Evidence Crew",
+          seats: [{ ...scout, allowOnce: escalationId }],
+          brief: "Find the evidence.",
+        });
+      yield* launch("allowed-once");
+      const created = (yield* Ref.get(commands)).findLast(
+        (command) => command.type === "thread.create" && command.title === "scout",
+      );
+      assert.deepStrictEqual(
+        created?.type === "thread.create" ? created.agentPersonaAssignment?.pickSource : undefined,
+        { kind: "allow-once", waived: "model-not-eligible" },
+      );
+      // Spent on that launch: the same seat again is held to the list.
+      assert.include((yield* launch("allowed-twice").pipe(Effect.flip)).message, "already used");
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+const codexLevel = (level: string) => ({ instanceId: ProviderInstanceId.make("codex"), level });
+const solAt = (value: string) => ({ ...sol, options: [{ id: "reasoningEffort", value }] });
+const terraAt = (value: string) => ({ ...terra, options: [{ id: "reasoningEffort", value }] });
+// The Captain runs on gpt-5.6-sol with no explicit level, so it runs at the model's default.
+const reasoningProviders = [
+  provider("codex", "codex", [
+    { slug: "gpt-5.6-sol", options: ["low", "medium", "high"], defaultOption: "medium" },
+    { slug: "gpt-5.6-terra", options: ["high", "xhigh"] },
+    { slug: "gpt-5.6-luna", options: [], noReasoning: true },
+  ]),
+];
+
+it.effect(
+  "a saved level list holds a custom seat to its checked levels and names what to use",
+  () =>
+    Effect.gen(function* () {
+      const { layer, captain, commands } = yield* eligibilityFixture({
+        providers: reasoningProviders,
+        settings: { crewMemberReasoning: [codexLevel("low"), codexLevel("high")] },
+      });
+      yield* Effect.gen(function* () {
+        const launcher = yield* CrewLaunchService;
+        const checked = yield* launcher.resolveSeats(
+          captain,
+          [customSeat("low", solAt("low")), customSeat("high", solAt("high"))],
+          "person",
+        );
+        assert.lengthOf(checked, 2);
+        const refused = yield* launcher
+          .resolveSeats(captain, [customSeat("medium", solAt("medium"))], "person")
+          .pipe(Effect.flip);
+        assert.equal(refused._tag, "CrewLaunchModelNotEligibleError");
+        for (const part of [
+          "Reasoning level medium of gpt-5.6-sol on codex",
+          "Billing Migration",
+          "Models for custom members in Agent Setup",
+          "Eligible levels for gpt-5.6-sol: low, high.",
+        ])
+          assert.include(refused.message, part);
+        // Another model's levels are listed for that model, not this one's.
+        const terraRefused = yield* launcher
+          .resolveSeats(captain, [customSeat("terra", terraAt("xhigh"))], "person")
+          .pipe(Effect.flip);
+        assert.include(terraRefused.message, "Eligible levels for gpt-5.6-terra: high.");
+        // Approving the roster goes through the same check, and nothing is created.
+        const launched = yield* launcher
+          .launch({
+            providerSessionId: "session",
+            requestKey: "launch-ineligible-level",
+            pick: "person",
+            captain,
+            displayName: "Crew",
+            seats: [customSeat("medium", solAt("medium"))],
+            brief: "Work.",
+          })
+          .pipe(Effect.flip);
+        assert.equal(launched._tag, "CrewLaunchModelNotEligibleError");
+        assert.lengthOf(yield* Ref.get(commands), 0);
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "a custom seat with no explicit level runs at the model's default, which is checked",
+  () =>
+    Effect.gen(function* () {
+      // The Captain's own selection names no level, so a seat that inherits it runs at medium.
+      const refusing = yield* eligibilityFixture({
+        providers: reasoningProviders,
+        settings: { crewMemberReasoning: [codexLevel("high")] },
+      });
+      yield* Effect.gen(function* () {
+        const launcher = yield* CrewLaunchService;
+        const refused = yield* launcher
+          .resolveSeats(refusing.captain, [customSeat("inherits")], "person")
+          .pipe(Effect.flip);
+        assert.include(refused.message, "Reasoning level medium of gpt-5.6-sol");
+      }).pipe(Effect.provide(refusing.layer));
+      const allowing = yield* eligibilityFixture({
+        providers: reasoningProviders,
+        settings: { crewMemberReasoning: [codexLevel("medium")] },
+      });
+      yield* Effect.gen(function* () {
+        const launcher = yield* CrewLaunchService;
+        yield* launcher.resolveSeats(allowing.captain, [customSeat("inherits")], "person");
+      }).pipe(Effect.provide(allowing.layer));
+    }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "a saved empty level list makes no level eligible, but a model with none is not held",
+  () =>
+    Effect.gen(function* () {
+      const { layer, captain } = yield* eligibilityFixture({
+        providers: reasoningProviders,
+        settings: { crewMemberReasoning: [] },
+      });
+      yield* Effect.gen(function* () {
+        const launcher = yield* CrewLaunchService;
+        const refused = yield* launcher
+          .resolveSeats(captain, [customSeat("inherits")], "person")
+          .pipe(Effect.flip);
+        assert.include(refused.message, "No reasoning level of gpt-5.6-sol is eligible");
+        yield* launcher.resolveSeats(
+          captain,
+          [customSeat("plain", { instanceId: sol.instanceId, model: "gpt-5.6-luna" })],
+          "person",
+        );
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "the model list is checked before the level, and a level new to the catalog starts unchecked",
+  () =>
+    Effect.gen(function* () {
+      const { layer, captain } = yield* eligibilityFixture({
+        providers: reasoningProviders,
+        // Saved when terra offered only xhigh; high arrived later.
+        settings: {
+          crewMemberModels: [terra],
+          crewMemberReasoning: [codexLevel("xhigh")],
+        },
+      });
+      yield* Effect.gen(function* () {
+        const launcher = yield* CrewLaunchService;
+        const modelFirst = yield* launcher
+          .resolveSeats(captain, [customSeat("sol", solAt("high"))], "person")
+          .pipe(Effect.flip);
+        assert.include(modelFirst.message, "Model gpt-5.6-sol on codex");
+        yield* launcher.resolveSeats(captain, [customSeat("known", terraAt("xhigh"))], "person");
+        const fresh = yield* launcher
+          .resolveSeats(captain, [customSeat("fresh", terraAt("high"))], "person")
+          .pipe(Effect.flip);
+        assert.include(fresh.message, "Reasoning level high of gpt-5.6-terra");
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
+);
+
+it.effect("a persona keeps its own level off the list, until its level is changed", () =>
+  Effect.gen(function* () {
+    const levels = ["low", "medium", "high", "xhigh"];
+    const { layer, captain } = yield* eligibilityFixture({
+      providers: [
+        provider(
+          "codex",
+          "codex",
+          ["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"].map((slug) => ({
+            slug,
+            options: levels,
+          })),
+        ),
+      ],
+      settings: { crewMemberReasoning: [] },
+    });
+    yield* Effect.gen(function* () {
+      const launcher = yield* CrewLaunchService;
+      const persona = {
+        workspace: { type: "shared" as const },
+        name: "builder",
+        agentId: "builder",
+        reason: "Builds",
+      };
+      const [own] = yield* launcher.resolveSeats(captain, [persona], "person");
+      // The card freezes the persona's whole selection into the seat; unchanged, it is not held.
+      yield* launcher.resolveSeats(
+        captain,
+        [{ ...persona, modelSelection: own!.modelSelection, runtimeMode: "approval-required" }],
+        "person",
+      );
+      const personaLevel = own!.modelSelection.options?.find(
+        (option) => option.id === "reasoningEffort",
+      )?.value;
+      const otherLevel = levels.find((level) => level !== personaLevel)!;
+      const refused = yield* launcher
+        .resolveSeats(
+          captain,
+          [
+            {
+              ...persona,
+              modelSelection: {
+                instanceId: own!.modelSelection.instanceId,
+                model: own!.modelSelection.model,
+                options: [{ id: "reasoningEffort", value: otherLevel }],
+              },
+            },
+          ],
+          "person",
+        )
+        .pipe(Effect.flip);
+      assert.equal(refused._tag, "CrewLaunchModelNotEligibleError");
+      assert.include(refused.message, `Reasoning level ${otherLevel}`);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "launches an indexed persona entry through Crew defaults and the thread-create guard",
+  () =>
+    Effect.gen(function* () {
+      const { context, commands, captain } = yield* fixture;
+      const basic = provider("codex", "codex", [{ slug: "ordered-crew", options: ["high"] }]);
+      const advertised: ServerProvider = {
+        ...basic,
+        models: basic.models.map((model) => ({
+          ...model,
+          capabilities: {
+            ...model.capabilities,
+            optionDescriptors: [
+              ...(model.capabilities?.optionDescriptors ?? []),
+              { id: "fastMode", label: "Fast", type: "boolean" as const, currentValue: false },
+            ],
+          },
+        })),
+      };
+      const limited: ServerProvider = {
+        ...advertised,
+        instanceId: ProviderInstanceId.make("limited"),
+        usageLimits: {
+          checkedAt: "2026-11-03T12:00:00Z",
+          windows: [
+            {
+              id: "primary",
+              kind: "session",
+              label: "Session",
+              usedPercent: 100,
+              resetsAt: "2099-11-03T13:00:00Z",
+            },
+          ],
+        },
+      };
+      const layer = crewLaunchLayer.pipe(
+        Layer.provideMerge(dependencies(commands, [limited, advertised])),
+        Layer.provideMerge(Layer.succeedContext(context)),
+        Layer.provideMerge(
+          personaLibraryLayer("j5-ordered-crew-", [BUILT_IN_AGENT_PERSONAS.scout]),
+        ),
+        Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+      );
+      yield* Effect.gen(function* () {
+        const launcher = yield* CrewLaunchService;
+        const library = yield* makeAgentPersonaLibrary;
+        const chosen = {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "ordered-crew",
+          options: [{ id: "reasoningEffort", value: "high" }],
+        };
+        yield* library.importFiles({
+          files: [
+            {
+              name: "ordered.yaml",
+              content: toYaml({
+                ...BUILT_IN_AGENT_PERSONAS.scout,
+                id: "ordered",
+                modelRoute: [
+                  { instanceId: "limited", model: chosen.model },
+                  { instanceId: chosen.instanceId, model: "not-offered" },
+                  chosen,
+                ],
+              }),
+            },
+          ],
+          replaceExisting: false,
+        });
+        const seat = {
+          name: "ordered",
+          agentId: "ordered",
+          reason: "Review",
+          workspace: { type: "shared" as const },
+        };
+        for (const request of [seat, { ...seat, modelSelection: chosen }]) {
+          const resolvedSeats = yield* launcher.resolveSeats(
+            captain,
+            [request, { ...request, name: "ordered-second" }],
+            "person",
+          );
+          assert.deepStrictEqual(
+            resolvedSeats.map((seat) => seat.assignment?.resolvedEntryIndex),
+            [2, 2],
+          );
+          const resolved = resolvedSeats[0];
+          assert.equal(resolved!.assignment?.resolvedEntryIndex, 2);
+          assert.deepStrictEqual(resolved!.modelSelection.options, [
+            ...chosen.options,
+            { id: "fastMode", value: false },
+          ]);
+          yield* guardAgentPersonaThreadCreate(
+            {
+              type: "thread.create",
+              createdBy: "agent",
+              creationSource: "mcp",
+              commandId: CommandId.make("ordered-create"),
+              threadId: ThreadId.make("ordered-thread"),
+              projectId: captain.thread.projectId,
+              title: "Ordered",
+              modelSelection: resolved!.modelSelection,
+              runtimeMode: resolved!.runtimeMode,
+              interactionMode: "default",
+              agentPersonaAssignment: resolved!.assignment!,
+              branch: null,
+              worktreePath: null,
+            },
+            library,
+            () => Effect.succeed("codex"),
+          );
+        }
+      }).pipe(Effect.provide(layer));
+    }).pipe(Effect.scoped),
+);
+
+it.effect("a reviewer added after a builder was replaced avoids both builders' models", () =>
+  Effect.gen(function* () {
+    const { context, commands, captain } = yield* fixture;
+    const models = ["gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.6-luna"];
+    const entry = (model: string) => ({
+      instanceId: ProviderInstanceId.make("codex"),
+      model,
+      options: [{ id: "reasoningEffort", value: "high" }],
+    });
+    const reviewer: AgentPersonaDefinition = {
+      ...BUILT_IN_AGENT_PERSONAS.scout,
+      id: "reviewer",
+      independentReviewer: true,
+      modelRoute: [entry("gpt-5.6-terra"), entry("gpt-5.6-sol"), entry("gpt-5.6-luna")],
+    };
+    // The builder ran on terra, and its replacement runs on sol.
+    const oldBuilder = ThreadId.make("thread:builder");
+    const newBuilder = ThreadId.make("thread:builder-2");
+    const modelByThread = new Map<string, string>([
+      [oldBuilder, "gpt-5.6-terra"],
+      [newBuilder, "gpt-5.6-sol"],
+    ]);
+    const authorThreads = Layer.mock(ThreadManagementService)({
+      getThreadRecords: (threadId) =>
+        Effect.succeed({
+          messages: [],
+          runs: [],
+          subagents: [],
+          thread: {
+            ...thread(threadId),
+            modelSelection: {
+              instanceId: ProviderInstanceId.make("codex"),
+              model: modelByThread.get(threadId) ?? "gpt-5.6-sol",
+            },
+            deletedAt: null,
+          },
+        } as unknown as OrchestrationV2ThreadProjection),
+    });
+    const layer = crewLaunchLayer.pipe(
+      Layer.provideMerge(authorThreads),
+      Layer.provideMerge(
+        dependencies(commands, [
+          provider(
+            "codex",
+            "codex",
+            models.map((slug) => ({ slug, options: ["high"] })),
+          ),
+        ]),
+      ),
+      Layer.provideMerge(Layer.succeedContext(context)),
+      Layer.provideMerge(
+        personaLibraryLayer("j5-crew-replaced-", [...launchablePersonas, reviewer]),
+      ),
+      Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+    );
+    yield* Effect.gen(function* () {
+      const launcher = yield* CrewLaunchService;
+      const [added] = yield* launcher.resolveSeats(
+        captain,
+        [{ name: "review", agentId: "reviewer", reason: "Reviews", workspace: { type: "shared" } }],
+        "agent",
+        {
+          members: [
+            {
+              seatName: "builder",
+              agentId: null,
+              participantId: participantIdForThread(newBuilder),
+              threadId: newBuilder,
+              addedVersion: 2,
+              reason: "Implements",
+            },
+          ],
+          replaced: [
+            {
+              seatName: "builder",
+              agentId: null,
+              participantId: participantIdForThread(oldBuilder),
+              threadId: oldBuilder,
+              playbookStepIds: [],
+              replacedBySeat: "builder",
+              replacedByParticipantId: participantIdForThread(newBuilder),
+              replacedAt: DateTime.formatIso(createdAt),
+            },
+          ],
+        },
+      );
+      assert.equal(added!.modelSelection.model, "gpt-5.6-luna");
+      assert.deepStrictEqual(added!.assignment!.reviewIndependence?.authorModels, [
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+      ]);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.scoped),
 );

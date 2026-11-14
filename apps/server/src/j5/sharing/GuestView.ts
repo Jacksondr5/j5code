@@ -80,7 +80,6 @@ const PROTOCOL_FLAGS = [
   "shellResumeCompletionMarker",
   "threadResumeCompletionMarker",
   "threadSnapshotPagination",
-  "reasoningMessages",
   "threadFind",
   "threadFindProgressive",
 ] as const satisfies ReadonlyArray<keyof ServerConfig>;

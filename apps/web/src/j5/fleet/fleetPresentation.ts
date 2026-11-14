@@ -3,7 +3,7 @@ import type { J5ReadSource } from "@t3tools/client-runtime/j5/readSources";
 import type { FleetProblem, FleetRuntimeFact } from "@t3tools/contracts/j5";
 import type { TimestampFormat } from "@t3tools/contracts/settings";
 import { formatChatTimestampTooltip, formatElapsedDurationLabel } from "../../timestampFormat";
-import type { CrewSeatState } from "../crew/crewState";
+import type { CrewSeatState } from "@t3tools/client-runtime/j5/crew-state";
 
 export { fleetAgentKey } from "@t3tools/client-runtime/j5/fleetFacts";
 

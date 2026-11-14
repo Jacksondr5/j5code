@@ -12,14 +12,15 @@ import type { ParticipantProvenance } from "./placementContracts.ts";
 export function provenanceFromThreadLineage(input: {
   readonly lineage: Pick<
     OrchestrationV2AppThread["lineage"],
-    "parentThreadId" | "relationshipToParent"
+    "parentThreadId" | "relationshipToParent" | "sideChat"
   >;
   readonly parentParticipantId: ParticipantId | null;
 }): ParticipantProvenance {
   if (input.lineage.parentThreadId === null || input.parentParticipantId === null) {
     return { kind: "unknown", source: "native_or_unobserved" };
   }
-  switch (input.lineage.relationshipToParent) {
+  // A side chat is a hidden fork that answers its parent, as a subagent does.
+  switch (input.lineage.sideChat === true ? "subagent" : input.lineage.relationshipToParent) {
     case "subagent":
       return {
         kind: "spawned-by",

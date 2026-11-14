@@ -29,7 +29,7 @@ export const repointCliLauncherToSelf = Effect.fn("j5.cli.repoint_launcher_to_se
   if (!home) return Option.none<string>();
   return yield* repointLauncher({
     launchedAs: path.join(home, ".local/bin/j5"),
-    versionsDir,
+    baseDir,
     targetEntryPath: executable,
   });
 });

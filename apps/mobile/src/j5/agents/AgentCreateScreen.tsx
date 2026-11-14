@@ -6,7 +6,7 @@ import {
   defaultAgentPersonaModelRoute,
 } from "@t3tools/client-runtime/j5/agent-personas";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import type { AgentPersonaAuthorityPolicy, AgentPersonaModelTarget } from "@t3tools/contracts";
+import type { AgentPersonaAccess, AgentPersonaModelEntry } from "@t3tools/contracts";
 import { useState } from "react";
 import { Pressable, View } from "react-native";
 
@@ -28,8 +28,9 @@ type PersonaDraft = {
   idEdited: boolean;
   description: string;
   instructions: string;
-  authorityPolicy: AgentPersonaAuthorityPolicy;
-  modelRoute: readonly [AgentPersonaModelTarget, AgentPersonaModelTarget] | null;
+  access: AgentPersonaAccess;
+  modelRoute: ReadonlyArray<AgentPersonaModelEntry> | null;
+  independentReviewer: boolean;
 };
 
 /** Author a personal agent; it is stored as an imported definition of this environment. */
@@ -53,8 +54,9 @@ export function AgentCreateScreen() {
           idEdited: false,
           description: "",
           instructions: "",
-          authorityPolicy: "read-only",
+          access: "read-only",
           modelRoute: null,
+          independentReviewer: false,
         },
   );
   const [draft, setDraft] = useState(startingDraft);
@@ -92,8 +94,9 @@ export function AgentCreateScreen() {
         displayName: draft.displayName.trim(),
         description: draft.description.trim(),
         instructions: draft.instructions,
-        authorityPolicy: draft.authorityPolicy,
-        modelRoute: [modelRoute[0], modelRoute[1]],
+        access: draft.access,
+        modelRoute,
+        independentReviewer: draft.independentReviewer,
       },
     });
     setSaving(false);
@@ -106,10 +109,7 @@ export function AgentCreateScreen() {
     exit.leaveAfterSave();
   }
   return (
-    <SettingsFormScreen
-      title={props.initial ? "Duplicate persona" : "Create persona"}
-      guarded={exit.guarded}
-    >
+    <SettingsFormScreen title={props.initial ? "Duplicate persona" : "Create persona"}>
       <Text className="text-sm text-foreground-muted">
         A personal persona for this environment. It joins the library like an import, so you can
         edit, switch off, or remove it later.
@@ -161,7 +161,7 @@ export function AgentCreateScreen() {
         <TextInput
           accessibilityLabel="Instructions"
           multiline
-          autoCapitalize="none"
+          autoCapitalize="sentences"
           autoCorrect={false}
           style={{ minHeight: 160 }}
           placeholder="# Who this persona is"
@@ -170,7 +170,7 @@ export function AgentCreateScreen() {
           onChangeText={(instructions) => setDraft({ ...draft, instructions })}
         />
         <Text className="text-xs text-foreground-muted">
-          Markdown. Instructions describe behavior; the runtime policy below is what is enforced.
+          Markdown. Instructions describe behavior; the access level below is what is enforced.
         </Text>
       </View>
       {modelRoute === null ? (
@@ -180,9 +180,15 @@ export function AgentCreateScreen() {
       ) : (
         <AgentRoutePolicyFields
           environmentId={props.environmentId}
-          value={{ authorityPolicy: draft.authorityPolicy, modelRoute }}
+          value={{
+            access: draft.access,
+            modelRoute,
+            independentReviewer: draft.independentReviewer,
+          }}
           disabled={saving}
-          onChange={(next) => setDraft({ ...draft, ...next })}
+          onChange={(next) =>
+            setDraft({ ...draft, ...next, independentReviewer: next.independentReviewer === true })
+          }
         />
       )}
       {error ? (

@@ -1,4 +1,4 @@
-import { createElement } from "react";
+import { createElement, useLayoutEffect } from "react";
 import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { describe, expect, it, vi } from "vite-plus/test";
 
@@ -44,9 +44,12 @@ describe("reading an artifact while the route changes", () => {
   const read = (resource: string) => () =>
     new Promise<string>((resolve) => reads.set(resource, { resolve }));
 
-  let seen: ReturnType<typeof useServerRead<string>> | undefined;
+  const renders: Array<ReturnType<typeof useServerRead<string>>> = [];
   function Viewer(props: { readonly resource: string }) {
-    seen = useServerRead(props.resource, read(props.resource));
+    const value = useServerRead(props.resource, read(props.resource));
+    useLayoutEffect(() => {
+      renders.push(value);
+    });
     return null;
   }
 
@@ -57,16 +60,19 @@ describe("reading an artifact while the route changes", () => {
       renderer = create(createElement(Viewer, { resource: "plan.md" }));
     });
     await act(async () => reads.get("plan.md")?.resolve("# Plan"));
-    expect(seen?.load).toEqual({ status: "ready", value: "# Plan" });
+    expect(renders.at(-1)?.load).toEqual({ status: "ready", value: "# Plan" });
 
     await act(async () => renderer?.update(createElement(Viewer, { resource: "spec.md" })));
-    expect(seen?.load).toEqual({ status: "loading" });
+    expect(renders.at(-1)?.load).toEqual({ status: "loading" });
 
     await act(async () => reads.get("spec.md")?.resolve("# Spec"));
-    expect(seen?.load).toEqual({ status: "ready", value: "# Spec" });
+    expect(renders.at(-1)?.load).toEqual({ status: "ready", value: "# Spec" });
 
-    await act(async () => seen?.refresh());
-    expect(seen).toMatchObject({ load: { status: "ready", value: "# Spec" }, refreshing: true });
+    await act(async () => renders.at(-1)?.refresh());
+    expect(renders.at(-1)).toMatchObject({
+      load: { status: "ready", value: "# Spec" },
+      refreshing: true,
+    });
     await act(async () => renderer?.unmount());
     vi.unstubAllGlobals();
   });

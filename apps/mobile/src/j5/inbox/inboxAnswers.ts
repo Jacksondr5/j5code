@@ -122,7 +122,7 @@ export function useInboxAnswers(input: {
   // An ask that leaves the open list rereads that server's answered list, so a kept item learns
   // who answered, or that the agent withdrew it, as web's Inbox does.
   const previousOpenKeys = useRef(new Map<EnvironmentId, ReadonlySet<string>>());
-  // oxlint-disable-next-line t3code/react-effect-budget -- an ask leaving the open list rereads the answered list; it reacts to data arriving, not to a handler here.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- an ask leaving the open list rereads the answered list; it reacts to data arriving, not to a handler here.
   useEffect(() => {
     const next = new Map<EnvironmentId, ReadonlySet<string>>();
     for (const source of openSources.sources) {

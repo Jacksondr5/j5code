@@ -1,3 +1,4 @@
+import * as Arr from "effect/Array";
 import type { ProjectId, ThreadId } from "@t3tools/contracts";
 import { type WriterLevel, levelReaches } from "@t3tools/contracts/j5";
 import * as Context from "effect/Context";
@@ -120,11 +121,11 @@ const make = Effect.gen(function* () {
   const recordShared = Effect.fn("j5.sharing.sharedThreads.recordShared")(function* (
     threadIds: ReadonlyArray<string>,
   ) {
-    if (threadIds.length === 0) return;
+    if (!Arr.isReadonlyArrayNonEmpty(threadIds)) return;
     const at = DateTime.formatIso(yield* DateTime.now);
     yield* sql`
         INSERT INTO j5_a2a_shared_thread ${sql.insert(
-          threadIds.map((thread_id) => ({ thread_id, shared_at: at })),
+          Arr.map(threadIds, (thread_id) => ({ thread_id, shared_at: at })),
         )}
         ON CONFLICT (thread_id) DO NOTHING
       `;
@@ -139,19 +140,20 @@ const make = Effect.gen(function* () {
       FROM tree
       JOIN orchestration_v2_projection_threads AS child
         ON json_extract(child.payload_json, '$.lineage.parentThreadId') = tree.thread_id
-       AND json_extract(child.payload_json, '$.lineage.relationshipToParent') = 'subagent'
+       AND (
+         json_extract(child.payload_json, '$.lineage.relationshipToParent') = 'subagent'
+         OR json_extract(child.payload_json, '$.lineage.sideChat') = 1
+       )
       WHERE tree.depth < ${MAX_DESCENDANT_DEPTH}
       UNION
       SELECT placed.thread_id, tree.depth + 1
       FROM tree
+      -- A placement stays where it was made when Turn into project moves either agent.
       JOIN j5_a2a_membership AS parent ON parent.thread_id = tree.thread_id
       JOIN j5_a2a_participant_placement AS placement
-        ON placement.project_id = parent.project_id
-       AND placement.placement_parent_id = parent.participant_id
+        ON placement.placement_parent_id = parent.participant_id
        AND placement.provenance_kind <> 'forked-from'
-      JOIN j5_a2a_membership AS placed
-        ON placed.project_id = placement.project_id
-       AND placed.participant_id = placement.participant_id
+      JOIN j5_a2a_membership AS placed ON placed.participant_id = placement.participant_id
       WHERE tree.depth < ${MAX_DESCENDANT_DEPTH} AND placed.thread_id IS NOT NULL
     )
     SELECT DISTINCT thread_id FROM tree

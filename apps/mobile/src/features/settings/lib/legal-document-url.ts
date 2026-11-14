@@ -22,11 +22,11 @@ function marketingSiteDocumentUrl(path: string): string {
   return new URL(path, MARKETING_SITE_URL).toString();
 }
 
-export const PRIVACY_POLICY_URL = marketingSiteDocumentUrl("privacy-policy");
+const PRIVACY_POLICY_URL = marketingSiteDocumentUrl("privacy-policy");
 export const LEGAL_URL = marketingSiteDocumentUrl("legal");
 
 // J5 publishes no terms of service or security policy page, so neither is linked or allowed.
-export const ALLOWED_LEGAL_DOCUMENT_URLS = [LEGAL_URL, PRIVACY_POLICY_URL] as const;
+const ALLOWED_LEGAL_DOCUMENT_URLS = [LEGAL_URL, PRIVACY_POLICY_URL] as const;
 
 function webDocumentIdentity(value: string): string | null {
   try {

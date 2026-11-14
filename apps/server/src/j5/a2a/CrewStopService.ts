@@ -138,7 +138,7 @@ export const layer = Layer.effect(
           return yield* new CrewStopRequestError({
             detail: `Crew ${instance.id} is commanded by ${instance.captainParticipantId}; only its Captain or the human may stop it.`,
             nextStep:
-              "Ask the Captain with j5_send_message, or stop one agent you command with j5_stop_agent.",
+              "Ask the Captain with j5_send_message, or stop one agent with t3_thread_interrupt and stop: true.",
           });
         if (instance.archivedAt !== null)
           return yield* new CrewStopRequestError({

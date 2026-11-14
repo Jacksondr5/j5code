@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
@@ -70,7 +71,7 @@ const testLayer = Layer.mergeAll(
   ),
   ArtifactWorkspace.layer.pipe(
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-guest-artifacts-" })),
-    Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
   ),
 );
 

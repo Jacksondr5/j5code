@@ -33,13 +33,22 @@ export const projectFleetProject = (input: {
   readonly outsideAgentNames?: ReadonlyMap<string, string>;
 }): FleetResponse["projects"][number] => {
   const seatByParticipant = new Map<string, FleetAgent["crew"]>();
+  const replacedByParticipant = new Map<string, J5Contracts.ReplacedCrewSeat>();
   for (const crew of input.crews) {
     if (crew.archivedAt !== null) continue;
+    for (const member of crew.replaced ?? [])
+      replacedByParticipant.set(member.participantId, {
+        crewInstanceId: crew.id,
+        crewName: crew.displayName,
+        seat: member.seatName,
+        replacedBy: member.replacedBySeat,
+      });
     for (const member of crew.members) {
       seatByParticipant.set(member.participantId, {
         crewInstanceId: crew.id,
         crewName: crew.displayName,
         seat: member.seatName,
+        ...(member.notStarted === undefined ? {} : { notStarted: member.notStarted }),
         captainParticipantId: crew.captainParticipantId,
       });
     }
@@ -109,6 +118,9 @@ export const projectFleetProject = (input: {
             }
           : {}),
         crew: seatByParticipant.get(row.participantId) ?? null,
+        ...(replacedByParticipant.has(row.participantId)
+          ? { replaced: replacedByParticipant.get(row.participantId)! }
+          : {}),
         openAsks: input.openAsks.get(row.participantId) ?? 0,
         ...(input.facts?.has(row.participantId)
           ? { facts: input.facts.get(row.participantId)! }
@@ -132,6 +144,7 @@ export const projectFleetProject = (input: {
         const steps = member.playbookStepIds ?? [];
         return {
           seat: member.seatName,
+          ...(member.notStarted === undefined ? {} : { notStarted: member.notStarted }),
           agentId: member.agentId,
           participantId: member.participantId,
           addedVersion: member.addedVersion,

@@ -6,6 +6,7 @@ import { makeManualOnlyProviderMaintenanceCapabilities } from "@t3tools/provider
 import * as ProviderLatestVersions from "@t3tools/provider-core/server/ProviderLatestVersions";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as ProviderInstanceRegistryMutator from "../../provider/ProviderInstanceRegistryMutator.ts";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
@@ -122,6 +123,9 @@ it.effect("records a failed discovery without hiding it from a post-update refre
       Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "j5-skill-discovery-" })),
       Layer.provide(ProviderLatestVersions.layer),
       Layer.provide(ModelManifest.layerTest),
+      Layer.provide(
+        Layer.mock(ProviderInstanceRegistryMutator.ProviderInstanceRegistryMutator)({}),
+      ),
       Layer.provide(NodeServices.layer),
     );
     yield* Effect.gen(function* () {

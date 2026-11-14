@@ -7,6 +7,8 @@ export * from "./j5/fleet.ts";
 export * from "./j5/peerPoll.ts";
 export * from "./j5/playbook.ts";
 export * from "./j5/access.ts";
+export * from "./j5/crewMemberModels.ts";
+export * from "./j5/crewMemberReasoning.ts";
 export * from "./j5/levels.ts";
 export * from "./j5/people.ts";
 export * from "./j5/sharedConversation.ts";
@@ -24,8 +26,13 @@ import {
 } from "./providerPolicy.ts";
 import { EnvironmentAuthorizationError } from "./auth.ts";
 import { EnvironmentId, RuntimeRequestId, ThreadId } from "./baseSchemas.ts";
+import { ChatAttachment } from "./chatAttachment.ts";
 import { J5ActionError } from "./j5/actionError.ts";
-import { AgentPersonaId } from "./j5/agentPersona.ts";
+import {
+  AgentPersonaDraftView,
+  AgentPersonaEscalationView,
+  AgentPersonaId,
+} from "./j5/agentPersona.ts";
 
 export const HumanInboxItem = Schema.Struct({
   personId: Schema.String,
@@ -38,6 +45,10 @@ export const HumanInboxItem = Schema.Struct({
   intent: Schema.String,
   urgency: Schema.Literals(["blocking", "soon", "fyi"]),
   message: Schema.String,
+  /** What the agent added to this ask, oldest first; absent when it added nothing. */
+  followUps: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ messageId: Schema.String, message: Schema.String })),
+  ),
   openedAt: Schema.String,
   status: Schema.Literals(["open", "answered"]),
   terminalAt: Schema.NullOr(Schema.String),
@@ -45,6 +56,10 @@ export const HumanInboxItem = Schema.Struct({
   forEveryone: Schema.optionalKey(Schema.Boolean),
   /** Who answered an ask that is closed, by the name they had then (Inbox AC16). */
   answeredBy: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  /** A refused persona launch this ask escalates, as the server recorded it. */
+  escalation: Schema.optionalKey(AgentPersonaEscalationView),
+  /** A persona draft this ask carries for the Owner's "Save persona"; never with `escalation`. */
+  personaDraft: Schema.optionalKey(AgentPersonaDraftView),
 });
 export type HumanInboxItem = typeof HumanInboxItem.Type;
 export type ScopedHumanInboxItem = HumanInboxItem & { readonly environmentId: EnvironmentId };
@@ -62,6 +77,8 @@ export type HumanInboxResponse = typeof HumanInboxResponse.Type;
 export const AnswerHumanExchangeRequest = Schema.Struct({
   exchangeId: Schema.String.check(Schema.isNonEmpty()),
   message: Schema.String.check(Schema.isNonEmpty()),
+  /** Pending uploads, claimed into the asking agent's thread with the answer. */
+  attachments: Schema.optional(Schema.Array(ChatAttachment)),
   clientRequestId: Schema.String.check(Schema.isNonEmpty()),
 });
 export type AnswerHumanExchangeRequest = typeof AnswerHumanExchangeRequest.Type;
@@ -74,6 +91,23 @@ export const AnswerHumanExchangeResponse = Schema.Struct({
     durableAtSeq: Schema.Number,
   }),
 });
+
+/**
+ * The Owner's "Allow this once" on an ask escalating a refused persona launch: it answers the
+ * ask with a fixed reply and lets the asking agent retry that one launch past its one limit.
+ */
+export const AllowPersonaOnceRequest = Schema.Struct({
+  exchangeId: Schema.String.check(Schema.isNonEmpty()),
+  clientRequestId: Schema.String.check(Schema.isNonEmpty()),
+});
+export type AllowPersonaOnceRequest = typeof AllowPersonaOnceRequest.Type;
+
+/** The Owner's "Save persona" on an ask carrying an agent's persona draft. */
+export const SavePersonaDraftRequest = Schema.Struct({
+  exchangeId: Schema.String.check(Schema.isNonEmpty()),
+  clientRequestId: Schema.String.check(Schema.isNonEmpty()),
+});
+export type SavePersonaDraftRequest = typeof SavePersonaDraftRequest.Type;
 
 export const OpenInboxCountResponse = Schema.Struct({
   personId: Schema.String,
@@ -105,7 +139,14 @@ export const CrewSeatWorkspace = Schema.Union([
   Schema.Struct({ type: Schema.Literal("shared") }),
   Schema.Struct({
     type: Schema.Literal("worktree"),
+    /** The label for the base; what the worktree starts from is `baseCommit`. */
     baseRef: Schema.String,
+    /**
+     * The full commit `baseRef` meant when the choice was accepted. Absent only on a choice stored
+     * before commits were pinned, or edited on the card since; preview then resolves it and the
+     * approval binds what it showed.
+     */
+    baseCommit: Schema.optionalKey(Schema.String),
     branch: Schema.optionalKey(Schema.String),
     startFromOrigin: Schema.optionalKey(Schema.Boolean),
   }),
@@ -150,10 +191,17 @@ export const CrewProposalSeat = Schema.Struct({
   agentId: Schema.NullOr(Schema.String),
   reason: Schema.String,
   instructions: Schema.optional(Schema.String),
+  /**
+   * The persona's whole instructions as the person edited them on the roster card, run in place
+   * of the persona's own. Agents never set it; `instructions` stays the extra text beside them.
+   */
+  personaInstructions: Schema.optional(Schema.String),
   modelSelection: Schema.optional(ModelSelection),
   runtimeMode: Schema.optional(RuntimeMode),
   /** Ids of the playbook steps this seat owns; only on a Crew that follows a playbook. */
   steps: Schema.optionalKey(Schema.Array(Schema.String)),
+  /** Seats (or, for an addition, members) whose work this reviewer persona reviews; default: every non-reviewer. */
+  reviews: Schema.optionalKey(Schema.Array(Schema.String)),
   /**
    * Every seat proposed now names one; only seats recorded before workspaces were required, or
    * with one this version can't read, lack it, and the server refuses those until one is chosen.
@@ -195,6 +243,7 @@ export const CrewProposal = Schema.Struct({
   captainThreadId: Schema.String,
   crewInstanceId: Schema.NullOr(Schema.String),
   kind: Schema.Literals(["roster", "addition"]),
+  approvalMode: Schema.optionalKey(Schema.Literals(["human", "automatic"])),
   status: Schema.Literals(["open", "approved", "declined"]),
   displayName: Schema.String,
   brief: Schema.String,
@@ -278,7 +327,12 @@ export type CrewRef = typeof CrewRef.Type;
 
 /** What a sidebar row needs: which Crew a thread sits in, or which Crews it commands. */
 export const ThreadCrewMembership = Schema.Union([
-  Schema.Struct({ kind: Schema.Literal("member"), seat: Schema.String, crew: CrewRef }),
+  Schema.Struct({
+    kind: Schema.Literal("member"),
+    seat: Schema.String,
+    crew: CrewRef,
+    notStarted: Schema.optionalKey(Schema.Boolean),
+  }),
   Schema.Struct({ kind: Schema.Literal("captain"), crews: Schema.Array(CrewRef) }),
 ]);
 export type ThreadCrewMembership = typeof ThreadCrewMembership.Type;
@@ -291,13 +345,31 @@ export const CrewMembershipsResponse = Schema.Struct({
   entries: Schema.Array(CrewMembershipEntry),
 });
 
+/**
+ * A member its Captain replaced: a plain agent now, no longer a seat, kept readable with the seat
+ * it held and the member that took its place.
+ */
+export const ReplacedCrewSeat = Schema.Struct({
+  crewInstanceId: Schema.String,
+  crewName: Schema.String,
+  seat: Schema.String,
+  replacedBy: Schema.String,
+});
+export type ReplacedCrewSeat = typeof ReplacedCrewSeat.Type;
+
 /** One agent placed directly under a visible thread, with its Crew seat when it has one. */
 export const SpawnedChild = Schema.Struct({
   threadId: ThreadId,
   participantId: Schema.String,
   seat: Schema.NullOr(
-    Schema.Struct({ crewInstanceId: Schema.String, crewName: Schema.String, seat: Schema.String }),
+    Schema.Struct({
+      crewInstanceId: Schema.String,
+      crewName: Schema.String,
+      seat: Schema.String,
+      notStarted: Schema.optionalKey(Schema.Boolean),
+    }),
   ),
+  replaced: Schema.optionalKey(ReplacedCrewSeat),
 });
 export type SpawnedChild = typeof SpawnedChild.Type;
 export const SpawnedChildrenEntry = Schema.Struct({
@@ -382,9 +454,12 @@ export const FleetAgent = Schema.Struct({
       crewInstanceId: Schema.String,
       crewName: Schema.String,
       seat: Schema.String,
+      notStarted: Schema.optionalKey(Schema.Boolean),
       captainParticipantId: Schema.String,
     }),
   ),
+  /** Set when its Captain replaced it on a live Crew; `crew` is then null. */
+  replaced: Schema.optionalKey(ReplacedCrewSeat),
   /** Open Exchanges this agent owes a reply on. */
   openAsks: Schema.Number,
   /** Absent on older environments; clients must show unknown, never healthy. */
@@ -461,6 +536,33 @@ export type PreArchiveCrewSeat = typeof PreArchiveCrewSeat.Type;
  */
 export const CrewArchiveRequest = Schema.Struct({ crewInstanceId: Schema.String });
 export type CrewArchiveRequest = typeof CrewArchiveRequest.Type;
+
+/**
+ * Why a Crew seat's worktree stays after the Crew is archived: it has uncommitted or untracked
+ * changes, commits the default branch does not have (and no merged pull request for that exact
+ * commit), another unarchived thread works in it, a provider session is still open in it, J5
+ * could not check one of those, or `git worktree remove` failed.
+ */
+export const CrewWorktreeReason = Schema.Literals([
+  "uncommitted_changes",
+  "unmerged_commits",
+  "shared",
+  "in_use",
+  "unverified",
+  "failed",
+]);
+export type CrewWorktreeReason = typeof CrewWorktreeReason.Type;
+
+/** One worktree J5 created for a Crew seat, and what archiving the Crew did with it. */
+export const CrewArchiveWorktree = Schema.Struct({
+  path: Schema.String,
+  branch: Schema.NullOr(Schema.String),
+  outcome: Schema.Literals(["removed", "kept", "failed"]),
+  /** Null when removed. */
+  reason: Schema.NullOr(CrewWorktreeReason),
+});
+export type CrewArchiveWorktree = typeof CrewArchiveWorktree.Type;
+
 export const CrewArchiveResponse = Schema.Struct({
   crewInstanceId: Schema.String,
   status: Schema.Literals(["archived", "already_archived"]),
@@ -471,8 +573,89 @@ export const CrewArchiveResponse = Schema.Struct({
       result: Schema.Literals(["archived", "already_archived"]),
     }),
   ),
+  /** Absent from a server that predates worktree cleanup, which removed none. */
+  worktrees: Schema.Array(CrewArchiveWorktree).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
 });
 export type CrewArchiveResponse = typeof CrewArchiveResponse.Type;
+
+/**
+ * What archiving these Crews would do with the worktrees J5 created for their seats, read before
+ * the person confirms. An estimate: each is checked again when the archive runs.
+ */
+export const CrewArchiveWorktreesRequest = Schema.Struct({
+  crewInstanceIds: Schema.Array(Schema.String),
+});
+export type CrewArchiveWorktreesRequest = typeof CrewArchiveWorktreesRequest.Type;
+export const CrewArchiveWorktreeEstimate = Schema.Struct({
+  crewInstanceId: Schema.String,
+  seat: Schema.String,
+  path: Schema.String,
+  branch: Schema.NullOr(Schema.String),
+  verdict: Schema.Literals(["remove", "keep"]),
+  /** Null when it would be removed. */
+  reason: Schema.NullOr(CrewWorktreeReason),
+});
+export type CrewArchiveWorktreeEstimate = typeof CrewArchiveWorktreeEstimate.Type;
+const CrewArchiveWorktreesResponse = Schema.Struct({
+  worktrees: Schema.Array(CrewArchiveWorktreeEstimate),
+});
+
+/**
+ * One worktree an archive kept with unfinished work, as measured when the archive kept it.
+ * Removing it discards the uncommitted files; the branch, and so every commit, stays.
+ */
+export const CrewWorktreeCleanupEntry = Schema.Struct({
+  threadId: ThreadId,
+  threadTitle: Schema.String,
+  path: Schema.String,
+  branch: Schema.NullOr(Schema.String),
+  uncommittedFiles: Schema.Int,
+  /** Null when the default branch could not be compared. */
+  commitsAhead: Schema.NullOr(Schema.Int),
+  pullRequestUrl: Schema.NullOr(Schema.String),
+  /** Null until the item is decided. `kept` is the person's choice; `skipped` is J5's. */
+  outcome: Schema.NullOr(Schema.Literals(["removed", "kept", "skipped", "failed"])),
+  /**
+   * Why it was skipped: its work changed after the item was filed, another unarchived thread or
+   * an open session now uses it, it was already gone, or J5 could not check it.
+   */
+  reason: Schema.NullOr(Schema.Literals(["changed", "shared", "in_use", "gone", "unverified"])),
+  /** The git error text of a failed removal. */
+  detail: Schema.NullOr(Schema.String),
+});
+export type CrewWorktreeCleanupEntry = typeof CrewWorktreeCleanupEntry.Type;
+
+/** The one Inbox approval an archive files for every J5-created worktree it kept unfinished. */
+export const CrewWorktreeCleanupItem = Schema.Struct({
+  id: Schema.String,
+  crewInstanceId: Schema.String,
+  crewName: Schema.String,
+  projectId: Schema.String,
+  captainThreadId: ThreadId,
+  filedAt: Schema.String,
+  status: Schema.Literals(["open", "decided"]),
+  decidedAt: Schema.NullOr(Schema.String),
+  entries: Schema.Array(CrewWorktreeCleanupEntry),
+});
+export type CrewWorktreeCleanupItem = typeof CrewWorktreeCleanupItem.Type;
+
+export const CrewWorktreeCleanupListRequest = Schema.Struct({
+  status: Schema.Literals(["open", "decided"]),
+});
+export type CrewWorktreeCleanupListRequest = typeof CrewWorktreeCleanupListRequest.Type;
+export const CrewWorktreeCleanupListResponse = Schema.Struct({
+  items: Schema.Array(CrewWorktreeCleanupItem),
+});
+
+/** The paths to remove; an empty list keeps every worktree and clears the item. */
+export const CrewWorktreeCleanupAnswerRequest = Schema.Struct({
+  itemId: Schema.String.check(Schema.isNonEmpty()),
+  removePaths: Schema.Array(Schema.String),
+});
+export type CrewWorktreeCleanupAnswerRequest = typeof CrewWorktreeCleanupAnswerRequest.Type;
+export const CrewWorktreeCleanupAnswerResponse = Schema.Struct({
+  item: CrewWorktreeCleanupItem,
+});
 
 /**
  * What a J5 server reports about its ledger. Every J5 read is gated on `j5ProjectLedger`. The two
@@ -1004,6 +1187,9 @@ export const J5_CLIENT_ACTION_WS_METHODS = {
   archiveCrew: "j5.crews.archive",
   respondCrewRuntimeRequest: "j5.crews.respondRuntimeRequest",
   answerHumanExchange: "j5.inbox.answer",
+  allowPersonaOnce: "j5.inbox.allowPersonaOnce",
+  savePersonaDraft: "j5.inbox.savePersonaDraft",
+  answerCrewWorktreeCleanup: "j5.crews.answerWorktreeCleanup",
   issuePeerCredential: "j5.peers.issueCredential",
   addPeer: "j5.peers.add",
   removePeer: "j5.peers.remove",
@@ -1043,6 +1229,21 @@ export const J5ClientActionRpcGroup = RpcGroup.make(
   Rpc.make(J5_CLIENT_ACTION_WS_METHODS.answerHumanExchange, {
     payload: AnswerHumanExchangeRequest,
     success: AnswerHumanExchangeResponse,
+    error: clientActionError,
+  }),
+  Rpc.make(J5_CLIENT_ACTION_WS_METHODS.allowPersonaOnce, {
+    payload: AllowPersonaOnceRequest,
+    success: AnswerHumanExchangeResponse,
+    error: clientActionError,
+  }),
+  Rpc.make(J5_CLIENT_ACTION_WS_METHODS.savePersonaDraft, {
+    payload: SavePersonaDraftRequest,
+    success: AnswerHumanExchangeResponse,
+    error: clientActionError,
+  }),
+  Rpc.make(J5_CLIENT_ACTION_WS_METHODS.answerCrewWorktreeCleanup, {
+    payload: CrewWorktreeCleanupAnswerRequest,
+    success: CrewWorktreeCleanupAnswerResponse,
     error: clientActionError,
   }),
   Rpc.make(J5_CLIENT_ACTION_WS_METHODS.issuePeerCredential, {
@@ -1177,6 +1378,8 @@ export const J5_CLIENT_READ_WS_METHODS = {
   readFleet: "j5.fleet.read",
   listSpawnedChildren: "j5.fleet.listSpawnedChildren",
   readPreArchiveFacts: "j5.archive.readFacts",
+  readCrewArchiveWorktrees: "j5.archive.readCrewWorktrees",
+  listCrewWorktreeCleanups: "j5.crews.listWorktreeCleanups",
   readParticipantIdentities: "j5.participants.readIdentities",
   listPeers: "j5.peers.list",
   subscribeReadChanges: "j5.reads.subscribeChanges",
@@ -1245,6 +1448,16 @@ export const J5ClientReadRpcGroup = RpcGroup.make(
     J5_CLIENT_READ_WS_METHODS.readPreArchiveFacts,
     PreArchiveFactsRequest,
     PreArchiveFacts,
+  ),
+  clientRead(
+    J5_CLIENT_READ_WS_METHODS.readCrewArchiveWorktrees,
+    CrewArchiveWorktreesRequest,
+    CrewArchiveWorktreesResponse,
+  ),
+  clientRead(
+    J5_CLIENT_READ_WS_METHODS.listCrewWorktreeCleanups,
+    CrewWorktreeCleanupListRequest,
+    CrewWorktreeCleanupListResponse,
   ),
   clientRead(
     J5_CLIENT_READ_WS_METHODS.readParticipantIdentities,

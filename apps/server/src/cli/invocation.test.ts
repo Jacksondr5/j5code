@@ -19,8 +19,9 @@ it.layer(NodeServices.layer)("root CLI commands", (it) => {
     readonly path?: string;
     readonly env?: Record<string, string>;
     readonly executable?: boolean;
+    readonly args?: ReadonlyArray<string>;
   }) =>
-    resolveRootCliCommand("browser setup").pipe(
+    resolveRootCliCommand("browser setup", input.args).pipe(
       Effect.provideService(HostProcess.ExecutablePath, input.node),
       Effect.provideService(HostProcess.Arguments, [input.node, input.entry]),
       Effect.provideService(HostProcess.IsExecutable, input.executable ?? false),
@@ -55,6 +56,23 @@ it.layer(NodeServices.layer)("root CLI commands", (it) => {
     }).pipe(Effect.scoped),
   );
 
+  it.effect("keeps the arguments, so root runs setup on the same J5 home", () =>
+    Effect.gen(function* () {
+      const args = ["--base-dir", "/srv/j5 home"];
+      expect(
+        yield* rootCommand({
+          node: "/home/theo/.local/node/bin/node",
+          entry: "/home/theo/.local/lib/node_modules/t3/dist/bin.mjs",
+          path: yield* pathWithJ5,
+          args,
+        }),
+      ).toBe(`sudo env "PATH=$PATH" j5 browser setup --base-dir '/srv/j5 home'`);
+      expect(
+        yield* rootCommand({ node: "/opt/j5/j5", entry: "/opt/j5/j5", executable: true, args }),
+      ).toBe("sudo /opt/j5/j5 browser setup --base-dir '/srv/j5 home'");
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("names this install's launcher when j5 is not on PATH", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -70,7 +88,16 @@ it.layer(NodeServices.layer)("root CLI commands", (it) => {
       };
 
       expect(yield* rootCommand(desktop)).toBe(`sudo '${shim}' browser setup`);
+
+      // An unrelated `j5` on PATH is another install's CLI.
       expect(yield* rootCommand({ ...desktop, path: yield* pathWithJ5 })).toBe(
+        `sudo '${shim}' browser setup`,
+      );
+
+      // The link the app installs onto PATH leads to its own launcher, so plain `j5` is right.
+      const linked = yield* fs.makeTempDirectoryScoped();
+      yield* fs.symlink(shim, path.join(linked, "j5"));
+      expect(yield* rootCommand({ ...desktop, path: linked })).toBe(
         'sudo env "PATH=$PATH" j5 browser setup',
       );
 

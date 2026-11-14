@@ -2,7 +2,7 @@ import type { AdvertisedEndpoint } from "@t3tools/contracts";
 import { isMarkedShareLink, markedAsShareLink } from "@t3tools/contracts/j5";
 import { describe, expect, it } from "vite-plus/test";
 
-import { getPairingTokenFromUrl } from "../../pairingUrl";
+import { getPairingTokenFromUrl } from "@t3tools/shared/remote";
 import {
   lifetimeLeft,
   linkRouteFromBaseUrl,

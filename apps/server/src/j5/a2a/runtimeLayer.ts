@@ -1,3 +1,4 @@
+import * as CrewSeatPreparation from "./CrewSeatPreparation.ts";
 import * as SpawnAgentService from "./SpawnAgentService.ts";
 import * as Layer from "effect/Layer";
 import { layerEventSink as OrchestrationV2EventSinkLayerLive } from "../../orchestration-v2/runtimeLayer.ts";
@@ -15,11 +16,16 @@ import { layer as archiveCrewLayer } from "./ArchiveCrewService.ts";
 import { layerNotifying as agentCrewProposalNotifyingLayer } from "./AgentCrewProposalService.ts";
 import { manualLayer as crewLaunchReporterLayer } from "./CrewLaunchReporter.ts";
 import { layer as crewLaunchLayer } from "./CrewLaunchService.ts";
+import { layer as crewMemberModelsLayer } from "../agents/crewMemberModels.ts";
+import { layer as agentPersonaEscalationsLayer } from "../agents/agentPersonaEscalation.ts";
+import { layer as agentPersonaDraftsLayer } from "../agents/agentPersonaDrafts.ts";
 import { layer as crewProposalLayer } from "./CrewProposalService.ts";
 import { layer as crewSeatFinishNotifierLayer } from "./CrewSeatFinishNotifier.ts";
 import * as NativeQuestionNotifier from "./NativeQuestionNotifier.ts";
 import { layer as captainArchiveCascadeLayer } from "./CrewCaptainArchiveCascade.ts";
 import { layer as crewStopLayer } from "./CrewStopService.ts";
+import { layer as crewWorktreesLayer } from "./CrewWorktrees.ts";
+import { layer as projectionStoreLayer } from "../../orchestration-v2/ProjectionStore.ts";
 import { layer as crewRuntimeRequestLayer } from "./CrewRuntimeRequestService.ts";
 import { layer as deliveryWorkerLayer } from "./DeliveryWorker.ts";
 import { live as deliveryTransportLayer } from "./DeliveryTransport.ts";
@@ -53,10 +59,6 @@ import { layer as spawnWorkspaceLayer } from "./spawnWorkspace.ts";
 import * as RequestReplayService from "./RequestReplayService.ts";
 import { layer as sharedConversationLayer } from "../sharing/SharedConversation.ts";
 import { layer as sharedThreadsLayer } from "../sharing/SharedThreads.ts";
-import { layer as agentHandoffArtifactDeleteLayer } from "../agents/agentHandoffArtifactDelete.ts";
-import { layer as agentHandoffNudgeQueueLayer } from "../agents/agentHandoffNudgeQueue.ts";
-import { layer as agentHandoffNudgeWorkerLayer } from "../agents/agentHandoffNudgeWorker.ts";
-import { layer as agentHandoffRefreshesLayer } from "../agents/agentHandoffRefreshes.ts";
 import { layer as exchangeAnalyticsLayer } from "../analytics/ExchangeAnalytics.ts";
 import { layer as fleetSnapshotLayer } from "../analytics/FleetSnapshot.ts";
 import { layer as threadAnalyticsLayer } from "../analytics/ThreadAnalytics.ts";
@@ -143,10 +145,11 @@ const makeJ5A2AAuxiliaryLayer = (
     Layer.provide(peerHttpClient),
   );
   const archiveFactsProvided = archiveFactsLayer.pipe(Layer.provide(placementFactsLayer));
-  // The saved-agent handoff worker drains the queue the run-finalization observer fills; the
-  // queue layer is the same instance server.ts provides to that observer.
-  const agentHandoffNudgeWorkerProvided = agentHandoffNudgeWorkerLayer.pipe(
-    Layer.provide(agentHandoffNudgeQueueLayer),
+  // One instance: its recorder daemon tails the event stream, and the archive and the dialog's
+  // read use the same service. The stateless projection reader is built from the shared database.
+  const crewWorktreesProvided = crewWorktreesLayer.pipe(
+    Layer.provide(projectionStoreLayer),
+    Layer.provide(readChangesLayer),
   );
   const archiveAgentProvided = archiveAgentLayer.pipe(
     Layer.provideMerge(lifecycleServiceProvided),
@@ -158,6 +161,7 @@ const makeJ5A2AAuxiliaryLayer = (
     Layer.provideMerge(archiveAgentProvided),
     Layer.provideMerge(agentCrewInstanceLayer),
     Layer.provideMerge(playbookStoreLayer),
+    Layer.provideMerge(crewWorktreesProvided),
   );
   // Hands each landing of a Crew-linked run to the seat that owns it, inside the Captain's step
   // calls; a pending hand-off is finished by the Captain's next or retried call.
@@ -168,6 +172,11 @@ const makeJ5A2AAuxiliaryLayer = (
   const crewLaunchProvided = crewLaunchLayer.pipe(
     Layer.provideMerge(agentCrewInstanceLayer),
     Layer.provideMerge(spawnWorkspaceProvided),
+    Layer.provideMerge(crewMemberModelsLayer),
+    // Every persona launch records its refusals here, and the Owner's grant is read from here.
+    Layer.provideMerge(agentPersonaEscalationsLayer.pipe(Layer.provide(agentCrewInstanceLayer))),
+    // Agents' persona drafts wait here for the Owner's "Save persona".
+    Layer.provideMerge(agentPersonaDraftsLayer.pipe(Layer.provide(agentCrewInstanceLayer))),
   );
   // The report watches the seats an approval launched and tells the Captain how they started; the
   // finish notifier's stream feeds it, so one stream serves every Crew reaction.
@@ -197,20 +206,15 @@ const makeJ5A2AAuxiliaryLayer = (
     Layer.provideMerge(archiveCrewProvided),
     Layer.provideMerge(agentCrewInstanceLayer),
   );
-  // The finish notifier tells a Captain when a seat's handoff file appears, so it reads the workspace.
   const crewSeatFinishNotifierProvided = crewSeatFinishNotifierLayer.pipe(
     Layer.provideMerge(crewLaunchReporterProvided),
     Layer.provideMerge(captainArchiveCascadeProvided),
     Layer.provideMerge(agentCrewInstanceLayer),
-    Layer.provide(artifactWorkspaceLayer),
   );
   const runtimeWithoutClientReads = Layer.mergeAll(
+    CrewSeatPreparation.layer,
     playbookStoreLayer,
     playbookCrewRelayProvided,
-    agentHandoffNudgeWorkerProvided,
-    // Exported to the routes so the J5 WebSocket handler streams the same revision counter the
-    // observer bumps (server.ts provides this layer object to the observer; Effect memoizes it).
-    agentHandoffRefreshesLayer,
     humanPersonRegistryLayer,
     machineParticipantLayer,
     peerDirectoryProvided,
@@ -248,10 +252,8 @@ const makeJ5A2AAuxiliaryLayer = (
     // ends a person's asks through the one lifecycle service, whose permit orders every drop.
     sharedConversationLayer.pipe(Layer.provide(lifecycleServiceProvided)),
   ).pipe(Layer.provideMerge(sharedThreadsLayer), Layer.provideMerge(peerRegistryProvided));
-  // The person's permanent artifact delete, which also marks a handoff that pointed at the file.
+  // The person's permanent artifact delete.
   const artifactDeletionProvided = artifactDeletionLayer.pipe(
-    Layer.provide(agentHandoffArtifactDeleteLayer),
-    Layer.provide(agentHandoffRefreshesLayer),
     Layer.provide(artifactWorkspaceLayer),
   );
   // What clients read and do, over the services above.

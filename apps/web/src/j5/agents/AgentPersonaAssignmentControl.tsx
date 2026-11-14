@@ -16,7 +16,10 @@ import { useEnvironmentQuery } from "../../state/query";
 import { AgentHandoffChip } from "./AgentHandoffChip";
 import { agentPersonaEnvironment } from "./agentPersonaAtoms";
 
-/** Replaces the model and mode controls for a persona thread: the launch route is fixed. */
+/**
+ * A persona's identity in the composer. On a draft it replaces the model and mode controls and
+ * shows the model the persona would start on; on a started thread it sits beside the model picker.
+ */
 export function AgentPersonaAssignmentControl(props: {
   readonly assignment: OrchestrationV2AgentPersonaAssignment;
   /** When known, the current library is compared with the launch snapshot to show drift. */
@@ -49,25 +52,32 @@ export function AgentPersonaAssignmentControl(props: {
           <ComposerControlIcon icon={BotIcon} opticalSize="large" />
           {presentation.personaLabel}
         </TooltipTrigger>
-        <TooltipPopup side="top">
-          Assigned by an agent orchestrator when this task started.
+        <TooltipPopup side="top" className="max-w-72">
+          {props.threadId === undefined
+            ? "Runs with this persona's instructions and access."
+            : `Runs on ${presentation.routeLabel}.`}
+          {presentation.switchNote === null ? null : ` ${presentation.switchNote}`}
         </TooltipPopup>
       </Tooltip>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <ComposerControl
-              type="button"
-              disabled
-              aria-label={`Assigned model: ${presentation.routeLabel}`}
-              className="max-w-64 overflow-hidden text-ellipsis whitespace-nowrap"
-            />
-          }
-        >
-          {presentation.routeLabel}
-        </TooltipTrigger>
-        <TooltipPopup side="top">This persona's model route is fixed for this task.</TooltipPopup>
-      </Tooltip>
+      {props.threadId === undefined ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <ComposerControl
+                type="button"
+                disabled
+                aria-label={`Assigned model: ${presentation.routeLabel}`}
+                className="max-w-64 overflow-hidden text-ellipsis whitespace-nowrap"
+              />
+            }
+          >
+            {presentation.routeLabel}
+          </TooltipTrigger>
+          <TooltipPopup side="top">
+            The persona's first available model. You can switch it once the task starts.
+          </TooltipPopup>
+        </Tooltip>
+      ) : null}
       {props.onClear ? (
         <Tooltip>
           <TooltipTrigger

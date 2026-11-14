@@ -7,7 +7,7 @@ import { useDraftAgentAssignment } from "./useDraftAgentAssignment";
 
 /**
  * The new-task draft's saved agent, in its own row under the checkout row: the picker until one is
- * chosen, then its persona, route and remove action, which the composer's input row has no room for.
+ * chosen, then its persona's name and remove action, which the composer's input row has no room for.
  */
 export function DraftAgentRow(props: {
   readonly environmentId: EnvironmentId;

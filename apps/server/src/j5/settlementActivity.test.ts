@@ -21,7 +21,6 @@ import { LedgerMessageId } from "./a2a/contracts.ts";
 
 const stores = [
   ["sql", ProjectionStore.layer.pipe(Layer.provideMerge(SqlitePersistence.layerMemory))],
-  ["memory", ProjectionStore.layerMemory],
 ] as const;
 
 const now = DateTime.makeUnsafe("2026-10-09T12:00:00Z");

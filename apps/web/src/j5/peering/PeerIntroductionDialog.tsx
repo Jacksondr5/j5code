@@ -163,7 +163,7 @@ export function PeerIntroductionDialog({
     local !== null && remote !== null && recordsRead && !heldHere && bothSupportPoll
       ? `${local.environmentId}|${remote.environmentId}`
       : null;
-  // oxlint-disable-next-line t3code/react-effect-budget -- runs the peering check against both servers whenever the pair changes, and drops a stale answer.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- runs the peering check against both servers whenever the pair changes, and drops a stale answer.
   useEffect(() => {
     if (checkKey === null || local === null || remote === null) return;
     let cancelled = false;

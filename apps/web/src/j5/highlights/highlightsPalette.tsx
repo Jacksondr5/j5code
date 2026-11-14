@@ -39,7 +39,7 @@ export function HighlightsSidebarReveal() {
   const { isMobile, open, openMobile, setOpen, setOpenMobile } = useSidebar();
   const requested = popover.open && popover.mode === "all";
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- the palette opens the list from outside the sidebar, so the sidebar opens itself in response.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- the palette opens the list from outside the sidebar, so the sidebar opens itself in response.
   useEffect(() => {
     if (!requested) return;
     if (onUtilityPage) void navigateToMainApp();

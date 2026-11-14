@@ -1,5 +1,5 @@
-import { type ChatAttachment, OrchestratorMcpFailure, type RuntimeMode } from "@t3tools/contracts";
-import * as Crypto from "effect/Crypto";
+import { type ChatAttachment, OrchestratorMcpFailure } from "@t3tools/contracts";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -13,7 +13,6 @@ import {
 } from "../../../mcp/McpInvocationContext.ts";
 import * as McpToolAccess from "../../../mcp/McpToolAccess.ts";
 import { assertTargetWithinLimits, loadCaller } from "../../../mcp/threadAccess.ts";
-import { exceededDispatchModeLimit } from "../../../orchestration-v2/DispatchModeLimit.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
 import { type CommCommandId, outsideAgentParticipantId } from "../contracts.ts";
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
@@ -39,6 +38,15 @@ export const spawnAndBrief = (task: string) =>
   `Start an agent with j5_spawn_agent and brief it to ${task}.`;
 
 /**
+ * Upstream's `writes`, telling work a fenced link started what J5 refuses it, where upstream's
+ * own refusal names scheduled tasks.
+ */
+export const j5Writes = <P, A, E, R>(handle: (params: P) => Effect.Effect<A, E, R>) =>
+  McpToolAccess.writes(handle, {
+    linkedRefusal: "message, start or stop agents here, which only this environment's own work may",
+  });
+
+/**
  * Declares a tool that acts as the calling thread, so it is refused to an outside agent with a
  * message naming what it can do instead. Every such J5 tool uses this, so none admits an outside
  * agent by a forgotten check. It is `writes` underneath: read-only clients are refused, and callers
@@ -49,7 +57,7 @@ export const actsAsThreadCaller = <P, A, E, R>(
   legalMove: string,
   handle: (params: P, scope: McpThreadInvocationScope) => Effect.Effect<A, E, R>,
 ) =>
-  McpToolAccess.writes((params: P) =>
+  j5Writes((params: P) =>
     threadCaller(tool, legalMove).pipe(Effect.flatMap((scope) => handle(params, scope))),
   );
 
@@ -108,31 +116,6 @@ export const outsideSpawnHasNoCheckout = new J5OutsideAgentToolError({
 });
 
 /**
- * A persona's policy sets the agent's permission mode, and for an outside agent that mode must
- * be within the level its sign-in was approved at. A thread caller's persona spawn has no such
- * ceiling: the approved level is a promise the approval page makes about an agent the person
- * does not watch.
- */
-export const assertPersonaWithinApprovedLevel = Effect.fn(
-  "j5.a2a.mcp.assertPersonaWithinApprovedLevel",
-)(function* (caller: OutsideAgentCaller, persona: string, runtimeMode: RuntimeMode) {
-  const { limits } = yield* loadCaller();
-  if (
-    exceededDispatchModeLimit(limits, {
-      runtimeMode,
-      interactionMode: limits.interactionMode,
-    }) === undefined
-  ) {
-    return;
-  }
-  return yield* new J5OutsideAgentToolError({
-    state: `Persona ${persona} runs in permission mode ${runtimeMode}, which is broader than the level this MCP client was approved for (${caller.client.access}).`,
-    nextCommand:
-      "Retry j5_spawn_agent with a persona within that level (j5_list_personas shows each one's runtime policy) or without a persona, or sign in again and have the person approve a higher level.",
-  });
-});
-
-/**
  * `j5_send_message` for an outside agent: a plain message to an agent on this server, recorded in
  * the receiver's project. The approved sign-in level caps every send, one that asks for no steer or restart included,
  * because it is a promise the approval page makes about an agent the person does not watch.
@@ -146,12 +129,13 @@ export const sendAsOutsideAgent = Effect.fn("j5.a2a.mcp.sendAsOutsideAgent")(fun
   if (
     input.expect_reply === true ||
     input.exchange_id != null ||
+    input.regarding != null ||
     input.intent != null ||
     input.urgency != null
   ) {
     return yield* new J5OutsideAgentToolError({
       state:
-        "An outside agent sends plain messages only. It cannot receive a reply, so expect_reply, exchange_id, intent and urgency are refused.",
+        "An outside agent sends plain messages only. It cannot receive a reply, so expect_reply, exchange_id, regarding, intent and urgency are refused.",
       nextCommand: "Retry j5_send_message without them.",
     });
   }
@@ -181,7 +165,8 @@ export const sendAsOutsideAgent = Effect.fn("j5.a2a.mcp.sendAsOutsideAgent")(fun
   const attachments = input.attachments ?? [];
   const acceptedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
   const requestKey =
-    input.client_request_id ?? (yield* (yield* Crypto.Crypto).randomUUIDv4().pipe(Effect.orDie));
+    input.client_request_id ??
+    (yield* (yield* SecureRandom.SecureRandom).uuidV4().pipe(Effect.orDie));
   const send = (claimed?: ReadonlyArray<ChatAttachment>) =>
     service.sendAsOutsideAgent({
       commandId: commandIdFor(requestKey),

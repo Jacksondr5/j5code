@@ -345,7 +345,8 @@ export const layer: Layer.Layer<
         event.kind !== "participant.left" &&
         event.kind !== "participant.archived" &&
         event.kind !== "participant.unarchived" &&
-        event.kind !== "participant.deleted"
+        event.kind !== "participant.deleted" &&
+        event.kind !== "participant.moved"
       )
         return;
       const participant = event.payload.participant;
@@ -366,6 +367,27 @@ export const layer: Layer.Layer<
         `;
         return;
       }
+      if (event.kind === "participant.moved") {
+        // The ledger it left drops its row; the one it joined takes it, archived or not.
+        if (event.projectId === event.payload.fromProjectId) {
+          yield* sql`
+            DELETE FROM j5_a2a_membership
+            WHERE project_id = ${event.projectId} AND participant_id = ${id}
+          `;
+          return;
+        }
+        yield* sql`
+          INSERT INTO j5_a2a_membership (
+            project_id, participant_id, participant_kind, thread_id, joined_seq, updated_seq,
+            payload, archived_at
+          ) VALUES (
+            ${event.projectId}, ${id}, ${participant.kind},
+            ${participant.kind === "agent" ? participant.threadId : null}, ${event.seq},
+            ${event.seq}, ${yield* encodeJson(participant)}, ${event.payload.archivedAt}
+          )
+        `;
+        return;
+      }
       if (event.kind === "participant.archived" || event.kind === "participant.unarchived") {
         yield* sql`UPDATE j5_a2a_membership
           SET archived_at = ${event.kind === "participant.archived" ? event.createdAt : null}, updated_seq = ${event.seq}
@@ -374,7 +396,8 @@ export const layer: Layer.Layer<
       }
       if (event.kind === "participant.left" || event.kind === "participant.deleted") {
         if (event.kind === "participant.deleted") {
-          yield* sql`DELETE FROM j5_a2a_participant_placement WHERE project_id = ${event.projectId} AND participant_id = ${id}`;
+          // Its placement stays where it was made when Turn into project moves it, so it goes by id.
+          yield* sql`DELETE FROM j5_a2a_participant_placement WHERE participant_id = ${id}`;
         }
         yield* sql`
           DELETE FROM j5_a2a_membership
@@ -668,6 +691,7 @@ export const layer: Layer.Layer<
         case "participant.archived":
         case "participant.unarchived":
         case "participant.deleted":
+        case "participant.moved":
           return;
       }
     });
@@ -1060,7 +1084,7 @@ export const layer: Layer.Layer<
                     created_at
                   FROM j5_a2a_comm_event
                   WHERE project_id = ${ledgerProjectId}
-                    AND kind IN ('participant.joined', 'participant.left', 'participant.archived', 'participant.unarchived', 'participant.deleted')
+                    AND kind IN ('participant.joined', 'participant.left', 'participant.archived', 'participant.unarchived', 'participant.deleted', 'participant.moved')
                   ORDER BY seq
                 `;
                 for (const row of rows) {

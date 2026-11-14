@@ -4,7 +4,7 @@ import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 
 import type { SupervisorConnectionState } from "../connection/model.ts";
-import type { EnvironmentCatalogState } from "../state/connections.ts";
+import { type EnvironmentCatalogState, enabledEnvironmentIds } from "../state/connections.ts";
 
 /** Environment labels are noise until a read model actually spans more than one environment. */
 export const spansMultipleEnvironments = (
@@ -28,6 +28,8 @@ export interface J5ReadSource<A> {
   readonly refreshing: boolean;
   /** Set when the source is unsupported because the connection is a guest's, not for the server's age. */
   readonly guest?: true;
+  /** Set when an offline source is retrying after a failure, which upstream calls reconnecting. */
+  readonly reconnecting?: true;
 }
 
 export interface J5ReadSources<A> {
@@ -39,6 +41,8 @@ export function resolveJ5ReadSource<A>(input: {
   readonly environmentId: EnvironmentId;
   readonly environmentLabel: string;
   readonly phase: SupervisorConnectionState["phase"];
+  /** A retry after a failure, or the wait before one, which upstream presents as reconnecting. */
+  readonly reconnecting?: boolean;
   readonly supported?: boolean;
   readonly guest?: boolean;
   readonly result: AsyncResult.AsyncResult<A, unknown>;
@@ -50,7 +54,7 @@ export function resolveJ5ReadSource<A>(input: {
   const status = unsupported
     ? "unsupported"
     : !connected
-      ? input.phase === "connecting" || input.phase === "available"
+      ? input.phase === "connecting" && input.reconnecting !== true
         ? "loading"
         : "offline"
       : failure !== null
@@ -72,11 +76,13 @@ export function resolveJ5ReadSource<A>(input: {
           : "The environment request failed.",
     refreshing: connected && input.result.waiting,
     ...(input.guest === true ? { guest: true as const } : {}),
+    ...(status === "offline" && input.reconnecting === true ? { reconnecting: true as const } : {}),
   };
 }
 
 /**
  * Merge read models through the existing catalog; each source keeps its own data and failure state.
+ * A server the person turned off is left out, as upstream's thread and project lists leave it out.
  * A server whose config does not report the capability has no J5 ledger: its source is unsupported
  * and this read is never made.
  */
@@ -99,7 +105,8 @@ export function createJ5ReadSourcesAtom<A>(input: {
   return Atom.make((get) => {
     const catalog = get(input.catalogValueAtom);
     const sources: Array<J5ReadSource<A>> = [];
-    for (const [environmentId, entry] of catalog.entries) {
+    for (const environmentId of enabledEnvironmentIds(catalog)) {
+      const entry = catalog.entries.get(environmentId)!;
       const state = Option.getOrNull(AsyncResult.value(get(input.stateAtom(environmentId))));
       const config = get(input.configValueAtom(environmentId));
       const guest = input.guestAtom !== undefined && get(input.guestAtom(environmentId));
@@ -112,7 +119,13 @@ export function createJ5ReadSourcesAtom<A>(input: {
         resolveJ5ReadSource({
           environmentId,
           environmentLabel: entry.target.label,
-          phase: state?.phase ?? "available",
+          // Before its supervisor publishes, an enabled server is starting to connect.
+          phase: state?.phase ?? "connecting",
+          // Upstream's `presentConnectionState` rule for "Reconnecting".
+          reconnecting:
+            state !== null &&
+            (state.phase === "backoff" ||
+              (state.phase === "connecting" && (state.attempt > 1 || state.lastFailure !== null))),
           ...(supported === undefined ? {} : { supported }),
           guest,
           result:

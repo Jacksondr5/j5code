@@ -1,4 +1,5 @@
-// @effect-diagnostics nodeBuiltinImport:off - FileSystem cannot create a FIFO.
+// @effect-diagnostics nodeBuiltinImport:off - deterministic legacy hashes and FIFO fixture subprocesses.
+import * as NodeCrypto from "node:crypto";
 import * as NodeChildProcess from "node:child_process";
 
 import { assert, describe, it } from "@effect/vitest";
@@ -8,6 +9,7 @@ import {
   AgentPersonaImportConflictError,
   ProviderDriverKind,
   ProviderInstanceId,
+  ThreadId,
   type OrchestrationV2AgentPersonaAssignment,
 } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -18,15 +20,21 @@ import * as PlatformError from "effect/PlatformError";
 import * as Schema from "effect/Schema";
 import { stringify as yaml } from "yaml";
 
-import { prepareAgentPersonaLaunch } from "./agentPersonaLaunch.ts";
+import { prepareAgentPersonaLaunch as prepareLaunch } from "./agentPersonaLaunch.ts";
 import {
   AgentPersonaLibraryError,
   definitionDigest,
   createAgentPersonaLibrary,
 } from "./agentPersonaLibrary.ts";
-import { BUILT_IN_AGENT_PERSONAS, decodeAgentPersonaDefinition } from "./agentPersonas.ts";
+import {
+  AGENT_PERSONA_ACCESS_REPAIR,
+  BUILT_IN_AGENT_PERSONAS,
+  decodeAgentPersonaDefinition,
+} from "./agentPersonas.ts";
 import { validateAgentPersonaAssignment } from "./agentPersonaAssignment.ts";
 import { resolveAgentPersonaRuntime } from "./agentPersonaRuntime.ts";
+
+const prepareAgentPersonaLaunch = prepareLaunch;
 
 const isImportConflict = Schema.is(AgentPersonaImportConflictError);
 const isLibraryError = Schema.is(AgentPersonaLibraryError);
@@ -68,7 +76,7 @@ const assignmentFor = (digest: string | undefined): OrchestrationV2AgentPersonaA
   resolvedDriver: ProviderDriverKind.make("codex"),
   resolvedModelSelection: {
     instanceId: ProviderInstanceId.make("codex"),
-    model: custom.modelRoute[0].model,
+    model: custom.modelRoute[0]!.model,
     options: [{ id: "reasoningEffort", value: "high" }],
   },
 });
@@ -186,12 +194,6 @@ describe("folder-backed persona library", () => {
       reason: "Invalid persona definition",
       location: false,
     },
-    {
-      name: "artifact reference",
-      content: yaml({ ...custom, outputArtifact: diagnosticCanary }),
-      reason: "Invalid persona definition",
-      location: false,
-    },
   ])("keeps source contents out of $name diagnostics", ({ content, reason, location }) =>
     Effect.gen(function* () {
       const { library, write, fs, path, folder } = yield* fixture;
@@ -285,7 +287,7 @@ describe("folder-backed persona library", () => {
   it.effect("reports invalid files, invalid configuration, and missing configured folders", () =>
     Effect.gen(function* () {
       const { library, write, fs, path, stateDir } = yield* fixture;
-      yield* write("invalid.yaml", { ...custom, outputArtifact: "UndefinedArtifact" });
+      yield* write("invalid.yaml", { ...custom, version: "one" });
       yield* write("valid.yaml", custom);
       yield* fs.writeFileString(path.join(stateDir, "personas", "syntax.yaml"), "id: [");
       const catalog = yield* library.catalog();
@@ -297,7 +299,7 @@ describe("folder-backed persona library", () => {
       assert.include(catalog.diagnostics[0]!.path, "invalid.yaml");
       assert.equal(
         catalog.diagnostics[0]!.message,
-        "Invalid persona definition: check field types, authority policy, and artifact references.",
+        "Invalid persona definition: check field types and access policy.",
       );
       assert.notInclude(catalog.diagnostics[0]!.message, "UndefinedArtifact");
       assert.include(catalog.diagnostics[1]!.path, "syntax.yaml");
@@ -318,9 +320,14 @@ describe("folder-backed persona library", () => {
     "resumes from the snapshot after source edits and removal, including same-version edits",
     () =>
       Effect.gen(function* () {
-        const { library, write, fs, folder } = yield* fixture;
+        const { library, write, fs, folder, path, stateDir } = yield* fixture;
         yield* write("researcher.yaml", custom);
-        const assignment = assignmentFor(yield* library.snapshot(custom));
+        const stored = JSON.stringify(custom);
+        const digest = NodeCrypto.createHash("sha256").update(stored).digest("hex");
+        const snapshotPath = path.join(stateDir, "agent-persona-snapshots", `${digest}.json`);
+        yield* fs.makeDirectory(path.dirname(snapshotPath), { recursive: true });
+        yield* fs.writeFileString(snapshotPath, stored);
+        const assignment = assignmentFor(digest);
         assert.isDefined(assignment.definitionDigest);
         yield* write("researcher.yaml", { ...custom, instructions: "Changed behavior" });
         assert.equal((yield* library.load())[0]?.instructions, "Changed behavior");
@@ -333,10 +340,13 @@ describe("folder-backed persona library", () => {
         });
         const restored = yield* freshLibrary.readSnapshot(assignment);
         assert.isUndefined(validateAgentPersonaAssignment(assignment, restored));
-        const policy = yield* resolveAgentPersonaRuntime(
-          { agentPersonaAssignment: assignment, runtimeMode: "full-access" },
-          freshLibrary,
-        );
+        // A thread with an id is what used to get the artifact section appended.
+        const thread = {
+          id: ThreadId.make("thread:persona-run"),
+          agentPersonaAssignment: assignment,
+          runtimeMode: "full-access" as const,
+        };
+        const policy = yield* resolveAgentPersonaRuntime(thread, freshLibrary);
         assert.include(
           "agentPersonaInstructions" in policy ? policy.agentPersonaInstructions : "",
           custom.instructions,
@@ -345,8 +355,282 @@ describe("folder-backed persona library", () => {
           "agentPersonaInstructions" in policy ? policy.agentPersonaInstructions : "",
           "Changed behavior",
         );
+        // `custom` still declares a TeamBrief, and the run owes no file for it.
+        assert.notInclude(
+          "agentPersonaInstructions" in policy ? policy.agentPersonaInstructions : "",
+          "TeamBrief",
+        );
         assert.equal(policy.runtimeMode, "approval-required");
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect(
+    "loads a snapshot that still carries retired handoff fields, under the same digest",
+    () =>
+      Effect.gen(function* () {
+        const { library, fs, path, stateDir } = yield* fixture;
+        // The digest is the one this definition had before the handoff fields were retired.
+        const legacy = {
+          id: "legacy-handoff",
+          version: 2,
+          displayName: "Legacy Handoff",
+          description: "Declared handoff artifacts before they were retired.",
+          artifacts: ["TeamBrief"],
+          inputArtifacts: ["ContextBrief"],
+          outputArtifact: "TeamBrief",
+          authority: { defaultPolicy: "read-only", allowedPolicies: ["read-only"] },
+          modelRoute: [
+            { driver: "codex", model: "gpt-5.6-terra", reasoningEffort: "high" },
+            { driver: "claudeAgent", model: "claude-opus-5", reasoningEffort: "high" },
+          ],
+          instructions: "# Identity\nLegacy.",
+        };
+        const digest = "b997f65bdec8e4a3aebe4fc1a51e3138d3cf21fd7c7a9cbef7c87b24faa162f9";
+        assert.equal(yield* library.snapshot(decodeAgentPersonaDefinition(legacy)), digest);
+        yield* fs.writeFileString(
+          path.join(stateDir, "agent-persona-snapshots", `${digest}.json`),
+          json(legacy),
+        );
+        const assignment = {
+          ...assignmentFor(digest),
+          personaId: legacy.id,
+          definitionVersion: legacy.version,
+          displayName: legacy.displayName,
+        };
+        const loaded = yield* library.readSnapshot(assignment);
+        assert.equal(loaded.outputArtifact, "TeamBrief");
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("rejects a snapshot changed only by an unknown property", () =>
+    Effect.gen(function* () {
+      const { library, fs, path, stateDir } = yield* fixture;
+      const assignment = assignmentFor(yield* library.snapshot(custom));
+      const file = path.join(
+        stateDir,
+        "agent-persona-snapshots",
+        `${assignment.definitionDigest}.json`,
+      );
+      yield* fs.writeFileString(file, json({ ...custom, extra: "tampered" }));
+      const result = yield* library.readSnapshot(assignment).pipe(Effect.flip);
+      assert.include(String(result), "does not match");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("refuses a workspace-write snapshot on Claude", () =>
+    Effect.gen(function* () {
+      const { library } = yield* fixture;
+      const definition = decodeAgentPersonaDefinition({
+        ...custom,
+        authority: undefined,
+        access: "workspace-write",
+      });
+      const assignment = {
+        ...assignmentFor(yield* library.snapshot(definition)),
+        authorityPolicy: "workspace-write" as const,
+        resolvedDriver: ProviderDriverKind.make("claudeAgent"),
+      };
+      const error = yield* resolveAgentPersonaRuntime(
+        { agentPersonaAssignment: assignment, runtimeMode: "full-access" },
+        library,
+      ).pipe(Effect.flip);
+      assert.include(String(error), "runtime permissions are unsupported");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("continues a saved critic-fix worker without the retired allowed-policy check", () =>
+    Effect.gen(function* () {
+      const { library, fs, path, stateDir } = yield* fixture;
+      const definition = decodeAgentPersonaDefinition({
+        ...custom,
+        authority: {
+          defaultPolicy: "read-only",
+          allowedPolicies: ["read-only"],
+        },
+      });
+      const assignment = {
+        ...assignmentFor(yield* library.snapshot(definition)),
+        authorityPolicy: "critic-fix" as const,
+      };
+      const file = path.join(
+        stateDir,
+        "agent-persona-snapshots",
+        `${assignment.definitionDigest}.json`,
+      );
+      const before = yield* fs.readFileString(file);
+      const resolved = yield* resolveAgentPersonaRuntime(
+        { agentPersonaAssignment: assignment, runtimeMode: "full-access" },
+        library,
+      );
+      assert.equal(resolved.runtimeMode, "auto-accept-edits");
+      assert.deepEqual("sandboxPolicy" in resolved ? resolved.sandboxPolicy : undefined, {
+        type: "workspaceWrite",
+        networkAccess: false,
+      });
+      assert.include(
+        "agentPersonaInstructions" in resolved ? resolved.agentPersonaInstructions : "",
+        custom.instructions,
+      );
+      assert.equal(yield* fs.readFileString(file), before);
+      assert.deepEqual(assignment.authorityPolicy, "critic-fix");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect(
+    "preserves pre-upgrade critic snapshots, instructions, and access after source removal",
+    () =>
+      Effect.gen(function* () {
+        const { library, fs, path, folder, stateDir, write } = yield* fixture;
+        const critic = BUILT_IN_AGENT_PERSONAS.critic;
+        const digest = "29aa1fd0d49b2bff3f19bbb02888f0ec3f8a6f563968f229afeaf552cd5f3493";
+        assert.equal(yield* library.snapshot(critic), digest);
+        yield* write("critic.yaml", { ...critic, instructions: "Different source instructions." });
+        yield* fs.remove(folder, { recursive: true });
+        const file = path.join(stateDir, "agent-persona-snapshots", `${digest}.json`);
+        const bytes = yield* fs.readFileString(file);
+        for (const authorityPolicy of ["critic-review", "critic-fix"] as const) {
+          const assignment = {
+            ...assignmentFor(digest),
+            personaId: critic.id,
+            definitionVersion: critic.version,
+            displayName: critic.displayName,
+            authorityPolicy,
+            resolvedRoute: "fallback" as const,
+          };
+          const runtime = yield* resolveAgentPersonaRuntime(
+            { agentPersonaAssignment: assignment, runtimeMode: "full-access" },
+            library,
+          );
+          assert.equal(
+            runtime.runtimeMode,
+            authorityPolicy === "critic-review" ? "approval-required" : "auto-accept-edits",
+          );
+          assert.include(
+            "agentPersonaInstructions" in runtime ? runtime.agentPersonaInstructions : "",
+            critic.instructions,
+          );
+          assert.notInclude(
+            "agentPersonaInstructions" in runtime ? runtime.agentPersonaInstructions : "",
+            "Different source instructions.",
+          );
+          assert.equal(assignment.authorityPolicy, authorityPolicy);
+        }
+        assert.equal(yield* fs.readFileString(file), bytes);
+        const historical = decodeAgentPersonaDefinition({
+          ...custom,
+          authority: { defaultPolicy: "diagnostic", allowedPolicies: ["diagnostic"] },
+        });
+        const overridden = {
+          ...assignmentFor(yield* library.snapshot(historical)),
+          authorityPolicy: "diagnostic" as const,
+          runtimeModeOverride: "full-access" as const,
+        };
+        const runtime = yield* resolveAgentPersonaRuntime(
+          { agentPersonaAssignment: overridden, runtimeMode: "full-access" },
+          library,
+        );
+        assert.equal(runtime.runtimeMode, "full-access");
+        assert.include(
+          "agentPersonaInstructions" in runtime ? runtime.agentPersonaInstructions : "",
+          custom.instructions,
+        );
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("reports unsupported source access with a repair message", () =>
+    Effect.gen(function* () {
+      const { library, write } = yield* fixture;
+      yield* write("invalid.yaml", {
+        ...custom,
+        authority: { defaultPolicy: "diagnostic", allowedPolicies: ["diagnostic"] },
+      });
+      const catalog = yield* library.catalog();
+      assert.deepEqual(catalog.definitions, []);
+      assert.lengthOf(catalog.diagnostics, 1);
+      assert.include(catalog.diagnostics[0]!.message, "read-only, workspace-write, or full-access");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("keeps invalid imported overrides blocked without rewriting the library", () =>
+    Effect.gen(function* () {
+      const { library, write, fs, path, stateDir } = yield* fixture;
+      yield* write("source.yaml", custom);
+      const file = path.join(stateDir, "imported-agent-personas.json");
+      const imported = [
+        {
+          ...custom,
+          enabled: false,
+          authority: { defaultPolicy: "diagnostic", allowedPolicies: ["diagnostic"] },
+        },
+        {
+          ...custom,
+          id: "publisher-invalid",
+          authority: { defaultPolicy: "publish-only", allowedPolicies: ["publish-only"] },
+        },
+        { ...custom, id: "valid-override", enabled: false },
+      ];
+      const bytes = json(imported);
+      yield* fs.writeFileString(file, bytes);
+      const catalog = yield* library.catalog();
+      assert.deepEqual(
+        catalog.definitions.map(({ id }) => id),
+        ["valid-override"],
+      );
+      assert.include(catalog.disabledIds, "valid-override");
+      assert.lengthOf(catalog.diagnostics, 2);
+      for (const diagnostic of catalog.diagnostics)
+        assert.include(diagnostic.message, "read-only, workspace-write, or full-access");
+      assert.equal(yield* fs.readFileString(file), bytes);
+      assert.deepEqual(yield* library.load(), []);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("loads and edits ordered imports while preserving saved snapshots", () =>
+    Effect.gen(function* () {
+      const { library, write } = yield* fixture;
+      const { authority: _authority, ...legacy } = custom;
+      const newer = {
+        ...legacy,
+        access: "read-only",
+        modelRoute: [
+          { instanceId: "codex", model: "first" },
+          { instanceId: "claudeAgent", model: "second" },
+          { instanceId: "codex", model: "third" },
+        ],
+      };
+      yield* write("source.yaml", custom);
+      yield* library.importFiles({
+        files: [{ name: "new.yaml", content: yaml(newer) }],
+        replaceExisting: true,
+      });
+      const definition = yield* library.read(custom.id);
+      yield* library.editImported({
+        personaId: custom.id,
+        expectedDigest: definitionDigest(definition),
+        displayName: "Edited ordered persona",
+        description: definition.description,
+        instructions: definition.instructions,
+        access: "read-only",
+        modelRoute: [...definition.modelRoute].reverse(),
+      });
+      const edited = yield* library.read(custom.id);
+      assert.deepEqual([...edited.modelRoute], [...definition.modelRoute].reverse());
+      assert.equal(edited.access, "read-only");
+      assert.isUndefined(edited.authority);
+      const assignment = {
+        ...assignmentFor(yield* library.snapshot(definition)),
+        authorityPolicy: "critic-review" as const,
+      };
+      const policy = yield* resolveAgentPersonaRuntime(
+        { agentPersonaAssignment: assignment, runtimeMode: "full-access" },
+        library,
+      );
+      assert.equal(policy.runtimeMode, "approval-required");
+      assert.include(
+        "agentPersonaInstructions" in policy ? policy.agentPersonaInstructions : "",
+        custom.instructions,
+      );
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
   it.effect("refuses a missing or modified snapshot instead of adopting current source", () =>
@@ -370,7 +654,6 @@ describe("folder-backed persona library", () => {
 
   it("validates structured references, identifiers, and authority choices", () => {
     assert.throws(() => decodeAgentPersonaDefinition({ ...custom, id: "../escape" }));
-    assert.throws(() => decodeAgentPersonaDefinition({ ...custom, inputArtifacts: ["Unknown"] }));
     assert.throws(() =>
       decodeAgentPersonaDefinition({
         ...custom,
@@ -575,6 +858,36 @@ describe("imported persona library", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
+  it.effect("an override of a folder persona is what every launch on the server loads", () =>
+    Effect.gen(function* () {
+      const { library, write, fs, folder, path } = yield* fixture;
+      yield* write("source.yaml", custom);
+      const sourceText = yield* fs.readFileString(path.join(folder, "source.yaml"));
+      const edit: AgentPersonaEditInput = {
+        personaId: custom.id,
+        expectedDigest: definitionDigest(custom),
+        displayName: custom.displayName,
+        description: custom.description,
+        instructions: "Cite two sources.",
+        access: "read-only",
+        modelRoute: custom.modelRoute,
+      };
+      const stale = yield* library
+        .overrideSource({ ...edit, expectedDigest: "0".repeat(64) })
+        .pipe(Effect.flip);
+      assert.include(stale.message, "changed since it was read");
+      yield* library.overrideSource(edit);
+      // The library is the server's, with no per-person view: anyone's launch loads this.
+      const loaded = (yield* library.load()).find(({ id }) => id === custom.id);
+      assert.equal(loaded?.instructions, "Cite two sources.");
+      assert.equal(loaded?.version, custom.version + 1);
+      assert.equal(yield* fs.readFileString(path.join(folder, "source.yaml")), sourceText);
+      // A second override of the same persona is an imported edit, not another override.
+      const again = yield* library.overrideSource(edit).pipe(Effect.flip);
+      assert.include(again.message, "no longer a folder persona");
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("preserves disabled state on replacement and clears it on removal", () =>
     Effect.gen(function* () {
       const { library, write } = yield* fixture;
@@ -739,9 +1052,69 @@ describe("editing imported agents", () => {
     displayName: definition.displayName,
     instructions: definition.instructions,
     description: definition.description,
-    authorityPolicy: definition.authority.defaultPolicy,
+    access: "read-only",
     modelRoute: definition.modelRoute,
   });
+
+  it.effect(
+    "keeps the reviewer flag through an edit that leaves it out, and stores no flag when cleared",
+    () =>
+      Effect.gen(function* () {
+        const { library } = yield* fixture;
+        // A definition saved before the flag existed loads with the digest it always had.
+        yield* library.importFiles({
+          files: [{ name: "agent.yaml", content: yaml(custom) }],
+          replaceExisting: false,
+        });
+        const current = () =>
+          library
+            .catalog()
+            .pipe(Effect.map(({ definitions }) => definitions.find(({ id }) => id === custom.id)!));
+        assert.equal(definitionDigest(yield* current()), definitionDigest(custom));
+
+        yield* library.editImported({ ...edit(), independentReviewer: true });
+        const flagged = yield* current();
+        assert.isTrue(flagged.independentReviewer);
+        // A client from before the flag sends no field, which keeps it.
+        yield* library.editImported({
+          ...edit(),
+          expectedDigest: definitionDigest(flagged),
+          displayName: "Renamed",
+        });
+        const renamed = yield* current();
+        assert.isTrue(renamed.independentReviewer);
+        yield* library.editImported({
+          ...edit(),
+          expectedDigest: definitionDigest(renamed),
+          independentReviewer: false,
+        });
+        assert.notProperty(yield* current(), "independentReviewer");
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("rejects unsupported access edits before changing stored bytes", () =>
+    Effect.gen(function* () {
+      const { library, fs, path, stateDir } = yield* fixture;
+      yield* library.importFiles({
+        files: [{ name: "agent.yaml", content: yaml(custom) }],
+        replaceExisting: false,
+      });
+      const file = path.join(stateDir, "imported-agent-personas.json");
+      const before = yield* fs.readFileString(file);
+      for (const authorityPolicy of ["diagnostic", "publish-only"] as const) {
+        const error = yield* library
+          // @ts-expect-error untyped input must also fail before writing.
+          .editImported({ ...edit(), access: authorityPolicy })
+          .pipe(Effect.flip);
+        assert.include(String(error), "Invalid agent details");
+        assert.equal(yield* fs.readFileString(file), before);
+        assert.deepEqual(
+          (yield* library.load()).map(({ id }) => id),
+          [custom.id],
+        );
+      }
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
 
   it.effect(
     "updates only the imported copy and preserves source, instructions, snapshots, and disabled state",
@@ -759,28 +1132,32 @@ describe("editing imported agents", () => {
           ...edit(),
           displayName: "Edited Researcher",
           description: "Edited description",
-          authorityPolicy: "workspace-write",
+          access: "workspace-write",
           modelRoute: [
             {
               driver: ProviderDriverKind.make("codex"),
               model: "team-model",
               reasoningEffort: "medium",
             },
-            custom.modelRoute[1],
+            custom.modelRoute[1]!,
           ],
         };
         yield* library.editImported(update);
         const restarted = createAgentPersonaLibrary({ fs, path, stateDir });
         const catalog = yield* restarted.catalog();
         const changed = catalog.definitions.find(({ id }) => id === custom.id)!;
-        assert.deepEqual(changed, {
-          ...custom,
-          displayName: update.displayName,
-          description: update.description,
-          version: custom.version + 1,
-          authority: { defaultPolicy: "workspace-write", allowedPolicies: ["workspace-write"] },
-          modelRoute: update.modelRoute,
-        });
+        const { authority: _legacyAuthority, ...details } = custom;
+        assert.deepEqual(
+          changed,
+          decodeAgentPersonaDefinition({
+            ...details,
+            displayName: update.displayName,
+            description: update.description,
+            version: custom.version + 1,
+            access: "workspace-write",
+            modelRoute: update.modelRoute,
+          }),
+        );
         assert.include(catalog.disabledIds, custom.id);
         assert.equal(yield* fs.readFileString(path.join(folder, "agent.yaml")), yaml(custom));
         assert.deepEqual(yield* restarted.readSnapshot(assignment), custom);
@@ -832,7 +1209,7 @@ describe("editing imported agents", () => {
   );
 
   it.effect(
-    "requires an imported copy and retains allowed policy choices when the default is unchanged",
+    "requires an imported copy and replaces legacy policy choices with one access level",
     () =>
       Effect.gen(function* () {
         const { library, write } = yield* fixture;
@@ -850,12 +1227,64 @@ describe("editing imported agents", () => {
           replaceExisting: true,
         });
         yield* library.editImported({ ...edit(definition), displayName: "New name" });
-        assert.deepEqual((yield* library.load())[0]?.authority, definition.authority);
+        assert.equal((yield* library.load())[0]?.authority, undefined);
+        assert.equal((yield* library.load())[0]?.access, "read-only");
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });
 
 describe("confirmed import replacement", () => {
+  it.effect("requires confirmation before replacing a hidden invalid import", () =>
+    Effect.gen(function* () {
+      const { library, fs, path, stateDir, write } = yield* fixture;
+      yield* write("source.yaml", custom);
+      const original = decodeAgentPersonaDefinition({
+        ...custom,
+        instructions: "Original reusable standards.",
+        authority: { defaultPolicy: "diagnostic", allowedPolicies: ["diagnostic"] },
+      });
+      const file = path.join(stateDir, "imported-agent-personas.json");
+      const before = json([{ ...original, enabled: false }]);
+      yield* fs.writeFileString(file, before);
+      assert.deepEqual((yield* library.catalog()).definitions, []);
+      const files = [
+        {
+          name: "replacement.yaml",
+          content: yaml({ ...custom, instructions: "Replacement standards." }),
+        },
+      ];
+      const conflict = yield* library
+        .importFiles({ files, replaceExisting: false })
+        .pipe(Effect.flip);
+      if (!isImportConflict(conflict)) return yield* Effect.die("Expected hidden-import conflict");
+      assert.deepEqual(conflict.conflicts, [
+        {
+          personaId: custom.id,
+          displayName: original.displayName,
+          definitionDigest: definitionDigest(original),
+        },
+      ]);
+      assert.equal(yield* fs.readFileString(file), before);
+      const changed = { ...original, instructions: "Edited while confirmation was open." };
+      yield* fs.writeFileString(file, json([{ ...changed, enabled: false }]));
+      const stale = yield* library
+        .importFiles({ files, replaceExisting: true, confirmedConflicts: conflict.conflicts })
+        .pipe(Effect.flip);
+      if (!isImportConflict(stale))
+        return yield* Effect.die("Expected fresh hidden-import confirmation");
+      assert.equal(stale.conflicts[0]?.definitionDigest, definitionDigest(changed));
+      assert.equal(yield* fs.readFileString(file), json([{ ...changed, enabled: false }]));
+      yield* library.importFiles({
+        files,
+        replaceExisting: true,
+        confirmedConflicts: stale.conflicts,
+      });
+      const catalog = yield* library.catalog();
+      assert.equal(catalog.definitions[0]?.instructions, "Replacement standards.");
+      assert.include(catalog.disabledIds, custom.id);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("reports conflicts before writing the batch and replaces only after confirmation", () =>
     Effect.gen(function* () {
       const { library } = yield* fixture;
@@ -923,7 +1352,7 @@ describe("confirmed import replacement", () => {
         displayName: "Concurrent edit",
         description: custom.description,
         instructions: custom.instructions,
-        authorityPolicy: custom.authority.defaultPolicy,
+        access: "read-only",
         modelRoute: custom.modelRoute,
       });
       yield* library.importFiles({
@@ -1087,7 +1516,6 @@ describe("YAML agent definitions", () => {
         "id: [broken",
         "id: one\nid: two",
         yaml({ ...custom, version: "one" }),
-        yaml({ ...custom, outputArtifact: "UnknownArtifact" }),
         yaml(custom) + "\n---\n" + yaml(custom),
         "id: !custom researcher",
         "id: &name researcher\ndisplayName: *name",
@@ -1180,6 +1608,59 @@ describe("restoring removed agents", () => {
 });
 
 describe("personal agents", () => {
+  it.effect("rejects unsupported access creates without leaving a hidden import", () =>
+    Effect.gen(function* () {
+      const { library, fs, path, stateDir } = yield* fixture;
+      const input = {
+        id: custom.id,
+        displayName: custom.displayName,
+        description: custom.description,
+        instructions: custom.instructions,
+        modelRoute: custom.modelRoute,
+      };
+      for (const authorityPolicy of ["diagnostic", "publish-only"] as const) {
+        const error = yield* library
+          // @ts-expect-error untyped input must also fail before writing.
+          .createPersona({ ...input, access: authorityPolicy })
+          .pipe(Effect.flip);
+        assert.include(String(error), "Invalid agent details");
+        assert.isFalse(yield* fs.exists(path.join(stateDir, "imported-agent-personas.json")));
+      }
+      yield* library.createPersona({ ...input, access: "read-only" });
+      assert.deepEqual(
+        (yield* library.load()).map(({ id }) => id),
+        [custom.id],
+      );
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("reserves hidden imported IDs so recreation cannot corrupt the library", () =>
+    Effect.gen(function* () {
+      const { library, fs, path, stateDir } = yield* fixture;
+      const file = path.join(stateDir, "imported-agent-personas.json");
+      const bytes = json([
+        { ...custom, authority: { defaultPolicy: "diagnostic", allowedPolicies: ["diagnostic"] } },
+      ]);
+      yield* fs.writeFileString(file, bytes);
+      assert.deepEqual((yield* library.catalog()).definitions, []);
+      const error = yield* library
+        .createPersona({
+          id: custom.id,
+          displayName: custom.displayName,
+          description: custom.description,
+          instructions: custom.instructions,
+          modelRoute: custom.modelRoute,
+          access: "read-only",
+        })
+        .pipe(Effect.flip);
+      assert.include(String(error), "already exists");
+      assert.equal(yield* fs.readFileString(file), bytes);
+      assert.lengthOf((yield* library.catalog()).diagnostics, 1);
+      yield* library.removeImported(custom.id);
+      assert.deepEqual(yield* library.load(), []);
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
   it.effect(
     "creates an enabled imported agent from Settings details and rejects duplicate IDs",
     () =>
@@ -1190,7 +1671,7 @@ describe("personal agents", () => {
           displayName: "My Reviewer",
           description: "Reviews my changes.",
           instructions: "# My Reviewer\n\nReview carefully.",
-          authorityPolicy: "read-only",
+          access: "read-only",
           modelRoute: custom.modelRoute,
         });
         assert.equal(created.personaId, "my-reviewer");
@@ -1199,10 +1680,8 @@ describe("personal agents", () => {
         const definition = catalog.definitions.find(({ id }) => id === "my-reviewer");
         assert.isTrue(catalog.importedIds.includes("my-reviewer"));
         assert.isFalse(catalog.disabledIds.includes("my-reviewer"));
-        assert.deepEqual(definition?.authority, {
-          defaultPolicy: "read-only",
-          allowedPolicies: ["read-only"],
-        });
+        assert.equal(definition?.access, "read-only");
+        assert.equal(definition?.authority, undefined);
         assert.equal(definition?.outputArtifact, undefined);
         assert.equal(definition?.acceptedInput, undefined);
         assert.equal(definition?.version, 1);
@@ -1213,7 +1692,7 @@ describe("personal agents", () => {
             displayName: "Again",
             description: "Again.",
             instructions: "Again.",
-            authorityPolicy: "read-only",
+            access: "read-only",
             modelRoute: custom.modelRoute,
           })
           .pipe(Effect.flip);
@@ -1224,7 +1703,7 @@ describe("personal agents", () => {
           displayName: "Scout",
           description: "My research persona.",
           instructions: "Collect evidence.",
-          authorityPolicy: "read-only",
+          access: "read-only",
           modelRoute: custom.modelRoute,
         });
         assert.equal(scout.personaId, "scout");
@@ -1253,7 +1732,7 @@ describe("reading and editing definitions", () => {
         displayName: "My Reviewer",
         description: "Reviews my changes.",
         instructions: "Review carefully.",
-        authorityPolicy: "read-only",
+        access: "read-only",
         modelRoute: custom.modelRoute,
       });
       const before = yield* library.read(created.personaId);
@@ -1263,8 +1742,8 @@ describe("reading and editing definitions", () => {
         displayName: before.displayName,
         description: before.description,
         instructions: "Review carefully.\n\nAlways cite file paths.",
-        authorityPolicy: "read-only",
-        modelRoute: before.modelRoute,
+        access: "read-only",
+        modelRoute: custom.modelRoute,
       });
       const after = yield* library.read(created.personaId);
       assert.equal(after.version, before.version + 1);
@@ -1439,6 +1918,54 @@ describe("switching source agents off", () => {
         String(yield* library.setEnabled("no-such-agent", false).pipe(Effect.flip)),
         "no longer exists",
       );
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+});
+
+describe("refusing a persona launch", () => {
+  it.effect("tells the six reasons apart, each with its own code", () =>
+    Effect.gen(function* () {
+      const { library, write, fs, path, stateDir } = yield* fixture;
+      const refusal = (personaId: string) =>
+        prepareAgentPersonaLaunch({ personaId }, [], library).pipe(
+          Effect.flip,
+          Effect.map((error) => ({
+            code: "code" in error ? error.code : undefined,
+            message: error.message,
+          })),
+        );
+
+      assert.deepEqual(yield* refusal(custom.id), {
+        code: "library_empty",
+        message: `This environment has no personas, so ${custom.id} cannot launch.`,
+      });
+      yield* write("researcher.yaml", custom);
+      assert.deepEqual(yield* refusal("nobody"), {
+        code: "persona_not_found",
+        message: "Unknown persona nobody in this environment.",
+      });
+      // An invalid file names the persona, so its launch says how to repair it.
+      yield* write("diagnostic.yaml", { ...custom, id: "diagnostic-agent", access: "diagnostic" });
+      const invalid = yield* refusal("diagnostic-agent");
+      assert.equal(invalid.code, "persona_invalid");
+      assert.include(invalid.message, "diagnostic.yaml");
+      assert.include(invalid.message, AGENT_PERSONA_ACCESS_REPAIR);
+      // With no provider signed in, every entry gives its own reason.
+      const exhausted = yield* refusal(custom.id);
+      assert.equal(exhausted.code, "models_exhausted");
+      assert.include(exhausted.message, "entry 1");
+      yield* library.setEnabled(custom.id, false);
+      assert.deepEqual(yield* refusal(custom.id), {
+        code: "persona_disabled",
+        message: `Persona ${custom.id} is disabled in this environment.`,
+      });
+      yield* fs.writeFileString(
+        path.join(stateDir, "agent-personas.json"),
+        json({ folders: ["missing"] }),
+      );
+      const unreadable = yield* refusal(custom.id);
+      assert.equal(unreadable.code, "library_unreadable");
+      assert.include(unreadable.message, "Configured persona folder does not exist");
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });

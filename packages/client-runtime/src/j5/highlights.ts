@@ -25,10 +25,25 @@ export interface Highlight {
 /** Newest first. Add an entry at the top. */
 export const HIGHLIGHTS: ReadonlyArray<Highlight> = [
   {
+    id: "2026-11-side-chats",
+    title: "Side chats",
+    description:
+      "Ask without derailing. Start a message with /side or /btw to ask about a thread while it keeps working. Bring the answer back when you want it.",
+    clients: ["web", "desktop"],
+  },
+  {
+    id: "2026-11-upstream-0-1-7",
+    title: "Also new: pinned projects and Force stop",
+    description:
+      "Pin and archive projects, review local commits in the Diff pane, run a scheduled task once, answer a delegated task's approvals from its parent, and Force stop an agent that ignores Stop. Cmd+K finds text inside messages.",
+    learnMoreUrl: "https://j5.codes/whats-new/0-1-3",
+    clients: ["web", "desktop"],
+  },
+  {
     id: "2026-10-new-design",
     title: "A new look",
     description:
-      "J5 Code has a refreshed design: a true black dark mode, dimmer read threads and simpler composer controls. Prefer the old one? Turn off New design in Settings, Appearance.",
+      "J5 Code has a refreshed design: a true black dark mode, dimmer read threads and simpler composer controls.",
     clients: ["web", "desktop"],
   },
   {
@@ -36,14 +51,6 @@ export const HIGHLIGHTS: ReadonlyArray<Highlight> = [
     title: "Your messages stay in view",
     description:
       "Messages from agents now fold to one line showing who sent them and whether they expect a reply. Click one to read it.",
-    clients: ["web", "desktop"],
-  },
-  {
-    id: "2026-10-upstream-0-1-3",
-    title: "Also new: search inside your messages",
-    description:
-      "Cmd+K now finds text inside messages, not just titles. Pull requests show what kind of code changed, approvals no longer block the composer, and busy threads scroll more smoothly.",
-    learnMoreUrl: "https://j5.codes/whats-new/0-1-3",
     clients: ["web", "desktop"],
   },
   {

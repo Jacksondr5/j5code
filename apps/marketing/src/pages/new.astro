@@ -1,10 +1,12 @@
 ---
 import Layout from "../layouts/Layout.astro";
 import Boat from "../components/Boat.astro";
+import ServerForm from "../components/ServerForm.astro";
+import "../styles/link-page.css";
 ---
 
 <Layout title="Open a prompt — J5 Code" description="A prompt shared as a link. It opens in J5 Code as a draft, and nothing runs until you press Send.">
-  <div class="prompt-page">
+  <div class="link-page">
     <div class="heading-boat"><Boat tone="dark" size={56} /></div>
 
     <section class="panel" id="prompt-link" hidden>
@@ -24,23 +26,7 @@ import Boat from "../components/Boat.astro";
         <a class="btn btn-ghost" href="/download">Get J5 Code</a>
       </div>
 
-      <form class="server" id="server-form" novalidate>
-        <label class="server-label" for="server-address">Using J5 Code in a browser? Open the prompt on your server.</label>
-        <div class="server-row">
-          <input
-            class="server-input"
-            id="server-address"
-            type="text"
-            inputmode="url"
-            autocomplete="url"
-            autocapitalize="off"
-            spellcheck="false"
-            placeholder="localhost:3773"
-          />
-          <button class="btn btn-ghost" type="submit">Open on my server</button>
-        </div>
-        <p class="server-error" id="server-error" role="alert" hidden>Enter your server's address, such as localhost:3773 or https://my-server.example.</p>
-      </form>
+      <ServerForm label="Using J5 Code in a browser? Open the prompt on your server." />
     </section>
 
     <section class="panel" id="prompt-link-error" hidden>
@@ -58,7 +44,8 @@ import Boat from "../components/Boat.astro";
 </Layout>
 
 <script>
-  import { readPromptLinkPage, serverPromptLinkUrl } from "../lib/promptLink";
+  import { readPromptLinkPage } from "../lib/promptLink";
+  import { wireServerForm } from "../lib/serverForm";
 
   const byId = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
   const page = readPromptLinkPage(window.location.href);
@@ -80,66 +67,12 @@ import Boat from "../components/Boat.astro";
     byId("prompt-details").textContent = details.join(" · ");
     byId<HTMLAnchorElement>("open-app").href = deepLink;
 
-    const address = byId<HTMLInputElement>("server-address");
-    const addressError = byId("server-error");
-    address.addEventListener("input", () => {
-      addressError.hidden = true;
-    });
-    byId<HTMLFormElement>("server-form").addEventListener("submit", (event) => {
-      event.preventDefault();
-      const target = serverPromptLinkUrl(address.value, appPath);
-      if (target === null) {
-        addressError.hidden = false;
-        address.focus();
-        return;
-      }
-      window.location.assign(target);
-    });
+    wireServerForm(appPath);
     byId("prompt-link").hidden = false;
   }
 </script>
 
 <style>
-  .prompt-page {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 8vh 1.5rem 4rem;
-    background:
-      radial-gradient(ellipse 70% 50% at 50% 0%, rgba(59, 143, 174, 0.14), transparent 70%),
-      var(--navy-950);
-  }
-
-  .heading-boat {
-    margin-bottom: 0.5rem;
-  }
-
-  .panel {
-    width: 100%;
-    max-width: 680px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-  }
-
-  .panel[hidden] {
-    display: none;
-  }
-
-  .heading {
-    font-size: clamp(2rem, 4.4vw, 3rem);
-    text-align: center;
-    margin-bottom: 0.5rem;
-  }
-
-  .subheading {
-    font-size: 0.95rem;
-    color: var(--foam-dim);
-    text-align: center;
-    margin-bottom: 2rem;
-  }
-
   .warning {
     align-self: stretch;
     display: flex;
@@ -188,72 +121,5 @@ import Boat from "../components/Boat.astro";
     margin-top: 0.6rem;
     font-size: 0.8rem;
     color: var(--foam-dim);
-  }
-
-  .actions {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: 0.6rem;
-    margin-top: 1.75rem;
-  }
-
-  .server {
-    align-self: stretch;
-    margin-top: 2.5rem;
-    padding-top: 1.5rem;
-    border-top: 1px solid var(--line);
-    display: flex;
-    flex-direction: column;
-    gap: 0.6rem;
-  }
-
-  .server-label {
-    font-size: 0.85rem;
-    color: var(--foam-muted);
-  }
-
-  .server-row {
-    display: flex;
-    gap: 0.5rem;
-  }
-
-  .server-input {
-    flex: 1;
-    min-width: 0;
-    padding: 10px 14px;
-    border-radius: 8px;
-    border: 1px solid var(--line);
-    background: rgba(0, 0, 0, 0.18);
-    color: var(--foam);
-    font-family: var(--font-mono);
-    font-size: 13px;
-  }
-
-  .server-input::placeholder {
-    color: var(--foam-dim);
-  }
-
-  .server-input:focus-visible {
-    border-color: var(--line-strong);
-  }
-
-  .server-error {
-    font-size: 0.8rem;
-    color: #e8836f;
-  }
-
-  .server-error[hidden] {
-    display: none;
-  }
-
-  @media (max-width: 640px) {
-    .prompt-page {
-      padding: 5vh 1.25rem 4rem;
-    }
-
-    .server-row {
-      flex-direction: column;
-    }
   }
 </style>

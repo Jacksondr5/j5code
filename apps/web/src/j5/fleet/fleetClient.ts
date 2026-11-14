@@ -103,9 +103,9 @@ const useFleetFocusRefresh = createVisibleRefreshHook(() => {
 /** The always-mounted rail badge keeps the live roster (no retired Crews, no rosters) current. */
 export function useFleetRefresh() {
   useFleetFocusRefresh();
-  // oxlint-disable-next-line t3code/react-effect-budget -- the always-mounted rail follows each roster read for as long as it is mounted.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- the always-mounted rail follows each roster read for as long as it is mounted.
   useEffect(followFleetRows, []);
-  // oxlint-disable-next-line t3code/react-effect-budget -- the rail keeps the shared Fleet facts Atom and its dispatch deadline alive while it is mounted.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- the rail keeps the shared Fleet facts Atom and its dispatch deadline alive while it is mounted.
   useEffect(() => appAtomRegistry.mount(fleetFactsAtom), []);
 }
 

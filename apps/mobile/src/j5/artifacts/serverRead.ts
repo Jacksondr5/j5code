@@ -35,7 +35,7 @@ export function visibleRead<T>(
 export function useServerRead<T>(resource: string | null, read: () => Promise<T>) {
   const [refresh, setRefresh] = useState(0);
   const [settled, setSettled] = useState<SettledRead<T> | null>(null);
-  // oxlint-disable-next-line t3code/react-effect-budget -- reads the artifact store on the server, which React can't derive.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reads the artifact store on the server, which React can't derive.
   useEffect(() => {
     if (resource === null) return;
     let current = true;

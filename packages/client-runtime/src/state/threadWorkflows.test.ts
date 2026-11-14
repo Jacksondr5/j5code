@@ -65,7 +65,7 @@ describe("thread workflows", () => {
     ).toBe(false);
   });
 
-  it("sorts queued messages and gates reorder and promotion from capabilities", () => {
+  it("sorts queued messages and gates promotion from capabilities", () => {
     const state = deriveThreadQueueWorkflowState({
       thread: { id: "thread", activeProviderThreadId: "provider-thread" },
       runs: [
@@ -133,7 +133,6 @@ describe("thread workflows", () => {
       [],
     ]);
     expect(state.activeRun?.id).toBe("active");
-    expect(state.canReorder).toBe(true);
     expect(state.canPromoteToSteer).toBe(true);
     expect(state.canSendNow).toBe(false);
   });
@@ -174,6 +173,26 @@ describe("thread workflows", () => {
       expect(state.canSendNow).toBe(false);
     },
   );
+
+  it("offers to skip a running compaction even when the provider cannot steer", () => {
+    const state = deriveThreadQueueWorkflowState({
+      thread: { id: "thread", activeProviderThreadId: null },
+      runs: [
+        { id: "compact", status: "running", userMessageId: "message-compact", ordinal: 1 },
+        { id: "queued", status: "queued", userMessageId: "message-queued", ordinal: 2 },
+      ],
+      messages: [
+        { id: "message-compact", role: "user", text: "/compact", attachments: [] },
+        { id: "message-queued", role: "user", text: "Next", attachments: [] },
+      ],
+      providerThreads: [],
+      providerTurns: [],
+      providerSessions: [],
+    } as never);
+
+    expect(state.canPromoteToSteer).toBe(true);
+    expect(state.promoteSkipsCompaction).toBe(true);
+  });
 
   it("keeps held messages visible and clears the hold when they leave the queue", () => {
     for (const status of ["queued", "cancelled", "starting"] as const) {
@@ -247,6 +266,31 @@ describe("thread workflows", () => {
     expect(state.queuedRuns.map(({ run, text }) => [run.id, text])).toEqual([
       ["visible", "Visible queued message"],
     ]);
+  });
+
+  it("hides J5 platform notices from the visible queue", () => {
+    const state = deriveThreadQueueWorkflowState({
+      thread: { id: "thread", activeProviderThreadId: null },
+      runs: [
+        { id: "seat-finished", status: "queued", userMessageId: "notice", ordinal: 1 },
+        { id: "letter", status: "queued", userMessageId: "letter", ordinal: 2 },
+        { id: "typed", status: "queued", userMessageId: "typed", ordinal: 3 },
+      ],
+      messages: [
+        {
+          id: "notice",
+          text: "<j5_seat_finished>\nseat: reviewer\n</j5_seat_finished>",
+          createdBy: "system",
+        },
+        { id: "letter", text: "A letter from another agent", createdBy: "agent" },
+        { id: "typed", text: "Typed by the person", createdBy: "user" },
+      ],
+      providerTurns: [],
+      providerThreads: [],
+      providerSessions: [],
+    } as never);
+
+    expect(state.queuedRuns.map(({ run }) => run.id)).toEqual(["letter", "typed"]);
   });
 
   it("removes only the promoted head from the visible queue", () => {

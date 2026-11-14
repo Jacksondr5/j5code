@@ -192,7 +192,7 @@ export function ArtifactsPage({
   }
   // Names the read, so a refresh that changes nothing else still reads again.
   const listRead = connected ? listInputs : null;
-  // oxlint-disable-next-line t3code/react-effect-budget -- lists the selected project's artifacts from the server, and drops a stale answer when the selection changes.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- lists the selected project's artifacts from the server, and drops a stale answer when the selection changes.
   useEffect(() => {
     if (listRead === null || selectedEnvironmentId === null || selectedProjectId === null) return;
     let current = true;
@@ -261,7 +261,7 @@ export function ArtifactsPage({
       setContentState("loading");
     }
   }
-  // oxlint-disable-next-line t3code/react-effect-budget -- reads the selected artifact from the server, and drops a stale answer when the selection changes.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reads the selected artifact from the server, and drops a stale answer when the selection changes.
   useEffect(() => {
     if (
       contentRead === null ||
@@ -297,7 +297,7 @@ export function ArtifactsPage({
   const selectionKey = JSON.stringify([selectedEnvironmentId, selectedProjectId, selectedPath]);
   const currentSelection = useRef(selectionKey);
   const currentProjectKey = useRef(selectedKey);
-  // oxlint-disable-next-line t3code/react-effect-budget -- async handlers compare against the latest selection, and render may not write refs.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- async handlers compare against the latest selection, and render may not write refs.
   useEffect(() => {
     currentSelection.current = selectionKey;
     currentProjectKey.current = selectedKey;

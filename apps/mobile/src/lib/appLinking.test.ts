@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { findLinkedRoute, restoreDraftLinkState, shouldHandleAppLink } from "./appLinking";
+import type { NavigationState } from "@react-navigation/native";
+import {
+  findLinkedRoute,
+  findStackRoute,
+  restoreDraftLinkState,
+  shouldHandleAppLink,
+  updateLinkedRoute,
+} from "./appLinking";
 
 describe("shouldHandleAppLink", () => {
   it.each(["j5code://", "j5code:///", "j5code-dev://", "j5code-preview://"])(
@@ -14,6 +21,7 @@ describe("shouldHandleAppLink", () => {
     "j5code://threads/env-1/thread-1",
     "j5code://pair?pairingUrl=x",
     "j5code-dev://settings/usage?tab=limits",
+    "https://app.t3.codes/threads/env/thread?prompt=Fix%20expo-development-client%20and%20j5code://expo-sharing",
   ])("handles path-bearing URL %s", (url) => {
     expect(shouldHandleAppLink(url, true)).toBe(true);
   });
@@ -112,5 +120,63 @@ describe("nested link routes", () => {
       autoConnect: "1",
     });
     expect(findLinkedRoute(settingsLink, ["ConnectionsNew"])).toBeUndefined();
+  });
+
+  it("rewrites a nested route without touching the rest of the state", () => {
+    const next = updateLinkedRoute(settingsLink, ["SettingsEnvironmentNew"], (route) => ({
+      ...route,
+      params: { pairingUrl: "x" },
+    }));
+    expect(findLinkedRoute(next, ["SettingsEnvironmentNew"])?.params).toEqual({ pairingUrl: "x" });
+    expect(next?.routes[0]).toBe(settingsLink.routes[0]);
+    expect(updateLinkedRoute(settingsLink, ["ConnectionsNew"], (route) => route)).toBe(
+      settingsLink,
+    );
+  });
+});
+
+describe("findStackRoute", () => {
+  const stack = (key: string, routes: NavigationState["routes"]) =>
+    ({
+      key,
+      index: routes.length - 1,
+      routeNames: routes.map((route) => route.name),
+      routes,
+      stale: false,
+      type: "stack",
+    }) as NavigationState;
+
+  it("finds a nested screen with the navigator that holds it", () => {
+    const root = stack("root", [
+      { key: "home", name: "Home" },
+      {
+        key: "settings",
+        name: "Settings",
+        state: stack("settings-stack", [{ key: "new-task", name: "NewTaskProject" }]),
+      },
+    ]);
+    expect(findStackRoute(root, "NewTaskProject")).toEqual({
+      navigatorKey: "settings-stack",
+      routeKey: "new-task",
+      focused: true,
+    });
+  });
+
+  it("reports whether the screen is its navigator's focused route", () => {
+    const covered = stack("root", [
+      { key: "new-task", name: "NewTaskProject" },
+      { key: "add-project", name: "AddProject" },
+    ]);
+    expect(findStackRoute(covered, "NewTaskProject")?.focused).toBe(false);
+    expect(findStackRoute(covered, "AddProject")?.focused).toBe(true);
+  });
+
+  it("prefers the top-most screen and reports a missing one", () => {
+    const root = stack("root", [
+      { key: "first", name: "NewTaskProject" },
+      { key: "second", name: "NewTaskProject" },
+    ]);
+    expect(findStackRoute(root, "NewTaskProject")?.routeKey).toBe("second");
+    expect(findStackRoute(root, "Thread")).toBeUndefined();
   });
 });

@@ -1,4 +1,5 @@
 import { seedPersonas, seedPlaybookOwners } from "./testFixtures.ts";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { AuthOrchestrationReadScope, ThreadId } from "@t3tools/contracts";
@@ -34,7 +35,7 @@ const owner = ThreadId.make("thread:playbook:owner");
 const otherOwner = ThreadId.make("thread:playbook:other");
 const MemoryLayer = Layer.mergeAll(
   NodeSqliteClient.layer({ filename: ":memory:" }),
-  NodeServices.layer,
+  Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
 );
 const definition = (ids = ["research", "implement", "review"]): PlaybookDefinition => ({
   title: "Test playbook",
@@ -893,7 +894,7 @@ it.effect(
         const newStore = yield* makePlaybookStore;
         assert.equal((yield* newStore.current(owner, runId)).currentStepId, "implement");
       }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: databasePath })));
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
 );
 
 it.effect(

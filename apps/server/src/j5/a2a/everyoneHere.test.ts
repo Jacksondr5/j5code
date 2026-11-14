@@ -1,11 +1,12 @@
 import { assert, it } from "@effect/vitest";
-import { ThreadId } from "@t3tools/contracts";
+import { ChatAttachmentId, ThreadId } from "@t3tools/contracts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as Effect from "effect/Effect";
 import { FetchHttpClient } from "effect/http";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import { AttachmentClaimError } from "../../orchestration-v2/AttachmentClaims.ts";
 import { EffectOutboxV2 } from "../../orchestration-v2/EffectOutbox.ts";
 import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
@@ -233,6 +234,42 @@ it.effect(
     }).pipe(Effect.provide(testLayer)),
 );
 
+it.effect("an answer whose files cannot be claimed leaves an ask to everyone open", () =>
+  Effect.gen(function* () {
+    yield* seed;
+    const exchangeId = yield* ask(EVERYONE_HERE_PERSON_ID, "files");
+    const failed = yield* Effect.flip(
+      A2AHumanInbox.use((inbox) =>
+        inbox.answer(
+          {
+            commandId: CommCommandId.make(`command:answer:${PRIYA}:files`),
+            personId: PRIYA,
+            exchangeId: exchangeId as never,
+            message: "Acme, see the screenshot.",
+            attachments: [
+              {
+                type: "image",
+                id: ChatAttachmentId.make("pending-00000000-0000-4000-8000-000000000000"),
+                name: "screen.png",
+                mimeType: "image/png",
+                sizeBytes: 3,
+              },
+            ],
+            acceptedAt: AT,
+          },
+          undefined,
+          () => Effect.fail(new AttachmentClaimError({ message: "attachment not found" })),
+        ),
+      ),
+    );
+    assert.strictEqual(failed._tag, "AttachmentClaimError");
+    assert.deepStrictEqual(yield* intents(PRIYA), [{ for: true, answeredBy: null }]);
+
+    yield* answer(SAM, exchangeId, "Globex first.");
+    assert.deepStrictEqual(yield* intents(PRIYA, "answered"), [{ for: true, answeredBy: "Sam" }]);
+  }).pipe(Effect.provide(testLayer)),
+);
+
 it.effect(
   "an ask to one person reaches only them, while they can write to the agent's thread",
   () =>
@@ -301,6 +338,49 @@ it.effect(
     }).pipe(Effect.provide(testLayer)),
 );
 
+it.effect("an ask the agent made before Turn into project moved it is judged on its thread", () =>
+  Effect.gen(function* () {
+    yield* seed;
+    const sql = yield* SqlClient.SqlClient;
+    const ledger = yield* A2ALedger;
+    const toPriya = yield* ask(PRIYA, "priya-before-move");
+    const promoted = LedgerProjectId.make("project:support-promoted");
+    yield* ledger.ensureProject({ projectId: promoted, createdAt: AT });
+    for (const ledgerProjectId of [projectId, promoted]) {
+      yield* ledger.append({
+        commandId: CommCommandId.make(`command:move:support:${ledgerProjectId}`),
+        projectId: ledgerProjectId,
+        acceptedAt: AT,
+        event: {
+          kind: "participant.moved",
+          sender: null,
+          receiver: agent.id,
+          exchangeId: null,
+          correlationId: null,
+          payload: {
+            participant: agent,
+            fromProjectId: projectId,
+            toProjectId: promoted,
+            archivedAt: null,
+          },
+          createdAt: AT,
+        },
+      });
+    }
+    yield* sql`UPDATE orchestration_v2_projection_threads SET project_id = ${promoted} WHERE thread_id = ${threadId}`;
+    // She still writes to the thread itself, wherever it lives, so her ask stays, she sees it
+    // linked to the thread, and she can answer it.
+    assert.deepStrictEqual(yield* endUnanswerableAsks(PRIYA), []);
+    assert.strictEqual(yield* exchangeStatus(toPriya), "open");
+    assert.deepStrictEqual(
+      (yield* A2AHumanInbox.use((inbox) => inbox.list(PRIYA))).map((item) => item.senderThreadId),
+      [threadId],
+    );
+    yield* answer(PRIYA, toPriya, "Acme first.");
+    assert.strictEqual(yield* exchangeStatus(toPriya), "closed");
+  }).pipe(Effect.provide(testLayer)),
+);
+
 it.effect("an ask to someone removed from the server ends", () =>
   Effect.gen(function* () {
     yield* seed;
@@ -311,6 +391,30 @@ it.effect("an ask to someone removed from the server ends", () =>
     yield* sql`UPDATE j5_a2a_human_person SET removed_at = ${AT} WHERE person_id = ${SAM}`;
     assert.deepStrictEqual(yield* endUnanswerableAsks(SAM), [toSam]);
     assert.strictEqual(yield* exchangeStatus(toSam), "dropped");
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("an open ask to everyone here still takes a follow-up once one writer remains", () =>
+  Effect.gen(function* () {
+    yield* seed;
+    const exchangeId = yield* ask(EVERYONE_HERE_PERSON_ID, "everyone-then-alone");
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`
+      INSERT INTO j5_a2a_shared_thread (thread_id, shared_at) VALUES (${threadId}, ${AT})
+    `;
+    yield* sql`
+      UPDATE j5_a2a_person_level SET level = 'viewer' WHERE person_id IN (${PRIYA}, ${SAM})
+    `;
+    const followUp = yield* (yield* A2ASendService).send({
+      commandId: CommCommandId.make("command:everyone-then-alone:follow-up"),
+      senderThreadId: threadId,
+      to: EVERYONE_HERE_PERSON_ID,
+      message: "One more detail.",
+      regarding: exchangeId,
+      acceptedAt: AT,
+    });
+    assert.strictEqual(followUp.exchangeId, exchangeId);
+    assert.isTrue(followUp.joinedExistingExchange);
   }).pipe(Effect.provide(testLayer)),
 );
 

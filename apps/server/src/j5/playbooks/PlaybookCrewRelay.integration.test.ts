@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import { assert, it } from "@effect/vitest";
@@ -53,7 +54,7 @@ import { makePlaybookStore, playbookError, PlaybookStore } from "./PlaybookStore
 // DelegatedCompletionDelivery.test.ts assembles them, so the step notice's command id is
 // replayed by the orchestrator's own receipts rather than by a mock.
 const PlatformTestLayer = Layer.merge(
-  NodeServices.layer,
+  Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
   Layer.mock(SourceControlProviderRegistry)({ resolveLink: () => Effect.die("unused title link") }),
 );
 const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
@@ -108,6 +109,7 @@ const TestLayer = Layer.mergeAll(
           faviconPath: null,
           repositoryIdentityResolved: false,
         }),
+      readRepositoryIdentity: () => Effect.succeed(null),
       invalidate: () => Effect.void,
       subscribeChanges: Effect.never,
     }),

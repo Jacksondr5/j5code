@@ -12,11 +12,15 @@ import {
   ThreadId,
   type OrchestratorMcpCapabilitiesResult,
 } from "@t3tools/contracts";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/ai";
 
 import * as McpInvocationContext from "../../../mcp/McpInvocationContext.ts";
 import { OrchestratorMcpService } from "../../../mcp/OrchestratorMcpService.ts";
+import { OrchestratorToolkit } from "../../../mcp/toolkits/orchestrator/tools.ts";
+import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
+import { AgentCrewInstanceService } from "../AgentCrewInstanceService.ts";
 
 const dependencies = [McpInvocationContext.McpInvocationContext, OrchestratorMcpService];
 
@@ -94,12 +98,33 @@ const J5OrchestratorCapabilitiesTool = Tool.make("orchestrator_capabilities", {
   .annotate(Tool.Destructive, false)
   .annotate(Tool.Idempotent, true);
 
+const upstreamInterrupt = OrchestratorToolkit.tools.t3_thread_interrupt;
+
+/** Upstream's tool as shipped; its handler adds the Captain's rule (threadInterrupt.ts). */
+const J5ThreadInterruptTool = Tool.make("t3_thread_interrupt", {
+  description: upstreamInterrupt.description,
+  parameters: upstreamInterrupt.parametersSchema,
+  success: upstreamInterrupt.successSchema,
+  failure: OrchestratorMcpFailure,
+  failureMode: "return",
+  dependencies: [
+    ...dependencies,
+    ThreadManagementService,
+    AgentCrewInstanceService,
+    SecureRandom.SecureRandom,
+  ],
+})
+  .annotate(Tool.Title, "Interrupt a J5 thread")
+  .annotate(Tool.Destructive, true);
+
 /**
- * The two orchestrator tools J5 declares itself: `delegate_task` takes a persona, and
- * `orchestrator_capabilities` leaves out upstream's claims about tools J5 does not expose. The
- * upstream tools J5 registers unchanged are in upstreamCatalog.ts.
+ * The orchestrator tools J5 declares itself: `delegate_task` takes a persona,
+ * `orchestrator_capabilities` leaves out upstream's claims about tools J5 does not expose, and
+ * `t3_thread_interrupt` lets a Captain stop its own seats. The upstream tools J5 registers
+ * unchanged are in upstreamCatalog.ts.
  */
 export const J5OrchestratorSurface = Toolkit.make(
   J5DelegateTaskTool,
   J5OrchestratorCapabilitiesTool,
+  J5ThreadInterruptTool,
 );

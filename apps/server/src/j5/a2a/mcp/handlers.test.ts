@@ -1,4 +1,8 @@
 import * as FileSystem from "effect/FileSystem";
+import { AgentPersonaDrafts } from "../../agents/agentPersonaDrafts.ts";
+import { AgentPersonaEscalations } from "../../agents/agentPersonaEscalation.ts";
+import { agentPersonaDraftsTestLayer } from "../../test-support/agentPersonaDrafts.ts";
+import { agentPersonaEscalationsTestLayer } from "../../test-support/agentPersonaEscalations.ts";
 import * as Path from "effect/Path";
 import { stringify as toYaml } from "yaml";
 import { makeAgentPersonaLibrary } from "../../agents/agentPersonaLibrary.ts";
@@ -6,10 +10,18 @@ import { resolveAgentPersonaRuntime } from "../../agents/agentPersonaRuntime.ts"
 import { BUILT_IN_AGENT_PERSONAS } from "../../agents/agentPersonas.ts";
 import { personaLibraryLayer } from "../../test-support/personaLibrary.ts";
 import { assert, it } from "@effect/vitest";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as SqlitePersistence from "../../../persistence/Sqlite.ts";
 import {
+  ProjectionStoreV2,
+  layer as ProjectionStoreLayer,
+} from "../../../orchestration-v2/ProjectionStore.ts";
+import {
   EnvironmentId,
+  EventId,
+  MessageId,
+  RunId,
   type ModelSelection,
   type OrchestrationV2ThreadShell,
   type RuntimeMode,
@@ -17,7 +29,6 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   ThreadId,
-  type OrchestrationV2Run,
   type OrchestrationV2ServerCommand,
   type OrchestrationV2ThreadProjection,
   type ServerProvider,
@@ -43,10 +54,10 @@ import {
   OrchestratorProjectionError,
   OrchestratorV2,
 } from "../../../orchestration-v2/Orchestrator.ts";
-import { DispatchModeLimit } from "../../../orchestration-v2/DispatchModeLimit.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
 import { ProviderRegistry } from "../../../provider/ProviderRegistry.ts";
-import { type AgentCrewInstance, AgentCrewInstanceService } from "../AgentCrewInstanceService.ts";
+import { permissiveCrewMemberModels } from "../../test-support/crewMemberModels.ts";
+import { AgentCrewInstanceService } from "../AgentCrewInstanceService.ts";
 import {
   ArchiveCrewConfirmationRequiredError,
   ArchiveCrewService,
@@ -95,9 +106,13 @@ import {
   type J5ProposeCrewInput,
   type J5RequestCrewMemberInput,
   type J5SpawnAgentInput,
-  type J5StopAgentInput,
 } from "./tools.ts";
 import { noDocumentTextLayer } from "../../test-support/documentText.ts";
+
+const launchablePersonas = Object.values(BUILT_IN_AGENT_PERSONAS).filter(
+  ({ authority }) =>
+    authority.defaultPolicy !== "diagnostic" && authority.defaultPolicy !== "publish-only",
+);
 
 const decodeJ5ListParticipantsResult = Schema.decodeUnknownEffect(J5ListParticipantsResult);
 const hasKey = (value: unknown, key: string): boolean => {
@@ -177,14 +192,17 @@ const projection = (threadId: ThreadId): OrchestrationV2ThreadProjection =>
       branch: null,
       worktreePath: null,
       createdAt,
+      deletedAt: null,
     },
+    runs: [],
+    subagents: [],
   }) as unknown as OrchestrationV2ThreadProjection;
 
 const missingProjectId = ProjectId.make("project:j5:mcp-directory:gone");
 /** The send tool claims attachments into the server's attachment store; none of these tests send one. */
 const serverConfigLayer = ServerConfig.layerTest(process.cwd(), {
   prefix: "j5-mcp-handlers-",
-}).pipe(Layer.provide(NodeServices.layer));
+}).pipe(Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
 const unusedLifecycleDependencies = Layer.mergeAll(
   noDocumentTextLayer,
   Layer.mock(A2AHomeRegistrar)({
@@ -231,6 +249,8 @@ const unusedLifecycleDependencies = Layer.mergeAll(
   serverConfigLayer,
   Layer.mock(PeerRegistryService)({}),
   Layer.mock(ThreadRegistration)({}),
+  agentPersonaEscalationsTestLayer(),
+  agentPersonaDraftsTestLayer(),
 );
 
 it.effect("namespaces mutating-tool idempotency and sender identity from authenticated scope", () =>
@@ -251,10 +271,11 @@ it.effect("namespaces mutating-tool idempotency and sender identity from authent
       "j5_playbook_save",
       "j5_playbook_start",
       "j5_propose_crew",
+      "j5_propose_persona",
+      "j5_read_persona",
       "j5_request_crew_member",
       "j5_send_message",
       "j5_spawn_agent",
-      "j5_stop_agent",
       "j5_stop_crew",
     ]);
     const sends = yield* Ref.make<ReadonlyArray<SendMessageInput>>([]);
@@ -305,7 +326,7 @@ it.effect("namespaces mutating-tool idempotency and sender identity from authent
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
       Layer.mock(OrchestratorV2)({}),
       unusedLifecycleDependencies,
-      NodeServices.layer,
+      Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
       SqlitePersistence.layerMemory,
     );
     const layer = J5ToolkitHandlersLive.pipe(
@@ -435,6 +456,8 @@ it.effect(
       });
       const dependencies = Layer.mergeAll(
         noDocumentTextLayer,
+        agentPersonaEscalationsTestLayer(),
+        agentPersonaDraftsTestLayer(),
         Layer.succeed(
           A2ASendService,
           A2ASendService.of({
@@ -518,7 +541,7 @@ it.effect(
         Layer.mock(ProjectService)({}),
         serverConfigLayer,
         Layer.mock(ThreadRegistration)({}),
-        NodeServices.layer,
+        Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
         SqlitePersistence.layerMemory,
       );
       const layer = J5ToolkitHandlersLive.pipe(
@@ -580,6 +603,132 @@ it.effect(
         // The same narrower caller may still send the message to wait its turn.
         assert.isFalse((yield* call({ to: targetParticipantId, message })).isFailure);
         assert.lengthOf(yield* Ref.get(sends), 4);
+
+        // An ask about a refused persona is the agent's words alone; J5's record of the block
+        // travels as data on the Inbox item, where the agent's text can't reach it.
+        const escalationId = yield* (yield* AgentPersonaEscalations).record({
+          callerParticipantId: participantIdForThread(invocation.threadId),
+          personaId: "reviewer",
+          code: "persona_disabled",
+          summary: "Persona reviewer is disabled in this environment.",
+          waivable: null,
+          scope: null,
+        });
+        const notAnAsk = yield* call({
+          to: targetParticipantId,
+          message,
+          escalation_id: escalationId,
+        });
+        assert.isTrue(notAnAsk.isFailure);
+        assert.include(JSON.stringify(notAnAsk.encodedResult), "only on an ask to a person");
+        assert.isFalse(
+          (yield* call({
+            to: personParticipantId,
+            message: "May reviewer run?",
+            expect_reply: true,
+            intent: "Re-enable reviewer?",
+            urgency: "soon",
+            escalation_id: escalationId,
+          })).isFailure,
+        );
+        const ask = (yield* Ref.get(sends)).at(-1)!;
+        assert.equal(ask.message, "May reviewer run?");
+        // J5's record stays on the ask that opened the Inbox item, so a follow-up to another ask
+        // can't carry it.
+        const openAsk = ExchangeId.make("exchange:j5:mcp-send-mode:open-ask");
+        const sentBefore = (yield* Ref.get(sends)).length;
+        const followUp = yield* call({
+          to: personParticipantId,
+          message: "Any word on reviewer?",
+          regarding: openAsk,
+          escalation_id: escalationId,
+        });
+        assert.isTrue(followUp.isFailure);
+        const followUpError = JSON.stringify(followUp.encodedResult);
+        assert.include(followUpError, "can't go on a regarding follow-up to another ask");
+        assert.include(
+          followUpError,
+          "new ask to the person with expect_reply=true, intent, urgency",
+        );
+        assert.lengthOf(yield* Ref.get(sends), sentBefore);
+        // On a follow-up to the ask it already sits on, the id is dropped and the follow-up goes.
+        yield* (yield* AgentPersonaEscalations).linkAsk({ escalationId, exchangeId: openAsk });
+        assert.isFalse(
+          (yield* call({
+            to: personParticipantId,
+            message: "Any word on reviewer?",
+            regarding: openAsk,
+            escalation_id: escalationId,
+          })).isFailure,
+        );
+        assert.equal((yield* Ref.get(sends)).at(-1)!.regarding, openAsk);
+
+        // An ask carrying a persona draft carries the draft's trusted summary, and only that.
+        const { draftId } = yield* (yield* AgentPersonaDrafts).propose({
+          proposerParticipantId: participantIdForThread(invocation.threadId),
+          proposerThreadId: invocation.threadId,
+          draft: {
+            mode: "create",
+            personaId: "release-notes",
+            fields: {
+              displayName: "Release Notes",
+              description: "Writes release notes.",
+              instructions: "Summarize the merged changes.",
+              access: "read-only",
+              modelRoute: [
+                {
+                  driver: ProviderDriverKind.make("codex"),
+                  model: "gpt-5",
+                  reasoningEffort: "high",
+                },
+              ],
+            },
+          },
+        });
+        const personAsk = {
+          to: personParticipantId,
+          message: "Save release-notes?",
+          expect_reply: true,
+          intent: "Save the release-notes persona?",
+          urgency: "soon",
+        } as const;
+        const both = yield* call({
+          ...personAsk,
+          escalation_id: escalationId,
+          persona_draft_id: draftId,
+        });
+        assert.isTrue(both.isFailure);
+        assert.include(JSON.stringify(both.encodedResult), "not both");
+        assert.isFalse((yield* call({ ...personAsk, persona_draft_id: draftId })).isFailure);
+        // J5's summary rides on the Inbox item, not in the agent's words.
+        const draftAsk = (yield* Ref.get(sends)).at(-1)!;
+        assert.equal(draftAsk.message, "Save release-notes?");
+        // A draft never rides a follow-up to an ask it isn't on.
+        const draftAskId = ExchangeId.make("exchange:j5:mcp-send-mode:draft-ask");
+        const draftSentBefore = (yield* Ref.get(sends)).length;
+        const draftFollowUp = yield* call({
+          to: personParticipantId,
+          message: "Revised draft attached.",
+          regarding: draftAskId,
+          persona_draft_id: draftId,
+        });
+        assert.isTrue(draftFollowUp.isFailure);
+        assert.include(
+          JSON.stringify(draftFollowUp.encodedResult),
+          "persona_draft_id opens its own Inbox item, so it can't go on a regarding follow-up to another ask",
+        );
+        assert.lengthOf(yield* Ref.get(sends), draftSentBefore);
+        // On a follow-up to the ask it already sits on, the id is dropped and the follow-up goes.
+        yield* (yield* AgentPersonaDrafts).linkAsk({ draftId, exchangeId: draftAskId });
+        assert.isFalse(
+          (yield* call({
+            to: personParticipantId,
+            message: "Any thoughts on the draft?",
+            regarding: draftAskId,
+            persona_draft_id: draftId,
+          })).isFailure,
+        );
+        assert.equal((yield* Ref.get(sends)).at(-1)!.regarding, draftAskId);
       }).pipe(Effect.provide(layer));
     }),
 );
@@ -682,7 +831,7 @@ it.effect("keeps participant listing placement-read-only", () =>
           Effect.fail(new OrchestratorProjectionError({ threadId: invocation.threadId })),
       }),
       unusedLifecycleDependencies,
-      NodeServices.layer,
+      Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
     );
     const layer = J5ToolkitHandlersLive.pipe(
       Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
@@ -850,9 +999,11 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
       }),
     );
     const shellSnapshotCalls = yield* Ref.make(0);
+    const shellSnapshotThreadIds = yield* Ref.make<ReadonlyArray<ThreadId> | undefined>(undefined);
     const orchestrator = Layer.mock(OrchestratorV2)({
-      getShellSnapshot: () =>
-        Ref.update(shellSnapshotCalls, (calls) => calls + 1).pipe(
+      getShellSnapshot: (options) =>
+        Ref.set(shellSnapshotThreadIds, options?.threadIds).pipe(
+          Effect.andThen(Ref.update(shellSnapshotCalls, (calls) => calls + 1)),
           Effect.as({
             schemaVersion: 2,
             snapshotSequence: 1,
@@ -875,7 +1026,7 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
           }),
           Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
           unusedLifecycleDependencies,
-          NodeServices.layer,
+          Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
         ),
       ),
     );
@@ -901,6 +1052,14 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
     const result = yield* call({});
     const directory = yield* decodeJ5ListParticipantsResult(result.encodedResult);
     assert.equal(yield* Ref.get(shellSnapshotCalls), 1);
+    assert.deepStrictEqual(
+      yield* Ref.get(shellSnapshotThreadIds),
+      rows.flatMap((row) =>
+        row.participant.kind === "agent" && row.projectId === ledgerProjectId
+          ? [row.participant.threadId]
+          : [],
+      ),
+    );
     assert.equal(directory.total, 5);
     assert.equal(directory.next_cursor, null);
 
@@ -916,6 +1075,8 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
         can_open_exchange: false,
         accepts_urgency: false,
         thread_id: invocation.threadId,
+        // The link upstream's tools return: the thread in this environment, ready to mention.
+        link: `<t3-thread://v2/environment:j5:mcp-handler/${invocation.threadId}>`,
         provenance: { kind: "unrecorded" },
         placement_parent_id: null,
         display_name: null,
@@ -931,6 +1092,7 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
         can_open_exchange: true,
         accepts_urgency: true,
         thread_id: null,
+        link: null,
         provenance: { kind: "not-applicable" },
         placement_parent_id: null,
         display_name: null,
@@ -946,6 +1108,7 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
         can_open_exchange: true,
         accepts_urgency: false,
         thread_id: archivedThreadId,
+        link: `<t3-thread://v2/environment:j5:mcp-handler/${archivedThreadId}>`,
         provenance: { kind: "unrecorded" },
         placement_parent_id: null,
         display_name: "Archived researcher",
@@ -961,6 +1124,7 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
         can_open_exchange: true,
         accepts_urgency: false,
         thread_id: activeThreadId,
+        link: `<t3-thread://v2/environment:j5:mcp-handler/${activeThreadId}>`,
         provenance: { kind: "unrecorded" },
         placement_parent_id: null,
         display_name: "Release reviewer",
@@ -976,6 +1140,7 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
         can_open_exchange: true,
         accepts_urgency: false,
         thread_id: missingThreadId,
+        link: `<t3-thread://v2/environment:j5:mcp-handler/${missingThreadId}>`,
         provenance: { kind: "unrecorded" },
         placement_parent_id: null,
         display_name: null,
@@ -1090,7 +1255,7 @@ it.effect("returns null display names when the ambient shell snapshot fails", ()
           }),
           Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
           unusedLifecycleDependencies,
-          NodeServices.layer,
+          Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
         ),
       ),
     );
@@ -1217,7 +1382,25 @@ it.effect("preflights home before creation and records facts before the one stab
         ),
     });
     const threadManagement = threadManagementMock({
-      getThreadProjection: (threadId) => Effect.succeed(projection(threadId)),
+      // Someone else's messages reached the new thread before and after its brief.
+      getThreadRecords: (threadId) =>
+        Ref.get(commands).pipe(
+          Effect.map((dispatched) => {
+            const brief = dispatched.find(
+              (command) => command.type === "message.dispatch" && command.threadId === threadId,
+            );
+            return brief?.type !== "message.dispatch"
+              ? projection(threadId)
+              : ({
+                  ...projection(threadId),
+                  runs: [
+                    { id: RunId.make("run:someone-before"), userMessageId: "message:before" },
+                    { id: RunId.make("run:brief"), userMessageId: brief.messageId },
+                    { id: RunId.make("run:someone-after"), userMessageId: "message:after" },
+                  ],
+                } as never);
+          }),
+        ),
       dispatch: (command) =>
         command.type === "thread.create" && String(command.commandId).includes("spawn-rejected")
           ? Effect.fail(
@@ -1290,6 +1473,9 @@ it.effect("preflights home before creation and records facts before the one stab
       orchestrator,
       Layer.mock(ParticipantPlacementService)({}),
       Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed([]) }),
+      permissiveCrewMemberModels,
+      agentPersonaEscalationsTestLayer(),
+      agentPersonaDraftsTestLayer(),
       Layer.mock(AgentCrewInstanceService)({ findMembership: () => Effect.succeed(null) }),
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
       Layer.mock(ArchiveCrewService)({}),
@@ -1303,7 +1489,7 @@ it.effect("preflights home before creation and records facts before the one stab
       Layer.mock(ManagedProjectFolders)({ namedProjectsRoot: "/tmp/j5-mcp-named-projects" }),
       Layer.mock(ProjectService)({}),
       serverConfigLayer,
-      NodeServices.layer,
+      Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
     );
     const layer = J5ToolkitHandlersLive.pipe(
       Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
@@ -1337,6 +1523,9 @@ it.effect("preflights home before creation and records facts before the one stab
       assert.deepStrictEqual(first.result, {
         participant_id: childParticipantId,
         thread_id: (first.result as { readonly thread_id: ThreadId }).thread_id,
+        link: `<t3-thread://v2/environment:j5:mcp-handler/${(first.result as { readonly thread_id: ThreadId }).thread_id}>`,
+        // The brief's own run, found by its message, not the first or the newest.
+        run_id: RunId.make("run:brief"),
         project_id: ledgerProjectId,
         project_title: projectTitle,
         placement: {
@@ -1410,7 +1599,7 @@ it.effect("preflights home before creation and records facts before the one stab
       assert.isTrue(optionless.isFailure);
       assert.include(
         (optionless.result as unknown as { readonly message: string }).message,
-        "Model grok-custom-optionless on provider codex-luna exposes no reasoning options; j5_spawn_agent requires explicit reasoning selection",
+        "Model grok-custom-optionless on provider codex-luna has no reasoning option",
       );
       assert.lengthOf(yield* Ref.get(commands), 4);
 
@@ -1457,6 +1646,9 @@ it.effect("refuses spawn before thread creation when the caller is a Subagent", 
         dispatch: () => Ref.update(dispatches, (count) => count + 1).pipe(Effect.as({} as never)),
       }),
       Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed([]) }),
+      permissiveCrewMemberModels,
+      agentPersonaEscalationsTestLayer(),
+      agentPersonaDraftsTestLayer(),
       Layer.mock(AgentCrewInstanceService)({ findMembership: () => Effect.succeed(null) }),
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
       Layer.mock(ArchiveCrewService)({}),
@@ -1468,7 +1660,7 @@ it.effect("refuses spawn before thread creation when the caller is a Subagent", 
       Layer.mock(ManagedProjectFolders)({ namedProjectsRoot: "/tmp/j5-mcp-named-projects" }),
       Layer.mock(ProjectService)({}),
       serverConfigLayer,
-      NodeServices.layer,
+      Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
     );
     const layer = J5ToolkitHandlersLive.pipe(
       Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
@@ -1544,7 +1736,10 @@ const personaCapabilityProvider = (provider: ServerProvider) => ({
     label: model.name,
     options: model.capabilities?.optionDescriptors?.map((descriptor) => ({
       id: descriptor.id,
-      values: descriptor.type === "select" ? descriptor.options.map((option) => option.id) : [],
+      values:
+        descriptor.type === "select"
+          ? descriptor.options.map((option) => option.id)
+          : [false, true],
     })),
   })),
   canRunChildTask: true,
@@ -1556,6 +1751,8 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
   Effect.gen(function* () {
     const ledgerProjectId = LedgerProjectId.make("project:j5:mcp-spawn-persona");
     const personaCallerRuntimeMode = yield* Ref.make<RuntimeMode>("full-access");
+    // What a person typed to start the caller's running turn, if anything.
+    const personTurn = yield* Ref.make<string | null>(null);
     const callerParticipantId = ParticipantId.make("agent:j5:mcp-spawn-persona-caller");
     const childParticipantId = ParticipantId.make("agent:j5:mcp-spawn-persona-child");
     const commands = yield* Ref.make<ReadonlyArray<OrchestrationV2ServerCommand>>([]);
@@ -1563,9 +1760,26 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
       { slug: "gpt-5.6-terra", options: ["medium", "high"] },
       { slug: "gpt-5.6-sol", options: ["high"] },
     ]);
-    const claude = personaProvider("claudeAgent", "claudeAgent", [
+    const claudeWithLevels = personaProvider("claudeAgent", "claudeAgent", [
       { slug: "claude-opus-5", options: ["high"] },
     ]);
+    const claude: ServerProvider = {
+      ...claudeWithLevels,
+      models: [
+        ...claudeWithLevels.models,
+        {
+          slug: "claude-haiku-4-5",
+          name: "claude-haiku-4-5",
+          isCustom: false,
+          capabilities: {
+            optionDescriptors: [
+              { id: "thinking", label: "Thinking", type: "boolean", currentValue: true },
+            ],
+          },
+        },
+      ],
+    };
+    const personaProviders = yield* Ref.make<ReadonlyArray<ServerProvider>>([codex, claude]);
     const callerRow = {
       projectId: ledgerProjectId,
       participantId: callerParticipantId,
@@ -1613,18 +1827,50 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
           }),
       }),
       threadManagementMock({
-        getThreadProjection: (threadId) =>
-          Ref.get(commands).pipe(
-            Effect.map((all) => {
+        getThreadRecords: (threadId) =>
+          Effect.all([
+            Ref.get(commands),
+            Ref.get(personaCallerRuntimeMode),
+            Ref.get(personTurn),
+          ]).pipe(
+            Effect.map(([all, runtimeMode, typed]) => {
               const create = all.find(
                 (command) => command.type === "thread.create" && command.threadId === threadId,
               );
-              return create?.type === "thread.create"
-                ? {
-                    ...projection(threadId),
-                    thread: { ...projection(threadId).thread, ...create, id: threadId },
-                  }
-                : projection(threadId);
+              if (create?.type === "thread.create")
+                return {
+                  ...projection(threadId),
+                  thread: { ...projection(threadId).thread, ...create, id: threadId },
+                };
+              if (threadId !== invocation.threadId) return projection(threadId);
+              const messageId = MessageId.make("caller-turn-message");
+              return {
+                ...projection(threadId),
+                thread: { ...projection(threadId).thread, runtimeMode },
+                runs:
+                  typed === null
+                    ? []
+                    : [
+                        {
+                          id: "caller-run",
+                          ordinal: 1,
+                          status: "running",
+                          userMessageId: messageId,
+                        },
+                      ],
+                messages:
+                  typed === null
+                    ? []
+                    : [
+                        {
+                          id: messageId,
+                          role: "user",
+                          createdBy: "user",
+                          creationSource: "web",
+                          text: typed,
+                        },
+                      ],
+              } as never;
             }),
           ),
         getThreadShell: (threadId) =>
@@ -1659,7 +1905,10 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
             },
           }),
       }),
-      Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed([codex, claude]) }),
+      Layer.mock(ProviderRegistry)({ getProviders: Ref.get(personaProviders) }),
+      permissiveCrewMemberModels,
+      agentPersonaEscalationsTestLayer(),
+      agentPersonaDraftsTestLayer(),
       Layer.mock(AgentCrewInstanceService)({ findMembership: () => Effect.succeed(null) }),
       Layer.mock(ParticipantPlacementService)({}),
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
@@ -1689,8 +1938,8 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
             deletedAt: null,
           }),
       }),
-      personaLibraryLayer("j5-mcp-spawn-persona-", Object.values(BUILT_IN_AGENT_PERSONAS)),
-    ).pipe(Layer.provideMerge(NodeServices.layer));
+      personaLibraryLayer("j5-mcp-spawn-persona-", launchablePersonas),
+    ).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
     const layer = J5ToolkitHandlersLive.pipe(
       Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
       Layer.provideMerge(dependencies),
@@ -1793,7 +2042,28 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
       assert.isTrue(outOfRoute.isFailure);
       assert.include(failureMessage(outOfRoute), "Agent scout allows only");
       assert.include(failureMessage(outOfRoute), "outside its declared routes");
-      assert.include(failureMessage(outOfRoute), "or omit persona");
+      assert.include(failureMessage(outOfRoute), "omit them to let the server choose");
+
+      // A route always names a level, so a persona never runs without one and none is inferred.
+      const { reasoning: _reasoning, ...scoutWithoutReasoning } = scout;
+      const noLevelOnRoute = yield* call({
+        ...scoutWithoutReasoning,
+        client_request_id: "spawn-persona-no-level-on-route",
+      });
+      assert.isTrue(noLevelOnRoute.isFailure);
+      assert.include(failureMessage(noLevelOnRoute), "needs a reasoning level");
+      const modelWithoutLevels = yield* call({
+        ...scoutWithoutReasoning,
+        provider: ProviderInstanceId.make("claudeAgent"),
+        model: "claude-haiku-4-5",
+        client_request_id: "spawn-persona-model-without-levels",
+      });
+      assert.isTrue(modelWithoutLevels.isFailure);
+      assert.include(failureMessage(modelWithoutLevels), "Agent scout allows only");
+      assert.include(
+        failureMessage(modelWithoutLevels),
+        "claudeAgent claude-haiku-4-5 (no reasoning) is outside its declared routes",
+      );
 
       const unenforceable = yield* call({
         ...scout,
@@ -1814,7 +2084,16 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
         client_request_id: "spawn-persona-unknown",
       });
       assert.isTrue(unknown.isFailure);
-      assert.include(failureMessage(unknown), "Unknown agent nobody");
+      // Every persona launch path gives the same code and text for the same block.
+      assert.equal((unknown.result as { readonly code: string }).code, "persona_not_found");
+      assert.include(
+        failureMessage(unknown),
+        "[persona_not_found] Unknown persona nobody in this environment.",
+      );
+      assert.include(
+        failureMessage(unknown),
+        "Never recreate a blocked persona as a custom worker",
+      );
       assert.lengthOf(yield* Ref.get(commands), commandCount);
 
       // A persona that declares full access spawns with the ordinary full-access mode.
@@ -1854,9 +2133,26 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
       assert.notProperty(operatorPolicy, "sandboxPolicy");
       assert.notProperty(operatorPolicy, "approvalPolicy");
 
-      // A persona's policy sets its permission mode, above the caller's own if it says so. The
-      // caller may still choose a narrower interaction mode, and may not choose the permissions.
+      // An agent may not pick a persona with more access than it runs with itself.
       yield* Ref.set(personaCallerRuntimeMode, "approval-required");
+      const createdBeforeAgentPick = (yield* createdThreads()).length;
+      const agentPick = yield* call({
+        ...scout,
+        persona: "operator",
+        client_request_id: "spawn-persona-agent-pick",
+      });
+      assert.isTrue(agentPick.isFailure);
+      assert.include(
+        failureMessage(agentPick),
+        "it would run with Full access, which is broader than the Supervised its caller runs with",
+      );
+      assert.include(failureMessage(agentPick), "@persona:operator");
+      assert.lengthOf(yield* createdThreads(), createdBeforeAgentPick);
+
+      // A persona the person picked with @persona sets its permission mode, above the caller's
+      // own if it says so. The caller may still choose a narrower interaction mode, and may not
+      // choose the permissions.
+      yield* Ref.set(personTurn, "Spawn @persona:operator to fix the build.");
       const planned = yield* call({
         ...scout,
         persona: "operator",
@@ -1867,6 +2163,8 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
       const plannedCreate = (yield* createdThreads()).at(-1)!;
       assert.equal(plannedCreate.runtimeMode, "full-access");
       assert.equal(plannedCreate.interactionMode, "plan");
+      assert.deepStrictEqual(plannedCreate.agentPersonaAssignment?.pickSource, { kind: "person" });
+      yield* Ref.set(personTurn, null);
       const chosen = yield* call({
         ...scout,
         persona: "operator",
@@ -1899,7 +2197,7 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
       assert.isTrue(above.isFailure);
       assert.include(
         failureMessage(above),
-        "Persona operator runs in permission mode full-access, which is broader than the level this MCP client was approved for (approval-required).",
+        "it would run with Full access, which is broader than the Supervised its caller runs with",
       );
       assert.include(failureMessage(above), "a persona within that level");
       assert.include(failureMessage(above), "sign in again");
@@ -1913,6 +2211,174 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
       const withinCreate = (yield* createdThreads()).at(-1)!;
       assert.equal(withinCreate.agentPersonaAssignment?.personaId, "scout");
       assert.equal(withinCreate.runtimeMode, "approval-required");
+      yield* library.importFiles({
+        files: [
+          {
+            name: "unpinned.yaml",
+            content: toYaml({
+              ...BUILT_IN_AGENT_PERSONAS.scout,
+              id: "unpinned",
+              modelRoute: [
+                { instanceId: "missing", model: "unavailable" },
+                { instanceId: "codex", model: "missing" },
+                { instanceId: "codex", model: "gpt-5.6-terra" },
+              ],
+            }),
+          },
+        ],
+        replaceExisting: false,
+      });
+      const unpinned = yield* call({
+        ...scout,
+        persona: "unpinned",
+        client_request_id: "spawn-unpinned",
+      });
+      assert.isFalse(unpinned.isFailure, failureMessage(unpinned));
+      const unpinnedCreate = (yield* createdThreads()).at(-1)!;
+      assert.equal(unpinnedCreate.agentPersonaAssignment?.resolvedEntryIndex, 2);
+      assert.deepStrictEqual(unpinnedCreate.modelSelection.options, [
+        { id: "reasoningEffort", value: "high" },
+      ]);
+
+      // An independent reviewer left to the server avoids its caller's model, and one pinned to
+      // the caller's model keeps it and says so. An outside agent naming no threads has no authors.
+      yield* library.importFiles({
+        files: [
+          {
+            name: "reviewer.yaml",
+            content: toYaml({
+              ...BUILT_IN_AGENT_PERSONAS.scout,
+              id: "reviewer",
+              independentReviewer: true,
+              modelRoute: ["gpt-5.6-sol", "gpt-5.6-terra"].map((model) => ({
+                instanceId: "codex",
+                model,
+                options: [{ id: "reasoningEffort", value: "high" }],
+              })),
+            }),
+          },
+        ],
+        replaceExisting: false,
+      });
+      const { provider: _provider, model: _model, reasoning: _level, ...unmodeled } = scout;
+      const lastBrief = () => briefs().pipe(Effect.map((items) => items.at(-1)!.text));
+      const review = yield* call({
+        ...unmodeled,
+        persona: "reviewer",
+        client_request_id: "spawn-reviewer",
+      });
+      assert.isFalse(review.isFailure, failureMessage(review));
+      const reviewCreate = (yield* createdThreads()).at(-1)!;
+      assert.equal(reviewCreate.modelSelection.model, "gpt-5.6-terra");
+      assert.deepStrictEqual(reviewCreate.agentPersonaAssignment?.reviewIndependence, {
+        outcome: "different-model",
+        authorModels: ["gpt-5.6-sol"],
+        authorThreadIds: [invocation.threadId],
+        partlyUnknown: false,
+        modelChosenBy: "server",
+      });
+      assert.include(
+        yield* lastBrief(),
+        "Review independence: you run on gpt-5.6-terra; the authors ran on gpt-5.6-sol.",
+      );
+      const pinnedReview = yield* call({
+        ...scout,
+        persona: "reviewer",
+        model: "gpt-5.6-sol",
+        client_request_id: "spawn-reviewer-pinned",
+      });
+      assert.isFalse(pinnedReview.isFailure, failureMessage(pinnedReview));
+      const pinnedCreate = (yield* createdThreads()).at(-1)!;
+      assert.equal(pinnedCreate.modelSelection.model, "gpt-5.6-sol");
+      assert.equal(
+        pinnedCreate.agentPersonaAssignment?.reviewIndependence?.outcome,
+        "same-model-as-author",
+      );
+      assert.include(
+        yield* lastBrief(),
+        "you run on the same model as the author (gpt-5.6-sol), because it was chosen explicitly.",
+      );
+      const outsideReview = yield* call(
+        { ...unmodeled, ...elsewhere, persona: "reviewer", client_request_id: "outside-reviewer" },
+        outside,
+      );
+      assert.isFalse(outsideReview.isFailure, failureMessage(outsideReview));
+      const outsideCreate = (yield* createdThreads()).at(-1)!;
+      assert.equal(outsideCreate.modelSelection.model, "gpt-5.6-sol");
+      assert.equal(
+        outsideCreate.agentPersonaAssignment?.reviewIndependence?.outcome,
+        "unknown-authors",
+      );
+      assert.include(yield* lastBrief(), "the authors of this work are unknown.");
+      const plainUnmodeled = yield* call({
+        workspace: { type: "shared" as const },
+        brief: "No persona and no model.",
+        title: "Plain agent",
+        client_request_id: "spawn-plain-no-model",
+      });
+      assert.isTrue(plainUnmodeled.isFailure);
+      assert.include(failureMessage(plainUnmodeled), "needs a provider and model");
+
+      yield* library.importFiles({
+        files: [
+          {
+            name: "options.yaml",
+            content: toYaml({
+              ...BUILT_IN_AGENT_PERSONAS.scout,
+              id: "options",
+              modelRoute: [
+                {
+                  instanceId: "claudeAgent",
+                  model: "claude-haiku-4-5",
+                  options: [{ id: "thinking", value: true }],
+                },
+              ],
+            }),
+          },
+        ],
+        replaceExisting: false,
+      });
+      const options = yield* call({
+        ...scoutWithoutReasoning,
+        provider: ProviderInstanceId.make("claudeAgent"),
+        model: "claude-haiku-4-5",
+        persona: "options",
+        client_request_id: "spawn-options",
+      });
+      assert.isFalse(options.isFailure, failureMessage(options));
+      assert.deepStrictEqual((yield* createdThreads()).at(-1)!.modelSelection.options, [
+        { id: "thinking", value: true },
+      ]);
+      const beforeLimited = (yield* createdThreads()).length;
+      yield* Ref.set(personaProviders, [
+        {
+          ...codex,
+          usageLimits: {
+            checkedAt: "2026-11-03T00:00:00Z",
+            windows: [
+              {
+                id: "secondary",
+                kind: "weekly",
+                label: "Weekly",
+                usedPercent: 100,
+                resetsAt: "2030-01-01T00:00:00Z",
+              },
+            ],
+          },
+        },
+        claude,
+      ]);
+      const limited = yield* call({
+        ...scout,
+        persona: "unpinned",
+        client_request_id: "spawn-limited-entry",
+      });
+      assert.isTrue(limited.isFailure);
+      assert.include(failureMessage(limited), "is at its usage limit");
+      assert.lengthOf(yield* createdThreads(), beforeLimited);
+      yield* Ref.set(personaProviders, [codex, claude]);
+
+      assert.lengthOf(yield* createdThreads(), beforeLimited);
     }).pipe(Effect.provide(layer));
   }),
 );
@@ -1984,6 +2450,9 @@ it.effect("archives a crew only as a unit through its captain with one confirmat
       threadManagementMock({}),
       Layer.mock(OrchestratorMcpService)({}),
       Layer.mock(ProviderRegistry)({}),
+      permissiveCrewMemberModels,
+      agentPersonaEscalationsTestLayer(),
+      agentPersonaDraftsTestLayer(),
       Layer.mock(ParticipantPlacementService)({}),
       Layer.mock(AgentCrewInstanceService)({}),
       Layer.mock(CrewProposalService)({}),
@@ -2007,13 +2476,21 @@ it.effect("archives a crew only as a unit through its captain with one confirmat
                         result: "archived" as const,
                       },
                     ],
+                    worktrees: [
+                      {
+                        path: "/wt/builder",
+                        branch: "j5/builder",
+                        outcome: "kept" as const,
+                        reason: "unmerged_commits" as const,
+                      },
+                    ],
                   }),
             ),
           ),
       }),
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
       Layer.mock(CrewStopService)({}),
-      NodeServices.layer,
+      Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
     );
     const layer = J5ToolkitHandlersLive.pipe(
       Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
@@ -2073,6 +2550,14 @@ it.effect("archives a crew only as a unit through its captain with one confirmat
         status: "archived",
         crew_instance_id: "crew:j5:test",
         members: [{ seat: "builder", participant_id: memberParticipantId, result: "archived" }],
+        worktrees: [
+          {
+            path: "/wt/builder",
+            branch: "j5/builder",
+            outcome: "kept",
+            reason: "unmerged_commits",
+          },
+        ],
       });
       const calls = yield* Ref.get(archiveCalls);
       assert.lengthOf(calls, 2);
@@ -2091,7 +2576,7 @@ it.effect("archives a crew only as a unit through its captain with one confirmat
   }),
 );
 
-it.effect("lists saved agents with purpose, policy, availability, and route", () =>
+it.effect("lists every ordered model entry with structured reasons and chosen index", () =>
   Effect.gen(function* () {
     const codex = personaProvider("codex", "codex", [
       { slug: "gpt-5.6-terra", options: ["high"] },
@@ -2105,6 +2590,9 @@ it.effect("lists saved agents with purpose, policy, availability, and route", ()
       threadManagementMock({}),
       Layer.mock(OrchestratorMcpService)({}),
       Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed([codex]) }),
+      permissiveCrewMemberModels,
+      agentPersonaEscalationsTestLayer(),
+      agentPersonaDraftsTestLayer(),
       Layer.mock(AgentCrewInstanceService)({ findMembership: () => Effect.succeed(null) }),
       Layer.mock(ParticipantPlacementService)({}),
       Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
@@ -2112,8 +2600,8 @@ it.effect("lists saved agents with purpose, policy, availability, and route", ()
       Layer.mock(ArchiveCrewService)({}),
       Layer.mock(CrewStopService)({}),
       Layer.mock(CrewProposalService)({}),
-      personaLibraryLayer("j5-mcp-list-agents-", Object.values(BUILT_IN_AGENT_PERSONAS)),
-    ).pipe(Layer.provideMerge(NodeServices.layer));
+      personaLibraryLayer("j5-mcp-list-agents-", launchablePersonas),
+    ).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
     const layer = J5ToolkitHandlersLive.pipe(
       Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
       Layer.provideMerge(dependencies),
@@ -2128,6 +2616,23 @@ it.effect("lists saved agents with purpose, policy, availability, and route", ()
       yield* fs.writeFileString(
         path.join(folder, "broken.yaml"),
         `instructions: [${diagnosticCanary}`,
+      );
+      yield* fs.writeFileString(
+        path.join(folder, "ordered-list.yaml"),
+        toYaml({
+          ...BUILT_IN_AGENT_PERSONAS.scout,
+          id: "ordered-list",
+          modelRoute: [
+            { instanceId: "absent-account", model: "gpt-5.6-terra" },
+            { instanceId: "codex", model: "not-offered" },
+            {
+              instanceId: "codex",
+              model: "gpt-5.6-terra",
+              options: [{ id: "reasoningEffort", value: "high" }],
+            },
+            { instanceId: "codex", model: "also-not-offered" },
+          ],
+        }),
       );
       const toolkit = yield* J5Toolkit;
       const response = yield* toolkit
@@ -2151,20 +2656,135 @@ it.effect("lists saved agents with purpose, policy, availability, and route", ()
       const { personas } = response.result as {
         readonly personas: ReadonlyArray<{
           readonly id: string;
-          readonly runtime_policy: string;
+          readonly access: string;
           readonly availability: string;
-          readonly route: string | null;
+          readonly entries: ReadonlyArray<{
+            readonly modelSelection?: { readonly instanceId: string; readonly model: string };
+            readonly failures: ReadonlyArray<string>;
+          }>;
+          readonly selected_entry_index: number | null;
         }>;
       };
-      assert.lengthOf(personas, 11);
+      assert.lengthOf(personas, launchablePersonas.length + 1);
+      const ordered = personas.find((persona) => persona.id === "ordered-list");
+      assert.equal(ordered?.selected_entry_index, 2);
+      assert.deepStrictEqual(
+        ordered?.entries.map(({ failures }) => failures),
+        [["provider-not-configured"], ["model-not-advertised"], [], ["model-not-advertised"]],
+      );
+      assert.equal(ordered?.entries[2]?.modelSelection?.instanceId, "codex");
       const scout = personas.find((persona) => persona.id === "scout");
       assert.deepStrictEqual(
-        [scout?.runtime_policy, scout?.availability, scout?.route],
-        ["read-only", "available", "codex · gpt-5.6-terra · high"],
+        [
+          scout?.access,
+          scout?.availability,
+          scout?.selected_entry_index,
+          scout?.entries[0]?.modelSelection?.instanceId,
+        ],
+        ["read-only", "available", 0, "codex"],
       );
-      // Publisher's publish-only policy has no enforceable provider yet, so it cannot start.
-      const publisher = personas.find((persona) => persona.id === "publisher");
-      assert.deepStrictEqual([publisher?.availability, publisher?.route], ["blocked", null]);
+      assert.isUndefined(personas.find((persona) => persona.id === "publisher"));
+    }).pipe(Effect.provide(layer));
+  }),
+);
+
+it.effect("reads a team persona and drafts an edit of it without touching the library", () =>
+  Effect.gen(function* () {
+    const dependencies = Layer.mergeAll(
+      Layer.mock(A2ASendService)({}),
+      Layer.mock(A2AHomeRegistrar)({
+        getHomeForThread: (threadId) => Effect.fail(new A2AHomeNotFoundError({ threadId })),
+      }),
+      Layer.mock(A2ALedger)({}),
+      Layer.mock(SpawnCompositionService)({}),
+      threadManagementMock({}),
+      Layer.mock(OrchestratorMcpService)({}),
+      Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed([]) }),
+      permissiveCrewMemberModels,
+      agentPersonaEscalationsTestLayer(),
+      Layer.mock(AgentCrewInstanceService)({ findMembership: () => Effect.succeed(null) }),
+      Layer.mock(ParticipantPlacementService)({}),
+      Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
+      Layer.mock(ArchiveCrewService)({}),
+      Layer.mock(CrewStopService)({}),
+      Layer.mock(CrewProposalService)({}),
+      personaLibraryLayer("j5-mcp-read-persona-", launchablePersonas),
+    ).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
+    const layer = J5ToolkitHandlersLive.pipe(
+      Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
+      // The drafts store reads the same library the tools do.
+      Layer.provideMerge(agentPersonaDraftsTestLayer()),
+      Layer.provideMerge(dependencies),
+    );
+    yield* Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const config = yield* ServerConfig;
+      const folder = path.join(config.stateDir, "personas");
+      const file = path.join(folder, "team-reviewer.yaml");
+      yield* fs.makeDirectory(folder, { recursive: true });
+      yield* fs.writeFileString(
+        file,
+        toYaml({
+          ...BUILT_IN_AGENT_PERSONAS.scout,
+          id: "team-reviewer",
+          authority: undefined,
+          access: "read-only",
+        }),
+      );
+      const toolkit = yield* J5Toolkit;
+      const handle = (name: "j5_read_persona" | "j5_propose_persona", params: unknown) =>
+        toolkit
+          .handle(name, params as never)
+          .pipe(
+            Stream.unwrap,
+            Stream.run(Sink.last()),
+            Effect.flatMap(Effect.fromOption),
+            Effect.provideService(McpInvocationContext, scope),
+          );
+      const read = yield* handle("j5_read_persona", { persona_id: "team-reviewer" });
+      assert.isFalse(read.isFailure);
+      const persona = read.result as {
+        readonly yaml: string;
+        readonly digest: string;
+        readonly origin: string;
+        readonly folder_file: string | null;
+        readonly overrides_folder: boolean;
+      };
+      assert.deepStrictEqual(
+        [persona.origin, persona.folder_file, persona.overrides_folder],
+        ["folder", file, false],
+      );
+      assert.include(persona.yaml, "id: team-reviewer");
+
+      const proposed = yield* handle("j5_propose_persona", {
+        mode: "edit",
+        persona_id: "team-reviewer",
+        expected_digest: persona.digest,
+        description: "Reviews changes, strictly.",
+      });
+      assert.isFalse(proposed.isFailure, JSON.stringify(proposed.encodedResult));
+      const draft = proposed.result as {
+        readonly summary: string;
+        readonly warnings: ReadonlyArray<string>;
+      };
+      assert.include(draft.summary, '- Description: "');
+      assert.lengthOf(draft.warnings, 2);
+      // Only the Owner's Save persona writes the library; the folder file is never written.
+      const library = yield* makeAgentPersonaLibrary;
+      assert.notInclude((yield* library.catalog()).importedIds, "team-reviewer");
+      assert.notInclude(yield* fs.readFileString(file), "strictly");
+
+      const incomplete = yield* handle("j5_propose_persona", {
+        mode: "create",
+        persona_id: "release-notes",
+        display_name: "Release Notes",
+      });
+      assert.isTrue(incomplete.isFailure);
+      assert.include(JSON.stringify(incomplete.encodedResult), "needs display_name, description");
+      const unknown = yield* handle("j5_read_persona", { persona_id: "nobody" });
+      assert.isTrue(unknown.isFailure);
+      assert.include(JSON.stringify(unknown.encodedResult), "There is no persona nobody here.");
     }).pipe(Effect.provide(layer));
   }),
 );
@@ -2230,10 +2850,13 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
       }),
       Layer.mock(SpawnCompositionService)({}),
       threadManagementMock({
-        getThreadProjection: (threadId) => Effect.succeed(projection(threadId)),
+        getThreadRecords: (threadId) => Effect.succeed(projection(threadId)),
       }),
       Layer.mock(OrchestratorMcpService)({}),
       Layer.mock(ProviderRegistry)({}),
+      permissiveCrewMemberModels,
+      agentPersonaEscalationsTestLayer(),
+      agentPersonaDraftsTestLayer(),
       Layer.mock(AgentCrewInstanceService)({
         findMembership: () => Ref.get(membership),
         listForCaptain: () => Effect.succeed([]),
@@ -2292,7 +2915,7 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
       Layer.mock(ProjectService)({}),
       Layer.mock(ManagedProjectFolders)({ namedProjectsRoot: "/tmp/j5-mcp-named-projects" }),
       serverConfigLayer,
-      NodeServices.layer,
+      Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
     );
     const layer = J5ToolkitHandlersLive.pipe(
       Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
@@ -2355,6 +2978,7 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
       assert.deepStrictEqual(proposed.result, {
         proposal_id: `proposal:${invocation.providerSessionId}:propose-1`,
         status: "open",
+        approval_mode: "human",
         crew_instance_id: null,
         members: [],
       });
@@ -2397,11 +3021,15 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
       const addedResult = added.result as unknown as {
         status: string;
         crew_instance_id: string;
-        members: unknown[];
+        members: ReadonlyArray<{ readonly link: string }>;
       };
       assert.equal(addedResult.status, "approved");
       assert.equal(addedResult.crew_instance_id, "crew:1");
       assert.lengthOf(addedResult.members, 1);
+      assert.equal(
+        addedResult.members[0]?.link,
+        `<t3-thread://v2/${invocation.environmentId}/thread:new>`,
+      );
       assert.deepStrictEqual(yield* Ref.get(addedSeats), [
         {
           workspace: { type: "shared" as const },
@@ -2439,213 +3067,6 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
       assert.include(message(spawned), "delegate_task");
     }).pipe(Effect.provide(layer));
   }),
-);
-
-it.effect(
-  "stops exactly one agent as upstream's Stop, in any project, within the caller's modes",
-  () =>
-    Effect.gen(function* () {
-      const ledgerProjectId = LedgerProjectId.make("project:j5:mcp-stop");
-      const callerParticipantId = ParticipantId.make("agent:j5:mcp-stop-caller");
-      const targetParticipantId = ParticipantId.make("agent:j5:mcp-stop-target");
-      const siblingParticipantId = ParticipantId.make("agent:j5:mcp-stop-sibling");
-      const childParticipantId = ParticipantId.make("agent:j5:mcp-stop-child");
-      const targetThreadId = ThreadId.make("thread:j5:mcp-stop-target");
-      const siblingThreadId = ThreadId.make("thread:j5:mcp-stop-sibling");
-      const childThreadId = ThreadId.make("thread:j5:mcp-stop-child");
-      const targetProjectId = ProjectId.make("project:j5:mcp-stop-target");
-      const stopped = yield* Ref.make<
-        ReadonlyArray<{
-          readonly commandId: string;
-          readonly threadId: ThreadId;
-          readonly reason: string | undefined;
-        }>
-      >([]);
-      const targetRunning = yield* Ref.make(true);
-      const callerRuntimeMode = yield* Ref.make<RuntimeMode>("full-access");
-      const targetIsCallersSeat = yield* Ref.make(false);
-      const stopLimits = yield* Ref.make<ReadonlyArray<RuntimeMode | undefined>>([]);
-      const callerRow = {
-        projectId: ledgerProjectId,
-        participantId: callerParticipantId,
-        participant: {
-          kind: "agent" as const,
-          id: callerParticipantId,
-          threadId: invocation.threadId,
-        },
-        archived: false,
-        canReceiveMessage: true,
-        canOpenExchange: true,
-        acceptsUrgency: false,
-      } satisfies ParticipantDirectoryRow;
-      // The target lives in another project: a stop reaches any agent on this server.
-      const agentRow = (participantId: ParticipantId, threadId: ThreadId) =>
-        ({
-          projectId: LedgerProjectId.make("project:j5:mcp-stop-elsewhere"),
-          participantId,
-          participant: { kind: "agent" as const, id: participantId, threadId },
-          archived: false,
-          canReceiveMessage: true,
-          canOpenExchange: true,
-          acceptsUrgency: false,
-        }) satisfies ParticipantDirectoryRow;
-      const dependencies = Layer.mergeAll(
-        Layer.succeed(
-          A2ASendService,
-          A2ASendService.of({
-            ...unusedOutsideAgentSends,
-            send: () => Effect.die("j5_send_message is outside this stop test"),
-            clearOwnAsk: () => Effect.die("j5_clear_own_ask is outside this stop test"),
-            sendAsMachine: () => Effect.die("unused"),
-            listParticipants: () =>
-              Effect.succeed([
-                callerRow,
-                agentRow(targetParticipantId, targetThreadId),
-                agentRow(siblingParticipantId, siblingThreadId),
-                agentRow(childParticipantId, childThreadId),
-              ]),
-          }),
-        ),
-        Layer.mock(ParticipantPlacementService)({
-          listParticipants: () => Effect.die("j5_stop_agent finds its target in the directory"),
-          listSubtree: () => Effect.die("j5_stop_agent must never resolve placement descendants"),
-        }),
-        threadManagementMock({
-          getThreadShell: (threadId) =>
-            Ref.get(callerRuntimeMode).pipe(
-              Effect.map((runtimeMode) =>
-                threadId === invocation.threadId
-                  ? liveThreadShell(threadId, { runtimeMode })
-                  : null,
-              ),
-            ),
-          getThreadProjection: (threadId) =>
-            Ref.get(targetRunning).pipe(
-              Effect.map((running) => ({
-                ...projection(threadId),
-                thread: {
-                  ...projection(threadId).thread,
-                  projectId: threadId === targetThreadId ? targetProjectId : projectId,
-                },
-                runs: running ? [{ status: "running" } as OrchestrationV2Run] : [],
-              })),
-            ),
-          dispatch: (command) =>
-            command.type === "thread.stop"
-              ? Ref.update(stopped, (items) => [
-                  ...items,
-                  {
-                    commandId: command.commandId,
-                    threadId: command.threadId,
-                    reason: command.reason,
-                  },
-                ]).pipe(
-                  // The limit upstream re-checks under the target's lock rides with the Stop.
-                  Effect.andThen(DispatchModeLimit),
-                  Effect.tap((limit) =>
-                    Ref.update(stopLimits, (items) => [...items, limit?.runtimeMode]),
-                  ),
-                  Effect.as({ sequence: 1, storedEvents: [] }),
-                )
-              : Effect.die(`j5_stop_agent must only dispatch thread.stop, not ${command.type}`),
-          // Upstream's thread.stop stops the target's delegated tasks itself.
-          stopDelegatedTasks: () =>
-            Effect.die("j5_stop_agent leaves delegated tasks to thread.stop"),
-          interruptThread: () =>
-            Effect.die("j5_stop_agent sends upstream's Stop, not an interrupt"),
-        }),
-        Layer.mock(A2AHomeRegistrar)({}),
-        Layer.mock(A2ALedger)({}),
-        Layer.mock(SpawnCompositionService)({}),
-        Layer.mock(OrchestratorMcpService)({}),
-        peerDirectoryNoneLayer,
-        Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
-        Layer.mock(AgentCrewInstanceService)({
-          findMembership: () =>
-            Ref.get(targetIsCallersSeat).pipe(
-              Effect.map((seat) =>
-                seat ? { crewInstanceId: "crew:stop", seatName: "builder" } : null,
-              ),
-            ),
-          read: () =>
-            Effect.succeed({ captainParticipantId: callerParticipantId } as AgentCrewInstance),
-          listForCaptain: () => Effect.succeed([]),
-        }),
-        Layer.mock(ArchiveCrewService)({}),
-        Layer.mock(CrewStopService)({}),
-        Layer.mock(CrewProposalService)({}),
-
-        Layer.mock(ThreadRegistration)({}),
-        NodeServices.layer,
-      );
-      const layer = J5ToolkitHandlersLive.pipe(
-        Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
-        Layer.provideMerge(dependencies),
-      );
-
-      yield* Effect.gen(function* () {
-        const toolkit = yield* J5Toolkit;
-        const call = (args: J5StopAgentInput) =>
-          toolkit
-            .handle("j5_stop_agent", args)
-            .pipe(
-              Stream.unwrap,
-              Stream.run(Sink.last()),
-              Effect.flatMap(Effect.fromOption),
-              Effect.provideService(McpInvocationContext, scope),
-            );
-        const args = {
-          participant_id: targetParticipantId,
-          client_request_id: "stop-one-1",
-        } satisfies J5StopAgentInput;
-        const first = yield* call(args);
-        const replay = yield* call(args);
-        assert.equal(first.result, "interrupt_requested");
-        assert.deepStrictEqual(replay.result, first.result);
-        // An idle target is still stopped: Stop also holds its queue and ends its watches.
-        yield* Ref.set(targetRunning, false);
-        const idle = yield* call({
-          ...args,
-          client_request_id: "stop-idle-1",
-        });
-        assert.equal(idle.result, "already_idle");
-        const calls = yield* Ref.get(stopped);
-        assert.lengthOf(calls, 3);
-        assert.isTrue(calls.every((call) => call.threadId === targetThreadId));
-        // An agent's Stop says so; without a reason the timeline reads "Stopped by user".
-        assert.isTrue(calls.every((call) => call.reason === "Stopped by an agent"));
-        // A replay reuses the command id.
-        assert.equal(calls[1]?.commandId, calls[0]?.commandId);
-        assert.notEqual(calls[2]?.commandId, calls[0]?.commandId);
-        assert.notInclude(
-          calls.map((call) => call.threadId),
-          siblingThreadId,
-        );
-        assert.notInclude(
-          calls.map((call) => call.threadId),
-          childThreadId,
-        );
-
-        // The target runs in full access. A caller in a narrower mode may not stop it.
-        yield* Ref.set(callerRuntimeMode, "approval-required");
-        const refused = yield* call({ ...args, client_request_id: "stop-narrow-1" });
-        assert.isTrue(refused.isFailure);
-        assert.include(JSON.stringify(refused.encodedResult), "broader permissions than you do");
-        assert.lengthOf(yield* Ref.get(stopped), calls.length, "a refused stop dispatches nothing");
-        // Unless the target is a seat of a Crew the caller commands.
-        yield* Ref.set(targetIsCallersSeat, true);
-        const commanded = yield* call({ ...args, client_request_id: "stop-seat-1" });
-        assert.equal(commanded.result, "already_idle");
-        assert.lengthOf(yield* Ref.get(stopped), calls.length + 1);
-        // Each Stop carries its caller's limit, except the Captain's, which has none.
-        assert.deepStrictEqual(yield* Ref.get(stopLimits), [
-          "full-access",
-          "full-access",
-          "full-access",
-          undefined,
-        ]);
-      }).pipe(Effect.provide(layer));
-    }),
 );
 
 it.effect(
@@ -2752,7 +3173,7 @@ it.effect(
         Layer.mock(CrewProposalService)({}),
         Layer.mock(ProjectService)({}),
         Layer.mock(ThreadRegistration)({}),
-        NodeServices.layer,
+        Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
       );
       const layer = J5ToolkitHandlersLive.pipe(
         Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
@@ -2808,6 +3229,8 @@ it.effect(
         assert.equal(remoteRow.can_open_exchange, true);
         assert.equal(remoteRow.self, false);
         assert.equal(remoteRow.thread_id, "thread:support");
+        // Its thread lives on Home, so its link names Home's environment, not this one.
+        assert.equal(remoteRow.link, "<t3-thread://v2/environment-home/thread:support>");
         assert.deepStrictEqual(remoteRow.provenance, { kind: "unrecorded" });
         assert.isFalse(hasKey(remoteRow, "environment_id"), "a server is named, never its id");
         assert.deepStrictEqual(
@@ -2854,4 +3277,67 @@ it.effect(
         assert.isTrue(settledRemote.isFailure);
       }).pipe(Effect.provide(layer));
     }),
+);
+
+// j5_list_participants joins the shells of its project's agents: active and archived alike, and a
+// project with no agents asks for none.
+it.effect(
+  "a shell snapshot by thread ids returns active and archived shells, and none for none",
+  () =>
+    Effect.gen(function* () {
+      const store = yield* ProjectionStoreV2;
+      const now = DateTime.makeUnsafe("2026-09-17T09:00:00.000Z");
+      const instanceId = ProviderInstanceId.make("codex");
+      const seed = (name: string, archivedAt: DateTime.Utc | null) => {
+        const threadId = ThreadId.make(`thread:by-ids:${name}`);
+        return store
+          .apply({
+            id: EventId.make(`event:by-ids:${name}`),
+            type: "thread.created",
+            threadId,
+            occurredAt: now,
+            payload: {
+              id: threadId,
+              projectId: ProjectId.make("project:by-ids"),
+              title: name,
+              providerInstanceId: instanceId,
+              modelSelection: { instanceId, model: "gpt-5.4" },
+              runtimeMode: "full-access",
+              interactionMode: "default",
+              branch: null,
+              worktreePath: null,
+              activeProviderThreadId: null,
+              lineage: { parentThreadId: null, relationshipToParent: null, rootThreadId: threadId },
+              forkedFrom: null,
+              createdBy: "user",
+              creationSource: "web",
+              createdAt: now,
+              updatedAt: now,
+              archivedAt,
+              settledOverride: null,
+              settledAt: null,
+              lastVisitedAt: null,
+              deletedAt: null,
+            },
+          })
+          .pipe(Effect.as(threadId));
+      };
+      const active = yield* seed("active", null);
+      const archived = yield* seed("archived", now);
+      yield* seed("elsewhere", null);
+
+      const chosen = yield* store.getShellSnapshot({ threadIds: [active, archived] });
+      assert.deepStrictEqual(
+        chosen.threads.map((thread) => thread.id),
+        [active],
+      );
+      assert.deepStrictEqual(
+        chosen.archivedThreads.map((thread) => thread.id),
+        [archived],
+      );
+      const none = yield* store.getShellSnapshot({ threadIds: [] });
+      assert.deepStrictEqual([none.threads, none.archivedThreads], [[], []]);
+    }).pipe(
+      Effect.provide(ProjectionStoreLayer.pipe(Layer.provide(SqlitePersistence.layerMemory))),
+    ),
 );

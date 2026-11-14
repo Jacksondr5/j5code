@@ -7,11 +7,7 @@ import {
   type AgentPersonaCreateDraft,
 } from "@t3tools/client-runtime/j5/agent-personas";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import type {
-  AgentPersonaAuthorityPolicy,
-  AgentPersonaModelTarget,
-  EnvironmentId,
-} from "@t3tools/contracts";
+import type { AgentPersonaAccess, AgentPersonaModelEntry, EnvironmentId } from "@t3tools/contracts";
 import { useState } from "react";
 
 import { Button } from "../../components/ui/button";
@@ -59,8 +55,9 @@ export function AgentCreateDialog(props: {
     idEdited: boolean;
     description: string;
     instructions: string;
-    authorityPolicy: AgentPersonaAuthorityPolicy;
-    modelRoute: readonly [AgentPersonaModelTarget, AgentPersonaModelTarget] | null;
+    access: AgentPersonaAccess;
+    modelRoute: ReadonlyArray<AgentPersonaModelEntry> | null;
+    independentReviewer: boolean;
   }>(
     props.initial
       ? { ...props.initial, idEdited: true }
@@ -70,8 +67,9 @@ export function AgentCreateDialog(props: {
           idEdited: false,
           description: "",
           instructions: "",
-          authorityPolicy: "read-only",
+          access: "read-only",
           modelRoute: null,
+          independentReviewer: false,
         },
   );
   const [saving, setSaving] = useState(false);
@@ -99,8 +97,9 @@ export function AgentCreateDialog(props: {
         displayName: draft.displayName.trim(),
         description: draft.description.trim(),
         instructions: draft.instructions,
-        authorityPolicy: draft.authorityPolicy,
-        modelRoute: [modelRoute[0], modelRoute[1]],
+        access: draft.access,
+        modelRoute,
+        independentReviewer: draft.independentReviewer,
       },
     });
     if (result._tag === "Failure") {
@@ -189,7 +188,7 @@ export function AgentCreateDialog(props: {
                 />
               </div>
               <span className="text-xs text-muted-foreground">
-                Markdown. Instructions describe behavior; the runtime policy below is what is
+                Markdown. Instructions describe behavior; the access level below is what is
                 enforced.
               </span>
             </label>
@@ -200,9 +199,19 @@ export function AgentCreateDialog(props: {
             ) : (
               <AgentRoutePolicyFields
                 environmentId={props.environmentId}
-                value={{ authorityPolicy: draft.authorityPolicy, modelRoute }}
+                value={{
+                  access: draft.access,
+                  modelRoute,
+                  independentReviewer: draft.independentReviewer,
+                }}
                 disabled={saving}
-                onChange={(next) => setDraft({ ...draft, ...next })}
+                onChange={(next) =>
+                  setDraft({
+                    ...draft,
+                    ...next,
+                    independentReviewer: next.independentReviewer === true,
+                  })
+                }
               />
             )}
             {error ? (

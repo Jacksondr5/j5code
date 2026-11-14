@@ -78,6 +78,7 @@ const makeLayer = (daemon: boolean) =>
             SELECT json_extract(payload_json, '$.lineage.parentThreadId') AS parent_id, thread_id
             FROM orchestration_v2_projection_threads
             WHERE json_extract(payload_json, '$.lineage.relationshipToParent') = 'subagent'
+               OR json_extract(payload_json, '$.lineage.sideChat') = 1
             UNION
             SELECT
               substr(provenance_participant_id, length('agent:j5:a2a:') + 1),

@@ -1,6 +1,6 @@
 # J5 Code
 
-J5 Code is a fork of [T3 Code](https://github.com/pingdotgg/t3code), a minimal GUI for coding agents. T3 Code's Node WebSocket server wraps provider CLIs and agents (Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity) and serves web, desktop, and mobile clients. J5 builds on that base to run a **fleet**: many agents working at once, coordinating with each other, and reaching the person only when they need to.
+J5 Code is a fork of [T3 Code](https://github.com/pingdotgg/t3code), a minimal GUI for coding agents. T3 Code's Node WebSocket server wraps provider CLIs and agents (Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity, Kiro) and serves web, desktop, and mobile clients. J5 builds on that base to run a **fleet**: many agents working at once, coordinating with each other, and reaching the person only when they need to.
 
 ## Know which zone you are in
 
@@ -71,7 +71,7 @@ The most common defect in this repo is a change that works on the path you teste
 
 - **Entry points.** A behavior reachable from the chat view is usually also reachable from Settings, the command palette, and a keybinding. Fixing one is not fixing the feature.
 - **Clients.** Web, desktop (wraps web, adds Electron shell/IPC), and mobile (React Native, separate navigation). Shared logic lives in `packages/client-runtime`.
-- **Providers.** Codex, Claude, Cursor, Grok, OpenCode, and Antigravity each have an adapter. Provider-shaped features need a decision per adapter, even if the decision is "not supported here". For J5 features, Codex, Claude, and Cursor are the priority: support and test them first, and the rest are a lower priority. Priority isn't parity: where an adapter can't support a feature without changing upstream's adapter (zone 3), record "not supported here" for it.
+- **Providers.** Codex, Claude, Cursor, Grok, OpenCode, Antigravity, and Kiro each have an adapter. Provider-shaped features need a decision per adapter, even if the decision is "not supported here". For J5 features, Codex, Claude, and Cursor are the priority: support and test them first, and the rest are a lower priority. Priority isn't parity: where an adapter can't support a feature without changing upstream's adapter (zone 3), record "not supported here" for it.
 - **Agents.** A capability a person can trigger is usually one an agent should reach through MCP tools, and scheduled tasks run the same paths. That only works when it is a service method, not handler code.
 - **Contracts.** Anything crossing the wire is typed in `packages/contracts`. Change the schema and the server, web, mobile, and desktop all follow.
 - **Reverse states.** If you added a way in, add the way out and the way to see it. Snooze needs unsnooze. Close needs reopen. A one-way door is a bug.
@@ -97,7 +97,7 @@ For a live test, run `node scripts/j5/setup-agent-live-test.ts` and follow its o
 A copy of real data is for a server the developer will use, or for rehearsing a migration. Take no agent turns on one: its threads point at the real checkouts and resume the real provider sessions.
 
 - A new worktree's first `vp run dev` starts on an empty database. Upstream seeds it from the live install; J5 turns that off, so real data only enters a worktree when you ask for it.
-- `vp run migrate-dev-db` from a worktree makes a copy that is safe to start a server on, in one command: recent stopped threads only, with pending work, schedules, peer servers and their credentials, undelivered agent messages and live Crews stood down. Its threads still point at the real checkouts, so a message you send to one runs a real agent there.
+- `vp run migrate-dev-db` from a worktree makes a copy that is safe to start a server on, in one command: recent stopped threads only, with pending work, schedules, peer servers and their credentials, links to other environments, undelivered agent messages and live Crews stood down. Its threads still point at the real checkouts, so a message you send to one runs a real agent there.
 - For a whole database, copy it yourself. Nothing in a raw copy is stood down: a server started on it resumes real deliveries and polls real peers.
 - Copy from `~/.j5code/userdata` (the developer's real data, the most realistic test set) or `~/.j5code/dev`. Worktree state lives at `<worktree>/.j5code/userdata`.
 - The server reads `statev2.sqlite`. A home that has not yet run a V2 server has only `state.sqlite`; once it has, `state.sqlite` is a frozen pre-V2 copy, so take `statev2.sqlite`.
@@ -121,11 +121,14 @@ A copy of real data is for a server the developer will use, or for rehearsing a 
 ## Verifying
 
 - Smallest proof that the change works. While you iterate, run `vp test run <files>` for the tests you touched; for big files, add `-t "<name>"`.
-- Before you push, run `vp run check:changed`. It runs CI's fast checks for changed files (format, lint, knip, typecheck of affected packages and dependents, and tests beside changes) against the merge base with `origin/j5/main`.
+- Before you push, run `vp run check:changed`. It runs CI's fast checks for changed files (format, lint, knip, typecheck of affected packages and dependents, tests beside changes, and the cross-file checks those miss) against the merge base with `origin/j5/main`. CI still runs the full test suites.
 - Use `vp run typecheck` in the package you changed, not `npx tsc`; it caches per package. Both run tsc-rs (`typescript` is the `@tsc-rs/typescript` drop-in).
 - Run `node -e` snippets from `apps/server` or the owning package. `effect` does not resolve from the repo root.
-- Proof for a bug fix depends on the bug. Logic, data, state, and protocol bugs get a failing test first (the fewest that fail on `j5/main` for that reason, in the module's existing test file), then the fix. Purely visual bugs (spacing, colour, alignment, a layout shift) get before/after captures as their proof and no test: do not add UI tests for nitpicks, and do not ask for one in review when a capture already shows it. A server-only fix with no visible surface ships the test plus a short runtime transcript.
-- Test meaningful logic or observable behavior. Do not render components to static markup to assert props or attributes, or add tests that merely assert callback wiring or mirror the implementation.
+- Proof for a bug fix depends on the bug. Logic, data, state, and protocol bugs get a failing test first (the fewest that fail on `j5/main` for that reason, in an existing case of the module's test file where one fits), then the fix. Purely visual bugs (spacing, colour, alignment, a layout shift) get before/after captures as their proof and no test: do not add UI tests for nitpicks, and do not ask for one in review when a capture already shows it. A server-only fix with no visible surface ships the test plus a short runtime transcript.
+- Test behavior that can break, such as orchestration and event-sourcing, provider protocol translation, auth and permission guards, persistence and migrations, external-format parsing, race fixes, and the logic a bug fix changed. Leave out tests for what types already guarantee, trivial logic, copy text, smoke runs, mock-call mirrors, callback wiring, and props rendered to static markup.
+- Extend before you add. When an existing test or table covers the behavior, add a row or an assertion there. Write a new `it` only when no case fits.
+- Test at one layer: the lowest one that fails on `j5/main`. Do not repeat the case in a wrapper test, at each call site, or in web and mobile copies of the same logic.
+- [Testing](docs/internals/testing.md) carries upstream's version of these test rules, plus review guidance, for review bots.
 - **Do not run repo-wide checks.** No `vp check`, no `vp run -r test`, no `vp run -r typecheck` unless asked. CI owns the full suite.
 - Backend behavior changes ship with focused tests for that behavior.
 - The server is event-sourced, and side effects run after the command commits. Wait on typed receipts, drain the effect worker (`OrchestrationEffectWorkerV2.drain`), or await the specific persisted event or `Deferred` that marks the milestone. Never wait on sleeps or polling. A test that needs a timeout to pass is wrong. Concretely:
@@ -154,10 +157,12 @@ A copy of real data is for a server the developer will use, or for rehearsing a 
   });
   ```
 
-- Upon request, user-visible frontend changes should get one integrated pass in a real client: `test-t3-app` for web, `test-t3-mobile` for mobile. The primary agent does this once after integrating. Subagents do not launch their own dev servers. Ask permission before doing computer use or spinning up browsers.
+- User-visible frontend changes should get one integrated pass in a real client: `test-t3-app` for web, `test-t3-mobile` for mobile. The primary agent does this once after integrating. Subagents do not launch their own dev servers.
 - When you are asked or authorized to live-test, the `j5-live-test` skill sets up a safe server and says what to cover and how to report.
 
-For authorized mobile verification, a missing or outdated native client is an install step, not a blocker. Run `vp run mobile:install <ios|android> [device-id]` on the device host before starting Metro; it targets the only booted simulator or connected Android device when the id is omitted. It installs the dev client for this checkout's native fingerprint from the shared cache in seconds and builds only when no machine has built it yet, so prefer it over `expo run:*`, `xcodebuild`, or `gradlew`, which rebuild from scratch. Its stdout is one JSON line; build output goes to the log it names. See `test-t3-mobile` for the full workflow.
+- Real agent turns cost money. To watch a turn stream through the pipeline and UI, use the free `Replay (dev)` provider that `vp run dev` registers; [test-t3-app](.agents/skills/test-t3-app/SKILL.md) shows how to start one. Use a real provider only when the change depends on that provider's behavior, and then pick its cheapest model, such as Haiku for Claude or Luna for Codex.
+
+For mobile verification, a missing or outdated native client is an install step, not a blocker. Run `vp run mobile:install <ios|android> [device-id]` on the device host before starting Metro; it targets the only booted simulator or connected Android device when the id is omitted. It installs the dev client for this checkout's native fingerprint from the shared cache in seconds and builds only when no machine has built it yet, so prefer it over `expo run:*`, `xcodebuild`, or `gradlew`, which rebuild from scratch. Its stdout is one JSON line; build output goes to the log it names. See `test-t3-mobile` for the full workflow.
 
 ## Evals
 
@@ -181,7 +186,7 @@ Most code changes do not need a documentation change. Agents can read the code.
 
 - **J5's docs live under `docs/j5/`.** [How the J5 docs are organized](docs/j5/process/docs.md) says what goes where. Feature definitions in `docs/j5/product/` are rewritten, never appended to.
 - **User docs** help users accomplish tasks. Give each major feature a concise section explaining what it does, how to start, and anything unintuitive. A settings path is useful; descriptions of visible buttons, icons, layouts, animations, or every UI state are not. Keep them in the shipped product's voice, without implementation details or contributor tooling. J5's go in `docs/j5/user/`; `docs/user/` is upstream's.
-- **Upstream's docs** (`docs/user/`, `docs/internals/`, `docs/operations/`) are upstream's. J5 doesn't add files there or edit its internal docs; J5's own go under `docs/j5/`.
+- **Upstream's docs** (`docs/user/`, `docs/internals/`, `docs/operations/`, `docs/README.md`) are upstream's. J5 doesn't add files there or edit them, not even to correct a name, path, or command for J5. J5's own go under `docs/j5/`; where J5 differs from an upstream user guide, [Using T3 Code's guides](docs/j5/user/t3-code-guides.md) says so.
 - Do not document every feature, enumerate fields or methods, narrate control flow, maintain file catalogs, or append PR summaries. Types, tests, and code already record the implementation.
 - A local reason the code can't show goes in a short nearby code comment. Link to the relevant source instead of copying it.
 - When a documented decision or constraint changes, rewrite or remove the affected text. Do not append another account of the new behavior.
@@ -202,7 +207,7 @@ Upstream's architecture and its constraints: `docs/internals/overview.md`. Upstr
 
 ## Where code lives
 
-- `apps/server` - WebSocket, orchestration, providers, checkpointing. Effect-heavy: read [Effect services](docs/internals/effect-services.md) before adding server code, and `.repos/effect-smol/LLMS.md` for the Effect library itself. J5's server code is `apps/server/src/j5`.
+- `apps/server` - WebSocket, orchestration, providers, checkpointing. Effect-heavy: read [Effect services](docs/internals/effect-services.md) before adding server code, and `.repos/effect/LLMS.md` for the Effect library itself. J5's server code is `apps/server/src/j5`.
 - `apps/web` - React/Vite UI. `apps/desktop` wraps it, `apps/mobile` is React Native, `apps/marketing` is the site. J5's UI is under each app's `src/j5`.
 - `packages/contracts` - Effect/Schema contracts plus small derived helpers. No heavy runtime logic. J5 contracts are `packages/contracts/src/j5`.
 - `packages/shared` - shared runtime utils, subpath exports, no barrel.
@@ -219,11 +224,10 @@ Upstream's architecture and its constraints: `docs/internals/overview.md`. Upstr
 - Reusable Effect functions use `Effect.fn("Service.operation")` with a stable span name, not a function wrapping `Effect.gen`. Keep `Effect.gen` for inline programs and layer construction. Use `Effect.fnUntraced` only when spans would be too frequent (stream chunks, per-event projection, tight loops) or duplicate an existing tracing boundary; explain that choice nearby. Named `Effect.fn` creates a span; the unnamed form does not. Preserve existing span names and options, and pass combinators as additional function-builder arguments. `t3code/prefer-effect-fn` enforces it.
 - Inferred types over annotations. `any` is the enemy.
 - Default to no comment. Write one only for a constraint, an external quirk, or an invariant the code can't show, in one line where you can and four at most. Don't restate names or signatures, narrate steps, record history, or explain the fix you just made; the PR carries that. `t3code/no-low-value-comments` enforces the length cap and the mechanical cases.
-- React effects are for synchronizing with something outside React. Derive in render and act in handlers instead of syncing state, but don't hide real lifecycle work in refs or stores to dodge one. The `t3code/react-effect-budget` lint rule holds each file to its count in `scripts/effect-budget.json`; a new effect states its reason with `// oxlint-disable-next-line t3code/react-effect-budget -- <why>`.
+- React effects are for synchronizing with something outside React. Derive in render and act in handlers instead of syncing state, but don't hide real lifecycle work in refs or stores to dodge one. The `t3code/no-unreasoned-state-sync` lint rule reports every effect; one that stays states its reason with `// oxlint-disable-next-line t3code/no-unreasoned-state-sync -- <why>`.
 - Our users drive agents all day and notice a dropped frame, a lying spinner, and a stale label. No continuously repainting animations; they peg the GPU on high-refresh displays.
 - If a rule here fights the task in front of you, say so loudly and get a human sign-off before breaking it.
 
 ## Additional tips
 
-- Don't verify with browsers or computer use unless the user explicitly agrees or requests it.
 - Security is important, but should not be over-indexed on, especially for dev mode/maintainer-only features.

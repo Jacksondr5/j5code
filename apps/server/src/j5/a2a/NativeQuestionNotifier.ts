@@ -3,6 +3,7 @@ import {
   MessageId,
   type OrchestrationV2RuntimeRequest,
   type OrchestrationV2StoredEvent,
+  isListedThreadLineage,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -66,7 +67,7 @@ const make = Effect.gen(function* () {
         child.thread.archivedAt !== null ||
         child.thread.deletedAt !== null ||
         (child.thread.lineage.parentThreadId !== null &&
-          child.thread.lineage.relationshipToParent === "subagent")
+          !isListedThreadLineage(child.thread.lineage))
       )
         return;
       if (

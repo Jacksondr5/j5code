@@ -8,19 +8,19 @@ upstream pin advance.
 
 Fork-owned values live in `scripts/lib/j5-branding.ts`:
 
-| Surface                     | Production                                                                                                                                                        | Development / preview                                                                                       |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| Display name                | `J5 Code`                                                                                                                                                         | `J5 Code (Dev)`, `J5 Code (Nightly)`, `J5 Code Preview`                                                     |
-| Desktop / mobile app ID     | `codes.jackson.j5code`                                                                                                                                            | `.dev` and `.preview` suffixes                                                                              |
-| URL scheme                  | `j5code`                                                                                                                                                          | `j5code-dev`, `j5code-preview`                                                                              |
-| Default desktop state       | `~/.j5code/userdata`                                                                                                                                              | `~/.j5code/dev`                                                                                             |
-| Default server state        | `~/.j5code/userdata`                                                                                                                                              | `~/.j5code/dev`                                                                                             |
-| Desktop App Support         | `j5code`                                                                                                                                                          | `j5code-dev`                                                                                                |
-| Linux executable / WM class | `j5code`                                                                                                                                                          | `j5code-dev`                                                                                                |
-| Desktop artifact prefix     | `J5-Code-`                                                                                                                                                        | same                                                                                                        |
-| CLI command on PATH         | `j5` (`J5_BRANDING.cli.command`; web `CLI_COMMAND` reads it for WelcomeWizard connect/pair/serve and pairing copy; `packageName` is the historical npm name only) | symlink `~/.local/bin/j5` → `<home>/runtime/versions/<v>/j5`; the desktop app's launcher is `<home>/bin/j5` |
-| Background service          | `j5code.service` (systemd), `codes.jackson.j5code.service` (launchd)                                                                                              | same                                                                                                        |
-| CLI release repository      | `Jacksondr5/j5code`                                                                                                                                               | archives `t3-<v>-<platform>.tar.gz`, `SHA256SUMS`, `install.sh`                                             |
+| Surface                 | Production                                                                                                                                                        | Development / preview                                                                                       |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| Display name            | `J5 Code`                                                                                                                                                         | `J5 Code (Dev)`, `J5 Code (Nightly)`, `J5 Code Preview`                                                     |
+| Desktop / mobile app ID | `codes.jackson.j5code`                                                                                                                                            | `.dev` and `.preview` suffixes                                                                              |
+| URL scheme              | `j5code`                                                                                                                                                          | `j5code-dev`, `j5code-preview`                                                                              |
+| Default desktop state   | `~/.j5code/userdata`                                                                                                                                              | `~/.j5code/dev`                                                                                             |
+| Default server state    | `~/.j5code/userdata`                                                                                                                                              | `~/.j5code/dev`                                                                                             |
+| Desktop App Support     | `j5code`                                                                                                                                                          | `j5code-dev`                                                                                                |
+| Linux executable        | `j5code`                                                                                                                                                          | `j5code-dev`                                                                                                |
+| Desktop artifact prefix | `J5-Code-`                                                                                                                                                        | same                                                                                                        |
+| CLI command on PATH     | `j5` (`J5_BRANDING.cli.command`; web `CLI_COMMAND` reads it for WelcomeWizard connect/pair/serve and pairing copy; `packageName` is the historical npm name only) | symlink `~/.local/bin/j5` → `<home>/runtime/versions/<v>/j5`; the desktop app's launcher is `<home>/bin/j5` |
+| Background service      | `j5code.service` (systemd), `codes.jackson.j5code.service` (launchd)                                                                                              | same                                                                                                        |
+| CLI release repository  | `Jacksondr5/j5code`                                                                                                                                               | archives `t3-<v>-<platform>.tar.gz` (`.zip` on win32), `SHA256SUMS`, `install.sh`                           |
 
 The macOS development launcher adds a checkout-derived suffix to the development bundle ID so
 multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5code`.
@@ -39,10 +39,8 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
 - Release archives and installers (FORK.md case 40): `packages/shared/src/cliRelease.ts`
   (`CLI_RELEASE_REPOSITORY`), `scripts/install.sh`, `scripts/install.ps1` (whose GitHub requests
   send the User-Agent `j5-install`, where upstream's send `t3-install`), and
-  `scripts/smoke-cli-archive.ts` (scratch `J5CODE_HOME`). Update everything
-  (`apps/web/src/components/sidebar/useUpdateEverything.ts`) checks J5's GitHub release through
-  `apps/web/src/j5/updates/releasePublished.ts` and says "J5 Code <version> is not released yet";
-  `updateEverythingRun.tsx` names the app with `APP_BASE_NAME`.
+  `scripts/smoke-cli-archive.ts` (scratch `J5CODE_HOME`). Update everything is upstream's as
+  shipped; `updateEverythingRun.tsx` names the app with `APP_BASE_NAME`.
 - One server per home (FORK.md cases 25 and 84): the one-owner messages in `apps/server/src/serverOwnership.ts`,
   `serviceLauncher.ts`, the desktop dialog in `apps/desktop/src/backend/DesktopBackendPool.ts` and
   the WSL refusal in `apps/desktop/src/wsl/DesktopWslBackend.ts` say J5 Code, J5 home and
@@ -61,7 +59,8 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
   `Jacksondr5/j5code` and `~/.local/bin/j5`; `cloud/ConnectReachability.ts` and
   `cloud/CliTokenManager.ts` (with its test) say `j5 connect`; `cli/doctor.ts` names the database
   from before J5's first archive release, 0.0.44, where upstream's says 0.1.0, and "a J5 Code
-  version"; and `cli/managedChatGptToken.ts` says to reconnect in J5 Code.
+  version"; `cli/managedChatGptToken.ts` says to reconnect in J5 Code; and `cli/thread.ts`, behind `j5 thread`
+  (FORK.md case 82), says J5 Code and `j5` and signs in as `j5-thread-cli`.
 - The command's name where the server looks it up or prints it: `apps/server/src/binCli.ts` (the
   root command and its help path), `cli/invocation.ts` (`isCommandAvailable("j5")` and the
   command it renders), `cli/browser.ts` (`j5 browser setup`), `cloud/CloudLink.ts`
@@ -70,9 +69,10 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
   `packages/client-runtime/src/preview/serverBrowserStream.ts` (`sudo j5 browser setup`).
 - Names J5 gives in other services: the EAS simulator session name in
   `apps/server/src/device/EasDeviceHost.ts` (`J5 Code · <label> · <hex>`), shown in Expo's dashboard.
-- Triage (`j5 triage`): `apps/server/src/cli/triagePrompt.ts` and its byte-identical repo copy
-  `.github/triage/PLAYBOOK.md` name J5 Code, clone and search `Jacksondr5/j5code`, refresh the
-  playbook from `j5/main`, and file issues there with the `via-triage` template and label
+- Triage (`j5 triage`, and the in-app triage upstream added at v0.1.7): `apps/server/src/triage/triagePrompt.ts`
+  (in `cli/` before v0.1.7) and its repo copy `.github/triage/PLAYBOOK.md` name J5 Code, and
+  `apps/server/src/triage/TriageService.ts` points at `Jacksondr5/j5code` (`T3CODE_REPOSITORY_URL`).
+  They clone and search `Jacksondr5/j5code`, refresh the playbook from `j5/main`, and file issues there with the `via-triage` template and label
   (`.github/ISSUE_TEMPLATE/via-triage.yml`). They say nothing of `npx`, since J5 publishes no npm
   package. Upstream's copies point at `pingdotgg/t3code` and
   `main`; re-apply after an advance that touches them.
@@ -156,10 +156,24 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
   is in `apps/web/src/shortcuts/chatRouteCommands.ts` (in `routes/_chat.tsx` until v0.1.3);
   `settings/SavedEnvironmentRows.tsx` says `j5 connect link`; and
   `pullRequest/PullRequestsPage.tsx` asks to update J5 Code servers.
-- Shared client copy: `packages/client-runtime` has no branding import, so its user-visible
-  strings stay product-neutral instead of naming T3 Code: `connection/compatibility.ts` ("Update the
-  server on …"), `connection/outdatedHostUpdate.ts`, `relay/errorPresentation.ts`, and
-  `state/pullRequestDiffHttp.ts` ("quit and reopen the app").
+- Shared client copy: `packages/client-runtime` has no branding import, so most of its
+  user-visible strings stay product-neutral: `connection/compatibility.ts` ("Update the server on
+  …"), `connection/outdatedHostUpdate.ts`, `relay/errorPresentation.ts`, and
+  `state/pullRequestDiffHttp.ts` ("quit and reopen the app"). Where upstream's copy names the
+  product, it says J5 Code: `connection/diagnosis.ts` (including `j5 connect status`),
+  `connection/hostFreeze.ts`, `state/threadRequests.ts`, `state/projectRemoval.ts`, and the
+  pairing-code label "J5 Code link" in `state/peerPairingCode.ts`.
+- Pairing app link: `packages/shared/src/remote.ts` builds and reads `j5code://pair?pairingUrl=…`
+  (any `j5code-*` channel scheme), which `j5 pair` and server startup print, the desktop app opens
+  and mobile's QR scan unwraps; upstream's is `t3code://pair`. The linked-environment code hints
+  say `j5 pair --person <name>` (web `settings/LinkedEnvironmentsSettings.tsx`) and `j5 pair`
+  (mobile `connection/ConnectionsNewRouteScreen.tsx`).
+- Linked environments (v0.1.7): the session a link signs in with is labelled `J5 Code · <label>`
+  (`apps/server/src/peer/PeerLinks.ts`, matched in `PeerLinks.testkit.ts`), and web's Forget
+  dialog names it so; the link errors there say J5 Code.
+- Agent-facing text upstream added at v0.1.7: the HTML render layout guide in
+  `packages/shared/src/htmlRender.ts`, and the release-notes prompt in
+  `scripts/generate-release-notes.ts`, which J5's release job runs to write the notes people read.
 - User-visible copy and marks (2026-10-04): every string a person or an agent reads names the
   product "J5 Code" (bare "T3" becomes "J5"), across web, desktop, mobile, the server's CLI and
   error messages, agent instructions and MCP tool titles, native capture helpers, and the
@@ -197,8 +211,9 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
 - Sign-in return links: `packages/shared/src/providerAuthReturnUrl.ts` and `codexAuthHandoff.ts`
   use the `J5_BRANDING` desktop schemes where upstream hard-codes `t3code` and `t3code-dev`.
   J5 has no hosted client, so upstream's `https://app.t3.codes` return origin is dropped. The
-  Codex sign-in pages (`apps/server/src/provider/CodexAuthCallbackPage.ts`, `CodexAuthCallback.ts`,
-  `packages/shared/src/codexAuthCallback.ts`) name J5 Code, and the `agent_name_hint` sent in
+  Codex sign-in pages (`apps/server/src/provider/CodexAuthCallbackPage.ts`,
+  `packages/shared/src/codexAuthCallback.ts`) name J5 Code (upstream deleted
+  `provider/CodexAuthCallback.ts` at v0.1.7), and the `agent_name_hint` sent in
   ChatGPT sign-in (`CodexChatGptAuth.ts`) is "J5 Code": ChatGPT may show it to the person, so it
   is a branding matter (Jackson's 2026-10-09 ruling).
 - Privacy: `PRIVACY_POLICY_URL` in `apps/web/src/legalLinks.ts` is `https://j5.codes/privacy-policy`,
@@ -207,6 +222,33 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
   `apps/server/src/pullRequest/githubStackRebase.ts` ("J5 Code" `<noreply@j5.codes>`, confirmed by the
   maintainer) and the readme
   line in `apps/server/src/project/ManagedProjectFolders.ts` ("Created in J5 Code").
+- Managed policy (upstream's administrator policy, v0.1.7; register D19), so a T3 Code policy on
+  the machine never governs J5: the policy file in `packages/shared/src/managedPolicyFile.ts`
+  (`/etc/j5code/policy.json`, `/Library/Application Support/J5Code/policy.json`,
+  `C:\Program Files\J5Code\policy.json`), the macOS managed preferences
+  `/Library/Managed Preferences/codes.jackson.j5code.plist`, the Windows registry key
+  `SOFTWARE\Policies\JacksonCodes\J5Code`; the templates `j5 policy` writes
+  (`apps/server/src/cli/policy.ts`, `apps/server/src/policy/policyTemplates.ts`): `j5code.admx`,
+  `en-US/j5code.adml` and `j5code.mobileconfig`, the ADMX namespace
+  `JacksonCodes.Policies.J5Code` with prefix `j5code` and category `J5Code`, and the profile's
+  `codes.jackson.j5code.policy` payload identifiers; and the policy messages in
+  `apps/desktop/src/updates/`.
+- `j5 service protect`'s systemd drop-in, `90-j5code-protect.conf`
+  (`apps/server/src/cloud/serviceProtection.ts`), so it never overwrites an installed T3 Code's.
+- Compile caches: the CLI's in `apps/server/src/cliCompileCache.ts` and the desktop's prepared
+  server cache in `apps/desktop/src/compileCache.ts` both live under a `j5code` directory.
+- Universal links: `apps/web/public/.well-known/apple-app-site-association.json` lists J5's iOS app
+  ids (team `46A73QH3S8`, `codes.jackson.j5code` and its `.preview` and `.dev` suffixes) for
+  `/threads/*`, and `assetlinks.json` is empty, since no Android fingerprint is known. J5's mobile
+  app claims no web domain (`app.config.ts` drops upstream's `applinks:app.t3.codes` and its
+  Android intent filters; FORK.md case 76).
+- The GitHub star prompt (`apps/web/src/components/GitHubStarPrompt.tsx`) stars and links
+  `Jacksondr5/j5code` and its toast says J5 Code (register D25). Its `t3code:github-star-prompt:*`
+  storage keys stay, as storage keys do.
+- Desktop startup recovery (`apps/desktop/src/app/DesktopStartupRecovery.ts`) links to
+  `https://github.com/Jacksondr5/j5code/releases` (register D20).
+- The device instructions' heading, "J5 Code devices", in
+  `packages/provider-core/src/server/orchestrationInstructions.ts` (FORK.md case 8).
 - New upstream files: the list above names only known sites. On every advance, also grep the files
   upstream added since the old pin for `t3code`, `T3 Code`, `.t3`, `T3CODE_HOME`, `pingdotgg`,
   `t3.codes/install`, and `npx t3`, then rebrand identity sites and user-visible copy, and leave the
@@ -225,13 +267,21 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
   `application/x-t3code-*` drag types, the desktop's `--t3code-preview-passkey-bridge` argument and
   `t3codeWebAuthn` field, and the `app.t3.context-fragment` clipboard type.
 - The GitHub and GitCafe API `user-agent: t3code` headers.
-- Documentation, including `docs/user/`: it keeps upstream's "T3 Code" wording, which marks what
-  is upstream's and what is J5's for the agents that read it. Facts that J5 changes (paths, names,
-  defaults, the `j5` command) are still corrected there, in `t3-connect-troubleshooting.md` too
-  since upstream added it at the 2026-10-24 advance, until
-  [#494](https://github.com/Jacksondr5/j5code/issues/494) settles whether J5 edits upstream's user docs.
-- "T3 Connect" and "T3 Account": upstream's hosted relay and sign-in, named as upstream names
-  them wherever they appear, along with `infra/relay`.
+- Upstream's documentation, `docs/user/` included: it stays as upstream wrote it, "T3 Code", the
+  `t3` command and T3 Code's paths and links with it, which marks what is upstream's and what is
+  J5's for the agents that read it. Where J5 differs, `docs/j5/user/t3-code-guides.md` says so, and
+  `docs/j5/user/install.md` and `telemetry.md` replace upstream's pages for J5 users.
+- "T3 Connect", "T3 Account" and "T3 Chat": upstream's hosted relay, sign-in and the hosted
+  account linked through it, named as upstream names them wherever they appear, along with
+  `infra/relay` and the relay's `T3-Mode-Limit` header.
+- "T3 Code for GitHub" (`packages/source-control-github/src/shared/definition.ts` `appName`):
+  upstream's GitHub App sign-in, which is off in J5. It turns on only when a server is given
+  `T3CODE_GITHUB_APP_CLIENT_ID` (`GitHubAppSignIn.ts`), and no J5 build or workflow sets it, so
+  web's and mobile's source control settings show no row for it. A server pointed at upstream's
+  app has the person authorize upstream's app under that name, so the name stays.
+- The Windows installer's running-app check (`apps/desktop/resources/installer.nsh`
+  `customAppRunningMessages`) matches upstream's channel names; J5's never match, so it falls back
+  to `${PRODUCT_NAME}`, which is J5's.
 - The `t3-code` MCP server key, its `T3 Code` MCP server `name` (`McpHttpServer.ts`), the Codex
   client info ("T3 Code", `CODEX_CLIENT_NAME` in `apps/server/src/provider/CodexProvider.ts`),
   and the Muse client info (`t3_code` / "T3 Code", `packages/provider-muse`): protocol identity
@@ -243,9 +293,6 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
 - Linux packaging metadata, which J5 doesn't build: the `.deb` identity strings in
   `scripts/build-desktop-artifact.ts` (maintainer, description, `/usr/share/doc/t3code`) and
   `apps/desktop/resources/linux/com.t3tools.t3code.metainfo.xml`.
-- Upstream's `thread` command (`apps/server/src/cli/thread.ts`), which J5 does not register (FORK.md
-  case 82), so its copy ("T3 Code", `t3 thread cli`) is never shown. Rebrand it if the command
-  returns ([#695](https://github.com/Jacksondr5/j5code/issues/695)).
 - Upstream's leftovers J5 has no use for: `resolveServerInstallation` in `cli/invocation.ts` still
   looks for an npm-global `t3` package, which never matches a J5 install; the AppArmor profile
   path keeps its `t3-` name (`preview/PreviewBrowserHost.ts`); and
@@ -255,6 +302,10 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
   Google Play links; J5 hides the row (FORK.md case 77).
 - Upstream's npm launcher, which J5 doesn't publish (`scripts/npm-launcher/`,
   `scripts/build-npm-launcher.ts`), and its Play Store APK mirror (`.github/scripts/mirror-play-apk.cjs`).
+- The peer-link protocol names upstream's linked environments use: the sign-in redirect
+  `http://127.0.0.1/t3code-peer-link` (`apps/server/src/peer/PeerLinks.ts`) and the MCP client
+  name `t3code-peer` (`PeerMcpClient.ts`). They are protocol identity shared with the server at the
+  other end of a link, which may be an upstream T3 Code server, and no person reads them.
 - The SSH tunnel's "Remote T3 server" message in `packages/ssh/src/tunnel.ts`, which belongs to the
   remote launch path that still uses `~/.t3/ssh-launch` (#339).
 - `t3.json`, its schema URL, the `refs/t3code/*` hidden refs, upstream's `README.md`,

@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -11,6 +12,7 @@ import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import { humanPersonRegistryLayer } from "../a2a/HumanPersonRegistry.ts";
 import { gateEnvironmentAuth } from "./AccessGate.ts";
 import { peopleLayer as recordsLayer } from "./PairingIntents.ts";
+import * as ManagedPolicy from "../../policy/ManagedPolicy.ts";
 import { People } from "./People.ts";
 import * as PersonAccess from "./PersonAccess.ts";
 
@@ -26,6 +28,7 @@ const layer = gateEnvironmentAuth(
     Layer.provideMerge(SqlitePersistence.layerMemory),
     Layer.provide(ServerSecretStore.layer),
     Layer.provide(ServerEnvironment.layerIdentity),
+    Layer.provide(ManagedPolicy.layerTest()),
     Layer.provideMerge(
       Layer.effect(
         ServerConfig.ServerConfig,
@@ -36,7 +39,7 @@ const layer = gateEnvironmentAuth(
       ).pipe(Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "j5-first-owner-" }))),
     ),
   ),
-).pipe(Layer.provideMerge(NodeServices.layer));
+).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
 
 const requestMetadata = { deviceType: "desktop" as const, os: "Linux", browser: "Chrome" };
 

@@ -1,4 +1,11 @@
-import { ChatAttachment, ProviderInteractionMode, RuntimeMode, ThreadId } from "@t3tools/contracts";
+import {
+  AgentPersonaDraftView,
+  AgentPersonaEscalationView,
+  ChatAttachment,
+  ProviderInteractionMode,
+  RuntimeMode,
+  ThreadId,
+} from "@t3tools/contracts";
 import { PeerSenderLabel } from "@t3tools/contracts/j5";
 import * as Schema from "effect/Schema";
 
@@ -154,6 +161,7 @@ export const CommEventKind = Schema.Literals([
   "participant.archived",
   "participant.unarchived",
   "participant.deleted",
+  "participant.moved",
 ]);
 export type CommEventKind = typeof CommEventKind.Type;
 
@@ -229,11 +237,29 @@ const ParticipantMembershipCommEvent = Schema.Struct({
   payload: Schema.Struct({ participant: Participant }),
 });
 
+/**
+ * An agent's membership moving with its thread to another project. Both ledgers record it: the
+ * one it left and the one it joined. It keeps its id and whether it is archived.
+ */
+export const ParticipantMovedPayload = Schema.Struct({
+  participant: Participant,
+  fromProjectId: LedgerProjectId,
+  toProjectId: LedgerProjectId,
+  archivedAt: Schema.NullOr(Schema.String),
+});
+
+const ParticipantMovedCommEvent = Schema.Struct({
+  ...eventAddressFields,
+  kind: Schema.Literal("participant.moved"),
+  payload: ParticipantMovedPayload,
+});
+
 export const CommEvent = Schema.Union([
   NonMembershipCommEvent,
   MessageReceivedCommEvent,
   ParticipantJoinedCommEvent,
   ParticipantMembershipCommEvent,
+  ParticipantMovedCommEvent,
 ]);
 export type CommEvent = typeof CommEvent.Type;
 
@@ -247,6 +273,7 @@ export const StoredCommEvent = Schema.Union([
   Schema.Struct({ ...storedFields, ...MessageReceivedCommEvent.fields }),
   Schema.Struct({ ...storedFields, ...ParticipantJoinedCommEvent.fields }),
   Schema.Struct({ ...storedFields, ...ParticipantMembershipCommEvent.fields }),
+  Schema.Struct({ ...storedFields, ...ParticipantMovedCommEvent.fields }),
 ]);
 export type StoredCommEvent = typeof StoredCommEvent.Type;
 
@@ -414,6 +441,8 @@ export const SendMessageInput = Schema.Struct({
   message: Schema.String.check(Schema.isNonEmpty()),
   expectReply: Schema.optional(Schema.Boolean),
   exchangeId: Schema.optional(ExchangeId),
+  /** An open ask to a person that this message follows up on. */
+  regarding: Schema.optional(ExchangeId),
   intent: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
   urgency: Schema.optional(Urgency),
   acceptedAt: Schema.String,
@@ -533,6 +562,10 @@ export const HumanInboxItem = Schema.Struct({
   intent: Schema.String,
   urgency: Urgency,
   message: Schema.String,
+  /** What the agent added to this ask, oldest first; absent when it added nothing. */
+  followUps: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ messageId: Schema.String, message: Schema.String })),
+  ),
   openedAt: Schema.String,
   status: Schema.Literals(["open", "answered"]),
   terminalAt: Schema.NullOr(Schema.String),
@@ -540,6 +573,10 @@ export const HumanInboxItem = Schema.Struct({
   forEveryone: Schema.optionalKey(Schema.Boolean),
   /** Who answered an ask to everyone that is closed, by the name they had then (Inbox AC16). */
   answeredBy: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  /** A refused persona launch this ask escalates, as the server recorded it. */
+  escalation: Schema.optionalKey(AgentPersonaEscalationView),
+  /** A persona draft this ask carries for the Owner's "Save persona"; never with `escalation`. */
+  personaDraft: Schema.optionalKey(AgentPersonaDraftView),
 });
 export type HumanInboxItem = typeof HumanInboxItem.Type;
 
@@ -551,6 +588,7 @@ export const AnswerHumanExchangeInput = Schema.Struct({
   personId: ParticipantId,
   exchangeId: ExchangeId,
   message: Schema.String.check(Schema.isNonEmpty()),
+  attachments: Schema.optional(Schema.Array(ChatAttachment)),
   acceptedAt: Schema.String,
 });
 export type AnswerHumanExchangeInput = typeof AnswerHumanExchangeInput.Type;

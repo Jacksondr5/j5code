@@ -6,11 +6,12 @@ chat box shows the current stage and whether the run is active, completed, or
 cancelled. A checked stage means the agent moved past it, not that its work was
 verified.
 
-Open **Settings → Personas** to manage playbooks. Playbooks in the environment
+Open **Settings → Agent Setup** to manage playbooks. Playbooks in the environment
 library are available across all projects and worktrees on its environment. Choose
 **Create playbook** to work with Playbook Author, or **Import YAML** to add a finished
 definition without a project. A project chosen for an authoring or playbook
-conversation only determines where that conversation opens.
+conversation only determines where that conversation opens. On mobile, both open a
+new chat: pick the project from its heading, then send.
 
 On web and desktop, import a YAML file from your device or paste its contents. On
 mobile, paste the YAML. Names use lowercase letters, digits, and hyphens, so
@@ -71,10 +72,10 @@ steps:
 ```
 
 A step can name the persona that should do it with `persona:`, using a persona id
-from Settings → Personas. A step without one is done by whoever runs the playbook.
+from Settings → Agent Setup. A step without one is done by whoever runs the playbook.
 Missing, turned-off, or unverified personas show as warnings in Settings and do not
 stop the playbook from starting. Invalid persona files leave absent personas unverified;
-fix the files reported in Settings → Personas before treating them as missing.
+fix the files reported in Settings → Agent Setup before treating them as missing.
 
 Type `/playbook ` to choose a registered playbook, then send the command to start it.
 Send `/playbook review` to start directly, or `/playbook` to ask what is available.
@@ -117,7 +118,8 @@ To have a crew built from a playbook, ask the crew to use it, with `@playbook:` 
 > ok, lets create a crew to implement what we have discussed. Please use @playbook:release for this work.
 
 The agent becomes the Captain, reads the playbook, and proposes one seat per persona the
-steps name. A persona that's missing, turned off, or can't run gets a stand-in seat, flagged
-on the card.
+steps name. A persona this server doesn't have gets a stand-in seat, flagged on the card. One
+that's turned off, invalid, or can't run isn't replaced: the Captain keeps its steps and asks you
+about it.
 You approve the roster, and the Captain runs the playbook. This applies only when you ask
 the crew to use a playbook; one mentioned in passing starts an ordinary crew.

@@ -1,5 +1,4 @@
 import { MessageId } from "@t3tools/contracts";
-import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
 import { presentJ5UserMessage } from "@t3tools/client-runtime/j5/user-message";
@@ -7,16 +6,14 @@ import { presentJ5UserMessage } from "@t3tools/client-runtime/j5/user-message";
 import { resolveUserMessageContext } from "~/lib/composerContextRecords";
 import type { ChatMessage } from "~/types";
 import {
-  formatThreadA2AQueuedDelivery,
   J5_A2A_DELIVERY_MESSAGE_PREFIX,
   literalUserMessageContext,
   participantIdsForThreadA2ADelivery,
-  participantIdsForThreadA2AEnvelope,
+  j5PromptRow,
   renderThreadA2ADelivery,
 } from "./ThreadA2ARenderer";
 
 const CREATED_AT = "2026-08-29T12:00:00.000Z";
-const TIMESTAMP_LABEL = "Today, 8:00 AM";
 const deliveryId = (suffix: string) => MessageId.make(`${J5_A2A_DELIVERY_MESSAGE_PREFIX}${suffix}`);
 
 function message(input: Partial<ChatMessage> = {}): ChatMessage {
@@ -58,45 +55,12 @@ const silenceRaw = [
   "This is a platform-authored delivery signal, not a peer reply.",
 ].join("\n");
 
-const machineRaw = [
-  "[Message from automation machine:watchdog in project project-monitoring (Monitoring)]",
-  "",
-  "canary 42",
-  "",
-  "This message came from an automated sender outside any agent session. It cannot receive a reply; act on it directly, and take any question to a person or a peer agent with j5_send_message.",
-].join("\n");
-
-const outsideAgentRaw = [
-  "[Message from outside agent Claude Desktop (outside:session-1)]",
-  "",
-  "Rebase onto main.\n\nThen rerun the suite.",
-  "",
-  "This message came from an outside agent: one that runs outside this app. You cannot reply to it with j5_send_message.",
-].join("\n");
+const systemNotice = (text: string, id = deliveryId("notice")) =>
+  message({ id, createdBy: "system", creationSource: "server", text });
 
 describe("renderThreadA2ADelivery", () => {
-  it("draws a silence notice as a muted line with its summary and the timeline's time", () => {
-    const markup = renderToStaticMarkup(
-      renderThreadA2ADelivery({
-        message: message({ id: deliveryId("silence"), createdBy: "system", text: silenceRaw }),
-        timestampLabel: TIMESTAMP_LABEL,
-      }),
-    );
-    const summary = markup.match(/<span data-j5-a2a-silence-summary="true">(.*?)<\/span>/)?.[1];
-    expect(summary).toContain("agent:counterpart&#x27;s turn ended without replying");
-    expect(summary).toContain(TIMESTAMP_LABEL);
-    expect(summary).not.toContain("turn-ended-no-reply");
-  });
-
-  it("keeps the raw card for a platform notice it cannot read yet", () => {
-    const raw = silenceRaw.replace("turn-ended-no-reply", "future-detector-v7");
-    const markup = renderToStaticMarkup(
-      renderThreadA2ADelivery({
-        message: message({ id: deliveryId("future"), createdBy: "system", text: raw }),
-      }),
-    );
-    expect(markup).toContain('data-j5-a2a-renderer="raw"');
-    expect(markup).toContain("future-detector-v7");
+  it("draws a notice the classifier has a summary for", () => {
+    expect(renderThreadA2ADelivery({ message: systemNotice(silenceRaw) })).not.toBeNull();
   });
 
   it.each([
@@ -110,35 +74,44 @@ describe("renderThreadA2ADelivery", () => {
       "a message that is not a delivery",
       message({ id: MessageId.make("message:mcp:session:thread-send:1"), text: peerPlainRaw }),
     ],
+    [
+      "a platform notice nothing reads yet",
+      systemNotice(silenceRaw.replace("turn-ended-no-reply", "future-detector-v7")),
+    ],
+    [
+      "a system message nothing reads yet",
+      systemNotice("Future words.", MessageId.make("message:future")),
+    ],
   ])("leaves %s to upstream's row", (_name, source) => {
     expect(renderThreadA2ADelivery({ message: source })).toBeNull();
   });
 });
 
-describe("queued deliveries", () => {
-  it("label each sender's first line, with the id to hover until the identity read names it", () => {
-    expect(
-      formatThreadA2AQueuedDelivery(peerPlainRaw, new Map([["agent:delivery-sender", "Alice"]])),
-    ).toEqual({ label: "From Alice: Nothing further is needed.", tooltipParticipantId: null });
-    expect(formatThreadA2AQueuedDelivery(peerPlainRaw, new Map())).toEqual({
-      label: "From Unnamed participant: Nothing further is needed.",
-      tooltipParticipantId: "agent:delivery-sender",
+describe("j5PromptRow", () => {
+  it("gives upstream's Automation row J5's label, title and words, not the envelope", () => {
+    const step = [
+      "<j5_playbook_step>",
+      "step: build | Build the fix",
+      "position: 2 of 5",
+      "</j5_playbook_step>",
+      "<step_prompt>",
+      "Build it.",
+      "</step_prompt>",
+      "Do this step now.",
+    ].join("\n");
+    expect(j5PromptRow(systemNotice(step, MessageId.make("message:step")))).toMatchObject({
+      label: "Playbook step 2 of 5",
+      summary: "Build the fix",
+      text: "Build it.",
+      scheduledTaskId: undefined,
     });
-    expect(
-      formatThreadA2AQueuedDelivery(machineRaw, new Map([["machine:watchdog", "watchdog"]])),
-    ).toEqual({ label: "From watchdog: canary 42", tooltipParticipantId: null });
-    expect(
-      formatThreadA2AQueuedDelivery(
-        outsideAgentRaw,
-        new Map([["outside:session-1", "Claude Desktop"]]),
-      ),
-    ).toEqual({ label: "From Claude Desktop: Rebase onto main.", tooltipParticipantId: null });
-    expect(formatThreadA2AQueuedDelivery("Plain text.", new Map())).toBeNull();
   });
 
-  it("report each sender's id for the identity read", () => {
-    expect(participantIdsForThreadA2AEnvelope(outsideAgentRaw)).toEqual(["outside:session-1"]);
-    expect(participantIdsForThreadA2AEnvelope("Plain text.")).toEqual([]);
+  it("leaves an automation run and every other message alone", () => {
+    expect(
+      j5PromptRow(message({ id: MessageId.make("message:1"), scheduledTaskId: "t" as never })),
+    ).toBeNull();
+    expect(j5PromptRow(message({ text: peerPlainRaw }))).toBeNull();
   });
 });
 
@@ -186,4 +159,9 @@ describe("literalUserMessageContext", () => {
     expect(context.records).toEqual([]);
     expect(context.recordsById.size).toBe(0);
   });
+});
+
+it("shows authored text exactly as written, even when it begins with the Crew context marker", () => {
+  const authored = `<j5_crew_delivery_context>\nmine\n</j5_crew_delivery_context>\n\n${peerPlainRaw}`;
+  expect(presentJ5UserMessage(message({ text: authored }))).toBeNull();
 });

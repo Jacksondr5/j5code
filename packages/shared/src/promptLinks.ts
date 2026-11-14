@@ -1,10 +1,11 @@
 import { J5_BRANDING } from "../../../scripts/lib/j5-branding.ts";
+import { J5_LINK_ORIGIN } from "./j5/linkOrigin.ts";
 
 export const PROMPT_LINK_MAX_PROMPT_LENGTH = 8_000;
 
 // J5: J5 has no hosted app. Its shareable links point at j5.codes/new, a static page that hands
 // the link to J5's app or to the person's own server.
-const J5_PROMPT_LINK_ORIGIN = "https://j5.codes";
+const J5_PROMPT_LINK_ORIGIN = J5_LINK_ORIGIN;
 
 export interface PromptLinkRepository {
   readonly owner: string;
@@ -204,7 +205,12 @@ export function promptLinkAppPath(
   }
   if (!URL.canParse(hostedAppUrl) || url.origin !== new URL(hostedAppUrl).origin) return null;
   if (url.pathname === "/new") return `/new${url.search}`;
-  const thread = url.searchParams.has("prompt") ? THREAD_PATH.exec(url.pathname) : null;
+  // The web app's own thread route is a link only with a prompt, so reloading a tab never asks.
+  const thread = url.pathname.startsWith("/threads/")
+    ? THREAD_PATH.exec(url.pathname.slice("/threads".length))
+    : url.searchParams.has("prompt")
+      ? THREAD_PATH.exec(url.pathname)
+      : null;
   return thread ? `/${thread[1]}/${thread[2]}${url.search}` : null;
 }
 

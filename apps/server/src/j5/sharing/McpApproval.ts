@@ -2,6 +2,7 @@ import * as Context from "effect/Context";
 import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Redacted from "effect/Redacted";
 import * as Ref from "effect/Ref";
 
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
@@ -80,7 +81,7 @@ const layerGatedMcpOAuth = Layer.effect(
         return redirect;
       }),
       exchangeCode: Effect.fn("j5.sharing.mcpApproval.exchangeCode")(function* (input) {
-        const code = input.token.code;
+        const code = input.token.code === undefined ? undefined : Redacted.value(input.token.code);
         const entry =
           code === undefined
             ? undefined

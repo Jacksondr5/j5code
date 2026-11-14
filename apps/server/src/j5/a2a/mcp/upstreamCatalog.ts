@@ -1,4 +1,8 @@
-import { Tool, Toolkit } from "effect/ai";
+import * as Context from "effect/Context";
+import * as Fiber from "effect/Fiber";
+import { McpSchema, Tool, Toolkit } from "effect/ai";
+
+import { McpInvocationContext } from "../../../mcp/McpInvocationContext.ts";
 
 import type { HandlersLayer } from "../../../mcp/McpToolAccess.ts";
 import { ArtifactToolkit } from "../../../mcp/toolkits/artifacts/tools.ts";
@@ -30,9 +34,19 @@ export const J5EnvironmentToolkit = Toolkit.make(
 );
 
 /**
+ * `McpSchema.EnabledWhen` for a tool only another environment's link may see and call: a task it
+ * delegates here starts through `t3_thread_launch` (register D42). An agent here uses
+ * `j5_spawn_agent`.
+ */
+const linkSessionsOnly = (): boolean => {
+  const fiber = Fiber.getCurrent();
+  const scope = fiber && Context.getOrUndefined(fiber.context, McpInvocationContext);
+  return scope?.client?.linked === true;
+};
+
+/**
  * `t3_project_delete` stays out until J5 settles what deleting a project does to the state it
- * keeps for each project. `t3_thread_launch` is in this toolkit too; `j5_spawn_agent` is the door
- * for it.
+ * keeps for each project. `t3_thread_launch` serves links only; `j5_spawn_agent` is an agent's door.
  */
 export const J5ProjectToolkit = Toolkit.make(
   ProjectToolkit.tools.t3_project_list
@@ -44,12 +58,13 @@ export const J5ProjectToolkit = Toolkit.make(
   ProjectToolkit.tools.t3_project_create,
   ProjectToolkit.tools.t3_project_update,
   ProjectToolkit.tools.t3_project_clone,
+  ProjectToolkit.tools.t3_thread_launch.annotate(McpSchema.EnabledWhen, linkSessionsOnly),
 );
 
-// Raw send, interrupt and bulk-create stay out: `j5_send_message`, `j5_stop_agent` and
-// `j5_spawn_agent` are their doors. `t3_thread_wait` stays out because platform notices queue
-// behind a running turn, so an agent blocked waiting on another thread never gets that thread's
-// finish notice. `orchestrator_capabilities` and `delegate_task` are J5's (orchestratorSurface.ts).
+// Raw send and bulk-create stay out: `j5_send_message` and `j5_spawn_agent` are their doors
+// (register D2). Waiting, interrupting and links are upstream's (D42).
+// `orchestrator_capabilities`, `delegate_task` and `t3_thread_interrupt` are J5's
+// (orchestratorSurface.ts).
 export const J5OrchestratorToolkit = Toolkit.make(
   OrchestratorToolkit.tools.task_status,
   OrchestratorToolkit.tools.task_cancel,
@@ -66,6 +81,14 @@ export const J5OrchestratorToolkit = Toolkit.make(
   OrchestratorToolkit.tools.t3_thread_update,
   OrchestratorToolkit.tools.t3_workflow_stop,
   OrchestratorToolkit.tools.t3_background_wait,
+  OrchestratorToolkit.tools.t3_thread_wait
+    .annotate(Tool.Destructive, false)
+    .annotate(Tool.OpenWorld, false),
+  OrchestratorToolkit.tools.t3_environment_links
+    .annotate(Tool.Destructive, false)
+    .annotate(Tool.OpenWorld, false),
+  OrchestratorToolkit.tools.t3_environment_link,
+  OrchestratorToolkit.tools.t3_environment_unlink,
 );
 
 // `t3_thread_transfer`, `t3_thread_organize` and `t3_queue` are J5's own (see threadTools.ts).

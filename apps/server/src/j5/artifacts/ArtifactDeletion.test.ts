@@ -10,7 +10,6 @@ import * as Path from "effect/Path";
 
 import * as ServerConfig from "../../config.ts";
 import * as ProjectService from "../../project/ProjectService.ts";
-import { AgentHandoffArtifactDelete } from "../agents/agentHandoffArtifactDelete.ts";
 import { ArtifactDeletion, layer } from "./ArtifactDeletion.ts";
 import { ArtifactWorkspace, ArtifactWorkspaceError } from "./ArtifactWorkspace.ts";
 import * as Workspace from "./ArtifactWorkspace.ts";
@@ -18,7 +17,7 @@ import * as Workspace from "./ArtifactWorkspace.ts";
 const projectId = ProjectId.make("project:artifact-deletion");
 const goneProjectId = ProjectId.make("project:artifact-deletion-gone");
 
-const deletionWith = (seen: { deleted: Array<string>; reconciled: Array<string> }) =>
+const deletionWith = (seen: { deleted: Array<string> }) =>
   layer.pipe(
     Layer.provide(
       Layer.mergeAll(
@@ -41,34 +40,23 @@ const deletionWith = (seen: { deleted: Array<string>; reconciled: Array<string> 
                   return "plan.md";
                 }),
         }),
-        Layer.mock(AgentHandoffArtifactDelete)({
-          reconcile: ({ path }) =>
-            path === "plan.md" && seen.reconciled.length > 0
-              ? Effect.die("handoff table unavailable")
-              : Effect.sync(() => void seen.reconciled.push(path)),
-        }),
       ),
     ),
   );
 
-it.effect("deletes the file, then marks a handoff that pointed at its stored path", () => {
-  const seen = { deleted: [] as Array<string>, reconciled: [] as Array<string> };
+it.effect("deletes the file", () => {
+  const seen = { deleted: [] as Array<string> };
   return Effect.gen(function* () {
     const deletion = yield* ArtifactDeletion;
     yield* deletion.delete({ projectId, path: "./plan.md" });
     assert.deepStrictEqual(seen.deleted, ["./plan.md"]);
-    // The handoff is matched by the path the workspace resolved, not the one the client sent.
-    assert.deepStrictEqual(seen.reconciled, ["plan.md"]);
-    // The file is already gone, so a failed handoff update does not fail the delete.
-    yield* deletion.delete({ projectId, path: "plan.md" });
-    assert.deepStrictEqual(seen.deleted, ["./plan.md", "plan.md"]);
   }).pipe(Effect.provide(deletionWith(seen)));
 });
 
 it.effect(
   "refuses an unknown project before touching the workspace, and reports a missing file",
   () => {
-    const seen = { deleted: [] as Array<string>, reconciled: [] as Array<string> };
+    const seen = { deleted: [] as Array<string> };
     return Effect.gen(function* () {
       const deletion = yield* ArtifactDeletion;
       const gone = yield* deletion
@@ -77,15 +65,14 @@ it.effect(
       assert.equal(gone._tag, "ArtifactProjectUnavailableError");
       const missing = yield* deletion.delete({ projectId, path: "missing.md" }).pipe(Effect.flip);
       assert.deepInclude(missing, { _tag: "ArtifactWorkspaceError", reason: "not_found" });
-      assert.deepStrictEqual(seen, { deleted: [], reconciled: [] });
+      assert.deepStrictEqual(seen, { deleted: [] });
     }).pipe(Effect.provide(deletionWith(seen)));
   },
 );
 
 it.effect(
-  "deletes over 2,000 artifacts without following links, preserves other projects, and reconciles handoffs",
+  "deletes over 2,000 artifacts without following links and preserves other projects",
   () => {
-    const reconciled: Array<string> = [];
     const testLayer = layer.pipe(
       Layer.provideMerge(Workspace.layer),
       Layer.provideMerge(
@@ -95,14 +82,6 @@ it.effect(
         Layer.mock(ProjectService.ProjectService)({
           getById: (id) =>
             Effect.succeed(id === goneProjectId ? Option.none() : Option.some({ id } as never)),
-        }),
-      ),
-      Layer.provide(
-        Layer.mock(AgentHandoffArtifactDelete)({
-          reconcile: ({ path }) =>
-            Effect.sync(() => {
-              reconciled.push(path);
-            }),
         }),
       ),
       Layer.provideMerge(NodeServices.layer),
@@ -140,9 +119,6 @@ it.effect(
 
       yield* deletion.deleteAll({ projectId });
       assert.deepStrictEqual(yield* artifacts.list(projectId), []);
-      assert.equal(reconciled.length, Workspace.MAX_ARTIFACT_COUNT * 4 + 1);
-      assert.include(reconciled, "handoffs/review.md");
-      assert.notInclude(reconciled, "000-link.md");
       if (symlinksSupported) assert.equal(yield* fs.readLink(link), linkTarget);
       assert.equal(
         (yield* artifacts.read({ projectId: otherProject, relativePath: "keep.md" })).content,
@@ -158,9 +134,8 @@ it.effect(
   },
 );
 
-it.effect("reports a bulk failure after reconciling files that were already deleted", () => {
+it.effect("reports a bulk failure after deleting the files before it", () => {
   const deleted: Array<string> = [];
-  const reconciled: Array<string> = [];
   const testLayer = layer.pipe(
     Layer.provide(
       Layer.mergeAll(
@@ -186,12 +161,6 @@ it.effect("reports a bulk failure after reconciling files that were already dele
                   return relativePath;
                 }),
         }),
-        Layer.mock(AgentHandoffArtifactDelete)({
-          reconcile: ({ path }) =>
-            Effect.sync(() => {
-              reconciled.push(path);
-            }),
-        }),
       ),
     ),
   );
@@ -200,6 +169,5 @@ it.effect("reports a bulk failure after reconciling files that were already dele
     const error = yield* deletion.deleteAll({ projectId }).pipe(Effect.flip);
     assert.equal(error._tag, "ArtifactWorkspaceError");
     assert.deepStrictEqual(deleted, ["plan.md"]);
-    assert.deepStrictEqual(reconciled, ["plan.md"]);
   }).pipe(Effect.provide(testLayer));
 });

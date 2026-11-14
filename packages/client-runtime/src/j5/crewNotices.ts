@@ -1,7 +1,7 @@
 /**
- * The platform's Crew notices as they appear in a Captain's thread, recognized from their tags so
- * the timeline can show a card instead of the raw block. Recognition is strict: a block the
- * parser does not understand stays raw, and prose is never guessed at.
+ * The platform's Crew notices in a Captain's thread, recognized strictly from their tags: a block
+ * the parser does not understand stays raw. It reads every field, including ones the timeline no
+ * longer draws, since the strict parse keeps an unreadable block raw and the approval summary reads them.
  */
 export interface CrewNoticeMessage {
   readonly role: string;
@@ -9,7 +9,7 @@ export interface CrewNoticeMessage {
   readonly createdBy?: string | undefined;
 }
 
-export type SeatStart = "started" | "failed" | "pending";
+export type SeatStart = "waiting" | "started" | "failed" | "pending";
 
 export interface CrewRosterSeat {
   readonly seat: string;
@@ -29,19 +29,6 @@ export interface SeatStartFailure {
   readonly detail: string;
 }
 
-export type SeatHandoff =
-  | { readonly status: "none declared" }
-  | {
-      readonly status: "written" | "missing" | "unavailable";
-      readonly kind: string;
-      /** The logical path the notice names, `artifacts/handoffs/...`. */
-      readonly artifactPath: string | null;
-      /** The handoff text when the notice carried it inline. */
-      readonly body: string | null;
-      /** Why an unavailable handoff can never be read, as the notice words it. */
-      readonly reason: string | null;
-    };
-
 export interface FinishedSeat {
   readonly seat: string;
   readonly crewName: string | null;
@@ -50,7 +37,6 @@ export interface FinishedSeat {
   readonly runStatus: string;
   /** The run's recorded error when it failed, as the notice carried it. */
   readonly failure: string | null;
-  readonly handoff: SeatHandoff;
 }
 
 export type CrewNoticePresentation =
@@ -83,7 +69,7 @@ export type CrewNoticePresentation =
 
 const GATE_BLOCK = /^<j5_crew_gate>\n([\s\S]*?)\n<\/j5_crew_gate>/;
 const ROSTER_LINE =
-  /^- ([^:]+): participant_id=(\S+) persona=(\S*) thread_id=(\S+)(?: start=(started|failed|pending))?( \(new\))?$/;
+  /^- ([^:]+): participant_id=(\S+) persona=(\S*) thread_id=(\S+)(?: start=(started|failed|pending|waiting))?( \(new\))?$/;
 
 // Decode after parsing: provider diagnostics cannot create fields or terminate tagged blocks.
 const decodeFailureField = (value: string) =>
@@ -97,7 +83,9 @@ const field = (block: string, name: string) =>
 const fields = (block: string, name: string) =>
   [...block.matchAll(new RegExp(`^${name}: (.*)$`, "gm"))].map((match) => match[1]!.trim());
 const seatStart = (value: string | undefined): SeatStart | null =>
-  value === "started" || value === "failed" || value === "pending" ? value : null;
+  value === "waiting" || value === "started" || value === "failed" || value === "pending"
+    ? value
+    : null;
 
 const parseGate = (text: string): CrewNoticePresentation | null => {
   const match = GATE_BLOCK.exec(text);
@@ -137,6 +125,8 @@ const parseGate = (text: string): CrewNoticePresentation | null => {
     });
   }
   // `seat_failed: <seat> | <run status> | <error>`; the error may itself contain the separator.
+  // The server always writes an error ("no error detail was recorded" when there is none,
+  // `formatRunFailure`), so a failed seat is never dropped here for an empty one.
   const failures = fields(block, "seat_failed").flatMap((entry) => {
     const [seat, runStatus, ...rest] = entry.split(" | ");
     return seat === undefined || runStatus === undefined || rest.length === 0
@@ -181,8 +171,6 @@ const parseGate = (text: string): CrewNoticePresentation | null => {
 
 const SEAT_OPEN = "<j5_seat_finished>";
 const SEAT_BLOCK = /^<j5_seat_finished>\n([\s\S]*?)\n<\/j5_seat_finished>([\s\S]*)$/;
-const HANDOFF_BODY = /<handoff_body>\n([\s\S]*?)\n<\/handoff_body>/;
-const HANDOFF_FIELD = /^(written|missing|unavailable) \((.+)\)$/;
 
 const parseSeatSection = (section: string): FinishedSeat | null => {
   const match = SEAT_BLOCK.exec(section);
@@ -192,29 +180,8 @@ const parseSeatSection = (section: string): FinishedSeat | null => {
   const participantId = field(block, "participant_id");
   const threadId = field(block, "thread_id");
   const runStatus = field(block, "run_status");
-  const handoffField = field(block, "handoff");
   if (seat === null || participantId === null || threadId === null || runStatus === null)
     return null;
-  let handoff: SeatHandoff;
-  if (handoffField === null || handoffField === "none declared") {
-    handoff = { status: "none declared" };
-  } else {
-    const parsed = HANDOFF_FIELD.exec(handoffField);
-    if (parsed === null) return null;
-    const bodyMatch = HANDOFF_BODY.exec(match[2]!);
-    handoff = {
-      status: parsed[1] as "written" | "missing" | "unavailable",
-      kind: parsed[2]!,
-      artifactPath: field(block, "artifact"),
-      reason: field(block, "handoff_reason"),
-      body:
-        bodyMatch === null
-          ? null
-          : bodyMatch[1]!
-              .replace(/<\\\/handoff_body>/g, "</handoff_body>")
-              .replace(/<\\j5_seat_finished>/g, "<j5_seat_finished>"),
-    };
-  }
   return {
     seat,
     crewName: field(block, "crew"),
@@ -222,7 +189,6 @@ const parseSeatSection = (section: string): FinishedSeat | null => {
     threadId,
     runStatus,
     failure: field(block, "failure") === null ? null : decodeFailureField(field(block, "failure")!),
-    handoff,
   };
 };
 
@@ -235,6 +201,34 @@ const parseSeats = (text: string): CrewNoticePresentation | null => {
   return seats.length === 0 || seats.some((seat) => seat === null)
     ? null
     : { kind: "seats", seats: seats as ReadonlyArray<FinishedSeat> };
+};
+
+/**
+ * What the platform told a Crew member with an assignment, kept in the member's own thread: the
+ * text the model read, in the tag the server wrote it in. Strictly recognized from that tag.
+ */
+export interface CrewContextNotice {
+  readonly kind: "introduction" | "roster-changed";
+  readonly title: string;
+  /** The context without its wrapper, as the model read it. */
+  readonly text: string;
+}
+
+const CONTEXT_OPEN = "<j5_crew_delivery_context>\n";
+const CONTEXT_CLOSE = "\n</j5_crew_delivery_context>";
+const ROSTER_CHANGED_OPEN = "<j5_crew_roster_changed>";
+
+export const presentCrewContext = (message: CrewNoticeMessage): CrewContextNotice | null => {
+  if (message.role !== "user" || message.createdBy !== "system") return null;
+  const { text } = message;
+  if (!text.startsWith(CONTEXT_OPEN) || !text.endsWith(CONTEXT_CLOSE)) return null;
+  const body = text
+    .slice(CONTEXT_OPEN.length, text.length - CONTEXT_CLOSE.length)
+    .replaceAll("<\\/j5_crew_delivery_context>", "</j5_crew_delivery_context>");
+  if (body.trim() === "") return null;
+  return body.startsWith(ROSTER_CHANGED_OPEN)
+    ? { kind: "roster-changed", title: "Roster changed", text: body }
+    : { kind: "introduction", title: "Introduction", text: body };
 };
 
 /** Null for anything that is not a Crew notice; the ordinary renderer then owns the message. */
@@ -250,4 +244,130 @@ export const participantIdsForCrewNotice = (message: CrewNoticeMessage): Readonl
   if (notice?.kind === "gate") return notice.roster.map((seat) => seat.participantId);
   if (notice?.kind === "seats") return notice.seats.map((seat) => seat.participantId);
   return [];
+};
+
+/** One seat a Crew notice says needs the person. */
+export interface CrewNoticeLine {
+  readonly seat: string;
+  /** Named only when one notice speaks for several Crews, where a seat name alone is ambiguous. */
+  readonly crewName: string | null;
+  /** Null when the seat's thread was never created: the line names it and doesn't link. */
+  readonly threadId: string | null;
+  readonly reason: string;
+  /** The error or fact behind the reason, for the line to open to. */
+  readonly detail: string | null;
+  readonly tone: "bad" | "warn";
+}
+
+/**
+ * What the person would act on in a notice, one line per seat: a seat that didn't start, or a run
+ * that didn't end clean. A seat that started or finished cleanly has no line; its row on the Fleet
+ * page and the Captain's expander says so.
+ */
+export const crewNoticeLines = (notice: CrewNoticePresentation): ReadonlyArray<CrewNoticeLine> => {
+  if (notice.kind === "gate") {
+    if (notice.decision !== "approved") return [];
+    const threadOf = (seat: string) =>
+      notice.roster.find((entry) => entry.seat === seat)?.threadId ?? null;
+    return [
+      ...notice.failures.map((failure) => ({
+        seat: failure.seat,
+        crewName: null,
+        threadId: threadOf(failure.seat),
+        reason: "couldn't start",
+        detail: failure.detail,
+        tone: "bad" as const,
+      })),
+      ...notice.notCreated.map((seat) => ({
+        seat: seat.seat,
+        crewName: null,
+        threadId: null,
+        reason: "was never created",
+        detail: seat.detail,
+        tone: "bad" as const,
+      })),
+      ...notice.pendingSeats.map((seat) => ({
+        seat,
+        crewName: null,
+        threadId: threadOf(seat),
+        reason: "hasn't confirmed it started",
+        detail: null,
+        tone: "warn" as const,
+      })),
+    ];
+  }
+  // Finishes from several Crews fold into one notice when the Captain commands more than one.
+  const severalCrews = new Set(notice.seats.map((seat) => seat.crewName)).size > 1;
+  return notice.seats.flatMap((seat): ReadonlyArray<CrewNoticeLine> => {
+    const crewName = severalCrews ? seat.crewName : null;
+    if (seat.runStatus === "completed") return [];
+    const ended =
+      seat.runStatus === "failed" || seat.runStatus === "errored"
+        ? "run failed"
+        : `run ${seat.runStatus}`;
+    return [
+      {
+        seat: seat.seat,
+        crewName,
+        threadId: seat.threadId,
+        reason: ended,
+        detail: seat.failure,
+        tone: "bad",
+      },
+    ];
+  });
+};
+
+/**
+ * The stored launch report records the approved members, including ones never created. The
+ * approver is named when the notice carries one, which only a shared conversation's does.
+ */
+export const crewApprovalSummary = (notice: CrewNoticePresentation): string | null => {
+  if (notice.kind !== "gate" || notice.decision !== "approved" || notice.requestKind !== "roster")
+    return null;
+  const count = notice.roster.length + notice.notCreated.length;
+  const by = notice.decidedBy ? ` · by ${notice.decidedBy}` : "";
+  return `Crew approved · ${count} ${count === 1 ? "member" : "members"}${by}`;
+};
+
+/** A declined request's one line. */
+export const crewDeclinedSummary = (notice: Extract<CrewNoticePresentation, { kind: "gate" }>) =>
+  `Crew ${notice.crewName === null ? "" : `${notice.crewName} `}· ${notice.requestKind === "roster" ? "roster" : "seat"} declined${notice.decidedBy === null ? "" : ` by ${notice.decidedBy}`}`;
+
+/** The notice's own line, beside the lines of the seats in it; null when it has none. */
+export const crewNoticeSummary = (notice: CrewNoticePresentation): string | null =>
+  notice.kind === "gate" && notice.decision === "declined"
+    ? crewDeclinedSummary(notice)
+    : crewApprovalSummary(notice);
+
+/** Completed finishes and successful additions take no row in the timeline. */
+export const isHiddenCrewNotice = (message: CrewNoticeMessage): boolean => {
+  const notice = presentCrewNotice(message);
+  if (notice === null || (notice.kind === "gate" && notice.decision === "declined")) return false;
+  return crewApprovalSummary(notice) === null && crewNoticeLines(notice).length === 0;
+};
+
+const visibleRows = new WeakMap<object, ReadonlyArray<unknown>>();
+
+/**
+ * A timeline's rows without the hidden Crew notices. Run it on rows already derived: every user
+ * message is a turn boundary, so dropping a notice before that would merge the Captain turn it
+ * started into the one before. The result is the input when nothing is hidden and is cached per
+ * input, since a list compares its rows by identity.
+ */
+export const withoutHiddenCrewNotices = <Rows extends ReadonlyArray<unknown>>(
+  rows: Rows,
+  messageOf: (row: Rows[number]) => CrewNoticeMessage | undefined,
+): Rows => {
+  const cached = visibleRows.get(rows);
+  if (cached !== undefined) return cached as Rows;
+  const hidden = (row: Rows[number]) => {
+    const message = messageOf(row);
+    return message !== undefined && isHiddenCrewNotice(message);
+  };
+  const visible = rows.some(hidden)
+    ? (rows.filter((row) => !hidden(row)) as unknown as Rows)
+    : rows;
+  visibleRows.set(rows, visible);
+  return visible;
 };

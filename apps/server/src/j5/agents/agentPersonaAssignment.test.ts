@@ -29,23 +29,23 @@ describe("agent persona assignment", () => {
     assert.deepEqual(result.assignment, {
       personaId: "critic",
       definitionVersion: 1,
-      authorityPolicy: "critic-review",
+      authorityPolicy: "read-only",
       resolvedRoute: "primary",
       resolvedDriver: ProviderDriverKind.make("claudeAgent"),
       resolvedModelSelection: criticRoute.modelSelection,
     });
   });
 
-  it("blocks Critic Fix Mode on a provider that cannot enforce workspace authority", () => {
+  it("rejects Critic Fix Mode for new reviewer assignments", () => {
     const result = buildAgentPersonaAssignment({
       resolution: criticRoute,
       authorityPolicy: "critic-fix",
     });
     assert.deepEqual(result, {
-      status: "authority-not-enforceable",
+      status: "invalid-authority-policy",
       personaId: "critic",
       requestedPolicy: "critic-fix",
-      driver: ProviderDriverKind.make("claudeAgent"),
+      allowedPolicies: ["read-only"],
     });
   });
 
@@ -58,7 +58,7 @@ describe("agent persona assignment", () => {
       status: "invalid-authority-policy",
       personaId: "critic",
       requestedPolicy: "workspace-write",
-      allowedPolicies: ["critic-review", "critic-fix"],
+      allowedPolicies: ["read-only"],
     });
   });
 
@@ -173,4 +173,64 @@ describe("agent persona assignment", () => {
       assert.equal(result.status, "authority-not-enforceable");
     });
   });
+});
+
+it("validates an indexed entry and declared options while allowing materialized defaults", () => {
+  const base = listBuiltInAgentPersonas()[0]!;
+  const target = {
+    instanceId: ProviderInstanceId.make("selected-account"),
+    model: "third",
+    options: [{ id: "effort", value: "high" }],
+  };
+  const definition = {
+    ...base,
+    modelRoute: [base.modelRoute[0], base.modelRoute[1], target] as const,
+  };
+  const assignment = {
+    personaId: base.id,
+    definitionVersion: base.version,
+    authorityPolicy: base.authority.defaultPolicy,
+    resolvedRoute: "fallback" as const,
+    resolvedEntryIndex: 2,
+    resolvedDriver: ProviderDriverKind.make("codex"),
+    resolvedModelSelection: {
+      ...target,
+      options: [...target.options, { id: "fastMode", value: false }],
+    },
+  };
+  for (const fastMode of [false, true]) {
+    assert.isUndefined(
+      validateAgentPersonaAssignment(
+        {
+          ...assignment,
+          resolvedModelSelection: {
+            ...assignment.resolvedModelSelection,
+            options: [...target.options, { id: "fastMode", value: fastMode }],
+          },
+        },
+        definition,
+      ),
+    );
+  }
+  assert.isDefined(
+    validateAgentPersonaAssignment({ ...assignment, resolvedEntryIndex: 3 }, definition),
+  );
+  assert.isDefined(
+    validateAgentPersonaAssignment(
+      {
+        ...assignment,
+        resolvedModelSelection: { ...target, instanceId: ProviderInstanceId.make("other-account") },
+      },
+      definition,
+    ),
+  );
+  assert.isDefined(
+    validateAgentPersonaAssignment(
+      {
+        ...assignment,
+        resolvedModelSelection: { ...target, options: [{ id: "effort", value: "low" }] },
+      },
+      definition,
+    ),
+  );
 });

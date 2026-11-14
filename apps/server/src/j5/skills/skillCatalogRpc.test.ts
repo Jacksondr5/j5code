@@ -71,8 +71,8 @@ const fixture = Effect.gen(function* () {
           driver: ProviderDriverKind.make("codex"),
           enabled: true,
           environment: [
-            { name: "HOME", value: homeDir },
-            { name: "USERPROFILE", value: homeDir },
+            { name: "HOME", value: homeDir, sensitive: false },
+            { name: "USERPROFILE", value: homeDir, sensitive: false },
           ],
         },
         [ProviderInstanceId.make("claudeAgent")]: {

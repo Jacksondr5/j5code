@@ -1,5 +1,5 @@
 import { type ChatAttachment, OrchestratorMcpFailure, type ThreadId } from "@t3tools/contracts";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import { Tool, Toolkit } from "effect/ai";
@@ -38,7 +38,7 @@ export const J5AttachmentUploadToolkit = Toolkit.make(
       ServerConfig,
       ServerSecretStore,
       FileSystem.FileSystem,
-      Crypto.Crypto,
+      SecureRandom.SecureRandom,
     ],
   }).annotate(Tool.Destructive, true),
   AttachmentToolkit.tools.t3_attachment_discard,

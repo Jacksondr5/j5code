@@ -79,13 +79,6 @@ export const makeCrewFailureAlert = Effect.gen(function* () {
           const exchangeId = ExchangeId.make(
             existing?.exchange_id ?? `${prefix}${encodeURIComponent(input.runId)}`,
           );
-          const previous =
-            existing === undefined
-              ? undefined
-              : (yield* sql<{ readonly message_text: string }>`
-      SELECT message_text FROM j5_a2a_delivery WHERE project_id = ${projectId}
-        AND exchange_id = ${exchangeId} AND receiver_id = ${personId} ORDER BY sent_seq DESC LIMIT 1
-    `)[0]?.message_text;
           const text = `Platform notice: Crew "${input.instance.displayName}", seat "${input.seatName}" needs your help.\n${formatRunFailure(input.failure)}\nCheck this environment's provider sign-in or permissions, then reply here so the Captain can re-brief the seat. No automatic retry was started.`;
           const at = DateTime.formatIso(yield* DateTime.now);
           const base = {
@@ -110,7 +103,7 @@ export const makeCrewFailureAlert = Effect.gen(function* () {
             kind: "message.sent",
             payload: {
               messageId: LedgerMessageId.make(`message:${commandId}`),
-              text: previous === undefined ? text : `${previous}\n\n${text}`,
+              text,
               originProjectId: projectId,
               receiverProjectId: projectId,
               exchangeRole: existing === undefined ? "ask" : "followup",

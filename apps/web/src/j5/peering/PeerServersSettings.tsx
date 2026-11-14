@@ -97,6 +97,7 @@ export function PeerServersSettings({
   return (
     <SettingsSection
       title="Peer servers"
+      description="Peer two servers you are connected to so their agents can exchange messages. Agents address each other by participant id and see which server each one lives on."
       headerAction={
         <Button size="xs" variant="ghost-muted" aria-label="Add peer" onClick={openDialog}>
           <PlusIcon className="size-3" />
@@ -108,10 +109,7 @@ export function PeerServersSettings({
         <PeerPairRow key={pair.key} pair={pair} />
       ))}
       {pairs.length === 0 && lists.some((list) => list.peers !== null) ? (
-        <SettingsRow
-          title="No peers yet"
-          description="Peer two servers you are connected to so their agents can exchange messages. Agents address each other by participant id and see which server each one lives on."
-        />
+        <SettingsRow title="No peers yet" />
       ) : null}
       {lists.map((list) =>
         list.error === null ? null : (

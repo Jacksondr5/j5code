@@ -18,6 +18,17 @@ class J5AgentToolStateError extends Data.TaggedError("J5AgentToolStateError")<{
 export const stateError = (state: string, nextCommand: string) =>
   new J5AgentToolStateError({ state, nextCommand });
 
+/** A refused persona launch, whose code (`persona_disabled` and so on) is the tool failure's. */
+export class J5PersonaBlockedError extends Data.TaggedError("J5PersonaBlockedError")<{
+  readonly code: string;
+  readonly state: string;
+  readonly nextCommand: string;
+}> {
+  override get message(): string {
+    return `${this.state} ${this.nextCommand}`;
+  }
+}
+
 type AgentDirectoryRow = ParticipantDirectoryRow & {
   readonly participant: Extract<ParticipantDirectoryRow["participant"], { readonly kind: "agent" }>;
 };

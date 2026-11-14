@@ -73,10 +73,14 @@ describe("useSharedConversationEntries", () => {
       seen.push(useSharedConversationEntries(threadRef, entries));
       return <span>{props.tick}</span>;
     }
+    // The message is first seen a millisecond before the thread is shared; on the wall clock both
+    // renders can fall in the same millisecond, which reads as seen once it may be shared.
+    using now = vi.spyOn(Date, "now").mockReturnValue(10);
     // The hook reads no route.
     await using screen = await render(<Probe tick={1} />, { router: false });
     expect(authors.refresh).not.toHaveBeenCalled();
     reach.people = twoWriters;
+    now.mockReturnValue(11);
     await screen.rerender(<Probe tick={2} />);
     expect(seen.at(-1)?.map((entry) => entry.id)).toEqual(["entry-1"]);
     expect(authors.refresh).toHaveBeenCalledTimes(1);

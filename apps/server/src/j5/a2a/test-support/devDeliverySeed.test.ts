@@ -1,8 +1,10 @@
 import { assert, it } from "@effect/vitest";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import type { ProjectId } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
 import * as FileSystem from "effect/FileSystem";
 import * as Logger from "effect/Logger";
 import * as Schema from "effect/Schema";
@@ -135,7 +137,7 @@ it.effect("requires an explicit isolated base and emits a provider-safe receipt"
     } finally {
       yield* fileSystem.remove(baseDir, { recursive: true, force: true }).pipe(Effect.ignore);
     }
-  }).pipe(Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
 );
 
 it.effect(
@@ -183,7 +185,7 @@ it.effect(
       yield* fileSystem.symlink(`${sharedHome}/userdata`, `${worktree}/.j5code/escape`);
       assert.isTrue(yield* rejected(`${worktree}/.j5code/escape`));
       assert.isTrue(yield* rejected(`${worktree}/.j5code/escape/home`));
-    }).pipe(Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
 );
 
 it.effect("seeds into an existing project instead of creating its own", () =>
@@ -219,5 +221,5 @@ it.effect("seeds into an existing project instead of creating its own", () =>
       seed({ id: first.project.id, workspaceRoot: `${process.cwd()}/elsewhere` }),
     );
     assert.equal(wrongRoot._tag, "Failure");
-  }).pipe(Effect.provide(NodeServices.layer)),
+  }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
 );

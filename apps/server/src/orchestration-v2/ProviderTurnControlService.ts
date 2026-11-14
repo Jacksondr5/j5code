@@ -17,6 +17,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+import * as CrewTurnContext from "../j5/a2a/CrewTurnContext.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as ProviderSessionManager from "./ProviderSessionManager.ts";
 
@@ -38,6 +39,8 @@ export class ProviderTurnControlError extends Schema.TaggedError<ProviderTurnCon
     operation: Schema.Literals(["interrupt", "restart", "steer"]),
     providerTurnId: ProviderTurnId,
     turnCompleted: Schema.optional(Schema.Boolean),
+    /** The provider never confirmed the stop; Force stop is the way out. */
+    unresponsive: Schema.optional(Schema.Boolean),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {}
@@ -90,6 +93,7 @@ export const layer: Layer.Layer<
   Effect.gen(function* () {
     const projections = yield* ProjectionStore.ProjectionStoreV2;
     const sessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
+    const crewTurnContext = yield* Effect.serviceOption(CrewTurnContext.CrewTurnContext);
 
     const load = Effect.fn("ProviderTurnControlService.load")(function* (input: {
       readonly threadId: ThreadId;
@@ -127,7 +131,11 @@ export const layer: Layer.Layer<
       const interruptProviderThread = targetsRecordedSession
         ? providerThread
         : { ...providerThread, providerSessionId: input.providerSessionId };
-      if (providerTurn.status !== "running") {
+      const continuingRun =
+        input.operation === "steer" &&
+        context.run?.status === "running" &&
+        context.run.activeAttemptId === providerTurn.runAttemptId;
+      if (providerTurn.status !== "running" && !continuingRun) {
         if (input.operation === "steer") {
           return yield* new ProviderTurnControlError({
             threadId: input.threadId,
@@ -214,11 +222,26 @@ export const layer: Layer.Layer<
             });
           }
           // Settled turns still reach adapters, which alone know whether background work remains.
-          yield* session.value.interruptTurn({
-            providerThread: loaded.providerThread,
-            providerTurnId: loaded.providerTurn.id,
-            requestRuntimeRestart: true,
-          });
+          yield* session.value
+            .interruptTurn({
+              providerThread: loaded.providerThread,
+              providerTurnId: loaded.providerTurn.id,
+              requestRuntimeRestart: true,
+            })
+            .pipe(
+              Effect.catchTags({
+                ProviderAdapterInterruptTimeoutError: (cause) =>
+                  Effect.fail(
+                    new ProviderTurnControlError({
+                      threadId: input.threadId,
+                      operation: "interrupt",
+                      providerTurnId: input.providerTurnId,
+                      unresponsive: true,
+                      cause,
+                    }),
+                  ),
+              }),
+            );
           // Use real time; ingestion fibers do not advance TestClock and would leave Stop blocked.
           yield* Effect.gen(function* () {
             const deadline = (yield* Clock.currentTimeMillis) + 2_000;
@@ -352,7 +375,10 @@ export const layer: Layer.Layer<
               cause: "The persisted steering message or target run is missing.",
             });
           }
-          yield* loaded.session.value
+          const session = Option.isSome(crewTurnContext)
+            ? crewTurnContext.value.steering(loaded.session.value)
+            : loaded.session.value;
+          yield* session
             .steerTurn({
               threadId: input.threadId,
               runId: run.id,

@@ -5,6 +5,7 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   answeredByLine,
   closedLine,
+  askWaitsForServerLine,
   compareInboxItems,
   type HumanInboxAnswerAttempt,
   j5SourceNotice,
@@ -43,31 +44,41 @@ import { useProject, useThreadShell } from "../../state/entities";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { RelativeTime } from "../../components/RelativeTime";
 import { RelativeAge } from "../RelativeAge";
+import {
+  AnswerAttachButton,
+  AnswerAttachmentList,
+  type AnswerAttachmentsState,
+  answerAttachmentInputHandlers,
+  useAnswerAttachmentSupport,
+  useAnswerAttachments,
+} from "./AnswerAttachments";
 import { answerHumanExchange } from "./humanInboxClient";
+import { J5RecordPanel } from "./J5RecordPanel";
+import { OwnerAskAction } from "./OwnerAskAction";
 import { useScopedParticipantLabels } from "./ParticipantIdentitiesClient";
 import { presentParticipantIdentity } from "@t3tools/client-runtime/j5/participant-identity";
-import { CrewProposalCard } from "../crew/CrewProposalCard";
 import { CrewRuntimeRequestsSection } from "../crew/CrewRuntimeRequestsSection";
-import type { ScopedCrewRuntimeRequest } from "../crew/crewRuntimeRequests.logic";
+import type { ScopedCrewRuntimeRequest } from "@t3tools/client-runtime/j5/crew-inbox-requests";
 import {
   refreshCrewRuntimeRequests,
   useCrewRuntimeRequests,
   useNativeQuestionInbox,
 } from "../crew/crewRuntimeRequestsClient";
 import { NativeQuestionInboxSection } from "./NativeQuestionInboxSection";
-import { inboxCrewRequests } from "../crew/crewProposals.logic";
 import {
-  mergeCrewProposalSources,
-  refreshCrewProposals,
-  resolveCrewProposal,
-  useCrewProposalsRefresh,
-  type CrewProposalSeat,
-  type ScopedCrewProposal,
-} from "../crew/crewProposalsClient";
+  CrewWorktreeCleanupSection,
+  DecidedCleanupRow,
+  useWorktreeCleanupInbox,
+} from "./CrewWorktreeCleanupSection";
+import { refreshWorktreeCleanups } from "./crewWorktreeCleanupClient";
+import {
+  inboxSummary,
+  worktreeCleanupKey,
+  type ScopedWorktreeCleanup,
+} from "@t3tools/client-runtime/j5/crew-worktree-cleanup";
 import {
   answeredInboxQueryAtom,
   answeredInboxSourcesAtom,
-  crewProposalSourcesAtom,
   crewRuntimeRequestSourcesAtom,
   j5Environment,
   openInboxQueryAtom,
@@ -193,15 +204,28 @@ function InboxMessage({ item }: { readonly item: HumanInboxItem }) {
         worktreePath: thread?.worktreePath ?? null,
       })
     : undefined;
-  return (
+  const markdown = (text: string) => (
     <ChatMarkdown
       className="max-w-[72ch] text-sm text-foreground/90"
       cwd={cwd}
       environmentId={item.environmentId}
-      lineBreaks={shouldPreserveAssistantLineBreaks(item.message)}
-      text={item.message}
+      lineBreaks={shouldPreserveAssistantLineBreaks(text)}
+      text={text}
       threadRef={threadRef ?? undefined}
     />
+  );
+  return (
+    <div className="flex flex-col gap-4">
+      {markdown(item.message)}
+      {item.escalation === undefined ? null : <J5RecordPanel text={item.escalation.summary} />}
+      {item.personaDraft === undefined ? null : <J5RecordPanel text={item.personaDraft.summary} />}
+      {item.followUps?.map((followUp) => (
+        <div className="flex flex-col gap-1" key={followUp.messageId}>
+          <p className="text-xs font-medium text-muted-foreground">Follow-up</p>
+          {markdown(followUp.message)}
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -209,6 +233,7 @@ function OpenInboxItem({
   item,
   answer,
   answerText,
+  attachments,
   pendingExchangeId,
   setAnswers,
   onOpenThread,
@@ -232,6 +257,7 @@ function OpenInboxItem({
   readonly senderLabels: SenderLabels;
   readonly projectNameOf: ProjectNameOf;
   readonly answerText: string;
+  readonly attachments: AnswerAttachmentsState;
   readonly pendingExchangeId: string | null;
   readonly showEnvironment: boolean;
   readonly setAnswers: (update: (current: HumanInboxAnswers) => HumanInboxAnswers) => void;
@@ -244,6 +270,16 @@ function OpenInboxItem({
   const canAnswer = item.sourceReady && mayAnswer;
   const ownName = useOwnName(item.environmentId);
   const closedText = closed === undefined ? null : closedLine({ ...closed, ownName });
+  const itemKey = scopedInboxItemKey(item);
+  const answerId = `inbox-answer-${encodeURIComponent(itemKey)}`;
+  const support = useAnswerAttachmentSupport(item.environmentId);
+  const addFiles =
+    support === null || closedText !== null || pendingExchangeId !== null
+      ? null
+      : (files: ReadonlyArray<File>) =>
+          attachments.add(itemKey, item.environmentId, support.maxFileBytes, files);
+  const readiness = attachments.ready(itemKey, item.environmentId);
+  const waitingOn = "blocked" in readiness ? readiness.blocked : null;
   return (
     <li className="border-b border-border/70 last:border-b-0">
       <details className="group/details">
@@ -290,42 +326,78 @@ function OpenInboxItem({
         </summary>
         <div className="border-t border-border/50 px-1 pb-5 pt-4 sm:ms-24 sm:px-0 sm:pe-1">
           <InboxMessage item={item} />
-          <div className="mt-4 flex flex-col gap-3">
-            <Textarea
-              aria-label={`Answer ${item.intent}`}
-              className="min-h-24 resize-y"
-              onChange={(event) =>
-                captureHumanInboxAnswer(event, scopedInboxItemKey(item), setAnswers)
-              }
-              placeholder="Type the answer exactly as it should be delivered"
-              value={answerText}
-            />
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <OpenThreadButton
-                environmentAvailable={item.connected}
-                item={item}
-                onOpen={onOpenThread}
+          {closedText === null && !item.connected ? (
+            // Read-only until its server is back; words typed earlier are kept for then.
+            <p className="mt-4 text-sm text-muted-foreground">
+              {askWaitsForServerLine(item.environmentLabel)}
+            </p>
+          ) : (
+            <div className="mt-4 flex flex-col gap-3">
+              <Textarea
+                aria-label={`Answer ${item.intent}`}
+                className="min-h-24 resize-y"
+                id={answerId}
+                onChange={(event) => captureHumanInboxAnswer(event, itemKey, setAnswers)}
+                placeholder="Type the answer exactly as it should be delivered"
+                value={answerText}
+                {...(addFiles === null ? {} : answerAttachmentInputHandlers(addFiles))}
               />
-              {closedText !== null ? (
-                <p className="text-sm text-muted-foreground" data-j5-inbox="closed">
-                  {closedText}
-                </p>
-              ) : (
-                <Button
-                  disabled={!canAnswer || pendingExchangeId !== null || answerText.length === 0}
-                  title={
-                    canAnswer
-                      ? undefined
-                      : "This environment is unavailable or this connection is read-only."
-                  }
-                  onClick={() => answer(item)}
-                  type="button"
-                >
-                  {pendingExchangeId === scopedInboxItemKey(item) ? "Delivering…" : "Answer"}
-                </Button>
-              )}
+              <AnswerAttachmentList
+                attachments={attachments.list(itemKey)}
+                environmentId={item.environmentId}
+                error={attachments.error(itemKey)}
+                onRemove={
+                  pendingExchangeId === null ? (id) => attachments.remove(itemKey, id) : null
+                }
+              />
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-1">
+                  <OpenThreadButton
+                    environmentAvailable={item.connected}
+                    item={item}
+                    onOpen={onOpenThread}
+                  />
+                  {addFiles === null || !canAnswer ? null : (
+                    <AnswerAttachButton
+                      focusAnswer={() => document.getElementById(answerId)?.focus()}
+                      onFiles={addFiles}
+                    />
+                  )}
+                </div>
+                {closedText !== null ? (
+                  <p className="text-sm text-muted-foreground" data-j5-inbox="closed">
+                    {closedText}
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <OwnerAskAction
+                      disabled={!item.sourceReady || pendingExchangeId !== null}
+                      environmentId={item.environmentId}
+                      item={item}
+                      size="default"
+                    />
+                    <Button
+                      disabled={
+                        !canAnswer ||
+                        pendingExchangeId !== null ||
+                        answerText.length === 0 ||
+                        waitingOn !== null
+                      }
+                      title={
+                        canAnswer
+                          ? (waitingOn ?? undefined)
+                          : "This environment is unavailable or this connection is read-only."
+                      }
+                      onClick={() => answer(item)}
+                      type="button"
+                    >
+                      {pendingExchangeId === scopedInboxItemKey(item) ? "Delivering…" : "Answer"}
+                    </Button>
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
+          )}
         </div>
       </details>
     </li>
@@ -334,18 +406,21 @@ function OpenInboxItem({
 
 function AnsweredShelf({
   items,
+  cleanups,
   onOpenThread,
   senderLabels,
   projectNameOf,
   showEnvironment,
 }: {
   readonly items: ReadonlyArray<HumanInboxItem>;
+  /** Worktree cleanups that are decided and not shown in place. */
+  readonly cleanups: ReadonlyArray<ScopedWorktreeCleanup>;
   readonly onOpenThread: (item: HumanInboxItem) => void;
   readonly senderLabels: SenderLabels;
   readonly projectNameOf: ProjectNameOf;
   readonly showEnvironment: boolean;
 }) {
-  if (items.length === 0) return null;
+  if (items.length === 0 && cleanups.length === 0) return null;
   return (
     <details className="group/shelf border-t border-border pt-4">
       <summary className="flex cursor-pointer list-none items-center gap-2 rounded-md py-2 text-sm font-medium text-muted-foreground outline-hidden marker:hidden hover:text-foreground focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
@@ -354,7 +429,9 @@ function AnsweredShelf({
           className="size-4 transition-transform duration-150 group-open/shelf:rotate-90"
         />
         Answered
-        <span className="tabular-nums text-muted-foreground/70">{items.length}</span>
+        <span className="tabular-nums text-muted-foreground/70">
+          {items.length + cleanups.length}
+        </span>
       </summary>
       <ol className="mt-1 divide-y divide-border/60 ps-6">
         {items.map((item) => {
@@ -385,6 +462,13 @@ function AnsweredShelf({
             </li>
           );
         })}
+        {cleanups.map((item) => (
+          <DecidedCleanupRow
+            item={item}
+            key={worktreeCleanupKey(item)}
+            showEnvironment={showEnvironment}
+          />
+        ))}
       </ol>
     </details>
   );
@@ -402,33 +486,10 @@ async function refreshHumanInboxes(environmentId?: EnvironmentId, force = false)
     refreshJ5Sources(openInboxSourcesAtom, openInboxQueryAtom, options),
     refreshJ5Sources(answeredInboxSourcesAtom, answeredInboxQueryAtom, options),
     refreshCrewRuntimeRequests(environmentId),
+    refreshWorktreeCleanups(environmentId),
   ]);
   const failed = results.flat().find((result) => result._tag === "Failure");
   if (failed?._tag === "Failure") throw Cause.squash(failed.cause);
-}
-
-/** Resolves outside the component: the React Compiler cannot compile `throw` inside `try`. */
-async function resolveInboxProposal(
-  proposal: ScopedCrewProposal,
-  decision: "approve" | "decline",
-  seats: ReadonlyArray<CrewProposalSeat>,
-  approvalToken: string | undefined,
-): Promise<string | null> {
-  try {
-    if (decision === "approve" && approvalToken === undefined)
-      throw new Error("Refresh the runtime preview before approving.");
-    await resolveCrewProposal(
-      proposal.environmentId,
-      decision === "approve"
-        ? { proposalId: proposal.id, decision, seats, approvalToken: approvalToken! }
-        : { proposalId: proposal.id, decision },
-    );
-    notifyHumanInboxChanged(proposal.environmentId);
-    await refreshCrewProposals(proposal.environmentId).catch(() => undefined);
-    return null;
-  } catch (cause) {
-    return cause instanceof Error ? cause.message : "Could not resolve the crew request.";
-  }
 }
 
 const useInboxRefresh = createVisibleRefreshHook(() => {
@@ -454,6 +515,7 @@ export function HumanInboxPage() {
   const projectNameOf = (item: HumanInboxItem) =>
     projectOf(item.environmentId, item.projectId)?.displayName ?? item.projectTitle;
   const [answers, setAnswers] = useState<HumanInboxAnswers>({});
+  const answerAttachments = useAnswerAttachments();
   // Removing a connection or changing its person must also discard that inbox's unsent replies.
   const personScopes = JSON.stringify(
     openSources.sources.map((source) => [source.environmentId, source.data?.personId ?? null]),
@@ -509,15 +571,12 @@ export function HumanInboxPage() {
   const [error, setError] = useState<string | null>(null);
   const answerAttempts = useRef(new Map<string, HumanInboxAnswerAttempt>());
   useInboxRefresh();
-  const crewSources = useAtomValue(crewProposalSourcesAtom);
-  const proposals = inboxCrewRequests(mergeCrewProposalSources(crewSources));
-  const [resolvingProposalId, setResolvingProposalId] = useState<string | null>(null);
-  useCrewProposalsRefresh();
   const runtimeRequests = useCrewRuntimeRequests();
   const runtimeSources = useAtomValue(crewRuntimeRequestSourcesAtom);
   const nativeQuestions = useNativeQuestionInbox();
+  const cleanups = useWorktreeCleanupInbox();
   const previousOpenItems = useRef(new Map<EnvironmentId, ReadonlySet<string>>());
-  // oxlint-disable-next-line t3code/react-effect-budget -- an answered item leaving the open list rereads the answered list; it reacts to data arriving, not to a handler here.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- an answered item leaving the open list rereads the answered list; it reacts to data arriving, not to a handler here.
   useEffect(() => {
     const next = new Map<EnvironmentId, ReadonlySet<string>>();
     for (const source of openSources.sources) {
@@ -570,7 +629,7 @@ export function HumanInboxPage() {
     await refreshHumanInboxes(environmentId, true);
   };
 
-  // oxlint-disable-next-line t3code/react-effect-budget -- prunes answer attempts for scopes this person no longer has; render may not write refs.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- prunes answer attempts for scopes this person no longer has; render may not write refs.
   useEffect(() => {
     const keep = keepForPersonScopes(personScopes);
     for (const key of answerAttempts.current.keys())
@@ -580,44 +639,27 @@ export function HumanInboxPage() {
   const answer = async (item: HumanInboxItem) => {
     const itemKey = scopedInboxItemKey(item);
     const message = answers[itemKey] ?? "";
-    if (message.length === 0 || !item.sourceReady) return;
+    const readiness = answerAttachments.ready(itemKey, item.environmentId);
+    if (message.length === 0 || !item.sourceReady || "blocked" in readiness) return;
     await submitHumanInboxAnswer({
       item,
       message,
+      attachments: readiness.attachments,
       attempts: answerAttempts.current,
       randomUUID,
       send: answerHumanExchange,
       refresh,
       notifyChanged: notifyHumanInboxChanged,
-      onAccepted: () =>
+      onAccepted: () => {
         setAnswers((current) => {
           const next = { ...current };
           delete next[itemKey];
           return next;
-        }),
+        });
+        answerAttachments.delivered(itemKey);
+      },
       setPendingExchangeId,
       setError,
-    });
-  };
-
-  const resolveProposal = async (
-    proposal: ScopedCrewProposal,
-    decision: "approve" | "decline",
-    seats: ReadonlyArray<CrewProposalSeat>,
-    approvalToken?: string,
-  ) => {
-    setResolvingProposalId(proposal.id);
-    setError(null);
-    const failure = await resolveInboxProposal(proposal, decision, seats, approvalToken);
-    if (failure !== null) setError(failure);
-    setResolvingProposalId(null);
-  };
-  const openCaptain = (proposal: ScopedCrewProposal) => {
-    void navigate({
-      to: "/$environmentId/$threadId",
-      params: buildThreadRouteParams(
-        scopeThreadRef(proposal.environmentId, ThreadId.make(proposal.captainThreadId)),
-      ),
     });
   };
 
@@ -656,15 +698,12 @@ export function HumanInboxPage() {
                 <p className="mt-1 text-sm text-muted-foreground">
                   {loading && items.length === 0
                     ? "Loading questions waiting on you…"
-                    : `${items.length} ${complete ? "open" : "loaded"} ${items.length === 1 ? "question" : "questions"}${
-                        proposals.length === 0
-                          ? ""
-                          : ` · ${proposals.length} crew ${proposals.length === 1 ? "request" : "requests"}`
-                      }${
-                        runtimeRequests.length + nativeQuestions.length === 0
-                          ? ""
-                          : ` · ${runtimeRequests.length + nativeQuestions.length} agent ${runtimeRequests.length + nativeQuestions.length === 1 ? "request" : "requests"}`
-                      }`}
+                    : inboxSummary({
+                        questions: items.length,
+                        complete,
+                        agentRequests: runtimeRequests.length + nativeQuestions.length,
+                        worktreeCleanups: cleanups.openCount,
+                      })}
                 </p>
               </div>
               <Button
@@ -705,28 +744,6 @@ export function HumanInboxPage() {
               </div>
             ) : null}
 
-            {proposals.length > 0 ? (
-              <section aria-label="Crew requests" className="mt-6">
-                <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-                  Crew requests
-                </h2>
-                <ul className="space-y-4">
-                  {proposals.map((proposal) => (
-                    <CrewProposalCard
-                      key={`${proposal.environmentId}:${proposal.id}`}
-                      proposal={proposal}
-                      environmentId={proposal.environmentId}
-                      busy={resolvingProposalId === proposal.id}
-                      onResolve={(decision, seats, approvalToken) =>
-                        void resolveProposal(proposal, decision, seats, approvalToken)
-                      }
-                      onOpenCaptain={() => openCaptain(proposal)}
-                    />
-                  ))}
-                </ul>
-              </section>
-            ) : null}
-
             <CrewRuntimeRequestsSection requests={runtimeRequests} onOpenThread={openCrewThread} />
             <NativeQuestionInboxSection questions={nativeQuestions} onOpenThread={openCrewThread} />
 
@@ -734,7 +751,7 @@ export function HumanInboxPage() {
             !loading &&
             error === null &&
             shownItems.length === 0 &&
-            proposals.length === 0 &&
+            cleanups.inPlace.length === 0 &&
             runtimeRequests.length === 0 &&
             nativeQuestions.length === 0 ? (
               <div className="flex min-h-56 flex-col items-center justify-center px-6 py-12 text-center">
@@ -753,6 +770,7 @@ export function HumanInboxPage() {
                     closed={closedOf(item)}
                     answer={answer}
                     answerText={answers[scopedInboxItemKey(item)] ?? ""}
+                    attachments={answerAttachments}
                     item={item}
                     key={scopedInboxItemKey(item)}
                     onOpenThread={openThread}
@@ -766,7 +784,16 @@ export function HumanInboxPage() {
               </ol>
             )}
 
+            <CrewWorktreeCleanupSection
+              errors={cleanups.errors}
+              items={cleanups.inPlace}
+              onAnswer={cleanups.answer}
+              pendingKey={cleanups.pendingKey}
+              showEnvironment={showEnvironment}
+            />
+
             <AnsweredShelf
+              cleanups={cleanups.shelf}
               items={answeredItems}
               onOpenThread={openThread}
               senderLabels={senderLabels}

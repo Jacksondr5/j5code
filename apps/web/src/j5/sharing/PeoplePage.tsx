@@ -229,7 +229,7 @@ function OwnedServerPeople({
   const links = useEnvironmentQuery(linksQuery(environmentId));
   const [query, setQuery] = useState("");
   const searchRef = useRef<HTMLInputElement>(null);
-  // oxlint-disable-next-line t3code/react-effect-budget -- people join, leave and pair devices without this client, so each opening reads again.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- people join, leave and pair devices without this client, so each opening reads again.
   useEffect(() => refreshSharing(environmentId), [environmentId]);
   const nowMs = Date.parse(useNowMinute());
   const everyone = (people.data?.people ?? []).toSorted(byStanding);

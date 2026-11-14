@@ -1,0 +1,223 @@
+import { describe, expect, it } from "vite-plus/test";
+import * as DateTime from "effect/DateTime";
+import { EnvironmentId, RuntimeRequestId, ThreadId } from "@t3tools/contracts";
+import type { CrewRuntimeRequestItem } from "@t3tools/contracts/j5";
+
+import {
+  crewApprovalReadPlan,
+  inboxBadgeCount,
+  inboxBellCount,
+  mergeCrewRuntimeRequestSources,
+  mergeNativeQuestionInboxSources,
+  toPendingApproval,
+} from "./crewInboxRequests.ts";
+
+const envA = EnvironmentId.make("env:a");
+const envB = EnvironmentId.make("env:b");
+const seatThread = ThreadId.make("thread:builder");
+
+const item = (requestId: string, threadId = seatThread): CrewRuntimeRequestItem => ({
+  threadId,
+  requestId: RuntimeRequestId.make(requestId),
+  crewInstanceId: "crew:1",
+  crewName: "Release Crew",
+  projectId: "project:1",
+  seat: "builder",
+  threadTitle: "builder",
+  createdAt: "2026-09-24T12:00:00.000Z",
+  requestKind: "command",
+  detail: "Run the tests?",
+});
+
+const sources = (
+  byEnvironment: ReadonlyArray<[EnvironmentId, ReadonlyArray<CrewRuntimeRequestItem>]>,
+) =>
+  ({
+    isReady: true,
+    sources: byEnvironment.map(([environmentId, data]) => ({
+      environmentId,
+      data: { requests: data },
+      environmentLabel: environmentId,
+      connected: true,
+    })),
+  }) as never;
+
+const shell = (
+  environmentId: EnvironmentId,
+  id: string,
+  hasPendingApprovals: boolean,
+  archivedAt: string | null = null,
+  hasPendingUserInput = false,
+) => ({
+  environmentId,
+  id: ThreadId.make(id),
+  hasPendingApprovals,
+  hasPendingUserInput,
+  archivedAt,
+});
+
+describe("Crew seat approvals in the Inbox", () => {
+  it("tags each approval with the environment that must answer it", () => {
+    const merged = mergeCrewRuntimeRequestSources(
+      sources([
+        [envA, [item("a1"), item("a2")]],
+        // The same local thread id on another environment is a different thread.
+        [envB, [item("a9")]],
+      ]),
+    );
+    expect(merged.map((request) => [request.environmentId, request.requestId])).toEqual([
+      [envA, "a1"],
+      [envA, "a2"],
+      [envB, "a9"],
+    ]);
+  });
+
+  it("hands the composer's approval UI a live approval with only the fields it has", () => {
+    expect(toPendingApproval(item("a1"))).toEqual({
+      requestId: "a1",
+      requestKind: "command",
+      createdAt: "2026-09-24T12:00:00.000Z",
+      detail: "Run the tests?",
+      responseCapability: "live",
+    });
+    const options = [{ decision: "accept" as const, label: "Allow", warning: "For good." }];
+    expect(
+      toPendingApproval({ ...item("a2"), requestKind: "permission", appName: "CI", options }),
+    ).toMatchObject({ requestKind: "permission", appName: "CI", options });
+  });
+
+  it("reads only environments with a thread waiting on an approval", () => {
+    expect(crewApprovalReadPlan([])).toEqual({ key: "", environmentIds: [] });
+    // Nothing pending anywhere, or only on an archived thread: no environment is read.
+    const idle = crewApprovalReadPlan([
+      shell(envA, "thread:1", false),
+      shell(envB, "thread:2", true, "2026-09-24T12:00:00.000Z"),
+    ]);
+    expect(idle).toEqual({ key: "", environmentIds: [] });
+
+    const pending = crewApprovalReadPlan([
+      shell(envB, "thread:2", true),
+      shell(envA, "thread:1", false),
+      shell(envB, "thread:3", true),
+    ]);
+    expect(pending.environmentIds).toEqual([envB]);
+
+    // The key moves when any thread's flag turns on or off, even within an environment already
+    // read, and holds still when unrelated shells change.
+    const oneCleared = crewApprovalReadPlan([
+      shell(envB, "thread:2", true),
+      shell(envA, "thread:1", false),
+      shell(envB, "thread:3", false),
+    ]);
+    expect(oneCleared.environmentIds).toEqual([envB]);
+    expect(oneCleared.key).not.toBe(pending.key);
+    expect(
+      crewApprovalReadPlan([shell(envB, "thread:3", true), shell(envB, "thread:2", true)]).key,
+    ).toBe(pending.key);
+  });
+
+  it("counts seat approvals on the bell, up while waiting and back down once answered", () => {
+    expect(inboxBadgeCount(2, 0)).toBe(2);
+    expect(inboxBadgeCount(2, 3)).toBe(5);
+    expect(inboxBadgeCount(2, 1)).toBe(3);
+    // Asks unread, Crew items read: still counted; nothing at all reads as no badge.
+    expect(inboxBadgeCount(null, 1)).toBe(1);
+    expect(inboxBadgeCount(null, 0)).toBeNull();
+  });
+});
+
+it("reads question-only environments and drops the read when the question resolves", () => {
+  const pending = crewApprovalReadPlan([shell(envA, "peer", false, null, true)]);
+  expect(pending.environmentIds).toEqual([envA]);
+  expect(crewApprovalReadPlan([shell(envA, "peer", false)]).environmentIds).toEqual([]);
+  expect(crewApprovalReadPlan([shell(envA, "peer", false)]).key).not.toBe(pending.key);
+});
+
+it("keeps native question links scoped to the owning environment without adding approvals", () => {
+  const question = {
+    threadId: seatThread,
+    requestId: RuntimeRequestId.make("native"),
+    projectId: "project:1",
+    threadTitle: "Builder",
+    responseCapability: "live" as const,
+    createdAt: "2026-10-19T12:00:00Z",
+  };
+  const input = {
+    isReady: true,
+    sources: [
+      {
+        environmentId: envA,
+        environmentLabel: "A",
+        connected: true,
+        data: { requests: [], questions: [question] },
+      },
+      {
+        environmentId: envB,
+        environmentLabel: "B",
+        connected: false,
+        data: { requests: [], questions: [question] },
+      },
+    ],
+  } as never;
+  expect(
+    mergeNativeQuestionInboxSources(input).map((row) => [row.environmentId, row.connected]),
+  ).toEqual([
+    [envA, true],
+    [envB, false],
+  ]);
+  expect(mergeCrewRuntimeRequestSources(input)).toEqual([]);
+  expect(mergeNativeQuestionInboxSources(sources([[envA, []]]))).toEqual([]);
+  expect(inboxBadgeCount(0, mergeNativeQuestionInboxSources(input).length)).toBe(2);
+});
+
+it("reads an async question summary even when presentation keeps the thread working", () => {
+  const row = {
+    ...shell(envA, "async-peer", false),
+    source: {
+      pendingRuntimeRequest: {
+        id: RuntimeRequestId.make("async"),
+        kind: "user_input" as const,
+        createdAt: DateTime.makeUnsafe("2026-10-19T12:00:00Z"),
+      },
+    },
+  };
+  expect(crewApprovalReadPlan([row]).environmentIds).toEqual([envA]);
+  expect(
+    crewApprovalReadPlan([{ ...row, source: { pendingRuntimeRequest: null } }]).environmentIds,
+  ).toEqual([]);
+});
+
+it("counts asks, seat approvals and agents' questions on the bell, marking it while a server can't be read", () => {
+  const question = {
+    threadId: seatThread,
+    requestId: RuntimeRequestId.make("native"),
+    projectId: "project:1",
+    threadTitle: "Builder",
+    responseCapability: "live" as const,
+    createdAt: "2026-10-19T12:00:00Z",
+  };
+  const crew = (status: string, data: unknown) =>
+    ({
+      isReady: true,
+      sources: [{ environmentId: envA, environmentLabel: "A", connected: true, status, data }],
+    }) as never;
+  const read = crew("ready", { requests: [item("a1")], questions: [question] });
+  expect(inboxBellCount({ count: 2, incomplete: false }, read)).toEqual({
+    count: 4,
+    incomplete: false,
+  });
+  // A server without the read adds nothing and leaves the count complete.
+  expect(inboxBellCount({ count: 2, incomplete: false }, crew("unsupported", null))).toEqual({
+    count: 2,
+    incomplete: false,
+  });
+  // A server whose requests could not be read leaves the count last known.
+  expect(inboxBellCount({ count: 2, incomplete: false }, crew("offline", null))).toEqual({
+    count: 2,
+    incomplete: true,
+  });
+  expect(inboxBellCount({ count: null, incomplete: true }, read)).toEqual({
+    count: 2,
+    incomplete: true,
+  });
+});

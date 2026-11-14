@@ -23,7 +23,6 @@ describe("timeline minimap items", () => {
     id: String(msg.id),
     createdAt: msg.createdAt,
     message: msg,
-    durationStart: msg.createdAt,
     showAssistantMeta: false,
     showAssistantCopyButton: false,
     assistantCopyStreaming: false,

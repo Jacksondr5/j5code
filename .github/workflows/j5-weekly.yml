@@ -15,7 +15,7 @@ concurrency:
 jobs:
   full-build:
     name: Full suite and ad-hoc signed macOS artifact
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 60
     steps:
       - name: Checkout

@@ -382,3 +382,132 @@ it.effect("stores the step owners the person approved last when a record is repl
     assert.deepStrictEqual(yield* service.read("crew:kept"), kept);
   }).pipe(Effect.provide(testLayer)),
 );
+
+it.effect("swaps a replacement in for a seat, moving only its unfinished steps", () =>
+  Effect.gen(function* () {
+    yield* runJ5A2AMigrations();
+    const projectId = LedgerProjectId.make("project:crew-replace");
+    yield* (yield* A2ALedger).ensureProject({ projectId, createdAt });
+    const service = yield* AgentCrewInstanceService;
+    const seat = (name: string, steps: ReadonlyArray<string>) => ({
+      seatName: name,
+      agentId: "scout",
+      participantId: ParticipantId.make(`agent:j5:a2a:thread:${name}`),
+      threadId: ThreadId.make(`thread:${name}`),
+      reason: null,
+      playbookStepIds: steps,
+    });
+    const id = "crew:replace";
+    yield* service.record({
+      id,
+      projectId,
+      captainParticipantId: ParticipantId.make("agent:j5:a2a:captain"),
+      captainThreadId: ThreadId.make("thread:captain"),
+      displayName: "Release",
+      brief: "Ship it.",
+      createdAt,
+      members: [seat("builder", ["plan", "build", "fix"]), seat("reviewer", ["review"])],
+    });
+    yield* service.markArchived(id, "2026-09-09T17:00:00.000Z", { withCaptain: true });
+    yield* service.restoreWithCaptain(id);
+    // The new member reuses the seat name; `plan` is finished and stays on the old member.
+    const replacement = {
+      ...seat("builder", []),
+      participantId: ParticipantId.make("agent:j5:a2a:thread:builder-2"),
+      threadId: ThreadId.make("thread:builder-2"),
+    };
+    const input = {
+      seatName: "builder",
+      participantId: ParticipantId.make("agent:j5:a2a:thread:builder"),
+      member: replacement,
+      movedStepIds: ["build", "fix"],
+      replacedAt: "2026-09-09T18:00:00.000Z",
+    };
+    const swapped = yield* service.replaceMember(id, input);
+    assert.equal(swapped.status, "replaced");
+    const crew = (yield* service.read(id))!;
+    assert.deepStrictEqual(
+      crew.members.map((member) => [member.seatName, member.participantId, member.playbookStepIds]),
+      [
+        ["builder", replacement.participantId, ["build", "fix"]],
+        ["reviewer", ParticipantId.make("agent:j5:a2a:thread:reviewer"), ["review"]],
+      ],
+    );
+    assert.deepStrictEqual(crew.replaced, [
+      {
+        seatName: "builder",
+        agentId: "scout",
+        participantId: input.participantId,
+        threadId: ThreadId.make("thread:builder"),
+        playbookStepIds: ["plan"],
+        replacedBySeat: "builder",
+        replacedByParticipantId: replacement.participantId,
+        replacedAt: input.replacedAt,
+      },
+    ]);
+    assert.equal(crew.version, 2);
+    // A plain agent now: no membership, no seat toward the cap, and it stays out on a restore.
+    assert.isNull(yield* service.findMembership(input.participantId));
+    assert.deepStrictEqual(yield* service.findMembership(replacement.participantId), {
+      crewInstanceId: id,
+      seatName: "builder",
+    });
+    const added = yield* service.addMembers(id, [seat("scribe", [])], { maxSeats: 3 });
+    assert.equal(added.status, "added");
+    // A replay of the same swap writes nothing; a second replacement of the old member is refused.
+    assert.equal((yield* service.replaceMember(id, input)).status, "replaced");
+    const again = yield* service.replaceMember(id, {
+      ...input,
+      member: {
+        ...replacement,
+        participantId: ParticipantId.make("agent:j5:a2a:thread:builder-3"),
+      },
+    });
+    assert.equal(again.status, "refused");
+    assert.equal((yield* service.read(id))!.version, 3);
+    yield* service.markArchived(id, "2026-09-09T19:00:00.000Z", { withCaptain: true });
+    yield* service.restoreWithCaptain(id);
+    const restored = (yield* service.read(id))!;
+    assert.isFalse(restored.members.some((member) => member.participantId === input.participantId));
+    assert.isNull(yield* service.findMembership(input.participantId));
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("refuses a replacement that would give a step two owners, writing nothing", () =>
+  Effect.gen(function* () {
+    yield* runJ5A2AMigrations();
+    const projectId = LedgerProjectId.make("project:crew-replace-owned");
+    yield* (yield* A2ALedger).ensureProject({ projectId, createdAt });
+    const service = yield* AgentCrewInstanceService;
+    const seat = (name: string, steps: ReadonlyArray<string>) => ({
+      seatName: name,
+      agentId: "scout",
+      participantId: ParticipantId.make(`agent:j5:a2a:thread:${name}`),
+      threadId: ThreadId.make(`thread:${name}`),
+      reason: null,
+      playbookStepIds: steps,
+    });
+    const id = "crew:replace-owned";
+    const recorded = yield* service.record({
+      id,
+      projectId,
+      captainParticipantId: ParticipantId.make("agent:j5:a2a:captain"),
+      captainThreadId: ThreadId.make("thread:captain"),
+      displayName: "Release",
+      brief: "Ship it.",
+      createdAt,
+      members: [seat("builder", ["build"]), seat("reviewer", ["review"])],
+    });
+    const failure = yield* service
+      .replaceMember(id, {
+        seatName: "builder",
+        participantId: ParticipantId.make("agent:j5:a2a:thread:builder"),
+        member: seat("builder-2", ["review"]),
+        movedStepIds: ["build"],
+        replacedAt: "2026-09-09T18:00:00.000Z",
+      })
+      .pipe(Effect.flip);
+    assert.instanceOf(failure, CrewStepAlreadyOwnedError);
+    assert.deepStrictEqual(yield* service.read(id), recorded);
+  }).pipe(Effect.provide(testLayer)),
+);

@@ -76,6 +76,8 @@ it("keeps a child's saved-agent identity and handoff link beside the row button"
     <ThreadRelationshipsPanel
       environmentId={EnvironmentId.make("test")}
       threadId={ThreadId.make("parent")}
+      showLineage
+      showSideChats={false}
     />,
   );
   const link = screen.container.querySelector<HTMLAnchorElement>('a[href="/artifacts"]');

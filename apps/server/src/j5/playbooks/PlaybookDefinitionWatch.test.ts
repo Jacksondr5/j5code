@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import { ThreadId } from "@t3tools/contracts";
@@ -20,7 +21,7 @@ const owner = ThreadId.make("thread:playbook:owner");
 const otherOwner = ThreadId.make("thread:playbook:other");
 const MemoryLayer = Layer.mergeAll(
   NodeSqliteClient.layer({ filename: ":memory:" }),
-  NodeServices.layer,
+  Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
 );
 
 /**

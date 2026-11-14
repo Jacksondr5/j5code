@@ -78,8 +78,23 @@ it.layer(accessLayer)("PersonAccess", (it) => {
         parent: "thread:captain",
         relationship: "fork",
       });
+      const sideChat = yield* thread("thread:side-chat", PROJECT, {
+        parent: "thread:captain",
+        relationship: "fork",
+        sideChat: true,
+      });
       yield* placed("thread:captain", null);
       yield* placed("thread:seat", "thread:captain");
+      // Turn into project moved this seat's thread: its membership went with it, its placement
+      // stayed under the Captain.
+      const movedSeat = yield* thread("thread:moved-seat", OTHER_PROJECT);
+      yield* placed("thread:moved-seat", "thread:captain");
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`
+        INSERT OR IGNORE INTO j5_a2a_project_ledger (project_id, created_at)
+        VALUES (${OTHER_PROJECT}, '2026-10-01T00:00:00.000Z')
+      `;
+      yield* sql`UPDATE j5_a2a_membership SET project_id = ${OTHER_PROJECT} WHERE thread_id = ${movedSeat}`;
       const other = yield* thread("thread:other");
 
       const sam = yield* person("Sam", [
@@ -90,7 +105,10 @@ it.layer(accessLayer)("PersonAccess", (it) => {
       assert.strictEqual(yield* people.threadLevel(sam.personId, captain), "collaborator");
       assert.strictEqual(yield* people.threadLevel(sam.personId, subagent), "collaborator");
       assert.strictEqual(yield* people.threadLevel(sam.personId, seat), "collaborator");
+      assert.strictEqual(yield* people.threadLevel(sam.personId, movedSeat), "collaborator");
       assert.strictEqual(yield* people.threadLevel(sam.personId, fork), "viewer");
+      // A side chat goes with the thread it answers, as a subagent does.
+      assert.strictEqual(yield* people.threadLevel(sam.personId, sideChat), "collaborator");
       // Elsewhere in the project, the project's level (AC10, AC11).
       assert.strictEqual(yield* people.threadLevel(sam.personId, other), "viewer");
       assert.strictEqual(yield* people.projectLevel(sam.personId, PROJECT), "viewer");

@@ -32,15 +32,23 @@ import { fleetDetailSourcesAtom, j5Environment } from "../state";
 import { useLogicalProjects } from "../logicalProjects";
 import { requestConfirmDialog } from "../../confirmDialog";
 import type { ArchiveWarningCrew } from "@t3tools/client-runtime/j5/archive-flow";
-import { ArchiveWarningCrewSeats } from "../a2a/ArchiveWarningContent";
+import {
+  ArchiveWarningCrewSeats,
+  ArchiveWarningWorktreeSection,
+} from "../a2a/ArchiveWarningContent";
+import { readCrewArchiveWorktrees } from "../a2a/archiveFlowClient";
 import { archiveCrew } from "../crew/crewArchiveClient";
-import { crewHasRunningSeat, summarizeCrewState } from "../crew/crewState";
+import {
+  classifyCrewSeat,
+  crewHasRunningSeat,
+  seatQuietLabel,
+  summarizeCrewState,
+} from "@t3tools/client-runtime/j5/crew-state";
 import { stopCrew } from "../crew/crewStopClient";
 import {
   countFleetProjects,
   fleetCrewAnchorId,
   orderFleetRowsByProject,
-  originLabel,
   partitionFleet,
   playbookRunHeader,
   retiredCrews,
@@ -64,7 +72,6 @@ import {
   FleetFactCells,
   FleetFactDetails,
   FleetSourceReadout,
-  FleetFactHint,
   FleetCrewSummary,
 } from "./FleetFacts";
 
@@ -79,12 +86,17 @@ const threadFor = (
   threadsByKey: ThreadLookup,
   environmentId: EnvironmentId,
   agent: FleetAgent,
-): EnvironmentThreadShell | undefined =>
-  agent.threadId === null
-    ? undefined
-    : threadsByKey.get(
-        scopedThreadKey(scopeThreadRef(environmentId, ThreadId.make(agent.threadId))),
-      );
+): (EnvironmentThreadShell & { readonly notStarted?: boolean }) | undefined => {
+  const thread =
+    agent.threadId === null
+      ? undefined
+      : threadsByKey.get(
+          scopedThreadKey(scopeThreadRef(environmentId, ThreadId.make(agent.threadId))),
+        );
+  return thread === undefined || agent.crew?.notStarted === undefined
+    ? thread
+    : { ...thread, notStarted: agent.crew.notStarted };
+};
 
 const projectKey = (ledgerProject: ScopedFleetLedgerProject) =>
   `${ledgerProject.environmentId}:${ledgerProject.id}`;
@@ -326,8 +338,8 @@ function FleetNodeRows(
   const { node, seatBadge, ...rows } = props;
   const { project: ledgerProject } = rows;
   const { environmentId } = ledgerProject;
-  // Stop and Archive need the same grant; either command answers for both.
   const canOperate = useAtomValue(j5Environment.stopCrew.permissionAtom(environmentId));
+  const canArchive = useAtomValue(j5Environment.archiveCrew.permissionAtom(environmentId));
   // "What is the state of this Crew?" from the seats' measured facts, no Playbook required.
   const crewState = (members: ReadonlyArray<FleetRow>) =>
     summarizeCrewState(
@@ -363,7 +375,11 @@ function FleetNodeRows(
         const thread = threadFor(props.threadsByKey, environmentId, agent);
         const displayName = thread?.title ?? agent.displayName;
         return {
-          seat: agent.crew?.seat ?? agent.participantId,
+          seat:
+            agent.crew?.seat ??
+            (agent.replaced === undefined
+              ? agent.participantId
+              : `${agent.replaced.seat} (replaced)`),
           participant:
             displayName === null
               ? { displayName: "Unnamed participant", tooltipParticipantId: agent.participantId }
@@ -374,6 +390,11 @@ function FleetNodeRows(
       }),
     };
     const consequential = warning.seats.some((seat) => seat.runningTurn || seat.openAsks > 0);
+    // Read before the dialog opens, so it can say what happens to each seat's worktree. A read
+    // that fails says so rather than promising nothing is removed.
+    const worktrees = await readCrewArchiveWorktrees(environmentId, [crew.crewInstanceId]).catch(
+      () => null,
+    );
     const confirmed = await (requestConfirmDialog(
       `Archive crew ${crew.crewName}?`,
       { variant: "destructive" },
@@ -382,10 +403,8 @@ function FleetNodeRows(
           <div className="space-y-3 text-left">
             <p>Its {warning.seats.length === 1 ? "seat retires" : "seats retire"} together:</p>
             <ArchiveWarningCrewSeats crew={warning} />
-            <p className="border-t border-border/60 pt-3 text-muted-foreground">
-              Worktrees, branches, and pull requests remain. The roster stays readable under Retired
-              crews.
-            </p>
+            <ArchiveWarningWorktreeSection worktrees={worktrees} />
+            <p className="text-muted-foreground">The roster stays readable under Retired crews.</p>
           </div>
         ),
         confirmLabel: consequential ? "Archive anyway" : "Archive",
@@ -466,11 +485,19 @@ function FleetNodeRows(
                       ) : null}
                       <Button
                         aria-label={`Archive crew ${crew.crewName}`}
-                        disabled={!canOperate || busy === crew.crewInstanceId}
+                        disabled={!canArchive || busy === crew.crewInstanceId}
                         onClick={(event) => {
                           event.preventDefault();
                           event.stopPropagation();
-                          void archive(crew, seats);
+                          // Members the Captain replaced retire with the Crew they left.
+                          void archive(crew, [
+                            ...seats,
+                            ...node.children
+                              .map((child) => child.row)
+                              .filter(
+                                (row) => row.agent.replaced?.crewInstanceId === crew.crewInstanceId,
+                              ),
+                          ]);
                         }}
                         size="xs"
                         variant="ghost"
@@ -682,31 +709,16 @@ export function FleetRowItem(
         }}
       >
         <span className="flex min-w-0 items-center gap-2">
-          <span className="truncate">{title}</span>
           {agent.outsideSpawner !== undefined ? (
-            // The label is whatever the client registered, so it yields to the agent's title; the
-            // name comes first so a cut keeps it, and the full text is on hover.
             <Tooltip>
-              <TooltipTrigger
-                render={
-                  <span className="max-w-[50%] shrink-0 truncate text-xs text-muted-foreground" />
-                }
-              >
-                {originLabel(agent)}
-              </TooltipTrigger>
-              <TooltipPopup>{originLabel(agent)}</TooltipPopup>
+              <TooltipTrigger render={<span className="truncate" />}>{title}</TooltipTrigger>
+              <TooltipPopup>
+                Started by {agent.outsideSpawner.name ?? agent.outsideSpawner.participantId}{" "}
+                (outside agent)
+              </TooltipPopup>
             </Tooltip>
-          ) : agent.origin === "human" ? null : (
-            <FleetFactHint
-              className="shrink-0 text-xs text-muted-foreground"
-              reason={
-                agent.origin === "unknown"
-                  ? "This environment has no recorded provenance for this agent."
-                  : undefined
-              }
-            >
-              {originLabel(agent)}
-            </FleetFactHint>
+          ) : (
+            <span className="truncate">{title}</span>
           )}
           {props.badge ? (
             <Badge variant="outline" size="sm" className="shrink-0">
@@ -716,10 +728,30 @@ export function FleetRowItem(
           {props.captainOf !== undefined && props.captainOf.length > 0 ? (
             <CaptainMark title={`Commands ${props.captainOf.join(", ")}`} />
           ) : null}
+          {agent.replaced === undefined ? null : (
+            <Tooltip>
+              <TooltipTrigger
+                render={<span className="min-w-0 truncate text-xs text-muted-foreground" />}
+              >
+                Replaced by {agent.replaced.replacedBy}
+              </TooltipTrigger>
+              <TooltipPopup>
+                Was seat {agent.replaced.seat} of crew {agent.replaced.crewName}
+              </TooltipPopup>
+            </Tooltip>
+          )}
         </span>
         {/* A placement tree lives in one project, so only its root names it. */}
         {props.row.depth === 0 ? <ProjectLabel {...props} agent={agent} /> : <span />}
-        <FleetFactCells environmentId={environmentId} agent={agent} />
+        <FleetFactCells
+          environmentId={environmentId}
+          agent={agent}
+          notStarted={
+            thread !== undefined &&
+            classifyCrewSeat(thread) !== "settled" &&
+            seatQuietLabel(thread) === "Not started"
+          }
+        />
       </button>
       <FleetFactDetails environmentId={environmentId} agent={agent} title={title} />
     </li>

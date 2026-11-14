@@ -24,7 +24,10 @@ import { defaultAgentPersonaModelRoute } from "./agentPersonas.ts";
 import type { StartThreadTurnInput } from "../operations/commands.ts";
 import type { EnvironmentProject, EnvironmentThreadShell } from "../state/shell.ts";
 
-const PLAYBOOK_AUTHOR_ID = "playbook-author";
+export const PLAYBOOK_AUTHOR_ID = "playbook-author";
+/** What a person asks Playbook Author first; mobile prefills it in a new chat. */
+export const PLAYBOOK_AUTHOR_PROMPT =
+  "Help me create a playbook, available across all projects and worktrees in this environment. Save the final YAML with j5_playbook_save. Start by asking what I want it to accomplish.";
 const PLAYBOOK_AUTHOR_INSTRUCTIONS = `You are Playbook Author. Help the user turn a repeatable task into a small, clear agent-led playbook shared across this environment.
 
 1. Start by asking what the playbook should accomplish. Clarify the desired result, inputs, constraints, and evidence of success one focused question at a time. Use details already provided instead of asking again.
@@ -44,7 +47,7 @@ steps:
 
 Each prompt tells the same agent what work to do, what evidence to retain, and when to advance.
 4. Call j5_playbook_list in this thread after writing. Fix issues in the definition you are authoring and repeat until it is listed without an issue. If a same-named workspace playbook is listed instead, explain that it overrides the library copy here; do not modify an unrelated local file. A successful environment save receipt confirms publication. Tell the user about any warnings, such as a persona that is missing or turned off. If the tool is unavailable, state that runtime validation is still unverified.
-5. Report the playbook name, saved destination, purpose, and steps. Say Environment library or the workspace file path; do not invent an absolute server path. Explain that the user can inspect it in Settings → Personas and send /playbook <name> when ready to run it.
+5. Report the playbook name, saved destination, purpose, and steps. Say Environment library or the workspace file path; do not invent an absolute server path. Explain that the user can inspect it in Settings → Agent Setup and send /playbook <name> when ready to run it.
 
 Stay within authoring and validation. Start a run only when the user explicitly asks. Make changes needed for the playbook; leave unrelated workspace files alone.`;
 
@@ -74,7 +77,7 @@ export async function ensurePlaybookAuthor(input: {
         displayName: "Playbook Author",
         description: "Helps you design, write, and validate agent-led playbooks.",
         instructions: PLAYBOOK_AUTHOR_INSTRUCTIONS,
-        authorityPolicy: "workspace-write",
+        access: "workspace-write",
         modelRoute,
       });
     } catch (cause) {
@@ -86,25 +89,26 @@ export async function ensurePlaybookAuthor(input: {
   }
   if (!persona || persona.availability.status !== "available")
     throw new Error(
-      "Playbook Author is unavailable. Enable or restore it and check its model route in Settings → Personas for this environment.",
+      "Playbook Author is unavailable. Enable or restore it and check its model route in Settings → Agent Setup for this environment.",
     );
   if (persona.defaultAuthorityPolicy !== "workspace-write")
     throw new Error(
-      "Playbook Author needs Workspace write authority to save YAML. Update it in Settings → Personas for this environment.",
+      "Playbook Author needs Workspace write authority to save YAML. Update it in Settings → Agent Setup for this environment.",
     );
   // Saved authors predate environment libraries. Update only the exact stock instructions,
   // using the existing digest guard so a concurrent human edit is never overwritten.
-  if (persona.editable && input.readDefinition && input.editPersona) {
+  const editable = persona.orderedEditable;
+  if (editable && input.readDefinition && input.editPersona) {
     const definition = await input.readDefinition(PLAYBOOK_AUTHOR_ID);
     if (definition.instructions === LEGACY_PLAYBOOK_AUTHOR_INSTRUCTIONS) {
       await input.editPersona({
         personaId: persona.personaId,
-        expectedDigest: persona.editable.definitionDigest,
+        expectedDigest: editable.definitionDigest,
         displayName: definition.displayName,
         description: definition.description,
         instructions: PLAYBOOK_AUTHOR_INSTRUCTIONS,
-        authorityPolicy: "workspace-write",
-        modelRoute: definition.modelRoute,
+        access: "workspace-write",
+        modelRoute: definition.models ?? definition.modelRoute,
       });
     }
   }
@@ -130,7 +134,7 @@ export function playbookAuthorLaunch(input: {
       message: {
         messageId,
         role: "user",
-        text: "Help me create a playbook, available across all projects and worktrees in this environment. Save the final YAML with j5_playbook_save. Start by asking what I want it to accomplish.",
+        text: PLAYBOOK_AUTHOR_PROMPT,
         attachments: [],
       },
       modelSelection,

@@ -1,3 +1,4 @@
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import {
@@ -12,7 +13,7 @@ import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderS
 import { ProviderAdapterV2RuntimePolicy } from "@t3tools/provider-core/server/ProviderAdapter";
 import * as CodexClient from "effect-codex-app-server/client";
 import * as CodexReplay from "effect-codex-app-server/replay";
-import * as Crypto from "effect/Crypto";
+import * as Digest from "effect/crypto/Digest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -20,7 +21,7 @@ import * as Schema from "effect/Schema";
 
 import packageJson from "../../../package.json" with { type: "json" };
 import * as CodexAdapterV2 from "../../orchestration-v2/Adapters/CodexAdapterV2.ts";
-import { makeReplayServerConfig } from "../../orchestration-v2/Adapters/CodexAdapterV2.testkit.ts";
+import { makeReplayServerConfig } from "../../orchestration-v2/testkit/ProviderReplayHarness.ts";
 import { CREW_SEAT_QUESTION_INSTRUCTIONS, J5_CODEX_CREW_SEAT_CONFIG } from "./crewSeatQuestions.ts";
 import { withCrewSeatQuestions } from "./crewSeatRuntime.ts";
 
@@ -158,7 +159,7 @@ const threadStartConfig = (
             Effect.orDie,
           ),
       },
-      crypto: yield* Crypto.Crypto,
+      digest: yield* Digest.Digest,
       fileSystem: yield* FileSystem.FileSystem,
       idAllocator: yield* IdAllocator.IdAllocatorV2,
       serverConfig: yield* makeReplayServerConfig(scenario).pipe(Effect.orDie),
@@ -199,7 +200,12 @@ describe("Crew seat question tools on Codex", () => {
     }).pipe(
       Effect.scoped,
       Effect.provide(
-        Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        Layer.mergeAll(
+          IdAllocator.layer,
+          McpProviderSessions.layer,
+          NodeServices.layer,
+          NodeCrypto.layer,
+        ),
       ),
     ),
   );

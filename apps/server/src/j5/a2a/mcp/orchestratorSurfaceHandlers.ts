@@ -6,6 +6,7 @@ import * as McpToolAccess from "../../../mcp/McpToolAccess.ts";
 import { OrchestratorMcpService } from "../../../mcp/OrchestratorMcpService.ts";
 import { actsAsThreadCaller, spawnAndBrief } from "./outsideAgent.ts";
 import { J5OrchestratorSurface, mapJ5OrchestratorCapabilities } from "./orchestratorSurface.ts";
+import { threadInterrupt } from "./threadInterrupt.ts";
 
 const handlers = {
   // A delegated task reports back to the thread that asked for it, and an outside agent has none.
@@ -24,6 +25,7 @@ const handlers = {
         .pipe(Effect.map(mapJ5OrchestratorCapabilities));
     }),
   ),
+  t3_thread_interrupt: threadInterrupt,
 } satisfies McpToolAccess.Handlers<typeof J5OrchestratorSurface.tools>;
 
 export const layer = McpToolAccess.toLayer(J5OrchestratorSurface, handlers);

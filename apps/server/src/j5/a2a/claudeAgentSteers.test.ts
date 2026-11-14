@@ -1,7 +1,7 @@
 import type { SDKMessage, SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { assert, it } from "@effect/vitest";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 
 import type { ClaudeAgentSdkQuerySession } from "../../orchestration-v2/Adapters/ClaudeAdapterV2.ts";
@@ -36,14 +36,17 @@ const offerAgentSteer = Effect.fnUntraced(function* (
   providerTurnId: string,
   messageId = `message-${providerTurnId}`,
 ) {
-  const steer = yield* j5ClaudeSteerFields({ createdBy: "agent" }, yield* Crypto.Crypto);
+  const steer = yield* j5ClaudeSteerFields(
+    { createdBy: "agent" },
+    yield* SecureRandom.SecureRandom,
+  );
   yield* j5OfferClaudeSteer({ query, providerTurnId, messageId, steer, offer: Effect.void });
   return steer.uuid ?? assert.fail("An agent's steer has a uuid.");
 });
 
 it.effect("keeps a person's steer on now and sends any other with next and a uuid", () =>
   Effect.gen(function* () {
-    const crypto = yield* Crypto.Crypto;
+    const crypto = yield* SecureRandom.SecureRandom;
     assert.deepEqual(yield* j5ClaudeSteerFields({ createdBy: "user" }, crypto), {
       priority: "now",
     });
@@ -113,7 +116,10 @@ it.effect("leaves nothing behind when the offer fails", () =>
     const query = newQuery();
     const turn = newTurn();
     j5ObserveClaudeSteer(query, lifecycle("the-turn-prompt", "started"));
-    const steer = yield* j5ClaudeSteerFields({ createdBy: "agent" }, yield* Crypto.Crypto);
+    const steer = yield* j5ClaudeSteerFields(
+      { createdBy: "agent" },
+      yield* SecureRandom.SecureRandom,
+    );
     const offered = yield* j5OfferClaudeSteer({
       query,
       providerTurnId: turn,
