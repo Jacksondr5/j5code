@@ -26,6 +26,7 @@ import {
   answerAttachmentDraftKey,
   type AnswerTarget,
   useAnswerDraftAttachments,
+  whileAddingAnswerAttachments,
 } from "./answerAttachmentDrafts";
 
 function useAnswerSupport(environmentId: EnvironmentId) {
@@ -66,27 +67,30 @@ export function AnswerAttachButton(props: {
   const support = useAnswerSupport(props.target.environmentId);
   const mounted = useMounted();
   if (support === null) return null;
-  const pick = async (kind: "media" | "files") => {
-    const result =
-      kind === "files"
-        ? await pickComposerFiles({
-            existingCount: existingCount(props.target),
-            ...(support.maxFileBytes === null ? {} : { maxBytes: support.maxFileBytes }),
-          })
-        : await pickComposerMedia({
-            existingCount: existingCount(props.target),
-            ...(support.maxFileBytes === null ? {} : { maxVideoBytes: support.maxFileBytes }),
-          });
-    const picked = "files" in result ? result.files : result.attachments;
-    if (!mounted.current) {
-      await releaseUnusedComposerAttachmentFiles(picked);
-      return;
-    }
-    const rejected = attach(props.target, picked);
-    if (result.error || rejected > 0) {
-      Dialog.alert("Could not attach file", result.error ?? "Too many attachments.");
-    }
-  };
+  const pick = (kind: "media" | "files") =>
+    whileAddingAnswerAttachments(props.target, async (stillWanted) => {
+      const result =
+        kind === "files"
+          ? await pickComposerFiles({
+              existingCount: existingCount(props.target),
+              ...(support.maxFileBytes === null ? {} : { maxBytes: support.maxFileBytes }),
+            })
+          : await pickComposerMedia({
+              existingCount: existingCount(props.target),
+              ...(support.maxFileBytes === null ? {} : { maxVideoBytes: support.maxFileBytes }),
+            });
+      const picked = "files" in result ? result.files : result.attachments;
+      if (!mounted.current || !stillWanted()) {
+        await releaseUnusedComposerAttachmentFiles(picked);
+        return;
+      }
+      const rejected = attach(props.target, picked);
+      if (result.error || rejected > 0) {
+        Dialog.alert("Could not attach file", result.error ?? "Too many attachments.");
+      }
+    }).catch((error: unknown) =>
+      Dialog.alert("Could not attach file", error instanceof Error ? error.message : "Try again."),
+    );
   return (
     <ComposerAttachmentButton
       disabled={props.disabled}
@@ -108,22 +112,21 @@ export function AnswerPasteTarget(props: {
   const mounted = useMounted();
   const paste = useNativePaste((uris) => {
     if (disabled || support === null) return;
-    void convertPastedImagesToAttachments({ uris, existingCount: existingCount(target) })
-      .then(async (images) => {
-        if (!mounted.current) {
-          await releaseUnusedComposerAttachmentFiles(images);
-          return;
-        }
-        if (attach(target, images) > 0) {
-          Dialog.alert("Could not paste image", "Too many attachments.");
-        }
-      })
-      .catch((error: unknown) =>
-        Dialog.alert(
-          "Could not paste image",
-          error instanceof Error ? error.message : "Try again.",
-        ),
-      );
+    void whileAddingAnswerAttachments(target, async (stillWanted) => {
+      const images = await convertPastedImagesToAttachments({
+        uris,
+        existingCount: existingCount(target),
+      });
+      if (!mounted.current || !stillWanted()) {
+        await releaseUnusedComposerAttachmentFiles(images);
+        return;
+      }
+      if (attach(target, images) > 0) {
+        Dialog.alert("Could not paste image", "Too many attachments.");
+      }
+    }).catch((error: unknown) =>
+      Dialog.alert("Could not paste image", error instanceof Error ? error.message : "Try again."),
+    );
   });
   return <TextInputWrapper onPaste={paste}>{props.children}</TextInputWrapper>;
 }
