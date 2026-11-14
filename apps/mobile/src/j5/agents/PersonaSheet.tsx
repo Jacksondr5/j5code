@@ -4,10 +4,11 @@ import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime"
 import type { AgentPersonaCatalogRow } from "@t3tools/client-runtime/j5/agent-personas";
 import type { AgentPersonaModelEntry, EnvironmentId } from "@t3tools/contracts";
 import { useEffect, useState } from "react";
-import { Modal, Pressable, ScrollView, View } from "react-native";
+import { Modal, Platform, Pressable, ScrollView, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import { AppText as Text } from "../../components/ui/AppText";
+import { ListActionRow } from "../../components/ui/ListActionRow";
 import { ListRowLayout } from "../../components/ui/ListRowLayout";
 import { SettingsSection } from "../../features/settings/components/SettingsSection";
 import { cn } from "../../lib/cn";
@@ -15,11 +16,25 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { agentPersonaEnvironment } from "./agentPersonaAtoms";
 import { personaDetailRows } from "./personaDetails";
 
-/** A persona the person can't edit, such as one from a folder, shown read-only. */
-export function AgentDetailsModal(props: {
+export interface PersonaSheetActionRow {
+  readonly key: string;
+  readonly label: string;
+  readonly tone?: "danger";
+  readonly disabled: boolean;
+  readonly onPress: () => void;
+}
+
+/**
+ * Everything about one persona and what can be done with it, opened by a tap on its row.
+ * Actions are plain rows, not a Menu: Android's Menu can't draw over a Modal. Each closes the
+ * sheet first; on iOS it waits for the dismissal, so a share sheet or modal it opens can present.
+ */
+export function PersonaSheet(props: {
   readonly environmentId: EnvironmentId;
+  readonly environmentLabel: string;
   readonly persona: AgentPersonaCatalogRow;
   readonly usageLine: string | null;
+  readonly actions: ReadonlyArray<PersonaSheetActionRow>;
   readonly onClose: () => void;
 }) {
   const [models, setModels] = useState<
@@ -51,14 +66,34 @@ export function AgentDetailsModal(props: {
       cancelled = true;
     };
   }, [props.environmentId, personaId, read]);
+  const [leaving, setLeaving] = useState<(() => void) | null>(null);
+  const leaveThen = (run: () => void) => {
+    if (Platform.OS !== "ios") {
+      props.onClose();
+      run();
+      return;
+    }
+    setLeaving(() => run);
+  };
   const providers = useAtomValue(serverEnvironment.providersValueAtom(props.environmentId));
-  const rows = personaDetailRows(props.persona, models, props.usageLine, providers ?? []);
+  const rows = personaDetailRows(
+    props.persona,
+    models,
+    props.usageLine,
+    providers ?? [],
+    props.environmentLabel,
+  );
   return (
     <Modal
-      visible
+      visible={leaving === null}
       animationType="slide"
       presentationStyle="pageSheet"
       onRequestClose={props.onClose}
+      onDismiss={() => {
+        if (leaving === null) return;
+        props.onClose();
+        leaving();
+      }}
     >
       {/* SafeAreaView takes no className, so the theme surface and flex go on a View. */}
       <View className="flex-1 bg-sheet">
@@ -71,7 +106,7 @@ export function AgentDetailsModal(props: {
               <Text>Done</Text>
             </Pressable>
           </View>
-          <ScrollView contentContainerClassName="px-5 pb-6">
+          <ScrollView contentContainerClassName="gap-5 px-5 pb-6">
             <SettingsSection>
               {rows.map((row, index) => (
                 <View
@@ -86,6 +121,23 @@ export function AgentDetailsModal(props: {
                 </View>
               ))}
             </SettingsSection>
+            {props.actions.length === 0 ? null : (
+              <SettingsSection>
+                {props.actions.map((action, index) => (
+                  <View
+                    key={action.key}
+                    className={cn(index > 0 && "border-t border-border-subtle")}
+                  >
+                    <ListActionRow
+                      label={action.label}
+                      disabled={action.disabled}
+                      onPress={() => leaveThen(action.onPress)}
+                      {...(action.tone === undefined ? {} : { tone: action.tone })}
+                    />
+                  </View>
+                ))}
+              </SettingsSection>
+            )}
           </ScrollView>
         </SafeAreaView>
       </View>

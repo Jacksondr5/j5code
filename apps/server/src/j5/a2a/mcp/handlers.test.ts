@@ -21,6 +21,7 @@ import {
   EnvironmentId,
   EventId,
   MessageId,
+  RunId,
   type ModelSelection,
   type OrchestrationV2ThreadShell,
   type RuntimeMode,
@@ -28,7 +29,6 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   ThreadId,
-  type OrchestrationV2Run,
   type OrchestrationV2ServerCommand,
   type OrchestrationV2ThreadProjection,
   type ServerProvider,
@@ -54,11 +54,10 @@ import {
   OrchestratorProjectionError,
   OrchestratorV2,
 } from "../../../orchestration-v2/Orchestrator.ts";
-import { DispatchModeLimit } from "../../../orchestration-v2/DispatchModeLimit.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
 import { ProviderRegistry } from "../../../provider/ProviderRegistry.ts";
 import { permissiveCrewMemberModels } from "../../test-support/crewMemberModels.ts";
-import { type AgentCrewInstance, AgentCrewInstanceService } from "../AgentCrewInstanceService.ts";
+import { AgentCrewInstanceService } from "../AgentCrewInstanceService.ts";
 import {
   ArchiveCrewConfirmationRequiredError,
   ArchiveCrewService,
@@ -107,7 +106,6 @@ import {
   type J5ProposeCrewInput,
   type J5RequestCrewMemberInput,
   type J5SpawnAgentInput,
-  type J5StopAgentInput,
 } from "./tools.ts";
 import { noDocumentTextLayer } from "../../test-support/documentText.ts";
 
@@ -278,7 +276,6 @@ it.effect("namespaces mutating-tool idempotency and sender identity from authent
       "j5_request_crew_member",
       "j5_send_message",
       "j5_spawn_agent",
-      "j5_stop_agent",
       "j5_stop_crew",
     ]);
     const sends = yield* Ref.make<ReadonlyArray<SendMessageInput>>([]);
@@ -1078,6 +1075,8 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
         can_open_exchange: false,
         accepts_urgency: false,
         thread_id: invocation.threadId,
+        // The link upstream's tools return: the thread in this environment, ready to mention.
+        link: `<t3-thread://v2/environment:j5:mcp-handler/${invocation.threadId}>`,
         provenance: { kind: "unrecorded" },
         placement_parent_id: null,
         display_name: null,
@@ -1093,6 +1092,7 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
         can_open_exchange: true,
         accepts_urgency: true,
         thread_id: null,
+        link: null,
         provenance: { kind: "not-applicable" },
         placement_parent_id: null,
         display_name: null,
@@ -1108,6 +1108,7 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
         can_open_exchange: true,
         accepts_urgency: false,
         thread_id: archivedThreadId,
+        link: `<t3-thread://v2/environment:j5:mcp-handler/${archivedThreadId}>`,
         provenance: { kind: "unrecorded" },
         placement_parent_id: null,
         display_name: "Archived researcher",
@@ -1123,6 +1124,7 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
         can_open_exchange: true,
         accepts_urgency: false,
         thread_id: activeThreadId,
+        link: `<t3-thread://v2/environment:j5:mcp-handler/${activeThreadId}>`,
         provenance: { kind: "unrecorded" },
         placement_parent_id: null,
         display_name: "Release reviewer",
@@ -1138,6 +1140,7 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
         can_open_exchange: true,
         accepts_urgency: false,
         thread_id: missingThreadId,
+        link: `<t3-thread://v2/environment:j5:mcp-handler/${missingThreadId}>`,
         provenance: { kind: "unrecorded" },
         placement_parent_id: null,
         display_name: null,
@@ -1379,7 +1382,25 @@ it.effect("preflights home before creation and records facts before the one stab
         ),
     });
     const threadManagement = threadManagementMock({
-      getThreadRecords: (threadId) => Effect.succeed(projection(threadId)),
+      // Someone else's messages reached the new thread before and after its brief.
+      getThreadRecords: (threadId) =>
+        Ref.get(commands).pipe(
+          Effect.map((dispatched) => {
+            const brief = dispatched.find(
+              (command) => command.type === "message.dispatch" && command.threadId === threadId,
+            );
+            return brief?.type !== "message.dispatch"
+              ? projection(threadId)
+              : ({
+                  ...projection(threadId),
+                  runs: [
+                    { id: RunId.make("run:someone-before"), userMessageId: "message:before" },
+                    { id: RunId.make("run:brief"), userMessageId: brief.messageId },
+                    { id: RunId.make("run:someone-after"), userMessageId: "message:after" },
+                  ],
+                } as never);
+          }),
+        ),
       dispatch: (command) =>
         command.type === "thread.create" && String(command.commandId).includes("spawn-rejected")
           ? Effect.fail(
@@ -1502,6 +1523,9 @@ it.effect("preflights home before creation and records facts before the one stab
       assert.deepStrictEqual(first.result, {
         participant_id: childParticipantId,
         thread_id: (first.result as { readonly thread_id: ThreadId }).thread_id,
+        link: `<t3-thread://v2/environment:j5:mcp-handler/${(first.result as { readonly thread_id: ThreadId }).thread_id}>`,
+        // The brief's own run, found by its message, not the first or the newest.
+        run_id: RunId.make("run:brief"),
         project_id: ledgerProjectId,
         project_title: projectTitle,
         placement: {
@@ -2997,11 +3021,15 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
       const addedResult = added.result as unknown as {
         status: string;
         crew_instance_id: string;
-        members: unknown[];
+        members: ReadonlyArray<{ readonly link: string }>;
       };
       assert.equal(addedResult.status, "approved");
       assert.equal(addedResult.crew_instance_id, "crew:1");
       assert.lengthOf(addedResult.members, 1);
+      assert.equal(
+        addedResult.members[0]?.link,
+        `<t3-thread://v2/${invocation.environmentId}/thread:new>`,
+      );
       assert.deepStrictEqual(yield* Ref.get(addedSeats), [
         {
           workspace: { type: "shared" as const },
@@ -3039,213 +3067,6 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
       assert.include(message(spawned), "delegate_task");
     }).pipe(Effect.provide(layer));
   }),
-);
-
-it.effect(
-  "stops exactly one agent as upstream's Stop, in any project, within the caller's modes",
-  () =>
-    Effect.gen(function* () {
-      const ledgerProjectId = LedgerProjectId.make("project:j5:mcp-stop");
-      const callerParticipantId = ParticipantId.make("agent:j5:mcp-stop-caller");
-      const targetParticipantId = ParticipantId.make("agent:j5:mcp-stop-target");
-      const siblingParticipantId = ParticipantId.make("agent:j5:mcp-stop-sibling");
-      const childParticipantId = ParticipantId.make("agent:j5:mcp-stop-child");
-      const targetThreadId = ThreadId.make("thread:j5:mcp-stop-target");
-      const siblingThreadId = ThreadId.make("thread:j5:mcp-stop-sibling");
-      const childThreadId = ThreadId.make("thread:j5:mcp-stop-child");
-      const targetProjectId = ProjectId.make("project:j5:mcp-stop-target");
-      const stopped = yield* Ref.make<
-        ReadonlyArray<{
-          readonly commandId: string;
-          readonly threadId: ThreadId;
-          readonly reason: string | undefined;
-        }>
-      >([]);
-      const targetRunning = yield* Ref.make(true);
-      const callerRuntimeMode = yield* Ref.make<RuntimeMode>("full-access");
-      const targetIsCallersSeat = yield* Ref.make(false);
-      const stopLimits = yield* Ref.make<ReadonlyArray<RuntimeMode | undefined>>([]);
-      const callerRow = {
-        projectId: ledgerProjectId,
-        participantId: callerParticipantId,
-        participant: {
-          kind: "agent" as const,
-          id: callerParticipantId,
-          threadId: invocation.threadId,
-        },
-        archived: false,
-        canReceiveMessage: true,
-        canOpenExchange: true,
-        acceptsUrgency: false,
-      } satisfies ParticipantDirectoryRow;
-      // The target lives in another project: a stop reaches any agent on this server.
-      const agentRow = (participantId: ParticipantId, threadId: ThreadId) =>
-        ({
-          projectId: LedgerProjectId.make("project:j5:mcp-stop-elsewhere"),
-          participantId,
-          participant: { kind: "agent" as const, id: participantId, threadId },
-          archived: false,
-          canReceiveMessage: true,
-          canOpenExchange: true,
-          acceptsUrgency: false,
-        }) satisfies ParticipantDirectoryRow;
-      const dependencies = Layer.mergeAll(
-        Layer.succeed(
-          A2ASendService,
-          A2ASendService.of({
-            ...unusedOutsideAgentSends,
-            send: () => Effect.die("j5_send_message is outside this stop test"),
-            clearOwnAsk: () => Effect.die("j5_clear_own_ask is outside this stop test"),
-            sendAsMachine: () => Effect.die("unused"),
-            listParticipants: () =>
-              Effect.succeed([
-                callerRow,
-                agentRow(targetParticipantId, targetThreadId),
-                agentRow(siblingParticipantId, siblingThreadId),
-                agentRow(childParticipantId, childThreadId),
-              ]),
-          }),
-        ),
-        Layer.mock(ParticipantPlacementService)({
-          listParticipants: () => Effect.die("j5_stop_agent finds its target in the directory"),
-          listSubtree: () => Effect.die("j5_stop_agent must never resolve placement descendants"),
-        }),
-        threadManagementMock({
-          getThreadShell: (threadId) =>
-            Ref.get(callerRuntimeMode).pipe(
-              Effect.map((runtimeMode) =>
-                threadId === invocation.threadId
-                  ? liveThreadShell(threadId, { runtimeMode })
-                  : null,
-              ),
-            ),
-          getThreadRecords: (threadId) =>
-            Ref.get(targetRunning).pipe(
-              Effect.map((running) => ({
-                ...projection(threadId),
-                thread: {
-                  ...projection(threadId).thread,
-                  projectId: threadId === targetThreadId ? targetProjectId : projectId,
-                },
-                runs: running ? [{ status: "running" } as OrchestrationV2Run] : [],
-              })),
-            ),
-          dispatch: (command) =>
-            command.type === "thread.stop"
-              ? Ref.update(stopped, (items) => [
-                  ...items,
-                  {
-                    commandId: command.commandId,
-                    threadId: command.threadId,
-                    reason: command.reason,
-                  },
-                ]).pipe(
-                  // The limit upstream re-checks under the target's lock rides with the Stop.
-                  Effect.andThen(DispatchModeLimit),
-                  Effect.tap((limit) =>
-                    Ref.update(stopLimits, (items) => [...items, limit?.runtimeMode]),
-                  ),
-                  Effect.as({ sequence: 1, storedEvents: [] }),
-                )
-              : Effect.die(`j5_stop_agent must only dispatch thread.stop, not ${command.type}`),
-          // Upstream's thread.stop stops the target's delegated tasks itself.
-          stopDelegatedTasks: () =>
-            Effect.die("j5_stop_agent leaves delegated tasks to thread.stop"),
-          interruptThread: () =>
-            Effect.die("j5_stop_agent sends upstream's Stop, not an interrupt"),
-        }),
-        Layer.mock(A2AHomeRegistrar)({}),
-        Layer.mock(A2ALedger)({}),
-        Layer.mock(SpawnCompositionService)({}),
-        Layer.mock(OrchestratorMcpService)({}),
-        peerDirectoryNoneLayer,
-        Layer.mock(A2ADeliveryWorker)({ notify: Effect.void }),
-        Layer.mock(AgentCrewInstanceService)({
-          findMembership: () =>
-            Ref.get(targetIsCallersSeat).pipe(
-              Effect.map((seat) =>
-                seat ? { crewInstanceId: "crew:stop", seatName: "builder" } : null,
-              ),
-            ),
-          read: () =>
-            Effect.succeed({ captainParticipantId: callerParticipantId } as AgentCrewInstance),
-          listForCaptain: () => Effect.succeed([]),
-        }),
-        Layer.mock(ArchiveCrewService)({}),
-        Layer.mock(CrewStopService)({}),
-        Layer.mock(CrewProposalService)({}),
-
-        Layer.mock(ThreadRegistration)({}),
-        Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
-      );
-      const layer = J5ToolkitHandlersLive.pipe(
-        Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
-        Layer.provideMerge(dependencies),
-      );
-
-      yield* Effect.gen(function* () {
-        const toolkit = yield* J5Toolkit;
-        const call = (args: J5StopAgentInput) =>
-          toolkit
-            .handle("j5_stop_agent", args)
-            .pipe(
-              Stream.unwrap,
-              Stream.run(Sink.last()),
-              Effect.flatMap(Effect.fromOption),
-              Effect.provideService(McpInvocationContext, scope),
-            );
-        const args = {
-          participant_id: targetParticipantId,
-          client_request_id: "stop-one-1",
-        } satisfies J5StopAgentInput;
-        const first = yield* call(args);
-        const replay = yield* call(args);
-        assert.equal(first.result, "interrupt_requested");
-        assert.deepStrictEqual(replay.result, first.result);
-        // An idle target is still stopped: Stop also holds its queue and ends its watches.
-        yield* Ref.set(targetRunning, false);
-        const idle = yield* call({
-          ...args,
-          client_request_id: "stop-idle-1",
-        });
-        assert.equal(idle.result, "already_idle");
-        const calls = yield* Ref.get(stopped);
-        assert.lengthOf(calls, 3);
-        assert.isTrue(calls.every((call) => call.threadId === targetThreadId));
-        // An agent's Stop says so; without a reason the timeline reads "Stopped by user".
-        assert.isTrue(calls.every((call) => call.reason === "Stopped by an agent"));
-        // A replay reuses the command id.
-        assert.equal(calls[1]?.commandId, calls[0]?.commandId);
-        assert.notEqual(calls[2]?.commandId, calls[0]?.commandId);
-        assert.notInclude(
-          calls.map((call) => call.threadId),
-          siblingThreadId,
-        );
-        assert.notInclude(
-          calls.map((call) => call.threadId),
-          childThreadId,
-        );
-
-        // The target runs in full access. A caller in a narrower mode may not stop it.
-        yield* Ref.set(callerRuntimeMode, "approval-required");
-        const refused = yield* call({ ...args, client_request_id: "stop-narrow-1" });
-        assert.isTrue(refused.isFailure);
-        assert.include(JSON.stringify(refused.encodedResult), "broader permissions than you do");
-        assert.lengthOf(yield* Ref.get(stopped), calls.length, "a refused stop dispatches nothing");
-        // Unless the target is a seat of a Crew the caller commands.
-        yield* Ref.set(targetIsCallersSeat, true);
-        const commanded = yield* call({ ...args, client_request_id: "stop-seat-1" });
-        assert.equal(commanded.result, "already_idle");
-        assert.lengthOf(yield* Ref.get(stopped), calls.length + 1);
-        // Each Stop carries its caller's limit, except the Captain's, which has none.
-        assert.deepStrictEqual(yield* Ref.get(stopLimits), [
-          "full-access",
-          "full-access",
-          "full-access",
-          undefined,
-        ]);
-      }).pipe(Effect.provide(layer));
-    }),
 );
 
 it.effect(
@@ -3408,6 +3229,8 @@ it.effect(
         assert.equal(remoteRow.can_open_exchange, true);
         assert.equal(remoteRow.self, false);
         assert.equal(remoteRow.thread_id, "thread:support");
+        // Its thread lives on Home, so its link names Home's environment, not this one.
+        assert.equal(remoteRow.link, "<t3-thread://v2/environment-home/thread:support>");
         assert.deepStrictEqual(remoteRow.provenance, { kind: "unrecorded" });
         assert.isFalse(hasKey(remoteRow, "environment_id"), "a server is named, never its id");
         assert.deepStrictEqual(

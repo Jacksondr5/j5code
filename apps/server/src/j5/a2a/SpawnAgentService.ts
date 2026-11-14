@@ -20,6 +20,7 @@ import * as Result from "effect/Result";
 import type { SqlError } from "effect/sql/SqlError";
 import {
   requireThreadScope,
+  threadLinkFor,
   type McpInvocationScope,
   type McpThreadInvocationScope,
 } from "../../mcp/McpInvocationContext.ts";
@@ -773,6 +774,7 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
                   ),
                 ),
               )).attachments;
+        const briefMessageId = spawnMessageId(stableInput);
         yield* spawnWorkspace
           .startBrief({
             workspace,
@@ -781,7 +783,7 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
             projectId: target,
             threadId,
             title: spawnTitle(input.title),
-            messageId: spawnMessageId(stableInput),
+            messageId: briefMessageId,
             text: spawnFirstTurnText({
               brief: withReviewIndependenceNote(input.brief, child.thread.agentPersonaAssignment),
               participantId: facts.home.participantId,
@@ -805,9 +807,22 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
               ),
             ),
           );
+        // Found by the brief's message: someone may message the new thread before its brief starts.
+        const briefRun = (yield* threadManagement
+          .getThreadRecords(threadId, ["runs"])
+          .pipe(
+            Effect.mapError((error) =>
+              stateError(
+                `Peer Agent ${facts.home.participantId} started, but its thread cannot be read: ${error.message}.`,
+                "Retry j5_spawn_agent with the same client_request_id to read the same result.",
+              ),
+            ),
+          )).runs.find((run) => run.userMessageId === briefMessageId);
         return {
           participant_id: facts.home.participantId,
           thread_id: threadId,
+          link: threadLinkFor(scope, threadId),
+          run_id: briefRun?.id ?? null,
           project_id: facts.home.projectId,
           project_title: targetProject.title,
           placement: {

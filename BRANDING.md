@@ -59,7 +59,8 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
   `Jacksondr5/j5code` and `~/.local/bin/j5`; `cloud/ConnectReachability.ts` and
   `cloud/CliTokenManager.ts` (with its test) say `j5 connect`; `cli/doctor.ts` names the database
   from before J5's first archive release, 0.0.44, where upstream's says 0.1.0, and "a J5 Code
-  version"; and `cli/managedChatGptToken.ts` says to reconnect in J5 Code.
+  version"; `cli/managedChatGptToken.ts` says to reconnect in J5 Code; and `cli/thread.ts`, behind `j5 thread`
+  (FORK.md case 82), says J5 Code and `j5` and signs in as `j5-thread-cli`.
 - The command's name where the server looks it up or prints it: `apps/server/src/binCli.ts` (the
   root command and its help path), `cli/invocation.ts` (`isCommandAvailable("j5")` and the
   command it renders), `cli/browser.ts` (`j5 browser setup`), `cloud/CloudLink.ts`
@@ -292,9 +293,6 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
 - Linux packaging metadata, which J5 doesn't build: the `.deb` identity strings in
   `scripts/build-desktop-artifact.ts` (maintainer, description, `/usr/share/doc/t3code`) and
   `apps/desktop/resources/linux/com.t3tools.t3code.metainfo.xml`.
-- Upstream's `thread` command (`apps/server/src/cli/thread.ts`), which J5 does not register (FORK.md
-  case 82), so its copy ("T3 Code", `t3 thread cli`) is never shown. Rebrand it if the command
-  returns ([#695](https://github.com/Jacksondr5/j5code/issues/695)).
 - Upstream's leftovers J5 has no use for: `resolveServerInstallation` in `cli/invocation.ts` still
   looks for an npm-global `t3` package, which never matches a J5 install; the AppArmor profile
   path keeps its `t3-` name (`preview/PreviewBrowserHost.ts`); and

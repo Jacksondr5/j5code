@@ -1947,6 +1947,7 @@ const playbookFixtureWithSettings = (
               Effect.andThen(Ref.update(commands, (items) => [...items, command])),
               Effect.as({ events: [], effects: [] } as never),
             ),
+          stopDelegatedTasks: () => Effect.void,
         }),
       ),
       Layer.provideMerge(

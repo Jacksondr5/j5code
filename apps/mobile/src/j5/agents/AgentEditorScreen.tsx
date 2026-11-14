@@ -81,7 +81,7 @@ export function AgentEditorScreen() {
     exit.leaveAfterSave();
   }
   return (
-    <SettingsFormScreen title={"Edit persona"} guarded={exit.guarded}>
+    <SettingsFormScreen title={"Edit persona"}>
       <Text className="text-sm text-foreground-muted">
         Changes apply to this imported copy and future launches. The original file and existing
         tasks stay unchanged.
@@ -110,7 +110,7 @@ export function AgentEditorScreen() {
         <TextInput
           accessibilityLabel="Instructions"
           multiline
-          autoCapitalize="none"
+          autoCapitalize="sentences"
           autoCorrect={false}
           style={{ minHeight: 160 }}
           placeholder={instructions === null ? "Loading…" : undefined}

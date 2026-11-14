@@ -36,9 +36,9 @@ export interface ThreadRegistrationShape {
 }
 
 /**
- * The one place a thread becomes an agent-to-agent participant. A thread's home is the project it
- * was registered in, so registration takes only the thread id; a thread upstream later turns into
- * a project keeps that home.
+ * The one place a thread becomes an agent-to-agent participant, in the thread's project, so
+ * registration takes only the thread id. When upstream later moves the thread (Turn into
+ * project), the lifecycle service moves its membership with it.
  */
 export class ThreadRegistration extends Context.Service<
   ThreadRegistration,

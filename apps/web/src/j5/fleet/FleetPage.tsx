@@ -43,7 +43,7 @@ import {
   crewHasRunningSeat,
   seatQuietLabel,
   summarizeCrewState,
-} from "../crew/crewState";
+} from "@t3tools/client-runtime/j5/crew-state";
 import { stopCrew } from "../crew/crewStopClient";
 import {
   countFleetProjects,

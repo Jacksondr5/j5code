@@ -1,6 +1,12 @@
 import { useAtomValue } from "@effect/atom-react";
 import {
+  mergeCrewRuntimeRequestSources,
+  mergeNativeQuestionInboxSources,
+} from "@t3tools/client-runtime/j5/crew-inbox-requests";
+import { mergeWorktreeCleanupSources } from "@t3tools/client-runtime/j5/crew-worktree-cleanup";
+import {
   answeredByLine,
+  askWaitsForServerLine,
   closedLine,
   j5SourceNotice,
   mergeHumanInboxSources,
@@ -28,13 +34,20 @@ import { SelectableMarkdownText } from "../../native/SelectableMarkdownText";
 import { j5Sharing } from "../sharing/guestAccess";
 import { j5Environment } from "../state";
 import { type ClosedItem, useInboxAnswers } from "./inboxAnswers";
+import { AgentQuestionsSection, SeatApprovalsSection } from "./InboxCrewRequests";
+import { WorktreeCleanupsSection } from "./InboxWorktreeCleanups";
+import { J5RecordPanel } from "./J5RecordPanel";
 import {
   answeredInboxQueryAtom,
   answeredInboxSourcesAtom,
+  crewRequestSourcesAtom,
   openInboxQueryAtom,
   openInboxSourcesAtom,
   readInboxSources,
+  refreshCrewRequestSources,
   refreshInboxSources,
+  worktreeCleanupQueryAtom,
+  worktreeCleanupSourcesAtom,
 } from "./inboxSources";
 import { createPullRefresh } from "./inboxPullRefresh.logic";
 import { useScopedParticipantLabels } from "./senderLabels";
@@ -64,18 +77,32 @@ function useOwnName(environmentId: EnvironmentId): string | null {
 function refreshAll() {
   refreshInboxSources(openInboxSourcesAtom, openInboxQueryAtom);
   refreshInboxSources(answeredInboxSourcesAtom, answeredInboxQueryAtom);
+  refreshInboxSources(worktreeCleanupSourcesAtom, worktreeCleanupQueryAtom);
+  refreshCrewRequestSources();
 }
 
 /**
  * The person's Inbox: what agents on every connected server have asked them, most urgent first
- * (Inbox AC6), answered in place, and the asks already answered.
+ * (Inbox AC6), answered in place, Crew seats' approvals and agents' questions, an Owner's
+ * worktree cleanups, and the asks already answered.
  */
 export function InboxScreen() {
   const openSources = useAtomValue(openInboxSourcesAtom);
   const answeredSources = useAtomValue(answeredInboxSourcesAtom);
   const items = mergeHumanInboxSources(openSources);
   const answered = mergeHumanInboxSources(answeredSources);
-  const showEnvironment = spansMultipleEnvironments([...items, ...answered]);
+  const crewSources = useAtomValue(crewRequestSourcesAtom);
+  const seatApprovals = mergeCrewRuntimeRequestSources(crewSources);
+  const agentQuestions = mergeNativeQuestionInboxSources(crewSources);
+  const cleanupSources = useAtomValue(worktreeCleanupSourcesAtom);
+  const cleanups = mergeWorktreeCleanupSources(cleanupSources);
+  const showEnvironment = spansMultipleEnvironments([
+    ...items,
+    ...answered,
+    ...seatApprovals,
+    ...agentQuestions,
+    ...cleanups,
+  ]);
   const labels = useScopedParticipantLabels(
     [...items, ...answered].map((item) => ({
       environmentId: item.environmentId,
@@ -96,7 +123,12 @@ export function InboxScreen() {
   );
   const notices = [
     ...new Set(
-      [...openSources.sources, ...answeredSources.sources].flatMap((source) => {
+      [
+        ...openSources.sources,
+        ...answeredSources.sources,
+        ...crewSources.sources,
+        ...cleanupSources.sources,
+      ].flatMap((source) => {
         const notice = j5SourceNotice(source);
         return notice === null ? [] : [notice];
       }),
@@ -110,8 +142,12 @@ export function InboxScreen() {
           {notice}
         </Text>
       ))}
+      <SeatApprovalsSection requests={seatApprovals} />
+      <AgentQuestionsSection questions={agentQuestions} showEnvironment={showEnvironment} />
       {answers.shownItems.length === 0 ? (
-        loading ? (
+        seatApprovals.length > 0 ||
+        agentQuestions.length > 0 ||
+        cleanups.length > 0 ? null : loading ? (
           <Text className="text-foreground-muted">Loading your inbox…</Text>
         ) : (
           <EmptyState
@@ -142,6 +178,7 @@ export function InboxScreen() {
           })}
         </View>
       )}
+      <WorktreeCleanupsSection items={cleanups} showEnvironment={showEnvironment} />
       <AnsweredShelf items={answered} labels={labels} showEnvironment={showEnvironment} />
     </>
   );
@@ -255,13 +292,7 @@ function InboxItem(props: {
         <View className="mt-3 gap-3 border-t border-border-subtle pt-3">
           <InboxMessage markdown={item.message} />
           {[item.escalation?.summary, item.personaDraft?.summary].map((record) =>
-            record === undefined ? null : (
-              // J5's own record, apart from the agent's words; plain text, so they can't alter it.
-              <View key={record} className="gap-1 rounded-lg bg-subtle px-3 py-2">
-                <Text className="text-xs font-t3-medium text-foreground-muted">Recorded by J5</Text>
-                <Text className="text-sm">{record}</Text>
-              </View>
-            ),
+            record === undefined ? null : <J5RecordPanel key={record} text={record} />,
           )}
           {item.followUps?.map((followUp) => (
             <View className="gap-1" key={followUp.messageId}>
@@ -269,35 +300,44 @@ function InboxItem(props: {
               <InboxMessage markdown={followUp.message} />
             </View>
           ))}
-          {/* Above the answer box, so it stays in view whenever the box is: iOS scrolls only the
-              focused box itself clear of the keyboard. */}
-          <View className="flex-row flex-wrap items-center justify-between gap-2">
-            <OpenSenderThread item={item} />
-            {closedText !== null ? (
-              <Text className="text-sm text-foreground-muted">{closedText}</Text>
-            ) : (
-              <Button
-                label={props.delivering ? "Delivering…" : "Answer"}
-                tone="primary"
-                loading={props.delivering}
-                disabled={!canAnswer || props.anyDelivering || props.answerText.length === 0}
-                accessibilityHint={
-                  canAnswer
-                    ? undefined
-                    : "This server is unavailable or this connection is read-only."
-                }
-                onPress={props.onAnswer}
+          {closedText === null && !item.connected ? (
+            // Read-only until its server is back; words typed earlier are kept for then.
+            <Text className="text-sm text-foreground-muted">
+              {askWaitsForServerLine(item.environmentLabel)}
+            </Text>
+          ) : (
+            <>
+              {/* Above the answer box, so it stays in view whenever the box is: iOS scrolls only
+                  the focused box itself clear of the keyboard. */}
+              <View className="flex-row flex-wrap items-center justify-between gap-2">
+                <OpenSenderThread item={item} />
+                {closedText !== null ? (
+                  <Text className="text-sm text-foreground-muted">{closedText}</Text>
+                ) : (
+                  <Button
+                    label={props.delivering ? "Delivering…" : "Answer"}
+                    tone="primary"
+                    loading={props.delivering}
+                    disabled={!canAnswer || props.anyDelivering || props.answerText.length === 0}
+                    accessibilityHint={
+                      canAnswer
+                        ? undefined
+                        : "This server is unavailable or this connection is read-only."
+                    }
+                    onPress={props.onAnswer}
+                  />
+                )}
+              </View>
+              <TextInput
+                accessibilityLabel={`Answer ${item.intent}`}
+                multiline
+                placeholder="Type the answer exactly as it should be delivered"
+                value={props.answerText}
+                onChangeText={props.onChangeAnswer}
+                style={{ minHeight: 96, textAlignVertical: "top" }}
               />
-            )}
-          </View>
-          <TextInput
-            accessibilityLabel={`Answer ${item.intent}`}
-            multiline
-            placeholder="Type the answer exactly as it should be delivered"
-            value={props.answerText}
-            onChangeText={props.onChangeAnswer}
-            style={{ minHeight: 96, textAlignVertical: "top" }}
-          />
+            </>
+          )}
           {props.error === null ? null : (
             <Text accessibilityRole="alert" className="text-sm text-danger-foreground">
               {props.error}

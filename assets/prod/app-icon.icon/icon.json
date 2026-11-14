@@ -36,6 +36,6 @@
   ],
   "supported-platforms": {
     "circles": ["watchOS"],
-    "squares": ["macOS"]
+    "squares": "shared"
   }
 }

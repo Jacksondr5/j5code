@@ -205,6 +205,7 @@ const callerThread = (threadId: ThreadId, runtimeMode: RuntimeMode = "full-acces
       worktreePath: null,
       createdAt,
     },
+    runs: [],
   }) as unknown as OrchestrationV2ThreadProjection;
 
 const spawnHarness = (input: {
@@ -612,6 +613,8 @@ it.effect("spawns into another project's main checkout, as a root of that projec
       assert.deepStrictEqual(spawned.result, {
         participant_id: childParticipantId,
         thread_id: result.thread_id,
+        link: `<t3-thread://v2/environment:j5:spawn-workspace/${result.thread_id}>`,
+        run_id: null,
         project_id: LedgerProjectId.make(otherProjectId),
         project_title: "Other project",
         placement: {
@@ -1144,6 +1147,8 @@ it.effect("an outside agent starts a top-level agent in the project it names", (
       assert.deepStrictEqual(spawned.result, {
         participant_id: childParticipantId,
         thread_id: result.thread_id,
+        link: `<t3-thread://v2/environment:j5:spawn-workspace/${result.thread_id}>`,
+        run_id: null,
         project_id: LedgerProjectId.make(otherProjectId),
         project_title: "Other project",
         placement: {
@@ -1584,6 +1589,8 @@ it.effect("spawns into a new worktree from base_ref, keeping home, placement, an
       assert.deepStrictEqual(spawned.result, {
         participant_id: childParticipantId,
         thread_id: result.thread_id,
+        link: `<t3-thread://v2/environment:j5:spawn-workspace/${result.thread_id}>`,
+        run_id: null,
         project_id: ledgerProjectId,
         project_title: "Workspace",
         placement: {

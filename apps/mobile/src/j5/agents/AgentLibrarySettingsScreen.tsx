@@ -3,15 +3,12 @@ import { LIBRARY_FOR_OWNERS } from "@t3tools/client-runtime/j5/sharing";
 import { useOwnedEnvironmentIds, useOwnerSomewhere } from "../sharing/guestAccess";
 import { AgentLibraryToast, type AgentLibraryNotification } from "./AgentLibraryToast";
 import { AgentImportConflictModal } from "./AgentImportConflictModal";
-import {
-  AGENT_PERSONA_OVERRIDE_NOTE,
-  agentPersonaDuplicateDraft,
-} from "@t3tools/client-runtime/j5/agent-personas";
-import { AgentDetailsModal } from "./AgentDetailsModal";
+import { agentPersonaDuplicateDraft } from "@t3tools/client-runtime/j5/agent-personas";
+import { PersonaSheet, type PersonaSheetActionRow } from "./PersonaSheet";
 import { AgentFolderPickerModal } from "./AgentFolderPickerModal";
 import { useSettingsFormNavigation } from "./SettingsFormScreen";
 import { sendWhenReconnected } from "./watchEnvironmentSessions";
-import { personaRowActions } from "./personaRowActions";
+import { personaRowMarker, personaSheetActions } from "./personaSheet";
 import { Menu } from "../../components/ui/Menu";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import {
@@ -240,8 +237,9 @@ function OwnerAgentLibrarySettingsScreen() {
   const setAgentEnabled = useAtomCommand(agentPersonaEnvironment.setAgentPersonaEnabled, {
     reportFailure: false,
   });
-  async function toggleAgent(personaId: string, enabled: boolean) {
-    if (effectiveEnvironmentId === null || busy) return;
+  /** Resolves whether the server took the change, so the row can drop its pending value. */
+  async function toggleAgent(personaId: string, enabled: boolean): Promise<boolean> {
+    if (effectiveEnvironmentId === null || busy) return false;
     setBusy(true);
     const result = await setAgentEnabled({
       environmentId: effectiveEnvironmentId,
@@ -250,9 +248,10 @@ function OwnerAgentLibrarySettingsScreen() {
     setBusy(false);
     if (result._tag === "Failure") {
       setNotification(failureNotice("Persona action failed", result));
-      return;
+      return false;
     }
     catalog.refresh();
+    return true;
   }
   async function removePersona(personaId: string) {
     if (effectiveEnvironmentId === null || busy) return;
@@ -327,6 +326,83 @@ function OwnerAgentLibrarySettingsScreen() {
       : presentAgentPersonaCatalog(catalog.data, providers ?? []);
 
   const viewedPersona = personas.find((persona) => persona.personaId === viewing);
+  const sheetActions: ReadonlyArray<PersonaSheetActionRow> =
+    viewedPersona === undefined
+      ? []
+      : personaSheetActions(
+          {
+            removed: viewedPersona.removed,
+            editable: viewedPersona.edit !== null && canOperate,
+          },
+          otherEnvironments.length > 0,
+        ).flatMap((action): ReadonlyArray<PersonaSheetActionRow> => {
+          const id = viewedPersona.personaId;
+          switch (action) {
+            case "edit":
+              return [
+                {
+                  key: action,
+                  label: "Edit",
+                  disabled: locked,
+                  onPress: () => {
+                    if (viewedPersona.edit && effectiveEnvironmentId)
+                      navigation.navigate("SettingsPersonaEdit", {
+                        environmentId: effectiveEnvironmentId,
+                        initial: viewedPersona.edit,
+                      });
+                  },
+                },
+              ];
+            case "duplicate":
+              return [
+                {
+                  key: action,
+                  label: "Duplicate as personal persona",
+                  disabled: locked || viewedPersona.availability === "unsupported",
+                  onPress: () => void duplicatePersona(id),
+                },
+              ];
+            case "export":
+              return [
+                {
+                  key: action,
+                  label: "Export YAML",
+                  disabled: busy,
+                  onPress: () => void exportPersona(id),
+                },
+              ];
+            case "copy":
+              return otherEnvironments.map((environment) => ({
+                key: `copy:${environment.environmentId}`,
+                label: `Copy to ${environment.environmentLabel}`,
+                disabled: busy,
+                onPress: () =>
+                  void copyPersona(id, {
+                    environmentId: environment.environmentId,
+                    label: environment.environmentLabel,
+                  }),
+              }));
+            case "remove":
+              return [
+                {
+                  key: action,
+                  label: "Remove",
+                  tone: "danger" as const,
+                  disabled: locked,
+                  onPress: () => void removePersona(id),
+                },
+              ];
+            case "restore":
+              return [
+                {
+                  key: action,
+                  label: "Restore",
+                  disabled: locked,
+                  onPress: () => void restorePersona(id),
+                },
+              ];
+          }
+        });
   const folders = librarySources.data?.folders ?? [];
   const environmentLabel =
     connectedEnvironments.find(
@@ -423,7 +499,7 @@ function OwnerAgentLibrarySettingsScreen() {
         ) : null}
 
         <SettingsSection
-          title="Agent Setup"
+          title="Personas"
           footer={
             Platform.OS === "web"
               ? "Use Settings → Agent Setup in the web app to import files."
@@ -432,7 +508,7 @@ function OwnerAgentLibrarySettingsScreen() {
         >
           {effectiveEnvironmentId === null ? (
             <InfoRow text="No connected environments" />
-          ) : catalog.isPending ? (
+          ) : catalog.isPending && catalog.data == null ? (
             <InfoRow text="Loading personas" />
           ) : catalog.error ? (
             <InfoRow tone="danger" text={catalog.error} />
@@ -441,30 +517,14 @@ function OwnerAgentLibrarySettingsScreen() {
           ) : (
             personas.map((persona, index) => (
               <PersonaRow
-                key={persona.personaId}
+                // Per environment too, so a pending switch value never carries across a switch.
+                key={`${effectiveEnvironmentId}:${persona.personaId}`}
                 persona={persona}
                 borderTop={index > 0}
-                locked={locked}
+                canOperate={canOperate}
                 busy={busy}
-                otherEnvironments={otherEnvironments}
-                onToggle={(enabled) => void toggleAgent(persona.personaId, enabled)}
-                onEdit={
-                  persona.edit && effectiveEnvironmentId && canOperate
-                    ? () => {
-                        if (persona.edit && effectiveEnvironmentId)
-                          navigation.navigate("SettingsPersonaEdit", {
-                            environmentId: effectiveEnvironmentId,
-                            initial: persona.edit,
-                          });
-                      }
-                    : null
-                }
-                onDetails={() => setViewing(persona.personaId)}
-                onDuplicate={() => void duplicatePersona(persona.personaId)}
-                onExport={() => void exportPersona(persona.personaId)}
-                onCopy={(target) => void copyPersona(persona.personaId, target)}
-                onRemove={() => void removePersona(persona.personaId)}
-                onRestore={() => void restorePersona(persona.personaId)}
+                onToggle={(enabled) => toggleAgent(persona.personaId, enabled)}
+                onOpen={() => setViewing(persona.personaId)}
               />
             ))
           )}
@@ -490,14 +550,14 @@ function OwnerAgentLibrarySettingsScreen() {
 
         {effectiveEnvironmentId !== null ? (
           <SettingsSection
-            title="Library sources"
+            title="Persona library sources"
             footer={
               librarySources.data?.configured === false
                 ? "Folders this environment reads YAML definitions from, on its machine. Bundled examples appear until a folder is configured or the default folder exists. Adding a folder writes agent-personas.json."
                 : "Folders this environment reads YAML definitions from, on its machine; relative paths resolve from its state directory. Files are read on every catalog request, so edits and git pulls apply without a restart."
             }
           >
-            {librarySources.isPending ? (
+            {librarySources.isPending && librarySources.data == null ? (
               <InfoRow text="Loading folders" />
             ) : librarySources.error ? (
               <InfoRow tone="danger" text={librarySources.error} />
@@ -533,6 +593,9 @@ function OwnerAgentLibrarySettingsScreen() {
         <SettingsSection title="Playbooks">
           <PlaybookLibrarySettingsSection environmentId={effectiveEnvironmentId} />
         </SettingsSection>
+        <SettingsSection title="Crews">
+          <InfoRow text="Crew settings (auto-approve, member models and reasoning) are in Agent Setup on web and desktop. The phone follows them." />
+        </SettingsSection>
       </ScreenScrollView>
       {notification ? (
         <AgentLibraryToast notification={notification} onDismiss={dismissNotification} />
@@ -549,14 +612,16 @@ function OwnerAgentLibrarySettingsScreen() {
         />
       ) : null}
       {viewedPersona && effectiveEnvironmentId ? (
-        <AgentDetailsModal
+        <PersonaSheet
           key={`${effectiveEnvironmentId}:${viewedPersona.personaId}`}
           environmentId={effectiveEnvironmentId}
+          environmentLabel={environmentLabel}
           persona={viewedPersona}
           usageLine={(() => {
             const entry = usageById.get(viewedPersona.personaId);
             return entry === undefined ? null : presentAgentPersonaUsage(entry).line;
           })()}
+          actions={sheetActions}
           onClose={() => setViewing(null)}
         />
       ) : null}
@@ -615,47 +680,42 @@ function InfoRow(props: {
 
 type PresentedPersona = ReturnType<typeof presentAgentPersonaCatalog>[number];
 
-/** One persona as a settings row: name and status, its switch, and the rest in a menu. */
+/** One persona as a settings row: its name, one status word, and its switch. A tap opens its sheet. */
 function PersonaRow(props: {
   readonly persona: PresentedPersona;
   readonly borderTop: boolean;
-  readonly locked: boolean;
+  readonly canOperate: boolean;
   readonly busy: boolean;
-  readonly otherEnvironments: ReadonlyArray<{
-    readonly environmentId: EnvironmentId;
-    readonly environmentLabel: string;
-  }>;
-  readonly onToggle: (enabled: boolean) => void;
-  readonly onEdit: (() => void) | null;
-  readonly onDetails: () => void;
-  readonly onDuplicate: () => void;
-  readonly onExport: () => void;
-  readonly onCopy: (target: { environmentId: EnvironmentId; label: string }) => void;
-  readonly onRemove: () => void;
-  readonly onRestore: () => void;
+  readonly onToggle: (enabled: boolean) => Promise<boolean>;
+  readonly onOpen: () => void;
 }) {
   const { persona } = props;
-  const unavailable = !persona.removed && persona.availability !== "available";
-  const actions = personaRowActions(
-    { removed: persona.removed, editable: props.onEdit !== null },
-    props.otherEnvironments.length > 0,
-  );
-  const onEdit = actions.includes("edit") ? props.onEdit : null;
+  // The tapped value holds until the reread catalog shows it; a controlled Switch otherwise snaps
+  // back to the old value while the toggle saves. A failed toggle drops it, so the row reverts.
+  const [pending, setPending] = useState<boolean | null>(null);
+  const enabled = pending ?? persona.enabled;
+  if (pending !== null && pending === persona.enabled) setPending(null);
+  const marker = personaRowMarker({
+    removed: persona.removed,
+    blocked:
+      !persona.removed && persona.availability !== "available" && persona.blockedReasons.length > 0,
+    overrideLabel: persona.overridesFolder === null ? null : persona.originLabel,
+  });
   return (
     <View
       className={cn(
-        "flex-row items-center gap-2 py-2 pl-4 pr-1",
+        "flex-row items-center gap-2 py-2 pl-4 pr-4",
         props.borderTop && "border-t border-border-subtle",
       )}
     >
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={
-          onEdit ? `Edit ${persona.displayName}` : `Details for ${persona.displayName}`
+          marker === null ? persona.displayName : `${persona.displayName}, ${marker.label}`
         }
-        accessibilityHint={persona.description}
+        accessibilityHint="Opens its details and actions"
         disabled={props.busy}
-        onPress={onEdit ?? props.onDetails}
+        onPress={props.onOpen}
         className="min-w-0 flex-1 gap-0.5 py-1 active:opacity-70"
       >
         <Text
@@ -667,93 +727,36 @@ function PersonaRow(props: {
         >
           {persona.displayName}
         </Text>
-        {persona.removed ? <Text className="text-sm text-foreground-muted">Removed</Text> : null}
-        {persona.overridesFolder !== null ? (
-          <Text className="text-sm text-foreground-muted">
-            {persona.originLabel}. {AGENT_PERSONA_OVERRIDE_NOTE}
+        {marker === null ? null : (
+          <Text
+            className={cn(
+              "text-sm",
+              marker.tone === "danger" ? "text-danger-foreground" : "text-foreground-muted",
+            )}
+            numberOfLines={1}
+          >
+            {marker.label}
           </Text>
-        ) : null}
-        {unavailable && persona.blockedReasons.join("; ") ? (
-          <Text className="text-sm text-danger-foreground">
-            {persona.blockedReasons.join("; ")}
-          </Text>
-        ) : null}
+        )}
       </Pressable>
       {persona.removed ? null : (
         <ThemedSwitch
           // React Native's Switch sets alignSelf: flex-start, which ignores the row's centring.
           style={{ alignSelf: "center" }}
-          value={persona.enabled}
-          disabled={props.locked}
+          value={enabled}
+          // Not disabled while a change saves, since a dimmed switch reads as a redraw.
+          disabled={!props.canOperate}
           accessibilityLabel={`Enable ${persona.displayName}`}
-          onValueChange={props.onToggle}
+          onValueChange={(next) => {
+            // One change at a time: a second tap before the reread lands would race it.
+            if (pending !== null) return;
+            setPending(next);
+            void props.onToggle(next).then((saved) => {
+              if (!saved) setPending(null);
+            });
+          }}
         />
       )}
-      <Menu
-        actions={actions.map((action) => {
-          switch (action) {
-            case "edit":
-              return { id: action, title: "Edit", attributes: { disabled: props.locked } };
-            case "details":
-              return { id: action, title: "Details" };
-            case "duplicate":
-              return {
-                id: action,
-                title: "Duplicate as personal persona",
-                attributes: { disabled: props.locked || persona.availability === "unsupported" },
-              };
-            case "export":
-              return { id: action, title: "Export YAML", attributes: { disabled: props.busy } };
-            case "copy":
-              return {
-                id: action,
-                title: "Copy to environment",
-                attributes: { disabled: props.busy },
-                subactions: props.otherEnvironments.map((environment) => ({
-                  id: `copy:${environment.environmentId}`,
-                  title: environment.environmentLabel,
-                })),
-              };
-            case "remove":
-              return {
-                id: action,
-                title: "Remove",
-                attributes: { destructive: true, disabled: props.locked },
-              };
-            case "restore":
-              return { id: action, title: "Restore", attributes: { disabled: props.locked } };
-          }
-        })}
-        onPressAction={({ nativeEvent }) => {
-          const action = nativeEvent.event;
-          if (action === "edit") onEdit?.();
-          else if (action === "details") props.onDetails();
-          else if (action === "duplicate") props.onDuplicate();
-          else if (action === "export") props.onExport();
-          else if (action === "remove") props.onRemove();
-          else if (action === "restore") props.onRestore();
-          else if (action.startsWith("copy:")) {
-            const target = props.otherEnvironments.find(
-              (environment) => `copy:${environment.environmentId}` === action,
-            );
-            if (target)
-              props.onCopy({ environmentId: target.environmentId, label: target.environmentLabel });
-          }
-        }}
-      >
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`More actions for ${persona.displayName}`}
-          className="size-11 items-center justify-center"
-        >
-          <SymbolView
-            name="ellipsis"
-            size={18}
-            tintColorClassName="accent-icon"
-            type="monochrome"
-          />
-        </Pressable>
-      </Menu>
     </View>
   );
 }

@@ -119,12 +119,12 @@ export const makeSpawnedChildrenRead = Effect.gen(function* () {
         return { entries: [], spawnedByAgent: [] } satisfies SpawnedChildrenResponse;
       const parentIds = [...new Set(threadIds.map(participantIdForThread))];
       // Retired children leave the expander as they leave the Fleet page: a membership
-      // stamped archived_at (reversible archive) is not a live child.
+      // stamped archived_at (reversible archive) is not a live child. A child that Turn into
+      // project moved keeps its placement where it was, so the two meet on the participant.
       const rows = yield* sql<PlacementRow>`
         SELECT p.participant_id, p.placement_parent_id
         FROM j5_a2a_participant_placement p
-        JOIN j5_a2a_membership m
-          ON m.project_id = p.project_id AND m.participant_id = p.participant_id
+        JOIN j5_a2a_membership m ON m.participant_id = p.participant_id
         WHERE p.placement_parent_id IN ${sql.in(parentIds)} AND m.archived_at IS NULL
       `;
       const childThreadIds = rows.flatMap((row) => {
@@ -156,8 +156,7 @@ export const makeSpawnedChildrenRead = Effect.gen(function* () {
             }>`
               SELECT m.participant_id, m.archived_at, p.placement_parent_id
               FROM j5_a2a_membership m
-              LEFT JOIN j5_a2a_participant_placement p
-                ON p.project_id = m.project_id AND p.participant_id = m.participant_id
+              LEFT JOIN j5_a2a_participant_placement p ON p.participant_id = m.participant_id
               WHERE m.participant_id IN ${sql.in(rosterIds)}
             `;
       // The sidebar's membership rule: a row an agent spawned leaves the top level, to

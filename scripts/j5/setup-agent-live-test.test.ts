@@ -129,6 +129,102 @@ describe("resolveLiveTestPaths", () => {
   });
 });
 
+describe("resolveLiveTestPaths with a homes root in the personal config", () => {
+  /** Writes the personal config under a config home of its own and returns the environment that finds it. */
+  const configure = (layout: ReturnType<typeof makeLayout>, config: unknown) => {
+    const configHome = NodePath.join(layout.base, "config");
+    NodeFS.mkdirSync(NodePath.join(configHome, "j5code"), { recursive: true });
+    NodeFS.writeFileSync(
+      NodePath.join(configHome, "j5code", "live-test.json"),
+      JSON.stringify(config),
+    );
+    return { XDG_CONFIG_HOME: configHome, J5CODE_HOME: layout.liveHome };
+  };
+  const resolveWith = (layout: ReturnType<typeof makeLayout>, environment: NodeJS.ProcessEnv) =>
+    resolveLiveTestPaths({
+      checkout: layout.worktree,
+      homeDirectory: layout.homeDirectory,
+      environment,
+    });
+
+  it("puts the test state under it, in a directory named for this worktree", async () => {
+    const layout = makeLayout();
+    const homesRoot = NodePath.join(layout.base, "live-test-homes");
+    const environment = configure(layout, { homesRoot });
+    const paths = await resolveWith(layout, environment);
+    // Outside any checkout, so upstream offers No project to the test home.
+    assert.equal(NodePath.dirname(paths.root), homesRoot);
+    assert.match(NodePath.basename(paths.root), /^feature-[0-9a-f]{8}$/);
+    assert.equal(paths.home, NodePath.join(paths.root, "home"));
+    // Every command finds the same place, stop and rebuild included.
+    assert.equal((await resolveWith(layout, environment)).root, paths.root);
+    // The base's own copy of the script keeps its home in the base checkout, where upgrade reads it.
+    assert.equal(
+      (await resolveWith(layout, { ...environment, J5_LIVE_TEST_HOME_INSIDE: "1" })).root,
+      NodePath.join(layout.worktree, ".j5code", "live-test"),
+    );
+    NodeFS.rmSync(layout.base, { recursive: true, force: true });
+  });
+
+  it("finds an existing build where it is, whatever the config says now", async () => {
+    const layout = makeLayout();
+    const inside = NodePath.join(layout.worktree, ".j5code", "live-test");
+    const homesRoot = NodePath.join(layout.base, "live-test-homes");
+    const environment = configure(layout, { homesRoot });
+    // A build made inside before the config was set stays where it is.
+    NodeFS.mkdirSync(inside, { recursive: true });
+    NodeFS.writeFileSync(NodePath.join(inside, "server.json"), "{}");
+    assert.equal((await resolveWith(layout, environment)).root, inside);
+    NodeFS.rmSync(inside, { recursive: true });
+    // A build made outside is found after the config is gone, through the worktree's record.
+    const outside = (await resolveWith(layout, environment)).root;
+    NodeFS.writeFileSync(NodePath.join(layout.worktree, ".j5code", "live-test-root"), outside);
+    assert.equal((await resolveWith(layout, { J5CODE_HOME: layout.liveHome })).root, outside);
+    // The record names only a root of this worktree's own.
+    NodeFS.writeFileSync(
+      NodePath.join(layout.worktree, ".j5code", "live-test-root"),
+      NodePath.join(homesRoot, "someone-else-12345678"),
+    );
+    assert.include(
+      await refusal(resolveWith(layout, { J5CODE_HOME: layout.liveHome })),
+      "is not this worktree's",
+    );
+    NodeFS.rmSync(layout.base, { recursive: true, force: true });
+  });
+
+  it("refuses a homes root that is the live home, inside its state, relative or linked out", async () => {
+    for (const [name, homesRoot, expected] of [
+      [
+        "the live home",
+        (layout: ReturnType<typeof makeLayout>) => layout.liveHome,
+        "is the live home",
+      ],
+      [
+        "the live state",
+        (layout: ReturnType<typeof makeLayout>) => NodePath.join(layout.liveHome, "userdata"),
+        "is the live home",
+      ],
+      ["relative", () => "live-test-homes", "must be an absolute path"],
+    ] as const) {
+      const layout = makeLayout();
+      assert.include(
+        await refusal(resolveWith(layout, configure(layout, { homesRoot: homesRoot(layout) }))),
+        expected,
+        name,
+      );
+      NodeFS.rmSync(layout.base, { recursive: true, force: true });
+    }
+    const layout = makeLayout();
+    const homesRoot = NodePath.join(layout.base, "live-test-homes");
+    const environment = configure(layout, { homesRoot });
+    const name = NodePath.basename((await resolveWith(layout, environment)).root);
+    NodeFS.mkdirSync(homesRoot, { recursive: true });
+    NodeFS.symlinkSync(layout.liveHome, NodePath.join(homesRoot, name));
+    assert.include(await refusal(resolveWith(layout, environment)), `outside ${homesRoot}`);
+    NodeFS.rmSync(layout.base, { recursive: true, force: true });
+  });
+});
+
 describe("resolveLiveTestPaths after a build", () => {
   const resolve = (layout: ReturnType<typeof makeLayout>) =>
     resolveLiveTestPaths({
@@ -446,7 +542,7 @@ describe("tailnet mappings", () => {
 });
 
 describe("liveTestEnvironment", () => {
-  it("drops what the live server exports, stops the dev server adopting its cwd and naming the owner", () => {
+  it("drops what the live server exports, stops the dev server adopting its cwd and naming the owner, and names the server after its worktree", () => {
     const environment = liveTestEnvironment(
       {
         T3CODE_PORT: "5773",
@@ -462,6 +558,7 @@ describe("liveTestEnvironment", () => {
       KEEP: "1",
       T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "false",
       J5CODE_DEV_OWNER_NAME: "",
+      J5CODE_SERVER_NAME: `${NodeOS.hostname()} test (tree)`,
       NODE_OPTIONS: "--disable-warning=ExperimentalWarning",
       PATH: `/work/tree/node_modules/.bin${NodePath.delimiter}/usr/bin`,
     });
@@ -641,6 +738,7 @@ describe("parseCommand", () => {
     assert.deepEqual(parseCommand([]), { command: "start", mode: "default" });
     assert.deepEqual(parseCommand(["restart"]), { command: "restart", mode: "default" });
     assert.deepEqual(parseCommand(["upgrade"]), { command: "upgrade", mode: "default" });
+    assert.deepEqual(parseCommand(["remove"]), { command: "remove", mode: "default" });
   });
 
   it("takes a mode flag on a start and on rebuild, in either position", () => {
@@ -949,6 +1047,8 @@ describe("baseEnvironment", () => {
     assert.equal(retry.J5_LIVE_TEST_NOW, "1760000000000");
     assert.isUndefined(first.T3CODE_PORT);
     assert.isUndefined(first.J5CODE_HOME);
+    // Its home stays in its own checkout, where `upgrade` reads it, whatever the personal config says.
+    assert.equal(first.J5_LIVE_TEST_HOME_INSIDE, "1");
   });
 
   it("sets no clock for a build that recorded none", () => {
@@ -978,6 +1078,7 @@ describe("formatInstructions", () => {
   const paths = {
     ...server("/w/.j5code/live-test"),
     root: "/w/.j5code/live-test",
+    rootRecord: "/w/.j5code/live-test-root",
     manifest: "/w/.j5code/live-test/manifest.json",
     base: "/w/.j5code/live-test/base",
     remote: { ...server("/w/.j5code/live-test/remote"), root: "/w/.j5code/live-test/remote" },
@@ -1374,6 +1475,7 @@ describe("formatUpgrade", () => {
   const paths = {
     ...server("/w/.j5code/live-test"),
     root: "/w/.j5code/live-test",
+    rootRecord: "/w/.j5code/live-test-root",
     manifest: "/w/.j5code/live-test/manifest.json",
     base: "/w/.j5code/live-test/base",
     remote: { ...server("/w/.j5code/live-test/remote"), root: "/w/.j5code/live-test/remote" },

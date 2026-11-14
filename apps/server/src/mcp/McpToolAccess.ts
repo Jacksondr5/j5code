@@ -286,6 +286,21 @@ export const either = <P, A, E, R, A2, E2, R2>(
   );
 };
 
+// J5 (FORK.md case 2): `either` picked by reading state, such as whether the caller is the
+// target's Captain. A call bound for a linked environment takes the second's check.
+export const eitherBy = <P, A, E, R, A2, E2, R2, E3, R3>(
+  useFirst: (params: P) => Effect.Effect<boolean, E3, R3>,
+  first: Declaration<(params: P) => Effect.Effect<A, E, R>>,
+  second: Declaration<(params: P) => Effect.Effect<A2, E2, R2>>,
+) =>
+  declare(
+    (params: P): Effect.Effect<A | A2, E | E2 | E3, R | R2 | R3> =>
+      Effect.flatMap(useFirst(params), (yes): Effect.Effect<A | A2, E | E2, R | R2> =>
+        yes ? checkedHandler(first)(params) : checkedHandler(second)(params),
+      ),
+    remoteCheckOf(second) as RemoteCheck<P> | undefined,
+  );
+
 const fullAccessRequired =
   "Changing projects or environment settings needs a live full-access/default calling thread or a full-access client.";
 

@@ -5,8 +5,8 @@ import { inboxBellPresentation, mergeOpenInboxCounts } from "@t3tools/client-run
 
 import { useSidebar } from "../../components/ui/sidebar";
 import { cn } from "../../lib/utils";
-import { inboxBadgeCount } from "../crew/crewRuntimeRequests.logic";
-import { useCrewRuntimeRequests, useNativeQuestionInbox } from "../crew/crewRuntimeRequestsClient";
+import { inboxBellCount } from "@t3tools/client-runtime/j5/crew-inbox-requests";
+import { useCrewRuntimeRequests } from "../crew/crewRuntimeRequestsClient";
 import {
   crewRuntimeRequestSourcesAtom,
   inboxCountQueryAtom,
@@ -21,24 +21,19 @@ const useCountRefresh = createVisibleRefreshHook(() => {
 
 export function HumanInboxBell({ onBackdrop }: { readonly onBackdrop: boolean }) {
   const { isMobile, setOpenMobile } = useSidebar();
-  const sources = useAtomValue(inboxCountSourcesAtom);
-  const merged = mergeOpenInboxCounts(sources);
-  const runtimeRequests = useCrewRuntimeRequests().length + useNativeQuestionInbox().length;
-  const count = inboxBadgeCount(merged.count, runtimeRequests);
-  const runtimeSources = useAtomValue(crewRuntimeRequestSourcesAtom);
-  const incomplete =
-    merged.incomplete ||
-    !runtimeSources.isReady ||
-    runtimeSources.sources.some(
-      (source) => source.status !== "ready" && source.status !== "unsupported",
-    );
+  // Mounts the Crew request reads and refreshes them on focus; the count reads their sources.
+  useCrewRuntimeRequests();
+  const bell = inboxBellCount(
+    mergeOpenInboxCounts(useAtomValue(inboxCountSourcesAtom)),
+    useAtomValue(crewRuntimeRequestSourcesAtom),
+  );
   useCountRefresh();
 
   const closeMobileSidebar = () => {
     if (isMobile) setOpenMobile(false);
   };
 
-  const { badge, label } = inboxBellPresentation({ count, incomplete });
+  const { badge, label } = inboxBellPresentation(bell);
   return (
     <Link
       aria-label={label}

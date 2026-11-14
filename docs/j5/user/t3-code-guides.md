@@ -81,6 +81,21 @@ In [Remote access](../../user/remote-access.md), the desktop app's first SSH lau
 J5 Code server release for the desktop app's version to `~/.j5code/runtime` on the host. The host
 must be Linux x64 or an Apple Silicon Mac, the platforms J5 Code publishes.
 
+## Scripts on the host
+
+In [Outside agents](../../user/outside-agents.md#scripts-on-the-host), the command is `j5 thread`,
+and it reaches agents the way any other outside agent does. Its messages come from `j5-thread-cli`.
+
+- `j5 thread start` starts a Peer Agent. Choose its model every time: pass `--persona <id>`, or
+  `--provider` and `--model` (with `--reasoning` for a model that has a reasoning level). The
+  model must be one the project lists in Models for custom members. The agent runs with full
+  access unless you pass `--runtime-mode`.
+- `j5 thread send` delivers the message as any agent's message: a busy Claude or GPT 6 agent takes
+  it into the turn it is running, and other agents take it after their turn ends. `send` doesn't
+  take `--wait`; follow up with `j5 thread show`.
+
+`j5 thread start --wait`, `show` and `list` work as described.
+
 ## Prompt links
 
 [Prompt links](../../user/prompt-links.md) work as described, but **Copy prompt link** makes

@@ -33,7 +33,8 @@ export function adjudicationAsks<Ask extends AskLike>(input: {
   const kept = input.refused.filter(
     (item) => !openIds.has(item.exchangeId) && input.hasWords(item.exchangeId),
   );
-  return [...open, ...kept].toSorted(
+  // A fresh array, sorted in place: Hermes has no `toSorted`.
+  return [...open, ...kept].sort(
     (left, right) =>
       left.openedAt.localeCompare(right.openedAt) ||
       left.exchangeId.localeCompare(right.exchangeId),
@@ -41,16 +42,29 @@ export function adjudicationAsks<Ask extends AskLike>(input: {
 }
 
 /**
- * The ask shown in full, and the rest behind the "more questions" row. The person's pick wins
- * while it is still pinned; otherwise the oldest.
+ * The ask shown in full, the rest behind the "more questions" row, and the one that row moves to:
+ * the next after the shown ask, wrapping, so every ask is reachable. The person's pick wins while
+ * it is still pinned; otherwise the oldest.
  */
 export function pickShownAsk<Ask extends { readonly exchangeId: string }>(
   asks: ReadonlyArray<Ask>,
   pickedExchangeId: string | null,
-): { readonly shown: Ask; readonly others: ReadonlyArray<Ask> } | null {
-  const shown = asks.find((ask) => ask.exchangeId === pickedExchangeId) ?? asks[0];
+): {
+  readonly shown: Ask;
+  readonly others: ReadonlyArray<Ask>;
+  readonly next: Ask | null;
+} | null {
+  const index = Math.max(
+    0,
+    asks.findIndex((ask) => ask.exchangeId === pickedExchangeId),
+  );
+  const shown = asks[index];
   if (shown === undefined) return null;
-  return { shown, others: asks.filter((ask) => ask !== shown) };
+  return {
+    shown,
+    others: asks.filter((ask) => ask !== shown),
+    next: asks.length > 1 ? asks[(index + 1) % asks.length]! : null,
+  };
 }
 
 /** The refusals that mean someone else's answer, or the agent's withdrawal, closed the ask first. */

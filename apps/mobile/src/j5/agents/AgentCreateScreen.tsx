@@ -109,10 +109,7 @@ export function AgentCreateScreen() {
     exit.leaveAfterSave();
   }
   return (
-    <SettingsFormScreen
-      title={props.initial ? "Duplicate persona" : "Create persona"}
-      guarded={exit.guarded}
-    >
+    <SettingsFormScreen title={props.initial ? "Duplicate persona" : "Create persona"}>
       <Text className="text-sm text-foreground-muted">
         A personal persona for this environment. It joins the library like an import, so you can
         edit, switch off, or remove it later.
@@ -164,7 +161,7 @@ export function AgentCreateScreen() {
         <TextInput
           accessibilityLabel="Instructions"
           multiline
-          autoCapitalize="none"
+          autoCapitalize="sentences"
           autoCorrect={false}
           style={{ minHeight: 160 }}
           placeholder="# Who this persona is"

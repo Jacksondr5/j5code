@@ -4,10 +4,9 @@ import {
   crewApprovalSummary,
   crewDeclinedSummary,
   crewNoticeLines,
+  isHiddenCrewNotice,
   presentCrewNotice,
 } from "@t3tools/client-runtime/j5/crew-notices";
-
-import { isHiddenCrewNotice, withoutHiddenCrewNotices } from "./crewNotices.logic";
 
 const approvedGate = [
   "<j5_crew_gate>",
@@ -285,33 +284,6 @@ describe("crew notices in the Captain's thread", () => {
       "Web",
       "Api",
     ]);
-  });
-
-  it("keeps the rows a hidden notice bounded, dropping only that notice's row", () => {
-    const row = (id: string, message: { role: string; createdBy: string; text: string }) => ({
-      kind: "message",
-      id,
-      message,
-    });
-    const visible = [
-      row("ask", { role: "user", createdBy: "user", text: "Ship it" }),
-      { kind: "work", id: "w1" },
-    ];
-    // Nothing hidden: the same array comes back, so the list's identity check holds.
-    expect(withoutHiddenCrewNotices(visible)).toBe(visible);
-    const rows = [
-      ...visible,
-      row("launch", {
-        role: "user",
-        createdBy: "system",
-        text: "<j5_seat_finished>\nseat: builder\nparticipant_id: agent:b\nthread_id: thread:b\nrun_status: completed\n</j5_seat_finished>",
-      }),
-      row("reply", { role: "assistant", createdBy: "agent", text: "Crew is running." }),
-    ];
-    const shown = withoutHiddenCrewNotices(rows);
-    expect(shown.map((entry) => entry.id)).toEqual(["ask", "w1", "reply"]);
-    // The same input gives the same output array.
-    expect(withoutHiddenCrewNotices(rows)).toBe(shown);
   });
 
   it("presents an added seat as new and a decline with what was requested", () => {

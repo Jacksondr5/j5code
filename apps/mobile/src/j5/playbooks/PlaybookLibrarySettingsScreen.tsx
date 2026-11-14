@@ -16,7 +16,7 @@ import { useRemoteConnectionStatus } from "../../state/use-remote-environment-re
 import { AgentFolderPickerModal } from "../agents/AgentFolderPickerModal";
 import { useOwnedEnvironmentIds } from "../sharing/guestAccess";
 import { j5Environment } from "../state";
-import { useSettingsFormNavigation } from "../agents/SettingsFormScreen";
+import { useStartPlaybookConversation } from "./startPlaybookConversation";
 
 export function PlaybookLibrarySettingsSection({
   environmentId,
@@ -76,13 +76,9 @@ function PlaybookLibrary({
   const [yaml, setYaml] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const navigation = useSettingsFormNavigation();
+  const startConversation = useStartPlaybookConversation(environmentId);
   const openConversation = (playbook: string | null) =>
-    navigation.navigate("SettingsPlaybookConversation", {
-      environmentId,
-      name: playbook,
-      projectId: project?.id ?? null,
-    });
+    void act(() => startConversation({ playbook, projects, projectId: project?.id ?? null }));
   const [details, setDetails] = useState<string | null>(null);
   const [copyTarget, setCopyTarget] = useState<{
     name: string;
@@ -328,8 +324,11 @@ function PlaybookLibrary({
             <Text className="text-sm text-foreground-muted">{playbook.description}</Text>
             <Text className="text-xs text-foreground-muted">
               {playbook.stepCount} {playbook.stepCount === 1 ? "step" : "steps"}
-              {source.kind === "folder" ? " · From source folder" : ""}
-              {source.kind === "workspace" ? ` · From ${project?.title ?? "project"}` : ""}
+              {source.kind === "folder" ? ` · From source folder on ${label}` : ""}
+              {source.kind === "workspace"
+                ? ` · From ${project?.title ?? "project"} on ${label}`
+                : ""}
+              {source.kind === "environment" ? ` · Library on ${label}` : ""}
               {playbook.overridesLibrary ? " · Overrides library copy" : ""}
             </Text>
             {playbook.issue ? (
@@ -401,15 +400,24 @@ function PlaybookLibrary({
           {/* SafeAreaView takes no className, so the theme surface and flex go on a View. */}
           <View className="flex-1 bg-sheet">
             <SafeAreaView style={{ flex: 1 }}>
-              <ScrollView contentContainerClassName="gap-3 p-4">
-                <Text className="text-xl font-semibold text-foreground">{detail.title}</Text>
+              {/* The persona sheets' header: the title, and Done at the top. */}
+              <View className="flex-row items-center justify-between gap-3 px-5 py-3">
+                <Text className="min-w-0 shrink text-xl font-t3-semibold" numberOfLines={1}>
+                  {detail.title}
+                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => setDetails(null)}
+                  className="px-3 py-2"
+                >
+                  <Text>Done</Text>
+                </Pressable>
+              </View>
+              <ScrollView contentContainerClassName="gap-3 px-5 pb-6">
                 <Text className="text-foreground-muted">{detail.description}</Text>
                 {detail.steps.map((step, index) => (
                   <Text key={step.id}>{playbookStepLabel(step, index)}</Text>
                 ))}
-                <Pressable accessibilityRole="button" onPress={() => setDetails(null)}>
-                  <Text className="text-primary">Close</Text>
-                </Pressable>
               </ScrollView>
             </SafeAreaView>
           </View>

@@ -24,6 +24,7 @@ import {
 } from "@t3tools/client-runtime/state/thread-settled";
 import type { WorktreeSetupCardProps } from "./worktree-setup-card";
 import type { ComposerTextPaste } from "../../native/T3ComposerEditor.types";
+import { J5ComposerControls } from "../../j5/composer/J5ComposerControls";
 import { PlaybookComposerControl } from "../../j5/playbooks/PlaybookComposerControl";
 import { type EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
@@ -200,6 +201,7 @@ import { ComposerPopoverHost } from "./ComposerPopoverHost";
 import { ThreadFeed, type ThreadFeedHandle, type ThreadFeedHistoryControls } from "./ThreadFeed";
 import { WorkspaceMutationIdProvider } from "./WorkspaceMutationIdProvider";
 import { useThreadTurnSubagents } from "./ThreadAgentsSheet";
+import { useJ5AgentsPillSegment } from "../../j5/crew/J5ThreadAgents";
 import { ComposerQueuedEditBanner } from "./ComposerQueuedEdit";
 import { useThreadQueuedCount } from "./ThreadQueueControl";
 import { ThreadGuestShareBar } from "./ThreadGuestShareBar";
@@ -482,7 +484,12 @@ function ThreadDetailBody(
   const composerError = useAtomValue(threadComposerErrorsAtom)[selectedThreadKey]?.message ?? null;
   const queuedCount = useThreadQueuedCount(props.selectedThreadDetailRef);
   const turnSubagents = useThreadTurnSubagents(props.selectedThreadDetailRef);
-  const agentsSegment = resolveSubagentPillSegment(turnSubagents);
+  // J5 (case 115): the pill counts the Crew seats and Peer Agents this thread spawned too.
+  const agentsSegment = useJ5AgentsPillSegment(
+    props.selectedThreadDetailRef,
+    turnSubagents,
+    resolveSubagentPillSegment(turnSubagents),
+  );
   const defaultComposerEditorRef = useRef<ComposerEditorHandle>(null);
   const composerEditorRef = props.draftMode?.editorRef ?? defaultComposerEditorRef;
   const isProviderSubagent = isProviderNativeSubagentThread(props.selectedThread.source);
@@ -1602,11 +1609,18 @@ function ThreadDetailBody(
                     {!props.draftMode &&
                       !props.activePendingApproval &&
                       !props.activePendingUserInput && (
-                        <PlaybookComposerControl
-                          key={selectedThreadKey}
-                          environmentId={props.environmentId}
-                          threadId={props.selectedThread.id}
-                        />
+                        <>
+                          <J5ComposerControls
+                            key={`j5:${selectedThreadKey}`}
+                            environmentId={props.environmentId}
+                            threadId={props.selectedThread.id}
+                          />
+                          <PlaybookComposerControl
+                            key={selectedThreadKey}
+                            environmentId={props.environmentId}
+                            threadId={props.selectedThread.id}
+                          />
+                        </>
                       )}
                     {props.queuedRunEdit !== null ? (
                       <Animated.View

@@ -6,16 +6,15 @@ import {
 } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { AgentPersonaCreateDraft } from "@t3tools/client-runtime/j5/agent-personas";
-import type { AgentPersonaEditInput, EnvironmentId, ProjectId } from "@t3tools/contracts";
+import type { AgentPersonaEditInput, EnvironmentId } from "@t3tools/contracts";
 import { useRef, type ReactNode } from "react";
-import { KeyboardAvoidingView, Platform } from "react-native";
+import { Platform } from "react-native";
+import { KeyboardAwareScrollView, useKeyboardState } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import * as Dialog from "../../components/ui/Dialog";
 import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
-import { withNativeGlassHeaderItem } from "../../features/layout/native-glass-header-items";
 import { SettingsScreen } from "../../features/settings/components/SettingsScreen";
-import { NativeStackScreenOptions } from "../../native/StackHeader";
 
 export type SettingsFormRoutes = {
   SettingsPersonaNew: {
@@ -26,12 +25,6 @@ export type SettingsFormRoutes = {
   SettingsPersonaEdit: {
     readonly environmentId: EnvironmentId;
     readonly initial: Omit<AgentPersonaEditInput, "instructions">;
-  };
-  SettingsPlaybookConversation: {
-    readonly environmentId: EnvironmentId;
-    readonly name: string | null;
-    /** The project Settings is showing, so a project playbook's chat opens where it lives. */
-    readonly projectId: ProjectId | null;
   };
 };
 
@@ -51,8 +44,8 @@ export function useSettingsFormExit(options: {
   const navigation = useNavigation();
   // Set once the save lands, so the removal guard lets the form close.
   const saved = useRef(false);
-  const guarded = options.hasChanges || options.saving;
-  usePreventRemove(guarded, ({ data }) => {
+  // Native stack also cancels iOS's native Back and swipe while this holds, so one back button guards.
+  usePreventRemove(options.hasChanges || options.saving, ({ data }) => {
     if (saved.current) {
       navigation.dispatch(data.action);
       return;
@@ -71,7 +64,6 @@ export function useSettingsFormExit(options: {
     ]);
   });
   return {
-    guarded,
     /** For a form that leaves by its own navigation action. */
     allowLeaving: () => {
       saved.current = true;
@@ -86,54 +78,46 @@ export function useSettingsFormExit(options: {
 /** A pushed settings page, because Android's Menu can't draw over an RN Modal or Sheet. */
 export function SettingsFormScreen(props: {
   readonly title: string;
-  readonly guarded: boolean;
   readonly children: ReactNode;
 }) {
-  const navigation = useNavigation();
   const insets = useSafeAreaInsets();
+  const keyboardVisible = useKeyboardState((state) => state.isVisible);
   return (
     <SettingsScreen title={props.title}>
+      {/* iOS keeps upstream's scroll view, which registers with the native header and insets for the
+          keyboard; with it up, the home indicator area is already covered, so Save gets no extra
+          padding. Android has no header marker, so keyboard-controller's scroll view lets the form
+          scroll clear of the keyboard, as the Inbox does. */}
       {Platform.OS === "ios" ? (
-        <NativeStackScreenOptions
-          // A custom back item also turns off iOS's swipe back, so it stays only while guarded.
-          options={
-            props.guarded
-              ? {
-                  headerBackVisible: false,
-                  gestureEnabled: false,
-                  // Native Back pops before removal guards; a bar action lets the guard run first.
-                  unstable_headerLeftItems: () => [
-                    withNativeGlassHeaderItem({
-                      type: "button",
-                      label: "",
-                      accessibilityLabel: "Back",
-                      icon: { type: "sfSymbol", name: "chevron.backward" },
-                      onPress: () => navigation.goBack(),
-                    }),
-                  ],
-                }
-              : {
-                  headerBackVisible: true,
-                  gestureEnabled: true,
-                  unstable_headerLeftItems: undefined,
-                }
-          }
-        />
-      ) : null}
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-      >
         <ScrollView
+          automaticallyAdjustKeyboardInsets
           keyboardShouldPersistTaps="handled"
           contentInsetAdjustmentBehavior="automatic"
           className="flex-1"
           contentContainerClassName="gap-4 px-5 pt-4"
-          contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 18) + 18 }}
+          contentContainerStyle={{
+            paddingBottom: keyboardVisible ? 0 : Math.max(insets.bottom, 18) + 18,
+          }}
         >
           {props.children}
         </ScrollView>
-      </KeyboardAvoidingView>
+      ) : (
+        <KeyboardAwareScrollView
+          bottomOffset={80}
+          keyboardShouldPersistTaps="handled"
+          className="flex-1"
+          contentContainerClassName="gap-4 px-5 pt-4"
+          // Android's content width cap, as upstream's ScreenScrollView applies it.
+          contentContainerStyle={{
+            width: "100%",
+            maxWidth: 720,
+            alignSelf: "center",
+            paddingBottom: Math.max(insets.bottom, 18) + 18,
+          }}
+        >
+          {props.children}
+        </KeyboardAwareScrollView>
+      )}
     </SettingsScreen>
   );
 }

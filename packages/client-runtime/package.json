@@ -379,6 +379,10 @@
       "types": "./src/j5/artifacts.ts",
       "default": "./src/j5/artifacts.ts"
     },
+    "./j5/crew-proposals": {
+      "types": "./src/j5/crewProposals.ts",
+      "default": "./src/j5/crewProposals.ts"
+    },
     "./j5/agent-personas": {
       "types": "./src/j5/agentPersonas.ts",
       "default": "./src/j5/agentPersonas.ts"
@@ -503,9 +507,33 @@
       "types": "./src/j5/sharedConversation.ts",
       "default": "./src/j5/sharedConversation.ts"
     },
+    "./j5/crew-inbox-requests": {
+      "types": "./src/j5/crewInboxRequests.ts",
+      "default": "./src/j5/crewInboxRequests.ts"
+    },
+    "./j5/crew-worktree-cleanup": {
+      "types": "./src/j5/crewWorktreeCleanup.ts",
+      "default": "./src/j5/crewWorktreeCleanup.ts"
+    },
     "./j5/crew-notices": {
       "types": "./src/j5/crewNotices.ts",
       "default": "./src/j5/crewNotices.ts"
+    },
+    "./j5/crew-state": {
+      "types": "./src/j5/crewState.ts",
+      "default": "./src/j5/crewState.ts"
+    },
+    "./j5/spawned-children": {
+      "types": "./src/j5/spawnedChildren.ts",
+      "default": "./src/j5/spawnedChildren.ts"
+    },
+    "./j5/crew-memberships": {
+      "types": "./src/j5/crewMemberships.ts",
+      "default": "./src/j5/crewMemberships.ts"
+    },
+    "./j5/adjudication-dock": {
+      "types": "./src/j5/adjudicationDock.ts",
+      "default": "./src/j5/adjudicationDock.ts"
     },
     "./pull-request-project-filter": {
       "types": "./src/pullRequestProjectFilter.ts",

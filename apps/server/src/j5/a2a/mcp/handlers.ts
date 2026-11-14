@@ -7,7 +7,7 @@ import {
   resolveCallerMembership,
   stateError,
 } from "../AgentCaller.ts";
-import { type ChatAttachment, ProjectId } from "@t3tools/contracts";
+import { type ChatAttachment, EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { playbookHandlers } from "../../playbooks/mcp.ts";
 import { playbookWorkspaceRoot } from "../../playbooks/workspace.ts";
 import * as SecureRandom from "effect/crypto/SecureRandom";
@@ -18,8 +18,10 @@ import * as Option from "effect/Option";
 
 import {
   McpInvocationContext,
+  type McpInvocationScope,
   type McpThreadInvocationScope,
   requireThreadScope,
+  threadLinkFor,
 } from "../../../mcp/McpInvocationContext.ts";
 import * as McpToolAccess from "../../../mcp/McpToolAccess.ts";
 
@@ -30,10 +32,7 @@ import {
 } from "../../../mcp/threadAccess.ts";
 
 import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
-import {
-  ThreadManagementService,
-  latestActiveRun,
-} from "../../../orchestration-v2/ThreadManagementService.ts";
+import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
 
 import { ProjectService } from "../../../project/ProjectService.ts";
 import { ProviderRegistry } from "../../../provider/ProviderRegistry.ts";
@@ -67,7 +66,6 @@ import { PeerRegistryService } from "../PeerRegistryService.ts";
 import { ParticipantPlacementService } from "../PlacementService.ts";
 import { withDeliveryNotice } from "../receiverBacklog.ts";
 import { A2ASendService } from "../SendService.ts";
-import { AGENT_STOP_REASON, stopThread } from "../stopThread.ts";
 import { sendClaimingAttachments } from "./attachments.ts";
 import {
   outsideAgentCaller,
@@ -85,7 +83,6 @@ import {
   isHumanParticipantId,
   LedgerProjectId,
   type ParticipantDirectoryRow,
-  type ParticipantId,
 } from "../contracts.ts";
 import { AgentPersonaEscalations } from "../../agents/agentPersonaEscalation.ts";
 import {
@@ -268,7 +265,7 @@ const crewProposalRefusal = (error: CrewProposalError) =>
       })
     : stateError(error.message, crewProposalNextStep(error));
 
-const projectCrewProposal = (outcome: CrewProposalOutcome) => ({
+const projectCrewProposal = (outcome: CrewProposalOutcome, scope: McpInvocationScope) => ({
   proposal_id: outcome.proposal.id,
   status: outcome.proposal.status,
   approval_mode: outcome.proposal.approvalMode ?? "human",
@@ -278,6 +275,7 @@ const projectCrewProposal = (outcome: CrewProposalOutcome) => ({
     persona_id: member.agentId,
     participant_id: member.participantId,
     thread_id: member.threadId,
+    link: threadLinkFor(scope, member.threadId),
   })),
   ...(outcome.playbook == null
     ? {}
@@ -561,6 +559,7 @@ const handlers = {
   ),
   j5_list_participants: McpToolAccess.reads((input) =>
     Effect.gen(function* () {
+      const scope = yield* McpInvocationContext;
       const outside = yield* outsideAgentCaller;
       const callerThreadId =
         outside === undefined ? (yield* callerScope).thread.threadId : undefined;
@@ -634,6 +633,7 @@ const handlers = {
           can_open_exchange: row.canOpenExchange,
           accepts_urgency: row.acceptsUrgency,
           thread_id: null,
+          link: null,
           provenance: projectProvenance({ kind: "not-applicable" } as const),
           placement_parent_id: null,
           display_name: row.displayName ?? null,
@@ -700,6 +700,11 @@ const handlers = {
               callerThreadId !== undefined && !agent.archived && agent.canReceiveMessage,
             accepts_urgency: false,
             thread_id: agent.threadId,
+            // The thread lives on that server, so its link names that server's environment.
+            link: threadLinkFor(
+              { environmentId: EnvironmentId.make(agent.environmentId), client: scope.client },
+              agent.threadId,
+            ),
             provenance: projectProvenance({ kind: "unrecorded" } as const),
             placement_parent_id: null,
             display_name: agent.displayName,
@@ -790,6 +795,10 @@ const handlers = {
               can_open_exchange: !isSelf && row.canOpenExchange,
               accepts_urgency: row.acceptsUrgency,
               thread_id: row.participant.kind === "agent" ? row.participant.threadId : null,
+              link:
+                row.participant.kind === "agent"
+                  ? threadLinkFor(scope, row.participant.threadId)
+                  : null,
               provenance: projectProvenance(
                 placement?.provenance ??
                   (row.participant.kind !== "agent"
@@ -877,7 +886,7 @@ const handlers = {
             seats: input.seats.map(crewSeatFromInput),
           })
           .pipe(Effect.mapError(crewProposalRefusal));
-        return projectCrewProposal(outcome);
+        return projectCrewProposal(outcome, scope);
       }).pipe(Effect.mapError(failure)),
   ),
   j5_request_crew_member: actsAsThreadCaller(
@@ -911,7 +920,7 @@ const handlers = {
             brief: input.brief ?? null,
           })
           .pipe(Effect.mapError(crewProposalRefusal));
-        return projectCrewProposal(outcome);
+        return projectCrewProposal(outcome, scope);
       }).pipe(Effect.mapError(failure)),
   ),
   j5_read_persona: McpToolAccess.reads((input) =>
@@ -1059,104 +1068,9 @@ const handlers = {
       };
     }).pipe(Effect.mapError(failure)),
   ),
-  j5_stop_agent: j5Writes((input) =>
-    Effect.gen(function* () {
-      const invocation = yield* McpInvocationContext;
-      const outside = yield* outsideAgentCaller;
-      const scope = outside === undefined ? yield* callerScope : undefined;
-      const crypto = yield* SecureRandom.SecureRandom;
-      // An outside agent has no membership, and is never a Captain.
-      const callerParticipantId: ParticipantId | undefined =
-        scope === undefined ? undefined : (yield* resolveCallerMembership(scope)).participantId;
-      const service = yield* A2ASendService;
-      // Any agent on this server, archived ones included: archiving can leave a run executing.
-      const matches = (yield* (
-        scope === undefined
-          ? service.listParticipantsWithoutCaller({ includeArchived: true })
-          : service.listParticipants(scope.thread.threadId, true)
-      ).pipe(
-        Effect.mapError((error) =>
-          stateError(
-            `This server's participants cannot be read for j5_stop_agent: ${error.message}.`,
-            "Retry j5_stop_agent with the same client_request_id.",
-          ),
-        ),
-      )).filter((row) => row.participantId === input.participant_id);
-      if (matches.length !== 1) {
-        return yield* stateError(
-          `This server has ${matches.length === 0 ? "no" : "an ambiguous"} participant ${input.participant_id}.`,
-          "Call j5_list_participants and retry j5_stop_agent with exactly one listed agent participant_id.",
-        );
-      }
-      const target = matches[0]!.participant;
-      if (target.kind !== "agent") {
-        return yield* stateError(
-          `Participant ${input.participant_id} is not an agent with a thread and cannot be stopped.`,
-          "Call j5_list_participants and retry j5_stop_agent with an agent participant_id.",
-        );
-      }
-      const threadManagement = yield* ThreadManagementService;
-      const targetProjection = yield* threadManagement
-        .getThreadRecords(target.threadId, ["runs"])
-        .pipe(
-          Effect.mapError((error) =>
-            stateError(
-              `Peer Agent thread ${target.threadId} cannot be read for j5_stop_agent: ${error.message}.`,
-              "Call j5_list_participants to confirm the target thread, then retry j5_stop_agent.",
-            ),
-          ),
-        );
-      // Upstream's rule for a write to another thread: it must run within the caller's modes.
-      // A Captain commands its own seats whatever their modes.
-      const crews = yield* AgentCrewInstanceService;
-      const seat = yield* crews.findMembership(input.participant_id);
-      const crew = seat === null ? null : yield* crews.read(seat.crewInstanceId);
-      const limits =
-        callerParticipantId !== undefined &&
-        crew !== null &&
-        crew.captainParticipantId === callerParticipantId
-          ? undefined
-          : (yield* loadCaller()).limits;
-      if (limits !== undefined) {
-        yield* assertTargetWithinLimits(limits, targetProjection.thread).pipe(
-          Effect.mapError((error) =>
-            stateError(
-              `Peer Agent ${input.participant_id} runs with broader permissions than you do: ${error.message}`,
-              "Ask its Captain or the user to stop it; j5_stop_agent reaches only agents within your own permission modes.",
-            ),
-          ),
-        );
-      }
-      const requestKey = input.client_request_id ?? (yield* crypto.uuidV4().pipe(Effect.orDie));
-      const commandId = lifecycleCommandId({
-        // An outside agent's retry keys are namespaced by its client session.
-        providerSessionId: scope?.thread.providerSessionId ?? invocation.requestNamespace,
-        requestKey,
-        operation: "stop-agent",
-      });
-      // Upstream's Stop, delegated tasks included (see stopThread.ts). The limit goes with it:
-      // the target's modes can be raised after the check above, and upstream checks again under
-      // the thread's lock.
-      yield* stopThread(
-        threadManagement,
-        { commandId, threadId: target.threadId, reason: AGENT_STOP_REASON },
-        limits,
-      ).pipe(
-        Effect.mapError((error) =>
-          stateError(
-            `Peer Agent ${input.participant_id} on thread ${target.threadId} could not be stopped: ${error.message}.`,
-            "Call j5_list_participants to confirm the target, then retry j5_stop_agent with the same client_request_id.",
-          ),
-        ),
-      );
-      return latestActiveRun(targetProjection) === undefined
-        ? ("already_idle" as const)
-        : ("interrupt_requested" as const);
-    }).pipe(Effect.mapError(failure)),
-  ),
   j5_stop_crew: actsAsThreadCaller(
     "j5_stop_crew",
-    "Only a Crew's Captain stops it: message the Captain with j5_send_message, or stop one agent with j5_stop_agent.",
+    "Only a Crew's Captain stops it: message the Captain with j5_send_message, or stop one agent with t3_thread_interrupt and stop: true.",
     (input, scope) =>
       Effect.gen(function* () {
         const crypto = yield* SecureRandom.SecureRandom;

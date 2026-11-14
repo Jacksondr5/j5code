@@ -1,4 +1,5 @@
 import {
+  AGENT_PERSONA_OVERRIDE_NOTE,
   agentPersonaEntryLabel,
   type AgentPersonaCatalogRow,
 } from "@t3tools/client-runtime/j5/agent-personas";
@@ -11,7 +12,7 @@ export interface PersonaDetailRow {
 }
 
 /**
- * What the read-only sheet shows for a persona the person can't edit. Models come from the
+ * What a persona's sheet shows about it. Models come from the
  * definition, read on open: `null` while it loads, and the catalog's resolved route if it fails.
  */
 export function personaDetailRows(
@@ -24,6 +25,7 @@ export function personaDetailRows(
     | "availabilityLabel"
     | "blockedReasons"
     | "route"
+    | "overridesFolder"
   >,
   models:
     | { readonly status: "loading" }
@@ -35,8 +37,11 @@ export function personaDetailRows(
       },
   usageLine: string | null,
   providers: ReadonlyArray<ServerProvider> = [],
+  environmentLabel?: string,
 ): ReadonlyArray<PersonaDetailRow> {
-  const source = persona.origin?.kind === "folder" ? persona.origin.path : persona.originLabel;
+  const origin = persona.origin?.kind === "folder" ? persona.origin.path : persona.originLabel;
+  const source =
+    origin === null || environmentLabel === undefined ? origin : `${origin} on ${environmentLabel}`;
   return [
     { label: "Status", value: persona.availabilityLabel },
     ...persona.blockedReasons.map((reason) => ({
@@ -45,6 +50,7 @@ export function personaDetailRows(
       tone: "danger" as const,
     })),
     ...(source === null ? [] : [{ label: "Source", value: source }]),
+    ...(persona.overridesFolder ? [{ label: "Override", value: AGENT_PERSONA_OVERRIDE_NOTE }] : []),
     { label: "Access", value: persona.authority },
     ...(models.status === "loaded"
       ? (models.models ?? models.route).map((entry, index) => {

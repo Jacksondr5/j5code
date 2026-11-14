@@ -40,7 +40,7 @@ import {
   uncommittedFilesLabel,
   worktreeCleanupKey,
   type ScopedWorktreeCleanup,
-} from "./crewWorktreeCleanup.logic";
+} from "@t3tools/client-runtime/j5/crew-worktree-cleanup";
 
 /**
  * The cleanup approvals as the Inbox page shows them. An item answered on this device stays in

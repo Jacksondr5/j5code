@@ -321,7 +321,6 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         "j5_request_crew_member",
         "j5_send_message",
         "j5_spawn_agent",
-        "j5_stop_agent",
         "j5_stop_crew",
         "j5_write_artifact",
         "link_pull_request",
@@ -455,7 +454,7 @@ it.effect("production mcp layer lists worktree tools over http", () =>
       // J5's tools were renamed with a `j5_` prefix and kept no aliases. An agent resumed from
       // before the rename may still call an old name; it gets the unknown-tool error by name.
       const j5ToolNames = toolNames.filter((name) => name.startsWith("j5_"));
-      expect(j5ToolNames).toHaveLength(25);
+      expect(j5ToolNames).toHaveLength(24);
       for (const [index, name] of j5ToolNames.map((name) => name.slice("j5_".length)).entries()) {
         expect(toolNames).not.toContain(name);
         const response = yield* httpClient.post("/mcp", {

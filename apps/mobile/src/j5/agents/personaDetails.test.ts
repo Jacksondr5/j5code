@@ -25,6 +25,17 @@ const rowsOf = (rows: ReturnType<typeof personaDetailRows>) =>
   rows.map(({ label, value }) => [label, value]);
 
 describe("personaDetailRows", () => {
+  it("explains an override, after its source", () => {
+    const override = {
+      ...persona,
+      origin: { kind: "imported" },
+      originLabel: "Overrides personas",
+      overridesFolder: "/srv/personas/luna.yaml",
+    } as unknown as Parameters<typeof personaDetailRows>[0];
+    const labels = personaDetailRows(override, { status: "failed" }, null).map((row) => row.label);
+    expect(labels.slice(0, 4)).toEqual(["Status", "Source", "Override", "Access"]);
+  });
+
   it("shows a folder persona's path, access, both models and description", () => {
     expect(
       rowsOf(

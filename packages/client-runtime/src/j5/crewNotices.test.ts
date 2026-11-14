@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { presentCrewContext } from "./crewNotices.ts";
+import { presentCrewContext, withoutHiddenCrewNotices } from "./crewNotices.ts";
 
 const context = (text: string) =>
   `<j5_crew_delivery_context>\n${text}\n</j5_crew_delivery_context>`;
@@ -40,5 +40,32 @@ describe("presentCrewContext", () => {
     expect(presentCrewContext(system(`Please read:\n${text}`))).toBeNull();
     expect(presentCrewContext(system(`${text}\n\nReview the fix.`))).toBeNull();
     expect(presentCrewContext(system(context("  ")))).toBeNull();
+  });
+});
+
+describe("withoutHiddenCrewNotices", () => {
+  it("keeps the rows a hidden notice bounded, dropping only that notice's row", () => {
+    type Row = { readonly id: string; readonly message?: ReturnType<typeof system> };
+    const messageOf = (row: Row) => row.message;
+    const visible: ReadonlyArray<Row> = [
+      { id: "ask", message: { role: "user", createdBy: "user", text: "Ship it" } },
+      { id: "w1" },
+    ];
+    // Nothing hidden: the same array comes back, so the list's identity check holds.
+    expect(withoutHiddenCrewNotices(visible, messageOf)).toBe(visible);
+    const rows: ReadonlyArray<Row> = [
+      ...visible,
+      {
+        id: "launch",
+        message: system(
+          "<j5_seat_finished>\nseat: builder\nparticipant_id: agent:b\nthread_id: thread:b\nrun_status: completed\n</j5_seat_finished>",
+        ),
+      },
+      { id: "reply", message: { role: "assistant", createdBy: "agent", text: "Crew is running." } },
+    ];
+    const shown = withoutHiddenCrewNotices(rows, messageOf);
+    expect(shown.map((entry) => entry.id)).toEqual(["ask", "w1", "reply"]);
+    // The same input gives the same output array.
+    expect(withoutHiddenCrewNotices(rows, messageOf)).toBe(shown);
   });
 });

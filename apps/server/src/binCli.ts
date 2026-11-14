@@ -31,6 +31,7 @@ import { servicePreflightCommand } from "./cli/servicePreflight.ts";
 import { themeCommand } from "./cli/theme.ts";
 import { traceCommand } from "./cli/trace.ts";
 import { a2aCommand } from "./j5/cli/a2a.ts";
+import { j5ThreadCommand } from "./j5/cli/thread.ts";
 import { triageCommand } from "./cli/triage.ts";
 import { connectCommand, statusCommand, upCommand } from "./cli/up.ts";
 
@@ -83,8 +84,8 @@ export const makeCli = ({ cloudEnabled = hasCloudPublicConfig } = {}) =>
       environmentCommand,
       browserCommand,
       projectCommand,
-      // J5: upstream's `thread` subcommand is not registered; agents launch and message
-      // threads through J5's own tools (decision 3, 2026-10-24 advance).
+      // J5 (FORK.md case 82): `thread` is J5's, on its own spawn and send tools.
+      j5ThreadCommand,
       upCommand,
       statusCommand,
       serviceCommand,

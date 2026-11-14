@@ -12,14 +12,12 @@ import {
   chooseCrewSeatPersona,
   chooseCrewSeatWorkspace,
   chooseCrewHarness,
-  describeCrewSeatWorkspace,
   setCrewSeatBaseRef,
   setCrewSeatStartFromOrigin,
   setCrewSeatWorktree,
   crewModelSelection,
   crewReasoningDescriptor,
   crewSeatDraft,
-  crewSeatStopsForApprovals,
   resolvedCrewSeatDraft,
   setCrewReasoning,
 } from "./crewSeatRuntime";
@@ -200,30 +198,6 @@ describe("crew member edits", () => {
   });
 });
 
-describe("crewSeatStopsForApprovals", () => {
-  const custom = { agentId: null } as const;
-  const persona = { agentId: "critic" } as const;
-  it("flags custom seats and overridden personas whose access is short of Full access", () => {
-    for (const runtimeMode of ["approval-required", "auto-accept-edits", "auto"] as const) {
-      expect(crewSeatStopsForApprovals(custom, { runtimeMode })).toBe(true);
-      expect(crewSeatStopsForApprovals({ ...persona, runtimeMode }, { runtimeMode })).toBe(true);
-    }
-    expect(crewSeatStopsForApprovals(custom, { runtimeMode: "full-access" })).toBe(false);
-    expect(
-      crewSeatStopsForApprovals(
-        { ...persona, runtimeMode: "full-access" },
-        { runtimeMode: "full-access" },
-      ),
-    ).toBe(false);
-  });
-
-  it("leaves persona defaults and unresolved runtimes quiet", () => {
-    // A read-only persona resolves to approval-required with approvals disabled: it never asks.
-    expect(crewSeatStopsForApprovals(persona, { runtimeMode: "approval-required" })).toBe(false);
-    expect(crewSeatStopsForApprovals(custom, undefined)).toBe(false);
-  });
-});
-
 describe("crew seat workspace", () => {
   const options = {
     currentBranch: "j5/main",
@@ -298,26 +272,5 @@ describe("crew seat workspace", () => {
       baseRef: "main",
       startFromOrigin: true,
     });
-  });
-
-  it("describes each choice on the seat row", () => {
-    expect(
-      describeCrewSeatWorkspace({
-        type: "worktree",
-        baseRef: "main",
-        baseCommit: "3f9c2ab1".repeat(5),
-      }),
-    ).toBe("New worktree from main @ 3f9c2ab1");
-    expect(describeCrewSeatWorkspace({ type: "shared" })).toBe("Captain's checkout");
-    expect(describeCrewSeatWorkspace({ type: "worktree", baseRef: "release" })).toBe(
-      "New worktree from release",
-    );
-    expect(
-      describeCrewSeatWorkspace({
-        type: "existing_worktree",
-        worktreePath: "/repo-worktrees/builder",
-        branch: "fix/login",
-      }),
-    ).toBe("Existing worktree on fix/login");
   });
 });

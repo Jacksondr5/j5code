@@ -12,8 +12,8 @@ const J5_DEFINITION_WRITE_TOOLS: ReadonlyArray<string> = ["j5_playbook_save"];
 /**
  * The t3-code tools Codex and Claude pre-approve, so the roster gate stays the only human step.
  * Harnesses prompt for MCP tools not annotated read-only, and approval policy `never` (full access,
- * every saved-agent policy) rejects them. Pre-approved: the J5 verbs, whose handlers authorize each
- * call, `j5_write_artifact` for requested files, and the Subagent verbs Crew members use.
+ * every saved-agent policy) rejects them. Pre-approved: the J5 verbs and `t3_thread_interrupt`,
+ * whose handlers authorize each call, `j5_write_artifact`, and the Subagent verbs.
  */
 export const J5_PREAPPROVED_TOOLS: ReadonlyArray<string> = [
   ...J5_DEFINITION_WRITE_TOOLS,
@@ -32,7 +32,7 @@ export const J5_PREAPPROVED_TOOLS: ReadonlyArray<string> = [
   "delegate_task",
   "task_status",
   "task_cancel",
-  "j5_stop_agent",
+  "t3_thread_interrupt",
   "j5_stop_crew",
   "j5_archive_crew",
   "j5_clear_own_ask",

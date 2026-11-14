@@ -115,7 +115,10 @@ const SEAMS: ReadonlyArray<Seam> = [
     from: "../../j5/a2a/timeline",
     reaches: [
       "resolveJ5FeedMessage(message, props.j5Timeline)",
-      "renderJ5TimelineNotice({ message, timestampLabel })",
+      "renderJ5TimelineNotice({",
+      "timeline: props.j5Timeline,",
+      "prompt={presentation.prompt}",
+      "J5_PROMPT_ICONS[props.prompt.kind]",
       "<J5MessageAuthorLine",
       "<J5OpenSenderThread",
       'from "../../j5/a2a/timelineState"',
@@ -123,6 +126,12 @@ const SEAMS: ReadonlyArray<Seam> = [
       "resolveJ5FeedMessage(entry.message, j5Timeline)",
       "j5FoldHeader(",
     ],
+  },
+  {
+    file: "features/threads/ThreadFeed.tsx",
+    record: "case 104: a Crew notice with nothing for the person takes no row",
+    from: "@t3tools/client-runtime/j5/crew-notices",
+    reaches: ["withoutHiddenCrewNotices(\n    appendGuestPendingMessages("],
   },
   {
     file: "lib/filePreview.test.ts",
@@ -156,7 +165,12 @@ const SEAMS: ReadonlyArray<Seam> = [
     file: "features/threads/thread-work-log.tsx",
     record: "case 99: answered by",
     from: "../../j5/sharing/sharedConversation",
-    reaches: ["<PromptAnswerTail", "!row.workEntry.questionAnswer"],
+    reaches: [
+      "<PromptAnsweredBy",
+      "alone={historyHasQuestion && expanded}",
+      "!row.workEntry.questionAnswer",
+      "historyHasQuestion && expanded ? null : displayText",
+    ],
   },
   {
     file: "features/threads/thread-search-match.tsx",
@@ -171,6 +185,24 @@ const SEAMS: ReadonlyArray<Seam> = [
     reaches: [
       "<AgentIdentityChip assignment={thread.agentPersonaAssignment} inset={titleTextInset} />",
     ],
+  },
+  {
+    file: "features/threads/ThreadAgentsSheet.tsx",
+    record: "case 115: spawned agents in the Agents sheet",
+    from: "../../j5/crew/J5ThreadAgents",
+    reaches: ["<J5ThreadAgents", "subagents.length === 0 && !hasJ5Agents"],
+  },
+  {
+    file: "features/threads/ThreadDetailScreen.tsx",
+    record: "case 115: the Agents pill counts spawned agents",
+    from: "../../j5/crew/J5ThreadAgents",
+    reaches: ["useJ5AgentsPillSegment("],
+  },
+  {
+    file: "features/threads/useThreadListV2.ts",
+    record: "case 115: agent-spawned threads leave the top level",
+    from: "../../j5/crew/spawnedChildren",
+    reaches: ["const threads = useCrewListedThreads(input.threads);"],
   },
   {
     file: "features/settings/SettingsAgentsRouteScreen.tsx",
@@ -203,6 +235,12 @@ const SEAMS: ReadonlyArray<Seam> = [
     reaches: ["...j5SettingsFormRoutes(SETTINGS_PAGE_OPTIONS)"],
   },
   {
+    file: "../metro.config.js",
+    record: "case 113: Metro doesn't watch .j5code",
+    from: "",
+    reaches: ["\\.j5code["],
+  },
+  {
     file: "Stack.tsx",
     record: "case 101: the Inbox route",
     from: "./j5/inbox/routes",
@@ -228,9 +266,15 @@ const SEAMS: ReadonlyArray<Seam> = [
   },
   {
     file: "Stack.tsx",
-    record: "case 98: artifact routes",
-    from: "./j5/artifacts/routes",
-    reaches: ["...j5ThreadArtifactRoutes(THREAD_LINKING_PREFIX, GLASS_HEADER_OPTIONS)"],
+    record: "cases 98 and 114: J5 thread routes (artifacts, Crew proposal review)",
+    from: "./j5/threadRoutes",
+    reaches: ["...j5ThreadRoutes(THREAD_LINKING_PREFIX, GLASS_HEADER_OPTIONS)"],
+  },
+  {
+    file: "features/threads/ThreadDetailScreen.tsx",
+    record: "case 114: J5 rows above the composer",
+    from: "../../j5/composer/J5ComposerControls",
+    reaches: ["<J5ComposerControls"],
   },
   {
     file: "features/threads/ThreadFeed.tsx",

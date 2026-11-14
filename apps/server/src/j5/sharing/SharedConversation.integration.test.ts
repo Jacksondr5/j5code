@@ -49,6 +49,8 @@ const layerFor = (harness: ReturnType<typeof makeHarness>) =>
     Layer.provide(quietLifecycleLayer),
     Layer.provideMerge(PersonAccess.layer),
     Layer.provideMerge(humanPersonRegistryLayer),
+    // The orchestrator's own event sink, memoized with the one inside `harness.layer`.
+    Layer.provide(harness.orchestrator),
     Layer.provideMerge(harness.layer),
   );
 

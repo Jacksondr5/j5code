@@ -590,14 +590,15 @@ export const layer = Layer.effect(
         }
 
         const expectedExchangeIds = before.facts.openExchanges.map((fact) => fact.exchangeId);
-        let interruptRequested = false;
-        if (before.facts.runningTurn !== null) {
+        const interruptRequested = before.facts.runningTurn !== null;
+        // Idle seats too: a retry after a failed delegate stop finds the seat idle, and its
+        // delegates on a linked machine still need stopping before it is archived.
+        if (before.projection.thread.archivedAt === null) {
           yield* stopThread(threadManagement, {
             commandId: input.interruptCommandId,
             threadId: input.target.threadId,
             reason: "Peer Agent archived as part of Crew retirement",
           }).pipe(Effect.mapError(operationError("requesting interruption of the active run")));
-          interruptRequested = true;
         }
 
         if (before.projection.thread.archivedAt === null) {

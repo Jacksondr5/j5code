@@ -24,7 +24,10 @@ import { defaultAgentPersonaModelRoute } from "./agentPersonas.ts";
 import type { StartThreadTurnInput } from "../operations/commands.ts";
 import type { EnvironmentProject, EnvironmentThreadShell } from "../state/shell.ts";
 
-const PLAYBOOK_AUTHOR_ID = "playbook-author";
+export const PLAYBOOK_AUTHOR_ID = "playbook-author";
+/** What a person asks Playbook Author first; mobile prefills it in a new chat. */
+export const PLAYBOOK_AUTHOR_PROMPT =
+  "Help me create a playbook, available across all projects and worktrees in this environment. Save the final YAML with j5_playbook_save. Start by asking what I want it to accomplish.";
 const PLAYBOOK_AUTHOR_INSTRUCTIONS = `You are Playbook Author. Help the user turn a repeatable task into a small, clear agent-led playbook shared across this environment.
 
 1. Start by asking what the playbook should accomplish. Clarify the desired result, inputs, constraints, and evidence of success one focused question at a time. Use details already provided instead of asking again.
@@ -131,7 +134,7 @@ export function playbookAuthorLaunch(input: {
       message: {
         messageId,
         role: "user",
-        text: "Help me create a playbook, available across all projects and worktrees in this environment. Save the final YAML with j5_playbook_save. Start by asking what I want it to accomplish.",
+        text: PLAYBOOK_AUTHOR_PROMPT,
         attachments: [],
       },
       modelSelection,

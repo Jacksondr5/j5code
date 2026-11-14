@@ -82,6 +82,7 @@ import { ThreadRelationshipIcon, threadRelationshipStatusLabel } from "./ThreadR
 import { ThreadLineageWorkflowRow } from "./ThreadLineageWorkflowRow";
 import { AgentRowIdentity } from "../../j5/agents/AgentIdentityChip";
 import { useCanMergeBack } from "../../j5/sharing/access";
+import { J5LineageRows, useJ5LineageRows } from "../../j5/threads/J5LineageRows";
 import { openSideChatTab } from "../../lib/sideChatPane";
 
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
@@ -109,7 +110,7 @@ function resolveThreadLineageWindow<Row>(
   return { visibleRows, hiddenCount: rows.length - visibleRows.length };
 }
 
-function ThreadLineageRowList(props: {
+export function ThreadLineageRowList(props: {
   readonly hiddenCount: number;
   readonly onShowMore: () => void;
   readonly children: ReactNode;
@@ -203,7 +204,7 @@ function relationshipThreadTitle(input: {
 }
 
 /** The full title, since the row truncates it, with what a click does. */
-function LineageTooltipContent(props: { readonly title: string; readonly hint: string }) {
+export function LineageTooltipContent(props: { readonly title: string; readonly hint: string }) {
   return (
     <>
       <span className="block font-medium">{props.title}</span>
@@ -429,6 +430,8 @@ export function ThreadRelationshipsPanel(props: {
   const mergeErrorToastId = useRef<string | null>(null);
   const detachErrorToastId = useRef<string | null>(null);
   const [stoppingId, setStoppingId] = useState<string | null>(null);
+  // J5: Peer Agent placement and Crew membership rows (case 116).
+  const j5Lineage = useJ5LineageRows(props.environmentId, props.threadId);
   // Derive graphs after hooks to preserve their compiler cache.
   const providers = providersByEnvironment.get(props.environmentId);
   const derivedProviderEntries = deriveProviderInstanceEntries(providers ?? []);
@@ -547,6 +550,7 @@ export function ThreadRelationshipsPanel(props: {
       runningCount > 0 ||
       remoteSubagents.length > 0 ||
       delegatedFrom !== undefined ||
+      j5Lineage.length > 0 ||
       // Disconnect lives in this heading, so a thread with only side chats still shows it.
       (canDetach && sideChats.length > 0));
   const sideChatsVisible = props.showSideChats && sideChats.length > 0;
@@ -908,7 +912,8 @@ export function ThreadRelationshipsPanel(props: {
             canDetach ||
             related.length > 0 ||
             active.length > 0 ||
-            delegatedFrom !== undefined
+            delegatedFrom !== undefined ||
+            j5Lineage.length > 0
           }
           data-thread-relationships-panel
           actions={
@@ -945,6 +950,7 @@ export function ThreadRelationshipsPanel(props: {
               />
             </ThreadLineageRowList>
           )}
+          <J5LineageRows environmentId={props.environmentId} rows={j5Lineage} />
           {groups.map((group) => (
             <ThreadLineageGroup key={`${scopedThreadKey(ref)}:${group.id}`} {...group}>
               {(visibleRows) => visibleRows.map(renderRelationshipRow)}
