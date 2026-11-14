@@ -288,8 +288,8 @@ it.effect.each([
               .filter((item) => item.runId === runId && item.type === "assistant_message")
               .map((item) => (item.type === "assistant_message" ? item.text : null));
           assert.deepEqual(replies(parent.id), ["The build passed."]);
-          // The steer's run is the Claude turn already running, on the model it was steered into.
-          assert.deepEqual(after.runs[1]!.modelSelection, parent.modelSelection);
+          // The steer's run drains the running turn without taking back the person's switch.
+          assert.equal(after.thread.modelSelection.model, "claude-opus-4-6");
           assert.deepEqual(replies(after.runs[1]!.id), ["Updated the changelog too."]);
           assert.isTrue(
             after.turnItems.some(
