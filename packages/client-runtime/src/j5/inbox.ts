@@ -279,3 +279,20 @@ export function keepForPersonScopes(personScopes: string) {
     );
   };
 }
+
+/**
+ * What an answer may carry on a server: an answer sends only uploads, so a server that takes no
+ * uploads takes no attachments, and one that takes no file uploads takes images only.
+ */
+export function answerAttachmentSupport(
+  capabilities:
+    | {
+        readonly attachmentUploads?: boolean;
+        readonly fileAttachments?: { readonly maxUploadBytes: number };
+      }
+    | undefined,
+): { readonly maxFileBytes: number | null } | null {
+  return capabilities?.attachmentUploads === true
+    ? { maxFileBytes: capabilities.fileAttachments?.maxUploadBytes ?? null }
+    : null;
+}

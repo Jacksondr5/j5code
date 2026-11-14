@@ -1,4 +1,5 @@
 import type { ChatAttachment, EnvironmentId } from "@t3tools/contracts";
+import { answerAttachmentSupport } from "@t3tools/client-runtime/j5/inbox";
 import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
 import { FileIcon, RefreshCwIcon, XIcon } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -37,11 +38,9 @@ function forget(attachment: AnswerAttachment) {
 /** Whether an environment takes answer attachments: only uploads can go with an answer. */
 export function useAnswerAttachmentSupport(environmentId: EnvironmentId | undefined) {
   const configs = useServerConfigs();
-  const capabilities =
-    environmentId === undefined ? undefined : configs.get(environmentId)?.environment.capabilities;
-  return capabilities?.attachmentUploads === true
-    ? { maxFileBytes: capabilities.fileAttachments?.maxUploadBytes ?? null }
-    : null;
+  return answerAttachmentSupport(
+    environmentId === undefined ? undefined : configs.get(environmentId)?.environment.capabilities,
+  );
 }
 
 /**

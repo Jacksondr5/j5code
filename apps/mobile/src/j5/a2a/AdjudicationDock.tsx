@@ -19,6 +19,11 @@ import { useMarkdownPreviewStyles } from "../../features/files/FileMarkdownPrevi
 import { relativeTime } from "../../lib/time";
 import { SelectableMarkdownText } from "../../native/SelectableMarkdownText";
 import { useCrewMembership } from "../crew/crewMemberships";
+import {
+  AnswerAttachButton,
+  AnswerAttachmentStrip,
+  AnswerPasteTarget,
+} from "../inbox/AnswerAttachments";
 import { useInboxAnswers } from "../inbox/inboxAnswers";
 import { answeredInboxSourcesAtom, openInboxSourcesAtom } from "../inbox/inboxSources";
 import { j5Sharing } from "../sharing/guestAccess";
@@ -209,20 +214,28 @@ function CaptainAsks(props: {
               </View>
             </Animated.ScrollView>
             <View className="gap-2">
-              <TextInput
-                accessibilityLabel={`Answer ${shown.intent}`}
-                multiline
-                placeholder="Type the answer exactly as it should be delivered"
-                value={text}
-                onChangeText={(value) => answers.setAnswerText(shown, value)}
-                style={{ minHeight: 64, maxHeight: 120, textAlignVertical: "top" }}
-              />
+              <AnswerPasteTarget target={shown} disabled={delivering}>
+                <TextInput
+                  accessibilityLabel={`Answer ${shown.intent}`}
+                  multiline
+                  placeholder="Type the answer exactly as it should be delivered"
+                  value={text}
+                  onChangeText={(value) => answers.setAnswerText(shown, value)}
+                  style={{ minHeight: 64, maxHeight: 120, textAlignVertical: "top" }}
+                />
+              </AnswerPasteTarget>
+              <AnswerAttachmentStrip target={shown} disabled={delivering} />
               {error === null ? null : (
                 <Text accessibilityRole="alert" className="text-sm text-danger-foreground">
                   {error}
                 </Text>
               )}
-              <View className="shrink-0 flex-row items-center justify-end gap-2">
+              <View className="shrink-0 flex-row items-center gap-2">
+                <AnswerAttachButton
+                  target={shown}
+                  disabled={!shown.sourceReady || delivering || closedText !== null}
+                />
+                <View className="flex-1" />
                 {closedText !== null ? (
                   <Text className="text-sm text-foreground-muted">{closedText}</Text>
                 ) : (
