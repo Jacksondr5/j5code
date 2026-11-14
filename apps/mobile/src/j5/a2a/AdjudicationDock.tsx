@@ -25,15 +25,14 @@ import { j5Environment } from "../state";
 
 /**
  * The room is for one card, and the playbook bar or a Crew proposal row can sit beside the dock;
- * on iOS nothing scrolls them, so the dock leaves one row's height for them.
+ * nothing may scroll them out of view, so the dock leaves one row's height, with its own
+ * bottom padding, for them.
  */
-const OTHER_ROW_HEIGHT = 64;
+const OTHER_ROW_HEIGHT = 72;
 /** Upstream's own floor for its pending-question card. */
 const DOCK_MIN_HEIGHT = 160;
 /** Two lines of the question stay readable however little room is left. */
 const QUESTION_MIN_HEIGHT = 48;
-/** The card's vertical padding, and the gap and padding around the opened body. */
-const DOCK_PADDING = 24;
 
 const URGENCY = {
   blocking: { label: "Blocking", className: "text-danger-foreground" },
@@ -79,10 +78,10 @@ function CaptainAsks(props: {
   const [open, setOpen] = useState(false);
   const [picked, setPicked] = useState<string | null>(null);
   // Opened, the dock grows with the question up to the room above the composer, which shrinks
-  // with the keyboard. The question gets what its row, answer box and switcher leave, measured
-  // rather than left to flex shrink, which Android did not apply inside the capped card.
+  // with the keyboard. The question gets what the rest of the card leaves, measured as the card's
+  // height less the question's, rather than left to flex shrink, which Android did not apply.
   const { maxHeight } = props;
-  const [heights, setHeights] = useState({ header: 0, controls: 0, switcher: 0 });
+  const [heights, setHeights] = useState({ card: 0, question: 0 });
   const measured = (part: keyof typeof heights) => (event: LayoutChangeEvent) => {
     const height = event.nativeEvent.layout.height;
     setHeights((current) => (current[part] === height ? current : { ...current, [part]: height }));
@@ -96,14 +95,16 @@ function CaptainAsks(props: {
     hasWords: () => true,
   });
   const view = pickShownAsk(asks, picked);
-  const chrome =
-    heights.header + heights.controls + (view?.next == null ? 0 : heights.switcher) + DOCK_PADDING;
-  const questionStyle = useAnimatedStyle(() => ({
-    maxHeight: Math.max(
-      QUESTION_MIN_HEIGHT,
-      Math.max(DOCK_MIN_HEIGHT, maxHeight.value - OTHER_ROW_HEIGHT) - chrome,
-    ),
-  }));
+  const chrome = Math.max(0, heights.card - heights.question);
+  const questionStyle = useAnimatedStyle(
+    () => ({
+      maxHeight: Math.max(
+        QUESTION_MIN_HEIGHT,
+        Math.max(DOCK_MIN_HEIGHT, maxHeight.value - OTHER_ROW_HEIGHT) - chrome,
+      ),
+    }),
+    [chrome],
+  );
   if (!mayAnswer || view === null) return null;
   const { shown, others, next: nextAsk } = view;
   const urgency = URGENCY[shown.urgency];
@@ -121,13 +122,15 @@ function CaptainAsks(props: {
 
   return (
     <View className="px-4 pb-2" testID="adjudication-dock">
-      <View className="rounded-[20px] border-continuous bg-card px-3 py-1">
+      <View
+        className="rounded-[20px] border-continuous bg-card px-3 py-1"
+        onLayout={measured("card")}
+      >
         <Pressable
           accessibilityRole="button"
           accessibilityState={{ expanded: open }}
           accessibilityLabel={`Question for you, ${urgency.label}: ${shown.intent}`}
           onPress={() => setOpen((value) => !value)}
-          onLayout={measured("header")}
           className="min-h-11 shrink-0 flex-row items-center gap-2"
         >
           <SymbolView name="questionmark.bubble" size={14} tintColorClassName="accent-icon-muted" />
@@ -153,7 +156,12 @@ function CaptainAsks(props: {
         </Pressable>
         {open ? (
           <View className="gap-2 pb-2">
-            <Animated.ScrollView key={shown.exchangeId} style={questionStyle} nestedScrollEnabled>
+            <Animated.ScrollView
+              key={shown.exchangeId}
+              style={questionStyle}
+              nestedScrollEnabled
+              onLayout={measured("question")}
+            >
               <View className="gap-2">
                 {markdown(shown.message)}
                 {[shown.escalation?.summary, shown.personaDraft?.summary].map((record) =>
@@ -175,7 +183,7 @@ function CaptainAsks(props: {
                 ))}
               </View>
             </Animated.ScrollView>
-            <View className="gap-2" onLayout={measured("controls")}>
+            <View className="gap-2">
               <TextInput
                 accessibilityLabel={`Answer ${shown.intent}`}
                 multiline
@@ -210,7 +218,6 @@ function CaptainAsks(props: {
           <Pressable
             accessibilityRole="button"
             onPress={() => setPicked(nextAsk.exchangeId)}
-            onLayout={measured("switcher")}
             className="min-h-9 shrink-0 flex-row items-center gap-1 border-t border-border-subtle"
           >
             <Text className="shrink-0 text-xs text-foreground">
