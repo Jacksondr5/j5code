@@ -3,7 +3,6 @@ import {
   mergeCrewRuntimeRequestSources,
   mergeNativeQuestionInboxSources,
 } from "@t3tools/client-runtime/j5/crew-inbox-requests";
-import { mergeWorktreeCleanupSources } from "@t3tools/client-runtime/j5/crew-worktree-cleanup";
 import {
   answeredByLine,
   askWaitsForServerLine,
@@ -13,6 +12,10 @@ import {
   type PresentedHumanInboxItem,
 } from "@t3tools/client-runtime/j5/inbox";
 import { presentParticipantIdentity } from "@t3tools/client-runtime/j5/participant-identity";
+import {
+  type ScopedWorktreeCleanup,
+  worktreeCleanupKey,
+} from "@t3tools/client-runtime/j5/crew-worktree-cleanup";
 import { spansMultipleEnvironments } from "@t3tools/client-runtime/j5/readSources";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { scopedInboxItemKey } from "@t3tools/contracts/j5";
@@ -36,12 +39,18 @@ import { j5Sharing } from "../sharing/guestAccess";
 import { j5Environment } from "../state";
 import { type ClosedItem, useInboxAnswers } from "./inboxAnswers";
 import { AgentQuestionsSection, SeatApprovalsSection } from "./InboxCrewRequests";
-import { WorktreeCleanupsSection } from "./InboxWorktreeCleanups";
+import {
+  DecidedCleanupRow,
+  useWorktreeCleanupInbox,
+  WorktreeCleanupsSection,
+} from "./InboxWorktreeCleanups";
 import { J5RecordPanel } from "./J5RecordPanel";
 import {
   answeredInboxQueryAtom,
   answeredInboxSourcesAtom,
   crewRequestSourcesAtom,
+  decidedWorktreeCleanupQueryAtom,
+  decidedWorktreeCleanupSourcesAtom,
   openInboxQueryAtom,
   openInboxSourcesAtom,
   readInboxSources,
@@ -79,6 +88,7 @@ function refreshAll() {
   refreshInboxSources(openInboxSourcesAtom, openInboxQueryAtom);
   refreshInboxSources(answeredInboxSourcesAtom, answeredInboxQueryAtom);
   refreshInboxSources(worktreeCleanupSourcesAtom, worktreeCleanupQueryAtom);
+  refreshInboxSources(decidedWorktreeCleanupSourcesAtom, decidedWorktreeCleanupQueryAtom);
   refreshCrewRequestSources();
 }
 
@@ -96,13 +106,14 @@ export function InboxScreen() {
   const seatApprovals = mergeCrewRuntimeRequestSources(crewSources);
   const agentQuestions = mergeNativeQuestionInboxSources(crewSources);
   const cleanupSources = useAtomValue(worktreeCleanupSourcesAtom);
-  const cleanups = mergeWorktreeCleanupSources(cleanupSources);
+  const cleanups = useWorktreeCleanupInbox();
   const showEnvironment = spansMultipleEnvironments([
     ...items,
     ...answered,
     ...seatApprovals,
     ...agentQuestions,
-    ...cleanups,
+    ...cleanups.inPlace,
+    ...cleanups.shelf,
   ]);
   const labels = useScopedParticipantLabels(
     [...items, ...answered].map((item) => ({
@@ -148,7 +159,7 @@ export function InboxScreen() {
       {answers.shownItems.length === 0 ? (
         seatApprovals.length > 0 ||
         agentQuestions.length > 0 ||
-        cleanups.length > 0 ? null : loading ? (
+        cleanups.inPlace.length > 0 ? null : loading ? (
           <Text className="text-foreground-muted">Loading your inbox…</Text>
         ) : (
           <EmptyState
@@ -179,8 +190,19 @@ export function InboxScreen() {
           })}
         </View>
       )}
-      <WorktreeCleanupsSection items={cleanups} showEnvironment={showEnvironment} />
-      <AnsweredShelf items={answered} labels={labels} showEnvironment={showEnvironment} />
+      <WorktreeCleanupsSection
+        items={cleanups.inPlace}
+        pendingKey={cleanups.pendingKey}
+        errors={cleanups.errors}
+        onAnswer={(item, removePaths) => void cleanups.answer(item, removePaths)}
+        showEnvironment={showEnvironment}
+      />
+      <AnsweredShelf
+        items={answered}
+        cleanups={cleanups.shelf}
+        labels={labels}
+        showEnvironment={showEnvironment}
+      />
     </>
   );
   const refreshControl = (
@@ -394,11 +416,13 @@ function OpenSenderThread(props: { readonly item: PresentedHumanInboxItem }) {
 
 function AnsweredShelf(props: {
   readonly items: ReadonlyArray<PresentedHumanInboxItem>;
+  readonly cleanups: ReadonlyArray<ScopedWorktreeCleanup>;
   readonly labels: SenderLabels;
   readonly showEnvironment: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  if (props.items.length === 0) return null;
+  const count = props.items.length + props.cleanups.length;
+  if (count === 0) return null;
   return (
     <View className="gap-2">
       <Pressable
@@ -412,7 +436,7 @@ function AnsweredShelf(props: {
           size={12}
           tintColorClassName="accent-icon-muted"
         />
-        <Text className="font-t3-medium text-foreground-muted">Answered {props.items.length}</Text>
+        <Text className="font-t3-medium text-foreground-muted">Answered {count}</Text>
       </Pressable>
       {open
         ? props.items.map((item) => (
@@ -420,6 +444,15 @@ function AnsweredShelf(props: {
               key={scopedInboxItemKey(item)}
               item={item}
               labels={props.labels}
+              showEnvironment={props.showEnvironment}
+            />
+          ))
+        : null}
+      {open
+        ? props.cleanups.map((item) => (
+            <DecidedCleanupRow
+              key={worktreeCleanupKey(item)}
+              item={item}
               showEnvironment={props.showEnvironment}
             />
           ))

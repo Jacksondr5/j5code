@@ -66,6 +66,14 @@ export const worktreeCleanupSourcesAtom = createJ5ReadSourcesAtom({
   label: "mobile-j5:worktree-cleanup-sources",
   queryAtom: worktreeCleanupQueryAtom,
 });
+export const decidedWorktreeCleanupQueryAtom = (environmentId: EnvironmentId) =>
+  j5Environment.crewWorktreeCleanups({ environmentId, input: { status: "decided" } });
+/** The cleanups an Owner has answered, for their results and the Answered shelf. */
+export const decidedWorktreeCleanupSourcesAtom = createJ5ReadSourcesAtom({
+  ...sourcesInput,
+  label: "mobile-j5:decided-worktree-cleanup-sources",
+  queryAtom: decidedWorktreeCleanupQueryAtom,
+});
 
 export const crewRequestsQueryAtom = (environmentId: EnvironmentId) =>
   j5Environment.crewRuntimeRequests({ environmentId, input: {} });
@@ -160,5 +168,16 @@ export const readInboxSources = () =>
     ...readConnectedSources(openInboxSourcesAtom, openInboxQueryAtom),
     ...readConnectedSources(answeredInboxSourcesAtom, answeredInboxQueryAtom),
     ...readConnectedSources(worktreeCleanupSourcesAtom, worktreeCleanupQueryAtom),
+    ...readConnectedSources(decidedWorktreeCleanupSourcesAtom, decidedWorktreeCleanupQueryAtom),
     readCrewRequestSources(),
+  ]);
+
+/** Reads one server's cleanups and its count again after an answer, and settles when they have. */
+export const readWorktreeCleanupSources = (environmentId: EnvironmentId) =>
+  Promise.all([
+    ...readConnectedSources(worktreeCleanupSourcesAtom, worktreeCleanupQueryAtom, [environmentId]),
+    ...readConnectedSources(decidedWorktreeCleanupSourcesAtom, decidedWorktreeCleanupQueryAtom, [
+      environmentId,
+    ]),
+    ...readConnectedSources(inboxCountSourcesAtom, inboxCountQueryAtom, [environmentId]),
   ]);

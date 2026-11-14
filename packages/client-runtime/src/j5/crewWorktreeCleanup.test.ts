@@ -1,4 +1,4 @@
-import { ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import type { CrewWorktreeCleanupEntry } from "@t3tools/contracts/j5";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -12,9 +12,12 @@ import {
   outcomeReason,
   outcomeSummary,
   pickedCleanupPaths,
+  placeWorktreeCleanups,
   pullRequestLabel,
   sliceCleanupRows,
   toggleCleanupPath,
+  type ScopedWorktreeCleanup,
+  worktreeCleanupKey,
 } from "./crewWorktreeCleanup.ts";
 
 const entry = (
@@ -94,6 +97,77 @@ describe("picking worktrees to remove", () => {
     const picked = new Set(["/wt/c", "/wt/gone", "/wt/a"]);
     expect(pickedCleanupPaths(picked, entries)).toEqual(["/wt/a", "/wt/c"]);
     expect(cleanupButtons(picked, entries).removeLabel).toBe("Remove selected (2)");
+  });
+});
+
+describe("where each cleanup shows", () => {
+  const item = (id: string, status: "open" | "decided"): ScopedWorktreeCleanup => ({
+    id,
+    crewInstanceId: `crew:${id}`,
+    crewName: id,
+    projectId: "project",
+    captainThreadId: ThreadId.make(`captain:${id}`),
+    filedAt: "2026-11-14T10:00:00.000Z",
+    status,
+    decidedAt: status === "open" ? null : "2026-11-14T11:00:00.000Z",
+    entries: [entry(id, status === "open" ? {} : { outcome: "removed" })],
+    environmentId: EnvironmentId.make("env"),
+    environmentLabel: "Laptop",
+    connected: true,
+    sourceReady: true,
+  });
+  const ids = (items: ReadonlyArray<ScopedWorktreeCleanup>) =>
+    items.map((shown) => `${shown.id}:${shown.status}`);
+
+  it("keeps an item answered here in place, as answered and then as read, and shelves the rest", () => {
+    const [mine, theirs, older] = [
+      item("mine", "open"),
+      item("theirs", "open"),
+      item("older", "decided"),
+    ];
+    const answered = { ...mine, status: "decided" as const };
+
+    // Before any answer: the open ones in place, the decided one on the shelf.
+    expect(
+      ids(
+        placeWorktreeCleanups({ open: [mine, theirs], decided: [older], answeredHere: new Map() })
+          .inPlace,
+      ),
+    ).toEqual(["mine:open", "theirs:open"]);
+
+    // Answered here: its answer stands in place until the reads catch up.
+    const here = new Map([[worktreeCleanupKey(mine), answered]]);
+    expect(
+      ids(
+        placeWorktreeCleanups({ open: [mine, theirs], decided: [older], answeredHere: here })
+          .inPlace,
+      ),
+    ).toEqual(["mine:decided", "theirs:open"]);
+
+    // After the reads: the decided read's copy stays in place, after the open ones, not on the shelf.
+    const read = { ...answered, decidedAt: "2026-11-14T12:00:00.000Z" };
+    const placed = placeWorktreeCleanups({
+      open: [theirs],
+      decided: [read, older],
+      answeredHere: here,
+    });
+    expect(placed.inPlace).toEqual([theirs, read]);
+    expect(ids(placed.shelf)).toEqual(["older:decided"]);
+  });
+
+  it("holds a refused answer back until the decided read shows how it was answered", () => {
+    const mine = item("mine", "open");
+    const refused = new Map([[worktreeCleanupKey(mine), null]]);
+    expect(placeWorktreeCleanups({ open: [], decided: [], answeredHere: refused }).inPlace).toEqual(
+      [],
+    );
+    const elsewhere = item("mine", "decided");
+    expect(
+      placeWorktreeCleanups({ open: [], decided: [elsewhere], answeredHere: refused }),
+    ).toEqual({
+      inPlace: [elsewhere],
+      shelf: [],
+    });
   });
 });
 
