@@ -1519,7 +1519,12 @@ function peerCli(
  * the issuer stores the holder's messages and the holder polls, so the issuer never connects.
  */
 export function peerSteps(input: {
-  readonly issuer: { readonly home: string; readonly origin: string };
+  readonly issuer: {
+    readonly home: string;
+    readonly origin: string;
+    /** Where the holder reaches the issuer when that differs from `origin`, as a saved record can. */
+    readonly peerOrigin?: string | undefined;
+  };
   readonly holder: {
     readonly home: string;
     readonly origin: string;
@@ -1553,7 +1558,7 @@ export function peerSteps(input: {
       "--origin",
       holder.origin,
       "--peer-origin",
-      issuer.origin,
+      issuer.peerOrigin ?? issuer.origin,
       "--credential",
       credential,
       ...(poll ? ["--poll"] : []),
@@ -1676,6 +1681,8 @@ async function peerServers(
 interface ListedPeer {
   readonly environmentId: string;
   readonly label: string;
+  /** Where this server reaches the peer; null for a peer that stores its messages here. */
+  readonly origin?: string | null;
   readonly lastError: string | null;
 }
 
@@ -1766,7 +1773,11 @@ export function peerStatus(input: {
       peerRepair(
         input.paths,
         peerSteps({
-          issuer: server(holder === "Local" ? "Remote" : "Local"),
+          // `peer add` refuses to move a known peer, so it is given the origin the holder saved.
+          issuer: {
+            ...server(holder === "Local" ? "Remote" : "Local"),
+            peerOrigin: records[holder].origin ?? undefined,
+          },
           holder: server(holder),
           poll: input.poll,
         }),

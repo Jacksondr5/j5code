@@ -957,6 +957,22 @@ describe("peerStatus", () => {
     assert.isTrue(failing.repairs[0]!.endsWith(" --poll"));
   });
 
+  it("gives the holder's saved origin, which a test may have moved", () => {
+    const failing = status({
+      ...healthy,
+      remote: list([
+        { ...record("local-id", "Local", "rejected"), origin: "http://localhost:4001" },
+      ]),
+    });
+    if (failing.kind !== "failing") throw new Error(`expected failing, got ${failing.kind}`);
+    assert.include(failing.repairs[0], "--peer-origin http://localhost:4001 --credential");
+    // The credential is still issued through the issuer's own address.
+    assert.include(
+      failing.repairs[0],
+      "credential --base-dir /local-home --origin http://127.0.0.1:4001",
+    );
+  });
+
   it("quotes paths a shell would split or expand", () => {
     const failing = peerStatus({
       paths: { worktree: "/tmp/j5 work" },
