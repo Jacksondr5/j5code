@@ -15,13 +15,12 @@ import Animated, { type DerivedValue, useAnimatedStyle } from "react-native-rean
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { AppText as Text, AppTextInput as TextInput } from "../../components/ui/AppText";
 import { Button } from "../../components/ui/Button";
-import { useMarkdownPreviewStyles } from "../../features/files/FileMarkdownPreview";
 import { relativeTime } from "../../lib/time";
-import { SelectableMarkdownText } from "../../native/SelectableMarkdownText";
 import { useCrewMembership } from "../crew/crewMemberships";
 import { useInboxAnswers } from "../inbox/inboxAnswers";
 import { answeredInboxSourcesAtom, openInboxSourcesAtom } from "../inbox/inboxSources";
 import { j5Sharing } from "../sharing/guestAccess";
+import { SenderMarkdown } from "../artifacts/WorkspaceMarkdown";
 import { j5Environment } from "../state";
 
 /**
@@ -84,7 +83,6 @@ function CaptainAsks(props: {
   });
   const mayAnswer = useAtomValue(j5Environment.answerHumanExchange.permissionAtom(environmentId));
   const access = useAtomValue(j5Sharing.connectionAccess(environmentId));
-  const styles = useMarkdownPreviewStyles();
   const [open, setOpen] = useState(false);
   const [picked, setPicked] = useState<string | null>(null);
   // Opened, the dock grows with the question up to the room above the composer, which shrinks
@@ -137,7 +135,12 @@ function CaptainAsks(props: {
   const delivering = answers.pendingKey !== null;
   const error = answers.errorFor(shown);
   const markdown = (value: string) => (
-    <SelectableMarkdownText markdown={value} textStyle={styles.nativeTextStyle} />
+    <SenderMarkdown
+      markdown={value}
+      environmentId={shown.environmentId}
+      projectId={shown.projectId}
+      senderThreadId={shown.senderThreadId}
+    />
   );
 
   return (

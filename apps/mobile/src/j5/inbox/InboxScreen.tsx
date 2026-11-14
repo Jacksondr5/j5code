@@ -29,13 +29,12 @@ import { SymbolView } from "../../components/ui/AppSymbol";
 import { AppText as Text, AppTextInput as TextInput } from "../../components/ui/AppText";
 import { Button } from "../../components/ui/Button";
 import { EmptyState } from "../../components/ui/EmptyState";
-import { useMarkdownPreviewStyles } from "../../features/files/FileMarkdownPreview";
 import { useOpenLinkedThread } from "../../features/threads/useOpenLinkedThread";
 import { relativeTime } from "../../lib/time";
 import { NativeScrollViewMarker } from "../../native/NativeScrollViewMarker";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
-import { SelectableMarkdownText } from "../../native/SelectableMarkdownText";
 import { j5Sharing } from "../sharing/guestAccess";
+import { SenderMarkdown } from "../artifacts/WorkspaceMarkdown";
 import { j5Environment } from "../state";
 import { type ClosedItem, useInboxAnswers } from "./inboxAnswers";
 import { AgentQuestionsSection, SeatApprovalsSection } from "./InboxCrewRequests";
@@ -323,14 +322,14 @@ function InboxItem(props: {
       </Pressable>
       {expanded ? (
         <View className="mt-3 gap-3 border-t border-border-subtle pt-3">
-          <InboxMessage markdown={item.message} />
+          <InboxMessage item={item} markdown={item.message} />
           {[item.escalation?.summary, item.personaDraft?.summary].map((record) =>
             record === undefined ? null : <J5RecordPanel key={record} text={record} />,
           )}
           {item.followUps?.map((followUp) => (
             <View className="gap-1" key={followUp.messageId}>
               <Text className="text-xs font-t3-medium text-foreground-muted">Follow-up</Text>
-              <InboxMessage markdown={followUp.message} />
+              <InboxMessage item={item} markdown={followUp.message} />
             </View>
           ))}
           {closedText === null && !item.connected ? (
@@ -380,9 +379,19 @@ function InboxItem(props: {
   );
 }
 
-function InboxMessage(props: { readonly markdown: string }) {
-  const styles = useMarkdownPreviewStyles();
-  return <SelectableMarkdownText markdown={props.markdown} textStyle={styles.nativeTextStyle} />;
+/** An ask's words, with its links and images read in the sender's thread, as web reads them. */
+function InboxMessage(props: {
+  readonly item: PresentedHumanInboxItem;
+  readonly markdown: string;
+}) {
+  return (
+    <SenderMarkdown
+      markdown={props.markdown}
+      environmentId={props.item.environmentId}
+      projectId={props.item.projectId}
+      senderThreadId={props.item.senderThreadId}
+    />
+  );
 }
 
 function OpenSenderThread(props: { readonly item: PresentedHumanInboxItem }) {
