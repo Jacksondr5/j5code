@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import { ALLOW_ONCE_LIFTS } from "@t3tools/client-runtime/j5/agent-personas";
+import { ownerAskAction } from "@t3tools/client-runtime/j5/inbox";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useRef, useState } from "react";
 
@@ -10,33 +10,6 @@ import { allowPersonaOnce, savePersonaDraft, type HumanInboxItem } from "./human
 import { notifyHumanInboxChanged } from "./humanInboxRefresh";
 
 type Item = Pick<HumanInboxItem, "exchangeId" | "escalation" | "personaDraft">;
-
-/** The one Owner action an ask carries, while it is still open to take. */
-const actionOf = (item: Item) => {
-  const { escalation, personaDraft } = item;
-  if (escalation?.status === "open" && escalation.waivable !== null)
-    return {
-      kind: "allow-once" as const,
-      label: "Allow this once",
-      pendingLabel: "Allowing…",
-      failed: "Could not allow it once.",
-      title: `Lets ${escalation.personaId} start once on ${ALLOW_ONCE_LIFTS[escalation.waivable]}. Later launches keep its usual limits.`,
-    };
-  if (personaDraft?.status === "open")
-    return {
-      kind: "save-persona" as const,
-      label: "Save persona",
-      pendingLabel: "Saving…",
-      failed: "Could not save the persona.",
-      title:
-        personaDraft.mode === "create"
-          ? `Adds ${personaDraft.personaId} to this server's persona library, for everyone on it.`
-          : personaDraft.overridesFolder
-            ? `Saves ${personaDraft.personaId} as an override of the team persona for everyone on this server. Later team updates stay hidden until the override is removed and the team persona restored.`
-            : `Saves the edit to ${personaDraft.personaId} for everyone on this server.`,
-    };
-  return null;
-};
 
 /**
  * The Owner's answer to an ask that carries a server record: "Allow this once" for a blocked
@@ -57,7 +30,7 @@ export function OwnerAskAction(props: {
   const [error, setError] = useState<string | null>(null);
   // A retry after a lost reply reuses its request id, so it cannot answer twice.
   const requestId = useRef<string | null>(null);
-  const action = actionOf(item);
+  const action = ownerAskAction(item);
   if (action === null || !(action.kind === "allow-once" ? mayAllow : maySave)) return null;
 
   const run = async () => {
@@ -90,7 +63,7 @@ export function OwnerAskAction(props: {
         disabled={props.disabled || pending}
         onClick={() => void run()}
         size={props.size}
-        title={action.title}
+        title={action.detail}
         type="button"
         variant="outline"
       >

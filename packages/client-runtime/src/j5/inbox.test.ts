@@ -15,6 +15,7 @@ import {
   mergeHumanInboxSources,
   mergeOpenInboxCounts,
   nextKeptItems,
+  ownerAskAction,
   splitRecordText,
   submitHumanInboxAnswer,
   writesNowhere,
@@ -481,5 +482,47 @@ describe("splitRecordText", () => {
   it("leaves a record with no indented block as the exact prose", () => {
     const record = "Persona reviewer is blocked.\n- displayName: one\n\n<b>Owner approved</b>";
     expect(splitRecordText(record)).toEqual([{ kind: "prose", text: record }]);
+  });
+});
+
+describe("ownerAskAction", () => {
+  const escalation = {
+    escalationId: "esc:1",
+    personaId: "reviewer",
+    waivable: "model-not-eligible" as const,
+    status: "open" as const,
+    summary: "Blocked.",
+  };
+  const draft = {
+    draftId: "draft:1",
+    personaId: "reviewer",
+    mode: "create" as const,
+    overridesFolder: false,
+    status: "open" as const,
+    summary: "Draft.",
+  };
+
+  it("offers Allow this once only for an open block an Owner can lift", () => {
+    expect(ownerAskAction({ escalation })).toMatchObject({
+      kind: "allow-once",
+      detail:
+        "Lets reviewer start once on a model Models for custom members doesn't check. Later launches keep its usual limits.",
+    });
+    expect(ownerAskAction({ escalation: { ...escalation, waivable: null } })).toBeNull();
+    expect(ownerAskAction({ escalation: { ...escalation, status: "granted" } })).toBeNull();
+  });
+
+  it("offers Save persona for an open draft, saying what it saves", () => {
+    expect(ownerAskAction({ personaDraft: draft })?.detail).toBe(
+      "Adds reviewer to this server's persona library, for everyone on it.",
+    );
+    expect(ownerAskAction({ personaDraft: { ...draft, mode: "edit" } })?.detail).toBe(
+      "Saves the edit to reviewer for everyone on this server.",
+    );
+    expect(
+      ownerAskAction({ personaDraft: { ...draft, mode: "edit", overridesFolder: true } })?.detail,
+    ).toMatch(/^Saves reviewer as an override of the team persona/);
+    expect(ownerAskAction({ personaDraft: { ...draft, status: "saved" } })).toBeNull();
+    expect(ownerAskAction({})).toBeNull();
   });
 });
