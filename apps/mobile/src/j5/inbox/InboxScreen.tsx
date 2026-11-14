@@ -388,7 +388,6 @@ function InboxMessage(props: {
     <SenderMarkdown
       markdown={props.markdown}
       environmentId={props.item.environmentId}
-      projectId={props.item.projectId}
       senderThreadId={props.item.senderThreadId}
     />
   );

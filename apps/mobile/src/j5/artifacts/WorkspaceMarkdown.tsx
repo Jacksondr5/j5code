@@ -1,6 +1,5 @@
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { type EnvironmentId, ProjectId, ThreadId } from "@t3tools/contracts";
-import { projectScriptCwd } from "@t3tools/shared/projectScripts";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { type EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { useNavigation } from "@react-navigation/native";
 
 import { useMarkdownPreviewStyles } from "../../features/files/FileMarkdownPreview";
@@ -12,7 +11,7 @@ import { resolveMarkdownLinkPresentation } from "../../lib/markdownLinks";
 import { tryOpenExternalUrl } from "../../lib/openExternalUrl";
 import { SelectableMarkdownText } from "../../native/SelectableMarkdownText";
 import { useMarkdownImageSource } from "../../native/useMarkdownImageSource";
-import { useProject, useThreadShell } from "../../state/entities";
+import { useThreadCwd } from "../../state/use-selected-thread-worktree";
 import {
   artifactLinkContextMenu,
   onArtifactLinkMenuAction,
@@ -67,23 +66,22 @@ export function WorkspaceMarkdown(props: {
 
 /**
  * An agent's words to a person, read as web reads them: in the sender's thread and its worktree
- * (or its project's root). Without a sender thread on this device, the links stay plain text.
+ * (or its project's root). Until that is known on this device, the links stay plain text.
  */
 export function SenderMarkdown(props: {
   readonly markdown: string;
   readonly environmentId: EnvironmentId;
-  readonly projectId: string;
   readonly senderThreadId: string | null;
 }) {
   const navigation = useNavigation();
   const styles = useMarkdownPreviewStyles();
-  const thread = useThreadShell(
+  // Loads the thread when its shell isn't here, so a worktree's links never resolve in the root.
+  const workspaceRoot = useThreadCwd(
     props.senderThreadId === null
       ? null
       : scopeThreadRef(props.environmentId, ThreadId.make(props.senderThreadId)),
   );
-  const project = useProject(scopeProjectRef(props.environmentId, ProjectId.make(props.projectId)));
-  if (props.senderThreadId === null || project === null) {
+  if (props.senderThreadId === null || workspaceRoot === null) {
     return <SelectableMarkdownText markdown={props.markdown} textStyle={styles.nativeTextStyle} />;
   }
   return (
@@ -93,10 +91,7 @@ export function SenderMarkdown(props: {
         navigation,
         environmentId: String(props.environmentId),
         threadId: props.senderThreadId,
-        workspaceRoot: projectScriptCwd({
-          project: { cwd: project.workspaceRoot },
-          worktreePath: thread?.worktreePath ?? null,
-        }),
+        workspaceRoot,
       }}
     />
   );

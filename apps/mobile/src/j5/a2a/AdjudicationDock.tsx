@@ -138,7 +138,6 @@ function CaptainAsks(props: {
     <SenderMarkdown
       markdown={value}
       environmentId={shown.environmentId}
-      projectId={shown.projectId}
       senderThreadId={shown.senderThreadId}
     />
   );
