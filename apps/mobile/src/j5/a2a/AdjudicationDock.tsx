@@ -8,7 +8,9 @@ import {
 import { closedLine, mergeHumanInboxSources } from "@t3tools/client-runtime/j5/inbox";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { useState } from "react";
-import { Pressable, ScrollView, View } from "react-native";
+import { type LayoutChangeEvent, Pressable, View } from "react-native";
+import { useReanimatedKeyboardAnimation } from "react-native-keyboard-controller";
+import Animated, { type DerivedValue, useAnimatedStyle } from "react-native-reanimated";
 
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { AppText as Text, AppTextInput as TextInput } from "../../components/ui/AppText";
@@ -22,8 +24,21 @@ import { answeredInboxSourcesAtom, openInboxSourcesAtom } from "../inbox/inboxSo
 import { j5Sharing } from "../sharing/guestAccess";
 import { j5Environment } from "../state";
 
-/** About three lines of the question while the dock is opened but not in full. */
-const EXCERPT_HEIGHT = 72;
+/**
+ * The room is for one card, and the playbook bar or a Crew proposal row can sit beside the dock;
+ * nothing may scroll them out of view, so the dock leaves one row's height, with its own
+ * bottom padding, for them.
+ */
+const OTHER_ROW_HEIGHT = 72;
+/** Upstream's own floor for its pending-question card. */
+const DOCK_MIN_HEIGHT = 160;
+/** Two lines of the question stay readable however little room is left. */
+const QUESTION_MIN_HEIGHT = 48;
+/**
+ * What the rest of an opened card takes (its row, answer box, Answer and switcher), until the
+ * first layout measures it, so the dock never opens past the room for a frame.
+ */
+const CHROME_ESTIMATE = 220;
 
 const URGENCY = {
   blocking: { label: "Blocking", className: "text-danger-foreground" },
@@ -39,6 +54,10 @@ const URGENCY = {
 export function AdjudicationDock(props: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
+  /** The room upstream's pending-question card gets, which includes the composer's. */
+  readonly maxHeight: DerivedValue<number>;
+  readonly composerHeight: number;
+  readonly composerBottomInset: number;
 }) {
   const membership = useCrewMembership(scopeThreadRef(props.environmentId, props.threadId));
   // The Inbox is read only for a Captain's thread.
@@ -48,6 +67,9 @@ export function AdjudicationDock(props: {
 function CaptainAsks(props: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
+  readonly maxHeight: DerivedValue<number>;
+  readonly composerHeight: number;
+  readonly composerBottomInset: number;
 }) {
   const { environmentId, threadId } = props;
   const openSources = useAtomValue(openInboxSourcesAtom);
@@ -64,10 +86,19 @@ function CaptainAsks(props: {
   const access = useAtomValue(j5Sharing.connectionAccess(environmentId));
   const styles = useMarkdownPreviewStyles();
   const [open, setOpen] = useState(false);
-  const [full, setFull] = useState(false);
   const [picked, setPicked] = useState<string | null>(null);
-  // The ask whose question runs past the excerpt's height.
-  const [overflowing, setOverflowing] = useState<string | null>(null);
+  // Opened, the dock grows with the question up to the room above the composer, which shrinks
+  // with the keyboard. The question gets what the rest of the card leaves, measured as the card's
+  // height less the question's, rather than left to flex shrink, which Android did not apply.
+  const { maxHeight, composerHeight, composerBottomInset } = props;
+  // Upstream's room takes off the bottom inset even while the keyboard covers it, which left
+  // the dock that much short with the keyboard up, so the dock adds it back as the keyboard rises.
+  const { progress: keyboardProgress } = useReanimatedKeyboardAnimation();
+  const [heights, setHeights] = useState({ card: 0, question: 0 });
+  const measured = (part: keyof typeof heights) => (event: LayoutChangeEvent) => {
+    const height = event.nativeEvent.layout.height;
+    setHeights((current) => (current[part] === height ? current : { ...current, [part]: height }));
+  };
 
   // An ask that closed while the person had typed into it stays, with who answered (Inbox AC17).
   const asks = adjudicationAsks({
@@ -77,6 +108,23 @@ function CaptainAsks(props: {
     hasWords: () => true,
   });
   const view = pickShownAsk(asks, picked);
+  const chrome =
+    heights.question === 0 ? CHROME_ESTIMATE : Math.max(0, heights.card - heights.question);
+  const questionStyle = useAnimatedStyle(
+    () => ({
+      maxHeight: Math.max(
+        QUESTION_MIN_HEIGHT,
+        Math.max(
+          DOCK_MIN_HEIGHT,
+          maxHeight.value +
+            keyboardProgress.value * composerBottomInset -
+            composerHeight -
+            OTHER_ROW_HEIGHT,
+        ) - chrome,
+      ),
+    }),
+    [chrome, composerHeight, composerBottomInset],
+  );
   if (!mayAnswer || view === null) return null;
   const { shown, others, next: nextAsk } = view;
   const urgency = URGENCY[shown.urgency];
@@ -88,21 +136,26 @@ function CaptainAsks(props: {
   const text = answers.answerText(shown);
   const delivering = answers.pendingKey !== null;
   const error = answers.errorFor(shown);
-  // Measured, not counted: a few short lines can still wrap past the excerpt on a phone.
-  const longer = full || overflowing === shown.exchangeId;
   const markdown = (value: string) => (
     <SelectableMarkdownText markdown={value} textStyle={styles.nativeTextStyle} />
   );
 
   return (
     <View className="px-4 pb-2" testID="adjudication-dock">
-      <View className="rounded-[20px] border-continuous bg-card px-3 py-1">
+      <View
+        className="rounded-[20px] border-continuous bg-card px-3 py-1"
+        onLayout={measured("card")}
+      >
         <Pressable
           accessibilityRole="button"
           accessibilityState={{ expanded: open }}
           accessibilityLabel={`Question for you, ${urgency.label}: ${shown.intent}`}
-          onPress={() => setOpen((value) => !value)}
-          className="min-h-11 flex-row items-center gap-2"
+          onPress={() => {
+            // A folded card holds no question, so its next opening measures afresh.
+            if (open) setHeights((current) => ({ ...current, question: 0 }));
+            setOpen(!open);
+          }}
+          className="min-h-11 shrink-0 flex-row items-center gap-2"
         >
           <SymbolView name="questionmark.bubble" size={14} tintColorClassName="accent-icon-muted" />
           <View className="min-w-0 flex-1">
@@ -127,15 +180,12 @@ function CaptainAsks(props: {
         </Pressable>
         {open ? (
           <View className="gap-2 pb-2">
-            <ScrollView
-              // Remounted per ask, so each reports its own content size.
+            <Animated.ScrollView
               key={shown.exchangeId}
-              style={{ maxHeight: full ? 280 : EXCERPT_HEIGHT }}
-              scrollEnabled={full}
+              // Hidden, not removed, until its first layout is measured, so no frame shows it unsized.
+              style={[questionStyle, heights.question === 0 ? { opacity: 0 } : null]}
               nestedScrollEnabled
-              onContentSizeChange={(_width, height) =>
-                setOverflowing(height > EXCERPT_HEIGHT ? shown.exchangeId : null)
-              }
+              onLayout={measured("question")}
             >
               <View className="gap-2">
                 {markdown(shown.message)}
@@ -157,55 +207,43 @@ function CaptainAsks(props: {
                   </View>
                 ))}
               </View>
-            </ScrollView>
-            {longer ? (
-              <Pressable
-                accessibilityRole="button"
-                hitSlop={6}
-                onPress={() => setFull((value) => !value)}
-              >
-                <Text className="text-xs font-t3-medium text-foreground-secondary">
-                  {full ? "Show less" : "Show full question"}
+            </Animated.ScrollView>
+            <View className="gap-2">
+              <TextInput
+                accessibilityLabel={`Answer ${shown.intent}`}
+                multiline
+                placeholder="Type the answer exactly as it should be delivered"
+                value={text}
+                onChangeText={(value) => answers.setAnswerText(shown, value)}
+                style={{ minHeight: 64, maxHeight: 120, textAlignVertical: "top" }}
+              />
+              {error === null ? null : (
+                <Text accessibilityRole="alert" className="text-sm text-danger-foreground">
+                  {error}
                 </Text>
-              </Pressable>
-            ) : null}
-            <TextInput
-              accessibilityLabel={`Answer ${shown.intent}`}
-              multiline
-              placeholder="Type the answer exactly as it should be delivered"
-              value={text}
-              onChangeText={(value) => answers.setAnswerText(shown, value)}
-              style={{ minHeight: 44, maxHeight: 120, textAlignVertical: "top" }}
-            />
-            {error === null ? null : (
-              <Text accessibilityRole="alert" className="text-sm text-danger-foreground">
-                {error}
-              </Text>
-            )}
-            <View className="flex-row items-center justify-end gap-2">
-              {closedText !== null ? (
-                <Text className="text-sm text-foreground-muted">{closedText}</Text>
-              ) : (
-                <Button
-                  label={delivering ? "Delivering…" : "Answer"}
-                  tone="primary"
-                  size="compact"
-                  loading={delivering}
-                  disabled={!shown.sourceReady || delivering || text.length === 0}
-                  onPress={() => void answers.answer(shown)}
-                />
               )}
+              <View className="shrink-0 flex-row items-center justify-end gap-2">
+                {closedText !== null ? (
+                  <Text className="text-sm text-foreground-muted">{closedText}</Text>
+                ) : (
+                  <Button
+                    label={delivering ? "Delivering…" : "Answer"}
+                    tone="primary"
+                    size="compact"
+                    loading={delivering}
+                    disabled={!shown.sourceReady || delivering || text.length === 0}
+                    onPress={() => void answers.answer(shown)}
+                  />
+                )}
+              </View>
             </View>
           </View>
         ) : null}
         {nextAsk !== null ? (
           <Pressable
             accessibilityRole="button"
-            onPress={() => {
-              setPicked(nextAsk.exchangeId);
-              setFull(false);
-            }}
-            className="min-h-9 flex-row items-center gap-1 border-t border-border-subtle"
+            onPress={() => setPicked(nextAsk.exchangeId)}
+            className="min-h-9 shrink-0 flex-row items-center gap-1 border-t border-border-subtle"
           >
             <Text className="shrink-0 text-xs text-foreground">
               {others.length} more {others.length === 1 ? "question" : "questions"}
