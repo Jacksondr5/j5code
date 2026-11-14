@@ -260,13 +260,13 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Upstream:** a resolved question's work row folds to one truncating label, so a long question hides its answer. Opened, it draws the readable answer, then the raw item as JSON.
 
-**J5:** folded, the row shows the trimmed question and who answered it, or just that it was answered. Opened, it shows the full question and the answer, without the trimmed question above them or the raw item below. An opened answer in an unshared thread reads "Answered". Other work rows, approvals included, keep upstream's detail.
+**J5:** folded, the row shows the trimmed question and who answered it, or just that it was answered. Opened, it shows the full question and the answer, without the trimmed question above them or the raw item below. Both rows say "answered" in lowercase, as web does: after the folded question ("· answered", or "· answered by Priya" in a shared thread), and in the opened row's header. Other work rows, approvals included, keep upstream's detail.
 
 **Why:** Jackson saw a giant JSON blob under an answer, and a folded row that read as only the question, on his iPhone at Checkpoint 2. His direction was to minimize the row to the question, the answer and who answered. Web draws no raw item either. At Checkpoint 3 the folded row split its width between a trimmed question, the answer and the name, so little of any showed, and the opened row repeated the question. So the folded row keeps the question and the name, and the answer moves to the opened row.
 
 **Consequences:** a small edit in upstream's mobile `thread-work-log.tsx`, carried at each advance (FORK.md case 99). If upstream stops drawing the raw item, drop J5's half of that edit.
 
-**Decided:** Jackson, 2026-11-01, at Checkpoint 2 ([#891](https://github.com/Jacksondr5/j5code/issues/891)), and 2026-11-07, at Checkpoint 3 ([#959](https://github.com/Jacksondr5/j5code/issues/959)), and 2026-11-14, at Checkpoint 5 ([#1028](https://github.com/Jacksondr5/j5code/issues/1028)). Recorded in FORK.md case 99.
+**Decided:** Jackson, 2026-11-01, at Checkpoint 2 ([#891](https://github.com/Jacksondr5/j5code/issues/891)), and 2026-11-07, at Checkpoint 3 ([#959](https://github.com/Jacksondr5/j5code/issues/959)), and 2026-11-14, at Checkpoint 5 ([#1028](https://github.com/Jacksondr5/j5code/issues/1028)), and 2026-11-14, at Checkpoint 6 ([#1035](https://github.com/Jacksondr5/j5code/issues/1035)). Recorded in FORK.md case 99.
 
 ### Storage, install, and identity
 
@@ -680,3 +680,4 @@ J5 kept a run from resuming after a usage-limit reset when the person had presse
 - 2026-11-07 — D45: a folded answered question shows its trimmed question and who answered, and the opened row drops the repeated question (Jackson, Checkpoint 3; [#959](https://github.com/Jacksondr5/j5code/issues/959)).
 - 2026-11-09 — D38: mobile draws the same notice lines and rows as web ([#918](https://github.com/Jacksondr5/j5code/issues/918), [#836](https://github.com/Jacksondr5/j5code/issues/836)).
 - 2026-11-14 — D45: a folded answered question with no one to name shows that it was answered (Jackson, Checkpoint 5; [#1028](https://github.com/Jacksondr5/j5code/issues/1028)).
+- 2026-11-14 — D45: the folded and opened answered labels are lowercase, as on web (Jackson, Checkpoint 6; [#1035](https://github.com/Jacksondr5/j5code/issues/1035)).
