@@ -26,6 +26,7 @@ import {
 } from "../inbox/AnswerAttachments";
 import { useInboxAnswers } from "../inbox/inboxAnswers";
 import { answeredInboxSourcesAtom, openInboxSourcesAtom } from "../inbox/inboxSources";
+import { OwnerAskAction } from "../inbox/OwnerAskAction";
 import { j5Sharing } from "../sharing/guestAccess";
 import { j5Environment } from "../state";
 
@@ -239,14 +240,24 @@ function CaptainAsks(props: {
                 {closedText !== null ? (
                   <Text className="text-sm text-foreground-muted">{closedText}</Text>
                 ) : (
-                  <Button
-                    label={delivering ? "Delivering…" : "Answer"}
-                    tone="primary"
-                    size="compact"
-                    loading={delivering}
-                    disabled={!shown.sourceReady || delivering || text.length === 0}
-                    onPress={() => void answers.answer(shown)}
-                  />
+                  <>
+                    <OwnerAskAction
+                      // One per ask, so a request id never carries to the next.
+                      key={shown.exchangeId}
+                      environmentId={environmentId}
+                      item={shown}
+                      disabled={!shown.sourceReady || delivering}
+                      size="compact"
+                    />
+                    <Button
+                      label={delivering ? "Delivering…" : "Answer"}
+                      tone="primary"
+                      size="compact"
+                      loading={delivering}
+                      disabled={!shown.sourceReady || delivering || text.length === 0}
+                      onPress={() => void answers.answer(shown)}
+                    />
+                  </>
                 )}
               </View>
             </View>

@@ -46,6 +46,7 @@ import {
   WorktreeCleanupsSection,
 } from "./InboxWorktreeCleanups";
 import { J5RecordPanel } from "./J5RecordPanel";
+import { OwnerAskAction } from "./OwnerAskAction";
 import {
   answeredInboxQueryAtom,
   answeredInboxSourcesAtom,
@@ -363,18 +364,25 @@ function InboxItem(props: {
                 {closedText !== null ? (
                   <Text className="text-sm text-foreground-muted">{closedText}</Text>
                 ) : (
-                  <Button
-                    label={props.delivering ? "Delivering…" : "Answer"}
-                    tone="primary"
-                    loading={props.delivering}
-                    disabled={!canAnswer || props.anyDelivering || props.answerText.length === 0}
-                    accessibilityHint={
-                      canAnswer
-                        ? undefined
-                        : "This server is unavailable or this connection is read-only."
-                    }
-                    onPress={props.onAnswer}
-                  />
+                  <View className="flex-row flex-wrap items-center justify-end gap-2">
+                    <OwnerAskAction
+                      environmentId={item.environmentId}
+                      item={item}
+                      disabled={!item.sourceReady || props.anyDelivering}
+                    />
+                    <Button
+                      label={props.delivering ? "Delivering…" : "Answer"}
+                      tone="primary"
+                      loading={props.delivering}
+                      disabled={!canAnswer || props.anyDelivering || props.answerText.length === 0}
+                      accessibilityHint={
+                        canAnswer
+                          ? undefined
+                          : "This server is unavailable or this connection is read-only."
+                      }
+                      onPress={props.onAnswer}
+                    />
+                  </View>
                 )}
               </View>
             </>

@@ -1,11 +1,13 @@
 import type { ChatAttachment, EnvironmentId } from "@t3tools/contracts";
 import {
   type ConnectionAccess,
+  type HumanInboxItem,
   type HumanInboxResponse,
   type ScopedHumanInboxItem,
   scopedInboxItemKey,
 } from "@t3tools/contracts/j5";
 
+import { ALLOW_ONCE_LIFTS } from "./agentPersonas.ts";
 import type { J5ReadSource, J5ReadSources } from "./readSources.ts";
 
 export type PresentedHumanInboxItem = ScopedHumanInboxItem & {
@@ -295,4 +297,34 @@ export function answerAttachmentSupport(
   return capabilities?.attachmentUploads === true
     ? { maxFileBytes: capabilities.fileAttachments?.maxUploadBytes ?? null }
     : null;
+}
+
+/**
+ * The one Owner action an ask carries while it is still open to take: "Allow this once" for a
+ * blocked persona launch, or "Save persona" for an agent's persona draft. `detail` says what it does.
+ */
+export function ownerAskAction(item: Pick<HumanInboxItem, "escalation" | "personaDraft">) {
+  const { escalation, personaDraft } = item;
+  if (escalation?.status === "open" && escalation.waivable !== null)
+    return {
+      kind: "allow-once" as const,
+      label: "Allow this once",
+      pendingLabel: "Allowing…",
+      failed: "Could not allow it once.",
+      detail: `Lets ${escalation.personaId} start once on ${ALLOW_ONCE_LIFTS[escalation.waivable]}. Later launches keep its usual limits.`,
+    };
+  if (personaDraft?.status === "open")
+    return {
+      kind: "save-persona" as const,
+      label: "Save persona",
+      pendingLabel: "Saving…",
+      failed: "Could not save the persona.",
+      detail:
+        personaDraft.mode === "create"
+          ? `Adds ${personaDraft.personaId} to this server's persona library, for everyone on it.`
+          : personaDraft.overridesFolder
+            ? `Saves ${personaDraft.personaId} as an override of the team persona for everyone on this server. Later team updates stay hidden until the override is removed and the team persona restored.`
+            : `Saves the edit to ${personaDraft.personaId} for everyone on this server.`,
+    };
+  return null;
 }
