@@ -705,7 +705,7 @@ const peerCredentialCommand = Command.make("credential", {
   ),
 }).pipe(
   Command.withDescription(
-    "Issue the credential another server presents when it delivers here: subject peer:<its environment id>, scope a2a:peer only. Issuing again for the same environment revokes the earlier credential. Needs an access:write token, or runs on the server host with a temporary local admin session.",
+    "Issue the credential another server presents when it delivers here: subject peer:<its environment id>, scope a2a:peer only. Issuing again for the same environment leaves the earlier credential working until the holder proves the new one, as peer add does. Needs an access:write token, or runs on the server host with a temporary local admin session.",
   ),
   Command.withHandler((flags) =>
     runOutcome(
