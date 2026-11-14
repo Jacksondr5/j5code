@@ -1780,11 +1780,13 @@ function peerRepair(
   paths: Pick<LiveTestPaths, "worktree">,
   steps: ReturnType<typeof peerSteps>,
 ): string {
-  const cli = `node ${NodePath.join(paths.worktree, "apps/server/src/bin.ts")} a2a peer`;
   const shell = (args: ReadonlyArray<string>) =>
     args
-      .map((argument) => (/^[\w./:=-]+$/.test(argument) ? argument : JSON.stringify(argument)))
+      .map((argument) =>
+        /^[\w./:=-]+$/.test(argument) ? argument : `'${argument.replaceAll("'", "'\\''")}'`,
+      )
       .join(" ");
+  const cli = `node ${shell([NodePath.join(paths.worktree, "apps/server/src/bin.ts")])} a2a peer`;
   const placeholder = "__J5_PEER_CREDENTIAL__";
   return `${cli} ${shell(steps.add(placeholder))}`.replace(
     placeholder,

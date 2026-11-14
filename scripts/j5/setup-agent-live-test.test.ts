@@ -956,6 +956,26 @@ describe("peerStatus", () => {
     assert.include(failing.repairs[0], "--credential-only --store)");
     assert.isTrue(failing.repairs[0]!.endsWith(" --poll"));
   });
+
+  it("quotes paths a shell would split or expand", () => {
+    const failing = peerStatus({
+      paths: { worktree: "/tmp/j5 work" },
+      poll: false,
+      local: {
+        home: "/homes/$HOME's",
+        origin: "http://127.0.0.1:4001",
+        list: list([record("remote-id", "Remote")]),
+      },
+      remote: {
+        home: "/remote-home",
+        origin: "http://127.0.0.1:4002",
+        list: list([record("local-id", "Local", "rejected")]),
+      },
+    });
+    if (failing.kind !== "failing") throw new Error(`expected failing, got ${failing.kind}`);
+    assert.include(failing.repairs[0], "node '/tmp/j5 work/apps/server/src/bin.ts' a2a peer add");
+    assert.include(failing.repairs[0], "--base-dir '/homes/$HOME'\\''s'");
+  });
 });
 
 describe("addRemoteUrl", () => {
