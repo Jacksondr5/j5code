@@ -3040,6 +3040,8 @@ export const OrchestrationV2Command = Schema.Union([
     commandId: CommandId,
     threadId: ThreadId,
     visitedAt: IsoDateTime,
+    // J5 personal reads still record shared opens, under the dispatch lock.
+    preserveReadMarker: Schema.optional(Schema.Literal(true)),
     // The user opened the thread, as opposed to new activity on an open one.
     // Older servers ignore both fields and only move the read watermark.
     opened: Schema.optional(Schema.Boolean),

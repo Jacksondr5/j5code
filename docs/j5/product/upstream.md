@@ -512,6 +512,18 @@ Recorded in `FORK.md` cases 69 to 73, 78 and 80.
 
 ### Clients
 
+#### D46. Thread read markers belong to the person
+
+**Upstream:** a thread has one read marker on the server. Opening it or marking it unread changes that marker for everyone.
+
+**J5:** each person has a durable read marker per thread, shared by their devices. Viewers can change their own markers within their scope. On upgrade, the first owner inherits the existing shared markers; other people start without markers. Browser-local marks are not imported into a person's account. An agent's mark-unread request is refused because an agent has no person-specific read state. Snooze, pin, settle and archive remain shared.
+
+**Why:** one person's visit must not clear another person's unread dot ([#629](https://github.com/Jacksondr5/j5code/issues/629)).
+
+**Consequences:** J5 stores and streams the markers separately from upstream's thread events. Web, desktop and mobile use the same client projection and read commands. Search-open ranking requires the device's operate permission and preserves the shared watermark under the dispatch lock. A person who has never visited sees fresh completions as unread; imported history stays read until fresh activity. Commands carry a bounded id and issuance time: retries expire after 24 hours and each person may retain at most 65,536 receipts. Expired retries fail instead of replaying an old action. Updated clients use upstream's read state when connected to older servers; older clients do not participate in personal read state on a new server. The shared client state factories and their app composition are maintained across upstream advances (FORK.md case 117). Following upstream would keep the multiplayer defect; making snooze and pin personal is deferred to the remainder of #629.
+
+**Decided:** Bastian, 2026-11-02: remove redundant Fleet origin labels and make unread state personal.
+
 #### D35. A client says what is new after it updates
 
 **Upstream:** a client tells the person about an update only before it installs: the desktop update button's release notes, on every track since v0.1.7, and the "Update downloaded" toast's link to the GitHub release. After the update, nothing in any client says what changed.

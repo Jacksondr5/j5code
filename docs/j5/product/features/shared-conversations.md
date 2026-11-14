@@ -23,7 +23,7 @@ A **shared conversation** is a thread that more than one person can write to: on
 
 **Anyone who can write runs the thread.** A Collaborator, like an Owner, sends, queues and steers messages, interrupts and stops work, and changes or withdraws any queued message. When a person can no longer write to a thread, the messages they still have queued there are withdrawn.
 
-**Thread state is shared, for now.** Whether a thread is archived, settled, snoozed or pinned, and whether it has been read, is one value for everyone on the server, as upstream keeps it. The exception is what ranks a thread in Cmd+K: how often it is opened, and the searches it was opened from. Those are kept only for the server's Owners and Collaborators at server scope. A person a thread or project is shared with, or a Viewer of the server, doesn't change them by opening a thread, and isn't shown them.
+**Read state belongs to each person.** Opening a thread or marking it unread changes only that person's marker, across their devices and after a restart. Viewers can change their own markers on threads they can read. Existing shared markers become the first owner's markers on upgrade; other people start without markers. Agents have no person-specific read state, so their mark-unread request is refused. Archive, settle, snooze and pin remain shared. What ranks a thread in Cmd+K is also shared: how often it is opened, and the searches it was opened from. Those are kept only for the server's Owners and Collaborators at server scope. A person a thread or project is shared with, or a Viewer of the server, doesn't change them by opening a thread, and isn't shown them.
 
 **Search reaches what is shared.** Cmd+K finds messages in the threads a person can open, at either level, and nowhere else: no thread, snippet or count from a thread they can't open. The server limits the search to those threads before it cuts the results, so their matches are never crowded out by threads they can't see. Their results are ranked without anyone's opens. As for an Owner, a word with more than 10,000 matches across the server finds only the newest of them.
 
@@ -35,7 +35,7 @@ A **shared conversation** is a thread that more than one person can write to: on
 
 Set aside on purpose, each tracked where it is linked. An item leaves this list when the definition takes it in.
 
-- The read marker, snooze and pin kept per person rather than per thread ([#629](https://github.com/Jacksondr5/j5code/issues/629)).
+- Snooze and pin kept per person rather than per thread ([#629](https://github.com/Jacksondr5/j5code/issues/629)).
 - A person's picture beside their messages: the GitHub profile picture for a username they enter in their own client ([#637](https://github.com/Jacksondr5/j5code/issues/637)).
 - Seeing who else is reading or typing in a thread, and the rest of the set-aside list ([#542](https://github.com/Jacksondr5/j5code/issues/542)).
 
@@ -84,7 +84,7 @@ Set aside on purpose, each tracked where it is linked. An item leaves this list 
 
 ### Thread state
 
-19. For now, archive, settle, snooze, pin and the read marker are one value per thread, shared by everyone on the server.
+19. Read markers belong to each person, sync across their devices and survive restart. Opening or marking a thread unread leaves other people's markers unchanged, including for Viewers. Archive, settle, snooze and pin remain shared.
 
 ### Scheduled runs
 

@@ -23,6 +23,7 @@ import { useComposerDraftStore } from "../../composerDraftStore";
 import { environmentCatalog } from "../../connection/catalog";
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { readThreadShell, useThreadShell } from "../../state/entities";
+import { environmentServerConfigsAtom } from "../../state/server";
 import { useEnvironmentScope } from "../../state/session";
 import { j5Sharing } from "../state";
 import { provideSharingMenuAccess } from "./sharingMenu";
@@ -233,6 +234,9 @@ provideSharingMenuAccess((thread) => {
     owner: isOwnerAccess(access),
     level: readThreadLevelInProject(thread),
     startsInProject: sharingAllowsStart(access, readThreadShell(thread)?.projectId ?? null),
+    personalThreadReads:
+      appAtomRegistry.get(environmentServerConfigsAtom).get(thread.environmentId)?.environment
+        .capabilities.j5PersonalThreadReads === true,
     holdsThread:
       access.kind === "person" &&
       !access.firstOwner &&
