@@ -634,6 +634,25 @@ export function currentServerState(paths: ServerPaths): ServerState {
 export const selfCommand = (paths: ServerPaths, command: string) =>
   `node ${NodePath.join(paths.worktree, "scripts/j5/setup-agent-live-test.ts")} ${command}`.trimEnd();
 
+/** What the peer lists say, and the command that repairs it when they say something is wrong. */
+function formatPeering(paths: ServerPaths, mode: "peer" | "peer-poll", peering: PeerStatus) {
+  switch (peering.kind) {
+    case "peered":
+      return `The two are peered: each records the other, and neither has reported a delivery error.${mode === "peer-poll" ? " Remote polls Local for its messages, and Local never connects to Remote." : ""} Only a delivery shows that they reach each other.`;
+    case "unread":
+      return `Could not read both servers' peer lists, so whether they are peered is unknown. Check again with: ${selfCommand(paths, "status")}`;
+    case "missing":
+      return `The two are NOT peered yet: each server's peer list does not name the other. Finish with: ${selfCommand(paths, MODE_FLAGS[mode])}`;
+    case "failing":
+      return `The two record each other, but delivery between them has failed:
+${peering.errors.map((error) => `  ${error}`).join("\n")}
+Starting again keeps these records. To give the failing side a new credential, run:
+${peering.repairs.map((repair) => `  ${repair}`).join("\n")}
+If the error says the other server cannot be reached, fix the saved address with \`a2a peer move\` instead.
+To start over with new servers, discarding both homes: ${selfCommand(paths, `rebuild ${MODE_FLAGS[mode]}`)}`;
+  }
+}
+
 /**
  * What only this script knows about the running server. How to test with it
  * is the j5-live-test skill's job and is not repeated here.
@@ -651,8 +670,8 @@ export function formatInstructions(input: {
     readonly ownerName: string | undefined;
     /** Opened in a browser paired with Local, it adds Remote there. Works once. */
     readonly addToBrowserUrl: string | undefined;
-    /** Whether each server's own peer list names the other. */
-    readonly peered: boolean;
+    /** What each server's own peer list says about the other. */
+    readonly peering: PeerStatus;
   };
 }): string {
   const { paths, manifest, facts, remote } = input;
@@ -681,11 +700,7 @@ Remote, which has no web server of its own:
   A rebuild gives both servers new ids. If the browser still lists a Remote from
   an earlier build, remove that one first (Settings > Connections).
 
-${
-  remote.peered
-    ? `The two are peered${manifest.mode === "peer-poll" ? ": Remote polls Local for its messages, and Local never connects to Remote" : " and send to each other directly"}.`
-    : `The two are NOT peered yet: each server's peer list does not name the other. Finish with: ${selfCommand(paths, MODE_FLAGS[manifest.mode === "peer-poll" ? "peer-poll" : "peer"])}`
-}
+${formatPeering(paths, manifest.mode === "peer-poll" ? "peer-poll" : "peer", remote.peering)}
 `
 }
 ${
@@ -897,7 +912,14 @@ export function printRunning(
             remote: {
               facts: remoteFacts,
               ownerName: remoteOwner,
-              peered: justPeered || arePeered(paths, facts.serverPort, remoteFacts.serverPort),
+              peering: justPeered
+                ? { kind: "peered" }
+                : readPeerStatus(
+                    paths,
+                    manifest.mode === "peer-poll",
+                    facts.serverPort,
+                    remoteFacts.serverPort,
+                  ),
               addToBrowserUrl: addRemoteUrl({
                 localWebPort: facts.webPort,
                 remoteServerPort: remoteFacts.serverPort,
@@ -1497,7 +1519,12 @@ function peerCli(
  * the issuer stores the holder's messages and the holder polls, so the issuer never connects.
  */
 export function peerSteps(input: {
-  readonly issuer: { readonly home: string; readonly origin: string };
+  readonly issuer: {
+    readonly home: string;
+    readonly origin: string;
+    /** Where the holder reaches the issuer when that differs from `origin`, as a saved record can. */
+    readonly peerOrigin?: string | undefined;
+  };
   readonly holder: {
     readonly home: string;
     readonly origin: string;
@@ -1531,7 +1558,7 @@ export function peerSteps(input: {
       "--origin",
       holder.origin,
       "--peer-origin",
-      issuer.origin,
+      issuer.peerOrigin ?? issuer.origin,
       "--credential",
       credential,
       ...(poll ? ["--poll"] : []),
@@ -1541,25 +1568,23 @@ export function peerSteps(input: {
 
 /**
  * The command that finishes a peering that did not complete. With both
- * servers up, the same start peers them. A start only joins a server that is
- * already there, so one that is not serving has to be stopped and started
- * again first, which is `restart`.
+ * servers up, the same start sets up the records that are missing. A start
+ * only joins a server that is already there, so one that is not serving has
+ * to be stopped and started again first, which is `restart`.
  */
 export function peerRepairCommand(mode: LiveTestMode, local: string, remote: string): string {
   return local === "RUNNING" && remote === "RUNNING" ? MODE_FLAGS[mode] : "restart";
 }
 
 /**
- * Peers the two running servers, as `scripts/j5/pr-env.sh --peer` does. Safe
- * to repeat: issuing again rotates the credential and re-adding rotates the
- * record, so every start leaves one clean pair.
+ * Completes an unrecorded peering between the two running test servers.
  */
 async function peerServers(
   paths: LiveTestPaths,
   mode: LiveTestMode,
   ports: { readonly local: number; readonly remote: number },
   deadline: number,
-): Promise<void> {
+): Promise<boolean> {
   const local = { home: paths.home, origin: `http://127.0.0.1:${ports.local}`, name: "Local" };
   const remote = {
     home: paths.remote.home,
@@ -1604,76 +1629,206 @@ async function peerServers(
       "Both servers report the same environment id; their homes are not separate.",
     );
   }
-  const poll = mode === "peer-poll";
-  // In poll mode only Remote holds a credential: it polls Local, which stores its messages.
-  const directions = poll
-    ? [{ issuer: withIds.local, holder: withIds.remote }]
-    : [
-        { issuer: withIds.remote, holder: withIds.local },
-        { issuer: withIds.local, holder: withIds.remote },
-      ];
-  for (const { issuer, holder } of directions) {
-    const steps = peerSteps({ issuer, holder, poll });
-    // A server that is seconds old can miss the first hello; pr-env.sh retries the same way.
-    for (let attempt = 1; ; attempt++) {
-      // Checked before every call, so a direction is never begun on spent time.
-      if (Date.now() > deadline) {
-        throw notPeeredYet(
-          `the time for this start ran out before ${holder.name} recorded ${issuer.name}.`,
-        );
+  return preservePeerSetup({
+    localId: withIds.local.environmentId,
+    remoteId: withIds.remote.environmentId,
+    list: (side) => {
+      const listed = peerCli(
+        paths,
+        ["list", "--json", "--base-dir", withIds[side].home, "--origin", withIds[side].origin],
+        deadline,
+      );
+      if (!listed.ok)
+        throw notPeeredYet("could not read the recorded peers; leaving credentials unchanged.");
+      return listed.output;
+    },
+    setup: async () => {
+      const poll = mode === "peer-poll";
+      // In poll mode only Remote holds a credential: it polls Local, which stores its messages.
+      const directions = poll
+        ? [{ issuer: withIds.local, holder: withIds.remote }]
+        : [
+            { issuer: withIds.remote, holder: withIds.local },
+            { issuer: withIds.local, holder: withIds.remote },
+          ];
+      for (const { issuer, holder } of directions) {
+        const steps = peerSteps({ issuer, holder, poll });
+        // A server that is seconds old can miss the first hello; pr-env.sh retries the same way.
+        for (let attempt = 1; ; attempt++) {
+          // Checked before every call, so a direction is never begun on spent time.
+          if (Date.now() > deadline) {
+            throw notPeeredYet(
+              `the time for this start ran out before ${holder.name} recorded ${issuer.name}.`,
+            );
+          }
+          const credential = peerCli(paths, steps.credential, deadline);
+          const added = credential.ok
+            ? peerCli(paths, steps.add(credential.output), deadline)
+            : credential;
+          if (added.ok) break;
+          if (attempt === 5) {
+            throw notPeeredYet(
+              `${holder.name} could not record ${issuer.name} as a peer after 5 attempts.\nThe peer command said:\n${added.error || "(nothing)"}`,
+            );
+          }
+          await NodeTimersPromises.setTimeout(3_000);
+        }
       }
-      const credential = peerCli(paths, steps.credential, deadline);
-      const added = credential.ok
-        ? peerCli(paths, steps.add(credential.output), deadline)
-        : credential;
-      if (added.ok) break;
-      if (attempt === 5) {
-        throw notPeeredYet(
-          `${holder.name} could not record ${issuer.name} as a peer after 5 attempts.\nThe peer command said:\n${added.error || "(nothing)"}`,
-        );
-      }
-      await NodeTimersPromises.setTimeout(3_000);
-    }
-  }
+    },
+  });
 }
 
-/**
- * Whether a server's own peer list, as `peer list --json` prints it, names
- * the other server with no error against it.
- */
-export function listsPeer(peerListJson: string | undefined, name: string): boolean {
+interface ListedPeer {
+  readonly environmentId: string;
+  readonly label: string;
+  /** Where this server reaches the peer; null for a peer that stores its messages here. */
+  readonly origin?: string | null;
+  readonly lastError: string | null;
+}
+
+/** A server's peer list as `peer list --json` prints it, or undefined when it is not one. */
+function parsePeerList(peerListJson: string | undefined): ReadonlyArray<ListedPeer> | undefined {
   try {
-    const { peers } = JSON.parse(peerListJson ?? "") as {
-      readonly peers?: ReadonlyArray<{ readonly label: string; readonly lastError: unknown }>;
-    };
-    return (peers ?? []).some((peer) => peer.label === name && peer.lastError === null);
+    const { peers } = JSON.parse(peerListJson ?? "") as { readonly peers?: unknown };
+    return Array.isArray(peers)
+      ? peers.filter((peer): peer is ListedPeer => typeof peer === "object" && peer !== null)
+      : undefined;
   } catch {
-    return false;
+    return undefined;
   }
 }
 
+/** Recorded identities survive origin changes and temporary transport errors. */
+function recordsPeer(peerListJson: string, environmentId: string): boolean {
+  const peers = parsePeerList(peerListJson);
+  if (peers === undefined) {
+    throw new LiveTestRefusal(
+      "A server's peer list was not what `peer list --json` prints; leaving credentials unchanged.",
+    );
+  }
+  return peers.some((peer) => peer.environmentId === environmentId);
+}
+
+export async function preservePeerSetup(input: {
+  readonly localId: string;
+  readonly remoteId: string;
+  readonly list: (side: "local" | "remote") => string;
+  readonly setup: () => Promise<void>;
+}): Promise<boolean> {
+  const localRecorded = recordsPeer(input.list("local"), input.remoteId);
+  const remoteRecorded = recordsPeer(input.list("remote"), input.localId);
+  if (localRecorded && remoteRecorded) return false;
+  await input.setup();
+  return true;
+}
+
 /**
- * The evidence that the two servers are peered: each one's peer list names
- * the other. Two listening ports say nothing about it.
+ * What the two servers' own peer lists say about each other. Each list carries only the last
+ * delivery error, so "peered" is the absence of a recorded failure, not proof of delivery.
  */
-function arePeered(
+export type PeerStatus =
+  | { readonly kind: "peered" }
+  | { readonly kind: "unread" }
+  | { readonly kind: "missing" }
+  | {
+      readonly kind: "failing";
+      readonly errors: ReadonlyArray<string>;
+      readonly repairs: ReadonlyArray<string>;
+    };
+
+interface PeerSide {
+  readonly home: string;
+  readonly origin: string;
+  /** `peer list --json` output, or undefined when it could not be read. */
+  readonly list: string | undefined;
+}
+
+export function peerStatus(input: {
+  readonly paths: Pick<LiveTestPaths, "worktree">;
+  readonly poll: boolean;
+  readonly local: PeerSide;
+  readonly remote: PeerSide;
+}): PeerStatus {
+  const localPeers = parsePeerList(input.local.list);
+  const remotePeers = parsePeerList(input.remote.list);
+  if (localPeers === undefined || remotePeers === undefined) return { kind: "unread" };
+  // Each record names the other server, so it carries the other's environment id.
+  const localRecord = localPeers.find((peer) => peer.label === "Remote");
+  const remoteRecord = remotePeers.find((peer) => peer.label === "Local");
+  if (localRecord === undefined || remoteRecord === undefined) return { kind: "missing" };
+  const records = { Local: localRecord, Remote: remoteRecord };
+  const failing = (["Local", "Remote"] as const).filter((name) => records[name].lastError != null);
+  if (failing.length === 0) return { kind: "peered" };
+  const server = (name: "Local" | "Remote") => {
+    const side = name === "Local" ? input.local : input.remote;
+    const other = records[name === "Local" ? "Remote" : "Local"];
+    return { home: side.home, origin: side.origin, name, environmentId: other.environmentId };
+  };
+  // In poll mode only Remote holds a credential, whichever side reports the error.
+  const holders = input.poll ? (["Remote"] as const) : failing;
+  return {
+    kind: "failing",
+    errors: failing.map((name) => `${name} reports: ${records[name].lastError}`),
+    repairs: holders.map((holder) =>
+      peerRepair(
+        input.paths,
+        peerSteps({
+          // `peer add` refuses to move a known peer, so it is given the origin the holder saved.
+          issuer: {
+            ...server(holder === "Local" ? "Remote" : "Local"),
+            peerOrigin: records[holder].origin ?? undefined,
+          },
+          holder: server(holder),
+          poll: input.poll,
+        }),
+      ),
+    ),
+  };
+}
+
+/** One shell line that issues a credential and records it on the holder, as `setup` does. */
+function peerRepair(
+  paths: Pick<LiveTestPaths, "worktree">,
+  steps: ReturnType<typeof peerSteps>,
+): string {
+  const shell = (args: ReadonlyArray<string>) =>
+    args
+      .map((argument) =>
+        /^[\w./:=-]+$/.test(argument) ? argument : `'${argument.replaceAll("'", "'\\''")}'`,
+      )
+      .join(" ");
+  const cli = `node ${shell([NodePath.join(paths.worktree, "apps/server/src/bin.ts")])} a2a peer`;
+  const placeholder = "__J5_PEER_CREDENTIAL__";
+  return `${cli} ${shell(steps.add(placeholder))}`.replace(
+    placeholder,
+    () => `"$(${cli} ${shell(steps.credential)})"`,
+  );
+}
+
+function readPeerStatus(
   paths: LiveTestPaths,
+  poll: boolean,
   localPort: number | undefined,
   remotePort: number | undefined,
-): boolean {
+): PeerStatus {
   // One deadline for both reads, so a server that accepts and never answers
-  // cannot hang `status`. A list that does not arrive in time counts as no evidence.
+  // cannot hang `status`. A list that does not arrive in time is unread.
   const deadline = Date.now() + PEER_LIST_TIMEOUT_MS;
-  const peerList = (home: string, port: number | undefined) =>
-    peerCli(
+  const side = (home: string, port: number | undefined): PeerSide => {
+    const origin = `http://127.0.0.1:${port}`;
+    const listed = peerCli(
       paths,
-      ["list", "--json", "--base-dir", home, "--origin", `http://127.0.0.1:${port}`],
+      ["list", "--json", "--base-dir", home, "--origin", origin],
       deadline,
-    ).output;
-  return (
-    listsPeer(peerList(paths.home, localPort), "Remote") &&
-    listsPeer(peerList(paths.remote.home, remotePort), "Local")
-  );
+    );
+    return { home, origin, list: listed.ok ? listed.output : undefined };
+  };
+  return peerStatus({
+    paths,
+    poll,
+    local: side(paths.home, localPort),
+    remote: side(paths.remote.home, remotePort),
+  });
 }
 
 async function start(
@@ -1784,8 +1939,13 @@ async function start(
   if (local.serverPort === undefined || remote.serverPort === undefined) {
     throw new LiveTestRefusal("A server is running without a reported port; cannot peer.");
   }
-  await peerServers(paths, mode, { local: local.serverPort, remote: remote.serverPort }, deadline);
-  printRunning(paths, local, remote, true);
+  const justPeered = await peerServers(
+    paths,
+    mode,
+    { local: local.serverPort, remote: remote.serverPort },
+    deadline,
+  );
+  printRunning(paths, local, remote, justPeered);
 }
 
 /** A base ref as the caller gave it, and the commit it names now. */
