@@ -20,7 +20,7 @@ import {
   addRemoteUrl,
   baseEnvironment,
   baseProgress,
-  listsPeer,
+  peerStatus,
   preservePeerSetup,
   peerRepairCommand,
   peerSteps,
@@ -889,21 +889,72 @@ describe("peerRepairCommand", () => {
   });
 });
 
-describe("listsPeer", () => {
+describe("peerStatus", () => {
   const list = (peers: ReadonlyArray<object>) => JSON.stringify({ ok: true, peers });
+  const record = (environmentId: string, label: string, lastError: string | null = null) => ({
+    environmentId,
+    label,
+    lastError,
+  });
+  const status = (input: {
+    readonly local: string | undefined;
+    readonly remote: string | undefined;
+    readonly poll?: boolean;
+  }) =>
+    peerStatus({
+      paths: { worktree: "/w" },
+      poll: input.poll ?? false,
+      local: { home: "/local-home", origin: "http://127.0.0.1:4001", list: input.local },
+      remote: { home: "/remote-home", origin: "http://127.0.0.1:4002", list: input.remote },
+    });
+  const healthy = {
+    local: list([record("remote-id", "Remote")]),
+    remote: list([record("local-id", "Local")]),
+  };
 
-  it("is true only when the server's own list names the other with no error", () => {
-    assert.isTrue(listsPeer(list([{ label: "Remote", lastError: null }]), "Remote"));
+  it("is peered only when each list names the other with no error", () => {
+    assert.deepEqual(status(healthy), { kind: "peered" });
     // Two ports listening is not peering: an empty list is the usual unpeered state.
-    assert.isFalse(listsPeer(list([]), "Remote"));
-    assert.isFalse(listsPeer(list([{ label: "Local", lastError: null }]), "Remote"));
-    assert.isFalse(listsPeer(list([{ label: "Remote", lastError: "hello failed" }]), "Remote"));
+    assert.deepEqual(status({ ...healthy, local: list([]) }), { kind: "missing" });
+    assert.deepEqual(status({ ...healthy, remote: list([record("x", "Other")]) }), {
+      kind: "missing",
+    });
   });
 
-  it("is false when the list could not be read", () => {
-    assert.isFalse(listsPeer(undefined, "Remote"));
-    assert.isFalse(listsPeer("", "Remote"));
-    assert.isFalse(listsPeer("not json", "Remote"));
+  it("says nothing about peering when a list could not be read", () => {
+    for (const unreadable of [undefined, "", "not json", JSON.stringify({ peers: "x" })]) {
+      assert.deepEqual(status({ ...healthy, remote: unreadable }), { kind: "unread" });
+    }
+  });
+
+  it("names the failing direction and the command that gives it a new credential", () => {
+    const failing = status({
+      ...healthy,
+      remote: list([record("local-id", "Local", "Local rejected this server's credential")]),
+    });
+    assert.deepEqual(failing, {
+      kind: "failing",
+      errors: ["Remote reports: Local rejected this server's credential"],
+      // Remote delivers to Local, so Local issues and Remote records, as setup does.
+      repairs: [
+        'node /w/apps/server/src/bin.ts a2a peer add --base-dir /remote-home --origin http://127.0.0.1:4002 --peer-origin http://127.0.0.1:4001 --credential "$(node /w/apps/server/src/bin.ts a2a peer credential --base-dir /local-home --origin http://127.0.0.1:4001 --for remote-id --label Remote --credential-only)"',
+      ],
+    });
+  });
+
+  it("repairs Remote's polling credential in poll mode, whichever side reports", () => {
+    const failing = status({
+      poll: true,
+      local: list([record("remote-id", "Remote", "poll stopped")]),
+      remote: list([record("local-id", "Local")]),
+    });
+    assert.equal(failing.kind, "failing");
+    if (failing.kind !== "failing") return;
+    assert.deepEqual(failing.errors, ["Local reports: poll stopped"]);
+    assert.lengthOf(failing.repairs, 1);
+    assert.include(failing.repairs[0], "add --base-dir /remote-home");
+    assert.include(failing.repairs[0], "--credential-only --store)");
+    assert.isTrue(failing.repairs[0]!.endsWith(" --poll"));
   });
 });
 
@@ -1134,14 +1185,14 @@ describe("formatInstructions", () => {
     assert.notInclude(skills, "Skills writes are prohibited");
   });
 
-  it("reports preserved unhealthy peer records without claiming direct delivery", async () => {
+  it("keeps unhealthy peer records and says how to repair them", async () => {
     const list = (side: "local" | "remote") =>
       JSON.stringify({
         peers: [
           {
             environmentId: side === "local" ? "remote-id" : "local-id",
             label: side === "local" ? "Remote" : "Local",
-            lastError: "connection refused",
+            lastError: side === "local" ? null : "Local rejected this server's credential",
           },
         ],
       });
@@ -1155,6 +1206,7 @@ describe("formatInstructions", () => {
       },
     });
     assert.isFalse(justPeered);
+    assert.equal(issued, 0);
     const output = formatInstructions({
       paths,
       manifest: { ...built, mode: "peer" },
@@ -1164,12 +1216,39 @@ describe("formatInstructions", () => {
         facts,
         ownerName: "Remote owner",
         addToBrowserUrl: undefined,
-        peered:
-          justPeered || (listsPeer(list("local"), "Remote") && listsPeer(list("remote"), "Local")),
+        peering: peerStatus({
+          paths,
+          poll: false,
+          local: { home: paths.home, origin: "http://127.0.0.1:4001", list: list("local") },
+          remote: {
+            home: paths.remote.home,
+            origin: "http://127.0.0.1:4002",
+            list: list("remote"),
+          },
+        }),
       },
     });
-    assert.equal(issued, 0);
-    assert.include(output, "The two are NOT peered yet");
+    assert.include(output, "The two record each other, but delivery between them has failed:");
+    assert.include(output, "  Remote reports: Local rejected this server's credential");
+    assert.include(output, "a2a peer add --base-dir");
+    assert.include(output, "rebuild --peer");
+    assert.notInclude(output, "NOT peered yet");
+  });
+
+  it("claims no more than the peer lists show when they are healthy", () => {
+    const output = formatInstructions({
+      paths,
+      manifest: { ...built, mode: "peer" },
+      facts,
+      pairingUrl: undefined,
+      remote: {
+        facts,
+        ownerName: undefined,
+        addToBrowserUrl: undefined,
+        peering: { kind: "peered" },
+      },
+    });
+    assert.include(output, "neither has reported a delivery error");
     assert.notInclude(output, "send to each other directly");
   });
 
@@ -1179,7 +1258,12 @@ describe("formatInstructions", () => {
       manifest: { ...built, mode: "peer", ownerName: "Local owner" },
       facts,
       pairingUrl: undefined,
-      remote: { facts, ownerName: "Remote owner", addToBrowserUrl: undefined, peered: true },
+      remote: {
+        facts,
+        ownerName: "Remote owner",
+        addToBrowserUrl: undefined,
+        peering: { kind: "peered" },
+      },
     });
     assert.deepEqual(ownerLines(output), [
       "  Owner         Local owner",
@@ -1673,12 +1757,12 @@ describe("preservePeerSetup", () => {
       preservePeerSetup({
         localId: "local-id",
         remoteId: "remote-id",
-        list: () => "not json",
+        list: () => JSON.stringify({ ok: true }),
         setup: async () => {
           issued++;
         },
       }),
-    ).rejects.toThrow();
+    ).rejects.toThrow(LiveTestRefusal);
     assert.equal(issued, 0);
   });
 });
