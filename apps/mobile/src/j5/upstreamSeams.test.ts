@@ -278,6 +278,7 @@ const SEAMS: ReadonlyArray<Seam> = [
       "<J5ComposerControls",
       "maxHeight={pendingUserInputMaxHeight}",
       "composerHeight={composerOverlapHeight - composerBottomInset}",
+      "composerBottomInset={composerBottomInset}",
     ],
   },
   {

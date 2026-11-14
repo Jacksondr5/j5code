@@ -9,6 +9,7 @@ import { closedLine, mergeHumanInboxSources } from "@t3tools/client-runtime/j5/i
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { useState } from "react";
 import { type LayoutChangeEvent, Pressable, View } from "react-native";
+import { useReanimatedKeyboardAnimation } from "react-native-keyboard-controller";
 import Animated, { type DerivedValue, useAnimatedStyle } from "react-native-reanimated";
 
 import { SymbolView } from "../../components/ui/AppSymbol";
@@ -33,6 +34,11 @@ const OTHER_ROW_HEIGHT = 72;
 const DOCK_MIN_HEIGHT = 160;
 /** Two lines of the question stay readable however little room is left. */
 const QUESTION_MIN_HEIGHT = 48;
+/**
+ * What the rest of an opened card takes (its row, answer box, Answer and switcher), until the
+ * first layout measures it, so the dock never opens past the room for a frame.
+ */
+const CHROME_ESTIMATE = 220;
 
 const URGENCY = {
   blocking: { label: "Blocking", className: "text-danger-foreground" },
@@ -51,6 +57,7 @@ export function AdjudicationDock(props: {
   /** The room upstream's pending-question card gets, which includes the composer's. */
   readonly maxHeight: DerivedValue<number>;
   readonly composerHeight: number;
+  readonly composerBottomInset: number;
 }) {
   const membership = useCrewMembership(scopeThreadRef(props.environmentId, props.threadId));
   // The Inbox is read only for a Captain's thread.
@@ -62,6 +69,7 @@ function CaptainAsks(props: {
   readonly threadId: ThreadId;
   readonly maxHeight: DerivedValue<number>;
   readonly composerHeight: number;
+  readonly composerBottomInset: number;
 }) {
   const { environmentId, threadId } = props;
   const openSources = useAtomValue(openInboxSourcesAtom);
@@ -82,7 +90,10 @@ function CaptainAsks(props: {
   // Opened, the dock grows with the question up to the room above the composer, which shrinks
   // with the keyboard. The question gets what the rest of the card leaves, measured as the card's
   // height less the question's, rather than left to flex shrink, which Android did not apply.
-  const { maxHeight, composerHeight } = props;
+  const { maxHeight, composerHeight, composerBottomInset } = props;
+  // Upstream's room takes off the bottom inset even while the keyboard covers it, which left
+  // the dock that much short with the keyboard up, so the dock adds it back as the keyboard rises.
+  const { progress: keyboardProgress } = useReanimatedKeyboardAnimation();
   const [heights, setHeights] = useState({ card: 0, question: 0 });
   const measured = (part: keyof typeof heights) => (event: LayoutChangeEvent) => {
     const height = event.nativeEvent.layout.height;
@@ -97,15 +108,22 @@ function CaptainAsks(props: {
     hasWords: () => true,
   });
   const view = pickShownAsk(asks, picked);
-  const chrome = Math.max(0, heights.card - heights.question);
+  const chrome =
+    heights.question === 0 ? CHROME_ESTIMATE : Math.max(0, heights.card - heights.question);
   const questionStyle = useAnimatedStyle(
     () => ({
       maxHeight: Math.max(
         QUESTION_MIN_HEIGHT,
-        Math.max(DOCK_MIN_HEIGHT, maxHeight.value - composerHeight - OTHER_ROW_HEIGHT) - chrome,
+        Math.max(
+          DOCK_MIN_HEIGHT,
+          maxHeight.value +
+            keyboardProgress.value * composerBottomInset -
+            composerHeight -
+            OTHER_ROW_HEIGHT,
+        ) - chrome,
       ),
     }),
-    [chrome, composerHeight],
+    [chrome, composerHeight, composerBottomInset],
   );
   if (!mayAnswer || view === null) return null;
   const { shown, others, next: nextAsk } = view;
@@ -132,7 +150,11 @@ function CaptainAsks(props: {
           accessibilityRole="button"
           accessibilityState={{ expanded: open }}
           accessibilityLabel={`Question for you, ${urgency.label}: ${shown.intent}`}
-          onPress={() => setOpen((value) => !value)}
+          onPress={() => {
+            // A folded card holds no question, so its next opening measures afresh.
+            if (open) setHeights((current) => ({ ...current, question: 0 }));
+            setOpen(!open);
+          }}
           className="min-h-11 shrink-0 flex-row items-center gap-2"
         >
           <SymbolView name="questionmark.bubble" size={14} tintColorClassName="accent-icon-muted" />
@@ -160,7 +182,8 @@ function CaptainAsks(props: {
           <View className="gap-2 pb-2">
             <Animated.ScrollView
               key={shown.exchangeId}
-              style={questionStyle}
+              // Hidden, not removed, until its first layout is measured, so no frame shows it unsized.
+              style={[questionStyle, heights.question === 0 ? { opacity: 0 } : null]}
               nestedScrollEnabled
               onLayout={measured("question")}
             >

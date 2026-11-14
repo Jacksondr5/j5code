@@ -17,6 +17,8 @@ export function J5ComposerControls(props: {
    */
   maxHeight: DerivedValue<number>;
   composerHeight: number;
+  /** Upstream's `composerBottomInset`, which its room takes off even under the keyboard. */
+  composerBottomInset: number;
 }) {
   return (
     <>
@@ -26,6 +28,7 @@ export function J5ComposerControls(props: {
         threadId={props.threadId}
         maxHeight={props.maxHeight}
         composerHeight={props.composerHeight}
+        composerBottomInset={props.composerBottomInset}
       />
     </>
   );
