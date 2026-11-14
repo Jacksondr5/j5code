@@ -1169,6 +1169,7 @@ const ThreadWorkLogRow = function ThreadWorkLogRow(
               environmentId={props.environmentId}
               item={row.projectedItem.item}
               alone={historyHasQuestion && expanded}
+              answered={answered}
             />
           </>
         )}

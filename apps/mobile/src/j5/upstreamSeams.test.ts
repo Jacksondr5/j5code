@@ -168,6 +168,7 @@ const SEAMS: ReadonlyArray<Seam> = [
     reaches: [
       "<PromptAnsweredBy",
       "alone={historyHasQuestion && expanded}",
+      "answered={answered}",
       "!row.workEntry.questionAnswer",
       "historyHasQuestion && expanded ? null : displayText",
     ],
