@@ -141,20 +141,21 @@ export function useSharedConversationFeed(
 export function PromptAnsweredBy(props: {
   readonly environmentId: EnvironmentId;
   readonly item: { readonly threadId: ThreadId };
-  /**
-   * Nothing precedes it in the row, so it reads as a sentence rather than a trailing clause, and
-   * says "Answered" where no one is recorded (an unshared thread), so the header is never empty.
-   */
+  /** Nothing precedes it in the row, so it reads as a sentence rather than a trailing clause. */
   readonly alone?: boolean;
+  /**
+   * The row is an answered question, so it says so even where no one is recorded (an unshared
+   * thread): "· answered" folded, "Answered" opened.
+   */
+  readonly answered?: boolean;
 }) {
   const { answers } = useThreadAuthorIndex(props.environmentId, props.item.threadId);
   const by = isSettledPrompt(props.item) ? answers.get(props.item.requestId) : undefined;
-  if (by === undefined && !props.alone) return null;
+  if (by === undefined && !props.alone && !props.answered) return null;
+  const said = props.alone ? "Answered" : "· answered";
   return (
     <Text numberOfLines={1} className="shrink-0 pl-1 pr-1.5 text-sm text-foreground-muted">
-      {by === undefined
-        ? "Answered"
-        : `${props.alone ? "Answered by" : "· answered by"} ${by.you ? "you" : (by.name ?? "someone")}`}
+      {by === undefined ? said : `${said} by ${by.you ? "you" : (by.name ?? "someone")}`}
     </Text>
   );
 }
