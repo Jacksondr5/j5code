@@ -237,15 +237,16 @@ function OwnerAgentLibrarySettingsScreen() {
   const setAgentEnabled = useAtomCommand(agentPersonaEnvironment.setAgentPersonaEnabled, {
     reportFailure: false,
   });
-  /** Resolves whether the server took the change, so the row can drop its pending value. */
+  /**
+   * Resolves whether the server took the change, so the row can drop its pending value. It leaves
+   * `busy` alone, which would dim every other row while it saves; the server serializes the writes.
+   */
   async function toggleAgent(personaId: string, enabled: boolean): Promise<boolean> {
     if (effectiveEnvironmentId === null || busy) return false;
-    setBusy(true);
     const result = await setAgentEnabled({
       environmentId: effectiveEnvironmentId,
       input: { personaId, enabled },
     });
-    setBusy(false);
     if (result._tag === "Failure") {
       setNotification(failureNotice("Persona action failed", result));
       return false;
