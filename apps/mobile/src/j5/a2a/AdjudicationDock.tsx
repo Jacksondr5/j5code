@@ -23,6 +23,14 @@ import { answeredInboxSourcesAtom, openInboxSourcesAtom } from "../inbox/inboxSo
 import { j5Sharing } from "../sharing/guestAccess";
 import { j5Environment } from "../state";
 
+/**
+ * The room is for one card, and the playbook bar or a Crew proposal row can sit beside the dock;
+ * on iOS nothing scrolls them, so the dock leaves one row's height for them.
+ */
+const OTHER_ROW_HEIGHT = 64;
+/** Upstream's own floor for its pending-question card. */
+const DOCK_MIN_HEIGHT = 160;
+
 const URGENCY = {
   blocking: { label: "Blocking", className: "text-danger-foreground" },
   soon: { label: "Soon", className: "text-warning-foreground" },
@@ -69,7 +77,9 @@ function CaptainAsks(props: {
   // Opened, the dock grows with the question up to the room above the composer, which shrinks
   // with the keyboard; the question scrolls inside it.
   const { maxHeight } = props;
-  const cardStyle = useAnimatedStyle(() => ({ maxHeight: maxHeight.value }));
+  const cardStyle = useAnimatedStyle(() => ({
+    maxHeight: Math.max(DOCK_MIN_HEIGHT, maxHeight.value - OTHER_ROW_HEIGHT),
+  }));
 
   // An ask that closed while the person had typed into it stays, with who answered (Inbox AC17).
   const asks = adjudicationAsks({
