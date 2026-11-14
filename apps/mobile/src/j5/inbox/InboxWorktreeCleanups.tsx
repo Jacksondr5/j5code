@@ -26,7 +26,6 @@ import { Linking, Pressable, View } from "react-native";
 
 import { type AppSymbolName, SymbolView } from "../../components/ui/AppSymbol";
 import { AppText as Text } from "../../components/ui/AppText";
-import { Button } from "../../components/ui/Button";
 import * as Dialog from "../../components/ui/Dialog";
 import { relativeTime } from "../../lib/time";
 import { useProjects } from "../../state/entities";
@@ -265,28 +264,51 @@ function OpenBody(props: {
         </Text>
       )}
       {canAnswer ? null : <Text className="text-xs text-foreground-muted">{UNAVAILABLE}</Text>}
-      <View className="flex-row flex-wrap gap-2">
-        <Button
-          label="Keep all"
-          size="compact"
-          disabled={hold}
-          onPress={() => props.onAnswer(item, [])}
-        />
-        <Button
-          label="Select all"
-          size="compact"
-          disabled={hold || buttons.selectAllDisabled}
-          onPress={() => setSelected(new Set(item.entries.map((entry) => entry.path)))}
-        />
-        <Button
-          label={props.pending ? "Removing…" : buttons.removeLabel}
-          size="compact"
-          tone="danger"
-          disabled={hold || buttons.removeDisabled}
-          onPress={removeSelected}
-        />
+      {/* Web's row: Keep all apart on the left, Select all and Remove on the right. */}
+      <View className="flex-row items-center justify-between gap-2">
+        <ActionPill label="Keep all" disabled={hold} onPress={() => props.onAnswer(item, [])} />
+        <View className="flex-row items-center gap-2">
+          <ActionPill
+            label="Select all"
+            disabled={hold || buttons.selectAllDisabled}
+            onPress={() => setSelected(new Set(item.entries.map((entry) => entry.path)))}
+          />
+          <ActionPill
+            label={props.pending ? "Removing…" : buttons.removeLabel}
+            tone="danger"
+            disabled={hold || buttons.removeDisabled}
+            onPress={removeSelected}
+          />
+        </View>
       </View>
     </>
+  );
+}
+
+/** The Inbox's compact action, as seat approvals draw theirs, so three fit one row on a phone. */
+function ActionPill(props: {
+  readonly label: string;
+  readonly tone?: "danger";
+  readonly disabled: boolean;
+  readonly onPress: () => void;
+}) {
+  const [container, label] = props.disabled
+    ? ["bg-subtle-strong", "text-foreground-muted"]
+    : props.tone === "danger"
+      ? ["bg-danger", "text-danger-foreground"]
+      : ["bg-secondary", "text-secondary-foreground"];
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ disabled: props.disabled }}
+      disabled={props.disabled}
+      onPress={props.onPress}
+      className={`min-h-9 justify-center rounded-full px-3 active:opacity-70 ${container}`}
+    >
+      <Text numberOfLines={1} className={`font-t3-medium text-sm ${label}`}>
+        {props.label}
+      </Text>
+    </Pressable>
   );
 }
 
