@@ -106,6 +106,7 @@ export function InboxScreen() {
   const seatApprovals = mergeCrewRuntimeRequestSources(crewSources);
   const agentQuestions = mergeNativeQuestionInboxSources(crewSources);
   const cleanupSources = useAtomValue(worktreeCleanupSourcesAtom);
+  const decidedCleanupSources = useAtomValue(decidedWorktreeCleanupSourcesAtom);
   const cleanups = useWorktreeCleanupInbox();
   const showEnvironment = spansMultipleEnvironments([
     ...items,
@@ -140,6 +141,7 @@ export function InboxScreen() {
         ...answeredSources.sources,
         ...crewSources.sources,
         ...cleanupSources.sources,
+        ...decidedCleanupSources.sources,
       ].flatMap((source) => {
         const notice = j5SourceNotice(source);
         return notice === null ? [] : [notice];
