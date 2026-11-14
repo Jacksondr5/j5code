@@ -264,8 +264,9 @@ function OpenBody(props: {
         </Text>
       )}
       {canAnswer ? null : <Text className="text-xs text-foreground-muted">{UNAVAILABLE}</Text>}
-      {/* Web's row: Keep all apart on the left, Select all and Remove on the right. */}
-      <View className="flex-row items-center justify-between gap-2">
+      {/* Web's row: Keep all on the left, Select all and Remove on the right. Too narrow for all
+          three, the pair drops to a second line together rather than running past the card. */}
+      <View className="flex-row flex-wrap items-center justify-between gap-2">
         <ActionPill label="Keep all" disabled={hold} onPress={() => props.onAnswer(item, [])} />
         <View className="flex-row items-center gap-2">
           <ActionPill
