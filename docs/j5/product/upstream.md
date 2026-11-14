@@ -260,13 +260,13 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Upstream:** a resolved question's work row folds to one truncating label, so a long question hides its answer. Opened, it draws the readable answer, then the raw item as JSON.
 
-**J5:** folded, the row shows the trimmed question and who answered it. Opened, it shows the full question and the answer, without the trimmed question above them or the raw item below. An opened answer in an unshared thread reads "Answered". Other work rows, approvals included, keep upstream's detail.
+**J5:** folded, the row shows the trimmed question and who answered it, or just that it was answered. Opened, it shows the full question and the answer, without the trimmed question above them or the raw item below. An opened answer in an unshared thread reads "Answered". Other work rows, approvals included, keep upstream's detail.
 
 **Why:** Jackson saw a giant JSON blob under an answer, and a folded row that read as only the question, on his iPhone at Checkpoint 2. His direction was to minimize the row to the question, the answer and who answered. Web draws no raw item either. At Checkpoint 3 the folded row split its width between a trimmed question, the answer and the name, so little of any showed, and the opened row repeated the question. So the folded row keeps the question and the name, and the answer moves to the opened row.
 
 **Consequences:** a small edit in upstream's mobile `thread-work-log.tsx`, carried at each advance (FORK.md case 99). If upstream stops drawing the raw item, drop J5's half of that edit.
 
-**Decided:** Jackson, 2026-11-01, at Checkpoint 2 ([#891](https://github.com/Jacksondr5/j5code/issues/891)), and 2026-11-07, at Checkpoint 3 ([#959](https://github.com/Jacksondr5/j5code/issues/959)). Recorded in FORK.md case 99.
+**Decided:** Jackson, 2026-11-01, at Checkpoint 2 ([#891](https://github.com/Jacksondr5/j5code/issues/891)), and 2026-11-07, at Checkpoint 3 ([#959](https://github.com/Jacksondr5/j5code/issues/959)), and 2026-11-14, at Checkpoint 5 ([#1028](https://github.com/Jacksondr5/j5code/issues/1028)). Recorded in FORK.md case 99.
 
 ### Storage, install, and identity
 
@@ -679,3 +679,4 @@ J5 kept a run from resuming after a usage-limit reset when the person had presse
 - 2026-11-07 — the advance onto upstream's stable v0.1.7: D2 admits the link tools and the pull-request link tools (88 tools), with J5's own refusal to fenced link work; D4 resumes a held queue on any J5 delivery, idle or busy, beside upstream's release of unattended held messages, and a person no longer reorders by hand; D6 names upstream's handoff-budget fresh start as a third deliberate case, with its own notice; D18 follows upstream's merged model control; D19 adds managed policy, the protect drop-in, the compile caches, the pairing app link and j5.codes thread links; D20 keeps the per-desktop track switch (#927 for a fleet switch) and retires the wait for a published release; D22 approved and moved out of Awaiting a decision; D25 points the star prompt at J5's repository; D26 adds the in-app triage; D35's upstream line now has release notes on every track; D36 adds `j5 up`'s hint; D38 gives queued messages their sides and sender on upstream's queue row; D40 hides only the guest-links row in Labs; D42 holds a link session's plain delegate to the target's lists; D24 retired, its aliases removed (Jackson, 2026-11-05 to 2026-11-07; FORK.md's pin log).
 - 2026-11-07 — D45: a folded answered question shows its trimmed question and who answered, and the opened row drops the repeated question (Jackson, Checkpoint 3; [#959](https://github.com/Jacksondr5/j5code/issues/959)).
 - 2026-11-09 — D38: mobile draws the same notice lines and rows as web ([#918](https://github.com/Jacksondr5/j5code/issues/918), [#836](https://github.com/Jacksondr5/j5code/issues/836)).
+- 2026-11-14 — D45: a folded answered question with no one to name shows that it was answered (Jackson, Checkpoint 5; [#1028](https://github.com/Jacksondr5/j5code/issues/1028)).
