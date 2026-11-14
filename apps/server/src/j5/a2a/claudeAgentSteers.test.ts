@@ -186,6 +186,29 @@ it.effect("claims missed steers in order, dropping those Claude ran in the same 
   }).pipe(Effect.provide(NodeCrypto.layer)),
 );
 
+it.effect("retires a missed steer Claude ran inside another turn before its own came", () =>
+  Effect.gen(function* () {
+    const query = newQuery();
+    const turn = newTurn();
+    const nativeThreadId = newNativeThread();
+    const first = yield* offerAgentSteer(query, turn, "message-own-turn");
+    const second = yield* offerAgentSteer(query, turn, "message-folded-later");
+    for (const uuid of [first, second]) j5ObserveClaudeSteer(query, lifecycle(uuid, "queued"));
+    j5NoteMissedClaudeSteers({ query, nativeThreadId, providerTurnId: turn, result: result() });
+    j5ObserveClaudeSteer(query, lifecycle(first, "started"));
+    assert.equal(j5ClaimMissedClaudeSteer(nativeThreadId, query), "message-own-turn");
+    // Claude Code adds the second at a tool result of the first one's turn.
+    j5ObserveClaudeSteer(query, lifecycle(second, "started"));
+    j5NoteMissedClaudeSteers({
+      query,
+      nativeThreadId,
+      providerTurnId: newTurn(),
+      result: result(),
+    });
+    assert.isUndefined(j5ClaimMissedClaudeSteer(nativeThreadId, query));
+  }).pipe(Effect.provide(NodeCrypto.layer)),
+);
+
 it.effect("releases a terminated run's steers without clearing another's", () =>
   Effect.gen(function* () {
     const query = newQuery();

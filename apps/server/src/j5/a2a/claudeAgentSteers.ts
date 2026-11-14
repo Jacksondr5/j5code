@@ -119,6 +119,12 @@ export const j5NoteMissedClaudeSteers = (input: {
   readonly providerTurnId: string;
   readonly result: SDKResultMessage;
 }): void => {
+  // Missed steers Claude Code took during this turn ran in it, so no later turn is theirs.
+  const pending = (missedByNativeThread.get(input.nativeThreadId) ?? []).filter(
+    (steer) => steer.state !== "taken",
+  );
+  if (pending.length === 0) missedByNativeThread.delete(input.nativeThreadId);
+  else missedByNativeThread.set(input.nativeThreadId, pending);
   const turn = steersByTurn.get(input.providerTurnId);
   steersByTurn.delete(input.providerTurnId);
   if (turn === undefined) return;
@@ -193,7 +199,12 @@ export const j5DispatchMissedClaudeSteer = Effect.fn("j5.a2a.claudeSteers.dispat
       messageIds: [messageId],
     });
     const message = projection.messages.find((candidate) => candidate.id === messageId);
-    if (message === undefined) {
+    const steered =
+      message?.runId == null
+        ? undefined
+        : (yield* threads.getThreadRecords(threadId, ["runs"], { runIds: [message.runId] }))
+            .runs[0];
+    if (message === undefined || steered === undefined) {
       missedSteerTurns.delete(messageId);
       return false;
     }
@@ -205,6 +216,8 @@ export const j5DispatchMissedClaudeSteer = Effect.fn("j5.a2a.claudeSteers.dispat
       text: message.text,
       ...(message.context ? { context: message.context } : {}),
       attachments: message.attachments,
+      // Claude Code is already running it, whatever the thread has switched to since.
+      modelSelection: steered.modelSelection,
       dispatchMode: { type: "queue_after_active" },
       createdBy: message.createdBy,
       creationSource: message.creationSource,

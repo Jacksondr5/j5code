@@ -245,6 +245,13 @@ it.effect.each([
           );
           yield* Queue.offer(sdkMessages, result("first-segment"));
           yield* Fiber.join(finished);
+          // A person switches the thread's model before Claude Code starts the steer's turn.
+          yield* orchestrator.dispatch({
+            type: "thread.model-selection.set",
+            commandId: CommandId.make("switch"),
+            threadId,
+            modelSelection: { ...modelSelection, model: "claude-opus-4-6" },
+          });
           yield* Queue.offer(sdkMessages, lifecycle(steerUuid, "started"));
           yield* Queue.offer(sdkMessages, turnStart);
           yield* Fiber.join(steerRun);
@@ -281,6 +288,8 @@ it.effect.each([
               .filter((item) => item.runId === runId && item.type === "assistant_message")
               .map((item) => (item.type === "assistant_message" ? item.text : null));
           assert.deepEqual(replies(parent.id), ["The build passed."]);
+          // The steer's run is the Claude turn already running, on the model it was steered into.
+          assert.deepEqual(after.runs[1]!.modelSelection, parent.modelSelection);
           assert.deepEqual(replies(after.runs[1]!.id), ["Updated the changelog too."]);
           assert.isTrue(
             after.turnItems.some(
