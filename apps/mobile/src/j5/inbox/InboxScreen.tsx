@@ -17,18 +17,19 @@ import { spansMultipleEnvironments } from "@t3tools/client-runtime/j5/readSource
 import type { EnvironmentId } from "@t3tools/contracts";
 import { scopedInboxItemKey } from "@t3tools/contracts/j5";
 import { useFocusEffect } from "@react-navigation/native";
-import { useCallback, useState } from "react";
+import { type ComponentProps, forwardRef, useCallback, useState } from "react";
 import { Platform, Pressable, RefreshControl, View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
+import Animated from "react-native-reanimated";
 
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { AppText as Text, AppTextInput as TextInput } from "../../components/ui/AppText";
 import { Button } from "../../components/ui/Button";
 import { EmptyState } from "../../components/ui/EmptyState";
-import { ScreenScrollView } from "../../components/ui/ScreenScrollView";
 import { useMarkdownPreviewStyles } from "../../features/files/FileMarkdownPreview";
 import { useOpenLinkedThread } from "../../features/threads/useOpenLinkedThread";
 import { relativeTime } from "../../lib/time";
+import { NativeScrollViewMarker } from "../../native/NativeScrollViewMarker";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { SelectableMarkdownText } from "../../native/SelectableMarkdownText";
 import { j5Sharing } from "../sharing/guestAccess";
@@ -185,34 +186,42 @@ export function InboxScreen() {
   const refreshControl = (
     <RefreshControl refreshing={refreshing} onRefresh={() => void pullToRefresh()} />
   );
-  // iOS keeps upstream's scroll view, which registers with the native header, and lets it move the
-  // focused answer box above the keyboard, as upstream's commit sheet does. Android has no header
-  // marker, so keyboard-controller's scroll view brings the box being typed in clear of the keyboard.
-  return Platform.OS === "ios" ? (
-    <ScreenScrollView
-      automaticallyAdjustKeyboardInsets
+  // keyboard-controller keeps the focused answer box, and the Answer row below it, clear of the
+  // keyboard on both platforms. The offset is measured from the caret, so it spans the rest of an
+  // empty box and the row.
+  return (
+    <KeyboardAwareScrollView
+      bottomOffset={140}
       contentInsetAdjustmentBehavior="automatic"
       className="flex-1 bg-sheet"
       contentContainerClassName="gap-4 px-4 py-4"
-      keyboardShouldPersistTaps="handled"
-      refreshControl={refreshControl}
-    >
-      {content}
-    </ScreenScrollView>
-  ) : (
-    <KeyboardAwareScrollView
-      bottomOffset={80}
-      className="flex-1 bg-sheet"
-      contentContainerClassName="gap-4 px-4 py-4"
       // Android's content width cap, as upstream's ScreenScrollView applies it.
-      contentContainerStyle={{ width: "100%", maxWidth: 720, alignSelf: "center" }}
+      contentContainerStyle={
+        Platform.OS === "android"
+          ? { width: "100%", maxWidth: 720, alignSelf: "center" }
+          : undefined
+      }
       keyboardShouldPersistTaps="handled"
       refreshControl={refreshControl}
+      {...(Platform.OS === "ios" ? { ScrollViewComponent: InboxScrollView } : {})}
     >
       {content}
     </KeyboardAwareScrollView>
   );
 }
+
+// iOS registers the screen's scroll view with its header through the marker, which must hold the
+// scroll view itself; keyboard-controller wraps its scroll view in a view of its own, so the marker
+// goes inside, around the scroll view it renders, as ThreadFeed's does.
+const InboxScrollView = forwardRef<Animated.ScrollView, ComponentProps<typeof Animated.ScrollView>>(
+  function InboxScrollView(props, ref) {
+    return (
+      <NativeScrollViewMarker style={{ flex: 1 }}>
+        <Animated.ScrollView ref={ref} {...props} />
+      </NativeScrollViewMarker>
+    );
+  },
+);
 
 function ItemMeta(props: {
   readonly item: PresentedHumanInboxItem;
@@ -307,8 +316,14 @@ function InboxItem(props: {
             </Text>
           ) : (
             <>
-              {/* Above the answer box, so it stays in view whenever the box is: iOS scrolls only
-                  the focused box itself clear of the keyboard. */}
+              <TextInput
+                accessibilityLabel={`Answer ${item.intent}`}
+                multiline
+                placeholder="Type the answer exactly as it should be delivered"
+                value={props.answerText}
+                onChangeText={props.onChangeAnswer}
+                style={{ minHeight: 96, textAlignVertical: "top" }}
+              />
               <View className="flex-row flex-wrap items-center justify-between gap-2">
                 <OpenSenderThread item={item} />
                 {closedText !== null ? (
@@ -328,14 +343,6 @@ function InboxItem(props: {
                   />
                 )}
               </View>
-              <TextInput
-                accessibilityLabel={`Answer ${item.intent}`}
-                multiline
-                placeholder="Type the answer exactly as it should be delivered"
-                value={props.answerText}
-                onChangeText={props.onChangeAnswer}
-                style={{ minHeight: 96, textAlignVertical: "top" }}
-              />
             </>
           )}
           {props.error === null ? null : (
