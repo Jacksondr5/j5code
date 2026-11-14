@@ -30,7 +30,7 @@ import { Platform, Pressable, Share, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAtomValue } from "@effect/atom-react";
 import { Atom } from "effect/reactivity";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { settlePromise, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { pickAgentDefinitions } from "./pickAgentDefinitions";
@@ -237,15 +237,17 @@ function OwnerAgentLibrarySettingsScreen() {
   const setAgentEnabled = useAtomCommand(agentPersonaEnvironment.setAgentPersonaEnabled, {
     reportFailure: false,
   });
+  // One toggle saves at a time, without `busy`: that dims every other row while it saves.
+  const toggling = useRef(false);
   /** Resolves whether the server took the change, so the row can drop its pending value. */
   async function toggleAgent(personaId: string, enabled: boolean): Promise<boolean> {
-    if (effectiveEnvironmentId === null || busy) return false;
-    setBusy(true);
+    if (effectiveEnvironmentId === null || busy || toggling.current) return false;
+    toggling.current = true;
     const result = await setAgentEnabled({
       environmentId: effectiveEnvironmentId,
       input: { personaId, enabled },
     });
-    setBusy(false);
+    toggling.current = false;
     if (result._tag === "Failure") {
       setNotification(failureNotice("Persona action failed", result));
       return false;
