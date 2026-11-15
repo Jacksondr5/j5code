@@ -1,12 +1,12 @@
 import { useWindowDimensions, View } from "react-native";
 import { WebView } from "react-native-webview";
 
-import { artifactHtmlLoadAllowed } from "./artifactHtmlPreview.logic";
+import { artifactHtmlFrameDocument, artifactHtmlLoadAllowed } from "./artifactHtmlPreview.logic";
 
 /**
- * An HTML artifact rendered as web shows it, in a frame with nothing enabled (`sandbox=""`): no
- * scripts, storage, cookies, file access or new windows, and no navigation. Images and styles it
- * links still load, as in web's frame. Its height is fixed, as web's is, and it scrolls inside.
+ * An HTML artifact in web's frame with nothing enabled (`sandbox=""`): no scripts, forms, popups,
+ * downloads or escape to the top; links still navigate inside the frame and images and styles
+ * still load, as on web. Its height is fixed, as web's is, and it scrolls inside.
  */
 export function ArtifactHtmlPreview(props: { readonly html: string; readonly path: string }) {
   const { height } = useWindowDimensions();
@@ -17,11 +17,12 @@ export function ArtifactHtmlPreview(props: { readonly html: string; readonly pat
       style={{ height: Math.max(384, height - 160) }}
     >
       <WebView
-        source={{ html: props.html }}
-        // Every origin passes this list, so nothing is handed to the system browser; the check
-        // below then refuses every load but the artifact's own.
+        source={{ html: artifactHtmlFrameDocument(props.html) }}
+        // Every origin passes this list, so nothing is handed to the system browser. The check
+        // below holds the top on the page as a second line; the frame's sandbox is the boundary,
+        // since Android skips the check for form posts.
         originWhitelist={["*"]}
-        onShouldStartLoadWithRequest={(request) => artifactHtmlLoadAllowed(request.url)}
+        onShouldStartLoadWithRequest={artifactHtmlLoadAllowed}
         javaScriptEnabled={false}
         javaScriptCanOpenWindowsAutomatically={false}
         setSupportMultipleWindows={false}
@@ -31,7 +32,6 @@ export function ArtifactHtmlPreview(props: { readonly html: string; readonly pat
         allowUniversalAccessFromFileURLs={false}
         thirdPartyCookiesEnabled={false}
         sharedCookiesEnabled={false}
-        incognito
         geolocationEnabled={false}
         allowsLinkPreview={false}
         mediaPlaybackRequiresUserAction
