@@ -8,6 +8,7 @@ import {
   stepTitle,
   unownedSteps,
 } from "@t3tools/client-runtime/j5/crew-proposals";
+import { askWaitsForServerLine } from "@t3tools/client-runtime/j5/inbox";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import type {
   CrewProposal,
@@ -28,6 +29,7 @@ import { useEnvironmentQuery } from "../../state/query";
 import { useCanOperateThread } from "../sharing/guestAccess";
 import { j5Environment } from "../state";
 import { resolveCrewProposal } from "./crewProposalsClient";
+import { useServerConnection } from "./serverConnection";
 import { useCrewProposalPreview } from "./useCrewProposalPreview";
 
 type Params = StaticScreenProps<{
@@ -98,6 +100,8 @@ function Review(props: {
   readonly threadId: ThreadId;
   readonly proposal: CrewProposal;
   readonly canResolve: boolean;
+  /** The Inbox's notice while the server is away; the review stays readable but takes no action. */
+  readonly waitsForServer: string | null;
   readonly onResolved: () => void;
 }) {
   const { proposal, environmentId } = props;
@@ -200,9 +204,10 @@ function Review(props: {
         ) : null}
         {error ? <Text className="text-sm text-danger-foreground">{error}</Text> : null}
         <Text className="text-sm text-foreground-muted">
-          {props.canResolve
-            ? "To change a seat, ask the Captain in chat, or edit the proposal on web or desktop."
-            : "Only someone who can write to the Captain's thread can approve or decline this Crew."}
+          {props.waitsForServer ??
+            (props.canResolve
+              ? "To change a seat, ask the Captain in chat, or edit the proposal on web or desktop."
+              : "Only someone who can write to the Captain's thread can approve or decline this Crew.")}
         </Text>
       </ScreenScrollView>
       <View
@@ -240,6 +245,7 @@ export function CrewProposalReviewScreen(props: Params) {
   const query = useEnvironmentQuery(j5Environment.crewProposals({ environmentId, input: {} }));
   const permitted = useAtomValue(j5Environment.resolveCrewProposal.permissionAtom(environmentId));
   const writesToCaptain = useCanOperateThread(environmentId, threadId);
+  const server = useServerConnection(environmentId);
   const proposal = query.data?.find((candidate) => candidate.id === props.route.params.proposalId);
   const header = <NativeStackScreenOptions options={{ title: "Crew proposal" }} />;
   if (proposal === undefined || proposal.status !== "open") {
@@ -279,7 +285,8 @@ export function CrewProposalReviewScreen(props: Params) {
         environmentId={environmentId}
         threadId={threadId}
         proposal={proposal}
-        canResolve={permitted && writesToCaptain}
+        canResolve={permitted && writesToCaptain && server.connected}
+        waitsForServer={server.connected ? null : askWaitsForServerLine(server.label)}
         onResolved={() => {
           query.refresh();
           navigation.goBack();
