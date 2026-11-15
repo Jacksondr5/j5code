@@ -1,13 +1,14 @@
 import { useAtomValue } from "@effect/atom-react";
 import { deriveJ5LineageRows, type J5LineageRow } from "@t3tools/client-runtime/j5/lineage";
 import { j5LedgerSupported } from "@t3tools/client-runtime/j5/readSources";
+import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { View } from "react-native";
 
 import { AppText as Text } from "../../components/ui/AppText";
 import { Button } from "../../components/ui/Button";
 import { useOpenLinkedThread } from "../../features/threads/useOpenLinkedThread";
-import { useEnvironmentServerConfig } from "../../state/entities";
+import { useEnvironmentServerConfig, useQuietThreadShell } from "../../state/entities";
 import { useEnvironmentQuery } from "../../state/query";
 import { j5Sharing } from "../sharing/guestAccess";
 import { j5Environment } from "../state";
@@ -33,10 +34,14 @@ function useJ5ParentRow(environmentId: EnvironmentId, threadId: ThreadId): J5Lin
  */
 export function J5OpenParentBar(props: { environmentId: EnvironmentId; threadId: ThreadId }) {
   const parent = useJ5ParentRow(props.environmentId, props.threadId);
+  const shell = useQuietThreadShell(
+    parent === null ? null : scopeThreadRef(props.environmentId, parent.threadId),
+  );
   const openLinkedThread = useOpenLinkedThread();
   if (parent === null) return null;
   const role = parent.role === "captain" ? "Captain" : "Parent agent";
-  const name = parent.displayName ?? role;
+  // Named as web's Lineage row names it.
+  const name = shell?.title ?? parent.displayName ?? role;
   const detail = parent.crew === null ? role : `${role} · ${parent.crew.crewName}`;
   return (
     <View className="px-4 pb-2">
