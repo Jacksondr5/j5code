@@ -1,15 +1,29 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { type EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { useNavigation } from "@react-navigation/native";
+import { useState } from "react";
 
+import { FilePreviewModal, type FilePreviewSource } from "../../components/FilePreviewModal";
 import { useMarkdownPreviewStyles } from "../../features/files/FileMarkdownPreview";
 import {
   fileRoutePathSegments,
   resolveWorkspaceRelativeFilePath,
 } from "../../features/files/filePath";
-import { resolveMarkdownLinkPresentation } from "../../lib/markdownLinks";
+import {
+  ThreadMarkdownImage,
+  ThreadMarkdownImageUnavailable,
+  ThreadMarkdownImageView,
+} from "../../features/threads/ThreadMarkdownImage";
+import {
+  normalizeNativeMarkdownUrl,
+  resolveMarkdownLinkPresentation,
+} from "../../lib/markdownLinks";
+import { resolveMobileMarkdownMediaSource } from "../../lib/markdownMediaSource";
 import { tryOpenExternalUrl } from "../../lib/openExternalUrl";
-import { SelectableMarkdownText } from "../../native/SelectableMarkdownText";
+import {
+  type MarkdownImageRenderer,
+  SelectableMarkdownText,
+} from "../../native/SelectableMarkdownText";
 import { useMarkdownImageSource } from "../../native/useMarkdownImageSource";
 import { useThreadCwd } from "../../state/use-selected-thread-worktree";
 import {
@@ -18,6 +32,7 @@ import {
   openArtifactLink,
   type ArtifactLinkContext,
 } from "./artifactLinks";
+import { withBlockImages } from "./blockImages";
 
 /**
  * Markdown read in one thread's workspace: `artifacts/…` links open J5's artifact viewer, as on
@@ -35,6 +50,38 @@ export function WorkspaceMarkdown(props: {
     threadId: ThreadId.make(links.threadId),
     workspaceRoot: links.workspaceRoot,
   });
+  const [preview, setPreview] = useState<FilePreviewSource | null>(null);
+  // Images draw at their own size within the width, as the timeline's do; a press opens them.
+  const renderImage: MarkdownImageRenderer = (image) => {
+    const media = resolveMobileMarkdownMediaSource(image.href, {
+      threadId: ThreadId.make(links.threadId),
+      workspaceRoot: links.workspaceRoot,
+      imageEmbed: true,
+    });
+    if (media === null || media.kind !== "image") return null;
+    if (media.access === "direct") {
+      return (
+        <ThreadMarkdownImageView
+          uri={normalizeNativeMarkdownUrl(media.uri)}
+          sourceKey={media.uri}
+          unavailable={false}
+          alt={image.alt}
+          format={media.mimeType === "image/svg+xml" ? "svg" : undefined}
+          onPressPreview={setPreview}
+        />
+      );
+    }
+    if (media.access === "unavailable") return <ThreadMarkdownImageUnavailable alt={image.alt} />;
+    return (
+      <ThreadMarkdownImage
+        environmentId={links.environmentId as EnvironmentId}
+        resource={media.resource}
+        alt={image.alt}
+        srcFragment={media.srcFragment}
+        onPressPreview={setPreview}
+      />
+    );
+  };
   const onLinkPress = (href: string) => {
     if (openArtifactLink(href, links)) return;
     const presentation = resolveMarkdownLinkPresentation(href);
@@ -53,14 +100,20 @@ export function WorkspaceMarkdown(props: {
     if (presentation.href) void tryOpenExternalUrl(presentation.href, "markdown-link");
   };
   return (
-    <SelectableMarkdownText
-      markdown={props.markdown}
-      textStyle={styles.nativeTextStyle}
-      resolveImageSource={resolveImageSource}
-      onLinkPress={onLinkPress}
-      fileContextMenu={(href) => artifactLinkContextMenu(href, links.workspaceRoot)}
-      onFileContextMenuAction={(href, actionId) => onArtifactLinkMenuAction(href, actionId, links)}
-    />
+    <>
+      <SelectableMarkdownText
+        markdown={withBlockImages(props.markdown)}
+        textStyle={styles.nativeTextStyle}
+        renderImage={renderImage}
+        resolveImageSource={resolveImageSource}
+        onLinkPress={onLinkPress}
+        fileContextMenu={(href) => artifactLinkContextMenu(href, links.workspaceRoot)}
+        onFileContextMenuAction={(href, actionId) =>
+          onArtifactLinkMenuAction(href, actionId, links)
+        }
+      />
+      <FilePreviewModal source={preview} onRequestClose={() => setPreview(null)} />
+    </>
   );
 }
 
