@@ -222,8 +222,10 @@ import { agentPersonaPromptSuffix } from "../../j5/agents/agentPersonaPrompts.ts
 import { J5_CLAUDE_MCP_ALLOWED_TOOLS } from "../../j5/a2a/mcp/claudeAllowedTools.ts";
 import { j5ClaudeCrewSeatQueryOverrides } from "../../j5/a2a/crewSeatQuestions.ts";
 import {
+  j5ClaimMissedClaudeSteer,
   j5ClaudeSteerFields,
-  j5ClaudeSteerHoldsResult,
+  j5IsMissedClaudeSteerTurn,
+  j5NoteMissedClaudeSteers,
   j5ObserveClaudeSteer,
   j5OfferClaudeSteer,
 } from "../../j5/a2a/claudeAgentSteers.ts";
@@ -3756,7 +3758,11 @@ function isClaudeActiveSteeringAbortResult(message: SDKResultMessage): boolean {
 function isClaudeProviderContinuationTurn(
   input: ProviderAdapter.ProviderAdapterV2TurnInput,
 ): boolean {
-  return input.message.createdBy === "agent" && input.message.creationSource === "provider";
+  return (
+    (input.message.createdBy === "agent" && input.message.creationSource === "provider") ||
+    // J5: case 89, a missed agent steer's run drains the turn Claude Code started for it.
+    j5IsMissedClaudeSteerTurn(input.message.messageId)
+  );
 }
 
 function isClaudePromptEchoGatedFrame(message: SDKMessage): boolean {
@@ -8248,12 +8254,18 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             threadId: route.threadId,
             providerThreadId: route.providerThreadId,
           });
+          // J5: case 89, a turn Claude Code starts for a missed agent steer carries its message.
+          const j5MissedSteer = j5ClaimMissedClaudeSteer(
+            wakeInput.nativeThreadId,
+            (yield* Ref.get(queryContext))?.query,
+          );
           yield* continuationRequests.offer({
             threadId: route.threadId,
             providerThreadId: route.providerThreadId,
             driver: CLAUDE_PROVIDER,
             detail,
             ...(notification === null ? {} : { notification }),
+            ...(j5MissedSteer === undefined ? {} : { messageId: j5MissedSteer }),
           });
         });
 
@@ -9593,13 +9605,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             const completedAt = yield* DateTime.now;
             const interrupted = (yield* Ref.get(interruptedTurns)).has(context.providerTurnId);
             const wasSteered = (yield* Ref.get(steeredTurns)).has(context.providerTurnId);
-            // J5: case 89 holds a segment whose agent steer is still to run.
-            if (
-              !interrupted &&
-              wasSteered &&
-              (isClaudeActiveSteeringAbortResult(message) ||
-                j5ClaudeSteerHoldsResult(liveQuery.query, context.providerTurnId, message))
-            ) {
+            if (!interrupted && wasSteered && isClaudeActiveSteeringAbortResult(message)) {
               context.steeredSegmentUsage.push(message.usage);
               context.steeredLedgerUsage = addClaudeLedgerUsage(
                 context.steeredLedgerUsage,
@@ -9611,6 +9617,13 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               const next = new Set(current);
               next.delete(context.providerTurnId);
               return next;
+            });
+            // J5: case 89.
+            j5NoteMissedClaudeSteers({
+              query: liveQuery.query,
+              nativeThreadId: liveQuery.nativeThreadId,
+              providerTurnId: context.providerTurnId,
+              result: message,
             });
             if (!isClaudeProviderContinuationTurn(context.input)) {
               yield* markAbsorbedWake(liveQuery.nativeThreadId);
