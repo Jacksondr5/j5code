@@ -23,7 +23,7 @@ vi.mock(import("../../j5/agents/AgentIdentityChip"), () => ({
 vi.mock(import("../../j5/sharing/access"), () => ({
   useCanMergeBack: (() => true) as never,
 }));
-// J5: Peer Agent and Crew rows (case 116) are tested in j5Lineage.logic.test.ts.
+// J5: Peer Agent and Crew rows (case 116) are tested in client-runtime's j5/lineage.test.ts.
 vi.mock(import("../../j5/threads/J5LineageRows"), () => ({
   J5LineageRows: (() => null) as never,
   useJ5LineageRows: (() => []) as never,

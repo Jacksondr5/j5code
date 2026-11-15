@@ -3,7 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { ThreadId } from "@t3tools/contracts";
 import type { FleetAgent, FleetProject } from "@t3tools/contracts/j5";
 
-import { deriveJ5LineageRows, visibleJ5LineageRows } from "./j5Lineage.logic";
+import { deriveJ5LineageRows, visibleJ5LineageRows } from "./lineage.ts";
 
 const agent = (participantId: string, overrides: Partial<FleetAgent> = {}): FleetAgent => ({
   participantId,

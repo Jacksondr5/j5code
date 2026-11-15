@@ -1,5 +1,10 @@
 import { useAtomValue } from "@effect/atom-react";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import {
+  deriveJ5LineageRows,
+  visibleJ5LineageRows,
+  type J5LineageRow,
+} from "@t3tools/client-runtime/j5/lineage";
 import { threadKey } from "@t3tools/client-runtime/state/entities";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import type { FleetProject } from "@t3tools/contracts/j5";
@@ -23,7 +28,6 @@ import {
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { AgentRowIdentity } from "../agents/AgentIdentityChip";
 import { fleetSourcesAtom } from "../state";
-import { deriveJ5LineageRows, visibleJ5LineageRows, type J5LineageRow } from "./j5Lineage.logic";
 
 const EMPTY: ReadonlyArray<FleetProject> = [];
 
