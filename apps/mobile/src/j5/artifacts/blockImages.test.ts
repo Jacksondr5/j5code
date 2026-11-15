@@ -30,4 +30,16 @@ describe("withBlockImages", () => {
       '![a](a.png)\n\nand\n\n![b](b.png "B")',
     );
   });
+
+  it("sets an image off from text on the lines next to it, which would make it inline", () => {
+    expect(withBlockImages("Here is the screenshot:\n![shot](shot.png)")).toBe(
+      "Here is the screenshot:\n\n![shot](shot.png)",
+    );
+    expect(withBlockImages("Intro\n![x](x.png)\nmore")).toBe("Intro\n\n![x](x.png)\n\nmore");
+  });
+
+  it("leaves a table row whole", () => {
+    const markdown = "| a | b |\n| --- | --- |\n| x ![p](p.png) | y |";
+    expect(withBlockImages(markdown)).toBe(markdown);
+  });
 });
