@@ -1,6 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { crewAgentStatus } from "@t3tools/client-runtime/j5/crew-state";
+import { askWaitsForServerLine } from "@t3tools/client-runtime/j5/inbox";
 import {
   groupSpawnedChildren,
   j5AgentsPillSegment,
@@ -35,6 +36,7 @@ import { appAtomRegistry } from "../../state/atom-registry";
 import { useThreadShells } from "../../state/entities";
 import { environmentThreadShells } from "../../state/threads";
 import { j5Environment } from "../state";
+import { useServerConnection } from "./serverConnection";
 import { useThreadSpawnedChildren } from "./spawnedChildren";
 
 type ChildTarget = { readonly environmentId: EnvironmentId; readonly threadId: ThreadId };
@@ -136,7 +138,9 @@ function SpawnedAgentGroup(props: {
   const { group } = props;
   const canStop = useAtomValue(j5Environment.stopCrew.permissionAtom(props.environmentId));
   const stoppable = canStop ? stoppableCrew(group) : null;
+  const server = useServerConnection(props.environmentId);
   const [stopping, setStopping] = useState(false);
+  const stopDisabled = stopping || !server.connected;
   const stop = (crew: { readonly crewInstanceId: string; readonly crewName: string }) => {
     setStopping(true);
     void j5Environment.stopCrew
@@ -170,14 +174,20 @@ function SpawnedAgentGroup(props: {
             className="ml-auto rounded-md border border-border px-2 py-1"
             accessibilityRole="button"
             accessibilityLabel={`Stop crew ${stoppable.crewName}`}
-            disabled={stopping}
+            accessibilityState={{ disabled: stopDisabled }}
+            disabled={stopDisabled}
             onPress={() => stop(stoppable)}
-            style={({ pressed }) => ({ opacity: stopping ? 0.5 : pressed ? 0.6 : 1 })}
+            style={({ pressed }) => ({ opacity: stopDisabled ? 0.5 : pressed ? 0.6 : 1 })}
           >
             <Text className="text-xs font-t3-medium text-foreground">Stop crew</Text>
           </Pressable>
         )}
       </View>
+      {stoppable !== null && !server.connected ? (
+        <Text className="pt-1 text-xs text-foreground-muted">
+          {askWaitsForServerLine(server.label)}
+        </Text>
+      ) : null}
       {group.rows.map(({ child, thread }) => (
         <SpawnedAgentRow
           key={child.threadId}
