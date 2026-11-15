@@ -20,6 +20,7 @@ import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { useThreadSelection } from "../../state/use-thread-selection";
 import { listArtifacts, readArtifact } from "./artifactClient";
 import { useServerRead } from "./serverRead";
+import { ArtifactHtmlPreview } from "./ArtifactHtmlPreview";
 import { WorkspaceMarkdown } from "./WorkspaceMarkdown";
 
 type ThreadArtifactsParams = StaticScreenProps<{
@@ -130,7 +131,7 @@ function ArtifactBody(props: { readonly content: ArtifactContent }) {
       />
     );
   }
-  // HTML shows as its source: a phone has no sandboxed frame to run it in safely.
+  if (kind === "html") return <ArtifactHtmlPreview html={content.content} path={content.path} />;
   return (
     <AppText className="font-mono text-sm text-foreground" selectable>
       {content.content}
