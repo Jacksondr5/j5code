@@ -51,6 +51,7 @@ export function deriveJ5LineageRows(
     captainId === null || captainId === parentId ? undefined : byParticipant.get(captainId);
   if (hasThread(captain)) rows.push(toRow(captain, "captain", crew));
 
+  // A fresh array, sorted in place: Hermes has no `toSorted`.
   const children = agents
     .filter(
       (agent): agent is FleetAgent & { threadId: string } =>
@@ -60,7 +61,7 @@ export function deriveJ5LineageRows(
         ((agent.placementParentId ?? agent.crew?.captainParticipantId) === self.participantId ||
           agent.crew?.captainParticipantId === self.participantId),
     )
-    .toSorted(
+    .sort(
       (left, right) =>
         Number(left.crew === null) - Number(right.crew === null) ||
         (left.crew?.crewName ?? "").localeCompare(right.crew?.crewName ?? "") ||
