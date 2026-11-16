@@ -31,7 +31,8 @@ type ThreadArtifactsParams = StaticScreenProps<{
 type ThreadArtifactParams = StaticScreenProps<{
   readonly environmentId: string;
   readonly threadId: string;
-  readonly path: string | string[];
+  /** Missing when an app link names no artifact. */
+  readonly path?: string | string[];
 }>;
 
 /** Artifacts belong to the thread's project, on the thread's server. */
@@ -142,20 +143,21 @@ function ArtifactBody(props: { readonly content: ArtifactContent }) {
 export function ThreadArtifactScreen(props: ThreadArtifactParams) {
   const navigation = useNavigation();
   const { environmentId, threadId } = props.route.params;
-  const path = Array.isArray(props.route.params.path)
-    ? props.route.params.path.join("/")
-    : props.route.params.path;
+  const routePath = props.route.params.path;
+  const path = (Array.isArray(routePath) ? routePath.join("/") : routePath) || null;
   const project = useArtifactProject(props.route.params);
   const { selectedThreadProject } = useThreadSelection();
   const workspaceRoot =
     (selectedThreadProject as { readonly workspaceRoot?: string } | null)?.workspaceRoot ?? null;
   const { load, refreshing, refresh } = useServerRead<ArtifactContent>(
-    project.projectId === null ? null : `${environmentId}:${project.projectId}:${path}`,
+    project.projectId === null || path === null
+      ? null
+      : `${environmentId}:${project.projectId}:${path}`,
     () =>
       readArtifact({
         environmentId: project.environmentId,
         projectId: project.projectId!,
-        path,
+        path: path!,
       }),
   );
   // One scroll view registered with the header, so iOS insets it under the transparent header
@@ -167,10 +169,10 @@ export function ThreadArtifactScreen(props: ThreadArtifactParams) {
       contentContainerClassName="gap-4 px-4 py-4"
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
     >
-      <NativeStackScreenOptions options={{ title: path.split("/").at(-1) ?? "Artifact" }} />
+      <NativeStackScreenOptions options={{ title: path?.split("/").at(-1) ?? "Artifact" }} />
       <View className="flex-row items-center justify-between gap-3">
         <AppText textRole="label" className="min-w-0 shrink text-foreground-muted" selectable>
-          artifacts/{path}
+          artifacts/{path ?? ""}
         </AppText>
         <Button
           label="All artifacts"
@@ -178,7 +180,9 @@ export function ThreadArtifactScreen(props: ThreadArtifactParams) {
           onPress={() => navigation.navigate("ThreadArtifacts", { environmentId, threadId })}
         />
       </View>
-      {project.projectId === null ? (
+      {path === null ? (
+        <EmptyState title="Couldn't open this artifact" detail="This link names no artifact." />
+      ) : project.projectId === null ? (
         <EmptyState title="Artifact unavailable" detail="This thread has no project." />
       ) : load.status === "loading" ? (
         <AppText className="text-foreground-muted">Opening artifact…</AppText>
