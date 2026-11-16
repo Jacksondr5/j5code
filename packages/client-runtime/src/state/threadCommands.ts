@@ -1,4 +1,5 @@
 import type { ThreadId } from "@t3tools/contracts";
+import { createPersonalThreadReadCommands } from "../j5/threadReads.ts";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
@@ -29,7 +30,6 @@ import {
   interruptThreadTurn,
   forkSideChat,
   forkThreadFromRun,
-  markThreadUnread,
   mergeThreadBack,
   promoteQueuedRun,
   resumeThreadQueue,
@@ -55,7 +55,6 @@ import {
   unsettleThread,
   unsnoozeThread,
   updateThreadMetadata,
-  visitThread,
   watchThreadPullRequest,
 } from "../operations/commands.ts";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
@@ -209,18 +208,7 @@ export function createThreadEnvironmentAtoms<R, E>(
       scheduler,
       concurrency,
     }),
-    visit: createEnvironmentCommand(runtime, {
-      label: "environment-data:commands:thread:visit",
-      execute: visitThread,
-      scheduler,
-      concurrency,
-    }),
-    markUnread: createEnvironmentCommand(runtime, {
-      label: "environment-data:commands:thread:mark-unread",
-      execute: markThreadUnread,
-      scheduler,
-      concurrency,
-    }),
+    ...createPersonalThreadReadCommands(runtime),
     updateMetadata: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:update-metadata",
       execute: updateThreadMetadata,

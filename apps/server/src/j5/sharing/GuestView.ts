@@ -69,6 +69,9 @@ const reduceEnvironment = (
   // Viewer nothing J5 reads by project or thread: a thread's Playbook runs, the inbox, Crew asks.
   capabilities: {
     repositoryIdentity: false,
+    ...(environment.capabilities.j5PersonalThreadReads === undefined
+      ? {}
+      : { j5PersonalThreadReads: environment.capabilities.j5PersonalThreadReads }),
     ...(environment.capabilities.j5ProjectLedger === undefined
       ? {}
       : { j5ProjectLedger: environment.capabilities.j5ProjectLedger }),

@@ -86,7 +86,7 @@ describe("the thread menu for someone who is not an Owner", () => {
     ).toEqual(["Rename thread", "Mark unread", "Copy", "Share thread…", "Leave thread"]);
   });
 
-  it("gives a Viewer no Mark unread, since the read marker is everyone's", () => {
+  it("gives a Viewer no Mark unread on servers with shared read markers", () => {
     expect(
       labels(
         sharingMenuItems(
@@ -96,6 +96,24 @@ describe("the thread menu for someone who is not an Owner", () => {
         ),
       ),
     ).toEqual(["Rename thread", "Copy", "Share thread…", "Leave thread"]);
+  });
+
+  it("keeps a Viewer's personal Mark unread action", () => {
+    expect(
+      labels(
+        sharingMenuItems(
+          upstream,
+          {
+            owner: false,
+            level: "viewer",
+            holdsThread: false,
+            startsInProject: false,
+            personalThreadReads: true,
+          },
+          { canShare: false },
+        ),
+      ),
+    ).toEqual(["Rename thread", "Mark unread", "Copy", "Share thread…"]);
   });
 
   it("offers no Leave to someone who reaches the thread only through a wider scope", () => {

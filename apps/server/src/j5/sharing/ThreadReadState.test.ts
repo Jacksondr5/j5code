@@ -1,0 +1,473 @@
+import { assert, it } from "@effect/vitest";
+import { AuthSessionId, CommandId, ThreadId } from "@t3tools/contracts";
+import type { PersonalThreadReadChange } from "@t3tools/contracts/j5";
+import * as DateTime from "effect/DateTime";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Queue from "effect/Queue";
+import * as TestClock from "effect/testing/TestClock";
+import * as Stream from "effect/Stream";
+import * as SqlClient from "effect/sql/SqlClient";
+import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
+import { humanPersonRegistryLayer } from "../a2a/HumanPersonRegistry.ts";
+import { runJ5A2AMigrations } from "../a2a/Migrations.ts";
+import { makeHarness, modelSelection, projectId } from "../test-support/threadLaunchHarness.ts";
+import * as PersonAccess from "./PersonAccess.ts";
+import * as ThreadReads from "./ThreadReadState.ts";
+
+const threadId = ThreadId.make("thread:personal-read");
+const completedAt = DateTime.makeUnsafe("2026-10-31T12:00:00.000Z");
+const issuedAt = "1970-01-01T00:00:00.000Z";
+const readAt = "2026-10-31T12:01:00.000Z";
+const owner = {
+  scopes: ["orchestration:read", "orchestration:operate"],
+  sessionId: AuthSessionId.make("session:owner"),
+  subject: "administrative-bootstrap",
+};
+
+function layer(completed = true) {
+  const harness = makeHarness();
+  const threads = Layer.effect(
+    ThreadManagementService,
+    Effect.gen(function* () {
+      const original = yield* ThreadManagementService;
+      return {
+        ...original,
+        getThreadShell: Effect.fn("test.completedShell")((id: ThreadId) =>
+          original
+            .getThreadShell(id)
+            .pipe(
+              Effect.map((shell) =>
+                shell === null
+                  ? null
+                  : { ...shell, latestRunCompletedAt: completed ? completedAt : null },
+              ),
+            ),
+        ),
+      };
+    }),
+  ).pipe(Layer.provide(harness.layer));
+  return ThreadReads.layer.pipe(
+    Layer.provideMerge(threads),
+    Layer.provideMerge(PersonAccess.layer),
+    Layer.provideMerge(humanPersonRegistryLayer),
+    Layer.provideMerge(harness.layer),
+  );
+}
+
+const seed = Effect.gen(function* () {
+  const threads = yield* ThreadManagementService;
+  yield* threads.dispatch({
+    type: "thread.create",
+    createdBy: "user",
+    creationSource: "web",
+    commandId: CommandId.make("create"),
+    threadId,
+    projectId,
+    title: "Personal read state",
+    modelSelection,
+    runtimeMode: "full-access",
+    interactionMode: "default",
+    branch: null,
+    worktreePath: null,
+  });
+  return yield* ThreadReads.ThreadReadState;
+});
+
+const viewer = Effect.fn("test.viewer")(function* (name: string) {
+  const access = yield* PersonAccess.PersonAccess;
+  const person = yield* access.createPerson({ displayName: name });
+  yield* access.setLevel({
+    personId: person.personId,
+    scope: { kind: "thread", threadId },
+    level: "viewer",
+  });
+  const session = {
+    scopes: ["orchestration:read"],
+    sessionId: AuthSessionId.make(`session:${name}`),
+    subject: "one-time-token",
+  };
+  yield* access.bindSession({
+    sessionId: session.sessionId,
+    personId: person.personId,
+    ceiling: ["orchestration:read"],
+  });
+  return { person, session };
+});
+
+const feed = Effect.fn("test.readFeed")(function* (session: PersonAccess.SessionIdentity) {
+  const reads = yield* ThreadReads.ThreadReadState;
+  const queue = yield* Queue.unbounded<PersonalThreadReadChange>();
+  yield* reads.subscribe(session).pipe(
+    Stream.runForEach((change) => Queue.offer(queue, change)),
+    Effect.forkChild,
+  );
+  return queue;
+});
+
+it.effect("preserves search-open ranking without advancing the shared read marker", () =>
+  Effect.gen(function* () {
+    const reads = yield* seed;
+    const threads = yield* ThreadManagementService;
+    const previous = "2026-10-30T00:00:00.000Z";
+    yield* threads.dispatch({
+      type: "thread.visit",
+      threadId,
+      commandId: CommandId.make("legacy"),
+      visitedAt: previous,
+    });
+    yield* reads.visit(owner, {
+      issuedAt,
+      commandId: CommandId.make("owner-open"),
+      threadId,
+      visitedAt: readAt,
+      opened: true,
+      searchQuery: "quartz",
+    });
+    const sql = yield* SqlClient.SqlClient;
+    const [before] = yield* sql<{
+      readonly opens: string;
+      readonly visited: string;
+    }>`SELECT json_extract(payload_json, '$.opens') AS opens, json_extract(payload_json, '$.lastVisitedAt') AS visited FROM orchestration_v2_projection_threads WHERE thread_id = ${threadId}`;
+    assert.include(before!.opens, "quartz");
+    assert.equal(before!.visited, previous);
+    const alice = yield* viewer("Alice");
+    yield* reads.visit(alice.session, {
+      issuedAt,
+      commandId: CommandId.make("viewer-open"),
+      threadId,
+      visitedAt: readAt,
+      opened: true,
+      searchQuery: "violet",
+    });
+    const [after] = yield* sql<{
+      readonly opens: string;
+      readonly visited: string;
+    }>`SELECT json_extract(payload_json, '$.opens') AS opens, json_extract(payload_json, '$.lastVisitedAt') AS visited FROM orchestration_v2_projection_threads WHERE thread_id = ${threadId}`;
+    assert.deepEqual(after, before);
+  }).pipe(Effect.provide(layer())),
+);
+
+it.effect("an open updates ranking without replacing an imported thread's null watermark", () =>
+  Effect.gen(function* () {
+    const reads = yield* seed;
+    yield* reads.visit(owner, {
+      issuedAt,
+      commandId: CommandId.make("import-open"),
+      threadId,
+      visitedAt: readAt,
+      opened: true,
+      searchQuery: "import",
+    });
+    const shell = yield* (yield* ThreadManagementService).getThreadShell(threadId);
+    assert.isNull(shell?.lastVisitedAt);
+    assert.isNotNull(shell?.opens);
+  }).pipe(Effect.provide(layer())),
+);
+
+it.effect("a read-only owner's open changes only their personal watermark", () =>
+  Effect.gen(function* () {
+    const reads = yield* seed;
+    const threads = yield* ThreadManagementService;
+    const before = yield* threads.getThreadShell(threadId);
+    const result = yield* reads.visit(
+      { ...owner, scopes: ["orchestration:read"] },
+      {
+        issuedAt,
+        commandId: CommandId.make("read-only-open"),
+        threadId,
+        visitedAt: readAt,
+        opened: true,
+        searchQuery: "injected",
+      },
+    );
+    assert.equal(DateTime.formatIso(result.lastVisitedAt), readAt);
+    assert.deepEqual(yield* threads.getThreadShell(threadId), before);
+  }).pipe(Effect.provide(layer())),
+);
+
+it.effect(
+  "keeps two people's markers independent and sends a viewer's changes to both their devices",
+  () =>
+    Effect.gen(function* () {
+      const reads = yield* seed;
+      const alice = yield* viewer("Alice");
+      const bob = yield* viewer("Bob");
+      const access = yield* PersonAccess.PersonAccess;
+      const second = { ...alice.session, sessionId: AuthSessionId.make("session:alice-phone") };
+      yield* access.bindSession({
+        sessionId: second.sessionId,
+        personId: alice.person.personId,
+        ceiling: ["orchestration:read"],
+      });
+      const aliceFeed = yield* feed(alice.session);
+      const phoneFeed = yield* feed(second);
+      const bobFeed = yield* feed(bob.session);
+      for (const queue of [aliceFeed, phoneFeed, bobFeed])
+        assert.deepEqual(yield* Queue.take(queue), { kind: "snapshot", markers: [] });
+      const marker = yield* reads.visit(alice.session, {
+        issuedAt,
+        commandId: CommandId.make("alice-read"),
+        threadId,
+        visitedAt: readAt,
+      });
+      for (const queue of [aliceFeed, phoneFeed])
+        assert.deepEqual(yield* Queue.take(queue), { kind: "changed", marker });
+      const bobMarker = yield* reads.visit(bob.session, {
+        issuedAt,
+        commandId: CommandId.make("bob-read"),
+        threadId,
+        visitedAt: readAt,
+      });
+      assert.deepEqual(yield* Queue.take(bobFeed), { kind: "changed", marker: bobMarker });
+      const unread = yield* reads.markUnread(second, {
+        issuedAt,
+        commandId: CommandId.make("alice-unread"),
+        threadId,
+      });
+      assert.equal(DateTime.formatIso(unread.lastVisitedAt), "2026-10-31T11:59:59.999Z");
+      for (const queue of [aliceFeed, phoneFeed])
+        assert.deepEqual(yield* Queue.take(queue), { kind: "changed", marker: unread });
+      const sql = yield* SqlClient.SqlClient;
+      assert.deepEqual(
+        yield* sql`SELECT person_id, last_visited_at FROM j5_thread_read ORDER BY person_id`,
+        [
+          { person_id: alice.person.personId, last_visited_at: "2026-10-31T11:59:59.999Z" },
+          { person_id: bob.person.personId, last_visited_at: readAt },
+        ].sort((a, b) => a.person_id.localeCompare(b.person_id)),
+      );
+      assert.isNull(
+        (yield* (yield* ThreadManagementService).getThreadShell(threadId))?.lastVisitedAt,
+      );
+      const restored = yield* Effect.gen(function* () {
+        const fresh = yield* ThreadReads.ThreadReadState;
+        return yield* fresh.subscribe(second).pipe(Stream.take(1), Stream.runCollect);
+      }).pipe(Effect.provide(ThreadReads.layer));
+      assert.deepEqual(restored, [{ kind: "snapshot", markers: [unread] }]);
+    }).pipe(Effect.provide(layer())),
+);
+
+it.effect("replays retries without undoing newer actions and rejects reused command ids", () =>
+  Effect.gen(function* () {
+    const reads = yield* seed;
+    const visit = { issuedAt, commandId: CommandId.make("read"), threadId, visitedAt: readAt };
+    const original = yield* reads.visit(owner, visit);
+    const unreadInput = { issuedAt, commandId: CommandId.make("unread"), threadId };
+    yield* reads.markUnread(owner, unreadInput);
+    assert.deepEqual(yield* reads.visit(owner, visit), original);
+    const [snapshot] = yield* reads.subscribe(owner).pipe(Stream.take(1), Stream.runCollect);
+    assert.equal(
+      snapshot?.kind === "snapshot" && DateTime.formatIso(snapshot.markers[0]!.lastVisitedAt),
+      "2026-10-31T11:59:59.999Z",
+    );
+    yield* reads.visit(owner, { ...visit, issuedAt, commandId: CommandId.make("new-read") });
+    yield* reads.markUnread(owner, unreadInput);
+    yield* reads.visit(owner, {
+      ...visit,
+      issuedAt,
+      commandId: CommandId.make("stale-read"),
+      visitedAt: "2026-10-30T00:00:00.000Z",
+    });
+    const [current] = yield* reads.subscribe(owner).pipe(Stream.take(1), Stream.runCollect);
+    assert.equal(
+      current?.kind === "snapshot" && DateTime.formatIso(current.markers[0]!.lastVisitedAt),
+      readAt,
+    );
+    const conflict = yield* reads
+      .markUnread(owner, { issuedAt, commandId: visit.commandId, threadId })
+      .pipe(Effect.flip);
+    assert.equal(conflict.reason, "request-conflict");
+  }).pipe(Effect.provide(layer())),
+);
+
+it.effect(
+  "refuses unknown devices and inaccessible threads and removes revoked access from snapshots",
+  () =>
+    Effect.gen(function* () {
+      const reads = yield* seed;
+      const alice = yield* viewer("Alice");
+      const input = { issuedAt, commandId: CommandId.make("read"), threadId, visitedAt: readAt };
+      assert.equal(
+        (yield* reads
+          .visit(
+            {
+              scopes: ["orchestration:read"],
+              sessionId: AuthSessionId.make("unknown"),
+              subject: "one-time-token",
+            },
+            input,
+          )
+          .pipe(Effect.flip)).reason,
+        "not-person",
+      );
+      assert.equal(
+        (yield* reads
+          .visit(alice.session, { ...input, threadId: ThreadId.make("not-shared") })
+          .pipe(Effect.flip)).reason,
+        "not-shared",
+      );
+      yield* reads.visit(alice.session, input);
+      const queue = yield* feed(alice.session);
+      yield* Queue.take(queue);
+      yield* (yield* PersonAccess.PersonAccess).removeLevel({
+        personId: alice.person.personId,
+        scope: { kind: "thread", threadId },
+      });
+      assert.deepEqual(yield* Queue.take(queue), { kind: "snapshot", markers: [] });
+      assert.equal(
+        (yield* reads
+          .markUnread(alice.session, { issuedAt, commandId: CommandId.make("denied"), threadId })
+          .pipe(Effect.flip)).reason,
+        "not-shared",
+      );
+    }).pipe(Effect.provide(layer())),
+);
+
+it.effect("refuses mark unread without a completed run", () =>
+  Effect.gen(function* () {
+    const reads = yield* seed;
+    assert.equal(
+      (yield* reads
+        .markUnread(owner, { issuedAt, commandId: CommandId.make("unread"), threadId })
+        .pipe(Effect.flip)).reason,
+      "no-completion",
+    );
+  }).pipe(Effect.provide(layer(false))),
+);
+
+it.effect("upgrades migration 57 and migrates existing markers only to the first owner", () =>
+  Effect.gen(function* () {
+    yield* seed;
+    yield* viewer("Alice");
+    const reach = yield* (yield* PersonAccess.PersonAccess).sessionReach(owner);
+    assert.equal(reach.kind, "person");
+    if (reach.kind !== "person") return;
+    yield* (yield* ThreadManagementService).dispatch({
+      type: "thread.visit",
+      commandId: CommandId.make("legacy-read"),
+      threadId,
+      visitedAt: readAt,
+    });
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`DROP TABLE j5_thread_read`;
+    yield* sql`DROP TABLE j5_thread_read_command`;
+    yield* sql`DELETE FROM j5_a2a_migrations WHERE migration_id = 58`;
+    const before = yield* sql<{
+      readonly migration_id: number;
+      readonly name: string;
+    }>`SELECT migration_id, name FROM j5_a2a_migrations ORDER BY migration_id`;
+    assert.equal(before.at(-1)?.migration_id, 57);
+    yield* runJ5A2AMigrations();
+    yield* runJ5A2AMigrations();
+    assert.deepEqual(
+      yield* sql`SELECT migration_id, name FROM j5_a2a_migrations ORDER BY migration_id`,
+      [...before, { migration_id: 58, name: "PersonalThreadReads" }],
+    );
+    assert.deepEqual(yield* sql`SELECT * FROM j5_thread_read`, [
+      { person_id: reach.person.personId, thread_id: threadId, last_visited_at: readAt },
+    ]);
+  }).pipe(Effect.provide(layer())),
+);
+
+it.effect(
+  "bounds viewer receipts without allowing an expired unread retry to rewind a newer visit",
+  () =>
+    Effect.gen(function* () {
+      const reads = yield* seed;
+      const alice = yield* viewer("Alice");
+      const unread = { issuedAt, commandId: CommandId.make("original-unread"), threadId };
+      const original = yield* reads.markUnread(alice.session, unread);
+      yield* reads.visit(alice.session, {
+        issuedAt,
+        commandId: CommandId.make("newer-visit"),
+        threadId,
+        visitedAt: readAt,
+      });
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`
+      WITH RECURSIVE ids(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM ids WHERE n < ${ThreadReads.READ_RECEIPT_LIMIT - 2})
+      INSERT INTO j5_thread_read_command (person_id, command_id, request_digest, thread_id, last_visited_at, issued_at)
+      SELECT ${alice.person.personId}, 'filler:' || n, 'digest', ${threadId}, ${readAt}, 0 FROM ids
+    `;
+      assert.equal(
+        (yield* reads
+          .markUnread(alice.session, { ...unread, commandId: CommandId.make("over-quota") })
+          .pipe(Effect.flip)).reason,
+        "receipt-limit",
+      );
+      assert.deepEqual(yield* reads.markUnread(alice.session, unread), original);
+      yield* TestClock.adjust(ThreadReads.READ_RETRY_WINDOW_MS + 1);
+      const freshIssuedAt = DateTime.formatIso(yield* DateTime.now);
+      yield* reads.visit(alice.session, {
+        issuedAt: freshIssuedAt,
+        commandId: CommandId.make("after-expiry"),
+        threadId,
+        visitedAt: readAt,
+      });
+      assert.equal(
+        (yield* reads.markUnread(alice.session, unread).pipe(Effect.flip)).reason,
+        "expired-request",
+      );
+      assert.deepEqual(
+        yield* sql`SELECT last_visited_at FROM j5_thread_read WHERE person_id = ${alice.person.personId}`,
+        [{ last_visited_at: readAt }],
+      );
+      assert.deepEqual(yield* sql`SELECT COUNT(*) AS total FROM j5_thread_read_command`, [
+        { total: 1 },
+      ]);
+    }).pipe(Effect.provide(layer())),
+);
+
+it.effect("validates personal command ids and both timestamps at the service boundary", () =>
+  Effect.gen(function* () {
+    const reads = yield* seed;
+    const input = { issuedAt, commandId: CommandId.make("valid"), threadId, visitedAt: readAt };
+    for (const invalid of [
+      { ...input, commandId: CommandId.make("x".repeat(129)) },
+      { ...input, issuedAt: "not-a-date" },
+      { ...input, issuedAt: "1970-01-02T00:00:00.000Z" },
+      { ...input, visitedAt: "not-a-date" },
+    ])
+      assert.equal(
+        (yield* reads.visit(owner, invalid).pipe(Effect.flip)).reason,
+        "invalid-request",
+      );
+    yield* reads.visit(owner, { ...input, commandId: CommandId.make("x".repeat(128)) });
+    const sql = yield* SqlClient.SqlClient;
+    assert.deepEqual(yield* sql`SELECT COUNT(*) AS total FROM j5_thread_read_command`, [
+      { total: 1 },
+    ]);
+  }).pipe(Effect.provide(layer())),
+);
+
+it.effect("refuses an owner open at quota before changing shared search ranking", () =>
+  Effect.gen(function* () {
+    const reads = yield* seed;
+    const access = yield* (yield* PersonAccess.PersonAccess).sessionReach(owner);
+    assert.equal(access.kind, "person");
+    if (access.kind !== "person") return;
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`
+      WITH RECURSIVE ids(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM ids WHERE n < ${ThreadReads.READ_RECEIPT_LIMIT})
+      INSERT INTO j5_thread_read_command (person_id, command_id, request_digest, thread_id, last_visited_at, issued_at)
+      SELECT ${access.person.personId}, 'filler:' || n, 'digest', ${threadId}, ${readAt}, 0 FROM ids
+    `;
+    const threads = yield* ThreadManagementService;
+    const before = yield* threads.getThreadShell(threadId);
+    assert.equal(
+      (yield* reads
+        .visit(owner, {
+          issuedAt,
+          commandId: CommandId.make("quota-open"),
+          threadId,
+          visitedAt: readAt,
+          opened: true,
+          searchQuery: "rejected",
+        })
+        .pipe(Effect.flip)).reason,
+      "receipt-limit",
+    );
+    assert.deepEqual(yield* threads.getThreadShell(threadId), before);
+    assert.deepEqual(yield* sql`SELECT * FROM j5_thread_read`, []);
+  }).pipe(Effect.provide(layer())),
+);

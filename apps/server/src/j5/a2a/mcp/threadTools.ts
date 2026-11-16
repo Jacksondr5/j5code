@@ -58,10 +58,17 @@ export const J5AdaptedThreadToolkit = Toolkit.make(
   Tool.make("t3_thread_organize", {
     ...common,
     dependencies: [...common.dependencies, AgentCrewInstanceService],
-    parameters: ThreadToolkit.tools.t3_thread_organize.parametersSchema,
+    parameters: Schema.Struct({
+      ...ThreadToolkit.tools.t3_thread_organize.parametersSchema.fields,
+      action: Schema.Literals(
+        ThreadToolkit.tools.t3_thread_organize.parametersSchema.fields.action.literals.filter(
+          (action) => action !== "mark_unread",
+        ),
+      ),
+    }),
     success: ThreadToolkit.tools.t3_thread_organize.successSchema,
     description:
-      "Pin, snooze, settle, archive, or mark a thread unread. Omit `threadId` for this thread. `snooze` needs `snoozedUntil`. Settling this thread applies at turn end. A failed turn or queued message leaves it active. Archive hides the agent and closes its Exchanges; unarchive restores it without reopening them. A Crew seat cannot be archived alone: use j5_archive_crew or the Fleet page. Archiving a Captain archives its Crew. Archive does not interrupt a running turn.",
+      "Pin, snooze, settle or archive. Unread is person-only. Omit `threadId` for this thread. `snooze` needs `snoozedUntil`. Settling this thread applies at turn end. A failed turn or queued message leaves it active. Archive hides the agent and closes its Exchanges; unarchive restores it without reopening them. A Crew seat cannot be archived alone: use j5_archive_crew or the Fleet page. Archiving a Captain archives its Crew. Archive does not interrupt a running turn.",
   })
     .annotate(Tool.Title, "Organize a thread")
     .annotate(Tool.Destructive, true),
@@ -302,9 +309,6 @@ export const layer = McpToolAccess.toLayer(J5AdaptedThreadToolkit, {
         case "unsnooze":
         case "unsettle":
           command = { ...common, type: `thread.${input.action}`, reason: "user" };
-          break;
-        case "mark_unread":
-          command = { ...common, type: "thread.mark-unread" };
           break;
         default:
           command = { ...common, type: `thread.${input.action}` };

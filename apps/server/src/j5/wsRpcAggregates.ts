@@ -8,6 +8,7 @@ import {
   J5_ACCESS_WS_METHODS,
   J5_CLIENT_ACTION_WS_METHODS,
   J5_PEOPLE_WS_METHODS,
+  J5_THREAD_READ_WS_METHODS,
   J5_SHARED_CONVERSATION_WS_METHODS,
   J5_CLIENT_READ_WS_METHODS,
   J5_PLAYBOOK_WS_METHODS,
@@ -35,6 +36,7 @@ export const J5_RPC_AGGREGATES = {
   ...labelled(J5_CLIENT_ACTION_WS_METHODS, "j5ClientActions"),
   ...labelled(J5_ACCESS_WS_METHODS, "j5Access"),
   ...labelled(J5_PEOPLE_WS_METHODS, "j5People"),
+  ...labelled(J5_THREAD_READ_WS_METHODS, "j5ThreadReads"),
   ...labelled(J5_SHARED_CONVERSATION_WS_METHODS, "j5SharedConversation"),
   ...labelled(J5_CLIENT_READ_WS_METHODS, "j5ClientReads"),
 };

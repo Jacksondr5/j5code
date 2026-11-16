@@ -34,7 +34,7 @@ interface VisitedShell {
 export interface ThreadVisitTrackerOptions {
   readonly threadShellAtom: (ref: ScopedThreadRef) => Atom.Atom<VisitedShell | null>;
   readonly visit: AtomCommand<
-    { readonly environmentId: EnvironmentId; readonly input: VisitThreadInput },
+    { readonly environmentId: EnvironmentId; readonly input: Omit<VisitThreadInput, "commandId"> },
     unknown,
     unknown
   >;
