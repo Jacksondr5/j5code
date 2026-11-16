@@ -15,7 +15,9 @@ export const j5ThreadRoutes = <Options extends object>(
   }),
   ThreadArtifact: createNativeStackScreen({
     screen: ThreadArtifactScreen,
-    linking: `${threadLinkingPrefix}/artifacts/:path*`,
+    // React Navigation 7 reads `:path*` as one segment named `path*`; the regex takes the rest of
+    // the link, nested folders included, as `path`.
+    linking: `${threadLinkingPrefix}/artifacts/:path(.+)`,
     options,
   }),
   ThreadCrewProposal: createNativeStackScreen({
