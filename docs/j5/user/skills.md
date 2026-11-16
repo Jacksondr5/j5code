@@ -3,7 +3,7 @@
 On web and desktop, open **Settings → Skills** and select the environment
 that should install the skills. Catalog installation and the Installed inventory support Codex and
 Claude instances and their configured homes. Mobile can use installed skills in
-chat but does not have this settings page.
+chat but does not have this settings page; its **Agent Setup** points here.
 
 The Installed section shows each provider instance's discovered skills and their
 sources. It starts with environment-wide discovery unless settings name a project.
