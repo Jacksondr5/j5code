@@ -597,6 +597,9 @@ function OwnerAgentLibrarySettingsScreen() {
         <SettingsSection title="Crews">
           <InfoRow text="Crew settings (auto-approve, member models and reasoning) are in Agent Setup on web and desktop. The phone follows them." />
         </SettingsSection>
+        <SettingsSection title="Skills">
+          <InfoRow text="Skills are installed and linked to providers in Settings → Skills on web and desktop. Installed skills work in chat here." />
+        </SettingsSection>
       </ScreenScrollView>
       {notification ? (
         <AgentLibraryToast notification={notification} onDismiss={dismissNotification} />
