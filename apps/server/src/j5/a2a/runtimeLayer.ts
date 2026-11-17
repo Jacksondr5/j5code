@@ -42,6 +42,7 @@ import { layer as peerDirectoryLayer } from "./PeerDirectory.ts";
 import { layer as peerInboundLayer } from "./PeerInboundService.ts";
 import { layer as peerStoreLayer } from "./PeerStoreService.ts";
 import { layer as peerPollerLayer } from "./PeerPoller.ts";
+import { layer as lineRegistryLayer } from "./line/LineRegistry.ts";
 import { layer as peerRemovalLayer } from "./PeerRemovalService.ts";
 import { layer as peerRegistryLayer } from "./PeerRegistryService.ts";
 import { layer as readChangeFeedsLayer } from "./ReadChangeFeeds.ts";
@@ -222,6 +223,9 @@ const makeJ5A2AAuxiliaryLayer = (
     peerStoreProvided,
     peerPollerProvided,
     peerRemovalProvided,
+    // The lines peers that poll this server hold; the same object reaches upstream's link services
+    // through `layerRoutingHttpClient` in server.ts, so Effect builds it once.
+    lineRegistryLayer,
     rosterLayer,
     sendServiceProvided,
     deliveryWorkerProvided,

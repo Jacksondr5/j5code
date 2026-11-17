@@ -878,6 +878,11 @@ export const PeerRecord = Schema.Struct({
   oldestWaitingAt: Schema.NullOr(Schema.String).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
+  /**
+   * Where this server's link to a peer that polls it is made: an address on this server's own
+   * loopback that only reaches the peer through its line. Null for every other peer.
+   */
+  lineAddress: Schema.NullOr(Schema.String).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
 });
 export type PeerRecord = typeof PeerRecord.Type;
 export const PeerListResponse = Schema.Struct({ peers: Schema.Array(PeerRecord) });
@@ -952,6 +957,8 @@ export const PeerCapabilities = Schema.Struct({
   poll: Schema.optionalKey(Schema.Boolean),
   /** This server lands a message as its sender asked: a delivery's `landing` is read, not dropped. */
   landing: Schema.optionalKey(Schema.Boolean),
+  /** This server takes a line from a peer that polls it, and reaches that peer through it. */
+  line: Schema.optionalKey(Schema.Boolean),
 });
 export type PeerCapabilities = typeof PeerCapabilities.Type;
 
@@ -1173,6 +1180,7 @@ export const J5_PEER_API_PATHS = {
   roster: "/api/j5/a2a/peers/roster",
   deliver: "/api/j5/a2a/peers/deliver",
   poll: "/api/j5/a2a/peers/poll",
+  line: "/api/j5/a2a/peers/line",
 } as const;
 
 /**

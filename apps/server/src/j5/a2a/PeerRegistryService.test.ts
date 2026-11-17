@@ -203,6 +203,7 @@ it.effect(
           lastError: null,
           waitingCount: 0,
           oldestWaitingAt: null,
+          lineAddress: null,
         });
         assert.equal(seen.length, 1);
         assert.equal(seen[0]!.url, `${homeOrigin}${J5_PEER_API_PATHS.hello}`);
@@ -759,6 +760,7 @@ it.effect(
       assert.isNull(recorded?.origin ?? null, "this server never connects to a peer that polls it");
       assert.equal(recorded?.label, laptop, "named by its id until its first poll");
       assert.equal(recorded?.createdAt, "2026-10-02T12:00:00.000Z");
+      assert.equal(recorded?.lineAddress, "http://127.77.0.1:1", "its line is reached here");
       // Later proofs find the record; the grant is spent.
       assert.isTrue(
         yield* registry.adoptStorePeer({
@@ -793,7 +795,25 @@ it.effect(
       );
       assert.equal(conflict._tag, "PeerLinkModeConflictError");
 
+      const desk = "environment-desk";
+      yield* registry.grantStore({
+        environmentId: desk,
+        sessionId: "auth-session:desk",
+        issuedAt: timestamp,
+      });
+      yield* registry.adoptStorePeer({
+        environmentId: desk,
+        sessionId: "auth-session:desk",
+        at: timestamp,
+      });
+      assert.equal((yield* registry.get(desk))?.lineAddress, "http://127.77.0.2:1");
+
       assert.deepStrictEqual(yield* registry.remove(laptop), { removed: true });
+      assert.equal(
+        (yield* registry.get(desk))?.lineAddress,
+        "http://127.77.0.2:1",
+        "another peer's address stays put when one is removed",
+      );
       assert.isFalse(
         yield* registry.adoptStorePeer({
           environmentId: laptop,

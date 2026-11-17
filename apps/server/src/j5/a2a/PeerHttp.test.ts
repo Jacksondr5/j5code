@@ -31,6 +31,8 @@ import { ServerConfig } from "../../config.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { layer as peerAdminLayer } from "./PeerAdminService.ts";
 import { peerHttpRouteLayer } from "./PeerHttp.ts";
+import { layer as lineRegistryLayer } from "./line/LineRegistry.ts";
+import * as SessionStore from "../../auth/SessionStore.ts";
 import { RosterService } from "./RosterService.ts";
 import { PeerRemovalService } from "./PeerRemovalService.ts";
 import { PeerStoreService, type PeerPollInput } from "./PeerStoreService.ts";
@@ -63,6 +65,7 @@ const homePeer: PeerRecord = {
   lastError: null,
   waitingCount: 0,
   oldestWaitingAt: null,
+  lineAddress: null,
 };
 
 const laptop = EnvironmentId.make("environment-laptop");
@@ -73,6 +76,7 @@ const laptopPeer: PeerRecord = {
   linkMode: "store",
   origin: null,
   credentialExpiresAt: null,
+  lineAddress: "http://127.77.0.1:1",
 };
 
 interface IssuedSession {
@@ -310,6 +314,14 @@ const makeHandler = (input: {
       }),
     ),
     Layer.provideMerge(auth),
+    Layer.provide(lineRegistryLayer),
+    Layer.provide(
+      Layer.mock(SessionStore.SessionStore)({
+        cookieName: "peer-http-test",
+        legacyCookieName: undefined,
+        awaitInvalidation: () => Effect.never,
+      }),
+    ),
     Layer.provide(
       ServerConfig.layerTest(process.cwd(), { prefix: "j5-peer-http-" }).pipe(
         Layer.provide(NodeServices.layer),
@@ -355,7 +367,7 @@ it("answers hello with this environment and the credential's subject, and comple
     assert.equal(body.peerProtocolVersion, PEER_PROTOCOL_VERSION);
     assert.deepStrictEqual(
       body.capabilities,
-      { poll: true, landing: true },
+      { poll: true, landing: true, line: true },
       "this server stores for a poller, and lands a message as its sender asked",
     );
     assert.deepStrictEqual(
@@ -716,7 +728,7 @@ it("shows a recorded peer only the agents it could address, and nobody else the 
     assert.equal(response.status, 200);
     assert.deepStrictEqual(await response.json(), {
       label: "Work VM",
-      capabilities: { poll: true, landing: true },
+      capabilities: { poll: true, landing: true, line: true },
       agents: [
         {
           participantId: "agent:j5:a2a:thread:local-triage",
@@ -834,6 +846,31 @@ it("hands a storing peer's poll to the store, and refuses a poll from a peer thi
     assert.equal(polls.length, 1, "nothing is handed out to a peer this server sends to");
   } finally {
     await homeHandler.dispose();
+  }
+});
+
+it("takes a line only from a peer that polls this server, and only as a WebSocket", async () => {
+  const laptopHandler = makeHandler({ subject: `peer:${laptop}`, scopes: [AuthA2APeerScope] });
+  try {
+    const notUpgraded = await laptopHandler.handler(get(J5_PEER_API_PATHS.line));
+    assert.equal(notUpgraded.status, 400);
+    assert.equal(((await notUpgraded.json()) as { error: string }).error, "line_upgrade_required");
+  } finally {
+    await laptopHandler.dispose();
+  }
+  const homeHandler = makeHandler({ subject: `peer:${home}`, scopes: [AuthA2APeerScope] });
+  try {
+    const direct = await homeHandler.handler(get(J5_PEER_API_PATHS.line));
+    assert.equal(direct.status, 409);
+    assert.equal(((await direct.json()) as { error: string }).error, "peer_not_polling");
+  } finally {
+    await homeHandler.dispose();
+  }
+  const unscoped = makeHandler({ subject: `peer:${laptop}`, scopes: [] });
+  try {
+    assert.equal((await unscoped.handler(get(J5_PEER_API_PATHS.line))).status, 403);
+  } finally {
+    await unscoped.dispose();
   }
 });
 

@@ -25,6 +25,7 @@ import type { SqlError } from "effect/sql/SqlError";
 
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
+import { lineAddressForSlot } from "./line/lineAddress.ts";
 import { reportedLabel } from "./peerLabel.ts";
 import {
   peerProtocolHeaders,
@@ -393,6 +394,9 @@ const encodeRosterSnapshot = Schema.encodeSync(
 const encodeCapabilities = Schema.encodeSync(Schema.fromJsonString(PeerCapabilities));
 const decodeCapabilities = Schema.decodeUnknownOption(Schema.fromJsonString(PeerCapabilities));
 
+const lineAddressOf = (slot: number | undefined) =>
+  slot === undefined ? null : lineAddressForSlot(slot);
+
 const decodeHello = Schema.decodeUnknownEffect(PeerHelloResponse);
 
 /** The message plus the cause chain: a transport error alone never says why the socket failed. */
@@ -555,10 +559,19 @@ export const layer: Layer.Layer<
       return new Map(rows.map((row) => [row.environment_id, row] as const));
     });
 
+    const linesByEnvironment = Effect.fn("j5.a2a.peer.lines")(function* (environmentId?: string) {
+      const rows = yield* sql<{ readonly environment_id: string; readonly slot: number }>`
+        SELECT environment_id, slot FROM j5_a2a_peer_line
+        WHERE ${environmentId === undefined ? sql`1 = 1` : sql`environment_id = ${environmentId}`}
+      `;
+      return new Map(rows.map((row) => [row.environment_id, row.slot] as const));
+    });
+
     const recordFromRow = (
       row: PeerRow,
       live: ReadonlySet<string>,
       waiting: ReadonlyMap<string, WaitingRow>,
+      lines: ReadonlyMap<string, number>,
     ): PeerRecord => ({
       environmentId: row.environment_id,
       // Cleaned on the way out too, for a name recorded before names were cleaned.
@@ -574,12 +587,14 @@ export const layer: Layer.Layer<
       lastError: row.last_error,
       waitingCount: waiting.get(row.environment_id)?.waiting ?? 0,
       oldestWaitingAt: waiting.get(row.environment_id)?.oldest ?? null,
+      lineAddress: lineAddressOf(lines.get(row.environment_id)),
     });
 
     const connectionFromRow = Effect.fn("j5.a2a.peer.connectionFromRow")(function* (
       row: PeerConnectionRow,
       live: ReadonlySet<string>,
       waiting: ReadonlyMap<string, WaitingRow>,
+      lines: ReadonlyMap<string, number>,
     ) {
       // A snapshot this server cannot read is no snapshot: the peer reads as not yet polled.
       const roster =
@@ -587,7 +602,7 @@ export const layer: Layer.Layer<
           ? null
           : yield* decodeRosterSnapshot(row.roster_json).pipe(Effect.orElseSucceed(() => null));
       return {
-        ...recordFromRow(row, live, waiting),
+        ...recordFromRow(row, live, waiting, lines),
         credential: row.credential,
         roster,
       } satisfies PeerConnection;
@@ -701,7 +716,10 @@ export const layer: Layer.Layer<
       yield* listChanged;
       const live = yield* liveSubjects;
       const waiting = yield* waitingByEnvironment(row.environment_id);
-      return { peer: recordFromRow(row, live, waiting), created: existing === null };
+      return {
+        peer: recordFromRow(row, live, waiting, yield* linesByEnvironment(row.environment_id)),
+        created: existing === null,
+      };
     });
 
     const changeOrigin: PeerRegistryServiceShape["changeOrigin"] = Effect.fn(
@@ -772,6 +790,7 @@ export const layer: Layer.Layer<
         row,
         yield* liveSubjects,
         yield* waitingByEnvironment(row.environment_id),
+        yield* linesByEnvironment(row.environment_id),
       );
     });
 
@@ -779,7 +798,12 @@ export const layer: Layer.Layer<
       function* (environmentId) {
         const row = yield* readRow(environmentId);
         if (row === null) return null;
-        return recordFromRow(row, yield* liveSubjects, yield* waitingByEnvironment(environmentId));
+        return recordFromRow(
+          row,
+          yield* liveSubjects,
+          yield* waitingByEnvironment(environmentId),
+          yield* linesByEnvironment(environmentId),
+        );
       },
     );
 
@@ -795,7 +819,8 @@ export const layer: Layer.Layer<
       if (rows.length === 0) return [];
       const live = yield* liveSubjects;
       const waiting = yield* waitingByEnvironment();
-      return yield* Effect.forEach(rows, (row) => connectionFromRow(row, live, waiting));
+      const lines = yield* linesByEnvironment();
+      return yield* Effect.forEach(rows, (row) => connectionFromRow(row, live, waiting, lines));
     });
 
     /** One peer's connection for a delivery attempt: one row and its session status, not the whole registry. */
@@ -814,6 +839,7 @@ export const layer: Layer.Layer<
           row,
           yield* liveSubjects,
           yield* waitingByEnvironment(environmentId),
+          yield* linesByEnvironment(environmentId),
         );
       },
     );
@@ -828,7 +854,8 @@ export const layer: Layer.Layer<
       if (rows.length === 0) return [];
       const live = yield* liveSubjects;
       const waiting = yield* waitingByEnvironment();
-      return rows.map((row) => recordFromRow(row, live, waiting));
+      const lines = yield* linesByEnvironment();
+      return rows.map((row) => recordFromRow(row, live, waiting, lines));
     });
 
     const remove: PeerRegistryServiceShape["remove"] = (environmentId) =>
@@ -836,6 +863,7 @@ export const layer: Layer.Layer<
         .withTransaction(
           Effect.gen(function* () {
             yield* sql`DELETE FROM j5_a2a_peer_store_grant WHERE environment_id = ${environmentId}`;
+            yield* sql`DELETE FROM j5_a2a_peer_line WHERE environment_id = ${environmentId}`;
             const rows = yield* sql<{ readonly environment_id: string }>`
             DELETE FROM j5_a2a_peer WHERE environment_id = ${environmentId}
             RETURNING environment_id
@@ -922,6 +950,13 @@ export const layer: Layer.Layer<
             yield* sql`
               INSERT INTO j5_a2a_peer (environment_id, label, link_mode, created_at, updated_at)
               VALUES (${input.environmentId}, ${input.environmentId}, 'store', ${input.at}, ${input.at})
+            `;
+            yield* sql`
+              INSERT INTO j5_a2a_peer_line (environment_id, slot)
+              VALUES (
+                ${input.environmentId},
+                (SELECT COALESCE(MAX(slot), 0) + 1 FROM j5_a2a_peer_line)
+              )
             `;
             yield* sql`DELETE FROM j5_a2a_peer_store_grant WHERE environment_id = ${input.environmentId}`;
             return "adopted" as const;

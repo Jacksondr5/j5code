@@ -73,6 +73,7 @@ const vmPeer: PeerConnection = {
   lastError: null,
   waitingCount: 0,
   oldestWaitingAt: null,
+  lineAddress: null,
   roster: null,
 };
 
