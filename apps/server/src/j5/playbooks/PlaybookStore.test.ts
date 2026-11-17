@@ -106,6 +106,14 @@ it.effect("derives owner ask flags without recipient filtering or request conten
     }
     const progress = () => store.listForThread(owner).pipe(Effect.map(({ runs }) => runs[0]!));
     assert.isTrue((yield* progress()).blocked);
+    yield* sql`INSERT INTO j5_playbook_checkpoint (request_id, run_id, owner_thread_id, step_id, step_title, summary, status, created_at)
+      VALUES ('unassociated', ${run.runId}, ${owner}, 'research', 'Research', 'private summary', 'pending', ${at})`;
+    assert.isFalse((yield* progress()).waitingForApproval, "only the current checkpoint counts");
+    yield* sql`UPDATE j5_playbook_run SET checkpoint_request_id = 'unassociated' WHERE run_id = ${run.runId}`;
+    assert.isTrue((yield* progress()).waitingForApproval);
+    assert.isTrue((yield* progress()).blocked, "waiting and blocked can coexist");
+    yield* sql`UPDATE j5_playbook_checkpoint SET status = 'approved' WHERE request_id = 'unassociated'`;
+    assert.isFalse((yield* progress()).waitingForApproval);
     assert.notInclude(JSON.stringify(yield* progress()), "private");
     for (const status of ["answered", "dropped"]) {
       yield* sql`UPDATE j5_a2a_human_inbox SET status = ${status}, terminal_seq = 2, terminal_at = ${at} WHERE exchange_id = 'owner-ask'`;
@@ -1749,6 +1757,8 @@ it.effect("shows legacy terminal history without consulting its definition file"
     assert.equal(history.cancelReason, "started before runs kept their own copy; start it again.");
     assert.deepStrictEqual(history.steps, []);
     assert.isNull(history.position);
+    assert.isFalse(history.waitingForApproval);
+    assert.isFalse(history.blocked);
     assert.notProperty(history, "definition");
     assert.notProperty(history, "currentStep");
   }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
@@ -1893,7 +1903,12 @@ it.effect(
         summary: "Plan and tradeoffs are ready.",
       };
       assert.equal((yield* Effect.flip(store.mutate(owner, leave))).code, "approval_pending");
+      const progress = () => store.listForThread(owner).pipe(Effect.map(({ runs }) => runs[0]!));
       const first = (yield* store.current(owner)).checkpoint!;
+      assert.isTrue((yield* progress()).waitingForApproval);
+      assert.isFalse((yield* progress()).blocked, "a checkpoint is not an ordinary ask");
+      assert.notProperty(yield* progress(), "checkpoint");
+      assert.notInclude(JSON.stringify(yield* progress()), leave.summary);
       assert.equal(
         (yield* Effect.flip(store.mutate(owner, { ...leave, expectedStepId: "wrong" }))).code,
         "step_conflict",
@@ -1958,6 +1973,7 @@ it.effect(
         (yield* restarted.current(owner)).checkpoint?.reason,
         "Add rollback instructions.",
       );
+      assert.isFalse((yield* progress()).waitingForApproval, "declining clears waiting");
       const dispatched = yield* Ref.make<
         ReadonlyArray<Parameters<ThreadManagementService["Service"]["dispatch"]>[0]>
       >([]);
@@ -2003,6 +2019,7 @@ it.effect(
       );
       assert.equal((yield* Effect.flip(store.mutate(owner, leave))).code, "approval_pending");
       const second = (yield* store.current(owner)).checkpoint!;
+      assert.isTrue((yield* progress()).waitingForApproval);
       assert.notEqual(second.requestId, first.requestId);
       yield* collaborator[J5_PLAYBOOK_WS_METHODS.answerCheckpoint]({
         threadId: owner,
@@ -2010,6 +2027,7 @@ it.effect(
         decision: "approve",
       });
       assert.equal((yield* restarted.current(owner)).checkpoint?.status, "approved");
+      assert.isFalse((yield* progress()).waitingForApproval, "approving clears waiting");
       // Same work with a new holder keeps the approval.
       yield* store.mutate(owner, {
         operation: "assign",
@@ -2037,6 +2055,7 @@ it.effect(
       );
       const revisit = (yield* store.current(owner)).checkpoint!;
       assert.notEqual(revisit.requestId, second.requestId);
+      assert.isTrue((yield* progress()).waitingForApproval);
       const revisedSteps = checked.steps.map((step) =>
         step.id === "plan" ? { ...step, prompt: "A different plan." } : step,
       );
@@ -2048,6 +2067,10 @@ it.effect(
         basis: "asked",
         client_request_id: "change-work",
       });
+      assert.isFalse(
+        (yield* progress()).waitingForApproval,
+        "superseding the request clears waiting",
+      );
       assert.equal(
         (yield* Effect.flip(
           store.answerCheckpoint({
@@ -2086,6 +2109,7 @@ it.effect(
         runId: run.runId,
         client_request_id: "cancel-checkpoint",
       });
+      assert.isFalse((yield* progress()).waitingForApproval, "cancelling clears waiting");
       assert.deepStrictEqual(yield* store.pendingCheckpoints(), []);
       assert.equal(
         (yield* Effect.flip(
