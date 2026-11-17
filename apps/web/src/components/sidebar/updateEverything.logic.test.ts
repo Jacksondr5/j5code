@@ -128,6 +128,9 @@ describe("collectServerUpdateTargets", () => {
   });
 });
 
+// J5: servers and releases also report J5's ledger heads (FORK.md case 120).
+const J5_HEADS = { j5_a2a_migrations: 57 };
+
 describe("collectChannelSwitchTargets", () => {
   const NIGHTLY = "0.1.4-nightly.20261027.3796";
   const OLD_NIGHTLY = "0.1.3-nightly.20261001.3500";
@@ -144,13 +147,20 @@ describe("collectChannelSwitchTargets", () => {
       environment: {
         ...base.serverConfig!.environment,
         platform: { os, arch: "x64" },
-        ...(databaseMigration === undefined ? {} : { databaseMigration }),
+        ...(databaseMigration === undefined
+          ? {}
+          : { databaseMigration, j5DatabaseMigrations: J5_HEADS }),
       },
     },
   });
 
   it("moves nightly hosts to stable only when stable knows their database", () => {
-    const stable = { channel: "latest" as const, version: "0.1.3", databaseMigration: 69 };
+    const stable = {
+      channel: "latest" as const,
+      version: "0.1.3",
+      databaseMigration: 69,
+      j5DatabaseMigrations: J5_HEADS,
+    };
     const { targets, skipped } = collectChannelSwitchTargets(
       [
         host(machine("this-app", NIGHTLY, "desktop-managed", { hostedByThisApp: true }), 72),
@@ -184,8 +194,9 @@ describe("collectChannelSwitchTargets", () => {
       ["current-desktop", "0.1.3", "latest", true],
     ]);
     expect(targets.every((target) => target.targetDatabaseMigration === 69)).toBe(true);
+    expect(targets.every((target) => target.targetJ5DatabaseMigrations === J5_HEADS)).toBe(true);
     expect(skipped.map((entry) => [entry.label, entry.reason])).toEqual([
-      ["newer-service", "run `t3 update --channel stable --allow-downgrade` there"],
+      ["newer-service", "run `j5 update --channel stable --allow-downgrade` there"],
       [
         "new-service",
         "its database has changes 0.1.3 does not support yet; stay on Nightly until Stable has them",
@@ -209,7 +220,12 @@ describe("collectChannelSwitchTargets", () => {
   });
 
   it("moves stable hosts to nightly only when nightly knows their database", () => {
-    const nightly = { channel: "nightly" as const, version: NIGHTLY, databaseMigration: 72 };
+    const nightly = {
+      channel: "nightly" as const,
+      version: NIGHTLY,
+      databaseMigration: 72,
+      j5DatabaseMigrations: J5_HEADS,
+    };
     const { targets, skipped } = collectChannelSwitchTargets(
       [
         host(machine("service", "0.1.2", "boot-service"), 70),
@@ -250,10 +266,15 @@ describe("collectChannelSwitchTargets", () => {
 
 describe("localSwitchBlockReason", () => {
   it("checks every server this app hosts, and only while connected", () => {
-    const stable = { channel: "latest" as const, version: "0.1.3", databaseMigration: 69 };
+    const stable = {
+      channel: "latest" as const,
+      version: "0.1.3",
+      databaseMigration: 69,
+      j5DatabaseMigrations: J5_HEADS,
+    };
     const nightly = "0.1.4-nightly.20261027.3796";
 
-    const windows = { connected: true, databaseMigration: 69 };
+    const windows = { connected: true, databaseMigration: 69, j5DatabaseMigrations: J5_HEADS };
     expect(localSwitchBlockReason(nightly, stable, [windows], 1)).toBeNull();
     // A WSL server's newer migration blocks the reinstall that would restart it.
     expect(

@@ -29,6 +29,8 @@ import {
 import packageJson from "../../package.json" with { type: "json" };
 import * as ServerConfig from "../config.ts";
 import * as DesktopAppUpdate from "../desktopUpdate/DesktopAppUpdate.ts";
+import { j5DatabaseMigrationHeads } from "../j5/persistence/j5MigrationLedgers.ts";
+import { j5TrackSwitchBlockReason } from "../j5/updates/trackSwitch.ts";
 import { databaseMigrationHead } from "../persistence/databaseMigrationHead.ts";
 import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
 import { managedUpdateMirror, managedUpdateRefusal } from "../policy/managedUpdates.ts";
@@ -115,10 +117,10 @@ export function trackSwitchBlockReason(input: {
   if (!crossesReleaseTrack(input.serverVersion, input.targetVersion)) return null;
   const databaseMigration = input.databaseMigration();
   if (input.targetDatabaseMigration === undefined || databaseMigration === undefined) {
-    return `Cannot confirm this database works with t3@${input.targetVersion}. Switch tracks from Settings → About → Update track, which checks it first.`;
+    return `Cannot confirm this database works with j5@${input.targetVersion}. Switch tracks from Settings → About → Update track, which checks it first.`;
   }
   return input.targetDatabaseMigration < databaseMigration
-    ? `This database has changes t3@${input.targetVersion} does not support yet; it stays on this release.`
+    ? `This database has changes j5@${input.targetVersion} does not support yet; it stays on this release.`
     : null;
 }
 
@@ -156,6 +158,13 @@ export const make = Effect.fn("cloud.server_self_update.make")(function* () {
       targetVersion: input.targetVersion,
       targetDatabaseMigration: input.targetDatabaseMigration,
       databaseMigration: () => databaseMigrationHead(serverConfig.dbPath),
+    }) ??
+    // J5: J5's ledgers count too (FORK.md case 120).
+    j5TrackSwitchBlockReason({
+      serverVersion: packageJson.version,
+      targetVersion: input.targetVersion,
+      targetJ5DatabaseMigrations: input.targetJ5DatabaseMigrations,
+      databaseMigrations: () => j5DatabaseMigrationHeads(serverConfig.dbPath),
     });
 
   const update: ServerSelfUpdate["Service"]["update"] = Effect.fn(

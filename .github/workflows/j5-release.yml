@@ -437,10 +437,18 @@ jobs:
       - name: Smoke-test CLI archive
         run: pnpm exec node scripts/smoke-cli-archive.ts --archive "release-cli/t3-$RELEASE_VERSION-${{ matrix.key }}.tar.gz" --expect-version "$RELEASE_VERSION"
 
+      # The migrations this release's server knows, which a track switch checks
+      # against each machine's database (#927). Every archive has the same ones.
+      - name: Write release metadata
+        if: matrix.key == 'linux-x64'
+        run: pnpm exec node apps/server/src/j5/updates/printReleaseMetadata.ts > release-cli/release-metadata.json
+
       - uses: actions/upload-artifact@v7
         with:
           name: j5-cli-${{ matrix.key }}
-          path: release-cli/t3-*-${{ matrix.key }}.tar.gz
+          path: |
+            release-cli/t3-*-${{ matrix.key }}.tar.gz
+            release-cli/release-metadata.json
           if-no-files-found: error
           retention-days: 30
 
@@ -569,6 +577,8 @@ jobs:
           for archive in "${archives[@]}"; do
             test -f "release-assets/$archive"
           done
+          # Every lookup of this release reads it, so a malformed file must stop the release.
+          jq -e '(.databaseMigration | type == "number" and . == floor) and (.j5DatabaseMigrations | type == "object" and length > 0 and all(.[]; type == "number" and . == floor))' release-assets/release-metadata.json
           cp scripts/install.sh scripts/install.ps1 release-assets/
           # Checksums come from the exact bytes being uploaded.
           (cd release-assets && sha256sum "${archives[@]}" install.sh install.ps1 > SHA256SUMS)

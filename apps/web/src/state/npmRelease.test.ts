@@ -34,6 +34,8 @@ const configFor = (environmentId: EnvironmentId | null, supported = true) =>
       label: environmentId,
       platform: { os: "linux", arch: "x64" },
       serverVersion: version,
+      // J5: only a server reporting J5's ledgers answers from J5's releases (FORK.md case 40).
+      ...(supported ? { j5DatabaseMigrations: { j5_a2a_migrations: 57 } } : {}),
       capabilities: {
         repositoryIdentity: true,
         ...(supported ? { npmReleaseLookup: true } : {}),

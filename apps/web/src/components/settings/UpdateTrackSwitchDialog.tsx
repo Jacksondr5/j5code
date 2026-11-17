@@ -6,7 +6,7 @@ import { isMacPlatform } from "@t3tools/shared/keybindings";
 import { useState } from "react";
 import { AsyncResult } from "effect/reactivity";
 
-import { APP_VERSION } from "~/branding";
+import { APP_BASE_NAME, APP_VERSION } from "~/branding";
 import { useDesktopUpdateState } from "~/state/desktopUpdate";
 import { useEnvironments } from "~/state/environments";
 import { npmReleaseAtom, npmReleaseFailureMessage } from "~/state/npmRelease";
@@ -54,7 +54,7 @@ export function UpdateTrackSwitchDialog({
             {AsyncResult.isFailure(release)
               ? npmReleaseFailureMessage(release.cause)
               : AsyncResult.isSuccess(release)
-                ? `Could not find the latest ${label} release in this environment's npm registry.`
+                ? `Could not find the latest ${label} release of J5 Code.`
                 : "Checking releases…"}
           </AlertDialogDescription>
         </AlertDialogHeader>
@@ -89,6 +89,7 @@ function SwitchPlan({
     environments.filter(isHostedByThisApp).map((environment) => ({
       connected: environment.connection.phase === "connected",
       databaseMigration: environment.serverConfig?.environment.databaseMigration,
+      j5DatabaseMigrations: environment.serverConfig?.environment.j5DatabaseMigrations,
     })),
     window.desktopBridge?.getLocalEnvironmentBootstraps().length ?? 0,
   );
@@ -164,7 +165,7 @@ function SwitchPlan({
           ? ["This app's updates are off here, so reinstall it yourself to switch."]
           : []),
         ...(switchesLocal && isMacPlatform(navigator.platform)
-          ? ["If T3 Code does not reopen after it restarts, open it again."]
+          ? [`If ${APP_BASE_NAME} does not reopen after it restarts, open it again.`]
           : []),
       ]}
       restarts={everything.restarts}
