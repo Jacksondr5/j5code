@@ -11,6 +11,8 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
+import WebSocket from "ws";
 import {
   FetchHttpClient,
   HttpClient,
@@ -175,6 +177,50 @@ it.effect("lets a newer line replace the old one, without the old one's close ta
         yield* get(line.client, `http://${LINE_HOST}:1/still`),
         `${LINE_HOST}:1 /still`,
       );
+    }),
+  ),
+);
+
+it.effect("fails calls at once when the poller's side of the line drops", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const line = yield* setup;
+      const ups = yield* line.lines.subscribeUps;
+      const held = yield* holdLine({
+        origin: line.origin,
+        credential: "good",
+        local: line.local,
+      }).pipe(Effect.forkScoped);
+      yield* Stream.runHead(ups);
+      assert.strictEqual(
+        yield* get(line.client, `http://${LINE_HOST}:1/before`),
+        `${LINE_HOST}:1 /before`,
+      );
+      // The laptop goes away without a word, as across a sleep or a dropped network.
+      yield* Fiber.interrupt(held);
+      yield* Effect.flip(get(line.client, `http://${LINE_HOST}:1/after`));
+    }),
+  ),
+);
+
+it.effect("closes a line that goes quiet, and calls fail after", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const line = yield* setup;
+      const ups = yield* line.lines.subscribeUps;
+      // A poller that opens the line and then says nothing at all.
+      yield* Effect.acquireRelease(
+        Effect.sync(
+          () =>
+            new WebSocket(`${line.origin.replace(/^http/, "ws")}${J5_PEER_API_PATHS.line}`, {
+              headers: { authorization: "Bearer good" },
+            }),
+        ),
+        (socket) => Effect.sync(() => socket.terminate()),
+      );
+      yield* Stream.runHead(ups);
+      yield* TestClock.adjust("30 seconds");
+      yield* Effect.flip(get(line.client, `http://${LINE_HOST}:1/after`));
     }),
   ),
 );

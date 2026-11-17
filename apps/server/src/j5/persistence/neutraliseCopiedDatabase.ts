@@ -72,6 +72,8 @@ export const neutraliseJ5State = Effect.fn("j5.neutraliseJ5State")(function* () 
         "j5_a2a_peer_store_grant",
         sql`DELETE FROM j5_a2a_peer_store_grant RETURNING session_id`,
       );
+      // A peer's line slot goes with it, or the same peer polling the copy could not be adopted.
+      yield* count("j5_a2a_peer_line", sql`DELETE FROM j5_a2a_peer_line RETURNING environment_id`);
       const peers = yield* count(
         "j5_a2a_peer",
         sql`DELETE FROM j5_a2a_peer RETURNING environment_id`,

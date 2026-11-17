@@ -139,7 +139,8 @@ const make = Effect.gen(function* () {
             Queue.offerUnsafe(outbound, pingFrame);
           }),
         );
-        yield* Effect.raceAll([
+        // Whichever ends first ends the line, a failure included: a dropped or quiet socket fails.
+        yield* Effect.raceAllFirst([
           readLoop,
           writeLoop,
           pingLoop,

@@ -398,6 +398,8 @@ const make = Effect.fn("j5.a2a.peer.poller.make")(function* (daemon: boolean) {
   const lineKeeper = Effect.sync(() => {
     let line: Fiber.Fiber<void> | null = null;
     let refused = false;
+    // A server that advertises a line but keeps refusing it is redialled after each poll; say so once.
+    let lastReason: string | null = null;
     return Effect.fn("j5.a2a.peer.poller.keepLine")(function* (environmentId: string) {
       if (Option.isNone(serverConfig) || refused || line !== null) return;
       const takesLine = yield* peers.capabilities(environmentId).pipe(
@@ -412,15 +414,15 @@ const make = Effect.fn("j5.a2a.peer.poller.make")(function* (daemon: boolean) {
         credential: peer.credential,
         local: localTarget(serverConfig.value),
       }).pipe(
-        Effect.flatMap((ended) =>
-          Effect.sync(() => {
-            if (ended.kind === "rejected") refused = true;
-          }).pipe(
-            Effect.andThen(
-              Effect.logInfo("J5 A2A peer line ended", { peer: peer.label, reason: ended.reason }),
-            ),
-          ),
-        ),
+        Effect.flatMap((ended) => {
+          if (ended.kind === "rejected") refused = true;
+          if (ended.reason === lastReason) return Effect.void;
+          lastReason = ended.reason;
+          return Effect.logInfo("J5 A2A peer line ended", {
+            peer: peer.label,
+            reason: ended.reason,
+          });
+        }),
         Effect.ensuring(Effect.sync(() => (line = null))),
         Effect.forkChild,
       );
