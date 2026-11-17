@@ -191,7 +191,7 @@ it.effect(
 
       // The playbook store's standing revision is not a change; its next one is.
       yield* Queue.offer(playbookRevisions, 8);
-      assert.deepStrictEqual(yield* Queue.take(notified), ["fleet"]);
+      assert.deepStrictEqual(yield* Queue.take(notified), ["fleet", "inbox"]);
 
       // The registry says one of its writes changed what the peer list reports: a peer was added.
       recordedPeers = true;

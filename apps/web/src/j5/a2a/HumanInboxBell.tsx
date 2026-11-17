@@ -6,9 +6,11 @@ import { inboxBellPresentation, mergeOpenInboxCounts } from "@t3tools/client-run
 import { useSidebar } from "../../components/ui/sidebar";
 import { cn } from "../../lib/utils";
 import { inboxBellCount } from "@t3tools/client-runtime/j5/crew-inbox-requests";
+import { usePlaybookCheckpoints } from "../playbooks/PlaybookCheckpointCard";
 import { useCrewRuntimeRequests } from "../crew/crewRuntimeRequestsClient";
 import {
   crewRuntimeRequestSourcesAtom,
+  playbookCheckpointSourcesAtom,
   inboxCountQueryAtom,
   inboxCountSourcesAtom,
   refreshJ5Sources,
@@ -33,7 +35,21 @@ export function HumanInboxBell({ onBackdrop }: { readonly onBackdrop: boolean })
     if (isMobile) setOpenMobile(false);
   };
 
-  const { badge, label } = inboxBellPresentation(bell);
+  const checkpoints = usePlaybookCheckpoints();
+  const checkpointSources = useAtomValue(playbookCheckpointSourcesAtom);
+  const { badge, label } = inboxBellPresentation({
+    count:
+      bell.count === null && checkpoints.length === 0
+        ? null
+        : (bell.count ?? 0) + checkpoints.length,
+    incomplete:
+      bell.incomplete ||
+      !checkpointSources.isReady ||
+      checkpointSources.sources.some(
+        (source) => source.status !== "ready" && source.status !== "unsupported",
+      ),
+  });
+
   return (
     <Link
       aria-label={label}

@@ -186,6 +186,7 @@ describe("J5 action commands", () => {
         atoms.stopCrew,
         atoms.respondCrewRuntimeRequest,
         atoms.answerHumanExchange,
+        atoms.answerPlaybookCheckpoint,
         atoms.deleteArtifact,
         atoms.deleteAllArtifacts,
       ]) {

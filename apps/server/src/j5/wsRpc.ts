@@ -32,6 +32,7 @@ import { ArtifactDeletion } from "./artifacts/ArtifactDeletion.ts";
 import { makeArtifactRpcHandlers } from "./artifacts/artifactRpc.ts";
 import type { ArtifactWorkspace } from "./artifacts/ArtifactWorkspace.ts";
 import { PlaybookStore } from "./playbooks/PlaybookStore.ts";
+import { makeCheckpointRpcHandlers } from "./playbooks/checkpointRpc.ts";
 import { makePlaybookRpcHandlers } from "./playbooks/playbookRpc.ts";
 import { Access } from "./sharing/Access.ts";
 import { makeAccessRpcHandlers } from "./sharing/accessRpc.ts";
@@ -136,6 +137,7 @@ export const layerJ5WsRpc = (
             ),
         })),
         ...(yield* makePlaybookRpcHandlers({ store: yield* PlaybookStore })),
+        ...(yield* makeCheckpointRpcHandlers(session)),
         ...(yield* makeAccessRpcHandlers({
           people: yield* PersonAccess,
           access: yield* Access,

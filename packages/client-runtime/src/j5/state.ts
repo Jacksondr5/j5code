@@ -142,6 +142,18 @@ export function createJ5EnvironmentAtoms<R, E>(
     /** A `refreshTrigger` for a read made elsewhere that one of the server's revisions covers. */
     rereadOn,
     playbookChanges,
+    playbookCheckpoints: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "j5:playbook-checkpoints",
+      tag: J5_PLAYBOOK_WS_METHODS.listCheckpoints,
+      refreshTrigger: rereadOn("inbox", "sharing"),
+      execute: (input) => j5Read(J5_PLAYBOOK_WS_METHODS.listCheckpoints, input),
+      staleTimeMs: 0,
+    }),
+    answerPlaybookCheckpoint: createJ5ActionCommand(
+      runtime,
+      "j5:answer-playbook-checkpoint",
+      J5_PLAYBOOK_WS_METHODS.answerCheckpoint,
+    ),
     playbookRuns: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "j5:playbook-runs",
       tag: J5_PLAYBOOK_WS_METHODS.listRuns,

@@ -22,6 +22,8 @@ export function suggestPlaybookName(text: string): string | null {
 }
 
 export const J5_PLAYBOOK_WS_METHODS = {
+  listCheckpoints: "j5.playbooks.listCheckpoints",
+  answerCheckpoint: "j5.playbooks.answerCheckpoint",
   subscribeChanges: "j5.playbooks.subscribeChanges",
   readLibrary: "j5.playbooks.readLibrary",
   listThreadRuns: "j5.playbooks.listThreadRuns",
@@ -41,6 +43,7 @@ export const PlaybookStep = Schema.Struct({
   title: Text,
   prompt: Text,
   persona: Schema.optionalKey(AgentPersonaId),
+  approval: Schema.optionalKey(Schema.Literal("required")),
 });
 export type PlaybookStep = typeof PlaybookStep.Type;
 export const PlaybookDefinition = Schema.Struct({
@@ -156,8 +159,29 @@ export const PlaybookProgress = Schema.Struct({
   total: Schema.Int,
 });
 export type PlaybookProgress = typeof PlaybookProgress.Type;
+export const PlaybookCheckpoint = Schema.Struct({
+  requestId: Text,
+  runId: Text,
+  ownerThreadId: ThreadId,
+  stepId: Text,
+  stepTitle: Text,
+  summary: Text,
+  status: Schema.Literals(["pending", "approved", "declined", "closed"]),
+  createdAt: Text,
+  answeredAt: Schema.NullOr(Text),
+  reason: Schema.NullOr(Schema.String),
+});
+export type PlaybookCheckpoint = typeof PlaybookCheckpoint.Type;
+export const PlaybookCheckpointAnswer = Schema.Struct({
+  threadId: ThreadId,
+  requestId: Text,
+  decision: Schema.Literals(["approve", "decline"]),
+  reason: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4000))),
+});
+export type PlaybookCheckpointAnswer = typeof PlaybookCheckpointAnswer.Type;
 export const PlaybookStepResponse = Schema.Struct({
   ...PlaybookProgress.fields,
+  checkpoint: Schema.optionalKey(Schema.NullOr(PlaybookCheckpoint)),
   currentStep: Schema.NullOr(PlaybookStep),
   replayed: Schema.Boolean,
   delivery: Schema.optionalKey(Schema.NullOr(PlaybookStepDelivery)),
@@ -183,7 +207,12 @@ export const PlaybookDiscovery = Schema.Struct({
       description: Schema.String,
       stepCount: Schema.Int,
       steps: Schema.Array(
-        Schema.Struct({ id: Text, title: Text, persona: Schema.optionalKey(AgentPersonaId) }),
+        Schema.Struct({
+          id: Text,
+          title: Text,
+          persona: Schema.optionalKey(AgentPersonaId),
+          approval: Schema.optionalKey(Schema.Literal("required")),
+        }),
       ),
       issue: Schema.NullOr(PlaybookError),
       // Optional so a newer client still reads an older server; this server always sends it.
@@ -247,6 +276,16 @@ export const PlaybookExportResponse = Schema.Struct({ fileName: Text, yaml: Sche
 export type PlaybookExportResponse = typeof PlaybookExportResponse.Type;
 
 export const J5PlaybookRpcGroup = RpcGroup.make(
+  Rpc.make(J5_PLAYBOOK_WS_METHODS.listCheckpoints, {
+    payload: Schema.Struct({}),
+    success: Schema.Struct({ requests: Schema.Array(PlaybookCheckpoint) }),
+    error: Schema.Union([PlaybookError, EnvironmentAuthorizationError]),
+  }),
+  Rpc.make(J5_PLAYBOOK_WS_METHODS.answerCheckpoint, {
+    payload: PlaybookCheckpointAnswer,
+    success: PlaybookCheckpoint,
+    error: Schema.Union([PlaybookError, EnvironmentAuthorizationError]),
+  }),
   Rpc.make(J5_PLAYBOOK_WS_METHODS.savePlaybook, {
     payload: PlaybookSaveRequest,
     success: PlaybookSaveResponse,
