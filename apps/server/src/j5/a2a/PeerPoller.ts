@@ -415,7 +415,9 @@ const make = Effect.fn("j5.a2a.peer.poller.make")(function* (daemon: boolean) {
         local: localTarget(serverConfig.value),
         onEnd: (ended) => {
           if (ended.kind === "rejected") refused = true;
-          // A refusal repeats after every poll; a line that was up and closed is always worth a line.
+          // A line that was up and closed is worth a log line; failed redials and repeated refusals
+          // are not, as the poll loop already reports an outage.
+          if (ended.kind === "closed" && !ended.opened) return Effect.void;
           if (ended.kind === "refused" && ended.reason === lastRefusal) return Effect.void;
           lastRefusal = ended.kind === "refused" ? ended.reason : null;
           return Effect.logInfo("J5 A2A peer line ended", {
