@@ -260,7 +260,8 @@ export const peerDropEvents = (input: {
 
 /**
  * The notice a thread gets when a server it could not reach holds a line here again: each call it
- * made there that failed with `peer_unreachable`, oldest first. The agent decides what to retry.
+ * made there that failed with `peer_unreachable`, oldest first. A call cut mid-answer may have run
+ * there, so the agent is told to check before it retries.
  */
 export const formatBackInReachNotice = (input: {
   readonly serverName: string;
@@ -270,9 +271,9 @@ export const formatBackInReachNotice = (input: {
     "[Cross-agent messaging system notice: linked environment reachable again]",
     `${input.serverName} is reachable again.`,
     [
-      "These calls you made there failed because it did not answer:",
+      "These calls you made there got no answer, so some may have run there before it stopped:",
       ...input.calls.map((call) => `- ${call.tool} at ${call.at}`),
     ].join("\n"),
-    "Retry any you still need. Nothing was retried for you.",
+    "Check what ran there (t3_thread_list, task_status) before you retry, or retry with the same clientRequestId. Nothing was retried for you.",
     "This is a platform-authored notice, not a peer reply.",
   ].join("\n\n");

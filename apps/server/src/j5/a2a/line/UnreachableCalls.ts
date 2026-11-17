@@ -1,7 +1,11 @@
-import type { ThreadId } from "@t3tools/contracts";
+// @effect-diagnostics nodeBuiltinImport:off
+import * as NodeCrypto from "node:crypto";
+
+import { OrchestratorMcpFailure, type ThreadId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
@@ -29,13 +33,8 @@ interface FailedCall {
   readonly lineId: string | null;
 }
 
-const isUnanswered = (error: unknown) =>
-  typeof error === "object" &&
-  error !== null &&
-  "_tag" in error &&
-  error._tag === "OrchestratorMcpFailure" &&
-  "code" in error &&
-  error.code === "peer_unreachable";
+const isFailure = Schema.is(OrchestratorMcpFailure);
+const isUnanswered = (error: unknown) => isFailure(error) && error.code === "peer_unreachable";
 
 const make = Effect.gen(function* () {
   const lines = yield* LineRegistry;
@@ -69,7 +68,8 @@ const make = Effect.gen(function* () {
         LIMIT 1
       `)[0];
       if (membership === undefined) continue;
-      const key = `${encodeURIComponent(lineId)}:${encodeURIComponent(threadId)}:${encodeURIComponent(threadCalls[0]!.at)}`;
+      // Nothing retries a notice, so each is its own command: two in one millisecond both land.
+      const key = `${encodeURIComponent(lineId)}:${encodeURIComponent(threadId)}:${NodeCrypto.randomUUID()}`;
       const commandId = CommCommandId.make(`j5-back-in-reach:${key}`);
       const projectId = LedgerProjectId.make(membership.project_id);
       const at = DateTime.formatIso(yield* DateTime.now);
@@ -125,26 +125,19 @@ const make = Effect.gen(function* () {
   const observe: UnreachableCallsShape["observe"] = (input, call) => {
     const threadId = input.threadId;
     if (threadId === undefined) return call;
-    return Effect.suspend(() => {
+    return Effect.gen(function* () {
       const lineId = lines.currentLineId(input.environmentId);
-      return call.pipe(
+      const at = DateTime.formatIso(yield* DateTime.now);
+      return yield* call.pipe(
         Effect.tapError((error) =>
           isUnanswered(error)
-            ? DateTime.now.pipe(
-                Effect.flatMap((now) =>
-                  turn.withPermit(
-                    record(input.environmentId, {
-                      threadId,
-                      tool: input.tool,
-                      at: DateTime.formatIso(now),
-                      lineId,
-                    }),
+            ? turn
+                .withPermit(record(input.environmentId, { threadId, tool: input.tool, at, lineId }))
+                .pipe(
+                  Effect.catchCause((cause) =>
+                    Effect.logWarning("J5 unanswered call could not be noted", { cause }),
                   ),
-                ),
-                Effect.catchCause((cause) =>
-                  Effect.logWarning("J5 unanswered call could not be noted", { cause }),
-                ),
-              )
+                )
             : Effect.void,
         ),
       );
@@ -158,10 +151,15 @@ const make = Effect.gen(function* () {
       turn.withPermit(
         Effect.gen(function* () {
           const waiting = pending.get(up.environmentId) ?? [];
-          pending.set(
-            up.environmentId,
-            waiting.filter((call) => call.lineId === up.lineId),
-          );
+          const kept = waiting.filter((call) => call.lineId === up.lineId);
+          if (kept.length === 0) pending.delete(up.environmentId);
+          else pending.set(up.environmentId, kept);
+          // A peer removed for good never comes back up; its calls go when any line does.
+          for (const other of Array.from(pending.keys())) {
+            if (other !== up.environmentId && (yield* peers.get(other)) === null) {
+              pending.delete(other);
+            }
+          }
           // Calls from before the peer was last recorded belong to an earlier peering, which ended.
           const peer = yield* peers.get(up.environmentId);
           const due = waiting.filter(

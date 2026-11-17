@@ -120,7 +120,7 @@ When the line is down, because the poller is asleep, between networks or reconne
 32. Messages between a poller and its storing server travel by polling whether or not the line is up.
 33. While a line is down, a call to its address fails at once; the poller opens a new line as soon as it can, and the platform retries nothing the line carried.
 34. A call through a link that the other machine does not answer, through a line or at any other address, fails with `peer_unreachable`, never with a code upstream's follower treats as final, so a delegate already running there is followed again once the machine answers.
-35. A thread whose call to a server that holds a line failed with `peer_unreachable` gets one platform notice when that line is next up, naming the server and each tool it called there and when, unless this server restarts first. A delegate's follower is not such a call, and an archived thread is not told.
+35. A thread whose call to a server that holds a line failed with `peer_unreachable` gets one platform notice when that line is next up, naming the server and each tool it called there and when, unless this server restarts first. A delegate's follower is not such a call, and an archived thread, or one that takes no messages such as a delegated child, is not told.
 
 ## Scenarios
 
