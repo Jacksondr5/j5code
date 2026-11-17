@@ -309,6 +309,14 @@ export function presentPlaybook(run: PlaybookProgress) {
       run.blocked ? "Blocked" : null,
     ].filter((flag) => flag !== null),
     holder: run.holderName ? `Held by ${run.holderName}` : null,
+    cancelReason:
+      run.cancelReason === "owner_archived"
+        ? "The owning conversation was archived."
+        : run.cancelReason === "owner_deleted"
+          ? "The owning conversation was deleted."
+          : run.cancelReason === "agent_cancelled"
+            ? "Cancelled by the playbook owner."
+            : (run.cancelReason ?? null),
     status:
       run.status === "active"
         ? "In progress"

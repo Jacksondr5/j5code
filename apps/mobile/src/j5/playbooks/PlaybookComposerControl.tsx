@@ -151,9 +151,9 @@ export function PlaybookComposerControl(props: {
             {display.revisionHistory && (
               <Text className="my-2 text-xs text-foreground-muted">{display.revisionHistory}</Text>
             )}
-            {run.cancelReason && (
+            {display.cancelReason && (
               <Text accessibilityRole="alert" className="my-2 text-xs text-foreground-muted">
-                {run.cancelReason}
+                {display.cancelReason}
               </Text>
             )}
             {display.steps.map((step, index) => (

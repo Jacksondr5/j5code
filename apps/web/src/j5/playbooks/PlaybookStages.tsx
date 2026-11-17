@@ -153,9 +153,9 @@ export function PlaybookStages({
               {display.revisionHistory && (
                 <p className="my-2 text-muted-foreground">{display.revisionHistory}</p>
               )}
-              {run.cancelReason && (
+              {display.cancelReason && (
                 <p role="status" className="my-2 text-warning">
-                  {run.cancelReason}
+                  {display.cancelReason}
                 </p>
               )}
             </ComposerBanner.Body>
