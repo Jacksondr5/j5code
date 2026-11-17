@@ -248,7 +248,7 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
     )
       return yield* playbookError(
         "holder_unavailable",
-        "The run's recorded holder or assigning owner identity cannot be resolved. Use j5_playbook_assign to take back or reassign this step, or j5_playbook_cancel to end the run.",
+        `The run's recorded holder or assigning owner identity cannot be resolved. Use j5_playbook_assign with runId=${JSON.stringify(response.runId)} and expectedStepId=${JSON.stringify(response.currentStepId)} to take back or reassign this step, or j5_playbook_cancel with that runId to end the run.`,
       );
     return withDelivery(
       response,

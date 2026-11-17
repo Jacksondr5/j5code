@@ -466,9 +466,11 @@ it.effect.each(["target", "owner"] as const)(
         yield* sql`UPDATE j5_playbook_step_delivery SET assigned_by_participant_id = NULL WHERE run_id = ${run.runId}`;
       }
       yield* Ref.set(fault, false);
-      const unavailable = yield* relay.current(owner, run.runId).pipe(Effect.flip);
+      const unavailable = yield* relay.current(owner).pipe(Effect.flip);
       assert.equal(unavailable.code, "holder_unavailable");
       assert.include(unavailable.message, "j5_playbook_assign");
+      assert.include(unavailable.message, `runId=${JSON.stringify(run.runId)}`);
+      assert.include(unavailable.message, `expectedStepId=${JSON.stringify(run.currentStepId)}`);
       const blocked = yield* move(run.runId, "next", "inspect", "next-unresolved").pipe(
         Effect.flip,
       );
