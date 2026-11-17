@@ -124,7 +124,7 @@ export const playbookTools = [
     ...common,
     parameters: Mutation,
     description:
-      "Cancel your playbook This does not interrupt or archive your agent." + mutationDescription,
+      "Cancel your playbook. This does not interrupt or archive your agent." + mutationDescription,
   }),
 ] as const;
 

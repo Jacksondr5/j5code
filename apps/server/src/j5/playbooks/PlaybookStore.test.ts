@@ -896,23 +896,49 @@ it.effect(
     }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );
 
-it.effect("keeps completed and cancelled history warning-free after steps or files disappear", () =>
-  Effect.gen(function* () {
-    const { store, workspaceRoot, write, fs, filename } = yield* makeFixture;
-    for (const operation of ["complete", "cancel"] as const) {
-      yield* write("demo");
-      const run = yield* store.start(owner, workspaceRoot, "demo", `start-${operation}`);
-      yield* store.mutate(owner, {
-        operation,
-        runId: run.runId,
-        expectedStepId: "research",
-        client_request_id: operation,
-      });
-      yield* write("demo", definition(["review"]));
-
-      yield* fs.remove(filename("demo"));
-    }
-  }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
+it.effect(
+  "keeps completed and cancelled snapshots available after library edits and deletion",
+  () =>
+    Effect.gen(function* () {
+      const { store, workspaceRoot, write, fs, filename } = yield* makeFixture;
+      for (const operation of ["complete", "cancel"] as const) {
+        yield* write("demo");
+        const run = yield* store.start(owner, workspaceRoot, "demo", `start-${operation}`);
+        yield* store.mutate(owner, {
+          operation,
+          runId: run.runId,
+          expectedStepId: "research",
+          client_request_id: operation,
+        });
+        yield* write("demo", { ...definition(["review"]), title: "Edited library title" });
+        for (const change of ["edited", "deleted"] as const) {
+          if (change === "deleted") yield* fs.remove(filename("demo"));
+          const current = yield* store.current(owner, run.runId);
+          const threadHistory = (yield* store.listForThread(owner)).runs.find(
+            (entry) => entry.runId === run.runId,
+          )!;
+          const allHistory = (yield* store.listAll({})).runs.find(
+            (entry) => entry.runId === run.runId,
+          )!;
+          for (const entry of [current, threadHistory, allHistory]) {
+            assert.equal(entry.status, operation === "complete" ? "completed" : "cancelled");
+            assert.equal(entry.title, definition().title);
+            assert.equal(entry.description, definition().description);
+            assert.equal(entry.currentStepId, "research");
+            assert.equal(entry.position, 1);
+            assert.equal(entry.total, 3);
+            assert.deepStrictEqual(
+              entry.steps,
+              definition().steps.map(({ id, title }) => ({ id, title })),
+            );
+            assert.notProperty(entry, "definition");
+          }
+          assert.deepStrictEqual(current.currentStep, definition().steps[0]);
+          assert.notProperty(threadHistory, "currentStep");
+          assert.notProperty(allHistory, "currentStep");
+        }
+      }
+    }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );
 
 it.effect(
