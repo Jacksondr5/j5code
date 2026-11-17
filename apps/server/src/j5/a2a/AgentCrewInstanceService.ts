@@ -147,8 +147,7 @@ export const replacementProblem = (
 
 export interface AgentCrewInstanceServiceShape {
   /**
-   * Idempotent by instance id: a launch retry with the same request key records nothing new. A
-   * The roster is recorded once under its instance id.
+   * Idempotent by instance id: a launch retry with the same request key records nothing new.
    */
   readonly record: (input: RecordAgentCrewInput) => Effect.Effect<AgentCrewInstance, SqlError>;
   /**

@@ -23,6 +23,7 @@ import {
 
 const PLAYBOOK_STEP_SESSION = "j5-playbook-step";
 const isPlaybookError = Schema.is(PlaybookError);
+const jsonString = Schema.encodeSync(Schema.fromJsonString(Schema.String));
 const operationFailed = (error: unknown) =>
   isPlaybookError(error)
     ? error
@@ -248,7 +249,7 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
     )
       return yield* playbookError(
         "holder_unavailable",
-        `The run's recorded holder or assigning owner identity cannot be resolved. Use j5_playbook_assign with runId=${JSON.stringify(response.runId)} and expectedStepId=${JSON.stringify(response.currentStepId)} to take back or reassign this step, or j5_playbook_cancel with that runId to end the run.`,
+        `The run's recorded holder or assigning owner identity cannot be resolved. Use j5_playbook_assign with runId=${jsonString(response.runId)} and expectedStepId=${jsonString(response.currentStepId)} to take back or reassign this step, or j5_playbook_cancel with that runId to end the run.`,
       );
     return withDelivery(
       response,
