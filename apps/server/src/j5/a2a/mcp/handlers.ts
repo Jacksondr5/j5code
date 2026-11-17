@@ -248,9 +248,7 @@ const crewProposalNextStep = (error: CrewProposalError) =>
           ? "The crew is full. Work with the seats it has, or propose a new crew for the extra work."
           : error._tag === "CrewLaunchSeatConflictError"
             ? "Choose a seat name the crew does not already use, then retry."
-            : error._tag === "CrewStepAlreadyOwnedError"
-              ? "Claim only steps no seat owns yet, then retry."
-              : "Retry with the same client_request_id; recovery is forward-only.";
+            : "Retry with the same client_request_id; recovery is forward-only.";
 
 /** A refused persona seat keeps its code, as on every other persona launch path. */
 const crewProposalRefusal = (error: CrewProposalError) =>

@@ -2077,7 +2077,7 @@ it.effect(
     }).pipe(Effect.scoped),
 );
 
-it.effect("records a playbook Crew's step owners and surfaces a taken step unwrapped", () =>
+it.effect("ignores a legacy fixed plan when launching and adding seats", () =>
   Effect.gen(function* () {
     const { context, commands, captain } = yield* fixture;
     const codex = provider("codex", "codex", [{ slug: "gpt-5.6-sol", options: ["high"] }]);
@@ -2090,15 +2090,6 @@ it.effect("records a playbook Crew's step owners and surfaces a taken step unwra
     yield* Effect.gen(function* () {
       const launcher = yield* CrewLaunchService;
       const crews = yield* AgentCrewInstanceService;
-      const playbook = {
-        name: "release",
-        definitionPath: "/repo/.j5/playbooks/release.yaml",
-        title: "Release",
-        steps: [
-          { id: "plan", title: "Plan the release" },
-          { id: "review", title: "Review" },
-        ],
-      };
       const custom = (name: string, steps?: ReadonlyArray<string>) => ({
         workspace: { type: "shared" as const },
         name,
@@ -2115,16 +2106,12 @@ it.effect("records a playbook Crew's step owners and surfaces a taken step unwra
         displayName: "Release Crew",
         seats: [custom("planner", ["plan"]), custom("helper")],
         brief: "Ship it.",
-        playbook,
       });
-      assert.deepStrictEqual(instance.playbook, {
-        name: "release",
-        definitionPath: playbook.definitionPath,
-      });
+      assert.isNull(instance.playbook);
       assert.deepStrictEqual(
         instance.members.map(({ seatName, playbookStepIds }) => [seatName, playbookStepIds]),
         [
-          ["planner", ["plan"]],
+          ["planner", []],
           ["helper", []],
         ],
       );
@@ -2135,23 +2122,25 @@ it.effect("records a playbook Crew's step owners and surfaces a taken step unwra
       assert.notInclude(briefs[0], "<seat_playbook>");
       assert.notInclude(briefs[1], "<seat_playbook>");
 
-      const sent = (yield* Ref.get(commands)).length;
-      const refused = yield* launcher
-        .addSeats({
-          providerSessionId: "session",
-          requestKey: "rival",
-          pick: "person",
-          captain,
-          instance,
-          seats: [custom("rival", ["plan"])],
-          playbook,
-        })
-        .pipe(Effect.flip);
-      assert.equal(refused._tag, "CrewStepAlreadyOwnedError");
-      assert.lengthOf(yield* Ref.get(commands), sent);
+      const added = yield* launcher.addSeats({
+        providerSessionId: "session",
+        requestKey: "rival",
+        pick: "person",
+        captain,
+        instance,
+        seats: [custom("rival", ["plan"])],
+      });
+      assert.equal(added.instance.members.length, 3);
       assert.deepStrictEqual(
-        (yield* crews.read(instance.id))?.members.map(({ seatName }) => seatName),
-        ["planner", "helper"],
+        (yield* crews.read(instance.id))?.members.map(({ seatName, playbookStepIds }) => [
+          seatName,
+          playbookStepIds,
+        ]),
+        [
+          ["planner", []],
+          ["helper", []],
+          ["rival", []],
+        ],
       );
     }).pipe(Effect.provide(layer));
   }),
@@ -2177,12 +2166,6 @@ it.effect("a relaunch after a failed link stores the re-approved seat's steps", 
         captain,
         displayName: "Release Crew",
         brief: "Ship it.",
-        playbook: {
-          name: "release",
-          definitionPath: "/repo/.j5/playbooks/release.yaml",
-          title: "Release",
-          steps: [{ id: "plan", title: "Plan" }],
-        },
       };
       const seat = (steps?: ReadonlyArray<string>) => ({
         workspace: { type: "shared" as const },
