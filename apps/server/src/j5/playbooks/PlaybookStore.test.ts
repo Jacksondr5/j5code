@@ -82,6 +82,46 @@ const makeFixture = Effect.gen(function* () {
   return { ...workspace, store };
 });
 
+it.effect("derives owner ask flags without recipient filtering or request contents", () =>
+  Effect.gen(function* () {
+    const { store, workspaceRoot } = yield* makeFixture;
+    const sql = yield* SqlClient.SqlClient;
+    const run = yield* store.start(owner, workspaceRoot, "demo", "progress-start");
+    yield* sql`UPDATE j5_playbook_run SET holder_thread_id = ${otherOwner} WHERE run_id = ${run.runId}`;
+    assert.equal((yield* store.listForThread(owner)).runs[0]?.holderName, "Owner");
+    yield* sql`UPDATE j5_playbook_run SET holder_thread_id = ${owner} WHERE run_id = ${run.runId}`;
+    assert.isNull((yield* store.listForThread(owner)).runs[0]?.holderName);
+    const at = "2026-11-01T00:00:00Z";
+    yield* sql`INSERT INTO j5_a2a_project_ledger (project_id, created_at) VALUES ('progress', ${at})`;
+    for (const [id, thread, person] of [
+      ["owner-ask", owner, "human:other-person"],
+      ["other-ask", otherOwner, "human:viewer"],
+    ]) {
+      yield* sql`INSERT INTO j5_a2a_membership (project_id, participant_id, participant_kind, thread_id, joined_seq, updated_seq, payload)
+        VALUES ('progress', ${id}, 'agent', ${thread}, 1, 1, '{}')`;
+      yield* sql`INSERT INTO j5_a2a_exchange (project_id, exchange_id, sender_id, receiver_id, status, intent, opened_seq, created_at, updated_at)
+        VALUES ('progress', ${id}, ${id}, ${person}, 'open', 'private intent', 1, ${at}, ${at})`;
+      yield* sql`INSERT INTO j5_a2a_human_inbox (person_id, project_id, exchange_id, sender_id, intent, urgency, latest_message_id, latest_message, opened_seq, opened_at, status)
+        VALUES (${person}, 'progress', ${id}, ${id}, 'private intent', 'soon', ${id}, 'private body', 1, ${at}, 'open')`;
+    }
+    const progress = () => store.listForThread(owner).pipe(Effect.map(({ runs }) => runs[0]!));
+    assert.isTrue((yield* progress()).blocked);
+    assert.notInclude(JSON.stringify(yield* progress()), "private");
+    for (const status of ["answered", "dropped"]) {
+      yield* sql`UPDATE j5_a2a_human_inbox SET status = ${status}, terminal_seq = 2, terminal_at = ${at} WHERE exchange_id = 'owner-ask'`;
+      assert.isFalse((yield* progress()).blocked, "another thread's open ask does not count");
+      yield* sql`UPDATE j5_a2a_human_inbox SET status = 'open', terminal_seq = NULL, terminal_at = NULL WHERE exchange_id = 'owner-ask'`;
+      assert.isTrue((yield* progress()).blocked);
+    }
+    yield* store.mutate(owner, {
+      runId: run.runId,
+      operation: "cancel",
+      client_request_id: "progress-cancel",
+    });
+    assert.isFalse((yield* progress()).blocked, "terminal runs do not claim to be blocked");
+  }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
+);
+
 it.effect(
   "publishes committed playbook changes during a turn and ignores failures and retries",
   () =>

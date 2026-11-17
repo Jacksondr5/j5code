@@ -1026,17 +1026,32 @@ export const makePlaybookStore = Effect.gen(function* () {
   const progressRows = Effect.fn("j5.playbooks.playbookStore.progressRows")(function* (
     rows: ReadonlyArray<RunRow>,
   ) {
-    return yield* Effect.succeed(
-      rows.map((row) => {
-        const run = fromRow(row);
-        const {
-          currentStep: _prompt,
-          replayed: _replayed,
-          ...progress
-        } = present(run, run.definition);
-        return progress;
-      }),
-    );
+    if (rows.length === 0) return [];
+    const details = yield* sql<{
+      run_id: string;
+      blocked: number;
+      holder_name: string | null;
+    }>`SELECT run.run_id,
+      (run.status = 'active' AND EXISTS (
+        SELECT 1 FROM j5_a2a_membership membership
+        JOIN j5_a2a_human_inbox inbox ON inbox.sender_id = membership.participant_id
+        WHERE membership.thread_id = run.owner_thread_id AND inbox.status = 'open'
+      )) AS blocked,
+      CASE WHEN run.holder_thread_id <> run.owner_thread_id THEN holder.title END AS holder_name
+      FROM j5_playbook_run run
+      LEFT JOIN orchestration_v2_projection_threads holder ON holder.thread_id = run.holder_thread_id
+      WHERE run.run_id IN ${sql.in(rows.map((row) => row.run_id))}`;
+    const byRun = new Map(details.map((detail) => [detail.run_id, detail]));
+    return rows.map((row) => {
+      const run = fromRow(row);
+      const {
+        currentStep: _prompt,
+        replayed: _replayed,
+        ...progress
+      } = present(run, run.definition);
+      const detail = byRun.get(run.runId)!;
+      return { ...progress, blocked: Boolean(detail.blocked), holderName: detail.holder_name };
+    });
   });
   const listForThread = Effect.fn("PlaybookStore.listForThread")(function* (owner: ThreadId) {
     yield* cancelOrphans();

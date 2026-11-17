@@ -138,6 +138,13 @@ export function createJ5EnvironmentAtoms<R, E>(
     tag: J5_PLAYBOOK_WS_METHODS.subscribeChanges,
     idleTtlMs: 0,
   });
+  const progressChanges = Atom.family((environmentId: EnvironmentId) =>
+    Atom.make((get) => {
+      const playbook = get(playbookChanges({ environmentId, input: {} }));
+      const inbox = get(rereadOn("inbox")({ environmentId }));
+      return `${Option.getOrNull(AsyncResult.value(playbook))}:${inbox}`;
+    }),
+  );
   return {
     readChanges,
     /** A `refreshTrigger` for a read made elsewhere that one of the server's revisions covers. */
@@ -218,6 +225,7 @@ export function createJ5EnvironmentAtoms<R, E>(
     ),
     playbooks: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "j5:playbooks",
+      refreshTrigger: (target) => progressChanges(target.environmentId),
       tag: J5_PLAYBOOK_WS_METHODS.listThreadRuns,
       execute: (input) => j5Read(J5_PLAYBOOK_WS_METHODS.listThreadRuns, input),
       staleTimeMs: 2_500,

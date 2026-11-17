@@ -2,9 +2,11 @@
 
 Playbooks give an agent an ordered sequence of prompts. The agent does the work
 in its existing thread and decides when to advance. The progress bar above the
-chat box shows the current stage and whether the run is active, completed, or
-cancelled. A checked stage means the agent moved past it, not that its work was
-verified.
+chat box shows the current step’s position and title. This is recorded progress,
+not proof that earlier work passed. Expand it to see the full procedure and who
+holds the step. **Waiting for approval** means the run has an open checkpoint;
+**Blocked** means its owner has another open ask to a person. Everyone viewing the
+thread sees these labels, even when someone else must answer.
 
 Open **Settings → Agent Setup** to manage playbooks. Playbooks in the environment
 library are available across all projects and worktrees on its environment. Choose
