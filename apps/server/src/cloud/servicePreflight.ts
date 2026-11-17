@@ -1,4 +1,5 @@
 import packageJson from "../../package.json" with { type: "json" };
+import { withNewerJ5Migrations } from "../j5/persistence/newerJ5Migrations.ts";
 import { BUILD_MIGRATION_HEAD, recordedMigrations } from "../persistence/databaseMigrationHead.ts";
 import { SERVICE_LAUNCHER_PROTOCOL } from "./serviceProtocol.ts";
 
@@ -44,7 +45,11 @@ export function runServicePreflight(input: {
     };
   }
 
-  const newer = newerRecordedMigrations(input.databasePath);
+  // J5: J5's migration ledgers count too (FORK.md case 117).
+  const newer = withNewerJ5Migrations(
+    input.databasePath,
+    newerRecordedMigrations(input.databasePath),
+  );
   if (newer === null) {
     return {
       status: "blocked",
