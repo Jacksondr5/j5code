@@ -874,6 +874,8 @@ export class OrchestratorMcpFailure extends Schema.TaggedError<OrchestratorMcpFa
       "orchestration_error",
       "thread_credential_required",
       "target_required",
+      // J5: a linked machine that did not answer (register D46).
+      "peer_unreachable",
     ]),
     message: Schema.String,
   },

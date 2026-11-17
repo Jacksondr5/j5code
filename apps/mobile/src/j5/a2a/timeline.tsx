@@ -93,6 +93,7 @@ const NOTICE_ICONS: Partial<Record<J5NoticeKind, AppSymbolName>> = {
   "not-delivered": "exclamationmark.circle",
   "exchange-dropped": "slash.circle",
   "exchange-withdrawn": "arrow.uturn.backward",
+  "back-in-reach": "wifi",
 };
 
 /** The icon for each of J5's prompts in upstream's Automation row. */

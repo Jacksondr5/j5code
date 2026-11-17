@@ -134,6 +134,19 @@ it.effect("keeps a link healthy when the peer refuses a call", () =>
       expect(refused).toMatchObject({ code: refusal.code, message: refusal.message });
       const link = yield* links.get(box.environmentId);
       expect(link._tag === "Some" ? link.value.lastError : "missing").toBeNull();
+
+      // J5 (register D46): an address that no longer answers as this machine is not a refusal.
+      yield* Ref.set(b.descriptor, descriptorOf("environment-elsewhere", "Elsewhere"));
+      const absent = yield* client
+        .call({
+          environmentId: box.environmentId,
+          tool: "refuse",
+          arguments: {},
+          limits: { runtimeMode: "full-access", interactionMode: "default" },
+          success: Result,
+        })
+        .pipe(Effect.flip);
+      expect(absent).toMatchObject({ code: "peer_unreachable" });
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );

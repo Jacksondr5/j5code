@@ -21,6 +21,7 @@ import {
   type LucideIcon,
   MailWarningIcon,
   MessageCircleOffIcon,
+  PlugZapIcon,
   UndoIcon,
   UnlinkIcon,
 } from "lucide-react";
@@ -67,6 +68,7 @@ const NOTICE_ICONS: Partial<Record<J5NoticeKind, LucideIcon>> = {
   "not-delivered": MailWarningIcon,
   "exchange-dropped": UnlinkIcon,
   "exchange-withdrawn": UndoIcon,
+  "back-in-reach": PlugZapIcon,
 };
 
 function J5PlatformNotice(props: {

@@ -21,7 +21,8 @@ export type DeliveryNoticeKind =
   | "silence"
   | "not-delivered"
   | "exchange-dropped"
-  | "exchange-withdrawn";
+  | "exchange-withdrawn"
+  | "back-in-reach";
 
 const notice = (
   summary: string,
@@ -166,6 +167,12 @@ function parseWithdrawn(paragraphs: ReadonlyArray<string>): PlatformNotice | nul
   );
 }
 
+function parseBackInReach(paragraphs: ReadonlyArray<string>): PlatformNotice | null {
+  const match = /^(.+) is reachable again\.$/.exec(paragraphs[0] ?? "");
+  if (match === null || paragraphs.length < 3) return null;
+  return notice(`${match[1]!} is reachable again`, paragraphs.slice(1, -1).join("\n\n"));
+}
+
 /** A `message:j5:a2a:delivery:` notice the platform wrote: a silence or a terminal notice. */
 export function parseDeliveryNotice(
   text: string,
@@ -192,6 +199,10 @@ export function parseDeliveryNotice(
     if (type === "exchange withdrawn") {
       const read = parseWithdrawn(paragraphs);
       return read === null ? null : { ...read, kind: "exchange-withdrawn" };
+    }
+    if (type === "linked environment reachable again") {
+      const read = parseBackInReach(paragraphs);
+      return read === null ? null : { ...read, kind: "back-in-reach" };
     }
     return null;
   })();

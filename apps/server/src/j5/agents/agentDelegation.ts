@@ -6,11 +6,13 @@ import {
   OrchestratorMcpFailure,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import { Tool } from "effect/ai";
 
 import { McpInvocationContext } from "../../mcp/McpInvocationContext.ts";
 import { OrchestratorMcpService } from "../../mcp/OrchestratorMcpService.ts";
+import { UnreachableCalls } from "../a2a/line/UnreachableCallsService.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import * as ProviderRegistry from "../../provider/ProviderRegistry.ts";
 import { invokeAgent } from "./agentInvocation.ts";
@@ -88,7 +90,7 @@ export const delegateTask = Effect.fn("j5.delegateTask")(function* (input: J5Del
     // A persona runs on its own model; a plain child, even one that inherits its parent's model,
     // runs on a model and level the project's lists allow. Upstream calls this with the model it
     // resolved.
-    return yield* service.delegateTask(scope, {
+    const delegated = service.delegateTask(scope, {
       ...delegate,
       authorizeTarget: ({ projectId, modelSelection }) =>
         memberModels.assertEligible({ projectId, selection: modelSelection }).pipe(
@@ -104,6 +106,15 @@ export const delegateTask = Effect.fn("j5.delegateTask")(function* (input: J5Del
           ),
         ),
     });
+    // A delegate on another machine that did not answer is told when its line is back (D46).
+    const remote = delegate.target?.environmentId;
+    const unanswered = yield* Effect.serviceOption(UnreachableCalls);
+    return yield* remote !== undefined && Option.isSome(unanswered)
+      ? unanswered.value.observe(
+          { threadId: scope.thread?.threadId, environmentId: remote, tool: "delegate_task" },
+          delegated,
+        )
+      : delegated;
   }
   if (delegate.target !== undefined || delegate.runtimeMode !== undefined) {
     return yield* new OrchestratorMcpFailure({

@@ -50,6 +50,8 @@ export interface LineRegistryShape {
    * make each connection, so it answers at once.
    */
   readonly connect: (host: string) => LineStream | LineClosedError;
+  /** The id of the line a peer holds here now, or null when none is up. */
+  readonly currentLineId: (environmentId: string) => string | null;
   /** Each line as it comes up, from the moment of subscribing. */
   readonly subscribeUps: Effect.Effect<Stream.Stream<LineUp>, never, Scope.Scope>;
 }
@@ -152,9 +154,17 @@ const make = Effect.gen(function* () {
       }),
     ).pipe(Effect.orElseSucceed(() => HttpServerResponse.empty()));
 
+  const currentLineId: LineRegistryShape["currentLineId"] = (environmentId) => {
+    for (const line of byHost.values()) {
+      if (line.environmentId === environmentId) return line.lineId;
+    }
+    return null;
+  };
+
   return LineRegistry.of({
     serve,
     connect,
+    currentLineId,
     subscribeUps: Effect.map(PubSub.subscribe(ups), Stream.fromSubscription),
   });
 });
