@@ -29,6 +29,7 @@ import { SqlError, UnknownError } from "effect/sql/SqlError";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
+import { PlaybookCrewRelay } from "../playbooks/PlaybookCrewRelay.ts";
 import { CrewCaptainArchiveCascade } from "./CrewCaptainArchiveCascade.ts";
 import { ServerConfig } from "../../config.ts";
 import { EventSinkV2 } from "../../orchestration-v2/EventSink.ts";
@@ -1063,6 +1064,12 @@ it.effect(
       const integrated = notifierLayer.pipe(
         Layer.provideMerge(layer),
         Layer.provideMerge(Layer.mock(CrewCaptainArchiveCascade)({})),
+        Layer.provide(
+          Layer.mock(PlaybookCrewRelay)({
+            reconcileOwners: () => Effect.void,
+            handleOwnerEvent: () => Effect.void,
+          }),
+        ),
         Layer.provideMerge(Layer.mock(ArtifactWorkspace)({})),
         Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "j5-launch-notice-" })),
         Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),

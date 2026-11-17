@@ -144,7 +144,8 @@ export const playbookTools = [
     ...common,
     parameters: Mutation,
     description:
-      "Cancel your playbook. This does not interrupt or archive your agent." + mutationDescription,
+      "Cancel your playbook first, then stop its current holder if that is another agent. Your own turn is never interrupted. The result records whether Stop was requested, unnecessary, or failed; retries do not stop again. Work and history remain." +
+      mutationDescription,
   }),
 ] as const;
 

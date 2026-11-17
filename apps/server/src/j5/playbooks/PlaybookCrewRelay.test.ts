@@ -6,6 +6,7 @@ import {
   ProviderInstanceId,
   ThreadId,
   type OrchestrationV2Command,
+  type OrchestrationV2StoredEvent,
   type OrchestrationV2ThreadProjection,
 } from "@t3tools/contracts";
 import type { PlaybookDefinition, PlaybookError } from "@t3tools/contracts/j5";
@@ -25,6 +26,7 @@ import {
   OrchestratorDispatchError,
   OrchestratorProjectionError,
 } from "../../orchestration-v2/Orchestrator.ts";
+import { DispatchModeLimit } from "../../orchestration-v2/DispatchModeLimit.ts";
 import { ProjectionStoreThreadNotFoundError } from "../../orchestration-v2/ProjectionStore.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import {
@@ -65,6 +67,8 @@ const projection = (id: ThreadId, archived: boolean): OrchestrationV2ThreadProje
       modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-6-sol" },
       archivedAt: archived ? at : null,
       deletedAt: null,
+      runtimeMode: "full-access",
+      interactionMode: "default",
     },
     messages: [],
     runs: [],
@@ -120,13 +124,28 @@ const fixture = Effect.gen(function* () {
   });
   const archived = yield* Ref.make(new Set<string>());
   const fault = yield* Ref.make(false);
+  const delegatedStopFault = yield* Ref.make(false);
+  const ownerPlan = yield* Ref.make(false);
+  const limits = yield* Ref.make<ReadonlyArray<unknown>>([]);
   const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
   const threads = ThreadManagementService.of({
     getThreadRecords: (id: ThreadId) =>
       Ref.get(archived).pipe(
         Effect.flatMap((ids) =>
           [owner, peer, crewMember, foreign].includes(id)
-            ? Effect.succeed(projection(id, ids.has(id)))
+            ? Ref.get(ownerPlan).pipe(
+                Effect.map((plan) => {
+                  const result = projection(id, ids.has(id));
+                  return {
+                    ...result,
+                    thread: {
+                      ...result.thread,
+                      interactionMode:
+                        plan && id === owner ? ("plan" as const) : ("default" as const),
+                    },
+                  };
+                }),
+              )
             : Effect.fail(
                 new OrchestratorProjectionError({
                   threadId: id,
@@ -142,14 +161,35 @@ const fixture = Effect.gen(function* () {
             commandId: "commandId" in command ? command.commandId : CommandId.make("missing"),
             commandType: command.type,
           });
+        if (command.type === "thread.stop") {
+          const rows = yield* sql<{
+            status: string;
+          }>`SELECT status FROM j5_playbook_run WHERE holder_thread_id = ${command.threadId}`;
+          assert.isTrue(rows.every((row) => row.status === "cancelled"));
+          const limit = yield* DispatchModeLimit;
+          yield* Ref.update(limits, (all) => [...all, limit]);
+        }
         yield* Ref.update(dispatched, (rows) => [...rows, command]);
         return { sequence: 1, storedEvents: [] };
       }),
-    stopDelegatedTasks: () => Effect.void,
+    stopDelegatedTasks: () =>
+      Ref.get(delegatedStopFault).pipe(
+        Effect.flatMap((fail) =>
+          fail
+            ? Effect.fail(
+                new OrchestratorDispatchError({
+                  commandId: CommandId.make("delegated-stop"),
+                  commandType: "thread.stop",
+                }),
+              )
+            : Effect.void,
+        ),
+      ),
   } as unknown as ThreadManagementService["Service"]);
   const store = yield* makePlaybookStore;
   const relay = yield* makePlaybookCrewRelay.pipe(
     Effect.provideService(PlaybookStore, store),
+    Effect.provideService(AgentCrewInstanceService, crews),
     Effect.provideService(ThreadManagementService, threads),
   );
   const notices = Ref.get(dispatched).pipe(
@@ -177,7 +217,23 @@ const fixture = Effect.gen(function* () {
       client_request_id: key,
       ...(assignee === undefined ? {} : { assignee }),
     });
-  return { store, relay, start, move, notices, fault, archived, sql, threads, root };
+  return {
+    store,
+    relay,
+    start,
+    move,
+    notices,
+    fault,
+    delegatedStopFault,
+    archived,
+    sql,
+    threads,
+    root,
+    dispatched,
+    ownerPlan,
+    limits,
+    crews,
+  };
 });
 const TestLayer = Layer.mergeAll(
   NodeSqliteClient.layer({ filename: ":memory:" }),
@@ -331,6 +387,7 @@ it.effect.each([
       const mutationEntered = yield* Deferred.make<void>();
       const armed = yield* Ref.make(false);
       const relay = yield* makePlaybookCrewRelay.pipe(
+        Effect.provide(Layer.mock(AgentCrewInstanceService)({})),
         Effect.provideService(PlaybookStore, {
           ...store,
           runById: (id) =>
@@ -402,6 +459,7 @@ it.effect(
       const inserted = yield* Deferred.make<void>();
       const releaseStart = yield* Deferred.make<void>();
       const relay = yield* makePlaybookCrewRelay.pipe(
+        Effect.provide(Layer.mock(AgentCrewInstanceService)({})),
         Effect.provideService(PlaybookStore, {
           ...store,
           start: (...input) =>
@@ -619,5 +677,140 @@ it.effect("refuses pending, stale, foreign and terminal no-Crew revisions", () =
     });
     assert.equal((yield* Effect.flip(relay.mutate(owner, input))).code, "run_terminal");
     assert.equal((yield* store.current(owner)).revisionCount, 0);
+  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);
+
+it.effect("cancels before stopping a holder once and never stops the owner", () =>
+  Effect.gen(function* () {
+    const { start, relay, dispatched } = yield* fixture;
+    for (const assignee of [undefined, peerId]) {
+      const run = yield* start(`cancel-${assignee}`, assignee);
+      const input = {
+        operation: "cancel",
+        runId: run.runId,
+        client_request_id: `end-${assignee}`,
+      } as const;
+      const ended = yield* relay.mutate(owner, input);
+      assert.equal(ended.status, "cancelled");
+      assert.equal(
+        ended.holderStop?.status,
+        assignee === undefined ? "owner_held" : "already_idle",
+      );
+      assert.deepStrictEqual((yield* relay.mutate(owner, input)).holderStop, ended.holderStop);
+    }
+    const stops = (yield* Ref.get(dispatched)).filter((item) => item.type === "thread.stop");
+    assert.equal(stops.length, 1);
+    assert.equal(stops[0]?.threadId, peer);
+  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);
+
+it.effect("persists Stop failure without failing cancellation or retrying Stop", () =>
+  Effect.gen(function* () {
+    const { start, relay, fault, delegatedStopFault, dispatched } = yield* fixture;
+    for (const delegated of [false, true]) {
+      const run = yield* start(`cancel-failure-${delegated}`, peerId);
+      yield* Ref.set(delegated ? delegatedStopFault : fault, true);
+      const input = {
+        operation: "cancel",
+        runId: run.runId,
+        client_request_id: `end-failure-${delegated}`,
+      } as const;
+      const ended = yield* relay.mutate(owner, input);
+      assert.equal(ended.status, "cancelled");
+      assert.equal(ended.holderStop?.status, "failed");
+      assert.isNotNull(ended.holderStop?.reason);
+      yield* Ref.set(fault, false);
+      yield* Ref.set(delegatedStopFault, false);
+      assert.deepStrictEqual((yield* relay.mutate(owner, input)).holderStop, ended.holderStop);
+    }
+    assert.equal(
+      (yield* Ref.get(dispatched)).filter((item) => item.type === "thread.stop").length,
+      1,
+    );
+  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);
+
+it.effect("uses owner modes for a peer and the Captain exemption for its Crew seat", () =>
+  Effect.gen(function* () {
+    const { start, relay, ownerPlan, limits } = yield* fixture;
+    for (const assignee of [peerId, crewId]) {
+      const run = yield* start(`mode-${assignee}`, assignee);
+      yield* Ref.set(ownerPlan, true);
+      const ended = yield* relay.mutate(owner, {
+        operation: "cancel",
+        runId: run.runId,
+        client_request_id: `end-${assignee}`,
+      });
+      assert.equal(ended.holderStop?.status, assignee === peerId ? "failed" : "already_idle");
+    }
+    assert.deepStrictEqual(yield* Ref.get(limits), [undefined]);
+  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);
+
+it.effect(
+  "cancels on owner lifecycle events and boot recovery without reopening on unarchive",
+  () =>
+    Effect.gen(function* () {
+      const { start, relay, sql, dispatched } = yield* fixture;
+      for (const kind of ["archived", "deleted"] as const) {
+        for (const boot of [false, true]) {
+          yield* sql`UPDATE orchestration_v2_projection_threads SET archived_at = NULL, deleted_at = NULL WHERE thread_id = ${owner}`;
+          const run = yield* start(`${kind}-${boot}`, peerId);
+          if (boot) {
+            if (kind === "archived")
+              yield* sql`UPDATE orchestration_v2_projection_threads SET archived_at = ${at} WHERE thread_id = ${owner}`;
+            else
+              yield* sql`UPDATE orchestration_v2_projection_threads SET deleted_at = ${at} WHERE thread_id = ${owner}`;
+            yield* relay.reconcileOwners();
+          } else
+            yield* relay.handleOwnerEvent({
+              event: { type: `thread.${kind}`, threadId: owner },
+            } as OrchestrationV2StoredEvent);
+          const ended = yield* relay.current(owner, run.runId);
+          assert.equal(ended.status, "cancelled");
+          assert.equal(ended.cancelReason, `owner_${kind}`);
+          yield* sql`UPDATE orchestration_v2_projection_threads SET archived_at = NULL, deleted_at = NULL WHERE thread_id = ${owner}`;
+          yield* relay.handleOwnerEvent({
+            event: { type: "thread.unarchived", threadId: owner },
+          } as OrchestrationV2StoredEvent);
+          yield* relay.reconcileOwners();
+          assert.equal((yield* relay.current(owner, run.runId)).status, "cancelled");
+        }
+      }
+      assert.equal(
+        (yield* Ref.get(dispatched)).filter((item) => item.type === "thread.stop").length,
+        4,
+      );
+    }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);
+
+it.effect("keeps a Crew's run active with an archived holder until the owner takes it back", () =>
+  Effect.gen(function* () {
+    const { start, relay, crews, archived, move } = yield* fixture;
+    const run = yield* start("crew-archive", crewId);
+    yield* crews.markArchived("crew:runtime", at);
+    yield* Ref.update(archived, (ids) => new Set([...ids, crewMember]));
+    const current = yield* relay.current(owner, run.runId);
+    assert.equal(current.status, "active");
+    assert.isTrue(current.delivery?.holderArchived);
+    assert.equal(current.holderThreadId, crewMember);
+    const taken = yield* move(run.runId, "assign", "inspect", "take-back");
+    assert.equal(taken.currentStepId, "inspect");
+    assert.equal(taken.holderThreadId, owner);
+  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);
+
+it.effect("reports a legacy missing holder without stopping anyone", () =>
+  Effect.gen(function* () {
+    const { start, relay, sql, dispatched } = yield* fixture;
+    const run = yield* start("missing-holder");
+    yield* sql`UPDATE j5_playbook_run SET holder_thread_id = NULL, holder_participant_id = NULL WHERE run_id = ${run.runId}`;
+    const ended = yield* relay.mutate(owner, {
+      operation: "cancel",
+      runId: run.runId,
+      client_request_id: "end-missing",
+    });
+    assert.equal(ended.holderStop?.status, "no_holder");
+    assert.equal((yield* Ref.get(dispatched)).length, 0);
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );

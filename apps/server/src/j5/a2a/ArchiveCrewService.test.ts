@@ -21,7 +21,6 @@ import {
   layer as archiveCrewLayer,
   type ArchiveCrewInput,
 } from "./ArchiveCrewService.ts";
-import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
 import { ExchangeId, ParticipantId, LedgerProjectId } from "./contracts.ts";
 import { CrewWorktrees } from "./CrewWorktrees.ts";
 import type { CrewArchiveWorktree } from "@t3tools/contracts/j5";
@@ -91,13 +90,13 @@ const fixture = Effect.gen(function* () {
   const crewArchivedAt = yield* Ref.make<string | null>(null);
   // Members the Captain replaced: off the roster, but their worktrees were made for this Crew.
   const replaced = yield* Ref.make<NonNullable<AgentCrewInstance["replaced"]>>([]);
-  // The order of cancels and retired stamps, so a test can see the run ends before the stamp.
+  // The retired stamps, including archive retries.
   const lifecycle = yield* Ref.make<ReadonlyArray<string>>([]);
   // What cleanup was asked about, and what it reports back.
   const cleanedSeats = yield* Ref.make<ReadonlyArray<ReadonlyArray<ThreadId>>>([]);
   const cleanupResult = yield* Ref.make<ReadonlyArray<CrewArchiveWorktree>>([]);
   const approvalStamps = yield* Ref.make<ReadonlyArray<string | undefined>>([]);
-  // The retired stamps and playbook cancels that had already happened when cleanup was asked.
+  // The retired stamps that had already happened when cleanup was asked.
   const lifecycleAtCleanup = yield* Ref.make<ReadonlyArray<string>>([]);
   // The order of session reads, seat archives, session closes and cleanup passes.
   const sessionSteps = yield* Ref.make<ReadonlyArray<string>>([]);
@@ -187,10 +186,6 @@ const fixture = Effect.gen(function* () {
                 query.captainParticipantId === captain ? [{ ...instance, archivedAt }] : [],
               ),
             ),
-        }),
-        Layer.mock(PlaybookStore)({
-          cancelForCrew: (id) =>
-            Ref.update(lifecycle, (items) => [...items, `cancelled:${id}`]).pipe(Effect.as([])),
         }),
         Layer.mock(ServerSecretStore)({
           getOrCreateRandom: () => Effect.succeed(new Uint8Array(32).fill(7)),
@@ -297,39 +292,28 @@ it.effect("refuses until the captain confirms every member's facts, then retires
   }),
 );
 
-it.effect("cancels the Crew's playbook run before the retired stamp, and again on a retry", () =>
+it.effect("archives a Crew without a playbook cancellation, including on retry", () =>
   Effect.gen(function* () {
     const { layer, input, lifecycle } = yield* fixture;
     yield* Effect.gen(function* () {
       const service = yield* ArchiveCrewService;
       yield* service.archive(input({ confirmationSatisfied: true }));
-      assert.deepStrictEqual(yield* Ref.get(lifecycle), [
-        `cancelled:${instance.id}`,
-        `marked:${instance.id}`,
-      ]);
-      // A crash after the stamp but before a cancel landed is repaired by the retry.
+      assert.deepStrictEqual(yield* Ref.get(lifecycle), [`marked:${instance.id}`]);
       const replay = yield* service.archive(input({ confirmationSatisfied: true }));
       assert.equal(replay.status, "already_archived");
-      assert.deepStrictEqual(yield* Ref.get(lifecycle), [
-        `cancelled:${instance.id}`,
-        `marked:${instance.id}`,
-        `cancelled:${instance.id}`,
-      ]);
+      assert.deepStrictEqual(yield* Ref.get(lifecycle), [`marked:${instance.id}`]);
     }).pipe(Effect.provide(layer));
   }),
 );
 
-it.effect("the Captain cascade's archive cancels the Crew's playbook run too", () =>
+it.effect("the Captain cascade archives the Crew independently of playbooks", () =>
   Effect.gen(function* () {
     const { layer, input, lifecycle } = yield* fixture;
     yield* Effect.gen(function* () {
       const service = yield* ArchiveCrewService;
       // CrewCaptainArchiveCascade.retire archives each Crew through this door with withCaptain.
       yield* service.archive(input({ confirmationSatisfied: true, withCaptain: true }));
-      assert.deepStrictEqual(yield* Ref.get(lifecycle), [
-        `cancelled:${instance.id}`,
-        `marked:${instance.id}`,
-      ]);
+      assert.deepStrictEqual(yield* Ref.get(lifecycle), [`marked:${instance.id}`]);
     }).pipe(Effect.provide(layer));
   }),
 );

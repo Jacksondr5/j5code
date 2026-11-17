@@ -1,4 +1,4 @@
-import { MessageId, ThreadId } from "@t3tools/contracts";
+import { MessageId, ThreadId, type OrchestrationV2StoredEvent } from "@t3tools/contracts";
 import {
   PlaybookError,
   type PlaybookStepDelivery,
@@ -11,6 +11,10 @@ import * as Schema from "effect/Schema";
 import * as KeyedLock from "@t3tools/shared/KeyedLock";
 
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
+import { AgentCrewInstanceService } from "../a2a/AgentCrewInstanceService.ts";
+import { participantIdForThread } from "../a2a/HomeRegistrar.ts";
+import { stopThread, agentStopReason } from "../a2a/stopThread.ts";
+import { exceededDispatchModeLimit } from "../../orchestration-v2/DispatchModeLimit.ts";
 import { lifecycleCommandId, lifecycleId } from "../a2a/spawnIds.ts";
 import { getThreadRecordsIfPresent } from "../a2a/threadProjectionReads.ts";
 import { crewStepNoticeText } from "./crewStepNotice.ts";
@@ -65,8 +69,94 @@ const withDelivery = (
 export const makePlaybookCrewRelay = Effect.gen(function* () {
   const store = yield* PlaybookStore;
   const threads = yield* ThreadManagementService;
+  const crews = yield* AgentCrewInstanceService;
   const locks = yield* KeyedLock.make<string>();
   const withRun = locks.withLock;
+
+  const finishCancellation = Effect.fn("PlaybookCrewRelay.finishCancellation")(function* (
+    runId: string,
+  ) {
+    const run = yield* store.runById(runId);
+    if (run === null || run.status !== "cancelled" || !(yield* store.claimHolderStop(runId)))
+      return;
+    const outcome = yield* Effect.gen(function* () {
+      if (run.holderThreadId === null) return { status: "no_holder" as const, reason: null };
+      if (run.holderThreadId === run.ownerThreadId)
+        return { status: "owner_held" as const, reason: null };
+      const target = yield* getThreadRecordsIfPresent(threads, run.holderThreadId, []);
+      if (target === null || target.thread.deletedAt !== null)
+        return { status: "failed" as const, reason: "The holder thread is unavailable." };
+      const membership = yield* crews.findMembership(participantIdForThread(run.holderThreadId));
+      const crew = membership === null ? null : yield* crews.read(membership.crewInstanceId);
+      const captain = crew?.captainParticipantId === participantIdForThread(run.ownerThreadId);
+      const owner = captain
+        ? null
+        : yield* getThreadRecordsIfPresent(threads, run.ownerThreadId, []);
+      if (!captain && owner === null)
+        return { status: "failed" as const, reason: "The owner modes cannot be resolved." };
+      const limit =
+        owner === null
+          ? undefined
+          : {
+              runtimeMode: owner.thread.runtimeMode,
+              interactionMode: owner.thread.interactionMode,
+            };
+      if (limit !== undefined && exceededDispatchModeLimit(limit, target.thread) !== undefined)
+        return {
+          status: "failed" as const,
+          reason: "The holder runs above the owner's runtime or interaction mode.",
+        };
+      const stopped = yield* stopThread(
+        threads,
+        {
+          commandId: lifecycleCommandId({
+            providerSessionId: "j5-playbook-cancel",
+            requestKey: runId,
+            operation: "stop-holder",
+          }),
+          threadId: run.holderThreadId,
+          reason: agentStopReason("Playbook cancelled"),
+        },
+        limit,
+      );
+      const interrupted = stopped.storedEvents.some(
+        ({ event }) =>
+          (event.type === "run.updated" && event.payload.status === "interrupted") ||
+          (event.type === "turn-item.updated" &&
+            event.payload.type === "run_interrupt_request" &&
+            event.payload.providerTurnId !== null),
+      );
+      return {
+        status: interrupted ? ("stop_requested" as const) : ("already_idle" as const),
+        reason: null,
+      };
+    }).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Playbook holder Stop failed", { runId, cause }).pipe(
+          Effect.as({
+            status: "failed" as const,
+            reason: "The holder Stop command or delegated-task stop failed.",
+          }),
+        ),
+      ),
+    );
+    yield* store.recordHolderStop(runId, outcome);
+  });
+  const reconcileOwners = Effect.fn("PlaybookCrewRelay.reconcileOwners")(function* () {
+    for (const run of yield* store.unreconciledCancellations())
+      yield* withRun(run.runId, finishCancellation(run.runId));
+  });
+  const handleOwnerEvent = Effect.fn("PlaybookCrewRelay.handleOwnerEvent")(function* (
+    stored: OrchestrationV2StoredEvent,
+  ) {
+    const event = stored.event;
+    if (event.type !== "thread.archived" && event.type !== "thread.deleted") return;
+    yield* store.cancelOwner(
+      event.threadId,
+      event.type === "thread.archived" ? "owner_archived" : "owner_deleted",
+    );
+    yield* reconcileOwners();
+  });
 
   const handOff = Effect.fn("PlaybookCrewRelay.handOff")(function* (
     runId: string,
@@ -162,7 +252,16 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
     const run = yield* store.runById(runId);
     const landing = yield* store.latestLanding(runId, currentStepId);
     if (run === null) return null;
-    if (landing !== null) return deliveryOf(landing, run.ownerThreadId);
+    if (landing !== null) {
+      const delivery = deliveryOf(landing, run.ownerThreadId);
+      const target =
+        run.holderThreadId === null
+          ? null
+          : yield* getThreadRecordsIfPresent(threads, run.holderThreadId, []);
+      return delivery === null
+        ? null
+        : { ...delivery, ...(target?.thread.archivedAt != null ? { holderArchived: true } : {}) };
+    }
     // Single-thread runs created before runtime staffing recorded no landing.
     return run.holderThreadId === run.ownerThreadId && run.holderParticipantId !== null
       ? {
@@ -172,7 +271,7 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
           participantId: run.holderParticipantId,
         }
       : null;
-  });
+  }, Effect.mapError(operationFailed));
   const respond = Effect.fn("PlaybookCrewRelay.respond")(function* (
     response: PlaybookStepResponse,
     requestId: string,
@@ -220,8 +319,14 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
         if (input.operation !== "assign" && input.operation !== "cancel")
           yield* drainLocked(run.runId);
         const response = yield* store.mutate(owner, input);
-        if (input.operation === "complete" || input.operation === "cancel")
-          return withDelivery(response, null);
+        if (input.operation === "cancel") {
+          yield* finishCancellation(run.runId);
+          return withDelivery(
+            { ...(yield* store.current(owner, run.runId)), replayed: response.replayed },
+            null,
+          );
+        }
+        if (input.operation === "complete") return withDelivery(response, null);
         return yield* respond(response, input.client_request_id);
       }),
     );
@@ -258,7 +363,16 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
         : null,
     );
   });
-  return { start, mutate, current, deliver, drainRun, currentDelivery };
+  return {
+    start,
+    mutate,
+    current,
+    deliver,
+    drainRun,
+    currentDelivery,
+    reconcileOwners,
+    handleOwnerEvent,
+  };
 });
 
 export class PlaybookCrewRelay extends Context.Service<

@@ -35,6 +35,7 @@ import {
   seatFinishedNoticeText,
 } from "./CrewSeatFinishNotifier.ts";
 import { CrewLaunchReporter } from "./CrewLaunchReporter.ts";
+import { PlaybookCrewRelay } from "../playbooks/PlaybookCrewRelay.ts";
 import { CrewCaptainArchiveCascade } from "./CrewCaptainArchiveCascade.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
@@ -373,6 +374,12 @@ it.effect("tells the Captain how each finished seat ended, and settles nothing",
         }),
       ),
       Layer.provideMerge(Layer.mock(CrewCaptainArchiveCascade)({})),
+      Layer.provide(
+        Layer.mock(PlaybookCrewRelay)({
+          reconcileOwners: () => Effect.void,
+          handleOwnerEvent: () => Effect.void,
+        }),
+      ),
       Layer.provideMerge(Layer.mock(EventSinkV2)({})),
       Layer.provideMerge(Layer.succeedContext(context)),
       Layer.provideMerge(Layer.mock(A2ADeliveryWorker)({ notify: Effect.void })),
@@ -593,6 +600,12 @@ it.effect(
           }),
         ),
         Layer.provideMerge(Layer.mock(CrewCaptainArchiveCascade)({})),
+        Layer.provide(
+          Layer.mock(PlaybookCrewRelay)({
+            reconcileOwners: () => Effect.void,
+            handleOwnerEvent: () => Effect.void,
+          }),
+        ),
         Layer.provideMerge(Layer.mock(EventSinkV2)({})),
         Layer.provideMerge(Layer.succeedContext(context)),
         Layer.provideMerge(Layer.mock(A2ADeliveryWorker)({ notify: Effect.void })),
@@ -727,6 +740,12 @@ it.effect(
           }),
         ),
         Layer.provideMerge(Layer.mock(CrewCaptainArchiveCascade)({})),
+        Layer.provide(
+          Layer.mock(PlaybookCrewRelay)({
+            reconcileOwners: () => Effect.void,
+            handleOwnerEvent: () => Effect.void,
+          }),
+        ),
         Layer.provideMerge(Layer.mock(EventSinkV2)({})),
         Layer.provideMerge(Layer.succeedContext(context)),
         Layer.provideMerge(Layer.mock(A2ADeliveryWorker)({ notify: Effect.void })),
@@ -831,6 +850,12 @@ it.effect("the boot sweep tells the Captain about a finished seat nothing report
         }),
       ),
       Layer.provideMerge(Layer.mock(CrewCaptainArchiveCascade)({})),
+      Layer.provide(
+        Layer.mock(PlaybookCrewRelay)({
+          reconcileOwners: () => Effect.void,
+          handleOwnerEvent: () => Effect.void,
+        }),
+      ),
       Layer.provideMerge(Layer.mock(EventSinkV2)({})),
       Layer.provideMerge(Layer.succeedContext(context)),
       Layer.provideMerge(Layer.mock(A2ADeliveryWorker)({ notify: Effect.void })),
@@ -886,6 +911,12 @@ const daemonHarness = (latestSequence: EventSinkV2["Service"]["latestSequence"])
               Stream.concat(Stream.never),
             );
           },
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(PlaybookCrewRelay)({
+          reconcileOwners: () => Effect.void,
+          handleOwnerEvent: () => Effect.void,
         }),
       ),
       Layer.provideMerge(

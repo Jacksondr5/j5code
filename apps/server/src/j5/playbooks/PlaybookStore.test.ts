@@ -857,53 +857,54 @@ it.effect(
     }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
 );
 
-it.effect(
-  "cancels deleted and missing owners before reads or deletion, while archived owners remain active",
-  () =>
-    Effect.gen(function* () {
-      const { store, workspaceRoot, write, fs, filename } = yield* makeFixture;
-      const sql = yield* SqlClient.SqlClient;
-      yield* write("archived");
-      const archived = yield* store.start(otherOwner, workspaceRoot, "archived", "archived");
-      yield* sql`UPDATE orchestration_v2_projection_threads SET archived_at = '2026-09-23' WHERE thread_id = ${otherOwner}`;
-      for (const entry of ["current", "thread", "active", "delete"] as const) {
-        for (const missing of [false, true]) {
-          yield* seedPlaybookOwners([owner]);
-          yield* sql`UPDATE orchestration_v2_projection_threads SET deleted_at = NULL WHERE thread_id = ${owner}`;
-          yield* write("demo");
-          const run = yield* store.start(owner, workspaceRoot, "demo", `${entry}-${missing}`);
-          if (missing)
-            yield* sql`DELETE FROM orchestration_v2_projection_threads WHERE thread_id = ${owner}`;
-          else
-            yield* sql`UPDATE orchestration_v2_projection_threads SET deleted_at = '2026-09-23' WHERE thread_id = ${owner}`;
-          if (entry === "current")
-            assert.equal((yield* store.current(owner, run.runId)).status, "cancelled");
-          if (entry === "thread")
-            assert.equal((yield* store.listForThread(owner)).runs[0]?.status, "cancelled");
-          if (entry === "active")
-            assert.deepStrictEqual(
-              (yield* store.listAll({ status: "active" })).runs.map((run) => run.runId),
-              [archived.runId],
-            );
-          yield* store.removeDefinition(workspaceRoot, "demo");
-          assert.isFalse(yield* fs.exists(filename("demo")));
-          const history = yield* store.current(owner, run.runId);
-          assert.equal(history.status, "cancelled");
-
-          yield* write("demo");
-          assert.equal(
-            (yield* Effect.flip(
-              store.start(owner, workspaceRoot, "demo", `deleted-${entry}-${missing}`),
-            )).code,
-            "thread_not_found",
+it.effect("cancels deleted, missing and archived owners before reads or deletion", () =>
+  Effect.gen(function* () {
+    const { store, workspaceRoot, write, fs, filename } = yield* makeFixture;
+    const sql = yield* SqlClient.SqlClient;
+    yield* write("archived");
+    const archived = yield* store.start(otherOwner, workspaceRoot, "archived", "archived");
+    yield* sql`UPDATE orchestration_v2_projection_threads SET archived_at = '2026-09-23' WHERE thread_id = ${otherOwner}`;
+    for (const entry of ["current", "thread", "active", "delete"] as const) {
+      for (const missing of [false, true]) {
+        yield* seedPlaybookOwners([owner]);
+        yield* sql`UPDATE orchestration_v2_projection_threads SET deleted_at = NULL WHERE thread_id = ${owner}`;
+        yield* write("demo");
+        const run = yield* store.start(owner, workspaceRoot, "demo", `${entry}-${missing}`);
+        if (missing)
+          yield* sql`DELETE FROM orchestration_v2_projection_threads WHERE thread_id = ${owner}`;
+        else
+          yield* sql`UPDATE orchestration_v2_projection_threads SET deleted_at = '2026-09-23' WHERE thread_id = ${owner}`;
+        if (entry === "current")
+          assert.equal((yield* store.current(owner, run.runId)).status, "cancelled");
+        if (entry === "thread")
+          assert.equal((yield* store.listForThread(owner)).runs[0]?.status, "cancelled");
+        if (entry === "active")
+          assert.deepStrictEqual(
+            (yield* store.listAll({ status: "active" })).runs.map((run) => run.runId),
+            [],
           );
-        }
+        yield* store.removeDefinition(workspaceRoot, "demo");
+        assert.isFalse(yield* fs.exists(filename("demo")));
+        const history = yield* store.current(owner, run.runId);
+        assert.equal(history.status, "cancelled");
+
+        yield* write("demo");
+        assert.equal(
+          (yield* Effect.flip(
+            store.start(owner, workspaceRoot, "demo", `deleted-${entry}-${missing}`),
+          )).code,
+          "thread_not_found",
+        );
       }
-      assert.equal((yield* store.current(otherOwner, archived.runId)).status, "active");
-      assert.deepStrictEqual(yield* store.removeDefinition(workspaceRoot, "archived"), {
-        deleted: true,
-      });
-    }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
+    }
+    assert.equal((yield* store.current(otherOwner, archived.runId)).status, "cancelled");
+    assert.equal((yield* store.current(otherOwner, archived.runId)).cancelReason, "owner_archived");
+    yield* sql`UPDATE orchestration_v2_projection_threads SET archived_at = NULL WHERE thread_id = ${otherOwner}`;
+    assert.equal((yield* store.current(otherOwner, archived.runId)).status, "cancelled");
+    assert.deepStrictEqual(yield* store.removeDefinition(workspaceRoot, "archived"), {
+      deleted: true,
+    });
+  }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );
 
 it.effect(
