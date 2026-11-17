@@ -443,7 +443,7 @@ is `delivered` (the seat has the step), `captain` (the Captain does it from `cur
 or `pending` (the hand-off hasn't finished; nobody should start the step). Only `captain` means
 the Captain does it. `j5_playbook_current` reports the same `delivery` without handing off again.
 While an earlier hand-off is still pending, `j5_playbook_next`, `j5_playbook_back`,
-and `j5_playbook_complete` refuse with `delivery_pending` and don't move; retry the same call. Nothing
+`j5_playbook_revise`, and `j5_playbook_complete` refuse with `delivery_pending` and don't move; retry the same call. Nothing
 retries a pending hand-off in the background, including after a restart: the Captain's next step
 call, or a retry of the same one, finishes it.
 `j5_playbook_cancel` always works. The platform never advances on its own: the Captain calls

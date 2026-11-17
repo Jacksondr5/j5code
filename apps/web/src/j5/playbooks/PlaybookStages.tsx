@@ -166,6 +166,9 @@ export function PlaybookStages({
                   Progress could not refresh. Showing the last received state.
                 </p>
               )}
+              {display.revisionHistory && (
+                <p className="my-2 text-muted-foreground">{display.revisionHistory}</p>
+              )}
               {run.cancelReason && (
                 <p role="status" className="my-2 text-warning">
                   {run.cancelReason}

@@ -44,6 +44,7 @@ export const J5_PREAPPROVED_TOOLS: ReadonlyArray<string> = [
   "j5_playbook_back",
   "j5_playbook_complete",
   "j5_playbook_cancel",
+  "j5_playbook_revise",
 ];
 
 /**
@@ -63,6 +64,7 @@ export const J5_COORDINATION_TOOLS: ReadonlyArray<string> = [
   "j5_playbook_back",
   "j5_playbook_complete",
   "j5_playbook_cancel",
+  "j5_playbook_revise",
 ];
 
 /** Mirrors the adapters' runtime-mode default: only full-access resolves to `never` on its own. */
