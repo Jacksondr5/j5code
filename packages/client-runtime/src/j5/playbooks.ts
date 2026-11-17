@@ -294,13 +294,14 @@ export function presentPlaybook(run: PlaybookProgress) {
   return {
     status:
       run.status === "active"
-        ? run.issue
-          ? "Needs attention"
-          : "In progress"
+        ? "In progress"
         : run.status === "completed"
           ? "Completed"
           : "Cancelled",
-    position: run.position === null ? "Step unavailable" : `Step ${run.position} of ${run.total}`,
+    position:
+      run.position === null
+        ? `Last step: ${run.currentStepId}`
+        : `Step ${run.position} of ${run.total}`,
     currentTitle: current?.title ?? run.currentStepId,
     steps: run.steps.map((step, index) => {
       const state =
@@ -388,11 +389,10 @@ export function playbookRunSelection(
   return runId === runs[0]?.runId ? null : runId;
 }
 
-/** Prioritize active runs with issues within a fetched page without mutating the query's runs. */
+/** Prioritize active runs within a fetched page without mutating the query's runs. */
 export function sortPlaybookRuns(runs: ReadonlyArray<PlaybookProgress>) {
   return [...runs].sort(
     (a, b) =>
-      Number(b.status === "active" && !!b.issue) - Number(a.status === "active" && !!a.issue) ||
       Number(b.status === "active") - Number(a.status === "active") ||
       Date.parse(b.updatedAt) - Date.parse(a.updatedAt),
   );

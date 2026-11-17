@@ -30,14 +30,14 @@ Playbooks are linear sequences. The initiative-level view — a plan whose nodes
 5. On each move, the step's owner receives its instructions in its context: the seat that owns the step in a Crew, or the Captain when no seat does.
 6. The interface shows which step each Crew and agent is on.
 7. A Playbook has no branching, retry, or automation owned by the platform.
-8. Live edits preserve the current step by stable ID; removing that ID requires explicit reselection before further movement.
-9. Missing or invalid definitions preserve active progress and permit cancellation; completed and cancelled runs do not report actionable definition issues.
+8. Starting a run saves its parsed procedure. Editing a saved playbook changes future runs only; active runs keep their steps, prompts, title, and purpose.
+9. Deleting a saved playbook succeeds while a run uses its copy. Past runs without a copy show their name, status, last step, and any cancellation reason without a step list.
 10. Back navigation changes the recorded position without undoing work, and retries cannot advance an active run twice.
 11. Completing or cancelling a run leaves its participants usable and preserves the run as history.
-12. Deleting the owner thread cancels its active run and stops that run from blocking definition deletion. Archiving a single agent's owner thread leaves its run resumable; archiving a Crew or its Captain cancels the Crew's run, and stopping a Crew doesn't.
+12. Deleting the owner thread cancels its active run. Archiving a single agent's owner thread leaves its run resumable; archiving a Crew or its Captain cancels the Crew's run, and stopping a Crew doesn't.
 13. New playbooks are saved to the environment library by default and are available across its projects and worktrees without a promotion step.
 14. A project's `.j5/playbooks/` definitions are discovered in that project and override a same-named library definition there; creating one is an explicit choice.
-15. Duplicate library names and unavailable sources are visible errors; running procedures retain their original file when discovery changes.
+15. Duplicate library names and unavailable sources are visible errors; running procedures retain their saved copy when discovery changes.
 16. Copying a definition between environments creates an independent copy without replacing an existing different definition.
 17. An agent can edit a library definition; the edit is refused if the definition changed since the agent read it.
 
@@ -47,7 +47,7 @@ Playbooks are linear sequences. The initiative-level view — a plan whose nodes
 - **A Crew from a playbook.** The user asks the agent in a thread for a crew to implement what they discussed, using `@playbook:release` or asking for the release playbook by name. The agent reads the playbook, proposes one seat per persona its steps name (a stand-in for a persona this server doesn't have; one that is turned off or blocked keeps its steps with the Captain, who escalates it), and, once the user approves, starts the playbook as the Crew's Captain. Each step goes to the seat that owns it, and Fleet shows "Step 1 of 4 · planner". (AC2, AC5, AC6)
 - **A judgment step.** Step 4 says "decide whether the migration is safe to run"; the platform delivers the instruction and waits — the agent decides, and declares. (AC3, AC7)
 
-- **A live single-agent procedure.** In Billing Migration, the user edits the current prompt while a Role follows the Playbook. The agent retrieves the revised prompt, moves back to inspect earlier work, and explicitly reselects when its step is removed. Deleting its owner thread cancels the run so the user can remove the definition. (AC8–AC12)
+- **A saved single-agent procedure.** In Billing Migration, a Role keeps following the procedure it started while the user edits or deletes its library definition. A new run uses the edited definition. The Role can move back to inspect earlier work; deleting its owner thread cancels the run. (AC8–AC12)
 
 ## History
 

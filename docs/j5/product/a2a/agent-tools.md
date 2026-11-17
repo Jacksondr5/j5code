@@ -428,7 +428,7 @@ stopping retires nothing.
 
 A Captain runs the playbook its Crew follows with `j5_playbook_start(name, client_request_id,
 crew_instance_id)`. The call is refused with `crew_not_linkable` unless the Crew is the caller's,
-is live, and follows that playbook. Each landing (start, next, back, reselect) hands the step's live
+is live, and follows that playbook. Each landing (start, next, back) hands the step's saved
 prompt to the seat that owns it, once per landing, as a `<j5_playbook_step>` notice in the seat's
 thread. A step no live seat owns is the Captain's, and no notice is sent for it.
 
@@ -436,7 +436,7 @@ Every step tool on a Crew-linked run returns `delivery`: `{ state, seat, thread_
 is `delivered` (the seat has the step), `captain` (the Captain does it from `currentStep.prompt`),
 or `pending` (the hand-off hasn't finished; nobody should start the step). Only `captain` means
 the Captain does it. `j5_playbook_current` reports the same `delivery` without handing off again.
-While an earlier hand-off is still pending, `j5_playbook_next`, `j5_playbook_back`, `j5_playbook_reselect`,
+While an earlier hand-off is still pending, `j5_playbook_next`, `j5_playbook_back`,
 and `j5_playbook_complete` refuse with `delivery_pending` and don't move; retry the same call. Nothing
 retries a pending hand-off in the background, including after a restart: the Captain's next step
 call, or a retry of the same one, finishes it.

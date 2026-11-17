@@ -328,7 +328,6 @@ it.effect("denies a different owner and every tool when orchestration capability
         yield* call("j5_playbook_next", movement, scope),
         yield* call("j5_playbook_back", movement, scope),
         yield* call("j5_playbook_complete", movement, scope),
-        yield* call("j5_playbook_reselect", { ...movement, stepId: "review" }, scope),
         yield* call("j5_playbook_cancel", { runId: run.runId, client_request_id: "denied" }, scope),
       ];
       for (const response of responses) {
@@ -351,7 +350,7 @@ it.effect("denies a different owner and every tool when orchestration capability
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );
 
-it.effect("returns actionable live-file errors and recovers or cancels through the toolkit", () =>
+it.effect("keeps the saved step after library edits and deletion through the toolkit", () =>
   Effect.gen(function* () {
     const { call, fs, path, worktree } = yield* fixture;
     const started = yield* call("j5_playbook_start", { name: "demo", client_request_id: "start" });
@@ -361,25 +360,11 @@ it.effect("returns actionable live-file errors and recovers or cancels through t
       file,
       stringify({ ...sample("Edited playbook"), steps: sample("Edited").steps.slice(1) }),
     );
-    const missing = yield* call("j5_playbook_current", { runId: run.runId });
-    assert.isTrue(missing.isFailure);
-    assert.deepStrictEqual((yield* decodeFailure(missing.result)).availableStepIds, [
-      "implement",
-      "review",
-    ]);
-    const recovered = yield* call("j5_playbook_reselect", {
-      runId: run.runId,
-      expectedStepId: "research",
-      stepId: "implement",
-      client_request_id: "recover",
-    });
-    assert.equal(
-      (yield* decodeStep(recovered.result)).currentStep?.prompt,
-      "Append BETA to your notes.",
-    );
+    const current = yield* call("j5_playbook_current", { runId: run.runId });
+    assert.equal((yield* decodeStep(current.result)).currentStepId, "research");
     yield* fs.remove(file);
-    const invalid = yield* call("j5_playbook_current", { runId: run.runId });
-    assert.equal((yield* decodeFailure(invalid.result)).code, "invalid_definition");
+    const replayed = yield* call("j5_playbook_start", { name: "demo", client_request_id: "start" });
+    assert.equal((yield* decodeStep(replayed.result)).runId, run.runId);
     const cancelled = yield* call("j5_playbook_cancel", {
       runId: run.runId,
       client_request_id: "cancel",
