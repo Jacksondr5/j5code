@@ -150,6 +150,10 @@ import { gateEnvironmentAuth } from "./j5/sharing/AccessGate.ts";
 import { gateMcpOAuth } from "./j5/sharing/McpApproval.ts";
 import { peopleLayer as J5PeopleLive } from "./j5/sharing/PairingIntents.ts";
 import { J5A2AAuxiliaryLayer, J5ThreadRegistrationLayer } from "./j5/a2a/runtimeLayer.ts";
+import {
+  layer as J5LineRegistryLive,
+  layerRoutingHttpClient as J5LineRoutingHttpClient,
+} from "./j5/a2a/line/LineRegistry.ts";
 import { layer as J5ArtifactRunFinalizationObserverLive } from "./j5/artifacts/ArtifactRunFinalizationObserver.ts";
 import { layer as J5ArtifactWorkspaceLive } from "./j5/artifacts/ArtifactWorkspace.ts";
 import {
@@ -833,6 +837,8 @@ const layerMakeRoutes = Layer.mergeAll(
     PeerForwarding.layer.pipe(
       Layer.provideMerge(PeerMcpClient.layer),
       Layer.provideMerge(PeerLinks.layer),
+      // J5: a link to a server that polls this one goes through that server's line.
+      Layer.provide(J5LineRoutingHttpClient.pipe(Layer.provide(J5LineRegistryLive))),
     ),
   ),
   Layer.provide(PreviewAutomationBroker.layer),

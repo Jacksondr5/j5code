@@ -31,6 +31,7 @@ const homePeer: PeerConnection = {
   lastError: null,
   waitingCount: 0,
   oldestWaitingAt: null,
+  lineAddress: null,
   roster: null,
 };
 const macPeer: PeerConnection = {
@@ -46,6 +47,7 @@ const macPeer: PeerConnection = {
   lastError: null,
   waitingCount: 0,
   oldestWaitingAt: null,
+  lineAddress: null,
   roster: null,
 };
 

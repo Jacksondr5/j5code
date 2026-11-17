@@ -36,6 +36,7 @@ import { SourceControlRepositoryService } from "../../sourceControl/SourceContro
 import { ThreadSearch } from "../../orchestration-v2/ThreadSearch.ts";
 import * as SecretRequests from "../../secrets/SecretRequests.ts";
 import { EnvironmentAuth } from "../../auth/EnvironmentAuth.ts";
+import { SessionStore } from "../../auth/SessionStore.ts";
 import { ServerEnvironment } from "../../environment/ServerEnvironment.ts";
 import * as ServerConfig from "../../config.ts";
 import { AnalyticsService } from "../../telemetry/AnalyticsService.ts";
@@ -277,6 +278,10 @@ it.effect("shares one runtime and outbox across the production HTTP and MCP regi
             Layer.provide(
               Layer.mergeAll(
                 Layer.mock(EnvironmentAuth)({}),
+                Layer.mock(SessionStore)({
+                  cookieName: "runtime-test",
+                  legacyCookieName: undefined,
+                }),
                 Layer.mock(ProjectService)({}),
                 Layer.mock(ProjectSetupScriptRunner)({}),
                 Layer.mock(ProviderRegistry)({}),

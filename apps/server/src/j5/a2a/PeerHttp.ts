@@ -30,6 +30,8 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 import packageJson from "../../../package.json" with { type: "json" };
 import type * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import { annotateEnvironmentRequest } from "../../auth/http.ts";
+import * as SessionStore from "../../auth/SessionStore.ts";
+import { LineRegistry } from "./line/LineRegistry.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { PeerAdminService, peerAdminRefusal } from "./PeerAdminService.ts";
 import {
@@ -123,6 +125,8 @@ export const peerHttpRouteLayer = Layer.unwrap(
     const worker = yield* A2ADeliveryWorker;
     const roster = yield* RosterService;
     const store = yield* PeerStoreService;
+    const lines = yield* LineRegistry;
+    const sessions = yield* SessionStore.SessionStore;
 
     /** Whether the session's environment is a recorded peer, recording a store peer on its first proof. */
     const adoptingStorePeer = (
@@ -437,7 +441,52 @@ export const peerHttpRouteLayer = Layer.unwrap(
       }).pipe(Effect.catchTags(respondableTags), statingPeerProtocol),
     );
 
+    /**
+     * A peer that polls this server holds a line here, through which this server reaches it.
+     * The line lasts until it closes, goes quiet, or the peer's session here ends.
+     */
+    const lineRoute = HttpRouter.add(
+      "GET",
+      J5_PEER_API_PATHS.line,
+      Effect.gen(function* () {
+        yield* annotateEnvironmentRequest("j5.a2a.peer.line");
+        const session = yield* authenticate;
+        yield* requireScope(session, AuthA2APeerScope);
+        const refused = yield* protocolRefusal(
+          `Peer ${environmentIdFromPeerSubject(session.subject) ?? session.subject}`,
+        );
+        if (refused !== null) return refused;
+        const origin = yield* registeredPeerForSession(session);
+        if (Result.isFailure(origin)) return origin.failure;
+        const record = yield* Effect.result(peers.get(origin.success));
+        if (Result.isFailure(record)) {
+          yield* Effect.logError("J5 A2A peer lookup failed", { cause: record.failure });
+          return jsonError(500, tagOf(record.failure), "Peer lookup failed.");
+        }
+        const lineAddress = record.success?.lineAddress ?? null;
+        if (record.success?.linkMode !== "store" || lineAddress === null) {
+          return jsonError(
+            409,
+            "peer_not_polling",
+            `Environment ${origin.success} does not poll this server, so this server reaches it directly and holds no line for it.`,
+          );
+        }
+        const request = yield* HttpServerRequest.HttpServerRequest;
+        const socket = yield* Effect.result(request.upgrade);
+        if (Result.isFailure(socket)) {
+          return jsonError(400, "line_upgrade_required", "A line is a WebSocket upgrade.");
+        }
+        return yield* lines.serve({
+          environmentId: origin.success,
+          host: new URL(lineAddress).hostname,
+          socket: socket.success,
+          ended: sessions.awaitInvalidation(session.sessionId).pipe(Effect.ignore),
+        });
+      }).pipe(Effect.catchTags(respondableTags), statingPeerProtocol),
+    );
+
     return Layer.mergeAll(
+      lineRoute,
       pollRoute,
       helloRoute,
       rosterRoute,
