@@ -23,11 +23,16 @@ import { playbookWorkspaceRoot } from "./workspace.ts";
 
 const Text = Schema.String.check(Schema.isNonEmpty());
 const Mutation = Schema.Struct({ runId: Text, client_request_id: Text });
-const Movement = Schema.Struct({ ...Mutation.fields, expectedStepId: Text });
+const Movement = Schema.Struct({
+  ...Mutation.fields,
+  expectedStepId: Text,
+  assignee: Schema.optional(Text),
+});
+const Finish = Schema.Struct({ ...Mutation.fields, expectedStepId: Text });
 const Start = Schema.Struct({
   name: Text,
   client_request_id: Text,
-  crew_instance_id: Schema.optional(Text),
+  assignee: Schema.optional(Text),
 });
 const Current = Schema.Struct({ runId: Schema.optional(Text) });
 const Read = Schema.Struct({ name: Text });
@@ -88,14 +93,14 @@ export const playbookTools = [
     dependencies: workspaceDependencies,
     parameters: Start,
     description:
-      "Start a named playbook in your own thread and retrieve its first saved prompt. Only one run may be active. You perform the work and control advancement; the playbook never spawns or stops agents. As a Captain, pass crew_instance_id to run the playbook your Crew follows: each step then goes to the seat that owns it, and delivery says who holds it." +
+      "Start a named playbook in your own thread. Pass an assignee participant ID to hand the first step to an agent you spawned or a member of a Crew you captain; otherwise you hold it. Delivery reports whether the notice reached the holder. Only you advance the run." +
       mutationDescription,
   }),
   Tool.make("j5_playbook_current", {
     ...common,
     parameters: Current,
     description:
-      "Retrieve your run's saved prompt, purpose and progress without moving. Omit runId to recover your active (or latest) run after compaction or restart.",
+      "Retrieve your run's saved prompt, holder, delivery status and progress without moving. Omit runId to recover your active (or latest) run after compaction or restart.",
   })
     .annotate(Tool.Readonly, true)
     .annotate(Tool.Destructive, false)
@@ -104,26 +109,33 @@ export const playbookTools = [
     ...common,
     parameters: Movement,
     description:
-      "Advance one step in the saved step order and retrieve its prompt. expectedStepId must equal your current step. At the last step, use j5_playbook_complete." +
+      "Advance one step in the saved step order and retrieve its prompt. Pass an optional assignee participant ID for that step; otherwise you hold it. expectedStepId must equal your current step. At the last step, use j5_playbook_complete." +
       mutationDescription,
   }),
   Tool.make("j5_playbook_back", {
     ...common,
     parameters: Movement,
     description:
-      "Move back one step in the saved step order and retrieve its saved prompt. This changes progress only; it does not undo work or file edits. expectedStepId guards against stale calls." +
+      "Move back one step in the saved step order and retrieve its saved prompt. Pass an optional assignee participant ID for that step; otherwise you hold it. This changes progress only; it does not undo work or file edits. expectedStepId guards against stale calls." +
+      mutationDescription,
+  }),
+  Tool.make("j5_playbook_assign", {
+    ...common,
+    parameters: Movement,
+    description:
+      "Hand the current step to an assignee participant ID, or omit assignee to take it back without moving. This can replace a pending hand-off to an unavailable holder. expectedStepId guards against a stale assignment." +
       mutationDescription,
   }),
   Tool.make("j5_playbook_revise", {
     ...common,
     parameters: PlaybookReviseRequest,
     description:
-      "Replace only your active run's steps after the user explicitly asked for the change (basis asked) or approved your proposal (basis approved). Preserve its title and purpose. expectedStepId guards against stale calls. If the current step ID remains, keep it; otherwise supply stepId naming its replacement. This never changes the reusable playbook. A changed current step follows normal delivery rules; editing the same step keeps its holder." +
+      "Replace only your active run's steps after the user explicitly asked for the change (basis asked) or approved your proposal (basis approved). Preserve its title and purpose. expectedStepId guards against stale calls. If the current step ID remains, keep it; otherwise supply stepId naming its replacement. This never changes the reusable playbook. For a changed current step, assignee optionally names an eligible local agent; omit it to assign the owner. Editing the same step keeps its holder and refuses assignee." +
       mutationDescription,
   }),
   Tool.make("j5_playbook_complete", {
     ...common,
-    parameters: Movement,
+    parameters: Finish,
     description:
       "Mark the playbook completed. expectedStepId guards against stale completion. Your agent and thread remain usable; you may start another playbook." +
       mutationDescription,
@@ -206,19 +218,12 @@ export const playbookHandlers = {
   j5_playbook_start: runsPlaybook((input: typeof Start.Type) =>
     Effect.gen(function* () {
       const { owner, root } = yield* workspace;
-      if (input.crew_instance_id === undefined)
-        return yield* (yield* PlaybookStore).start(
-          owner,
-          root,
-          input.name,
-          input.client_request_id,
-        );
       return yield* (yield* PlaybookCrewRelay).start({
         owner,
         root,
         name: input.name,
         key: input.client_request_id,
-        crewInstanceId: input.crew_instance_id,
+        ...(input.assignee === undefined ? {} : { assignee: input.assignee }),
       });
     }),
   ),
@@ -236,7 +241,10 @@ export const playbookHandlers = {
   j5_playbook_revise: runsPlaybook((input: PlaybookReviseRequest) =>
     mutate({ ...input, operation: "revise" }),
   ),
-  j5_playbook_complete: runsPlaybook((input: typeof Movement.Type) =>
+  j5_playbook_assign: runsPlaybook((input: typeof Movement.Type) =>
+    mutate({ ...input, operation: "assign" }),
+  ),
+  j5_playbook_complete: runsPlaybook((input: typeof Finish.Type) =>
     mutate({ ...input, operation: "complete" }),
   ),
   j5_playbook_cancel: runsPlaybook((input: typeof Mutation.Type) =>

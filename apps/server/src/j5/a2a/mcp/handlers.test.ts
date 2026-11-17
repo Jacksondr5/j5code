@@ -260,6 +260,7 @@ it.effect("namespaces mutating-tool idempotency and sender identity from authent
       "j5_clear_own_ask",
       "j5_list_participants",
       "j5_list_personas",
+      "j5_playbook_assign",
       "j5_playbook_back",
       "j5_playbook_cancel",
       "j5_playbook_complete",

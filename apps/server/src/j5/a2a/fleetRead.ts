@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect";
 import * as J5Contracts from "@t3tools/contracts/j5";
 import * as SqlClient from "effect/sql/SqlClient";
 
-import { PlaybookCrewRelay } from "../playbooks/PlaybookCrewRelay.ts";
+import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
 import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
 import { A2ALedger } from "./LedgerService.ts";
 import { ParticipantPlacementService } from "./PlacementService.ts";
@@ -27,8 +27,8 @@ export const projectFleetProject = (input: {
   readonly crews: ReadonlyArray<AgentCrewInstance>;
   readonly openAsks: ReadonlyMap<string, number>;
   readonly facts?: ReadonlyMap<string, J5Contracts.FleetAgentFacts>;
-  /** Each live Crew's active playbook run, by Crew id. */
-  readonly playbookRuns?: ReadonlyMap<string, J5Contracts.FleetCrew["playbookRun"]>;
+  /** Each owner's active playbook run, by thread id. */
+  readonly playbookRuns?: ReadonlyMap<string, J5Contracts.FleetPlaybookRun>;
   /** The label of each outside agent that spawned one of the participants, by its id. */
   readonly outsideAgentNames?: ReadonlyMap<string, string>;
 }): FleetResponse["projects"][number] => {
@@ -93,6 +93,7 @@ export const projectFleetProject = (input: {
       ...agents.map((row): FleetAgent => ({
         participantId: row.participantId,
         threadId: row.threadId,
+        playbookRun: row.threadId === null ? null : (input.playbookRuns?.get(row.threadId) ?? null),
         displayName:
           "displayName" in row.participant && typeof row.participant.displayName === "string"
             ? row.participant.displayName
@@ -139,9 +140,8 @@ export const projectFleetProject = (input: {
       version: crew.version,
       createdAt: crew.createdAt,
       archivedAt: crew.archivedAt,
-      playbook: crew.playbook == null ? null : { name: crew.playbook.name },
+      playbook: null,
       roster: crew.members.map((member) => {
-        const steps = member.playbookStepIds ?? [];
         return {
           seat: member.seatName,
           ...(member.notStarted === undefined ? {} : { notStarted: member.notStarted }),
@@ -149,10 +149,9 @@ export const projectFleetProject = (input: {
           participantId: member.participantId,
           addedVersion: member.addedVersion,
           reason: member.reason,
-          ...(steps.length === 0 ? {} : { steps }),
         };
       }),
-      playbookRun: input.playbookRuns?.get(crew.id) ?? null,
+      playbookRun: null,
     })),
   };
 };
@@ -165,7 +164,7 @@ export const makeFleetRead = Effect.gen(function* () {
   const ledger = yield* A2ALedger;
   const placements = yield* ParticipantPlacementService;
   const crews = yield* AgentCrewInstanceService;
-  const relay = yield* PlaybookCrewRelay;
+  const playbooks = yield* PlaybookStore;
   const sql = yield* SqlClient.SqlClient;
   return (includeRetired: boolean) =>
     Effect.gen(function* () {
@@ -253,10 +252,24 @@ export const makeFleetRead = Effect.gen(function* () {
         const projectCrews = (yield* crews.listForProject(project.id)).filter(
           (crew) => includeRetired || crew.archivedAt === null,
         );
-        // Archiving a Crew cancels its run, so only live Crews can have one.
-        const playbookRuns = new Map<string, J5Contracts.FleetCrew["playbookRun"]>();
-        for (const crew of projectCrews)
-          if (crew.archivedAt === null) playbookRuns.set(crew.id, yield* relay.fleetRun(crew.id));
+        const playbookRuns = new Map<string, J5Contracts.FleetPlaybookRun>();
+        const ownerThreads = participants.flatMap((row) =>
+          row.participant.kind === "agent" && row.threadId !== null ? [row.threadId] : [],
+        );
+        for (const batch of clientReadBatches(ownerThreads))
+          for (const run of yield* playbooks.activeRunSummaries(batch)) {
+            const holder = run.holderParticipantId;
+            playbookRuns.set(run.ownerThreadId, {
+              runId: run.runId,
+              position: run.position,
+              total: run.total,
+              stepId: run.stepId,
+              stepTitle: run.stepTitle,
+              state: run.state,
+              holderParticipantId: holder,
+              holderLabel: holder === null ? "unknown holder" : (names.get(holder) ?? holder),
+            });
+          }
         result.push(
           projectFleetProject({
             project,

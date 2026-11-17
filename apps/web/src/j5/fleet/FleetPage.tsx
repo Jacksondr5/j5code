@@ -101,15 +101,6 @@ const threadFor = (
 const projectKey = (ledgerProject: ScopedFleetLedgerProject) =>
   `${ledgerProject.environmentId}:${ledgerProject.id}`;
 
-/** A seat's badge, with the playbook step ids it owns when its Crew follows one. */
-const seatBadgeWithSteps = (
-  seat: string | null,
-  stepsBySeat: ReadonlyMap<string, ReadonlyArray<string>>,
-): string | null => {
-  const steps = seat === null ? undefined : stepsBySeat.get(seat);
-  return seat === null || steps === undefined ? seat : `${seat} · ${steps.join(", ")}`;
-};
-
 /**
  * The Roster (SB6). Status and last activity come from the client's thread state; placement,
  * provenance, seats, and owed asks come from each environment's ledger read. Unknowns render as
@@ -447,9 +438,6 @@ function FleetNodeRows(
                 className="size-3.5 transition-transform duration-150 group-open/crew:rotate-90"
               />
               <span>Crew · {crew.crewName}</span>
-              {crew.playbookName === null ? null : (
-                <span className="text-muted-foreground/70">Playbook: {crew.playbookName}</span>
-              )}
               {(() => {
                 const seats = crew.members.map((member) => member.row);
                 const state = crewState(seats);
@@ -462,11 +450,6 @@ function FleetNodeRows(
                         agents={seats.map((seat) => seat.agent)}
                       />
                     </span>
-                    {crew.playbookRun === null ? null : (
-                      <span className="truncate text-foreground/80">
-                        {playbookRunHeader(crew.playbookRun)}
-                      </span>
-                    )}
                     <span className="ms-auto flex items-center gap-1.5">
                       {canOperate && crewHasRunningSeat(state) ? (
                         <Button
@@ -514,10 +497,7 @@ function FleetNodeRows(
                 <FleetNodeRows
                   key={member.row.agent.participantId}
                   node={member}
-                  seatBadge={seatBadgeWithSteps(
-                    member.row.agent.crew?.seat ?? null,
-                    crew.stepsBySeat,
-                  )}
+                  seatBadge={member.row.agent.crew?.seat ?? null}
                   {...rows}
                 />
               ))}
@@ -590,9 +570,6 @@ function RetiredCrewItem(props: FleetRowsProps & FleetProjectCrew<ScopedFleetLed
         <div className="border-t border-border/40 px-3 py-2 ps-8.5 text-xs">
           <RetiredCrewCaptain {...props} environmentId={ledgerProject.environmentId} />
           <p className="mt-2 whitespace-pre-wrap break-words text-muted-foreground">{crew.brief}</p>
-          {crew.playbook == null ? null : (
-            <p className="mt-1 text-muted-foreground">Playbook: {crew.playbook.name}</p>
-          )}
           {crew.roster.length === 0 ? (
             <p className="mt-2 text-muted-foreground">No seats were approved.</p>
           ) : (
@@ -728,6 +705,11 @@ export function FleetRowItem(
           {props.captainOf !== undefined && props.captainOf.length > 0 ? (
             <CaptainMark title={`Commands ${props.captainOf.join(", ")}`} />
           ) : null}
+          {agent.playbookRun == null ? null : (
+            <span className="min-w-0 truncate text-xs text-muted-foreground">
+              {playbookRunHeader(agent.playbookRun)}
+            </span>
+          )}
           {agent.replaced === undefined ? null : (
             <Tooltip>
               <TooltipTrigger

@@ -16,12 +16,6 @@ import { agentPersonaEnvironment } from "../agents/agentPersonaAtoms";
 import type { CrewProposal, CrewProposalSeat } from "./crewProposalsClient";
 import { readCrewProposalDraft, saveCrewProposalDraft } from "./crewProposalDraftStore";
 import { crewProposalRows, crewProposalRoster, newCrewProposalRow } from "./crewProposalDraft";
-import {
-  describePersonaSwap,
-  removedSeatSteps,
-  stepTitle,
-  unownedSteps,
-} from "@t3tools/client-runtime/j5/crew-proposals";
 import { CrewProposalMemberDialog } from "./CrewProposalMemberDialog";
 import type { CrewProposalRow } from "./crewProposalDraft";
 import { CrewProposalMemberRow } from "./CrewProposalMemberRow";
@@ -123,11 +117,6 @@ export function CrewProposalCard(props: {
     props.busy,
     errors.size === 0,
   );
-  const playbook = preview.data?.playbook ?? proposal.playbook ?? null;
-  const unowned =
-    preview.data?.unownedSteps ?? (proposal.kind === "roster" ? unownedSteps(playbook, seats) : []);
-  const titles = (ids: ReadonlyArray<string>) =>
-    ids.map((id) => stepTitle(playbook, id)).join(", ");
   const canApprove =
     !props.busy &&
     canResolve &&
@@ -211,18 +200,6 @@ export function CrewProposalCard(props: {
               {fullBrief ? "View less" : "View more"}
             </Button>
           </div>
-          {playbook === null ? null : (
-            <div className="mt-2 text-xs text-muted-foreground">
-              <p>
-                Follows playbook: <span className="text-foreground">{playbook.title}</span>
-              </p>
-              {playbook.issue === null ? null : (
-                <p className="text-destructive" role="alert">
-                  {playbook.issue}
-                </p>
-              )}
-            </div>
-          )}
           <ul className="divide-y divide-border border-y border-border/70">
             {rows.map((row, index) => {
               const seat = seats[index]!;
@@ -247,38 +224,10 @@ export function CrewProposalCard(props: {
                     addButton.current?.focus();
                     changeRows(rows.filter((candidate) => candidate.id !== row.id));
                   }}
-                >
-                  {seat.steps?.length ? (
-                    <p className="mt-1 break-words text-xs text-muted-foreground">
-                      Steps: {titles(seat.steps)}
-                    </p>
-                  ) : null}
-                  {(runtime !== undefined
-                    ? (runtime.personaSwaps ?? [])
-                    : seat.agentId === row.original?.agentId
-                      ? (seat.personaSwaps ?? [])
-                      : []
-                  ).map((swap) => (
-                    <p key={swap.stepId} className="mt-1 break-words text-xs text-warning">
-                      {stepTitle(playbook, swap.stepId)} {describePersonaSwap(swap, seat.seat)}
-                    </p>
-                  ))}
-                </CrewProposalMemberRow>
+                ></CrewProposalMemberRow>
               );
             })}
           </ul>
-          {playbook === null ? null : (
-            <div className="mt-2 space-y-0.5 text-xs text-muted-foreground">
-              {removedSeatSteps(proposal.requestedSeats, seats).map(({ seat, steps }) => (
-                <p key={seat} role="status">
-                  Removing {seat} leaves {titles(steps)} unowned.
-                </p>
-              ))}
-              {unowned.length ? (
-                <p className="break-words">Unowned steps, done by the Captain: {titles(unowned)}</p>
-              ) : null}
-            </div>
-          )}
           {preview.error ? (
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <p className="text-xs text-destructive" role="alert">

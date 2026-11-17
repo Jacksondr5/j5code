@@ -21,7 +21,6 @@ import { AgentPersonaEscalations, personaBlockText } from "../agents/agentPerson
 import { findAgentPersonaDefinition } from "../agents/agentPersonaLaunch.ts";
 import { makeAgentPersonaLibrary } from "../agents/agentPersonaLibrary.ts";
 import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
-import { makePlaybookCrewRelay } from "../playbooks/PlaybookCrewRelay.ts";
 import {
   AgentCrewInstanceService,
   replacementProblem,
@@ -927,12 +926,9 @@ export const layer = Layer.effect(
       return owned.filter((stepId) => later.includes(stepId));
     });
 
-    const relay = yield* makePlaybookCrewRelay;
-
     /**
      * After the swap: the replaced member's running turn is interrupted, with no message to it,
-     * and a current step it had been handed goes to its replacement. Both are keyed by the
-     * request, so a retry of the same call finishes whichever did not happen.
+     * The run owner decides whether to reassign any step the replaced member held.
      */
     const finishReplacement = Effect.fn("j5.a2a.crewProposal.finishReplacement")(function* (
       outcome: CrewProposalOutcome,
@@ -959,21 +955,6 @@ export const layer = Layer.effect(
           threadId: replaced.threadId,
           reason: AGENT_STOP_REASON,
         }).pipe(Effect.mapError(operationError("stopping the replaced member")));
-      yield* relay
-        .handOver({
-          crewInstanceId: outcome.instance.id,
-          fromThreadId: replaced.threadId,
-          requestKey: `replace:${proposalId}`,
-        })
-        .pipe(
-          Effect.mapError(
-            (error) =>
-              new CrewProposalRequestError({
-                detail: `Seat ${seat.replaces} was replaced by ${seat.seat}, but the step it held wasn't handed over: ${error.message}`,
-                nextStep: "Retry this call with the same client_request_id.",
-              }),
-          ),
-        );
     });
 
     const requestMember: CrewProposalServiceShape["requestMember"] = (input) => {

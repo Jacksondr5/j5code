@@ -1378,18 +1378,11 @@ it.effect(
       assert.equal(yield* moved(store.removeDefinition(workspaceRoot, "unused")), 1);
       assert.equal(yield* moved(Effect.flip(store.removeDefinition(workspaceRoot, "unused"))), 0);
 
-      // A Crew-linked run's landing gets its target once; Fleet shows the seat it is headed to.
-      const run = yield* store.start(owner, workspaceRoot, "demo", "start", {
-        crewInstanceId: "crew:watch",
-      });
-
-      const target = { seat: "builder", threadId: "thread:builder" };
-      assert.equal(yield* moved(store.targetLanding(run.runId, "start", target)), 1);
-      assert.equal(
-        yield* moved(store.targetLanding(run.runId, "start", { seat: null, threadId: "thread:x" })),
-        0,
-        "a later call keeps the first target",
-      );
+      // The first landing records the owner as holder in the start transaction.
+      const run = yield* store.start(owner, workspaceRoot, "demo", "start");
+      assert.equal((yield* store.landing(run.runId, "start"))?.targetThreadId, owner);
+      assert.equal(yield* moved(store.resolveLanding(run.runId, "start", "captain")), 1);
+      assert.equal(yield* moved(store.resolveLanding(run.runId, "start", "captain")), 0);
 
       // Reads cancel a run whose owner is gone. One that cancelled nothing moves nothing, or every
       // read would cause the next.
@@ -1399,6 +1392,25 @@ it.effect(
       assert.equal(yield* moved(store.listAll({})), 1);
       assert.equal(yield* moved(store.listAll({})), 0);
     }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
+);
+
+it.effect("projects a compact active run for its owner without prompt bodies", () =>
+  Effect.gen(function* () {
+    const { store, workspaceRoot } = yield* makeFixture;
+    const run = yield* store.start(owner, workspaceRoot, "demo", "start");
+    assert.deepStrictEqual(yield* store.activeRunSummaries([owner, otherOwner]), [
+      {
+        ownerThreadId: owner,
+        runId: run.runId,
+        position: 1,
+        total: 3,
+        stepId: "research",
+        stepTitle: "Step research",
+        holderParticipantId: run.holderParticipantId,
+        state: "captain",
+      },
+    ]);
+  }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );
 
 it.effect(

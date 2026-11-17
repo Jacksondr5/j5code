@@ -244,7 +244,7 @@ it("keeps every live roster seat: one with no ledger row rides under its Captain
   });
 });
 
-it("carries a Crew's playbook and each seat's steps on the Fleet roster", () => {
+it("keeps legacy Crew playbook fields out of the Fleet roster", () => {
   const projected = projectFleetProject({
     project: { id: projectId, name: "Fleet" },
     participants: [agentRow(captain, captainThread, { kind: "unrecorded" }, null)],
@@ -263,13 +263,13 @@ it("carries a Crew's playbook and each seat's steps on the Fleet roster", () => 
     ],
     openAsks: new Map(),
   });
-  assert.deepStrictEqual(projected.crews[0]?.playbook, { name: "release" });
-  assert.deepStrictEqual(projected.crews[0]?.roster[0]?.steps, ["plan", "build"]);
+  assert.isNull(projected.crews[0]?.playbook);
+  assert.notProperty(projected.crews[0]?.roster[0], "steps");
   assert.isNull(projected.crews[1]?.playbook);
   assert.notProperty(projected.crews[1]?.roster[0], "steps");
 });
 
-it("carries each live Crew's playbook run, and null for a Crew without one", () => {
+it("carries a run on its owner row, including an owner who commands a Crew", () => {
   const playbookRun = {
     runId: "run:1",
     position: 2,
@@ -277,23 +277,19 @@ it("carries each live Crew's playbook run, and null for a Crew without one", () 
     stepId: "review",
     stepTitle: "Review",
     state: "pending" as const,
-    seat: "builder",
+    holderParticipantId: builder,
+    holderLabel: "builder",
   };
   const projected = projectFleetProject({
     project: { id: projectId, name: "Fleet" },
-    participants: [],
+    participants: [agentRow(captain, captainThread, { kind: "unrecorded" }, null)],
     crews: [crew, { ...crew, id: "crew:idle" }],
     openAsks: new Map(),
-    playbookRuns: new Map([
-      ["crew:1", playbookRun],
-      ["crew:idle", null],
-    ]),
+    playbookRuns: new Map([[captainThread, playbookRun]]),
   });
+  assert.deepStrictEqual(projected.agents[0]?.playbookRun, playbookRun);
   assert.deepStrictEqual(
-    projected.crews.map((entry) => [entry.crewInstanceId, entry.playbookRun]),
-    [
-      ["crew:1", playbookRun],
-      ["crew:idle", null],
-    ],
+    projected.crews.map((entry) => entry.playbookRun),
+    [null, null],
   );
 });

@@ -8,8 +8,6 @@ import * as RequestReplayService from "../RequestReplayService.ts";
 import { Tool, Toolkit } from "effect/ai";
 import { playbookTools } from "../../playbooks/mcp.ts";
 import * as Schema from "effect/Schema";
-import { PLAYBOOK_MAX_STEPS } from "@t3tools/contracts/j5";
-import { PlaybookStore } from "../../playbooks/PlaybookStore.ts";
 import { ManagedProjectFolders } from "../../../project/ManagedProjectFolders.ts";
 import { ProjectService } from "../../../project/ProjectService.ts";
 
@@ -497,16 +495,6 @@ const CrewSeatModelSelection = Schema.toType(ModelSelection).annotate({
   description:
     "Custom seats only: provider instance and model from orchestrator_capabilities. Set options to an array of {id, value} using that model's advertised reasoning option. Omit to inherit the Captain's model selection.",
 });
-const CrewSeatSteps = Schema.Array(NonEmptyString)
-  .check(Schema.isMaxLength(PLAYBOOK_MAX_STEPS))
-  .annotate({
-    description:
-      "Only when the crew follows a playbook: ids of the steps this seat owns, from j5_playbook_read. A step has one owner; steps no seat owns are yours to do as Captain.",
-  });
-const CrewPlaybookName = NonEmptyString.annotate({
-  description:
-    "Optional: the playbook this crew follows, by the name j5_playbook_list returns (the same name j5_playbook_start takes). Give seats the step ids they own with steps.",
-});
 const CrewSeatWorkspace = J5SpawnWorkspace.annotate({
   description:
     'Where the seat works, chosen for every seat, with the same three choices as j5_spawn_agent: {"type":"shared"} (your checkout), {"type":"worktree","base_ref":...}, or {"type":"existing_worktree","worktree_path":...}. A new worktree\'s base_ref is resolved to a commit when the proposal is accepted and the worktree starts from that commit, so renaming or moving the branch later changes nothing; a base_ref that does not resolve is refused. Name your own branch to start from your checkout\'s current commit; uncommitted changes are not included.',
@@ -519,7 +507,7 @@ const CrewSeatReviews = Schema.Array(CrewSeatName)
   });
 const CrewSeatReplaces = CrewSeatName.annotate({
   description:
-    "Optional: the seat of a live member this one replaces, for example to run its work on a different model. Its unfinished playbook steps move to the new member, and it is stopped and leaves the Crew. Not your own seat as Captain.",
+    "Optional: the seat of a live member this one replaces, for example to run its work on a different model. The old member is stopped and leaves the Crew. Not your own seat as Captain.",
 });
 const CrewSeatRuntimeMode = RuntimeMode.annotate({
   description:
@@ -534,7 +522,6 @@ export const J5CrewSeatInput = Schema.Struct({
   runtime_mode: Schema.optional(CrewSeatRuntimeMode),
   reason: CrewReason,
   instructions: Schema.optional(CrewText),
-  steps: Schema.optional(CrewSeatSteps),
   reviews: Schema.optional(CrewSeatReviews),
   workspace: CrewSeatWorkspace,
 });
@@ -542,7 +529,6 @@ export const J5CrewSeatInput = Schema.Struct({
 export const J5ProposeCrewInput = Schema.Struct({
   name: CrewName,
   brief: CrewText,
-  playbook: Schema.optional(CrewPlaybookName),
   seats: Schema.Array(J5CrewSeatInput).check(
     Schema.isMinLength(1),
     Schema.isMaxLength(CREW_SEAT_CAP),
@@ -561,7 +547,6 @@ export const J5RequestCrewMemberInput = Schema.Struct({
   reason: CrewReason,
   brief: Schema.optional(CrewText),
   instructions: Schema.optional(CrewText),
-  steps: Schema.optional(CrewSeatSteps),
   reviews: Schema.optional(CrewSeatReviews),
   replaces: Schema.optional(CrewSeatReplaces),
   workspace: CrewSeatWorkspace,
@@ -581,23 +566,6 @@ export const J5CrewProposalResult = Schema.Struct({
       participant_id: ParticipantId,
       thread_id: ThreadId,
       link: Schema.String,
-    }),
-  ),
-  /** Present only when the proposal follows a playbook. */
-  playbook: Schema.optional(
-    Schema.Struct({
-      name: NonEmptyString,
-      title: NonEmptyString,
-      unowned_steps: Schema.Array(NonEmptyString),
-      persona_swaps: Schema.Array(
-        Schema.Struct({
-          seat: NonEmptyString,
-          step_id: NonEmptyString,
-          wanted_persona: AgentPersonaId,
-          seat_persona: Schema.NullOr(AgentPersonaId),
-          wanted_problem: Schema.NullOr(Schema.Literals(["missing", "disabled"])),
-        }),
-      ),
     }),
   ),
 });
@@ -713,12 +681,12 @@ const J5_PROPOSE_PERSONA_DESCRIPTION =
 export const J5_PROPOSE_CREW_DESCRIPTION =
   "Put members on a Crew, the second of the two ways to get help (the first is a subagent). Propose the crew you need for the brief you were given. Use it when the user asks for a crew, or when the work needs workers who must respond to each other, such as a builder and reviewers iterating on a change; independent assignments go to subagents instead. Mix saved personas and custom seats in the same roster: call j5_list_personas when choosing a saved persona, or leave persona unset for a custom seat with its own instructions (required) and the brief. Custom seats inherit your harness, model, and reasoning by default and, unless you set runtime_mode, run with full-access on a roster the user approves and with your own access when it is auto-approved; to choose different ones, set model_selection (instanceId, model, options) and/or runtime_mode using orchestrator_capabilities. A custom seat's model and reasoning level, yours included, must be ones the project's Models for custom members lists allow; an ineligible one is refused with the eligible ones. Saved personas are proposed with their own configuration; only the human may override their runtime before approval. A persona seat marked independent_reviewer prefers a model none of the seats it reviews runs on: every seat that is not a reviewer, unless reviews names some. When a roster is auto-approved, no seat may have more access than you run with, and persona seats use only their models checked in Models for custom members. " +
   BLOCKED_PERSONA_TOOL_TEXT +
-  " To have the crew follow a playbook, set playbook to a name from j5_playbook_list and give seats the step ids they own (steps, from j5_playbook_read); a step has one owner, steps no seat owns are yours as Captain, and the result reports unowned steps and any step whose persona differs from its seat's. For a crew built from a playbook, staff one seat per distinct persona its steps name, each owning that persona's steps, and propose a custom seat, noted in its reason, only where a named persona doesn't exist here; keep the steps of a disabled, invalid or blocked persona yourself and escalate it, never replacing it. Every seat names its workspace, with the same three choices as j5_spawn_agent. Name the crew for what it is for and give each seat a short lowercase-hyphen name like code-reviewer. By default the user reviews and edits the roster in this thread, then approves or declines. If Auto-approve new Crews is on for your project, the proposed roster is created immediately with no approval card. The result says whether it is open or approved; the launch report arrives here once creation finishes or fails. Approval creates seats without starting turns. Send each member its first assignment when it has work; reuse finished members for follow-up work in the same thread. On a roster the user approves, each seat keeps its configured access and tool approvals, which may exceed yours. You become the crew's Captain and may command several crews at once; later requests, stops, and archives name the crew they mean. Use j5_send_message for member-to-member, member-to-Captain, and Captain-to-Captain coordination, including findings and direct results; artifacts do not gate these conversations. Members run their own review loops and message you only for a review pass, a blocker, a disagreement they could not settle, or their final result or step report; you resolve technical disagreements within the agreed scope and ask the user only when product intent or their judgment is needed. Reuse client_request_id to retry safely; a changed request is refused, so use a fresh one for new work. This tool works under every sandbox and approval policy, including approval policy never; never refuse the brief because approvals are disabled.";
+  " Every seat names its workspace, with the same three choices as j5_spawn_agent. Name the crew for what it is for and give each seat a short lowercase-hyphen name like code-reviewer. By default the user reviews and edits the roster in this thread, then approves or declines. If Auto-approve new Crews is on for your project, the proposed roster is created immediately with no approval card. The result says whether it is open or approved; the launch report arrives here once creation finishes or fails. Approval creates seats without starting turns. Send each member its first assignment when it has work; reuse finished members for follow-up work in the same thread. On a roster the user approves, each seat keeps its configured access and tool approvals, which may exceed yours. You become the crew's Captain and may command several crews at once; later requests, stops, and archives name the crew they mean. Use j5_send_message for member-to-member, member-to-Captain, and Captain-to-Captain coordination, including findings and direct results; artifacts do not gate these conversations. Members run their own review loops and message you only for a review pass, a blocker, a disagreement they could not settle, or their final result or step report; you resolve technical disagreements within the agreed scope and ask the user only when product intent or their judgment is needed. Reuse client_request_id to retry safely; a changed request is refused, so use a fresh one for new work. This tool works under every sandbox and approval policy, including approval policy never; never refuse the brief because approvals are disabled.";
 
 export const J5_REQUEST_CREW_MEMBER_DESCRIPTION =
   "Put one more member on a Crew, the second of the two ways to get help: add one seat directly to a running crew you command when the work needs expertise the roster lacks. No human approval is needed, regardless of Auto-approve new Crews. Give a seat name, a persona id from j5_list_personas or required instructions for a custom seat, a reason identifying the missing expertise, and its workspace (the same choices as j5_propose_crew). Custom seats inherit your model selection and your own access unless you set model_selection or a narrower runtime_mode; a custom seat's model and reasoning level must be ones the project's Models for custom members lists allow. Saved personas use their own configuration, held to the models that list checks and to no more access than you run with; a refusal names the limit. " +
   BLOCKED_PERSONA_TOOL_TEXT +
-  " A persona marked independent_reviewer prefers a model none of the members it reviews runs on: every member that is not a reviewer, unless reviews names some. Optionally give a brief; otherwise the seat gets the Crew's brief. On a playbook Crew, steps may claim only unowned step ids from j5_playbook_read. To put a member's work on a different model, such as a reviewer whose model just wrote the work it will review, set replaces to that member's seat: the new member may reuse the seat name, and once it launches it takes over the seat's unfinished steps, gets any current step already handed to the old member, and is told where the old member's thread is. The replaced member is stopped and leaves the Crew, and its thread stays readable. If the new member fails to launch, nothing changes, except that an allow_once it used is spent. The result returns the updated roster or refuses the seat with its name and reason; creation is reported separately here. The new member waits for its first assignment; send it with j5_send_message when the work is ready. Each member's configured access still controls tool approvals. Captain-only: a member sends the concern to its Captain with j5_send_message. Reuse client_request_id to retry safely; a changed request is refused, so use a fresh one for new work. Works under every approval policy, including approval policy never.";
+  " A persona marked independent_reviewer prefers a model none of the members it reviews runs on: every member that is not a reviewer, unless reviews names some. Optionally give a brief; otherwise the seat gets the Crew's brief. To put a member's work on a different model, such as a reviewer whose model just wrote the work it will review, set replaces to that member's seat: the new member may reuse the seat name, and once it launches it is told where the old member's thread is. A playbook run owner explicitly assigns any step the old member held. The replaced member is stopped and leaves the Crew, and its thread stays readable. If the new member fails to launch, nothing changes, except that an allow_once it used is spent. The result returns the updated roster or refuses the seat with its name and reason; creation is reported separately here. The new member waits for its first assignment; send it with j5_send_message when the work is ready. Each member's configured access still controls tool approvals. Captain-only: a member sends the concern to its Captain with j5_send_message. Reuse client_request_id to retry safely; a changed request is refused, so use a fresh one for new work. Works under every approval policy, including approval policy never.";
 
 const J5_ARCHIVE_CREW_DESCRIPTION =
   "Retire a whole Crew you command. Crews archive only as a unit; members are never retired one by one. A clean archive completes immediately; otherwise the call refuses with the facts and a confirmation_token. Before retrying with that token, check with the user. Archiving removes the worktrees J5 created for the Crew's seats when they are clean, committed, merged, used by no other thread or project, and have no open session or terminal, and keeps every branch and pull request. Anything else stays and is listed in the result's worktrees with its reason: uncommitted_changes, unmerged_commits, shared, in_use, unverified (a check could not run), or failed (the removal itself failed). Worktrees from before this existed, the Captain's checkout, and existing worktrees a seat was pointed at are never removed. Ledgers stay readable. Reuse client_request_id to retry safely.";
@@ -799,8 +767,6 @@ const crewProposalDependencies = [
   ThreadManagementService,
   AgentCrewInstanceService,
   CrewProposalService,
-  // j5_propose_crew resolves the Captain's playbook workspace like the playbook tools do.
-  PlaybookStore,
   ProjectService,
 ];
 

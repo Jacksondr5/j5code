@@ -397,7 +397,7 @@ export const FleetCrew = Schema.Struct({
   version: Schema.Number,
   createdAt: Schema.String,
   archivedAt: Schema.NullOr(Schema.String),
-  /** The playbook the Crew follows, fixed at approval. */
+  /** Legacy field; new runs are owned by FleetAgent rows. */
   playbook: Schema.optionalKey(Schema.NullOr(Schema.Struct({ name: Schema.String }))),
   /** Every seat was approved by the person; the record keeps the version it joined at and why. */
   roster: Schema.Array(
@@ -407,13 +407,12 @@ export const FleetCrew = Schema.Struct({
       participantId: Schema.String,
       addedVersion: Schema.Number,
       reason: Schema.NullOr(Schema.String),
-      /** Ids of the playbook steps this seat owns. */
+      /** Legacy field from fixed seat plans. */
       steps: Schema.optionalKey(Schema.Array(Schema.String)),
     }),
   ),
   /**
-   * The Crew's active playbook run: where it is and who holds the current step. `state` has the
-   * meaning of `PlaybookStepDelivery.state`; only `"captain"` means the Captain does the step.
+   * Legacy Crew run projection. Active runs now ride on their owner's FleetAgent row.
    */
   playbookRun: Schema.optionalKey(
     Schema.NullOr(
@@ -431,11 +430,24 @@ export const FleetCrew = Schema.Struct({
 });
 export type FleetCrew = typeof FleetCrew.Type;
 
+export const FleetPlaybookRun = Schema.Struct({
+  runId: Schema.String,
+  position: Schema.Number,
+  total: Schema.Number,
+  stepId: Schema.String,
+  stepTitle: Schema.String,
+  state: Schema.Literals(["delivered", "captain", "pending"]),
+  holderParticipantId: Schema.NullOr(Schema.String),
+  holderLabel: Schema.String,
+});
+export type FleetPlaybookRun = typeof FleetPlaybookRun.Type;
+
 /** One agent row of the Fleet page: placement, provenance, Crew seat, and measured open asks. */
 export const FleetAgent = Schema.Struct({
   participantId: Schema.String,
   threadId: Schema.NullOr(Schema.String),
   displayName: Schema.NullOr(Schema.String),
+  playbookRun: Schema.optionalKey(Schema.NullOr(FleetPlaybookRun)),
   /** `agent` when another agent spawned it (roster-only in the sidebar); `unknown` when never recorded. */
   origin: Schema.Literals(["human", "agent", "unknown"]),
   placementParentId: Schema.NullOr(Schema.String),

@@ -186,7 +186,7 @@ describe("sidebar rows following the roster", () => {
   });
 });
 
-describe("a Crew's playbook run", () => {
+describe("an owner's playbook run", () => {
   const run = {
     runId: "run:1",
     position: 2,
@@ -194,30 +194,40 @@ describe("a Crew's playbook run", () => {
     stepId: "review",
     stepTitle: "Review",
     state: "delivered" as const,
-    seat: "critic",
+    holderParticipantId: "critic",
+    holderLabel: "critic",
   };
 
   it("names who holds the step, and never the Captain for a hand-off in progress", () => {
     expect(playbookRunOwnerLabel(run)).toBe("critic");
-    expect(playbookRunOwnerLabel({ state: "captain", seat: null })).toBe("Captain");
-    expect(playbookRunOwnerLabel({ state: "pending", seat: "critic" })).toBe(
+    expect(playbookRunOwnerLabel({ state: "captain", holderLabel: "captain" })).toBe("Owner");
+    expect(playbookRunOwnerLabel({ state: "pending", holderLabel: "critic" })).toBe(
       "handing off to critic",
     );
-    expect(playbookRunOwnerLabel({ state: "pending", seat: null })).toBe("handing off");
+    expect(playbookRunOwnerLabel({ state: "pending", holderLabel: "critic (archived)" })).toBe(
+      "handing off to critic (archived)",
+    );
     expect(playbookRunHeader(run)).toBe("Step 2 of 3: Review · critic");
   });
 
-  it("rides onto the Captain's Crew group", () => {
+  it("rides on the owner row whether the owner commands a Crew", () => {
     const [captain] = buildFleetTree({
       id: "project-alpha",
       title: "Alpha",
-      crews: [{ ...crew("crew:1", null), playbookRun: run }],
+      crews: [crew("crew:1", null)],
       agents: [
-        agent("captain"),
+        { ...agent("captain"), playbookRun: run },
         agent("critic", { placementParentId: "captain", crew: seat("critic", "captain") }),
       ],
     });
-    expect(captain?.crews[0]?.playbookRun).toEqual(run);
+    expect(captain?.row.agent.playbookRun).toEqual(run);
+    const [independent] = buildFleetTree({
+      id: "project-alpha",
+      title: "Alpha",
+      crews: [],
+      agents: [{ ...agent("captain"), playbookRun: run }],
+    });
+    expect(independent?.row.agent.playbookRun).toEqual(run);
   });
 });
 

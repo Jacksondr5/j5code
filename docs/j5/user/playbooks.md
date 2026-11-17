@@ -96,8 +96,10 @@ To change a procedure already running, ask its agent to revise the run: for exam
 “Remove the deployment step from this run” or “Add a review step before reporting.”
 The agent can also propose a change for you to approve. The change applies only to
 this run; editing the reusable playbook is separate. If the change removes the
-current step, name the step to continue on. Run history shows how many revisions
-were made and whether the latest was requested or approved.
+current step, name the step to continue on; the owner can assign that replacement
+to an eligible agent or keep it. A change that keeps the current step also keeps
+its holder. Run history shows how many revisions were made and whether the latest
+was requested or approved.
 
 Ask the agent to go back when you want to revisit a phase. Going back changes its
 position, not your files or previous work. Progress survives context compaction and
@@ -110,22 +112,8 @@ Each run belongs to one thread. Deleting that thread cancels its active run, so
 you can remove the playbook file. Archiving a thread leaves its run available when
 you return to it.
 
-## With a Crew
+## Assigning steps
 
-A Crew can follow a playbook. Its Captain starts the playbook in its own thread, and
-each step goes to the seat that owns it. The Captain moves to the next step after that
-seat reports back. Steps no seat owns are the Captain's. Going back to a
-step hands it to its owner again. Fleet shows each Crew's current step and who has it,
-or "handing off" while a step is on its way to a seat. Archiving the Crew or its
-Captain cancels the run; stopping the Crew doesn't.
+The agent that starts a playbook owns its run and advances the steps. It can name an eligible Peer Agent or a member of a Crew it captains as the holder when starting, moving forward, or going back. That agent receives the current step's saved instructions in its thread. The owner can also assign the current step to someone else or take it back without changing the step. A Crew seat does not automatically own a step.
 
-To have a crew built from a playbook, ask the crew to use it, with `@playbook:` or by name:
-
-> ok, lets create a crew to implement what we have discussed. Please use @playbook:release for this work.
-
-The agent becomes the Captain, reads the playbook, and proposes one seat per persona the
-steps name. A persona this server doesn't have gets a stand-in seat, flagged on the card. One
-that's turned off, invalid, or can't run isn't replaced: the Captain keeps its steps and asks you
-about it.
-You approve the roster, and the Captain runs the playbook. This applies only when you ask
-the crew to use a playbook; one mentioned in passing starts an ordinary crew.
+Fleet shows the run beside its owner and names the current holder. “Handing off” means the step notice has not reached that holder yet; the owner can reassign or take back a stuck hand-off. The owner advances after the holder reports back. Archiving a holder does not change the recorded assignment or move the run.

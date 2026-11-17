@@ -2132,8 +2132,8 @@ it.effect("records a playbook Crew's step owners and surfaces a taken step unwra
       assert.isFalse(
         (yield* Ref.get(commands)).some((command) => command.type === "message.dispatch"),
       );
-      assert.include(briefs[0], "your_steps:\n- plan: Plan the release\n</seat_playbook>");
-      assert.include(briefs[1], "your_steps: none\n</seat_playbook>");
+      assert.notInclude(briefs[0], "<seat_playbook>");
+      assert.notInclude(briefs[1], "<seat_playbook>");
 
       const sent = (yield* Ref.get(commands)).length;
       const refused = yield* launcher

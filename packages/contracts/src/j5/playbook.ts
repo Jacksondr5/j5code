@@ -105,6 +105,7 @@ export const PlaybookReviseRequest = Schema.Struct({
   steps: PlaybookDefinition.fields.steps,
   basis: PlaybookRevision.fields.basis,
   stepId: Schema.optionalKey(Text),
+  assignee: Schema.optionalKey(Text),
   client_request_id: Text,
 });
 export type PlaybookReviseRequest = typeof PlaybookReviseRequest.Type;
@@ -114,25 +115,26 @@ export const PlaybookRun = Schema.Struct({
   ownerThreadId: ThreadId,
   definitionPath: Text,
   currentStepId: Text,
+  holderParticipantId: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  holderThreadId: Schema.optionalKey(Schema.NullOr(ThreadId)),
+  assignedByParticipantId: Schema.optionalKey(Schema.NullOr(Schema.String)),
   cancelReason: Schema.optionalKey(Schema.NullOr(Schema.String)),
   revisionCount: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   latestRevision: Schema.optionalKey(Schema.NullOr(PlaybookRevision)),
   status: Schema.Literals(["active", "completed", "cancelled"]),
   createdAt: Text,
   updatedAt: Text,
-  /** The Crew whose seats receive this run's steps; absent or null for an ordinary thread run. */
+  /** Legacy association on past runs; runtime assignment records the holder above. */
   crewInstanceId: Schema.optionalKey(Schema.NullOr(Schema.String)),
 });
 export type PlaybookRun = typeof PlaybookRun.Type;
 
-/**
- * Who holds a Crew-linked run's current step. Only `state: "captain"` means the Captain does it;
- * `pending` means the hand-off hasn't finished and nobody should start the step yet.
- */
+/** Pending means the named holder's notice has not been accepted yet. */
 export const PlaybookStepDelivery = Schema.Struct({
   state: Schema.Literals(["delivered", "captain", "pending"]),
   seat: Schema.NullOr(Schema.String),
   threadId: Schema.NullOr(Schema.String),
+  participantId: Schema.optionalKey(Schema.NullOr(Schema.String)),
 });
 export type PlaybookStepDelivery = typeof PlaybookStepDelivery.Type;
 
@@ -150,7 +152,6 @@ export const PlaybookStepResponse = Schema.Struct({
   ...PlaybookProgress.fields,
   currentStep: Schema.NullOr(PlaybookStep),
   replayed: Schema.Boolean,
-  /** Set for Crew-linked runs' step tools; null on complete and cancel; absent for thread runs. */
   delivery: Schema.optionalKey(Schema.NullOr(PlaybookStepDelivery)),
 });
 export type PlaybookStepResponse = typeof PlaybookStepResponse.Type;

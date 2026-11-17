@@ -9,7 +9,6 @@ import {
 } from "../AgentCaller.ts";
 import { type ChatAttachment, EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { playbookHandlers } from "../../playbooks/mcp.ts";
-import { playbookWorkspaceRoot } from "../../playbooks/workspace.ts";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 
 import * as DateTime from "effect/DateTime";
@@ -277,22 +276,6 @@ const projectCrewProposal = (outcome: CrewProposalOutcome, scope: McpInvocationS
     thread_id: member.threadId,
     link: threadLinkFor(scope, member.threadId),
   })),
-  ...(outcome.playbook == null
-    ? {}
-    : {
-        playbook: {
-          name: outcome.playbook.name,
-          title: outcome.playbook.title,
-          unowned_steps: outcome.playbook.unownedSteps,
-          persona_swaps: outcome.playbook.swaps.map(({ seat, swap }) => ({
-            seat,
-            step_id: swap.stepId,
-            wanted_persona: swap.wanted,
-            seat_persona: swap.seatPersona,
-            wanted_problem: swap.wantedProblem,
-          })),
-        },
-      }),
 });
 
 /** One j5_propose_crew seat as the proposal service takes it; unset fields stay unset. */
@@ -304,7 +287,6 @@ export const crewSeatFromInput = (seat: J5ProposeCrewInput["seats"][number]) => 
   ...(seat.instructions === undefined ? {} : { instructions: seat.instructions }),
   ...(seat.model_selection === undefined ? {} : { modelSelection: seat.model_selection }),
   ...(seat.runtime_mode === undefined ? {} : { runtimeMode: seat.runtime_mode }),
-  ...(seat.steps === undefined ? {} : { steps: seat.steps }),
   ...(seat.reviews === undefined ? {} : { reviews: seat.reviews }),
   workspace: spawnWorkspaceFromInput(seat.workspace),
 });
@@ -861,28 +843,12 @@ const handlers = {
         const crypto = yield* SecureRandom.SecureRandom;
         const captain = yield* preflightCrewCaptain(scope, "j5_propose_crew");
         const requestKey = input.client_request_id ?? (yield* crypto.uuidV4().pipe(Effect.orDie));
-        // The Captain's playbooks are the ones its own j5_playbook_list shows.
-        const playbook =
-          input.playbook === undefined
-            ? undefined
-            : {
-                name: input.playbook,
-                workspaceRoot: yield* playbookWorkspaceRoot(captain.thread.id).pipe(
-                  Effect.mapError((error) =>
-                    stateError(
-                      `Your playbook workspace could not be read: ${error.message}`,
-                      "Retry, or propose the crew without a playbook.",
-                    ),
-                  ),
-                ),
-              };
         const outcome = yield* (yield* CrewProposalService)
           .propose({
             requestKey: `${scope.thread.providerSessionId}:${requestKey}`,
             captain,
             displayName: input.name,
             brief: input.brief,
-            ...(playbook === undefined ? {} : { playbook }),
             seats: input.seats.map(crewSeatFromInput),
           })
           .pipe(Effect.mapError(crewProposalRefusal));
@@ -912,7 +878,6 @@ const handlers = {
                 ? {}
                 : { modelSelection: input.model_selection }),
               ...(input.runtime_mode === undefined ? {} : { runtimeMode: input.runtime_mode }),
-              ...(input.steps === undefined ? {} : { steps: input.steps }),
               ...(input.reviews === undefined ? {} : { reviews: input.reviews }),
               ...(input.replaces === undefined ? {} : { replaces: input.replaces }),
               workspace: spawnWorkspaceFromInput(input.workspace),
