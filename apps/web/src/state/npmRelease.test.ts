@@ -27,7 +27,8 @@ const first = EnvironmentId.make("first");
 const second = EnvironmentId.make("second");
 const decodeServerConfig = Schema.decodeUnknownSync(ServerConfig);
 
-const configFor = (environmentId: EnvironmentId | null, supported = true) =>
+// J5: "npm" is an older J5 server, which still looks up npm (FORK.md case 40).
+const configFor = (environmentId: EnvironmentId | null, supported: boolean | "npm" = true) =>
   decodeServerConfig({
     environment: {
       environmentId,
@@ -35,7 +36,7 @@ const configFor = (environmentId: EnvironmentId | null, supported = true) =>
       platform: { os: "linux", arch: "x64" },
       serverVersion: version,
       // J5: only a server reporting J5's ledgers answers from J5's releases (FORK.md case 40).
-      ...(supported ? { j5DatabaseMigrations: { j5_a2a_migrations: 57 } } : {}),
+      ...(supported === true ? { j5DatabaseMigrations: { j5_a2a_migrations: 57 } } : {}),
       capabilities: {
         repositoryIdentity: true,
         ...(supported ? { npmReleaseLookup: true } : {}),
@@ -62,7 +63,7 @@ const configFor = (environmentId: EnvironmentId | null, supported = true) =>
     settings: {},
   });
 
-function setup(supported = true) {
+function setup(supported: boolean | "npm" = true) {
   vi.mocked(serverEnvironment.configValueAtom)
     .mockReset()
     .mockImplementation((environmentId) => Atom.make(configFor(environmentId, supported)));
@@ -133,32 +134,34 @@ it.effect("resolves track metadata through a supporting server when there is no 
   }),
 );
 
-it.effect("does not call an unsupported RPC or fetch public npm for an older primary server", () =>
-  Effect.gen(function* () {
-    const query = setup(false);
-    using fetch = vi
-      .spyOn(globalThis, "fetch")
-      .mockRejectedValue(new Error("Unexpected browser fetch"));
-    const registry = AtomRegistry.make();
-    NodeAssert.ok(
-      Atom.isWritable<EnvironmentId | null, EnvironmentId | null>(primaryEnvironmentIdAtom),
-      "Expected the mocked primary environment atom to be writable.",
-    );
-    registry.set(primaryEnvironmentIdAtom, first);
-    const release = npmReleaseAtom("latest");
-    const unmount = registry.mount(release);
-    try {
-      const error = yield* AtomRegistry.getResult(registry, release).pipe(Effect.flip);
-      expect(npmReleaseFailureMessage(Cause.fail(error))).toContain(
-        "Update it before switching tracks",
+it.effect.each([false, "npm"] as const)(
+  "does not call an unsupported RPC or fetch public npm for an older primary server (%s)",
+  (supported) =>
+    Effect.gen(function* () {
+      const query = setup(supported);
+      using fetch = vi
+        .spyOn(globalThis, "fetch")
+        .mockRejectedValue(new Error("Unexpected browser fetch"));
+      const registry = AtomRegistry.make();
+      NodeAssert.ok(
+        Atom.isWritable<EnvironmentId | null, EnvironmentId | null>(primaryEnvironmentIdAtom),
+        "Expected the mocked primary environment atom to be writable.",
       );
-      expect(query).not.toHaveBeenCalled();
-      expect(fetch).not.toHaveBeenCalled();
-    } finally {
-      unmount();
-      registry.dispose();
-    }
-  }),
+      registry.set(primaryEnvironmentIdAtom, first);
+      const release = npmReleaseAtom("latest");
+      const unmount = registry.mount(release);
+      try {
+        const error = yield* AtomRegistry.getResult(registry, release).pipe(Effect.flip);
+        expect(npmReleaseFailureMessage(Cause.fail(error))).toContain(
+          "Update it before switching tracks",
+        );
+        expect(query).not.toHaveBeenCalled();
+        expect(fetch).not.toHaveBeenCalled();
+      } finally {
+        unmount();
+        registry.dispose();
+      }
+    }),
 );
 
 it("only displays the safe release error, not arbitrary transport diagnostics", () => {
