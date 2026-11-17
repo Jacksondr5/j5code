@@ -8,15 +8,11 @@ const LINE_HOST_PREFIX = "127.77.";
 const LINE_PORT = 1;
 const MAX_SLOT = 0xffff;
 
-const lineHostForSlot = (slot: number): string => {
-  if (!Number.isSafeInteger(slot) || slot < 1 || slot > MAX_SLOT) {
-    throw new RangeError(`Line slot ${String(slot)} is outside 1–${String(MAX_SLOT)}.`);
-  }
-  return `${LINE_HOST_PREFIX}${String(slot >> 8)}.${String(slot & 0xff)}`;
-};
-
-export const lineAddressForSlot = (slot: number): string =>
-  `http://${lineHostForSlot(slot)}:${String(LINE_PORT)}`;
+/** Null for a slot past the 65,535 the range holds: that poller holds no line, and reads still work. */
+export const lineAddressForSlot = (slot: number): string | null =>
+  Number.isSafeInteger(slot) && slot >= 1 && slot <= MAX_SLOT
+    ? `http://${LINE_HOST_PREFIX}${String(slot >> 8)}.${String(slot & 0xff)}:${String(LINE_PORT)}`
+    : null;
 
 /** Whether a URL's hostname is a line host; such a request may only travel through a line. */
 export const isLineHost = (hostname: string): boolean => {
