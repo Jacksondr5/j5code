@@ -123,6 +123,13 @@ const setup = Effect.gen(function* () {
   const nextNotice = Queue.take(notices).pipe(
     Effect.map((event) => ({
       receiver: String(event.receiver),
+      messageId:
+        typeof event.payload === "object" &&
+        event.payload !== null &&
+        "messageId" in event.payload &&
+        typeof event.payload.messageId === "string"
+          ? event.payload.messageId
+          : "",
       text:
         typeof event.payload === "object" &&
         event.payload !== null &&
@@ -132,7 +139,10 @@ const setup = Effect.gen(function* () {
           : "",
     })),
   );
-  return { current, peers, notices, fail, lineUp, nextNotice };
+  /** An up event for a line that is not the current one, as when it closed again before being handled. */
+  const staleUp = (environmentId: string, lineId: string) =>
+    PubSub.publish(ups, { environmentId, lineId });
+  return { current, peers, notices, fail, lineUp, staleUp, nextNotice };
 });
 
 it.effect("tells each thread once, when the line it could not reach comes back", () =>
@@ -166,6 +176,15 @@ it.effect("tells each thread once, when the line it could not reach comes back",
       assert.include(later.text, "- t3_thread_wait at ");
       assert.notInclude(later.text, "t3_thread_launch", "each call is told once");
       assert.strictEqual(yield* Queue.size(line.notices), 0);
+
+      // An up event for a line that already closed again sends nothing; the next line's does.
+      yield* line.fail(reviewer, LAPTOP, "t3_thread_list");
+      yield* line.staleUp(LAPTOP, "line-gone");
+      yield* line.lineUp(LAPTOP, "line-4");
+      const afterStale = yield* line.nextNotice;
+      assert.include(afterStale.messageId, "line-4");
+      assert.include(afterStale.text, "- t3_thread_list at ");
+      assert.strictEqual(yield* Queue.size(line.notices), 0);
     }),
   ),
 );
@@ -198,6 +217,16 @@ it.effect("leaves out calls from before the peer was recorded again", () =>
       yield* line.lineUp(LAPTOP, "line-1");
       const only = yield* line.nextNotice;
       assert.strictEqual(only.receiver, participant(reviewer));
+
+      // A call that began before the peer was recorded again, failing once its new line is up.
+      yield* line.fail(writer, LAPTOP, "t3_queue", () => {
+        line.peers.set(LAPTOP, {
+          linkMode: "store",
+          label: "Laptop",
+          createdAt: "1970-01-01T00:00:05.000Z",
+        });
+        line.current.set(LAPTOP, "line-2");
+      });
       assert.strictEqual(yield* Queue.size(line.notices), 0);
     }),
   ),

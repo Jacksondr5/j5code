@@ -112,7 +112,8 @@ const make = Effect.gen(function* () {
     call: FailedCall,
   ) {
     const peer = yield* peers.get(environmentId);
-    if (peer?.linkMode !== "store") return;
+    // Not a server that holds a line here, or a call from an earlier peering, which ended.
+    if (peer?.linkMode !== "store" || call.at < peer.createdAt) return;
     const current = lines.currentLineId(environmentId);
     // Its line already came back since the call started: nothing to wait for.
     if (current !== null && current !== call.lineId) {
@@ -150,6 +151,8 @@ const make = Effect.gen(function* () {
     Stream.runForEach((up) =>
       turn.withPermit(
         Effect.gen(function* () {
+          // That line closed again before this ran: its calls wait for the next one.
+          if (lines.currentLineId(up.environmentId) !== up.lineId) return;
           const waiting = pending.get(up.environmentId) ?? [];
           const kept = waiting.filter((call) => call.lineId === up.lineId);
           if (kept.length === 0) pending.delete(up.environmentId);
