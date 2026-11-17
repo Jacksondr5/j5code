@@ -3,6 +3,7 @@ import * as NodeNet from "node:net";
 
 import { J5_PEER_API_PATHS } from "@t3tools/contracts/j5";
 import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import WebSocket from "ws";
 
@@ -15,7 +16,7 @@ import { encodeFrame, FrameType, LineClosedError, LineMux, type LineStream } fro
  * because this server's credential is no longer accepted.
  */
 export type LineEnd =
-  | { readonly kind: "closed"; readonly reason: string }
+  | { readonly kind: "closed"; readonly reason: string; readonly opened: boolean }
   | { readonly kind: "refused"; readonly reason: string }
   | { readonly kind: "rejected"; readonly reason: string };
 
@@ -92,6 +93,10 @@ export const holdLine = Effect.fn("j5.a2a.peer.line.hold")(function* (input: {
       );
 
       let quiet = 0;
+      let opened = false;
+      socket.on("open", () => {
+        opened = true;
+      });
       socket.on("message", (data, isBinary) => {
         quiet = 0;
         if (!isBinary) return;
@@ -114,16 +119,17 @@ export const holdLine = Effect.fn("j5.a2a.peer.line.hold")(function* (input: {
         end({
           kind: "closed",
           reason: `The line closed (${String(code)} ${reason.toString()}).`.trim(),
+          opened,
         }),
       );
-      socket.on("error", (error) => end({ kind: "closed", reason: error.message }));
+      socket.on("error", (error) => end({ kind: "closed", reason: error.message, opened }));
 
       const ping = Effect.forever(
         Effect.gen(function* () {
           yield* Effect.sleep(LINE_PING_INTERVAL);
           quiet += 1;
           if (quiet >= LINE_QUIET_PERIODS) {
-            end({ kind: "closed", reason: "The line went quiet." });
+            end({ kind: "closed", reason: "The line went quiet.", opened });
           } else if (socket.readyState === WebSocket.OPEN) {
             socket.send(pingFrame, { binary: true });
           }
@@ -132,4 +138,29 @@ export const holdLine = Effect.fn("j5.a2a.peer.line.hold")(function* (input: {
       return yield* Effect.raceFirst(Deferred.await(ended), ping);
     }),
   );
+});
+
+const REDIAL_START = Duration.seconds(1);
+const REDIAL_CAP = Duration.seconds(30);
+
+/**
+ * Holds a line and opens a new one as soon as it closes, so a server that wakes or changes networks
+ * is reachable again within a second or so rather than at its next poll. Lines that keep failing
+ * to open back off to 30 seconds. A refusal ends it; the poll loop decides whether to dial again.
+ */
+export const keepLineUp = Effect.fn("j5.a2a.peer.line.keepUp")(function* (input: {
+  readonly origin: string;
+  readonly credential: string;
+  readonly local: { readonly host: string; readonly port: number };
+  readonly onEnd: (ended: LineEnd) => Effect.Effect<void>;
+}) {
+  let backoff = REDIAL_START;
+  while (true) {
+    const ended = yield* holdLine(input);
+    yield* input.onEnd(ended);
+    if (ended.kind !== "closed") return ended;
+    if (ended.opened) backoff = REDIAL_START;
+    yield* Effect.sleep(backoff);
+    backoff = Duration.min(Duration.times(backoff, 2), REDIAL_CAP);
+  }
 });

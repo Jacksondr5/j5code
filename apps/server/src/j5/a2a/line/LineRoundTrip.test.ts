@@ -10,6 +10,8 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Queue from "effect/Queue";
+import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import WebSocket from "ws";
@@ -22,7 +24,7 @@ import {
   HttpServerResponse,
 } from "effect/http";
 
-import { holdLine } from "./LineClient.ts";
+import { holdLine, keepLineUp, type LineEnd } from "./LineClient.ts";
 import {
   layer as lineRegistryLayer,
   layerRoutingHttpClient,
@@ -34,9 +36,10 @@ const LINE_HOST = "127.77.0.1";
 
 /**
  * The storing server: the line route, minus the peer checks `PeerHttp.test.ts` covers, served on a
- * real socket so it can upgrade. `ended` stands for the peer's session ending here.
+ * real socket so it can upgrade. `ended` holds the signal for the peer's session ending here; each
+ * line served awaits the one current when it opened.
  */
-const storingServer = (ended: Deferred.Deferred<void>) =>
+const storingServer = (ended: Ref.Ref<Deferred.Deferred<void>>) =>
   HttpRouter.add(
     "GET",
     J5_PEER_API_PATHS.line,
@@ -45,13 +48,15 @@ const storingServer = (ended: Deferred.Deferred<void>) =>
       if (request.headers.authorization !== "Bearer good") {
         return HttpServerResponse.empty({ status: 401 });
       }
+      // Read before the line is up, so a session ended after its up event is this line's.
+      const session = yield* Ref.get(ended);
       const socket = yield* request.upgrade;
       const lines = yield* LineRegistry;
       return yield* lines.serve({
         environmentId: LAPTOP,
         host: LINE_HOST,
         socket,
-        ended: Deferred.await(ended),
+        ended: Deferred.await(session),
       });
     }).pipe(Effect.orDie),
   );
@@ -71,7 +76,7 @@ const pollerServer = Effect.acquireRelease(
 );
 
 const setup = Effect.gen(function* () {
-  const ended = yield* Deferred.make<void>();
+  const ended = yield* Ref.make(yield* Deferred.make<void>());
   const registry = yield* Layer.build(lineRegistryLayer);
   const served = yield* Layer.build(
     HttpRouter.serve(storingServer(ended), { disableListenLog: true, disableLogger: true }).pipe(
@@ -88,7 +93,12 @@ const setup = Effect.gen(function* () {
   const poller = yield* pollerServer;
   const lines = Context.get(registry, LineRegistry);
   return {
-    ended,
+    /** Ends the peer's session for the line up now; a later line gets a session of its own. */
+    endSession: Effect.gen(function* () {
+      const current = yield* Ref.get(ended);
+      yield* Ref.set(ended, yield* Deferred.make<void>());
+      yield* Deferred.succeed(current, undefined);
+    }),
     lines,
     client: Context.get(routed, HttpClient.HttpClient),
     origin: HttpServer.formatAddress(Context.get(served, HttpServer.HttpServer).address),
@@ -140,7 +150,7 @@ it.effect("closes the line when the peer's session ends, and calls fail after", 
         local: line.local,
       }).pipe(Effect.forkScoped);
       yield* Stream.runHead(ups);
-      yield* Deferred.succeed(line.ended, undefined);
+      yield* line.endSession;
       const ended = yield* Fiber.join(held);
       assert.strictEqual(ended.kind, "closed");
       yield* Effect.flip(get(line.client, `http://${LINE_HOST}:1/hello`));
@@ -221,6 +231,36 @@ it.effect("closes a line that goes quiet, and calls fail after", () =>
       yield* Stream.runHead(ups);
       yield* TestClock.adjust("30 seconds");
       yield* Effect.flip(get(line.client, `http://${LINE_HOST}:1/after`));
+    }),
+  ),
+);
+
+it.effect("opens a new line as soon as the old one closes, without waiting for a poll", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const line = yield* setup;
+      const ups = yield* Queue.unbounded<string>();
+      yield* (yield* line.lines.subscribeUps).pipe(
+        Stream.runForEach((up) => Queue.offer(ups, up.lineId)),
+        Effect.forkScoped,
+      );
+      const endings = yield* Queue.unbounded<LineEnd>();
+      yield* keepLineUp({
+        origin: line.origin,
+        credential: "good",
+        local: line.local,
+        onEnd: (ended) => Queue.offer(endings, ended).pipe(Effect.asVoid),
+      }).pipe(Effect.forkScoped);
+      const first = yield* Queue.take(ups);
+      yield* line.endSession;
+      assert.deepInclude(yield* Queue.take(endings), { kind: "closed", opened: true });
+      yield* TestClock.adjust("1 second");
+      const second = yield* Queue.take(ups);
+      assert.notStrictEqual(second, first);
+      assert.strictEqual(
+        yield* get(line.client, `http://${LINE_HOST}:1/again`),
+        `${LINE_HOST}:1 /again`,
+      );
     }),
   ),
 );

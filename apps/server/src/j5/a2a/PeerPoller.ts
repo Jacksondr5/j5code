@@ -22,7 +22,7 @@ import { HttpClient, HttpClientRequest, type HttpClientResponse } from "effect/h
 
 import { ServerConfig } from "../../config.ts";
 import { EventSinkV2 } from "../../orchestration-v2/EventSink.ts";
-import { holdLine, localTarget } from "./line/LineClient.ts";
+import { keepLineUp, localTarget } from "./line/LineClient.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { A2ALedger } from "./LedgerService.ts";
 import { PeerInboundService, peerDeliveryRefusal } from "./PeerInboundService.ts";
@@ -409,12 +409,11 @@ const make = Effect.fn("j5.a2a.peer.poller.make")(function* (daemon: boolean) {
       if (!takesLine) return;
       const peer = yield* peers.connection(environmentId).pipe(Effect.orElseSucceed(() => null));
       if (peer === null || peer.origin === null || peer.credential === null) return;
-      line = yield* holdLine({
+      line = yield* keepLineUp({
         origin: peer.origin,
         credential: peer.credential,
         local: localTarget(serverConfig.value),
-      }).pipe(
-        Effect.flatMap((ended) => {
+        onEnd: (ended) => {
           if (ended.kind === "rejected") refused = true;
           // A refusal repeats after every poll; a line that was up and closed is always worth a line.
           if (ended.kind === "refused" && ended.reason === lastRefusal) return Effect.void;
@@ -423,10 +422,8 @@ const make = Effect.fn("j5.a2a.peer.poller.make")(function* (daemon: boolean) {
             peer: peer.label,
             reason: ended.reason,
           });
-        }),
-        Effect.ensuring(Effect.sync(() => (line = null))),
-        Effect.forkChild,
-      );
+        },
+      }).pipe(Effect.asVoid, Effect.ensuring(Effect.sync(() => (line = null))), Effect.forkChild);
     });
   });
 
