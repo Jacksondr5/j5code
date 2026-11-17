@@ -105,48 +105,43 @@ describe("LineMux", () => {
   });
 
   it("fails every open exchange when the line closes, and opens nothing after", async () => {
-    let held: NodeHttp.ServerResponse | null = null;
-    await using line = await pair((_req, res) => {
-      held = res;
-    });
+    const { promise: arrived, resolve: arrive } = Promise.withResolvers<void>();
+    await using line = await pair(() => arrive());
     const waiting = line.request("/wait");
-    await expect.poll(() => held).not.toBeNull();
+    await arrived;
     line.storing.close(new LineClosedError("The line went quiet."));
     await expect(waiting).rejects.toThrow("The line went quiet.");
     expect(() => line.storing.open()).toThrow(LineClosedError);
   });
 
   it("resets only the exchange that was aborted", async () => {
-    let held: NodeHttp.ServerResponse | null = null;
+    const { promise: arrived, resolve: arrive } = Promise.withResolvers<void>();
     await using line = await pair((req, res) => {
-      if (req.url === "/wait") held = res;
+      if (req.url === "/wait") arrive();
       else res.end("still here");
     });
     const abort = new AbortController();
     const waiting = line.request("/wait", abort.signal);
-    await expect.poll(() => held).not.toBeNull();
+    await arrived;
     abort.abort();
     await expect(waiting).rejects.toThrow();
     expect(line.sentByStoring).toContain(FrameType.reset);
     expect((await line.request("/other")).body).toBe("still here");
   });
 
-  it("resets a stream whose reader falls too far behind, instead of buffering more", () => {
+  it("resets a stream whose reader falls too far behind, instead of buffering more", async () => {
     const sent: Array<Uint8Array> = [];
     const mux = new LineMux({
       send: (frame, done) => (sent.push(frame), done()),
       maxUnreadBytes: 8,
     });
     const stream = mux.open();
-    let failure: Error | null = null;
-    stream.on("error", (error) => (failure = error));
+    const failure = new Promise<Error>((resolve) => stream.once("error", resolve));
     const id = decodeFrame(sent[0]!)!.id;
     const data = new Uint8Array([FrameType.data, 0, 0, 0, id, ...new Array(16).fill(65)]);
     mux.receive(data);
     expect(stream.destroyed).toBe(true);
     expect(sent.map((frame) => frame[0])).toContain(FrameType.reset);
-    return expect
-      .poll(() => failure?.message)
-      .toBe("The line stream's reader fell too far behind.");
+    expect((await failure).message).toBe("The line stream's reader fell too far behind.");
   });
 });

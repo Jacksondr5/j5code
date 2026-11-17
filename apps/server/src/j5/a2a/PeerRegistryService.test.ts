@@ -814,6 +814,22 @@ it.effect(
         "http://127.77.0.2:1",
         "another peer's address stays put when one is removed",
       );
+      const studio = "environment-studio";
+      yield* registry.grantStore({
+        environmentId: studio,
+        sessionId: "auth-session:studio",
+        issuedAt: timestamp,
+      });
+      yield* registry.adoptStorePeer({
+        environmentId: studio,
+        sessionId: "auth-session:studio",
+        at: timestamp,
+      });
+      assert.equal(
+        (yield* registry.get(studio))?.lineAddress,
+        "http://127.77.0.1:1",
+        "a freed slot is taken again, so slots stay within the peers that poll here",
+      );
       assert.isFalse(
         yield* registry.adoptStorePeer({
           environmentId: laptop,

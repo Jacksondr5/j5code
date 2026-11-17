@@ -955,7 +955,16 @@ export const layer: Layer.Layer<
               INSERT INTO j5_a2a_peer_line (environment_id, slot)
               VALUES (
                 ${input.environmentId},
-                (SELECT COALESCE(MAX(slot), 0) + 1 FROM j5_a2a_peer_line)
+                -- The lowest free slot, so slots stay within the number of peers that poll here.
+                (
+                  SELECT CASE
+                    WHEN NOT EXISTS (SELECT 1 FROM j5_a2a_peer_line WHERE slot = 1) THEN 1
+                    ELSE (
+                      SELECT MIN(slot) + 1 FROM j5_a2a_peer_line
+                      WHERE slot + 1 NOT IN (SELECT slot FROM j5_a2a_peer_line)
+                    )
+                  END
+                )
               )
             `;
             yield* sql`DELETE FROM j5_a2a_peer_store_grant WHERE environment_id = ${input.environmentId}`;
