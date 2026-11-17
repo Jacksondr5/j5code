@@ -1722,3 +1722,151 @@ it.effect("cancels only active pre-copy playbook runs when adding snapshots", ()
     ]);
   }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
+
+it.effect("preserves pre-holder snapshot ownership and recorded Crew targets on upgrade", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* runMigrations();
+    yield* runJ5A2AMigrations({ toMigrationInclusive: 60 });
+    yield* sql`INSERT INTO j5_a2a_project_ledger (project_id, created_at) VALUES ('upgrade', 'before')`;
+    for (const thread of [
+      "owner-held",
+      "captain-delivered",
+      "captain-pending",
+      "captain-unresolved",
+      "captain-untargeted",
+      "old-peer",
+      "replacement",
+    ]) {
+      yield* sql`INSERT INTO j5_a2a_membership
+        (project_id, participant_id, participant_kind, thread_id, joined_seq, updated_seq, payload)
+        VALUES ('upgrade', ${`agent:${thread}`}, 'agent', ${thread}, 1, 1, '{}')`;
+    }
+    for (const run of ["delivered", "pending", "unresolved", "untargeted"]) {
+      yield* sql`INSERT INTO j5_agent_crew_instance
+        (id, project_id, captain_participant_id, captain_thread_id, display_name, brief, version, created_at)
+        VALUES (${`crew-${run}`}, 'upgrade', ${`agent:captain-${run}`}, ${`captain-${run}`}, 'Upgrade', 'Preserve identity.', 1, 'before')`;
+    }
+    yield* sql`INSERT INTO j5_agent_crew_member
+      (crew_instance_id, seat_name, participant_id, thread_id, ordinal, added_version)
+      VALUES ('crew-pending', 'critic', 'agent:replacement', 'replacement', 0, 1)`;
+    yield* sql`INSERT INTO j5_agent_crew_member
+      (crew_instance_id, seat_name, participant_id, thread_id, ordinal, added_version)
+      VALUES ('crew-delivered', 'critic', 'agent:recorded-worker', 'recorded-worker', 0, 1)`;
+    yield* sql`DELETE FROM j5_a2a_membership WHERE thread_id = 'captain-pending'`;
+
+    for (const run of [
+      "owner-held",
+      "delivered",
+      "pending",
+      "unresolved",
+      "untargeted",
+      "missing-owner",
+      "legacy",
+    ]) {
+      yield* sql`INSERT INTO j5_playbook_run
+        (run_id, owner_thread_id, definition_path, current_step_id, status, created_at, updated_at, crew_instance_id, definition_json)
+        VALUES (${run}, ${run === "owner-held" || run === "missing-owner" ? run : `captain-${run}`}, '/demo.yaml', 'inspect',
+          ${run === "legacy" ? "completed" : "active"}, 'before', 'unchanged',
+          ${["owner-held", "missing-owner", "legacy"].includes(run) ? null : `crew-${run}`},
+          ${run === "legacy" ? null : "{}"})`;
+    }
+    for (const run of ["delivered", "pending", "unresolved", "untargeted"]) {
+      yield* sql`INSERT INTO j5_playbook_step_delivery
+        (run_id, request_id, step_id, landed_at, target_seat, target_thread_id, outcome, resolved_at)
+        VALUES (${run}, 'earlier', 'inspect', 'before', NULL, ${`captain-${run}`}, 'captain', 'before')`;
+      yield* sql`INSERT INTO j5_playbook_step_delivery
+        (run_id, request_id, step_id, landed_at, target_seat, target_thread_id, outcome, resolved_at)
+        VALUES (${run}, 'current', 'inspect', 'later', 'critic',
+          ${run === "untargeted" ? null : run === "unresolved" ? "missing-worker" : run === "delivered" ? "recorded-worker" : "old-peer"},
+          ${run === "delivered" ? "delivered" : null}, ${run === "delivered" ? "later" : null})`;
+    }
+    const before =
+      yield* sql`SELECT run_id, request_id, step_id, landed_at, target_seat, target_thread_id, outcome, resolved_at
+      FROM j5_playbook_step_delivery ORDER BY run_id, request_id`;
+    yield* runJ5A2AMigrations();
+    assert.deepStrictEqual(
+      yield* sql`SELECT run_id, request_id, step_id, landed_at, target_seat, target_thread_id, outcome, resolved_at
+      FROM j5_playbook_step_delivery ORDER BY run_id, request_id`,
+      before,
+    );
+    assert.deepStrictEqual(
+      yield* sql`SELECT target_participant_id FROM j5_playbook_step_delivery
+      WHERE run_id = 'pending' AND request_id = 'earlier'`,
+      [{ target_participant_id: "agent:captain-pending" }],
+    );
+    const holders =
+      yield* sql`SELECT run_id, holder_thread_id, holder_participant_id, assigned_by_participant_id
+      FROM j5_playbook_run ORDER BY run_id`;
+    assert.deepStrictEqual(holders, [
+      {
+        run_id: "delivered",
+        holder_thread_id: "recorded-worker",
+        holder_participant_id: "agent:recorded-worker",
+        assigned_by_participant_id: "agent:captain-delivered",
+      },
+      {
+        run_id: "legacy",
+        holder_thread_id: null,
+        holder_participant_id: null,
+        assigned_by_participant_id: null,
+      },
+      {
+        run_id: "missing-owner",
+        holder_thread_id: "missing-owner",
+        holder_participant_id: null,
+        assigned_by_participant_id: null,
+      },
+      {
+        run_id: "owner-held",
+        holder_thread_id: "owner-held",
+        holder_participant_id: "agent:owner-held",
+        assigned_by_participant_id: "agent:owner-held",
+      },
+      {
+        run_id: "pending",
+        holder_thread_id: "old-peer",
+        holder_participant_id: "agent:old-peer",
+        assigned_by_participant_id: "agent:captain-pending",
+      },
+      {
+        run_id: "unresolved",
+        holder_thread_id: "missing-worker",
+        holder_participant_id: null,
+        assigned_by_participant_id: "agent:captain-unresolved",
+      },
+      {
+        run_id: "untargeted",
+        holder_thread_id: null,
+        holder_participant_id: null,
+        assigned_by_participant_id: "agent:captain-untargeted",
+      },
+    ]);
+    assert.deepStrictEqual(
+      yield* sql`SELECT run_id, target_participant_id, assigned_by_participant_id
+      FROM j5_playbook_step_delivery WHERE request_id = 'current' ORDER BY run_id`,
+      [
+        {
+          run_id: "delivered",
+          target_participant_id: "agent:recorded-worker",
+          assigned_by_participant_id: "agent:captain-delivered",
+        },
+        {
+          run_id: "pending",
+          target_participant_id: "agent:old-peer",
+          assigned_by_participant_id: "agent:captain-pending",
+        },
+        {
+          run_id: "unresolved",
+          target_participant_id: null,
+          assigned_by_participant_id: "agent:captain-unresolved",
+        },
+        {
+          run_id: "untargeted",
+          target_participant_id: null,
+          assigned_by_participant_id: "agent:captain-untargeted",
+        },
+      ],
+    );
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+);

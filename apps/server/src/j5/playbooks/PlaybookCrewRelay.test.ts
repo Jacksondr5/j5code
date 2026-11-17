@@ -438,6 +438,51 @@ it.effect(
     }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );
 
+it.effect("an upgraded owner-held run without landings still reports its recorded owner", () =>
+  Effect.gen(function* () {
+    const { start, store, relay, sql, notices } = yield* fixture;
+    const run = yield* start("owner-before-upgrade");
+    yield* sql`DELETE FROM j5_playbook_step_delivery WHERE run_id = ${run.runId}`;
+    const current = yield* relay.current(owner, run.runId);
+    assert.equal(current.delivery?.state, "captain");
+    assert.equal(current.delivery?.participantId, ownerId);
+    assert.lengthOf(yield* notices, 0);
+    assert.isNull(yield* store.latestLanding(run.runId));
+  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);
+
+it.effect.each(["target", "owner"] as const)(
+  "an unresolved upgraded $0 identity requires explicit recovery",
+  (missing) =>
+    Effect.gen(function* () {
+      const { start, relay, fault, sql, notices, store, move } = yield* fixture;
+      yield* Ref.set(fault, true);
+      const run = yield* start("pending-before-upgrade", peerId);
+      if (missing === "target") {
+        yield* sql`UPDATE j5_playbook_run SET holder_participant_id = NULL WHERE run_id = ${run.runId}`;
+        yield* sql`UPDATE j5_playbook_step_delivery SET target_participant_id = NULL WHERE run_id = ${run.runId}`;
+      } else {
+        yield* sql`UPDATE j5_playbook_run SET assigned_by_participant_id = NULL WHERE run_id = ${run.runId}`;
+        yield* sql`UPDATE j5_playbook_step_delivery SET assigned_by_participant_id = NULL WHERE run_id = ${run.runId}`;
+      }
+      yield* Ref.set(fault, false);
+      const unavailable = yield* relay.current(owner, run.runId).pipe(Effect.flip);
+      assert.equal(unavailable.code, "holder_unavailable");
+      assert.include(unavailable.message, "j5_playbook_assign");
+      const blocked = yield* move(run.runId, "next", "inspect", "next-unresolved").pipe(
+        Effect.flip,
+      );
+      assert.equal(blocked.code, "delivery_pending");
+      assert.include(blocked.message, "recorded");
+      assert.lengthOf(yield* notices, 0);
+      assert.isNull((yield* store.landing(run.runId, "pending-before-upgrade"))?.resolvedAt);
+      const recovered = yield* move(run.runId, "assign", "inspect", "recover-upgrade");
+      assert.equal(recovered.delivery?.state, "captain");
+      assert.equal(recovered.assignedByParticipantId, ownerId);
+      assert.equal((yield* store.landing(run.runId, "pending-before-upgrade"))?.outcome, "skipped");
+    }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);
+
 it.effect(
   "revises a no-Crew run to a Peer once, preserves its holder, and can return it to the owner",
   () =>

@@ -81,13 +81,27 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
     if (landing.resolvedAt !== null) return result(landing);
     if (run.status !== "active")
       return result(yield* store.resolveLanding(runId, requestId, "skipped"));
+    if (
+      landing.targetThreadId === null ||
+      landing.targetParticipantId === null ||
+      landing.assignedByParticipantId === null
+    )
+      return {
+        delivery: {
+          state: "pending" as const,
+          seat: landing.targetSeat,
+          threadId: landing.targetThreadId,
+          participantId: landing.targetParticipantId,
+        },
+        reason:
+          "the recorded holder or assigning owner identity cannot be resolved; use j5_playbook_assign to take back or reassign this step",
+      };
     if (landing.targetThreadId === run.ownerThreadId)
       return result(yield* store.resolveLanding(runId, requestId, "captain"));
-    if (landing.targetThreadId === null || landing.targetParticipantId === null)
-      return result(landing, "the recorded holder is missing");
     const { step, ...playbook } = yield* store.snapshotStep(run, landing.stepId);
     if (step === null) return result(yield* store.resolveLanding(runId, requestId, "skipped"));
     const targetThreadId = ThreadId.make(landing.targetThreadId);
+    const ownerParticipantId = landing.assignedByParticipantId;
     const sent = yield* Effect.gen(function* () {
       const target = yield* getThreadRecordsIfPresent(threads, targetThreadId, []);
       if (target === null || target.thread.archivedAt !== null || target.thread.deletedAt !== null)
@@ -106,7 +120,7 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
           stepTitle: step.title,
           position: playbook.position,
           total: playbook.total,
-          ownerParticipantId: landing.assignedByParticipantId ?? run.assignedByParticipantId ?? "",
+          ownerParticipantId,
           prompt: step.prompt,
         }),
         attachments: [],
@@ -146,7 +160,17 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
   ) {
     const run = yield* store.runById(runId);
     const landing = yield* store.latestLanding(runId, currentStepId);
-    return run === null || landing === null ? null : deliveryOf(landing, run.ownerThreadId);
+    if (run === null) return null;
+    if (landing !== null) return deliveryOf(landing, run.ownerThreadId);
+    // Single-thread runs created before runtime staffing recorded no landing.
+    return run.holderThreadId === run.ownerThreadId && run.holderParticipantId !== null
+      ? {
+          state: "captain" as const,
+          seat: null,
+          threadId: run.ownerThreadId,
+          participantId: run.holderParticipantId,
+        }
+      : null;
   });
   const respond = Effect.fn("PlaybookCrewRelay.respond")(function* (
     response: PlaybookStepResponse,
@@ -218,6 +242,14 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
     runId?: string,
   ) {
     const response = yield* store.current(owner, runId);
+    if (
+      response.status === "active" &&
+      (response.holderParticipantId == null || response.assignedByParticipantId == null)
+    )
+      return yield* playbookError(
+        "holder_unavailable",
+        "The run's recorded holder or assigning owner identity cannot be resolved. Use j5_playbook_assign to take back or reassign this step, or j5_playbook_cancel to end the run.",
+      );
     return withDelivery(
       response,
       response.status === "active"
