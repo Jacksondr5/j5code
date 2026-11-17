@@ -20,6 +20,7 @@ import {
   DispatchModeLimit,
   type DispatchModeRefusal,
 } from "../orchestration-v2/DispatchModeLimit.ts";
+import { UnreachableCalls } from "../j5/a2a/line/UnreachableCallsService.ts";
 import * as PeerForwarding from "../peer/PeerForwarding.ts";
 import { assertNotLinked, assertSameLink, callerLinkOrigin } from "./linkOrigin.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
@@ -402,6 +403,8 @@ const routed = Effect.fn("McpToolAccess.routed")(function* <Tools extends Record
 ) {
   // Optional so toolkits that never leave this environment build without it.
   const forwarding = yield* Effect.serviceOption(PeerForwarding.PeerForwarding);
+  // J5: notes a call to a machine that did not answer (register D46).
+  const unanswered = yield* Effect.serviceOption(UnreachableCalls);
   const handlers: Record<string, unknown> = { ...checked };
   for (const [name, declaration] of Object.entries<Declaration<unknown>>(declarations)) {
     const tool = toolkit.tools[name];
@@ -422,7 +425,13 @@ const routed = Effect.fn("McpToolAccess.routed")(function* <Tools extends Record
         if (scope.linkedEnvironments === false) return yield* PeerForwarding.linkedEnvironmentsOff;
         yield* (remote as RemoteCheck<typeof params>)(params);
         if (Option.isNone(forwarding)) return yield* linksUnavailable;
-        return yield* forwarding.value.call(scope, tool, target, { ...params, environmentId });
+        const call = forwarding.value.call(scope, tool, target, { ...params, environmentId });
+        return yield* Option.isSome(unanswered)
+          ? unanswered.value.observe(
+              { threadId: scope.thread?.threadId, environmentId: target, tool: name },
+              call,
+            )
+          : call;
       });
   }
   return handlers as Toolkit.HandlersFrom<Tools>;

@@ -10,7 +10,7 @@ import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/ai";
-import { HttpClient, HttpClientResponse } from "effect/http";
+import { FetchHttpClient, HttpClient, HttpClientError, HttpClientResponse } from "effect/http";
 
 import * as McpHttpServer from "../mcp/McpHttpServer.ts";
 import * as McpInvocationContext from "../mcp/McpInvocationContext.ts";
@@ -134,6 +134,69 @@ it.effect("keeps a link healthy when the peer refuses a call", () =>
       expect(refused).toMatchObject({ code: refusal.code, message: refusal.message });
       const link = yield* links.get(box.environmentId);
       expect(link._tag === "Some" ? link.value.lastError : "missing").toBeNull();
+
+      // J5 (register D46): an address that no longer answers as this machine is not a refusal.
+      yield* Ref.set(b.descriptor, descriptorOf("environment-elsewhere", "Elsewhere"));
+      const absent = yield* client
+        .call({
+          environmentId: box.environmentId,
+          tool: "refuse",
+          arguments: {},
+          limits: { runtimeMode: "full-access", interactionMode: "default" },
+          success: Result,
+        })
+        .pipe(Effect.flip);
+      expect(absent).toMatchObject({ code: "peer_unreachable" });
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
+
+// J5 (register D46): a call whose connection fails before its answer arrives got no answer.
+it.effect("says a call cut on the way got no answer", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const handlers = McpToolAccess.toLayer(toolkit, {
+        probe: McpToolAccess.reads(() => Effect.succeed({ modes: "" })),
+        hold: McpToolAccess.reads(() => Effect.succeed({ modes: "" })),
+        refuse: McpToolAccess.reads(() => Effect.fail(refusal)),
+      });
+      const box = descriptorOf("environment-box", "Box");
+      const b = yield* servePeer(box, McpHttpServer.toolkitRegistration(toolkit, handlers));
+      const context = yield* Layer.build(
+        layerLinkingEnvironment(descriptorOf("environment-a", "A")),
+      );
+      yield* linkTo(Context.get(context, PeerLinks.PeerLinks), b);
+      const fetch = yield* HttpClient.HttpClient.pipe(Effect.provide(FetchHttpClient.layer));
+      // The session opens; the tool call's connection drops before any answer.
+      const cutting = HttpClient.make((request) =>
+        request.body._tag === "Uint8Array" &&
+        new TextDecoder().decode(request.body.body).includes('"tools/call"')
+          ? Effect.fail(
+              new HttpClientError.HttpClientError({
+                reason: new HttpClientError.TransportError({ request, description: "cut" }),
+              }),
+            )
+          : fetch.execute(request),
+      );
+      const client = Context.get(
+        yield* Layer.build(
+          PeerMcpClient.layer.pipe(
+            Layer.provide(Layer.succeed(HttpClient.HttpClient, cutting)),
+            Layer.provide(Layer.succeedContext(context)),
+          ),
+        ),
+        PeerMcpClient.PeerMcpClient,
+      );
+      const cut = yield* client
+        .call({
+          environmentId: box.environmentId,
+          tool: "probe",
+          arguments: {},
+          limits: { runtimeMode: "full-access", interactionMode: "default" },
+          success: Result,
+        })
+        .pipe(Effect.flip);
+      expect(cut).toMatchObject({ code: "peer_unreachable" });
     }),
   ).pipe(Effect.provide(NodeHttpServer.layerTest)),
 );
