@@ -8,7 +8,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import * as Semaphore from "effect/Semaphore";
+import * as KeyedLock from "@t3tools/shared/KeyedLock";
 
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { lifecycleCommandId, lifecycleId } from "../a2a/spawnIds.ts";
@@ -64,18 +64,8 @@ const withDelivery = (
 export const makePlaybookCrewRelay = Effect.gen(function* () {
   const store = yield* PlaybookStore;
   const threads = yield* ThreadManagementService;
-  const locks = new Map<string, Semaphore.Semaphore>();
-  const withRun = Effect.fn("PlaybookCrewRelay.withRun")(function* <A, E, R>(
-    key: string,
-    effect: Effect.Effect<A, E, R>,
-  ) {
-    let lock = locks.get(key);
-    if (lock === undefined) {
-      lock = yield* Semaphore.make(1);
-      locks.set(key, lock);
-    }
-    return yield* lock.withPermits(1)(effect);
-  });
+  const locks = yield* KeyedLock.make<string>();
+  const withRun = locks.withLock;
 
   const handOff = Effect.fn("PlaybookCrewRelay.handOff")(function* (
     runId: string,
@@ -170,26 +160,29 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
         : null,
     );
   });
-  const start = (input: {
+  const start = Effect.fn("PlaybookCrewRelay.start")(function* (input: {
     readonly owner: ThreadId;
     readonly root: string;
     readonly name: string;
     readonly key: string;
     readonly assignee?: string;
-  }) =>
-    withRun(
+  }) {
+    const response = yield* store.start(
       input.owner,
+      input.root,
+      input.name,
+      input.key,
+      input.assignee,
+    );
+    return yield* withRun(
+      response.runId,
       Effect.gen(function* () {
-        const response = yield* store.start(
-          input.owner,
-          input.root,
-          input.name,
-          input.key,
-          input.assignee,
-        );
-        return yield* respond(response, input.key);
+        // A mutation may acquire the run between insertion and this lock.
+        const current = yield* store.current(input.owner, response.runId);
+        return yield* respond({ ...current, replayed: response.replayed }, input.key);
       }),
     );
+  });
   const mutate = Effect.fn("j5.playbooks.playbookCrewRelay.mutate")(function* (
     owner: ThreadId,
     input: PlaybookMutation,

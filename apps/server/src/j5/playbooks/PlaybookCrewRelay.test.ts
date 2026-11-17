@@ -12,6 +12,8 @@ import type { PlaybookDefinition, PlaybookError } from "@t3tools/contracts/j5";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
@@ -175,7 +177,7 @@ const fixture = Effect.gen(function* () {
       client_request_id: key,
       ...(assignee === undefined ? {} : { assignee }),
     });
-  return { store, relay, start, move, notices, fault, archived, sql };
+  return { store, relay, start, move, notices, fault, archived, sql, threads, root };
 });
 const TestLayer = Layer.mergeAll(
   NodeSqliteClient.layer({ filename: ":memory:" }),
@@ -306,6 +308,134 @@ it.effect("only the owner can move a run whose holder is another agent", () =>
       .pipe(Effect.flip);
     assert.equal(code(refusal), "not_owner");
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);
+
+it.effect.each([
+  { startMode: "first", operation: "assign" },
+  { startMode: "first", operation: "cancel" },
+  { startMode: "retry", operation: "assign" },
+  { startMode: "retry", operation: "cancel" },
+] as const)(
+  "serializes $operation with $startMode start delivery while other runs proceed",
+  ({ startMode, operation }) =>
+    Effect.gen(function* () {
+      const { store, start, fault, threads, root, notices } = yield* fixture;
+      if (startMode === "retry") {
+        yield* Ref.set(fault, true);
+        yield* start("start-race", peerId);
+        yield* Ref.set(fault, false);
+      }
+      const dispatchEntered = yield* Deferred.make<void>();
+      const releaseDispatch = yield* Deferred.make<void>();
+      const runRead = yield* Deferred.make<void>();
+      const mutationEntered = yield* Deferred.make<void>();
+      const armed = yield* Ref.make(false);
+      const relay = yield* makePlaybookCrewRelay.pipe(
+        Effect.provideService(PlaybookStore, {
+          ...store,
+          runById: (id) =>
+            store
+              .runById(id)
+              .pipe(
+                Effect.tap(() =>
+                  Ref.get(armed).pipe(
+                    Effect.flatMap((active) =>
+                      active ? Deferred.succeed(runRead, undefined) : Effect.void,
+                    ),
+                  ),
+                ),
+              ),
+          mutate: (caller, input) =>
+            Deferred.succeed(mutationEntered, undefined).pipe(
+              Effect.andThen(store.mutate(caller, input)),
+            ),
+        }),
+        Effect.provideService(ThreadManagementService, {
+          ...threads,
+          dispatch: (command) =>
+            Deferred.succeed(dispatchEntered, undefined).pipe(
+              Effect.andThen(Deferred.await(releaseDispatch)),
+              Effect.andThen(threads.dispatch(command)),
+            ),
+        }),
+      );
+      const starting = yield* relay
+        .start({ owner, root, name: "review", key: "start-race", assignee: peerId })
+        .pipe(Effect.forkChild({ startImmediately: true }));
+      yield* Deferred.await(dispatchEntered);
+      const current = yield* store.current(owner);
+      yield* Ref.set(armed, true);
+      const mutation = yield* relay
+        .mutate(owner, {
+          runId: current.runId,
+          operation,
+          expectedStepId: "inspect",
+          client_request_id: "mutation-race",
+        })
+        .pipe(Effect.forkChild({ startImmediately: true }));
+      yield* Deferred.await(runRead);
+      const unrelated = yield* relay.start({
+        owner: foreign,
+        root,
+        name: "review",
+        key: "unrelated",
+      });
+      assert.equal(unrelated.delivery?.state, "captain");
+      assert.isFalse(yield* Deferred.isDone(mutationEntered));
+      assert.equal((yield* store.landing(current.runId, "start-race"))?.outcome, null);
+      yield* Deferred.succeed(releaseDispatch, undefined);
+      const started = yield* Fiber.join(starting);
+      assert.equal(started.delivery?.state, "delivered");
+      const changed = yield* Fiber.join(mutation);
+      assert.equal(changed.status, operation === "cancel" ? "cancelled" : "active");
+      assert.equal(changed.delivery?.state, operation === "assign" ? "captain" : undefined);
+      assert.lengthOf(yield* notices, 1);
+      assert.equal((yield* store.landing(current.runId, "start-race"))?.outcome, "delivered");
+    }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);
+
+it.effect(
+  "a mutation winning the insertion-to-lock gap supersedes the start response and notice",
+  () =>
+    Effect.gen(function* () {
+      const { store, threads, root, notices } = yield* fixture;
+      const inserted = yield* Deferred.make<void>();
+      const releaseStart = yield* Deferred.make<void>();
+      const relay = yield* makePlaybookCrewRelay.pipe(
+        Effect.provideService(PlaybookStore, {
+          ...store,
+          start: (...input) =>
+            store
+              .start(...input)
+              .pipe(
+                Effect.tap(() =>
+                  Deferred.succeed(inserted, undefined).pipe(
+                    Effect.andThen(Deferred.await(releaseStart)),
+                  ),
+                ),
+              ),
+        }),
+        Effect.provideService(ThreadManagementService, threads),
+      );
+      const starting = yield* relay
+        .start({ owner, root, name: "review", key: "start-gap", assignee: peerId })
+        .pipe(Effect.forkChild);
+      yield* Deferred.await(inserted);
+      const run = yield* store.current(owner);
+      yield* relay.mutate(owner, {
+        runId: run.runId,
+        operation: "assign",
+        expectedStepId: "inspect",
+        client_request_id: "take-back-gap",
+      });
+      yield* Deferred.succeed(releaseStart, undefined);
+      const response = yield* Fiber.join(starting);
+      assert.equal(response.holderParticipantId, ownerId);
+      assert.equal(response.delivery?.state, "captain");
+      assert.isFalse(response.replayed);
+      assert.equal((yield* store.landing(run.runId, "start-gap"))?.outcome, "skipped");
+      assert.lengthOf(yield* notices, 0);
+    }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );
 
 it.effect(
