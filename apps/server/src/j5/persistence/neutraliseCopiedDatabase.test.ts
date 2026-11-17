@@ -49,6 +49,7 @@ const seed = Effect.fn("test.j5.neutralise.seed")(function* () {
       ('env-polling', 'Polling', 'store', NULL, NULL, ${at}, ${at})`;
   yield* sql`INSERT INTO j5_a2a_peer_store_grant (session_id, environment_id, issued_at)
     VALUES ('session-peer', 'env-polling', ${at})`;
+  yield* sql`INSERT INTO j5_a2a_peer_line (environment_id, slot) VALUES ('env-polling', 1)`;
   for (const [sessionId, subject, scopes] of [
     ["session-peer", "env-polling", '["a2a:peer"]'],
     ["session-machine", "machine:watchdog", '["a2a:send"]'],
@@ -188,6 +189,8 @@ it.layer(NodeServices.layer)("neutraliseCopiedDatabase", (it) => {
         playbookStepDeliveries: 1,
       });
       assert.deepEqual(yield* actingRows(), nothingActing);
+      // A peer's line slot goes with it.
+      assert.deepEqual(yield* sql`SELECT environment_id FROM j5_a2a_peer_line`, []);
 
       // Stood down into states the product already reads, not removed.
       assert.deepEqual(

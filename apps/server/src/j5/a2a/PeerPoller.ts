@@ -399,7 +399,7 @@ const make = Effect.fn("j5.a2a.peer.poller.make")(function* (daemon: boolean) {
     let line: Fiber.Fiber<void> | null = null;
     let refused = false;
     // A server that advertises a line but keeps refusing it is redialled after each poll; say so once.
-    let lastReason: string | null = null;
+    let lastRefusal: string | null = null;
     return Effect.fn("j5.a2a.peer.poller.keepLine")(function* (environmentId: string) {
       if (Option.isNone(serverConfig) || refused || line !== null) return;
       const takesLine = yield* peers.capabilities(environmentId).pipe(
@@ -416,8 +416,9 @@ const make = Effect.fn("j5.a2a.peer.poller.make")(function* (daemon: boolean) {
       }).pipe(
         Effect.flatMap((ended) => {
           if (ended.kind === "rejected") refused = true;
-          if (ended.reason === lastReason) return Effect.void;
-          lastReason = ended.reason;
+          // A refusal repeats after every poll; a line that was up and closed is always worth a line.
+          if (ended.kind === "refused" && ended.reason === lastRefusal) return Effect.void;
+          lastRefusal = ended.kind === "refused" ? ended.reason : null;
           return Effect.logInfo("J5 A2A peer line ended", {
             peer: peer.label,
             reason: ended.reason,

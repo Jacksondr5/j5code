@@ -10,9 +10,13 @@ import { peerProtocolHeaders } from "../peerProtocol.ts";
 import { LINE_MAX_UNREAD_BYTES, LINE_PING_INTERVAL, LINE_QUIET_PERIODS } from "./LineRegistry.ts";
 import { encodeFrame, FrameType, LineClosedError, LineMux, type LineStream } from "./LineMux.ts";
 
-/** How a line ended: closed for any reason, or refused because this server's credential is no longer accepted. */
+/**
+ * How a line ended: closed after it was up or while dialling, refused before it opened, or rejected
+ * because this server's credential is no longer accepted.
+ */
 export type LineEnd =
   | { readonly kind: "closed"; readonly reason: string }
+  | { readonly kind: "refused"; readonly reason: string }
   | { readonly kind: "rejected"; readonly reason: string };
 
 const pingFrame = encodeFrame(FrameType.ping, 0);
@@ -103,7 +107,7 @@ export const holdLine = Effect.fn("j5.a2a.peer.line.hold")(function* (input: {
                 kind: "rejected",
                 reason: "The server this one polls no longer accepts its credential.",
               }
-            : { kind: "closed", reason: `The line was refused with HTTP ${String(status)}.` },
+            : { kind: "refused", reason: `The line was refused with HTTP ${String(status)}.` },
         );
       });
       socket.on("close", (code, reason) =>
