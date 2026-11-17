@@ -12,6 +12,7 @@ import {
   J5_SKILL_CATALOG_WS_METHODS,
   J5_SKILL_LINK_WS_METHODS,
   ProjectId,
+  ThreadId,
   type AuthEnvironmentScope,
   type AuthSessionState,
 } from "@t3tools/contracts";
@@ -126,6 +127,22 @@ describe("J5 action commands", () => {
       expect(failureOf(refused)).toMatchObject({
         _tag: "EnvironmentAuthorizationError",
         requiredPermission: AuthSettingsWriteScope,
+      });
+      expect(calls).toEqual([]);
+      expect(registry.get(atoms.answerPlaybookCheckpoint.permissionAtom(home))).toBe(false);
+      const checkpointRefused = yield* Effect.promise(() =>
+        atoms.answerPlaybookCheckpoint.run(registry, {
+          environmentId: home,
+          input: {
+            threadId: ThreadId.make("thread:viewed"),
+            requestId: "checkpoint:viewed",
+            decision: "approve",
+          },
+        }),
+      );
+      expect(failureOf(checkpointRefused)).toMatchObject({
+        _tag: "EnvironmentAuthorizationError",
+        requiredPermission: AuthOrchestrationOperateScope,
       });
       expect(calls).toEqual([]);
 

@@ -77,6 +77,7 @@ const READS_A_NARROW_PERSON_SENDS: ReadonlySet<string> = new Set([
   J5_ARTIFACT_WS_METHODS.listArtifacts,
   J5_PLAYBOOK_WS_METHODS.readLibrary,
   J5_PLAYBOOK_WS_METHODS.listThreadRuns,
+  J5_PLAYBOOK_WS_METHODS.listCheckpoints,
   J5_CLIENT_READ_WS_METHODS.readParticipantIdentities,
   J5_CLIENT_READ_WS_METHODS.listHumanInbox,
   J5_CLIENT_READ_WS_METHODS.readOpenInboxCount,
