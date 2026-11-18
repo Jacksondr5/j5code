@@ -154,6 +154,7 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
       { migration_id: 60, name: "PlaybookRunRevisions" },
       { migration_id: 61, name: "PlaybookRuntimeHolders" },
       { migration_id: 62, name: "PlaybookCancellation" },
+      { migration_id: 64, name: "PlaybookRunStartSequence" },
     ]);
     assert.deepStrictEqual(
       migrationEntries.map(([id, name]) => [id, name]),
@@ -220,6 +221,7 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
         [60, "PlaybookRunRevisions"],
         [61, "PlaybookRuntimeHolders"],
         [62, "PlaybookCancellation"],
+        [64, "PlaybookRunStartSequence"],
       ],
     );
   }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
@@ -1469,7 +1471,7 @@ it.effect("recreates earlier-shaped crews tables when 14 runs over them", () =>
       [
         13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35,
         36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58,
-        59, 60, 61, 62,
+        59, 60, 61, 62, 64,
       ],
     );
     const memberColumns = yield* sql<{ readonly name: string }>`
@@ -1873,6 +1875,21 @@ it.effect("preserves pre-holder snapshot ownership and recorded Crew targets on 
           assigned_by_participant_id: "agent:captain-untargeted",
         },
       ],
+    );
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+);
+
+it.effect("adding the start event sequence leaves pre-upgrade runs eligible for cancellation", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* runJ5A2AMigrations({ toMigrationInclusive: 62 });
+    yield* sql`INSERT INTO j5_playbook_run
+      (run_id, owner_thread_id, definition_path, current_step_id, status, created_at, updated_at)
+      VALUES ('legacy', 'owner', '/review.yaml', 'review', 'active', 'before', 'before')`;
+    yield* runJ5A2AMigrations();
+    assert.deepStrictEqual(
+      yield* sql`SELECT status, start_event_sequence, updated_at FROM j5_playbook_run WHERE run_id = 'legacy'`,
+      [{ status: "active", start_event_sequence: 0, updated_at: "before" }],
     );
   }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
