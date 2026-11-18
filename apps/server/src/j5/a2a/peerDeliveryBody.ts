@@ -70,9 +70,11 @@ const landing = Effect.fn("j5.a2a.peer.deliveryBody.landing")(function* (
   `;
   if (sent[0]?.kind !== "message.sent") return {};
   const payload = yield* decodeSentPayload(sent[0].payload);
+  const origin =
+    payload.playbookOrigin === undefined ? {} : { playbookOrigin: payload.playbookOrigin };
   return payload.mode === undefined || payload.mode === "queue" || payload.modeLimit === undefined
-    ? {}
-    : { landing: { mode: payload.mode, limit: payload.modeLimit } };
+    ? origin
+    : { ...origin, landing: { mode: payload.mode, limit: payload.modeLimit } };
 });
 
 const exchangeFacts = Effect.fn("j5.a2a.peer.deliveryBody.exchangeFacts")(function* (

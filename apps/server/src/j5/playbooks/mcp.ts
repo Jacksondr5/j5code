@@ -20,7 +20,7 @@ import { PlaybookStore, playbookError, type PlaybookMutation } from "./PlaybookS
 import { mapAgentPersonaPolicy } from "../agents/agentPersonas.ts";
 import { readCaller } from "../../mcp/threadAccess.ts";
 import { playbookWorkspaceRoot } from "./workspace.ts";
-import { authorizeScheduledPlaybookStart } from "./scheduledStart.ts";
+import { authorizePlaybookRevision, authorizeScheduledPlaybookStart } from "./scheduledStart.ts";
 
 const Text = Schema.String.check(Schema.isNonEmpty());
 const Mutation = Schema.Struct({ runId: Text, client_request_id: Text });
@@ -254,7 +254,7 @@ export const playbookHandlers = {
     mutate({ ...input, operation: "back" }),
   ),
   j5_playbook_revise: runsPlaybook((input: PlaybookReviseRequest) =>
-    mutate({ ...input, operation: "revise" }),
+    authorizePlaybookRevision().pipe(Effect.andThen(mutate({ ...input, operation: "revise" }))),
   ),
   j5_playbook_assign: runsPlaybook((input: typeof Movement.Type) =>
     mutate({ ...input, operation: "assign" }),

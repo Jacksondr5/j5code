@@ -132,7 +132,10 @@ it.effect(
         const worker = yield* A2ADeliveryWorker;
         const sql = yield* SqlClient.SqlClient;
 
-        const first = yield* inbound.receive(ask);
+        const first = yield* inbound.receive({
+          ...ask,
+          playbookOrigin: { kind: "scheduled", names: ["demo"] },
+        });
         assert.isFalse(first.replay);
         const again = yield* inbound.receive(ask);
         assert.isTrue(again.replay);
@@ -190,6 +193,7 @@ it.effect(
         assert.equal(attempts[0]!.originProjectId, homeProject, "the envelope names the origin");
         assert.equal(attempts[0]!.receiverProjectId, localProject);
         assert.equal(attempts[0]!.senderId, remoteAsker);
+        assert.deepStrictEqual(attempts[0]?.playbookOrigin, { kind: "scheduled", names: ["demo"] });
         assert.equal(attempts[0]!.exchangeRole, "ask");
         assert.isNull(yield* worker.runOnce, "nothing else to deliver");
 

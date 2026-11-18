@@ -7,6 +7,7 @@ import * as Effect from "effect/Effect";
 import {
   type McpClientCaller,
   McpInvocationContext,
+  linkedPlaybookOrigin,
   type McpInvocationScope,
   type McpThreadInvocationScope,
   requireThreadScope,
@@ -172,6 +173,7 @@ export const sendAsOutsideAgent = Effect.fn("j5.a2a.mcp.sendAsOutsideAgent")(fun
       commandId: commandIdFor(requestKey),
       senderParticipantId: outsideAgentParticipantId(caller.client.sessionId),
       senderName: caller.client.label,
+      ...linkedPlaybookOrigin(caller.client),
       to: input.to,
       receiverProjectId: receiver.projectId,
       message: input.message,

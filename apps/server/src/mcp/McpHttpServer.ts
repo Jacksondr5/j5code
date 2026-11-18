@@ -175,6 +175,16 @@ const withModeLimit = (
   invocation: McpInvocationContext.McpInvocationScope,
   request: HttpServerRequest.HttpServerRequest,
 ): McpInvocationContext.McpInvocationScope | undefined => {
+  if (invocation.client?.linked === true)
+    invocation = {
+      ...invocation,
+      client: {
+        ...invocation.client,
+        playbookOrigin: McpInvocationContext.parsePeerPlaybookOrigin(
+          request.headers[McpInvocationContext.PLAYBOOK_ORIGIN_HEADER],
+        ),
+      },
+    };
   const header = request.headers[McpInvocationContext.MODE_LIMIT_HEADER];
   if (header === undefined || invocation.client === undefined) return invocation;
   const limit = parseModeLimit(header);

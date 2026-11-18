@@ -1220,6 +1220,9 @@ const rawLayer: Layer.Layer<
             exchangeId,
             correlationId,
             payload: yield* encodeSentPayload({
+              ...(input.playbookOrigin === undefined
+                ? {}
+                : { playbookOrigin: input.playbookOrigin }),
               messageId,
               text: input.message,
               ...(input.attachments === undefined ? {} : { attachments: input.attachments }),

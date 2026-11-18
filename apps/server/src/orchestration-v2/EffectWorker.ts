@@ -1,3 +1,4 @@
+import { messageProvenance } from "./messageProvenance.ts";
 import { CommandId } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
@@ -306,12 +307,7 @@ export const layerExecutor: Layer.Layer<
                         ...(message.notification === undefined
                           ? {}
                           : { notification: message.notification }),
-                        ...(message.scheduledTaskId === undefined
-                          ? {}
-                          : { scheduledTaskId: message.scheduledTaskId }),
-                        ...(message.senderThreadId === undefined
-                          ? {}
-                          : { senderThreadId: message.senderThreadId }),
+                        ...messageProvenance(message),
                       })
                       .pipe(
                         // A disabled instance cannot retry this completed turn; its result stands.

@@ -1,3 +1,4 @@
+import { j5DispatchMissedClaudeSteer } from "../j5/a2a/claudeAgentSteers.ts";
 import * as DocumentText from "../provider/DocumentText.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as WorktreeSetupTracker from "../project/WorktreeSetupTracker.ts";
@@ -532,6 +533,23 @@ it.effect("keeps the schedule prompt snapshot across edits to a queued message",
     assert.equal(message?.scheduledTaskPrompt, "Run the audit");
     assert.equal(message?.senderThreadId, senderThreadId);
     assert.equal(message?.text, "Run a different audit");
+    const dispatched: Array<Parameters<typeof threads.dispatch>[0]> = [];
+    yield* j5DispatchMissedClaudeSteer(
+      {
+        ...threads,
+        dispatch: (command) => {
+          dispatched.push(command);
+          return threads.dispatch(command);
+        },
+      },
+      launched.threadId,
+      queued.message.id,
+    );
+    assert.deepInclude(dispatched[0], {
+      scheduledTaskId,
+      scheduledTaskPrompt: "Run the audit",
+      senderThreadId,
+    });
   }).pipe(Effect.provide(harness.layer));
 });
 

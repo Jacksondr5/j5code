@@ -55,6 +55,13 @@ describe("orchestration V2 contracts", () => {
     const stamped = { ...dispatch, scheduledTaskPrompt: "Run the audit." };
     expect(decodeCommand(stamped)).toMatchObject(stamped);
     expect(decodePublicCommand(dispatch)).toMatchObject(dispatch);
+    for (const metadata of [
+      { senderRunId: "parent-run" },
+      { playbookOrigin: { kind: "unscheduled" } },
+    ]) {
+      expect(decodeCommand({ ...dispatch, ...metadata })).toMatchObject(metadata);
+      expect(() => decodePublicCommand({ ...dispatch, ...metadata })).toThrow();
+    }
     expect(() => decodePublicCommand(stamped)).toThrow(
       "Scheduled task prompt snapshots are server-owned.",
     );

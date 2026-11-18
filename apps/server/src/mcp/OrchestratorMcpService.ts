@@ -110,6 +110,7 @@ import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts
 import * as ServerSettings from "../serverSettings.ts";
 import {
   clientModeCeiling,
+  linkedPlaybookOrigin,
   type McpInvocationScope,
   type McpThreadInvocationScope,
   requireThreadScope,
@@ -2879,6 +2880,7 @@ const make = Effect.gen(function* () {
                     }),
                     threadId,
                     senderThreadId: scope.thread.threadId,
+                    senderRunId: parentRun.id,
                     messageId: stableMessageId({
                       scope,
                       requestKey: key,
@@ -3107,6 +3109,7 @@ const make = Effect.gen(function* () {
       yield* resolveRuntimeMode(limits.runtimeMode, target.thread.runtimeMode);
       yield* resolveInteractionMode(limits.interactionMode, target.thread.interactionMode);
 
+      const senderRunId = parent && ThreadManagementService.latestActiveRun(parent)?.id;
       const mode = input.mode ?? "auto";
       const key = yield* requestKey(input.clientRequestId);
       const messageId = stableOperationMessageId({
@@ -3123,8 +3126,14 @@ const make = Effect.gen(function* () {
             operation: "thread-send",
           }),
           threadId: input.threadId,
-          ...(parent === undefined ? {} : { senderThreadId: parent.thread.id }),
+          ...(parent === undefined
+            ? {}
+            : {
+                senderThreadId: parent.thread.id,
+                ...(senderRunId === undefined ? {} : { senderRunId }),
+              }),
           messageId,
+          ...linkedPlaybookOrigin(scope.client),
           text: input.message,
           attachments: [],
           mode,

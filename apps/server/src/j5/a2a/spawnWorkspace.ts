@@ -7,6 +7,7 @@ import {
   type ModelSelection,
   type ProjectId,
   type ProviderInteractionMode,
+  type RunId,
   type RuntimeMode,
   type ThreadId,
 } from "@t3tools/contracts";
@@ -18,7 +19,7 @@ import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 
-import type { CrewWorkspaceOptions } from "@t3tools/contracts/j5";
+import type { CrewWorkspaceOptions, PlaybookOrigin } from "@t3tools/contracts/j5";
 import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
 import * as GitVcsDriver from "../../vcs/GitVcsDriver.ts";
 import {
@@ -318,6 +319,9 @@ export const spawnThreadCheckout = (
       : { branch: null, worktreePath: null };
 
 export interface StartSpawnBriefInput {
+  readonly senderThreadId?: ThreadId;
+  readonly senderRunId?: RunId;
+  readonly playbookOrigin?: PlaybookOrigin;
   readonly workspace: ResolvedSpawnWorkspace;
   readonly stableInput: SpawnStableInput;
   readonly ledgerProjectId: string;
@@ -647,6 +651,9 @@ const make = Effect.gen(function* () {
             commandId: spawnBriefCommandId(input.stableInput, input.workspace.type),
             threadId: input.threadId,
             messageId: input.messageId,
+            ...(input.senderThreadId === undefined ? {} : { senderThreadId: input.senderThreadId }),
+            ...(input.senderRunId === undefined ? {} : { senderRunId: input.senderRunId }),
+            ...(input.playbookOrigin === undefined ? {} : { playbookOrigin: input.playbookOrigin }),
             text: input.text,
             attachments: input.attachments ?? [],
             modelSelection: input.modelSelection,
@@ -671,6 +678,13 @@ const make = Effect.gen(function* () {
             },
             initialMessage: {
               messageId: input.messageId,
+              ...(input.senderThreadId === undefined
+                ? {}
+                : { senderThreadId: input.senderThreadId }),
+              ...(input.senderRunId === undefined ? {} : { senderRunId: input.senderRunId }),
+              ...(input.playbookOrigin === undefined
+                ? {}
+                : { playbookOrigin: input.playbookOrigin }),
               text: input.text,
               attachments: input.attachments ?? [],
             },

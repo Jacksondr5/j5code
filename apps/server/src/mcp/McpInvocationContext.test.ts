@@ -95,3 +95,18 @@ it("acts at an administrator's ceiling for a client approved above it", () => {
   expect(modes(scope("auto-accept-edits"), "auto").runtimeMode).toBe("auto-accept-edits");
   expect(modes(scope("full-access")).runtimeMode).toBe("full-access");
 });
+
+it("accepts a playbook origin only from a linked client and treats missing evidence as unverified", () => {
+  const client = { sessionId: "link", label: "Peer", access: "full-access" as const };
+  for (const header of [undefined, "malformed", '{"kind":"scheduled","names":["invalid name"]}'])
+    expect(McpInvocationContext.parsePeerPlaybookOrigin(header)).toEqual({ kind: "unverified" });
+  expect(McpInvocationContext.linkedPlaybookOrigin({ ...client, linked: true })).toEqual({
+    playbookOrigin: { kind: "unverified" },
+  });
+  expect(
+    McpInvocationContext.linkedPlaybookOrigin({
+      ...client,
+      playbookOrigin: { kind: "unscheduled" },
+    }),
+  ).toEqual({});
+});

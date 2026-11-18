@@ -41,6 +41,7 @@ import {
   TrimmedNonEmptyString,
   TurnItemId,
 } from "./baseSchemas.ts";
+import { PlaybookOrigin } from "./j5/playbookOrigin.ts";
 import { AuthMcpClientAccess } from "./auth.ts";
 import { ChatAttachment } from "./chatAttachment.ts";
 import { ThreadGuestShare } from "./guestShare.ts";
@@ -1297,6 +1298,8 @@ export const OrchestrationV2ConversationMessage = Schema.Struct({
   scheduledTaskId: Schema.optional(ScheduledTaskId),
   /** Authored schedule text at dispatch. Webhook substitutions are excluded. */
   scheduledTaskPrompt: Schema.optional(Schema.String),
+  senderRunId: Schema.optional(RunId),
+  playbookOrigin: Schema.optional(PlaybookOrigin),
   senderThreadId: Schema.optional(ThreadId),
   idleCompaction: Schema.optional(OrchestrationV2IdleCompaction),
   /**
@@ -3161,6 +3164,8 @@ export const OrchestrationV2Command = Schema.Union([
     ...OrchestrationV2CreationFields,
     scheduledTaskId: Schema.optional(ScheduledTaskId),
     scheduledTaskPrompt: OrchestrationV2ConversationMessage.fields.scheduledTaskPrompt,
+    senderRunId: Schema.optional(RunId),
+    playbookOrigin: Schema.optional(PlaybookOrigin),
     senderThreadId: Schema.optional(ThreadId),
     idleCompaction: Schema.optional(OrchestrationV2IdleCompaction),
     commandId: CommandId,
@@ -3601,7 +3606,10 @@ export const OrchestrationV2PublicCommand = OrchestrationV2Command.check(
     (command.type === "thread.create" || command.type === "delegated_task.request") &&
     command.agentPersonaAssignment !== undefined
       ? "Resolved agent persona assignments are server-owned."
-      : command.type === "message.dispatch" && command.scheduledTaskPrompt !== undefined
+      : command.type === "message.dispatch" &&
+          (command.scheduledTaskPrompt !== undefined ||
+            command.senderRunId !== undefined ||
+            command.playbookOrigin !== undefined)
         ? "Scheduled task prompt snapshots are server-owned."
         : undefined,
   ),

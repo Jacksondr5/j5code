@@ -6,6 +6,8 @@ export * from "./j5/actionError.ts";
 export * from "./j5/fleet.ts";
 export * from "./j5/peerPoll.ts";
 export * from "./j5/playbook.ts";
+export * from "./j5/playbookOrigin.ts";
+import { PlaybookOrigin } from "./j5/playbookOrigin.ts";
 export * from "./j5/access.ts";
 export * from "./j5/crewMemberModels.ts";
 export * from "./j5/crewMemberReasoning.ts";
@@ -1032,6 +1034,7 @@ export const PeerDeliveryLanding = Schema.Struct({
 export type PeerDeliveryLanding = typeof PeerDeliveryLanding.Type;
 
 export const PeerDeliveryRequest = Schema.Struct({
+  playbookOrigin: Schema.optional(PlaybookOrigin),
   messageId: Schema.String.check(Schema.isNonEmpty()),
   /** Absent for a message that waits its turn, which is every message from an older server. */
   landing: Schema.optional(PeerDeliveryLanding),
