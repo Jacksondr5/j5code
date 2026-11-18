@@ -809,6 +809,50 @@ export const makePlaybookStore = Effect.gen(function* () {
     }).pipe(permit.withPermits(1));
   }, Effect.mapError(storageError));
 
+  const reconcilePersonaApproval = Effect.fn("PlaybookStore.reconcilePersonaApproval")(function* (
+    runId: string,
+    owner: ThreadId,
+    definition: PlaybookDefinition,
+    stepId: string,
+    assessment: Effect.Success<ReturnType<typeof assessRequiredPersonas>>,
+    timestamp: string,
+  ) {
+    const picks = Object.fromEntries(
+      Object.entries(assessment.picks)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([persona, scope]) => [
+          persona,
+          {
+            ...scope,
+            stepIds: definition.steps
+              .filter((step) => step.persona === persona)
+              .map((step) => step.id)
+              .sort(),
+          },
+        ]),
+    );
+    const limited = assessment.statuses.flatMap((entry) =>
+      entry.status === "limited"
+        ? [`• ${entry.persona} for ${picks[entry.persona]?.stepIds.join(", ")}: ${entry.limits}`]
+        : [],
+    );
+    yield* checkpoints.replacePersonaApproval(
+      {
+        requestId: yield* crypto.uuidV4().pipe(Effect.orDie),
+        runId,
+        ownerThreadId: owner,
+        stepId,
+        stepTitle: "Playbook persona picks",
+        summary: `Approve one staffing launch per listed step using the listed models and saved access.\n\n${limited.join("\n")}`,
+        status: "pending",
+        createdAt: timestamp,
+        answeredAt: null,
+        reason: null,
+      },
+      picks,
+    );
+  });
+
   const start = Effect.fn("PlaybookStore.start")(function* (
     owner: ThreadId,
     workspaceRoot: string,
@@ -878,24 +922,14 @@ export const makePlaybookStore = Effect.gen(function* () {
             ${run.holderParticipantId}, ${run.holderThreadId}, ${run.assignedByParticipantId},
             (SELECT COALESCE(MAX(sequence), 0) FROM orchestration_events), ${encodeRequiredPersonas(statuses)}, ${run.personaBlockReason})`;
           if (holder !== null) yield* land(run.runId, key, run.currentStepId, timestamp, holder);
-          const limited = statuses.flatMap((entry) =>
-            entry.status === "limited" ? [`• ${entry.persona}: ${entry.limits}`] : [],
-          );
-          if (limited.length > 0)
-            yield* checkpoints.open(
-              {
-                requestId: yield* crypto.uuidV4().pipe(Effect.orDie),
-                runId: run.runId,
-                ownerThreadId: owner,
-                stepId: firstStep.id,
-                stepTitle: "Playbook persona picks",
-                summary: `Approve these persona picks for this run. The owner's launches of these personas can use their own models and saved access.\n\n${limited.join("\n")}`,
-                status: "pending",
-                createdAt: timestamp,
-                answeredAt: null,
-                reason: null,
-              },
-              picks,
+          if (Object.keys(picks).length > 0)
+            yield* reconcilePersonaApproval(
+              run.runId,
+              owner,
+              definition,
+              firstStep.id,
+              { statuses, picks },
+              timestamp,
             );
           yield* remember(owner, key, request, run.runId);
           return { run, replayed: false };
@@ -971,6 +1005,16 @@ export const makePlaybookStore = Effect.gen(function* () {
       yield* cancelOrphans();
       const previous = yield* replay(owner, input.client_request_id, request);
       if (previous) return yield* view(previous, true);
+      const revisedPersonas =
+        input.operation === "revise"
+          ? yield* assessRequiredPersonas(
+              [...new Set(namedSteps(input.steps).map(({ persona }) => persona))],
+              personas,
+              registry,
+              memberModels,
+              yield* threadPersona(owner),
+            )
+          : undefined;
       const result = yield* sql.withTransaction(
         Effect.gen(function* () {
           const previous = yield* replay(owner, input.client_request_id, request);
@@ -1137,10 +1181,18 @@ export const makePlaybookStore = Effect.gen(function* () {
                   ORDER BY landed_at DESC, rowid DESC LIMIT 1`;
               }
             }
+            yield* reconcilePersonaApproval(
+              run.runId,
+              owner,
+              definition!,
+              currentStepId,
+              revisedPersonas!,
+              updatedAt,
+            );
             revisionCount += 1;
             yield* sql`INSERT INTO j5_playbook_revision (run_id, request_id, basis, revised_at, owner_thread_id, from_step_id, to_step_id, steps_digest)
               VALUES (${run.runId}, ${input.client_request_id}, ${input.basis}, ${updatedAt}, ${owner}, ${run.currentStepId}, ${currentStepId}, ${latestRevision.stepsDigest})`;
-            yield* sql`UPDATE j5_playbook_run SET definition_json = ${encodeDefinition(definition!)}, revision_count = ${revisionCount}, latest_revision_json = ${encodeRevision(latestRevision)} WHERE run_id = ${run.runId}`;
+            yield* sql`UPDATE j5_playbook_run SET definition_json = ${encodeDefinition(definition!)}, required_personas_json = ${encodeRequiredPersonas(revisedPersonas!.statuses)}, revision_count = ${revisionCount}, latest_revision_json = ${encodeRevision(latestRevision)} WHERE run_id = ${run.runId}`;
           }
           yield* sql`UPDATE j5_playbook_run SET current_step_id = ${currentStepId}, status = ${status}, updated_at = ${updatedAt},
             cancel_reason = ${input.operation === "cancel" ? "agent_cancelled" : (run.cancelReason ?? null)},
@@ -1160,6 +1212,7 @@ export const makePlaybookStore = Effect.gen(function* () {
               cancelReason:
                 input.operation === "cancel" ? "agent_cancelled" : (run.cancelReason ?? null),
               definition,
+              requiredPersonas: revisedPersonas?.statuses ?? run.requiredPersonas,
               currentStepId,
               status,
               updatedAt,

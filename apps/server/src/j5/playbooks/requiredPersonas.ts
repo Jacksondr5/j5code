@@ -14,6 +14,9 @@ import { translateAgentPersonaProviderPolicy } from "../agents/agentPersonaProvi
 import { resolveAgentPersonaRoute } from "../agents/agentPersonaRouting.ts";
 import { CrewMemberModels } from "../agents/crewMemberModels.ts";
 
+import type { ApprovedPick } from "./personaPickApprovals.ts";
+import { agentPersonaPolicy } from "../agents/agentPersonas.ts";
+
 type Status = (typeof PlaybookRequiredPersonas.Type)[number];
 type Library = ReturnType<typeof createAgentPersonaLibrary>;
 
@@ -27,7 +30,10 @@ export const assessRequiredPersonas = Effect.fn("Playbooks.assessRequiredPersona
   },
 ) {
   if (ids.length === 0)
-    return { statuses: [] as ReadonlyArray<Status>, picks: {} as Readonly<Record<string, string>> };
+    return {
+      statuses: [] as ReadonlyArray<Status>,
+      picks: {} as Readonly<Record<string, Omit<ApprovedPick, "stepIds">>>,
+    };
   const catalog = yield* Effect.result(library.catalog());
   if (catalog._tag === "Failure") {
     return {
@@ -54,7 +60,7 @@ export const assessRequiredPersonas = Effect.fn("Playbooks.assessRequiredPersona
             agentAccessOf(translateAgentPersonaProviderPolicy(authority, driver)),
           ),
         };
-  const picks: Record<string, string> = Object.create(null);
+  const picks: Record<string, Omit<ApprovedPick, "stepIds">> = Object.create(null);
   const statuses = yield* Effect.forEach(ids, (persona) =>
     Effect.gen(function* (): Effect.fn.Return<Status> {
       const found = yield* Effect.result(findAgentPersonaDefinition(persona, cachedLibrary));
@@ -86,8 +92,62 @@ export const assessRequiredPersonas = Effect.fn("Playbooks.assessRequiredPersona
           return failures.length === 0 ? [] : [{ ...attempt, failures }];
         });
         if (blocked.length > 0) {
-          picks[persona] = definitionDigest(definition);
-          return { persona, status: "limited", limits: describeRouteAttempts(blocked, providers) };
+          const entries = blocked.flatMap(({ failures }) =>
+            failures.flatMap(({ selection }, index) => {
+              if (
+                !selection ||
+                failures.findIndex((other) => other.instanceId === selection.instanceId) !== index
+              )
+                return [];
+              const provider = providers.find(
+                (candidate) => candidate.instanceId === selection.instanceId,
+              );
+              if (!provider) return [];
+              return [
+                {
+                  instanceId: selection.instanceId,
+                  driver: provider.driver,
+                  model: selection.model,
+                  options: selection.options ?? [],
+                  ...agentAccessOf(
+                    translateAgentPersonaProviderPolicy(
+                      agentPersonaPolicy(definition),
+                      provider.driver,
+                    ),
+                  ),
+                  constraints: failures.flatMap((failure) =>
+                    failure.instanceId === selection.instanceId &&
+                    (failure.code === "model-not-eligible" ||
+                      failure.code === "access-above-caller")
+                      ? [failure.code]
+                      : [],
+                  ),
+                },
+              ];
+            }),
+          );
+          picks[persona] = {
+            projectId: owner!.projectId,
+            definitionDigest: definitionDigest(definition),
+            entries,
+          };
+          return {
+            persona,
+            status: "limited",
+            limits:
+              describeRouteAttempts(blocked, providers) +
+              " · " +
+              entries
+                .map((entry) =>
+                  [
+                    entry.instanceId,
+                    entry.model,
+                    ...entry.options.map((option) => option.id + "=" + String(option.value)),
+                    entry.sandbox ?? entry.runtimeMode,
+                  ].join(" "),
+                )
+                .join(", "),
+          };
         }
       }
       return { persona, status: "available" };
