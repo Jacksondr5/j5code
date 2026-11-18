@@ -262,7 +262,7 @@ const sharedThread = Effect.fn("test.sharedThread")(function* (on: ThreadId) {
     sessionId: session,
     subject: "one-time-token",
   });
-  const store = yield* makePlaybookStore;
+  const store = yield* makePlaybookStoreForTests;
   const sql = yield* SqlClient.SqlClient;
   const send = (
     from: typeof owner,
