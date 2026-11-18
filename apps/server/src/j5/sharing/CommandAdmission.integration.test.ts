@@ -290,17 +290,31 @@ const sharedThread = Effect.fn("test.sharedThread")(function* (on: ThreadId) {
       WHERE thread_id = ${on}
         AND json_extract(payload_json, '$.userMessageId') = ${`message:${on}:${name}`}
     `.pipe(Effect.map((rows) => RunId.make(rows[0]!.run_id)));
-  /** Ends the Owner's first turn and starts the queued one, as the queue does. */
-  const startQueued = Effect.fn("test.startQueued")(function* (first: RunId, queued: RunId) {
+  const statusOf = (run: RunId) =>
+    sql<{ readonly status: string }>`
+      SELECT status FROM orchestration_v2_projection_runs WHERE run_id = ${run}
+    `.pipe(Effect.map((rows) => rows[0]?.status));
+  /**
+   * Stop, as the person's Stop button sends it: it ends the turn and holds the queue in the one
+   * command, so the queue cannot start the next message on its own before the test does.
+   */
+  const stop = Effect.fn("test.stop")(function* (run: RunId) {
     yield* owner.dispatchCommand(
       {
         type: "run.interrupt",
-        commandId: CommandId.make(`command:${on}:interrupt`),
+        commandId: CommandId.make(`command:${on}:stop:${run}`),
         threadId: on,
-        runId: first,
+        runId: run,
+        holdQueue: true,
       },
       threads.dispatch,
     );
+    assert.strictEqual(yield* statusOf(run), "interrupted");
+  });
+  /** Stops the Owner's first turn and sends the held queued one now. */
+  const startQueued = Effect.fn("test.startQueued")(function* (first: RunId, queued: RunId) {
+    yield* stop(first);
+    assert.strictEqual(yield* statusOf(queued), "queued");
     yield* owner.dispatchCommand(
       {
         type: "queued-run.start",
@@ -310,13 +324,14 @@ const sharedThread = Effect.fn("test.sharedThread")(function* (on: ThreadId) {
       },
       threads.dispatch,
     );
+    assert.strictEqual(yield* statusOf(queued), "starting");
   });
   const save = (run: RunId, name: string) =>
     store.saveDefinitionFromTurn(on, run, { name, yaml: sampleYaml }).pipe(
       Effect.result,
       Effect.map((result) => (result._tag === "Success" ? "saved" : result.failure.code)),
     );
-  return { owner, collaborator, threads, send, runOf, startQueued, save };
+  return { owner, collaborator, threads, send, runOf, stop, startQueued, save };
 });
 
 const sampleYaml =
@@ -622,15 +637,7 @@ it.effect.each([
       assert.strictEqual(yield* thread.save(queued, `inherited-${outcome}`), outcome);
 
       // A message the Owner sends afresh carries nothing anyone else left.
-      yield* thread.owner.dispatchCommand(
-        {
-          type: "run.interrupt",
-          commandId: CommandId.make(`command:${on}:interrupt-second`),
-          threadId: on,
-          runId: queued,
-        },
-        thread.threads.dispatch,
-      );
+      yield* thread.stop(queued);
       yield* thread.send(thread.owner, "third", "Save the approved draft.", "start_immediately");
       assert.strictEqual(
         yield* thread.save(yield* thread.runOf("third"), "inherited-fresh"),
