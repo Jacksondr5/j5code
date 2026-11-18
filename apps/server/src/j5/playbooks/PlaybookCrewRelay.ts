@@ -151,11 +151,16 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
   ) {
     const event = stored.event;
     if (event.type !== "thread.archived" && event.type !== "thread.deleted") return;
-    yield* store.cancelOwner(
-      event.threadId,
-      event.type === "thread.archived" ? "owner_archived" : "owner_deleted",
-    );
-    yield* reconcileOwners();
+    const reason = event.type === "thread.archived" ? "owner_archived" : "owner_deleted";
+    for (const { run_id } of yield* store.ownerLifecycleRuns(event.threadId, stored.sequence)) {
+      yield* withRun(
+        run_id,
+        Effect.gen(function* () {
+          yield* store.cancelOwner(event.threadId, reason, run_id);
+          yield* finishCancellation(run_id);
+        }),
+      );
+    }
   });
 
   const handOff = Effect.fn("PlaybookCrewRelay.handOff")(function* (
