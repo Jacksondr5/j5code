@@ -2,6 +2,7 @@ import { ThreadId } from "@t3tools/contracts";
 import type { PlaybookCheckpoint, PlaybookCheckpointAnswer } from "@t3tools/contracts/j5";
 import * as Effect from "effect/Effect";
 import type * as SqlClient from "effect/sql/SqlClient";
+import { encodePickDigests } from "./personaPickApprovals.ts";
 import { playbookError } from "./definition.ts";
 
 import { reachableThreadQuery, type SessionReach } from "../sharing/PersonAccess.ts";
@@ -17,8 +18,10 @@ type Row = {
   created_at: string;
   answered_at: string | null;
   reason: string | null;
+  persona_picks_json: string | null;
 };
 const present = (row: Row): PlaybookCheckpoint => ({
+  ...(row.persona_picks_json === null ? {} : { kind: "persona_picks" as const }),
   requestId: row.request_id,
   runId: row.run_id,
   ownerThreadId: ThreadId.make(row.owner_thread_id),
@@ -37,24 +40,39 @@ export const makePlaybookCheckpoints = (sql: SqlClient.SqlClient) => {
       JOIN j5_playbook_run run ON run.checkpoint_request_id = checkpoint.request_id WHERE run.run_id = ${runId}`;
     return rows[0] ? present(rows[0]) : null;
   });
+  const personaApproval = Effect.fn("PlaybookCheckpoints.personaApproval")(function* (
+    runId: string,
+  ) {
+    const rows = yield* sql<Row>`SELECT * FROM j5_playbook_checkpoint
+      WHERE run_id = ${runId} AND persona_picks_json IS NOT NULL`;
+    return rows[0] ? present(rows[0]) : null;
+  });
   const close = Effect.fn("PlaybookCheckpoints.close")(function* (
     runId: string,
     timestamp: string,
+    closingRun = false,
   ) {
     yield* sql`UPDATE j5_playbook_checkpoint SET status = 'closed', answered_at = ${timestamp}
-      WHERE run_id = ${runId} AND status = 'pending'`;
+      WHERE run_id = ${runId} AND status = 'pending'
+        AND (${closingRun} OR persona_picks_json IS NULL)`;
     yield* sql`UPDATE j5_playbook_run SET checkpoint_request_id = NULL WHERE run_id = ${runId}`;
   });
-  const open = Effect.fn("PlaybookCheckpoints.open")(function* (request: PlaybookCheckpoint) {
-    yield* sql`INSERT INTO j5_playbook_checkpoint (request_id, run_id, owner_thread_id, step_id, step_title, summary, status, created_at)
-      VALUES (${request.requestId}, ${request.runId}, ${request.ownerThreadId}, ${request.stepId}, ${request.stepTitle}, ${request.summary}, 'pending', ${request.createdAt})`;
-    yield* sql`UPDATE j5_playbook_run SET checkpoint_request_id = ${request.requestId} WHERE run_id = ${request.runId}`;
+  const open = Effect.fn("PlaybookCheckpoints.open")(function* (
+    request: PlaybookCheckpoint,
+    picks?: Readonly<Record<string, string>>,
+  ) {
+    yield* sql`INSERT INTO j5_playbook_checkpoint (request_id, run_id, owner_thread_id, step_id, step_title, summary, status, created_at, persona_picks_json)
+      VALUES (${request.requestId}, ${request.runId}, ${request.ownerThreadId}, ${request.stepId}, ${request.stepTitle},
+        ${request.summary}, 'pending', ${request.createdAt}, ${picks === undefined ? null : encodePickDigests(picks)})`;
+    if (picks === undefined)
+      yield* sql`UPDATE j5_playbook_run SET checkpoint_request_id = ${request.requestId} WHERE run_id = ${request.runId}`;
   });
   const pendingRows = (reach: SessionReach, threadId?: ThreadId) => {
     const threadFilter =
       threadId === undefined ? sql`` : sql`AND checkpoint.owner_thread_id = ${threadId}`;
     const from = sql`FROM j5_playbook_checkpoint checkpoint
-      JOIN j5_playbook_run run ON run.checkpoint_request_id = checkpoint.request_id
+      JOIN j5_playbook_run run ON run.run_id = checkpoint.run_id
+        AND (checkpoint.persona_picks_json IS NOT NULL OR run.checkpoint_request_id = checkpoint.request_id)
       WHERE run.status = 'active' AND checkpoint.status = 'pending' ${threadFilter}`;
     if (reach.kind === "service" || (reach.kind === "person" && reach.serverLevel !== null))
       return from;
@@ -87,14 +105,28 @@ export const makePlaybookCheckpoints = (sql: SqlClient.SqlClient) => {
   const answer = Effect.fn("PlaybookCheckpoints.answer")(function* (
     input: PlaybookCheckpointAnswer,
     timestamp: string,
+    canApprovePersonaPicks: boolean,
   ) {
+    const canAnswerPersonaPicks = canApprovePersonaPicks || input.decision === "decline";
     const rows =
       yield* sql<Row>`UPDATE j5_playbook_checkpoint SET status = ${input.decision === "approve" ? "approved" : "declined"},
       answered_at = ${timestamp}, reason = ${input.reason?.trim() || null}
       WHERE request_id = ${input.requestId} AND owner_thread_id = ${input.threadId} AND status = 'pending'
+        AND (${canAnswerPersonaPicks} OR persona_picks_json IS NULL)
         AND EXISTS (SELECT 1 FROM j5_playbook_run run JOIN orchestration_v2_projection_threads thread ON thread.thread_id = run.owner_thread_id
-          WHERE run.checkpoint_request_id = ${input.requestId} AND run.status = 'active' AND thread.archived_at IS NULL AND thread.deleted_at IS NULL)
+          WHERE run.run_id = j5_playbook_checkpoint.run_id
+            AND (j5_playbook_checkpoint.persona_picks_json IS NOT NULL OR run.checkpoint_request_id = ${input.requestId}) AND run.status = 'active' AND thread.archived_at IS NULL AND thread.deleted_at IS NULL)
       RETURNING *`;
+    if (!rows[0] && !canAnswerPersonaPicks) {
+      const restricted = yield* sql`SELECT request_id FROM j5_playbook_checkpoint
+        WHERE request_id = ${input.requestId} AND owner_thread_id = ${input.threadId}
+          AND persona_picks_json IS NOT NULL`;
+      if (restricted.length > 0)
+        return yield* playbookError(
+          "capability_denied",
+          "Only a server Owner can approve playbook persona picks.",
+        );
+    }
     if (!rows[0])
       return yield* playbookError(
         "already_answered",
@@ -102,5 +134,5 @@ export const makePlaybookCheckpoints = (sql: SqlClient.SqlClient) => {
       );
     return present(rows[0]);
   });
-  return { current, close, open, pending, count, answer };
+  return { current, personaApproval, close, open, pending, count, answer };
 };

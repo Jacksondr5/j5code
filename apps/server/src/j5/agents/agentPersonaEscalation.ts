@@ -1,3 +1,5 @@
+import type { ThreadId } from "@t3tools/contracts";
+import { approvedPlaybookPersonaPicks } from "../playbooks/personaPickApprovals.ts";
 // @effect-diagnostics nodeBuiltinImport:off - a random id; no Crypto service is wired into this layer.
 import * as NodeCrypto from "node:crypto";
 import {
@@ -127,6 +129,9 @@ interface EscalationRow {
 export class AgentPersonaEscalations extends Context.Service<
   AgentPersonaEscalations,
   {
+    readonly approvedRunPicks: (
+      owner: ThreadId,
+    ) => Effect.Effect<ReadonlyMap<string, string>, SqlError | Schema.SchemaError>;
     /** Record a refused launch; returns its id. */
     readonly record: (input: {
       readonly callerParticipantId: string;
@@ -365,6 +370,9 @@ export const layer = Layer.effect(
     );
 
     return AgentPersonaEscalations.of({
+      approvedRunPicks: Effect.fn("AgentPersonaEscalations.approvedRunPicks")((owner) =>
+        approvedPlaybookPersonaPicks(owner).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
+      ),
       record,
       authorizeAsk,
       linkedAsk,

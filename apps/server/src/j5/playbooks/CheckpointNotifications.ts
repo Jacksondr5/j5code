@@ -11,11 +11,12 @@ export const unnotifiedCheckpoints = (sql: SqlClient.SqlClient) => sql<{
   request_id: string;
   owner_thread_id: string;
   step_title: string;
+  persona_picks: number;
   status: string;
   reason: string | null;
 }>`
       SELECT checkpoint.request_id, checkpoint.owner_thread_id, checkpoint.step_title,
-        checkpoint.status, checkpoint.reason
+        checkpoint.status, checkpoint.reason, (checkpoint.persona_picks_json IS NOT NULL) AS persona_picks
       FROM j5_playbook_checkpoint checkpoint
       JOIN j5_playbook_run run ON run.run_id = checkpoint.run_id
       WHERE checkpoint.status IN ('approved', 'declined') AND checkpoint.notified_at IS NULL AND run.status = 'active'`;
@@ -35,6 +36,7 @@ export const makeCheckpointNotifications = Effect.gen(function* () {
           stepTitle: row.step_title,
           status: row.status,
           reason: row.reason,
+          personaPicks: Boolean(row.persona_picks),
         };
         const target = yield* getThreadRecordsIfPresent(threads, request.ownerThreadId, []);
         if (!target || target.thread.archivedAt !== null || target.thread.deletedAt !== null)
@@ -46,7 +48,9 @@ export const makeCheckpointNotifications = Effect.gen(function* () {
           commandId: CommandId.make(`playbook-checkpoint:${request.requestId}`),
           messageId: MessageId.make(`playbook-checkpoint:${request.requestId}`),
           threadId: request.ownerThreadId,
-          text: `Playbook checkpoint "${request.stepTitle}" was ${request.status}.${request.reason ? ` Reason: ${request.reason}` : ""} This decision applies to that submitted request. Retrieve j5_playbook_current before continuing; changed work may need fresh approval.`,
+          text: request.personaPicks
+            ? `The run's persona picks were ${request.status}.${request.reason ? ` Reason: ${request.reason}` : ""} Retrieve j5_playbook_current before staffing the run.`
+            : `Playbook checkpoint "${request.stepTitle}" was ${request.status}.${request.reason ? ` Reason: ${request.reason}` : ""} This decision applies to that submitted request. Retrieve j5_playbook_current before continuing; changed work may need fresh approval.`,
           attachments: [],
           modelSelection: target.thread.modelSelection,
           dispatchMode: { type: "start_immediately" },

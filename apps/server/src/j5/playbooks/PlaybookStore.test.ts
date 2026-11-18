@@ -7,11 +7,18 @@ import { PersonAccess } from "../sharing/PersonAccess.ts";
 import { SharedThreads } from "../sharing/SharedThreads.ts";
 import { ParticipantId } from "../a2a/contracts.ts";
 import { AuthSessionId } from "@t3tools/contracts";
-import { seedPersonas, seedPlaybookOwners } from "./testFixtures.ts";
+import { makePlaybookStoreForTests, seedPersonas, seedPlaybookOwners } from "./testFixtures.ts";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
-import { AuthOrchestrationReadScope, ThreadId } from "@t3tools/contracts";
+import {
+  AuthOrchestrationReadScope,
+  ProjectId,
+  ProviderDriverKind,
+  ProviderInstanceId,
+  ThreadId,
+  type ServerProvider,
+} from "@t3tools/contracts";
 import {
   J5_PLAYBOOK_WS_METHODS,
   PLAYBOOK_MAX_BYTES,
@@ -34,6 +41,12 @@ import { parse, stringify } from "yaml";
 
 import { ServerConfig } from "../../config.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
+import { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
+import { layer as personaEscalationsLayer } from "../agents/agentPersonaEscalation.ts";
+import { pickAgentPersona } from "../agents/agentPersonaPick.ts";
+import { CrewMemberModels } from "../agents/crewMemberModels.ts";
+import { AgentCrewInstanceService } from "../a2a/AgentCrewInstanceService.ts";
+import { participantIdForThread } from "../a2a/HomeRegistrar.ts";
 import { ProjectService } from "../../project/ProjectService.ts";
 import { AnalyticsService } from "../../telemetry/AnalyticsService.ts";
 import { runJ5A2AMigrations } from "../a2a/Migrations.ts";
@@ -73,7 +86,7 @@ const initializeStore = Effect.gen(function* () {
     "healthy-owner",
     ...Array.from({ length: PLAYBOOK_RUNS_PAGE_SIZE + 1 }, (_, index) => `owner-${index}`),
   ]);
-  return yield* makePlaybookStore;
+  return yield* makePlaybookStoreForTests;
 });
 
 const makeFixture = Effect.gen(function* () {
@@ -223,7 +236,7 @@ it.effect(
     Effect.gen(function* () {
       const { workspaceRoot, fs, write, filename } = yield* makeFixture;
       let reads = 0;
-      const store = yield* makePlaybookStore.pipe(
+      const store = yield* makePlaybookStoreForTests.pipe(
         Effect.provideService(FileSystem.FileSystem, {
           ...fs,
           readFileString: (file, encoding) => {
@@ -276,7 +289,7 @@ it.effect("reads no files for twenty thread runs", () =>
   Effect.gen(function* () {
     const { workspaceRoot, fs, write, filename } = yield* makeFixture;
     let reads = 0;
-    const store = yield* makePlaybookStore.pipe(
+    const store = yield* makePlaybookStoreForTests.pipe(
       Effect.provideService(FileSystem.FileSystem, {
         ...fs,
         readFileString: (file, encoding) => {
@@ -908,7 +921,7 @@ it.effect(
           client_request_id: "new-next",
         });
         assert.equal(moved.currentStepId, "implement");
-        const newStore = yield* makePlaybookStore;
+        const newStore = yield* makePlaybookStoreForTests;
         assert.equal((yield* newStore.current(owner, runId)).currentStepId, "implement");
       }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: databasePath })));
     }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
@@ -1063,7 +1076,7 @@ it.effect(
       const { workspaceRoot, fs } = yield* makeFixture;
       const sql = yield* SqlClient.SqlClient;
       let reads = 0;
-      const store = yield* makePlaybookStore.pipe(
+      const store = yield* makePlaybookStoreForTests.pipe(
         Effect.provideService(FileSystem.FileSystem, {
           ...fs,
           readFileString: (file, encoding) =>
@@ -1232,7 +1245,7 @@ it.effect("reads a definition without personas exactly as before, with no warnin
   }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );
 
-it.effect("returns step personas from discover, read, and every step tool", () =>
+it.effect("returns required personas from discover, read, and start", () =>
   Effect.gen(function* () {
     const { store, workspaceRoot, write } = yield* makeFixture;
     yield* seedPersonas([
@@ -1250,32 +1263,271 @@ it.effect("returns step personas from discover, read, and every step tool", () =
     assert.deepStrictEqual((yield* store.read(workspaceRoot, "demo")).steps, staffed().steps);
 
     const run = yield* store.start(owner, workspaceRoot, "demo", "start");
-    assert.equal(run.currentStep?.persona, "planner");
-    assert.equal((yield* store.current(owner)).currentStep?.persona, "planner");
-    const next = yield* store.mutate(owner, {
-      operation: "next",
-      runId: run.runId,
-      expectedStepId: "research",
-      client_request_id: "next",
-    });
-    assert.equal(next.currentStep?.persona, "builder-bot");
-    const back = yield* store.mutate(owner, {
-      operation: "back",
-      runId: run.runId,
-      expectedStepId: "implement",
-      client_request_id: "back",
-    });
-    assert.equal(back.currentStep?.persona, "planner");
-    const advanced = yield* store.mutate(owner, {
-      operation: "next",
-      runId: run.runId,
-      expectedStepId: "research",
-      client_request_id: "next-again",
-    });
-    assert.equal(advanced.currentStep?.persona, "builder-bot");
-    // Progress on the board stays titles only.
-    assert.deepStrictEqual(advanced.steps[0], { id: "research", title: "Research" });
+    assert.isNull(run.currentStep);
+    assert.deepEqual(
+      run.requiredPersonas?.map(({ persona, status }) => [persona, status]),
+      [
+        ["planner", "unavailable"],
+        ["builder-bot", "unavailable"],
+      ],
+    );
+    assert.deepStrictEqual(run.steps[0], { id: "research", title: "Research" });
   }).pipe(Effect.scoped, Effect.provide(CatalogLayer)),
+);
+
+const requiredPersonaProviders = [
+  { kind: "codex", models: ["gpt-5.5", "allowed-model"], reasoningId: "reasoningEffort" },
+  { kind: "claudeAgent", models: ["claude-opus-5-5"], reasoningId: "effort" },
+].map(
+  ({ kind, models, reasoningId }) =>
+    ({
+      instanceId: ProviderInstanceId.make(kind),
+      driver: ProviderDriverKind.make(kind),
+      enabled: true,
+      installed: true,
+      status: "ready",
+      auth: { status: "authenticated" },
+      availability: "available",
+      models: models.map((slug) => ({
+        slug,
+        name: slug,
+        capabilities: {
+          optionDescriptors: [
+            {
+              id: reasoningId,
+              label: "Reasoning",
+              type: "select",
+              options: [{ id: "high", label: "High" }],
+            },
+          ],
+        },
+      })),
+    }) as unknown as ServerProvider,
+);
+const requiredPersonaRoutingLayer = Layer.mergeAll(
+  Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed(requiredPersonaProviders) }),
+  Layer.mock(CrewMemberModels)({
+    eligibility: () => Effect.succeed(({ model }) => model === "allowed-model"),
+  }),
+  Layer.mock(ThreadManagementService)({}),
+  personaEscalationsLayer.pipe(Layer.provide(Layer.mock(AgentCrewInstanceService)({}))),
+);
+
+it.effect("groups limited picks for one run and keeps reviewer preference and step approval", () =>
+  Effect.gen(function* () {
+    const { workspaceRoot, write } = yield* makeFixture;
+    const store = yield* makePlaybookStore;
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`UPDATE orchestration_v2_projection_threads SET runtime_mode = 'approval-required'
+      WHERE thread_id = ${owner}`;
+    yield* seedPersonas([
+      { id: "ready", enabled: true, codexModel: "allowed-model" },
+      { id: "reviewer", enabled: true, independentReviewer: true },
+      { id: "researcher", enabled: true, codexModel: "allowed-model", access: "full-access" },
+      { id: "unavailable", enabled: false },
+    ]);
+    const firstStep = { ...definition(["plan"]).steps[0]!, approval: "required" as const };
+    const procedure: PlaybookDefinition = {
+      ...definition(),
+      steps: [
+        firstStep,
+        { id: "staff", title: "Staff", prompt: "Staff the remaining steps." },
+        ...["ready", "reviewer", "researcher", "unavailable"].map((persona) => ({
+          id: persona,
+          title: persona,
+          prompt: persona,
+          persona,
+        })),
+      ],
+    };
+    yield* write("demo", procedure);
+    const run = yield* store.start(owner, workspaceRoot, "demo", "start");
+    assert.deepEqual(
+      run.requiredPersonas?.map(({ persona, status }) => [persona, status]),
+      [
+        ["ready", "available"],
+        ["reviewer", "limited"],
+        ["researcher", "limited"],
+        ["unavailable", "unavailable"],
+      ],
+    );
+    assert.equal(run.personaApproval?.kind, "persona_picks");
+    assert.include(run.personaApproval?.summary ?? "", "researcher");
+    assert.include(run.personaApproval?.summary ?? "", "gpt-5.5");
+    assert.include(run.personaApproval?.summary ?? "", "broader than the Supervised");
+    assert.notInclude(run.personaApproval?.summary ?? "", "unavailable");
+    assert.deepEqual(
+      (yield* store.start(owner, workspaceRoot, "demo", "start")).personaApproval,
+      run.personaApproval,
+    );
+
+    const pick = (ownerThreadId: ThreadId) =>
+      pickAgentPersona({
+        personaId: "reviewer",
+        source: "agent",
+        ownerThreadId,
+        caller: { approvedLevel: "full-access" },
+        projectId: ProjectId.make("project:playbook-test"),
+        reviewAuthors: { threads: [], models: ["gpt-5.5"] },
+      });
+    assert.equal((yield* Effect.flip(pick(owner))).code, "models_exhausted");
+    const move = {
+      operation: "next",
+      runId: run.runId,
+      expectedStepId: firstStep.id,
+      client_request_id: "leave-step",
+      summary: "Plan reviewed.",
+    } as const;
+    const requireCheckpoint = store.mutate(owner, move).pipe(Effect.flip);
+    assert.equal((yield* requireCheckpoint).code, "approval_pending");
+    const [personaRequest, stepRequest] = [
+      run.personaApproval!,
+      (yield* store.current(owner)).checkpoint!,
+    ];
+    assert.lengthOf(yield* store.pendingCheckpoints({ kind: "service" }), 2);
+    const answer = {
+      threadId: owner,
+      requestId: personaRequest.requestId,
+      decision: "approve",
+    } as const;
+    assert.equal(
+      (yield* Effect.flip(store.answerCheckpoint(answer, false))).code,
+      "capability_denied",
+    );
+    yield* store.answerCheckpoint(answer, true);
+    assert.equal((yield* requireCheckpoint).code, "approval_pending");
+    assert.equal((yield* store.current(owner)).checkpoint?.requestId, stepRequest.requestId);
+    assert.equal((yield* Effect.flip(pick(otherOwner))).code, "models_exhausted");
+
+    const reviewer = (yield* pick(owner)).assignment;
+    assert.deepEqual(reviewer.pickSource, { kind: "person" });
+    assert.equal(reviewer.resolvedModelSelection.model, "claude-opus-5-5");
+    assert.equal(reviewer.reviewIndependence?.outcome, "different-model");
+    yield* store.answerCheckpoint({ ...answer, requestId: stepRequest.requestId });
+    assert.equal((yield* store.current(owner)).checkpoint?.status, "approved");
+    assert.equal((yield* store.mutate(owner, move)).currentStepId, "staff");
+    assert.equal((yield* store.current(owner)).personaApproval?.status, "approved");
+    yield* store.mutate(owner, {
+      operation: "revise",
+      runId: run.runId,
+      expectedStepId: "staff",
+      basis: "asked",
+      client_request_id: "revise",
+      steps: procedure.steps.map((step) =>
+        step.id === "staff" ? { ...step, prompt: "Prepare staffing." } : step,
+      ),
+    });
+    assert.deepEqual((yield* pick(owner)).assignment.pickSource, { kind: "person" });
+    yield* store.mutate(owner, {
+      operation: "cancel",
+      runId: run.runId,
+      client_request_id: "cancel",
+    });
+    assert.equal((yield* Effect.flip(pick(owner))).code, "models_exhausted");
+  }).pipe(Effect.provide(requiredPersonaRoutingLayer), Effect.scoped, Effect.provide(CatalogLayer)),
+);
+
+it.effect(
+  "withholds an unstaffed first step, refuses wrong holders and recovers the same run",
+  () =>
+    Effect.gen(function* () {
+      const { workspaceRoot, write } = yield* makeFixture;
+      const store = yield* makePlaybookStore;
+      const sql = yield* SqlClient.SqlClient;
+      yield* seedPersonas([{ id: "reviewer", enabled: true }]);
+      const { assignment } = yield* pickAgentPersona({
+        personaId: "reviewer",
+        source: "person",
+        caller: { approvedLevel: "full-access" },
+        projectId: ProjectId.make("project:playbook-test"),
+      });
+      yield* sql`UPDATE orchestration_v2_projection_threads
+      SET payload_json = ${JSON.stringify({ agentPersonaAssignment: assignment })} WHERE thread_id = ${otherOwner}`;
+      const project = "persona-handoff-test";
+      const wrongThread = ThreadId.make("healthy-owner");
+      const ownerParticipant = participantIdForThread(owner);
+      const correct = participantIdForThread(otherOwner);
+      const wrong = participantIdForThread(wrongThread);
+      yield* sql`INSERT INTO j5_a2a_project_ledger (project_id, created_at) VALUES (${project}, 'now')`;
+      for (const [id, thread] of [
+        [ownerParticipant, owner],
+        [correct, otherOwner],
+        [wrong, wrongThread],
+      ] as const) {
+        yield* sql`INSERT INTO j5_a2a_membership (project_id, participant_id, participant_kind, thread_id, joined_seq, updated_seq, payload)
+        VALUES (${project}, ${id}, 'agent', ${thread}, 1, 1, '{}')`;
+        if (id !== ownerParticipant)
+          yield* sql`INSERT INTO j5_a2a_participant_placement
+          (project_id, participant_id, provenance_kind, provenance_participant_id,
+            provenance_source, placement_parent_id, created_event_seq, updated_event_seq)
+          VALUES (${project}, ${id}, 'spawned-by', ${ownerParticipant}, 'j5_spawn', ${ownerParticipant}, 1, 1)`;
+      }
+      const initial = definition(["review", "continue"]);
+      yield* write("demo", {
+        ...initial,
+        steps: [{ ...initial.steps[0]!, persona: "reviewer" }, initial.steps[1]!],
+      });
+      const run = yield* store.start(owner, workspaceRoot, "demo", "start", wrong);
+      assert.isNull(run.currentStep);
+      assert.isNull(run.holderThreadId);
+      assert.isNull(yield* store.latestLanding(run.runId, "review"));
+      const current = { runId: run.runId, expectedStepId: "review" };
+      for (const operation of ["assign", "next", "complete"] as const)
+        assert.equal(
+          (yield* Effect.flip(
+            store.mutate(owner, {
+              ...current,
+              operation,
+              client_request_id: `refused-${operation}`,
+            }),
+          )).code,
+          "required_persona_mismatch",
+        );
+      assert.equal(
+        (yield* Effect.flip(
+          store.mutate(owner, {
+            ...current,
+            operation: "assign",
+            assignee: wrong,
+            client_request_id: "wrong-holder",
+          }),
+        )).code,
+        "required_persona_mismatch",
+      );
+      const recovered = yield* store.mutate(owner, {
+        ...current,
+        operation: "assign",
+        assignee: correct,
+        client_request_id: "matching-holder",
+      });
+      assert.equal(recovered.runId, run.runId);
+      assert.equal(recovered.currentStep?.persona, "reviewer");
+      assert.equal(recovered.holderThreadId, otherOwner);
+      const moved = yield* store.mutate(owner, {
+        ...current,
+        operation: "next",
+        client_request_id: "next-after-recovery",
+      });
+      assert.equal(moved.currentStepId, "continue");
+      assert.equal(
+        (yield* Effect.flip(
+          store.mutate(owner, {
+            ...current,
+            expectedStepId: "continue",
+            operation: "back",
+            client_request_id: "cannot-take-back",
+          }),
+        )).code,
+        "required_persona_mismatch",
+      );
+      const owned = yield* store.start(otherOwner, workspaceRoot, "demo", "matching-owner");
+      assert.equal(owned.holderThreadId, otherOwner);
+      assert.equal(owned.currentStep?.persona, "reviewer");
+    }).pipe(
+      Effect.provide(requiredPersonaRoutingLayer),
+      Effect.scoped,
+      Effect.provide(CatalogLayer),
+    ),
 );
 
 it.effect("warns about a disabled or missing persona without invalidating the definition", () =>
@@ -1288,13 +1540,13 @@ it.effect("warns about a disabled or missing persona without invalidating the de
         code: "persona_disabled",
         stepId: "research",
         persona: "planner",
-        message: `Step "research" names persona "planner", which is turned off.`,
+        message: `Step "research" has a required persona disabled in this environment: "planner".`,
       },
       {
         code: "persona_missing",
         stepId: "implement",
         persona: "builder-bot",
-        message: `Step "implement" names persona "builder-bot", which is not in this environment's library.`,
+        message: `Step "implement" has a required persona missing from this environment's library: "builder-bot".`,
       },
     ];
     const [entry] = (yield* store.discover(workspaceRoot)).playbooks;
@@ -1386,6 +1638,19 @@ it.effect("reports personas as unverified when persona configuration cannot be r
       ],
     );
     assert.include(read.warnings[0]?.message ?? "", "could not be checked");
+    const run = yield* store.start(owner, workspaceRoot, "demo", "start");
+    assert.equal(run.status, "active");
+    assert.deepEqual(
+      run.requiredPersonas?.map((entry) => [
+        entry.persona,
+        entry.status,
+        "code" in entry ? entry.code : null,
+      ]),
+      [
+        ["planner", "unavailable", "library_unreadable"],
+        ["builder-bot", "unavailable", "library_unreadable"],
+      ],
+    );
   }).pipe(Effect.scoped, Effect.provide(CatalogLayer)),
 );
 
@@ -1750,7 +2015,7 @@ it.effect(
       assert.equal(yield* fs.readFileString(path.join(stateDir, "playbooks/shared.yaml")), yaml);
       assert.isFalse(yield* fs.exists(path.join(stateDir, "playbooks/invalid.yaml")));
       // Recreating the store reloads the same library files.
-      const restarted = yield* makePlaybookStore;
+      const restarted = yield* makePlaybookStoreForTests;
       assert.equal((yield* restarted.read("", "shared")).title, "Test playbook");
     }).pipe(Effect.scoped, Effect.provide(CatalogLayer)),
 );
@@ -1816,7 +2081,7 @@ it.effect("revises only the owner's run copy and records an idempotent attribute
     assert.equal(revised.latestRevision?.revisedAt, revised.updatedAt);
     assert.deepStrictEqual((yield* store.current(otherOwner, other.runId)).steps, other.steps);
     assert.equal(yield* fs.readFileString(filename("demo")), saved);
-    const restarted = yield* makePlaybookStore;
+    const restarted = yield* makePlaybookStoreForTests;
     assert.deepStrictEqual((yield* restarted.current(owner)).steps, revised.steps);
     assert.isTrue((yield* restarted.mutate(owner, input)).replayed);
     assert.equal(
@@ -1954,7 +2219,7 @@ it.effect(
         "approval_pending",
       );
       assert.equal((yield* store.pendingCheckpoints({ kind: "service" })).length, 1);
-      const restarted = yield* makePlaybookStore;
+      const restarted = yield* makePlaybookStoreForTests;
       assert.deepStrictEqual((yield* restarted.current(owner)).checkpoint, first);
       const handlersFor = (level: "owner" | "collaborator" | "viewer") =>
         makeCheckpointRpcHandlers({
@@ -2014,7 +2279,8 @@ it.effect(
         ReadonlyArray<Parameters<ThreadManagementService["Service"]["dispatch"]>[0]>
       >([]);
       const sql = yield* SqlClient.SqlClient;
-      yield* sql`INSERT INTO j5_playbook_checkpoint
+      yield* sql`INSERT INTO j5_playbook_checkpoint (request_id, run_id, owner_thread_id, step_id,
+        step_title, summary, status, created_at, answered_at, reason, notified_at)
         SELECT 'retry-notice', run_id, owner_thread_id, step_id, step_title, summary,
                'approved', created_at, answered_at, reason, NULL
         FROM j5_playbook_checkpoint WHERE request_id = ${first.requestId}`;

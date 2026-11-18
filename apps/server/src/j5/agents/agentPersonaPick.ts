@@ -2,6 +2,7 @@ import {
   AgentPersonaBlockCode,
   AgentPersonaPickConstraint,
   isAgentPersonaReasoningOptionId,
+  type AgentPersonaAuthorityPolicy,
   type ProviderDriverKind,
   type ProviderOptionSelection,
   type OrchestrationV2AgentPersonaCommandAssignment,
@@ -26,7 +27,11 @@ import {
   AgentPersonaWaiverScope,
   personaBlockText,
 } from "./agentPersonaEscalation.ts";
-import { driverLabel, prepareAgentPersonaLaunch } from "./agentPersonaLaunch.ts";
+import {
+  driverLabel,
+  findAgentPersonaDefinition,
+  prepareAgentPersonaLaunch,
+} from "./agentPersonaLaunch.ts";
 import {
   definitionDigest,
   makeAgentPersonaLibrary,
@@ -133,6 +138,18 @@ const withinAccess = (child: AgentAccess, limit: AgentAccess) =>
   !broaderThan(child.runtimeMode, limit.runtimeMode) &&
   (limit.sandbox !== "readOnly" || child.sandbox === "readOnly");
 
+export const agentPersonaAccessLimit =
+  (
+    limit: AgentAccess,
+    accessOn: (authority: AgentPersonaAuthorityPolicy, driver: ProviderDriverKind) => AgentAccess,
+  ): AgentPersonaPickLimits["accessAbove"] =>
+  (authority, driver) => {
+    const child = accessOn(authority, driver);
+    return withinAccess(child, limit)
+      ? undefined
+      : `on ${driverLabel(driver)} it would run with ${accessLabel(child)}, which is broader than the ${accessLabel(limit)} its caller runs with`;
+  };
+
 /**
  * The access limit on anything an agent picks. `subject` names the worker, e.g. "Custom seat
  * reviewer".
@@ -198,6 +215,8 @@ const reviewAuthorsFor = Effect.fn("j5.agents.reviewAuthorsFor")(function* (
 export interface AgentPersonaPickInput {
   readonly personaId: AgentPersonaId;
   readonly source: AgentPersonaPickSourceKind;
+  /** The actual launching thread, when it can hold a playbook approval. */
+  readonly ownerThreadId?: ThreadId | undefined;
   readonly caller: AgentPersonaPickCaller;
   readonly projectId: ProjectId;
   readonly pinned?: {
@@ -223,9 +242,31 @@ export interface AgentPersonaPickInput {
  * `escalateFor`; a granted `allowOnce` lifts one limit, and the caller spends it on launch.
  */
 export const pickAgentPersona = Effect.fn("j5.agents.pickAgentPersona")(function* (
-  input: AgentPersonaPickInput,
+  requested: AgentPersonaPickInput,
 ) {
   const escalations = yield* AgentPersonaEscalations;
+  const approvedPickDigest =
+    requested.source !== "agent" || requested.ownerThreadId === undefined
+      ? undefined
+      : (yield* escalations.approvedRunPicks(requested.ownerThreadId).pipe(
+          Effect.mapError(
+            () =>
+              new AgentPersonaPickError({
+                message: "Playbook persona approvals could not be read.",
+                constraint: null,
+              }),
+          ),
+        )).get(requested.personaId);
+  const approvedDefinition =
+    approvedPickDigest === undefined
+      ? undefined
+      : yield* findAgentPersonaDefinition(requested.personaId, yield* makeAgentPersonaLibrary).pipe(
+          Effect.orElseSucceed(() => undefined),
+        );
+  const input =
+    approvedDefinition !== undefined && definitionDigest(approvedDefinition) === approvedPickDigest
+      ? { ...requested, source: "person" as const, approvedPickDigest }
+      : requested;
   const agentPick = input.source === "agent";
   // A person's pick has no limits to lift, so it neither checks nor spends a grant.
   const grant =
@@ -316,7 +357,7 @@ const describeScope = (scope: AgentPersonaWaiverScope) =>
     .join(" or ");
 
 const pickWithin = Effect.fn("j5.agents.pickWithin")(function* (
-  input: AgentPersonaPickInput,
+  input: AgentPersonaPickInput & { readonly approvedPickDigest?: string | undefined },
   grant:
     | { readonly constraint: AgentPersonaPickConstraint; readonly scope: AgentPersonaWaiverScope }
     | undefined,
@@ -336,6 +377,11 @@ const pickWithin = Effect.fn("j5.agents.pickWithin")(function* (
   const library: Library = { ...sources, catalog: () => Effect.succeed(catalog) };
   const definition = catalog.definitions.find(({ id }) => id === input.personaId);
   const digest = definition === undefined ? undefined : definitionDigest(definition);
+  if (input.approvedPickDigest !== undefined && digest !== input.approvedPickDigest)
+    return yield* new AgentPersonaPickError({
+      message: `Persona ${input.personaId} changed during this launch. Retry to use its current definition.`,
+      constraint: null,
+    });
   if (grant !== undefined && digest !== undefined && digest !== grant.scope.definitionDigest)
     return yield* new AgentPersonaPickError({
       message: `allow_once ${input.allowOnce} was granted under an earlier version of persona ${input.personaId}'s definition, so it no longer applies; it stays unspent. Ask the person again.`,
@@ -376,12 +422,7 @@ const pickWithin = Effect.fn("j5.agents.pickWithin")(function* (
       : {
           eligible:
             input.eligible ?? (yield* (yield* CrewMemberModels).eligibility(input.projectId)),
-          accessAbove: (authority, driver) => {
-            const child = accessOn(authority, driver);
-            return withinAccess(child, limit)
-              ? undefined
-              : `on ${driverLabel(driver)} it would run with ${accessLabel(child)}, which is broader than the ${accessLabel(limit)} its caller runs with`;
-          },
+          accessAbove: agentPersonaAccessLimit(limit, accessOn),
           waived:
             grant === undefined
               ? undefined

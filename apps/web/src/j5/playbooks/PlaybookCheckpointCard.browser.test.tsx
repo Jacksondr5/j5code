@@ -10,11 +10,15 @@ vi.mock("../state", async () => {
   const allowed = Atom.make(true);
   const writer = Atom.make("collaborator");
   const viewer = Atom.make("viewer");
+  const ownerAccess = Atom.make({ kind: "person", owner: true });
+  const writerAccess = Atom.make({ kind: "person", owner: false });
   return {
     j5Environment: {
       answerPlaybookCheckpoint: { permissionAtom: () => allowed, run: calls.answer },
     },
     j5Sharing: {
+      connectionAccess: (environmentId: string) =>
+        environmentId === "owner" ? ownerAccess : writerAccess,
       threadLevel: (environmentId: string) => (environmentId === "read-only" ? viewer : writer),
     },
     playbookCheckpointsQueryAtom: () => Atom.make(null),
@@ -81,4 +85,21 @@ it("Viewers and disconnected clients can read but cannot answer", async () => {
   );
   await expect.element(screen.getByRole("button", { name: "Approve", exact: true })).toBeDisabled();
   expect(calls.answer).not.toHaveBeenCalled();
+});
+
+it("only a server Owner can approve the grouped persona picks", async () => {
+  setup();
+  const request = { ...checkpoint, kind: "persona_picks" as const };
+  await using screen = await render(
+    <PlaybookCheckpointCard request={request} environmentId={EnvironmentId.make("writeable")} />,
+  );
+  await expect.element(screen.getByRole("button", { name: "Approve", exact: true })).toBeDisabled();
+  await expect.element(screen.getByRole("button", { name: "Decline", exact: true })).toBeEnabled();
+  const environmentId = EnvironmentId.make("owner");
+  await screen.rerender(<PlaybookCheckpointCard request={request} environmentId={environmentId} />);
+  await userEvent.click(screen.getByRole("button", { name: "Approve", exact: true }));
+  expect(calls.answer).toHaveBeenCalledWith(expect.anything(), {
+    environmentId,
+    input: { threadId: request.ownerThreadId, requestId: request.requestId, decision: "approve" },
+  });
 });

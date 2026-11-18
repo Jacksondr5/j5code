@@ -2,7 +2,7 @@ import * as Schema from "effect/Schema";
 import { Rpc, RpcGroup } from "effect/rpc";
 import { EnvironmentAuthorizationError } from "../auth.ts";
 import { ProjectId, ThreadId } from "../baseSchemas.ts";
-import { AgentPersonaId } from "./agentPersona.ts";
+import { AgentPersonaBlockCode, AgentPersonaId } from "./agentPersona.ts";
 
 export const PLAYBOOK_MAX_BYTES = 262144;
 export const PLAYBOOK_MAX_STEPS = 100;
@@ -38,7 +38,7 @@ export const J5_PLAYBOOK_WS_METHODS = {
 } as const;
 
 const Text = Schema.String.check(Schema.isPattern(/\S/));
-/** `persona` names the library persona a step wants; a missing or disabled one is a warning. */
+/** `persona` names the saved persona that must hold the step. */
 export const PlaybookStep = Schema.Struct({
   id: Text,
   title: Text,
@@ -80,7 +80,7 @@ export const PlaybookSaveRequest = Schema.Struct({
 export type PlaybookSaveRequest = typeof PlaybookSaveRequest.Type;
 export const PlaybookSaveResponse = Schema.Struct({ name: Text, saved: Schema.Boolean });
 
-/** Advisory findings about a valid definition; unlike `issue`, they never block starting. */
+/** Persona problems on a valid definition. The run may start before those steps can be staffed. */
 export const PlaybookWarning = Schema.Struct({
   code: Schema.Literals(["persona_missing", "persona_disabled", "persona_unverified"]),
   stepId: Text,
@@ -144,8 +144,9 @@ export type PlaybookRun = typeof PlaybookRun.Type;
 
 /** Pending means the named holder's notice has not been accepted yet. */
 export const PlaybookStepDelivery = Schema.Struct({
-  state: Schema.Literals(["delivered", "captain", "pending"]),
+  state: Schema.Literals(["delivered", "captain", "pending", "blocked"]),
   holderArchived: Schema.optionalKey(Schema.Boolean),
+  reason: Schema.optionalKey(Text),
   seat: Schema.NullOr(Schema.String),
   threadId: Schema.NullOr(Schema.String),
   participantId: Schema.optionalKey(Schema.NullOr(Schema.String)),
@@ -166,6 +167,7 @@ export const PlaybookProgress = Schema.Struct({
 });
 export type PlaybookProgress = typeof PlaybookProgress.Type;
 export const PlaybookCheckpoint = Schema.Struct({
+  kind: Schema.optionalKey(Schema.Literal("persona_picks")),
   requestId: Text,
   runId: Text,
   ownerThreadId: ThreadId,
@@ -185,9 +187,23 @@ export const PlaybookCheckpointAnswer = Schema.Struct({
   reason: Schema.optionalKey(Schema.String.check(Schema.isMaxLength(4000))),
 });
 export type PlaybookCheckpointAnswer = typeof PlaybookCheckpointAnswer.Type;
+export const PlaybookRequiredPersonas = Schema.Array(
+  Schema.Union([
+    Schema.Struct({ persona: AgentPersonaId, status: Schema.Literal("available") }),
+    Schema.Struct({ persona: AgentPersonaId, status: Schema.Literal("limited"), limits: Text }),
+    Schema.Struct({
+      persona: AgentPersonaId,
+      status: Schema.Literal("unavailable"),
+      code: AgentPersonaBlockCode,
+      reason: Text,
+    }),
+  ]),
+);
 export const PlaybookStepResponse = Schema.Struct({
   ...PlaybookProgress.fields,
   checkpoint: Schema.optionalKey(Schema.NullOr(PlaybookCheckpoint)),
+  personaApproval: Schema.optionalKey(Schema.NullOr(PlaybookCheckpoint)),
+  requiredPersonas: Schema.optionalKey(PlaybookRequiredPersonas),
   currentStep: Schema.NullOr(PlaybookStep),
   replayed: Schema.Boolean,
   delivery: Schema.optionalKey(Schema.NullOr(PlaybookStepDelivery)),

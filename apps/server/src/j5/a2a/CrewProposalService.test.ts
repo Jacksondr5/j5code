@@ -50,7 +50,7 @@ import { personaLibraryLayer } from "../test-support/personaLibrary.ts";
 import { crewMemberModelsLayer } from "../test-support/crewMemberModels.ts";
 import { crewSeatFromInput } from "./mcp/handlers.ts";
 import { J5ProposeCrewInput } from "./mcp/tools.ts";
-import { playbookStoreLayer } from "../playbooks/PlaybookStore.ts";
+import { playbookStoreTestLayer } from "../playbooks/testFixtures.ts";
 import { seedPersonas, seedPlaybookOwners } from "../playbooks/testFixtures.ts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import {
@@ -516,7 +516,7 @@ const fixtureWithDatabase = Effect.fn("test.crewProposal.fixture")(function* (
           }),
       }),
     ),
-    Layer.provideMerge(playbookStoreLayer),
+    Layer.provideMerge(playbookStoreTestLayer),
     Layer.provideMerge(Layer.succeedContext(context)),
     Layer.provideMerge(personaLibraryLayer("j5-crew-proposal-", launchablePersonas)),
     Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
@@ -1913,7 +1913,7 @@ const playbookFixtureWithSettings = (
         }),
       ),
       Layer.provideMerge(Layer.mock(CrewLaunchReporter)({ watch: () => Effect.void })),
-      Layer.provideMerge(playbookStoreLayer),
+      Layer.provideMerge(playbookStoreTestLayer),
       Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: { isRepo: true, refName: "main" } })),
       Layer.provideMerge(
         Layer.mock(ThreadManagementService)({

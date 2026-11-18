@@ -587,6 +587,7 @@ export const layer = Layer.effect(
             const { assignment: prepared } = yield* pickAgentPersona({
               personaId: agentId,
               source: pick,
+              ownerThreadId: captain.thread.id,
               caller,
               projectId: captain.thread.projectId,
               runtimeMode: seat.runtimeMode,

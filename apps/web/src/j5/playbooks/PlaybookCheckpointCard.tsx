@@ -1,3 +1,4 @@
+import { isOwnerAccess } from "@t3tools/client-runtime/j5/sharing";
 import { j5LedgerSupported } from "@t3tools/client-runtime/j5/readSources";
 import { Link } from "@tanstack/react-router";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
@@ -58,7 +59,9 @@ export function PlaybookCheckpointCard({
     j5Environment.answerPlaybookCheckpoint.permissionAtom(environmentId),
   );
   const level = useAtomValue(j5Sharing.threadLevel(environmentId, request.ownerThreadId));
+  const access = useAtomValue(j5Sharing.connectionAccess(environmentId));
   const canAnswer = permission && levelReaches(level, "collaborator") && connected;
+  const canApprove = canAnswer && (request.kind !== "persona_picks" || isOwnerAccess(access));
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -108,7 +111,7 @@ export function PlaybookCheckpointCard({
         onChange={(event) => setReason(event.target.value)}
       />
       <div className="flex gap-2">
-        <Button size="sm" disabled={!canAnswer || busy} onClick={() => void answer("approve")}>
+        <Button size="sm" disabled={!canApprove || busy} onClick={() => void answer("approve")}>
           Approve
         </Button>
         <Button
