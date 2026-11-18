@@ -6,11 +6,11 @@ import { inboxBellPresentation, mergeOpenInboxCounts } from "@t3tools/client-run
 import { useSidebar } from "../../components/ui/sidebar";
 import { cn } from "../../lib/utils";
 import { inboxBellCount } from "@t3tools/client-runtime/j5/crew-inbox-requests";
-import { usePlaybookCheckpoints } from "../playbooks/PlaybookCheckpointCard";
 import { useCrewRuntimeRequests } from "../crew/crewRuntimeRequestsClient";
 import {
   crewRuntimeRequestSourcesAtom,
-  playbookCheckpointSourcesAtom,
+  playbookCheckpointCountQueryAtom,
+  playbookCheckpointCountSourcesAtom,
   inboxCountQueryAtom,
   inboxCountSourcesAtom,
   refreshJ5Sources,
@@ -19,6 +19,7 @@ import { createVisibleRefreshHook } from "../useVisibleRefresh";
 
 const useCountRefresh = createVisibleRefreshHook(() => {
   void refreshJ5Sources(inboxCountSourcesAtom, inboxCountQueryAtom);
+  void refreshJ5Sources(playbookCheckpointCountSourcesAtom, playbookCheckpointCountQueryAtom);
 });
 
 export function HumanInboxBell({ onBackdrop }: { readonly onBackdrop: boolean }) {
@@ -35,13 +36,14 @@ export function HumanInboxBell({ onBackdrop }: { readonly onBackdrop: boolean })
     if (isMobile) setOpenMobile(false);
   };
 
-  const checkpoints = usePlaybookCheckpoints();
-  const checkpointSources = useAtomValue(playbookCheckpointSourcesAtom);
+  const checkpointSources = useAtomValue(playbookCheckpointCountSourcesAtom);
+  const checkpointCount = checkpointSources.sources.reduce(
+    (sum, source) => sum + (source.data?.count ?? 0),
+    0,
+  );
   const { badge, label } = inboxBellPresentation({
     count:
-      bell.count === null && checkpoints.length === 0
-        ? null
-        : (bell.count ?? 0) + checkpoints.length,
+      bell.count === null && checkpointCount === 0 ? null : (bell.count ?? 0) + checkpointCount,
     incomplete:
       bell.incomplete ||
       !checkpointSources.isReady ||

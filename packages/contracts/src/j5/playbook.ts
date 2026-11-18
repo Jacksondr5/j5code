@@ -22,6 +22,7 @@ export function suggestPlaybookName(text: string): string | null {
 }
 
 export const J5_PLAYBOOK_WS_METHODS = {
+  countCheckpoints: "j5.playbooks.countCheckpoints",
   listCheckpoints: "j5.playbooks.listCheckpoints",
   answerCheckpoint: "j5.playbooks.answerCheckpoint",
   subscribeChanges: "j5.playbooks.subscribeChanges",
@@ -276,8 +277,13 @@ export const PlaybookExportResponse = Schema.Struct({ fileName: Text, yaml: Sche
 export type PlaybookExportResponse = typeof PlaybookExportResponse.Type;
 
 export const J5PlaybookRpcGroup = RpcGroup.make(
-  Rpc.make(J5_PLAYBOOK_WS_METHODS.listCheckpoints, {
+  Rpc.make(J5_PLAYBOOK_WS_METHODS.countCheckpoints, {
     payload: Schema.Struct({}),
+    success: Schema.Struct({ count: Schema.Int }),
+    error: Schema.Union([PlaybookError, EnvironmentAuthorizationError]),
+  }),
+  Rpc.make(J5_PLAYBOOK_WS_METHODS.listCheckpoints, {
+    payload: Schema.Struct({ threadId: Schema.optionalKey(ThreadId) }),
     success: Schema.Struct({ requests: Schema.Array(PlaybookCheckpoint) }),
     error: Schema.Union([PlaybookError, EnvironmentAuthorizationError]),
   }),

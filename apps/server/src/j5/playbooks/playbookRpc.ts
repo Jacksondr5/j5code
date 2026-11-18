@@ -25,6 +25,7 @@ import { makeWorkspacePlaybooks } from "./WorkspacePlaybooks.ts";
  */
 export const PLAYBOOK_RPC_SCOPES = {
   [J5_PLAYBOOK_WS_METHODS.listCheckpoints]: AuthOrchestrationReadScope,
+  [J5_PLAYBOOK_WS_METHODS.countCheckpoints]: AuthOrchestrationReadScope,
   [J5_PLAYBOOK_WS_METHODS.answerCheckpoint]: AuthOrchestrationOperateScope,
   [J5_PLAYBOOK_WS_METHODS.savePlaybook]: AuthSettingsWriteScope,
   [J5_PLAYBOOK_WS_METHODS.setFolders]: AuthSettingsWriteScope,
