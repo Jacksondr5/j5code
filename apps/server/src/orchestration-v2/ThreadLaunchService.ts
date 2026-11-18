@@ -78,6 +78,7 @@ export type ThreadLaunchWorkspaceStrategy =
 export interface ThreadLaunchInitialMessage {
   readonly messageId?: MessageId;
   readonly scheduledTaskId?: ScheduledTaskId;
+  readonly scheduledTaskPrompt?: string;
   readonly senderThreadId?: ThreadId;
   readonly text: string;
   readonly attachments: ReadonlyArray<ChatAttachment>;
@@ -1021,6 +1022,9 @@ const make = Effect.gen(function* () {
               ...(input.initialMessage.scheduledTaskId === undefined
                 ? {}
                 : { scheduledTaskId: input.initialMessage.scheduledTaskId }),
+              ...(input.initialMessage.scheduledTaskPrompt === undefined
+                ? {}
+                : { scheduledTaskPrompt: input.initialMessage.scheduledTaskPrompt }),
               ...(input.initialMessage.senderThreadId === undefined
                 ? {}
                 : { senderThreadId: input.initialMessage.senderThreadId }),

@@ -8,6 +8,8 @@ import {
   OrchestrationV2ProviderCapabilities,
   OrchestrationV2ProviderThread,
   OrchestrationV2ProviderThreadJson,
+  OrchestrationV2PublicCommand,
+  OrchestrationV2Command,
   OrchestrationV2RpcSchemas,
   OrchestrationV2Subagent,
   OrchestrationV2ThreadShellJson,
@@ -18,6 +20,8 @@ import {
 } from "./orchestrationV2.ts";
 
 const now = DateTime.makeUnsafe("2026-04-20T00:00:00.000Z");
+const decodeCommand = Schema.decodeUnknownSync(OrchestrationV2Command);
+const decodePublicCommand = Schema.decodeUnknownSync(OrchestrationV2PublicCommand);
 
 const decodeOrchestrationV2TurnItemJson = Schema.decodeUnknownSync(OrchestrationV2TurnItemJson);
 const encodeOrchestrationV2TurnItemJson = Schema.encodeSync(OrchestrationV2TurnItemJson);
@@ -35,6 +39,27 @@ const decodeOrchestrationV2ProviderCapabilities = Schema.decodeUnknownSync(
 );
 
 describe("orchestration V2 contracts", () => {
+  it("only accepts a scheduled prompt snapshot from a server command", () => {
+    const dispatch = {
+      type: "message.dispatch",
+      commandId: "command:scheduled",
+      threadId: "thread:scheduled",
+      messageId: "message:scheduled",
+      scheduledTaskId: "scheduled-task",
+      text: "Run the audit.",
+      attachments: [],
+      createdBy: "user",
+      creationSource: "web",
+      dispatchMode: { type: "queue_after_active" },
+    };
+    const stamped = { ...dispatch, scheduledTaskPrompt: "Run the audit." };
+    expect(decodeCommand(stamped)).toMatchObject(stamped);
+    expect(decodePublicCommand(dispatch)).toMatchObject(dispatch);
+    expect(() => decodePublicCommand(stamped)).toThrow(
+      "Scheduled task prompt snapshots are server-owned.",
+    );
+  });
+
   it("decodes thread event types from a newer server as skippable items", () => {
     const decodeWireItems = Schema.decodeUnknownSync(
       Schema.toCodecJson(Schema.Array(OrchestrationV2RpcSchemas.subscribeThread.output)),

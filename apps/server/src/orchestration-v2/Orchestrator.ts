@@ -4772,6 +4772,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     readonly createdBy: OrchestrationV2ConversationMessage["createdBy"];
     readonly creationSource: OrchestrationV2ConversationMessage["creationSource"];
     readonly scheduledTaskId?: OrchestrationV2ConversationMessage["scheduledTaskId"];
+    readonly scheduledTaskPrompt?: string;
     readonly senderThreadId?: OrchestrationV2ConversationMessage["senderThreadId"];
     readonly idleCompaction?: OrchestrationV2ConversationMessage["idleCompaction"];
     readonly delegatedCompletion?: OrchestrationV2ConversationMessage["delegatedCompletion"];
@@ -4933,6 +4934,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           ...(input.scheduledTaskId === undefined
             ? {}
             : { scheduledTaskId: input.scheduledTaskId }),
+          ...(input.scheduledTaskPrompt === undefined
+            ? {}
+            : { scheduledTaskPrompt: input.scheduledTaskPrompt }),
           ...(input.senderThreadId === undefined ? {} : { senderThreadId: input.senderThreadId }),
           ...(input.idleCompaction === undefined ? {} : { idleCompaction: input.idleCompaction }),
           id: input.messageId,
@@ -5941,6 +5945,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         ...(command.scheduledTaskId === undefined
           ? {}
           : { scheduledTaskId: command.scheduledTaskId }),
+        ...(command.scheduledTaskPrompt === undefined
+          ? {}
+          : { scheduledTaskPrompt: command.scheduledTaskPrompt }),
         ...(command.senderThreadId === undefined ? {} : { senderThreadId: command.senderThreadId }),
         ...(command.idleCompaction === undefined ? {} : { idleCompaction: command.idleCompaction }),
         forceRestart: dispatchMode.type === "restart_active",
@@ -6176,6 +6183,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         ...(command.scheduledTaskId === undefined
           ? {}
           : { scheduledTaskId: command.scheduledTaskId }),
+        ...(command.scheduledTaskPrompt === undefined
+          ? {}
+          : { scheduledTaskPrompt: command.scheduledTaskPrompt }),
         ...(command.senderThreadId === undefined ? {} : { senderThreadId: command.senderThreadId }),
         ...(command.idleCompaction === undefined ? {} : { idleCompaction: command.idleCompaction }),
         id: command.messageId,
@@ -6542,6 +6552,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         ...(command.scheduledTaskId === undefined
           ? {}
           : { scheduledTaskId: command.scheduledTaskId }),
+        ...(command.scheduledTaskPrompt === undefined
+          ? {}
+          : { scheduledTaskPrompt: command.scheduledTaskPrompt }),
         ...(command.senderThreadId === undefined ? {} : { senderThreadId: command.senderThreadId }),
         ...(command.idleCompaction === undefined ? {} : { idleCompaction: command.idleCompaction }),
         id: command.messageId,
@@ -7294,6 +7307,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       ...(command.scheduledTaskId === undefined
         ? {}
         : { scheduledTaskId: command.scheduledTaskId }),
+      ...(command.scheduledTaskPrompt === undefined
+        ? {}
+        : { scheduledTaskPrompt: command.scheduledTaskPrompt }),
       ...(command.senderThreadId === undefined ? {} : { senderThreadId: command.senderThreadId }),
       ...(command.idleCompaction === undefined ? {} : { idleCompaction: command.idleCompaction }),
       id: command.messageId,
@@ -9788,6 +9804,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       ...(queuedMessage.scheduledTaskId === undefined
         ? {}
         : { scheduledTaskId: queuedMessage.scheduledTaskId }),
+      ...(queuedMessage.scheduledTaskPrompt === undefined
+        ? {}
+        : { scheduledTaskPrompt: queuedMessage.scheduledTaskPrompt }),
       ...(queuedMessage.senderThreadId === undefined
         ? {}
         : { senderThreadId: queuedMessage.senderThreadId }),

@@ -141,6 +141,7 @@ export interface ThreadManagementSendInput {
   readonly threadId: ThreadId;
   readonly messageId: MessageId;
   readonly scheduledTaskId?: ScheduledTaskId;
+  readonly scheduledTaskPrompt?: string;
   readonly senderThreadId?: ThreadId;
   readonly text: string;
   readonly attachments: ReadonlyArray<ChatAttachment>;
@@ -847,6 +848,9 @@ const make = Effect.gen(function* () {
       threadId: input.threadId,
       messageId: input.messageId,
       ...(input.scheduledTaskId === undefined ? {} : { scheduledTaskId: input.scheduledTaskId }),
+      ...(input.scheduledTaskPrompt === undefined
+        ? {}
+        : { scheduledTaskPrompt: input.scheduledTaskPrompt }),
       ...(input.senderThreadId === undefined ? {} : { senderThreadId: input.senderThreadId }),
       text: input.text,
       attachments: input.attachments,

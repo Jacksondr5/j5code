@@ -384,6 +384,7 @@ it.effect.each(
       const wire = yield* encodeThreadProjection(projection);
       assert.equal(wire.messages[0]?.text, task.prompt);
       assert.equal(wire.messages[0]?.scheduledTaskId, task.id);
+      assert.equal(wire.messages[0]?.scheduledTaskPrompt, task.prompt);
       assert.equal(wire.messages[0]?.createdBy, createdBy);
       const turnItem = wire.turnItems.find(
         (item): item is Extract<typeof item, { type: "user_message" }> =>
@@ -487,7 +488,7 @@ it.effect("runs a thread-bound automation on the provider the thread uses now", 
   }).pipe(Effect.provide(Layer.mergeAll(harness.layer, layerScheduledTasks)));
 });
 
-it.effect("retains automation and sender attribution while a message waits in the queue", () => {
+it.effect("keeps the schedule prompt snapshot across edits to a queued message", () => {
   const harness = makeHarness({ runSetup: () => Effect.never });
   return Effect.gen(function* () {
     const launches = yield* ThreadLaunch.ThreadLaunchService;
@@ -508,6 +509,7 @@ it.effect("retains automation and sender attribution while a message waits in th
       threadId: launched.threadId,
       messageId: MessageId.make("message:automation:queued"),
       scheduledTaskId,
+      scheduledTaskPrompt: "Run the audit",
       senderThreadId,
       text: "Run the audit",
       attachments: [],
@@ -516,12 +518,72 @@ it.effect("retains automation and sender attribution while a message waits in th
       creationSource: "mcp",
     });
     assert.equal(queued.delivery, "queued");
+    assert.isNotNull(queued.message.runId);
+    yield* threads.dispatch({
+      type: "queued-run.edit",
+      commandId: CommandId.make("command:automation:edit"),
+      threadId: launched.threadId,
+      runId: queued.message.runId!,
+      text: "Run a different audit",
+    });
     const projection = yield* threads.getThreadProjection(launched.threadId);
     const message = projection.messages.find((item) => item.id === queued.message.id);
     assert.equal(message?.scheduledTaskId, scheduledTaskId);
+    assert.equal(message?.scheduledTaskPrompt, "Run the audit");
     assert.equal(message?.senderThreadId, senderThreadId);
-    assert.equal(message?.text, "Run the audit");
+    assert.equal(message?.text, "Run a different audit");
   }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("keeps the task prompt recorded at enqueue time after the task is edited", () => {
+  const harness = makeHarness({ runSetup: () => Effect.never });
+  const layerScheduledTasks = ScheduledTasks.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        harness.layer,
+        NodeCrypto.layer,
+        Scheduler.layer,
+        Layer.mock(SecretRequests.SecretRequests)({}),
+        ManagedPolicy.layerTest(),
+        Layer.mock(RemoteDelegation.RemoteDelegation)({}),
+      ),
+    ),
+  );
+  return Effect.gen(function* () {
+    const launches = yield* ThreadLaunch.ThreadLaunchService;
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    const tasks = yield* ScheduledTasks.ScheduledTaskService;
+    const launched = yield* launches.launch(
+      launchInput({
+        command: "command:automation:template",
+        thread: "thread:automation:template",
+        message: "First message",
+        workspace: { type: "worktree", baseRef: "main" },
+      }),
+    );
+    const input = {
+      id: ScheduledTaskId.make("scheduled-task:template"),
+      title: "Audit",
+      prompt: "Use @playbook:audit.",
+      enabled: false,
+      schedule: { type: "interval", everyMs: 60_000 },
+      projectId,
+      threadId: launched.threadId,
+      workspaceStrategy: { type: "root" },
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      createdBy: "user",
+      creationSource: "web",
+    } as const;
+    yield* tasks.upsert(input);
+    yield* tasks.runNow({ id: input.id });
+    yield* tasks.upsert({ ...input, prompt: "Use @playbook:other-audit." });
+    const projection = yield* threads.getThreadProjection(launched.threadId);
+    const message = projection.messages.find((item) => item.scheduledTaskId === input.id);
+    assert.equal(projection.runs.find((item) => item.id === message?.runId)?.status, "queued");
+    assert.equal(message?.scheduledTaskPrompt, input.prompt);
+  }).pipe(Effect.provide(Layer.mergeAll(harness.layer, layerScheduledTasks)));
 });
 
 it.effect("provisions independent launches concurrently instead of behind a global semaphore", () =>

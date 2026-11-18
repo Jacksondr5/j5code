@@ -287,6 +287,7 @@ it.effect("dispatches exactly the rendered prompt and logs the delivery", () =>
         /^Review this PR: <(webhook-data-[0-9a-f]{12})>https:\/\/github\.com\/org\/repo\/pull\/45<\/\1>\n\nText between <\1> and <\/\1> was copied from the webhook request\./;
       const frame = framed.exec(launched.initialMessage?.text ?? "")?.[1];
       assert.isDefined(frame);
+      assert.equal(launched.initialMessage?.scheduledTaskPrompt, "Review this PR: _");
       assert.equal(
         launched.commandId,
         `scheduled-task:${task.id}:webhook:${result._tag === "accepted" ? result.deliveryId : ""}`,
