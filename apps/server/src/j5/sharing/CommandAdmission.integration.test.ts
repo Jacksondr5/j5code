@@ -135,7 +135,7 @@ it.effect("attributes a private Owner's launch and chat turns through real messa
       interactionMode: "default",
       workspaceStrategy: { type: "root" },
     } as const;
-    // The initial message and its thread can both have ids allocated by upstream.
+    // The caller can omit both the thread and message ids.
     const launch = (input: Parameters<typeof admission.launchThread>[0]) =>
       admission.launchThread(input, (admitted) =>
         launches.launch({
@@ -146,6 +146,9 @@ it.effect("attributes a private Owner's launch and chat turns through real messa
             : {
                 initialMessage: {
                   text: admitted.initialMessage.text,
+                  ...(admitted.initialMessage.messageId === undefined
+                    ? {}
+                    : { messageId: admitted.initialMessage.messageId }),
                   attachments: admitted.initialMessage.attachments,
                 },
               }),

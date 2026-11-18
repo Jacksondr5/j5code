@@ -256,8 +256,8 @@ const stampActiveTurn = Effect.fn("test.stampActiveTurn")(function* (
       ${createdAt}, ${createdAt})
   `;
   yield* sql`
-    INSERT INTO j5_human_message_command (command_id, person_id, settings_write)
-    VALUES (${commandId}, ${person}, ${source === "collaborator" ? 0 : 1})
+    INSERT INTO j5_human_message_command (command_id, message_id, person_id, settings_write)
+    VALUES (${commandId}, ${messageId}, ${person}, ${source === "collaborator" ? 0 : 1})
   `;
 });
 const TestLayer = Layer.mergeAll(

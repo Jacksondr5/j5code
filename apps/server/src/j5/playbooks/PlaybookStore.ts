@@ -1316,10 +1316,7 @@ export const makePlaybookStore = Effect.gen(function* () {
             ),
             authorized AS (
               SELECT input.message_id FROM inputs AS input
-              JOIN orchestration_events AS event ON event.stream_id = ${threadId}
-                AND event.aggregate_kind = 'thread' AND event.event_type = 'message.updated'
-                AND json_extract(event.payload_json, '$.id') = input.message_id
-              JOIN j5_human_message_command AS claim ON claim.command_id = event.command_id
+              JOIN j5_human_message_command AS claim ON claim.message_id = input.message_id
               JOIN j5_a2a_person_level AS grant
                 ON grant.person_id = claim.person_id AND grant.scope_kind = 'server'
               JOIN j5_a2a_human_person AS person ON person.person_id = claim.person_id
@@ -1327,6 +1324,12 @@ export const makePlaybookStore = Effect.gen(function* () {
                 AND json_extract(input.payload_json, '$.senderThreadId') IS NULL
                 AND json_extract(input.payload_json, '$.createdBy') = 'user'
                 AND claim.settings_write = 1 AND grant.level = 'owner' AND person.removed_at IS NULL
+                AND EXISTS (
+                  SELECT 1 FROM orchestration_events AS event INDEXED BY idx_orch_events_command_id
+                  WHERE event.command_id = claim.command_id AND event.stream_id = ${threadId}
+                    AND event.aggregate_kind = 'thread' AND event.event_type = 'message.updated'
+                    AND json_extract(event.payload_json, '$.id') = input.message_id
+                )
             )
             SELECT 1 AS allowed FROM turn
             WHERE initiating_id IN (SELECT message_id FROM authorized)
