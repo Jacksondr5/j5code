@@ -60,8 +60,11 @@ export function PlaybookCheckpointCard({
   );
   const level = useAtomValue(j5Sharing.threadLevel(environmentId, request.ownerThreadId));
   const access = useAtomValue(j5Sharing.connectionAccess(environmentId));
-  const canAnswer = permission && levelReaches(level, "collaborator") && connected;
-  const canApprove = canAnswer && (request.kind !== "persona_picks" || isOwnerAccess(access));
+  const canAnswer =
+    permission &&
+    levelReaches(level, "collaborator") &&
+    connected &&
+    (request.kind !== "persona_picks" || isOwnerAccess(access));
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -111,7 +114,7 @@ export function PlaybookCheckpointCard({
         onChange={(event) => setReason(event.target.value)}
       />
       <div className="flex gap-2">
-        <Button size="sm" disabled={!canApprove || busy} onClick={() => void answer("approve")}>
+        <Button size="sm" disabled={!canAnswer || busy} onClick={() => void answer("approve")}>
           Approve
         </Button>
         <Button
