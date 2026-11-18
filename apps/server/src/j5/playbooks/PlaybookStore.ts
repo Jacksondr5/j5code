@@ -1580,6 +1580,22 @@ export const makePlaybookStore = Effect.gen(function* () {
                 AND event.aggregate_kind = 'thread' AND event.event_type = 'message.updated'
                 AND json_extract(event.payload_json, '$.id') = input.message_id
             ),
+            -- Queued edits upstream took that no settings-writing Owner sent: an agent's, through
+            -- its own tools, or a person's. A later Owner edit keeps what such an edit left.
+            foreign_edits AS (
+              SELECT receipt.command_id
+              FROM orchestration_command_receipts AS receipt
+              WHERE receipt.aggregate_kind = 'thread' AND receipt.aggregate_id = ${threadId}
+                AND receipt.command_type = 'queued-run.edit' AND receipt.status = 'accepted'
+                AND NOT EXISTS (
+                  SELECT 1 FROM j5_human_message_command AS claim
+                  JOIN j5_a2a_human_person AS person ON person.person_id = claim.person_id
+                  JOIN j5_a2a_person_level AS held
+                    ON held.person_id = claim.person_id AND held.scope_kind = 'server'
+                  WHERE claim.command_id = receipt.command_id AND claim.settings_write = 1
+                    AND held.level = 'owner' AND person.removed_at IS NULL
+                )
+            ),
             -- An Owner wrote the words the agent reads now, and nobody else has changed them.
             authorized AS (
               SELECT input.message_id FROM inputs AS input
@@ -1599,6 +1615,13 @@ export const makePlaybookStore = Effect.gen(function* () {
                 AND NOT EXISTS (
                   SELECT 1 FROM writes AS written
                   WHERE written.message_id = input.message_id AND NOT written.by_owner
+                )
+                AND NOT EXISTS (
+                  SELECT 1 FROM foreign_edits AS edit
+                  JOIN orchestration_events AS event INDEXED BY idx_orch_events_command_id
+                    ON event.command_id = edit.command_id AND event.stream_id = ${threadId}
+                    AND event.aggregate_kind = 'thread' AND event.event_type = 'message.updated'
+                    AND json_extract(event.payload_json, '$.id') = input.message_id
                 )
             ),
             -- Words given to this turn's questions and approvals. A request whose node names no

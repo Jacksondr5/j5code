@@ -564,3 +564,78 @@ it.effect.each([
     }).pipe(Effect.provide(saveLayer(harness)));
   },
 );
+
+it.effect.each([
+  ["after an agent swapped its attachment", true, "owner_required"],
+  ["that nobody else touched", false, "saved"],
+] as const)(
+  "an Owner's words-only edit of a queued message %s keeps who chose the rest",
+  ([, agentEdited, outcome]) => {
+    const harness = makeHarness();
+    const on = ThreadId.make(`thread:inherited:${agentEdited ? "agent" : "owner"}`);
+    return Effect.gen(function* () {
+      const thread = yield* sharedThread(on);
+      const sql = yield* SqlClient.SqlClient;
+      const stored = (field: "text" | "attachments") =>
+        sql<{ readonly value: string }>`
+          SELECT json_extract(payload_json, ${`$.${field}`}) AS value
+          FROM orchestration_v2_projection_messages WHERE message_id = ${`message:${on}:second`}
+        `.pipe(Effect.map((rows) => rows[0]!.value));
+      yield* thread.send(thread.owner, "first", "Draft a review playbook.", "start_immediately");
+      yield* thread.owner.dispatchCommand(
+        {
+          type: "message.dispatch",
+          threadId: on,
+          commandId: CommandId.make(`command:${on}:second`),
+          messageId: MessageId.make(`message:${on}:second`),
+          text: "Save the playbook in the attached picture.",
+          attachments: [picture("approved")],
+          createdBy: "user",
+          creationSource: "web",
+          dispatchMode: { type: "queue_after_active" },
+        },
+        thread.threads.dispatch,
+      );
+      const queued = yield* thread.runOf("second");
+      if (agentEdited)
+        yield* sendAs(thread, "agent", {
+          type: "queued-run.edit",
+          commandId: CommandId.make(`command:${on}:agent-edit`),
+          threadId: on,
+          runId: queued,
+          text: yield* stored("text"),
+          attachments: [picture("swapped")],
+        });
+      // The Owner changes the words alone, which keeps whatever attachment is there.
+      yield* sendAs(thread, "owner", {
+        type: "queued-run.edit",
+        commandId: CommandId.make(`command:${on}:owner-edit`),
+        threadId: on,
+        runId: queued,
+        text: "Save the playbook in the attached picture, please.",
+      });
+      assert.include(
+        yield* stored("attachments"),
+        agentEdited ? "attachment-swapped" : "attachment-approved",
+      );
+      yield* thread.startQueued(yield* thread.runOf("first"), queued);
+      assert.strictEqual(yield* thread.save(queued, `inherited-${outcome}`), outcome);
+
+      // A message the Owner sends afresh carries nothing anyone else left.
+      yield* thread.owner.dispatchCommand(
+        {
+          type: "run.interrupt",
+          commandId: CommandId.make(`command:${on}:interrupt-second`),
+          threadId: on,
+          runId: queued,
+        },
+        thread.threads.dispatch,
+      );
+      yield* thread.send(thread.owner, "third", "Save the approved draft.", "start_immediately");
+      assert.strictEqual(
+        yield* thread.save(yield* thread.runOf("third"), "inherited-fresh"),
+        "saved",
+      );
+    }).pipe(Effect.provide(saveLayer(harness)));
+  },
+);
