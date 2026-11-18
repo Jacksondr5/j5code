@@ -918,6 +918,19 @@ export const makePlaybookStore = Effect.gen(function* () {
               toStepId: currentStepId,
               stepsDigest: playbookDigest(encodeJson(definition!.steps)),
             };
+            if (currentStepId === run.currentStepId && run.holderThreadId !== owner) {
+              const previousStep = run.definition?.steps.find((step) => step.id === currentStepId);
+              const revisedStep = definition!.steps.find((step) => step.id === currentStepId);
+              if (previousStep?.prompt !== revisedStep?.prompt) {
+                // Preserve the recipient and seat recorded for this step.
+                yield* sql`INSERT INTO j5_playbook_step_delivery (run_id, request_id, step_id, landed_at,
+                  target_seat, target_thread_id, target_participant_id, assigned_by_participant_id)
+                  SELECT run_id, ${input.client_request_id}, step_id, ${updatedAt},
+                    target_seat, target_thread_id, target_participant_id, assigned_by_participant_id
+                  FROM j5_playbook_step_delivery WHERE run_id = ${run.runId} AND step_id = ${currentStepId}
+                  ORDER BY landed_at DESC, rowid DESC LIMIT 1`;
+              }
+            }
             revisionCount += 1;
             yield* sql`INSERT INTO j5_playbook_revision (run_id, request_id, basis, revised_at, owner_thread_id, from_step_id, to_step_id, steps_digest)
               VALUES (${run.runId}, ${input.client_request_id}, ${input.basis}, ${updatedAt}, ${owner}, ${run.currentStepId}, ${currentStepId}, ${latestRevision.stepsDigest})`;

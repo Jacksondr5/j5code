@@ -577,17 +577,27 @@ it.effect(
         (yield* Effect.flip(relay.mutate(owner, { ...input, assignee: crewId }))).code,
         "request_conflict",
       );
-      const edited = yield* relay.mutate(owner, {
+      const edit = {
         ...unassigned,
         expectedStepId: "review",
         client_request_id: "edit-held",
         steps: input.steps.map((step) => ({ ...step, prompt: `Edited ${step.id}.` })),
-      });
+      };
+      const edited = yield* relay.mutate(owner, edit);
       assert.equal(edited.holderParticipantId, peerId);
       assert.equal(edited.delivery?.participantId, peerId);
       assert.equal(edited.currentStep?.prompt, "Edited review.");
-      assert.isNull(yield* store.landing(run.runId, "edit-held"));
-      assert.lengthOf(yield* notices, 1);
+      assert.equal((yield* store.landing(run.runId, "edit-held"))?.targetParticipantId, peerId);
+      assert.include((yield* notices)[1]?.text, "Edited review.");
+      assert.isTrue((yield* relay.mutate(owner, edit)).replayed);
+      yield* relay.mutate(owner, {
+        ...edit,
+        client_request_id: "edit-later-step",
+        steps: edit.steps.map((step) =>
+          step.id === "report" ? { ...step, prompt: "New report." } : step,
+        ),
+      });
+      assert.lengthOf(yield* notices, 2);
       const returned = yield* relay.mutate(owner, {
         ...unassigned,
         expectedStepId: "review",
@@ -598,8 +608,8 @@ it.effect(
       assert.equal(returned.currentStepId, "report");
       assert.equal(returned.holderParticipantId, ownerId);
       assert.equal(returned.delivery?.state, "captain");
-      assert.equal(returned.revisionCount, 3);
-      assert.lengthOf(yield* notices, 1);
+      assert.equal(returned.revisionCount, 4);
+      assert.lengthOf(yield* notices, 2);
     }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );
 
