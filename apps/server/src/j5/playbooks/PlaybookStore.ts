@@ -290,13 +290,16 @@ export const makePlaybookStore = Effect.gen(function* () {
   const cancelOwner = Effect.fn("PlaybookStore.cancelOwner")(function* (
     owner: ThreadId,
     reason: "owner_archived" | "owner_deleted",
+    runId?: string,
   ) {
     return yield* sql.withTransaction(
       Effect.gen(function* () {
         const timestamp = yield* now;
         const rows = yield* sql<RunRow>`UPDATE j5_playbook_run
         SET status = 'cancelled', cancel_reason = ${reason}, updated_at = ${timestamp}
-        WHERE owner_thread_id = ${owner} AND status = 'active' RETURNING *`;
+        WHERE owner_thread_id = ${owner} AND status = 'active'
+        ${runId === undefined ? sql`` : sql`AND run_id = ${runId}`}
+        RETURNING *`;
         for (const row of rows) {
           yield* skipPending(row.run_id, timestamp);
           yield* checkpoints.close(row.run_id, timestamp);
@@ -308,17 +311,19 @@ export const makePlaybookStore = Effect.gen(function* () {
   }, Effect.mapError(storageError));
   const cancelOrphans = Effect.fn("PlaybookStore.cancelOrphans")(function* () {
     const rows = yield* sql<{
+      run_id: string;
       owner_thread_id: string;
       archived_at: string | null;
       deleted_at: string | null;
     }>`
-      SELECT run.owner_thread_id, thread.archived_at, thread.deleted_at FROM j5_playbook_run run
+      SELECT run.run_id, run.owner_thread_id, thread.archived_at, thread.deleted_at FROM j5_playbook_run run
       LEFT JOIN orchestration_v2_projection_threads thread ON thread.thread_id = run.owner_thread_id
       WHERE run.status = 'active' AND (thread.thread_id IS NULL OR thread.deleted_at IS NOT NULL OR thread.archived_at IS NOT NULL)`;
     for (const row of rows)
       yield* cancelOwner(
         ThreadId.make(row.owner_thread_id),
         row.archived_at !== null && row.deleted_at === null ? "owner_archived" : "owner_deleted",
+        row.run_id,
       );
   });
   const requireOwner = Effect.fn("PlaybookStore.requireOwner")(function* (owner: ThreadId) {
@@ -766,9 +771,9 @@ export const makePlaybookStore = Effect.gen(function* () {
             updatedAt: timestamp,
           };
           yield* sql`INSERT INTO j5_playbook_run (run_id, owner_thread_id, definition_path, current_step_id, status, created_at, updated_at, definition_json,
-            holder_participant_id, holder_thread_id, assigned_by_participant_id)
+            holder_participant_id, holder_thread_id, assigned_by_participant_id, start_event_sequence)
           VALUES (${run.runId}, ${owner}, ${definitionPath}, ${run.currentStepId}, ${run.status}, ${timestamp}, ${timestamp}, ${encodeDefinition(definition)},
-            ${holder.participantId}, ${holder.threadId}, ${holder.assignedBy})`;
+            ${holder.participantId}, ${holder.threadId}, ${holder.assignedBy}, (SELECT COALESCE(MAX(sequence), 0) FROM orchestration_events))`;
           yield* land(run.runId, key, run.currentStepId, timestamp, holder);
           yield* remember(owner, key, request, run.runId);
           return { run, replayed: false };
@@ -1188,6 +1193,17 @@ export const makePlaybookStore = Effect.gen(function* () {
     yield* sql`UPDATE j5_playbook_run SET holder_stop_json = ${encodeHolderStop(outcome)} WHERE run_id = ${runId} AND status = 'cancelled'`;
     yield* bumpRevision;
   }, Effect.mapError(storageError));
+  const ownerLifecycleRuns = Effect.fn("PlaybookStore.ownerLifecycleRuns")(function* (
+    owner: ThreadId,
+    eventSequence: number,
+  ) {
+    // A read may already have cancelled the old run, and an unarchive may have
+    // allowed its replacement to start before the daemon handles the archive.
+    return yield* sql<{ run_id: string }>`SELECT run_id FROM j5_playbook_run
+      WHERE owner_thread_id = ${owner} AND start_event_sequence < ${eventSequence}
+        AND (status = 'active' OR (status = 'cancelled' AND holder_stop_json IS NULL
+          AND cancel_reason IN ('owner_archived', 'owner_deleted', 'agent_cancelled')))`;
+  }, Effect.mapError(storageError));
   const unreconciledCancellations = Effect.fn("PlaybookStore.unreconciledCancellations")(
     function* () {
       yield* cancelOrphans();
@@ -1290,6 +1306,7 @@ export const makePlaybookStore = Effect.gen(function* () {
     claimHolderStop,
     recordHolderStop,
     unreconciledCancellations,
+    ownerLifecycleRuns,
     activeRunForCrew,
     activeRunSummaries,
   };
