@@ -1361,14 +1361,18 @@ export const makePlaybookStore = Effect.gen(function* () {
                   WHERE written.message_id = input.message_id AND NOT written.by_owner
                 )
             ),
-            -- Words given to the agent's own questions and approvals since this turn was asked for.
+            -- Words given to this turn's questions and approvals. A request whose node names no
+            -- run counts from when the turn was asked for, so unknown provenance stays refused.
             answers AS (
               SELECT request.runtime_request_id FROM turn
               JOIN orchestration_v2_projection_runtime_requests AS request
                 ON request.thread_id = turn.thread_id AND request.status = 'resolved'
-              WHERE request.resolved_at >= turn.requested_at
-                AND (json_extract(request.payload_json, '$.answers') IS NOT NULL
+              LEFT JOIN orchestration_v2_projection_nodes AS node
+                ON node.node_id = request.node_id AND node.thread_id = request.thread_id
+              WHERE (json_extract(request.payload_json, '$.answers') IS NOT NULL
                   OR json_extract(request.payload_json, '$.feedback') IS NOT NULL)
+                AND (node.run_id = turn.run_id
+                  OR (node.run_id IS NULL AND request.resolved_at >= turn.requested_at))
             )
             SELECT 1 AS allowed FROM turn
             WHERE initiating_id IN (SELECT message_id FROM authorized)
