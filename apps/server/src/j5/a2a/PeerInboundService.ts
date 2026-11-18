@@ -462,6 +462,9 @@ export const layer: Layer.Layer<PeerInboundService, never, PeerInboundServiceReq
               originProjectId,
               originEnvironmentId: input.originEnvironmentId,
               originMessageId: input.messageId,
+              ...(input.playbookOrigin === undefined
+                ? {}
+                : { playbookOrigin: input.playbookOrigin }),
               originCreatedAt: input.createdAt,
               // A withdrawal closes the debt here as it does at the origin: silently.
               ...(input.terminal?.kind === "sender-cleared" ? { injection: "none" as const } : {}),

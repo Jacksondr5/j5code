@@ -1,3 +1,5 @@
+import { messageProvenance } from "./messageProvenance.ts";
+import type { PlaybookOrigin } from "@t3tools/contracts/j5";
 import type {
   GuestShareId,
   OrchestrationV2SearchThreadInput,
@@ -4773,6 +4775,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     readonly creationSource: OrchestrationV2ConversationMessage["creationSource"];
     readonly scheduledTaskId?: OrchestrationV2ConversationMessage["scheduledTaskId"];
     readonly scheduledTaskPrompt?: string;
+    readonly senderRunId?: RunId;
+    readonly playbookOrigin?: PlaybookOrigin;
     readonly senderThreadId?: OrchestrationV2ConversationMessage["senderThreadId"];
     readonly idleCompaction?: OrchestrationV2ConversationMessage["idleCompaction"];
     readonly delegatedCompletion?: OrchestrationV2ConversationMessage["delegatedCompletion"];
@@ -4931,13 +4935,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             ? {}
             : { delegatedCompletion: input.delegatedCompletion }),
           ...(input.notification === undefined ? {} : { notification: input.notification }),
-          ...(input.scheduledTaskId === undefined
-            ? {}
-            : { scheduledTaskId: input.scheduledTaskId }),
-          ...(input.scheduledTaskPrompt === undefined
-            ? {}
-            : { scheduledTaskPrompt: input.scheduledTaskPrompt }),
-          ...(input.senderThreadId === undefined ? {} : { senderThreadId: input.senderThreadId }),
+          ...messageProvenance(input),
           ...(input.idleCompaction === undefined ? {} : { idleCompaction: input.idleCompaction }),
           id: input.messageId,
           threadId: input.command.threadId,
@@ -5942,13 +5940,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         attachments: command.attachments,
         createdBy: command.createdBy,
         creationSource: command.creationSource,
-        ...(command.scheduledTaskId === undefined
-          ? {}
-          : { scheduledTaskId: command.scheduledTaskId }),
-        ...(command.scheduledTaskPrompt === undefined
-          ? {}
-          : { scheduledTaskPrompt: command.scheduledTaskPrompt }),
-        ...(command.senderThreadId === undefined ? {} : { senderThreadId: command.senderThreadId }),
+        ...messageProvenance(command),
         ...(command.idleCompaction === undefined ? {} : { idleCompaction: command.idleCompaction }),
         forceRestart: dispatchMode.type === "restart_active",
       });
@@ -6180,13 +6172,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const message: OrchestrationV2ConversationMessage = {
         createdBy: command.createdBy,
         creationSource: command.creationSource,
-        ...(command.scheduledTaskId === undefined
-          ? {}
-          : { scheduledTaskId: command.scheduledTaskId }),
-        ...(command.scheduledTaskPrompt === undefined
-          ? {}
-          : { scheduledTaskPrompt: command.scheduledTaskPrompt }),
-        ...(command.senderThreadId === undefined ? {} : { senderThreadId: command.senderThreadId }),
+        ...messageProvenance(command),
         ...(command.idleCompaction === undefined ? {} : { idleCompaction: command.idleCompaction }),
         id: command.messageId,
         threadId: command.threadId,
@@ -6549,13 +6535,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const message: OrchestrationV2ConversationMessage = {
         createdBy: command.createdBy,
         creationSource: command.creationSource,
-        ...(command.scheduledTaskId === undefined
-          ? {}
-          : { scheduledTaskId: command.scheduledTaskId }),
-        ...(command.scheduledTaskPrompt === undefined
-          ? {}
-          : { scheduledTaskPrompt: command.scheduledTaskPrompt }),
-        ...(command.senderThreadId === undefined ? {} : { senderThreadId: command.senderThreadId }),
+        ...messageProvenance(command),
         ...(command.idleCompaction === undefined ? {} : { idleCompaction: command.idleCompaction }),
         id: command.messageId,
         threadId: command.threadId,
@@ -7304,13 +7284,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     const message: OrchestrationV2ConversationMessage = {
       createdBy: command.createdBy,
       creationSource: command.creationSource,
-      ...(command.scheduledTaskId === undefined
-        ? {}
-        : { scheduledTaskId: command.scheduledTaskId }),
-      ...(command.scheduledTaskPrompt === undefined
-        ? {}
-        : { scheduledTaskPrompt: command.scheduledTaskPrompt }),
-      ...(command.senderThreadId === undefined ? {} : { senderThreadId: command.senderThreadId }),
+      ...messageProvenance(command),
       ...(command.idleCompaction === undefined ? {} : { idleCompaction: command.idleCompaction }),
       id: command.messageId,
       threadId: command.threadId,
@@ -7962,6 +7936,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         commandId: command.commandId,
         threadId: childThreadId,
         senderThreadId: command.parentThreadId,
+        senderRunId: parentRun.id,
         messageId: childMessageId,
         text: command.task,
         attachments: [],
@@ -9801,15 +9776,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       ...(queuedMessage.context ? { context: queuedMessage.context } : {}),
       createdBy: queuedMessage.createdBy,
       creationSource: queuedMessage.creationSource,
-      ...(queuedMessage.scheduledTaskId === undefined
-        ? {}
-        : { scheduledTaskId: queuedMessage.scheduledTaskId }),
-      ...(queuedMessage.scheduledTaskPrompt === undefined
-        ? {}
-        : { scheduledTaskPrompt: queuedMessage.scheduledTaskPrompt }),
-      ...(queuedMessage.senderThreadId === undefined
-        ? {}
-        : { senderThreadId: queuedMessage.senderThreadId }),
+      ...messageProvenance(queuedMessage),
       ...(queuedMessage.idleCompaction === undefined
         ? {}
         : { idleCompaction: queuedMessage.idleCompaction }),

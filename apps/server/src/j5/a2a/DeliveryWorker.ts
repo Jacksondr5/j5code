@@ -402,6 +402,9 @@ const makeLayer = (daemon: boolean) =>
                   `)[0]?.label,
                 ) ?? row.origin_environment_id);
           yield* transport.deliverAgent({
+            ...(landing?.playbookOrigin === undefined
+              ? {}
+              : { playbookOrigin: landing.playbookOrigin }),
             originProjectId,
             receiverProjectId,
             messageId,

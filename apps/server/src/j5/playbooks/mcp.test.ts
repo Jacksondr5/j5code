@@ -410,6 +410,7 @@ it.effect("uses the initiating scheduled prompt to authorize an MCP start", () =
     });
     const joined = webhook("Start de{{body.missing}}mo.");
     assert.equal(joined.text, "Start demo.");
+    let steerPrompt: string | undefined;
     let text = "Check the repository.";
     let scheduled: { readonly scheduledTaskPrompt?: string } | undefined;
     const { call } = yield* makeFixture(liveThreadShell, (threadId) => {
@@ -434,8 +435,11 @@ it.effect("uses the initiating scheduled prompt to authorize an MCP start", () =
           {
             ...message,
             id: MessageId.make("message:steer"),
+            ...(steerPrompt === undefined
+              ? {}
+              : { scheduledTaskId: ScheduledTaskId.make("steered") }),
             text: "Run demo.",
-            scheduledTaskPrompt: "Run demo.",
+            scheduledTaskPrompt: steerPrompt ?? "Run demo.",
           },
           {
             ...message,
@@ -453,6 +457,8 @@ it.effect("uses the initiating scheduled prompt to authorize an MCP start", () =
         text: "Run @playbook:demo-weekly and demography.",
         configured: "Run @playbook:demo-weekly and demography.",
       },
+      { text: "Demo the result.", configured: "Demo the result." },
+      { text: "Run demo.sh.", configured: "Run demo.sh." },
       { text: "Run @persona:demo.", configured: "Run @persona:demo." },
       webhook("Process this request: {{body.notes}}"),
       joined,
@@ -468,8 +474,22 @@ it.effect("uses the initiating scheduled prompt to authorize an MCP start", () =
       assert.include(failure.message, "demo");
     }
 
+    scheduled = undefined;
+    steerPrompt = "Demo this change.";
+    const steered = yield* call("j5_playbook_start", start);
+    assert.equal((yield* decodeFailure(steered.result)).code, "scheduled_playbook_not_named");
+    const revise = yield* call("j5_playbook_revise", {
+      runId: "example",
+      expectedStepId: "research",
+      steps: sample("Demo").steps,
+      basis: "asked",
+      client_request_id: "revision",
+    });
+    assert.equal((yield* decodeFailure(revise.result)).code, "scheduled_playbook_revision");
+    steerPrompt = "Use the demo playbook.";
     for (const valid of [
       webhook("Start @playbook:demo. Notes: {{body.notes}}"),
+      { text: "Run `demo`.", configured: "Run `demo`." },
       // A queued prompt can be edited before delivery. Authorization follows its dispatch snapshot.
       { text: "Queued text edited since dispatch.", configured: "Run demo." },
       { text: "Check the repository.", configured: undefined },
@@ -484,6 +504,99 @@ it.effect("uses the initiating scheduled prompt to authorize an MCP start", () =
       start.client_request_id = `start:${runId}`;
     }
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);
+
+it.effect("enforces authenticated peer provenance and refuses an unverified remote origin", () =>
+  Effect.gen(function* () {
+    let origin: OrchestrationV2ConversationMessage["playbookOrigin"] = { kind: "unverified" };
+    const { call } = yield* makeFixture(liveThreadShell, (threadId) => {
+      const {
+        runs,
+        messages: [message],
+      } = kickoffRecords(threadId);
+      return { runs, messages: [{ ...message, createdBy: "agent", playbookOrigin: origin }] };
+    });
+    const start = { name: "demo", client_request_id: "remote" };
+    assert.equal(
+      (yield* decodeFailure((yield* call("j5_playbook_start", start)).result)).code,
+      "playbook_turn_unavailable",
+    );
+    origin = { kind: "scheduled", names: ["other"] };
+    assert.equal(
+      (yield* decodeFailure((yield* call("j5_playbook_start", start)).result)).code,
+      "scheduled_playbook_not_named",
+    );
+    for (const verified of [
+      { kind: "scheduled", names: ["demo"] },
+      { kind: "unscheduled" },
+    ] as const) {
+      origin = verified;
+      const result = yield* call("j5_playbook_start", {
+        ...start,
+        client_request_id: verified.kind,
+      });
+      assert.isFalse(result.isFailure);
+      const { runId } = yield* decodeStep(result.result);
+      yield* call("j5_playbook_cancel", { runId, client_request_id: "cancel:" + runId });
+    }
+  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);
+
+it.effect(
+  "checks the sending run of a child or a peer message even after the parent moves on",
+  () =>
+    Effect.gen(function* () {
+      const parent = ThreadId.make("thread:scheduled-parent");
+      const parentRunId = RunId.make("run:scheduled-parent");
+      let configured = "Review open PRs.";
+      let human = false;
+      const { call } = yield* makeFixture(liveThreadShell, (threadId) => {
+        const {
+          runs: [run],
+          messages: [message],
+        } = kickoffRecords(threadId);
+        if (threadId === parent)
+          return {
+            runs: [{ ...run, id: parentRunId, status: "completed" }],
+            messages: [
+              {
+                ...message,
+                runId: parentRunId,
+                scheduledTaskId: ScheduledTaskId.make("review"),
+                scheduledTaskPrompt: configured,
+              },
+            ],
+          };
+        return {
+          runs: [run],
+          messages: [
+            human
+              ? message
+              : {
+                  ...message,
+                  createdBy: "agent",
+                  senderThreadId: parent,
+                  senderRunId: parentRunId,
+                },
+          ],
+        };
+      });
+      const start = { name: "demo", client_request_id: "child" };
+      assert.equal(
+        (yield* decodeFailure((yield* call("j5_playbook_start", start)).result)).code,
+        "scheduled_playbook_not_named",
+      );
+      configured = "Run demo.";
+      const named = yield* call("j5_playbook_start", start);
+      assert.isFalse(named.isFailure);
+      const { runId } = yield* decodeStep(named.result);
+      yield* call("j5_playbook_cancel", { runId, client_request_id: "cancel" });
+      human = true;
+      configured = "Review open PRs.";
+      assert.isFalse(
+        (yield* call("j5_playbook_start", { ...start, client_request_id: "human" })).isFailure,
+      );
+    }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );
 
 it.effect("discovers and starts from the thread worktree, falling back to its project root", () =>

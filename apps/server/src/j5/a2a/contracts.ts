@@ -6,7 +6,7 @@ import {
   RuntimeMode,
   ThreadId,
 } from "@t3tools/contracts";
-import { PeerSenderLabel } from "@t3tools/contracts/j5";
+import { PeerSenderLabel, PlaybookOrigin } from "@t3tools/contracts/j5";
 import * as Schema from "effect/Schema";
 
 const Identifier = Schema.String.check(Schema.isNonEmpty());
@@ -197,6 +197,7 @@ const NonMembershipCommEvent = Schema.Struct({
  * the fact this server delivers from, since no `message.sent` exists here.
  */
 export const MessageReceivedPayload = Schema.Struct({
+  playbookOrigin: Schema.optional(PlaybookOrigin),
   originProjectId: LedgerProjectId,
   originEnvironmentId: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
   /** The id and clock the origin used; this ledger keys and stamps the message itself. */
@@ -332,6 +333,7 @@ export const TerminalFact = Schema.Union([
 export type TerminalFact = typeof TerminalFact.Type;
 
 export const MessageSentPayload = Schema.Struct({
+  playbookOrigin: Schema.optional(PlaybookOrigin),
   attachments: Schema.optional(Schema.Array(ChatAttachment)),
   /** How the sender asked for the message to land; absent means `queue`. */
   mode: Schema.optional(SendMode),
@@ -432,6 +434,7 @@ export const ClearOwnAskResult = Schema.Struct({
 export type ClearOwnAskResult = typeof ClearOwnAskResult.Type;
 
 export const SendMessageInput = Schema.Struct({
+  playbookOrigin: Schema.optional(PlaybookOrigin),
   attachments: Schema.optional(Schema.Array(ChatAttachment)),
   mode: Schema.optional(SendMode),
   modeLimit: Schema.optional(SendModeLimit),
@@ -461,6 +464,7 @@ export type SendAsMachineInput = typeof SendAsMachineInput.Type;
 
 /** An outside agent commits a plain message only, to an agent on this server. */
 export const SendAsOutsideAgentInput = Schema.Struct({
+  playbookOrigin: Schema.optional(PlaybookOrigin),
   attachments: Schema.optional(Schema.Array(ChatAttachment)),
   mode: Schema.optional(SendMode),
   modeLimit: Schema.optional(SendModeLimit),

@@ -1,3 +1,4 @@
+import { handoffPlaybookOrigin } from "../../playbooks/scheduledStart.ts";
 import * as Clock from "effect/Clock";
 import * as Layer from "effect/Layer";
 import * as SpawnAgentService from "../SpawnAgentService.ts";
@@ -401,7 +402,7 @@ const handlers = {
       const worker = yield* A2ADeliveryWorker;
       const mode = input.mode ?? "queue";
       const attachments = input.attachments ?? [];
-      // A plain queued message needs nothing read first. A file is claimed into the receiver's
+      // A plain queued message needs no receiver lookup. A file is claimed into the receiver's
       // thread, so its receiver must be an agent on this server. A steer or a restart acts on the
       // receiver's turn: here this server checks it, and on a peer server that server does.
       const receiver =
@@ -472,6 +473,7 @@ const handlers = {
       }
       const acceptedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
       const requestKey = input.client_request_id ?? (yield* crypto.uuidV4().pipe(Effect.orDie));
+      const playbookOrigin = yield* handoffPlaybookOrigin();
       const send = (claimed?: ReadonlyArray<ChatAttachment>) =>
         service.send({
           commandId: commandIdForRequest({
@@ -480,6 +482,7 @@ const handlers = {
             requestKey,
           }),
           senderThreadId: scope.thread.threadId,
+          playbookOrigin,
           to: input.to,
           message: input.message,
           ...(input.expect_reply == null ? {} : { expectReply: input.expect_reply }),
