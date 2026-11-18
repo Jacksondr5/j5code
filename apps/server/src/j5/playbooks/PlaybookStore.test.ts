@@ -1313,6 +1313,62 @@ const requiredPersonaRoutingLayer = Layer.mergeAll(
   personaEscalationsLayer.pipe(Layer.provide(Layer.mock(AgentCrewInstanceService)({}))),
 );
 
+it.effect(
+  "checks the checkpoint before refusing an unavailable next holder and reads persona files outside transactions",
+  () =>
+    Effect.gen(function* () {
+      const { workspaceRoot, write, fs } = yield* makeFixture;
+      const sql = yield* SqlClient.SqlClient;
+      const readFiles: string[] = [];
+      const lockedFiles: string[] = [];
+      const store = yield* makePlaybookStore.pipe(
+        Effect.provideService(FileSystem.FileSystem, {
+          ...fs,
+          readFileString: (file, encoding) =>
+            Effect.gen(function* () {
+              readFiles.push(file);
+              if (
+                file.includes("agent-personas") &&
+                Option.isSome(yield* Effect.serviceOption(sql.transactionService))
+              )
+                lockedFiles.push(file);
+              return yield* fs.readFileString(file, encoding);
+            }),
+        }),
+      );
+      yield* seedPersonas([{ id: "disabled", enabled: false }]);
+      const procedure = definition(["plan", "review"]);
+      const steps = [
+        { ...procedure.steps[0]!, approval: "required" as const },
+        { ...procedure.steps[1]!, persona: "disabled" },
+      ];
+      yield* write("demo", { ...procedure, steps });
+      const run = yield* store.start(owner, workspaceRoot, "demo", "start");
+      const next = {
+        operation: "next",
+        expectedStepId: "plan",
+        runId: run.runId,
+        client_request_id: "next",
+        summary: "Plan ready.",
+      } as const;
+      assert.equal((yield* Effect.flip(store.mutate(owner, next))).code, "approval_pending");
+      const checkpoint = (yield* store.current(owner)).checkpoint!;
+      yield* store.answerCheckpoint({
+        threadId: owner,
+        requestId: checkpoint.requestId,
+        decision: "approve",
+      });
+      assert.equal((yield* Effect.flip(store.mutate(owner, next))).code, "persona_unavailable");
+      assert.equal((yield* store.current(owner)).currentStepId, "plan");
+      assert.isTrue(readFiles.some((file) => file.includes("agent-personas")));
+      assert.deepEqual(lockedFiles, []);
+    }).pipe(
+      Effect.provide(requiredPersonaRoutingLayer),
+      Effect.scoped,
+      Effect.provide(CatalogLayer),
+    ),
+);
+
 it.effect("groups limited picks for one run and keeps reviewer preference and step approval", () =>
   Effect.gen(function* () {
     const { workspaceRoot, write } = yield* makeFixture;
@@ -1507,6 +1563,28 @@ it.effect(
       assert.equal(recovered.runId, run.runId);
       assert.equal(recovered.currentStep?.persona, "reviewer");
       assert.equal(recovered.holderThreadId, otherOwner);
+      yield* seedPersonas([{ id: "builder", enabled: true }]);
+      const builder = yield* pickAgentPersona({
+        personaId: "builder",
+        source: "person",
+        caller: { approvedLevel: "full-access" },
+        projectId: ProjectId.make("project:playbook-test"),
+      });
+      yield* sql`UPDATE orchestration_v2_projection_threads SET payload_json = ${JSON.stringify({ agentPersonaAssignment: builder.assignment })} WHERE thread_id = ${wrongThread}`;
+      const revision = {
+        ...current,
+        operation: "revise",
+        basis: "approved",
+        assignee: wrong,
+        steps: [{ ...initial.steps[0]!, persona: "builder" }, initial.steps[1]!],
+        client_request_id: "replace-reviewer",
+      } as const;
+      const revised = yield* store.mutate(owner, revision);
+      assert.equal(revised.currentStepId, "review");
+      assert.equal(revised.currentStep?.persona, "builder");
+      assert.equal(revised.holderThreadId, wrongThread);
+      assert.equal((yield* store.landing(run.runId, "matching-holder"))?.outcome, "skipped");
+      assert.equal((yield* store.mutate(owner, revision)).holderThreadId, wrongThread);
       const moved = yield* store.mutate(owner, {
         ...current,
         operation: "next",

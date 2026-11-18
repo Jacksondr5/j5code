@@ -543,6 +543,28 @@ export const makePlaybookStore = Effect.gen(function* () {
             : { agentPersonaAssignment: decodeAssignment(row.assignment_json) }),
         };
   });
+  const assessSteps = Effect.fn("PlaybookStore.assessSteps")(function* (
+    steps: ReadonlyArray<PlaybookStep>,
+    owner?: ThreadId,
+  ) {
+    const ids = [...new Set(namedSteps(steps).map(({ persona }) => persona))];
+    return yield* assessRequiredPersonas(
+      ids,
+      personas,
+      registry,
+      memberModels,
+      owner === undefined || ids.length === 0 ? undefined : yield* threadPersona(owner),
+    );
+  });
+  type Assessment = Effect.Success<ReturnType<typeof assessSteps>>;
+  const matchingAssessment = (steps: ReadonlyArray<PlaybookStep>, prepared?: Assessment) => {
+    const ids = new Set(namedSteps(steps).map(({ persona }) => persona));
+    const assessment = prepared ?? { statuses: [], picks: {} };
+    return ids.size === assessment.statuses.length &&
+      assessment.statuses.every(({ persona }) => ids.has(persona))
+      ? assessment
+      : undefined;
+  };
   const assertRequiredHolder = Effect.fn("PlaybookStore.assertRequiredHolder")(function* (
     step: PlaybookStep | undefined,
     threadId: ThreadId | null,
@@ -826,8 +848,8 @@ export const makePlaybookStore = Effect.gen(function* () {
       yield* cancelOrphans();
       const previous = yield* replay(owner, key, request);
       if (previous) return yield* view(previous, true);
-      const result = yield* sql.withTransaction(
-        Effect.gen(function* () {
+      const persist = Effect.fn("PlaybookStore.persistStart")(function* (prepared?: Assessment) {
+        return yield* Effect.gen(function* () {
           const previous = yield* replay(owner, key, request);
           if (previous) return { run: previous, replayed: true };
           yield* requireOwner(owner);
@@ -840,15 +862,10 @@ export const makePlaybookStore = Effect.gen(function* () {
             );
           const definition = yield* readDefinition(definitionPath);
           const firstStep = definition.steps[0]!;
+          const assessment = matchingAssessment(definition.steps, prepared);
+          if (assessment === undefined) return { needsAssessment: definition.steps };
+          const { statuses, picks } = assessment;
           const target = yield* resolveHolder(owner, assignee);
-          const ids = [...new Set(namedSteps(definition.steps).map(({ persona }) => persona))];
-          const { statuses, picks } = yield* assessRequiredPersonas(
-            ids,
-            personas,
-            registry,
-            memberModels,
-            ids.length === 0 ? undefined : yield* threadPersona(owner),
-          );
           const checked = yield* Effect.result(
             assertRequiredHolder(firstStep, target.threadId, true, statuses),
           );
@@ -899,8 +916,19 @@ export const makePlaybookStore = Effect.gen(function* () {
             );
           yield* remember(owner, key, request, run.runId);
           return { run, replayed: false };
-        }),
-      );
+        }).pipe(sql.withTransaction);
+      });
+      // The insert snapshots the current YAML. Release the database connection for catalog
+      // and provider reads, then verify that their persona IDs still match that snapshot.
+      let result = yield* persist();
+      if (result.needsAssessment !== undefined) {
+        result = yield* persist(yield* assessSteps(result.needsAssessment, owner));
+        if (result.needsAssessment !== undefined)
+          return yield* playbookError(
+            "step_conflict",
+            "The playbook's required personas changed during start. Read the playbook and retry.",
+          );
+      }
       if (result.replayed) return yield* view(result.run, true);
       const definition = result.run.definition!;
       yield* recordAnalytics("j5.playbook.run.started", {
@@ -971,8 +999,8 @@ export const makePlaybookStore = Effect.gen(function* () {
       yield* cancelOrphans();
       const previous = yield* replay(owner, input.client_request_id, request);
       if (previous) return yield* view(previous, true);
-      const result = yield* sql.withTransaction(
-        Effect.gen(function* () {
+      const persist = Effect.fn("PlaybookStore.persistMutation")(function* (prepared?: Assessment) {
+        return yield* Effect.gen(function* () {
           const previous = yield* replay(owner, input.client_request_id, request);
           if (previous) return { run: previous, replayed: true };
           const run = yield* readRun(owner, input.runId);
@@ -1049,31 +1077,23 @@ export const makePlaybookStore = Effect.gen(function* () {
               currentStepId = target;
             }
           }
+          const oldStep = run.definition?.steps.find((step) => step.id === run.currentStepId);
+          const newStep = definition?.steps.find((step) => step.id === currentStepId);
+          const personaChanged = oldStep?.persona !== newStep?.persona;
           if (
             input.operation === "revise" &&
             currentStepId === run.currentStepId &&
-            input.assignee !== undefined
+            input.assignee !== undefined &&
+            !personaChanged
           )
             return yield* playbookError(
               "invalid_assignee",
-              "A revision that keeps the current step cannot change its holder. Use j5_playbook_assign.",
+              "A revision that keeps the current step and persona cannot change its holder. Use j5_playbook_assign.",
             );
-          const oldStep = run.definition?.steps.find((step) => step.id === run.currentStepId);
-          const newStep = definition?.steps.find((step) => step.id === currentStepId);
           const revised =
             input.operation === "revise" && encodeJson(oldStep) !== encodeJson(newStep);
           if (input.operation === "next" || input.operation === "complete")
             yield* assertRequiredHolder(oldStep, run.holderThreadId, false);
-          const holder =
-            input.operation === "next" ||
-            input.operation === "back" ||
-            input.operation === "assign" ||
-            (input.operation === "revise" &&
-              (currentStepId !== run.currentStepId || (revised && run.personaBlockReason !== null)))
-              ? yield* resolveHolder(owner, input.assignee)
-              : null;
-          if (holder !== null || revised)
-            yield* assertRequiredHolder(newStep, holder?.threadId ?? run.holderThreadId, true);
           const updatedAt = yield* now;
           if (input.operation === "next" || input.operation === "complete") {
             const step = run.definition?.steps.find((step) => step.id === run.currentStepId);
@@ -1107,6 +1127,35 @@ export const makePlaybookStore = Effect.gen(function* () {
               }
             }
           }
+          const holder =
+            input.operation === "next" ||
+            input.operation === "back" ||
+            input.operation === "assign" ||
+            (input.operation === "revise" &&
+              (currentStepId !== run.currentStepId ||
+                (revised &&
+                  (run.personaBlockReason !== null ||
+                    (personaChanged && input.assignee !== undefined)))))
+              ? yield* resolveHolder(owner, input.assignee)
+              : null;
+          const assessmentSteps =
+            input.operation === "revise"
+              ? input.steps
+              : holder !== null && newStep !== undefined
+                ? [newStep]
+                : [];
+          const revisedPersonas = matchingAssessment(assessmentSteps, prepared);
+          if (revisedPersonas === undefined) return { needsAssessment: assessmentSteps };
+          if (holder !== null || revised) {
+            const statuses = revisedPersonas.statuses;
+            yield* assertRequiredHolder(
+              newStep,
+              holder?.threadId ?? run.holderThreadId,
+              true,
+              statuses,
+            );
+          }
+
           if (input.operation !== "assign" && (input.operation !== "revise" || revised))
             yield* checkpoints.close(run.runId, updatedAt, status !== "active");
           let revisionCount = run.revisionCount ?? 0;
@@ -1149,7 +1198,11 @@ export const makePlaybookStore = Effect.gen(function* () {
             holder_thread_id = ${holder?.threadId ?? run.holderThreadId},
             assigned_by_participant_id = ${holder?.assignedBy ?? run.assignedByParticipantId}
           WHERE run_id = ${run.runId} AND owner_thread_id = ${owner}`;
-          if (input.operation === "assign" || status !== "active")
+          if (
+            input.operation === "assign" ||
+            (input.operation === "revise" && holder !== null) ||
+            status !== "active"
+          )
             yield* skipPending(run.runId, updatedAt);
           if (holder !== null)
             yield* land(run.runId, input.client_request_id, currentStepId, updatedAt, holder);
@@ -1172,8 +1225,22 @@ export const makePlaybookStore = Effect.gen(function* () {
             },
             replayed: false,
           };
-        }),
-      );
+        }).pipe(sql.withTransaction);
+      });
+      let result = yield* persist();
+      if (result.needsAssessment !== undefined) {
+        result = yield* persist(
+          yield* assessSteps(
+            result.needsAssessment,
+            input.operation === "revise" ? owner : undefined,
+          ),
+        );
+        if (result.needsAssessment !== undefined)
+          return yield* playbookError(
+            "step_conflict",
+            "The run's required personas changed. Retrieve j5_playbook_current and retry.",
+          );
+      }
       if ("approvalPending" in result) {
         yield* bumpRevision;
         return yield* playbookError(
