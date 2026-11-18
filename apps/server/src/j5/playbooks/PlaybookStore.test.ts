@@ -1858,6 +1858,26 @@ it.effect(
         (yield* Effect.flip(store.mutate(owner, { ...leave, expectedStepId: "wrong" }))).code,
         "step_conflict",
       );
+      for (const [index, steps] of [
+        checked.steps.slice(1),
+        definition(["plan", "build"]).steps,
+      ].entries()) {
+        assert.equal(
+          (yield* Effect.flip(
+            store.mutate(owner, {
+              operation: "revise",
+              runId: run.runId,
+              expectedStepId: "plan",
+              stepId: "build",
+              steps,
+              basis: "approved",
+              client_request_id: `drop-checkpoint-${index}`,
+            }),
+          )).code,
+          "invalid_definition",
+        );
+        assert.deepStrictEqual((yield* store.current(owner)).checkpoint, first);
+      }
       assert.equal(first.summary, leave.summary);
       assert.equal(first.ownerThreadId, owner);
       assert.equal(first.stepTitle, "Step plan");
@@ -2087,6 +2107,16 @@ it.effect("completion needs approval and owner cancellation closes its pending c
     yield* store.answerCheckpoint({
       threadId: owner,
       requestId: request.requestId,
+      decision: "approve",
+    });
+    const amended = { ...finish, summary: "Report and appendix attached." };
+    assert.equal((yield* Effect.flip(store.mutate(owner, amended))).code, "approval_pending");
+    const replacement = (yield* store.current(owner)).checkpoint!;
+    assert.notEqual(replacement.requestId, request.requestId);
+    assert.equal(replacement.summary, amended.summary);
+    yield* store.answerCheckpoint({
+      threadId: owner,
+      requestId: replacement.requestId,
       decision: "approve",
     });
     assert.equal((yield* store.mutate(owner, finish)).status, "completed");
