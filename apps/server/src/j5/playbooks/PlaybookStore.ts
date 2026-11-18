@@ -1425,45 +1425,104 @@ export const makePlaybookStore = Effect.gen(function* () {
       library.save(input).pipe(permit.withPermits(1), Effect.tap(bumpRevision)),
     saveDefinitionFromTurn: Effect.fn("PlaybookStore.saveDefinitionFromTurn")(
       function* (threadId: ThreadId, runId: RunId | null, input: PlaybookSaveRequest) {
-        // A later steer can change what the agent acts on before this run ends.
+        // A later steer, an edit of a queued message or an answer to the agent's question can
+        // change what the agent acts on, so each must be an Owner's too.
         const allowed =
           runId === null
             ? []
             : yield* sql<{ readonly allowed: number }>`
             WITH turn AS (
-              SELECT thread_id, run_id, json_extract(payload_json, '$.userMessageId') AS initiating_id
+              SELECT thread_id, run_id, requested_at,
+                json_extract(payload_json, '$.userMessageId') AS initiating_id
               FROM orchestration_v2_projection_runs
               WHERE run_id = ${runId} AND thread_id = ${threadId}
                 AND status IN ('starting', 'running', 'waiting')
             ),
+            -- An answer upstream writes as a message is claimed under the request it answers.
             inputs AS (
-              SELECT message.message_id, message.payload_json
+              SELECT message.message_id, message.payload_json,
+                CASE
+                  WHEN message.message_id LIKE 'approval-feedback:%'
+                    THEN 'runtime-request:' || substr(message.message_id, 19)
+                  WHEN message.message_id LIKE 'async-answer:%'
+                    THEN 'runtime-request:' || substr(message.message_id, 14)
+                  ELSE message.message_id
+                END AS claim_key
               FROM turn
               JOIN orchestration_v2_projection_messages AS message
                 ON message.thread_id = turn.thread_id AND message.run_id = turn.run_id
               WHERE message.role = 'user'
             ),
+            -- Each accepted command a person sent that wrote one of the turn's messages.
+            writes AS (
+              SELECT input.message_id, event.payload_json AS written_json,
+                (claim.settings_write = 1 AND person.removed_at IS NULL AND EXISTS (
+                  SELECT 1 FROM j5_a2a_person_level AS held
+                  WHERE held.person_id = claim.person_id AND held.scope_kind = 'server'
+                    AND held.level = 'owner'
+                )) AS by_owner
+              FROM inputs AS input
+              JOIN j5_human_message_command AS claim ON claim.message_id = input.claim_key
+              JOIN j5_a2a_human_person AS person ON person.person_id = claim.person_id
+              JOIN orchestration_events AS event INDEXED BY idx_orch_events_command_id
+                ON event.command_id = claim.command_id AND event.stream_id = ${threadId}
+                AND event.aggregate_kind = 'thread' AND event.event_type = 'message.updated'
+                AND json_extract(event.payload_json, '$.id') = input.message_id
+            ),
+            -- An Owner wrote the words the agent reads now, and nobody else has changed them.
             authorized AS (
               SELECT input.message_id FROM inputs AS input
-              JOIN j5_human_message_command AS claim ON claim.message_id = input.message_id
-              JOIN j5_a2a_person_level AS grant
-                ON grant.person_id = claim.person_id AND grant.scope_kind = 'server'
-              JOIN j5_a2a_human_person AS person ON person.person_id = claim.person_id
               WHERE json_extract(input.payload_json, '$.scheduledTaskId') IS NULL
                 AND json_extract(input.payload_json, '$.senderThreadId') IS NULL
                 AND json_extract(input.payload_json, '$.createdBy') = 'user'
-                AND claim.settings_write = 1 AND grant.level = 'owner' AND person.removed_at IS NULL
                 AND EXISTS (
-                  SELECT 1 FROM orchestration_events AS event INDEXED BY idx_orch_events_command_id
-                  WHERE event.command_id = claim.command_id AND event.stream_id = ${threadId}
-                    AND event.aggregate_kind = 'thread' AND event.event_type = 'message.updated'
-                    AND json_extract(event.payload_json, '$.id') = input.message_id
+                  SELECT 1 FROM writes AS written
+                  WHERE written.message_id = input.message_id AND written.by_owner
+                    AND json_extract(written.written_json, '$.text')
+                      IS json_extract(input.payload_json, '$.text')
+                    AND json_extract(written.written_json, '$.attachments')
+                      IS json_extract(input.payload_json, '$.attachments')
+                    AND json_extract(written.written_json, '$.context')
+                      IS json_extract(input.payload_json, '$.context')
                 )
+                AND NOT EXISTS (
+                  SELECT 1 FROM writes AS written
+                  WHERE written.message_id = input.message_id AND NOT written.by_owner
+                )
+            ),
+            -- Words given to the agent's own questions and approvals since this turn was asked for.
+            answers AS (
+              SELECT request.runtime_request_id FROM turn
+              JOIN orchestration_v2_projection_runtime_requests AS request
+                ON request.thread_id = turn.thread_id AND request.status = 'resolved'
+              WHERE request.resolved_at >= turn.requested_at
+                AND (json_extract(request.payload_json, '$.answers') IS NOT NULL
+                  OR json_extract(request.payload_json, '$.feedback') IS NOT NULL)
             )
             SELECT 1 AS allowed FROM turn
             WHERE initiating_id IN (SELECT message_id FROM authorized)
               AND NOT EXISTS (
                 SELECT 1 FROM inputs WHERE message_id NOT IN (SELECT message_id FROM authorized)
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM answers AS answer
+                WHERE NOT EXISTS (
+                  SELECT 1 FROM j5_human_message_command AS claim
+                  JOIN j5_a2a_human_person AS person ON person.person_id = claim.person_id
+                  JOIN j5_a2a_person_level AS held
+                    ON held.person_id = claim.person_id AND held.scope_kind = 'server'
+                  WHERE claim.message_id = 'runtime-request:' || answer.runtime_request_id
+                    AND claim.settings_write = 1 AND held.level = 'owner'
+                    AND person.removed_at IS NULL
+                    AND EXISTS (
+                      SELECT 1 FROM orchestration_events AS event
+                        INDEXED BY idx_orch_events_command_id
+                      WHERE event.command_id = claim.command_id AND event.stream_id = ${threadId}
+                        AND event.aggregate_kind = 'thread'
+                        AND event.event_type = 'runtime-request.updated'
+                        AND json_extract(event.payload_json, '$.id') = answer.runtime_request_id
+                    )
+                )
               )
             LIMIT 1
           `;
