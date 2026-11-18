@@ -1,5 +1,7 @@
 import {
   AuthOrchestrationOperateScope,
+  AuthSettingsWriteScope,
+  CommandId,
   EnvironmentAuthorizationError,
   OrchestrationV2DispatchCommandError,
   type OrchestrationV2Command,
@@ -285,6 +287,35 @@ export const makeCommandAdmission = Effect.fn("j5.sharing.commandAdmission.makeC
     });
 
     const person = reachPersonId(reach);
+    const claimMessage = Effect.fn("j5.sharing.commandAdmission.claimMessage")(function* (
+      commandId: CommandId,
+    ) {
+      if (reach.kind !== "person") return;
+      const canWriteSettings =
+        reach.serverLevel === "owner" &&
+        (reach.ceiling === null || reach.ceiling.includes(AuthSettingsWriteScope));
+      const [inserted] = yield* sql<{ readonly person_id: string }>`
+        INSERT OR IGNORE INTO j5_human_message_command (command_id, person_id, settings_write)
+        SELECT ${commandId}, ${reach.person.personId}, ${canWriteSettings ? 1 : 0}
+        WHERE NOT EXISTS (SELECT 1 FROM orchestration_events WHERE command_id = ${commandId})
+        RETURNING person_id
+      `.pipe(Effect.mapError(() => refused("Could not verify the sender of this message.")));
+      if (inserted) return;
+      const [previous] = yield* sql<{
+        readonly person_id: string;
+        readonly settings_write: number;
+      }>`
+        SELECT person_id, settings_write FROM j5_human_message_command
+        WHERE command_id = ${commandId}
+      `.pipe(Effect.mapError(() => refused("Could not verify the sender of this message.")));
+      if (
+        previous &&
+        (previous.person_id !== reach.person.personId ||
+          (previous.settings_write === 1 && !canWriteSettings))
+      ) {
+        return yield* refused("This message command was already submitted.");
+      }
+    });
     // Only a person may switch a persona worker's model; the orchestrator checks the switch.
     const asPerson = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
       person === null
@@ -316,6 +347,7 @@ export const makeCommandAdmission = Effect.fn("j5.sharing.commandAdmission.makeC
         Effect.flatMap((admitted) =>
           conversation.dispatch(person, admitted, (stamped) =>
             Effect.gen(function* () {
+              if (stamped.type === "message.dispatch") yield* claimMessage(stamped.commandId);
               const claimed = yield* claimEdit(stamped);
               return yield* asPerson(dispatch(stamped)).pipe(
                 Effect.tapError(() => (claimed ? releaseEdit(stamped) : Effect.void)),
@@ -338,7 +370,14 @@ export const makeCommandAdmission = Effect.fn("j5.sharing.commandAdmission.makeC
           ? { kind: "thread", threadId: input.threadId }
           : { kind: "project", projectId: input.projectId };
       yield* requireLevel(scope, "collaborator");
-      return yield* conversation.launch(person, input, (admitted) => asPerson(launch(admitted)));
+      return yield* conversation.launch(person, input, (admitted) =>
+        Effect.gen(function* () {
+          if (admitted.initialMessage !== undefined) {
+            yield* claimMessage(CommandId.make(`${admitted.commandId}:initial-message`));
+          }
+          return yield* asPerson(launch(admitted));
+        }),
+      );
     });
 
     const upsertScheduledTask: CommandAdmission["upsertScheduledTask"] = (input, upsert) => {

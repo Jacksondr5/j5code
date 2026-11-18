@@ -23,10 +23,11 @@ definition on web and desktop and shares it from mobile.
 
 The library can read additional folders on the environment's machine. Add a source
 folder through the library's actions menu. Removing a source stops reading it
-without deleting its files. Folder definitions are read-only in the app: edit the
-source file, or copy it into the managed library. Refresh after changing files
-outside the app. Duplicate names across sources show an error until a copy is
-renamed or a source is removed.
+without deleting its files. Edit a folder definition at its source, or ask an agent to draft an edit and
+approve a same-named library copy. **Copy to library** in Settings can make the same
+override. The library copy hides later updates from the team folder. Deleting the
+copy restores the team version. Duplicate names across team folders still show an
+error. Refresh after changing files outside the app.
 
 A project can also keep playbooks in its own `.j5/playbooks/` folder, committed with
 its code. They are available only in that project and its worktrees, and override a
@@ -51,9 +52,12 @@ each run's owner thread, agent activity, and current step. Select a run to open
 its thread, or choose **All** to include completed and cancelled runs.
 Unavailable environments keep their last received progress marked as stale.
 
-Ask your agent to create or change a playbook. It saves to the environment library
-unless you ask for a project-only playbook, which it writes to `.j5/playbooks/` in that
-project. The playbook's name uses lowercase letters, digits, and hyphens, such as
+Ask your agent to create or change a playbook. Playbook Author shows the full YAML
+for approval before saving. Reply in a new chat turn to approve the draft, or
+cancel to leave it in the conversation. Only environment Owners can save to the
+library. Collaborators can draft a playbook for an Owner to approve and save. For
+a workspace-only playbook, ask the agent to write it in `.j5/playbooks/`, where
+your workspace's write access applies. The playbook's name uses lowercase letters, digits, and hyphens, such as
 `release-review`. The `title` is what you see in the app. For example, import this
 definition as `review`, or save it as `.j5/playbooks/review.yaml`:
 

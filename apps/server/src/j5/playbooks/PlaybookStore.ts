@@ -1,6 +1,6 @@
 import type { SessionReach } from "../sharing/PersonAccess.ts";
 import { makePlaybookCheckpoints } from "./PlaybookCheckpoints.ts";
-import { ThreadId } from "@t3tools/contracts";
+import { type RunId, ThreadId } from "@t3tools/contracts";
 import {
   PlaybookError,
   PlaybookHolderStop,
@@ -548,7 +548,12 @@ export const makePlaybookStore = Effect.gen(function* () {
       Effect.gen(function* () {
         const selection = selectPlaybookSource(selected, name, selectedSource !== undefined);
         const source = selection.entry!;
-        const base = { name, source: source.source, overridesLibrary: selection.overridesLibrary };
+        const base = {
+          name,
+          source: source.source,
+          overridesLibrary: selection.overridesLibrary,
+          overridesFolder: selection.overridesFolder,
+        };
         const issue = selection.issue;
         const read =
           issue === null
@@ -1289,6 +1294,58 @@ export const makePlaybookStore = Effect.gen(function* () {
       ),
     saveDefinition: (input: PlaybookSaveRequest) =>
       library.save(input).pipe(permit.withPermits(1), Effect.tap(bumpRevision)),
+    saveDefinitionFromTurn: Effect.fn("PlaybookStore.saveDefinitionFromTurn")(
+      function* (threadId: ThreadId, runId: RunId | null, input: PlaybookSaveRequest) {
+        // A later steer can change what the agent acts on before this run ends.
+        const allowed =
+          runId === null
+            ? []
+            : yield* sql<{ readonly allowed: number }>`
+            WITH turn AS (
+              SELECT thread_id, run_id, json_extract(payload_json, '$.userMessageId') AS initiating_id
+              FROM orchestration_v2_projection_runs
+              WHERE run_id = ${runId} AND thread_id = ${threadId}
+                AND status IN ('starting', 'running', 'waiting')
+            ),
+            inputs AS (
+              SELECT message.message_id, message.payload_json
+              FROM turn
+              JOIN orchestration_v2_projection_messages AS message
+                ON message.thread_id = turn.thread_id AND message.run_id = turn.run_id
+              WHERE message.role = 'user'
+            ),
+            authorized AS (
+              SELECT input.message_id FROM inputs AS input
+              JOIN orchestration_events AS event ON event.stream_id = ${threadId}
+                AND event.aggregate_kind = 'thread' AND event.event_type = 'message.updated'
+                AND json_extract(event.payload_json, '$.id') = input.message_id
+              JOIN j5_human_message_command AS claim ON claim.command_id = event.command_id
+              JOIN j5_a2a_person_level AS grant
+                ON grant.person_id = claim.person_id AND grant.scope_kind = 'server'
+              JOIN j5_a2a_human_person AS person ON person.person_id = claim.person_id
+              WHERE json_extract(input.payload_json, '$.scheduledTaskId') IS NULL
+                AND json_extract(input.payload_json, '$.senderThreadId') IS NULL
+                AND json_extract(input.payload_json, '$.createdBy') = 'user'
+                AND claim.settings_write = 1 AND grant.level = 'owner' AND person.removed_at IS NULL
+            )
+            SELECT 1 AS allowed FROM turn
+            WHERE initiating_id IN (SELECT message_id FROM authorized)
+              AND NOT EXISTS (
+                SELECT 1 FROM inputs WHERE message_id NOT IN (SELECT message_id FROM authorized)
+              )
+            LIMIT 1
+          `;
+        if (allowed.length === 0) {
+          return yield* playbookError(
+            "owner_required",
+            "Only an environment Owner can save a library playbook. Keep the full YAML draft in this conversation and ask an Owner to approve and save it in a new chat turn or in Settings.",
+          );
+        }
+        return yield* library.save(input).pipe(Effect.tap(bumpRevision));
+      },
+      Effect.mapError(storageError),
+      permit.withPermits(1),
+    ),
     setFolders: (input: PlaybookFoldersInput) =>
       library.setFolders(input).pipe(permit.withPermits(1), Effect.tap(bumpRevision)),
     startDefinitionPathFor,

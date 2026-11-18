@@ -1,4 +1,7 @@
-import { LEGACY_PLAYBOOK_AUTHOR_INSTRUCTIONS } from "./playbookAuthorLegacy.ts";
+import {
+  LEGACY_PLAYBOOK_AUTHOR_INSTRUCTIONS,
+  PREVIOUS_PLAYBOOK_AUTHOR_INSTRUCTIONS,
+} from "./playbookAuthorLegacy.ts";
 import type { AgentPersonaEditInput } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import {
@@ -136,10 +139,15 @@ describe("Playbook Author launch", () => {
 });
 
 describe("saved Playbook Author instructions", () => {
-  it.each([true, false])("updates only unchanged stock instructions (stock=%s)", async (stock) => {
-    const original = stock
-      ? LEGACY_PLAYBOOK_AUTHOR_INSTRUCTIONS
-      : `${LEGACY_PLAYBOOK_AUTHOR_INSTRUCTIONS}\nMy custom rule.`;
+  it.each([
+    { version: "workspace", original: LEGACY_PLAYBOOK_AUTHOR_INSTRUCTIONS, stock: true },
+    { version: "library", original: PREVIOUS_PLAYBOOK_AUTHOR_INSTRUCTIONS, stock: true },
+    {
+      version: "custom",
+      original: `${LEGACY_PLAYBOOK_AUTHOR_INSTRUCTIONS}\nMy custom rule.`,
+      stock: false,
+    },
+  ])("updates only unchanged stock instructions ($version)", async ({ original, stock }) => {
     let instructions = original;
     const modelRoute = decodePersonaCreate({
       id: "playbook-author",
@@ -190,6 +198,7 @@ describe("saved Playbook Author instructions", () => {
     if (stock)
       expect(edits[0]).toMatchObject({
         expectedDigest: "a".repeat(64),
+        instructions: expect.stringContaining("wait for explicit approval"),
         displayName: author.displayName,
         modelRoute,
       });

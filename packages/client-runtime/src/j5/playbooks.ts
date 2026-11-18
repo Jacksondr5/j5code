@@ -19,7 +19,11 @@ import {
   PLAYBOOK_MENTION_PREFIX,
   playbookMentionReplacement,
 } from "@t3tools/shared/j5/agentMention";
-import { LEGACY_PLAYBOOK_AUTHOR_INSTRUCTIONS } from "./playbookAuthorLegacy.ts";
+import {
+  CHECKPOINT_AUTHOR_GUIDANCE,
+  LEGACY_PLAYBOOK_AUTHOR_INSTRUCTIONS,
+  PREVIOUS_PLAYBOOK_AUTHOR_INSTRUCTIONS,
+} from "./playbookAuthorLegacy.ts";
 import { defaultAgentPersonaModelRoute } from "./agentPersonas.ts";
 import type { StartThreadTurnInput } from "../operations/commands.ts";
 import type { EnvironmentProject, EnvironmentThreadShell } from "../state/shell.ts";
@@ -27,14 +31,14 @@ import type { EnvironmentProject, EnvironmentThreadShell } from "../state/shell.
 export const PLAYBOOK_AUTHOR_ID = "playbook-author";
 /** What a person asks Playbook Author first; mobile prefills it in a new chat. */
 export const PLAYBOOK_AUTHOR_PROMPT =
-  "Help me create a playbook, available across all projects and worktrees in this environment. Save the final YAML with j5_playbook_save. Start by asking what I want it to accomplish.";
-const CHECKPOINT_AUTHOR_GUIDANCE =
-  "A step may add approval: required when the user wants a reusable sign-off checkpoint. The owner submits a summary when leaving; a person approves in the Inbox or owner chat. A task-specific show-me-first instruction stays in the prompt. ";
+  "Help me create a playbook, available across all projects and worktrees in this environment. Show me the full YAML and wait for my approval before using j5_playbook_save. Start by asking what I want it to accomplish.";
+export const PLAYBOOK_FOLDER_OVERRIDE_WARNING =
+  "The library copy hides later updates from the team folder. Removing the library copy restores the team version.";
 const PLAYBOOK_AUTHOR_INSTRUCTIONS = `You are Playbook Author. Help the user turn a repeatable task into a small, clear agent-led playbook shared across this environment.
 
 1. Start by asking what the playbook should accomplish. Clarify the desired result, inputs, constraints, and evidence of success one focused question at a time. Use details already provided instead of asking again.
-2. Inspect existing definitions with j5_playbook_list and j5_playbook_read, and relevant workspace guidance. Propose the smallest useful sequence of steps, then write or refine the definition once the user's intent is clear. Ask before replacing an unrelated existing definition; preserve stable step IDs when editing.
-3. By default save the finished YAML with j5_playbook_save({name, yaml}) to the environment library. It becomes available across all projects and worktrees on this environment. To edit an environment library playbook, pass the digest from j5_playbook_read as expectedDigest. Only when the user explicitly chooses This workspace only, write .j5/playbooks/<name>.yaml relative to this thread's workspace; edit a workspace playbook in that file. A workspace playbook overrides a same-named library playbook in that workspace. Do not write directly outside the workspace sandbox. If the save tool cannot run, show the YAML and explain the save failure; do not claim the playbook is shared. The name must be lowercase letters, digits, and hyphens, starting with a letter, such as release-review; put the human-readable name in title. Use YAML 1.2 with title, description, and steps. Each step has a unique stable id, a title, and a non-empty prompt. ${CHECKPOINT_AUTHOR_GUIDANCE}A step may add persona, the id of the persona that should do it; call j5_list_personas before writing one, and leave it off steps the user doesn't assign. Use 1–${PLAYBOOK_MAX_STEPS} steps, no YAML aliases, and at most ${PLAYBOOK_MAX_BYTES / 1024} KiB. For example:
+2. Inspect existing definitions with j5_playbook_list and j5_playbook_read, and relevant workspace guidance. Propose the smallest useful sequence of steps, then show the complete YAML draft in chat. Preserve stable step IDs when editing. Name the destination and wait for explicit approval of that exact draft in a new chat message before saving or writing any file. Show revised YAML and ask again after any change. If the user cancels or wants a draft, end with the draft in chat.
+3. After approval, save with j5_playbook_save({name, yaml}) to the environment library by default. Only an environment Owner can authorize that save. If the tool returns owner_required, leave the full draft in chat and explain that an Owner needs to approve and save it. Do the same if the tool is unavailable, with the actual reason. Pass expectedDigest from j5_playbook_read when editing a library definition. For a team-folder playbook, include this warning with the draft. ${PLAYBOOK_FOLDER_OVERRIDE_WARNING} After approval, pass overrideFolder: true without expectedDigest to create the same-named library copy. When the user explicitly requests a workspace-only playbook, use .j5/playbooks/<name>.yaml in this thread's workspace under ordinary workspace write access and only after draft approval. Edit existing workspace playbooks in their file. The name must be lowercase letters, digits, and hyphens, starting with a letter, such as release-review; put the human-readable name in title. Use YAML 1.2 with title, description, and steps. Each step has a unique stable id, a title, and a non-empty prompt. ${CHECKPOINT_AUTHOR_GUIDANCE}A step may add persona, the id of the persona that should do it; call j5_list_personas before writing one, and leave it off steps the user doesn't assign. Use 1–${PLAYBOOK_MAX_STEPS} steps, no YAML aliases, and at most ${PLAYBOOK_MAX_BYTES / 1024} KiB. For example:
 
 title: Review a change
 description: Inspect a change and report evidence.
@@ -97,15 +101,16 @@ export async function ensurePlaybookAuthor(input: {
     throw new Error(
       "Playbook Author needs Workspace write authority to save YAML. Update it in Settings → Agent Setup for this environment.",
     );
-  // Saved authors predate environment libraries. Update only the exact stock instructions,
+  // Update only exact stock instructions across previously shipped versions,
   // using the existing digest guard so a concurrent human edit is never overwritten.
   const editable = persona.orderedEditable;
   if (editable && input.readDefinition && input.editPersona) {
     const definition = await input.readDefinition(PLAYBOOK_AUTHOR_ID);
     if (
       definition.instructions === LEGACY_PLAYBOOK_AUTHOR_INSTRUCTIONS ||
+      definition.instructions === PREVIOUS_PLAYBOOK_AUTHOR_INSTRUCTIONS ||
       definition.instructions ===
-        PLAYBOOK_AUTHOR_INSTRUCTIONS.replace(CHECKPOINT_AUTHOR_GUIDANCE, "")
+        PREVIOUS_PLAYBOOK_AUTHOR_INSTRUCTIONS.replace(CHECKPOINT_AUTHOR_GUIDANCE, "")
     ) {
       await input.editPersona({
         personaId: persona.personaId,
