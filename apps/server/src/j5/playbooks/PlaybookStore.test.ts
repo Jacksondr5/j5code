@@ -1913,6 +1913,26 @@ it.effect(
         (yield* Effect.flip(store.mutate(owner, { ...leave, expectedStepId: "wrong" }))).code,
         "step_conflict",
       );
+      for (const [index, steps] of [
+        checked.steps.slice(1),
+        definition(["plan", "build"]).steps,
+      ].entries()) {
+        assert.equal(
+          (yield* Effect.flip(
+            store.mutate(owner, {
+              operation: "revise",
+              runId: run.runId,
+              expectedStepId: "plan",
+              stepId: "build",
+              steps,
+              basis: "approved",
+              client_request_id: `drop-checkpoint-${index}`,
+            }),
+          )).code,
+          "invalid_definition",
+        );
+        assert.deepStrictEqual((yield* store.current(owner)).checkpoint, first);
+      }
       assert.equal(first.summary, leave.summary);
       assert.equal(first.ownerThreadId, owner);
       assert.equal(first.stepTitle, "Step plan");
@@ -1977,6 +1997,12 @@ it.effect(
       const dispatched = yield* Ref.make<
         ReadonlyArray<Parameters<ThreadManagementService["Service"]["dispatch"]>[0]>
       >([]);
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`INSERT INTO j5_playbook_checkpoint
+        SELECT 'retry-notice', run_id, owner_thread_id, step_id, step_title, summary,
+               'approved', created_at, answered_at, reason, NULL
+        FROM j5_playbook_checkpoint WHERE request_id = ${first.requestId}`;
+      let failDispatch = true;
       const notifier = yield* makeCheckpointNotifications.pipe(
         Effect.provide(
           Layer.mergeAll(
@@ -1987,26 +2013,28 @@ it.effect(
                   thread: { archivedAt: null, deletedAt: null },
                 } as OrchestrationV2ThreadProjection),
               dispatch: (command) =>
-                Ref.update(dispatched, (commands) => [...commands, command]).pipe(
-                  Effect.as({ sequence: 1, storedEvents: [] }),
-                ),
+                failDispatch && command.commandId === "playbook-checkpoint:retry-notice"
+                  ? Effect.die("temporary dispatch failure")
+                  : Ref.update(dispatched, (commands) => [...commands, command]).pipe(
+                      Effect.as({ sequence: 1, storedEvents: [] }),
+                    ),
             }),
           ),
         ),
       );
-      yield* notifier.drain();
+      assert.isTrue(yield* notifier.drain());
       const notice = (yield* Ref.get(dispatched))[0]!;
       assert.equal(notice.type, "message.dispatch");
       if (notice.type === "message.dispatch") {
         assert.equal(notice.threadId, owner);
         assert.include(notice.text, "Add rollback instructions.");
       }
-      yield* notifier.drain();
-      assert.equal((yield* Ref.get(dispatched)).length, 1);
-      const sql = yield* SqlClient.SqlClient;
+      failDispatch = false;
+      assert.isFalse(yield* notifier.drain());
+      assert.equal((yield* Ref.get(dispatched)).length, 2);
       yield* sql`UPDATE j5_playbook_checkpoint SET notified_at = NULL WHERE request_id = ${first.requestId}`;
       yield* notifier.drain();
-      assert.deepStrictEqual((yield* Ref.get(dispatched))[1], notice);
+      assert.deepStrictEqual((yield* Ref.get(dispatched))[2], notice);
       assert.equal(
         (yield* Effect.flip(
           store.answerCheckpoint({
@@ -2151,6 +2179,16 @@ it.effect("completion needs approval and owner cancellation closes its pending c
     yield* store.answerCheckpoint({
       threadId: owner,
       requestId: request.requestId,
+      decision: "approve",
+    });
+    const amended = { ...finish, summary: "Report and appendix attached." };
+    assert.equal((yield* Effect.flip(store.mutate(owner, amended))).code, "approval_pending");
+    const replacement = (yield* store.current(owner)).checkpoint!;
+    assert.notEqual(replacement.requestId, request.requestId);
+    assert.equal(replacement.summary, amended.summary);
+    yield* store.answerCheckpoint({
+      threadId: owner,
+      requestId: replacement.requestId,
       decision: "approve",
     });
     assert.equal((yield* store.mutate(owner, finish)).status, "completed");

@@ -876,9 +876,23 @@ export const makePlaybookStore = Effect.gen(function* () {
                 "invalid_definition",
                 "A revision requires an asked or approved basis.",
               );
+            const previousSteps = definition.steps;
             definition = (yield* decodePlaybookDocument(
               encodeJson({ ...definition, steps: input.steps }),
             )).definition;
+            const requiredIds = new Set(
+              definition.steps
+                .filter((step) => step.approval === "required")
+                .map((step) => step.id),
+            );
+            const removed = previousSteps.find(
+              (step) => step.approval === "required" && !requiredIds.has(step.id),
+            );
+            if (removed)
+              return yield* playbookError(
+                "invalid_definition",
+                `The revision must keep the required approval on step '${removed.id}'.`,
+              );
             const ids = definition.steps.map((step) => step.id);
             if (!ids.includes(currentStepId)) {
               if (input.stepId === undefined || !ids.includes(input.stepId))
@@ -929,20 +943,24 @@ export const makePlaybookStore = Effect.gen(function* () {
             const step = run.definition?.steps.find((step) => step.id === run.currentStepId);
             if (step?.approval === "required") {
               const checkpoint = yield* checkpoints.current(run.runId);
-              if (checkpoint?.status !== "approved") {
-                if (checkpoint?.status !== "pending") {
-                  if (!input.summary?.trim() || input.summary.length > 8000)
+              const summary = input.summary?.trim();
+              const changedSummary = input.summary !== undefined && summary !== checkpoint?.summary;
+              if (checkpoint?.status !== "approved" || changedSummary) {
+                if (checkpoint?.status !== "pending" || changedSummary) {
+                  if (!input.summary || !summary || input.summary.length > 8000)
                     return yield* playbookError(
                       "approval_summary_required",
                       "Submit a summary of the finished work to approve (1–8000 characters).",
                     );
+                  if (checkpoint?.status === "pending")
+                    yield* checkpoints.close(run.runId, updatedAt);
                   yield* checkpoints.open({
                     requestId: yield* crypto.uuidV4().pipe(Effect.orDie),
                     runId: run.runId,
                     ownerThreadId: owner,
                     stepId: step.id,
                     stepTitle: step.title,
-                    summary: input.summary.trim(),
+                    summary,
                     status: "pending",
                     createdAt: updatedAt,
                     answeredAt: null,
@@ -971,6 +989,19 @@ export const makePlaybookStore = Effect.gen(function* () {
               toStepId: currentStepId,
               stepsDigest: playbookDigest(encodeJson(definition!.steps)),
             };
+            if (currentStepId === run.currentStepId && run.holderThreadId !== owner) {
+              const previousStep = run.definition?.steps.find((step) => step.id === currentStepId);
+              const revisedStep = definition!.steps.find((step) => step.id === currentStepId);
+              if (previousStep?.prompt !== revisedStep?.prompt) {
+                // Preserve the recipient and seat recorded for this step.
+                yield* sql`INSERT INTO j5_playbook_step_delivery (run_id, request_id, step_id, landed_at,
+                  target_seat, target_thread_id, target_participant_id, assigned_by_participant_id)
+                  SELECT run_id, ${input.client_request_id}, step_id, ${updatedAt},
+                    target_seat, target_thread_id, target_participant_id, assigned_by_participant_id
+                  FROM j5_playbook_step_delivery WHERE run_id = ${run.runId} AND step_id = ${currentStepId}
+                  ORDER BY landed_at DESC, rowid DESC LIMIT 1`;
+              }
+            }
             revisionCount += 1;
             yield* sql`INSERT INTO j5_playbook_revision (run_id, request_id, basis, revised_at, owner_thread_id, from_step_id, to_step_id, steps_digest)
               VALUES (${run.runId}, ${input.client_request_id}, ${input.basis}, ${updatedAt}, ${owner}, ${run.currentStepId}, ${currentStepId}, ${latestRevision.stepsDigest})`;
