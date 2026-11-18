@@ -774,6 +774,7 @@ it.effect(
             yield* relay.reconcileOwners();
           } else
             yield* relay.handleOwnerEvent({
+              sequence: 1,
               event: { type: `thread.${kind}`, threadId: owner },
             } as OrchestrationV2StoredEvent);
           const ended = yield* relay.current(owner, run.runId);
@@ -792,6 +793,39 @@ it.effect(
         4,
       );
     }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);
+
+it.effect("a delayed archive reconciles its owner without cancelling a replacement run", () =>
+  Effect.gen(function* () {
+    const { start, store, relay, root, sql, dispatched } = yield* fixture;
+    const original = yield* start("original", peerId);
+    const [archive] = yield* sql<{ sequence: number }>`
+      INSERT INTO orchestration_events
+        (event_id, aggregate_kind, stream_id, stream_version, event_type, occurred_at,
+         actor_kind, payload_json, metadata_json, application_event_version)
+      VALUES ('test:archive', 'thread', ${owner}, 1, 'thread.archived', ${at},
+        'system', '{}', '{}', 2) RETURNING sequence`;
+    yield* sql`UPDATE orchestration_v2_projection_threads SET archived_at = ${at} WHERE thread_id = ${owner}`;
+    assert.equal((yield* store.current(owner, original.runId)).status, "cancelled");
+    yield* sql`UPDATE orchestration_v2_projection_threads SET archived_at = NULL WHERE thread_id = ${owner}`;
+    const replacement = yield* start("replacement");
+    const unrelated = yield* store.start(foreign, root, "review", "unrelated");
+    yield* sql`UPDATE orchestration_v2_projection_threads SET archived_at = ${at} WHERE thread_id = ${foreign}`;
+
+    const event = {
+      sequence: archive!.sequence,
+      event: { type: "thread.archived", threadId: owner },
+    } as OrchestrationV2StoredEvent;
+    yield* relay.handleOwnerEvent(event);
+    yield* relay.handleOwnerEvent(event);
+    assert.equal((yield* store.runById(replacement.runId))?.status, "active");
+    assert.equal((yield* store.runById(unrelated.runId))?.status, "active");
+    assert.equal((yield* store.runById(original.runId))?.holderStop?.status, "already_idle");
+    assert.equal(
+      (yield* Ref.get(dispatched)).filter((item) => item.type === "thread.stop").length,
+      1,
+    );
+  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );
 
 it.effect("keeps a Crew's run active with an archived holder until the owner takes it back", () =>
