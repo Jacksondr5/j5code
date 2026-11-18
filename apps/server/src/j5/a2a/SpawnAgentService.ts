@@ -664,6 +664,20 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
                   ),
                 };
         // The allowance is spent on the launch it allowed, once, before the thread exists.
+        if (current === null && persona?.assignment.pickSource?.kind === "playbook" && home)
+          yield* (yield* AgentPersonaEscalations)
+            .spendStaffingPick({
+              owner: home.thread.id,
+              projectId: target,
+              personaId: persona.assignment.personaId,
+              requestId: persona.assignment.pickSource.requestId,
+              stepId: persona.assignment.pickSource.stepId,
+            })
+            .pipe(
+              Effect.mapError((error) =>
+                stateError(error.message, "Retrieve the current playbook staffing approval."),
+              ),
+            );
         if (current === null && persona?.assignment.pickSource?.kind === "allow-once")
           yield* (yield* AgentPersonaEscalations)
             .use(input.allow_once!)

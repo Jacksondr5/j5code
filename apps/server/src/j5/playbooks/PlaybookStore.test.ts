@@ -42,7 +42,10 @@ import { parse, stringify } from "yaml";
 import { ServerConfig } from "../../config.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
-import { layer as personaEscalationsLayer } from "../agents/agentPersonaEscalation.ts";
+import {
+  AgentPersonaEscalations,
+  layer as personaEscalationsLayer,
+} from "../agents/agentPersonaEscalation.ts";
 import { pickAgentPersona } from "../agents/agentPersonaPick.ts";
 import { CrewMemberModels } from "../agents/crewMemberModels.ts";
 import { AgentCrewInstanceService } from "../a2a/AgentCrewInstanceService.ts";
@@ -1417,14 +1420,22 @@ it.effect("groups limited picks for one run and keeps reviewer preference and st
       run.personaApproval,
     );
 
-    const pick = (ownerThreadId: ThreadId) =>
+    const requestId = run.personaApproval!.requestId;
+    const token = `playbook:${requestId}:reviewer`;
+    const pick = (
+      ownerThreadId: ThreadId,
+      allowOnce?: string,
+      overrides: Partial<Parameters<typeof pickAgentPersona>[0]> = {},
+    ) =>
       pickAgentPersona({
         personaId: "reviewer",
         source: "agent",
         ownerThreadId,
+        allowOnce,
         caller: { approvedLevel: "full-access" },
         projectId: ProjectId.make("project:playbook-test"),
         reviewAuthors: { threads: [], models: ["gpt-5.5"] },
+        ...overrides,
       });
     assert.equal((yield* Effect.flip(pick(owner))).code, "models_exhausted");
     const move = {
@@ -1459,8 +1470,18 @@ it.effect("groups limited picks for one run and keeps reviewer preference and st
     assert.equal((yield* store.current(owner)).checkpoint?.requestId, stepRequest.requestId);
     assert.equal((yield* Effect.flip(pick(otherOwner))).code, "models_exhausted");
 
-    const reviewer = (yield* pick(owner)).assignment;
-    assert.deepEqual(reviewer.pickSource, { kind: "person" });
+    const otherProject = ProjectId.make("project:other");
+    for (const disallowed of [
+      pick(owner),
+      pick(otherOwner, token),
+      pick(owner, token, { projectId: otherProject }),
+      pick(owner, token, { runtimeMode: "full-access" }),
+      pick(owner, `playbook:${requestId}:staff`),
+      pick(owner, token, { personaId: "researcher" }),
+    ])
+      assert.isTrue((yield* Effect.result(disallowed))._tag === "Failure");
+    const reviewer = (yield* pick(owner, token)).assignment;
+    assert.deepEqual(reviewer.pickSource, { kind: "playbook", requestId, stepId: "reviewer" });
     assert.equal(reviewer.resolvedModelSelection.model, "claude-opus-5-5");
     assert.equal(reviewer.reviewIndependence?.outcome, "different-model");
     yield* store.answerCheckpoint({ ...answer, requestId: stepRequest.requestId });
@@ -1477,12 +1498,51 @@ it.effect("groups limited picks for one run and keeps reviewer preference and st
         step.id === "staff" ? { ...step, prompt: "Prepare staffing." } : step,
       ),
     });
-    assert.deepEqual((yield* pick(owner)).assignment.pickSource, { kind: "person" });
+    assert.deepEqual((yield* pick(owner, token)).assignment.pickSource, reviewer.pickSource);
+    const allowances = yield* AgentPersonaEscalations;
+    const spend = allowances.spendStaffingPick({
+      owner,
+      projectId: ProjectId.make("project:playbook-test"),
+      personaId: "reviewer",
+      requestId,
+      stepId: "reviewer",
+    });
+    const reservations = yield* Effect.all([Effect.result(spend), Effect.result(spend)], {
+      concurrency: 2,
+    });
+    assert.lengthOf(
+      reservations.filter((result) => result._tag === "Success"),
+      1,
+    );
+    assert.isTrue((yield* Effect.result(pick(owner, token)))._tag === "Failure");
+    const revised = yield* store.mutate(owner, {
+      operation: "revise",
+      runId: run.runId,
+      expectedStepId: "staff",
+      basis: "asked",
+      client_request_id: "change-roster",
+      steps: procedure.steps
+        .filter((step) => step.id !== "researcher")
+        .map((step) => (step.id === "unavailable" ? { ...step, persona: "reviewer" } : step)),
+    });
+    assert.notInclude(revised.requiredPersonas?.map((entry) => entry.persona) ?? [], "researcher");
+    assert.equal(revised.personaApproval?.status, "pending");
+    assert.notEqual(revised.personaApproval?.requestId, requestId);
+    assert.isTrue(
+      (yield* Effect.result(pick(owner, `playbook:${requestId}:unavailable`)))._tag === "Failure",
+    );
+    const replacementToken = `playbook:${revised.personaApproval!.requestId}:unavailable`;
+    yield* store.answerCheckpoint(
+      { ...answer, requestId: revised.personaApproval!.requestId },
+      true,
+    );
+    assert.equal((yield* pick(owner, replacementToken)).assignment.pickSource?.kind, "playbook");
     yield* store.mutate(owner, {
       operation: "cancel",
       runId: run.runId,
       client_request_id: "cancel",
     });
+    assert.isTrue((yield* Effect.result(pick(owner, replacementToken)))._tag === "Failure");
     assert.equal((yield* Effect.flip(pick(owner))).code, "models_exhausted");
   }).pipe(Effect.provide(requiredPersonaRoutingLayer), Effect.scoped, Effect.provide(CatalogLayer)),
 );
