@@ -223,6 +223,11 @@ export type AgentPersonaEntryEligibility = (
 /** The limits an agent's pick is held to, per entry; a person's pick passes none. */
 export interface AgentPersonaPickLimits {
   readonly eligible: AgentPersonaEntryEligibility;
+  readonly approvedFor?: (
+    selection: ModelSelection,
+    provider: ServerProvider,
+    constraint: AgentPersonaPickConstraint,
+  ) => boolean;
   /** Why the persona's access on this driver is broader than the caller's; undefined within it. */
   readonly accessAbove: (
     authority: AgentPersonaAuthorityPolicy,
@@ -250,11 +255,16 @@ export const agentPersonaLimitFailures = (
     limits.waived !== undefined && limits.waived.covers(selection)
       ? limits.waived.constraint
       : undefined;
-  if (waived !== "model-not-eligible" && !limits.eligible(selection, provider))
+  if (
+    waived !== "model-not-eligible" &&
+    !limits.eligible(selection, provider) &&
+    !limits.approvedFor?.(selection, provider, "model-not-eligible")
+  )
     failures.push({ code: "model-not-eligible" });
   const above =
     waived === "access-above-caller" ? undefined : limits.accessAbove(authority, provider.driver);
-  if (above !== undefined) failures.push({ code: "access-above-caller", detail: above });
+  if (above !== undefined && !limits.approvedFor?.(selection, provider, "access-above-caller"))
+    failures.push({ code: "access-above-caller", detail: above });
   return failures;
 };
 

@@ -7,6 +7,7 @@ import {
   EventId,
   MessageId,
   NodeId,
+  type OrchestrationV2Command,
   ProviderDriverKind,
   ProviderSessionId,
   RunId,
@@ -261,7 +262,7 @@ const sharedThread = Effect.fn("test.sharedThread")(function* (on: ThreadId) {
     sessionId: session,
     subject: "one-time-token",
   });
-  const store = yield* makePlaybookStore;
+  const store = yield* makePlaybookStoreForTests;
   const sql = yield* SqlClient.SqlClient;
   const send = (
     from: typeof owner,
@@ -350,13 +351,7 @@ it.effect.each([
         runId: queued,
         text: "Save my playbook to the library.",
       } as const;
-      // An agent's edit reaches upstream through its own tools, past no person's socket.
-      yield* editor === "agent"
-        ? thread.threads.dispatch(edit)
-        : (editor === "owner" ? thread.owner : thread.collaborator).dispatchCommand(
-            edit,
-            thread.threads.dispatch,
-          );
+      yield* sendAs(thread, editor, edit);
       yield* thread.startQueued(yield* thread.runOf("first"), queued);
       assert.strictEqual(yield* thread.save(queued, `edited-by-${editor}`), outcome);
     }).pipe(Effect.provide(saveLayer(harness)));
@@ -376,80 +371,196 @@ it.effect("an Owner's queued message nobody edited still saves once it starts", 
   }).pipe(Effect.provide(saveLayer(harness)));
 });
 
-it.effect.each([
+type Shared = Effect.Success<ReturnType<typeof sharedThread>>;
+type Sender = "collaborator" | "agent" | "owner";
+/** A person's command through their socket; an agent's reaches upstream past every socket. */
+const sendAs = (thread: Shared, sender: Sender, command: OrchestrationV2Command) =>
+  sender === "agent"
+    ? thread.threads.dispatch(command)
+    : (sender === "owner" ? thread.owner : thread.collaborator).dispatchCommand(
+        command,
+        thread.threads.dispatch,
+      );
+
+/** Declines, with words, an approval the agent asked for at `nodeId` over a live session. */
+const declineWithWords = Effect.fn("test.declineWithWords")(function* (
+  thread: Shared,
+  on: ThreadId,
+  sender: Sender,
+  nodeId: NodeId,
+) {
+  const projections = yield* ProjectionStore.ProjectionStoreV2;
+  const now = yield* DateTime.now;
+  const sessionId = ProviderSessionId.make(`session:${on}`);
+  yield* projections.apply({
+    id: EventId.make(`event:${on}:session`),
+    type: "provider-session.attached",
+    threadId: on,
+    occurredAt: now,
+    payload: {
+      id: sessionId,
+      driver: ProviderDriverKind.make("codex"),
+      providerInstanceId: modelSelection.instanceId,
+      status: "ready",
+      cwd: "/repo",
+      model: modelSelection.model,
+      capabilities: CodexProviderCapabilitiesV2,
+      createdAt: now,
+      updatedAt: now,
+      lastError: null,
+    },
+  });
+  const requestId = RuntimeRequestId.make(`request:${on}`);
+  yield* projections.apply({
+    id: EventId.make(`event:${on}:request`),
+    type: "runtime-request.updated",
+    threadId: on,
+    occurredAt: now,
+    payload: {
+      id: requestId,
+      nodeId,
+      providerTurnId: null,
+      nativeRequestRef: null,
+      kind: "command",
+      status: "pending",
+      responseCapability: { type: "live", providerSessionId: sessionId, supportsFeedback: true },
+      createdAt: now,
+      resolvedAt: null,
+    },
+  });
+  yield* sendAs(thread, sender, {
+    type: "runtime-request.respond",
+    commandId: CommandId.make(`command:${on}:answer`),
+    threadId: on,
+    requestId,
+    decision: "decline",
+    feedback: "Save my playbook to the library instead.",
+  });
+});
+
+/** The node upstream runs a turn under, which its requests hang from. */
+const rootNodeOf = (on: ThreadId, run: RunId) =>
+  SqlClient.SqlClient.use(
+    (sql) => sql<{ readonly node_id: string }>`
+      SELECT node_id FROM orchestration_v2_projection_nodes
+      WHERE thread_id = ${on} AND run_id = ${run} AND parent_node_id IS NULL
+    `,
+  ).pipe(Effect.map((rows) => NodeId.make(rows[0]!.node_id)));
+
+const answerers = [
   ["a collaborator", "collaborator", "owner_required"],
   ["an agent", "agent", "owner_required"],
   ["the Owner", "owner", "saved"],
-] as const)(
+] as const;
+
+it.effect.each(answerers)(
   "words %s answers the agent with during an Owner's turn count as theirs",
   ([, answerer, outcome]) => {
     const harness = makeHarness();
     const on = ThreadId.make(`thread:answered:${answerer}`);
     return Effect.gen(function* () {
       const thread = yield* sharedThread(on);
-      const projections = yield* ProjectionStore.ProjectionStoreV2;
       yield* thread.send(thread.owner, "first", "Draft a review playbook.", "start_immediately");
       const run = yield* thread.runOf("first");
       assert.strictEqual(yield* thread.save(run, `before-${answerer}`), "saved");
-
-      // An approval the agent asked for, as upstream records one from a live provider session.
-      const now = yield* DateTime.now;
-      const sessionId = ProviderSessionId.make(`session:${on}`);
-      yield* projections.apply({
-        id: EventId.make(`event:${on}:session`),
-        type: "provider-session.attached",
-        threadId: on,
-        occurredAt: now,
-        payload: {
-          id: sessionId,
-          driver: ProviderDriverKind.make("codex"),
-          providerInstanceId: modelSelection.instanceId,
-          status: "ready",
-          cwd: "/repo",
-          model: modelSelection.model,
-          capabilities: CodexProviderCapabilitiesV2,
-          createdAt: now,
-          updatedAt: now,
-          lastError: null,
-        },
-      });
-      const requestId = RuntimeRequestId.make(`request:${on}`);
-      yield* projections.apply({
-        id: EventId.make(`event:${on}:request`),
-        type: "runtime-request.updated",
-        threadId: on,
-        occurredAt: now,
-        payload: {
-          id: requestId,
-          nodeId: NodeId.make(`node:${on}`),
-          providerTurnId: null,
-          nativeRequestRef: null,
-          kind: "command",
-          status: "pending",
-          responseCapability: {
-            type: "live",
-            providerSessionId: sessionId,
-            supportsFeedback: true,
-          },
-          createdAt: now,
-          resolvedAt: null,
-        },
-      });
-      const answer = {
-        type: "runtime-request.respond",
-        commandId: CommandId.make(`command:${on}:answer`),
-        threadId: on,
-        requestId,
-        decision: "decline",
-        feedback: "Save my playbook to the library instead.",
-      } as const;
-      yield* answerer === "agent"
-        ? thread.threads.dispatch(answer)
-        : (answerer === "owner" ? thread.owner : thread.collaborator).dispatchCommand(
-            answer,
-            thread.threads.dispatch,
-          );
+      yield* declineWithWords(thread, on, answerer, yield* rootNodeOf(on, run));
       assert.strictEqual(yield* thread.save(run, `after-${answerer}`), outcome);
+    }).pipe(Effect.provide(saveLayer(harness)));
+  },
+);
+
+it.effect.each(answerers)(
+  "words %s gives a request of no known turn count from when the turn was asked for",
+  ([, answerer, outcome]) => {
+    const harness = makeHarness();
+    const on = ThreadId.make(`thread:unplaced:${answerer}`);
+    return Effect.gen(function* () {
+      const thread = yield* sharedThread(on);
+      yield* thread.send(thread.owner, "first", "Draft a review playbook.", "start_immediately");
+      const run = yield* thread.runOf("first");
+      yield* declineWithWords(thread, on, answerer, NodeId.make(`node:unplaced:${on}`));
+      assert.strictEqual(yield* thread.save(run, `unplaced-${answerer}`), outcome);
+    }).pipe(Effect.provide(saveLayer(harness)));
+  },
+);
+
+it.effect("a collaborator's words in an earlier turn leave a later Owner turn able to save", () => {
+  const harness = makeHarness();
+  const on = ThreadId.make("thread:answered-earlier");
+  return Effect.gen(function* () {
+    const thread = yield* sharedThread(on);
+    yield* thread.send(thread.owner, "first", "Draft a review playbook.", "start_immediately");
+    // Queued before the answer, so only the request's own turn tells the two apart.
+    yield* thread.send(thread.owner, "second", "Save the approved draft.", "queue_after_active");
+    const first = yield* thread.runOf("first");
+    const second = yield* thread.runOf("second");
+    yield* declineWithWords(thread, on, "collaborator", yield* rootNodeOf(on, first));
+    assert.strictEqual(yield* thread.save(first, "earlier-first"), "owner_required");
+    yield* thread.startQueued(first, second);
+    assert.strictEqual(yield* thread.save(second, "earlier-second"), "saved");
+  }).pipe(Effect.provide(saveLayer(harness)));
+});
+
+const picture = (name: string) =>
+  ({
+    type: "image",
+    id: `attachment-${name}`,
+    name: `${name}.png`,
+    mimeType: "image/png",
+    sizeBytes: 12,
+  }) as const;
+
+it.effect.each([
+  ["an agent swaps", "agent", "owner_required"],
+  ["a collaborator swaps", "collaborator", "owner_required"],
+  ["the Owner swaps", "owner", "saved"],
+  ["nobody touches", null, "saved"],
+] as const)(
+  "when %s a queued message's attachments, the save follows who chose them",
+  ([, editor, outcome]) => {
+    const harness = makeHarness();
+    const on = ThreadId.make(`thread:attachments:${editor ?? "nobody"}`);
+    return Effect.gen(function* () {
+      const thread = yield* sharedThread(on);
+      const sql = yield* SqlClient.SqlClient;
+      const stored = (field: "text" | "attachments") =>
+        sql<{ readonly value: string }>`
+          SELECT json_extract(payload_json, ${`$.${field}`}) AS value
+          FROM orchestration_v2_projection_messages WHERE message_id = ${`message:${on}:second`}
+        `.pipe(Effect.map((rows) => rows[0]!.value));
+      yield* thread.send(thread.owner, "first", "Draft a review playbook.", "start_immediately");
+      yield* thread.owner.dispatchCommand(
+        {
+          type: "message.dispatch",
+          threadId: on,
+          commandId: CommandId.make(`command:${on}:second`),
+          messageId: MessageId.make(`message:${on}:second`),
+          text: "Save the playbook in the attached picture.",
+          attachments: [picture("approved")],
+          createdBy: "user",
+          creationSource: "web",
+          dispatchMode: { type: "queue_after_active" },
+        },
+        thread.threads.dispatch,
+      );
+      const queued = yield* thread.runOf("second");
+      if (editor !== null) {
+        // An agent's edit keeps the stored words, so only the attachment differs.
+        yield* sendAs(thread, editor, {
+          type: "queued-run.edit",
+          commandId: CommandId.make(`command:${on}:edit`),
+          threadId: on,
+          runId: queued,
+          text:
+            editor === "agent"
+              ? yield* stored("text")
+              : "Save the playbook in the attached picture.",
+          attachments: [picture("swapped")],
+        });
+        assert.include(yield* stored("attachments"), "attachment-swapped");
+      }
+      yield* thread.startQueued(yield* thread.runOf("first"), queued);
+      assert.strictEqual(yield* thread.save(queued, `attachments-${editor ?? "nobody"}`), outcome);
     }).pipe(Effect.provide(saveLayer(harness)));
   },
 );

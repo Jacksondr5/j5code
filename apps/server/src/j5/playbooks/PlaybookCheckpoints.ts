@@ -2,7 +2,7 @@ import { ThreadId } from "@t3tools/contracts";
 import type { PlaybookCheckpoint, PlaybookCheckpointAnswer } from "@t3tools/contracts/j5";
 import * as Effect from "effect/Effect";
 import type * as SqlClient from "effect/sql/SqlClient";
-import { encodePickDigests } from "./personaPickApprovals.ts";
+import { encodePickScopes, type ApprovedPick } from "./personaPickApprovals.ts";
 import { playbookError } from "./definition.ts";
 
 import { reachableThreadQuery, type SessionReach } from "../sharing/PersonAccess.ts";
@@ -44,7 +44,7 @@ export const makePlaybookCheckpoints = (sql: SqlClient.SqlClient) => {
     runId: string,
   ) {
     const rows = yield* sql<Row>`SELECT * FROM j5_playbook_checkpoint
-      WHERE run_id = ${runId} AND persona_picks_json IS NOT NULL`;
+      WHERE run_id = ${runId} AND persona_picks_json IS NOT NULL AND status <> 'closed'`;
     return rows[0] ? present(rows[0]) : null;
   });
   const close = Effect.fn("PlaybookCheckpoints.close")(function* (
@@ -59,13 +59,26 @@ export const makePlaybookCheckpoints = (sql: SqlClient.SqlClient) => {
   });
   const open = Effect.fn("PlaybookCheckpoints.open")(function* (
     request: PlaybookCheckpoint,
-    picks?: Readonly<Record<string, string>>,
+    picks?: Readonly<Record<string, ApprovedPick>>,
   ) {
     yield* sql`INSERT INTO j5_playbook_checkpoint (request_id, run_id, owner_thread_id, step_id, step_title, summary, status, created_at, persona_picks_json)
       VALUES (${request.requestId}, ${request.runId}, ${request.ownerThreadId}, ${request.stepId}, ${request.stepTitle},
-        ${request.summary}, 'pending', ${request.createdAt}, ${picks === undefined ? null : encodePickDigests(picks)})`;
+        ${request.summary}, 'pending', ${request.createdAt}, ${picks === undefined ? null : encodePickScopes(picks)})`;
     if (picks === undefined)
       yield* sql`UPDATE j5_playbook_run SET checkpoint_request_id = ${request.requestId} WHERE run_id = ${request.runId}`;
+  });
+  const replacePersonaApproval = Effect.fn("PlaybookCheckpoints.replacePersonaApproval")(function* (
+    request: PlaybookCheckpoint,
+    picks: Readonly<Record<string, ApprovedPick>>,
+  ) {
+    const [current] =
+      yield* sql<Row>`SELECT * FROM j5_playbook_checkpoint WHERE run_id = ${request.runId}
+      AND persona_picks_json IS NOT NULL AND status <> 'closed'`;
+    if (current?.persona_picks_json === encodePickScopes(picks)) return;
+    if (current)
+      yield* sql`UPDATE j5_playbook_checkpoint SET status = 'closed', answered_at = COALESCE(answered_at, ${request.createdAt})
+      WHERE request_id = ${current.request_id}`;
+    if (Object.keys(picks).length > 0) yield* open(request, picks);
   });
   const pendingRows = (reach: SessionReach, threadId?: ThreadId) => {
     const threadFilter =
@@ -119,7 +132,7 @@ export const makePlaybookCheckpoints = (sql: SqlClient.SqlClient) => {
     if (!rows[0] && !canAnswerPersonaPicks) {
       const restricted = yield* sql`SELECT request_id FROM j5_playbook_checkpoint
         WHERE request_id = ${input.requestId} AND owner_thread_id = ${input.threadId}
-          AND persona_picks_json IS NOT NULL`;
+          AND persona_picks_json IS NOT NULL AND status <> 'closed'`;
       if (restricted.length > 0)
         return yield* playbookError(
           "capability_denied",
@@ -133,5 +146,5 @@ export const makePlaybookCheckpoints = (sql: SqlClient.SqlClient) => {
       );
     return present(rows[0]);
   });
-  return { current, personaApproval, close, open, pending, count, answer };
+  return { current, personaApproval, replacePersonaApproval, close, open, pending, count, answer };
 };

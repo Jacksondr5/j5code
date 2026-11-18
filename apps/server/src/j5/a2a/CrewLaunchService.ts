@@ -823,15 +823,30 @@ export const layer = Layer.effect(
         Effect.provideService(AgentPersonaEscalations, escalations),
       );
 
+    const sql = yield* SqlClient.SqlClient;
     /** A seat let past its limit once spends that allowance as it launches. */
-    const spendAllowances = (resolved: ReadonlyArray<ResolvedCrewLaunchSeat>) =>
+    const spendAllowances = (
+      resolved: ReadonlyArray<ResolvedCrewLaunchSeat>,
+      captain: CrewCaptain,
+    ) =>
       Effect.forEach(
         resolved.filter(
           ({ seat, assignment }) =>
-            seat.allowOnce !== undefined && assignment?.pickSource?.kind === "allow-once",
+            seat.allowOnce !== undefined &&
+            (assignment?.pickSource?.kind === "allow-once" ||
+              assignment?.pickSource?.kind === "playbook"),
         ),
-        ({ seat }) =>
-          escalations.use(seat.allowOnce!).pipe(
+        ({ seat, assignment }) =>
+          (assignment?.pickSource?.kind === "playbook"
+            ? escalations.spendStaffingPick({
+                owner: captain.thread.id,
+                projectId: captain.thread.projectId,
+                personaId: assignment.personaId,
+                requestId: assignment.pickSource.requestId,
+                stepId: assignment.pickSource.stepId,
+              })
+            : escalations.use(seat.allowOnce!)
+          ).pipe(
             Effect.mapError(
               (error) =>
                 new CrewLaunchSeatUnavailableError({
@@ -842,6 +857,18 @@ export const layer = Layer.effect(
             ),
           ),
         { discard: true },
+      ).pipe(
+        sql.withTransaction,
+        Effect.mapError((error) =>
+          error._tag === "SqlError"
+            ? new CrewLaunchOperationError({
+                phase: "spending staffing allowances",
+                seatName: null,
+                createdSeats: [],
+                cause: error,
+              })
+            : error,
+        ),
       );
 
     const plan = (
@@ -965,7 +992,6 @@ export const layer = Layer.effect(
       return { outcomes, created };
     });
 
-    const sql = yield* SqlClient.SqlClient;
     const encodeWorkspace = Schema.encodeEffect(Schema.fromJsonString(CrewSeatWorkspace));
     const prepareBriefs = Effect.fn("j5.a2a.crewLaunch.prepareBriefs")(function* (
       captain: CrewCaptain,
@@ -1076,7 +1102,7 @@ export const layer = Layer.effect(
       function* (input) {
         const resolved =
           input.resolvedSeats ?? (yield* resolveSeats(input.captain, input.seats, input.pick));
-        yield* spendAllowances(resolved);
+        yield* spendAllowances(resolved, input.captain);
         const planned = plan(input.providerSessionId, input.requestKey, resolved);
         const recordError = (phase: string) => (cause: unknown) =>
           new CrewLaunchOperationError({ phase, seatName: null, createdSeats: [], cause });
@@ -1246,7 +1272,7 @@ export const layer = Layer.effect(
         const resolved =
           input.resolvedSeats ??
           (yield* resolveSeats(input.captain, input.seats, input.pick, input.instance));
-        yield* spendAllowances(resolved);
+        yield* spendAllowances(resolved, input.captain);
         const planned = plan(input.providerSessionId, input.requestKey, resolved);
         if (input.replacement !== undefined)
           return yield* replaceSeat(input, input.replacement, planned);

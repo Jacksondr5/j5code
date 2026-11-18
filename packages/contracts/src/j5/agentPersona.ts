@@ -128,6 +128,11 @@ export type AgentPersonaDraftView = typeof AgentPersonaDraftView.Type;
 export const AgentPersonaPickSource = Schema.Union([
   Schema.Struct({ kind: Schema.Literal("person") }),
   Schema.Struct({ kind: Schema.Literal("agent") }),
+  Schema.Struct({
+    kind: Schema.Literal("playbook"),
+    requestId: Schema.String,
+    stepId: Schema.String,
+  }),
   Schema.Struct({ kind: Schema.Literal("allow-once"), waived: AgentPersonaPickConstraint }),
 ]);
 export type AgentPersonaPickSource = typeof AgentPersonaPickSource.Type;
