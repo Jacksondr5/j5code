@@ -11,6 +11,7 @@ import {
   ScheduledTaskError,
   type ScheduledTaskMutationResult,
   type ScheduledTaskUpsertInput,
+  type RunId,
   ThreadId,
   authScopeRequiredResponse,
 } from "@t3tools/contracts";
@@ -137,6 +138,8 @@ const refused = (message: string) =>
     ...authScopeRequiredResponse(AuthOrchestrationOperateScope),
   });
 
+/** A claim on an answer names the runtime request it answers (`PlaybookStore`). */
+const RUNTIME_REQUEST_CLAIM_PREFIX = "runtime-request:";
 const NOT_SHARED = "This is not shared with you on this server.";
 const OWNERS_ONLY =
   "Only an Owner of this server archives or deletes a thread, for now. Ask an Owner to do it.";
@@ -320,6 +323,18 @@ export const makeCommandAdmission = Effect.fn("j5.sharing.commandAdmission.makeC
         return yield* refused("This message command was already submitted.");
       }
     });
+    /** The message a queued run would deliver; upstream refuses an edit of any other run. */
+    const queuedMessageId = (threadId: ThreadId, runId: RunId) =>
+      sql<{ readonly message_id: string | null }>`
+        SELECT json_extract(payload_json, '$.userMessageId') AS message_id
+        FROM orchestration_v2_projection_runs
+        WHERE run_id = ${runId} AND thread_id = ${threadId}
+      `.pipe(
+        Effect.map((rows) =>
+          rows[0]?.message_id == null ? null : MessageId.make(rows[0].message_id),
+        ),
+        Effect.mapError(() => refused("Could not verify the sender of this message.")),
+      );
     // Only a person may switch a persona worker's model; the orchestrator checks the switch.
     const asPerson = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
       person === null
@@ -353,6 +368,18 @@ export const makeCommandAdmission = Effect.fn("j5.sharing.commandAdmission.makeC
             Effect.gen(function* () {
               if (stamped.type === "message.dispatch") {
                 yield* claimMessage(stamped.commandId, stamped.messageId);
+              }
+              // An edit rewrites a queued message and an answer reaches the agent as words, so
+              // both are claimed for whoever sent them (`PlaybookStore.saveDefinitionFromTurn`).
+              if (stamped.type === "queued-run.edit") {
+                const messageId = yield* queuedMessageId(stamped.threadId, stamped.runId);
+                if (messageId !== null) yield* claimMessage(stamped.commandId, messageId);
+              }
+              if (stamped.type === "runtime-request.respond") {
+                yield* claimMessage(
+                  stamped.commandId,
+                  MessageId.make(`${RUNTIME_REQUEST_CLAIM_PREFIX}${stamped.requestId}`),
+                );
               }
               const claimed = yield* claimEdit(stamped);
               return yield* asPerson(dispatch(stamped)).pipe(
