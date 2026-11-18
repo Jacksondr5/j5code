@@ -7,20 +7,25 @@ import { ThreadManagementService } from "../../orchestration-v2/ThreadManagement
 import { getThreadRecordsIfPresent } from "../a2a/threadProjectionReads.ts";
 import { PlaybookStore } from "./PlaybookStore.ts";
 
+export const unnotifiedCheckpoints = (sql: SqlClient.SqlClient) => sql<{
+  request_id: string;
+  owner_thread_id: string;
+  step_title: string;
+  status: string;
+  reason: string | null;
+}>`
+      SELECT checkpoint.request_id, checkpoint.owner_thread_id, checkpoint.step_title,
+        checkpoint.status, checkpoint.reason
+      FROM j5_playbook_checkpoint checkpoint
+      JOIN j5_playbook_run run ON run.run_id = checkpoint.run_id
+      WHERE checkpoint.status IN ('approved', 'declined') AND checkpoint.notified_at IS NULL AND run.status = 'active'`;
+
 export const makeCheckpointNotifications = Effect.gen(function* () {
   const store = yield* PlaybookStore;
   const sql = yield* SqlClient.SqlClient;
   const threads = yield* ThreadManagementService;
   const drain = Effect.fn("CheckpointNotifications.drain")(function* () {
-    const rows = yield* sql<{
-      request_id: string;
-      owner_thread_id: string;
-      step_title: string;
-      status: string;
-      reason: string | null;
-    }>`
-      SELECT checkpoint.* FROM j5_playbook_checkpoint checkpoint JOIN j5_playbook_run run ON run.run_id = checkpoint.run_id
-      WHERE checkpoint.status IN ('approved', 'declined') AND checkpoint.notified_at IS NULL AND run.status = 'active'`;
+    const rows = yield* unnotifiedCheckpoints(sql);
     let failed = false;
     for (const row of rows) {
       yield* Effect.gen(function* () {

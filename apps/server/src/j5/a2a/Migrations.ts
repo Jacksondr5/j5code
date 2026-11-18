@@ -62,6 +62,7 @@ import Migration0058 from "./migrations/058_PeerLines.ts";
 
 import Migration0059 from "./migrations/059_PlaybookRunSnapshots.ts";
 import Migration0060 from "./migrations/060_PlaybookRunRevisions.ts";
+import Migration0065 from "./migrations/065_CheckpointNotificationIndex.ts";
 import Migration0063 from "./migrations/063_PlaybookCheckpoints.ts";
 import Migration0061 from "./migrations/061_PlaybookRuntimeHolders.ts";
 import Migration0062 from "./migrations/062_PlaybookCancellation.ts";
@@ -141,6 +142,7 @@ export const migrationEntries = [
   [62, "PlaybookCancellation", Migration0062],
   [63, "PlaybookCheckpoints", Migration0063],
   [64, "PlaybookRunStartSequence", Migration0064],
+  [65, "CheckpointNotificationIndex", Migration0065],
 ] as const;
 
 const makeMigrationLoader = (throughId?: number) =>

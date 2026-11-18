@@ -169,6 +169,10 @@ const environments = Effect.fn(function* (
               otherReads.push(`${environmentId}:artifacts`);
               return Effect.succeed({ entries: [] });
             },
+            [J5_PLAYBOOK_WS_METHODS.countCheckpoints]: () => {
+              otherReads.push(`${environmentId}:checkpointCount`);
+              return Effect.succeed({ count: checkpointRequests.length });
+            },
             [J5_PLAYBOOK_WS_METHODS.listCheckpoints]: () => {
               otherReads.push(`${environmentId}:checkpoints`);
               return Effect.succeed({ requests: checkpointRequests });
@@ -441,6 +445,11 @@ describe("a connection that holds two threads of a server", () => {
         expect(
           yield* refused(atoms.crewProposals({ environmentId: SHARED_SERVER, input: {} })),
         ).toBe(false);
+        const count = atoms.playbookCheckpointCount({ environmentId: SHARED_SERVER, input: {} });
+        yield* AtomRegistry.mount(registry, count);
+        expect(yield* AtomRegistry.getResult(registry, count)).toEqual({
+          count: checkpointRequests.length,
+        });
         const checkpoints = atoms.playbookCheckpoints({ environmentId: SHARED_SERVER, input: {} });
         yield* AtomRegistry.mount(registry, checkpoints);
         expect(yield* AtomRegistry.getResult(registry, checkpoints)).toEqual({
@@ -451,6 +460,7 @@ describe("a connection that holds two threads of a server", () => {
           `${SHARED_SERVER}:artifacts`,
           `${SHARED_SERVER}:inbox`,
           `${SHARED_SERVER}:crew`,
+          `${SHARED_SERVER}:checkpointCount`,
           `${SHARED_SERVER}:checkpoints`,
         ]);
         expect(fleetReads).toEqual([]);
