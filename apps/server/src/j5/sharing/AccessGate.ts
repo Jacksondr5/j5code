@@ -332,6 +332,7 @@ const ACCESS_RPC_RULES: Partial<Record<WsRpcMethod, AccessRpcRule>> = {
   [J5_PLAYBOOK_WS_METHODS.listThreadRuns]: onThread("viewer"),
   [J5_PLAYBOOK_WS_METHODS.listRuns]: serverHome,
   [J5_PLAYBOOK_WS_METHODS.listCheckpoints]: narrowedForAll,
+  [J5_PLAYBOOK_WS_METHODS.countCheckpoints]: narrowedForAll,
   [J5_PLAYBOOK_WS_METHODS.answerCheckpoint]: onThread("collaborator"),
 
   // The server's own surfaces (AC23), read by someone who holds a level at server scope.

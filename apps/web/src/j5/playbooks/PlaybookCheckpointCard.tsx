@@ -21,7 +21,7 @@ import {
   playbookCheckpointSourcesAtom,
   refreshJ5Sources,
 } from "../state";
-import { createVisibleRefreshHook } from "../useVisibleRefresh";
+import { createVisibleRefreshHook, useVisibleRefresh } from "../useVisibleRefresh";
 
 const refresh = (environmentId?: EnvironmentId) =>
   refreshJ5Sources(playbookCheckpointSourcesAtom, playbookCheckpointsQueryAtom, {
@@ -140,9 +140,12 @@ export function PlaybookCheckpointGate({
   const query = useEnvironmentQuery(
     j5LedgerSupported(environment?.serverConfig) === false
       ? null
-      : playbookCheckpointsQueryAtom(environmentId),
+      : j5Environment.playbookCheckpoints({ environmentId, input: { threadId } }),
   );
-  useRefresh();
+  useVisibleRefresh(
+    query.refresh,
+    environment?.connection.phase === "connected" && !query.isPending,
+  );
   const requests = (query.data?.requests ?? []).filter(
     (request) => request.ownerThreadId === threadId,
   );

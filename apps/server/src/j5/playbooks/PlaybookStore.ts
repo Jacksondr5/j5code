@@ -1,3 +1,4 @@
+import type { SessionReach } from "../sharing/PersonAccess.ts";
 import { makePlaybookCheckpoints } from "./PlaybookCheckpoints.ts";
 import { ThreadId } from "@t3tools/contracts";
 import {
@@ -1192,9 +1193,16 @@ export const makePlaybookStore = Effect.gen(function* () {
   return {
     // Include the current revision so subscribing after a mutation still refreshes the view.
     changes: SubscriptionRef.changes(revision),
-    pendingCheckpoints: Effect.fn("PlaybookStore.pendingCheckpoints")(function* () {
+    pendingCheckpoints: Effect.fn("PlaybookStore.pendingCheckpoints")(function* (
+      reach: SessionReach,
+      threadId?: ThreadId,
+    ) {
       yield* cancelOrphans();
-      return yield* checkpoints.pending();
+      return yield* checkpoints.pending(reach, threadId);
+    }, Effect.mapError(storageError)),
+    countCheckpoints: Effect.fn("PlaybookStore.countCheckpoints")(function* (reach: SessionReach) {
+      yield* cancelOrphans();
+      return yield* checkpoints.count(reach);
     }, Effect.mapError(storageError)),
     answerCheckpoint: Effect.fn("PlaybookStore.answerCheckpoint")(function* (
       input: import("@t3tools/contracts/j5").PlaybookCheckpointAnswer,

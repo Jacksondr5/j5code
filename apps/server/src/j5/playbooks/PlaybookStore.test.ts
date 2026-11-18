@@ -1,4 +1,4 @@
-import { makeCheckpointNotifications } from "./CheckpointNotifications.ts";
+import { makeCheckpointNotifications, unnotifiedCheckpoints } from "./CheckpointNotifications.ts";
 import type { OrchestrationV2ThreadProjection } from "@t3tools/contracts";
 import * as Ref from "effect/Ref";
 import { makeCheckpointRpcHandlers } from "./checkpointRpc.ts";
@@ -1865,7 +1865,7 @@ it.effect(
         (yield* Effect.flip(store.mutate(owner, { ...leave, client_request_id: "repeat" }))).code,
         "approval_pending",
       );
-      assert.equal((yield* store.pendingCheckpoints()).length, 1);
+      assert.equal((yield* store.pendingCheckpoints({ kind: "service" })).length, 1);
       const restarted = yield* makePlaybookStore;
       assert.deepStrictEqual((yield* restarted.current(owner)).checkpoint, first);
       const handlersFor = (level: "owner" | "collaborator" | "viewer") =>
@@ -1896,7 +1896,10 @@ it.effect(
           ),
         );
       const viewer = yield* handlersFor("viewer");
-      assert.equal((yield* viewer[J5_PLAYBOOK_WS_METHODS.listCheckpoints]()).requests.length, 1);
+      assert.deepStrictEqual(yield* viewer[J5_PLAYBOOK_WS_METHODS.countCheckpoints](), {
+        count: 1,
+      });
+      assert.equal((yield* viewer[J5_PLAYBOOK_WS_METHODS.listCheckpoints]({})).requests.length, 1);
       assert.equal(
         (yield* Effect.flip(
           viewer[J5_PLAYBOOK_WS_METHODS.answerCheckpoint]({
@@ -2046,7 +2049,7 @@ it.effect(
         runId: run.runId,
         client_request_id: "cancel-checkpoint",
       });
-      assert.deepStrictEqual(yield* store.pendingCheckpoints(), []);
+      assert.deepStrictEqual(yield* store.pendingCheckpoints({ kind: "service" }), []);
       assert.equal(
         (yield* Effect.flip(
           store.answerCheckpoint({
@@ -2078,7 +2081,7 @@ it.effect("completion needs approval and owner cancellation closes its pending c
       (yield* Effect.flip(store.mutate(owner, finish))).code,
       "approval_summary_required",
     );
-    assert.deepStrictEqual(yield* store.pendingCheckpoints(), []);
+    assert.deepStrictEqual(yield* store.pendingCheckpoints({ kind: "service" }), []);
     assert.equal(
       (yield* Effect.flip(store.mutate(owner, { ...finish, summary: "Report attached." }))).code,
       "approval_pending",
@@ -2112,7 +2115,7 @@ it.effect("completion needs approval and owner cancellation closes its pending c
           const column = reason === "owner_archived" ? "archived_at" : "deleted_at";
           yield* sql`UPDATE orchestration_v2_projection_threads SET ${sql(column)} = '2026-11-17T00:00:00Z' WHERE thread_id = ${owner}`;
         } else yield* store.cancelOwner(owner, reason);
-        assert.deepStrictEqual(yield* store.pendingCheckpoints(), []);
+        assert.deepStrictEqual(yield* store.pendingCheckpoints({ kind: "service" }), []);
         const ended = yield* store.current(owner);
         assert.equal(ended.status, "cancelled");
         assert.equal(ended.cancelReason, reason);
@@ -2135,4 +2138,61 @@ it.effect("completion needs approval and owner cancellation closes its pending c
       }
     }
   }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
+);
+
+it.effect("counts and lists only pending checkpoints on reachable threads", () =>
+  Effect.gen(function* () {
+    const { store, workspaceRoot, write } = yield* makeFixture;
+    const sql = yield* SqlClient.SqlClient;
+    const personId = ParticipantId.make("human:checkpoint-reader");
+    yield* sql`INSERT INTO j5_a2a_human_person (person_id, is_local_operator, created_at)
+      VALUES (${personId}, 0, 'now')`;
+    yield* sql`INSERT INTO j5_a2a_person_level (person_id, scope_kind, scope_id, level, created_at, updated_at)
+      VALUES (${personId}, 'thread', ${owner}, 'viewer', 'now', 'now')`;
+    const reader = {
+      kind: "person",
+      person: { personId, displayName: "Reader", firstOwner: false },
+      levels: [{ scope: { kind: "thread", threadId: owner }, level: "viewer" }],
+      serverLevel: null,
+      highest: "viewer",
+      ceiling: null,
+    } as const;
+    const original = definition(["plan"]);
+    yield* write("demo", {
+      ...original,
+      steps: original.steps.map((step) => ({ ...step, approval: "required" })),
+    });
+    for (const threadId of [owner, otherOwner]) {
+      const run = yield* store.start(threadId, workspaceRoot, "demo", "start");
+      yield* Effect.flip(
+        store.mutate(threadId, {
+          operation: "complete",
+          runId: run.runId,
+          expectedStepId: "plan",
+          client_request_id: "finish",
+          summary: "Ready for approval.",
+        }),
+      );
+    }
+    assert.deepStrictEqual(
+      (yield* store.pendingCheckpoints(reader)).map((row) => row.ownerThreadId),
+      [owner],
+    );
+    assert.deepStrictEqual(yield* store.pendingCheckpoints(reader, otherOwner), []);
+    assert.deepStrictEqual(yield* store.countCheckpoints(reader), { count: 1 });
+    assert.deepStrictEqual(yield* store.countCheckpoints({ kind: "service" }), { count: 2 });
+    assert.deepStrictEqual(yield* store.countCheckpoints({ kind: "unknown" }), { count: 0 });
+  }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
+);
+
+it.effect("drains checkpoint answers using the outstanding-notification index", () =>
+  Effect.gen(function* () {
+    yield* runJ5A2AMigrations();
+    const sql = yield* SqlClient.SqlClient;
+    const plan = yield* sql<{ detail: string }>`EXPLAIN QUERY PLAN ${unnotifiedCheckpoints(sql)}`;
+    assert.isTrue(
+      plan.some((row) => row.detail.includes("j5_playbook_checkpoint_unnotified")),
+      JSON.stringify(plan),
+    );
+  }).pipe(Effect.provide(MemoryLayer)),
 );

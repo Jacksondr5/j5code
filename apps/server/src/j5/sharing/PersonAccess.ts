@@ -16,6 +16,7 @@ import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
+import type * as Statement from "effect/sql/Statement";
 import * as SqlClient from "effect/sql/SqlClient";
 import { mcpAppFromToolItem } from "@t3tools/shared/toolOutput";
 
@@ -427,6 +428,75 @@ const isPersonAccessError = Schema.is(
 /** How far up a placement tree a thread's level is looked for; trees are a few levels deep. */
 const MAX_ANCESTOR_DEPTH = 64;
 
+// The thread above `chain.thread_id`. A Subagent's parent is its upstream lineage parent; a
+// Peer Agent's is its placement parent, unless it is a fork.
+const parentOfChain = (sql: SqlClient.SqlClient) => sql`
+  COALESCE(
+    (
+      SELECT json_extract(thread.payload_json, '$.lineage.parentThreadId')
+      FROM orchestration_v2_projection_threads AS thread
+      WHERE thread.thread_id = chain.thread_id
+        AND (
+          json_extract(thread.payload_json, '$.lineage.relationshipToParent') = 'subagent'
+          OR json_extract(thread.payload_json, '$.lineage.sideChat') = 1
+        )
+    ),
+    (
+      SELECT parent.thread_id
+      FROM j5_a2a_membership AS child
+      -- A placement stays where it was made when Turn into project moves either agent.
+      JOIN j5_a2a_participant_placement AS placement
+        ON placement.participant_id = child.participant_id
+      JOIN j5_a2a_membership AS parent
+        ON parent.participant_id = placement.placement_parent_id
+      WHERE child.thread_id = chain.thread_id
+        AND placement.provenance_kind <> 'forked-from'
+      LIMIT 1
+    )
+  )
+`;
+
+/** Resolve scoped read access in one query, optionally starting from only the candidate threads. */
+export function reachableThreadQuery(
+  sql: SqlClient.SqlClient,
+  personId: ParticipantId,
+  hasThreadLevel: boolean,
+  candidates: Statement.Fragment = sql`SELECT thread_id, project_id FROM orchestration_v2_projection_threads WHERE deleted_at IS NULL`,
+) {
+  // `coveringThread` for every thread at once: each thread's line of ancestors, kept where a
+  // thread on it, or the thread's project, is one the person holds a level on. The lines are
+  // walked only for someone who holds a thread.
+  const underThreads = hasThreadLevel
+    ? sql`
+        , chain(origin, thread_id, depth) AS (
+          SELECT thread_id, thread_id, 0
+          FROM candidates
+          UNION ALL
+          SELECT chain.origin, ${parentOfChain(sql)}, chain.depth + 1
+          FROM chain
+          WHERE chain.thread_id IS NOT NULL AND chain.depth < ${MAX_ANCESTOR_DEPTH}
+        )
+        SELECT DISTINCT chain.origin AS thread_id
+        FROM chain
+        JOIN j5_a2a_person_level AS held
+          ON held.person_id = ${personId}
+         AND held.scope_kind = 'thread'
+         AND held.scope_id = chain.thread_id
+        UNION
+      `
+    : sql``;
+  return sql<{ readonly thread_id: string }>`
+    WITH RECURSIVE candidates AS (${candidates})
+    ${underThreads}
+    SELECT threads.thread_id
+    FROM candidates AS threads
+    JOIN j5_a2a_person_level AS held
+      ON held.person_id = ${personId}
+     AND held.scope_kind = 'project'
+     AND held.scope_id = threads.project_id
+  `;
+}
+
 const make: Layer.Layer<PersonAccess, never, SqlClient.SqlClient | ReadChanges> = Layer.effect(
   PersonAccess,
   Effect.gen(function* () {
@@ -533,33 +603,7 @@ const make: Layer.Layer<PersonAccess, never, SqlClient.SqlClient | ReadChanges> 
       Effect.mapError(storage("read whose a session is")),
     );
 
-    // The thread above `chain.thread_id`. A Subagent's parent is its upstream lineage parent; a
-    // Peer Agent's is its placement parent, unless it is a fork.
-    const parentInChain = sql`
-      COALESCE(
-        (
-          SELECT json_extract(thread.payload_json, '$.lineage.parentThreadId')
-          FROM orchestration_v2_projection_threads AS thread
-          WHERE thread.thread_id = chain.thread_id
-            AND (
-              json_extract(thread.payload_json, '$.lineage.relationshipToParent') = 'subagent'
-              OR json_extract(thread.payload_json, '$.lineage.sideChat') = 1
-            )
-        ),
-        (
-          SELECT parent.thread_id
-          FROM j5_a2a_membership AS child
-          -- A placement stays where it was made when Turn into project moves either agent.
-          JOIN j5_a2a_participant_placement AS placement
-            ON placement.participant_id = child.participant_id
-          JOIN j5_a2a_membership AS parent
-            ON parent.participant_id = placement.placement_parent_id
-          WHERE child.thread_id = chain.thread_id
-            AND placement.provenance_kind <> 'forked-from'
-          LIMIT 1
-        )
-      )
-    `;
+    const parentInChain = parentOfChain(sql);
 
     // Every thread from the one asked about up to the root of its tree.
     const chain = (threadId: ThreadId) => sql`
@@ -607,39 +651,11 @@ const make: Layer.Layer<PersonAccess, never, SqlClient.SqlClient | ReadChanges> 
         const levels = yield* levelsOf(personId);
         if (levels.some((held) => held.scope.kind === "server")) return null;
         if (levels.length === 0) return [];
-        // `coveringThread` for every thread at once: each thread's line of ancestors, kept where a
-        // thread on it, or the thread's project, is one the person holds a level on. The lines are
-        // walked only for someone who holds a thread.
-        const underThreads = levels.some((held) => held.scope.kind === "thread")
-          ? sql`
-              WITH RECURSIVE chain(origin, thread_id, depth) AS (
-                SELECT thread_id, thread_id, 0
-                FROM orchestration_v2_projection_threads
-                WHERE deleted_at IS NULL
-                UNION ALL
-                SELECT chain.origin, ${parentInChain}, chain.depth + 1
-                FROM chain
-                WHERE chain.thread_id IS NOT NULL AND chain.depth < ${MAX_ANCESTOR_DEPTH}
-              )
-              SELECT DISTINCT chain.origin AS thread_id
-              FROM chain
-              JOIN j5_a2a_person_level AS held
-                ON held.person_id = ${personId}
-               AND held.scope_kind = 'thread'
-               AND held.scope_id = chain.thread_id
-              UNION
-            `
-          : sql``;
-        const rows = yield* sql<{ readonly thread_id: string }>`
-          ${underThreads}
-          SELECT threads.thread_id
-          FROM orchestration_v2_projection_threads AS threads
-          JOIN j5_a2a_person_level AS held
-            ON held.person_id = ${personId}
-           AND held.scope_kind = 'project'
-           AND held.scope_id = threads.project_id
-          WHERE threads.deleted_at IS NULL
-        `;
+        const rows = yield* reachableThreadQuery(
+          sql,
+          personId,
+          levels.some((held) => held.scope.kind === "thread"),
+        );
         return rows.map((row) => row.thread_id as ThreadId);
       },
       Effect.mapError(storage("read the threads a person reaches")),

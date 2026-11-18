@@ -4,6 +4,8 @@ import * as Effect from "effect/Effect";
 import type * as SqlClient from "effect/sql/SqlClient";
 import { playbookError } from "./definition.ts";
 
+import { reachableThreadQuery, type SessionReach } from "../sharing/PersonAccess.ts";
+
 type Row = {
   request_id: string;
   run_id: string;
@@ -48,11 +50,39 @@ export const makePlaybookCheckpoints = (sql: SqlClient.SqlClient) => {
       VALUES (${request.requestId}, ${request.runId}, ${request.ownerThreadId}, ${request.stepId}, ${request.stepTitle}, ${request.summary}, 'pending', ${request.createdAt})`;
     yield* sql`UPDATE j5_playbook_run SET checkpoint_request_id = ${request.requestId} WHERE run_id = ${request.runId}`;
   });
-  const pending = Effect.fn("PlaybookCheckpoints.pending")(function* () {
-    const rows = yield* sql<Row>`SELECT checkpoint.* FROM j5_playbook_checkpoint checkpoint
+  const pendingRows = (reach: SessionReach, threadId?: ThreadId) => {
+    const threadFilter =
+      threadId === undefined ? sql`` : sql`AND checkpoint.owner_thread_id = ${threadId}`;
+    const from = sql`FROM j5_playbook_checkpoint checkpoint
       JOIN j5_playbook_run run ON run.checkpoint_request_id = checkpoint.request_id
-      WHERE run.status = 'active' AND checkpoint.status = 'pending' ORDER BY checkpoint.created_at`;
+      WHERE run.status = 'active' AND checkpoint.status = 'pending' ${threadFilter}`;
+    if (reach.kind === "service" || (reach.kind === "person" && reach.serverLevel !== null))
+      return from;
+    if (reach.kind !== "person" || reach.levels.length === 0) return sql`${from} AND 0`;
+    const candidates = sql`SELECT thread.thread_id, thread.project_id
+      FROM j5_playbook_checkpoint pending
+      JOIN orchestration_v2_projection_threads thread ON thread.thread_id = pending.owner_thread_id
+      WHERE pending.status = 'pending' AND thread.deleted_at IS NULL
+        ${threadId === undefined ? sql`` : sql`AND pending.owner_thread_id = ${threadId}`}`;
+    const visible = reachableThreadQuery(
+      sql,
+      reach.person.personId,
+      reach.levels.some((level) => level.scope.kind === "thread"),
+      candidates,
+    );
+    return sql`${from} AND checkpoint.owner_thread_id IN (${visible})`;
+  };
+  const pending = Effect.fn("PlaybookCheckpoints.pending")(function* (
+    reach: SessionReach,
+    threadId?: ThreadId,
+  ) {
+    const rows =
+      yield* sql<Row>`SELECT checkpoint.* ${pendingRows(reach, threadId)} ORDER BY checkpoint.created_at`;
     return rows.map(present);
+  });
+  const count = Effect.fn("PlaybookCheckpoints.count")(function* (reach: SessionReach) {
+    const rows = yield* sql<{ count: number }>`SELECT COUNT(*) AS count ${pendingRows(reach)}`;
+    return rows[0]!;
   });
   const answer = Effect.fn("PlaybookCheckpoints.answer")(function* (
     input: PlaybookCheckpointAnswer,
@@ -72,5 +102,5 @@ export const makePlaybookCheckpoints = (sql: SqlClient.SqlClient) => {
       );
     return present(rows[0]);
   });
-  return { current, close, open, pending, answer };
+  return { current, close, open, pending, count, answer };
 };

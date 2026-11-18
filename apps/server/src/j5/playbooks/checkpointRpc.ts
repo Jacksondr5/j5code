@@ -1,6 +1,7 @@
+import type { ThreadId } from "@t3tools/contracts";
 import { J5_PLAYBOOK_WS_METHODS, type PlaybookCheckpointAnswer } from "@t3tools/contracts/j5";
 import * as Effect from "effect/Effect";
-import { connectionReads, requireWrites } from "../sharing/connectionWriter.ts";
+import { requireWrites } from "../sharing/connectionWriter.ts";
 import { SharedThreads } from "../sharing/SharedThreads.ts";
 import { PersonAccess } from "../sharing/PersonAccess.ts";
 import type { SessionIdentity } from "../sharing/PersonAccess.ts";
@@ -19,14 +20,23 @@ export const makeCheckpointRpcHandlers = Effect.fn("makeCheckpointRpcHandlers")(
       Effect.provideService(SharedThreads, shared),
     );
   return {
-    [J5_PLAYBOOK_WS_METHODS.listCheckpoints]: Effect.fn("PlaybookCheckpointRpc.list")(function* () {
-      const reaches = yield* authorized(connectionReads(session));
-      return {
-        requests: yield* Effect.filter(yield* store.pendingCheckpoints(), (request) =>
-          authorized(reaches(Effect.succeed(request.ownerThreadId))),
-        ),
-      };
-    }, Effect.mapError(storageError)),
+    [J5_PLAYBOOK_WS_METHODS.listCheckpoints]: Effect.fn("PlaybookCheckpointRpc.list")(
+      function* (input: { threadId?: ThreadId }) {
+        return {
+          requests: yield* store.pendingCheckpoints(
+            yield* people.sessionReach(session),
+            input.threadId,
+          ),
+        };
+      },
+      Effect.mapError(storageError),
+    ),
+    [J5_PLAYBOOK_WS_METHODS.countCheckpoints]: Effect.fn("PlaybookCheckpointRpc.count")(
+      function* () {
+        return yield* store.countCheckpoints(yield* people.sessionReach(session));
+      },
+      Effect.mapError(storageError),
+    ),
     [J5_PLAYBOOK_WS_METHODS.answerCheckpoint]: Effect.fn("PlaybookCheckpointRpc.answer")(function* (
       input: PlaybookCheckpointAnswer,
     ) {
