@@ -1394,6 +1394,10 @@ it.effect("groups limited picks for one run and keeps reviewer preference and st
       (yield* Effect.flip(store.answerCheckpoint(answer, false))).code,
       "capability_denied",
     );
+    assert.equal(
+      (yield* Effect.flip(store.answerCheckpoint({ ...answer, decision: "decline" }, false))).code,
+      "capability_denied",
+    );
     yield* store.answerCheckpoint(answer, true);
     assert.equal((yield* requireCheckpoint).code, "approval_pending");
     assert.equal((yield* store.current(owner)).checkpoint?.requestId, stepRequest.requestId);

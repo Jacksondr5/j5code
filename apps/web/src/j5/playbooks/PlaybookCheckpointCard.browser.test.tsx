@@ -87,14 +87,14 @@ it("Viewers and disconnected clients can read but cannot answer", async () => {
   expect(calls.answer).not.toHaveBeenCalled();
 });
 
-it("only a server Owner can approve the grouped persona picks", async () => {
+it("only a server Owner can answer the grouped persona picks", async () => {
   setup();
   const request = { ...checkpoint, kind: "persona_picks" as const };
   await using screen = await render(
     <PlaybookCheckpointCard request={request} environmentId={EnvironmentId.make("writeable")} />,
   );
   await expect.element(screen.getByRole("button", { name: "Approve", exact: true })).toBeDisabled();
-  await expect.element(screen.getByRole("button", { name: "Decline", exact: true })).toBeEnabled();
+  await expect.element(screen.getByRole("button", { name: "Decline", exact: true })).toBeDisabled();
   const environmentId = EnvironmentId.make("owner");
   await screen.rerender(<PlaybookCheckpointCard request={request} environmentId={environmentId} />);
   await userEvent.click(screen.getByRole("button", { name: "Approve", exact: true }));

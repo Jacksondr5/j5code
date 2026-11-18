@@ -105,9 +105,8 @@ export const makePlaybookCheckpoints = (sql: SqlClient.SqlClient) => {
   const answer = Effect.fn("PlaybookCheckpoints.answer")(function* (
     input: PlaybookCheckpointAnswer,
     timestamp: string,
-    canApprovePersonaPicks: boolean,
+    canAnswerPersonaPicks: boolean,
   ) {
-    const canAnswerPersonaPicks = canApprovePersonaPicks || input.decision === "decline";
     const rows =
       yield* sql<Row>`UPDATE j5_playbook_checkpoint SET status = ${input.decision === "approve" ? "approved" : "declined"},
       answered_at = ${timestamp}, reason = ${input.reason?.trim() || null}
@@ -124,7 +123,7 @@ export const makePlaybookCheckpoints = (sql: SqlClient.SqlClient) => {
       if (restricted.length > 0)
         return yield* playbookError(
           "capability_denied",
-          "Only a server Owner can approve playbook persona picks.",
+          "Only a server Owner can answer playbook persona picks.",
         );
     }
     if (!rows[0])
