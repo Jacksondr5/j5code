@@ -32,6 +32,7 @@ import { SharedConversation } from "./SharedConversation.ts";
 import { NOTE_CLOSE } from "./sharedConversationNotes.ts";
 import { PROJECT, device, thread } from "./test-support/accessHarness.ts";
 import { conversationLayer } from "./test-support/conversationHarness.ts";
+import { webhookPromptLiterals } from "../../scheduledTasks/webhookTemplate.ts";
 
 /**
  * A scheduled task's runs in a shared conversation (Shared conversations AC20): upstream's
@@ -45,10 +46,12 @@ const TASK = "scheduled-task:nightly";
 interface Sent {
   readonly threadId: string;
   readonly text: string;
+  readonly scheduledTaskPrompt?: string | undefined;
 }
 interface Launched {
   readonly threadId: string | undefined;
   readonly text: string | undefined;
+  readonly scheduledTaskPrompt?: string | undefined;
 }
 
 class Handed extends Context.Service<
@@ -78,7 +81,13 @@ const upstreamThreadsLayer = Layer.effectContext(
         sendToThread: (input: ThreadManagementSendInput) =>
           Ref.update(handed.sent, (sent) => [
             ...sent,
-            { threadId: input.threadId, text: input.text },
+            {
+              threadId: input.threadId,
+              text: input.text,
+              ...(input.scheduledTaskPrompt === undefined
+                ? {}
+                : { scheduledTaskPrompt: input.scheduledTaskPrompt }),
+            },
           ]).pipe(Effect.as({} as never)),
       } as unknown as ThreadManagementService["Service"]),
     ).pipe(
@@ -88,7 +97,13 @@ const upstreamThreadsLayer = Layer.effectContext(
           launch: (input: ThreadLaunchInput) =>
             Ref.update(handed.launched, (launched) => [
               ...launched,
-              { threadId: input.threadId, text: input.initialMessage?.text },
+              {
+                threadId: input.threadId,
+                text: input.initialMessage?.text,
+                ...(input.initialMessage?.scheduledTaskPrompt === undefined
+                  ? {}
+                  : { scheduledTaskPrompt: input.initialMessage.scheduledTaskPrompt }),
+              },
             ]).pipe(Effect.as({} as never)),
         } as unknown as ThreadLaunchService["Service"]),
       ),
@@ -156,7 +171,11 @@ const save = Effect.fn("test.save")(function* (personId: string, prompt: string)
 
 let fired = 0;
 /** A run of the task, as upstream's service sends it to a thread. */
-const run = Effect.fn("test.run")(function* (threadId: ThreadId, prompt: string) {
+const run = Effect.fn("test.run")(function* (
+  threadId: ThreadId,
+  prompt: string,
+  scheduledTaskPrompt?: string,
+) {
   fired += 1;
   const threads = yield* ThreadManagementService;
   return yield* threads.sendToThread({
@@ -165,6 +184,7 @@ const run = Effect.fn("test.run")(function* (threadId: ThreadId, prompt: string)
     threadId,
     messageId: MessageId.make(`message:scheduled:${fired}`),
     scheduledTaskId: ScheduledTaskId.make(TASK),
+    ...(scheduledTaskPrompt === undefined ? {} : { scheduledTaskPrompt }),
     text: prompt,
     attachments: [],
     mode: "queue",
@@ -346,5 +366,62 @@ it.effect("someone else's edit of a queued run keeps it scheduled and says who e
       afterNote((edited as { readonly text: string }).text),
       "[Scheduled by Priya (collaborator), edited by Jackson (owner)]\n\nCheck CI only.",
     );
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("a run's schedule can name a playbook only while a person's saved prompt runs", () =>
+  Effect.gen(function* () {
+    const owner = yield* jackson;
+    const threadId = yield* thread("thread:nightly");
+    const sql = yield* SqlClient.SqlClient;
+    const snapshot = Effect.gen(function* () {
+      const sent = yield* Ref.get((yield* Handed).sent);
+      return sent.at(-1)?.scheduledTaskPrompt;
+    });
+
+    // An agent scheduled it over MCP, so no person chose the playbook it names.
+    yield* task(threadId, "Run @playbook:demo.");
+    yield* run(threadId, "Run @playbook:demo.", "Run @playbook:demo.");
+    assert.strictEqual(yield* snapshot, undefined);
+    assert.strictEqual(yield* lastSent, "Run @playbook:demo.");
+
+    yield* save(owner, "Run @playbook:demo.");
+    yield* run(threadId, "Run @playbook:demo.", "Run @playbook:demo.");
+    assert.strictEqual(yield* snapshot, "Run @playbook:demo.");
+
+    const template = "Run @playbook:demo on {{body.repo}}.";
+    yield* save(owner, template);
+    yield* run(threadId, "Run @playbook:demo on web.", webhookPromptLiterals(template));
+    assert.strictEqual(yield* snapshot, webhookPromptLiterals(template));
+    // A snapshot that is not the saved prompt, such as one taken before a person's save.
+    yield* run(threadId, "Run @playbook:other.", "Run @playbook:other.");
+    assert.strictEqual(yield* snapshot, undefined);
+
+    // An agent's edit over MCP records no one, so the playbook it names is not authorized.
+    yield* sql`UPDATE scheduled_tasks SET prompt = 'Run @playbook:other.' WHERE task_id = ${TASK}`;
+    yield* run(threadId, "Run @playbook:other.", "Run @playbook:other.");
+    assert.strictEqual(yield* snapshot, undefined);
+    assert.strictEqual(yield* lastSent, "Run @playbook:other.");
+
+    const launch = yield* ThreadLaunchService;
+    const launchWith = (key: string, scheduledTaskPrompt: string) =>
+      launch.launch({
+        commandId: CommandId.make(`scheduled-task:${TASK}:launch:${key}`),
+        projectId: ProjectId.make("project:alone"),
+        title: "Nightly",
+        initialMessage: {
+          messageId: MessageId.make(`message:scheduled:launch:${key}`),
+          scheduledTaskId: ScheduledTaskId.make(TASK),
+          scheduledTaskPrompt,
+          text: scheduledTaskPrompt,
+          attachments: [],
+        },
+      } as never);
+    yield* launchWith("agent", "Run @playbook:other.");
+    yield* save(owner, "Run @playbook:demo.");
+    yield* launchWith("person", "Run @playbook:demo.");
+    const [byAgent, byPerson] = yield* Ref.get((yield* Handed).launched);
+    assert.strictEqual(byAgent!.scheduledTaskPrompt, undefined);
+    assert.strictEqual(byPerson!.scheduledTaskPrompt, "Run @playbook:demo.");
   }).pipe(Effect.provide(testLayer)),
 );

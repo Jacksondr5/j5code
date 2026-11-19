@@ -11,7 +11,7 @@ An agent following a long procedure reads it once at the beginning and the later
 
 ## Definition
 
-A **Playbook** is a saved, ordered procedure for a piece of work. In conversation, an agent can choose and name a playbook that clearly fits the request. It asks first when the choice is unclear. A scheduled turn can start a playbook only if its configured task prompt names it. Every run stays within the scope and approvals of the original request.
+A **Playbook** is a saved, ordered procedure for a piece of work. In conversation, an agent can choose and name a playbook that clearly fits the request. It asks first when the choice is unclear. A scheduled turn can start a playbook only if its configured task prompt, as a person last saved it, names it. Every run stays within the scope and approvals of the original request.
 
 The thread that starts a run owns it. Its agent can do the work directly, delegate independent work, or use a Crew when workers need to collaborate. It can change arrangements during a run and carry completed work forward. The owner can assign a step to an eligible agent it spawned or a member of a Crew it captains. A required persona must match the holder's recorded launch assignment, including when the owner holds the step. The holder reports results and evidence to the owner, and only the owner advances. An owner completes the run after the required work and checkpoints are satisfied and reports the result, verification, and limitations.
 
