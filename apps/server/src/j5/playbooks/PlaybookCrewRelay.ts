@@ -14,7 +14,10 @@ import { ThreadManagementService } from "../../orchestration-v2/ThreadManagement
 import { AgentCrewInstanceService } from "../a2a/AgentCrewInstanceService.ts";
 import { participantIdForThread } from "../a2a/HomeRegistrar.ts";
 import { stopThread, agentStopReason } from "../a2a/stopThread.ts";
-import { exceededDispatchModeLimit } from "../../orchestration-v2/DispatchModeLimit.ts";
+import {
+  DispatchModeLimit,
+  exceededDispatchModeLimit,
+} from "../../orchestration-v2/DispatchModeLimit.ts";
 import { lifecycleCommandId, lifecycleId } from "../a2a/spawnIds.ts";
 import { getThreadRecordsIfPresent } from "../a2a/threadProjectionReads.ts";
 import { crewStepNoticeText } from "./crewStepNotice.ts";
@@ -75,6 +78,7 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
 
   const finishCancellation = Effect.fn("PlaybookCrewRelay.finishCancellation")(function* (
     runId: string,
+    immediate = false,
   ) {
     const run = yield* store.runById(runId);
     if (run === null || run.status !== "cancelled" || !(yield* store.claimHolderStop(runId)))
@@ -106,19 +110,37 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
           status: "failed" as const,
           reason: "The holder runs above the owner's runtime or interaction mode.",
         };
-      const stopped = yield* stopThread(
-        threads,
-        {
-          commandId: lifecycleCommandId({
-            providerSessionId: "j5-playbook-cancel",
-            requestKey: runId,
-            operation: "stop-holder",
-          }),
-          threadId: run.holderThreadId,
-          reason: agentStopReason("Playbook cancelled"),
-        },
-        limit,
-      );
+      const command = {
+        commandId: lifecycleCommandId({
+          providerSessionId: "j5-playbook-cancel",
+          requestKey: runId,
+          operation: "stop-holder",
+        }),
+        threadId: run.holderThreadId,
+        reason: agentStopReason("Playbook cancelled"),
+      };
+      // An explicit cancel stops the holder. Lifecycle events and retries may
+      // arrive after it has taken on unrelated work, including delegated tasks.
+      const stopped = immediate
+        ? yield* stopThread(threads, command, limit)
+        : yield* Effect.gen(function* () {
+            const landing = yield* store.latestLanding(runId, run.currentStepId);
+            if (landing?.targetThreadId !== command.threadId) return null;
+            const notice = stepMessageId(runId, landing.requestId);
+            const { runs } = yield* threads.getThreadRecords(command.threadId, ["runs"], {
+              runStatuses: ["preparing", "starting", "running"],
+            });
+            const turn = runs.find((entry) => entry.userMessageId === notice);
+            if (!turn) return null;
+            return yield* threads
+              .dispatch({
+                ...command,
+                type: "run.interrupt",
+                runId: turn.id,
+              })
+              .pipe(Effect.provideService(DispatchModeLimit, limit));
+          });
+      if (stopped === null) return { status: "already_idle" as const, reason: null };
       const interrupted = stopped.storedEvents.some(
         ({ event }) =>
           (event.type === "run.updated" && event.payload.status === "interrupted") ||
@@ -325,7 +347,10 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
           yield* drainLocked(run.runId);
         const response = yield* store.mutate(owner, input);
         if (input.operation === "cancel") {
-          yield* finishCancellation(run.runId);
+          yield* finishCancellation(
+            run.runId,
+            !response.replayed && response.cancelReason === "agent_cancelled",
+          );
           return withDelivery(
             { ...(yield* store.current(owner, run.runId)), replayed: response.replayed },
             null,
