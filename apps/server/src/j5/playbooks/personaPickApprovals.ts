@@ -11,6 +11,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 const ApprovedPick = Schema.Struct({
   stepIds: Schema.Array(Schema.String),
+  retryStepId: Schema.optionalKey(Schema.String),
   projectId: Schema.String,
   definitionDigest: Schema.String,
   entries: Schema.Array(
@@ -28,7 +29,7 @@ const ApprovedPick = Schema.Struct({
 export type ApprovedPick = typeof ApprovedPick.Type;
 const PickScopes = Schema.fromJsonString(Schema.Record(Schema.String, ApprovedPick));
 export const encodePickScopes = Schema.encodeSync(PickScopes);
-const decodePickScopes = Schema.decodeUnknownEffect(PickScopes);
+export const decodePickScopes = Schema.decodeUnknownEffect(PickScopes);
 
 export type StaffingRequest = {
   owner: ThreadId;

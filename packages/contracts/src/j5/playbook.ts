@@ -110,6 +110,7 @@ export const PlaybookReviseRequest = Schema.Struct({
   expectedStepId: Text,
   steps: PlaybookDefinition.fields.steps,
   basis: PlaybookRevision.fields.basis,
+  retryStaffingStepId: Schema.optionalKey(Text),
   stepId: Schema.optionalKey(Text),
   assignee: Schema.optionalKey(Text),
   client_request_id: Text,

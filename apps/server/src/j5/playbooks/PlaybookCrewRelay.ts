@@ -369,7 +369,9 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
     return yield* withRun(
       run.runId,
       Effect.gen(function* () {
-        if (input.operation !== "assign" && input.operation !== "cancel")
+        const staffingRetry =
+          input.operation === "revise" && input.retryStaffingStepId !== undefined;
+        if (input.operation !== "assign" && input.operation !== "cancel" && !staffingRetry)
           yield* drainLocked(run.runId);
         const response = yield* store.mutate(owner, input);
         if (input.operation === "cancel") {

@@ -850,6 +850,7 @@ export const makePlaybookStore = Effect.gen(function* () {
     stepId: string,
     assessment: Effect.Success<ReturnType<typeof assessRequiredPersonas>>,
     timestamp: string,
+    retryStepId?: string,
   ) {
     const picks = Object.fromEntries(
       Object.entries(assessment.picks)
@@ -865,11 +866,7 @@ export const makePlaybookStore = Effect.gen(function* () {
           },
         ]),
     );
-    const limited = assessment.statuses.flatMap((entry) =>
-      entry.status === "limited"
-        ? [`• ${entry.persona} for ${picks[entry.persona]?.stepIds.join(", ")}: ${entry.limits}`]
-        : [],
-    );
+
     yield* checkpoints.replacePersonaApproval(
       {
         requestId: yield* crypto.uuidV4().pipe(Effect.orDie),
@@ -877,13 +874,16 @@ export const makePlaybookStore = Effect.gen(function* () {
         ownerThreadId: owner,
         stepId,
         stepTitle: "Playbook persona picks",
-        summary: `Approve one staffing launch per listed step using the listed models and saved access.\n\n${limited.join("\n")}`,
+        summary:
+          "Approve one staffing launch per listed step using the listed models and saved access.",
         status: "pending",
         createdAt: timestamp,
         answeredAt: null,
         reason: null,
       },
       picks,
+      assessment.statuses,
+      retryStepId,
     );
   });
 
@@ -1041,6 +1041,8 @@ export const makePlaybookStore = Effect.gen(function* () {
           ]
         : []),
     ];
+    if (input.operation === "revise" && input.retryStaffingStepId !== undefined)
+      baseRequest.push("retryStaffingStepId", input.retryStaffingStepId);
     if (input.summary !== undefined) baseRequest.push("summary", input.summary);
     const request = encodeRequest(
       "assignee" in input && input.assignee !== undefined
@@ -1087,6 +1089,16 @@ export const makePlaybookStore = Effect.gen(function* () {
             definition = (yield* decodePlaybookDocument(
               encodeJson({ ...definition, steps: input.steps }),
             )).definition;
+            if (
+              input.retryStaffingStepId !== undefined &&
+              (input.assignee !== undefined ||
+                input.stepId !== undefined ||
+                encodeJson(definition.steps) !== encodeJson(previousSteps))
+            )
+              return yield* playbookError(
+                "invalid_staffing_retry",
+                "Request another staffing launch with the unchanged steps and no assignment or movement.",
+              );
             const requiredIds = new Set(
               definition.steps
                 .filter((step) => step.approval === "required")
@@ -1245,6 +1257,7 @@ export const makePlaybookStore = Effect.gen(function* () {
               currentStepId,
               revisedPersonas,
               updatedAt,
+              input.retryStaffingStepId,
             );
             revisionCount += 1;
             yield* sql`INSERT INTO j5_playbook_revision (run_id, request_id, basis, revised_at, owner_thread_id, from_step_id, to_step_id, steps_digest)
