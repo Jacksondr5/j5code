@@ -989,7 +989,7 @@ it.effect(
 );
 
 it.effect(
-  "captures the parsed definition within the start transaction and never reads it on movement",
+  "reads the source once outside the writer transaction and keeps the snapshot on replay and movement",
   () =>
     Effect.gen(function* () {
       const { workspaceRoot, fs } = yield* makeFixture;
@@ -1000,7 +1000,7 @@ it.effect(
           ...fs,
           readFileString: (file, encoding) =>
             Effect.gen(function* () {
-              assert.isTrue(Option.isSome(yield* Effect.serviceOption(sql.transactionService)));
+              assert.isTrue(Option.isNone(yield* Effect.serviceOption(sql.transactionService)));
               reads += 1;
               return yield* fs.readFileString(file, encoding);
             }),

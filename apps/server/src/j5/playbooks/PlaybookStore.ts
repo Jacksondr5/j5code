@@ -178,7 +178,7 @@ export const makePlaybookStore = Effect.gen(function* () {
   const recordAnalytics = yield* j5AnalyticsRecorder;
 
   /** `unreadable` replaces the default read-failure message, which names the file's absolute path. */
-  const readDefinitionDocument = Effect.fn("PlaybookStore.readDefinitionDocument")(
+  const readDefinitionText = Effect.fn("PlaybookStore.readDefinitionText")(
     function* (definitionPath: string, _unreadable?: string) {
       const root = path.resolve(definitionPath, "../../..");
       const realRoot = yield* fs.realPath(root);
@@ -206,16 +206,7 @@ export const makePlaybookStore = Effect.gen(function* () {
           "invalid_path",
           "Playbook files must stay inside their source folder.",
         );
-      const text = yield* fs.readFileString(realFile);
-      return yield* decodePlaybookDocument(text).pipe(
-        Effect.mapError((error) =>
-          playbookError(
-            error.code,
-            _unreadable ?? `Cannot read this playbook. Fix its YAML and retry. ${error.message}`,
-            error.availableStepIds,
-          ),
-        ),
-      );
+      return yield* fs.readFileString(realFile);
     },
     (effect, _definitionPath: string, unreadable?: string) =>
       Effect.mapError(effect, (error) =>
@@ -228,6 +219,25 @@ export const makePlaybookStore = Effect.gen(function* () {
             ),
       ),
   );
+  const parseDefinitionText = (text: string, unreadable?: string) =>
+    decodePlaybookDocument(text).pipe(
+      Effect.mapError((error) =>
+        playbookError(
+          error.code,
+          unreadable ?? `Cannot read this playbook. Fix its YAML and retry. ${error.message}`,
+          error.availableStepIds,
+        ),
+      ),
+    );
+  const readDefinitionDocument = Effect.fn("PlaybookStore.readDefinitionDocument")(function* (
+    definitionPath: string,
+    unreadable?: string,
+  ) {
+    return yield* parseDefinitionText(
+      yield* readDefinitionText(definitionPath, unreadable),
+      unreadable,
+    );
+  });
   const readDefinition = Effect.fn("PlaybookStore.readDefinition")(function* (
     definitionPath: string,
   ) {
@@ -564,6 +574,8 @@ export const makePlaybookStore = Effect.gen(function* () {
       yield* cancelOrphans();
       const previous = yield* replay(owner, key, request);
       if (previous) return yield* view(previous, true);
+      // Capture the file before taking SQLite's writer lock. Decode these exact bytes in the insert transaction.
+      const source = yield* Effect.result(readDefinitionText(definitionPath));
       const result = yield* sql.withTransaction(
         Effect.gen(function* () {
           const previous = yield* replay(owner, key, request);
@@ -576,7 +588,8 @@ export const makePlaybookStore = Effect.gen(function* () {
               "already_active",
               `Run '${active[0].run_id}' is active. Retrieve, complete, or cancel it before starting another.`,
             );
-          const definition = yield* readDefinition(definitionPath);
+          if (source._tag === "Failure") return yield* source.failure;
+          const { definition } = yield* parseDefinitionText(source.success);
           const timestamp = yield* now;
           const run: StoredPlaybookRun = {
             definition,
