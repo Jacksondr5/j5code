@@ -1467,6 +1467,29 @@ export const makePlaybookStore = Effect.gen(function* () {
   }, Effect.mapError(storageError));
   const unreconciledCancellations = Effect.fn("PlaybookStore.unreconciledCancellations")(
     function* () {
+      // The daemon subscribes at the current high-water mark. An unarchive can
+      // already have hidden a missed archive in the owner's projection.
+      const missed = yield* sql<{
+        run_id: string;
+        owner_thread_id: string;
+        event_type: "thread.archived" | "thread.deleted";
+      }>`SELECT run.run_id, run.owner_thread_id, event.event_type
+        FROM j5_playbook_run run
+        JOIN orchestration_events event ON event.sequence = (
+          SELECT lifecycle.sequence FROM orchestration_events lifecycle
+          WHERE lifecycle.aggregate_kind = 'thread' AND lifecycle.stream_id = run.owner_thread_id
+            AND lifecycle.sequence > run.start_event_sequence
+            AND (run.start_event_sequence <> 0 OR lifecycle.occurred_at >= run.created_at)
+            AND lifecycle.event_type IN ('thread.archived', 'thread.deleted')
+            AND lifecycle.application_event_version = 2
+          ORDER BY lifecycle.sequence LIMIT 1)
+        WHERE run.status = 'active'`;
+      for (const row of missed)
+        yield* cancelOwner(
+          ThreadId.make(row.owner_thread_id),
+          row.event_type === "thread.archived" ? "owner_archived" : "owner_deleted",
+          row.run_id,
+        );
       yield* cancelOrphans();
       return (yield* sql<RunRow>`SELECT * FROM j5_playbook_run WHERE status = 'cancelled' AND holder_stop_json IS NULL AND cancel_reason IN ('owner_archived', 'owner_deleted', 'agent_cancelled')`).map(
         fromRow,

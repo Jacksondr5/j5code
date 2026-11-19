@@ -4,6 +4,7 @@ import { assert, it } from "@effect/vitest";
 import {
   CommandId,
   ProviderInstanceId,
+  RunId,
   ThreadId,
   type OrchestrationV2Command,
   type OrchestrationV2StoredEvent,
@@ -131,30 +132,35 @@ const fixture = Effect.gen(function* () {
   const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
   const threads = ThreadManagementService.of({
     getThreadRecords: (id: ThreadId) =>
-      Ref.get(archived).pipe(
-        Effect.flatMap((ids) =>
-          [owner, peer, crewMember, foreign].includes(id)
-            ? Ref.get(ownerPlan).pipe(
-                Effect.map((plan) => {
-                  const result = projection(id, ids.has(id));
-                  return {
-                    ...result,
-                    thread: {
-                      ...result.thread,
-                      interactionMode:
-                        plan && id === owner ? ("plan" as const) : ("default" as const),
-                    },
-                  };
-                }),
-              )
-            : Effect.fail(
-                new OrchestratorProjectionError({
-                  threadId: id,
-                  cause: new ProjectionStoreThreadNotFoundError({ threadId: id }),
-                }),
-              ),
-        ),
-      ),
+      Effect.gen(function* () {
+        if (![owner, peer, crewMember, foreign].includes(id))
+          return yield* new OrchestratorProjectionError({
+            threadId: id,
+            cause: new ProjectionStoreThreadNotFoundError({ threadId: id }),
+          });
+        const result = projection(id, (yield* Ref.get(archived)).has(id));
+        const plan = yield* Ref.get(ownerPlan);
+        const notice = (yield* Ref.get(dispatched)).findLast(
+          (item) => item.type === "message.dispatch" && item.threadId === id,
+        );
+        return {
+          ...result,
+          runs:
+            notice?.type === "message.dispatch"
+              ? [
+                  {
+                    id: RunId.make("run:" + notice.messageId),
+                    userMessageId: notice.messageId,
+                    status: "running",
+                  },
+                ]
+              : [],
+          thread: {
+            ...result.thread,
+            interactionMode: plan && id === owner ? ("plan" as const) : ("default" as const),
+          },
+        };
+      }),
     dispatch: (command: OrchestrationV2Command) =>
       Effect.gen(function* () {
         if (yield* Ref.get(fault))
@@ -790,10 +796,29 @@ it.effect(
         }
       }
       assert.equal(
-        (yield* Ref.get(dispatched)).filter((item) => item.type === "thread.stop").length,
+        (yield* Ref.get(dispatched)).filter((item) => item.type === "run.interrupt").length,
         4,
       );
     }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);
+
+it.effect("boot recovers an archive followed by unarchive before the notifier saw it", () =>
+  Effect.gen(function* () {
+    const { start, relay, store, sql } = yield* fixture;
+    const run = yield* start("original", peerId);
+    for (const [index, type] of ["thread.archived", "thread.unarchived"].entries()) {
+      yield* sql`INSERT INTO orchestration_events
+        (event_id, aggregate_kind, stream_id, stream_version, event_type, occurred_at,
+         actor_kind, payload_json, metadata_json, application_event_version)
+        VALUES (${type}, 'thread', ${owner}, ${index + 1}, ${type}, ${run.createdAt},
+          'system', '{}', '{}', 2)`;
+    }
+    yield* relay.reconcileOwners();
+    assert.equal((yield* store.runById(run.runId))?.cancelReason, "owner_archived");
+    const replacement = yield* start("replacement", peerId);
+    yield* relay.reconcileOwners();
+    assert.equal((yield* store.runById(replacement.runId))?.status, "active");
+  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );
 
 it.effect("a delayed archive reconciles its owner without cancelling a replacement run", () =>
@@ -809,7 +834,7 @@ it.effect("a delayed archive reconciles its owner without cancelling a replaceme
     yield* sql`UPDATE orchestration_v2_projection_threads SET archived_at = ${at} WHERE thread_id = ${owner}`;
     assert.equal((yield* store.current(owner, original.runId)).status, "cancelled");
     yield* sql`UPDATE orchestration_v2_projection_threads SET archived_at = NULL WHERE thread_id = ${owner}`;
-    const replacement = yield* start("replacement");
+    const replacement = yield* start("replacement", peerId);
     const unrelated = yield* store.start(foreign, root, "review", "unrelated");
     yield* sql`UPDATE orchestration_v2_projection_threads SET archived_at = ${at} WHERE thread_id = ${foreign}`;
 
@@ -823,8 +848,10 @@ it.effect("a delayed archive reconciles its owner without cancelling a replaceme
     assert.equal((yield* store.runById(unrelated.runId))?.status, "active");
     assert.equal((yield* store.runById(original.runId))?.holderStop?.status, "already_idle");
     assert.equal(
-      (yield* Ref.get(dispatched)).filter((item) => item.type === "thread.stop").length,
-      1,
+      (yield* Ref.get(dispatched)).filter(
+        (item) => item.type === "thread.stop" || item.type === "run.interrupt",
+      ).length,
+      0,
     );
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );
