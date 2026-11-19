@@ -332,6 +332,27 @@ it.effect("pages beyond 100 runs without losing older active owners", () =>
   }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );
 
+it.effect("replays a pre-upgrade crew receipt only for the original start", () =>
+  Effect.gen(function* () {
+    const { store, workspaceRoot } = yield* makeFixture;
+    const sql = yield* SqlClient.SqlClient;
+    const first = yield* store.start(owner, workspaceRoot, "demo", "legacy");
+    const receipt = JSON.stringify(["start", first.definitionPath, "old-crew"]);
+    yield* sql`UPDATE j5_playbook_request SET request_json = ${receipt} WHERE run_id = ${first.runId}`;
+    const retry = yield* store.start(owner, workspaceRoot, "demo.yaml", "legacy");
+    assert.isTrue(retry.replayed);
+    assert.equal(retry.runId, first.runId);
+    assert.equal(
+      (yield* Effect.flip(store.start(owner, workspaceRoot, "demo", "legacy", "peer"))).code,
+      "request_conflict",
+    );
+    assert.equal(
+      (yield* Effect.flip(store.start(owner, workspaceRoot, "other", "legacy"))).code,
+      "request_conflict",
+    );
+  }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
+);
+
 it.effect("retains sequential runs and permits a new run after completion or cancellation", () =>
   Effect.gen(function* () {
     const { store, workspaceRoot } = yield* makeFixture;
@@ -1057,7 +1078,7 @@ it.effect(
 );
 
 it.effect(
-  "captures the parsed definition within the start transaction and never reads it on movement",
+  "reads the source once outside the writer transaction and keeps the snapshot on replay and movement",
   () =>
     Effect.gen(function* () {
       const { workspaceRoot, fs } = yield* makeFixture;
@@ -1068,7 +1089,7 @@ it.effect(
           ...fs,
           readFileString: (file, encoding) =>
             Effect.gen(function* () {
-              assert.isTrue(Option.isSome(yield* Effect.serviceOption(sql.transactionService)));
+              assert.isTrue(Option.isNone(yield* Effect.serviceOption(sql.transactionService)));
               reads += 1;
               return yield* fs.readFileString(file, encoding);
             }),
