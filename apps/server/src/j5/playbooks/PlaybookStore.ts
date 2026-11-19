@@ -554,7 +554,6 @@ export const makePlaybookStore = Effect.gen(function* () {
     workspaceRoot: string,
     name: string,
     key: string,
-    crewInstanceId?: string,
   ) {
     const rows = yield* sql<{
       request_json: string;
@@ -565,16 +564,19 @@ export const makePlaybookStore = Effect.gen(function* () {
       if (
         request[0] !== "start" ||
         !recordedPath ||
-        path.basename(recordedPath, ".yaml") !== name.replace(/\.yaml$/, "") ||
-        (request[2] ?? null) !== (crewInstanceId ?? null)
+        path.basename(recordedPath, ".yaml") !== name.replace(/\.yaml$/, "")
       )
         return yield* playbookError(
           "request_conflict",
           "This client_request_id belongs to a different operation. Use a new key for a new operation.",
         );
-      return { definitionPath: recordedPath };
+      // Before runtime assignees, starts could include the originating Crew ID.
+      // Preserve that legacy shape only for retries of the original unassigned start.
+      const legacyRequest =
+        request.length === 3 && typeof request[2] === "string" ? rows[0].request_json : undefined;
+      return { definitionPath: recordedPath, legacyRequest };
     }
-    return yield* definitionPathFor(workspaceRoot, name);
+    return { ...(yield* definitionPathFor(workspaceRoot, name)), legacyRequest: undefined };
   }, Effect.mapError(storageError));
 
   /** Reads a live definition without touching run state: no permit, no SQL, no revision bump. */
@@ -688,12 +690,16 @@ export const makePlaybookStore = Effect.gen(function* () {
     key: string,
     assignee?: string,
   ) {
-    const { definitionPath } = yield* startDefinitionPathFor(owner, workspaceRoot, name, key);
-    const request = encodeRequest(
-      assignee === undefined
-        ? ["start", definitionPath]
-        : ["start", definitionPath, null, assignee],
+    const { definitionPath, legacyRequest } = yield* startDefinitionPathFor(
+      owner,
+      workspaceRoot,
+      name,
+      key,
     );
+    const request =
+      assignee === undefined
+        ? (legacyRequest ?? encodeRequest(["start", definitionPath]))
+        : encodeRequest(["start", definitionPath, null, assignee]);
     return yield* Effect.gen(function* () {
       yield* cancelOrphans();
       const previous = yield* replay(owner, key, request);
@@ -1077,14 +1083,6 @@ export const makePlaybookStore = Effect.gen(function* () {
         permit.withPermits(1),
       );
   }, Effect.mapError(storageError));
-  /** A Crew's active run with its saved progress, or null. */
-  const activeRunForCrew = Effect.fn("PlaybookStore.activeRunForCrew")(function* (
-    crewInstanceId: string,
-  ) {
-    const rows = yield* sql<RunRow>`SELECT * FROM j5_playbook_run
-      WHERE crew_instance_id = ${crewInstanceId} AND status = 'active' LIMIT 1`;
-    return rows[0] ? yield* view(fromRow(rows[0])) : null;
-  }, Effect.mapError(storageError));
   const activeRunSummaries = Effect.fn("PlaybookStore.activeRunSummaries")(function* (
     ownerThreadIds: ReadonlyArray<ThreadId>,
   ) {
@@ -1156,7 +1154,6 @@ export const makePlaybookStore = Effect.gen(function* () {
     pendingLandings,
     resolveLanding,
     cancelForCrew,
-    activeRunForCrew,
     activeRunSummaries,
   };
 });
