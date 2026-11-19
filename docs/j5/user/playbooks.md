@@ -94,11 +94,13 @@ asks first. The run follows the scope and approvals of your request.
 To choose one yourself, use `/playbook ` at the start of a message or type
 `@playbook:` anywhere to pick a saved playbook. You can also ask directly, as
 in “Start playbook review.” Add instructions after the name when needed. For
-a scheduled task, write `Run review`, `Use the review playbook`, or
-`@playbook:review` in the configured prompt. J5 checks the prompt saved when
-the task fires. That permission follows steers, messages to other agents, and
-delegated work. A person can request changes to a running procedure in a new
-human turn. Webhook request values cannot grant permission to start a playbook.
+a scheduled task, save its prompt with a directive such as `Run review` at
+the beginning of a sentence, or put `@playbook:review` on its own line. When an
+agent creates a task or changes its prompt, a person must save that prompt
+before it can authorize a playbook. J5 carries the permission from the firing
+through steers, worktree handoffs, step and checkpoint notices, and delegated
+work. A person can request changes to a running procedure in a new human turn.
+Webhook request values cannot grant permission to start a playbook.
 
 One playbook can be active per thread. Finishing or cancelling it makes the
 thread available for another run.
