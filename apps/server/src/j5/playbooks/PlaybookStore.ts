@@ -258,7 +258,7 @@ export const makePlaybookStore = Effect.gen(function* () {
   const recordAnalytics = yield* j5AnalyticsRecorder;
 
   /** `unreadable` replaces the default read-failure message, which names the file's absolute path. */
-  const readDefinitionDocument = Effect.fn("PlaybookStore.readDefinitionDocument")(
+  const readDefinitionText = Effect.fn("PlaybookStore.readDefinitionText")(
     function* (definitionPath: string, _unreadable?: string) {
       const root = path.resolve(definitionPath, "../../..");
       const realRoot = yield* fs.realPath(root);
@@ -286,16 +286,7 @@ export const makePlaybookStore = Effect.gen(function* () {
           "invalid_path",
           "Playbook files must stay inside their source folder.",
         );
-      const text = yield* fs.readFileString(realFile);
-      return yield* decodePlaybookDocument(text).pipe(
-        Effect.mapError((error) =>
-          playbookError(
-            error.code,
-            _unreadable ?? `Cannot read this playbook. Fix its YAML and retry. ${error.message}`,
-            error.availableStepIds,
-          ),
-        ),
-      );
+      return yield* fs.readFileString(realFile);
     },
     (effect, _definitionPath: string, unreadable?: string) =>
       Effect.mapError(effect, (error) =>
@@ -308,6 +299,25 @@ export const makePlaybookStore = Effect.gen(function* () {
             ),
       ),
   );
+  const parseDefinitionText = (text: string, unreadable?: string) =>
+    decodePlaybookDocument(text).pipe(
+      Effect.mapError((error) =>
+        playbookError(
+          error.code,
+          unreadable ?? `Cannot read this playbook. Fix its YAML and retry. ${error.message}`,
+          error.availableStepIds,
+        ),
+      ),
+    );
+  const readDefinitionDocument = Effect.fn("PlaybookStore.readDefinitionDocument")(function* (
+    definitionPath: string,
+    unreadable?: string,
+  ) {
+    return yield* parseDefinitionText(
+      yield* readDefinitionText(definitionPath, unreadable),
+      unreadable,
+    );
+  });
   const readDefinition = Effect.fn("PlaybookStore.readDefinition")(function* (
     definitionPath: string,
   ) {
@@ -704,7 +714,6 @@ export const makePlaybookStore = Effect.gen(function* () {
     workspaceRoot: string,
     name: string,
     key: string,
-    crewInstanceId?: string,
   ) {
     const rows = yield* sql<{
       request_json: string;
@@ -715,16 +724,19 @@ export const makePlaybookStore = Effect.gen(function* () {
       if (
         request[0] !== "start" ||
         !recordedPath ||
-        path.basename(recordedPath, ".yaml") !== name.replace(/\.yaml$/, "") ||
-        (request[2] ?? null) !== (crewInstanceId ?? null)
+        path.basename(recordedPath, ".yaml") !== name.replace(/\.yaml$/, "")
       )
         return yield* playbookError(
           "request_conflict",
           "This client_request_id belongs to a different operation. Use a new key for a new operation.",
         );
-      return { definitionPath: recordedPath };
+      // Before runtime assignees, starts could include the originating Crew ID.
+      // Preserve that legacy shape only for retries of the original unassigned start.
+      const legacyRequest =
+        request.length === 3 && typeof request[2] === "string" ? rows[0].request_json : undefined;
+      return { definitionPath: recordedPath, legacyRequest };
     }
-    return yield* definitionPathFor(workspaceRoot, name);
+    return { ...(yield* definitionPathFor(workspaceRoot, name)), legacyRequest: undefined };
   }, Effect.mapError(storageError));
 
   /** Reads a live definition without touching run state: no permit, no SQL, no revision bump. */
@@ -882,16 +894,22 @@ export const makePlaybookStore = Effect.gen(function* () {
     key: string,
     assignee?: string,
   ) {
-    const { definitionPath } = yield* startDefinitionPathFor(owner, workspaceRoot, name, key);
-    const request = encodeRequest(
-      assignee === undefined
-        ? ["start", definitionPath]
-        : ["start", definitionPath, null, assignee],
+    const { definitionPath, legacyRequest } = yield* startDefinitionPathFor(
+      owner,
+      workspaceRoot,
+      name,
+      key,
     );
+    const request =
+      assignee === undefined
+        ? (legacyRequest ?? encodeRequest(["start", definitionPath]))
+        : encodeRequest(["start", definitionPath, null, assignee]);
     return yield* Effect.gen(function* () {
       yield* cancelOrphans();
       const previous = yield* replay(owner, key, request);
       if (previous) return yield* view(previous, true);
+      // Read once, even when a named persona needs assessment before insertion.
+      const source = yield* Effect.result(readDefinitionText(definitionPath));
       const persist = Effect.fn("PlaybookStore.persistStart")(function* (prepared?: Assessment) {
         return yield* Effect.gen(function* () {
           const previous = yield* replay(owner, key, request);
@@ -904,7 +922,8 @@ export const makePlaybookStore = Effect.gen(function* () {
               "already_active",
               `Run '${active[0].run_id}' is active. Retrieve, complete, or cancel it before starting another.`,
             );
-          const definition = yield* readDefinition(definitionPath);
+          if (source._tag === "Failure") return yield* source.failure;
+          const { definition } = yield* parseDefinitionText(source.success);
           const firstStep = definition.steps[0]!;
           const assessment = matchingAssessment(definition.steps, prepared);
           if (assessment === undefined) return { needsAssessment: definition.steps };
@@ -952,8 +971,7 @@ export const makePlaybookStore = Effect.gen(function* () {
           return { run, replayed: false };
         }).pipe(sql.withTransaction);
       });
-      // The insert snapshots the current YAML. Release the database connection for catalog
-      // and provider reads, then verify that their persona IDs still match that snapshot.
+      // Release the writer for catalog and provider reads. The next transaction uses the same YAML.
       let result = yield* persist();
       if (result.needsAssessment !== undefined) {
         result = yield* persist(yield* assessSteps(result.needsAssessment, owner));
@@ -1456,14 +1474,6 @@ export const makePlaybookStore = Effect.gen(function* () {
     },
     Effect.mapError(storageError),
   );
-  /** A Crew's active run with its saved progress, or null. */
-  const activeRunForCrew = Effect.fn("PlaybookStore.activeRunForCrew")(function* (
-    crewInstanceId: string,
-  ) {
-    const rows = yield* sql<RunRow>`SELECT * FROM j5_playbook_run
-      WHERE crew_instance_id = ${crewInstanceId} AND status = 'active' LIMIT 1`;
-    return rows[0] ? yield* view(fromRow(rows[0])) : null;
-  }, Effect.mapError(storageError));
   const activeRunSummaries = Effect.fn("PlaybookStore.activeRunSummaries")(function* (
     ownerThreadIds: ReadonlyArray<ThreadId>,
   ) {
@@ -1702,7 +1712,6 @@ export const makePlaybookStore = Effect.gen(function* () {
     recordHolderStop,
     unreconciledCancellations,
     ownerLifecycleRuns,
-    activeRunForCrew,
     activeRunSummaries,
   };
 });
