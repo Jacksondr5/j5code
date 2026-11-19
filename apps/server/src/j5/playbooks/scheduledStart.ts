@@ -119,7 +119,7 @@ export const authorizeScheduledPlaybookStart = Effect.fn("Playbook.authorizeSche
     if (origin.kind === "scheduled" && !origin.names.includes(stem))
       return yield* playbookError(
         "scheduled_playbook_not_named",
-        `Include @playbook:${stem} or an instruction to run ${stem} in the configured schedule before starting it.`,
+        `Ask a person to save the schedule in Settings with @playbook:${stem} on its own line or a directive such as “Run ${stem}.”`,
       );
     return origin;
   },
