@@ -64,7 +64,7 @@ describe("J5 orchestration instructions", () => {
     }
     assert.isTrue(
       J5_ORCHESTRATION_SECTIONS.some((section) =>
-        section.startsWith("Playbooks in a Crew:\n\n- As a Captain"),
+        section.startsWith("Playbooks in a Crew:\n\n- The run owner"),
       ),
     );
   });
