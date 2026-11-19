@@ -457,6 +457,9 @@ it.effect("uses the initiating scheduled prompt to authorize an MCP start", () =
         text: "Run @playbook:demo-weekly and demography.",
         configured: "Run @playbook:demo-weekly and demography.",
       },
+      { text: "Do not run demo.", configured: "Do not run demo." },
+      { text: "Never use @playbook:demo.", configured: "Never use @playbook:demo." },
+      { text: "Explain how to run demo.", configured: "Explain how to run demo." },
       { text: "Demo the result.", configured: "Demo the result." },
       { text: "Run demo.sh.", configured: "Run demo.sh." },
       { text: "Run @persona:demo.", configured: "Run @persona:demo." },
@@ -489,6 +492,7 @@ it.effect("uses the initiating scheduled prompt to authorize an MCP start", () =
     steerPrompt = "Use the demo playbook.";
     for (const valid of [
       webhook("Start @playbook:demo. Notes: {{body.notes}}"),
+      { text: "Run demo without editing files.", configured: "Run demo without editing files." },
       { text: "Run `demo`.", configured: "Run `demo`." },
       // A queued prompt can be edited before delivery. Authorization follows its dispatch snapshot.
       { text: "Queued text edited since dispatch.", configured: "Run demo." },

@@ -22,6 +22,8 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import type * as PlatformError from "effect/PlatformError";
 
+import { handoffPlaybookOrigin } from "../j5/playbooks/scheduledStart.ts";
+import { McpInvocationContext } from "./McpInvocationContext.ts";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
@@ -322,6 +324,16 @@ const make = Effect.gen(function* () {
         );
 
         // Queue continuation immediately after binding; detachment terminates the caller, so relaunch needs a durable message.
+        const playbookOrigin =
+          input.continuationPrompt === undefined
+            ? undefined
+            : yield* handoffPlaybookOrigin().pipe(
+                Effect.provideService(McpInvocationContext, scope),
+                Effect.provideService(
+                  ThreadManagementService.ThreadManagementService,
+                  threadManagement,
+                ),
+              );
         const queueContinuation: Effect.Effect<WorktreeMcpContinuationStatus, WorktreeMcpFailure> =
           Effect.suspend(() =>
             input.continuationPrompt === undefined
@@ -333,6 +345,7 @@ const make = Effect.gen(function* () {
                     threadId: scope.thread.threadId,
                     messageId: ids.continuationMessageId,
                     text: input.continuationPrompt,
+                    ...(playbookOrigin === undefined ? {} : { playbookOrigin }),
                     attachments: [],
                     mode: "queue",
                     createdBy: "agent",

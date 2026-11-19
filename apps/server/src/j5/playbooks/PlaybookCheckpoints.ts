@@ -1,3 +1,4 @@
+import { NoticeOrigin, encodeNoticeOrigin } from "./noticeOrigin.ts";
 import { ThreadId } from "@t3tools/contracts";
 import type { PlaybookCheckpoint, PlaybookCheckpointAnswer } from "@t3tools/contracts/j5";
 import * as Effect from "effect/Effect";
@@ -61,9 +62,9 @@ export const makePlaybookCheckpoints = (sql: SqlClient.SqlClient) => {
     request: PlaybookCheckpoint,
     picks?: Readonly<Record<string, ApprovedPick>>,
   ) {
-    yield* sql`INSERT INTO j5_playbook_checkpoint (request_id, run_id, owner_thread_id, step_id, step_title, summary, status, created_at, persona_picks_json)
+    yield* sql`INSERT INTO j5_playbook_checkpoint (request_id, run_id, owner_thread_id, step_id, step_title, summary, status, created_at, persona_picks_json, playbook_origin_json)
       VALUES (${request.requestId}, ${request.runId}, ${request.ownerThreadId}, ${request.stepId}, ${request.stepTitle},
-        ${request.summary}, 'pending', ${request.createdAt}, ${picks === undefined ? null : encodePickScopes(picks)})`;
+        ${request.summary}, 'pending', ${request.createdAt}, ${picks === undefined ? null : encodePickScopes(picks)}, ${encodeNoticeOrigin(yield* NoticeOrigin)})`;
     if (picks === undefined)
       yield* sql`UPDATE j5_playbook_run SET checkpoint_request_id = ${request.requestId} WHERE run_id = ${request.runId}`;
   });

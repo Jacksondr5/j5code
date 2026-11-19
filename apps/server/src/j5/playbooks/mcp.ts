@@ -20,7 +20,12 @@ import { PlaybookStore, playbookError, type PlaybookMutation } from "./PlaybookS
 import { mapAgentPersonaPolicy } from "../agents/agentPersonas.ts";
 import { readCaller } from "../../mcp/threadAccess.ts";
 import { playbookWorkspaceRoot } from "./workspace.ts";
-import { authorizePlaybookRevision, authorizeScheduledPlaybookStart } from "./scheduledStart.ts";
+import { NoticeOrigin } from "./noticeOrigin.ts";
+import {
+  handoffPlaybookOrigin,
+  authorizePlaybookRevision,
+  authorizeScheduledPlaybookStart,
+} from "./scheduledStart.ts";
 
 const Text = Schema.String.check(Schema.isNonEmpty());
 const Mutation = Schema.Struct({ runId: Text, client_request_id: Text });
@@ -174,7 +179,10 @@ const workspace = Effect.gen(function* () {
 });
 
 const mutate = Effect.fn("PlaybookMcp.mutate")(function* (input: PlaybookMutation) {
-  return yield* (yield* PlaybookCrewRelay).mutate(yield* ownerScope, input);
+  const origin = yield* handoffPlaybookOrigin();
+  return yield* (yield* PlaybookCrewRelay)
+    .mutate(yield* ownerScope, input)
+    .pipe(Effect.provideService(NoticeOrigin, origin));
 });
 
 /** A run belongs to a calling thread, so an outside agent is told to start one that runs it. */
@@ -231,15 +239,17 @@ export const playbookHandlers = {
   ),
   j5_playbook_start: runsPlaybook((input: typeof Start.Type) =>
     Effect.gen(function* () {
-      yield* authorizeScheduledPlaybookStart(input.name);
+      const origin = yield* authorizeScheduledPlaybookStart(input.name);
       const { owner, root } = yield* workspace;
-      return yield* (yield* PlaybookCrewRelay).start({
-        owner,
-        root,
-        name: input.name,
-        key: input.client_request_id,
-        ...(input.assignee === undefined ? {} : { assignee: input.assignee }),
-      });
+      return yield* (yield* PlaybookCrewRelay)
+        .start({
+          owner,
+          root,
+          name: input.name,
+          key: input.client_request_id,
+          ...(input.assignee === undefined ? {} : { assignee: input.assignee }),
+        })
+        .pipe(Effect.provideService(NoticeOrigin, origin));
     }),
   ),
   j5_playbook_current: readsPlaybooks((input: typeof Current.Type) =>

@@ -6,20 +6,25 @@ import * as Effect from "effect/Effect";
 import { readCaller } from "../../mcp/threadAccess.ts";
 import { playbookError } from "./definition.ts";
 
-// A bare name needs an instruction to use it. Ordinary prose can contain the same word.
+// A configured schedule grants authority with an affirmative directive. A playbook name
+// inside prose, a quoted example or a prohibition does not grant that authority.
+const scheduledName = "([a-z][a-z0-9]*(?:-[a-z0-9]+)*)(?:\\.yaml)?";
+const nameArgument = "(?:@playbook:|[`'\"“]?)" + scheduledName + "[`'\"”]?";
+const scheduledDirective = new RegExp(
+  "^(?:please\\s+)?(?:(?:run|start|use|execute|launch)\\s+(?:the\\s+)?(?:playbook\\s+(?:(?:named|called)\\s+)?)?|/playbook\\s+)" +
+    nameArgument +
+    "(?![\\p{L}\\p{N}_/-]|\\.[\\p{L}\\p{N}_-])",
+  "iu",
+);
+const explicitMention = new RegExp("^@playbook:" + scheduledName + "$", "iu");
 const namedPlaybooks = (prompt: string) => {
   const names = new Set<string>();
-  const before = "(?<![\\p{L}\\p{N}_:@/-])";
-  const after = "(?![\\p{L}\\p{N}_/-]|\\.[\\p{L}\\p{N}_-])";
-  const name = "([a-z][a-z0-9]*(?:-[a-z0-9]+)*)(?:\\.yaml)?";
-  const quotedName = "[`'\"“]?" + name + "[`'\"”]?";
-  const instruction = "(?:run|start|use|execute|launch)(?:\\s+the)?(?:\\s+playbook)?";
-  const reference = `(?:@playbook:${name}|(?:/playbook|playbook(?:\\s+(?:named|called))?|${instruction})\\s+${quotedName}|${quotedName}\\s+playbook)`;
   const trimmed = prompt.trim().toLowerCase();
   if (PLAYBOOK_NAME_PATTERN.test(trimmed)) names.add(trimmed);
-  for (const match of prompt.matchAll(new RegExp(before + reference + after, "giu"))) {
-    const found = (match[1] ?? match[2] ?? match[3])?.toLowerCase();
-    if (found !== undefined && PLAYBOOK_NAME_PATTERN.test(found)) names.add(found);
+  for (const sentence of prompt.split(/(?<=[.!?;])\s+|\n/u)) {
+    const clause = sentence.trim().replace(/[.!?;]$/, "");
+    const name = (scheduledDirective.exec(clause) ?? explicitMention.exec(clause))?.[1];
+    if (name !== undefined) names.add(name.toLowerCase());
   }
   return names;
 };
@@ -70,6 +75,16 @@ const readOrigin = Effect.fn("Playbook.scheduledInputs")(function* () {
     for (const input of inputs) {
       const at = DateTime.toEpochMillis(input.createdAt);
       if (at > through) continue;
+      // A notice already queued before origin snapshots were introduced cannot establish authority.
+      if (
+        input.playbookOrigin === undefined &&
+        ((input.createdBy === "system" &&
+          (input.id.startsWith("playbook-checkpoint:") ||
+            input.id.startsWith("message:j5:a2a:mcp:j5-playbook-step:playbook-step:"))) ||
+          (input.createdBy === "agent" &&
+            /^message:mcp:[^:]+:worktree-continuation:/.test(input.id)))
+      )
+        return yield* unavailable;
       if (input.delegatedCompletion !== undefined)
         pending.push({ threadId, runId: input.delegatedCompletion.parentRunId, through: at });
       if (input.scheduledTaskId !== undefined)
@@ -106,6 +121,7 @@ export const authorizeScheduledPlaybookStart = Effect.fn("Playbook.authorizeSche
         "scheduled_playbook_not_named",
         `Include @playbook:${stem} or an instruction to run ${stem} in the configured schedule before starting it.`,
       );
+    return origin;
   },
 );
 

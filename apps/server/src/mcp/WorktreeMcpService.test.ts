@@ -637,7 +637,9 @@ describe("t3_worktree_handoff", () => {
       yield* Fiber.join(interruption);
 
       expect(harness.dispatch).toHaveBeenCalledTimes(1);
-      expect(harness.sendToThread).toHaveBeenCalledTimes(1);
+      expect(harness.sendToThread).toHaveBeenCalledWith(
+        expect.objectContaining({ playbookOrigin: { kind: "unverified" } }),
+      );
       expect(harness.runForThread).toHaveBeenCalledTimes(1);
     }),
   );

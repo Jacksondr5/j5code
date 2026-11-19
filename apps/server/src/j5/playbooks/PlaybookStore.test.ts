@@ -1,3 +1,4 @@
+import { NoticeOrigin } from "./noticeOrigin.ts";
 import { makeCheckpointNotifications, unnotifiedCheckpoints } from "./CheckpointNotifications.ts";
 import type { OrchestrationV2ThreadProjection } from "@t3tools/contracts";
 import * as Ref from "effect/Ref";
@@ -2389,7 +2390,14 @@ it.effect(
         client_request_id: "checkpoint-next",
         summary: "Plan and tradeoffs are ready.",
       };
-      assert.equal((yield* Effect.flip(store.mutate(owner, leave))).code, "approval_pending");
+      assert.equal(
+        (yield* Effect.flip(
+          store
+            .mutate(owner, leave)
+            .pipe(Effect.provideService(NoticeOrigin, { kind: "scheduled", names: ["demo"] })),
+        )).code,
+        "approval_pending",
+      );
       const progress = () => store.listForThread(owner).pipe(Effect.map(({ runs }) => runs[0]!));
       const first = (yield* store.current(owner)).checkpoint!;
       assert.isTrue((yield* progress()).waitingForApproval);
@@ -2519,6 +2527,7 @@ it.effect(
       if (notice.type === "message.dispatch") {
         assert.equal(notice.threadId, owner);
         assert.include(notice.text, "Add rollback instructions.");
+        assert.deepStrictEqual(notice.playbookOrigin, { kind: "scheduled", names: ["demo"] });
       }
       failDispatch = false;
       assert.isFalse(yield* notifier.drain());

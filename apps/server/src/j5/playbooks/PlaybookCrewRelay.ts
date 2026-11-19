@@ -246,6 +246,7 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
         type: "message.dispatch",
         createdBy: "system",
         creationSource: "server",
+        playbookOrigin: landing.playbookOrigin,
         commandId: stepCommandId(runId, requestId),
         threadId: targetThreadId,
         messageId: stepMessageId(runId, requestId),

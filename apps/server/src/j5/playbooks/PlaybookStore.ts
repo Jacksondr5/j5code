@@ -1,3 +1,4 @@
+import { NoticeOrigin, encodeNoticeOrigin, decodeNoticeOrigin } from "./noticeOrigin.ts";
 import type { SessionReach } from "../sharing/PersonAccess.ts";
 import { makePlaybookCheckpoints } from "./PlaybookCheckpoints.ts";
 import {
@@ -182,6 +183,7 @@ const fromRow = (row: RunRow): StoredPlaybookRun => ({
 
 /** One recorded step landing and how its hand-off resolved. */
 export type PlaybookLanding = {
+  readonly playbookOrigin: ReturnType<typeof decodeNoticeOrigin>;
   readonly runId: string;
   readonly requestId: string;
   readonly stepId: string;
@@ -195,6 +197,7 @@ export type PlaybookLanding = {
   readonly resolvedAt: string | null;
 };
 type LandingRow = {
+  playbook_origin_json: string | null;
   run_id: string;
   request_id: string;
   step_id: string;
@@ -211,6 +214,7 @@ const landingFromRow = (row: LandingRow): PlaybookLanding => ({
   requestId: row.request_id,
   stepId: row.step_id,
   landedAt: row.landed_at,
+  playbookOrigin: decodeNoticeOrigin(row.playbook_origin_json),
   targetSeat: row.target_seat,
   targetThreadId: row.target_thread_id,
   targetParticipantId: row.target_participant_id,
@@ -602,16 +606,17 @@ export const makePlaybookStore = Effect.gen(function* () {
       );
   });
   // Target and attribution are committed with the run pointer, so a retry cannot change holders.
-  const land = (
+  const land = Effect.fn("PlaybookStore.land")(function* (
     runId: string,
     requestId: string,
     stepId: string,
     landedAt: string,
     holder: Holder,
-  ) =>
-    sql`INSERT INTO j5_playbook_step_delivery (run_id, request_id, step_id, landed_at,
-      target_seat, target_thread_id, target_participant_id, assigned_by_participant_id)
-      VALUES (${runId}, ${requestId}, ${stepId}, ${landedAt}, ${holder.seat}, ${holder.threadId}, ${holder.participantId}, ${holder.assignedBy})`;
+  ) {
+    yield* sql`INSERT INTO j5_playbook_step_delivery (run_id, request_id, step_id, landed_at,
+      target_seat, target_thread_id, target_participant_id, assigned_by_participant_id, playbook_origin_json)
+      VALUES (${runId}, ${requestId}, ${stepId}, ${landedAt}, ${holder.seat}, ${holder.threadId}, ${holder.participantId}, ${holder.assignedBy}, ${encodeNoticeOrigin(yield* NoticeOrigin)})`;
+  });
   const skipPending = (runId: string, resolvedAt: string) =>
     sql`UPDATE j5_playbook_step_delivery SET outcome = 'skipped', resolved_at = ${resolvedAt}
       WHERE run_id = ${runId} AND resolved_at IS NULL`;
@@ -1243,9 +1248,9 @@ export const makePlaybookStore = Effect.gen(function* () {
               if (previousStep?.prompt !== revisedStep?.prompt) {
                 // Preserve the recipient and seat recorded for this step.
                 yield* sql`INSERT INTO j5_playbook_step_delivery (run_id, request_id, step_id, landed_at,
-                  target_seat, target_thread_id, target_participant_id, assigned_by_participant_id)
+                  target_seat, target_thread_id, target_participant_id, assigned_by_participant_id, playbook_origin_json)
                   SELECT run_id, ${input.client_request_id}, step_id, ${updatedAt},
-                    target_seat, target_thread_id, target_participant_id, assigned_by_participant_id
+                    target_seat, target_thread_id, target_participant_id, assigned_by_participant_id, ${encodeNoticeOrigin(yield* NoticeOrigin)}
                   FROM j5_playbook_step_delivery WHERE run_id = ${run.runId} AND step_id = ${currentStepId}
                   ORDER BY landed_at DESC, rowid DESC LIMIT 1`;
               }

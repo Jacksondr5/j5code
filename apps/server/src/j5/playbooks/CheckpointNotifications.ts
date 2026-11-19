@@ -1,3 +1,4 @@
+import { decodeNoticeOrigin } from "./noticeOrigin.ts";
 import { CommandId, MessageId, ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -12,11 +13,12 @@ export const unnotifiedCheckpoints = (sql: SqlClient.SqlClient) => sql<{
   owner_thread_id: string;
   step_title: string;
   persona_picks: number;
+  playbook_origin_json: string | null;
   status: string;
   reason: string | null;
 }>`
       SELECT checkpoint.request_id, checkpoint.owner_thread_id, checkpoint.step_title,
-        checkpoint.status, checkpoint.reason, (checkpoint.persona_picks_json IS NOT NULL) AS persona_picks
+        checkpoint.status, checkpoint.reason, checkpoint.playbook_origin_json, (checkpoint.persona_picks_json IS NOT NULL) AS persona_picks
       FROM j5_playbook_checkpoint checkpoint
       JOIN j5_playbook_run run ON run.run_id = checkpoint.run_id
       WHERE checkpoint.status IN ('approved', 'declined') AND checkpoint.notified_at IS NULL AND run.status = 'active'`;
@@ -45,6 +47,7 @@ export const makeCheckpointNotifications = Effect.gen(function* () {
           type: "message.dispatch",
           createdBy: "system",
           creationSource: "server",
+          playbookOrigin: decodeNoticeOrigin(row.playbook_origin_json),
           commandId: CommandId.make(`playbook-checkpoint:${request.requestId}`),
           messageId: MessageId.make(`playbook-checkpoint:${request.requestId}`),
           threadId: request.ownerThreadId,
