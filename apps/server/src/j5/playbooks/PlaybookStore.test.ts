@@ -1537,7 +1537,7 @@ it.effect("groups limited picks for one run and keeps reviewer preference and st
       1,
     );
     assert.isTrue((yield* Effect.result(pick(owner, token)))._tag === "Failure");
-    const revised = yield* store.mutate(owner, {
+    const revision = {
       operation: "revise",
       runId: run.runId,
       expectedStepId: "staff",
@@ -1546,7 +1546,10 @@ it.effect("groups limited picks for one run and keeps reviewer preference and st
       steps: procedure.steps
         .filter((step) => step.id !== "researcher")
         .map((step) => (step.id === "unavailable" ? { ...step, persona: "reviewer" } : step)),
-    });
+    } as const;
+    const revised = yield* store.mutate(owner, revision);
+    assert.include(revised.personaApproval!.summary, "reviewer for unavailable:");
+    assert.notInclude(revised.personaApproval!.summary, "for reviewer");
     assert.notInclude(revised.requiredPersonas?.map((entry) => entry.persona) ?? [], "researcher");
     assert.equal(revised.personaApproval?.status, "pending");
     assert.notEqual(revised.personaApproval?.requestId, requestId);
@@ -1559,6 +1562,48 @@ it.effect("groups limited picks for one run and keeps reviewer preference and st
       true,
     );
     assert.equal((yield* pick(owner, replacementToken)).assignment.pickSource?.kind, "playbook");
+    const retry = {
+      ...revision,
+      retryStaffingStepId: "reviewer",
+      client_request_id: "retry-staffing",
+    };
+    const renewal = (yield* store.mutate(owner, retry)).personaApproval!;
+    assert.equal(renewal.status, "pending");
+    assert.include(renewal.summary, "another launch for reviewer");
+    assert.equal((yield* store.mutate(owner, retry)).personaApproval?.requestId, renewal.requestId);
+    const renewalToken = `playbook:${renewal.requestId}:reviewer`;
+    assert.isTrue((yield* Effect.result(pick(owner, renewalToken)))._tag === "Failure");
+    const renewDecision = { ...answer, requestId: renewal.requestId };
+    assert.equal(
+      (yield* Effect.flip(store.answerCheckpoint(renewDecision, false))).code,
+      "capability_denied",
+    );
+    yield* store.answerCheckpoint({ ...renewDecision, decision: "decline" }, true);
+    assert.isTrue((yield* Effect.result(pick(owner, renewalToken)))._tag === "Failure");
+    const approvedRetry = (yield* store.mutate(owner, {
+      ...retry,
+      client_request_id: "retry-again",
+    })).personaApproval!;
+    assert.notEqual(approvedRetry.requestId, renewal.requestId);
+    yield* store.answerCheckpoint({ ...answer, requestId: approvedRetry.requestId }, true);
+    assert.isTrue((yield* Effect.result(pick(owner, token)))._tag === "Failure");
+    assert.isTrue((yield* Effect.result(pick(owner, renewalToken)))._tag === "Failure");
+    const renewedSpend = allowances.spendStaffingPick({
+      owner,
+      projectId: ProjectId.make("project:playbook-test"),
+      personaId: "reviewer",
+      requestId: approvedRetry.requestId,
+      stepId: "reviewer",
+    });
+    yield* renewedSpend;
+    assert.isTrue((yield* Effect.result(renewedSpend))._tag === "Failure");
+    assert.equal(
+      (yield* Effect.flip(
+        store.answerCheckpoint({ ...answer, requestId: approvedRetry.requestId }, true),
+      )).code,
+      "already_answered",
+    );
+    assert.isTrue((yield* Effect.result(renewedSpend))._tag === "Failure");
     yield* store.mutate(owner, {
       operation: "cancel",
       runId: run.runId,

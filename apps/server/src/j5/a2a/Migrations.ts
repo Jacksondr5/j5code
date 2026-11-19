@@ -149,6 +149,7 @@ export const migrationEntries = [
   [65, "CheckpointNotificationIndex", Migration0065],
   [66, "HumanMessageCommands", Migration0066],
   [67, "PlaybookRequiredPersonas", Migration0067],
+  // 068 is reserved. Preserve the gap in persisted migration history.
   [69, "PlaybookStaffingLaunches", Migration0069],
 ] as const;
 
