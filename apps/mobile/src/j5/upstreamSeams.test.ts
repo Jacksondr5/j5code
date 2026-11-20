@@ -355,6 +355,12 @@ const SEAMS: ReadonlyArray<Seam> = [
     reaches: ["const startsSomewhere = useStartsSomewhere();", "!startsSomewhere ||"],
   },
   {
+    file: "features/workspace/WorkspaceNativeTabs.ios.tsx",
+    record: "case 90: starting follows the person's level",
+    from: "../../j5/sharing/startAccess",
+    reaches: ["const startsSomewhere = useStartsSomewhere();", "startsSomewhere &&"],
+  },
+  {
     file: "features/threads/NewTaskDraftScreen.tsx",
     record: "case 90: starting follows the person's level",
     from: "../../j5/sharing/startAccess",
