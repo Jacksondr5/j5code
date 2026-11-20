@@ -491,13 +491,11 @@ const replyClosureCommandIdFor = (commandId: CommCommandId) =>
 
 // The withdraw tool is deferred on some harnesses, so its own description is often unseen.
 const askWithdrawal = (input: {
-  readonly receiverId: string;
+  readonly receiverId: ParticipantId;
   readonly exchangeId: ExchangeId | null;
   readonly newAsk: boolean;
 }) =>
-  input.newAsk &&
-  input.exchangeId !== null &&
-  isHumanParticipantId(ParticipantId.make(input.receiverId))
+  input.newAsk && input.exchangeId !== null && isHumanParticipantId(input.receiverId)
     ? { ifAnsweredInThread: formatAskWithdrawInstruction({ exchangeId: input.exchangeId }) }
     : {};
 
@@ -1018,7 +1016,7 @@ const rawLayer: Layer.Layer<
         joinedExistingExchange: row.exchange_role === "followup",
         durableAtSeq: row.sent_seq,
         ...askWithdrawal({
-          receiverId: row.receiver_id,
+          receiverId: ParticipantId.make(row.receiver_id),
           exchangeId: row.exchange_id === null ? null : ExchangeId.make(row.exchange_id),
           newAsk: row.exchange_role === "ask",
         }),
