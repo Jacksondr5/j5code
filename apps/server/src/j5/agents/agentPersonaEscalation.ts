@@ -1,3 +1,9 @@
+import {
+  approvedStaffingPick,
+  spendStaffingPick,
+  type ApprovedPick,
+  type StaffingRequest,
+} from "../playbooks/personaPickApprovals.ts";
 // @effect-diagnostics nodeBuiltinImport:off - a random id; no Crypto service is wired into this layer.
 import * as NodeCrypto from "node:crypto";
 import {
@@ -47,7 +53,7 @@ export const BLOCKED_PERSONA_TOOL_TEXT =
 /** The retry field on every persona launch tool. */
 export const AllowOnceInput = Schema.String.check(Schema.isNonEmpty()).annotate({
   description:
-    "Only to retry a persona launch the person allowed once: the escalation_id from its refusal. It lifts the one limit named there for this launch only; any later launch is held to the persona's limits again. A text reply never grants it.",
+    "Only to retry a persona launch the person allowed once: the escalation_id from its refusal. For an approved playbook staffing request, pass playbook:<requestId>:<stepId> for one launch for that required step in the owner project. An escalation lifts the one limit named there for this launch only; any later launch is held to the persona's limits again. A text reply never grants it.",
 });
 
 /** Why an escalation can't be asked about, granted, or used as asked. */
@@ -127,6 +133,12 @@ interface EscalationRow {
 export class AgentPersonaEscalations extends Context.Service<
   AgentPersonaEscalations,
   {
+    readonly approvedStaffingPick: (
+      request: StaffingRequest,
+    ) => Effect.Effect<ApprovedPick | undefined, SqlError | Schema.SchemaError>;
+    readonly spendStaffingPick: (
+      request: StaffingRequest,
+    ) => Effect.Effect<void, SqlError | AgentPersonaEscalationError>;
     /** Record a refused launch; returns its id. */
     readonly record: (input: {
       readonly callerParticipantId: string;
@@ -365,6 +377,19 @@ export const layer = Layer.effect(
     );
 
     return AgentPersonaEscalations.of({
+      approvedStaffingPick: Effect.fn("AgentPersonaEscalations.approvedStaffingPick")((request) =>
+        approvedStaffingPick(request).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
+      ),
+      spendStaffingPick: Effect.fn("AgentPersonaEscalations.spendStaffingPick")((request) =>
+        spendStaffingPick(request).pipe(
+          Effect.provideService(SqlClient.SqlClient, sql),
+          Effect.flatMap((spent) =>
+            spent
+              ? Effect.void
+              : refuse("This playbook staffing allowance has been used or is no longer active."),
+          ),
+        ),
+      ),
       record,
       authorizeAsk,
       linkedAsk,

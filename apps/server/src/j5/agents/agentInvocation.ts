@@ -63,6 +63,7 @@ export const invokeAgent = Effect.fn("j5.invokeAgent")(function* (
   const { assignment, runtimeMode: childMode } = yield* pickAgentPersona({
     personaId: input.personaId,
     source: yield* turnPickSource(thread.threadId, input.personaId).pipe(Effect.mapError(refused)),
+    ownerThreadId: thread.threadId,
     caller: { thread: parent.thread },
     projectId: parent.thread.projectId,
     reviewAuthors: {
@@ -74,6 +75,21 @@ export const invokeAgent = Effect.fn("j5.invokeAgent")(function* (
     escalateFor: participantIdForThread(thread.threadId),
     allowOnce: input.allowOnce,
   }).pipe(Effect.mapError(refused));
+  if (assignment.pickSource?.kind === "playbook")
+    yield* (yield* AgentPersonaEscalations)
+      .spendStaffingPick({
+        owner: thread.threadId,
+        projectId: parent.thread.projectId,
+        personaId: input.personaId,
+        requestId: assignment.pickSource.requestId,
+        stepId: assignment.pickSource.stepId,
+      })
+      .pipe(
+        Effect.mapError(
+          (error) =>
+            new OrchestratorMcpFailure({ code: "invalid_request", message: error.message }),
+        ),
+      );
   if (assignment.pickSource?.kind === "allow-once")
     yield* (yield* AgentPersonaEscalations)
       .use(input.allowOnce!)

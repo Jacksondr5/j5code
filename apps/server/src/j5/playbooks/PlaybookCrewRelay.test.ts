@@ -39,7 +39,8 @@ import { A2ALedger, layer as ledgerLayer } from "../a2a/LedgerService.ts";
 import { runJ5A2AMigrations } from "../a2a/Migrations.ts";
 import { LedgerProjectId } from "../a2a/contracts.ts";
 import { makePlaybookCrewRelay } from "./PlaybookCrewRelay.ts";
-import { makePlaybookStore, PlaybookStore } from "./PlaybookStore.ts";
+import { PlaybookStore } from "./PlaybookStore.ts";
+import { makePlaybookStoreForTests } from "./testFixtures.ts";
 import { seedPlaybookOwners } from "./testFixtures.ts";
 
 const projectId = LedgerProjectId.make("project:runtime-holders");
@@ -192,7 +193,7 @@ const fixture = Effect.gen(function* () {
         ),
       ),
   } as unknown as ThreadManagementService["Service"]);
-  const store = yield* makePlaybookStore;
+  const store = yield* makePlaybookStoreForTests;
   const relay = yield* makePlaybookCrewRelay.pipe(
     Effect.provideService(PlaybookStore, store),
     Effect.provideService(AgentCrewInstanceService, crews),
@@ -337,6 +338,20 @@ it.effect("assign replaces an archived pending target and old retries cannot rev
     assert.equal(code(blocked), "delivery_pending");
     yield* Ref.update(archived, (ids) => new Set([...ids, peer]));
     yield* sql`UPDATE orchestration_v2_projection_threads SET archived_at = ${at} WHERE thread_id = ${peer}`;
+    const steps = (yield* store.runById(run.runId))!.definition!.steps;
+    const retry = {
+      operation: "revise",
+      expectedStepId: "inspect",
+      runId: run.runId,
+      client_request_id: "retry-staff",
+      basis: "asked",
+      retryStaffingStepId: "inspect",
+      steps,
+    } as const;
+    // Even an unreachable holder cannot block a staffing request. Only spent limited steps qualify.
+    assert.equal(code(yield* Effect.flip(relay.mutate(owner, retry))), "invalid_staffing_retry");
+    const changed = { ...retry, steps: steps.map((step) => ({ ...step, prompt: "Changed." })) };
+    assert.equal(code(yield* Effect.flip(relay.mutate(owner, changed))), "invalid_staffing_retry");
     const invalid = yield* move(run.runId, "assign", "inspect", "bad-takeover", foreignId).pipe(
       Effect.flip,
     );

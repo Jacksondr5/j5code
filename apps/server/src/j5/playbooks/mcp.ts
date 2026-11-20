@@ -138,7 +138,7 @@ export const playbookTools = [
     ...common,
     parameters: PlaybookReviseRequest,
     description:
-      "Replace only your active run's steps after the user explicitly asked for the change (basis asked) or approved your proposal (basis approved). Preserve its title and purpose. expectedStepId guards against stale calls. If the current step ID remains, keep it; otherwise supply stepId naming its replacement. This never changes the reusable playbook. For a changed current step, assignee optionally names an eligible local agent; omit it to assign the owner. Editing the same step keeps its holder and refuses assignee." +
+      "Replace only your active run's steps after the user explicitly asked for the change (basis asked) or approved your proposal (basis approved). Preserve its title and purpose. expectedStepId guards against stale calls. If the current step ID remains, keep it; otherwise supply stepId naming its replacement. This never changes the reusable playbook. For a changed current step, assignee optionally names an eligible local agent; omit it to assign the owner. Editing the same step keeps its holder unless its required persona changes; then pass a matching assignee to reassign it in the revision. For a failed launch or lost holder, pass retryStaffingStepId with the current steps to request a fresh server Owner approval for another launch." +
       mutationDescription,
   }),
   Tool.make("j5_playbook_complete", {

@@ -176,6 +176,7 @@ const prepareSpawnPersona = Effect.fn("j5.a2a.mcp.prepareSpawnPersona")(function
   selected: ModelSelection | undefined,
   pick: {
     readonly source: AgentPersonaPickSourceKind;
+    readonly ownerThreadId?: ThreadId | undefined;
     readonly caller: AgentPersonaPickCaller;
     readonly projectId: ProjectId;
     readonly reviewAuthors: ReviewAuthorsRequest;
@@ -536,6 +537,7 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
                     stateError(error.message, "Retry j5_spawn_agent once the thread is readable."),
                   ),
                 ),
+          ownerThreadId: home?.thread.id,
           caller:
             home === undefined ? { approvedLevel: limits.runtimeMode } : { thread: home.thread },
           projectId: target,
@@ -662,6 +664,20 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
                   ),
                 };
         // The allowance is spent on the launch it allowed, once, before the thread exists.
+        if (current === null && persona?.assignment.pickSource?.kind === "playbook" && home)
+          yield* (yield* AgentPersonaEscalations)
+            .spendStaffingPick({
+              owner: home.thread.id,
+              projectId: target,
+              personaId: persona.assignment.personaId,
+              requestId: persona.assignment.pickSource.requestId,
+              stepId: persona.assignment.pickSource.stepId,
+            })
+            .pipe(
+              Effect.mapError((error) =>
+                stateError(error.message, "Retrieve the current playbook staffing approval."),
+              ),
+            );
         if (current === null && persona?.assignment.pickSource?.kind === "allow-once")
           yield* (yield* AgentPersonaEscalations)
             .use(input.allow_once!)

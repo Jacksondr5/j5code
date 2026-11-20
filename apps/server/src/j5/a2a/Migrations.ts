@@ -67,6 +67,8 @@ import Migration0063 from "./migrations/063_PlaybookCheckpoints.ts";
 import Migration0061 from "./migrations/061_PlaybookRuntimeHolders.ts";
 import Migration0062 from "./migrations/062_PlaybookCancellation.ts";
 import Migration0064 from "./migrations/064_PlaybookRunStartSequence.ts";
+import Migration0069 from "./migrations/069_PlaybookStaffingLaunches.ts";
+import Migration0067 from "./migrations/067_PlaybookRequiredPersonas.ts";
 
 import Migration0066 from "./migrations/066_HumanMessageCommands.ts";
 
@@ -146,6 +148,9 @@ export const migrationEntries = [
   [64, "PlaybookRunStartSequence", Migration0064],
   [65, "CheckpointNotificationIndex", Migration0065],
   [66, "HumanMessageCommands", Migration0066],
+  [67, "PlaybookRequiredPersonas", Migration0067],
+  // 068 is reserved. Preserve the gap in persisted migration history.
+  [69, "PlaybookStaffingLaunches", Migration0069],
 ] as const;
 
 const makeMigrationLoader = (throughId?: number) =>

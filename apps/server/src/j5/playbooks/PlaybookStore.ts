@@ -1,10 +1,17 @@
 import type { SessionReach } from "../sharing/PersonAccess.ts";
 import { makePlaybookCheckpoints } from "./PlaybookCheckpoints.ts";
-import { type RunId, ThreadId } from "@t3tools/contracts";
+import {
+  OrchestrationV2AgentPersonaAssignment,
+  ProjectId,
+  type RunId,
+  RuntimeMode,
+  ThreadId,
+} from "@t3tools/contracts";
 import {
   PlaybookError,
   PlaybookHolderStop,
   PlaybookRevision,
+  PlaybookRequiredPersonas,
   type PlaybookReviseRequest,
   PLAYBOOK_RUNS_PAGE_SIZE,
   PLAYBOOK_MAX_BYTES,
@@ -44,6 +51,9 @@ export { playbookError } from "./definition.ts";
 
 import { makeAgentPersonaLibrary, personaCatalogProblem } from "../agents/agentPersonaLibrary.ts";
 import { durationMsBetween, j5AnalyticsRecorder } from "../analytics/recorder.ts";
+import { assessRequiredPersonas } from "./requiredPersonas.ts";
+import { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
+import { CrewMemberModels } from "../agents/crewMemberModels.ts";
 import { participantIdForThread } from "../a2a/HomeRegistrar.ts";
 
 const isPlaybookError = Schema.is(PlaybookError);
@@ -96,18 +106,27 @@ const stepPersonaWarnings = (
         message: unverified
           ? `Step "${step.id}" names persona "${step.persona}", which could not be checked because some persona files are invalid. Check Settings → Agent Setup.`
           : problem === "missing"
-            ? `Step "${step.id}" names persona "${step.persona}", which is not in this environment's library.`
-            : `Step "${step.id}" names persona "${step.persona}", which is turned off.`,
+            ? `Step "${step.id}" has a required persona missing from this environment's library: "${step.persona}".`
+            : `Step "${step.id}" has a required persona disabled in this environment: "${step.persona}".`,
       },
     ];
   });
 
 export type StoredPlaybookRun = PlaybookRun & {
   readonly definition: PlaybookDefinition | null;
+  readonly personaBlockReason: string | null;
+  readonly requiredPersonas: typeof PlaybookRequiredPersonas.Type | null;
   readonly holderParticipantId: string | null;
   readonly holderThreadId: ThreadId | null;
   readonly assignedByParticipantId: string | null;
 };
+const RequiredPersonasJson = Schema.fromJsonString(PlaybookRequiredPersonas);
+const encodeRequiredPersonas = Schema.encodeSync(RequiredPersonasJson);
+const decodeRequiredPersonas = Schema.decodeUnknownSync(RequiredPersonasJson);
+const decodeAssignment = Schema.decodeUnknownSync(
+  Schema.fromJsonString(OrchestrationV2AgentPersonaAssignment),
+);
+const decodeRuntimeMode = Schema.decodeUnknownSync(RuntimeMode);
 const DefinitionJson = Schema.fromJsonString(PlaybookDefinition);
 const decodeDefinition = Schema.decodeUnknownOption(DefinitionJson);
 const encodeDefinition = Schema.encodeSync(DefinitionJson);
@@ -132,6 +151,8 @@ type RunRow = {
   updated_at: string;
   crew_instance_id: string | null;
   definition_json: string | null;
+  required_personas_json: string | null;
+  persona_block_reason: string | null;
   cancel_reason: string | null;
   holder_stop_json: string | null;
   revision_count: number;
@@ -140,6 +161,9 @@ type RunRow = {
 const fromRow = (row: RunRow): StoredPlaybookRun => ({
   definition:
     row.definition_json === null ? null : Option.getOrNull(decodeDefinition(row.definition_json)),
+  requiredPersonas:
+    row.required_personas_json === null ? null : decodeRequiredPersonas(row.required_personas_json),
+  personaBlockReason: row.persona_block_reason,
   cancelReason: row.cancel_reason,
   holderStop: row.holder_stop_json == null ? null : decodeHolderStop(row.holder_stop_json),
   revisionCount: row.revision_count,
@@ -223,6 +247,8 @@ export const makePlaybookStore = Effect.gen(function* () {
   const path = yield* Path.Path;
   const crypto = yield* SecureRandom.SecureRandom;
   const personas = yield* makeAgentPersonaLibrary;
+  const registry = yield* ProviderRegistry;
+  const memberModels = yield* CrewMemberModels;
   const library = yield* makePlaybookLibrary;
   const revision = yield* SubscriptionRef.make(0);
   const bumpRevision = SubscriptionRef.update(revision, (value) => value + 1);
@@ -315,7 +341,7 @@ export const makePlaybookStore = Effect.gen(function* () {
         RETURNING *`;
         for (const row of rows) {
           yield* skipPending(row.run_id, timestamp);
-          yield* checkpoints.close(row.run_id, timestamp);
+          yield* checkpoints.close(row.run_id, timestamp, true);
         }
         if (rows.length > 0) yield* bumpRevision;
         return rows.map(fromRow);
@@ -370,7 +396,12 @@ export const makePlaybookStore = Effect.gen(function* () {
   });
 
   const present = (
-    { definition: _snapshot, ...run }: StoredPlaybookRun,
+    {
+      definition: _snapshot,
+      requiredPersonas: _statuses,
+      personaBlockReason,
+      ...run
+    }: StoredPlaybookRun,
     definition: PlaybookDefinition | null,
     replayed = false,
   ): PlaybookStepResponse => {
@@ -383,7 +414,7 @@ export const makePlaybookStore = Effect.gen(function* () {
       steps: definition?.steps.map(({ id, title }) => ({ id, title })) ?? [],
       position: index < 0 ? null : index + 1,
       total: definition?.steps.length ?? 0,
-      currentStep: definition?.steps[index] ?? null,
+      currentStep: personaBlockReason === null ? (definition?.steps[index] ?? null) : null,
       replayed,
     };
   };
@@ -393,7 +424,11 @@ export const makePlaybookStore = Effect.gen(function* () {
   ) {
     return {
       ...present(run, run.definition, replayed),
+      ...(run.requiredPersonas === null ? {} : { requiredPersonas: run.requiredPersonas }),
       checkpoint: yield* checkpoints.current(run.runId),
+      ...(run.requiredPersonas?.some(({ status }) => status === "limited")
+        ? { personaApproval: yield* checkpoints.personaApproval(run.runId) }
+        : {}),
     };
   });
   const replay = Effect.fn("PlaybookStore.replay")(function* (
@@ -500,6 +535,74 @@ export const makePlaybookStore = Effect.gen(function* () {
       assignedBy,
       seat: null,
     };
+  });
+  const threadPersona = Effect.fn("PlaybookStore.threadPersona")(function* (threadId: ThreadId) {
+    const rows = yield* sql<{
+      project_id: string;
+      runtime_mode: string;
+      assignment_json: string | null;
+    }>`
+      SELECT project_id, runtime_mode, json_extract(payload_json, '$.agentPersonaAssignment') AS assignment_json
+      FROM orchestration_v2_projection_threads
+      WHERE thread_id = ${threadId} AND archived_at IS NULL AND deleted_at IS NULL`;
+    const row = rows[0];
+    return row === undefined
+      ? undefined
+      : {
+          projectId: ProjectId.make(row.project_id),
+          runtimeMode: decodeRuntimeMode(row.runtime_mode),
+          ...(row.assignment_json === null
+            ? {}
+            : { agentPersonaAssignment: decodeAssignment(row.assignment_json) }),
+        };
+  });
+  const assessSteps = Effect.fn("PlaybookStore.assessSteps")(function* (
+    steps: ReadonlyArray<PlaybookStep>,
+    owner?: ThreadId,
+  ) {
+    const ids = [...new Set(namedSteps(steps).map(({ persona }) => persona))];
+    return yield* assessRequiredPersonas(
+      ids,
+      personas,
+      registry,
+      memberModels,
+      owner === undefined || ids.length === 0 ? undefined : yield* threadPersona(owner),
+    );
+  });
+  type Assessment = Effect.Success<ReturnType<typeof assessSteps>>;
+  const matchingAssessment = (steps: ReadonlyArray<PlaybookStep>, prepared?: Assessment) => {
+    const ids = new Set(namedSteps(steps).map(({ persona }) => persona));
+    const assessment = prepared ?? { statuses: [], picks: {} };
+    return ids.size === assessment.statuses.length &&
+      assessment.statuses.every(({ persona }) => ids.has(persona))
+      ? assessment
+      : undefined;
+  };
+  const assertRequiredHolder = Effect.fn("PlaybookStore.assertRequiredHolder")(function* (
+    step: PlaybookStep | undefined,
+    threadId: ThreadId | null,
+    checkAvailability: boolean,
+    statuses?: typeof PlaybookRequiredPersonas.Type,
+  ) {
+    if (step?.persona === undefined) return;
+    const persona = step.persona;
+    if (checkAvailability) {
+      const status = (
+        statuses ??
+        (yield* assessRequiredPersonas([persona], personas, registry, memberModels)).statuses
+      ).find((entry) => entry.persona === persona);
+      if (status?.status === "unavailable")
+        return yield* playbookError(
+          "persona_unavailable",
+          `Step "${step.id}" requires persona "${persona}". ${status.reason}`,
+        );
+    }
+    const thread = threadId === null ? undefined : yield* threadPersona(threadId);
+    if (thread?.agentPersonaAssignment?.personaId !== persona)
+      return yield* playbookError(
+        "required_persona_mismatch",
+        `Step "${step.id}" requires a holder running persona "${persona}". Assign it to a matching participant.`,
+      );
   });
   // Target and attribution are committed with the run pointer, so a retry cannot change holders.
   const land = (
@@ -743,6 +846,50 @@ export const makePlaybookStore = Effect.gen(function* () {
     }).pipe(permit.withPermits(1));
   }, Effect.mapError(storageError));
 
+  const reconcilePersonaApproval = Effect.fn("PlaybookStore.reconcilePersonaApproval")(function* (
+    runId: string,
+    owner: ThreadId,
+    definition: PlaybookDefinition,
+    stepId: string,
+    assessment: Effect.Success<ReturnType<typeof assessRequiredPersonas>>,
+    timestamp: string,
+    retryStepId?: string,
+  ) {
+    const picks = Object.fromEntries(
+      Object.entries(assessment.picks)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([persona, scope]) => [
+          persona,
+          {
+            ...scope,
+            stepIds: definition.steps
+              .filter((step) => step.persona === persona)
+              .map((step) => step.id)
+              .sort(),
+          },
+        ]),
+    );
+
+    yield* checkpoints.replacePersonaApproval(
+      {
+        requestId: yield* crypto.uuidV4().pipe(Effect.orDie),
+        runId,
+        ownerThreadId: owner,
+        stepId,
+        stepTitle: "Playbook persona picks",
+        summary:
+          "Approve one staffing launch per listed step using the listed models and saved access.",
+        status: "pending",
+        createdAt: timestamp,
+        answeredAt: null,
+        reason: null,
+      },
+      picks,
+      assessment.statuses,
+      retryStepId,
+    );
+  });
+
   const start = Effect.fn("PlaybookStore.start")(function* (
     owner: ThreadId,
     workspaceRoot: string,
@@ -764,10 +911,10 @@ export const makePlaybookStore = Effect.gen(function* () {
       yield* cancelOrphans();
       const previous = yield* replay(owner, key, request);
       if (previous) return yield* view(previous, true);
-      // Capture the file before taking SQLite's writer lock. Decode these exact bytes in the insert transaction.
+      // Read once, even when a named persona needs assessment before insertion.
       const source = yield* Effect.result(readDefinitionText(definitionPath));
-      const result = yield* sql.withTransaction(
-        Effect.gen(function* () {
+      const persist = Effect.fn("PlaybookStore.persistStart")(function* (prepared?: Assessment) {
+        return yield* Effect.gen(function* () {
           const previous = yield* replay(owner, key, request);
           if (previous) return { run: previous, replayed: true };
           yield* requireOwner(owner);
@@ -780,33 +927,63 @@ export const makePlaybookStore = Effect.gen(function* () {
             );
           if (source._tag === "Failure") return yield* source.failure;
           const { definition } = yield* parseDefinitionText(source.success);
-          const holder = yield* resolveHolder(owner, assignee);
+          const firstStep = definition.steps[0]!;
+          const assessment = matchingAssessment(definition.steps, prepared);
+          if (assessment === undefined) return { needsAssessment: definition.steps };
+          const { statuses, picks } = assessment;
+          const target = yield* resolveHolder(owner, assignee);
+          const checked = yield* Effect.result(
+            assertRequiredHolder(firstStep, target.threadId, true, statuses),
+          );
+          const holder = checked._tag === "Success" ? target : null;
           const timestamp = yield* now;
           const run: StoredPlaybookRun = {
             definition,
+            requiredPersonas: statuses,
+            personaBlockReason: checked._tag === "Failure" ? checked.failure.message : null,
             cancelReason: null,
             revisionCount: 0,
             latestRevision: null,
             runId: yield* crypto.uuidV4().pipe(Effect.orDie),
             ownerThreadId: owner,
             definitionPath,
-            currentStepId: definition.steps[0]!.id,
-            holderParticipantId: holder.participantId,
-            holderThreadId: holder.threadId,
-            assignedByParticipantId: holder.assignedBy,
+            currentStepId: firstStep.id,
+            holderParticipantId: holder?.participantId ?? null,
+            holderThreadId: holder?.threadId ?? null,
+            assignedByParticipantId: holder?.assignedBy ?? null,
             status: "active",
             createdAt: timestamp,
             updatedAt: timestamp,
           };
           yield* sql`INSERT INTO j5_playbook_run (run_id, owner_thread_id, definition_path, current_step_id, status, created_at, updated_at, definition_json,
-            holder_participant_id, holder_thread_id, assigned_by_participant_id, start_event_sequence)
+            holder_participant_id, holder_thread_id, assigned_by_participant_id, start_event_sequence, required_personas_json, persona_block_reason)
           VALUES (${run.runId}, ${owner}, ${definitionPath}, ${run.currentStepId}, ${run.status}, ${timestamp}, ${timestamp}, ${encodeDefinition(definition)},
-            ${holder.participantId}, ${holder.threadId}, ${holder.assignedBy}, (SELECT COALESCE(MAX(sequence), 0) FROM orchestration_events))`;
-          yield* land(run.runId, key, run.currentStepId, timestamp, holder);
+            ${run.holderParticipantId}, ${run.holderThreadId}, ${run.assignedByParticipantId},
+            (SELECT COALESCE(MAX(sequence), 0) FROM orchestration_events), ${encodeRequiredPersonas(statuses)}, ${run.personaBlockReason})`;
+          if (holder !== null) yield* land(run.runId, key, run.currentStepId, timestamp, holder);
+          if (Object.keys(picks).length > 0)
+            yield* reconcilePersonaApproval(
+              run.runId,
+              owner,
+              definition,
+              firstStep.id,
+              { statuses, picks },
+              timestamp,
+            );
           yield* remember(owner, key, request, run.runId);
           return { run, replayed: false };
-        }),
-      );
+        }).pipe(sql.withTransaction);
+      });
+      // Release the writer for catalog and provider reads. The next transaction uses the same YAML.
+      let result = yield* persist();
+      if (result.needsAssessment !== undefined) {
+        result = yield* persist(yield* assessSteps(result.needsAssessment, owner));
+        if (result.needsAssessment !== undefined)
+          return yield* playbookError(
+            "step_conflict",
+            "The playbook's required personas changed during start. Read the playbook and retry.",
+          );
+      }
       if (result.replayed) return yield* view(result.run, true);
       const definition = result.run.definition!;
       yield* recordAnalytics("j5.playbook.run.started", {
@@ -814,7 +991,7 @@ export const makePlaybookStore = Effect.gen(function* () {
         stepsWithPersona: definition.steps.filter((step) => step.persona !== undefined).length,
         crewBound: false,
       });
-      return present(result.run, definition);
+      return yield* view(result.run);
     }).pipe(Effect.tap(notifyChange), permit.withPermits(1));
   }, Effect.mapError(storageError));
 
@@ -867,6 +1044,8 @@ export const makePlaybookStore = Effect.gen(function* () {
           ]
         : []),
     ];
+    if (input.operation === "revise" && input.retryStaffingStepId !== undefined)
+      baseRequest.push("retryStaffingStepId", input.retryStaffingStepId);
     if (input.summary !== undefined) baseRequest.push("summary", input.summary);
     const request = encodeRequest(
       "assignee" in input && input.assignee !== undefined
@@ -877,8 +1056,8 @@ export const makePlaybookStore = Effect.gen(function* () {
       yield* cancelOrphans();
       const previous = yield* replay(owner, input.client_request_id, request);
       if (previous) return yield* view(previous, true);
-      const result = yield* sql.withTransaction(
-        Effect.gen(function* () {
+      const persist = Effect.fn("PlaybookStore.persistMutation")(function* (prepared?: Assessment) {
+        return yield* Effect.gen(function* () {
           const previous = yield* replay(owner, input.client_request_id, request);
           if (previous) return { run: previous, replayed: true };
           const run = yield* readRun(owner, input.runId);
@@ -918,6 +1097,16 @@ export const makePlaybookStore = Effect.gen(function* () {
             definition = (yield* decodePlaybookDocument(
               encodeJson({ ...definition, steps: input.steps }),
             )).definition;
+            if (
+              input.retryStaffingStepId !== undefined &&
+              (input.assignee !== undefined ||
+                input.stepId !== undefined ||
+                encodeJson(definition.steps) !== encodeJson(previousSteps))
+            )
+              return yield* playbookError(
+                "invalid_staffing_retry",
+                "Request another staffing launch with the unchanged steps and no assignment or movement.",
+              );
             const requiredIds = new Set(
               definition.steps
                 .filter((step) => step.approval === "required")
@@ -960,22 +1149,23 @@ export const makePlaybookStore = Effect.gen(function* () {
               currentStepId = target;
             }
           }
+          const oldStep = run.definition?.steps.find((step) => step.id === run.currentStepId);
+          const newStep = definition?.steps.find((step) => step.id === currentStepId);
+          const personaChanged = oldStep?.persona !== newStep?.persona;
           if (
             input.operation === "revise" &&
             currentStepId === run.currentStepId &&
-            input.assignee !== undefined
+            input.assignee !== undefined &&
+            !personaChanged
           )
             return yield* playbookError(
               "invalid_assignee",
-              "A revision that keeps the current step cannot change its holder. Use j5_playbook_assign.",
+              "A revision that keeps the current step and persona cannot change its holder. Use j5_playbook_assign.",
             );
-          const holder =
-            input.operation === "next" ||
-            input.operation === "back" ||
-            input.operation === "assign" ||
-            (input.operation === "revise" && currentStepId !== run.currentStepId)
-              ? yield* resolveHolder(owner, input.assignee)
-              : null;
+          const revised =
+            input.operation === "revise" && encodeJson(oldStep) !== encodeJson(newStep);
+          if (input.operation === "next" || input.operation === "complete")
+            yield* assertRequiredHolder(oldStep, run.holderThreadId, false);
           const updatedAt = yield* now;
           if (input.operation === "next" || input.operation === "complete") {
             const step = run.definition?.steps.find((step) => step.id === run.currentStepId);
@@ -1009,13 +1199,37 @@ export const makePlaybookStore = Effect.gen(function* () {
               }
             }
           }
-          const oldStep = run.definition?.steps.find((step) => step.id === run.currentStepId);
-          const newStep = definition?.steps.find((step) => step.id === currentStepId);
-          if (
-            input.operation !== "assign" &&
-            (input.operation !== "revise" || encodeJson(oldStep) !== encodeJson(newStep))
-          )
-            yield* checkpoints.close(run.runId, updatedAt);
+          const holder =
+            input.operation === "next" ||
+            input.operation === "back" ||
+            input.operation === "assign" ||
+            (input.operation === "revise" &&
+              (currentStepId !== run.currentStepId ||
+                (revised &&
+                  (run.personaBlockReason !== null ||
+                    (personaChanged && input.assignee !== undefined)))))
+              ? yield* resolveHolder(owner, input.assignee)
+              : null;
+          const assessmentSteps =
+            input.operation === "revise"
+              ? input.steps
+              : holder !== null && newStep !== undefined
+                ? [newStep]
+                : [];
+          const revisedPersonas = matchingAssessment(assessmentSteps, prepared);
+          if (revisedPersonas === undefined) return { needsAssessment: assessmentSteps };
+          if (holder !== null || revised) {
+            const statuses = revisedPersonas.statuses;
+            yield* assertRequiredHolder(
+              newStep,
+              holder?.threadId ?? run.holderThreadId,
+              true,
+              statuses,
+            );
+          }
+
+          if (input.operation !== "assign" && (input.operation !== "revise" || revised))
+            yield* checkpoints.close(run.runId, updatedAt, status !== "active");
           let revisionCount = run.revisionCount ?? 0;
           let latestRevision = run.latestRevision ?? null;
           if (input.operation === "revise") {
@@ -1027,7 +1241,11 @@ export const makePlaybookStore = Effect.gen(function* () {
               toStepId: currentStepId,
               stepsDigest: playbookDigest(encodeJson(definition!.steps)),
             };
-            if (currentStepId === run.currentStepId && run.holderThreadId !== owner) {
+            if (
+              holder === null &&
+              currentStepId === run.currentStepId &&
+              run.holderThreadId !== owner
+            ) {
               const previousStep = run.definition?.steps.find((step) => step.id === currentStepId);
               const revisedStep = definition!.steps.find((step) => step.id === currentStepId);
               if (previousStep?.prompt !== revisedStep?.prompt) {
@@ -1040,18 +1258,32 @@ export const makePlaybookStore = Effect.gen(function* () {
                   ORDER BY landed_at DESC, rowid DESC LIMIT 1`;
               }
             }
+            yield* reconcilePersonaApproval(
+              run.runId,
+              owner,
+              definition!,
+              currentStepId,
+              revisedPersonas,
+              updatedAt,
+              input.retryStaffingStepId,
+            );
             revisionCount += 1;
             yield* sql`INSERT INTO j5_playbook_revision (run_id, request_id, basis, revised_at, owner_thread_id, from_step_id, to_step_id, steps_digest)
               VALUES (${run.runId}, ${input.client_request_id}, ${input.basis}, ${updatedAt}, ${owner}, ${run.currentStepId}, ${currentStepId}, ${latestRevision.stepsDigest})`;
-            yield* sql`UPDATE j5_playbook_run SET definition_json = ${encodeDefinition(definition!)}, revision_count = ${revisionCount}, latest_revision_json = ${encodeRevision(latestRevision)} WHERE run_id = ${run.runId}`;
+            yield* sql`UPDATE j5_playbook_run SET definition_json = ${encodeDefinition(definition!)}, required_personas_json = ${encodeRequiredPersonas(revisedPersonas.statuses)}, revision_count = ${revisionCount}, latest_revision_json = ${encodeRevision(latestRevision)} WHERE run_id = ${run.runId}`;
           }
           yield* sql`UPDATE j5_playbook_run SET current_step_id = ${currentStepId}, status = ${status}, updated_at = ${updatedAt},
             cancel_reason = ${input.operation === "cancel" ? "agent_cancelled" : (run.cancelReason ?? null)},
+            persona_block_reason = ${holder === null ? run.personaBlockReason : null},
             holder_participant_id = ${holder?.participantId ?? run.holderParticipantId},
             holder_thread_id = ${holder?.threadId ?? run.holderThreadId},
             assigned_by_participant_id = ${holder?.assignedBy ?? run.assignedByParticipantId}
           WHERE run_id = ${run.runId} AND owner_thread_id = ${owner}`;
-          if (input.operation === "assign" || status !== "active")
+          if (
+            input.operation === "assign" ||
+            (input.operation === "revise" && holder !== null) ||
+            status !== "active"
+          )
             yield* skipPending(run.runId, updatedAt);
           if (holder !== null)
             yield* land(run.runId, input.client_request_id, currentStepId, updatedAt, holder);
@@ -1062,19 +1294,36 @@ export const makePlaybookStore = Effect.gen(function* () {
               cancelReason:
                 input.operation === "cancel" ? "agent_cancelled" : (run.cancelReason ?? null),
               definition,
+              requiredPersonas:
+                input.operation === "revise" ? revisedPersonas.statuses : run.requiredPersonas,
               currentStepId,
               status,
               updatedAt,
               revisionCount,
               latestRevision,
+              personaBlockReason: holder === null ? run.personaBlockReason : null,
               holderParticipantId: holder?.participantId ?? run.holderParticipantId,
               holderThreadId: holder?.threadId ?? run.holderThreadId,
               assignedByParticipantId: holder?.assignedBy ?? run.assignedByParticipantId,
             },
             replayed: false,
           };
-        }),
-      );
+        }).pipe(sql.withTransaction);
+      });
+      let result = yield* persist();
+      if (result.needsAssessment !== undefined) {
+        result = yield* persist(
+          yield* assessSteps(
+            result.needsAssessment,
+            input.operation === "revise" ? owner : undefined,
+          ),
+        );
+        if (result.needsAssessment !== undefined)
+          return yield* playbookError(
+            "step_conflict",
+            "The run's required personas changed. Retrieve j5_playbook_current and retry.",
+          );
+      }
       if ("approvalPending" in result) {
         yield* bumpRevision;
         return yield* playbookError(
@@ -1103,11 +1352,11 @@ export const makePlaybookStore = Effect.gen(function* () {
       holder_name: string | null;
     }>`SELECT run.run_id,
       (run.status = 'active' AND COALESCE(checkpoint.status = 'pending', 0)) AS waiting_for_approval,
-      (run.status = 'active' AND EXISTS (
+      (run.status = 'active' AND (run.persona_block_reason IS NOT NULL OR EXISTS (
         SELECT 1 FROM j5_a2a_membership membership
         JOIN j5_a2a_human_inbox inbox ON inbox.sender_id = membership.participant_id
         WHERE membership.thread_id = run.owner_thread_id AND inbox.status = 'open'
-      )) AS blocked,
+      ))) AS blocked,
       CASE WHEN run.holder_thread_id <> run.owner_thread_id THEN holder.title END AS holder_name
       FROM j5_playbook_run run
       LEFT JOIN orchestration_v2_projection_threads holder ON holder.thread_id = run.holder_thread_id
@@ -1299,11 +1548,13 @@ export const makePlaybookStore = Effect.gen(function* () {
         stepTitle: progress.currentStep?.title ?? run.currentStepId,
         holderParticipantId: run.holderParticipantId,
         state:
-          run.holderThreadId === run.ownerThreadId
-            ? ("captain" as const)
-            : row.delivery_outcome === "delivered"
-              ? ("delivered" as const)
-              : ("pending" as const),
+          run.personaBlockReason !== null
+            ? ("blocked" as const)
+            : run.holderThreadId === run.ownerThreadId
+              ? ("captain" as const)
+              : row.delivery_outcome === "delivered"
+                ? ("delivered" as const)
+                : ("pending" as const),
       };
     });
   }, Effect.mapError(storageError));
@@ -1323,9 +1574,10 @@ export const makePlaybookStore = Effect.gen(function* () {
     }, Effect.mapError(storageError)),
     answerCheckpoint: Effect.fn("PlaybookStore.answerCheckpoint")(function* (
       input: import("@t3tools/contracts/j5").PlaybookCheckpointAnswer,
+      canApprovePersonaPicks = false,
     ) {
       return yield* checkpoints
-        .answer(input, yield* now)
+        .answer(input, yield* now, canApprovePersonaPicks)
         .pipe(sql.withTransaction, Effect.tap(bumpRevision), permit.withPermits(1));
     }, Effect.mapError(storageError)),
     sources: () =>
@@ -1494,6 +1746,7 @@ export const makePlaybookStore = Effect.gen(function* () {
     listAll,
     runById,
     snapshotStep,
+    assertRequiredHolder,
     landing,
     latestLanding,
     pendingLandings,

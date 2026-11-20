@@ -26,7 +26,7 @@ import * as ProjectionStore from "../../orchestration-v2/ProjectionStore.ts";
 import { ThreadLaunchService } from "../../orchestration-v2/ThreadLaunchService.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import * as ProviderRegistryMock from "../../provider/testUtils/providerRegistryMock.ts";
-import { makePlaybookStore } from "../playbooks/PlaybookStore.ts";
+import { makePlaybookStoreForTests } from "../playbooks/testFixtures.ts";
 import { humanPersonRegistryLayer } from "../a2a/HumanPersonRegistry.ts";
 import { makeHarness, modelSelection, projectId } from "../test-support/threadLaunchHarness.ts";
 import { makeCommandAdmission } from "./CommandAdmission.ts";
@@ -139,7 +139,7 @@ it.effect("attributes a private Owner's launch and chat turns through real messa
     });
     const threads = yield* ThreadManagementService;
     const launches = yield* ThreadLaunchService;
-    const store = yield* makePlaybookStore;
+    const store = yield* makePlaybookStoreForTests;
     const yaml =
       "title: Review\ndescription: Review a change.\nsteps:\n  - id: review\n    title: Review\n    prompt: Read the change.\n";
     const launchInput = {
@@ -262,7 +262,7 @@ const sharedThread = Effect.fn("test.sharedThread")(function* (on: ThreadId) {
     sessionId: session,
     subject: "one-time-token",
   });
-  const store = yield* makePlaybookStore;
+  const store = yield* makePlaybookStoreForTests;
   const sql = yield* SqlClient.SqlClient;
   const send = (
     from: typeof owner,

@@ -67,7 +67,17 @@ const deliveryOf = (
 const withDelivery = (
   response: PlaybookStepResponse,
   delivery: PlaybookStepDelivery | null,
-): PlaybookStepResponse => ({ ...response, delivery });
+): PlaybookStepResponse => ({
+  ...response,
+  ...(delivery?.state === "blocked" ? { currentStep: null } : {}),
+  delivery,
+});
+const blockedDelivery = (reason: string): PlaybookStepDelivery => ({
+  state: "blocked",
+  seat: null,
+  threadId: null,
+  reason,
+});
 
 export const makePlaybookCrewRelay = Effect.gen(function* () {
   const store = yield* PlaybookStore;
@@ -214,11 +224,19 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
         reason:
           "the recorded holder or assigning owner identity cannot be resolved; use j5_playbook_assign to take back or reassign this step",
       };
-    if (landing.targetThreadId === run.ownerThreadId)
-      return result(yield* store.resolveLanding(runId, requestId, "captain"));
     const { step, ...playbook } = yield* store.snapshotStep(run, landing.stepId);
     if (step === null) return result(yield* store.resolveLanding(runId, requestId, "skipped"));
     const targetThreadId = ThreadId.make(landing.targetThreadId);
+    // Existing landings can predate persona enforcement in the run transaction.
+    if (run.requiredPersonas === null) {
+      const checked = yield* Effect.result(store.assertRequiredHolder(step, targetThreadId, true));
+      if (checked._tag === "Failure") {
+        const reason = checked.failure.message;
+        return { delivery: blockedDelivery(reason), reason };
+      }
+    }
+    if (targetThreadId === run.ownerThreadId)
+      return result(yield* store.resolveLanding(runId, requestId, "captain"));
     const ownerParticipantId = landing.assignedByParticipantId;
     const sent = yield* Effect.gen(function* () {
       const target = yield* getThreadRecordsIfPresent(threads, targetThreadId, []);
@@ -265,7 +283,7 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
   const drainLocked = Effect.fn("PlaybookCrewRelay.drainLocked")(function* (runId: string) {
     for (const landing of yield* store.pendingLandings(runId)) {
       const { delivery, reason } = yield* handOff(runId, landing.requestId);
-      if (delivery?.state === "pending")
+      if (delivery?.state === "pending" || delivery?.state === "blocked")
         return yield* playbookError(
           "delivery_pending",
           `The hand-off of step ${landing.stepId} to ${delivery.participantId ?? "its holder"} is pending: ${reason ?? "retry it"}. Use j5_playbook_assign to take back or reassign a stuck step.`,
@@ -279,6 +297,14 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
     const run = yield* store.runById(runId);
     const landing = yield* store.latestLanding(runId, currentStepId);
     if (run === null) return null;
+    if (run.personaBlockReason !== null) return blockedDelivery(run.personaBlockReason);
+    if (run.requiredPersonas === null) {
+      const step = run.definition?.steps.find(({ id }) => id === currentStepId);
+      const checked = yield* Effect.result(
+        store.assertRequiredHolder(step, run.holderThreadId, landing?.resolvedAt === null),
+      );
+      if (checked._tag === "Failure") return blockedDelivery(checked.failure.message);
+    }
     if (landing !== null) {
       const delivery = deliveryOf(landing, run.ownerThreadId);
       const target =
@@ -343,7 +369,9 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
     return yield* withRun(
       run.runId,
       Effect.gen(function* () {
-        if (input.operation !== "assign" && input.operation !== "cancel")
+        const staffingRetry =
+          input.operation === "revise" && input.retryStaffingStepId !== undefined;
+        if (input.operation !== "assign" && input.operation !== "cancel" && !staffingRetry)
           yield* drainLocked(run.runId);
         const response = yield* store.mutate(owner, input);
         if (input.operation === "cancel") {
@@ -378,20 +406,17 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
     runId?: string,
   ) {
     const response = yield* store.current(owner, runId);
+    if (response.status !== "active") return withDelivery(response, null);
+    const delivery = yield* currentDelivery(response.runId, response.currentStepId);
     if (
-      response.status === "active" &&
+      delivery?.state !== "blocked" &&
       (response.holderParticipantId == null || response.assignedByParticipantId == null)
     )
       return yield* playbookError(
         "holder_unavailable",
         `The run's recorded holder or assigning owner identity cannot be resolved. Use j5_playbook_assign with runId=${jsonString(response.runId)} and expectedStepId=${jsonString(response.currentStepId)} to take back or reassign this step, or j5_playbook_cancel with that runId to end the run.`,
       );
-    return withDelivery(
-      response,
-      response.status === "active"
-        ? yield* currentDelivery(response.runId, response.currentStepId)
-        : null,
-    );
+    return withDelivery(response, delivery);
   });
   return {
     start,

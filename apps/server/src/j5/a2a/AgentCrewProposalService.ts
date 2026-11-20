@@ -4,7 +4,7 @@ import {
   RuntimeMode,
   ThreadId,
 } from "@t3tools/contracts";
-import { CrewPersonaSwap, PLAYBOOK_MAX_STEPS } from "@t3tools/contracts/j5";
+import { CrewPersonaSwap, PLAYBOOK_MAX_BYTES, PLAYBOOK_MAX_STEPS } from "@t3tools/contracts/j5";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -53,7 +53,12 @@ export const CrewProposalSeat = Schema.Struct({
   /** Set only by a Captain's addition: the live seat this one takes over. */
   replaces: Schema.optionalKey(bounded(CREW_NAME_MAX_CHARS)),
   /** Set only by a Captain: a granted escalation this persona seat retries with. */
-  allowOnce: Schema.optionalKey(bounded(CREW_NAME_MAX_CHARS)),
+  allowOnce: Schema.optionalKey(
+    Schema.Union([
+      bounded(CREW_NAME_MAX_CHARS),
+      bounded(PLAYBOOK_MAX_BYTES + 46).check(Schema.isPattern(/^playbook:/u)),
+    ]),
+  ),
   /**
    * Where the seat works, as the Captain or the person chose it. Required at every door that
    * files or approves a seat. A stored one this version can't read, such as one written by another

@@ -1,7 +1,7 @@
 import type { ThreadId } from "@t3tools/contracts";
 import { J5_PLAYBOOK_WS_METHODS, type PlaybookCheckpointAnswer } from "@t3tools/contracts/j5";
 import * as Effect from "effect/Effect";
-import { requireWrites } from "../sharing/connectionWriter.ts";
+import { isOwner, requireWrites } from "../sharing/connectionWriter.ts";
 import { SharedThreads } from "../sharing/SharedThreads.ts";
 import { PersonAccess } from "../sharing/PersonAccess.ts";
 import type { SessionIdentity } from "../sharing/PersonAccess.ts";
@@ -14,7 +14,9 @@ export const makeCheckpointRpcHandlers = Effect.fn("makeCheckpointRpcHandlers")(
   const store = yield* PlaybookStore;
   const people = yield* PersonAccess;
   const shared = yield* SharedThreads;
-  const authorized = <A, E>(effect: Effect.Effect<A, E, PersonAccess | SharedThreads>) =>
+  const authorized = <A, E, R extends PersonAccess | SharedThreads>(
+    effect: Effect.Effect<A, E, R>,
+  ) =>
     effect.pipe(
       Effect.provideService(PersonAccess, people),
       Effect.provideService(SharedThreads, shared),
@@ -41,7 +43,7 @@ export const makeCheckpointRpcHandlers = Effect.fn("makeCheckpointRpcHandlers")(
       input: PlaybookCheckpointAnswer,
     ) {
       yield* authorized(requireWrites(session, Effect.succeed(input.threadId)));
-      return yield* store.answerCheckpoint(input);
+      return yield* store.answerCheckpoint(input, yield* authorized(isOwner(session)));
     }, Effect.mapError(storageError)),
   };
 });

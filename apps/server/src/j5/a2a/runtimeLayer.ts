@@ -157,17 +157,18 @@ const makeJ5A2AAuxiliaryLayer = (
     Layer.provideMerge(lifecycleServiceProvided),
     Layer.provideMerge(archiveFactsProvided),
   );
+  const playbookStoreProvided = playbookStoreLayer.pipe(Layer.provide(crewMemberModelsLayer));
   const archiveCrewProvided = archiveCrewLayer.pipe(
     Layer.provideMerge(archiveAgentProvided),
     Layer.provideMerge(agentCrewInstanceLayer),
-    Layer.provideMerge(playbookStoreLayer),
+    Layer.provideMerge(playbookStoreProvided),
     Layer.provideMerge(crewWorktreesProvided),
   );
   // Hands each landing of a Crew-linked run to the seat that owns it, inside the Captain's step
   // calls; a pending hand-off is finished by the Captain's next or retried call.
   const playbookCrewRelayProvided = playbookCrewRelayLayer.pipe(
     Layer.provideMerge(agentCrewInstanceLayer),
-    Layer.provideMerge(playbookStoreLayer),
+    Layer.provideMerge(playbookStoreProvided),
   );
   const crewLaunchProvided = crewLaunchLayer.pipe(
     Layer.provideMerge(agentCrewInstanceLayer),
@@ -182,7 +183,7 @@ const makeJ5A2AAuxiliaryLayer = (
   // finish notifier's stream feeds it, so one stream serves every Crew reaction.
   // Both Crew reactions raise failure alerts, which wake the one delivery worker after committing.
   const crewLaunchReporterProvided = crewLaunchReporterLayer.pipe(
-    Layer.provideMerge(playbookStoreLayer),
+    Layer.provideMerge(playbookStoreProvided),
     Layer.provideMerge(agentCrewProposalLayer),
     Layer.provideMerge(agentCrewInstanceLayer),
     Layer.provideMerge(deliveryWorkerProvided),
@@ -199,7 +200,7 @@ const makeJ5A2AAuxiliaryLayer = (
   const crewProposalProvided = crewProposalLayer.pipe(
     Layer.provideMerge(crewLaunchProvided),
     Layer.provideMerge(crewLaunchReporterProvided),
-    Layer.provideMerge(playbookStoreLayer),
+    Layer.provideMerge(playbookStoreProvided),
   );
   // A Captain's lifecycle carries its Crews, read from the same event stream the notifier reads.
   const captainArchiveCascadeProvided = captainArchiveCascadeLayer.pipe(
@@ -214,9 +215,9 @@ const makeJ5A2AAuxiliaryLayer = (
   );
   const runtimeWithoutClientReads = Layer.mergeAll(
     CrewSeatPreparation.layer,
-    playbookStoreLayer,
+    playbookStoreProvided,
     playbookCrewRelayProvided,
-    checkpointNotificationsLayer.pipe(Layer.provide(playbookStoreLayer)),
+    checkpointNotificationsLayer.pipe(Layer.provide(playbookStoreProvided)),
     humanPersonRegistryLayer,
     machineParticipantLayer,
     peerDirectoryProvided,
@@ -255,7 +256,10 @@ const makeJ5A2AAuxiliaryLayer = (
     // Exported to the routes so the J5 WebSocket handler streams the revisions the writers move.
     readChangesLayer,
     // The feeds follow the one peer registry, provided below, whose writes move `peers`.
-    readChangeFeedsLayer.pipe(Layer.provide(readChangesLayer), Layer.provide(playbookStoreLayer)),
+    readChangeFeedsLayer.pipe(
+      Layer.provide(readChangesLayer),
+      Layer.provide(playbookStoreProvided),
+    ),
     // Moves the one store's revision when the YAML of an active run changes on disk.
     // Shared conversations: what a person's message carries to the agent, and who wrote it. It
     // ends a person's asks through the one lifecycle service, whose permit orders every drop.
