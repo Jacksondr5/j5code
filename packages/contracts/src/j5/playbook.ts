@@ -155,6 +155,7 @@ export type PlaybookStepDelivery = typeof PlaybookStepDelivery.Type;
 /** The progress bar receives titles, never the other steps' prompt bodies. */
 export const PlaybookProgress = Schema.Struct({
   ...PlaybookRun.fields,
+  issue: Schema.optionalKey(Schema.NullOr(PlaybookError)),
   title: Schema.String,
   description: Schema.String,
   steps: Schema.Array(Schema.Struct({ id: Text, title: Text })),
