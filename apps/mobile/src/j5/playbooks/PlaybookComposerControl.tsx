@@ -2,7 +2,7 @@ import {
   type PlaybookStagesView,
   playbookRunSelection,
   playbookStagesView,
-  presentPlaybookStages,
+  presentPlaybook,
   rememberPlaybookStagesView,
   selectedPlaybookRun,
 } from "@t3tools/client-runtime/j5/playbooks";
@@ -46,30 +46,25 @@ export function PlaybookComposerControl(props: {
     setViewState(next);
   };
   const { expanded } = view;
-  const changes = useEnvironmentQuery(
-    focused && query.data
-      ? j5Environment.playbookChanges({ environmentId: props.environmentId, input: {} })
-      : null,
-  );
   usePlaybookRefresh({
     focused,
     connected: runtime?.connectionState === "connected",
     supported,
     isPending: query.isPending,
-    refreshKey: `${thread?.latestRun?.runId}:${thread?.latestRun?.status}:${changes.data}`,
+    refreshKey: `${thread?.latestRun?.runId}:${thread?.latestRun?.status}`,
     refresh: query.refresh,
   });
   const runs = query.data?.runs ?? [];
   const run = selectedPlaybookRun(runs, view.selectedRunId);
   if (!run) return null;
-  const display = presentPlaybookStages(run);
+  const display = presentPlaybook(run);
   return (
     <View className="px-4 pb-2" accessibilityLabel="Playbook progress">
       <View className="rounded-[20px] border-continuous bg-card px-3 py-1">
         <Pressable
           accessibilityRole="button"
           accessibilityState={{ expanded }}
-          accessibilityLabel={`${run.title}. ${display.status}. ${display.position}. ${display.currentTitle}${query.error ? ". Progress out of date" : ""}${run.runId !== runs[0]?.runId ? ". Earlier run" : ""}`}
+          accessibilityLabel={`${run.title}. ${display.status}. ${display.headline}${display.flags.length ? `. ${display.flags.join(". ")}` : ""}${query.error ? ". Progress out of date" : ""}${run.runId !== runs[0]?.runId ? ". Earlier run" : ""}`}
           onPress={() => setView({ ...view, expanded: !expanded })}
           className="min-h-11 flex-row items-center gap-2"
         >
@@ -80,7 +75,7 @@ export function PlaybookComposerControl(props: {
           />
           <View className="min-w-0 flex-1">
             <Text numberOfLines={1} className="text-xs text-foreground">
-              {run.title}
+              {display.headline}
             </Text>
             {(run.status !== "active" || query.error || run.runId !== runs[0]?.runId) && (
               <Text className="text-xs text-foreground-muted">
@@ -88,13 +83,13 @@ export function PlaybookComposerControl(props: {
                 {query.error ? "Out of date" : display.status}
               </Text>
             )}
+            {display.flags.map((flag) => (
+              <Text key={flag} className="text-xs text-foreground-muted">
+                {flag}
+              </Text>
+            ))}
           </View>
           <View className="items-end gap-1">
-            <Text
-              className={`text-xs ${run.status === "completed" ? "text-adaptive-emerald-600-400" : "text-foreground-muted"}`}
-            >
-              {run.total === 0 ? display.position : `${display.completedSteps}/${run.total}`}
-            </Text>
             {display.steps.length > 1 && display.steps.length <= 10 && (
               <View
                 className="w-10 flex-row gap-0.5"
@@ -105,9 +100,9 @@ export function PlaybookComposerControl(props: {
                   <View
                     key={step.id}
                     className={`h-[3px] min-w-0 flex-1 rounded-full ${
-                      step.status === "completed"
-                        ? "bg-adaptive-emerald-600-400"
-                        : step.status === "inProgress"
+                      step.state === "earlier"
+                        ? "bg-foreground-muted/40"
+                        : step.current
                           ? "bg-primary"
                           : "bg-foreground-muted/25"
                     }`}
@@ -124,6 +119,10 @@ export function PlaybookComposerControl(props: {
         </Pressable>
         {expanded && (
           <ScrollView className="max-h-48" nestedScrollEnabled accessibilityLabel="Playbook stages">
+            <Text className="my-2 text-xs text-foreground">{run.title}</Text>
+            {display.holder && (
+              <Text className="my-2 text-xs text-foreground-muted">{display.holder}</Text>
+            )}
             {runs.length > 1 && (
               <ScrollView horizontal className="my-2" accessibilityLabel="Playbook runs">
                 {runs.map((entry, index) => (
@@ -152,9 +151,9 @@ export function PlaybookComposerControl(props: {
             {display.revisionHistory && (
               <Text className="my-2 text-xs text-foreground-muted">{display.revisionHistory}</Text>
             )}
-            {run.cancelReason && (
+            {display.cancelReason && (
               <Text accessibilityRole="alert" className="my-2 text-xs text-foreground-muted">
-                {run.cancelReason}
+                {display.cancelReason}
               </Text>
             )}
             {display.steps.map((step, index) => (
@@ -165,26 +164,22 @@ export function PlaybookComposerControl(props: {
                 className="flex-row items-start gap-2 py-1"
               >
                 <View className="h-4 w-6 items-center justify-center">
-                  {step.status === "inProgress" ? (
+                  {step.current ? (
                     <View className="size-3 items-center justify-center rounded-full border border-primary">
                       <View className="size-1 rounded-full bg-primary" />
                     </View>
                   ) : (
-                    <View className={step.status === "completed" ? undefined : "opacity-40"}>
+                    <View className={step.state === "earlier" ? undefined : "opacity-40"}>
                       <SymbolView
-                        name={step.status === "completed" ? "checkmark" : "circle"}
+                        name="circle"
                         size={12}
-                        tintColorClassName={
-                          step.status === "completed"
-                            ? "accent-adaptive-emerald-600-400"
-                            : "accent-foreground-muted"
-                        }
+                        tintColorClassName="accent-foreground-muted"
                       />
                     </View>
                   )}
                 </View>
                 <Text
-                  className={`min-w-0 flex-1 text-xs ${step.status === "completed" ? "text-foreground-muted/55" : step.status === "inProgress" ? "text-foreground/90" : "text-foreground-muted/70"}`}
+                  className={`min-w-0 flex-1 text-xs ${step.state === "earlier" ? "text-foreground-muted/55" : step.current ? "text-foreground/90" : "text-foreground-muted/70"}`}
                 >
                   {index + 1}. {step.title}
                 </Text>

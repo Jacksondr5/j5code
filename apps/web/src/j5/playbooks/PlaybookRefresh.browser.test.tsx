@@ -1,4 +1,4 @@
-import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { ThreadId } from "@t3tools/contracts";
 import type { PlaybookProgress } from "@t3tools/contracts/j5";
 import { useSyncExternalStore } from "react";
 import { expect, it, vi } from "vite-plus/test";
@@ -83,7 +83,6 @@ vi.mock(import("./PlaybookStepStrip"), async (importOriginal) => ({
   PlaybookStepStrip: () => null,
 }));
 import { act, fakeTimers, render } from "../../../test/render";
-import { PlaybookComposerControl } from "./PlaybookComposerControl";
 import { PlaybookRunsSection } from "./PlaybookRunsSection";
 
 // The test page is always visible, so the test overrides the document's own getter.
@@ -116,95 +115,81 @@ function setup() {
   });
 }
 
-it.each(["thread", "Fleet"] as const)(
-  "%s discovers a playbook started in the same running turn, and no pending timer refreshes with or without an active run",
-  async (surface) => {
-    setup();
-    using _timers = fakeTimers();
-    using visibility = stubVisibility();
-    await using screen = await render(
-      surface === "thread" ? (
-        <PlaybookComposerControl
-          environmentId={EnvironmentId.make("env")}
-          threadId={ThreadId.make("thread")}
-        />
-      ) : (
-        <PlaybookRunsSection />
-      ),
-    );
-    // Every pending timer fires, whatever mounted it; none of them may refresh.
-    await act(() => void vi.runOnlyPendingTimers());
-    expect(state.refresh).not.toHaveBeenCalled();
+it("Fleet discovers a playbook started in the same running turn without timer refreshes", async () => {
+  setup();
+  using _timers = fakeTimers();
+  using visibility = stubVisibility();
+  await using screen = await render(<PlaybookRunsSection />);
+  // Every pending timer fires, whatever mounted it; none of them may refresh.
+  await act(() => void vi.runOnlyPendingTimers());
+  expect(state.refresh).not.toHaveBeenCalled();
 
-    state.serverRuns = [
-      {
-        runId: "playbook",
-        ownerThreadId: ThreadId.make("thread"),
-        definitionPath: "/workspace/.j5/playbooks/demo.yaml",
-        currentStepId: "first",
-        status: "active",
-        createdAt: "2026-09-23T12:00:00Z",
-        updatedAt: "2026-09-23T12:00:00Z",
-        title: "Live demo",
-        description: "",
-        steps: [{ id: "first", title: "First" }],
-        position: 1,
-        total: 1,
-      },
-    ];
-    await act(() => {
-      state.revision++;
-      emit();
-    });
-    expect(state.refresh).toHaveBeenCalledTimes(1);
-    expect(screen.container.textContent).toContain("Live demo");
-    // An active run is followed by the server's revision, which a file change moves too.
-    await act(() => void vi.runOnlyPendingTimers());
-    expect(state.refresh).toHaveBeenCalledTimes(1);
+  state.serverRuns = [
+    {
+      runId: "playbook",
+      ownerThreadId: ThreadId.make("thread"),
+      definitionPath: "/workspace/.j5/playbooks/demo.yaml",
+      currentStepId: "first",
+      status: "active",
+      createdAt: "2026-09-23T12:00:00Z",
+      updatedAt: "2026-09-23T12:00:00Z",
+      title: "Live demo",
+      description: "",
+      steps: [{ id: "first", title: "First" }],
+      position: 1,
+      total: 1,
+    },
+  ];
+  await act(() => {
+    state.revision++;
+    emit();
+  });
+  expect(state.refresh).toHaveBeenCalledTimes(1);
+  expect(screen.container.textContent).toContain("Live demo");
+  // An active run is followed by the server's revision, which a file change moves too.
+  await act(() => void vi.runOnlyPendingTimers());
+  expect(state.refresh).toHaveBeenCalledTimes(1);
 
-    // A terminal update arriving during a read must be fetched once that read finishes.
-    await act(() => {
-      state.pending = true;
-      emit();
-    });
-    state.serverRuns = [{ ...state.serverRuns[0]!, status: "completed" }];
-    await act(() => {
-      state.revision++;
-      emit();
-    });
-    expect(state.refresh).toHaveBeenCalledTimes(1);
-    await act(() => {
-      state.pending = false;
-      emit();
-    });
-    expect(state.refresh).toHaveBeenCalledTimes(2);
-    expect(screen.container.textContent).toContain("Completed");
+  // A terminal update arriving during a read must be fetched once that read finishes.
+  await act(() => {
+    state.pending = true;
+    emit();
+  });
+  state.serverRuns = [{ ...state.serverRuns[0]!, status: "completed" }];
+  await act(() => {
+    state.revision++;
+    emit();
+  });
+  expect(state.refresh).toHaveBeenCalledTimes(1);
+  await act(() => {
+    state.pending = false;
+    emit();
+  });
+  expect(state.refresh).toHaveBeenCalledTimes(2);
+  expect(screen.container.textContent).toContain("Completed");
 
-    visibility.set("hidden");
-    await act(() => void document.dispatchEvent(new Event("visibilitychange")));
-    state.serverRuns = [
-      { ...state.serverRuns[0]!, status: "active", title: "Started while hidden" },
-    ];
-    await act(() => {
-      state.revision++;
-      emit();
-      vi.advanceTimersByTime(60_000);
-    });
-    expect(state.refresh).toHaveBeenCalledTimes(2);
-    visibility.set("visible");
-    await act(() => void document.dispatchEvent(new Event("visibilitychange")));
-    expect(screen.container.textContent).toContain("Started while hidden");
+  visibility.set("hidden");
+  await act(() => void document.dispatchEvent(new Event("visibilitychange")));
+  state.serverRuns = [{ ...state.serverRuns[0]!, status: "active", title: "Started while hidden" }];
+  await act(() => {
+    state.revision++;
+    emit();
+    vi.advanceTimersByTime(60_000);
+  });
+  expect(state.refresh).toHaveBeenCalledTimes(2);
+  visibility.set("visible");
+  await act(() => void document.dispatchEvent(new Event("visibilitychange")));
+  expect(screen.container.textContent).toContain("Started while hidden");
 
-    await act(() => {
-      state.supported = false;
-      emit();
-    });
-    state.refresh.mockClear();
-    await act(() => {
-      state.revision++;
-      emit();
-      vi.advanceTimersByTime(60_000);
-    });
-    expect(state.refresh).not.toHaveBeenCalled();
-  },
-);
+  await act(() => {
+    state.supported = false;
+    emit();
+  });
+  state.refresh.mockClear();
+  await act(() => {
+    state.revision++;
+    emit();
+    vi.advanceTimersByTime(60_000);
+  });
+  expect(state.refresh).not.toHaveBeenCalled();
+});

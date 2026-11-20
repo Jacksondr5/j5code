@@ -159,6 +159,9 @@ export const PlaybookProgress = Schema.Struct({
   steps: Schema.Array(Schema.Struct({ id: Text, title: Text })),
   position: Schema.NullOr(Schema.Int),
   total: Schema.Int,
+  waitingForApproval: Schema.optionalKey(Schema.Boolean),
+  blocked: Schema.optionalKey(Schema.Boolean),
+  holderName: Schema.optionalKey(Schema.NullOr(Schema.String)),
 });
 export type PlaybookProgress = typeof PlaybookProgress.Type;
 export const PlaybookCheckpoint = Schema.Struct({
