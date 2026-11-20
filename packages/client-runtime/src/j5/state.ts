@@ -77,6 +77,8 @@ const READS_A_NARROW_PERSON_SENDS: ReadonlySet<string> = new Set([
   J5_ARTIFACT_WS_METHODS.listArtifacts,
   J5_PLAYBOOK_WS_METHODS.readLibrary,
   J5_PLAYBOOK_WS_METHODS.listThreadRuns,
+  J5_PLAYBOOK_WS_METHODS.listCheckpoints,
+  J5_PLAYBOOK_WS_METHODS.countCheckpoints,
   J5_CLIENT_READ_WS_METHODS.readParticipantIdentities,
   J5_CLIENT_READ_WS_METHODS.listHumanInbox,
   J5_CLIENT_READ_WS_METHODS.readOpenInboxCount,
@@ -142,6 +144,25 @@ export function createJ5EnvironmentAtoms<R, E>(
     /** A `refreshTrigger` for a read made elsewhere that one of the server's revisions covers. */
     rereadOn,
     playbookChanges,
+    playbookCheckpointCount: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "j5:playbook-checkpoint-count",
+      tag: J5_PLAYBOOK_WS_METHODS.countCheckpoints,
+      refreshTrigger: rereadOn("inbox", "sharing"),
+      execute: (input) => j5Read(J5_PLAYBOOK_WS_METHODS.countCheckpoints, input),
+      staleTimeMs: 0,
+    }),
+    playbookCheckpoints: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "j5:playbook-checkpoints",
+      tag: J5_PLAYBOOK_WS_METHODS.listCheckpoints,
+      refreshTrigger: rereadOn("inbox", "sharing"),
+      execute: (input) => j5Read(J5_PLAYBOOK_WS_METHODS.listCheckpoints, input),
+      staleTimeMs: 0,
+    }),
+    answerPlaybookCheckpoint: createJ5ActionCommand(
+      runtime,
+      "j5:answer-playbook-checkpoint",
+      J5_PLAYBOOK_WS_METHODS.answerCheckpoint,
+    ),
     playbookRuns: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "j5:playbook-runs",
       tag: J5_PLAYBOOK_WS_METHODS.listRuns,

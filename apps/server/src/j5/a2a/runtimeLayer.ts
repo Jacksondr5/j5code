@@ -3,6 +3,7 @@ import * as SpawnAgentService from "./SpawnAgentService.ts";
 import * as Layer from "effect/Layer";
 import { layerEventSink as OrchestrationV2EventSinkLayerLive } from "../../orchestration-v2/runtimeLayer.ts";
 import { layer as playbookCrewRelayLayer } from "../playbooks/PlaybookCrewRelay.ts";
+import { layer as checkpointNotificationsLayer } from "../playbooks/CheckpointNotifications.ts";
 import { playbookStoreLayer } from "../playbooks/PlaybookStore.ts";
 import { FetchHttpClient } from "effect/http";
 
@@ -215,6 +216,7 @@ const makeJ5A2AAuxiliaryLayer = (
     CrewSeatPreparation.layer,
     playbookStoreLayer,
     playbookCrewRelayProvided,
+    checkpointNotificationsLayer.pipe(Layer.provide(playbookStoreLayer)),
     humanPersonRegistryLayer,
     machineParticipantLayer,
     peerDirectoryProvided,

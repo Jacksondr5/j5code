@@ -12,6 +12,7 @@ import {
   J5_SKILL_CATALOG_WS_METHODS,
   J5_SKILL_LINK_WS_METHODS,
   ProjectId,
+  ThreadId,
   type AuthEnvironmentScope,
   type AuthSessionState,
 } from "@t3tools/contracts";
@@ -128,6 +129,22 @@ describe("J5 action commands", () => {
         requiredPermission: AuthSettingsWriteScope,
       });
       expect(calls).toEqual([]);
+      expect(registry.get(atoms.answerPlaybookCheckpoint.permissionAtom(home))).toBe(false);
+      const checkpointRefused = yield* Effect.promise(() =>
+        atoms.answerPlaybookCheckpoint.run(registry, {
+          environmentId: home,
+          input: {
+            threadId: ThreadId.make("thread:viewed"),
+            requestId: "checkpoint:viewed",
+            decision: "approve",
+          },
+        }),
+      );
+      expect(failureOf(checkpointRefused)).toMatchObject({
+        _tag: "EnvironmentAuthorizationError",
+        requiredPermission: AuthOrchestrationOperateScope,
+      });
+      expect(calls).toEqual([]);
 
       // A sheet opened while the session could change the library loses its action when the
       // grant narrows.
@@ -186,6 +203,7 @@ describe("J5 action commands", () => {
         atoms.stopCrew,
         atoms.respondCrewRuntimeRequest,
         atoms.answerHumanExchange,
+        atoms.answerPlaybookCheckpoint,
         atoms.deleteArtifact,
         atoms.deleteAllArtifacts,
       ]) {

@@ -9,6 +9,8 @@ import { inboxBellCount } from "@t3tools/client-runtime/j5/crew-inbox-requests";
 import { useCrewRuntimeRequests } from "../crew/crewRuntimeRequestsClient";
 import {
   crewRuntimeRequestSourcesAtom,
+  playbookCheckpointCountQueryAtom,
+  playbookCheckpointCountSourcesAtom,
   inboxCountQueryAtom,
   inboxCountSourcesAtom,
   refreshJ5Sources,
@@ -17,6 +19,7 @@ import { createVisibleRefreshHook } from "../useVisibleRefresh";
 
 const useCountRefresh = createVisibleRefreshHook(() => {
   void refreshJ5Sources(inboxCountSourcesAtom, inboxCountQueryAtom);
+  void refreshJ5Sources(playbookCheckpointCountSourcesAtom, playbookCheckpointCountQueryAtom);
 });
 
 export function HumanInboxBell({ onBackdrop }: { readonly onBackdrop: boolean }) {
@@ -33,7 +36,22 @@ export function HumanInboxBell({ onBackdrop }: { readonly onBackdrop: boolean })
     if (isMobile) setOpenMobile(false);
   };
 
-  const { badge, label } = inboxBellPresentation(bell);
+  const checkpointSources = useAtomValue(playbookCheckpointCountSourcesAtom);
+  const checkpointCount = checkpointSources.sources.reduce(
+    (sum, source) => sum + (source.data?.count ?? 0),
+    0,
+  );
+  const { badge, label } = inboxBellPresentation({
+    count:
+      bell.count === null && checkpointCount === 0 ? null : (bell.count ?? 0) + checkpointCount,
+    incomplete:
+      bell.incomplete ||
+      !checkpointSources.isReady ||
+      checkpointSources.sources.some(
+        (source) => source.status !== "ready" && source.status !== "unsupported",
+      ),
+  });
+
   return (
     <Link
       aria-label={label}

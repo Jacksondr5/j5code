@@ -150,7 +150,7 @@ export const layer = Layer.effectDiscard(
     // revision, not a change.
     yield* playbooks.changes.pipe(
       Stream.drop(1),
-      Stream.runForEach(() => changes.notify("fleet")),
+      Stream.runForEach(() => changes.notify("fleet", "inbox")),
       Effect.forkScoped,
     );
 

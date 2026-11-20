@@ -4,6 +4,7 @@ import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { useEnvironment } from "../../state/environments";
 import { useThreadShell } from "../../state/entities";
 import { useEnvironmentQuery } from "../../state/query";
+import { PlaybookCheckpointGate } from "./PlaybookCheckpointCard";
 import { PlaybookStages } from "./PlaybookStages";
 import { j5Environment } from "../state";
 import { useVisibleRefresh } from "../useVisibleRefresh";
@@ -40,10 +41,13 @@ export function PlaybookComposerControl(props: {
     `${thread?.latestRun?.runId}:${thread?.latestRun?.status}:${changes.data}`,
   );
   return (
-    <PlaybookStages
-      runs={runs}
-      stale={Boolean(query.error)}
-      viewKey={`${props.environmentId}:${props.threadId}`}
-    />
+    <>
+      <PlaybookCheckpointGate environmentId={props.environmentId} threadId={props.threadId} />
+      <PlaybookStages
+        runs={runs}
+        stale={Boolean(query.error)}
+        viewKey={`${props.environmentId}:${props.threadId}`}
+      />
+    </>
   );
 }

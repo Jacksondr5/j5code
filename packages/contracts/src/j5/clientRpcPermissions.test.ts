@@ -65,6 +65,8 @@ describe("J5 client RPC permissions", () => {
 
   it("leave reads unguarded, so a read-only session can still load them", () => {
     for (const method of [
+      J5_PLAYBOOK_WS_METHODS.listCheckpoints,
+      J5_PLAYBOOK_WS_METHODS.countCheckpoints,
       J5_PLAYBOOK_WS_METHODS.exportPlaybook,
       J5_PLAYBOOK_WS_METHODS.readSources,
       J5_PLAYBOOK_WS_METHODS.readLibrary,

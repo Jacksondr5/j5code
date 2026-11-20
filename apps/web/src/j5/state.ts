@@ -42,6 +42,28 @@ const writesNowhereAtom = Atom.family((environmentId: EnvironmentId) =>
 );
 const inboxSourcesInput = { ...sourcesInput, guestAtom: writesNowhereAtom };
 
+export const playbookCheckpointsQueryAtom = (environmentId: EnvironmentId) =>
+  j5Environment.playbookCheckpoints({ environmentId, input: {} });
+export const playbookCheckpointSourcesAtom = createJ5ReadSourcesAtom({
+  catalogValueAtom: environmentCatalog.catalogValueAtom,
+  stateAtom: environmentCatalog.stateAtom,
+  configValueAtom: serverEnvironment.configValueAtom,
+  label: "web-j5:playbook-checkpoints",
+  capability: "j5ProjectLedger",
+  queryAtom: playbookCheckpointsQueryAtom,
+});
+
+export const playbookCheckpointCountQueryAtom = (environmentId: EnvironmentId) =>
+  j5Environment.playbookCheckpointCount({ environmentId, input: {} });
+export const playbookCheckpointCountSourcesAtom = createJ5ReadSourcesAtom({
+  catalogValueAtom: environmentCatalog.catalogValueAtom,
+  stateAtom: environmentCatalog.stateAtom,
+  configValueAtom: serverEnvironment.configValueAtom,
+  label: "web-j5:playbook-checkpoint-count",
+  capability: "j5ProjectLedger",
+  queryAtom: playbookCheckpointCountQueryAtom,
+});
+
 export const openInboxQueryAtom = (environmentId: EnvironmentId) =>
   j5Environment.inbox({ environmentId, input: { status: "open" } });
 export const answeredInboxQueryAtom = (environmentId: EnvironmentId) =>

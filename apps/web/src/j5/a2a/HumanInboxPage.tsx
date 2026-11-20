@@ -57,6 +57,10 @@ import { J5RecordPanel } from "./J5RecordPanel";
 import { OwnerAskAction } from "./OwnerAskAction";
 import { useScopedParticipantLabels } from "./ParticipantIdentitiesClient";
 import { presentParticipantIdentity } from "@t3tools/client-runtime/j5/participant-identity";
+import {
+  PlaybookCheckpointCard,
+  usePlaybookCheckpoints,
+} from "../playbooks/PlaybookCheckpointCard";
 import { CrewRuntimeRequestsSection } from "../crew/CrewRuntimeRequestsSection";
 import type { ScopedCrewRuntimeRequest } from "@t3tools/client-runtime/j5/crew-inbox-requests";
 import {
@@ -80,6 +84,8 @@ import {
   answeredInboxQueryAtom,
   answeredInboxSourcesAtom,
   crewRuntimeRequestSourcesAtom,
+  playbookCheckpointSourcesAtom,
+  playbookCheckpointsQueryAtom,
   j5Environment,
   openInboxQueryAtom,
   openInboxSourcesAtom,
@@ -486,6 +492,7 @@ async function refreshHumanInboxes(environmentId?: EnvironmentId, force = false)
     refreshJ5Sources(openInboxSourcesAtom, openInboxQueryAtom, options),
     refreshJ5Sources(answeredInboxSourcesAtom, answeredInboxQueryAtom, options),
     refreshCrewRuntimeRequests(environmentId),
+    refreshJ5Sources(playbookCheckpointSourcesAtom, playbookCheckpointsQueryAtom, options),
     refreshWorktreeCleanups(environmentId),
   ]);
   const failed = results.flat().find((result) => result._tag === "Failure");
@@ -572,6 +579,8 @@ export function HumanInboxPage() {
   const answerAttempts = useRef(new Map<string, HumanInboxAnswerAttempt>());
   useInboxRefresh();
   const runtimeRequests = useCrewRuntimeRequests();
+  const checkpoints = usePlaybookCheckpoints();
+  const checkpointSources = useAtomValue(playbookCheckpointSourcesAtom);
   const runtimeSources = useAtomValue(crewRuntimeRequestSourcesAtom);
   const nativeQuestions = useNativeQuestionInbox();
   const cleanups = useWorktreeCleanupInbox();
@@ -608,6 +617,10 @@ export function HumanInboxPage() {
   const complete =
     openSources.isReady &&
     runtimeSources.isReady &&
+    checkpointSources.isReady &&
+    checkpointSources.sources.every(
+      (source) => source.status === "ready" || source.status === "unsupported",
+    ) &&
     runtimeSources.sources.every(
       (source) => source.status === "ready" || source.status === "unsupported",
     ) &&
@@ -617,12 +630,15 @@ export function HumanInboxPage() {
     );
   const notices = [
     ...new Set(
-      [...openSources.sources, ...answeredSources.sources, ...runtimeSources.sources].flatMap(
-        (source) => {
-          const notice = j5SourceNotice(source);
-          return notice === null ? [] : [notice];
-        },
-      ),
+      [
+        ...openSources.sources,
+        ...answeredSources.sources,
+        ...runtimeSources.sources,
+        ...checkpointSources.sources,
+      ].flatMap((source) => {
+        const notice = j5SourceNotice(source);
+        return notice === null ? [] : [notice];
+      }),
     ),
   ];
   const refresh = async (environmentId?: EnvironmentId) => {
@@ -701,7 +717,8 @@ export function HumanInboxPage() {
                     : inboxSummary({
                         questions: items.length,
                         complete,
-                        agentRequests: runtimeRequests.length + nativeQuestions.length,
+                        agentRequests:
+                          runtimeRequests.length + nativeQuestions.length + checkpoints.length,
                         worktreeCleanups: cleanups.openCount,
                       })}
                 </p>
@@ -744,6 +761,14 @@ export function HumanInboxPage() {
               </div>
             ) : null}
 
+            {checkpoints.map(({ request, environmentId, connected }) => (
+              <PlaybookCheckpointCard
+                key={`${environmentId}:${request.requestId}`}
+                request={request}
+                environmentId={environmentId}
+                connected={connected}
+              />
+            ))}
             <CrewRuntimeRequestsSection requests={runtimeRequests} onOpenThread={openCrewThread} />
             <NativeQuestionInboxSection questions={nativeQuestions} onOpenThread={openCrewThread} />
 
@@ -752,6 +777,7 @@ export function HumanInboxPage() {
             error === null &&
             shownItems.length === 0 &&
             cleanups.inPlace.length === 0 &&
+            checkpoints.length === 0 &&
             runtimeRequests.length === 0 &&
             nativeQuestions.length === 0 ? (
               <div className="flex min-h-56 flex-col items-center justify-center px-6 py-12 text-center">

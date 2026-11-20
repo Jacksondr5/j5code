@@ -41,6 +41,7 @@ export const J5_CLIENT_GUARDED_RPC_SCOPES = {
   [J5_SKILL_LINK_WS_METHODS.delete]: AuthOrchestrationOperateScope,
 
   // The server's library is changed by its Owners only.
+  [J5_PLAYBOOK_WS_METHODS.answerCheckpoint]: AuthOrchestrationOperateScope,
   [J5_PLAYBOOK_WS_METHODS.savePlaybook]: AuthSettingsWriteScope,
   [J5_PLAYBOOK_WS_METHODS.setFolders]: AuthSettingsWriteScope,
   [J5_PLAYBOOK_WS_METHODS.deletePlaybook]: AuthSettingsWriteScope,

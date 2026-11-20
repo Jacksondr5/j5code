@@ -79,6 +79,10 @@ Missing, turned-off, or unverified personas show as warnings in Settings and do 
 stop the playbook from starting. Invalid persona files leave absent personas unverified;
 fix the files reported in Settings → Agent Setup before treating them as missing.
 
+Add `approval: required` to a step when each run needs a person's sign-off before moving on. The owner submits a summary of the finished work when it tries to leave. One request appears in the Inbox and the owner's chat on web and desktop; answering either updates both on connected devices. Owners and Collaborators who can write to the owner thread may approve or decline. Viewers can read the request but cannot answer. A decline can include a reason, which returns to the owner; the run stays on that step until a new request is approved. Mobile shows checkpoint state in progress; use web or desktop to answer.
+
+Approval permits the owner's next move; it does not move the run automatically or replace Crew, persona, or tool permissions. Going back onto an approved step asks again. Revisions must keep each required checkpoint and its step ID. Submitting a different summary opens a fresh request. Changing that step's saved work invalidates its approval; changing only its holder does not. Cancelling the run or removing its owner closes any pending request. A one-off “show me first” can remain an instruction to the agent without changing the reusable playbook.
+
 Type `/playbook ` to choose a registered playbook, then send the command to start it.
 Send `/playbook review` to start directly, or `/playbook` to ask what is available.
 Text after the name stays part of your message, as in

@@ -1,4 +1,8 @@
-import { AuthOrchestrationReadScope, AuthSettingsWriteScope } from "@t3tools/contracts";
+import {
+  AuthOrchestrationOperateScope,
+  AuthOrchestrationReadScope,
+  AuthSettingsWriteScope,
+} from "@t3tools/contracts";
 import {
   J5_PLAYBOOK_WS_METHODS,
   type PlaybookDeleteRequest,
@@ -20,6 +24,9 @@ import { makeWorkspacePlaybooks } from "./WorkspacePlaybooks.ts";
  * (People and access); `settings:write` is a permission only an Owner's level holds.
  */
 export const PLAYBOOK_RPC_SCOPES = {
+  [J5_PLAYBOOK_WS_METHODS.listCheckpoints]: AuthOrchestrationReadScope,
+  [J5_PLAYBOOK_WS_METHODS.countCheckpoints]: AuthOrchestrationReadScope,
+  [J5_PLAYBOOK_WS_METHODS.answerCheckpoint]: AuthOrchestrationOperateScope,
   [J5_PLAYBOOK_WS_METHODS.savePlaybook]: AuthSettingsWriteScope,
   [J5_PLAYBOOK_WS_METHODS.setFolders]: AuthSettingsWriteScope,
   [J5_PLAYBOOK_WS_METHODS.readSources]: AuthSettingsWriteScope,

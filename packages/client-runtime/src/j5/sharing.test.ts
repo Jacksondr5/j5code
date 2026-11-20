@@ -4,6 +4,8 @@ import {
   type ConnectionAccess,
   type HeldPersonLevel,
   J5_ACCESS_WS_METHODS,
+  J5_PLAYBOOK_WS_METHODS,
+  type PlaybookCheckpoint,
   J5_CLIENT_READ_WS_METHODS,
   type PersonLevel,
 } from "@t3tools/contracts/j5";
@@ -111,6 +113,20 @@ const environments = Effect.fn(function* (
   const asked: Array<string> = [];
   const fleetReads: Array<EnvironmentId> = [];
   const otherReads: Array<string> = [];
+  const checkpointRequests: ReadonlyArray<PlaybookCheckpoint> = [VIEWED, JOINED].map(
+    (threadId) => ({
+      requestId: `checkpoint:${threadId}`,
+      runId: `run:${threadId}`,
+      ownerThreadId: threadId,
+      stepId: "plan",
+      stepTitle: "Approve plan",
+      summary: "Review this thread's plan.",
+      status: "pending",
+      createdAt: "2026-11-17T00:00:00Z",
+      answeredAt: null,
+      reason: null,
+    }),
+  );
   const supervisor = Effect.fn(function* (environmentId: EnvironmentId, access: ConnectionAccess) {
     const target = new BearerConnectionTarget({
       environmentId,
@@ -153,6 +169,14 @@ const environments = Effect.fn(function* (
               otherReads.push(`${environmentId}:artifacts`);
               return Effect.succeed({ entries: [] });
             },
+            [J5_PLAYBOOK_WS_METHODS.countCheckpoints]: () => {
+              otherReads.push(`${environmentId}:checkpointCount`);
+              return Effect.succeed({ count: checkpointRequests.length });
+            },
+            [J5_PLAYBOOK_WS_METHODS.listCheckpoints]: () => {
+              otherReads.push(`${environmentId}:checkpoints`);
+              return Effect.succeed({ requests: checkpointRequests });
+            },
             [J5_ACCESS_WS_METHODS.getConnectionAccess]: () => {
               asked.push(`${environmentId}:connection`);
               return answer(access);
@@ -189,7 +213,7 @@ const environments = Effect.fn(function* (
     Effect.sync(() => AtomRegistry.make()),
     (registry) => Effect.sync(() => registry.dispose()),
   );
-  return { layer, registry, viewedLevel, asked, fleetReads, otherReads };
+  return { layer, registry, viewedLevel, asked, fleetReads, otherReads, checkpointRequests };
 });
 
 /** Waits for the atom to hold a value that passes; one that never arrives fails the test by timeout. */
@@ -390,42 +414,57 @@ describe("a connection that holds two threads of a server", () => {
     }),
   );
 
-  it.effect("still asks for what its scope gives it: artifacts, its inbox and Crew requests", () =>
-    Effect.gen(function* () {
-      const { layer, registry, fleetReads, otherReads } = yield* environments();
-      const runtime = Atom.runtime(layer);
-      const sharing = createSharingEnvironmentAtoms(runtime);
-      const atoms = createJ5EnvironmentAtoms(runtime);
-      yield* AtomRegistry.mount(registry, sharing.isNarrow(SHARED_SERVER));
-      expect(yield* settlesAt(registry, sharing.isNarrow(SHARED_SERVER), true)).toBe(true);
+  it.effect(
+    "still asks for what its scope gives it: artifacts, its inbox, Crew requests and checkpoints",
+    () =>
+      Effect.gen(function* () {
+        const { layer, registry, fleetReads, otherReads, checkpointRequests } =
+          yield* environments();
+        const runtime = Atom.runtime(layer);
+        const sharing = createSharingEnvironmentAtoms(runtime);
+        const atoms = createJ5EnvironmentAtoms(runtime);
+        yield* AtomRegistry.mount(registry, sharing.isNarrow(SHARED_SERVER));
+        expect(yield* settlesAt(registry, sharing.isNarrow(SHARED_SERVER), true)).toBe(true);
 
-      const listed = yield* Effect.promise(() =>
-        atoms.listArtifacts.run(registry, {
-          environmentId: SHARED_SERVER,
-          input: { projectId: ProjectId.make("project-shared") },
-        }),
-      );
-      expect(AsyncResult.isSuccess(listed)).toBe(true);
-
-      const refused = <A, E>(atom: Atom.Atom<AsyncResult.AsyncResult<A, E>>) =>
-        AtomRegistry.mount(registry, atom).pipe(
-          Effect.andThen(Effect.exit(AtomRegistry.getResult(registry, atom))),
-          Effect.map((exit) => exit._tag === "Failure"),
+        const listed = yield* Effect.promise(() =>
+          atoms.listArtifacts.run(registry, {
+            environmentId: SHARED_SERVER,
+            input: { projectId: ProjectId.make("project-shared") },
+          }),
         );
-      expect(yield* refused(atoms.openCount({ environmentId: SHARED_SERVER, input: {} }))).toBe(
-        false,
-      );
-      expect(yield* refused(atoms.crewProposals({ environmentId: SHARED_SERVER, input: {} }))).toBe(
-        false,
-      );
-      expect(yield* refused(atoms.fleet({ environmentId: SHARED_SERVER, input: {} }))).toBe(true);
-      expect(otherReads).toEqual([
-        `${SHARED_SERVER}:artifacts`,
-        `${SHARED_SERVER}:inbox`,
-        `${SHARED_SERVER}:crew`,
-      ]);
-      expect(fleetReads).toEqual([]);
-    }),
+        expect(AsyncResult.isSuccess(listed)).toBe(true);
+
+        const refused = <A, E>(atom: Atom.Atom<AsyncResult.AsyncResult<A, E>>) =>
+          AtomRegistry.mount(registry, atom).pipe(
+            Effect.andThen(Effect.exit(AtomRegistry.getResult(registry, atom))),
+            Effect.map((exit) => exit._tag === "Failure"),
+          );
+        expect(yield* refused(atoms.openCount({ environmentId: SHARED_SERVER, input: {} }))).toBe(
+          false,
+        );
+        expect(
+          yield* refused(atoms.crewProposals({ environmentId: SHARED_SERVER, input: {} })),
+        ).toBe(false);
+        const count = atoms.playbookCheckpointCount({ environmentId: SHARED_SERVER, input: {} });
+        yield* AtomRegistry.mount(registry, count);
+        expect(yield* AtomRegistry.getResult(registry, count)).toEqual({
+          count: checkpointRequests.length,
+        });
+        const checkpoints = atoms.playbookCheckpoints({ environmentId: SHARED_SERVER, input: {} });
+        yield* AtomRegistry.mount(registry, checkpoints);
+        expect(yield* AtomRegistry.getResult(registry, checkpoints)).toEqual({
+          requests: checkpointRequests,
+        });
+        expect(yield* refused(atoms.fleet({ environmentId: SHARED_SERVER, input: {} }))).toBe(true);
+        expect(otherReads).toEqual([
+          `${SHARED_SERVER}:artifacts`,
+          `${SHARED_SERVER}:inbox`,
+          `${SHARED_SERVER}:crew`,
+          `${SHARED_SERVER}:checkpointCount`,
+          `${SHARED_SERVER}:checkpoints`,
+        ]);
+        expect(fleetReads).toEqual([]);
+      }),
   );
 });
 
