@@ -1,9 +1,10 @@
+import { useAtomValue } from "@effect/atom-react";
 import type { ParticipantIdentities } from "@t3tools/client-runtime/j5/participant-identity";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 
 import { useWorkspaceEnvironments } from "../../state/workspace";
-import { connectionMemory } from "../connection/memory";
+import { connectionMemory, namesExpectedAtom } from "../connection/memory";
 import { pendingParticipants } from "../connection/memory.logic";
 
 export const NO_IDENTITIES: ParticipantIdentities = { labels: new Map(), threads: new Map() };
@@ -36,6 +37,8 @@ export function useParticipantIdentities(
 ): ScreenIdentities {
   const idsKey = Array.from(new Set(participantIds)).sort().join("\0");
   const connected = useConnectedEnvironmentIds().has(environmentId);
+  // Through a re-pair's first connection too, so the line never swaps a stand-in for the name.
+  const expected = useAtomValue(namesExpectedAtom).has(environmentId);
   const {
     memory,
     names: known,
@@ -57,7 +60,7 @@ export function useParticipantIdentities(
       settled,
       environmentId,
       idsKey === "" ? [] : idsKey.split("\0"),
-      connected,
+      expected,
     ),
   ].join("\0");
   const pending = useMemo(

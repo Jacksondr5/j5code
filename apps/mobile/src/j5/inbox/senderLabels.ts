@@ -1,7 +1,8 @@
+import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 
-import { connectionMemory } from "../connection/memory";
+import { connectionMemory, namesExpectedAtom } from "../connection/memory";
 import { pendingParticipants } from "../connection/memory.logic";
 
 export interface ScopedParticipantRef {
@@ -56,12 +57,21 @@ export function useScopedParticipantLabels(
     () => new Map([...names].map(([environmentId, known]) => [environmentId, known.labels])),
     [names],
   );
-  const pendingKey = [...byEnvironment]
-    .flatMap(([environmentId, ids]) =>
-      [...pendingParticipants(memory, settled, environmentId, ids, true)].map((id) =>
-        JSON.stringify([environmentId, id]),
-      ),
+  // Every sender on screen, through a re-pair's first connection too: a name on its way shows none.
+  const expected = useAtomValue(namesExpectedAtom);
+  const pendingKey = refs
+    .flatMap((ref) =>
+      pendingParticipants(
+        memory,
+        settled,
+        ref.environmentId,
+        [ref.participantId],
+        expected.has(ref.environmentId),
+      ).size > 0
+        ? [JSON.stringify([ref.environmentId, ref.participantId])]
+        : [],
     )
+    .sort()
     .join("\n");
   return useMemo(() => {
     const pending = new Set(pendingKey === "" ? [] : pendingKey.split("\n"));

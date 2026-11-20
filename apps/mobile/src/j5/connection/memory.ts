@@ -15,6 +15,7 @@ import { j5Sharing } from "../sharing/guestAccess";
 import { j5Environment } from "../state";
 import {
   answeredSince,
+  answerOnItsWay,
   credentialKey,
   decodeMemory,
   encodeMemory,
@@ -161,14 +162,18 @@ export const accessConfirmedAtom = Atom.family((environmentId: EnvironmentId) =>
  */
 export const answerExpectedAtom = Atom.make((get) => {
   const expected = new Set<EnvironmentId>();
-  for (const id of get(environmentCatalog.catalogValueAtom).entries.keys()) {
-    const state = Option.getOrNull(AsyncResult.value(get(environmentCatalog.stateAtom(id))));
-    if (state === null || get(j5Sharing.isNarrow(id))) continue;
-    if (state.phase === "connected" || (state.phase === "connecting" && state.lastFailure === null))
-      expected.add(id);
-  }
+  for (const id of get(namesExpectedAtom)) if (!get(j5Sharing.isNarrow(id))) expected.add(id);
   return expected;
 }).pipe(Atom.withLabel("mobile-j5:answer-expected"));
+
+/** Servers whose answers are on its way to anyone, a narrower person's name reads included. */
+export const namesExpectedAtom = Atom.make((get) => {
+  const expected = new Set<EnvironmentId>();
+  for (const id of get(environmentCatalog.catalogValueAtom).entries.keys())
+    if (answerOnItsWay(Option.getOrNull(AsyncResult.value(get(environmentCatalog.stateAtom(id))))))
+      expected.add(id);
+  return expected;
+}).pipe(Atom.withLabel("mobile-j5:names-expected"));
 
 export const connectionMemory = {
   subscribe: (listener: () => void) => {

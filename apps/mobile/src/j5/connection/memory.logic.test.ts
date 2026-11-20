@@ -2,8 +2,11 @@ import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { AsyncResult } from "effect/reactivity";
 import { describe, expect, it } from "vite-plus/test";
 
+import { credentialMissingError } from "@t3tools/client-runtime/connection";
+
 import {
   answeredSince,
+  answerOnItsWay,
   credentialKey,
   crewListedThreads,
   crewListWaiting,
@@ -184,6 +187,16 @@ describe("pendingParticipants", () => {
     expect(pendingParticipants(memory, failed, server, ids, true).size).toBe(0);
     // Offline, no read is coming: the stand-in shows.
     expect(pendingParticipants(memory, new Map(), server, ids, false).size).toBe(0);
+  });
+
+  it("counts a re-pair's first connection as an answer on its way, and a retry after a failure not", () => {
+    const failure = credentialMissingError("connection-1");
+
+    expect(answerOnItsWay({ phase: "connected", lastFailure: null })).toBe(true);
+    expect(answerOnItsWay({ phase: "connecting", lastFailure: null })).toBe(true);
+    expect(answerOnItsWay({ phase: "connecting", lastFailure: failure })).toBe(false);
+    expect(answerOnItsWay({ phase: "backoff", lastFailure: failure })).toBe(false);
+    expect(answerOnItsWay(null)).toBe(false);
   });
 });
 

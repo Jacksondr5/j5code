@@ -1,4 +1,7 @@
-import type { PreparedConnection } from "@t3tools/client-runtime/connection";
+import type {
+  PreparedConnection,
+  SupervisorConnectionState,
+} from "@t3tools/client-runtime/connection";
 import { isSidebarMember } from "@t3tools/client-runtime/j5/spawned-children";
 import type { ParticipantIdentities } from "@t3tools/client-runtime/j5/participant-identity";
 import { EnvironmentId, ThreadId, type ScopedThreadRef } from "@t3tools/contracts";
@@ -237,17 +240,28 @@ export const settleNames = (
 const NO_ONE: ReadonlySet<string> = new Set();
 
 /**
- * Ids whose name is on its way: their connected server has no remembered name for them and no
- * read has settled. A screen says nothing for them rather than a stand-in it would replace.
+ * Whether a server's answer is on its way: it is connected, or on a first attempt that has not
+ * failed yet, as after a re-pair. A retry after a failure may take minutes.
+ */
+export const answerOnItsWay = (
+  state: Pick<SupervisorConnectionState, "phase" | "lastFailure"> | null,
+) =>
+  state !== null &&
+  (state.phase === "connected" || (state.phase === "connecting" && state.lastFailure === null));
+
+/**
+ * Ids whose name is on its way: their server's answer is coming, it has no remembered name for
+ * them, and no read has settled. A screen says nothing for them rather than a stand-in it would
+ * replace.
  */
 export const pendingParticipants = (
   memory: ConnectionMemory,
   settled: SettledNames,
   environmentId: EnvironmentId,
   participantIds: ReadonlyArray<string>,
-  connected: boolean,
+  answerOnItsWay: boolean,
 ): ReadonlySet<string> => {
-  if (!connected) return NO_ONE;
+  if (!answerOnItsWay) return NO_ONE;
   const done = settled.get(environmentId);
   const labels = memory.get(environmentId)?.names.labels;
   const pending = participantIds.filter((id) => !done?.has(id) && !labels?.has(id));
