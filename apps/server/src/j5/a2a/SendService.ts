@@ -489,6 +489,18 @@ const correlationIdFor = (commandId: CommCommandId) =>
 const replyClosureCommandIdFor = (commandId: CommCommandId) =>
   CommCommandId.make(`command:j5:a2a:reply-closure:${encodeURIComponent(commandId)}`);
 
+// The withdraw tool is deferred on some harnesses, so its own description is often unseen.
+const askWithdrawal = (input: {
+  readonly receiverId: string;
+  readonly exchangeId: ExchangeId | null;
+  readonly newAsk: boolean;
+}) =>
+  input.newAsk &&
+  input.exchangeId !== null &&
+  isHumanParticipantId(ParticipantId.make(input.receiverId))
+    ? { ifAnsweredInThread: formatAskWithdrawInstruction({ exchangeId: input.exchangeId }) }
+    : {};
+
 const withdrawalMessageIdFor = (commandId: CommCommandId) =>
   LedgerMessageId.make(`message:j5:a2a:withdraw:${encodeURIComponent(commandId)}`);
 
@@ -1005,6 +1017,11 @@ const rawLayer: Layer.Layer<
               : ("closed" as const),
         joinedExistingExchange: row.exchange_role === "followup",
         durableAtSeq: row.sent_seq,
+        ...askWithdrawal({
+          receiverId: row.receiver_id,
+          exchangeId: row.exchange_id === null ? null : ExchangeId.make(row.exchange_id),
+          newAsk: row.exchange_role === "ask",
+        }),
       } satisfies SendMessageResult;
     });
 
@@ -1268,6 +1285,7 @@ const rawLayer: Layer.Layer<
         joinedExistingExchange:
           exchangeId !== null && !opened && !closed ? joinedExistingExchange : false,
         durableAtSeq: sent.seq,
+        ...askWithdrawal({ receiverId, exchangeId, newAsk: opened }),
       } satisfies SendMessageResult;
     });
 
@@ -1342,17 +1360,7 @@ const rawLayer: Layer.Layer<
         ),
       );
       yield* writer.publishCommitted(committed);
-      const withServer = yield* withReceiverServer(result);
-      // The withdraw tool is deferred on some harnesses, so its own description is often unseen.
-      return isHumanParticipantId(input.to) &&
-        withServer.exchangeId !== null &&
-        withServer.exchangeState === "open" &&
-        !withServer.joinedExistingExchange
-        ? {
-            ...withServer,
-            ifAnsweredInThread: formatAskWithdrawInstruction({ exchangeId: withServer.exchangeId }),
-          }
-        : withServer;
+      return yield* withReceiverServer(result);
     });
 
     const sendAsMachine: A2ASendServiceShape["sendAsMachine"] = Effect.fn(

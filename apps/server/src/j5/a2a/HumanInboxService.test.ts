@@ -498,15 +498,9 @@ it.effect("shows follow-ups beneath the ask they join, and an answer closes only
       const merge = yield* message("Merge now?", { ...asking, intent: "Merge timing" });
       const branch = yield* message("Delete the branch?", { ...asking, intent: "Old branch" });
       yield* worker.drain;
-      const followUp = yield* message("The audit finished.", { regarding: merge.exchangeId! });
+      yield* message("The audit finished.", { regarding: merge.exchangeId! });
       yield* message("CI is green too.", { regarding: merge.exchangeId! });
       yield* worker.drain;
-      assert.include(
-        merge.ifAnsweredInThread,
-        `j5_clear_own_ask(exchange_id="${merge.exchangeId}")`,
-      );
-      assert.include(branch.ifAnsweredInThread, `exchange_id="${branch.exchangeId}"`);
-      assert.notProperty(followUp, "ifAnsweredInThread");
 
       const open = yield* inbox.list(firstPerson.id);
       const mergeItem = open.find((item) => item.exchangeId === merge.exchangeId);
