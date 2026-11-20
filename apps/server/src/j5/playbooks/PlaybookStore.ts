@@ -36,6 +36,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
@@ -132,7 +133,7 @@ const readStepLabels = Schema.decodeUnknownSync(
   Schema.fromJsonString(PlaybookProgress.fields.steps),
 );
 const DefinitionJson = Schema.fromJsonString(PlaybookDefinition);
-const decodeDefinition = Schema.decodeUnknownSync(DefinitionJson);
+const decodeDefinition = Schema.decodeUnknownOption(DefinitionJson);
 const encodeDefinition = Schema.encodeSync(DefinitionJson);
 const RevisionJson = Schema.fromJsonString(PlaybookRevision);
 const decodeRevision = Schema.decodeUnknownSync(RevisionJson);
@@ -163,7 +164,8 @@ type RunRow = {
   latest_revision_json: string | null;
 };
 const fromRow = (row: RunRow): StoredPlaybookRun => ({
-  definition: row.definition_json === null ? null : decodeDefinition(row.definition_json),
+  definition:
+    row.definition_json === null ? null : Option.getOrNull(decodeDefinition(row.definition_json)),
   requiredPersonas:
     row.required_personas_json === null ? null : decodeRequiredPersonas(row.required_personas_json),
   personaBlockReason: row.persona_block_reason,
@@ -1073,6 +1075,11 @@ export const makePlaybookStore = Effect.gen(function* () {
             return yield* playbookError(
               "run_terminal",
               `This run is ${run.status}. Start a new run to continue.`,
+            );
+          if (definition === null && input.operation !== "cancel")
+            return yield* playbookError(
+              "invalid_snapshot",
+              "This run has no readable saved procedure. Cancel it and start again.",
             );
           yield* requireOwner(owner);
           if ("expectedStepId" in input && input.expectedStepId !== run.currentStepId) {

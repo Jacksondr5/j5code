@@ -2237,6 +2237,41 @@ it.effect(
     }).pipe(Effect.scoped, Effect.provide(CatalogLayer)),
 );
 
+it.effect("isolates unreadable snapshots and allows their cancellation", () =>
+  Effect.gen(function* () {
+    const { store, workspaceRoot } = yield* makeFixture;
+    const sql = yield* SqlClient.SqlClient;
+    yield* store.start(otherOwner, workspaceRoot, "demo", "healthy");
+    const run = yield* store.start(owner, workspaceRoot, "demo", "damaged");
+    for (const snapshot of ["{", '{"steps":["invalid"]}']) {
+      yield* sql`UPDATE j5_playbook_run SET definition_json = ${snapshot} WHERE run_id = ${run.runId}`;
+      const history = (yield* store.listForThread(owner)).runs[0]!;
+      assert.equal(history.title, "demo");
+      assert.isNull(history.issue);
+      assert.deepEqual(history.steps, []);
+      assert.equal((yield* store.listAll({ status: "all" })).runs.length, 2);
+      assert.isNull((yield* store.current(owner)).currentStep);
+      const failure = yield* Effect.flip(
+        store.mutate(owner, {
+          operation: "complete",
+          runId: run.runId,
+          expectedStepId: "research",
+          client_request_id: "complete",
+        }),
+      );
+      assert.equal(failure.code, "invalid_snapshot");
+    }
+    assert.equal(
+      (yield* store.mutate(owner, {
+        operation: "cancel",
+        runId: run.runId,
+        client_request_id: "cancel",
+      })).status,
+      "cancelled",
+    );
+  }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
+);
+
 it.effect("shows legacy terminal history without consulting its definition file", () =>
   Effect.gen(function* () {
     const { store, workspaceRoot, fs, filename } = yield* makeFixture;
