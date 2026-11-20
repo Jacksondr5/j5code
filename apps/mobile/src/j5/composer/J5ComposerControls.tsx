@@ -89,7 +89,8 @@ function Controls(props: Props & { readonly questions: CaptainQuestions | null }
   // Asks answered elsewhere close the panel for good, so a later ask arrives folded.
   if (questionsFocused && questions === null) setQuestionsFocused(false);
   const questionsOpen = questionsFocused && questions !== null;
-  // A composer popover folds the steps while it's open, so no card shows above a short one (AC-13).
+  // A composer popover folds the steps and hides the row while it's open, so no card shows beside
+  // or above a short one (AC-13).
   const playbookOpen =
     playbook !== null && playbook.view.expanded && !questionsOpen && !popoverOpen;
   const setPlaybookExpanded = (expanded: boolean) =>
@@ -166,7 +167,14 @@ function Controls(props: Props & { readonly questions: CaptainQuestions | null }
     );
   if (cards.length === 0) return null;
   return (
-    <Animated.View key="carousel" entering={ROW_ENTERING} exiting={ROW_EXITING}>
+    <Animated.View
+      key="carousel"
+      entering={ROW_ENTERING}
+      exiting={ROW_EXITING}
+      // Under an open popover, kept in place but unseen, so no neighbour peeks out beside it (AC-13).
+      style={popoverOpen ? { opacity: 0 } : undefined}
+      pointerEvents={popoverOpen ? "none" : "auto"}
+    >
       <AttentionCarousel cards={cards} shownKey={pageKey} onShownChange={setPageKey} />
     </Animated.View>
   );
