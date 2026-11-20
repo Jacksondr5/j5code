@@ -81,6 +81,34 @@ In [Remote access](../../user/remote-access.md), the desktop app's first SSH lau
 J5 Code server release for the desktop app's version to `~/.j5code/runtime` on the host. The host
 must be Linux x64 or an Apple Silicon Mac, the platforms J5 Code publishes.
 
+## Linked environments
+
+In [Remote access](../../user/remote-access.md), a linked environment lets agents on one machine
+act on another. In J5 Code on web and desktop, a link does more, and you set it up once:
+
+- **A link also carries messages.** Agents on two linked J5 Code servers can message each other,
+  in both directions. [Connecting two J5 servers](./j5-peering.md) explains how messages travel.
+- **Each direction has its own level.** You choose what agents on each server may do on the
+  other: **Messages only**, or one of T3 Code's access levels. Both start at Supervised.
+- **Link from Settings → Environments → Linked environments,** or when J5 Code offers it after
+  you add an environment. Tick the servers to link with and choose the two levels. J5 Code checks
+  which server can reach which, tells you how each pair will work, and links them. It turns on
+  the Linked environments beta on those servers for you.
+- **You don't type an address or a pairing code.** Add the other server to this app first, with
+  **Add environment** and a pairing link that manages access.
+- **Renew** on a pair's row renews both directions before or after the 30 days run out. Messages
+  keep working in the meantime.
+- **Change a level on the pair's row** at any time. Two servers that only exchange messages gain
+  actions the same way: raise a direction from **Messages only**.
+- **Remove** ends the link on both servers. To stop only what one server's agents may do on the
+  other, set that direction to **Messages only**. If this app can manage only one of the two
+  servers, it warns that the other keeps its side until you remove the link there too.
+- **An agent's link request** sets up messages too, and the one direction the agent asked for.
+  Agents can ask once a server has its first link.
+
+A link made in the mobile app, or with `j5 environment link`, works as T3 Code's guide describes:
+one direction, with no messages. Its row on web and desktop offers to set up messaging.
+
 ## Scripts on the host
 
 In [Outside agents](../../user/outside-agents.md#scripts-on-the-host), the command is `j5 thread`,
