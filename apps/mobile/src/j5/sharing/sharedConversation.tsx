@@ -158,14 +158,17 @@ export function PromptAnsweredBy(props: {
   // Lowercase in every state, as web's "· answered by Priya" is.
   const said = props.alone ? "answered" : "· answered";
   return (
-    <Text
-      numberOfLines={1}
-      // Shrinks with the label, so a long name never hides the question. Alone, it cancels the
-      // row's gap-1.5 around the empty label before it.
-      className={`min-w-0 shrink grow pr-1.5 text-sm text-foreground-muted ${props.alone ? "-ml-1.5" : "pl-1"}`}
-    >
-      {by === undefined ? said : `${said} by ${by.you ? "you" : (by.name ?? "someone")}`}
-    </Text>
+    <>
+      <Text
+        numberOfLines={1}
+        // The question truncates first; a long name stops at half the row. Alone, it cancels
+        // the row's gap-1.5 around the empty label before it.
+        className={`max-w-[50%] shrink-0 pr-1.5 text-sm text-foreground-muted ${props.alone ? "-ml-1.5" : "pl-1"}`}
+      >
+        {by === undefined ? said : `${said} by ${by.you ? "you" : (by.name ?? "someone")}`}
+      </Text>
+      <View className="flex-1" />
+    </>
   );
 }
 
