@@ -2250,6 +2250,7 @@ it.effect("isolates unreadable snapshots and allows their cancellation", () =>
       assert.isNull(history.issue);
       assert.deepEqual(history.steps, []);
       assert.equal((yield* store.listAll({ status: "all" })).runs.length, 2);
+      assert.equal((yield* store.activeRunSummaries([owner, otherOwner])).length, 2);
       assert.isNull((yield* store.current(owner)).currentStep);
       const failure = yield* Effect.flip(
         store.mutate(owner, {

@@ -129,7 +129,7 @@ const decodeAssignment = Schema.decodeUnknownSync(
   Schema.fromJsonString(OrchestrationV2AgentPersonaAssignment),
 );
 const decodeRuntimeMode = Schema.decodeUnknownSync(RuntimeMode);
-const readStepLabels = Schema.decodeUnknownSync(
+const readStepLabels = Schema.decodeUnknownOption(
   Schema.fromJsonString(PlaybookProgress.fields.steps),
 );
 const DefinitionJson = Schema.fromJsonString(PlaybookDefinition);
@@ -1379,13 +1379,15 @@ export const makePlaybookStore = Effect.gen(function* () {
     description: string | null;
     steps_json: string;
   };
+  // SQLite JSON functions throw on malformed text, including scalar step entries.
+  const displayDefinition = sql`CASE WHEN json_valid(definition_json) THEN definition_json END`;
   const progressColumns = sql`run_id, owner_thread_id, definition_path, current_step_id,
     holder_participant_id, holder_thread_id, assigned_by_participant_id, status, created_at,
     updated_at, crew_instance_id, cancel_reason, holder_stop_json, revision_count, latest_revision_json,
     NULL AS definition_json, NULL AS required_personas_json, persona_block_reason,
-    json_extract(definition_json, '$.title') AS title, json_extract(definition_json, '$.description') AS description,
-    (SELECT json_group_array(json_object('id', value ->> '$.id', 'title', value ->> '$.title'))
-     FROM json_each(j5_playbook_run.definition_json, '$.steps')) AS steps_json`;
+    json_extract(${displayDefinition}, '$.title') AS title, json_extract(${displayDefinition}, '$.description') AS description,
+    (SELECT json_group_array(CASE WHEN type = 'object' THEN json_object('id', value ->> '$.id', 'title', value ->> '$.title') END)
+     FROM json_each(${displayDefinition}, '$.steps')) AS steps_json`;
   const progressRows = Effect.fn("j5.playbooks.playbookStore.progressRows")(function* (
     rows: ReadonlyArray<ProgressRow>,
   ) {
@@ -1418,13 +1420,16 @@ export const makePlaybookStore = Effect.gen(function* () {
         replayed: _replayed,
         ...progress
       } = present(run, run.definition);
-      const steps = readStepLabels(row.steps_json);
+      const steps =
+        typeof row.title === "string" && typeof row.description === "string"
+          ? Option.getOrElse(readStepLabels(row.steps_json), () => [])
+          : [];
       const index = steps.findIndex((step) => step.id === run.currentStepId);
       const detail = byRun.get(run.runId)!;
       return {
         ...progress,
-        title: row.title ?? progress.title,
-        description: row.description ?? "",
+        title: steps.length ? (row.title ?? progress.title) : progress.title,
+        description: steps.length ? (row.description ?? "") : "",
         steps,
         position: index < 0 ? null : index + 1,
         total: steps.length,
@@ -1597,10 +1602,10 @@ export const makePlaybookStore = Effect.gen(function* () {
     >`SELECT run.run_id, run.owner_thread_id, run.current_step_id, run.holder_participant_id,
       run.holder_thread_id, run.persona_block_reason, delivery.outcome AS delivery_outcome,
       COALESCE(step.key + 1, 0) AS position,
-      COALESCE(json_array_length(run.definition_json, '$.steps'), 0) AS total,
+      COALESCE(json_array_length(${displayDefinition}, '$.steps'), 0) AS total,
       COALESCE(step.value ->> '$.title', run.current_step_id) AS step_title
       FROM j5_playbook_run run
-      LEFT JOIN json_each(run.definition_json, '$.steps') step ON step.value ->> '$.id' = run.current_step_id
+      LEFT JOIN json_each(${displayDefinition}, '$.steps') step ON CASE WHEN step.type = 'object' THEN step.value ->> '$.id' END = run.current_step_id
       LEFT JOIN j5_playbook_step_delivery delivery ON delivery.rowid = (
         SELECT landing.rowid FROM j5_playbook_step_delivery landing
         WHERE landing.run_id = run.run_id AND landing.step_id = run.current_step_id
