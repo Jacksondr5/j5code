@@ -161,9 +161,9 @@ export function PromptAnsweredBy(props: {
     <>
       <Text
         numberOfLines={1}
-        // The question truncates first; a long name stops at half the row. Alone, it cancels
-        // the row's gap-1.5 around the empty label before it.
-        className={`max-w-[50%] shrink-0 pr-1.5 text-sm text-foreground-muted ${props.alone ? "-ml-1.5" : "pl-1"}`}
+        // After a question, the question truncates first and a long name stops at half the row.
+        // Alone, it takes the row and cancels the gap-1.5 around the empty label before it.
+        className={`pr-1.5 text-sm text-foreground-muted ${props.alone ? "-ml-1.5 min-w-0 shrink" : "max-w-[50%] shrink-0 pl-1"}`}
       >
         {by === undefined ? said : `${said} by ${by.you ? "you" : (by.name ?? "someone")}`}
       </Text>
