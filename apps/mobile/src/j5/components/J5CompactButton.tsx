@@ -19,11 +19,11 @@ const TONES = {
   danger: ["border-transparent bg-danger", "text-danger-foreground", "accent-danger-foreground"],
 } as const;
 
-// With `px-3.5` (12.25 dp a side), the spinner sits 5–17 dp from the left edge and the label moves
-// 8 dp right, leaving about 4 dp either side of the spinner and label together.
-const SPINNER_SIZE = 12;
-const SPINNER_INSET = 5;
-const LABEL_SHIFT = 8;
+// `px-3` keeps a cleanup's three actions on one row at normal text size. Sending, the spinner sits
+// 4–14 dp from the outer left edge and the label moves 6 dp right, ending 5.5 dp from the right.
+const SPINNER_SIZE = 10;
+const SPINNER_INSET = 3;
+const LABEL_SHIFT = 6;
 
 /**
  * J5's small one-row action for its own cards, where upstream's Button would wrap the row (its
@@ -52,7 +52,7 @@ export function J5CompactButton(props: {
       disabled={ignoresTaps}
       onPress={props.onPress}
       className={cn(
-        "min-h-9 flex-row items-center justify-center rounded-full border px-3.5",
+        "min-h-9 flex-row items-center justify-center rounded-full border px-3",
         container,
         // A lasting can't-act state, as upstream's attach button dims; sending never dims.
         disabled ? "opacity-50" : !ignoresTaps && "active:opacity-70",
@@ -73,7 +73,11 @@ export function J5CompactButton(props: {
             <AppActivityIndicator
               // iOS draws its small spinner at 20 pt only, so it is scaled down to fit.
               size={Platform.OS === "android" ? SPINNER_SIZE : "small"}
-              style={Platform.OS === "android" ? undefined : { transform: [{ scale: 0.6 }] }}
+              style={
+                Platform.OS === "android"
+                  ? undefined
+                  : { transform: [{ scale: SPINNER_SIZE / 20 }] }
+              }
               colorClassName={spinner}
             />
           </View>
