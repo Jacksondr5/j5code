@@ -412,25 +412,31 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
               </Text>
               {Platform.OS === "android" ? (
                 <>
+                  {/* J5: each Button sits in a View, so the card's items-center centers it
+                      (Button is self-start; FORK.md case 90). */}
                   {catalogState.hasReadyEnvironment && !canAddProject ? null : (
-                    <Button
-                      label={
-                        catalogState.hasReadyEnvironment ? "Add new project" : "Add environment"
-                      }
-                      tone="primary"
-                      onPress={() =>
-                        catalogState.hasReadyEnvironment
-                          ? navigation.dispatch(StackActions.push("AddProject"))
-                          : navigation.navigate("ConnectionsNew")
-                      }
-                    />
+                    <View>
+                      <Button
+                        label={
+                          catalogState.hasReadyEnvironment ? "Add new project" : "Add environment"
+                        }
+                        tone="primary"
+                        onPress={() =>
+                          catalogState.hasReadyEnvironment
+                            ? navigation.dispatch(StackActions.push("AddProject"))
+                            : navigation.navigate("ConnectionsNew")
+                        }
+                      />
+                    </View>
                   )}
                   {canStartScratch ? (
-                    <Button
-                      label="Start without a project"
-                      tone="secondary"
-                      onPress={() => void startScratch()}
-                    />
+                    <View>
+                      <Button
+                        label="Start without a project"
+                        tone="secondary"
+                        onPress={() => void startScratch()}
+                      />
+                    </View>
                   ) : null}
                 </>
               ) : !catalogState.hasReadyEnvironment ? (
@@ -453,11 +459,13 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
                     </View>
                   ) : null}
                   {canStartScratch ? (
-                    <Button
-                      label="Start without a project"
-                      tone="secondary"
-                      onPress={() => void startScratch()}
-                    />
+                    <View>
+                      <Button
+                        label="Start without a project"
+                        tone="secondary"
+                        onPress={() => void startScratch()}
+                      />
+                    </View>
                   ) : null}
                 </>
               )}
