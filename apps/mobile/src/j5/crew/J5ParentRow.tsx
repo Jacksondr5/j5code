@@ -62,8 +62,9 @@ export function J5ParentRow(props: {
   const { parent } = props;
   const shell = useQuietThreadShell(scopeThreadRef(props.environmentId, parent.threadId));
   const role = parentRoleLabel(parent);
-  // Named as web's Lineage row names it.
-  const name = shell?.title ?? parent.displayName ?? role;
+  // Named as web's Lineage row names it. Until a name is known the line stays blank, at its height,
+  // rather than showing a placeholder that the real name then replaces.
+  const name = shell?.title ?? parent.displayName ?? null;
   const detail = parent.crew === null ? role : `${role} · ${parent.crew.crewName}`;
   return (
     <View>
@@ -72,7 +73,7 @@ export function J5ParentRow(props: {
       </View>
       <Pressable
         accessibilityRole="link"
-        accessibilityLabel={`${name}, ${detail}`}
+        accessibilityLabel={name === null ? detail : `${name}, ${detail}`}
         accessibilityHint="Opens the parent's thread"
         onPress={() =>
           props.onOpen({ environmentId: props.environmentId, threadId: parent.threadId })
@@ -81,7 +82,7 @@ export function J5ParentRow(props: {
       >
         <View className="min-w-0 flex-1 gap-1">
           <Text numberOfLines={1} className="font-t3-medium text-sm text-foreground">
-            {name}
+            {name ?? " "}
           </Text>
           <Text numberOfLines={1} className="text-xs text-foreground-muted">
             {detail}
