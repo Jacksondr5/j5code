@@ -108,6 +108,17 @@ describe("ChatMarkdown artifact references", () => {
       expect(onOpenArtifact).toHaveBeenCalledExactlyOnceWith("plan.md");
     }
     expect(openArtifact).not.toHaveBeenCalled();
+
+    // With neither, nothing can open it, so the chip stays a copy-only menu button.
+    await using screen = await render(
+      <ChatMarkdown
+        cwd="/tmp/project"
+        environmentId={threadRef.environmentId}
+        text="[Plan](artifacts/plan.md)"
+      />,
+    );
+    expect(screen.container.querySelector("a[data-artifact]")).toBeNull();
+    expect(screen.container.querySelector("button[data-artifact]")).not.toBeNull();
   });
 
   it("copies an artifact reference as its logical path, not a workspace path", async () => {
