@@ -212,13 +212,14 @@ export function crewListedThreads<T extends ListedThread>(
 }
 
 /**
- * Whether a query has settled again since `baseline`, its value when the credential changed: a
- * later settled result came over the new connection, even when it reuses the old value.
+ * Whether a query has answered again since `baseline`, its value when the credential changed: a
+ * later settled success came over the new connection, even when it reuses the old value. A
+ * failure says nothing about who the new person is.
  */
 export const answeredSince = (
   baseline: unknown,
   result: AsyncResult.AsyncResult<unknown, unknown>,
-) => result !== baseline && result._tag !== "Initial" && !result.waiting;
+) => result !== baseline && result._tag === "Success" && !result.waiting;
 
 /** The participants a name read has settled for, per server, under its current credential. */
 export type SettledNames = ReadonlyMap<EnvironmentId, ReadonlySet<string>>;

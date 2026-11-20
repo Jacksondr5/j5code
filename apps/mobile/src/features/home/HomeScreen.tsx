@@ -656,10 +656,9 @@ export function HomeScreen(props: HomeScreenProps) {
   // J5 (case 115): threads waiting for their first spawned-children answer are still loading.
   const j5ListWaiting = useCrewListWaiting(props.threads);
   const hasAnyThreads =
-    !j5ListWaiting &&
-    (props.threads.some((thread) => thread.archivedAt === null) ||
-      props.pendingTasks.length > 0 ||
-      threadListV2Layout.settledCount > 0);
+    (!j5ListWaiting && props.threads.some((thread) => thread.archivedAt === null)) ||
+    props.pendingTasks.length > 0 ||
+    threadListV2Layout.settledCount > 0;
   const selectedEnvironmentLabel =
     props.selectedEnvironmentId === null
       ? null

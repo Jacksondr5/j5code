@@ -19,6 +19,7 @@ export function useJ5Timeline(
 ): J5Timeline {
   const access = useAtomValue(j5Sharing.connectionAccess(environmentId));
   const accessConfirmed = useAtomValue(accessConfirmedAtom(environmentId));
+  const narrow = useAtomValue(j5Sharing.isNarrow(environmentId));
   const { authors } = useThreadAuthorIndex(environmentId, threadId);
   const identities = useParticipantIdentities(
     environmentId,
@@ -27,6 +28,7 @@ export function useJ5Timeline(
   return {
     ...identities,
     accessConfirmed,
+    narrow,
     environmentId,
     viewerParticipantId: access?.kind === "person" ? access.personId : null,
     sharedAuthors: authors,

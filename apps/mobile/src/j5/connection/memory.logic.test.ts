@@ -210,4 +210,10 @@ describe("answeredSince", () => {
     expect(answeredSince(baseline, AsyncResult.success(owner, { waiting: true }))).toBe(false);
     expect(answeredSince(baseline, AsyncResult.success(owner))).toBe(true);
   });
+
+  it("does not take a failed read as the answer", () => {
+    const baseline = AsyncResult.success({ kind: "person", wide: true });
+
+    expect(answeredSince(baseline, AsyncResult.fail(new Error("refused")))).toBe(false);
+  });
 });

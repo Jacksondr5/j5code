@@ -212,7 +212,7 @@ const SEAMS: ReadonlyArray<Seam> = [
     from: "../../j5/crew/spawnedChildren",
     reaches: [
       "const j5ListWaiting = useCrewListWaiting(props.threads);",
-      "!j5ListWaiting &&",
+      "(!j5ListWaiting && props.threads.some(",
       "j5ListWaiting ? connectingWorkspace(props.catalogState) : props.catalogState",
     ],
   },
