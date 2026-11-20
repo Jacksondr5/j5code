@@ -810,6 +810,14 @@ it.effect(
           )).code,
           "request_conflict",
         );
+        yield* store.mutate(owner, {
+          operation: "revise",
+          runId: run.runId,
+          expectedStepId: "research",
+          client_request_id: "revise-before-restart",
+          basis: "approved",
+          steps: definition().steps.map((step) => ({ ...step, prompt: `Revised ${step.id}.` })),
+        });
         return run.runId;
       }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: databasePath })));
 
@@ -822,7 +830,9 @@ it.effect(
         const current = yield* store.current(owner);
         assert.equal(current.runId, runId);
         assert.equal(current.currentStepId, "research");
-        assert.equal(current.currentStep?.prompt, "Follow research.");
+        assert.equal(current.currentStep?.prompt, "Revised research.");
+        assert.equal(current.revisionCount, 1);
+        assert.equal(current.latestRevision?.basis, "approved");
         const retry = yield* store.mutate(owner, {
           operation: "next",
           runId,
@@ -831,7 +841,7 @@ it.effect(
         });
         assert.isTrue(retry.replayed);
         assert.equal(retry.currentStepId, "research");
-        assert.equal(retry.currentStep?.prompt, "Follow research.");
+        assert.equal(retry.currentStep?.prompt, "Revised research.");
         assert.equal((yield* store.current(owner)).currentStepId, "research");
         assert.equal((yield* store.listForThread(owner)).runs.length, 1);
         const moved = yield* store.mutate(owner, {
@@ -1715,4 +1725,121 @@ it.effect("shows legacy terminal history without consulting its definition file"
     assert.notProperty(history, "definition");
     assert.notProperty(history, "currentStep");
   }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
+);
+
+it.effect("revises only the owner's run copy and records an idempotent attributed revision", () =>
+  Effect.gen(function* () {
+    const { store, workspaceRoot, fs, filename } = yield* makeFixture;
+    const saved = yield* fs.readFileString(filename("demo"));
+    const run = yield* store.start(owner, workspaceRoot, "demo", "revision-start");
+    const other = yield* store.start(otherOwner, workspaceRoot, "demo", "other-start");
+    const input = {
+      operation: "revise" as const,
+      runId: run.runId,
+      expectedStepId: "research",
+      steps: definition(["review", "research", "added"]).steps,
+      basis: "asked" as const,
+      client_request_id: "revision",
+    };
+    assert.equal((yield* Effect.flip(store.mutate(otherOwner, input))).code, "not_owner");
+    assert.equal(
+      (yield* Effect.flip(store.mutate(owner, { ...input, expectedStepId: "stale" }))).code,
+      "step_conflict",
+    );
+    for (const steps of [
+      [],
+      [input.steps[0]!, input.steps[0]!],
+      [{ id: "x", title: "X", prompt: "x".repeat(PLAYBOOK_MAX_BYTES) }],
+    ]) {
+      assert.equal(
+        (yield* Effect.flip(store.mutate(owner, { ...input, steps }))).code,
+        "invalid_definition",
+      );
+      assert.deepStrictEqual((yield* store.current(owner)).steps, run.steps);
+    }
+    const revised = yield* store.mutate(owner, input);
+    assert.equal(revised.currentStepId, "research");
+    assert.equal(revised.position, 2);
+    assert.equal(revised.revisionCount, 1);
+    assert.equal(revised.latestRevision?.basis, "asked");
+    assert.equal(revised.latestRevision?.ownerThreadId, owner);
+    assert.equal(revised.latestRevision?.revisedAt, revised.updatedAt);
+    assert.deepStrictEqual((yield* store.current(otherOwner, other.runId)).steps, other.steps);
+    assert.equal(yield* fs.readFileString(filename("demo")), saved);
+    const restarted = yield* makePlaybookStore;
+    assert.deepStrictEqual((yield* restarted.current(owner)).steps, revised.steps);
+    assert.isTrue((yield* restarted.mutate(owner, input)).replayed);
+    assert.equal(
+      (yield* Effect.flip(store.mutate(owner, { ...input, basis: "approved" }))).code,
+      "request_conflict",
+    );
+    assert.equal(
+      (yield* Effect.flip(
+        store.mutate(owner, { ...input, steps: definition(["different"]).steps }),
+      )).code,
+      "request_conflict",
+    );
+    const sql = yield* SqlClient.SqlClient;
+    const history = yield* sql<{
+      basis: string;
+      owner_thread_id: string;
+    }>`SELECT * FROM j5_playbook_revision WHERE run_id = ${run.runId}`;
+    assert.equal(history.length, 1);
+    assert.equal(history[0]?.basis, "asked");
+    assert.equal(history[0]?.owner_thread_id, owner);
+    const second = yield* store.mutate(owner, {
+      ...input,
+      client_request_id: "second-revision",
+      basis: "approved",
+      stepId: "added",
+    });
+    assert.equal(second.currentStepId, "research");
+    assert.equal(second.revisionCount, 2);
+    assert.equal(second.latestRevision?.basis, "approved");
+    const originalRetry = yield* store.mutate(owner, input);
+    assert.isTrue(originalRetry.replayed);
+    assert.equal(originalRetry.revisionCount, 2);
+    assert.equal(originalRetry.latestRevision?.basis, "approved");
+    const allHistory = yield* sql`SELECT * FROM j5_playbook_revision WHERE run_id = ${run.runId}`;
+    assert.equal(allHistory.length, 2);
+  }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
+);
+
+it.effect(
+  "requires a replacement when revising away the current step and refuses terminal revisions",
+  () =>
+    Effect.gen(function* () {
+      const { store, workspaceRoot } = yield* makeFixture;
+      const run = yield* store.start(owner, workspaceRoot, "demo", "start");
+      const input = {
+        operation: "revise" as const,
+        runId: run.runId,
+        expectedStepId: "research",
+        steps: definition(["implement", "review"]).steps,
+        basis: "approved" as const,
+        client_request_id: "replace",
+      };
+      for (const stepId of [undefined, "absent"]) {
+        assert.equal(
+          (yield* Effect.flip(store.mutate(owner, { ...input, ...(stepId ? { stepId } : {}) })))
+            .code,
+          "step_missing",
+        );
+        assert.equal((yield* store.current(owner)).currentStepId, "research");
+      }
+      const revised = yield* store.mutate(owner, { ...input, stepId: "review" });
+      assert.equal(revised.currentStepId, "review");
+      assert.equal(revised.latestRevision?.basis, "approved");
+      yield* store.mutate(owner, {
+        operation: "complete",
+        runId: run.runId,
+        expectedStepId: "review",
+        client_request_id: "complete",
+      });
+      assert.equal(
+        (yield* Effect.flip(store.mutate(owner, { ...input, client_request_id: "terminal" }))).code,
+        "run_terminal",
+      );
+      assert.equal((yield* store.listForThread(owner)).runs[0]?.revisionCount, 1);
+    }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );

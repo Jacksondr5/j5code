@@ -303,6 +303,9 @@ export function presentPlaybook(run: PlaybookProgress) {
         ? `Last step: ${run.currentStepId}`
         : `Step ${run.position} of ${run.total}`,
     currentTitle: current?.title ?? run.currentStepId,
+    revisionHistory: run.latestRevision
+      ? `Revised ${run.revisionCount ?? 1} ${(run.revisionCount ?? 1) === 1 ? "time" : "times"} · Latest change ${run.latestRevision.basis === "asked" ? "requested" : "approved"}`
+      : null,
     steps: run.steps.map((step, index) => {
       const state =
         step.id === run.currentStepId

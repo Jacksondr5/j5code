@@ -149,6 +149,9 @@ export function PlaybookComposerControl(props: {
                 Progress could not refresh. Showing the last received state.
               </Text>
             )}
+            {display.revisionHistory && (
+              <Text className="my-2 text-xs text-foreground-muted">{display.revisionHistory}</Text>
+            )}
             {run.cancelReason && (
               <Text accessibilityRole="alert" className="my-2 text-xs text-foreground-muted">
                 {run.cancelReason}

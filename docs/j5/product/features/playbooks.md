@@ -41,6 +41,8 @@ Playbooks are linear sequences. The initiative-level view — a plan whose nodes
 16. Copying a definition between environments creates an independent copy without replacing an existing different definition.
 17. An agent can edit a library definition; the edit is refused if the definition changed since the agent read it.
 
+18. On the user's explicit request or approved proposal, the owner can revise an active run's steps without changing the reusable definition or other runs. The run records each revision's basis, time, and owner; history shows its revision count and latest basis. A revision preserves the current step by stable ID or requires an explicit replacement step, and stale calls and retries cannot apply it twice.
+
 ## Scenarios
 
 - **A release Playbook.** The user writes a five-step release Playbook whose steps name the Builder and the Sitter, and launches a Crew in Website Redesign that follows it. The Fleet page shows "Step 2 of 5 · builder". When the Builder reports step 2 done, the Captain advances, and the Sitter's next turn opens with step 3's instructions; an unowned step is the Captain's. (AC2, AC3, AC5, AC6)

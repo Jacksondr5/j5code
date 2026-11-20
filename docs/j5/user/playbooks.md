@@ -94,6 +94,13 @@ Editing prompts or reordering steps in a saved playbook changes the procedure fo
 future runs. The current run keeps the copy it started with, even if the saved
 playbook is deleted.
 
+To change a procedure already running, ask its agent to revise the run: for example,
+“Remove the deployment step from this run” or “Add a review step before reporting.”
+The agent can also propose a change for you to approve. The change applies only to
+this run; editing the reusable playbook is separate. If the change removes the
+current step, name the step to continue on. Run history shows how many revisions
+were made and whether the latest was requested or approved.
+
 Ask the agent to go back when you want to revisit a phase. Going back changes its
 position, not your files or previous work. Progress survives context compaction and
 provider restarts. Expand the playbook above the chat box to see its stages or

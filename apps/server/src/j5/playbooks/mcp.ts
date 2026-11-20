@@ -4,6 +4,7 @@ import {
   PlaybookReadResponse,
   PlaybookStepResponse,
   PlaybookSaveRequest,
+  PlaybookReviseRequest,
   PlaybookSaveResponse,
 } from "@t3tools/contracts/j5";
 import { isAgentPersonaAuthorityPolicy, OrchestratorMcpFailure } from "@t3tools/contracts";
@@ -111,6 +112,13 @@ export const playbookTools = [
     parameters: Movement,
     description:
       "Move back one step in the saved step order and retrieve its saved prompt. This changes progress only; it does not undo work or file edits. expectedStepId guards against stale calls." +
+      mutationDescription,
+  }),
+  Tool.make("j5_playbook_revise", {
+    ...common,
+    parameters: PlaybookReviseRequest,
+    description:
+      "Replace only your active run's steps after the user explicitly asked for the change (basis asked) or approved your proposal (basis approved). Preserve its title and purpose. expectedStepId guards against stale calls. If the current step ID remains, keep it; otherwise supply stepId naming its replacement. This never changes the reusable playbook. A changed current step follows normal delivery rules; editing the same step keeps its holder." +
       mutationDescription,
   }),
   Tool.make("j5_playbook_complete", {
@@ -224,6 +232,9 @@ export const playbookHandlers = {
   ),
   j5_playbook_back: runsPlaybook((input: typeof Movement.Type) =>
     mutate({ ...input, operation: "back" }),
+  ),
+  j5_playbook_revise: runsPlaybook((input: PlaybookReviseRequest) =>
+    mutate({ ...input, operation: "revise" }),
   ),
   j5_playbook_complete: runsPlaybook((input: typeof Movement.Type) =>
     mutate({ ...input, operation: "complete" }),
