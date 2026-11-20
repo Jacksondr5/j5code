@@ -226,7 +226,10 @@ export function isPlaybookSlashCommandVisible(command: string, atMessageStart: b
   return command !== "playbook" || atMessageStart;
 }
 
-/** `/playbook <query>` suggestions: exact name, then name prefix, then name or title substring. */
+/**
+ * `/playbook <query>` suggestions: exact name, then name prefix, then name or title substring. A row
+ * shows the title and the description; the name, which the title repeats, is only inserted.
+ */
 export function matchPlaybookSuggestions(
   playbooks: ReadonlyArray<PlaybookSuggestionInput>,
   query: string,
@@ -248,12 +251,17 @@ export function matchPlaybookSuggestions(
       id: `playbook:${playbook.name}`,
       type: "playbook" as const,
       name: playbook.name,
-      label: playbook.name,
-      description: playbook.title,
+      label: playbook.title || playbook.name,
+      description: playbook.description,
     }));
 }
 
-type PlaybookSuggestionInput = { name: string; title: string; issue: { message: string } | null };
+type PlaybookSuggestionInput = {
+  name: string;
+  title: string;
+  description: string;
+  issue: { message: string } | null;
+};
 type PlaybookTriggerRange = { rangeStart: number; rangeEnd: number };
 
 /** `@playbook:` and `/playbook` share one trigger kind; the text at `rangeStart` tells them apart. */

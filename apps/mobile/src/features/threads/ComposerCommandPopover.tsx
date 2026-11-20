@@ -11,7 +11,7 @@ import type {
   ServerProviderSlashCommand,
 } from "@t3tools/contracts";
 import type { ComposerTriggerKind } from "@t3tools/shared/composerTrigger";
-import { memo } from "react";
+import { Fragment, memo } from "react";
 import { Pressable, ScrollView, StyleSheet, View, type ViewStyle } from "react-native";
 
 import { SymbolView, type AppSymbolName } from "../../components/ui/AppSymbol";
@@ -21,6 +21,7 @@ import { GlassSurface } from "../../components/ui/GlassSurface";
 import { PierreEntryIcon } from "../../components/PierreEntryIcon";
 import { pullRequestStatus } from "../pull-requests/pullRequestStatus";
 import type { agentPersonaMentionItems } from "@t3tools/client-runtime/j5/agent-mentions";
+import { leadingPersonaCount, PopoverGroupHeading } from "../../j5/composer/PopoverPersonaGroup";
 
 export type ComposerCommandItem =
   | ReturnType<typeof agentPersonaMentionItems>[number]
@@ -231,7 +232,9 @@ const CommandRow = memo(function CommandRow(props: {
 export const ComposerCommandPopover = memo(function ComposerCommandPopover(
   props: ComposerCommandPopoverProps,
 ) {
-  const label = groupLabel(props.triggerKind);
+  // J5 (AC-3): personas leading a bare `@` list get their own heading, and "Files" follows them.
+  const personas = leadingPersonaCount(props.triggerKind, props.items);
+  const label = personas > 0 ? "Personas" : groupLabel(props.triggerKind);
 
   return (
     <PopoverSurface>
@@ -249,13 +252,17 @@ export const ComposerCommandPopover = memo(function ComposerCommandPopover(
           showsVerticalScrollIndicator={false}
         >
           {props.items.map((item, index) => (
-            <CommandRow
-              key={item.id}
-              item={item}
-              onPress={() => props.onSelect(item)}
-              isLast={index === props.items.length - 1}
-              isSlashSkill={props.triggerKind === "slash-command" && item.type === "skill"}
-            />
+            <Fragment key={item.id}>
+              {personas > 0 && index === personas ? (
+                <PopoverGroupHeading label={groupLabel(props.triggerKind) ?? ""} />
+              ) : null}
+              <CommandRow
+                item={item}
+                onPress={() => props.onSelect(item)}
+                isLast={index === props.items.length - 1}
+                isSlashSkill={props.triggerKind === "slash-command" && item.type === "skill"}
+              />
+            </Fragment>
           ))}
         </ScrollView>
       ) : (

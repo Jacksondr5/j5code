@@ -1,7 +1,10 @@
+import { agentPersonaMentionItems } from "@t3tools/client-runtime/j5/agent-mentions";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { View } from "react-native";
 
+import { useEnvironmentQuery } from "../../state/query";
 import { AgentDraftPicker } from "./AgentDraftPicker";
+import { agentPersonaEnvironment } from "./agentPersonaAtoms";
 import { AgentPersonaAssignmentControls } from "./AgentPersonaAssignmentControls";
 import { useDraftAgentAssignment } from "./useDraftAgentAssignment";
 
@@ -15,7 +18,18 @@ export function DraftAgentRow(props: {
   readonly disabled: boolean;
 }) {
   const draftAgent = useDraftAgentAssignment(props.draftKey, props.environmentId);
+  const catalog = useEnvironmentQuery(
+    agentPersonaEnvironment.catalog({ environmentId: props.environmentId, input: {} }),
+  );
   if (draftAgent.personaId !== null && draftAgent.assignment === null) return null;
+  // No band when there is no persona to start as; it holds its place while the catalog loads.
+  if (
+    draftAgent.assignment === null &&
+    (catalog.isSuccess || catalog.failure !== null) &&
+    !catalog.isPending &&
+    agentPersonaMentionItems(catalog.data ?? null, "").length === 0
+  )
+    return null;
   return (
     // Clips the 44-tall controls' padding to sit closer to the checkout row, without overlapping it.
     <View className="h-[36px] flex-row items-center overflow-hidden px-2">

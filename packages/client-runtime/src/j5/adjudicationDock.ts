@@ -4,8 +4,11 @@ interface AskLike {
   readonly exchangeId: string;
   readonly senderThreadId: string | null;
   readonly status: "open" | "answered";
+  readonly urgency: "blocking" | "soon" | "fyi";
   readonly openedAt: string;
 }
+
+const URGENCY_ORDER = { blocking: 0, soon: 1, fyi: 2 } as const;
 
 /** The excerpt is three lines; a body past that, or very long, offers "Show full question". */
 const EXCERPT_LINES = 3;
@@ -15,9 +18,9 @@ export const hasMoreThanExcerpt = (message: string): boolean =>
   message.split("\n").length > EXCERPT_LINES || message.length > EXCERPT_CHARACTERS;
 
 /**
- * The asks pinned above a thread's composer, oldest first: the open asks this thread made to the
- * person, read from the same list the Inbox shows, plus an ask a refused answer left behind for as
- * long as the person's words are still in its box.
+ * The asks pinned above a thread's composer, most urgent first, then oldest: the open asks this
+ * thread made to the person, read from the same list the Inbox shows, plus an ask a refused answer
+ * left behind for as long as the person's words are still in its box.
  */
 export function adjudicationAsks<Ask extends AskLike>(input: {
   readonly items: ReadonlyArray<Ask>;
@@ -36,6 +39,7 @@ export function adjudicationAsks<Ask extends AskLike>(input: {
   // A fresh array, sorted in place: Hermes has no `toSorted`.
   return [...open, ...kept].sort(
     (left, right) =>
+      URGENCY_ORDER[left.urgency] - URGENCY_ORDER[right.urgency] ||
       left.openedAt.localeCompare(right.openedAt) ||
       left.exchangeId.localeCompare(right.exchangeId),
   );
@@ -44,7 +48,7 @@ export function adjudicationAsks<Ask extends AskLike>(input: {
 /**
  * The ask shown in full, the rest behind the "more questions" row, and the one that row moves to:
  * the next after the shown ask, wrapping, so every ask is reachable. The person's pick wins while
- * it is still pinned; otherwise the oldest.
+ * it is still pinned; otherwise the first, so answering one returns to the first still open.
  */
 export function pickShownAsk<Ask extends { readonly exchangeId: string }>(
   asks: ReadonlyArray<Ask>,

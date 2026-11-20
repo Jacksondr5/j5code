@@ -513,7 +513,7 @@ it("ranks playbook suggestions by exact name, then prefix, then name or title ma
     { name: "review-plan", title: "Plan", issue: null },
     { name: "review", title: "Review", issue: null },
     { name: "review-broken", title: "Broken", issue },
-  ];
+  ].map((playbook) => ({ ...playbook, description: "" }));
   expect(matchPlaybookSuggestions(playbooks, " Review ").map(({ name }) => name)).toEqual([
     "review",
     "review-plan",
@@ -540,10 +540,10 @@ describe("playbook mention picker", () => {
     availableStepIds: [],
   });
   const playbooks = [
-    { name: "release-broken", title: "Broken release", issue: broken },
-    { name: "Release Plan", title: "Release Plan", issue: badName },
-    { name: "code-release", title: "Code release", issue: null },
-    { name: "release", title: "Release", issue: null },
+    { name: "release-broken", title: "Broken release", description: "", issue: broken },
+    { name: "Release Plan", title: "Release Plan", description: "", issue: badName },
+    { name: "code-release", title: "Code release", description: "Tag and ship", issue: null },
+    { name: "release", title: "Release", description: "Cut a release", issue: null },
   ];
   const mention = (text: string) => ({
     kind: "slash-playbook",
@@ -555,14 +555,19 @@ describe("playbook mention picker", () => {
   it("lists valid playbooks first, then invalid ones with their error, but no misnamed file", () => {
     const text = "Use @playbook:rel";
     expect(
-      playbookMenuItems(playbooks, mention(text), text).map(({ name, description }) => ({
+      playbookMenuItems(playbooks, mention(text), text).map(({ name, label, description }) => ({
         name,
+        label,
         description,
       })),
     ).toEqual([
-      { name: "release", description: "Release" },
-      { name: "code-release", description: "Code release" },
-      { name: "release-broken", description: "Step report is missing a prompt." },
+      { name: "release", label: "Release", description: "Cut a release" },
+      { name: "code-release", label: "Code release", description: "Tag and ship" },
+      {
+        name: "release-broken",
+        label: "Broken release",
+        description: "Step report is missing a prompt.",
+      },
     ]);
   });
 
