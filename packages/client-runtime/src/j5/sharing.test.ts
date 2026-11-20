@@ -36,8 +36,10 @@ import {
   sharingAllowsOperate,
   sharingAllowsStart,
   sharingAllowsStartAnywhere,
+  someServerAllowsStart,
   threadLevelFor,
   threadLevelInProject,
+  type KnownConnectionAccess,
 } from "./sharing.ts";
 import { createJ5EnvironmentAtoms } from "./state.ts";
 
@@ -313,6 +315,34 @@ describe("what a connection may start", () => {
     expect(sharingAllowsStart({ kind: "unknown" }, PROJECT)).toBe(false);
     expect(sharingAllowsStartAnywhere(null)).toBe(true);
     expect(sharingAllowsStartAnywhere({ kind: "unknown" })).toBe(false);
+  });
+
+  it("offers a door only where one server's levels and its session's Operate tasks both allow", () => {
+    const addsProject = (access: KnownConnectionAccess) => sharingAllowsStart(access, null);
+    for (const allows of [addsProject, sharingAllowsStartAnywhere]) {
+      expect(someServerAllowsStart([], allows)).toBe(true);
+      // An Owner on a device paired read-only.
+      expect(someServerAllowsStart([{ access: OWNER, operates: false }], allows)).toBe(false);
+      // Ownership on one server and Operate tasks on another open neither.
+      expect(
+        someServerAllowsStart(
+          [
+            { access: OWNER, operates: false },
+            { access: SERVER_VIEWER, operates: true },
+          ],
+          allows,
+        ),
+      ).toBe(false);
+      expect(
+        someServerAllowsStart(
+          [
+            { access: SERVER_VIEWER, operates: true },
+            { access: OWNER, operates: true },
+          ],
+          allows,
+        ),
+      ).toBe(true);
+    }
   });
 });
 

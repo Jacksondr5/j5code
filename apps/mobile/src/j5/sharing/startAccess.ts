@@ -4,6 +4,7 @@ import {
   type KnownConnectionAccess,
   sharingAllowsStart,
   sharingAllowsStartAnywhere,
+  someServerAllowsStart,
 } from "@t3tools/client-runtime/j5/sharing";
 import {
   AuthOrchestrationOperateScope,
@@ -11,13 +12,18 @@ import {
   type ProjectId,
   type ThreadId,
 } from "@t3tools/contracts";
-import { Atom } from "effect/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 import { useMemo } from "react";
 
 import { environmentCatalog } from "../../connection/catalog";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { useThreadShell } from "../../state/entities";
-import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
+import {
+  environmentSession,
+  readEnvironmentScope,
+  sessionHasScope,
+  useEnvironmentScope,
+} from "../../state/session";
 import { j5Sharing } from "./guestAccess";
 
 // Where this connection may start something, read across every saved server at once. A server
@@ -31,10 +37,20 @@ const startsAtom = Atom.make((get) => {
     sharingAllowsStart(accessById.get(environmentId) ?? null, projectId);
 }).pipe(Atom.withLabel("mobile-j5:access:starts"));
 
+// A session not yet read withholds nothing, as access not yet answered doesn't.
 const savedServersAllow = (label: string, allows: (access: KnownConnectionAccess) => boolean) =>
   Atom.make((get) =>
-    [...get(environmentCatalog.catalogValueAtom).entries.keys()].some((id) =>
-      allows(get(j5Sharing.connectionAccess(id))),
+    someServerAllowsStart(
+      [...get(environmentCatalog.catalogValueAtom).entries.keys()].map((id) => {
+        const session = get(environmentSession.sessionStateAtom(id));
+        return {
+          access: get(j5Sharing.connectionAccess(id)),
+          operates:
+            AsyncResult.isInitial(session) ||
+            sessionHasScope(session, AuthOrchestrationOperateScope),
+        };
+      }),
+      allows,
     ),
   ).pipe(Atom.withLabel(label));
 

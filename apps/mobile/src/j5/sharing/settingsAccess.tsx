@@ -47,10 +47,7 @@ function OwnerOnlySettingsNotice() {
     writesSomewhere: useWritesSomewhere(),
   });
   return (
-    <ScreenScrollView
-      contentInsetAdjustmentBehavior="automatic"
-      contentContainerClassName="px-5 pt-4"
-    >
+    <ScreenScrollView contentInsetAdjustmentBehavior="automatic">
       <EmptyState variant="plain" title={notice.title} detail={notice.body} />
     </ScreenScrollView>
   );

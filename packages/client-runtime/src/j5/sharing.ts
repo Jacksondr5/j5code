@@ -143,6 +143,17 @@ export const sharingAllowsStartAnywhere = (access: KnownConnectionAccess): boole
     : sharingAllowsStart(access, null);
 
 /**
+ * Whether some saved server lets this device start what `allows` asks: that server's levels and its
+ * session's "Operate tasks" (`operates`) together, so one server's grant opens no other's door.
+ * With no saved server nothing is refused, so upstream's doors stay as they are.
+ */
+export const someServerAllowsStart = (
+  servers: ReadonlyArray<{ readonly access: KnownConnectionAccess; readonly operates: boolean }>,
+  allows: (access: KnownConnectionAccess) => boolean,
+): boolean =>
+  servers.length === 0 || servers.some((server) => server.operates && allows(server.access));
+
+/**
  * Which server, if any, is asked "What should people and agents on <server> call you?" now:
  * a device the server cannot place (People and access AC5), or the first owner with no name yet
  * (AC6). One server at a time, in the order they are listed. Neither can be put off: each is
