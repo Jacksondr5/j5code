@@ -1,12 +1,16 @@
 import type { ThreadId } from "@t3tools/contracts";
-import { J5_PLAYBOOK_WS_METHODS, type PlaybookCheckpointAnswer } from "@t3tools/contracts/j5";
+import {
+  levelReaches,
+  J5_PLAYBOOK_WS_METHODS,
+  type PlaybookCheckpointAnswer,
+} from "@t3tools/contracts/j5";
 import * as Effect from "effect/Effect";
-import { isOwner, requireWrites } from "../sharing/connectionWriter.ts";
+import { requireWrites } from "../sharing/connectionWriter.ts";
 import { SharedThreads } from "../sharing/SharedThreads.ts";
 import { PersonAccess } from "../sharing/PersonAccess.ts";
 import type { SessionIdentity } from "../sharing/PersonAccess.ts";
 import { PlaybookStore } from "./PlaybookStore.ts";
-import { storageError } from "./definition.ts";
+import { playbookError, storageError } from "./definition.ts";
 
 export const makeCheckpointRpcHandlers = Effect.fn("makeCheckpointRpcHandlers")(function* (
   session: SessionIdentity,
@@ -42,8 +46,11 @@ export const makeCheckpointRpcHandlers = Effect.fn("makeCheckpointRpcHandlers")(
     [J5_PLAYBOOK_WS_METHODS.answerCheckpoint]: Effect.fn("PlaybookCheckpointRpc.answer")(function* (
       input: PlaybookCheckpointAnswer,
     ) {
+      const reach = yield* people.sessionReach(session);
+      if (reach.kind !== "person")
+        return yield* playbookError("not_authorized", "A person must answer this request.");
       yield* authorized(requireWrites(session, Effect.succeed(input.threadId)));
-      return yield* store.answerCheckpoint(input, yield* authorized(isOwner(session)));
+      return yield* store.answerCheckpoint(input, levelReaches(reach.serverLevel, "owner"));
     }, Effect.mapError(storageError)),
   };
 });

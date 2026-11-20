@@ -1433,6 +1433,7 @@ it.effect("groups limited picks for one run and keeps reviewer preference and st
         ["unavailable", "unavailable"],
       ],
     );
+    assert.isTrue((yield* store.listForThread(owner)).runs[0]?.blocked);
     assert.equal(run.personaApproval?.kind, "persona_picks");
     assert.include(run.personaApproval?.summary ?? "", "researcher");
     assert.include(run.personaApproval?.summary ?? "", "gpt-5.5");
@@ -1943,6 +1944,12 @@ it.effect("projects a compact active run for its owner without prompt bodies", (
         state: "captain",
       },
     ]);
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`UPDATE j5_playbook_run SET persona_block_reason = 'missing' WHERE run_id = ${run.runId}`;
+    const [blocked] = yield* store.activeRunSummaries([owner]);
+    assert.equal(blocked?.state, "blocked");
+    assert.equal(blocked?.stepTitle, "Step research");
+    assert.isNull((yield* store.listForThread(owner)).runs[0]?.issue);
   }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );
 
@@ -2438,7 +2445,7 @@ it.effect(
       assert.equal((yield* store.pendingCheckpoints({ kind: "service" })).length, 1);
       const restarted = yield* makePlaybookStoreForTests;
       assert.deepStrictEqual((yield* restarted.current(owner)).checkpoint, first);
-      const handlersFor = (level: "owner" | "collaborator" | "viewer") =>
+      const handlersFor = (level: "owner" | "collaborator" | "viewer" | "service") =>
         makeCheckpointRpcHandlers({
           sessionId: AuthSessionId.make(`session:${level}`),
           subject: "one-time-token",
@@ -2448,23 +2455,36 @@ it.effect(
               Layer.succeed(PlaybookStore, store),
               Layer.mock(PersonAccess)({
                 sessionReach: () =>
-                  Effect.succeed({
-                    kind: "person",
-                    person: {
-                      personId: ParticipantId.make(`human:${level}`),
-                      displayName: level,
-                      firstOwner: level === "owner",
-                    },
-                    levels: [],
-                    serverLevel: level,
-                    highest: level,
-                    ceiling: null,
-                  }),
+                  Effect.succeed(
+                    level === "service"
+                      ? { kind: "service" }
+                      : {
+                          kind: "person",
+                          person: {
+                            personId: ParticipantId.make(`human:${level}`),
+                            displayName: level,
+                            firstOwner: level === "owner",
+                          },
+                          levels: [],
+                          serverLevel: level,
+                          highest: level,
+                          ceiling: null,
+                        },
+                  ),
               }),
               Layer.mock(SharedThreads)({ writerLevel: () => Effect.succeed(null) }),
             ),
           ),
         );
+      const service = yield* handlersFor("service");
+      const denied = yield* Effect.flip(
+        service[J5_PLAYBOOK_WS_METHODS.answerCheckpoint]({
+          threadId: owner,
+          requestId: first.requestId,
+          decision: "approve",
+        }),
+      );
+      assert.equal(denied.code, "not_authorized");
       const viewer = yield* handlersFor("viewer");
       assert.deepStrictEqual(yield* viewer[J5_PLAYBOOK_WS_METHODS.countCheckpoints](), {
         count: 1,
@@ -2650,6 +2670,41 @@ it.effect(
         "already_answered",
       );
     }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
+);
+
+it.effect("refuses completion ahead of a required checkpoint", () =>
+  Effect.gen(function* () {
+    const { store, workspaceRoot, write } = yield* makeFixture;
+    const procedure = definition(["prepare", "publish"]);
+    yield* write("demo", {
+      ...procedure,
+      steps: procedure.steps.map((step) =>
+        step.id === "publish" ? { ...step, approval: "required" } : step,
+      ),
+    });
+    const run = yield* store.start(owner, workspaceRoot, "demo", "start");
+    const error = yield* Effect.flip(
+      store.mutate(owner, {
+        operation: "complete",
+        runId: run.runId,
+        expectedStepId: "prepare",
+        client_request_id: "finish",
+      }),
+    );
+    const reordered = yield* Effect.flip(
+      store.mutate(owner, {
+        operation: "revise",
+        runId: run.runId,
+        expectedStepId: "prepare",
+        client_request_id: "reorder",
+        basis: "asked",
+        steps: [{ ...procedure.steps[1]!, approval: "required" }, procedure.steps[0]!],
+      }),
+    );
+    assert.equal(reordered.code, "invalid_definition");
+    assert.equal(error.code, "step_boundary");
+    assert.equal((yield* store.current(owner)).status, "active");
+  }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );
 
 it.effect("completion needs approval and owner cancellation closes its pending checkpoint", () =>

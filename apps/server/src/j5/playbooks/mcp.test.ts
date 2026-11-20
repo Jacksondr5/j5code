@@ -464,6 +464,7 @@ it.effect("uses the initiating scheduled prompt to authorize an MCP start", () =
       { text: "Run demo.sh.", configured: "Run demo.sh." },
       { text: "Run @persona:demo.", configured: "Run @persona:demo." },
       webhook("Process this request: {{body.notes}}"),
+      { text: "Example", configured: "Example:\n```text\nRun demo.\n```" },
       joined,
       { text: "Start demo.", configured: undefined },
     ]) {
@@ -521,6 +522,11 @@ it.effect("enforces authenticated peer provenance and refuses an unverified remo
       return { runs, messages: [{ ...message, createdBy: "agent", playbookOrigin: origin }] };
     });
     const start = { name: "demo", client_request_id: "remote" };
+    assert.equal(
+      (yield* decodeFailure((yield* call("j5_playbook_start", start)).result)).code,
+      "playbook_turn_unavailable",
+    );
+    origin = undefined;
     assert.equal(
       (yield* decodeFailure((yield* call("j5_playbook_start", start)).result)).code,
       "playbook_turn_unavailable",

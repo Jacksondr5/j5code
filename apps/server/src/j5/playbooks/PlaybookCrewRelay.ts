@@ -86,6 +86,19 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
   const locks = yield* KeyedLock.make<string>();
   const withRun = locks.withLock;
 
+  // A Captain may dispatch to its approved Crew. A spawned peer inherits the owner's ceiling.
+  const holderLimit = Effect.fn("PlaybookCrewRelay.holderLimit")(function* (
+    ownerId: ThreadId,
+    holderId: ThreadId,
+  ) {
+    const membership = yield* crews.findMembership(participantIdForThread(holderId));
+    const crew = membership === null ? null : yield* crews.read(membership.crewInstanceId);
+    if (crew?.captainParticipantId === participantIdForThread(ownerId)) return undefined;
+    const owner = yield* getThreadRecordsIfPresent(threads, ownerId, []);
+    return owner === null
+      ? null
+      : { runtimeMode: owner.thread.runtimeMode, interactionMode: owner.thread.interactionMode };
+  });
   const finishCancellation = Effect.fn("PlaybookCrewRelay.finishCancellation")(function* (
     runId: string,
     immediate = false,
@@ -100,21 +113,9 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
       const target = yield* getThreadRecordsIfPresent(threads, run.holderThreadId, []);
       if (target === null || target.thread.deletedAt !== null)
         return { status: "failed" as const, reason: "The holder thread is unavailable." };
-      const membership = yield* crews.findMembership(participantIdForThread(run.holderThreadId));
-      const crew = membership === null ? null : yield* crews.read(membership.crewInstanceId);
-      const captain = crew?.captainParticipantId === participantIdForThread(run.ownerThreadId);
-      const owner = captain
-        ? null
-        : yield* getThreadRecordsIfPresent(threads, run.ownerThreadId, []);
-      if (!captain && owner === null)
+      const limit = yield* holderLimit(run.ownerThreadId, run.holderThreadId);
+      if (limit === null)
         return { status: "failed" as const, reason: "The owner modes cannot be resolved." };
-      const limit =
-        owner === null
-          ? undefined
-          : {
-              runtimeMode: owner.thread.runtimeMode,
-              interactionMode: owner.thread.interactionMode,
-            };
       if (limit !== undefined && exceededDispatchModeLimit(limit, target.thread) !== undefined)
         return {
           status: "failed" as const,
@@ -138,7 +139,7 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
             if (landing?.targetThreadId !== command.threadId) return null;
             const notice = stepMessageId(runId, landing.requestId);
             const { runs } = yield* threads.getThreadRecords(command.threadId, ["runs"], {
-              runStatuses: ["preparing", "starting", "running"],
+              runStatuses: ["preparing", "starting", "running", "waiting"],
             });
             const turn = runs.find((entry) => entry.userMessageId === notice);
             if (!turn) return null;
@@ -242,28 +243,33 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
       const target = yield* getThreadRecordsIfPresent(threads, targetThreadId, []);
       if (target === null || target.thread.archivedAt !== null || target.thread.deletedAt !== null)
         return false;
-      yield* threads.dispatch({
-        type: "message.dispatch",
-        createdBy: "system",
-        creationSource: "server",
-        playbookOrigin: landing.playbookOrigin,
-        commandId: stepCommandId(runId, requestId),
-        threadId: targetThreadId,
-        messageId: stepMessageId(runId, requestId),
-        text: crewStepNoticeText({
-          playbookName: playbook.name,
-          playbookTitle: playbook.title,
-          stepId: step.id,
-          stepTitle: step.title,
-          position: playbook.position,
-          total: playbook.total,
-          ownerParticipantId,
-          prompt: step.prompt,
-        }),
-        attachments: [],
-        modelSelection: target.thread.modelSelection,
-        dispatchMode: { type: "start_immediately" },
-      });
+      const limit = yield* holderLimit(run.ownerThreadId, targetThreadId);
+      if (limit === null || (limit && exceededDispatchModeLimit(limit, target.thread)))
+        return false;
+      yield* threads
+        .dispatch({
+          type: "message.dispatch",
+          createdBy: "system",
+          creationSource: "server",
+          playbookOrigin: landing.playbookOrigin,
+          commandId: stepCommandId(runId, requestId),
+          threadId: targetThreadId,
+          messageId: stepMessageId(runId, requestId),
+          text: crewStepNoticeText({
+            playbookName: playbook.name,
+            playbookTitle: playbook.title,
+            stepId: step.id,
+            stepTitle: step.title,
+            position: playbook.position,
+            total: playbook.total,
+            ownerParticipantId,
+            prompt: step.prompt,
+          }),
+          attachments: [],
+          modelSelection: target.thread.modelSelection,
+          dispatchMode: { type: "start_immediately" },
+        })
+        .pipe(Effect.provideService(DispatchModeLimit, limit));
       return true;
     }).pipe(
       Effect.catch((error) =>

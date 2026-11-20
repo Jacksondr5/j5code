@@ -21,10 +21,20 @@ const namedPlaybooks = (prompt: string) => {
   const names = new Set<string>();
   const trimmed = prompt.trim().toLowerCase();
   if (PLAYBOOK_NAME_PATTERN.test(trimmed)) names.add(trimmed);
-  for (const sentence of prompt.split(/(?<=[.!?;])\s+|\n/u)) {
-    const clause = sentence.trim().replace(/[.!?;]$/, "");
-    const name = (scheduledDirective.exec(clause) ?? explicitMention.exec(clause))?.[1];
-    if (name !== undefined) names.add(name.toLowerCase());
+  let fence: string | undefined;
+  for (const line of prompt.split(/\r?\n/u)) {
+    const marker = /^ {0,3}(`{3,}|~{3,})(.*)$/u.exec(line);
+    if (marker) {
+      if (!fence) fence = marker[1];
+      else if (marker[1]!.startsWith(fence) && !marker[2]!.trim()) fence = undefined;
+      continue;
+    }
+    if (fence || /^(?: {4}|\t|\s*>)/u.test(line)) continue;
+    for (const sentence of line.split(/(?<=[.!?;])\s+/u)) {
+      const clause = sentence.trim().replace(/[.!?;]$/, "");
+      const name = (scheduledDirective.exec(clause) ?? explicitMention.exec(clause))?.[1];
+      if (name !== undefined) names.add(name.toLowerCase());
+    }
   }
   return names;
 };
@@ -75,14 +85,13 @@ const readOrigin = Effect.fn("Playbook.scheduledInputs")(function* () {
     for (const input of inputs) {
       const at = DateTime.toEpochMillis(input.createdAt);
       if (at > through) continue;
-      // A notice already queued before origin snapshots were introduced cannot establish authority.
       if (
+        input.createdBy !== "user" &&
         input.playbookOrigin === undefined &&
-        ((input.createdBy === "system" &&
-          (input.id.startsWith("playbook-checkpoint:") ||
-            input.id.startsWith("message:j5:a2a:mcp:j5-playbook-step:playbook-step:"))) ||
-          (input.createdBy === "agent" &&
-            /^message:mcp:[^:]+:worktree-continuation:/.test(input.id)))
+        input.scheduledTaskId === undefined &&
+        input.senderThreadId === undefined &&
+        input.delegatedCompletion === undefined &&
+        run?.restartContinuationOfRunId === undefined
       )
         return yield* unavailable;
       if (input.delegatedCompletion !== undefined)

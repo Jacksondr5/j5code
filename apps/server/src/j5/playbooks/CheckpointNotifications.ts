@@ -1,5 +1,6 @@
 import { decodeNoticeOrigin } from "./noticeOrigin.ts";
 import { CommandId, MessageId, ThreadId } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
@@ -7,6 +8,8 @@ import * as SqlClient from "effect/sql/SqlClient";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { getThreadRecordsIfPresent } from "../a2a/threadProjectionReads.ts";
 import { PlaybookStore } from "./PlaybookStore.ts";
+
+const quoteText = Schema.encodeSync(Schema.fromJsonString(Schema.String));
 
 export const unnotifiedCheckpoints = (sql: SqlClient.SqlClient) => sql<{
   request_id: string;
@@ -52,8 +55,8 @@ export const makeCheckpointNotifications = Effect.gen(function* () {
           messageId: MessageId.make(`playbook-checkpoint:${request.requestId}`),
           threadId: request.ownerThreadId,
           text: request.personaPicks
-            ? `The run's persona picks were ${request.status}.${request.reason ? ` Reason: ${request.reason}` : ""} Retrieve j5_playbook_current before staffing the run.`
-            : `Playbook checkpoint "${request.stepTitle}" was ${request.status}.${request.reason ? ` Reason: ${request.reason}` : ""} This decision applies to that submitted request. Retrieve j5_playbook_current before continuing; changed work may need fresh approval.`,
+            ? `The run's persona picks were ${request.status}.${request.reason ? ` The respondent gave this reason: ${quoteText(request.reason)}` : ""} Retrieve j5_playbook_current before staffing the run.`
+            : `Playbook checkpoint "${request.stepTitle}" was ${request.status}.${request.reason ? ` The respondent gave this reason: ${quoteText(request.reason)}` : ""} This decision applies to that submitted request. Retrieve j5_playbook_current before continuing; changed work may need fresh approval.`,
           attachments: [],
           modelSelection: target.thread.modelSelection,
           dispatchMode: { type: "start_immediately" },
