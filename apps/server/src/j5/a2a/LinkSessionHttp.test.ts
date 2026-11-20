@@ -19,7 +19,8 @@ const tokens: Record<string, { readonly sessionId: string; readonly peerLink: bo
   "outside-agent": { sessionId: "auth-session:outside-agent", peerLink: false },
 };
 
-const makeHandler = (revoked: Array<string>) => {
+/** `failOnce` holds session ids whose next revocation the auth store fails. */
+const makeHandler = (revoked: Array<string>, failOnce = new Set<string>()) => {
   const auth = Layer.mock(EnvironmentAuth.EnvironmentAuth)({
     authenticateMcpClient: (request) => {
       const session = tokens[request.headers.authorization?.replace("Bearer ", "") ?? ""];
@@ -33,11 +34,13 @@ const makeHandler = (revoked: Array<string>) => {
           });
     },
     revokeSession: (sessionId) =>
-      Effect.sync(() => {
-        if (revoked.includes(sessionId)) return false;
-        revoked.push(sessionId);
-        return true;
-      }),
+      failOnce.delete(sessionId)
+        ? Effect.fail(new EnvironmentAuth.ServerAuthSessionRevocationError({ cause: "store down" }))
+        : Effect.sync(() => {
+            if (revoked.includes(sessionId)) return false;
+            revoked.push(sessionId);
+            return true;
+          }),
   });
   const routes = Layer.merge(
     linkSessionHttpRouteLayer,
@@ -60,7 +63,8 @@ const call = (method: "PUT" | "DELETE", token: string, body?: unknown) =>
 
 it("lets a link's own token say which server holds it and revoke itself, and nothing else", async () => {
   const revoked: Array<string> = [];
-  const { dispose, handler } = makeHandler(revoked);
+  const failOnce = new Set(["auth-session:home-first"]);
+  const { dispose, handler } = makeHandler(revoked, failOnce);
   try {
     assert.equal(
       (await handler(call("PUT", "home-first", { environmentId: "environment-home" }))).status,
@@ -72,6 +76,13 @@ it("lets a link's own token say which server holds it and revoke itself, and not
     );
     assert.deepStrictEqual(revoked, [], "a first claim ends nothing");
 
+    assert.equal(
+      (await handler(call("PUT", "home-renewed", { environmentId: "environment-home" }))).status,
+      500,
+      "the replaced session could not be revoked",
+    );
+    assert.deepStrictEqual(revoked, []);
+    // The replaced session is still on record, so the same claim revokes it once the store works.
     assert.equal(
       (await handler(call("PUT", "home-renewed", { environmentId: "environment-home" }))).status,
       204,

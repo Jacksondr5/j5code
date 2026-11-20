@@ -91,7 +91,8 @@ const makeServices = Effect.gen(function* () {
     } else {
       const label = resolved.success.link.label;
       const released = yield* Effect.result(sessionRequest("DELETE", resolved.success));
-      if (Result.isSuccess(released) && released.success.status === 204) {
+      // A 401 means the token is dead already: revoked there by hand, or with that server's side.
+      if (Result.isSuccess(released) && [204, 401].includes(released.success.status)) {
         sessionRevoked = true;
       } else if (Result.isSuccess(released) && released.success.status === 404) {
         detail = `${label} runs a version that cannot end a link's session when asked.`;

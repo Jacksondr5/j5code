@@ -37,40 +37,47 @@ const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
 
-  const revokeRows = Effect.fn("j5.a2a.linkSessions.revokeRows")(function* (
+  /** A session's record goes only once it is revoked, so a revocation that fails can be tried again. */
+  const revokeAndForget = Effect.fn("j5.a2a.linkSessions.revokeAndForget")(function* (
+    sessionId: string,
+  ) {
+    const revoked = yield* serverAuth.revokeSession(AuthSessionId.make(sessionId));
+    yield* sql`DELETE FROM j5_link_session WHERE session_id = ${sessionId}`;
+    return revoked;
+  });
+
+  const revokeEach = Effect.fn("j5.a2a.linkSessions.revokeEach")(function* (
     rows: ReadonlyArray<{ readonly session_id: string }>,
   ) {
     let revoked = 0;
-    for (const row of rows) {
-      if (yield* serverAuth.revokeSession(AuthSessionId.make(row.session_id))) revoked += 1;
-    }
+    for (const row of rows) if (yield* revokeAndForget(row.session_id)) revoked += 1;
     return revoked;
   });
 
   return LinkSessionService.of({
     claim: Effect.fn("j5.a2a.linkSessions.claim")(function* (input) {
       const now = DateTime.formatIso(yield* DateTime.now);
-      const replaced = yield* sql<{ readonly session_id: string }>`
-        DELETE FROM j5_link_session
-        WHERE environment_id = ${input.environmentId} AND session_id <> ${input.sessionId}
-        RETURNING session_id
-      `;
       yield* sql`
         INSERT INTO j5_link_session (session_id, environment_id, claimed_at)
         VALUES (${input.sessionId}, ${input.environmentId}, ${now})
         ON CONFLICT (session_id) DO UPDATE SET environment_id = excluded.environment_id
       `;
-      yield* revokeRows(replaced);
+      yield* revokeEach(
+        yield* sql<{ readonly session_id: string }>`
+          SELECT session_id FROM j5_link_session
+          WHERE environment_id = ${input.environmentId} AND session_id <> ${input.sessionId}
+        `,
+      );
     }),
     release: Effect.fn("j5.a2a.linkSessions.release")(function* (sessionId) {
-      yield* sql`DELETE FROM j5_link_session WHERE session_id = ${sessionId}`;
-      yield* serverAuth.revokeSession(sessionId);
+      yield* revokeAndForget(sessionId);
     }),
     revokeFor: Effect.fn("j5.a2a.linkSessions.revokeFor")(function* (environmentId) {
-      const rows = yield* sql<{ readonly session_id: string }>`
-        DELETE FROM j5_link_session WHERE environment_id = ${environmentId} RETURNING session_id
-      `;
-      return yield* revokeRows(rows);
+      return yield* revokeEach(
+        yield* sql<{ readonly session_id: string }>`
+          SELECT session_id FROM j5_link_session WHERE environment_id = ${environmentId}
+        `,
+      );
     }),
   });
 });

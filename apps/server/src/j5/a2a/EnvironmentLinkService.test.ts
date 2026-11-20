@@ -192,6 +192,7 @@ it.effect("forgets a link after asking the other server to end its session", () 
   Effect.gen(function* () {
     const cases = [
       { name: "ended there", resolve: "linked", answer: 204, asked: true, revoked: true },
+      { name: "already ended there", resolve: "linked", answer: 401, asked: true, revoked: true },
       { name: "an older server", resolve: "linked", answer: 404, asked: true, revoked: false },
       { name: "no answer", resolve: "linked", answer: null, asked: true, revoked: false },
       {
