@@ -2,6 +2,7 @@ import { answerAttachmentSupport } from "@t3tools/client-runtime/j5/inbox";
 import { type EnvironmentId, PROVIDER_SEND_TURN_MAX_ATTACHMENTS } from "@t3tools/contracts";
 import { TextInputWrapper } from "expo-paste-input";
 import { type ReactNode, useEffect, useRef, useState } from "react";
+import { View } from "react-native";
 
 import { ComposerAttachmentStrip } from "../../components/ComposerAttachmentStrip";
 import { FilePreviewModal, type FilePreviewSource } from "../../components/FilePreviewModal";
@@ -59,11 +60,30 @@ function existingCount(target: AnswerTarget) {
   );
 }
 
-/** The composer's attach button for an answer: photos, and files where the server takes them. */
-export function AnswerAttachButton(props: {
+/**
+ * "+" and the answer's attachments, left-aligned above its box, as upstream's question card puts
+ * them. `disabled` holds the button; `sending` also holds removing an attachment.
+ */
+export function AnswerAttachRow(props: {
   readonly target: AnswerTarget;
   readonly disabled: boolean;
+  readonly sending: boolean;
 }) {
+  const support = useAnswerSupport(props.target.environmentId);
+  const attachments = useAnswerDraftAttachments(props.target);
+  if (support === null && attachments.length === 0) return null;
+  return (
+    <View className="gap-2">
+      <View className="self-start">
+        <AnswerAttachButton target={props.target} disabled={props.disabled} />
+      </View>
+      <AnswerAttachmentStrip target={props.target} disabled={props.sending} />
+    </View>
+  );
+}
+
+/** The composer's attach button for an answer: photos, and files where the server takes them. */
+function AnswerAttachButton(props: { readonly target: AnswerTarget; readonly disabled: boolean }) {
   const support = useAnswerSupport(props.target.environmentId);
   const mounted = useMounted();
   if (support === null) return null;
@@ -132,7 +152,7 @@ export function AnswerPasteTarget(props: {
 }
 
 /** The answer's attachments, each showing its upload, with a way to remove it. */
-export function AnswerAttachmentStrip(props: {
+function AnswerAttachmentStrip(props: {
   readonly target: AnswerTarget;
   readonly disabled: boolean;
 }) {

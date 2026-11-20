@@ -22,7 +22,7 @@ import {
   worktreeCleanupKey,
 } from "@t3tools/client-runtime/j5/crew-worktree-cleanup";
 import { useState } from "react";
-import { Linking, Pressable, View } from "react-native";
+import { Linking, Platform, Pressable, View } from "react-native";
 
 import { type AppSymbolName, SymbolView } from "../../components/ui/AppSymbol";
 import { AppText as Text } from "../../components/ui/AppText";
@@ -30,6 +30,8 @@ import * as Dialog from "../../components/ui/Dialog";
 import { relativeTime } from "../../lib/time";
 import { useProjects } from "../../state/entities";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { J5Card, J5CardEyebrow } from "../components/J5Card";
+import { J5CompactButton } from "../components/J5CompactButton";
 import { j5Environment } from "../state";
 import {
   decidedWorktreeCleanupSourcesAtom,
@@ -145,10 +147,10 @@ function WorktreeCleanup(props: {
 }) {
   const { item } = props;
   const [expanded, setExpanded] = useState(false);
-  const title = cleanupTitle(item);
+  const title = shownTitle(item);
   const attention = cleanupNeedsAttention(item.entries);
   return (
-    <View className="rounded-2xl border-continuous bg-card px-4 py-3">
+    <J5Card>
       <Pressable
         accessibilityRole="button"
         accessibilityState={{ expanded }}
@@ -158,7 +160,7 @@ function WorktreeCleanup(props: {
       >
         <View className="flex-row items-center gap-2">
           {item.status === "open" ? (
-            <Text className="text-xs font-t3-semibold uppercase text-foreground-muted">FYI</Text>
+            <J5CardEyebrow label="FYI" className="text-foreground-muted" />
           ) : (
             <SymbolView
               name={attention ? "exclamationmark.triangle" : "checkmark.circle.fill"}
@@ -173,7 +175,7 @@ function WorktreeCleanup(props: {
             tintColorClassName="accent-icon-muted"
           />
         </View>
-        <Text className="text-base font-t3-semibold">{title}</Text>
+        <Text className="text-base font-t3-bold">{title}</Text>
         <Text className="text-xs text-foreground-muted" numberOfLines={2}>
           {cleanupMeta(item, props.projectTitle, props.showEnvironment).join(" · ")}
         </Text>
@@ -192,9 +194,15 @@ function WorktreeCleanup(props: {
           )}
         </View>
       ) : null}
-    </View>
+    </J5Card>
   );
 }
+
+/** What was asked while it is open; once decided, what came of it. */
+const shownTitle = (item: ScopedWorktreeCleanup) =>
+  item.status === "open"
+    ? cleanupTitle(item)
+    : `Worktrees from "${item.crewName}": ${outcomeSummary(item.entries)}`;
 
 function OpenBody(props: {
   readonly item: ScopedWorktreeCleanup;
@@ -210,6 +218,8 @@ function OpenBody(props: {
   const hold = !canAnswer || props.pending;
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [showAll, setShowAll] = useState(false);
+  // Which answer is sending, so that one shows the spinner.
+  const [sent, setSent] = useState<"keep" | "remove" | null>(null);
   const { shown, hidden } = sliceCleanupRows(orderCleanupRows(item.entries), showAll);
   const buttons = cleanupButtons(selected, item.entries);
   const removeSelected = () => {
@@ -220,7 +230,10 @@ function OpenBody(props: {
       message: `Removing ${count} discards their uncommitted changes. Their branches are kept.`,
       confirmText: "Remove",
       destructive: true,
-      onConfirm: () => props.onAnswer(item, paths),
+      onConfirm: () => {
+        setSent("remove");
+        props.onAnswer(item, paths);
+      },
     });
   };
   return (
@@ -244,7 +257,7 @@ function OpenBody(props: {
               <SymbolView
                 name={picked ? "checkmark.circle.fill" : "circle"}
                 size={20}
-                tintColorClassName={picked ? "accent-icon" : "accent-icon-muted"}
+                tintColorClassName={picked ? PICKED_TINT : "accent-icon-muted"}
               />
               <EntryLines entry={entry} />
             </Pressable>
@@ -267,17 +280,29 @@ function OpenBody(props: {
       {/* Web's row: Keep all on the left, Select all and Remove on the right. Too narrow for all
           three, the pair drops to a second line together rather than running past the card. */}
       <View className="flex-row flex-wrap items-center justify-between gap-2">
-        <ActionPill label="Keep all" disabled={hold} onPress={() => props.onAnswer(item, [])} />
+        <J5CompactButton
+          label="Keep all"
+          disabled={!canAnswer}
+          loading={props.pending && sent === "keep"}
+          inactive={props.pending}
+          onPress={() => {
+            setSent("keep");
+            props.onAnswer(item, []);
+          }}
+        />
         <View className="flex-row items-center gap-2">
-          <ActionPill
+          <J5CompactButton
             label="Select all"
-            disabled={hold || buttons.selectAllDisabled}
+            disabled={!canAnswer || buttons.selectAllDisabled}
+            inactive={props.pending}
             onPress={() => setSelected(new Set(item.entries.map((entry) => entry.path)))}
           />
-          <ActionPill
-            label={props.pending ? "Removing…" : buttons.removeLabel}
+          <J5CompactButton
+            label={buttons.removeLabel}
             tone="danger"
-            disabled={hold || buttons.removeDisabled}
+            disabled={!canAnswer || buttons.removeDisabled}
+            loading={props.pending && sent === "remove"}
+            inactive={props.pending}
             onPress={removeSelected}
           />
         </View>
@@ -286,32 +311,8 @@ function OpenBody(props: {
   );
 }
 
-/** The Inbox's compact action, as seat approvals draw theirs, so three fit one row on a phone. */
-function ActionPill(props: {
-  readonly label: string;
-  readonly tone?: "danger";
-  readonly disabled: boolean;
-  readonly onPress: () => void;
-}) {
-  const [container, label] = props.disabled
-    ? ["bg-subtle-strong", "text-foreground-muted"]
-    : props.tone === "danger"
-      ? ["bg-danger", "text-danger-foreground"]
-      : ["bg-secondary", "text-secondary-foreground"];
-  return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityState={{ disabled: props.disabled }}
-      disabled={props.disabled}
-      onPress={props.onPress}
-      className={`min-h-9 justify-center rounded-full px-3 active:opacity-70 ${container}`}
-    >
-      <Text numberOfLines={1} className={`font-t3-medium text-sm ${label}`}>
-        {props.label}
-      </Text>
-    </Pressable>
-  );
-}
+// Upstream's checkbox mark: the link colour on iOS, the focus colour on Android.
+const PICKED_TINT = Platform.OS === "ios" ? "accent-primary-text" : "accent-focus";
 
 function EntryLines(props: { readonly entry: ScopedWorktreeCleanup["entries"][number] }) {
   const { entry } = props;
@@ -374,7 +375,7 @@ function ResultBody(props: {
               size={14}
               tintColorClassName={GROUP_ICON[group.outcome].tint}
             />
-            <Text className="text-xs font-t3-semibold">{group.label}</Text>
+            <Text className="text-xs font-t3-bold">{group.label}</Text>
           </View>
           {group.rows.map((entry) => {
             const reason = outcomeReason(entry);
@@ -417,12 +418,11 @@ export function DecidedCleanupRow(props: {
         project.environmentId === props.item.environmentId && project.id === props.item.projectId,
     )?.title ?? null;
   return (
-    <View className="gap-1 rounded-2xl bg-card px-4 py-3">
-      <Text className="text-sm font-t3-medium">{cleanupTitle(props.item)}</Text>
+    <J5Card className="gap-1">
+      <Text className="text-sm font-t3-medium">{shownTitle(props.item)}</Text>
       <Text className="text-xs text-foreground-muted" numberOfLines={2}>
         {cleanupMeta(props.item, projectTitle, props.showEnvironment).join(" · ")}
       </Text>
-      <Text className="text-xs text-foreground-muted">{outcomeSummary(props.item.entries)}</Text>
-    </View>
+    </J5Card>
   );
 }

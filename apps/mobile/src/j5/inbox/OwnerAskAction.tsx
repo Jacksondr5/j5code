@@ -5,7 +5,6 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import type { HumanInboxItem } from "@t3tools/contracts/j5";
 import { useRef, useState } from "react";
 
-import { Button } from "../../components/ui/Button";
 import * as Dialog from "../../components/ui/Dialog";
 import { uuidv4 } from "../../lib/uuid";
 import { appAtomRegistry } from "../../state/atom-registry";
@@ -13,18 +12,17 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { j5Environment } from "../state";
 import { inboxCountQueryAtom, readInboxSources } from "./inboxSources";
 
+export type OwnerAskActionState = NonNullable<ReturnType<typeof useOwnerAskAction>>;
+
 /**
  * The Owner's answer to an ask that carries a server record, as on web: "Allow this once" for a
- * blocked persona launch, or "Save persona" for an agent's persona draft. Shown only to an Owner;
- * a typed reply answers the ask but grants or saves nothing.
+ * blocked persona launch, or "Save persona" for an agent's persona draft. Null unless this
+ * connection is an Owner who may take it; a typed reply answers the ask but grants or saves nothing.
  */
-export function OwnerAskAction(props: {
-  readonly environmentId: EnvironmentId;
-  readonly item: Pick<HumanInboxItem, "exchangeId" | "escalation" | "personaDraft">;
-  readonly disabled: boolean;
-  readonly size?: "default" | "compact";
-}) {
-  const { environmentId, item } = props;
+export function useOwnerAskAction(
+  environmentId: EnvironmentId,
+  item: Pick<HumanInboxItem, "exchangeId" | "escalation" | "personaDraft">,
+) {
   const mayAllow = useAtomValue(j5Environment.allowPersonaOnce.permissionAtom(environmentId));
   const maySave = useAtomValue(j5Environment.savePersonaDraft.permissionAtom(environmentId));
   const allowOnce = useAtomCommand(j5Environment.allowPersonaOnce, { reportFailure: false });
@@ -55,15 +53,5 @@ export function OwnerAskAction(props: {
     setPending(false);
   };
 
-  return (
-    <Button
-      label={pending ? action.pendingLabel : action.label}
-      size={props.size}
-      loading={pending}
-      disabled={props.disabled}
-      // What it does, which web shows on hover.
-      accessibilityHint={action.detail}
-      onPress={() => void run()}
-    />
-  );
+  return { label: action.label, detail: action.detail, pending, run };
 }
