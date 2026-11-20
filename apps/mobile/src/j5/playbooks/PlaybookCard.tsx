@@ -18,7 +18,7 @@ import { AppText as Text } from "../../components/ui/AppText";
 import { useEnvironmentServerConfig, useThreadShell } from "../../state/entities";
 import { useEnvironmentQuery } from "../../state/query";
 import { useRemoteEnvironmentRuntime } from "../../state/use-remote-environment-registry";
-import { J5CardEyebrow } from "../components/J5Card";
+import { J5_CARD_CHROME, J5CardEyebrow } from "../components/J5Card";
 import { j5Environment } from "../state";
 import { usePlaybookRefresh } from "./usePlaybookRefresh";
 
@@ -149,7 +149,7 @@ export function PlaybookSteps(props: {
   const display = presentPlaybookStages(run);
   return (
     <View className="px-4 pb-3" accessibilityLabel="Playbook progress">
-      <View className="rounded-[20px] border border-foreground/15 bg-card-alt px-4 pb-2.5 pt-[5.25px]">
+      <View className={`${J5_CARD_CHROME} px-4 pb-2.5 pt-[5.25px]`}>
         <Pressable
           accessibilityRole="button"
           accessibilityState={{ expanded: true }}
