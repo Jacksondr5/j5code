@@ -677,7 +677,11 @@ it.effect.each([
 ])("configures supported emulator cameras for $name", ({ front, back, code, extra, expected }) =>
   Effect.gen(function* () {
     const result = yield* LocalDeviceHost.__testing
-      .hubEnvironment({ ANDROID_HOME: "/sdk", EXPO_DEVICE_HUB_EMULATOR_EXTRA_ARGS: extra })
+      .hubEnvironment({
+        ANDROID_HOME: "/sdk",
+        JAVA_HOME: "/jdk",
+        EXPO_DEVICE_HUB_EMULATOR_EXTRA_ARGS: extra,
+      })
       .pipe(
         Effect.provideService(HostProcess.Platform, "darwin"),
         Effect.provideService(HostProcess.UserId, 1000),
@@ -694,6 +698,92 @@ it.effect.each([
       );
     expect(result.EXPO_DEVICE_HUB_EMULATOR_EXTRA_ARGS).toBe(expected);
   }),
+);
+
+const macJbr = "/Applications/Android Studio.app/Contents/jbr/Contents/Home";
+const windowsJbr = "C:\\Program Files\\Android\\Android Studio\\jbr";
+it.effect.each([
+  {
+    name: "only the macOS java launcher",
+    platform: "darwin",
+    environment: { PATH: "/usr/bin" },
+    files: ["/usr/bin/java", `${macJbr}/bin/java`],
+    systemJdk: false,
+    expected: macJbr,
+  },
+  {
+    name: "the macOS java launcher ahead of a JDK",
+    platform: "darwin",
+    environment: { PATH: "/usr/bin:/jdk/bin" },
+    files: ["/usr/bin/java", "/jdk/bin/java", `${macJbr}/bin/java`],
+    systemJdk: false,
+    expected: macJbr,
+  },
+  {
+    name: "a macOS system JDK",
+    platform: "darwin",
+    environment: { PATH: "/usr/bin" },
+    files: ["/usr/bin/java", `${macJbr}/bin/java`],
+    systemJdk: true,
+    expected: undefined,
+  },
+  {
+    name: "a JDK on PATH",
+    platform: "darwin",
+    environment: { PATH: "/jdk/bin:/usr/bin" },
+    files: ["/jdk/bin/java", `${macJbr}/bin/java`],
+    systemJdk: false,
+    expected: undefined,
+  },
+  {
+    name: "an explicit JAVA_HOME",
+    platform: "darwin",
+    environment: { PATH: "", JAVA_HOME: "/jdk" },
+    files: [`${macJbr}/bin/java`],
+    systemJdk: false,
+    expected: "/jdk",
+  },
+  {
+    name: "Linux without Java",
+    platform: "linux",
+    environment: { HOME: "/home/u", PATH: "/usr/bin" },
+    files: ["/opt/android-studio/jbr/bin/java"],
+    systemJdk: false,
+    expected: "/opt/android-studio/jbr",
+  },
+  {
+    name: "Windows without Java",
+    platform: "win32",
+    environment: { USERPROFILE: "C:\\Users\\u", Path: "C:\\Windows" },
+    files: [`${windowsJbr}\\bin\\java.exe`],
+    systemJdk: false,
+    expected: windowsJbr,
+  },
+] as const)(
+  "gives the hub Android Studio's JDK with $name",
+  ({ platform, environment, files, systemJdk, expected }) =>
+    Effect.gen(function* () {
+      const result = yield* LocalDeviceHost.__testing
+        .hubEnvironment({ ...environment, ANDROID_HOME: "/sdk" })
+        .pipe(
+          Effect.provideService(HostProcess.Platform, platform),
+          Effect.provideService(HostProcess.UserId, 1000),
+          Effect.provideService(
+            FileSystem.FileSystem,
+            FileSystem.makeNoop({
+              exists: (file) => Effect.succeed((files as ReadonlyArray<string>).includes(file)),
+            }),
+          ),
+          Effect.provideService(ProcessRunner.ProcessRunner, {
+            run: (input) =>
+              Effect.succeed(
+                processOutput(input.command === "/usr/libexec/java_home" && systemJdk ? 0 : 1),
+              ),
+          }),
+          Effect.provide(platform === "win32" ? NodePath.layerWin32 : NodePath.layerPosix),
+        );
+      expect(result.JAVA_HOME).toBe(expected);
+    }),
 );
 
 it.effect("keeps local Android and iOS available without ffmpeg", () =>

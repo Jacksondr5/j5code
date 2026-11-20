@@ -195,6 +195,65 @@ const deviceHostEnvironment = (
     : environment;
 };
 
+// The hub runs avdmanager, a Java program, before every boot; Android Studio's JDK is on neither
+// JAVA_HOME nor PATH.
+const bundledJavaHome = Effect.fn("LocalDeviceHost.bundledJavaHome")(function* (
+  environment: NodeJS.ProcessEnv,
+) {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const platform = yield* HostProcess.Platform;
+  const windows = platform === "win32";
+  const home = environment.HOME ?? environment.USERPROFILE ?? "";
+  const java = windows ? "java.exe" : "java";
+  const exists = (file: string) => fs.exists(file).pipe(Effect.orElseSucceed(() => false));
+  const macJbr = (app: string) => path.join(app, "Contents", "jbr", "Contents", "Home");
+  const candidates =
+    platform === "darwin"
+      ? [
+          macJbr("/Applications/Android Studio.app"),
+          macJbr(path.join(home, "Applications", "Android Studio.app")),
+        ]
+      : windows
+        ? [
+            path.join(
+              environment.ProgramFiles ?? "C:\\Program Files",
+              "Android",
+              "Android Studio",
+              "jbr",
+            ),
+          ]
+        : [
+            path.join(home, ".local", "opt", "android-studio", "jbr"),
+            "/opt/android-studio/jbr",
+            "/usr/local/android-studio/jbr",
+          ];
+  let jbr: string | null = null;
+  for (const candidate of candidates) {
+    if (yield* exists(path.join(candidate, "bin", java))) {
+      jbr = candidate;
+      break;
+    }
+  }
+  if (!jbr) return null;
+  const searchPath = environment.PATH ?? environment.Path ?? "";
+  for (const directory of searchPath.split(windows ? ";" : ":")) {
+    const command = directory && path.join(directory, java);
+    if (!command || !(yield* exists(command))) continue;
+    if (platform !== "darwin" || command !== "/usr/bin/java") return null;
+    // macOS's /usr/bin/java is a launcher that fails unless a JDK is installed system-wide.
+    const runner = yield* ProcessRunner.ProcessRunner;
+    const installed = yield* runner
+      .run({ command: "/usr/libexec/java_home", args: [], timeout: Duration.seconds(5) })
+      .pipe(
+        Effect.map((result) => result.code === 0),
+        Effect.orElseSucceed(() => false),
+      );
+    return installed ? null : jbr;
+  }
+  return jbr;
+});
+
 const hubEnvironment = Effect.fn("LocalDeviceHost.hubEnvironment")(function* (
   environment: NodeJS.ProcessEnv,
 ) {
@@ -202,6 +261,10 @@ const hubEnvironment = Effect.fn("LocalDeviceHost.hubEnvironment")(function* (
   const platform = yield* HostProcess.Platform;
   const uid = yield* HostProcess.UserId;
   if (env.ANDROID_HOME) {
+    if (!env.JAVA_HOME?.trim()) {
+      const javaHome = yield* bundledJavaHome(env);
+      if (javaHome) env.JAVA_HOME = javaHome;
+    }
     const path = yield* Path.Path;
     const runner = yield* ProcessRunner.ProcessRunner;
     const emulator = path.join(
