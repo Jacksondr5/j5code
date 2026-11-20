@@ -40,7 +40,9 @@ playbook does not automatically publish it to other environments.
 
 Runs keep a copy of the procedure they started with. Editing or deleting a saved
 playbook affects future runs only. Existing runs continue from their copy, and
-completed or cancelled runs remain in history. Older runs that predate saved copies
+completed or cancelled runs remain in history. Upgrading cancels active runs created before
+saved copies were introduced. Start those runs again to continue their work.
+Older runs that predate saved copies
 show their last recorded step and any cancellation reason without a step list.
 
 On web and desktop, open **Fleet** and use its **Playbook runs** section to follow
