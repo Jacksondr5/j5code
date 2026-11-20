@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   crewApprovalSummary,
+  crewDeclinedDetail,
   crewDeclinedSummary,
   crewNoticeLines,
   isHiddenCrewNotice,
@@ -298,7 +299,7 @@ describe("crew notices in the Captain's thread", () => {
     const declined = presentCrewNotice({
       role: "user",
       createdBy: "system",
-      text: "<j5_crew_gate>\nproposal_id: p2\nkind: addition\ndecision: declined\ncrew_name: Invoice Export PR\nrequested_seats: sitter=sentry\n</j5_crew_gate>\n\nThe human declined this crew request.",
+      text: "<j5_crew_gate>\nproposal_id: p2\nkind: addition\ndecision: declined\ncrew_name: Invoice Export PR\nrequested_seats: sitter=sentry, nested-helper=\n</j5_crew_gate>\n\nThe human declined this crew request.",
     });
     expect(declined).toMatchObject({
       kind: "gate",
@@ -307,12 +308,18 @@ describe("crew notices in the Captain's thread", () => {
       crewInstanceId: null,
       crewVersion: null,
       roster: [],
-      requestedSeats: [{ seat: "sitter", agentId: "sentry" }],
+      requestedSeats: [
+        { seat: "sitter", agentId: "sentry" },
+        { seat: "nested-helper", agentId: "" },
+      ],
     });
     // A decline keeps its line: it has no seat lines, and is not hidden.
     if (declined?.kind === "gate") {
       expect(crewDeclinedSummary(declined)).toBe("Crew Invoice Export PR · seat declined");
       expect(crewNoticeLines(declined)).toEqual([]);
+      expect(crewDeclinedDetail(declined)).toBe(
+        "Requested: sitter (sentry), nested-helper\n\nThe Captain can revise the request and propose again.",
+      );
     }
     expect(
       isHiddenCrewNotice({

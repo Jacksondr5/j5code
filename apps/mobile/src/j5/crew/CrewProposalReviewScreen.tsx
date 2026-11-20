@@ -12,18 +12,20 @@ import { askWaitsForServerLine } from "@t3tools/client-runtime/j5/inbox";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import type {
   CrewProposal,
+  CrewProposalPreviewResponse,
   CrewProposalSeat,
   CrewProposalSeatRuntime,
 } from "@t3tools/contracts/j5";
 import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { useState } from "react";
-import { View } from "react-native";
+import { Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppText as Text } from "../../components/ui/AppText";
 import { Button } from "../../components/ui/Button";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { ScreenScrollView } from "../../components/ui/ScreenScrollView";
+import { cn } from "../../lib/cn";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { useEnvironmentQuery } from "../../state/query";
 import { useCanOperateThread } from "../sharing/guestAccess";
@@ -39,6 +41,41 @@ type Params = StaticScreenProps<{
 }>;
 
 const seatTitle = (seat: string) => seat[0]!.toUpperCase() + seat.slice(1);
+
+/** What the person would approve for these seats, to check a fresh preview against. */
+const runtimeShown = (
+  seats: ReadonlyArray<CrewProposalSeat>,
+  runtime: ReadonlyArray<CrewProposalSeatRuntime>,
+) => JSON.stringify(seats.map((seat) => runtime.find((row) => row.seat === seat.seat) ?? null));
+
+/** A text action in line with the copy it belongs to; unavailable reads muted, not as a pill. */
+function TextAction(props: {
+  readonly label: string;
+  readonly accessibilityLabel?: string;
+  readonly disabled?: boolean;
+  readonly onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={props.accessibilityLabel ?? props.label}
+      accessibilityState={{ disabled: Boolean(props.disabled) }}
+      disabled={props.disabled}
+      hitSlop={6}
+      onPress={props.onPress}
+      className="min-h-9 justify-center self-start active:opacity-70"
+    >
+      <Text
+        className={cn(
+          "text-sm font-t3-medium",
+          props.disabled ? "text-foreground-muted" : "text-primary-text",
+        )}
+      >
+        {props.label}
+      </Text>
+    </Pressable>
+  );
+}
 
 function SeatRow(props: {
   readonly seat: CrewProposalSeat;
@@ -84,10 +121,9 @@ function SeatRow(props: {
           </Text>
         ))}
       </View>
-      <Button
+      <TextAction
         label="Remove"
         accessibilityLabel={`Remove seat ${seat.seat}`}
-        tone="text"
         disabled={!props.removable}
         onPress={props.onRemove}
       />
@@ -109,6 +145,7 @@ function Review(props: {
   const [removed, setRemoved] = useState<ReadonlyArray<string>>([]);
   const [fullBrief, setFullBrief] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [waitingForPreview, setWaitingForPreview] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const seats = removed.reduce(removeSeat, proposal.requestedSeats);
   const preview = useCrewProposalPreview(environmentId, proposal.id, seats, !busy);
@@ -117,15 +154,11 @@ function Review(props: {
     ids.map((id) => stepTitle(playbook, id)).join(", ");
   const unowned =
     preview.data?.unownedSteps ?? (proposal.kind === "roster" ? unownedSteps(playbook, seats) : []);
-  const canApprove = props.canResolve && !busy && preview.data !== null;
+  const answering = busy || waitingForPreview;
+  // A re-preview after Remove or Restore keeps Approve as it is; only a failed preview stops it.
+  const canApprove = props.canResolve && !answering && preview.error === null;
 
-  const resolve = async (decision: "approve" | "decline") => {
-    const approvalToken = preview.data?.approvalToken;
-    if (decision === "approve" && approvalToken === undefined) return;
-    const request =
-      decision === "approve"
-        ? { proposalId: proposal.id, decision, seats, approvalToken: approvalToken! }
-        : { proposalId: proposal.id, decision };
+  const resolve = async (request: Parameters<typeof resolveCrewProposal>[1]) => {
     setBusy(true);
     setError(null);
     try {
@@ -137,6 +170,22 @@ function Review(props: {
       preview.refresh();
       setBusy(false);
     }
+  };
+  const approve = (approval: CrewProposalPreviewResponse) =>
+    resolve({
+      proposalId: proposal.id,
+      decision: "approve",
+      seats,
+      approvalToken: approval.approvalToken,
+    });
+
+  // Tapped mid-preview: wait for its token, and use it only if it previews what the person saw.
+  const approveWhenPreviewed = async () => {
+    const shown = runtimeShown(seats, preview.runtime);
+    setWaitingForPreview(true);
+    const fresh = await preview.next();
+    setWaitingForPreview(false);
+    if (fresh !== null && runtimeShown(seats, fresh.seats) === shown) await approve(fresh);
   };
 
   return (
@@ -150,9 +199,8 @@ function Review(props: {
         <Text className="text-sm text-foreground-muted" numberOfLines={fullBrief ? undefined : 2}>
           {proposal.brief}
         </Text>
-        <Button
+        <TextAction
           label={fullBrief ? "View less" : "View more"}
-          tone="text"
           onPress={() => setFullBrief((full) => !full)}
         />
         {playbook === null ? null : (
@@ -166,17 +214,22 @@ function Review(props: {
           </View>
         )}
         <View className="border-t border-separator">
-          {seats.map((seat) => (
-            <SeatRow
-              key={seat.seat}
-              seat={seat}
-              runtime={preview.runtime.find((row) => row.seat === seat.seat)}
-              runtimeLoading={preview.loading}
-              playbook={playbook}
-              removable={props.canResolve && !busy && seats.length > 1}
-              onRemove={() => setRemoved([...removed, seat.seat])}
-            />
-          ))}
+          {/* Seats wait for their runtime, so each appears in its final shape (rubric §3.6). */}
+          {preview.settled ? (
+            seats.map((seat) => (
+              <SeatRow
+                key={seat.seat}
+                seat={seat}
+                runtime={preview.runtime.find((row) => row.seat === seat.seat)}
+                runtimeLoading={preview.loading}
+                playbook={playbook}
+                removable={props.canResolve && !answering && seats.length > 1}
+                onRemove={() => setRemoved([...removed, seat.seat])}
+              />
+            ))
+          ) : (
+            <Text className="py-3 text-sm text-foreground-muted">Resolving runtime…</Text>
+          )}
         </View>
         {removedSeatSteps(proposal.requestedSeats, seats).map(({ seat, steps }) => (
           <Text key={seat} className="text-sm text-foreground-muted">
@@ -189,10 +242,9 @@ function Review(props: {
           </Text>
         ) : null}
         {removed.length > 0 ? (
-          <Button
+          <TextAction
             label="Restore removed seats"
-            tone="text"
-            disabled={busy}
+            disabled={answering}
             onPress={() => setRemoved([])}
           />
         ) : null}
@@ -218,8 +270,8 @@ function Review(props: {
           <Button
             label="Decline"
             fullWidth
-            disabled={!props.canResolve || busy}
-            onPress={() => void resolve("decline")}
+            disabled={!props.canResolve || answering}
+            onPress={() => void resolve({ proposalId: proposal.id, decision: "decline" })}
           />
         </View>
         <View className="flex-1">
@@ -227,9 +279,11 @@ function Review(props: {
             label={proposal.kind === "roster" ? "Approve Crew" : "Approve member"}
             tone="primary"
             fullWidth
-            loading={busy}
+            loading={answering}
             disabled={!canApprove}
-            onPress={() => void resolve("approve")}
+            onPress={() =>
+              void (preview.data === null ? approveWhenPreviewed() : approve(preview.data))
+            }
           />
         </View>
       </View>
@@ -246,7 +300,10 @@ export function CrewProposalReviewScreen(props: Params) {
   const permitted = useAtomValue(j5Environment.resolveCrewProposal.permissionAtom(environmentId));
   const writesToCaptain = useCanOperateThread(environmentId, threadId);
   const server = useServerConnection(environmentId);
-  const proposal = query.data?.find((candidate) => candidate.id === props.route.params.proposalId);
+  // Answered here: the page keeps it on screen while it pops, rather than reading "Already answered".
+  const [answeredHere, setAnsweredHere] = useState<CrewProposal | null>(null);
+  const proposal =
+    answeredHere ?? query.data?.find((candidate) => candidate.id === props.route.params.proposalId);
   const header = <NativeStackScreenOptions options={{ title: "Crew proposal" }} />;
   if (proposal === undefined || proposal.status !== "open") {
     return (
@@ -288,6 +345,7 @@ export function CrewProposalReviewScreen(props: Params) {
         canResolve={permitted && writesToCaptain && server.connected}
         waitsForServer={server.connected ? null : askWaitsForServerLine(server.label)}
         onResolved={() => {
+          setAnsweredHere(proposal);
           query.refresh();
           navigation.goBack();
         }}

@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 
 import {
   crewApprovalSummary,
+  crewDeclinedDetail,
   crewDeclinedSummary,
   crewNoticeLines,
   presentCrewContext,
@@ -125,9 +126,6 @@ export function renderCrewNotice(input: CrewNoticeRenderInput): ReactNode {
   const notice = presentCrewNotice(input.message);
   if (notice === null) return null;
   if (notice.kind === "gate" && notice.decision === "declined") {
-    const requested = notice.requestedSeats
-      .map((seat) => `${seat.seat} (${seat.agentId})`)
-      .join(", ");
     return (
       <J5NoticeLine
         kind="crew-declined"
@@ -135,9 +133,7 @@ export function renderCrewNotice(input: CrewNoticeRenderInput): ReactNode {
         summary={crewDeclinedSummary(notice)}
         timestampLabel={input.timestampLabel}
       >
-        <J5NoticeDetailText
-          text={`${requested.length === 0 ? "" : `Requested: ${requested}\n\n`}The Captain can revise the request and propose again.`}
-        />
+        <J5NoticeDetailText text={crewDeclinedDetail(notice)} />
       </J5NoticeLine>
     );
   }
