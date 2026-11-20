@@ -12,8 +12,6 @@ import { useAtomCommand } from "../../state/use-atom-command";
 import { j5Environment } from "../state";
 import { inboxCountQueryAtom, readInboxSources } from "./inboxSources";
 
-export type OwnerAskActionState = NonNullable<ReturnType<typeof useOwnerAskAction>>;
-
 /**
  * The Owner's answer to an ask that carries a server record, as on web: "Allow this once" for a
  * blocked persona launch, or "Save persona" for an agent's persona draft. Null unless this

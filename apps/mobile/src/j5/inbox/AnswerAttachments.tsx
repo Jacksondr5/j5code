@@ -60,24 +60,22 @@ function existingCount(target: AnswerTarget) {
   );
 }
 
-/**
- * "+" and the answer's attachments, left-aligned above its box, as upstream's question card puts
- * them. `disabled` holds the button; `sending` also holds removing an attachment.
- */
+/** "+" and the answer's attachments, left-aligned above its box, as upstream's question card puts them. */
 export function AnswerAttachRow(props: {
   readonly target: AnswerTarget;
   readonly disabled: boolean;
-  readonly sending: boolean;
+  /** Something on the card is sending: the row ignores taps but keeps its look. */
+  readonly held: boolean;
 }) {
   const support = useAnswerSupport(props.target.environmentId);
   const attachments = useAnswerDraftAttachments(props.target);
   if (support === null && attachments.length === 0) return null;
   return (
-    <View className="gap-2">
+    <View className="gap-2" pointerEvents={props.held ? "none" : "auto"}>
       <View className="self-start">
         <AnswerAttachButton target={props.target} disabled={props.disabled} />
       </View>
-      <AnswerAttachmentStrip target={props.target} disabled={props.sending} />
+      <AnswerAttachmentStrip target={props.target} disabled={props.held} />
     </View>
   );
 }

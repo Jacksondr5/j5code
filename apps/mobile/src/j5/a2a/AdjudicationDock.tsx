@@ -14,11 +14,10 @@ import { useReanimatedKeyboardAnimation } from "react-native-keyboard-controller
 import Animated, { type DerivedValue, useAnimatedStyle } from "react-native-reanimated";
 
 import { SymbolView } from "../../components/ui/AppSymbol";
-import { AppText as Text, AppTextInput as TextInput } from "../../components/ui/AppText";
+import { AppText as Text } from "../../components/ui/AppText";
 import { relativeTime } from "../../lib/time";
 import { useCrewMembership } from "../crew/crewMemberships";
-import { AnswerActionRow } from "../inbox/AnswerActionRow";
-import { AnswerAttachRow, AnswerPasteTarget } from "../inbox/AnswerAttachments";
+import { AnswerArea } from "../inbox/AnswerArea";
 import { useInboxAnswers } from "../inbox/inboxAnswers";
 import { answeredInboxSourcesAtom, openInboxSourcesAtom } from "../inbox/inboxSources";
 import { J5RecordPanel } from "../inbox/J5RecordPanel";
@@ -207,34 +206,17 @@ function CaptainAsks(props: {
               </View>
             </Animated.ScrollView>
             <View className="gap-2">
-              <AnswerAttachRow
-                target={shown}
-                disabled={!shown.sourceReady || delivering || closedText !== null}
-                sending={sending}
-              />
-              <AnswerPasteTarget target={shown} disabled={delivering}>
-                <TextInput
-                  accessibilityLabel={`Answer ${shown.intent}`}
-                  multiline
-                  placeholder="Type the answer exactly as it should be delivered"
-                  value={text}
-                  onChangeText={(value) => answers.setAnswerText(shown, value)}
-                  style={{ minHeight: 64, maxHeight: 120, textAlignVertical: "top" }}
-                />
-              </AnswerPasteTarget>
-              {error === null ? null : (
-                <Text accessibilityRole="alert" className="text-sm text-danger-foreground">
-                  {error}
-                </Text>
-              )}
-              <AnswerActionRow
+              <AnswerArea
                 key={shown.exchangeId}
                 item={shown}
+                text={text}
+                onChangeText={(value) => answers.setAnswerText(shown, value)}
+                inputStyle={{ minHeight: 64, maxHeight: 120, textAlignVertical: "top" }}
                 closedText={closedText}
                 sending={sending}
                 busy={delivering && !sending}
                 canAnswer={shown.sourceReady}
-                hasWords={text.length > 0}
+                error={error}
                 onAnswer={() => void answers.answer(shown)}
               />
             </View>

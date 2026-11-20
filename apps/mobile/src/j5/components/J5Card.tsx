@@ -5,8 +5,9 @@ import { SymbolView } from "../../components/ui/AppSymbol";
 import { AppText } from "../../components/ui/AppText";
 import { cn } from "../../lib/cn";
 
-// Upstream's question-card chrome, with the text-field border J5's cards use to stand off the sheet.
-const CARD = "rounded-[20px] border-continuous border border-input-border bg-card-alt p-4";
+// Upstream's question-card chrome, with an edge derived from the text colour so a J5 card stands
+// off the sheet on every theme.
+const CARD = "rounded-[20px] border border-foreground/15 bg-card-alt p-4";
 
 /** A J5 card: upstream's question-card chrome around J5's own compact content. */
 export function J5Card(props: { readonly children: ReactNode; readonly className?: string }) {

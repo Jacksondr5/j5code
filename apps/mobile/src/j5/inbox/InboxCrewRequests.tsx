@@ -108,6 +108,8 @@ function SeatApproval(props: {
         <Pressable
           accessibilityRole="link"
           accessibilityLabel={`Open ${request.threadTitle}`}
+          // Held, but not dimmed, while an answer sends.
+          disabled={responding !== null}
           hitSlop={6}
           onPress={() =>
             openLinkedThread({

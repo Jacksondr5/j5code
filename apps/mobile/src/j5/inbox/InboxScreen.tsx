@@ -4,7 +4,6 @@ import {
   mergeNativeQuestionInboxSources,
 } from "@t3tools/client-runtime/j5/crew-inbox-requests";
 import {
-  answeredByLine,
   askWaitsForServerLine,
   closedLine,
   j5SourceNotice,
@@ -27,7 +26,7 @@ import Animated from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { SymbolView } from "../../components/ui/AppSymbol";
-import { AppText as Text, AppTextInput as TextInput } from "../../components/ui/AppText";
+import { AppText as Text } from "../../components/ui/AppText";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { Notice } from "../../components/ui/Notice";
 import { useOpenLinkedThread } from "../../features/threads/useOpenLinkedThread";
@@ -38,8 +37,7 @@ import { j5Sharing } from "../sharing/guestAccess";
 import { SenderMarkdown } from "../artifacts/WorkspaceMarkdown";
 import { J5Card, J5CardEyebrow, J5LinkCard } from "../components/J5Card";
 import { j5Environment } from "../state";
-import { AnswerActionRow } from "./AnswerActionRow";
-import { AnswerAttachRow, AnswerPasteTarget } from "./AnswerAttachments";
+import { AnswerArea } from "./AnswerArea";
 import { type ClosedItem, useInboxAnswers } from "./inboxAnswers";
 import { AgentQuestionsSection, SeatApprovalsSection } from "./InboxCrewRequests";
 import {
@@ -343,33 +341,18 @@ function InboxItem(props: {
               {askWaitsForServerLine(item.environmentLabel)}
             </Text>
           ) : (
-            <>
-              <AnswerAttachRow
-                target={item}
-                disabled={!canAnswer || props.anyDelivering || closedText !== null}
-                sending={props.delivering}
-              />
-              <AnswerPasteTarget target={item} disabled={props.delivering}>
-                <TextInput
-                  accessibilityLabel={`Answer ${item.intent}`}
-                  multiline
-                  placeholder="Type the answer exactly as it should be delivered"
-                  value={props.answerText}
-                  onChangeText={props.onChangeAnswer}
-                  style={{ minHeight: 96, textAlignVertical: "top" }}
-                />
-              </AnswerPasteTarget>
-              <AnswerActionRow
-                item={item}
-                leading={<OpenSenderThread item={item} />}
-                closedText={closedText}
-                sending={props.delivering}
-                busy={props.anyDelivering && !props.delivering}
-                canAnswer={canAnswer}
-                hasWords={props.answerText.length > 0}
-                onAnswer={props.onAnswer}
-              />
-            </>
+            <AnswerArea
+              item={item}
+              text={props.answerText}
+              onChangeText={props.onChangeAnswer}
+              inputStyle={{ minHeight: 96, textAlignVertical: "top" }}
+              leading={<OpenSenderThread item={item} />}
+              closedText={closedText}
+              sending={props.delivering}
+              busy={props.anyDelivering && !props.delivering}
+              canAnswer={canAnswer}
+              onAnswer={props.onAnswer}
+            />
           )}
           {props.error === null ? null : (
             <Text accessibilityRole="alert" className="text-sm text-danger-foreground">
@@ -482,8 +465,14 @@ function AnsweredItem(props: {
 }) {
   const { item } = props;
   const openLinkedThread = useOpenLinkedThread();
-  const answeredBy = answeredByLine(item.answeredBy, useOwnName(item.environmentId));
-  const when = item.terminalAt ? `answered ${relativeTime(item.terminalAt)}` : "answered";
+  const ownName = useOwnName(item.environmentId);
+  const answerer =
+    item.answeredBy === null || item.answeredBy === undefined
+      ? null
+      : item.answeredBy === ownName
+        ? "you"
+        : item.answeredBy;
+  const answered = answerer === null ? "answered" : `answered by ${answerer}`;
   const { senderThreadId } = item;
   return (
     // The whole card opens the sender's thread; offline, or with the sender gone, it is inert.
@@ -507,7 +496,7 @@ function AnsweredItem(props: {
         numberOfLines={1}
       />
       <Text className="text-xs text-foreground-muted">
-        {answeredBy === null ? when : `${when} · ${answeredBy}`}
+        {item.terminalAt ? `${answered} · ${relativeTime(item.terminalAt)}` : answered}
       </Text>
       {item.connected && senderThreadId === null ? (
         <Text className="text-xs text-foreground-muted">The sender is no longer in the roster</Text>
