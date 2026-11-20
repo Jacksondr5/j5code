@@ -4,7 +4,6 @@ import {
   artifactPreviewKind,
 } from "@t3tools/client-runtime/j5/artifacts";
 import type { ArtifactContent, ArtifactEntry, EnvironmentId, ProjectId } from "@t3tools/contracts";
-import { useHeaderHeight } from "@react-navigation/elements";
 import { StackActions, useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { useState } from "react";
 import { Platform, RefreshControl, View } from "react-native";
@@ -22,6 +21,7 @@ import { fileRoutePathSegments } from "../../features/files/filePath";
 import { ThreadMarkdownImageView } from "../../features/threads/ThreadMarkdownImage";
 import { copyTextWithHaptic } from "../../lib/copyTextWithHaptic";
 import { relativeTime } from "../../lib/time";
+import { useNativeColumnLayoutMetrics } from "../../native/native-layout-metrics";
 import { useThreadSelection } from "../../state/use-thread-selection";
 import { listArtifacts, readArtifact } from "./artifactClient";
 import { useServerRead } from "./serverRead";
@@ -217,15 +217,13 @@ export function ThreadArtifactScreen(props: ThreadArtifactParams) {
         path: path!,
       }),
   );
-  const headerHeight = useHeaderHeight();
+  const columnMetrics = useNativeColumnLayoutMetrics();
   const insets = useSafeAreaInsets();
   const [viewportHeight, setViewportHeight] = useState(0);
   // The HTML frame fills the room the scroll view shows, so it scrolls inside without the page
   // scrolling first. iOS's header floats over the scroll view; Android's AppBar sits above it.
-  const frameHeight = Math.max(
-    320,
-    viewportHeight - (Platform.OS === "ios" ? headerHeight : 0) - insets.bottom - 28,
-  );
+  const headerInset = Platform.OS === "ios" ? (columnMetrics?.safeArea.top ?? insets.top) : 0;
+  const frameHeight = Math.max(320, viewportHeight - headerInset - insets.bottom - 28);
   const fullPath = `artifacts/${path ?? ""}`;
   const directory = fullPath.slice(0, fullPath.lastIndexOf("/"));
   return (
