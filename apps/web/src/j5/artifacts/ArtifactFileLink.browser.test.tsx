@@ -82,6 +82,34 @@ describe("ChatMarkdown artifact references", () => {
     expect(openFile).not.toHaveBeenCalled();
   });
 
+  it("opens an artifact reference through onOpenArtifact where no thread panel is on screen", async () => {
+    workspaceSearch.mockReset().mockResolvedValue(AsyncResult.success({ entries: [] }));
+    filesystemMetadata.mockReset().mockResolvedValue(AsyncResult.success({ entries: [null] }));
+    using openArtifact = vi
+      .spyOn(useRightPanelStore.getState(), "openArtifact")
+      .mockImplementation(() => {});
+    const onOpenArtifact = vi.fn<(path: string) => void>();
+    for (const ref of [threadRef, undefined]) {
+      onOpenArtifact.mockReset();
+      await using screen = await render(
+        <ChatMarkdown
+          cwd="/tmp/project"
+          environmentId={threadRef.environmentId}
+          text="[Plan](artifacts/plan.md)"
+          threadRef={ref}
+          onOpenArtifact={onOpenArtifact}
+        />,
+      );
+      const link = screen.container.querySelector<HTMLAnchorElement>("a[data-artifact]");
+      expect(link).not.toBeNull();
+
+      await act(async () => link!.click());
+
+      expect(onOpenArtifact).toHaveBeenCalledExactlyOnceWith("plan.md");
+    }
+    expect(openArtifact).not.toHaveBeenCalled();
+  });
+
   it("copies an artifact reference as its logical path, not a workspace path", async () => {
     workspaceSearch.mockReset().mockResolvedValue(AsyncResult.success({ entries: [] }));
     filesystemMetadata.mockReset().mockResolvedValue(AsyncResult.success({ entries: [null] }));

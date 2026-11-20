@@ -204,6 +204,17 @@ function InboxMessage({ item }: { readonly item: HumanInboxItem }) {
         worktreePath: thread?.worktreePath ?? null,
       })
     : undefined;
+  const navigate = useNavigate();
+  // The Inbox shows no thread panel, so artifact links open the Artifacts page.
+  const openArtifact = (path: string) =>
+    void navigate({
+      to: "/artifacts",
+      search: {
+        environmentId: item.environmentId,
+        projectId: ProjectId.make(item.projectId),
+        path,
+      },
+    });
   const markdown = (text: string) => (
     <ChatMarkdown
       className="max-w-[72ch] text-sm text-foreground/90"
@@ -212,6 +223,7 @@ function InboxMessage({ item }: { readonly item: HumanInboxItem }) {
       lineBreaks={shouldPreserveAssistantLineBreaks(text)}
       text={text}
       threadRef={threadRef ?? undefined}
+      onOpenArtifact={openArtifact}
     />
   );
   return (

@@ -114,7 +114,7 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
   };
 
   const handleOpenInFilePreview = () => {
-    if (threadRef && panelPath) {
+    if ((threadRef || artifact) && panelPath) {
       onOpenInPanel(panelPath, line);
       return;
     }
@@ -314,7 +314,8 @@ export const MarkdownFileLink = memo(function MarkdownFileLink({
 
   const canOpenInEditor = onOpen !== undefined;
   const canOpenInBrowser = onOpenInBrowser !== undefined;
-  const canOpenInPanel = threadRef !== undefined && Boolean(panelPath);
+  // J5 (case 33): an artifact link has a panelPath only when ChatMarkdown can open it.
+  const canOpenInPanel = (threadRef !== undefined || artifact) && Boolean(panelPath);
   const hasPrimaryAction = hasMarkdownFilePrimaryAction({
     canOpenInEditor,
     canOpenInBrowser,
