@@ -45,6 +45,8 @@ Four points were left open on 2026-11-09. The definition answers them, for Jacks
 - **The route for messages.** Unchanged: chosen by the check when the pair is linked, and changed only by removing the link and linking again.
 - **The command line.** `j5 environment link` and `j5 a2a peer` stay as they are, for a pair no one client can manage. The first makes a link with its actions part alone; the second makes one with both directions at Messages only.
 
+Jackson, on reading the definition the same day: adding actions to a pair that is already peered "should be a simple UX, not something that requires a repair". It is one step, raising a level on the pair's row.
+
 ## Related
 
 #925, the comparison this replaced. #951, the line. #956 and #957, which need both parts of a link. #1097, linking from mobile.
