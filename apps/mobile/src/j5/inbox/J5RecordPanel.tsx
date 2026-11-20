@@ -10,7 +10,7 @@ import { AppText as Text } from "../../components/ui/AppText";
  */
 export function J5RecordPanel(props: { readonly text: string }) {
   return (
-    <View className="gap-1 rounded-lg bg-subtle px-3 py-2">
+    <View className="gap-1 rounded-2xl border border-border bg-grouped-card px-3.5 py-3">
       <Text className="text-xs font-t3-medium text-foreground-muted">Recorded by J5</Text>
       {splitRecordText(props.text).map((part, index) =>
         part.kind === "block" ? (

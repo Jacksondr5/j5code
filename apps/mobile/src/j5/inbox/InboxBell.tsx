@@ -35,7 +35,7 @@ export function InboxBell() {
           pointerEvents="none"
           className="absolute right-1 top-1 min-w-4 items-center justify-center rounded-full bg-primary px-1"
         >
-          <Text className="text-[10px] font-t3-semibold leading-4 text-primary-foreground">
+          <Text className="text-[10px] font-t3-bold leading-4 text-primary-foreground">
             {badge}
           </Text>
         </View>

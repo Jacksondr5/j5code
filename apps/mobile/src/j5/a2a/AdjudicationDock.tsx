@@ -7,24 +7,20 @@ import {
 } from "@t3tools/client-runtime/j5/adjudication-dock";
 import { closedLine, mergeHumanInboxSources } from "@t3tools/client-runtime/j5/inbox";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { scopedInboxItemKey } from "@t3tools/contracts/j5";
 import { useState } from "react";
 import { type LayoutChangeEvent, Pressable, View } from "react-native";
 import { useReanimatedKeyboardAnimation } from "react-native-keyboard-controller";
 import Animated, { type DerivedValue, useAnimatedStyle } from "react-native-reanimated";
 
 import { SymbolView } from "../../components/ui/AppSymbol";
-import { AppText as Text, AppTextInput as TextInput } from "../../components/ui/AppText";
-import { Button } from "../../components/ui/Button";
+import { AppText as Text } from "../../components/ui/AppText";
 import { relativeTime } from "../../lib/time";
 import { useCrewMembership } from "../crew/crewMemberships";
-import {
-  AnswerAttachButton,
-  AnswerAttachmentStrip,
-  AnswerPasteTarget,
-} from "../inbox/AnswerAttachments";
+import { AnswerArea } from "../inbox/AnswerArea";
 import { useInboxAnswers } from "../inbox/inboxAnswers";
 import { answeredInboxSourcesAtom, openInboxSourcesAtom } from "../inbox/inboxSources";
-import { OwnerAskAction } from "../inbox/OwnerAskAction";
+import { J5RecordPanel } from "../inbox/J5RecordPanel";
 import { j5Sharing } from "../sharing/guestAccess";
 import { SenderMarkdown } from "../artifacts/WorkspaceMarkdown";
 import { j5Environment } from "../state";
@@ -139,6 +135,7 @@ function CaptainAsks(props: {
       : closedLine({ ...closed, ownName: access?.kind === "person" ? access.name : null });
   const text = answers.answerText(shown);
   const delivering = answers.pendingKey !== null;
+  const sending = answers.pendingKey === scopedInboxItemKey(shown);
   const error = answers.errorFor(shown);
   const markdown = (value: string) => (
     <SenderMarkdown
@@ -198,15 +195,7 @@ function CaptainAsks(props: {
               <View className="gap-2">
                 {markdown(shown.message)}
                 {[shown.escalation?.summary, shown.personaDraft?.summary].map((record) =>
-                  record === undefined ? null : (
-                    // J5's own record, apart from the agent's words; plain text, so they can't alter it.
-                    <View key={record} className="gap-1 rounded-lg bg-subtle px-3 py-2">
-                      <Text className="text-xs font-t3-medium text-foreground-muted">
-                        Recorded by J5
-                      </Text>
-                      <Text className="text-sm">{record}</Text>
-                    </View>
-                  ),
+                  record === undefined ? null : <J5RecordPanel key={record} text={record} />,
                 )}
                 {shown.followUps?.map((followUp) => (
                   <View className="gap-1" key={followUp.messageId}>
@@ -217,51 +206,19 @@ function CaptainAsks(props: {
               </View>
             </Animated.ScrollView>
             <View className="gap-2">
-              <AnswerPasteTarget target={shown} disabled={delivering}>
-                <TextInput
-                  accessibilityLabel={`Answer ${shown.intent}`}
-                  multiline
-                  placeholder="Type the answer exactly as it should be delivered"
-                  value={text}
-                  onChangeText={(value) => answers.setAnswerText(shown, value)}
-                  style={{ minHeight: 64, maxHeight: 120, textAlignVertical: "top" }}
-                />
-              </AnswerPasteTarget>
-              <AnswerAttachmentStrip target={shown} disabled={delivering} />
-              {error === null ? null : (
-                <Text accessibilityRole="alert" className="text-sm text-danger-foreground">
-                  {error}
-                </Text>
-              )}
-              <View className="shrink-0 flex-row items-center gap-2">
-                <AnswerAttachButton
-                  target={shown}
-                  disabled={!shown.sourceReady || delivering || closedText !== null}
-                />
-                <View className="flex-1" />
-                {closedText !== null ? (
-                  <Text className="text-sm text-foreground-muted">{closedText}</Text>
-                ) : (
-                  <>
-                    <OwnerAskAction
-                      // One per ask, so a request id never carries to the next.
-                      key={shown.exchangeId}
-                      environmentId={environmentId}
-                      item={shown}
-                      disabled={!shown.sourceReady || delivering}
-                      size="compact"
-                    />
-                    <Button
-                      label={delivering ? "Delivering…" : "Answer"}
-                      tone="primary"
-                      size="compact"
-                      loading={delivering}
-                      disabled={!shown.sourceReady || delivering || text.length === 0}
-                      onPress={() => void answers.answer(shown)}
-                    />
-                  </>
-                )}
-              </View>
+              <AnswerArea
+                key={shown.exchangeId}
+                item={shown}
+                text={text}
+                onChangeText={(value) => answers.setAnswerText(shown, value)}
+                inputStyle={{ minHeight: 64, maxHeight: 120, textAlignVertical: "top" }}
+                closedText={closedText}
+                sending={sending}
+                busy={delivering && !sending}
+                canAnswer={shown.sourceReady}
+                error={error}
+                onAnswer={() => void answers.answer(shown)}
+              />
             </View>
           </View>
         ) : null}

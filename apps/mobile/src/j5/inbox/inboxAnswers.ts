@@ -148,6 +148,9 @@ export function useInboxAnswers(input: {
   }, [openSources]);
 
   const [pendingKey, setPendingKey] = useState<string | null>(null);
+  // The words being sent stay in the box until the re-read takes the card away. The draft itself
+  // is cleared on acceptance, so the closing ask is not kept as one answered elsewhere (AC17).
+  const [sentText, setSentText] = useState<string | null>(null);
   // An error belongs to the ask that was being answered: on a phone it is shown by that ask's
   // answer box, which is where the person is looking.
   const [error, setError] = useState<{ readonly key: string; readonly message: string } | null>(
@@ -166,6 +169,7 @@ export function useInboxAnswers(input: {
     }
     const keep = keepForPersonScopes(personScopes);
     for (const key of attempts.current.keys()) if (!keep(key)) attempts.current.delete(key);
+    setSentText(message);
     await submitHumanInboxAnswer({
       item,
       message,
@@ -173,7 +177,10 @@ export function useInboxAnswers(input: {
       attempts: attempts.current,
       randomUUID: uuidv4,
       send: sendAnswer,
-      refresh: refreshAfterAnswer,
+      // Called once the server took the answer. Its attachments, like its words, stay on the card
+      // until the re-read takes the card away.
+      refresh: (environmentId) =>
+        refreshAfterAnswer(environmentId).finally(() => clearAnswerAttachments(item)),
       notifyChanged: notifyCountChanged,
       onAccepted: () => {
         setAnswers((current) => {
@@ -181,7 +188,6 @@ export function useInboxAnswers(input: {
           delete next[itemKey];
           return next;
         });
-        clearAnswerAttachments(item);
       },
       setPendingExchangeId: setPendingKey,
       setError: (message) => setError(message === null ? null : { key: itemKey, message }),
@@ -191,7 +197,10 @@ export function useInboxAnswers(input: {
   return {
     shownItems,
     closedOf,
-    answerText: (item: PresentedHumanInboxItem) => answers[scopedInboxItemKey(item)] ?? "",
+    answerText: (item: PresentedHumanInboxItem) => {
+      const key = scopedInboxItemKey(item);
+      return answers[key] ?? (key === pendingKey ? (sentText ?? "") : "");
+    },
     setAnswerText: (item: PresentedHumanInboxItem, text: string) => {
       const key = scopedInboxItemKey(item);
       setAnswers((current) => ({ ...current, [key]: text }));

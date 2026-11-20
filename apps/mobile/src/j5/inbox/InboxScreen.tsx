@@ -4,7 +4,6 @@ import {
   mergeNativeQuestionInboxSources,
 } from "@t3tools/client-runtime/j5/crew-inbox-requests";
 import {
-  answeredByLine,
   askWaitsForServerLine,
   closedLine,
   j5SourceNotice,
@@ -24,19 +23,21 @@ import { type ComponentProps, forwardRef, useCallback, useState } from "react";
 import { Platform, Pressable, RefreshControl, View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import Animated from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { SymbolView } from "../../components/ui/AppSymbol";
-import { AppText as Text, AppTextInput as TextInput } from "../../components/ui/AppText";
-import { Button } from "../../components/ui/Button";
+import { AppText as Text } from "../../components/ui/AppText";
 import { EmptyState } from "../../components/ui/EmptyState";
+import { Notice } from "../../components/ui/Notice";
 import { useOpenLinkedThread } from "../../features/threads/useOpenLinkedThread";
 import { relativeTime } from "../../lib/time";
 import { NativeScrollViewMarker } from "../../native/NativeScrollViewMarker";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { j5Sharing } from "../sharing/guestAccess";
 import { SenderMarkdown } from "../artifacts/WorkspaceMarkdown";
+import { J5Card, J5CardEyebrow, J5LinkCard } from "../components/J5Card";
 import { j5Environment } from "../state";
-import { AnswerAttachButton, AnswerAttachmentStrip, AnswerPasteTarget } from "./AnswerAttachments";
+import { AnswerArea } from "./AnswerArea";
 import { type ClosedItem, useInboxAnswers } from "./inboxAnswers";
 import { AgentQuestionsSection, SeatApprovalsSection } from "./InboxCrewRequests";
 import {
@@ -45,7 +46,6 @@ import {
   WorktreeCleanupsSection,
 } from "./InboxWorktreeCleanups";
 import { J5RecordPanel } from "./J5RecordPanel";
-import { OwnerAskAction } from "./OwnerAskAction";
 import {
   answeredInboxQueryAtom,
   answeredInboxSourcesAtom,
@@ -135,27 +135,30 @@ export function InboxScreen() {
   const [pullToRefresh] = useState(() =>
     createPullRefresh({ read: readInboxSources, onChange: setRefreshing }),
   );
-  const notices = [
-    ...new Set(
-      [
-        ...openSources.sources,
-        ...answeredSources.sources,
-        ...crewSources.sources,
-        ...cleanupSources.sources,
-        ...decidedCleanupSources.sources,
-      ].flatMap((source) => {
-        const notice = j5SourceNotice(source);
-        return notice === null ? [] : [notice];
-      }),
-    ),
-  ];
+  // A connected server whose read is still on its way gets no notice: it would show and leave
+  // again within a frame or two as the Inbox opens.
+  const notices = new Map(
+    [
+      ...openSources.sources,
+      ...answeredSources.sources,
+      ...crewSources.sources,
+      ...cleanupSources.sources,
+      ...decidedCleanupSources.sources,
+    ].flatMap((source) => {
+      const notice = source.status === "loading" ? null : j5SourceNotice(source);
+      return notice === null ? [] : [[notice, source.status === "offline"] as const];
+    }),
+  );
+  const insets = useSafeAreaInsets();
   const content = (
     <>
       <NativeStackScreenOptions options={{ title: "Inbox" }} />
-      {notices.map((notice) => (
-        <Text key={notice} className="text-sm text-foreground-muted">
-          {notice}
-        </Text>
+      {[...notices].map(([notice, offline]) => (
+        <Notice
+          key={notice}
+          message={notice}
+          icon={offline ? "wifi.slash" : "exclamationmark.triangle"}
+        />
       ))}
       <SeatApprovalsSection requests={seatApprovals} />
       <AgentQuestionsSection questions={agentQuestions} showEnvironment={showEnvironment} />
@@ -219,13 +222,12 @@ export function InboxScreen() {
       bottomOffset={140}
       contentInsetAdjustmentBehavior="automatic"
       className="flex-1 bg-sheet"
-      contentContainerClassName="gap-4 px-4 py-4"
-      // Android's content width cap, as upstream's ScreenScrollView applies it.
-      contentContainerStyle={
-        Platform.OS === "android"
-          ? { width: "100%", maxWidth: 720, alignSelf: "center" }
-          : undefined
-      }
+      contentContainerClassName="gap-4 px-5 pt-4"
+      contentContainerStyle={{
+        // Upstream's page bottom padding, and Android's content width cap as ScreenScrollView applies it.
+        paddingBottom: Math.max(insets.bottom, 18) + 18,
+        ...(Platform.OS === "android" ? { width: "100%", maxWidth: 720, alignSelf: "center" } : {}),
+      }}
       keyboardShouldPersistTaps="handled"
       refreshControl={refreshControl}
       {...(Platform.OS === "ios" ? { ScrollViewComponent: InboxScrollView } : {})}
@@ -253,6 +255,7 @@ function ItemMeta(props: {
   readonly labels: SenderLabels;
   readonly showEnvironment: boolean;
   readonly trailing?: string | null;
+  readonly numberOfLines?: number;
 }) {
   const { item } = props;
   const parts = [
@@ -265,7 +268,7 @@ function ItemMeta(props: {
     props.trailing ?? null,
   ].filter((part): part is string => part !== null && part !== "");
   return (
-    <Text className="text-xs text-foreground-muted" numberOfLines={2}>
+    <Text className="text-xs text-foreground-muted" numberOfLines={props.numberOfLines ?? 2}>
       {parts.join(" · ")}
     </Text>
   );
@@ -295,7 +298,7 @@ function InboxItem(props: {
   const canAnswer = item.sourceReady && mayAnswer;
   const closedText = props.closed === undefined ? null : closedLine({ ...props.closed, ownName });
   return (
-    <View className="rounded-2xl border-continuous bg-card px-4 py-3">
+    <J5Card>
       <Pressable
         accessibilityRole="button"
         accessibilityState={{ expanded }}
@@ -304,9 +307,7 @@ function InboxItem(props: {
         className="gap-1"
       >
         <View className="flex-row items-center gap-2">
-          <Text className={`text-xs font-t3-semibold uppercase ${urgency.className}`}>
-            {urgency.label}
-          </Text>
+          <J5CardEyebrow label={urgency.label} className={urgency.className} />
           <View className="flex-1" />
           <SymbolView
             name={expanded ? "chevron.down" : "chevron.right"}
@@ -314,7 +315,7 @@ function InboxItem(props: {
             tintColorClassName="accent-icon-muted"
           />
         </View>
-        <Text className="text-base font-t3-semibold">{item.intent}</Text>
+        <Text className="text-base font-t3-bold">{item.intent}</Text>
         <ItemMeta
           item={item}
           labels={props.labels}
@@ -340,51 +341,18 @@ function InboxItem(props: {
               {askWaitsForServerLine(item.environmentLabel)}
             </Text>
           ) : (
-            <>
-              <AnswerPasteTarget target={item} disabled={props.delivering}>
-                <TextInput
-                  accessibilityLabel={`Answer ${item.intent}`}
-                  multiline
-                  placeholder="Type the answer exactly as it should be delivered"
-                  value={props.answerText}
-                  onChangeText={props.onChangeAnswer}
-                  style={{ minHeight: 96, textAlignVertical: "top" }}
-                />
-              </AnswerPasteTarget>
-              <AnswerAttachmentStrip target={item} disabled={props.delivering} />
-              <View className="flex-row flex-wrap items-center justify-between gap-2">
-                <View className="flex-row items-center gap-1">
-                  <AnswerAttachButton
-                    target={item}
-                    disabled={!canAnswer || props.delivering || closedText !== null}
-                  />
-                  <OpenSenderThread item={item} />
-                </View>
-                {closedText !== null ? (
-                  <Text className="text-sm text-foreground-muted">{closedText}</Text>
-                ) : (
-                  <View className="flex-row flex-wrap items-center justify-end gap-2">
-                    <OwnerAskAction
-                      environmentId={item.environmentId}
-                      item={item}
-                      disabled={!item.sourceReady || props.anyDelivering}
-                    />
-                    <Button
-                      label={props.delivering ? "Delivering…" : "Answer"}
-                      tone="primary"
-                      loading={props.delivering}
-                      disabled={!canAnswer || props.anyDelivering || props.answerText.length === 0}
-                      accessibilityHint={
-                        canAnswer
-                          ? undefined
-                          : "This server is unavailable or this connection is read-only."
-                      }
-                      onPress={props.onAnswer}
-                    />
-                  </View>
-                )}
-              </View>
-            </>
+            <AnswerArea
+              item={item}
+              text={props.answerText}
+              onChangeText={props.onChangeAnswer}
+              inputStyle={{ minHeight: 96, textAlignVertical: "top" }}
+              leading={<OpenSenderThread item={item} />}
+              closedText={closedText}
+              sending={props.delivering}
+              busy={props.anyDelivering && !props.delivering}
+              canAnswer={canAnswer}
+              onAnswer={props.onAnswer}
+            />
           )}
           {props.error === null ? null : (
             <Text accessibilityRole="alert" className="text-sm text-danger-foreground">
@@ -393,7 +361,7 @@ function InboxItem(props: {
           )}
         </View>
       ) : null}
-    </View>
+    </J5Card>
   );
 }
 
@@ -428,9 +396,10 @@ function OpenSenderThread(props: { readonly item: PresentedHumanInboxItem }) {
           threadId: item.senderThreadId,
         })
       }
+      className="min-h-9 shrink justify-center active:opacity-70"
     >
       <Text
-        className={`font-t3-medium text-sm ${available ? "text-foreground-secondary" : "text-foreground-muted"}`}
+        className={`font-t3-medium text-sm ${available ? "text-primary-text" : "text-foreground-muted"}`}
       >
         {available
           ? "Open thread"
@@ -495,18 +464,43 @@ function AnsweredItem(props: {
   readonly showEnvironment: boolean;
 }) {
   const { item } = props;
-  const answeredBy = answeredByLine(item.answeredBy, useOwnName(item.environmentId));
-  const when = item.terminalAt ? `answered ${relativeTime(item.terminalAt)}` : "answered";
+  const openLinkedThread = useOpenLinkedThread();
+  const ownName = useOwnName(item.environmentId);
+  const answerer =
+    item.answeredBy === null || item.answeredBy === undefined
+      ? null
+      : item.answeredBy === ownName
+        ? "you"
+        : item.answeredBy;
+  const answered = answerer === null ? "answered" : `answered by ${answerer}`;
+  const { senderThreadId } = item;
   return (
-    <View className="gap-1 rounded-2xl bg-card px-4 py-3">
+    // The whole card opens the sender's thread; offline, or with the sender gone, it is inert.
+    <J5LinkCard
+      accessibilityLabel={`Open ${item.intent}`}
+      onPress={
+        item.connected && senderThreadId !== null
+          ? () =>
+              openLinkedThread({
+                environmentId: String(item.environmentId),
+                threadId: senderThreadId,
+              })
+          : null
+      }
+    >
       <Text className="text-sm font-t3-medium">{item.intent}</Text>
       <ItemMeta
         item={item}
         labels={props.labels}
         showEnvironment={props.showEnvironment}
-        trailing={answeredBy === null ? when : `${when} · ${answeredBy}`}
+        numberOfLines={1}
       />
-      <OpenSenderThread item={item} />
-    </View>
+      <Text className="text-xs text-foreground-muted">
+        {item.terminalAt ? `${answered} · ${relativeTime(item.terminalAt)}` : answered}
+      </Text>
+      {item.connected && senderThreadId === null ? (
+        <Text className="text-xs text-foreground-muted">The sender is no longer in the roster</Text>
+      ) : null}
+    </J5LinkCard>
   );
 }
