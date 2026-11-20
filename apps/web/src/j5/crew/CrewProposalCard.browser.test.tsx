@@ -503,13 +503,18 @@ it("remembers disclosure for each proposal, environment and thread when the comp
     />
   );
   await using screen = await render(gate("remember-test"), { router: false });
+  const states = () =>
+    ["proposal:1", "proposal:2"].map((id) => toggle(id).getAttribute("aria-expanded"));
   await click(toggle("proposal:1"));
-  expect(toggle("proposal:1").getAttribute("aria-expanded")).toBe("true");
-  expect(toggle("proposal:2").getAttribute("aria-expanded")).toBe("false");
+  expect(states()).toEqual(["true", "false"]);
+  await click(toggle("proposal:2"));
+  expect(states()).toEqual(["true", "true"]);
+  await click(toggle("proposal:1"));
+  expect(states()).toEqual(["false", "true"]);
   await screen.rerender(null);
   await screen.rerender(gate("remember-test"));
-  expect(toggle("proposal:1").getAttribute("aria-expanded")).toBe("true");
-  expect(toggle("proposal:2").getAttribute("aria-expanded")).toBe("false");
+  expect(states()).toEqual(["false", "true"]);
+  await click(toggle("proposal:1"));
   state.proposals = [proposal];
   await screen.rerender(gate("different-environment"));
   expect(button("Expand Crew proposal").getAttribute("aria-expanded")).toBe("false");
