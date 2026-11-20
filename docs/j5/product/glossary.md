@@ -18,9 +18,10 @@ The J5 vocabulary, in one place, so that a name used anywhere in these docs reso
 | Term                   | Gloss                                                                                                      | Owner                                                  |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------ |
 | fleet                  | All of a user's agents across every connected server — the totality, never a sub-grouping                  | [cross-device.md](cross-device.md)                     |
+| environment link       | What connects two of a person's servers: messages between their agents, and a level for actions each way   | [cross-device.md](cross-device.md)                     |
 | peer server            | Another server this server exchanges agent messages with, by mutual record ("peer" alone is another agent) | [cross-device.md](cross-device.md)                     |
 | peering, peer registry | The mutual recording of two servers as each other's peer servers, and the set of a server's peer records   | [cross-device.md](cross-device.md)                     |
-| link mode              | How a peer-server link carries messages                                                                    | [cross-device.md](cross-device.md)                     |
+| link mode              | How messages travel between two peer servers                                                               | [cross-device.md](cross-device.md)                     |
 | line                   | The connection a polling server holds open to the server it polls, which reaches it through it             | [cross-device.md](cross-device.md)                     |
 | **Crew**               | A group of agents that work one task as a unit                                                             | [features/crews.md](features/crews.md)                 |
 | **Captain**            | Any agent with Crews placed under it                                                                       | [features/crews.md](features/crews.md)                 |
