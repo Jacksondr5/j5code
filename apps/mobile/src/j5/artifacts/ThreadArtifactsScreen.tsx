@@ -56,7 +56,13 @@ function useBack(params: { readonly environmentId: string; readonly threadId: st
   const navigation = useNavigation();
   return () => {
     if (navigation.canGoBack()) navigation.goBack();
-    else navigation.dispatch(StackActions.replace("Thread", params));
+    else
+      navigation.dispatch(
+        StackActions.replace("Thread", {
+          environmentId: params.environmentId,
+          threadId: params.threadId,
+        }),
+      );
   };
 }
 
