@@ -42,6 +42,7 @@ import {
   selfContainedLayer as threadRegistrationLayer,
   ThreadRegistration,
 } from "./ThreadRegistration.ts";
+import { formatAskWithdrawInstruction } from "./EnvelopeFormatter.ts";
 import { isHumanPerson } from "./HumanPersonRegistry.ts";
 import type { PersonAccessStorageError } from "../sharing/PersonAccess.ts";
 import { SharedThreads, layer as sharedThreadsLayer } from "../sharing/SharedThreads.ts";
@@ -1341,7 +1342,17 @@ const rawLayer: Layer.Layer<
         ),
       );
       yield* writer.publishCommitted(committed);
-      return yield* withReceiverServer(result);
+      const withServer = yield* withReceiverServer(result);
+      // The withdraw tool is deferred on some harnesses, so its own description is often unseen.
+      return isHumanParticipantId(input.to) &&
+        withServer.exchangeId !== null &&
+        withServer.exchangeState === "open" &&
+        !withServer.joinedExistingExchange
+        ? {
+            ...withServer,
+            ifAnsweredInThread: formatAskWithdrawInstruction({ exchangeId: withServer.exchangeId }),
+          }
+        : withServer;
     });
 
     const sendAsMachine: A2ASendServiceShape["sendAsMachine"] = Effect.fn(

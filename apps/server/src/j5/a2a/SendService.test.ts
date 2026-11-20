@@ -114,6 +114,7 @@ it.effect("opens once per sender-receiver pair, joins follow-ups, and one reply 
     });
     assert.equal(followup.exchangeId, first.exchangeId);
     assert.isTrue(followup.joinedExistingExchange);
+    assert.notProperty(first, "ifAnsweredInThread");
 
     const reply = yield* service.send({
       commandId: CommCommandId.make("command:exchange:reply"),
