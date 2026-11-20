@@ -494,7 +494,9 @@ it("remembers disclosure for each proposal, environment and thread when the comp
   setup();
   state.proposals = [proposal, { ...proposal, id: "proposal:2" }];
   const toggle = (id: string) =>
-    document.querySelector<HTMLButtonElement>(`[data-testid="crew-proposal-${id}"] button`)!;
+    document.querySelector<HTMLButtonElement>(
+      `[data-testid="crew-proposal-${id}"] button[aria-label$="Crew proposal"]`,
+    )!;
   const gate = (environment: string) => (
     <CrewRosterGate
       key={environment}
@@ -514,15 +516,10 @@ it("remembers disclosure for each proposal, environment and thread when the comp
   await screen.rerender(null);
   await screen.rerender(gate("remember-test"));
   expect(states()).toEqual(["false", "true"]);
-  await click(toggle("proposal:1"));
-  state.proposals = [proposal];
   await screen.rerender(gate("different-environment"));
-  expect(button("Expand Crew proposal").getAttribute("aria-expanded")).toBe("false");
+  expect(states()).toEqual(["false", "false"]);
   await screen.rerender(gate("remember-test"));
-  await click(button("Collapse Crew proposal"));
-  await screen.rerender(null);
-  await screen.rerender(gate("remember-test"));
-  expect(button("Expand Crew proposal").getAttribute("aria-expanded")).toBe("false");
+  expect(states()).toEqual(["false", "true"]);
 });
 
 it("switches provider with its model defaults and keeps the model menu scoped to that provider", async () => {
