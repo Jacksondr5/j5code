@@ -340,6 +340,8 @@ const SEAMS: ReadonlyArray<Seam> = [
       "noStartableProjectState({",
       "useAddsProjectSomewhere() && catalogState.hasReadyEnvironment",
       "canAddProject={canAddProject}",
+      "useCanAddProject(scratchOption?.environmentId ?? null)",
+      "scratchOption !== null && canAddScratch &&",
     ],
   },
   {

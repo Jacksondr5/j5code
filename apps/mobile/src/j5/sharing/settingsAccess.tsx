@@ -38,12 +38,19 @@ export function useOwnerOnlySettingsPage(routeName: string, children: ReactNode)
   return <OwnerOnlySettingsNotice />;
 }
 
+// A long server name in running text would be broken mid-identifier on Android.
+const SERVER_NAME_LIMIT = 32;
+const shortenMiddle = (name: string) =>
+  name.length <= SERVER_NAME_LIMIT
+    ? name
+    : `${name.slice(0, SERVER_NAME_LIMIT / 2)}…${name.slice(1 - SERVER_NAME_LIMIT / 2)}`;
+
 function OwnerOnlySettingsNotice() {
   const presentations = useAtomValue(environmentPresentations.presentationsAtom);
   // With one saved server the notice names it; with several, it can't tell which one is meant.
   const only = presentations.size === 1 ? [...presentations.values()][0] : undefined;
   const notice = ownerOnlySettingsNotice({
-    serverName: only?.entry.target.label ?? null,
+    serverName: only === undefined ? null : shortenMiddle(only.entry.target.label),
     writesSomewhere: useWritesSomewhere(),
   });
   return (

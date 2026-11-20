@@ -41,7 +41,11 @@ import {
   resolveNewTaskScratchOption,
 } from "./new-task-project-selection";
 import { useSelectWorkspaceDetail } from "../workspace/useSelectWorkspaceDetail";
-import { noStartableProjectState, useAddsProjectSomewhere } from "../../j5/sharing/startAccess";
+import {
+  noStartableProjectState,
+  useAddsProjectSomewhere,
+  useCanAddProject,
+} from "../../j5/sharing/startAccess";
 
 type NewTaskRouteParams = {
   readonly incomingShareId?: string | string[];
@@ -216,7 +220,9 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
           selectedEnvironmentId,
         })
       : null;
-  const canStartScratch = scratchOption?.ready === true;
+  // J5: a scratch thread is a project of its own, so it needs Add project's level (FORK.md case 90).
+  const canAddScratch = useCanAddProject(scratchOption?.environmentId ?? null);
+  const canStartScratch = canAddScratch && scratchOption?.ready === true;
   const scratchStartInFlightRef = useRef(false);
 
   async function selectProject(project: EnvironmentProject): Promise<void> {
@@ -338,7 +344,7 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
               : {}),
           }}
         >
-          {scratchOption !== null && listScopes.length > 0 ? (
+          {scratchOption !== null && canAddScratch && listScopes.length > 0 ? (
             Platform.OS === "android" ? (
               <View collapsable={false} className="overflow-hidden rounded-[28px] bg-grouped-card">
                 <NavigationRow

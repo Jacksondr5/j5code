@@ -123,10 +123,10 @@ function NameQuestion({
       ],
     );
 
-  const nameInput = (label: string) => (
+  const nameInput = (
     <TextInput
-      accessibilityLabel={label}
-      placeholder={label}
+      accessibilityLabel="Your name"
+      placeholder="Your name"
       autoFocus={kind === "first-owner" || people.length === 0}
       autoCapitalize="words"
       autoCorrect={false}
@@ -164,8 +164,8 @@ function NameQuestion({
                   keyboardShouldPersistTaps="handled"
                   contentContainerClassName="gap-5 p-5"
                 >
-                  <View className="gap-2">
-                    <View>
+                  <View className="gap-3">
+                    <View className="gap-0.5">
                       <Text
                         accessibilityRole="header"
                         textRole="title"
@@ -173,10 +173,12 @@ function NameQuestion({
                       >
                         What should we call you?
                       </Text>
-                      <Text className="text-foreground-muted">on {serverName}</Text>
+                      <Text textRole="body" className="text-foreground-muted">
+                        on {serverName}
+                      </Text>
                     </View>
                     {kind === "claim" ? (
-                      <Text className="text-foreground-muted">
+                      <Text textRole="footnote" className="text-foreground-muted">
                         This device is paired but the server does not know who it belongs to.
                       </Text>
                     ) : null}
@@ -212,7 +214,7 @@ function NameQuestion({
                       />
                     </ListSection>
                   ) : null}
-                  {naming ? nameInput(people.length > 0 ? "Someone new" : "Your name") : null}
+                  {naming ? nameInput : null}
                   {claimable.error === null || busy ? null : (
                     <Text className="text-sm text-foreground-muted">
                       The people on this server could not be listed: {claimable.error}
