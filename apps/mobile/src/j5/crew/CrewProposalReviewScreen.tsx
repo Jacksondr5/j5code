@@ -1,8 +1,10 @@
 import { useAtomValue } from "@effect/atom-react";
 import {
+  crewProposalReview,
   crewSeatStopsForApprovals,
   describeCrewSeatWorkspace,
   describePersonaSwap,
+  heldCrewApprovalSends,
   removedSeatSteps,
   removeSeat,
   stepTitle,
@@ -41,12 +43,6 @@ type Params = StaticScreenProps<{
 }>;
 
 const seatTitle = (seat: string) => seat[0]!.toUpperCase() + seat.slice(1);
-
-/** What the person would approve for these seats, to check a fresh preview against. */
-const runtimeShown = (
-  seats: ReadonlyArray<CrewProposalSeat>,
-  runtime: ReadonlyArray<CrewProposalSeatRuntime>,
-) => JSON.stringify(seats.map((seat) => runtime.find((row) => row.seat === seat.seat) ?? null));
 
 /** A text action in line with the copy it belongs to; unavailable reads muted, not as a pill. */
 function TextAction(props: {
@@ -138,6 +134,8 @@ function Review(props: {
   readonly canResolve: boolean;
   /** The Inbox's notice while the server is away; the review stays readable but takes no action. */
   readonly waitsForServer: string | null;
+  /** Holds this proposal on screen while this page answers it, and lets go if the answer fails. */
+  readonly onAnswering: (held: boolean) => void;
   readonly onResolved: () => void;
 }) {
   const { proposal, environmentId } = props;
@@ -155,11 +153,13 @@ function Review(props: {
   const unowned =
     preview.data?.unownedSteps ?? (proposal.kind === "roster" ? unownedSteps(playbook, seats) : []);
   const answering = busy || waitingForPreview;
-  // A re-preview after Remove or Restore keeps Approve as it is; only a failed preview stops it.
-  const canApprove = props.canResolve && !answering && preview.error === null;
+  // Nothing to approve until a runtime is shown; after that, a re-preview after Remove or
+  // Restore keeps Approve as it is, and only a failed preview stops it.
+  const canApprove = props.canResolve && !answering && preview.settled && preview.error === null;
 
   const resolve = async (request: Parameters<typeof resolveCrewProposal>[1]) => {
     setBusy(true);
+    props.onAnswering(true);
     setError(null);
     try {
       await resolveCrewProposal(environmentId, request);
@@ -169,6 +169,7 @@ function Review(props: {
       // A token is spent by the attempt; the next approval asks for a fresh preview.
       preview.refresh();
       setBusy(false);
+      props.onAnswering(false);
     }
   };
   const approve = (approval: CrewProposalPreviewResponse) =>
@@ -181,11 +182,14 @@ function Review(props: {
 
   // Tapped mid-preview: wait for its token, and use it only if it previews what the person saw.
   const approveWhenPreviewed = async () => {
-    const shown = runtimeShown(seats, preview.runtime);
+    const held = { proposalId: proposal.id, seats, runtime: preview.runtime };
     setWaitingForPreview(true);
     const fresh = await preview.next();
     setWaitingForPreview(false);
-    if (fresh !== null && runtimeShown(seats, fresh.seats) === shown) await approve(fresh);
+    // A failed preview shows its own error; one that changed a seat says so.
+    if (fresh === null) return;
+    if (heldCrewApprovalSends(held, fresh)) await approve(fresh);
+    else setError("The runtime changed while it loaded. Check the seats and approve again.");
   };
 
   return (
@@ -300,12 +304,11 @@ export function CrewProposalReviewScreen(props: Params) {
   const permitted = useAtomValue(j5Environment.resolveCrewProposal.permissionAtom(environmentId));
   const writesToCaptain = useCanOperateThread(environmentId, threadId);
   const server = useServerConnection(environmentId);
-  // Answered here: the page keeps it on screen while it pops, rather than reading "Already answered".
-  const [answeredHere, setAnsweredHere] = useState<CrewProposal | null>(null);
-  const proposal =
-    answeredHere ?? query.data?.find((candidate) => candidate.id === props.route.params.proposalId);
+  // Held from this page's own answer to the pop: the list may drop it before the answer returns.
+  const [answering, setAnswering] = useState<CrewProposal | null>(null);
+  const review = crewProposalReview(query.data, props.route.params.proposalId, answering);
   const header = <NativeStackScreenOptions options={{ title: "Crew proposal" }} />;
-  if (proposal === undefined || proposal.status !== "open") {
+  if (review.kind !== "open") {
     return (
       <View className="flex-1 bg-sheet">
         {header}
@@ -319,22 +322,16 @@ export function CrewProposalReviewScreen(props: Params) {
               <EmptyState title="Couldn't load the Crew proposal" detail={query.error} />
               <Button label="Retry" onPress={query.refresh} />
             </View>
-          ) : query.data === null ? (
+          ) : review.kind === "loading" ? (
             <Text className="text-foreground-muted">Loading the proposal…</Text>
           ) : (
-            <EmptyState
-              title="Already answered"
-              detail={
-                proposal === undefined
-                  ? "This Crew proposal is no longer open."
-                  : `This Crew proposal was ${proposal.status}.`
-              }
-            />
+            <EmptyState title="Already answered" detail={review.detail} />
           )}
         </ScreenScrollView>
       </View>
     );
   }
+  const { proposal } = review;
   return (
     <>
       {header}
@@ -344,8 +341,8 @@ export function CrewProposalReviewScreen(props: Params) {
         proposal={proposal}
         canResolve={permitted && writesToCaptain && server.connected}
         waitsForServer={server.connected ? null : askWaitsForServerLine(server.label)}
+        onAnswering={(held) => setAnswering(held ? proposal : null)}
         onResolved={() => {
-          setAnsweredHere(proposal);
           query.refresh();
           navigation.goBack();
         }}

@@ -1,13 +1,10 @@
 import {
   crewPreviewIsComplete,
   crewPreviewRuntimeForSeats,
+  rememberPreviewedSeats,
 } from "@t3tools/client-runtime/j5/crew-proposals";
 import type { EnvironmentId } from "@t3tools/contracts";
-import type {
-  CrewProposalPreviewResponse,
-  CrewProposalSeat,
-  CrewProposalSeatRuntime,
-} from "@t3tools/contracts/j5";
+import type { CrewProposalPreviewResponse, CrewProposalSeat } from "@t3tools/contracts/j5";
 import { useEffect, useRef, useState } from "react";
 
 import { previewCrewProposal } from "./crewProposalsClient";
@@ -16,11 +13,6 @@ interface Settled {
   readonly key: string;
   readonly data: CrewProposalPreviewResponse | null;
   readonly error: string | null;
-}
-
-interface Previewed {
-  readonly seat: CrewProposalSeat;
-  readonly runtime: CrewProposalSeatRuntime;
 }
 
 /**
@@ -35,8 +27,7 @@ export function useCrewProposalPreview(
 ) {
   const [refreshes, setRefreshes] = useState(0);
   const [settled, setSettled] = useState<Settled | null>(null);
-  // Every seat's latest previewed runtime, so a seat removed and restored keeps its lines.
-  const [previewed, setPreviewed] = useState<ReadonlyArray<Previewed>>([]);
+  const [previewed, setPreviewed] = useState<ReturnType<typeof rememberPreviewedSeats>>([]);
   // The preview being asked for: its complete answer, or null when it failed or went stale.
   const inflight = useRef<Promise<CrewProposalPreviewResponse | null>>(Promise.resolve(null));
   const key = JSON.stringify([environmentId, proposalId, seats, refreshes]);
@@ -48,13 +39,7 @@ export function useCrewProposalPreview(
       if (!current) return null;
       setSettled({ key, data, error });
       if (data === null) return null;
-      setPreviewed((rows) => [
-        ...rows.filter((row) => !data.seats.some((runtime) => runtime.seat === row.seat.seat)),
-        ...data.seats.flatMap((runtime) => {
-          const seat = seats.find((candidate) => candidate.seat === runtime.seat);
-          return seat === undefined ? [] : [{ seat, runtime }];
-        }),
-      ]);
+      setPreviewed((rows) => rememberPreviewedSeats(rows, seats, data.seats));
       return data;
     };
     inflight.current = previewCrewProposal(environmentId, { proposalId, seats }).then(

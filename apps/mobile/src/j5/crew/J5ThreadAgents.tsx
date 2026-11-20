@@ -173,12 +173,12 @@ function SpawnedAgentGroup(props: {
       <View
         className={cn(
           "flex-row items-center gap-3 border-b border-border pt-3",
-          // Room for Stop crew (Compose's 48-dp minimum on Android), so seats starting and
-          // stopping don't move the rows.
+          // Room for Stop crew (35 pt; Compose's 48-dp minimum on Android) plus pt-3 and the
+          // border, so seats starting and stopping don't move the rows.
           canStop && group.crew !== null
             ? Platform.OS === "android"
-              ? "min-h-[58.5px]"
-              : "min-h-13"
+              ? "min-h-[59.5px]"
+              : "min-h-[46.5px]"
             : "min-h-11",
         )}
       >
