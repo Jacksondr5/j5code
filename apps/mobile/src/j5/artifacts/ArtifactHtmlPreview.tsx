@@ -1,4 +1,4 @@
-import { useWindowDimensions, View } from "react-native";
+import { View } from "react-native";
 import { WebView } from "react-native-webview";
 
 import { artifactHtmlFrameDocument, artifactHtmlLoadAllowed } from "./artifactHtmlPreview.logic";
@@ -8,13 +8,16 @@ import { artifactHtmlFrameDocument, artifactHtmlLoadAllowed } from "./artifactHt
  * downloads or escape to the top; links still navigate inside the frame and images and styles
  * still load, as on web. Its height is fixed, as web's is, and it scrolls inside.
  */
-export function ArtifactHtmlPreview(props: { readonly html: string; readonly path: string }) {
-  const { height } = useWindowDimensions();
+export function ArtifactHtmlPreview(props: {
+  readonly html: string;
+  readonly path: string;
+  readonly height: number;
+}) {
   return (
     <View
       accessibilityLabel={`Artifact preview: ${props.path}`}
-      className="overflow-hidden rounded-xl border border-border"
-      style={{ height: Math.max(384, height - 160) }}
+      className="overflow-hidden rounded-2xl border border-border"
+      style={{ height: props.height }}
     >
       <WebView
         source={{ html: artifactHtmlFrameDocument(props.html) }}
@@ -37,7 +40,7 @@ export function ArtifactHtmlPreview(props: { readonly html: string; readonly pat
         mediaPlaybackRequiresUserAction
         mixedContentMode="never"
         nestedScrollEnabled
-        style={{ flex: 1, backgroundColor: "transparent" }}
+        style={{ flex: 1, backgroundColor: "#fff" }}
       />
     </View>
   );
