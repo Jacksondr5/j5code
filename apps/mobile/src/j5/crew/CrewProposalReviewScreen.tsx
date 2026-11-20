@@ -84,45 +84,48 @@ function SeatRow(props: {
   const { seat, runtime } = props;
   const swaps = runtime?.personaSwaps ?? seat.personaSwaps ?? [];
   return (
-    <View className="flex-row items-start gap-3 border-b border-separator py-3">
-      <View className="min-w-0 flex-1 gap-1">
-        <Text className="text-base font-t3-medium text-foreground">{seatTitle(seat.seat)}</Text>
-        {/* The settings the approval binds: the server's resolved runtime for this exact seat. */}
-        <Text className="text-sm text-foreground">
-          {runtime
-            ? [runtime.model.replace(/^Claude\s+/u, ""), runtime.reasoning, runtime.access].join(
-                " · ",
-              )
-            : props.runtimeLoading
-              ? "Resolving runtime…"
-              : "Runtime unavailable"}
+    <View className="gap-1 border-b border-separator py-3">
+      {/* Remove shares the name's line, centred on it. */}
+      <View className="flex-row items-center gap-3">
+        <Text className="min-w-0 flex-1 text-base font-t3-medium text-foreground">
+          {seatTitle(seat.seat)}
         </Text>
-        <Text className="text-sm text-foreground-muted">{seat.reason}</Text>
-        {runtime?.workspace && runtime.workspace.type !== "shared" ? (
-          <Text className="text-sm text-foreground-muted">
-            {describeCrewSeatWorkspace(runtime.workspace)}
-          </Text>
-        ) : null}
-        {crewSeatStopsForApprovals(seat, runtime) ? (
-          <Text className="text-sm text-warning-foreground">Asks for approvals</Text>
-        ) : null}
-        {seat.steps?.length ? (
-          <Text className="text-sm text-foreground-muted">
-            Steps: {seat.steps.map((id) => stepTitle(props.playbook ?? null, id)).join(", ")}
-          </Text>
-        ) : null}
-        {swaps.map((swap) => (
-          <Text key={swap.stepId} className="text-sm text-warning-foreground">
-            {stepTitle(props.playbook ?? null, swap.stepId)} {describePersonaSwap(swap, seat.seat)}
-          </Text>
-        ))}
+        <TextAction
+          label="Remove"
+          accessibilityLabel={`Remove seat ${seat.seat}`}
+          disabled={!props.removable}
+          onPress={props.onRemove}
+        />
       </View>
-      <TextAction
-        label="Remove"
-        accessibilityLabel={`Remove seat ${seat.seat}`}
-        disabled={!props.removable}
-        onPress={props.onRemove}
-      />
+      {/* The settings the approval binds: the server's resolved runtime for this exact seat. */}
+      <Text className="text-sm text-foreground">
+        {runtime
+          ? [runtime.model.replace(/^Claude\s+/u, ""), runtime.reasoning, runtime.access].join(
+              " · ",
+            )
+          : props.runtimeLoading
+            ? "Resolving runtime…"
+            : "Runtime unavailable"}
+      </Text>
+      <Text className="text-sm text-foreground-muted">{seat.reason}</Text>
+      {runtime?.workspace && runtime.workspace.type !== "shared" ? (
+        <Text className="text-sm text-foreground-muted">
+          {describeCrewSeatWorkspace(runtime.workspace)}
+        </Text>
+      ) : null}
+      {crewSeatStopsForApprovals(seat, runtime) ? (
+        <Text className="text-sm text-warning-foreground">Asks for approvals</Text>
+      ) : null}
+      {seat.steps?.length ? (
+        <Text className="text-sm text-foreground-muted">
+          Steps: {seat.steps.map((id) => stepTitle(props.playbook ?? null, id)).join(", ")}
+        </Text>
+      ) : null}
+      {swaps.map((swap) => (
+        <Text key={swap.stepId} className="text-sm text-warning-foreground">
+          {stepTitle(props.playbook ?? null, swap.stepId)} {describePersonaSwap(swap, seat.seat)}
+        </Text>
+      ))}
     </View>
   );
 }

@@ -153,9 +153,13 @@ function SpawnedAgentGroup(props: {
         if (result._tag === "Failure") throw Cause.squash(result.cause);
       })
       .catch((error: unknown) => {
+        // The server names the Crew by its id, which agents need; the person knows it by name.
         Dialog.alert(
           `Couldn't stop crew ${crew.crewName}`,
-          error instanceof Error ? error.message : String(error),
+          (error instanceof Error ? error.message : String(error)).replaceAll(
+            crew.crewInstanceId,
+            crew.crewName,
+          ),
         );
       })
       .finally(() => setStopping(false));
