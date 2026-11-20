@@ -27,6 +27,7 @@ import * as Semaphore from "effect/Semaphore";
 
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import { ServerConfig } from "../../config.ts";
+import { LinkSessionService } from "./LinkSessionService.ts";
 import {
   type AddPeerError,
   type ChangePeerOriginError,
@@ -194,6 +195,7 @@ const make = Effect.gen(function* () {
   const removal = yield* PeerRemovalService;
   const config = yield* ServerConfig;
   const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+  const linkSessions = yield* LinkSessionService;
 
   // Rotation and removal list sessions and then revoke; one permit keeps them
   // serial so concurrent calls cannot leave two live credentials or revoke a
@@ -305,13 +307,15 @@ const make = Effect.gen(function* () {
               peerSubjectForEnvironment(input.environmentId),
               null,
             ),
+            // What the removed server's links may do here ends with its messages.
+            revokedLinkSessions: linkSessions.revokeFor(input.environmentId),
             removed: removal.remove(input.environmentId),
           }),
         )
         .pipe(
           Effect.map((outcome) => ({
             removed: outcome.removed.removed,
-            revokedSessions: outcome.revokedSessions,
+            revokedSessions: outcome.revokedSessions + outcome.revokedLinkSessions,
           })),
           Effect.mapError((cause) => new PeerAdminOperationError({ operation: "remove", cause })),
         );
