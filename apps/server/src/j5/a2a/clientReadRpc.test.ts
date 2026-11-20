@@ -9,22 +9,18 @@ import { agentPersonaDraftsTestLayer } from "../test-support/agentPersonaDrafts.
 import { agentPersonaEscalationsTestLayer } from "../test-support/agentPersonaEscalations.ts";
 import { J5_CLIENT_READ_WS_METHODS, type J5ActionError } from "@t3tools/contracts/j5";
 import { assert, it } from "@effect/vitest";
-import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
-import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
-import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Path from "effect/Path";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 import type { SqlError } from "effect/sql/SqlError";
 
 import { requiredScopeForRpcMethod } from "../../auth/RpcAuthorization.ts";
 import { PlaybookCrewRelay } from "../playbooks/PlaybookCrewRelay.ts";
-import { PlaybookStore, playbookStoreLayer } from "../playbooks/PlaybookStore.ts";
+import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
 import { AgentCrewInstanceService } from "./AgentCrewInstanceService.ts";
 import { AgentCrewProposalService, type CrewProposal } from "./AgentCrewProposalService.ts";
 import { ArchiveCrewService } from "./ArchiveCrewService.ts";
@@ -98,7 +94,6 @@ const handlersOver = (
 const handlersWith = (given: {
   readonly inbox?: Layer.Layer<A2AHumanInbox>;
   readonly proposals?: Layer.Layer<AgentCrewProposalService>;
-  readonly playbooks?: Layer.Layer<PlaybookStore, SqlError>;
   readonly runtimeRequests?: Layer.Layer<CrewRuntimeRequestService>;
   readonly archiveFacts?: Layer.Layer<A2AArchiveFacts>;
   readonly personId?: ParticipantId | null;
@@ -109,7 +104,7 @@ const handlersWith = (given: {
         Layer.mergeAll(
           given.inbox ?? Layer.mock(A2AHumanInbox)({}),
           given.proposals ?? Layer.mock(AgentCrewProposalService)({}),
-          given.playbooks ?? Layer.mock(PlaybookStore)({}),
+          Layer.mock(PlaybookStore)({}),
           given.runtimeRequests ?? Layer.mock(CrewRuntimeRequestService)({}),
           given.archiveFacts ?? Layer.mock(A2AArchiveFacts)({}),
           Layer.mock(A2ALedger)({}),
@@ -294,69 +289,29 @@ const proposal: CrewProposal = {
   reportedAt: null,
 };
 
-it.effect(
-  "lists each open proposal with its playbook from the live YAML, and a broken one as its issue",
-  () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const root = yield* fs.makeTempDirectoryScoped({ prefix: "j5-crew-proposals-read-" });
-      yield* fs.makeDirectory(path.join(root, ".j5/playbooks"), { recursive: true });
-      yield* fs.writeFileString(
-        path.join(root, ".j5/playbooks/release.yaml"),
-        "title: Release\ndescription: Ship.\nsteps:\n  - id: plan\n    title: Plan\n    prompt: Plan.\n    persona: planner\n  - id: review\n    title: Review\n    prompt: Review.\n",
-      );
-      const withPlaybook = (
-        id: string,
-        name: string,
-        steps: ReadonlyArray<string>,
-      ): CrewProposal => ({
-        ...proposal,
-        id,
-        requestedSeats: [
-          {
-            workspace: { type: "shared" as const },
-            seat: "planner",
-            agentId: null,
-            reason: "Plans",
-            steps,
-          },
-        ],
-        playbook: { name, definitionPath: path.join(root, ".j5/playbooks", `${name}.yaml`) },
-      });
-      const handlers = yield* handlersWith({
-        proposals: Layer.mock(AgentCrewProposalService)({
-          listOpen: () =>
-            Effect.succeed([
-              proposal,
-              withPlaybook("p-live", "release", ["plan"]),
-              withPlaybook("p-lost", "release", ["ship"]),
-              withPlaybook("p-gone", "gone", []),
-            ]),
-        }),
-        playbooks: playbookStoreLayer.pipe(
-          Layer.provide(database),
-          Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
-        ),
-      });
-      const { proposals } = yield* handlers[METHODS.listCrewProposals]();
-
-      assert.equal(proposals[0]?.id, proposal.id);
-      assert.lengthOf(proposals[0]?.requestedSeats ?? [], 1);
-      assert.isNull(proposals[0]?.playbook);
-      assert.deepStrictEqual(proposals[1]?.playbook, {
-        name: "release",
-        title: "Release",
-        steps: [
-          { id: "plan", title: "Plan", persona: "planner" },
-          { id: "review", title: "Review" },
-        ],
-        issue: null,
-      });
-      assert.include(proposals[2]?.playbook?.issue, "Step ship is no longer in the playbook");
-      assert.deepStrictEqual(proposals[3]?.playbook?.steps, []);
-      assert.include(proposals[3]?.playbook?.issue, "No playbook named gone");
-    }).pipe(Effect.scoped, Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
+it.effect("lists legacy Crew proposals without fixed playbook staffing", () =>
+  Effect.gen(function* () {
+    const legacy: CrewProposal = {
+      ...proposal,
+      id: "p-legacy",
+      playbook: { name: "release", definitionPath: "/workspace/.j5/playbooks/release.yaml" },
+      requestedSeats: proposal.requestedSeats.map((seat) => ({ ...seat, steps: ["plan"] })),
+    };
+    const handlers = yield* handlersWith({
+      proposals: Layer.mock(AgentCrewProposalService)({
+        listOpen: () => Effect.succeed([proposal, legacy]),
+      }),
+    });
+    const { proposals } = yield* handlers[METHODS.listCrewProposals]();
+    assert.deepStrictEqual(
+      proposals.map((entry) => entry.id),
+      [proposal.id, legacy.id],
+    );
+    for (const entry of proposals) {
+      assert.isNull(entry.playbook);
+      assert.deepStrictEqual(entry.requestedSeats, proposal.requestedSeats);
+    }
+  }),
 );
 
 it.effect("lists a live Crew seat's approvals", () =>

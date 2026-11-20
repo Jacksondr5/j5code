@@ -4,10 +4,10 @@
  * upstream's own text changes here by hand; Subagent, Peer Agent, Crew and playbook text is J5's.
  */
 import { AGENT_INVOCATION_INSTRUCTIONS } from "./agentInvocationInstructions.ts";
-import { PLAYBOOK_INSTRUCTIONS } from "./playbookInstructions.ts";
-
-// The playbook guidance is longer than one section allows, so a Captain's bullets get their own.
-const CAPTAIN_PLAYBOOK_START = PLAYBOOK_INSTRUCTIONS.indexOf("\n- As a Captain");
+import {
+  PLAYBOOK_GENERAL_INSTRUCTIONS,
+  PLAYBOOK_HANDOFF_INSTRUCTIONS,
+} from "./playbookInstructions.ts";
 
 /**
  * Codex delivers each section as its own context entry and cuts the middle out of any entry over
@@ -47,10 +47,10 @@ ${AGENT_INVOCATION_INSTRUCTIONS}
 - J5 tools may load late. Try the name once before you call it absent.`,
   `Playbooks guide work in this thread:
 
-${PLAYBOOK_INSTRUCTIONS.slice(0, CAPTAIN_PLAYBOOK_START).trim()}`,
+${PLAYBOOK_GENERAL_INSTRUCTIONS.trim()}`,
   `Playbooks in a Crew:
 
-${PLAYBOOK_INSTRUCTIONS.slice(CAPTAIN_PLAYBOOK_START).trim()}`,
+${PLAYBOOK_HANDOFF_INSTRUCTIONS.trim()}`,
   `### Visuals and preview
 
 - Answer data with a trend or comparison with a chart, and show any visual the user asks for here: pass its HTML to \`html_preview\`, then \`html_render\`. If the visual is a file, pass that file's HTML. A screenshot on disk or a text description does not show it. Never start a server for it. Tools a web page exposes give data only. Never use them to show results. Asked for an image to post, send, or use elsewhere: a \`.png\` file and its path, never \`html_render\`.

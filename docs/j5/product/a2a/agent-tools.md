@@ -244,14 +244,7 @@ seats it reviews runs on: every seat that is not a reviewer, unless reviews name
 roster is auto-approved, no seat may have more access than you run with, and persona seats use only
 their models checked in Models for custom members. A refused persona stays blocked and its refusal
 gives a code and an escalation_id: never recreate it as a custom worker or plain agent to get around
-its limits. Escalate it instead, and retry with allow_once only after an Owner allows it once. To
-have the crew follow a playbook, set playbook to a name from j5_playbook_list and give seats the
-step ids they own (steps, from j5_playbook_read); a step has one owner, steps no seat owns are yours
-as Captain, and the result reports unowned steps and any step whose persona differs from its seat's.
-For a crew built from a playbook, staff one seat per distinct persona its steps name, each owning
-that persona's steps, and propose a custom seat, noted in its reason, only where a named persona
-doesn't exist here; keep the steps of a disabled, invalid or blocked persona yourself and escalate
-it, never replacing it. Every seat names its workspace, with the same three choices as
+its limits. Escalate it instead, and retry with allow_once only after an Owner allows it once. Every seat names its workspace, with the same three choices as
 j5_spawn_agent. Name the crew for what it is for and give each seat a short lowercase-hyphen name
 like code-reviewer. By default the user reviews and edits the roster in this thread, then approves
 or declines. If Auto-approve new Crews is on for your project, the proposed roster is created
@@ -272,31 +265,22 @@ disabled."
 
 Published with `destructiveHint: true`: depending on the project setting, this call can launch agents immediately.
 
-| Input               | Type                                                                                                                         | Required | Meaning                                                                                                                                                                                                                                                                                                   |
-| ------------------- | ---------------------------------------------------------------------------------------------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`              | string                                                                                                                       | yes      | The Crew's display name                                                                                                                                                                                                                                                                                   |
-| `brief`             | string                                                                                                                       | yes      | The shared brief included with each seat's first assignment                                                                                                                                                                                                                                               |
-| `seats`             | 1–12 of `{seat, persona?, allow_once?, model_selection?, runtime_mode?, reason, instructions?, steps?, reviews?, workspace}` | yes      | Seat name, persona id from `j5_list_personas` (none for a custom seat), an escalation an Owner allowed once for that persona, why, wiring, custom-seat runtime, the playbook step ids the seat owns, the seats an independent reviewer reviews, and where it works (the `j5_spawn_agent` workspace shape) |
-| `playbook`          | string                                                                                                                       | no       | A playbook name from `j5_playbook_list` in the Captain's workspace; the Crew follows it                                                                                                                                                                                                                   |
-| `client_request_id` | string                                                                                                                       | no       | Supply and reuse to make retries safe                                                                                                                                                                                                                                                                     |
+| Input               | Type                                                                                                                 | Required | Meaning                                                                                                                                                                                                                                                              |
+| ------------------- | -------------------------------------------------------------------------------------------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`              | string                                                                                                               | yes      | The Crew's display name                                                                                                                                                                                                                                              |
+| `brief`             | string                                                                                                               | yes      | The shared brief included with each seat's first assignment                                                                                                                                                                                                          |
+| `seats`             | 1–12 of `{seat, persona?, allow_once?, model_selection?, runtime_mode?, reason, instructions?, reviews?, workspace}` | yes      | Seat name, persona id from `j5_list_personas` (none for a custom seat), an escalation an Owner allowed once for that persona, why, wiring, custom-seat runtime, the seats an independent reviewer reviews, and where it works (the `j5_spawn_agent` workspace shape) |
+| `client_request_id` | string                                                                                                               | no       | Supply and reuse to make retries safe                                                                                                                                                                                                                                |
 
 Bounds: `name` and `seat` up to 100 characters, `reason` up to 500, `brief` and `instructions` up
 to 8,000.
 
 Result: `proposal_id`, `status` (`open`, `approved`, `declined`),
-`crew_instance_id`, and `members` (seat, persona_id, participant_id, thread_id, link) once spawned. A
-proposal that follows a playbook adds `playbook`: `name`, `title`, `unowned_steps` (the Captain's),
-and `persona_swaps` (seat, step_id, wanted_persona, seat_persona, and wanted_problem `missing` or
-`disabled` when the wanted persona could not staff the step itself).
+`crew_instance_id`, and `members` (seat, persona_id, participant_id, thread_id, link) once spawned.
 Semantics: the caller must have a usable home and must not sit in a Crew (R20). Seats are validated
 against the library before anything is recorded: unknown or disabled personas, duplicate seat names,
-or more than twelve seats refuse with the next step. With `playbook`, the live definition is read
-and each claimed step must exist and have one owner; an unknown or invalid playbook, an unknown step,
-a doubly claimed step, or `steps` without a playbook refuse the same way. A seat that claims no
-steps needs no readable definition, so a Crew whose playbook file is gone can still add one. The
-proposal records the playbook's definition path, and the Crew keeps it from approval on; each
-member records the step ids it owns, and each seat's first turn lists its steps by live title in a
-`<seat_playbook>` block. An open roster proposal waits for the human
+or more than twelve seats refuse with the next step. Playbook step holders are chosen by the run
+owner through the playbook tools, after a Crew member exists. An open roster proposal waits for the human
 gate inline above the Captain's composer unless Auto-approve new Crews is enabled for the Captain's project; approval spawns the approved roster (the human may have edited it) as Peer Agents under the
 caller, persona-backed where a seat names one, records the Crew snapshot with each member's reason
 (with human or automatic approval recorded), and posts
@@ -320,11 +304,10 @@ gives a code and an escalation_id: never recreate it as a custom worker or plain
 its limits. Escalate it instead, and retry with allow_once only after an Owner allows it once. A
 persona marked independent_reviewer prefers a model none of the members it reviews runs on: every
 member that is not a reviewer, unless reviews names some. Optionally give a brief; otherwise the
-seat gets the Crew's brief. On a playbook Crew, steps may claim only unowned step ids from
-j5_playbook_read. To put a member's work on a different model, such as a reviewer whose model just
+seat gets the Crew's brief. To put a member's work on a different model, such as a reviewer whose model just
 wrote the work it will review, set replaces to that member's seat: the new member may reuse the seat
-name, and once it launches it takes over the seat's unfinished steps, gets any current step already
-handed to the old member, and is told where the old member's thread is. The replaced member is
+name, and once it launches it is told where the old member's thread is. A playbook run owner explicitly
+assigns any step the old member held. The replaced member is
 stopped and leaves the Crew, and its thread stays readable. If the new member fails to launch,
 nothing changes, except that an allow_once it used is spent. The result returns the updated roster
 or refuses the seat with its name and reason; creation is reported separately here. The new member
@@ -333,22 +316,21 @@ configured access still controls tool approvals. Captain-only: a member sends th
 Captain with j5_send_message. Reuse client_request_id to retry safely; a changed request is refused,
 so use a fresh one for new work. Works under every approval policy, including approval policy never."
 
-| Input                             | Type           | Required | Meaning                                                                    |
-| --------------------------------- | -------------- | -------- | -------------------------------------------------------------------------- |
-| `crew_instance_id`                | string         | no       | Required only when the caller commands more than one live Crew             |
-| `seat`, `persona`                 | string         | yes      | New seat name and persona id (none for a custom seat)                      |
-| `model_selection`, `runtime_mode` | object, string | no       | Custom seats only; omitted, the Captain's model selection and access       |
-| `reason`                          | string         | yes      | The expertise the Crew needs                                               |
-| `brief`                           | string         | no       | The new seat's brief; the Crew's brief when omitted                        |
-| `instructions`                    | string         | no       | Seat wiring text, verbatim                                                 |
-| `steps`                           | string[]       | no       | Playbook step ids no seat owns yet; only on a Crew that follows a playbook |
-| `reviews`                         | string[]       | no       | Independent reviewer personas only: the members it reviews                 |
-| `replaces`                        | string         | no       | A live member's seat this one replaces; never the Captain                  |
-| `allow_once`                      | string         | no       | An escalation an Owner allowed once, to retry this persona seat            |
-| `workspace`                       | object         | yes      | Where the seat works; the same three choices as `j5_propose_crew`          |
-| `client_request_id`               | string         | no       | Supply and reuse to make retries safe                                      |
+| Input                             | Type           | Required | Meaning                                                              |
+| --------------------------------- | -------------- | -------- | -------------------------------------------------------------------- |
+| `crew_instance_id`                | string         | no       | Required only when the caller commands more than one live Crew       |
+| `seat`, `persona`                 | string         | yes      | New seat name and persona id (none for a custom seat)                |
+| `model_selection`, `runtime_mode` | object, string | no       | Custom seats only; omitted, the Captain's model selection and access |
+| `reason`                          | string         | yes      | The expertise the Crew needs                                         |
+| `brief`                           | string         | no       | The new seat's brief; the Crew's brief when omitted                  |
+| `instructions`                    | string         | no       | Seat wiring text, verbatim                                           |
+| `reviews`                         | string[]       | no       | Independent reviewer personas only: the members it reviews           |
+| `replaces`                        | string         | no       | A live member's seat this one replaces; never the Captain            |
+| `allow_once`                      | string         | no       | An escalation an Owner allowed once, to retry this persona seat      |
+| `workspace`                       | object         | yes      | Where the seat works; the same three choices as `j5_propose_crew`    |
+| `client_request_id`               | string         | no       | Supply and reuse to make retries safe                                |
 
-Result: as `j5_propose_crew`. Only the Captain can add a seat. The member is added directly regardless of the auto-approval setting, with the same validation, model and capacity checks as a launch, so a custom seat on a model off the project's list is refused naming the seat, the model and the setting. The result returns the updated roster or a refusal naming the seat and reason; the launch report later records its startup outcome. Retries reuse the original request and cannot add a second copy. With `replaces`, the new member launches first; only then does one write move the replaced seat's unfinished steps (the run's current step and every later one, or all its steps without an active run) and take the old member off the roster, which then interrupts its turn without a message and hands it a current step it held. A launch that fails moves nothing. An unknown seat, an already replaced one, or the Captain is refused; a retry finishes a stop or hand-off that didn't happen. A refused automatic request repeats its original reason on retry; a revised request needs a new `client_request_id`. Existing pending addition requests remain human decisions above their Captain's composer, where they can still be approved or declined; additions never appear in the Inbox or its bell count. Member tool approvals remain in the Inbox.
+Result: as `j5_propose_crew`. Only the Captain can add a seat. The member is added directly regardless of the auto-approval setting, with the same validation, model and capacity checks as a launch, so a custom seat on a model off the project's list is refused naming the seat, the model and the setting. The result returns the updated roster or a refusal naming the seat and reason; the launch report later records its startup outcome. Retries reuse the original request and cannot add a second copy. With `replaces`, the new member launches first; only then does one write take the old member off the roster, which then interrupts its turn without a message. The playbook run owner explicitly reassigns a current step when needed. A launch that fails moves nothing. An unknown seat, an already replaced one, or the Captain is refused; a retry finishes a stop or hand-off that didn't happen. A refused automatic request repeats its original reason on retry; a revised request needs a new `client_request_id`. Existing pending addition requests remain human decisions above their Captain's composer, where they can still be approved or declined; additions never appear in the Inbox or its bell count. Member tool approvals remain in the Inbox.
 
 ### Seat finish notices
 
@@ -430,25 +412,17 @@ stopping retires nothing.
 
 Cancellation preserves the run and its saved procedure in history.
 
-### Crew playbook runs
+### Playbook run holders
 
-A Captain runs the playbook its Crew follows with `j5_playbook_start(name, client_request_id,
-crew_instance_id)`. The call is refused with `crew_not_linkable` unless the Crew is the caller's,
-is live, and follows that playbook. Each landing (start, next, back) hands the step's saved
-prompt to the seat that owns it, once per landing, as a `<j5_playbook_step>` notice in the seat's
-thread. A step no live seat owns is the Captain's, and no notice is sent for it.
+The thread that starts a run owns its step pointer and is the only thread allowed to move, revise, assign, complete, or cancel it. `j5_playbook_start`, `j5_playbook_next`, and `j5_playbook_back` accept an optional `assignee` participant ID. A local, active Peer Agent spawned by the owner, or a live member of a Crew the owner captains, can hold a step. Without an assignee, the owner holds it. The holder is checked and recorded in the same transaction as the step move. Playbook steps do not belong to fixed Crew seats.
 
-Every step tool on a Crew-linked run returns `delivery`: `{ state, seat, thread_id }`, where `state`
-is `delivered` (the seat has the step), `captain` (the Captain does it from `currentStep.prompt`),
-or `pending` (the hand-off hasn't finished; nobody should start the step). Only `captain` means
-the Captain does it. `j5_playbook_current` reports the same `delivery` without handing off again.
-While an earlier hand-off is still pending, `j5_playbook_next`, `j5_playbook_back`,
-`j5_playbook_revise`, and `j5_playbook_complete` refuse with `delivery_pending` and don't move; retry the same call. Nothing
-retries a pending hand-off in the background, including after a restart: the Captain's next step
-call, or a retry of the same one, finishes it.
-`j5_playbook_cancel` always works. The platform never advances on its own: the Captain calls
-`j5_playbook_next` after the seat reports back. Archiving the Crew or its Captain cancels its active
-run; `j5_stop_crew` doesn't, and unarchiving doesn't restart it.
+Each landing records its holder and sends that step's saved prompt to the holder's thread as a `<j5_playbook_step>` notice. The `delivery` state is `captain` for an owner-held step, `delivered` once the holder receives the notice, or `pending` while delivery is unresolved. A pending delivery does not mean the step was executed. `j5_playbook_current` reports the saved holder and delivery state without resending. Each landing has stable dispatch IDs, so a retry cannot duplicate the notice or silently change its target.
+
+A revision that replaces the current step accepts the same optional assignee and records its new holder atomically; without one it returns the step to the owner. A revision retaining the current step keeps its holder and refuses an assignee.
+
+While a hand-off is pending, `j5_playbook_next`, `j5_playbook_back`, `j5_playbook_revise`, and `j5_playbook_complete` refuse with `delivery_pending`. `j5_playbook_assign(runId, expectedStepId, client_request_id, assignee?)` can reassign the current step or take it back, even if its previous delivery is stuck because a holder was archived. It atomically supersedes the old pending landing; a retry of the old request cannot revive it. `j5_playbook_cancel` remains available. The platform never advances the pointer on its own.
+
+Fleet shows the active run on its owner agent, including current step, recorded holder, and pending delivery state. It keeps a recorded holder visible if that agent becomes unavailable.
 
 ### Kept upstream tools
 
@@ -479,7 +453,7 @@ run; `j5_stop_crew` doesn't, and unarchiving doesn't restart it.
 5. A `j5_send_message` to the caller itself is refused with an error naming the caller's own id.
 6. `j5_list_participants` marks the caller's row `self`, reports a person's row as unable to receive a plain message and able to be asked, gives every agent row its `thread_id`, and omits provider Subagents and delegates.
 7. `j5_spawn_agent` refuses a call without a persona that omits provider or model, or any call that gives only one of them, refuses one that omits reasoning for a model with a reasoning option or passes it for a model without one, naming the options, accepts one that omits it for a model without one, refuses a choice outside the Role's allowlist with an error naming the Role, and refuses a caller that sits in a Crew with an error naming escalation to its Captain.
-8. A spawned agent's first turn contains its own participant id and project. A Crew seat receives its approved instructions, shared brief, current roster with responsibilities and participant ids, and any playbook on its first assignment; the assignment keeps its own envelope and reply obligation. Later assignments reuse the same thread without repeating that introduction, unless the provider conversation was replaced, which sends it again. Started members receive net roster changes at the top of their next delivery, including a message steered into a running turn, without a separate turn.
+8. A spawned agent's first turn contains its own participant id and project. A Crew seat receives its approved instructions, shared brief, current roster with responsibilities and participant ids, on its first assignment; the assignment keeps its own envelope and reply obligation. Later assignments reuse the same thread without repeating that introduction, unless the provider conversation was replaced, which sends it again. Started members receive net roster changes at the top of their next delivery, including a message steered into a running turn, without a separate turn.
 9. `t3_thread_interrupt` and `t3_thread_organize` act on one target; neither cascades. `t3_thread_interrupt` with `stop: true` stops a thread as its Stop button does, and refuses a target that runs with broader permission modes than the caller unless the caller is that seat's Captain. A stopped run is never resumed after a server restart, even when restart continuation is enabled.
 10. `t3_thread_organize` archives and restores any thread in the environment that upstream's access check lets the caller act on. Archive closes Exchanges through the shared reactor without a confirmation-token exchange or interrupting an existing run; human archive warnings remain.
 11. `j5_clear_own_ask` closes only an Exchange the caller opened and records the closure as sender-cleared.

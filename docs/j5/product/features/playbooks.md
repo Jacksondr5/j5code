@@ -11,11 +11,11 @@ An agent following a long procedure reads it once at the beginning and the later
 
 ## Definition
 
-A **Playbook** is user-authored, step-by-step content for a piece of work, followed by a single Role or by a Crew; either can be spawned and told to follow one. A step may name the Role that should do it. In a Crew each step has one owner, the seat that owns it, and the Captain does any step no seat owns. A single-agent Playbook is the case where the one agent does every step.
+A **Playbook** is user-authored, step-by-step content for a piece of work. Its run belongs to the thread that started it. A step may name a persona as guidance. On each move, the owner may assign that step to an eligible local agent it spawned or to a member of a Crew it captains; otherwise the owner holds it.
 
 **The engine is the platform's; the steps are the user's.** The platform holds the step pointer, keeps instructions fresh, and renders progress. The steps, their content, and the judgment that a step is done belong to the Playbook and the agents following it. This is how a workflow like the PR Group becomes expressible on the platform without being codified into it.
 
-It runs in three moves. **An agent declares when to advance** through a tool call, so "what step are they on" is a cheap, honest, measured fact — asserted by the agent, visibly so, never parsed from output or inferred by the platform. **On each move, the platform delivers the step's instructions to its owner**, fresh in context: the owning seat in a Crew, or the Captain when no seat owns it; this is what defeats read-once-and-forget. **The interface renders progress** from the step pointer: which step each Crew is on, at a glance. Playbook run tools only read prompts and move the calling thread's own run; they never run a step or touch the workspace. So J5 pre-approves them wherever it pre-approves its other tools (Codex and Claude, [divergence D3](../upstream.md)), and every other harness keeps its own approval prompts.
+It runs in three moves. **An agent declares when to advance** through a tool call, so "what step are they on" is a cheap, honest, measured fact — asserted by the agent, visibly so, never parsed from output or inferred by the platform. **On each move, the platform delivers the step's instructions to its owner**, fresh in context: the recorded holder, or the owner when no assignee is named; this is what defeats read-once-and-forget. **The interface renders progress** from the step pointer: which step each owner agent is on, at a glance. Playbook run tools only read prompts and move the calling thread's own run; they never run a step or touch the workspace. So J5 pre-approves them wherever it pre-approves its other tools (Codex and Claude, [divergence D3](../upstream.md)), and every other harness keeps its own approval prompts.
 
 Definitions live in the environment's library, available from every project and worktree on that server, and in folders the environment is configured to read. A project can also keep its own definitions in `.j5/playbooks/`; inside that project they override a library definition with the same name. Saving a definition to the library is a separate writing operation, pre-approved the same way but refused to read-only personas and plan-mode callers. An agent edits a library definition only against the version it read, so it can't overwrite a change it hasn't seen.
 
@@ -24,17 +24,17 @@ Playbooks are linear sequences. The initiative-level view — a plan whose nodes
 ## Acceptance criteria
 
 1. A Playbook is a user-authored file the platform reads; it never generates or edits steps.
-2. A Role or a Crew can be spawned with a Playbook and told to follow it.
+2. An agent can start a Playbook run and assign each step at runtime, including a step held by a Crew member it captains.
 3. An agent advances a Playbook through a tool call with its expected current step; the platform never advances a step on its own.
-4. The current step of every agent and Crew following a Playbook is a recorded fact, attributed to the agent that declared it.
-5. On each move, the step's owner receives its instructions in its context: the seat that owns the step in a Crew, or the Captain when no seat does.
-6. The interface shows which step each Crew and agent is on.
+4. The current step and its holder are recorded facts of the owner agent’s run.
+5. On each move, the recorded holder receives the saved step instructions. Pending delivery is visible and does not imply execution.
+6. The interface shows the current step and holder beside each owner agent, with pending delivery visible.
 7. A Playbook has no branching, retry, or automation owned by the platform.
 8. Starting a run saves its parsed procedure. Editing a saved playbook changes future runs only; active runs keep their steps, prompts, title, and purpose.
 9. Deleting a saved playbook succeeds while a run uses its copy. Past runs without a copy show their name, status, last step, and any cancellation reason without a step list.
 10. Back navigation changes the recorded position without undoing work, and retries cannot advance an active run twice.
 11. Completing or cancelling a run leaves its participants usable and preserves the run as history.
-12. Deleting the owner thread cancels its active run. Archiving a single agent's owner thread leaves its run resumable; archiving a Crew or its Captain cancels the Crew's run, and stopping a Crew doesn't.
+12. Deleting the owner thread cancels its active run. Archiving its thread leaves the run resumable. Archiving a holder preserves the recorded assignment until the owner reassigns or takes it back.
 13. New playbooks are saved to the environment library by default and are available across its projects and worktrees without a promotion step.
 14. A project's `.j5/playbooks/` definitions are discovered in that project and override a same-named library definition there; creating one is an explicit choice.
 15. Duplicate library names and unavailable sources are visible errors; running procedures retain their saved copy when discovery changes.
@@ -45,8 +45,8 @@ Playbooks are linear sequences. The initiative-level view — a plan whose nodes
 
 ## Scenarios
 
-- **A release Playbook.** The user writes a five-step release Playbook whose steps name the Builder and the Sitter, and launches a Crew in Website Redesign that follows it. The Fleet page shows "Step 2 of 5 · builder". When the Builder reports step 2 done, the Captain advances, and the Sitter's next turn opens with step 3's instructions; an unowned step is the Captain's. (AC2, AC3, AC5, AC6)
-- **A Crew from a playbook.** The user asks the agent in a thread for a crew to implement what they discussed, using `@playbook:release` or asking for the release playbook by name. The agent reads the playbook, proposes one seat per persona its steps name (a stand-in for a persona this server doesn't have; one that is turned off or blocked keeps its steps with the Captain, who escalates it), and, once the user approves, starts the playbook as the Crew's Captain. Each step goes to the seat that owns it, and Fleet shows "Step 1 of 4 · planner". (AC2, AC5, AC6)
+- **A release Playbook.** The user writes a five-step release Playbook and an agent starts it. The owner assigns step 2 to a Builder Peer Agent it spawned. Fleet shows step 2 beside the owner and names the Builder as holder. When the Builder reports back, the owner advances and assigns step 3 to a Crew member it captains. (AC2, AC3, AC5, AC6)
+- **An unavailable holder.** The current step's notice cannot reach its archived holder. Fleet shows the recorded holder and pending status. The owner assigns the same step to another eligible agent or takes it back; the old notice retry does not deliver it to the archived holder. (AC4–AC6)
 - **A judgment step.** Step 4 says "decide whether the migration is safe to run"; the platform delivers the instruction and waits — the agent decides, and declares. (AC3, AC7)
 
 - **A saved single-agent procedure.** In Billing Migration, a Role keeps following the procedure it started while the user edits or deletes its library definition. A new run uses the edited definition. The Role can move back to inspect earlier work; deleting its owner thread cancels the run. (AC8–AC12)

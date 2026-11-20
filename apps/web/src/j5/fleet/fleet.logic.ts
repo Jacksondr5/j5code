@@ -4,6 +4,7 @@ import type { J5ReadRevisions } from "@t3tools/contracts/j5";
 
 import type { CrewSeatState } from "@t3tools/client-runtime/j5/crew-state";
 import type { FleetAgent, FleetCrew, FleetLedgerProject } from "./fleetClient";
+import type { FleetPlaybookRun } from "@t3tools/contracts/j5";
 
 /** One rendered row of the Roster tree. Crew members hang under their Captain as one unit. */
 export interface FleetRow {
@@ -16,35 +17,23 @@ export interface FleetRow {
 export interface FleetCrewGroup {
   readonly crewInstanceId: string;
   readonly crewName: string;
-  /** The playbook the Crew follows, and the step ids each seat owns. */
-  readonly playbookName: string | null;
-  readonly stepsBySeat: ReadonlyMap<string, ReadonlyArray<string>>;
   /** Seats are nodes too: a helper an agent places under a seat renders beneath that seat. */
   readonly members: ReadonlyArray<FleetNode>;
-  /** The Crew's active playbook run, when it follows one. */
-  readonly playbookRun: FleetPlaybookRun | null;
 }
 
-export type FleetPlaybookRun = NonNullable<FleetCrew["playbookRun"]>;
-
-/**
- * Who holds a Crew's current step. Only `captain` is the Captain; a hand-off still in progress
- * never reads as the Captain's, even when it has no seat yet.
- */
-export const playbookRunOwnerLabel = (run: Pick<FleetPlaybookRun, "state" | "seat">) =>
+/** The recorded holder remains visible even while its notice is pending. */
+export const playbookRunOwnerLabel = (run: Pick<FleetPlaybookRun, "state" | "holderLabel">) =>
   run.state === "delivered"
-    ? (run.seat ?? "Seat")
+    ? run.holderLabel
     : run.state === "captain"
-      ? "Captain"
-      : run.seat === null
-        ? "handing off"
-        : `handing off to ${run.seat}`;
+      ? "Owner"
+      : `handing off to ${run.holderLabel}`;
 
 /** The DOM id of a live Crew's group on the Fleet page, unique across environments. */
 export const fleetCrewAnchorId = (environmentId: string, crewInstanceId: string) =>
   `fleet-crew:${environmentId}:${crewInstanceId}`;
 
-/** A Crew's current step and holder. */
+/** An owner's current step and holder. */
 export const playbookRunHeader = (run: FleetPlaybookRun) =>
   `Step ${run.position} of ${run.total}: ${run.stepTitle} · ${playbookRunOwnerLabel(run)}`;
 
@@ -66,7 +55,6 @@ const byLabel = (left: FleetAgent, right: FleetAgent) =>
  */
 export function buildFleetTree(ledgerProject: FleetLedgerProject): ReadonlyArray<FleetNode> {
   const byId = new Map(ledgerProject.agents.map((agent) => [agent.participantId, agent]));
-  const crewById = new Map(ledgerProject.crews.map((crew) => [crew.crewInstanceId, crew]));
   const children = new Map<string | null, Array<FleetAgent>>();
   for (const agent of ledgerProject.agents) {
     const placed = agent.placementParentId ?? agent.crew?.captainParticipantId ?? null;
@@ -102,21 +90,11 @@ export function buildFleetTree(ledgerProject: FleetLedgerProject): ReadonlyArray
     return {
       row: { agent, depth, crewInstanceId: null },
       children: plain,
-      crews: [...crewGroups.entries()].map(([crewInstanceId, group]) => {
-        const crew = crewById.get(crewInstanceId);
-        return {
-          crewInstanceId,
-          crewName: group.name,
-          playbookName: crew?.playbook?.name ?? null,
-          stepsBySeat: new Map(
-            (crew?.roster ?? []).flatMap((seat) =>
-              seat.steps === undefined ? [] : [[seat.seat, seat.steps] as const],
-            ),
-          ),
-          members: group.members,
-          playbookRun: crew?.playbookRun ?? null,
-        };
-      }),
+      crews: [...crewGroups.entries()].map(([crewInstanceId, group]) => ({
+        crewInstanceId,
+        crewName: group.name,
+        members: group.members,
+      })),
     };
   };
   const roots = (children.get(null) ?? [])
