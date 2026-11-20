@@ -25,6 +25,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
@@ -102,7 +103,7 @@ export type StoredPlaybookRun = PlaybookRun & {
   readonly assignedByParticipantId: string | null;
 };
 const DefinitionJson = Schema.fromJsonString(PlaybookDefinition);
-const decodeDefinition = Schema.decodeUnknownSync(DefinitionJson);
+const decodeDefinition = Schema.decodeUnknownOption(DefinitionJson);
 const encodeDefinition = Schema.encodeSync(DefinitionJson);
 const RevisionJson = Schema.fromJsonString(PlaybookRevision);
 const decodeRevision = Schema.decodeUnknownSync(RevisionJson);
@@ -131,7 +132,8 @@ type RunRow = {
   latest_revision_json: string | null;
 };
 const fromRow = (row: RunRow): StoredPlaybookRun => ({
-  definition: row.definition_json === null ? null : decodeDefinition(row.definition_json),
+  definition:
+    row.definition_json === null ? null : Option.getOrNull(decodeDefinition(row.definition_json)),
   cancelReason: row.cancel_reason,
   holderStop: row.holder_stop_json == null ? null : decodeHolderStop(row.holder_stop_json),
   revisionCount: row.revision_count,
@@ -364,6 +366,7 @@ export const makePlaybookStore = Effect.gen(function* () {
     const index = definition?.steps.findIndex((step) => step.id === run.currentStepId) ?? -1;
     return {
       ...run,
+      issue: null,
       title: definition?.title ?? path.basename(run.definitionPath, ".yaml"),
       description: definition?.description ?? "",
       steps: definition?.steps.map(({ id, title }) => ({ id, title })) ?? [],
@@ -860,6 +863,11 @@ export const makePlaybookStore = Effect.gen(function* () {
             return yield* playbookError(
               "run_terminal",
               `This run is ${run.status}. Start a new run to continue.`,
+            );
+          if (definition === null && input.operation !== "cancel")
+            return yield* playbookError(
+              "invalid_snapshot",
+              "This run has no readable saved procedure. Cancel it and start again.",
             );
           yield* requireOwner(owner);
           if ("expectedStepId" in input && input.expectedStepId !== run.currentStepId) {
