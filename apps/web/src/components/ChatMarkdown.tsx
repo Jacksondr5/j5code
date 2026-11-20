@@ -239,6 +239,8 @@ interface ChatMarkdownProps {
   parseRawHtml?: boolean;
   onUseArtifactTemplate?: ((template: CodexArtifactTemplate) => void) | undefined;
   onRunShellCommand?: ((command: string) => void) | undefined;
+  /** J5 (case 33): opens `artifacts/…` links where the thread's right panel isn't on screen. */
+  onOpenArtifact?: ((artifactPath: string) => void) | undefined;
   imageBaseDir?: string | undefined;
   workspaceMutationId?: string | null | undefined;
   onImageExpand?: ((preview: ExpandedImagePreview) => void) | undefined;
@@ -505,6 +507,7 @@ function useChatMarkdownState({
   renderContextReference,
   headingLevelOffset = 0,
   sourceControlMedia = false,
+  onOpenArtifact,
 }: ChatMarkdownProps) {
   const resolvedTheme = useRenderedAppearance();
   const markdownRef = useRef<HTMLElement>(null);
@@ -818,6 +821,7 @@ function useChatMarkdownState({
     })();
   };
   const openArtifactInPanel = (artifactPath: string) => {
+    if (onOpenArtifact) return onOpenArtifact(artifactPath);
     if (!threadRef) return;
     useRightPanelStore.getState().openArtifact(threadRef, artifactPath);
   };
@@ -841,9 +845,12 @@ function useChatMarkdownState({
         fileLinkMeta.basename.slice(fileLinkMeta.basename.lastIndexOf(".")),
       ) !== null;
     const panelPath =
-      artifactPath ??
-      fileLinkMeta.workspaceRelativePath ??
-      (!canPreviewMedia && isHostPath(fileLinkMeta.filePath) ? fileLinkMeta.filePath : null);
+      artifactPath !== null
+        ? threadRef || onOpenArtifact
+          ? artifactPath
+          : null
+        : (fileLinkMeta.workspaceRelativePath ??
+          (!canPreviewMedia && isHostPath(fileLinkMeta.filePath) ? fileLinkMeta.filePath : null));
 
     return (
       <MarkdownFileLink
