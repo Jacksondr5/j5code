@@ -66,7 +66,7 @@ const mutationDescription =
 export const playbookTools = [
   Tool.make("j5_playbook_save", {
     description:
-      "Save a playbook YAML definition to this environment's library, available across all its projects and worktrees. This writes application data. Use for creation unless the user explicitly requests workspace-only storage. To edit a library playbook, pass the digest j5_playbook_read returned as expectedDigest; the save is refused if the file changed since. Without it, existing names are never overwritten. Identical content is a safe retry. Workspace playbooks are edited in their .j5/playbooks file instead. Report a save failure instead of claiming a workspace draft is shared.",
+      "Save YAML to the environment library after an Owner approves the full draft in a new chat turn. It is the default location unless the user asks for a workspace-only definition. If owner_required, leave the draft in chat for an Owner to save. Pass expectedDigest from j5_playbook_read for library edits. For a team-folder override, warn that the copy hides later team updates and removal restores the team version, then pass overrideFolder: true after approval. Edit workspace-only playbooks in .j5/playbooks. Identical saves are safe retries.",
     parameters: PlaybookSaveRequest,
     success: PlaybookSaveResponse,
     failure: Failure,
@@ -191,7 +191,7 @@ const readsPlaybooks = <P, A, E, R>(handle: (params: P) => Effect.Effect<A, E, R
 export const playbookHandlers = {
   j5_playbook_save: runsPlaybook((input: PlaybookSaveRequest) =>
     Effect.gen(function* () {
-      yield* ownerScope;
+      const threadId = yield* ownerScope;
       const caller = yield* readCaller();
       const assignment = caller.caller?.agentPersonaAssignment;
       const authorityPolicy =
@@ -209,7 +209,11 @@ export const playbookHandlers = {
           "capability_denied",
           "This agent's runtime policy cannot save playbook definitions. Use Save YAML in Settings or a writing agent.",
         );
-      return yield* (yield* PlaybookStore).saveDefinition(input);
+      return yield* (yield* PlaybookStore).saveDefinitionFromTurn(
+        threadId,
+        caller.scope.thread?.subagent ? null : (caller.caller?.activeRunId ?? null),
+        input,
+      );
     }),
   ),
   j5_playbook_list: readsPlaybooks(() =>

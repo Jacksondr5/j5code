@@ -1,6 +1,6 @@
 import type { SessionReach } from "../sharing/PersonAccess.ts";
 import { makePlaybookCheckpoints } from "./PlaybookCheckpoints.ts";
-import { ThreadId } from "@t3tools/contracts";
+import { type RunId, ThreadId } from "@t3tools/contracts";
 import {
   PlaybookError,
   PlaybookHolderStop,
@@ -561,7 +561,12 @@ export const makePlaybookStore = Effect.gen(function* () {
       Effect.gen(function* () {
         const selection = selectPlaybookSource(selected, name, selectedSource !== undefined);
         const source = selection.entry!;
-        const base = { name, source: source.source, overridesLibrary: selection.overridesLibrary };
+        const base = {
+          name,
+          source: source.source,
+          overridesLibrary: selection.overridesLibrary,
+          overridesFolder: selection.overridesFolder,
+        };
         const issue = selection.issue;
         const read =
           issue === null
@@ -1331,6 +1336,147 @@ export const makePlaybookStore = Effect.gen(function* () {
       ),
     saveDefinition: (input: PlaybookSaveRequest) =>
       library.save(input).pipe(permit.withPermits(1), Effect.tap(bumpRevision)),
+    saveDefinitionFromTurn: Effect.fn("PlaybookStore.saveDefinitionFromTurn")(
+      function* (threadId: ThreadId, runId: RunId | null, input: PlaybookSaveRequest) {
+        // A later steer, an edit of a queued message or an answer to the agent's question can
+        // change what the agent acts on, so each must be an Owner's too.
+        const allowed =
+          runId === null
+            ? []
+            : yield* sql<{ readonly allowed: number }>`
+            WITH turn AS (
+              SELECT thread_id, run_id, requested_at,
+                json_extract(payload_json, '$.userMessageId') AS initiating_id
+              FROM orchestration_v2_projection_runs
+              WHERE run_id = ${runId} AND thread_id = ${threadId}
+                AND status IN ('starting', 'running', 'waiting')
+            ),
+            -- An answer upstream writes as a message is claimed under the request it answers.
+            inputs AS (
+              SELECT message.message_id, message.payload_json,
+                CASE
+                  WHEN message.message_id LIKE 'approval-feedback:%'
+                    THEN 'runtime-request:' || substr(message.message_id, 19)
+                  WHEN message.message_id LIKE 'async-answer:%'
+                    THEN 'runtime-request:' || substr(message.message_id, 14)
+                  ELSE message.message_id
+                END AS claim_key
+              FROM turn
+              JOIN orchestration_v2_projection_messages AS message
+                ON message.thread_id = turn.thread_id AND message.run_id = turn.run_id
+              WHERE message.role = 'user'
+            ),
+            -- Each accepted command a person sent that wrote one of the turn's messages.
+            writes AS (
+              SELECT input.message_id, event.payload_json AS written_json,
+                (claim.settings_write = 1 AND person.removed_at IS NULL AND EXISTS (
+                  SELECT 1 FROM j5_a2a_person_level AS held
+                  WHERE held.person_id = claim.person_id AND held.scope_kind = 'server'
+                    AND held.level = 'owner'
+                )) AS by_owner
+              FROM inputs AS input
+              JOIN j5_human_message_command AS claim ON claim.message_id = input.claim_key
+              JOIN j5_a2a_human_person AS person ON person.person_id = claim.person_id
+              JOIN orchestration_events AS event INDEXED BY idx_orch_events_command_id
+                ON event.command_id = claim.command_id AND event.stream_id = ${threadId}
+                AND event.aggregate_kind = 'thread' AND event.event_type = 'message.updated'
+                AND json_extract(event.payload_json, '$.id') = input.message_id
+            ),
+            -- Queued edits upstream took that no settings-writing Owner sent: an agent's, through
+            -- its own tools, or a person's. A later Owner edit keeps what such an edit left.
+            foreign_edits AS (
+              SELECT receipt.command_id
+              FROM orchestration_command_receipts AS receipt
+              WHERE receipt.aggregate_kind = 'thread' AND receipt.aggregate_id = ${threadId}
+                AND receipt.command_type = 'queued-run.edit' AND receipt.status = 'accepted'
+                AND NOT EXISTS (
+                  SELECT 1 FROM j5_human_message_command AS claim
+                  JOIN j5_a2a_human_person AS person ON person.person_id = claim.person_id
+                  JOIN j5_a2a_person_level AS held
+                    ON held.person_id = claim.person_id AND held.scope_kind = 'server'
+                  WHERE claim.command_id = receipt.command_id AND claim.settings_write = 1
+                    AND held.level = 'owner' AND person.removed_at IS NULL
+                )
+            ),
+            -- An Owner wrote the words the agent reads now, and nobody else has changed them.
+            authorized AS (
+              SELECT input.message_id FROM inputs AS input
+              WHERE json_extract(input.payload_json, '$.scheduledTaskId') IS NULL
+                AND json_extract(input.payload_json, '$.senderThreadId') IS NULL
+                AND json_extract(input.payload_json, '$.createdBy') = 'user'
+                AND EXISTS (
+                  SELECT 1 FROM writes AS written
+                  WHERE written.message_id = input.message_id AND written.by_owner
+                    AND json_extract(written.written_json, '$.text')
+                      IS json_extract(input.payload_json, '$.text')
+                    AND json_extract(written.written_json, '$.attachments')
+                      IS json_extract(input.payload_json, '$.attachments')
+                    AND json_extract(written.written_json, '$.context')
+                      IS json_extract(input.payload_json, '$.context')
+                )
+                AND NOT EXISTS (
+                  SELECT 1 FROM writes AS written
+                  WHERE written.message_id = input.message_id AND NOT written.by_owner
+                )
+                AND NOT EXISTS (
+                  SELECT 1 FROM foreign_edits AS edit
+                  JOIN orchestration_events AS event INDEXED BY idx_orch_events_command_id
+                    ON event.command_id = edit.command_id AND event.stream_id = ${threadId}
+                    AND event.aggregate_kind = 'thread' AND event.event_type = 'message.updated'
+                    AND json_extract(event.payload_json, '$.id') = input.message_id
+                )
+            ),
+            -- Words given to this turn's questions and approvals. A request whose node names no
+            -- run counts from when the turn was asked for, so unknown provenance stays refused.
+            answers AS (
+              SELECT request.runtime_request_id FROM turn
+              JOIN orchestration_v2_projection_runtime_requests AS request
+                ON request.thread_id = turn.thread_id AND request.status = 'resolved'
+              LEFT JOIN orchestration_v2_projection_nodes AS node
+                ON node.node_id = request.node_id AND node.thread_id = request.thread_id
+              WHERE (json_extract(request.payload_json, '$.answers') IS NOT NULL
+                  OR json_extract(request.payload_json, '$.feedback') IS NOT NULL)
+                AND (node.run_id = turn.run_id
+                  OR (node.run_id IS NULL AND request.resolved_at >= turn.requested_at))
+            )
+            SELECT 1 AS allowed FROM turn
+            WHERE initiating_id IN (SELECT message_id FROM authorized)
+              AND NOT EXISTS (
+                SELECT 1 FROM inputs WHERE message_id NOT IN (SELECT message_id FROM authorized)
+              )
+              AND NOT EXISTS (
+                SELECT 1 FROM answers AS answer
+                WHERE NOT EXISTS (
+                  SELECT 1 FROM j5_human_message_command AS claim
+                  JOIN j5_a2a_human_person AS person ON person.person_id = claim.person_id
+                  JOIN j5_a2a_person_level AS held
+                    ON held.person_id = claim.person_id AND held.scope_kind = 'server'
+                  WHERE claim.message_id = 'runtime-request:' || answer.runtime_request_id
+                    AND claim.settings_write = 1 AND held.level = 'owner'
+                    AND person.removed_at IS NULL
+                    AND EXISTS (
+                      SELECT 1 FROM orchestration_events AS event
+                        INDEXED BY idx_orch_events_command_id
+                      WHERE event.command_id = claim.command_id AND event.stream_id = ${threadId}
+                        AND event.aggregate_kind = 'thread'
+                        AND event.event_type = 'runtime-request.updated'
+                        AND json_extract(event.payload_json, '$.id') = answer.runtime_request_id
+                    )
+                )
+              )
+            LIMIT 1
+          `;
+        if (allowed.length === 0) {
+          return yield* playbookError(
+            "owner_required",
+            "Only an environment Owner can save a library playbook. Keep the full YAML draft in this conversation and ask an Owner to approve and save it in a new chat turn or in Settings.",
+          );
+        }
+        return yield* library.save(input).pipe(Effect.tap(bumpRevision));
+      },
+      Effect.mapError(storageError),
+      permit.withPermits(1),
+    ),
     setFolders: (input: PlaybookFoldersInput) =>
       library.setFolders(input).pipe(permit.withPermits(1), Effect.tap(bumpRevision)),
     startDefinitionPathFor,

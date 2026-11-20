@@ -74,6 +74,8 @@ export const PlaybookSaveRequest = Schema.Struct({
   yaml: Schema.String,
   /** Replaces an existing environment-library definition only while it still has this digest. */
   expectedDigest: Schema.optionalKey(PlaybookDigest),
+  /** Create a same-named library copy over a configured team folder. */
+  overrideFolder: Schema.optionalKey(Schema.Boolean),
 });
 export type PlaybookSaveRequest = typeof PlaybookSaveRequest.Type;
 export const PlaybookSaveResponse = Schema.Struct({ name: Text, saved: Schema.Boolean });
@@ -208,6 +210,7 @@ export const PlaybookDiscovery = Schema.Struct({
       name: Text,
       source: Schema.optionalKey(PlaybookSource),
       overridesLibrary: Schema.optionalKey(Schema.Boolean),
+      overridesFolder: Schema.optionalKey(Schema.Boolean),
       title: Schema.String,
       description: Schema.String,
       stepCount: Schema.Int,

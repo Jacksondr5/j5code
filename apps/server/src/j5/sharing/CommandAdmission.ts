@@ -1,6 +1,9 @@
 import {
   AuthOrchestrationOperateScope,
+  AuthSettingsWriteScope,
+  CommandId,
   EnvironmentAuthorizationError,
+  MessageId,
   OrchestrationV2DispatchCommandError,
   type OrchestrationV2Command,
   type OrchestrationV2ThreadLaunchInput,
@@ -8,6 +11,7 @@ import {
   ScheduledTaskError,
   type ScheduledTaskMutationResult,
   type ScheduledTaskUpsertInput,
+  type RunId,
   ThreadId,
   authScopeRequiredResponse,
 } from "@t3tools/contracts";
@@ -134,6 +138,8 @@ const refused = (message: string) =>
     ...authScopeRequiredResponse(AuthOrchestrationOperateScope),
   });
 
+/** A claim on an answer names the runtime request it answers (`PlaybookStore`). */
+const RUNTIME_REQUEST_CLAIM_PREFIX = "runtime-request:";
 const NOT_SHARED = "This is not shared with you on this server.";
 const OWNERS_ONLY =
   "Only an Owner of this server archives or deletes a thread, for now. Ask an Owner to do it.";
@@ -285,6 +291,50 @@ export const makeCommandAdmission = Effect.fn("j5.sharing.commandAdmission.makeC
     });
 
     const person = reachPersonId(reach);
+    const claimMessage = Effect.fn("j5.sharing.commandAdmission.claimMessage")(function* (
+      commandId: CommandId,
+      messageId: MessageId,
+    ) {
+      if (reach.kind !== "person") return;
+      const canWriteSettings =
+        reach.serverLevel === "owner" &&
+        (reach.ceiling === null || reach.ceiling.includes(AuthSettingsWriteScope));
+      const [inserted] = yield* sql<{ readonly person_id: string }>`
+        INSERT OR IGNORE INTO j5_human_message_command (command_id, message_id, person_id, settings_write)
+        SELECT ${commandId}, ${messageId}, ${reach.person.personId}, ${canWriteSettings ? 1 : 0}
+        WHERE NOT EXISTS (SELECT 1 FROM orchestration_events WHERE command_id = ${commandId})
+        RETURNING person_id
+      `.pipe(Effect.mapError(() => refused("Could not verify the sender of this message.")));
+      if (inserted) return;
+      const [previous] = yield* sql<{
+        readonly person_id: string;
+        readonly message_id: string;
+        readonly settings_write: number;
+      }>`
+        SELECT person_id, message_id, settings_write FROM j5_human_message_command
+        WHERE command_id = ${commandId}
+      `.pipe(Effect.mapError(() => refused("Could not verify the sender of this message.")));
+      if (
+        previous &&
+        (previous.person_id !== reach.person.personId ||
+          previous.message_id !== messageId ||
+          (previous.settings_write === 1 && !canWriteSettings))
+      ) {
+        return yield* refused("This message command was already submitted.");
+      }
+    });
+    /** The message a queued run would deliver; upstream refuses an edit of any other run. */
+    const queuedMessageId = (threadId: ThreadId, runId: RunId) =>
+      sql<{ readonly message_id: string | null }>`
+        SELECT json_extract(payload_json, '$.userMessageId') AS message_id
+        FROM orchestration_v2_projection_runs
+        WHERE run_id = ${runId} AND thread_id = ${threadId}
+      `.pipe(
+        Effect.map((rows) =>
+          rows[0]?.message_id == null ? null : MessageId.make(rows[0].message_id),
+        ),
+        Effect.mapError(() => refused("Could not verify the sender of this message.")),
+      );
     // Only a person may switch a persona worker's model; the orchestrator checks the switch.
     const asPerson = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
       person === null
@@ -316,6 +366,21 @@ export const makeCommandAdmission = Effect.fn("j5.sharing.commandAdmission.makeC
         Effect.flatMap((admitted) =>
           conversation.dispatch(person, admitted, (stamped) =>
             Effect.gen(function* () {
+              if (stamped.type === "message.dispatch") {
+                yield* claimMessage(stamped.commandId, stamped.messageId);
+              }
+              // An edit rewrites a queued message and an answer reaches the agent as words, so
+              // both are claimed for whoever sent them (`PlaybookStore.saveDefinitionFromTurn`).
+              if (stamped.type === "queued-run.edit") {
+                const messageId = yield* queuedMessageId(stamped.threadId, stamped.runId);
+                if (messageId !== null) yield* claimMessage(stamped.commandId, messageId);
+              }
+              if (stamped.type === "runtime-request.respond") {
+                yield* claimMessage(
+                  stamped.commandId,
+                  MessageId.make(`${RUNTIME_REQUEST_CLAIM_PREFIX}${stamped.requestId}`),
+                );
+              }
               const claimed = yield* claimEdit(stamped);
               return yield* asPerson(dispatch(stamped)).pipe(
                 Effect.tapError(() => (claimed ? releaseEdit(stamped) : Effect.void)),
@@ -338,7 +403,23 @@ export const makeCommandAdmission = Effect.fn("j5.sharing.commandAdmission.makeC
           ? { kind: "thread", threadId: input.threadId }
           : { kind: "project", projectId: input.projectId };
       yield* requireLevel(scope, "collaborator");
-      return yield* conversation.launch(person, input, (admitted) => asPerson(launch(admitted)));
+      const first = input.initialMessage;
+      const messageId =
+        person === null || first === undefined
+          ? undefined
+          : (first.messageId ?? MessageId.make(`message:j5:launch:${input.commandId}`));
+      const withId =
+        first !== undefined && messageId !== undefined && first.messageId === undefined
+          ? { ...input, initialMessage: { ...first, messageId } }
+          : input;
+      return yield* conversation.launch(person, withId, (admitted) =>
+        Effect.gen(function* () {
+          if (messageId !== undefined) {
+            yield* claimMessage(CommandId.make(`${admitted.commandId}:initial-message`), messageId);
+          }
+          return yield* asPerson(launch(admitted));
+        }),
+      );
     });
 
     const upsertScheduledTask: CommandAdmission["upsertScheduledTask"] = (input, upsert) => {

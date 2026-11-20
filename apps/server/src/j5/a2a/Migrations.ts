@@ -68,6 +68,8 @@ import Migration0061 from "./migrations/061_PlaybookRuntimeHolders.ts";
 import Migration0062 from "./migrations/062_PlaybookCancellation.ts";
 import Migration0064 from "./migrations/064_PlaybookRunStartSequence.ts";
 
+import Migration0066 from "./migrations/066_HumanMessageCommands.ts";
+
 export const J5_A2A_MIGRATIONS_TABLE = "j5_a2a_migrations";
 
 // Every entry already in this list is persisted migration history: keep its id, file, and
@@ -143,6 +145,7 @@ export const migrationEntries = [
   [63, "PlaybookCheckpoints", Migration0063],
   [64, "PlaybookRunStartSequence", Migration0064],
   [65, "CheckpointNotificationIndex", Migration0065],
+  [66, "HumanMessageCommands", Migration0066],
 ] as const;
 
 const makeMigrationLoader = (throughId?: number) =>
