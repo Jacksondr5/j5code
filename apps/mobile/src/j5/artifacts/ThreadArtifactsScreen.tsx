@@ -140,18 +140,33 @@ function ArtifactBody(props: { readonly content: ArtifactContent; readonly frame
   const [preview, setPreview] = useState<FilePreviewSource | null>(null);
   const kind = artifactPreviewKind(content);
   if (kind === "image") {
+    const svg = artifactExtension(content.path) === "svg";
+    const image = (
+      <ThreadMarkdownImageView
+        uri={artifactDataUrl(content)}
+        sourceKey={content.path}
+        unavailable={false}
+        alt={content.path}
+        format={svg ? "svg" : undefined}
+        onPressPreview={(source) => setPreview({ ...source, name: content.path.split("/").at(-1) })}
+      />
+    );
+    // Upstream's Android full-screen viewer can't draw SVG, so there an SVG is only an image.
+    if (svg && Platform.OS === "android") {
+      return (
+        <View
+          pointerEvents="none"
+          accessible
+          accessibilityRole="image"
+          accessibilityLabel={content.path}
+        >
+          {image}
+        </View>
+      );
+    }
     return (
       <>
-        <ThreadMarkdownImageView
-          uri={artifactDataUrl(content)}
-          sourceKey={content.path}
-          unavailable={false}
-          alt={content.path}
-          format={artifactExtension(content.path) === "svg" ? "svg" : undefined}
-          onPressPreview={(source) =>
-            setPreview({ ...source, name: content.path.split("/").at(-1) })
-          }
-        />
+        {image}
         <FilePreviewModal source={preview} onRequestClose={() => setPreview(null)} />
       </>
     );
