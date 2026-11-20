@@ -27,7 +27,7 @@ it("names the playbook, step, position, and owner before the saved prompt", () =
       "<step_prompt>",
       "Read the change.",
       "</step_prompt>",
-      "You hold this step. Do it now, then report back to agent:owner with j5_send_message, including what you did and the evidence. The owner advances the playbook; you don't call its movement tools.",
+      "Follow the saved step prompt. Use j5_send_message to report back to agent:owner with your result and supporting evidence. The run owner advances the playbook.",
     ].join("\n"),
   );
 });

@@ -16,6 +16,7 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import { OrchestratorDispatchError } from "../../orchestration-v2/Orchestrator.ts";
+import { webhookPromptLiterals } from "../../scheduledTasks/webhookTemplate.ts";
 import { ThreadLaunchService } from "../../orchestration-v2/ThreadLaunchService.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import type { ParticipantId } from "../a2a/contracts.ts";
@@ -38,18 +39,22 @@ export const scheduledLine = (author: Author, editedBy: Author | null = null) =>
     : `[Scheduled by ${authorLabel(author)}, edited by ${authorLabel(editedBy)}]`;
 
 /**
- * Records who scheduled a task as a person saves it: whoever creates it, and whoever changes its
- * prompt. `before` is its prompt before the save, `null` for a new task. An agent's change over
- * MCP is not recorded, so the person recorded no longer set the prompt that runs and the task's
- * runs name no one (`schedulerOf`).
+ * Records who scheduled a task as a person saves it: its creator, whoever changes its prompt, and
+ * whoever saves a prompt no person is recorded for. `before` is the prompt before the save, `null`
+ * for a new task. An agent's MCP change is not recorded, so its runs name no one (`schedulerOf`).
  */
 export const recordScheduler = Effect.fn("j5.sharing.scheduledRuns.recordScheduler")(function* (
   personId: ParticipantId,
   task: Pick<ScheduledTask, "id" | "prompt">,
   before: string | null,
 ) {
-  if (before === task.prompt) return;
   const sql = yield* SqlClient.SqlClient;
+  // An unchanged save keeps its recorded person, but claims a prompt no person is recorded for.
+  if (before === task.prompt) {
+    const recorded = yield* sql`SELECT 1 FROM j5_a2a_task_scheduler
+      WHERE task_id = ${task.id} AND prompt = ${task.prompt}`;
+    if (recorded.length > 0) return;
+  }
   const recordedAt = DateTime.formatIso(yield* DateTime.now);
   yield* sql`
     INSERT INTO j5_a2a_task_scheduler (task_id, person_id, prompt, recorded_at)
@@ -110,6 +115,34 @@ const make = Effect.gen(function* () {
     `.pipe(Effect.map((rows) => (rows[0]?.person_id ?? null) as ParticipantId | null));
 
   /**
+   * The schedule text that may name playbooks (`scheduledStart.ts`): only a prompt a person saved.
+   * An agent can write a task's prompt over MCP, so its text names none until a person saves it.
+   */
+  const authorizedPrompt = Effect.fn("j5.sharing.scheduledRuns.authorizedPrompt")(function* (
+    taskId: string,
+    snapshot: string | undefined,
+  ) {
+    if (snapshot === undefined) return undefined;
+    const rows = yield* sql<{ readonly prompt: string }>`
+      SELECT prompt FROM j5_a2a_task_scheduler WHERE task_id = ${taskId}
+    `;
+    const saved = rows[0]?.prompt;
+    return saved !== undefined && (snapshot === saved || snapshot === webhookPromptLiterals(saved))
+      ? snapshot
+      : undefined;
+  });
+  const withAuthorizedPrompt = <A extends { readonly scheduledTaskPrompt?: string }>(
+    taskId: string,
+    input: A,
+  ) =>
+    authorizedPrompt(taskId, input.scheduledTaskPrompt).pipe(
+      Effect.map((prompt): A => {
+        const { scheduledTaskPrompt: _snapshot, ...rest } = input;
+        return (prompt === undefined ? rest : { ...rest, scheduledTaskPrompt: prompt }) as A;
+      }),
+    );
+
+  /**
    * A run's text as the agent reads it, on a thread that is a shared conversation: its
    * scheduler's line, and any note due. Unchanged where no person is recorded for it. When its
    * scheduler can no longer write there, the run is not sent.
@@ -149,6 +182,9 @@ const make = Effect.gen(function* () {
     sendToThread: Effect.fn("j5.sharing.scheduledRuns.sendToThread")(function* (input) {
       const taskId = input.scheduledTaskId;
       if (taskId === undefined) return yield* inner.threads.sendToThread(input);
+      const authorized = yield* withAuthorizedPrompt(taskId, input).pipe(
+        Effect.catch(failRun(input.commandId)),
+      );
       const text = yield* Effect.gen(function* () {
         if (!(yield* shared.isShared(input.threadId))) return input.text;
         return yield* stamp({
@@ -160,18 +196,24 @@ const make = Effect.gen(function* () {
           launchingIn: null,
         });
       }).pipe(Effect.catch(failRun(input.commandId)));
-      return yield* inner.threads.sendToThread({ ...input, text });
+      return yield* inner.threads.sendToThread({ ...authorized, text });
     }),
   });
 
   const launch = ThreadLaunchService.of({
     ...inner.launch,
-    launch: Effect.fn("j5.sharing.scheduledRuns.launch")(function* (input) {
-      const first = input.initialMessage;
-      const taskId = first?.scheduledTaskId;
-      if (first === undefined || taskId === undefined || input.threadId !== undefined) {
-        return yield* inner.launch.launch(input);
+    launch: Effect.fn("j5.sharing.scheduledRuns.launch")(function* (requested) {
+      const requestedFirst = requested.initialMessage;
+      const taskId = requestedFirst?.scheduledTaskId;
+      if (requestedFirst === undefined || taskId === undefined) {
+        return yield* inner.launch.launch(requested);
       }
+      const first = yield* withAuthorizedPrompt(taskId, requestedFirst).pipe(
+        Effect.catch(failRun(requested.commandId)),
+        Effect.orDie,
+      );
+      const input = { ...requested, initialMessage: first };
+      if (input.threadId !== undefined) return yield* inner.launch.launch(input);
       const stamped = yield* Effect.gen(function* () {
         // A shared conversation's messages are recorded under their thread, so the run's thread
         // is named before it is made, the same for each retry of the run's command.

@@ -1,11 +1,17 @@
+import { NoticeOrigin, encodeNoticeOrigin } from "./noticeOrigin.ts";
 import { ThreadId } from "@t3tools/contracts";
 import type { PlaybookCheckpoint, PlaybookCheckpointAnswer } from "@t3tools/contracts/j5";
+import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 import type * as SqlClient from "effect/sql/SqlClient";
 import { decodePickScopes, encodePickScopes, type ApprovedPick } from "./personaPickApprovals.ts";
 import { playbookError } from "./definition.ts";
 
 import { reachableThreadQuery, type SessionReach } from "../sharing/PersonAccess.ts";
+
+const encodeText = Schema.encodeSync(Schema.fromJsonString(Schema.String));
+
+const quoteText = (text: string) => (/^[a-z0-9_-]+$/i.test(text) ? text : encodeText(text));
 
 type Row = {
   request_id: string;
@@ -61,9 +67,9 @@ export const makePlaybookCheckpoints = (sql: SqlClient.SqlClient) => {
     request: PlaybookCheckpoint,
     picks?: Readonly<Record<string, ApprovedPick>>,
   ) {
-    yield* sql`INSERT INTO j5_playbook_checkpoint (request_id, run_id, owner_thread_id, step_id, step_title, summary, status, created_at, persona_picks_json)
+    yield* sql`INSERT INTO j5_playbook_checkpoint (request_id, run_id, owner_thread_id, step_id, step_title, summary, status, created_at, persona_picks_json, playbook_origin_json)
       VALUES (${request.requestId}, ${request.runId}, ${request.ownerThreadId}, ${request.stepId}, ${request.stepTitle},
-        ${request.summary}, 'pending', ${request.createdAt}, ${picks === undefined ? null : encodePickScopes(picks)})`;
+        ${request.summary}, 'pending', ${request.createdAt}, ${picks === undefined ? null : encodePickScopes(picks)}, ${encodeNoticeOrigin(yield* NoticeOrigin)})`;
     if (picks === undefined)
       yield* sql`UPDATE j5_playbook_run SET checkpoint_request_id = ${request.requestId} WHERE run_id = ${request.runId}`;
   });
@@ -129,8 +135,10 @@ export const makePlaybookCheckpoints = (sql: SqlClient.SqlClient) => {
     if (Object.keys(remaining).length === 0) return;
     const lines = Object.entries(remaining).map(([persona, scope]) => {
       const limits = statuses.find((entry) => entry.persona === persona)?.limits;
-      const renewal = scope.retryStepId ? ` (another launch for ${scope.retryStepId})` : "";
-      return `• ${persona} for ${scope.stepIds.join(", ")}${renewal}: ${limits}`;
+      const renewal = scope.retryStepId
+        ? ` (another launch for ${quoteText(scope.retryStepId)})`
+        : "";
+      return `• ${persona} for ${scope.stepIds.map((id) => quoteText(id)).join(", ")}${renewal}: ${limits}`;
     });
     yield* open({ ...request, summary: [request.summary, ...lines].join("\n") }, remaining);
   });
@@ -140,6 +148,8 @@ export const makePlaybookCheckpoints = (sql: SqlClient.SqlClient) => {
     const from = sql`FROM j5_playbook_checkpoint checkpoint
       JOIN j5_playbook_run run ON run.run_id = checkpoint.run_id
         AND (checkpoint.persona_picks_json IS NOT NULL OR run.checkpoint_request_id = checkpoint.request_id)
+      JOIN orchestration_v2_projection_threads owner ON owner.thread_id = checkpoint.owner_thread_id
+        AND owner.deleted_at IS NULL AND owner.archived_at IS NULL
       WHERE run.status = 'active' AND checkpoint.status = 'pending' ${threadFilter}`;
     if (reach.kind === "service" || (reach.kind === "person" && reach.serverLevel !== null))
       return from;

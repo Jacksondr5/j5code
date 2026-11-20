@@ -21,6 +21,7 @@ import type { SqlError } from "effect/sql/SqlError";
 import {
   requireThreadScope,
   threadLinkFor,
+  linkedPlaybookOrigin,
   type McpInvocationScope,
   type McpThreadInvocationScope,
 } from "../../mcp/McpInvocationContext.ts";
@@ -246,7 +247,9 @@ const preflightThreadSpawner = Effect.fn("j5.a2a.mcp.preflightThreadSpawner")(fu
     );
   }
   const parent = yield* (yield* ThreadManagementService.ThreadManagementService)
-    .getThreadRecords(scope.thread.threadId, [])
+    .getThreadRecords(scope.thread.threadId, ["runs"], {
+      runStatuses: ["preparing", "starting", "running", "waiting"],
+    })
     .pipe(
       Effect.mapError((error) =>
         stateError(
@@ -262,6 +265,7 @@ const preflightThreadSpawner = Effect.fn("j5.a2a.mcp.preflightThreadSpawner")(fu
     home: {
       ledgerProject: { id: caller.projectId, title: caller.project.name },
       thread: parent.thread,
+      senderRunId: ThreadManagementService.latestActiveRun(parent)?.id,
     },
     outside: undefined,
   };
@@ -793,6 +797,9 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
         const briefMessageId = spawnMessageId(stableInput);
         yield* spawnWorkspace
           .startBrief({
+            ...linkedPlaybookOrigin(scope.client),
+            ...(home === undefined ? {} : { senderThreadId: home.thread.id }),
+            ...(home?.senderRunId === undefined ? {} : { senderRunId: home.senderRunId }),
             workspace,
             stableInput,
             ledgerProjectId: facts.home.projectId,

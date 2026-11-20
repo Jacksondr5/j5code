@@ -1,3 +1,4 @@
+import { NoticeOrigin, encodeNoticeOrigin, decodeNoticeOrigin } from "./noticeOrigin.ts";
 import type { SessionReach } from "../sharing/PersonAccess.ts";
 import { makePlaybookCheckpoints } from "./PlaybookCheckpoints.ts";
 import {
@@ -10,6 +11,7 @@ import {
 import {
   PlaybookError,
   PlaybookHolderStop,
+  PlaybookProgress,
   PlaybookRevision,
   PlaybookRequiredPersonas,
   type PlaybookReviseRequest,
@@ -127,6 +129,9 @@ const decodeAssignment = Schema.decodeUnknownSync(
   Schema.fromJsonString(OrchestrationV2AgentPersonaAssignment),
 );
 const decodeRuntimeMode = Schema.decodeUnknownSync(RuntimeMode);
+const readStepLabels = Schema.decodeUnknownOption(
+  Schema.fromJsonString(PlaybookProgress.fields.steps),
+);
 const DefinitionJson = Schema.fromJsonString(PlaybookDefinition);
 const decodeDefinition = Schema.decodeUnknownOption(DefinitionJson);
 const encodeDefinition = Schema.encodeSync(DefinitionJson);
@@ -184,6 +189,7 @@ const fromRow = (row: RunRow): StoredPlaybookRun => ({
 
 /** One recorded step landing and how its hand-off resolved. */
 export type PlaybookLanding = {
+  readonly playbookOrigin: ReturnType<typeof decodeNoticeOrigin>;
   readonly runId: string;
   readonly requestId: string;
   readonly stepId: string;
@@ -197,6 +203,7 @@ export type PlaybookLanding = {
   readonly resolvedAt: string | null;
 };
 type LandingRow = {
+  playbook_origin_json: string | null;
   run_id: string;
   request_id: string;
   step_id: string;
@@ -213,6 +220,7 @@ const landingFromRow = (row: LandingRow): PlaybookLanding => ({
   requestId: row.request_id,
   stepId: row.step_id,
   landedAt: row.landed_at,
+  playbookOrigin: decodeNoticeOrigin(row.playbook_origin_json),
   targetSeat: row.target_seat,
   targetThreadId: row.target_thread_id,
   targetParticipantId: row.target_participant_id,
@@ -605,16 +613,17 @@ export const makePlaybookStore = Effect.gen(function* () {
       );
   });
   // Target and attribution are committed with the run pointer, so a retry cannot change holders.
-  const land = (
+  const land = Effect.fn("PlaybookStore.land")(function* (
     runId: string,
     requestId: string,
     stepId: string,
     landedAt: string,
     holder: Holder,
-  ) =>
-    sql`INSERT INTO j5_playbook_step_delivery (run_id, request_id, step_id, landed_at,
-      target_seat, target_thread_id, target_participant_id, assigned_by_participant_id)
-      VALUES (${runId}, ${requestId}, ${stepId}, ${landedAt}, ${holder.seat}, ${holder.threadId}, ${holder.participantId}, ${holder.assignedBy})`;
+  ) {
+    yield* sql`INSERT INTO j5_playbook_step_delivery (run_id, request_id, step_id, landed_at,
+      target_seat, target_thread_id, target_participant_id, assigned_by_participant_id, playbook_origin_json)
+      VALUES (${runId}, ${requestId}, ${stepId}, ${landedAt}, ${holder.seat}, ${holder.threadId}, ${holder.participantId}, ${holder.assignedBy}, ${encodeNoticeOrigin(yield* NoticeOrigin)})`;
+  });
   const skipPending = (runId: string, resolvedAt: string) =>
     sql`UPDATE j5_playbook_step_delivery SET outcome = 'skipped', resolved_at = ${resolvedAt}
       WHERE run_id = ${runId} AND resolved_at IS NULL`;
@@ -1130,13 +1139,37 @@ export const makePlaybookStore = Effect.gen(function* () {
                 );
               currentStepId = input.stepId;
             }
+            const previouslyPassed = new Set(
+              previousSteps
+                .slice(
+                  0,
+                  previousSteps.findIndex((step) => step.id === run.currentStepId),
+                )
+                .filter((step) => step.approval === "required")
+                .map((step) => step.id),
+            );
+            if (
+              definition.steps
+                .slice(0, ids.indexOf(currentStepId))
+                .some((step) => step.approval === "required" && !previouslyPassed.has(step.id))
+            )
+              return yield* playbookError(
+                "invalid_definition",
+                "The revision would skip a required approval.",
+              );
           } else if (definition) {
             const ids = definition.steps.map((step) => step.id);
             const index = ids.indexOf(run.currentStepId);
             if (index < 0)
               return yield* playbookError("invalid_snapshot", "The run has no current step.");
-            if (input.operation === "complete") status = "completed";
-            else if (input.operation !== "assign") {
+            if (input.operation === "complete") {
+              if (definition.steps.slice(index + 1).some((step) => step.approval === "required"))
+                return yield* playbookError(
+                  "step_boundary",
+                  "A later step requires approval before this run can complete.",
+                );
+              status = "completed";
+            } else if (input.operation !== "assign") {
               const target = ids[index + (input.operation === "next" ? 1 : -1)];
               if (!target)
                 return yield* playbookError(
@@ -1251,9 +1284,9 @@ export const makePlaybookStore = Effect.gen(function* () {
               if (previousStep?.prompt !== revisedStep?.prompt) {
                 // Preserve the recipient and seat recorded for this step.
                 yield* sql`INSERT INTO j5_playbook_step_delivery (run_id, request_id, step_id, landed_at,
-                  target_seat, target_thread_id, target_participant_id, assigned_by_participant_id)
+                  target_seat, target_thread_id, target_participant_id, assigned_by_participant_id, playbook_origin_json)
                   SELECT run_id, ${input.client_request_id}, step_id, ${updatedAt},
-                    target_seat, target_thread_id, target_participant_id, assigned_by_participant_id
+                    target_seat, target_thread_id, target_participant_id, assigned_by_participant_id, ${encodeNoticeOrigin(yield* NoticeOrigin)}
                   FROM j5_playbook_step_delivery WHERE run_id = ${run.runId} AND step_id = ${currentStepId}
                   ORDER BY landed_at DESC, rowid DESC LIMIT 1`;
               }
@@ -1341,8 +1374,22 @@ export const makePlaybookStore = Effect.gen(function* () {
     yield* cancelOrphans();
     return yield* view(yield* readRun(owner, runId));
   }, Effect.mapError(storageError));
+  type ProgressRow = RunRow & {
+    title: string | null;
+    description: string | null;
+    steps_json: string;
+  };
+  // SQLite JSON functions throw on malformed text, including scalar step entries.
+  const displayDefinition = sql`CASE WHEN json_valid(definition_json) THEN definition_json END`;
+  const progressColumns = sql`run_id, owner_thread_id, definition_path, current_step_id,
+    holder_participant_id, holder_thread_id, assigned_by_participant_id, status, created_at,
+    updated_at, crew_instance_id, cancel_reason, holder_stop_json, revision_count, latest_revision_json,
+    NULL AS definition_json, NULL AS required_personas_json, persona_block_reason,
+    json_extract(${displayDefinition}, '$.title') AS title, json_extract(${displayDefinition}, '$.description') AS description,
+    (SELECT json_group_array(CASE WHEN type = 'object' THEN json_object('id', value ->> '$.id', 'title', value ->> '$.title') END)
+     FROM json_each(${displayDefinition}, '$.steps')) AS steps_json`;
   const progressRows = Effect.fn("j5.playbooks.playbookStore.progressRows")(function* (
-    rows: ReadonlyArray<RunRow>,
+    rows: ReadonlyArray<ProgressRow>,
   ) {
     if (rows.length === 0) return [];
     const details = yield* sql<{
@@ -1353,6 +1400,9 @@ export const makePlaybookStore = Effect.gen(function* () {
     }>`SELECT run.run_id,
       (run.status = 'active' AND COALESCE(checkpoint.status = 'pending', 0)) AS waiting_for_approval,
       (run.status = 'active' AND (run.persona_block_reason IS NOT NULL OR EXISTS (
+        SELECT 1 FROM j5_playbook_checkpoint staffing WHERE staffing.run_id = run.run_id
+        AND staffing.persona_picks_json IS NOT NULL AND staffing.status = 'pending'
+      ) OR EXISTS (
         SELECT 1 FROM j5_a2a_membership membership
         JOIN j5_a2a_human_inbox inbox ON inbox.sender_id = membership.participant_id
         WHERE membership.thread_id = run.owner_thread_id AND inbox.status = 'open'
@@ -1370,9 +1420,19 @@ export const makePlaybookStore = Effect.gen(function* () {
         replayed: _replayed,
         ...progress
       } = present(run, run.definition);
+      const steps =
+        typeof row.title === "string" && typeof row.description === "string"
+          ? Option.getOrElse(readStepLabels(row.steps_json), () => [])
+          : [];
+      const index = steps.findIndex((step) => step.id === run.currentStepId);
       const detail = byRun.get(run.runId)!;
       return {
         ...progress,
+        title: steps.length ? (row.title ?? progress.title) : progress.title,
+        description: steps.length ? (row.description ?? "") : "",
+        steps,
+        position: index < 0 ? null : index + 1,
+        total: steps.length,
         blocked: Boolean(detail.blocked),
         waitingForApproval: Boolean(detail.waiting_for_approval),
         holderName: detail.holder_name,
@@ -1381,7 +1441,8 @@ export const makePlaybookStore = Effect.gen(function* () {
   });
   const listForThread = Effect.fn("PlaybookStore.listForThread")(function* (owner: ThreadId) {
     yield* cancelOrphans();
-    const rows = yield* sql<RunRow>`SELECT * FROM j5_playbook_run WHERE owner_thread_id = ${owner}
+    const rows =
+      yield* sql<ProgressRow>`SELECT ${progressColumns} FROM j5_playbook_run WHERE owner_thread_id = ${owner}
       ORDER BY (status = 'active') DESC, rowid DESC LIMIT 20`;
     const runs = yield* progressRows(rows);
     return { runs };
@@ -1392,7 +1453,8 @@ export const makePlaybookStore = Effect.gen(function* () {
     const counts = yield* sql<{
       total: number;
     }>`SELECT COUNT(*) AS total FROM j5_playbook_run WHERE ${filter}`;
-    const rows = yield* sql<RunRow>`SELECT * FROM j5_playbook_run WHERE ${filter}
+    const rows =
+      yield* sql<ProgressRow>`SELECT ${progressColumns} FROM j5_playbook_run WHERE ${filter}
       ORDER BY ${input.status === "active" ? sql`updated_at DESC, rowid DESC` : sql`(status = 'active') DESC, updated_at DESC, rowid DESC`}
       LIMIT ${PLAYBOOK_RUNS_PAGE_SIZE} OFFSET ${input.offset ?? 0}`;
     const runs = yield* progressRows(rows);
@@ -1523,13 +1585,27 @@ export const makePlaybookStore = Effect.gen(function* () {
   ) {
     if (ownerThreadIds.length === 0) return [];
     const rows = yield* sql<
-      RunRow & {
+      Pick<
+        RunRow,
+        | "run_id"
+        | "owner_thread_id"
+        | "current_step_id"
+        | "holder_participant_id"
+        | "holder_thread_id"
+        | "persona_block_reason"
+      > & {
         delivery_outcome: PlaybookLanding["outcome"];
-        delivery_resolved_at: string | null;
+        position: number;
+        total: number;
+        step_title: string;
       }
-    >`SELECT run.*, delivery.outcome AS delivery_outcome,
-      delivery.resolved_at AS delivery_resolved_at
+    >`SELECT run.run_id, run.owner_thread_id, run.current_step_id, run.holder_participant_id,
+      run.holder_thread_id, run.persona_block_reason, delivery.outcome AS delivery_outcome,
+      COALESCE(step.key + 1, 0) AS position,
+      COALESCE(json_array_length(${displayDefinition}, '$.steps'), 0) AS total,
+      COALESCE(step.value ->> '$.title', run.current_step_id) AS step_title
       FROM j5_playbook_run run
+      LEFT JOIN json_each(${displayDefinition}, '$.steps') step ON CASE WHEN step.type = 'object' THEN step.value ->> '$.id' END = run.current_step_id
       LEFT JOIN j5_playbook_step_delivery delivery ON delivery.rowid = (
         SELECT landing.rowid FROM j5_playbook_step_delivery landing
         WHERE landing.run_id = run.run_id AND landing.step_id = run.current_step_id
@@ -1537,20 +1613,18 @@ export const makePlaybookStore = Effect.gen(function* () {
       )
       WHERE run.status = 'active' AND run.owner_thread_id IN ${sql.in([...ownerThreadIds])}`;
     return rows.map((row) => {
-      const run = fromRow(row);
-      const progress = present(run, run.definition);
       return {
-        ownerThreadId: run.ownerThreadId,
-        runId: run.runId,
-        position: progress.position ?? 0,
-        total: progress.total,
-        stepId: run.currentStepId,
-        stepTitle: progress.currentStep?.title ?? run.currentStepId,
-        holderParticipantId: run.holderParticipantId,
+        ownerThreadId: ThreadId.make(row.owner_thread_id),
+        runId: row.run_id,
+        position: row.position,
+        total: row.total,
+        stepId: row.current_step_id,
+        stepTitle: row.step_title,
+        holderParticipantId: row.holder_participant_id,
         state:
-          run.personaBlockReason !== null
+          row.persona_block_reason !== null
             ? ("blocked" as const)
-            : run.holderThreadId === run.ownerThreadId
+            : row.holder_thread_id === row.owner_thread_id
               ? ("captain" as const)
               : row.delivery_outcome === "delivered"
                 ? ("delivered" as const)
@@ -1565,11 +1639,9 @@ export const makePlaybookStore = Effect.gen(function* () {
       reach: SessionReach,
       threadId?: ThreadId,
     ) {
-      yield* cancelOrphans();
       return yield* checkpoints.pending(reach, threadId);
     }, Effect.mapError(storageError)),
     countCheckpoints: Effect.fn("PlaybookStore.countCheckpoints")(function* (reach: SessionReach) {
-      yield* cancelOrphans();
       return yield* checkpoints.count(reach);
     }, Effect.mapError(storageError)),
     answerCheckpoint: Effect.fn("PlaybookStore.answerCheckpoint")(function* (

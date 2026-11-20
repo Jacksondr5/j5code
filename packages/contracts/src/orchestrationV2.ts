@@ -41,6 +41,7 @@ import {
   TrimmedNonEmptyString,
   TurnItemId,
 } from "./baseSchemas.ts";
+import { PlaybookOrigin } from "./j5/playbookOrigin.ts";
 import { AuthMcpClientAccess } from "./auth.ts";
 import { ChatAttachment } from "./chatAttachment.ts";
 import { ThreadGuestShare } from "./guestShare.ts";
@@ -1295,6 +1296,10 @@ export const OrchestrationV2ConversationMessage = Schema.Struct({
   notification: Schema.optional(OrchestrationV2Notification),
   ...OrchestrationV2CreationFields,
   scheduledTaskId: Schema.optional(ScheduledTaskId),
+  /** Authored schedule text at dispatch. Webhook substitutions are excluded. */
+  scheduledTaskPrompt: Schema.optional(Schema.String),
+  senderRunId: Schema.optional(RunId),
+  playbookOrigin: Schema.optional(PlaybookOrigin),
   senderThreadId: Schema.optional(ThreadId),
   idleCompaction: Schema.optional(OrchestrationV2IdleCompaction),
   /**
@@ -3158,6 +3163,9 @@ export const OrchestrationV2Command = Schema.Union([
     guestMessageId: Schema.optional(GuestMessageId),
     ...OrchestrationV2CreationFields,
     scheduledTaskId: Schema.optional(ScheduledTaskId),
+    scheduledTaskPrompt: OrchestrationV2ConversationMessage.fields.scheduledTaskPrompt,
+    senderRunId: Schema.optional(RunId),
+    playbookOrigin: Schema.optional(PlaybookOrigin),
     senderThreadId: Schema.optional(ThreadId),
     idleCompaction: Schema.optional(OrchestrationV2IdleCompaction),
     commandId: CommandId,
@@ -3592,13 +3600,18 @@ const OrchestrationV2InternalCommand = Schema.Union([
 export type OrchestrationV2InternalCommand = typeof OrchestrationV2InternalCommand.Type;
 
 export type OrchestrationV2ServerCommand = OrchestrationV2Command | OrchestrationV2InternalCommand;
-/** Public clients may request a persona launch, but only the server may resolve its assignment. */
+/** Resolved persona assignments and scheduled prompt snapshots are server-owned. */
 export const OrchestrationV2PublicCommand = OrchestrationV2Command.check(
   Schema.makeFilter((command) =>
     (command.type === "thread.create" || command.type === "delegated_task.request") &&
     command.agentPersonaAssignment !== undefined
       ? "Resolved agent persona assignments are server-owned."
-      : undefined,
+      : command.type === "message.dispatch" &&
+          (command.scheduledTaskPrompt !== undefined ||
+            command.senderRunId !== undefined ||
+            command.playbookOrigin !== undefined)
+        ? "Scheduled task prompt snapshots are server-owned."
+        : undefined,
   ),
 );
 export type OrchestrationV2PublicCommand = typeof OrchestrationV2PublicCommand.Type;

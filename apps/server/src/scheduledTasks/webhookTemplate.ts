@@ -47,6 +47,9 @@ export function redactQuery(query: string): string {
 // Trim after matching so unclosed placeholders cannot backtrack over whitespace partitions.
 const PLACEHOLDER = /\{\{([^{}]*)\}\}/g;
 
+/** Keep a token boundary from forming inside a playbook name around a placeholder. */
+export const webhookPromptLiterals = (template: string) => template.replace(PLACEHOLDER, "_");
+
 // Break mentions before provider CLI parsing, including currency signs, embedded @, commands, context links and frame tags.
 // Checked with Claude Code 2.1.296, Codex 0.162.1, Pi 1.2.0 and dsh 0.2.0-rc.2; others may parse more.
 const MENTION = /[\p{Sc}@]|(?<=^|\s)\/(?=[^\s/]+(?:\s|$))|t3-context(?=:)|webhook(?=-data)/giu;

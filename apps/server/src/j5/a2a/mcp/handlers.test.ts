@@ -164,6 +164,7 @@ const threadManagementMock = (
   Layer.mock(ThreadManagementService)({
     getThreadShell: (threadId) =>
       Effect.succeed(threadId === invocation.threadId ? liveThreadShell(threadId) : null),
+    getThreadRecords: (threadId) => Effect.succeed({ ...projection(threadId), messages: [] }),
     ...service,
   });
 

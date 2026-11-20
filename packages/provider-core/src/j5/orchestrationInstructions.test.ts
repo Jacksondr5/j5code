@@ -12,7 +12,7 @@ import {
   J5_ORCHESTRATION_INSTRUCTIONS,
   J5_ORCHESTRATION_SECTIONS,
 } from "./orchestrationInstructions.ts";
-import { PLAYBOOK_INSTRUCTIONS } from "./playbookInstructions.ts";
+import { PLAYBOOK_INSTRUCTIONS, PLAYBOOK_LIBRARY_INSTRUCTIONS } from "./playbookInstructions.ts";
 
 // Codex cuts the middle out of any additionalContext entry over this many UTF-8 bytes; it gets
 // each section as its own entry (upstream's CODEX_ADDITIONAL_CONTEXT_VALUE_MAX_BYTES).
@@ -53,19 +53,13 @@ describe("J5 orchestration instructions", () => {
     }
   });
 
-  it("keep every playbook bullet when the playbook guidance is split across sections", () => {
-    const bullets = PLAYBOOK_INSTRUCTIONS.trim().split("\n");
-    assert.isAbove(bullets.length, 1);
-    for (const bullet of bullets) {
-      assert.isTrue(
-        J5_ORCHESTRATION_SECTIONS.some((section) => section.includes(bullet)),
-        bullet.slice(0, 60),
-      );
-    }
-    assert.isTrue(
-      J5_ORCHESTRATION_SECTIONS.some((section) =>
-        section.startsWith("Playbooks in a Crew:\n\n- The run owner"),
-      ),
+  it("includes the complete owner and library instructions for every harness", () => {
+    assert.includeMembers(
+      [...J5_ORCHESTRATION_SECTIONS],
+      [
+        `Owning a playbook run\n\n${PLAYBOOK_INSTRUCTIONS.trim()}`,
+        `Working with saved playbooks\n\n${PLAYBOOK_LIBRARY_INSTRUCTIONS.trim()}`,
+      ],
     );
   });
 

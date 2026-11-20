@@ -1,3 +1,4 @@
+import { NoticeOrigin } from "./noticeOrigin.ts";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
@@ -254,13 +255,15 @@ it.layer(TestLayer)("Crew playbook hand-off through the real orchestrator", (it)
           ),
         );
 
-      const started = yield* relay.start({
-        owner: captainThread,
-        root,
-        name: "review",
-        key: "start-1",
-        assignee: participantIdForThread(seatThread),
-      });
+      const started = yield* relay
+        .start({
+          owner: captainThread,
+          root,
+          name: "review",
+          key: "start-1",
+          assignee: participantIdForThread(seatThread),
+        })
+        .pipe(Effect.provideService(NoticeOrigin, { kind: "scheduled", names: ["review"] }));
       yield* worker.drain();
       assert.deepStrictEqual(started.delivery, {
         state: "pending",
@@ -298,6 +301,7 @@ it.layer(TestLayer)("Crew playbook hand-off through the real orchestrator", (it)
       const notices = yield* seatNotices;
       assert.lengthOf(notices, 1);
       assert.include(notices[0]?.id, "playbook-step");
+      assert.deepStrictEqual(notices[0]?.playbookOrigin, { kind: "scheduled", names: ["review"] });
       assert.include(notices[0]?.text, "Read the change.");
       assert.notInclude(notices[0]?.text, "edited");
       assert.equal((yield* real.landing(started.runId, "start-1"))?.outcome, "delivered");

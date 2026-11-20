@@ -81,22 +81,31 @@ steps:
 
 Use `persona:` with a saved persona ID from Settings → Agent Setup to require that persona for the step. The owner or a worker can take the step if its thread runs that persona. If any qualified worker can do the job, describe the skill in the prompt and leave out `persona:`.
 
-The run can start while a required persona is missing, turned off, or unavailable. Its step waits until the persona is available and a matching agent can take it. Settings identifies required personas that are missing or disabled. When a required persona can run but the owner agent's model or access limits restrict it, starting the run opens one approval in the owner's chat and Inbox on web and desktop. A server Owner can approve the picks for this run. The owner can then use `allow_once: playbook:<requestId>:<stepId>` on delegate_task, j5_spawn_agent or a Crew seat for one launch for each listed step in its project, including a future step. It covers the displayed models, options and saved access. A revision that changes the requested staffing requires fresh approval. If a launch failed or its holder is no longer available, ask the run owner to revise with the current steps and `retryStaffingStepId` naming the spent step. A server Owner must approve another launch. The earlier token stays invalid.
+The run can start while a required persona is missing, turned off, or unavailable. Its step waits until the persona is available and a matching agent can take it. Settings identifies required personas that are missing or disabled. When a required persona can run but the owner agent's model or access limits restrict it, starting the run opens one approval in the owner's chat and Inbox on web and desktop. Existing eligible holders and routes within the agent's limits remain available while approval is pending. A server Owner can approve the picks for this run. The owner can then use `allow_once: playbook:<requestId>:<stepId>` on delegate_task, j5_spawn_agent or a Crew seat for one launch for each listed step in its project, including a future step. It covers the displayed models, options and saved access. A revision that changes the requested staffing requires fresh approval. If a launch failed or its holder is no longer available, ask the run owner to revise with the current steps and `retryStaffingStepId` naming the spent step. A server Owner must approve another launch. The earlier token stays invalid.
 
 Add `approval: required` to a step when each run needs a person's sign-off before moving on. The owner submits a summary of the finished work when it tries to leave. One request appears in the Inbox and the owner's chat on web and desktop; answering either updates both on connected devices. Owners and Collaborators who can write to the owner thread may approve or decline. Viewers can read the request but cannot answer. A decline can include a reason, which returns to the owner; the run stays on that step until a new request is approved. Mobile shows checkpoint state in progress; use web or desktop to answer.
 
 Approval permits the owner's next move; it does not move the run automatically or replace Crew, persona, or tool permissions. Going back onto an approved step asks again. Revisions must keep each required checkpoint and its step ID. Submitting a different summary opens a fresh request. Changing that step's saved work invalidates its approval; changing only its holder does not. Cancelling the run or removing its owner closes any pending request. A one-off “show me first” can remain an instruction to the agent without changing the reusable playbook.
 
-Type `/playbook ` to choose a registered playbook, then send the command to start it.
-Send `/playbook review` to start directly, or `/playbook` to ask what is available.
-Text after the name stays part of your message, as in
-`/playbook review, then summarize the risks`. You can also ask directly: “Start
-playbook review.” One playbook can be active per thread;
-finishing or cancelling it leaves the agent ready for other work or another playbook.
+## Starting a run
 
-Type `@playbook:` anywhere in a message to pick a playbook by name. On its own, the
-mention asks the agent to start that playbook in the thread. Invalid playbooks appear in the
-list with their error.
+Describe the work you need. Your agent can choose a playbook that clearly fits
+and tell you which one it is using. If the fit is unclear or several fit, it
+asks first. The run follows the scope and approvals of your request.
+
+To choose one yourself, use `/playbook ` at the start of a message or type
+`@playbook:` anywhere to pick a saved playbook. You can also ask directly, as
+in “Start playbook review.” Add instructions after the name when needed. For
+a scheduled task, save its prompt with a directive such as `Run review` at
+the beginning of a sentence, or put `@playbook:review` on its own line. When an
+agent creates a task or changes its prompt, a person must save that prompt
+before it can authorize a playbook. J5 carries the permission from the firing
+through steers, worktree handoffs, step and checkpoint notices, and delegated
+work. A person can request changes to a running procedure in a new human turn.
+Webhook request values cannot grant permission to start a playbook.
+
+One playbook can be active per thread. Finishing or cancelling it makes the
+thread available for another run.
 
 Editing prompts or reordering steps in a saved playbook changes the procedure for
 future runs. The current run keeps the copy it started with, even if the saved

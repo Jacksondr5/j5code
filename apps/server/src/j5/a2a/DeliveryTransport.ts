@@ -1,3 +1,4 @@
+import type { PlaybookOrigin } from "@t3tools/contracts/j5";
 import {
   type ChatAttachment,
   CommandId,
@@ -115,6 +116,7 @@ export class A2ADeliveryRefusedError extends Schema.TaggedError<A2ADeliveryRefus
 export const isRefusedError = Schema.is(A2ADeliveryRefusedError);
 
 export interface AgentDeliveryInput {
+  readonly playbookOrigin?: PlaybookOrigin;
   readonly originProjectId: LedgerProjectId;
   readonly receiverProjectId: LedgerProjectId;
   readonly messageId: LedgerMessageId;
@@ -683,6 +685,13 @@ export const live: Layer.Layer<
             threadId: participant.threadId,
             messageId: deliveryMessageId(input.messageId),
             ...(senderThreadId === undefined ? {} : { senderThreadId }),
+            ...(input.playbookOrigin !== undefined
+              ? { playbookOrigin: input.playbookOrigin }
+              : input.senderServerName !== undefined &&
+                  input.envelopeChannel === "peer" &&
+                  !isHumanParticipantId(input.senderId)
+                ? { playbookOrigin: { kind: "unverified" as const } }
+                : {}),
             text: envelope,
             attachments: input.attachments ?? [],
             mode: "queue",
@@ -764,6 +773,9 @@ export const live: Layer.Layer<
                   messageId: sendInput.messageId,
                   text: sendInput.text,
                   attachments: sendInput.attachments,
+                  ...(sendInput.playbookOrigin === undefined
+                    ? {}
+                    : { playbookOrigin: sendInput.playbookOrigin }),
                   ...(sendInput.senderThreadId === undefined
                     ? {}
                     : { senderThreadId: sendInput.senderThreadId }),
@@ -816,6 +828,9 @@ export const live: Layer.Layer<
                 messageId: sendInput.messageId,
                 text: sendInput.text,
                 attachments: sendInput.attachments,
+                ...(sendInput.playbookOrigin === undefined
+                  ? {}
+                  : { playbookOrigin: sendInput.playbookOrigin }),
                 ...(sendInput.senderThreadId === undefined
                   ? {}
                   : { senderThreadId: sendInput.senderThreadId }),

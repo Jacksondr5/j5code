@@ -1,3 +1,4 @@
+import { handoffPlaybookOrigin } from "../j5/playbooks/scheduledStart.ts";
 import {
   type EnvironmentId,
   OrchestratorMcpFailure,
@@ -146,7 +147,19 @@ const make = Effect.gen(function* () {
     if (typeof args.clientRequestId === "string") {
       args.clientRequestId = yield* scopedRequestId(scope.requestNamespace, args.clientRequestId);
     }
+    const carriesInput = [
+      "t3_thread_launch",
+      "t3_thread_send",
+      "t3_thread_send_attachments",
+    ].includes(toolName);
+    const playbookOrigin = carriesInput
+      ? yield* handoffPlaybookOrigin().pipe(
+          Effect.provideService(McpInvocationContext.McpInvocationContext, scope),
+          Effect.provideService(ThreadManagement.ThreadManagementService, threads),
+        )
+      : undefined;
     return yield* peers.call({
+      ...(playbookOrigin === undefined ? {} : { playbookOrigin }),
       environmentId,
       tool: toolName,
       arguments: args,

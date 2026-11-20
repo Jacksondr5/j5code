@@ -4,6 +4,7 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   EnvironmentId,
+  MessageId,
   type OrchestrationV2Run,
   type OrchestrationV2ThreadShell,
   type SourceControlCloneRepositoryInput,
@@ -299,6 +300,27 @@ const makeLaptop = Effect.gen(function* () {
                     : { runtimeMode: "full-access" },
                 ),
           ),
+        getThreadRecords: (threadId) => {
+          const thread = liveThreadShell(threadId);
+          const runId = thread.activeRunId!;
+          const messageId = MessageId.make("kickoff");
+          return Effect.succeed({
+            thread,
+            runs: [{ id: runId, userMessageId: messageId, ordinal: 1 }],
+            messages: [
+              {
+                id: messageId,
+                runId,
+                createdAt: thread.createdAt,
+                role: "user",
+                createdBy: "user",
+                ...(threadId === "thread:laptop-scheduled"
+                  ? { scheduledTaskId: "weekly", scheduledTaskPrompt: "Run @playbook:demo." }
+                  : {}),
+              },
+            ],
+          } as never);
+        },
         getProjectThreadRecords: ({ threadId }) =>
           Effect.succeed({
             thread: liveThreadShell(threadId, { runtimeMode: "full-access" }),
@@ -408,6 +430,18 @@ it.effect("an agent here works on a linked environment's threads within its own 
       });
       expect(failureOf(planned)).toMatchObject({ code: "interaction_mode_escalation_denied" });
       expect((yield* Ref.get(seen)).sends).toHaveLength(1);
+      expect((yield* Ref.get(seen)).sends[0]?.playbookOrigin).toEqual({ kind: "unscheduled" });
+      const scheduled = yield* a.call("thread:laptop-scheduled", "t3_thread_send", {
+        environmentId: box.environmentId,
+        threadId: boxThread,
+        message: "Work on this task.",
+        playbookOrigin: { kind: "unscheduled" },
+      });
+      expect(scheduled.isError).toBe(false);
+      expect((yield* Ref.get(seen)).sends.at(-1)?.playbookOrigin).toEqual({
+        kind: "scheduled",
+        names: ["demo"],
+      });
 
       // stop=true stops the thread there as its Stop button does: the whole
       // thread and the tasks it delegated, not just the running turn.

@@ -1,3 +1,4 @@
+import { messageProvenance } from "../../orchestration-v2/messageProvenance.ts";
 import type { SDKMessage, SDKResultMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { CommandId, type MessageId, type ThreadId } from "@t3tools/contracts";
 import type { ProviderAdapterV2TurnMessage } from "@t3tools/provider-core/server/ProviderAdapter";
@@ -214,10 +215,7 @@ export const j5DispatchMissedClaudeSteer = Effect.fn("j5.a2a.claudeSteers.dispat
       dispatchMode: { type: "queue_after_active" },
       createdBy: message.createdBy,
       creationSource: message.creationSource,
-      ...(message.scheduledTaskId === undefined
-        ? {}
-        : { scheduledTaskId: message.scheduledTaskId }),
-      ...(message.senderThreadId === undefined ? {} : { senderThreadId: message.senderThreadId }),
+      ...messageProvenance(message),
     });
     return true;
   },

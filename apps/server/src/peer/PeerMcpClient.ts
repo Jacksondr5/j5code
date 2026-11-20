@@ -1,3 +1,4 @@
+import { PlaybookOrigin } from "@t3tools/contracts/j5";
 import {
   type EnvironmentId,
   OrchestratorMcpFailure,
@@ -41,10 +42,13 @@ export class PeerMcpClient extends Context.Service<
       readonly tool: string;
       readonly arguments: Record<string, unknown>;
       readonly limits: PeerCallLimits;
+      readonly playbookOrigin?: PlaybookOrigin;
       readonly success: S;
     }) => Effect.Effect<S["Type"], OrchestratorMcpFailure>;
   }
 >()("t3/peer/PeerMcpClient") {}
+
+const encodeOrigin = Schema.encodeSync(Schema.fromJsonString(PlaybookOrigin));
 
 const ToolCallResponse = Schema.Struct({
   result: Schema.optional(
@@ -161,7 +165,15 @@ const make = Effect.gen(function* () {
       const resolved = yield* links
         .resolve(input.environmentId)
         .pipe(Effect.mapError(fromLinkError));
+      const origin =
+        input.playbookOrigin === undefined ? undefined : encodeOrigin(input.playbookOrigin);
       const limitHeader = {
+        ...(origin === undefined
+          ? {}
+          : {
+              [McpInvocationContext.PLAYBOOK_ORIGIN_HEADER]:
+                origin.length <= 4096 ? origin : '{"kind":"unverified"}',
+            }),
         [McpInvocationContext.MODE_LIMIT_HEADER]: `${input.limits.runtimeMode}/${input.limits.interactionMode}`,
       };
       const sessionKey = `${input.environmentId} ${resolved.url}`;

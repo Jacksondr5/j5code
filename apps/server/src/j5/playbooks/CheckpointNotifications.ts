@@ -1,4 +1,6 @@
+import { decodeNoticeOrigin } from "./noticeOrigin.ts";
 import { CommandId, MessageId, ThreadId } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
@@ -7,16 +9,19 @@ import { ThreadManagementService } from "../../orchestration-v2/ThreadManagement
 import { getThreadRecordsIfPresent } from "../a2a/threadProjectionReads.ts";
 import { PlaybookStore } from "./PlaybookStore.ts";
 
+const quoteText = Schema.encodeSync(Schema.fromJsonString(Schema.String));
+
 export const unnotifiedCheckpoints = (sql: SqlClient.SqlClient) => sql<{
   request_id: string;
   owner_thread_id: string;
   step_title: string;
   persona_picks: number;
+  playbook_origin_json: string | null;
   status: string;
   reason: string | null;
 }>`
       SELECT checkpoint.request_id, checkpoint.owner_thread_id, checkpoint.step_title,
-        checkpoint.status, checkpoint.reason, (checkpoint.persona_picks_json IS NOT NULL) AS persona_picks
+        checkpoint.status, checkpoint.reason, checkpoint.playbook_origin_json, (checkpoint.persona_picks_json IS NOT NULL) AS persona_picks
       FROM j5_playbook_checkpoint checkpoint
       JOIN j5_playbook_run run ON run.run_id = checkpoint.run_id
       WHERE checkpoint.status IN ('approved', 'declined') AND checkpoint.notified_at IS NULL AND run.status = 'active'`;
@@ -45,12 +50,13 @@ export const makeCheckpointNotifications = Effect.gen(function* () {
           type: "message.dispatch",
           createdBy: "system",
           creationSource: "server",
+          playbookOrigin: decodeNoticeOrigin(row.playbook_origin_json),
           commandId: CommandId.make(`playbook-checkpoint:${request.requestId}`),
           messageId: MessageId.make(`playbook-checkpoint:${request.requestId}`),
           threadId: request.ownerThreadId,
           text: request.personaPicks
-            ? `The run's persona picks were ${request.status}.${request.reason ? ` Reason: ${request.reason}` : ""} Retrieve j5_playbook_current before staffing the run.`
-            : `Playbook checkpoint "${request.stepTitle}" was ${request.status}.${request.reason ? ` Reason: ${request.reason}` : ""} This decision applies to that submitted request. Retrieve j5_playbook_current before continuing; changed work may need fresh approval.`,
+            ? `The run's persona picks were ${request.status}.${request.reason ? ` The respondent gave this reason: ${quoteText(request.reason)}` : ""} Retrieve j5_playbook_current before staffing the run.`
+            : `Playbook checkpoint "${request.stepTitle}" was ${request.status}.${request.reason ? ` The respondent gave this reason: ${quoteText(request.reason)}` : ""} This decision applies to that submitted request. Retrieve j5_playbook_current before continuing; changed work may need fresh approval.`,
           attachments: [],
           modelSelection: target.thread.modelSelection,
           dispatchMode: { type: "start_immediately" },

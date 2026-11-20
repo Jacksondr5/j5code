@@ -1,3 +1,6 @@
+import { PlaybookOrigin } from "@t3tools/contracts/j5";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 import {
   type AuthMcpClientAccess,
   type EnvironmentId,
@@ -41,6 +44,7 @@ export interface McpClientCaller {
    * session as `linkOrigin`, and it changes only that work (`linkOrigin.ts`).
    */
   readonly linked?: boolean | undefined;
+  readonly playbookOrigin?: PlaybookOrigin;
   /**
    * Narrower modes the client asked for on this request (`T3-Mode-Limit`):
    * another environment passing on the limits of the agent it calls for.
@@ -49,6 +53,17 @@ export interface McpClientCaller {
   /** An outside client's thread links go through this hosted app, as Copy thread's do. */
   readonly hostedAppUrl?: string | undefined;
 }
+
+export const PLAYBOOK_ORIGIN_HEADER = "t3-playbook-origin";
+const decodeOrigin = Schema.decodeUnknownOption(Schema.fromJsonString(PlaybookOrigin));
+export const linkedPlaybookOrigin = (client: McpClientCaller | undefined) =>
+  client?.linked === true
+    ? { playbookOrigin: client.playbookOrigin ?? { kind: "unverified" as const } }
+    : {};
+export const parsePeerPlaybookOrigin = (header: string | undefined): PlaybookOrigin =>
+  header === undefined
+    ? { kind: "unverified" }
+    : Option.getOrElse(decodeOrigin(header), () => ({ kind: "unverified" as const }));
 
 /**
  * `T3-Mode-Limit: <runtimeMode>/<interactionMode>` lets an OAuth client cap

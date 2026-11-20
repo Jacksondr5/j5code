@@ -60,6 +60,7 @@ import {
   redactHeaders,
   redactQuery,
   renderWebhookPrompt,
+  webhookPromptLiterals,
   type WebhookRequest,
 } from "./webhookTemplate.ts";
 import {
@@ -882,6 +883,8 @@ export const layer = Layer.effect(
         const commandId = CommandId.make(`scheduled-task:${fireKey}`);
         const messageId = MessageId.make(`${SCHEDULED_TASK_MESSAGE_ID_PREFIX}${fireKey}`);
         const prompt = webhook?.prompt ?? active.prompt;
+        const scheduledTaskPrompt =
+          webhook === undefined ? active.prompt : webhookPromptLiterals(task.prompt);
 
         // A bound thread can move to another project (No project to a project) while
         // this fires. Follow it; one move needs at most two retries. Same ids replay safely.
@@ -897,6 +900,7 @@ export const layer = Layer.effect(
               threadId,
               messageId,
               scheduledTaskId: active.id,
+              scheduledTaskPrompt,
               text: prompt,
               attachments: [],
               mode: "queue",
@@ -935,6 +939,7 @@ export const layer = Layer.effect(
                     initialMessage: {
                       messageId,
                       scheduledTaskId: active.id,
+                      scheduledTaskPrompt,
                       text: prompt,
                       attachments: [],
                     },

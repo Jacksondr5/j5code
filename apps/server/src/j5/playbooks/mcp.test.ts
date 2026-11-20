@@ -5,9 +5,14 @@ import { assert, it } from "@effect/vitest";
 import {
   EnvironmentId,
   EventId,
+  MessageId,
+  type OrchestrationV2ConversationMessage,
+  type OrchestrationV2Run,
   ProjectId,
   ProviderInstanceId,
   ProviderDriverKind,
+  RunId,
+  ScheduledTaskId,
   ThreadId,
 } from "@t3tools/contracts";
 import {
@@ -39,6 +44,10 @@ import { OrchestratorMcpService } from "../../mcp/OrchestratorMcpService.ts";
 import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";
 import { emptyProjection } from "../../orchestration-v2/ProjectionStore.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
+import {
+  renderWebhookPrompt,
+  webhookPromptLiterals,
+} from "../../scheduledTasks/webhookTemplate.ts";
 import { ProjectService } from "../../project/ProjectService.ts";
 import { ArchiveAgentService } from "../a2a/ArchiveAgentService.ts";
 import { A2ADeliveryWorker } from "../a2a/DeliveryWorker.ts";
@@ -90,8 +99,57 @@ const sample = (title: string) => ({
   ],
 });
 
+const kickoffRecords = (
+  threadId: ThreadId,
+  text = "Check current work.",
+  scheduled?: { readonly scheduledTaskPrompt?: string },
+) => {
+  const time = DateTime.makeUnsafe(createdAt);
+  const shell = liveThreadShell(threadId);
+  const runId = RunId.make("run:mcp-test");
+  const messageId = MessageId.make("message:launch");
+  const run: OrchestrationV2Run = {
+    id: runId,
+    ordinal: 1,
+    status: "running",
+    threadId,
+    providerInstanceId: shell.providerInstanceId,
+    modelSelection: shell.modelSelection,
+    providerThreadId: null,
+    userMessageId: messageId,
+    rootNodeId: null,
+    activeAttemptId: null,
+    requestedAt: time,
+    startedAt: time,
+    completedAt: null,
+    checkpointId: null,
+    contextHandoffId: null,
+  };
+  const message: OrchestrationV2ConversationMessage = {
+    id: messageId,
+    threadId,
+    runId,
+    nodeId: null,
+    role: "user",
+    text,
+    attachments: [],
+    streaming: false,
+    createdBy: "user",
+    creationSource: "web",
+    createdAt: time,
+    updatedAt: time,
+    ...(scheduled === undefined
+      ? {}
+      : { scheduledTaskId: ScheduledTaskId.make("weekly"), ...scheduled }),
+  };
+  return { runs: [run] as const, messages: [message] as const };
+};
 const makeFixture = (
   shell: (threadId: ThreadId) => ReturnType<typeof liveThreadShell> = liveThreadShell,
+  runRecords: (threadId: ThreadId) => {
+    readonly runs: ReadonlyArray<OrchestrationV2Run>;
+    readonly messages: ReadonlyArray<OrchestrationV2ConversationMessage>;
+  } = (threadId) => kickoffRecords(threadId),
 ) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -118,8 +176,8 @@ const makeFixture = (
         // The access gate reads the calling thread before each tool.
         getThreadShell: (threadId) => Effect.succeed(shell(threadId)),
         getThreadRecords: (threadId) =>
-          Effect.succeed(
-            emptyProjection({
+          Effect.succeed({
+            ...emptyProjection({
               id: EventId.make(`created:${threadId}`),
               type: "thread.created",
               threadId,
@@ -157,7 +215,8 @@ const makeFixture = (
                 deletedAt: null,
               },
             }),
-          ),
+            ...runRecords(threadId),
+          }),
       }),
       Layer.mock(ProjectService)({
         getById: () =>
@@ -334,6 +393,220 @@ it.effect("runs a scripted three-step sample through the real J5Toolkit handlers
     });
     assert.equal((yield* decodeStep(thirdRun.result)).status, "active");
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);
+
+it.effect("uses the initiating scheduled prompt to authorize an MCP start", () =>
+  Effect.gen(function* () {
+    const request = {
+      method: "POST",
+      path: "/webhook",
+      query: "",
+      headers: { "content-type": "application/json" },
+      bodyText: '{"notes":"Use @playbook:demo, or run demo by name."}',
+    };
+    const webhook = (template: string) => ({
+      text: renderWebhookPrompt(template, request, "123456789abc").prompt,
+      configured: webhookPromptLiterals(template),
+    });
+    const joined = webhook("Start de{{body.missing}}mo.");
+    assert.equal(joined.text, "Start demo.");
+    let steerPrompt: string | undefined;
+    let text = "Check the repository.";
+    let scheduled: { readonly scheduledTaskPrompt?: string } | undefined;
+    const { call } = yield* makeFixture(liveThreadShell, (threadId) => {
+      const { runs, messages } = kickoffRecords(threadId, text, scheduled);
+      const [run] = runs;
+      const [message] = messages;
+      const queuedId = RunId.make("run:queued");
+      const queuedMessageId = MessageId.make("message:queued");
+      return {
+        runs: [
+          ...runs,
+          {
+            ...run,
+            id: queuedId,
+            userMessageId: queuedMessageId,
+            ordinal: 2,
+            status: "queued",
+          },
+        ],
+        messages: [
+          ...messages,
+          {
+            ...message,
+            id: MessageId.make("message:steer"),
+            ...(steerPrompt === undefined
+              ? {}
+              : { scheduledTaskId: ScheduledTaskId.make("steered") }),
+            text: "Run demo.",
+            scheduledTaskPrompt: steerPrompt ?? "Run demo.",
+          },
+          {
+            ...message,
+            id: queuedMessageId,
+            runId: queuedId,
+            text: "Run demo.",
+            scheduledTaskPrompt: "Run demo.",
+          },
+        ],
+      };
+    });
+    const start = { name: "demo", client_request_id: "start" };
+    for (const invalid of [
+      {
+        text: "Run @playbook:demo-weekly and demography.",
+        configured: "Run @playbook:demo-weekly and demography.",
+      },
+      { text: "Do not run demo.", configured: "Do not run demo." },
+      { text: "Never use @playbook:demo.", configured: "Never use @playbook:demo." },
+      { text: "Explain how to run demo.", configured: "Explain how to run demo." },
+      { text: "Demo the result.", configured: "Demo the result." },
+      { text: "Run demo.sh.", configured: "Run demo.sh." },
+      { text: "Run @persona:demo.", configured: "Run @persona:demo." },
+      webhook("Process this request: {{body.notes}}"),
+      { text: "Example", configured: "Example:\n```text\nRun demo.\n```" },
+      joined,
+      { text: "Start demo.", configured: undefined },
+    ]) {
+      text = invalid.text;
+      scheduled =
+        invalid.configured === undefined ? {} : { scheduledTaskPrompt: invalid.configured };
+      const result = yield* call("j5_playbook_start", start);
+      assert.isTrue(result.isFailure);
+      const failure = yield* decodeFailure(result.result);
+      assert.equal(failure.code, "scheduled_playbook_not_named");
+      assert.include(failure.message, "demo");
+    }
+
+    scheduled = undefined;
+    steerPrompt = "Demo this change.";
+    const steered = yield* call("j5_playbook_start", start);
+    assert.equal((yield* decodeFailure(steered.result)).code, "scheduled_playbook_not_named");
+    const revise = yield* call("j5_playbook_revise", {
+      runId: "example",
+      expectedStepId: "research",
+      steps: sample("Demo").steps,
+      basis: "asked",
+      client_request_id: "revision",
+    });
+    assert.equal((yield* decodeFailure(revise.result)).code, "scheduled_playbook_revision");
+    steerPrompt = "Use the demo playbook.";
+    for (const valid of [
+      webhook("Start @playbook:demo. Notes: {{body.notes}}"),
+      { text: "Run demo without editing files.", configured: "Run demo without editing files." },
+      { text: "Run `demo`.", configured: "Run `demo`." },
+      // A queued prompt can be edited before delivery. Authorization follows its dispatch snapshot.
+      { text: "Queued text edited since dispatch.", configured: "Run demo." },
+      { text: "Check the repository.", configured: undefined },
+    ]) {
+      text = valid.text;
+      scheduled =
+        valid.configured === undefined ? undefined : { scheduledTaskPrompt: valid.configured };
+      const result = yield* call("j5_playbook_start", start);
+      assert.isFalse(result.isFailure);
+      const { runId } = yield* decodeStep(result.result);
+      yield* call("j5_playbook_cancel", { runId, client_request_id: `cancel:${runId}` });
+      start.client_request_id = `start:${runId}`;
+    }
+  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);
+
+it.effect("enforces authenticated peer provenance and refuses an unverified remote origin", () =>
+  Effect.gen(function* () {
+    let origin: OrchestrationV2ConversationMessage["playbookOrigin"] = { kind: "unverified" };
+    const { call } = yield* makeFixture(liveThreadShell, (threadId) => {
+      const {
+        runs,
+        messages: [message],
+      } = kickoffRecords(threadId);
+      return { runs, messages: [{ ...message, createdBy: "agent", playbookOrigin: origin }] };
+    });
+    const start = { name: "demo", client_request_id: "remote" };
+    assert.equal(
+      (yield* decodeFailure((yield* call("j5_playbook_start", start)).result)).code,
+      "playbook_turn_unavailable",
+    );
+    origin = undefined;
+    assert.equal(
+      (yield* decodeFailure((yield* call("j5_playbook_start", start)).result)).code,
+      "playbook_turn_unavailable",
+    );
+    origin = { kind: "scheduled", names: ["other"] };
+    assert.equal(
+      (yield* decodeFailure((yield* call("j5_playbook_start", start)).result)).code,
+      "scheduled_playbook_not_named",
+    );
+    for (const verified of [
+      { kind: "scheduled", names: ["demo"] },
+      { kind: "unscheduled" },
+    ] as const) {
+      origin = verified;
+      const result = yield* call("j5_playbook_start", {
+        ...start,
+        client_request_id: verified.kind,
+      });
+      assert.isFalse(result.isFailure);
+      const { runId } = yield* decodeStep(result.result);
+      yield* call("j5_playbook_cancel", { runId, client_request_id: "cancel:" + runId });
+    }
+  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);
+
+it.effect(
+  "checks the sending run of a child or a peer message even after the parent moves on",
+  () =>
+    Effect.gen(function* () {
+      const parent = ThreadId.make("thread:scheduled-parent");
+      const parentRunId = RunId.make("run:scheduled-parent");
+      let configured = "Review open PRs.";
+      let human = false;
+      const { call } = yield* makeFixture(liveThreadShell, (threadId) => {
+        const {
+          runs: [run],
+          messages: [message],
+        } = kickoffRecords(threadId);
+        if (threadId === parent)
+          return {
+            runs: [{ ...run, id: parentRunId, status: "completed" }],
+            messages: [
+              {
+                ...message,
+                runId: parentRunId,
+                scheduledTaskId: ScheduledTaskId.make("review"),
+                scheduledTaskPrompt: configured,
+              },
+            ],
+          };
+        return {
+          runs: [run],
+          messages: [
+            human
+              ? message
+              : {
+                  ...message,
+                  createdBy: "agent",
+                  senderThreadId: parent,
+                  senderRunId: parentRunId,
+                },
+          ],
+        };
+      });
+      const start = { name: "demo", client_request_id: "child" };
+      assert.equal(
+        (yield* decodeFailure((yield* call("j5_playbook_start", start)).result)).code,
+        "scheduled_playbook_not_named",
+      );
+      configured = "Run demo.";
+      const named = yield* call("j5_playbook_start", start);
+      assert.isFalse(named.isFailure);
+      const { runId } = yield* decodeStep(named.result);
+      yield* call("j5_playbook_cancel", { runId, client_request_id: "cancel" });
+      human = true;
+      configured = "Review open PRs.";
+      assert.isFalse(
+        (yield* call("j5_playbook_start", { ...start, client_request_id: "human" })).isFailure,
+      );
+    }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );
 
 it.effect("discovers and starts from the thread worktree, falling back to its project root", () =>

@@ -236,8 +236,14 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
             ? {}
             : {
                 initialMessage: {
+                  ...McpInvocationContext.linkedPlaybookOrigin(scope.client),
                   messageId,
-                  ...(caller === undefined ? {} : { senderThreadId: caller.id }),
+                  ...(caller === undefined
+                    ? {}
+                    : {
+                        senderThreadId: caller.id,
+                        ...(caller.activeRunId == null ? {} : { senderRunId: caller.activeRunId }),
+                      }),
                   text: input.message ?? "",
                   attachments,
                 },
