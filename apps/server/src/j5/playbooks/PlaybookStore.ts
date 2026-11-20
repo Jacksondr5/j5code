@@ -1,6 +1,7 @@
 import { ThreadId } from "@t3tools/contracts";
 import {
   PlaybookError,
+  PlaybookHolderStop,
   PlaybookRevision,
   type PlaybookReviseRequest,
   PLAYBOOK_RUNS_PAGE_SIZE,
@@ -108,6 +109,10 @@ const RevisionJson = Schema.fromJsonString(PlaybookRevision);
 const decodeRevision = Schema.decodeUnknownSync(RevisionJson);
 const encodeRevision = Schema.encodeSync(RevisionJson);
 
+const HolderStopJson = Schema.fromJsonString(PlaybookHolderStop);
+const encodeHolderStop = Schema.encodeSync(HolderStopJson);
+const decodeHolderStop = Schema.decodeUnknownSync(HolderStopJson);
+
 type RunRow = {
   run_id: string;
   owner_thread_id: string;
@@ -122,6 +127,7 @@ type RunRow = {
   crew_instance_id: string | null;
   definition_json: string | null;
   cancel_reason: string | null;
+  holder_stop_json: string | null;
   revision_count: number;
   latest_revision_json: string | null;
 };
@@ -129,6 +135,7 @@ const fromRow = (row: RunRow): StoredPlaybookRun => ({
   definition:
     row.definition_json === null ? null : Option.getOrNull(decodeDefinition(row.definition_json)),
   cancelReason: row.cancel_reason,
+  holderStop: row.holder_stop_json == null ? null : decodeHolderStop(row.holder_stop_json),
   revisionCount: row.revision_count,
   latestRevision:
     row.latest_revision_json === null ? null : decodeRevision(row.latest_revision_json),
@@ -285,22 +292,50 @@ export const makePlaybookStore = Effect.gen(function* () {
     return (yield* readDefinitionDocument(definitionPath)).definition;
   });
 
-  /** Runs inside reads, so it moves the revision only when it cancelled a run: a read that changed nothing must not cause another. */
+  const cancelOwner = Effect.fn("PlaybookStore.cancelOwner")(function* (
+    owner: ThreadId,
+    reason: "owner_archived" | "owner_deleted",
+    runId?: string,
+  ) {
+    return yield* sql.withTransaction(
+      Effect.gen(function* () {
+        const timestamp = yield* now;
+        const rows = yield* sql<RunRow>`UPDATE j5_playbook_run
+        SET status = 'cancelled', cancel_reason = ${reason}, updated_at = ${timestamp}
+        WHERE owner_thread_id = ${owner} AND status = 'active'
+        ${runId === undefined ? sql`` : sql`AND run_id = ${runId}`}
+        RETURNING *`;
+        for (const row of rows) yield* skipPending(row.run_id, timestamp);
+        if (rows.length > 0) yield* bumpRevision;
+        return rows.map(fromRow);
+      }),
+    );
+  }, Effect.mapError(storageError));
   const cancelOrphans = Effect.fn("PlaybookStore.cancelOrphans")(function* () {
-    const timestamp = yield* now;
-    const cancelled =
-      yield* sql`UPDATE j5_playbook_run SET status = 'cancelled', updated_at = ${timestamp}
-      WHERE status = 'active' AND NOT EXISTS (
-        SELECT 1 FROM orchestration_v2_projection_threads AS thread
-        WHERE thread.thread_id = owner_thread_id AND thread.deleted_at IS NULL
-      )
-      RETURNING run_id`;
-    if (cancelled.length > 0) yield* bumpRevision;
+    const rows = yield* sql<{
+      run_id: string;
+      owner_thread_id: string;
+      archived_at: string | null;
+      deleted_at: string | null;
+    }>`
+      SELECT run.run_id, run.owner_thread_id, thread.archived_at, thread.deleted_at FROM j5_playbook_run run
+      LEFT JOIN orchestration_v2_projection_threads thread ON thread.thread_id = run.owner_thread_id
+      WHERE run.status = 'active' AND (thread.thread_id IS NULL OR thread.deleted_at IS NOT NULL OR thread.archived_at IS NOT NULL)`;
+    for (const row of rows)
+      yield* cancelOwner(
+        ThreadId.make(row.owner_thread_id),
+        row.archived_at !== null && row.deleted_at === null ? "owner_archived" : "owner_deleted",
+        row.run_id,
+      );
   });
   const requireOwner = Effect.fn("PlaybookStore.requireOwner")(function* (owner: ThreadId) {
     const rows = yield* sql`SELECT thread_id FROM orchestration_v2_projection_threads
-      WHERE thread_id = ${owner} AND deleted_at IS NULL`;
-    if (!rows[0]) return yield* playbookError("thread_not_found", "The owner thread was deleted.");
+      WHERE thread_id = ${owner} AND deleted_at IS NULL AND archived_at IS NULL`;
+    if (!rows[0])
+      return yield* playbookError(
+        "thread_not_found",
+        "The owner thread is archived, deleted, or unavailable.",
+      );
   });
 
   const readRun = Effect.fn("PlaybookStore.readRun")(function* (owner: ThreadId, runId?: string) {
@@ -742,9 +777,9 @@ export const makePlaybookStore = Effect.gen(function* () {
             updatedAt: timestamp,
           };
           yield* sql`INSERT INTO j5_playbook_run (run_id, owner_thread_id, definition_path, current_step_id, status, created_at, updated_at, definition_json,
-            holder_participant_id, holder_thread_id, assigned_by_participant_id)
+            holder_participant_id, holder_thread_id, assigned_by_participant_id, start_event_sequence)
           VALUES (${run.runId}, ${owner}, ${definitionPath}, ${run.currentStepId}, ${run.status}, ${timestamp}, ${timestamp}, ${encodeDefinition(definition)},
-            ${holder.participantId}, ${holder.threadId}, ${holder.assignedBy})`;
+            ${holder.participantId}, ${holder.threadId}, ${holder.assignedBy}, (SELECT COALESCE(MAX(sequence), 0) FROM orchestration_events))`;
           yield* land(run.runId, key, run.currentStepId, timestamp, holder);
           yield* remember(owner, key, request, run.runId);
           return { run, replayed: false };
@@ -767,7 +802,7 @@ export const makePlaybookStore = Effect.gen(function* () {
    */
   const recordFinished = Effect.fn("PlaybookStore.recordFinished")(function* (
     run: StoredPlaybookRun,
-    cause: "agent" | "crew_archive",
+    cause: "agent",
   ) {
     const definition = run.definition;
     const position =
@@ -934,6 +969,7 @@ export const makePlaybookStore = Effect.gen(function* () {
             yield* sql`UPDATE j5_playbook_run SET definition_json = ${encodeDefinition(definition!)}, revision_count = ${revisionCount}, latest_revision_json = ${encodeRevision(latestRevision)} WHERE run_id = ${run.runId}`;
           }
           yield* sql`UPDATE j5_playbook_run SET current_step_id = ${currentStepId}, status = ${status}, updated_at = ${updatedAt},
+            cancel_reason = ${input.operation === "cancel" ? "agent_cancelled" : (run.cancelReason ?? null)},
             holder_participant_id = ${holder?.participantId ?? run.holderParticipantId},
             holder_thread_id = ${holder?.threadId ?? run.holderThreadId},
             assigned_by_participant_id = ${holder?.assignedBy ?? run.assignedByParticipantId}
@@ -946,6 +982,8 @@ export const makePlaybookStore = Effect.gen(function* () {
           return {
             run: {
               ...run,
+              cancelReason:
+                input.operation === "cancel" ? "agent_cancelled" : (run.cancelReason ?? null),
               definition,
               currentStepId,
               status,
@@ -1064,33 +1102,66 @@ export const makePlaybookStore = Effect.gen(function* () {
     if (rows.length > 0) yield* bumpRevision;
     return (yield* landing(runId, requestId))!;
   }, Effect.mapError(storageError));
-  /** Archiving a Crew cancels its active run; idempotent, so an archive retry repairs a crash. */
-  const cancelForCrew = Effect.fn("PlaybookStore.cancelForCrew")(function* (
-    crewInstanceId: string,
-  ) {
-    return yield* sql
-      .withTransaction(
-        Effect.gen(function* () {
-          const timestamp = yield* now;
-          const rows = yield* sql<RunRow>`UPDATE j5_playbook_run
-            SET status = 'cancelled', updated_at = ${timestamp}
-            WHERE crew_instance_id = ${crewInstanceId} AND status = 'active'
-            RETURNING *`;
-          for (const { run_id } of rows) yield* skipPending(run_id, timestamp);
-          return rows.map(fromRow);
-        }),
-      )
-      .pipe(
-        Effect.tap((runs) => (runs.length > 0 ? bumpRevision : Effect.void)),
-        Effect.tap((runs) =>
-          Effect.forEach(runs, (run) => recordFinished(run, "crew_archive"), {
-            discard: true,
-          }),
-        ),
-        Effect.map((runs) => runs.map((run) => run.runId)),
-        permit.withPermits(1),
-      );
+  const claimHolderStop = Effect.fn("PlaybookStore.claimHolderStop")(function* (runId: string) {
+    // Claim before external I/O: a crash must not let a retry stop unrelated later work.
+    const outcome = encodeHolderStop({
+      status: "failed",
+      reason: "Stop outcome unavailable after cancellation; it will not be retried.",
+    });
+    const rows = yield* sql`UPDATE j5_playbook_run SET holder_stop_json = ${outcome}
+      WHERE run_id = ${runId} AND status = 'cancelled' AND holder_stop_json IS NULL RETURNING run_id`;
+    return rows.length > 0;
   }, Effect.mapError(storageError));
+  const recordHolderStop = Effect.fn("PlaybookStore.recordHolderStop")(function* (
+    runId: string,
+    outcome: PlaybookHolderStop,
+  ) {
+    yield* sql`UPDATE j5_playbook_run SET holder_stop_json = ${encodeHolderStop(outcome)} WHERE run_id = ${runId} AND status = 'cancelled'`;
+    yield* bumpRevision;
+  }, Effect.mapError(storageError));
+  const ownerLifecycleRuns = Effect.fn("PlaybookStore.ownerLifecycleRuns")(function* (
+    owner: ThreadId,
+    eventSequence: number,
+  ) {
+    // A read may already have cancelled the old run, and an unarchive may have
+    // allowed its replacement to start before the daemon handles the archive.
+    return yield* sql<{ run_id: string }>`SELECT run_id FROM j5_playbook_run
+      WHERE owner_thread_id = ${owner} AND start_event_sequence < ${eventSequence}
+        AND (status = 'active' OR (status = 'cancelled' AND holder_stop_json IS NULL
+          AND cancel_reason IN ('owner_archived', 'owner_deleted', 'agent_cancelled')))`;
+  }, Effect.mapError(storageError));
+  const unreconciledCancellations = Effect.fn("PlaybookStore.unreconciledCancellations")(
+    function* () {
+      // The daemon subscribes at the current high-water mark. An unarchive can
+      // already have hidden a missed archive in the owner's projection.
+      const missed = yield* sql<{
+        run_id: string;
+        owner_thread_id: string;
+        event_type: "thread.archived" | "thread.deleted";
+      }>`SELECT run.run_id, run.owner_thread_id, event.event_type
+        FROM j5_playbook_run run
+        JOIN orchestration_events event ON event.sequence = (
+          SELECT lifecycle.sequence FROM orchestration_events lifecycle
+          WHERE lifecycle.aggregate_kind = 'thread' AND lifecycle.stream_id = run.owner_thread_id
+            AND lifecycle.sequence > run.start_event_sequence
+            AND (run.start_event_sequence <> 0 OR lifecycle.occurred_at >= run.created_at)
+            AND lifecycle.event_type IN ('thread.archived', 'thread.deleted')
+            AND lifecycle.application_event_version = 2
+          ORDER BY lifecycle.sequence LIMIT 1)
+        WHERE run.status = 'active'`;
+      for (const row of missed)
+        yield* cancelOwner(
+          ThreadId.make(row.owner_thread_id),
+          row.event_type === "thread.archived" ? "owner_archived" : "owner_deleted",
+          row.run_id,
+        );
+      yield* cancelOrphans();
+      return (yield* sql<RunRow>`SELECT * FROM j5_playbook_run WHERE status = 'cancelled' AND holder_stop_json IS NULL AND cancel_reason IN ('owner_archived', 'owner_deleted', 'agent_cancelled')`).map(
+        fromRow,
+      );
+    },
+    Effect.mapError(storageError),
+  );
   const activeRunSummaries = Effect.fn("PlaybookStore.activeRunSummaries")(function* (
     ownerThreadIds: ReadonlyArray<ThreadId>,
   ) {
@@ -1161,7 +1232,11 @@ export const makePlaybookStore = Effect.gen(function* () {
     latestLanding,
     pendingLandings,
     resolveLanding,
-    cancelForCrew,
+    cancelOwner,
+    claimHolderStop,
+    recordHolderStop,
+    unreconciledCancellations,
+    ownerLifecycleRuns,
     activeRunSummaries,
   };
 });

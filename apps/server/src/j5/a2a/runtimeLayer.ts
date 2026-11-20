@@ -156,8 +156,6 @@ const makeJ5A2AAuxiliaryLayer = (
     Layer.provideMerge(lifecycleServiceProvided),
     Layer.provideMerge(archiveFactsProvided),
   );
-  // Archiving a Crew cancels its playbook run through the one store object, so the store's
-  // permit and revision are never duplicated.
   const archiveCrewProvided = archiveCrewLayer.pipe(
     Layer.provideMerge(archiveAgentProvided),
     Layer.provideMerge(agentCrewInstanceLayer),
@@ -208,6 +206,7 @@ const makeJ5A2AAuxiliaryLayer = (
     Layer.provideMerge(agentCrewInstanceLayer),
   );
   const crewSeatFinishNotifierProvided = crewSeatFinishNotifierLayer.pipe(
+    Layer.provideMerge(playbookCrewRelayProvided),
     Layer.provideMerge(crewLaunchReporterProvided),
     Layer.provideMerge(captainArchiveCascadeProvided),
     Layer.provideMerge(agentCrewInstanceLayer),

@@ -408,7 +408,7 @@ stopping retires nothing.
 
 ### `j5_playbook_cancel`
 
-**Description (contract):** "Cancel your playbook. This does not interrupt or archive your agent. Reuse client_request_id only to retry this exact operation; use a fresh ID for each new action. Active-run retries return current live progress without moving again. After completion or cancellation, only start and finish retries are retained."
+**Description (contract):** "Cancel your playbook first, then stop its current holder if that is another agent. Your own turn is never interrupted. The result records whether Stop was requested, unnecessary, or failed; retries do not stop again. Work and history remain. Reuse client_request_id only to retry this exact operation; use a fresh ID for each new action. Active-run retries return current live progress without moving again. After completion or cancellation, only start and finish retries are retained."
 
 Cancellation preserves the run and its saved procedure in history.
 

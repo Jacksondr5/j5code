@@ -19,6 +19,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
 import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
 import { CrewLaunchReporter } from "./CrewLaunchReporter.ts";
+import { PlaybookCrewRelay } from "../playbooks/PlaybookCrewRelay.ts";
 import { CrewCaptainArchiveCascade } from "./CrewCaptainArchiveCascade.ts";
 import { readEventStoreHighWater } from "./eventStoreHighWater.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
@@ -355,6 +356,7 @@ const makeLayer = (daemon: boolean) =>
       );
 
       if (daemon) {
+        const playbooks = yield* PlaybookCrewRelay;
         // The stream starts from the event store's current high-water mark, so everything that
         // landed while the server was down, and every reaction that failed before it, is caught
         // up by one sweep first: orphaned Crews retire, finished seats tell their Captains.
@@ -362,6 +364,7 @@ const makeLayer = (daemon: boolean) =>
           let afterSequence = yield* readEventStoreHighWater("J5 crew seat finish notifier");
           // Launches the server lost mid-report are reported first, so a first turn that failed
           // while it was down is a launch outcome rather than a finish.
+          yield* playbooks.reconcileOwners();
           yield* reporter.reconcile;
           yield* cascade.reconcile;
           yield* reconcile;
@@ -372,7 +375,8 @@ const makeLayer = (daemon: boolean) =>
               // One stream serves both Crew reactions: seats settling, and a Captain's archive
               // retiring its Crews (CrewCaptainArchiveCascade).
               Stream.runForEach((event) =>
-                reporter.handleStoredEvent(event).pipe(
+                playbooks.handleOwnerEvent(event).pipe(
+                  Effect.andThen(reporter.handleStoredEvent(event)),
                   Effect.andThen(handleStoredEvent(event)),
                   Effect.andThen(cascade.handleStoredEvent(event)),
                   Effect.tap(() => Effect.sync(() => (afterSequence = event.sequence))),
