@@ -131,14 +131,16 @@ To move a machine to nightlies:
   `curl -fsSL https://github.com/Jacksondr5/j5code/releases/latest/download/install.sh | T3CODE_CHANNEL=nightly sh`.
 - **Installed server:** `j5 update --channel nightly`. A server on a nightly follows nightlies, so
   later a plain `j5 update` takes the next one.
-- **Mac app:** **Settings → General → Update track → Nightly**. The app then updates itself to the
-  nightly build in place: one install, one profile and one database, as with upstream's.
+- **Mac app:** **Settings → About → Update track → Nightly**. This moves the app and every
+  connected machine it can, as upstream's does, and lists the ones it skips and why. The app
+  updates itself in place: one install, one profile and one database.
 
 To return to stable when the stable build knows every migration the nightly ran:
 
 - **Server:** `j5 update --channel stable`, adding `--allow-downgrade` while the newest stable is
   older than the nightly.
-- **Mac app:** **Update track → Stable**.
+- **Mac app:** **Update track → Stable**. The switch checks each machine's database against the
+  stable release and skips a machine whose database it doesn't support, saying why.
 
 That is the case when the stable release was cut from the nightly's commit or a later one. It is
 also the case when no nightly you ran migrated the database, which you can check: the server took

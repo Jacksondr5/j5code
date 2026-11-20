@@ -31,8 +31,6 @@ Other environment variables keep T3 Code's names, such as `T3CODE_HOST`, `T3CODE
 - Servers update from releases on GitHub (`Jacksondr5/j5code`), not from npm. **Update
   everything** asks each server for the app's own version; if that version has no J5 Code
   release, such as a development build, that server's update fails and says so.
-- The Stable or Nightly track is chosen for each desktop app on its own, and choosing it does not
-  move your servers.
 - A server installed from npm (`@jacksondr5/j5code` 0.0.43 or earlier) cannot update itself to a
   release archive: **Update server** fails because no newer npm version exists. Follow
   [Migrating to release archives](./migrating-to-release-archives.md) on that machine once; later

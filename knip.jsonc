@@ -9,14 +9,11 @@
   "ignoreFiles": [
     "apps/mobile/src/components/T3Wordmark.tsx",
     "apps/web/src/components/T3Wordmark.tsx",
-    "apps/web/src/components/settings/UpdateTrackSwitchDialog.tsx",
   ],
   "ignoreIssues": {
     "apps/server/src/cli/thread.ts": ["exports"],
-    // The fleet track switch's dialog, which J5 does not use (decision 5 of the v0.1.7 advance).
-    "apps/web/src/components/sidebar/SidebarUpdatePill.tsx": ["exports"],
-    "apps/web/src/components/sidebar/updateEverything.logic.ts": ["exports"],
-    "apps/web/src/components/sidebar/useUpdateEverything.ts": ["exports"],
+    // J5 answers release lookups from its own releases (FORK.md case 40).
+    "apps/server/src/cloud/npmRelease.ts": ["exports"],
     "packages/shared/src/t3ProjectFile.ts": ["exports"],
   },
   "workspaces": {
@@ -71,8 +68,9 @@
         "scripts/update-test-shard-weights.ts",
         "scripts/verify-background-live.ts",
         "src/provider/testFixtures/*.mjs",
-        // J5: scripts/j5/*.sh run these by path.
+        // J5: scripts/j5/*.sh and j5-release.yml run these by path.
         "src/j5/fleet-load.ts",
+        "src/j5/updates/printReleaseMetadata.ts",
         "src/j5/a2a/test-support/devDeliverySeedRunner.ts",
         // graphqlgen reads its config.
         "graphql.config.ts",

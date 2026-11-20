@@ -14,13 +14,14 @@ import {
   RUN_OBSERVABILITY_MIGRATIONS_TABLE,
   runObservabilityMigrationIds,
 } from "../run-observability/Migrations.ts";
+import { J5_BUILD_MIGRATION_HEADS, j5DatabaseMigrationHeads } from "./j5MigrationLedgers.ts";
 
 const ledgers = [
   { table: J5_A2A_MIGRATIONS_TABLE, ids: migrationEntries.map(([id]) => id) },
   { table: RUN_OBSERVABILITY_MIGRATIONS_TABLE, ids: runObservabilityMigrationIds },
 ];
 
-it.layer(NodeServices.layer)("service preflight with J5's ledgers", (it) => {
+it.layer(NodeServices.layer)("J5 migration ledgers", (it) => {
   it.effect.each(ledgers)("blocks a database whose $table a newer build migrated", (ledger) =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -45,6 +46,7 @@ it.layer(NodeServices.layer)("service preflight with J5's ledgers", (it) => {
 
       // Upstream's ledger is current, so only the J5 ledger below can block.
       expect(preflight().status).toBe("ready");
+      expect(j5DatabaseMigrationHeads(databasePath)).toEqual(J5_BUILD_MIGRATION_HEADS);
 
       const newerId = Math.max(...ledger.ids) + 1;
       db.prepare(`INSERT INTO "${ledger.table}" VALUES (?, ?)`).run(newerId, "FromNightly");
@@ -54,6 +56,16 @@ it.layer(NodeServices.layer)("service preflight with J5's ledgers", (it) => {
       expect(result.status === "blocked" ? result.reason : "").toContain(
         `${ledger.table} ${newerId}_FromNightly`,
       );
+      // Servers report these heads, so a track switch sees a database a newer build migrated.
+      expect(j5DatabaseMigrationHeads(databasePath)).toEqual({
+        ...J5_BUILD_MIGRATION_HEADS,
+        [ledger.table]: newerId,
+      });
+
+      // A database that exists but cannot be read has unknown heads.
+      const unreadable = path.join(path.dirname(databasePath), "unreadable.sqlite");
+      yield* fs.writeFileString(unreadable, "not a database");
+      expect(j5DatabaseMigrationHeads(unreadable)).toBeUndefined();
     }),
   );
 });

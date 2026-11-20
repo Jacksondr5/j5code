@@ -15,10 +15,12 @@ function unsupportedLookup(config: ServerConfig | null): ServerNpmReleaseError |
   if (config === null) {
     return new ServerNpmReleaseError({ reason: "Connect to this server to check releases." });
   }
-  return config.environment.capabilities.npmReleaseLookup === true
+  // J5: a server that reports J5's ledgers answers from J5's releases; an older one asks npm.
+  return config.environment.capabilities.npmReleaseLookup === true &&
+    config.environment.j5DatabaseMigrations !== undefined
     ? null
     : new ServerNpmReleaseError({
-        reason: "This server does not support registry lookups. Update it before switching tracks.",
+        reason: "This server does not support release lookups. Update it before switching tracks.",
       });
 }
 
@@ -26,7 +28,7 @@ export function npmReleaseFailureMessage(cause: Cause.Cause<unknown>): string {
   const error = Option.getOrUndefined(Cause.findErrorOption(cause));
   return isServerNpmReleaseError(error)
     ? error.message
-    : "Could not check this environment's npm registry. Check the connection and registry settings.";
+    : "Could not check J5's releases. Check the connection.";
 }
 
 export const npmReleaseAtom = Atom.family((spec: string) =>
@@ -46,14 +48,16 @@ export const npmReleaseAtom = Atom.family((spec: string) =>
     }
     const unsupported = unsupportedLookup(get(serverEnvironment.configValueAtom(environmentId)));
     if (unsupported !== null) return Effect.fail(unsupported);
-    return get
-      .result(serverEnvironment.npmRelease({ environmentId, input: { spec } }))
-      .pipe(
-        Effect.map((release) =>
-          release === null
-            ? null
-            : { version: release.version, databaseMigration: release.databaseMigration },
-        ),
-      );
+    return get.result(serverEnvironment.npmRelease({ environmentId, input: { spec } })).pipe(
+      Effect.map((release) =>
+        release === null
+          ? null
+          : {
+              version: release.version,
+              databaseMigration: release.databaseMigration,
+              j5DatabaseMigrations: release.j5DatabaseMigrations,
+            },
+      ),
+    );
   }).pipe(Atom.withLabel(`npm-release:${spec}`)),
 );

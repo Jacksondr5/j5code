@@ -21,6 +21,7 @@ import { readAgentActivityPublishingActive } from "../cloud/config.ts";
 import { resolveServerSelfUpdateCapability } from "../cloud/selfUpdate.ts";
 import { resolveServiceLauncherMode } from "../cloud/serviceLauncherClient.ts";
 import * as ServerConfig from "../config.ts";
+import { j5DatabaseMigrationHeads } from "../j5/persistence/j5MigrationLedgers.ts";
 import { databaseMigrationHead } from "../persistence/databaseMigrationHead.ts";
 import * as ProcessRunner from "../processRunner.ts";
 import { resolveServerEnvironmentLabel } from "./ServerEnvironmentLabel.ts";
@@ -206,6 +207,7 @@ export const make = Effect.gen(function* () {
     serverSelfUpdate === "desktop-managed" && serverConfig.desktopTelemetryControlFd !== undefined;
 
   const databaseMigration = databaseMigrationHead(serverConfig.dbPath);
+  const j5DatabaseMigrations = j5DatabaseMigrationHeads(serverConfig.dbPath);
   const descriptor: ExecutionEnvironmentDescriptor = {
     environmentId,
     label,
@@ -217,6 +219,7 @@ export const make = Effect.gen(function* () {
     serverVersion: packageJson.version,
     orchestrationProtocolVersion: ORCHESTRATION_PROTOCOL_VERSION,
     ...(databaseMigration === undefined ? {} : { databaseMigration }),
+    ...(j5DatabaseMigrations === undefined ? {} : { j5DatabaseMigrations }),
     capabilities: {
       ...J5_LEDGER_CAPABILITIES,
       j5PeerPoll: true,

@@ -192,6 +192,7 @@ import * as ProviderAuthService from "./provider/ProviderAuthService.ts";
 import { makeProviderInstallation } from "./provider/providerInstallation.ts";
 import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as NpmRelease from "./cloud/npmRelease.ts";
+import * as J5ReleaseLookup from "./j5/updates/J5ReleaseLookup.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as SecretResolver from "@t3tools/secret-provider-core/server/SecretResolver";
@@ -3614,4 +3615,8 @@ export const layer = Layer.unwrap(
       ),
     );
   }),
-).pipe(Layer.provide(ArtifactWorkspace.layer), Layer.provide(NpmRelease.layer));
+).pipe(
+  Layer.provide(ArtifactWorkspace.layer),
+  // J5: release lookups read J5's GitHub releases, not npm (FORK.md case 40).
+  Layer.provide(J5ReleaseLookup.layer),
+);
