@@ -132,6 +132,17 @@ export const sharingAllowsStart = (
   });
 
 /**
+ * Whether a connection may start anything on its server: a project of its own, or a thread in a
+ * project it holds. Read from its levels alone, so it is known before the server lists projects.
+ */
+export const sharingAllowsStartAnywhere = (access: KnownConnectionAccess): boolean =>
+  access?.kind === "person"
+    ? access.levels.some(
+        (held) => held.scope.kind !== "thread" && levelReaches(held.level, "collaborator"),
+      )
+    : sharingAllowsStart(access, null);
+
+/**
  * Which server, if any, is asked "What should people and agents on <server> call you?" now:
  * a device the server cannot place (People and access AC5), or the first owner with no name yet
  * (AC6). One server at a time, in the order they are listed. Neither can be put off: each is

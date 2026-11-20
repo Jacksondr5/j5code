@@ -41,7 +41,7 @@ import {
   resolveNewTaskScratchOption,
 } from "./new-task-project-selection";
 import { useSelectWorkspaceDetail } from "../workspace/useSelectWorkspaceDetail";
-import { noStartableProjectState } from "../../j5/sharing/startAccess";
+import { noStartableProjectState, useAddsProjectSomewhere } from "../../j5/sharing/startAccess";
 
 type NewTaskRouteParams = {
   readonly incomingShareId?: string | string[];
@@ -181,6 +181,8 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
       projectCount: projects.length,
       startableScopeCount: projectScopes.length,
     }) ?? deriveProjectEmptyState(catalogState);
+  // J5: Add project is offered only to someone who may add one (FORK.md case 90).
+  const canAddProject = useAddsProjectSomewhere() && catalogState.hasReadyEnvironment;
   const serverConfigs = useServerConfigs();
   const listScopes = pickableProjectGroups(projectScopes).filter(
     (scope) =>
@@ -314,7 +316,7 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
       <NewTaskHeader
         title={screenTitle}
         subtitle={incomingShareSubtitle}
-        canAddProject={catalogState.hasReadyEnvironment}
+        canAddProject={canAddProject}
         searchText={searchText}
         onSearchTextChange={setSearchText}
       />
@@ -410,15 +412,19 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
               </Text>
               {Platform.OS === "android" ? (
                 <>
-                  <Button
-                    label={catalogState.hasReadyEnvironment ? "Add new project" : "Add environment"}
-                    tone="primary"
-                    onPress={() =>
-                      catalogState.hasReadyEnvironment
-                        ? navigation.dispatch(StackActions.push("AddProject"))
-                        : navigation.navigate("ConnectionsNew")
-                    }
-                  />
+                  {catalogState.hasReadyEnvironment && !canAddProject ? null : (
+                    <Button
+                      label={
+                        catalogState.hasReadyEnvironment ? "Add new project" : "Add environment"
+                      }
+                      tone="primary"
+                      onPress={() =>
+                        catalogState.hasReadyEnvironment
+                          ? navigation.dispatch(StackActions.push("AddProject"))
+                          : navigation.navigate("ConnectionsNew")
+                      }
+                    />
+                  )}
                   {canStartScratch ? (
                     <Button
                       label="Start without a project"
@@ -437,13 +443,15 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
                 </View>
               ) : (
                 <>
-                  <View className="mt-1">
-                    <Button
-                      label="Add new project"
-                      tone="primary"
-                      onPress={() => navigation.dispatch(StackActions.push("AddProject"))}
-                    />
-                  </View>
+                  {canAddProject ? (
+                    <View className="mt-1">
+                      <Button
+                        label="Add new project"
+                        tone="primary"
+                        onPress={() => navigation.dispatch(StackActions.push("AddProject"))}
+                      />
+                    </View>
+                  ) : null}
                   {canStartScratch ? (
                     <Button
                       label="Start without a project"

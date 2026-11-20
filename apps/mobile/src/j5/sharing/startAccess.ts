@@ -1,6 +1,10 @@
 import { useAtomValue } from "@effect/atom-react";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { type KnownConnectionAccess, sharingAllowsStart } from "@t3tools/client-runtime/j5/sharing";
+import {
+  type KnownConnectionAccess,
+  sharingAllowsStart,
+  sharingAllowsStartAnywhere,
+} from "@t3tools/client-runtime/j5/sharing";
 import {
   AuthOrchestrationOperateScope,
   type EnvironmentId,
@@ -26,6 +30,34 @@ const startsAtom = Atom.make((get) => {
   return (environmentId: EnvironmentId, projectId: ProjectId | null) =>
     sharingAllowsStart(accessById.get(environmentId) ?? null, projectId);
 }).pipe(Atom.withLabel("mobile-j5:access:starts"));
+
+const savedServersAllow = (label: string, allows: (access: KnownConnectionAccess) => boolean) =>
+  Atom.make((get) =>
+    [...get(environmentCatalog.catalogValueAtom).entries.keys()].some((id) =>
+      allows(get(j5Sharing.connectionAccess(id))),
+    ),
+  ).pipe(Atom.withLabel(label));
+
+const addsProjectSomewhereAtom = savedServersAllow("mobile-j5:access:adds-project", (access) =>
+  sharingAllowsStart(access, null),
+);
+const startsSomewhereAtom = savedServersAllow(
+  "mobile-j5:access:starts-somewhere",
+  sharingAllowsStartAnywhere,
+);
+
+/**
+ * Whether New thread's doors are offered: some saved server lets this connection add a project or
+ * start a thread in one. A thread-only Viewer is offered none.
+ */
+export function useStartsSomewhere(): boolean {
+  return useAtomValue(startsSomewhereAtom);
+}
+
+/** Whether Add project is offered: some saved server lets this connection add one (AC19). */
+export function useAddsProjectSomewhere(): boolean {
+  return useAtomValue(addsProjectSomewhereAtom);
+}
 
 /**
  * Whether this connection may start a thread in a project: upstream's "Operate tasks", and a

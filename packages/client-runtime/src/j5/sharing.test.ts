@@ -35,6 +35,7 @@ import {
   serverToAskNameFor,
   sharingAllowsOperate,
   sharingAllowsStart,
+  sharingAllowsStartAnywhere,
   threadLevelFor,
   threadLevelInProject,
 } from "./sharing.ts";
@@ -267,6 +268,7 @@ describe("what a connection may start", () => {
     const access = person([{ scope: { kind: "thread", threadId: THREAD }, level: "collaborator" }]);
     expect(sharingAllowsStart(access, PROJECT)).toBe(false);
     expect(sharingAllowsStart(access, null)).toBe(false);
+    expect(sharingAllowsStartAnywhere(access)).toBe(false);
   });
 
   it("lets a project's Collaborator start threads there and add no project", () => {
@@ -277,6 +279,7 @@ describe("what a connection may start", () => {
     expect(sharingAllowsStart(access, PROJECT)).toBe(true);
     expect(sharingAllowsStart(access, "project:other")).toBe(false);
     expect(sharingAllowsStart(access, null)).toBe(false);
+    expect(sharingAllowsStartAnywhere(access)).toBe(true);
   });
 
   it("lets a Viewer here who writes to another thread start nothing here", () => {
@@ -285,11 +288,13 @@ describe("what a connection may start", () => {
       { scope: { kind: "thread", threadId: THREAD }, level: "collaborator" },
     ]);
     expect(sharingAllowsStart(access, PROJECT)).toBe(false);
+    expect(sharingAllowsStartAnywhere(access)).toBe(false);
   });
 
   it("lets a server's Viewer start nothing anywhere", () => {
     expect(sharingAllowsStart(SERVER_VIEWER, PROJECT)).toBe(false);
     expect(sharingAllowsStart(SERVER_VIEWER, null)).toBe(false);
+    expect(sharingAllowsStartAnywhere(SERVER_VIEWER)).toBe(false);
   });
 
   it("lets a server's Collaborator or Owner, or a service, start anything", () => {
@@ -299,12 +304,15 @@ describe("what a connection may start", () => {
     for (const access of [collaborator, OWNER, { kind: "service" } as const]) {
       expect(sharingAllowsStart(access, PROJECT)).toBe(true);
       expect(sharingAllowsStart(access, null)).toBe(true);
+      expect(sharingAllowsStartAnywhere(access)).toBe(true);
     }
   });
 
   it("withholds nothing before the server answers, and everything from an unplaced device", () => {
     expect(sharingAllowsStart(null, null)).toBe(true);
     expect(sharingAllowsStart({ kind: "unknown" }, PROJECT)).toBe(false);
+    expect(sharingAllowsStartAnywhere(null)).toBe(true);
+    expect(sharingAllowsStartAnywhere({ kind: "unknown" })).toBe(false);
   });
 });
 

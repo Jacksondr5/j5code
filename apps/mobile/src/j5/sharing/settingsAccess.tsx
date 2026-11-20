@@ -4,6 +4,7 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import { type ReactNode, useMemo } from "react";
 
 import { EmptyState } from "../../components/ui/EmptyState";
+import { ScreenScrollView } from "../../components/ui/ScreenScrollView";
 import { environmentPresentations } from "../../state/presentation";
 import { useOwnedEnvironmentIds, useOwnerSomewhere, useWritesSomewhere } from "./guestAccess";
 import { settingsPageShown } from "./settingsAccess.logic";
@@ -45,7 +46,14 @@ function OwnerOnlySettingsNotice() {
     serverName: only?.entry.target.label ?? null,
     writesSomewhere: useWritesSomewhere(),
   });
-  return <EmptyState variant="plain" title={notice.title} detail={notice.body} />;
+  return (
+    <ScreenScrollView
+      contentInsetAdjustmentBehavior="automatic"
+      contentContainerClassName="px-5 pt-4"
+    >
+      <EmptyState variant="plain" title={notice.title} detail={notice.body} />
+    </ScreenScrollView>
+  );
 }
 
 /**

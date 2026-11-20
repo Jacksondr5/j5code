@@ -12,6 +12,7 @@ import {
   type AndroidHomeFabLayout as SharedAndroidHomeFabLayout,
 } from "./AndroidHomeFab.shared";
 import { useWorkspaceState } from "../../state/workspace";
+import { useStartsSomewhere } from "../../j5/sharing/startAccess";
 import { FabScrollContext } from "./FabScrollContext";
 import { updateFabScroll } from "./fab-scroll";
 import { useAndroidControlSizing } from "../../components/ui/useAndroidControlSizing";
@@ -33,6 +34,8 @@ export function AndroidHomeFabLayout(props: ComponentProps<typeof SharedAndroidH
   const [expanded, setExpanded] = useState(true);
   const { scale, fabSize } = useAndroidControlSizing();
   const enabledTabs = useEnabledNavigationTabs();
+  // J5: New thread is offered only to someone who may start one (FORK.md case 90).
+  const startsSomewhere = useStartsSomewhere();
   const barWidth =
     layoutWidth === null
       ? undefined
@@ -63,6 +66,7 @@ export function AndroidHomeFabLayout(props: ComponentProps<typeof SharedAndroidH
         <FabScrollContext value={onScroll}>{props.children}</FabScrollContext>
       </WorkspaceTabsContext>
       {!props.disabled &&
+      startsSomewhere &&
       (!props.sidebar || floatingTabsEnabled) &&
       state.hasConnections &&
       layoutWidth !== null ? (
