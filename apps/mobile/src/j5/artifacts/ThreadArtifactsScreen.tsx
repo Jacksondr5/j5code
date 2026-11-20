@@ -160,7 +160,7 @@ function ArtifactBody(props: { readonly content: ArtifactContent; readonly frame
           accessibilityRole="image"
           accessibilityLabel={content.path}
         >
-          {image}
+          <View importantForAccessibility="no-hide-descendants">{image}</View>
         </View>
       );
     }
