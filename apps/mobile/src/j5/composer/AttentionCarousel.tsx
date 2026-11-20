@@ -1,7 +1,13 @@
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useLayoutEffect, useRef, useState } from "react";
 import { type NativeScrollEvent, type NativeSyntheticEvent, Pressable, View } from "react-native";
-import Animated, { FadeInDown, FadeOut, ReduceMotion } from "react-native-reanimated";
+import Animated, {
+  FadeInDown,
+  FadeOut,
+  LayoutAnimationConfig,
+  ReduceMotion,
+} from "react-native-reanimated";
 
+import { J5_CARD_CHROME } from "../components/J5Card";
 import {
   CAROUSEL_GAP,
   CAROUSEL_INSET,
@@ -15,8 +21,7 @@ export const ROW_ENTERING = FadeInDown.duration(180).reduceMotion(ReduceMotion.S
 export const ROW_EXITING = FadeOut.duration(120).reduceMotion(ReduceMotion.System);
 
 /** The folded card's chrome: J5's card set at the folded question bar's 47.5 pt. */
-export const FOLDED_CARD =
-  "h-[47.5px] justify-center rounded-[20px] border border-foreground/15 bg-card-alt px-4";
+const FOLDED_CARD = `${J5_CARD_CHROME} h-[47.5px] justify-center px-4`;
 
 export interface CarouselCard {
   readonly key: string;
@@ -31,23 +36,37 @@ export interface CarouselCard {
  */
 export function AttentionCarousel(props: {
   readonly cards: ReadonlyArray<CarouselCard>;
-  readonly page: number;
-  readonly onPageChange: (page: number) => void;
+  /** The card on screen, by key; the first card when it isn't in the row. */
+  readonly shownKey: string | null;
+  readonly onShownChange: (key: string) => void;
 }) {
-  const { cards, page } = props;
+  const { cards } = props;
   const [width, setWidth] = useState(0);
   const scroll = useRef<Animated.ScrollView>(null);
   const count = cards.length;
+  const page = Math.max(
+    0,
+    cards.findIndex((card) => card.key === props.shownKey),
+  );
+  const shownKey = cards[page]?.key ?? null;
   const cardWidth = carouselCardWidth(width, count);
   const offsets = carouselOffsets(count, cardWidth);
-  const offset = offsets[Math.min(page, count - 1)] ?? 0;
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- moves the native scroll view when a card is added before the shown one or a new question takes the row back to the first card
-  useEffect(() => {
-    scroll.current?.scrollTo({ x: offset, animated: true });
-  }, [offset]);
+  const offset = offsets[page] ?? 0;
+  const placed = useRef(shownKey);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- moves the native scroll view: at once, before paint, when cards around the shown one change; animated when the row moves to another card
+  useLayoutEffect(() => {
+    const paging = placed.current !== shownKey;
+    placed.current = shownKey;
+    scroll.current?.scrollTo({ x: offset, animated: paging });
+  }, [offset, shownKey]);
   const settle = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
     const index = nearestCard(offsets, event.nativeEvent.contentOffset.x);
-    if (index !== page) props.onPageChange(index);
+    const key = cards[index]?.key;
+    if (key !== undefined && key !== shownKey) {
+      // The swipe already put it there.
+      placed.current = key;
+      props.onShownChange(key);
+    }
   };
   return (
     <View
@@ -66,9 +85,10 @@ export function AttentionCarousel(props: {
         onMomentumScrollEnd={settle}
         contentContainerStyle={{ paddingHorizontal: CAROUSEL_INSET, gap: CAROUSEL_GAP }}
       >
-        {width === 0
-          ? null
-          : cards.map((card) => (
+        {width === 0 ? null : (
+          // The row fades in as a whole; only cards that arrive later fade in on their own.
+          <LayoutAnimationConfig skipEntering>
+            {cards.map((card) => (
               <Animated.View
                 key={card.key}
                 entering={ROW_ENTERING}
@@ -85,6 +105,8 @@ export function AttentionCarousel(props: {
                 </Pressable>
               </Animated.View>
             ))}
+          </LayoutAnimationConfig>
+        )}
       </Animated.ScrollView>
       {/* Holds the row's height before its width is known, so nothing below it moves. */}
       {width === 0 ? <View className="mx-4 h-[47.5px]" /> : null}

@@ -102,7 +102,8 @@ function Controls(props: Props & { readonly questions: CaptainQuestions | null }
     return () => setHidesComposer(false);
   }, [questionsOpen, setHidesComposer]);
 
-  // A question that wasn't there before takes the row back to the questions card.
+  // A question that wasn't there before takes the row back to the questions card. An open panel
+  // isn't pulled away: the row shows that card once the person folds it.
   const askIds = questions?.asks.map((ask) => ask.exchangeId) ?? [];
   const [seenAskIds, setSeenAskIds] = useState(askIds);
   const [pageKey, setPageKey] = useState<string | null>(null);
@@ -164,17 +165,9 @@ function Controls(props: Props & { readonly questions: CaptainQuestions | null }
       </Animated.View>
     );
   if (cards.length === 0) return null;
-  const page = Math.max(
-    0,
-    cards.findIndex((card) => card.key === pageKey),
-  );
   return (
     <Animated.View key="carousel" entering={ROW_ENTERING} exiting={ROW_EXITING}>
-      <AttentionCarousel
-        cards={cards}
-        page={page}
-        onPageChange={(index) => setPageKey(cards[index]?.key ?? null)}
-      />
+      <AttentionCarousel cards={cards} shownKey={pageKey} onShownChange={setPageKey} />
     </Animated.View>
   );
 }

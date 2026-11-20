@@ -90,12 +90,6 @@ const SEAMS: ReadonlyArray<Seam> = [
     reaches: ["expandPlaybookPrompt(draft.text.trim())"],
   },
   {
-    file: "features/threads/ThreadDetailScreen.tsx",
-    record: "case 45: native playbook composer control (a card in case 114's carousel)",
-    from: "../../j5/composer/J5ComposerControls",
-    reaches: ["<J5ComposerControls", "hasServerThread={"],
-  },
-  {
     file: "features/threads/ThreadComposer.tsx",
     record:
       "PR #75–#86 role library; saved-agent mentions: handoff artifacts, draft-as-agent; case 49",

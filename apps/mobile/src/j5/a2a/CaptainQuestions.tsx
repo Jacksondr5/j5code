@@ -25,8 +25,11 @@ import { J5RecordPanel } from "../inbox/J5RecordPanel";
 import { j5Sharing } from "../sharing/guestAccess";
 import { j5Environment } from "../state";
 
-/** Three lines of the question stay readable however little room is left (IN-14). */
-const QUESTION_MIN_HEIGHT = 64;
+/**
+ * Two lines of the question stay readable, and scroll, however little room is left (IN-14). More
+ * would push the slot under the header once a long title and the agents pill share the room (DL-1).
+ */
+const QUESTION_MIN_HEIGHT = 42;
 
 const URGENCY = {
   blocking: { label: "Blocking", className: "text-danger-foreground" },
@@ -117,7 +120,8 @@ export function QuestionPanel(props: {
 }) {
   const { questions, maxHeight, composerBottomInset, overlayHeight } = props;
   const { answers } = questions;
-  const [picked, setPicked] = useState<string | null>(null);
+  // Pinned on opening, so an ask that arrives sorted ahead never swaps the question being answered.
+  const [picked, setPicked] = useState(() => questions.asks[0]?.exchangeId ?? null);
   const [questionHeight, setQuestionHeight] = useState(0);
   // The slot's bottom inset hides under the keyboard, which upstream's room doesn't count.
   const { progress: keyboardProgress } = useReanimatedKeyboardAnimation();
@@ -137,6 +141,8 @@ export function QuestionPanel(props: {
     [measured, questionHeight, composerBottomInset, overlayHeight],
   );
   const view = pickShownAsk(questions.asks, picked);
+  // Answered, it falls back to the first still open, which is pinned in turn.
+  if (view !== null && view.shown.exchangeId !== picked) setPicked(view.shown.exchangeId);
   if (view === null) return null;
   const { shown, others, next: nextAsk } = view;
   const closed = answers.closedOf(shown);
@@ -231,7 +237,7 @@ export function QuestionPanel(props: {
           </>
         ) : (
           <AnswerArea
-            key={shown.exchangeId}
+            key={`answer:${shown.exchangeId}`}
             item={shown}
             text={answers.answerText(shown)}
             onChangeText={(value) => answers.setAnswerText(shown, value)}
