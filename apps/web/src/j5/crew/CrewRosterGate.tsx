@@ -16,7 +16,7 @@ import {
   type CrewProposalSeat,
 } from "./crewProposalsClient";
 
-const proposalViews = new Map<string, boolean>();
+const proposalViews = new Map<string, ReadonlySet<string>>();
 
 export function CrewRosterGate(props: {
   readonly environmentId: EnvironmentId | undefined;
@@ -28,7 +28,7 @@ export function CrewRosterGate(props: {
   );
   useCrewProposalsRefresh();
   const viewKey = JSON.stringify([environmentId, threadId]);
-  const [expanded, setExpanded] = useState(() => proposalViews.get(viewKey) ?? false);
+  const [expanded, setExpanded] = useState(() => proposalViews.get(viewKey) ?? new Set<string>());
   const contentId = useId();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -81,10 +81,11 @@ export function CrewRosterGate(props: {
               environmentId={environmentId}
               busy={busyId === proposal.id}
               disclosure={{
-                expanded,
+                expanded: expanded.has(proposal.id),
                 contentId: `${contentId}-${proposal.id}`,
                 onToggle: () => {
-                  const next = !expanded;
+                  const next = new Set(expanded);
+                  if (!next.delete(proposal.id)) next.add(proposal.id);
                   proposalViews.set(viewKey, next);
                   setExpanded(next);
                 },

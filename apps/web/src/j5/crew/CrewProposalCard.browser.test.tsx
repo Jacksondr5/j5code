@@ -17,6 +17,7 @@ const state = vi.hoisted(() => ({
   read: vi.fn(),
   memberModels: null as ReadonlyArray<{ instanceId: string; model: string }> | null,
   memberReasoning: null as ReadonlyArray<{ instanceId: string; level: string }> | null,
+  proposals: [] as ReadonlyArray<CrewProposal>,
 }));
 vi.mock(import("@effect/atom-react"), async (importOriginal) => ({
   ...(await importOriginal()),
@@ -35,7 +36,9 @@ vi.mock("./useCrewMemberModels", () => ({
   useCrewMemberReasoning: () => state.memberReasoning,
 }));
 vi.mock("../../state/query", () => ({
-  useEnvironmentQuery: (query: unknown) => ({ data: query === "crew-proposals" ? [proposal] : {} }),
+  useEnvironmentQuery: (query: unknown) => ({
+    data: query === "crew-proposals" ? state.proposals : {},
+  }),
 }));
 vi.mock("../a2a/humanInboxRefresh", () => ({ notifyHumanInboxChanged: vi.fn() }));
 vi.mock("@t3tools/client-runtime/j5/agent-personas", () => ({
@@ -158,6 +161,7 @@ function setup() {
   state.permitted = true;
   state.memberModels = null;
   state.memberReasoning = null;
+  state.proposals = [proposal];
   state.preview.mockReset().mockImplementation(preview);
   state.read.mockReset().mockImplementation(({ input }: { input: { personaId: string } }) =>
     Promise.resolve({
@@ -486,8 +490,11 @@ it("starts as a compact strip and keeps member edits when collapsed and reopened
   ).toBe("Keep this draft when folded");
 });
 
-it("remembers disclosure for each environment and thread when the composer remounts", async () => {
+it("remembers disclosure for each proposal, environment and thread when the composer remounts", async () => {
   setup();
+  state.proposals = [proposal, { ...proposal, id: "proposal:2" }];
+  const toggle = (id: string) =>
+    document.querySelector<HTMLButtonElement>(`[data-testid="crew-proposal-${id}"] button`)!;
   const gate = (environment: string) => (
     <CrewRosterGate
       key={environment}
@@ -496,10 +503,14 @@ it("remembers disclosure for each environment and thread when the composer remou
     />
   );
   await using screen = await render(gate("remember-test"), { router: false });
-  await click(button("Expand Crew proposal"));
+  await click(toggle("proposal:1"));
+  expect(toggle("proposal:1").getAttribute("aria-expanded")).toBe("true");
+  expect(toggle("proposal:2").getAttribute("aria-expanded")).toBe("false");
   await screen.rerender(null);
   await screen.rerender(gate("remember-test"));
-  expect(button("Collapse Crew proposal").getAttribute("aria-expanded")).toBe("true");
+  expect(toggle("proposal:1").getAttribute("aria-expanded")).toBe("true");
+  expect(toggle("proposal:2").getAttribute("aria-expanded")).toBe("false");
+  state.proposals = [proposal];
   await screen.rerender(gate("different-environment"));
   expect(button("Expand Crew proposal").getAttribute("aria-expanded")).toBe("false");
   await screen.rerender(gate("remember-test"));
