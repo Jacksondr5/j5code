@@ -192,10 +192,9 @@ export interface ListedThread {
 }
 
 /**
- * The list's threads without the ones an agent spawned (register D22). On a server that has
- * answered before, a thread it has not answered for yet waits while the answer is on its way, so
- * it never shows and then leaves. Where no answer is coming (offline, a narrower person, a failed
- * read) it shows, and so does every thread of a server never heard from, rather than an empty list.
+ * The list's threads without the ones an agent spawned (register D22). A thread its server has
+ * not answered for yet waits while the answer is on its way, so it never shows and then leaves.
+ * Where no answer is coming (offline, a narrower person, a failed read) it shows.
  */
 export function crewListedThreads<T extends ListedThread>(
   threads: ReadonlyArray<T>,
@@ -204,14 +203,8 @@ export function crewListedThreads<T extends ListedThread>(
 ): ReadonlyArray<T> {
   const listed = threads.filter((thread) => {
     if (thread.archivedAt !== null || thread.pinnedAt != null) return true;
-    const answers = memory.get(thread.environmentId)?.spawned;
-    const spawned = answers?.get(thread.id);
-    if (spawned === undefined)
-      return !(
-        answerExpected.has(thread.environmentId) &&
-        answers !== undefined &&
-        answers.size > 0
-      );
+    const spawned = memory.get(thread.environmentId)?.spawned.get(thread.id);
+    if (spawned === undefined) return !answerExpected.has(thread.environmentId);
     return isSidebarMember(thread, spawned);
   });
   // The same array when nothing was dropped, so the list's own memos keep their values.
@@ -226,3 +219,52 @@ export const answeredSince = (
   baseline: unknown,
   result: AsyncResult.AsyncResult<unknown, unknown>,
 ) => result !== baseline && result._tag !== "Initial" && !result.waiting;
+
+/** The participants a name read has settled for, per server, under its current credential. */
+export type SettledNames = ReadonlyMap<EnvironmentId, ReadonlySet<string>>;
+
+export const settleNames = (
+  settled: SettledNames,
+  environmentId: EnvironmentId,
+  participantIds: ReadonlyArray<string>,
+): SettledNames =>
+  new Map(settled).set(
+    environmentId,
+    new Set([...(settled.get(environmentId) ?? []), ...participantIds]),
+  );
+
+const NO_ONE: ReadonlySet<string> = new Set();
+
+/**
+ * Ids whose name is on its way: their connected server has no remembered name for them and no
+ * read has settled. A screen says nothing for them rather than a stand-in it would replace.
+ */
+export const pendingParticipants = (
+  memory: ConnectionMemory,
+  settled: SettledNames,
+  environmentId: EnvironmentId,
+  participantIds: ReadonlyArray<string>,
+  connected: boolean,
+): ReadonlySet<string> => {
+  if (!connected) return NO_ONE;
+  const done = settled.get(environmentId);
+  const labels = memory.get(environmentId)?.names.labels;
+  const pending = participantIds.filter((id) => !done?.has(id) && !labels?.has(id));
+  return pending.length === 0 ? NO_ONE : new Set(pending);
+};
+
+/** Whether the list is empty only because every live thread waits for its first answer. */
+export function crewListWaiting(
+  threads: ReadonlyArray<ListedThread>,
+  memory: ConnectionMemory,
+  answerExpected: ReadonlySet<EnvironmentId>,
+): boolean {
+  const live = threads.filter((thread) => thread.archivedAt === null);
+  if (live.length === 0) return false;
+  if (crewListedThreads(live, memory, answerExpected).length > 0) return false;
+  return live.some(
+    (thread) =>
+      answerExpected.has(thread.environmentId) &&
+      memory.get(thread.environmentId)?.spawned.get(thread.id) === undefined,
+  );
+}

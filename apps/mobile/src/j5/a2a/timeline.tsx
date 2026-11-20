@@ -313,7 +313,9 @@ function useSenderThread(
   });
   // A peer's thread opens only from a client connected to that peer, and only if the person can
   // see it there; the client's own thread list answers both.
-  const shell = useQuietThreadShell(presentation.j5?.group === "participant" ? ref : null);
+  const shell = useQuietThreadShell(
+    presentation.j5?.group === "participant" && timeline.accessConfirmed ? ref : null,
+  );
   return { ref: shell === null ? null : ref, title: shell?.title };
 }
 

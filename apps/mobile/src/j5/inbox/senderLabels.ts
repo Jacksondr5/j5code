@@ -1,8 +1,8 @@
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 
-import { pendingParticipants } from "../a2a/participantIdentities";
 import { connectionMemory } from "../connection/memory";
+import { pendingParticipants } from "../connection/memory.logic";
 
 export interface ScopedParticipantRef {
   readonly environmentId: EnvironmentId;
@@ -18,8 +18,8 @@ export interface ScopedParticipantLabels {
 
 /**
  * Names for senders spread across servers, as web's merged inbox reads them: each connected
- * server names its own senders once a connection, and the names are kept per server and paired
- * credential, so a revisit shows them on its first frame.
+ * server names its own senders as the Inbox opens or reconnects, and the names are kept per
+ * server and paired credential, so a revisit shows them on its first frame.
  */
 export function useScopedParticipantLabels(
   refs: ReadonlyArray<ScopedParticipantRef>,
@@ -33,7 +33,7 @@ export function useScopedParticipantLabels(
   )
     .sort()
     .join("\n");
-  const snapshot = useSyncExternalStore(
+  const { memory, names, settled } = useSyncExternalStore(
     connectionMemory.subscribe,
     connectionMemory.getSnapshot,
     connectionMemory.getSnapshot,
@@ -46,27 +46,29 @@ export function useScopedParticipantLabels(
     }
     return ids;
   }, [key]);
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- asks each server for the senders on screen it has not named this connection.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reads each server's names for the senders on screen, again as they connect.
   useEffect(() => {
     for (const [environmentId, ids] of byEnvironment)
       void connectionMemory.readNames(environmentId, ids);
   }, [byEnvironment]);
-  return useMemo(
-    () => ({
-      labels: new Map(
-        [...snapshot.memory].map(([environmentId, connection]) => [
-          environmentId,
-          connection.names.labels,
-        ]),
-      ),
-      isPending: (environmentId: EnvironmentId, participantId: string) =>
-        pendingParticipants(
-          snapshot,
-          environmentId,
-          [participantId],
-          byEnvironment.has(environmentId),
-        ).size > 0,
-    }),
-    [snapshot, byEnvironment],
+  // Keyed on the names alone, so a classification answer does not re-render the cards.
+  const labels = useMemo(
+    () => new Map([...names].map(([environmentId, known]) => [environmentId, known.labels])),
+    [names],
   );
+  const pendingKey = [...byEnvironment]
+    .flatMap(([environmentId, ids]) =>
+      [...pendingParticipants(memory, settled, environmentId, ids, true)].map((id) =>
+        JSON.stringify([environmentId, id]),
+      ),
+    )
+    .join("\n");
+  return useMemo(() => {
+    const pending = new Set(pendingKey === "" ? [] : pendingKey.split("\n"));
+    return {
+      labels,
+      isPending: (environmentId: EnvironmentId, participantId: string) =>
+        pending.has(JSON.stringify([environmentId, participantId])),
+    };
+  }, [labels, pendingKey]);
 }

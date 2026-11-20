@@ -160,7 +160,7 @@ export function PromptAnsweredBy(props: {
   return (
     <Text
       numberOfLines={1}
-      // Alone, the empty label before it would add a second gap after the icon.
+      // Alone, it cancels the row's gap-1.5 around the empty label before it.
       className={`grow shrink-0 pr-1.5 text-sm text-foreground-muted ${props.alone ? "-ml-1.5" : "pl-1"}`}
     >
       {by === undefined ? said : `${said} by ${by.you ? "you" : (by.name ?? "someone")}`}

@@ -25,6 +25,8 @@ import type { MessageAuthor } from "@t3tools/contracts/j5";
 export interface J5Timeline extends ParticipantIdentities {
   /** Senders whose name is still on its way. */
   readonly pending: ReadonlySet<string>;
+  /** False after a re-pair until the server says who the new person is: no sender threads yet. */
+  readonly accessConfirmed: boolean;
   readonly environmentId: EnvironmentId;
   readonly viewerParticipantId: string | null;
   readonly sharedAuthors: ReadonlyMap<string, MessageAuthor>;

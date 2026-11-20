@@ -46,6 +46,7 @@ import { useWorkspaceState } from "../../state/workspace";
 import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
 import { useHardwareKeyboardCommand } from "../keyboard/hardwareKeyboardCommands";
 import { useThreadListV2 } from "./useThreadListV2";
+import { useCrewListWaiting } from "../../j5/crew/spawnedChildren";
 import { useThreadJumpShortcuts } from "../keyboard/threadKeyboardShortcuts";
 import { requestThreadMessageJump } from "./threadMessageJump";
 import { useThreadListSearchMatches } from "./useThreadListSearchMatches";
@@ -680,6 +681,8 @@ function ThreadNavigationSidebarPane(
     filterMenu,
     onOpenSettings: props.onOpenSettings,
   });
+  // J5 (case 115): threads waiting for their first spawned-children answer are still loading.
+  const j5ListWaiting = useCrewListWaiting(threads);
   const listEmpty = (
     <Text
       className={
@@ -688,7 +691,7 @@ function ThreadNavigationSidebarPane(
           : "px-2 py-4 text-sm text-drawer-foreground-muted"
       }
     >
-      {catalogState.isLoadingConnections
+      {catalogState.isLoadingConnections || j5ListWaiting
         ? "Loading threads…"
         : Platform.OS === "android" && !catalogState.hasConnections
           ? "No environments connected"

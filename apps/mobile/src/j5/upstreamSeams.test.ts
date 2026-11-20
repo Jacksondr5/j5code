@@ -207,6 +207,25 @@ const SEAMS: ReadonlyArray<Seam> = [
     reaches: ["const threads = useCrewListedThreads(input.threads);"],
   },
   {
+    file: "features/home/HomeScreen.tsx",
+    record: "case 115: a list waiting for its first answer is loading",
+    from: "../../j5/crew/spawnedChildren",
+    reaches: [
+      "const j5ListWaiting = useCrewListWaiting(props.threads);",
+      "!j5ListWaiting &&",
+      "j5ListWaiting ? connectingWorkspace(props.catalogState) : props.catalogState",
+    ],
+  },
+  {
+    file: "features/threads/ThreadNavigationSidebar.tsx",
+    record: "case 115: a list waiting for its first answer is loading",
+    from: "../../j5/crew/spawnedChildren",
+    reaches: [
+      "const j5ListWaiting = useCrewListWaiting(threads);",
+      "catalogState.isLoadingConnections || j5ListWaiting",
+    ],
+  },
+  {
     file: "features/settings/SettingsAgentsRouteScreen.tsx",
     record: "PR #75–#86 role library: Personas settings",
     from: "../../j5/agents/AgentLibrarySettingsScreen",

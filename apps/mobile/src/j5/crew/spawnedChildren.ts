@@ -18,8 +18,9 @@ import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { environmentCatalog } from "../../connection/catalog";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { environmentSession } from "../../state/session";
+import type { WorkspaceState } from "../../state/workspaceModel";
 import { answerExpectedAtom, connectionMemory } from "../connection/memory";
-import { crewListedThreads, type ListedThread } from "../connection/memory.logic";
+import { crewListedThreads, crewListWaiting, type ListedThread } from "../connection/memory.logic";
 import { j5Sharing } from "../sharing/guestAccess";
 import { j5Environment } from "../state";
 
@@ -93,6 +94,21 @@ const requestRows = (refs: ReadonlyArray<ScopedThreadRef>, revisions: string) =>
     );
 };
 
+/** The remembered answers, and the servers whose answer is on its way (a failed read is not). */
+const useAnswers = () => {
+  const expected = useAtomValue(answerExpectedAtom);
+  const { memory, failedReads } = useSyncExternalStore(
+    connectionMemory.subscribe,
+    connectionMemory.getSnapshot,
+    connectionMemory.getSnapshot,
+  );
+  const answerExpected = useMemo(
+    () => new Set([...expected].filter((id) => !failedReads.has(id))),
+    [expected, failedReads],
+  );
+  return { memory, answerExpected };
+};
+
 /**
  * The list's threads without the ones an agent spawned (register D22): those show in their
  * spawner's Agents sheet unless pinned. Each answer is remembered for the connection, so the
@@ -103,7 +119,7 @@ export function useCrewListedThreads<T extends ListedThread>(
 ): ReadonlyArray<T> {
   const connections = useAtomValue(threadReadConnectionsAtom);
   const revisions = useAtomValue(placementRevisionsAtom);
-  const answerExpected = useAtomValue(answerExpectedAtom);
+  const { memory, answerExpected } = useAnswers();
   // The list re-renders while turns stream, so the effect keys on the serialized row set.
   const key = JSON.stringify(
     threads.flatMap((thread) =>
@@ -118,21 +134,32 @@ export function useCrewListedThreads<T extends ListedThread>(
     );
     requestRows(refs, revisions);
   }, [connections, key, revisions]);
-  const { memory, failedReads } = useSyncExternalStore(
-    connectionMemory.subscribe,
-    connectionMemory.getSnapshot,
-    connectionMemory.getSnapshot,
-  );
   return useMemo(
-    () =>
-      crewListedThreads(
-        threads,
-        memory,
-        new Set([...answerExpected].filter((id) => !failedReads.has(id))),
-      ),
-    [threads, memory, answerExpected, failedReads],
+    () => crewListedThreads(threads, memory, answerExpected),
+    [threads, memory, answerExpected],
   );
 }
+
+/**
+ * Whether the list is empty only because its threads wait for their first spawned-children
+ * answer (a first launch or new pairing), so it shows upstream's loading state, not "No threads".
+ */
+export function useCrewListWaiting(threads: ReadonlyArray<ListedThread>): boolean {
+  const { memory, answerExpected } = useAnswers();
+  return useMemo(
+    () => crewListWaiting(threads, memory, answerExpected),
+    [threads, memory, answerExpected],
+  );
+}
+
+/** The workspace as upstream's "Connecting to environment" loading state reads it. */
+export const connectingWorkspace = (state: WorkspaceState): WorkspaceState => ({
+  ...state,
+  connectionState: "connecting",
+  hasConnectingEnvironment: true,
+  hasLoadedShellSnapshot: false,
+  connectionError: null,
+});
 
 const EMPTY: ReadonlyArray<SpawnedChild> = [];
 

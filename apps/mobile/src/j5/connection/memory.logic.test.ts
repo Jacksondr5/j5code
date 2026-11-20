@@ -6,11 +6,14 @@ import {
   answeredSince,
   credentialKey,
   crewListedThreads,
+  crewListWaiting,
   decodeMemory,
   encodeMemory,
   observeCredential,
+  pendingParticipants,
   rememberIdentities,
   rememberSpawned,
+  settleNames,
   type ConnectionMemory,
 } from "./memory.logic";
 
@@ -57,8 +60,18 @@ describe("crewListedThreads", () => {
     expect(titles(crewListedThreads(threads, memory, answering))).toEqual([id("captain")]);
     // Offline, refused or failed: no answer is coming, so the thread shows.
     expect(crewListedThreads(threads, memory, nobodyAnswering)).toBe(threads);
-    // A server never heard from (a first launch, a new pairing) lists everything, not nothing.
-    expect(crewListedThreads(threads, new Map(), answering)).toBe(threads);
+    // A first launch or new pairing has nothing saved: every row waits for the first answer.
+    expect(crewListedThreads(threads, new Map(), answering)).toEqual([]);
+  });
+
+  it("calls a first launch's list loading until the first answer, and empty only when it is", () => {
+    const threads = [row("captain"), row("seat")];
+
+    expect(crewListWaiting(threads, new Map(), answering)).toBe(true);
+    expect(crewListWaiting(threads, new Map(), nobodyAnswering)).toBe(false);
+    // Every thread was spawned: the list is truly empty, not loading.
+    expect(crewListWaiting(threads, heard(["captain", "seat"], []), answering)).toBe(false);
+    expect(crewListWaiting(threads, heard([], ["captain"]), answering)).toBe(false);
   });
 
   it("keeps the Captain listed through a spawn, and the new agent never shows", () => {
@@ -151,6 +164,26 @@ describe("participant names", () => {
       named([["agent:captain", "Captain"]]),
     );
     expect(late).toBe(repaired);
+  });
+});
+
+describe("pendingParticipants", () => {
+  const memory = rememberIdentities(
+    observeCredential(new Map(), server, owner),
+    server,
+    owner,
+    ["agent:a"],
+    { labels: new Map([["agent:a", "Sender A"]]), threads: new Map() },
+  );
+
+  it("says a new sender's name is on its way until a read settles, even a failed one", () => {
+    const ids = ["agent:a", "agent:b"];
+
+    expect([...pendingParticipants(memory, new Map(), server, ids, true)]).toEqual(["agent:b"]);
+    const failed = settleNames(new Map(), server, ["agent:b"]);
+    expect(pendingParticipants(memory, failed, server, ids, true).size).toBe(0);
+    // Offline, no read is coming: the stand-in shows.
+    expect(pendingParticipants(memory, new Map(), server, ids, false).size).toBe(0);
   });
 });
 

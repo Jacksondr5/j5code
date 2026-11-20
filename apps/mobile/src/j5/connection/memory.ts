@@ -1,4 +1,7 @@
-import { participantIdentitiesFromResponse } from "@t3tools/client-runtime/j5/participant-identity";
+import {
+  participantIdentitiesFromResponse,
+  type ParticipantIdentities,
+} from "@t3tools/client-runtime/j5/participant-identity";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { File, Paths } from "expo-file-system";
 import * as Option from "effect/Option";
@@ -19,13 +22,16 @@ import {
   rememberIdentities,
   rememberSpawned,
   retainSpawned,
+  settleNames,
   type ConnectionMemory,
+  type SettledNames,
 } from "./memory.logic";
 
 export interface MemorySnapshot {
   readonly memory: ConnectionMemory;
-  /** Participants each server has answered for since its credential was last seen this launch. */
-  readonly heard: ReadonlyMap<EnvironmentId, ReadonlySet<string>>;
+  /** Each server's names; a new map only when some server's names change. */
+  readonly names: ReadonlyMap<EnvironmentId, ParticipantIdentities>;
+  readonly settled: SettledNames;
   /** Servers whose last spawned-children read failed: they answer nothing until it succeeds. */
   readonly failedReads: ReadonlySet<EnvironmentId>;
 }
@@ -42,7 +48,16 @@ const loadSaved = (): ConnectionMemory => {
   }
 };
 
-let snapshot: MemorySnapshot = { memory: loadSaved(), heard: new Map(), failedReads: new Set() };
+const namesOf = (memory: ConnectionMemory) =>
+  new Map([...memory].map(([environmentId, connection]) => [environmentId, connection.names]));
+
+const loaded = loadSaved();
+let snapshot: MemorySnapshot = {
+  memory: loaded,
+  names: namesOf(loaded),
+  settled: new Map(),
+  failedReads: new Set(),
+};
 const listeners = new Set<() => void>();
 /** The credential each server's connection uses this launch. */
 const credentials = new Map<EnvironmentId, string>();
@@ -56,13 +71,20 @@ const scheduleSave = () => {
   if (saveTimer !== null) return;
   saveTimer = setTimeout(() => {
     saveTimer = null;
-    const contents = encodeMemory(retainSpawned(snapshot.memory, asked));
+    // Saves follow a credential seen this launch, so the catalog has loaded: a removed server goes.
+    const saved = new Set(appAtomRegistry.get(environmentCatalog.catalogValueAtom).entries.keys());
+    const memory = new Map([...snapshot.memory].filter(([id]) => saved.has(id)));
+    const contents = encodeMemory(retainSpawned(memory, asked));
     writing = writing.then(() => writeFileAtomically(file(), contents)).catch(() => undefined);
   }, 500);
 };
 
-const publish = (next: Partial<MemorySnapshot>) => {
-  snapshot = { ...snapshot, ...next };
+const publish = (next: Partial<Omit<MemorySnapshot, "names">>) => {
+  const names = next.memory === undefined ? snapshot.names : namesOf(next.memory);
+  const sameNames =
+    names.size === snapshot.names.size &&
+    [...names].every(([environmentId, known]) => snapshot.names.get(environmentId) === known);
+  snapshot = { ...snapshot, ...next, names: sameNames ? snapshot.names : names };
   if (next.memory !== undefined) scheduleSave();
   listeners.forEach((listener) => listener());
 };
@@ -99,7 +121,7 @@ appAtomRegistry.subscribe(
   credentialKeysAtom,
   (keys) => {
     let memory = snapshot.memory;
-    let { heard, failedReads } = snapshot;
+    let { settled, failedReads } = snapshot;
     const changed: Array<EnvironmentId> = [];
     for (const [environmentId, key] of keys) {
       const previous = credentials.get(environmentId);
@@ -108,11 +130,11 @@ appAtomRegistry.subscribe(
       memory = observeCredential(memory, environmentId, key);
       if (previous === undefined) continue;
       changed.push(environmentId);
-      heard = without(heard, environmentId);
+      settled = without(settled, environmentId);
       failedReads = new Set([...failedReads].filter((id) => id !== environmentId));
       namesInFlight.delete(environmentId);
     }
-    if (memory !== snapshot.memory) publish({ memory, heard, failedReads });
+    if (memory !== snapshot.memory) publish({ memory, settled, failedReads });
     if (changed.length === 0) return;
     const baselines = new Map(appAtomRegistry.get(accessBaselinesAtom));
     for (const environmentId of changed)
@@ -184,40 +206,39 @@ export const connectionMemory = {
       publish({ failedReads: new Set(snapshot.failedReads).add(environmentId) });
   },
 
-  /** Asks for the participants this credential has not heard named this launch. */
+  /**
+   * Reads the names of the ids on screen again, as each screen mounts or reconnects: a title can
+   * change after a spawn. The remembered names stay shown meanwhile.
+   */
   readNames: async (environmentId: EnvironmentId, participantIds: ReadonlyArray<string>) => {
     const credential = credentials.get(environmentId);
     if (credential === undefined) return;
-    const heard = snapshot.heard.get(environmentId);
     const inFlight = namesInFlight.get(environmentId) ?? new Set<string>();
-    const missing = [...new Set(participantIds)].filter(
-      (id) => !heard?.has(id) && !inFlight.has(id),
-    );
-    if (missing.length === 0) return;
+    const ids = [...new Set(participantIds)].filter((id) => !inFlight.has(id));
+    if (ids.length === 0) return;
     namesInFlight.set(environmentId, inFlight);
-    for (const id of missing) inFlight.add(id);
+    for (const id of ids) inFlight.add(id);
     try {
       const result = await j5Environment.readParticipantIdentities.run(appAtomRegistry, {
         environmentId,
-        input: { participantIds: missing },
+        input: { participantIds: ids },
       });
-      // A failed read names nobody and is not heard, so the next connection asks again.
-      if (result._tag === "Failure" || credentials.get(environmentId) !== credential) return;
+      if (credentials.get(environmentId) !== credential) return;
+      // A failed read still settles, so its senders fall back to a stand-in until the next one.
+      const settled = settleNames(snapshot.settled, environmentId, ids);
+      if (result._tag === "Failure") return publish({ settled });
       publish({
         memory: rememberIdentities(
           snapshot.memory,
           environmentId,
           credential,
-          missing,
+          ids,
           participantIdentitiesFromResponse(environmentId, result.value),
         ),
-        heard: new Map(snapshot.heard).set(
-          environmentId,
-          new Set([...(snapshot.heard.get(environmentId) ?? []), ...missing]),
-        ),
+        settled,
       });
     } finally {
-      for (const id of missing) inFlight.delete(id);
+      for (const id of ids) inFlight.delete(id);
     }
   },
 };
