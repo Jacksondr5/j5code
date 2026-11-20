@@ -23,6 +23,8 @@ import type { MessageAuthor } from "@t3tools/contracts/j5";
  * who sent each message of a shared conversation.
  */
 export interface J5Timeline extends ParticipantIdentities {
+  /** Senders whose name is still on its way. */
+  readonly pending: ReadonlySet<string>;
   readonly environmentId: EnvironmentId;
   readonly viewerParticipantId: string | null;
   readonly sharedAuthors: ReadonlyMap<string, MessageAuthor>;

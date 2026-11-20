@@ -167,6 +167,7 @@ const SEAMS: ReadonlyArray<Seam> = [
     from: "../../j5/sharing/sharedConversation",
     reaches: [
       "<PromptAnsweredBy",
+      "fitText={answeredByFollowsLabel(row.projectedItem.item, answered)}",
       "alone={historyHasQuestion && expanded}",
       "answered={answered}",
       "!row.workEntry.questionAnswer",

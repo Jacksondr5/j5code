@@ -21,6 +21,7 @@ const timeline = (viewerParticipantId: string | null): J5Timeline => ({
   viewerParticipantId,
   labels: new Map(),
   threads: new Map(),
+  pending: new Set(),
   sharedAuthors: new Map(),
 });
 

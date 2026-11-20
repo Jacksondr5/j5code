@@ -389,11 +389,16 @@ function ParticipantAuthorLine(props: {
   const { j5 } = props;
   const openLinkedThread = useOpenLinkedThread();
   const sender = useSenderThread(props.message, props.presentation, props.timeline);
-  const name = j5MessageAuthorName({
-    presentation: j5,
-    participantLabels: props.timeline.labels,
-    senderThreadTitle: sender.title,
-  });
+  // A sender whose name is on its way keeps the line's height without a stand-in word.
+  const named =
+    j5.senderId === null || !props.timeline.pending.has(j5.senderId) || !!sender.title?.trim();
+  const name = named
+    ? j5MessageAuthorName({
+        presentation: j5,
+        participantLabels: props.timeline.labels,
+        senderThreadTitle: sender.title,
+      })
+    : " ";
   const { ref } = sender;
   return (
     <View className="mb-1 max-w-[85%] flex-row items-center gap-1.5 pl-1">

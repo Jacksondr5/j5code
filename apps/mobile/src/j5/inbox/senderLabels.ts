@@ -1,9 +1,8 @@
-import { readParticipantIdentities } from "@t3tools/client-runtime/j5/archive-flow";
 import type { EnvironmentId } from "@t3tools/contracts";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useSyncExternalStore } from "react";
 
-import { appAtomRegistry } from "../../state/atom-registry";
-import { j5Environment } from "../state";
+import { pendingParticipants } from "../a2a/participantIdentities";
+import { connectionMemory } from "../connection/memory";
 
 export interface ScopedParticipantRef {
   readonly environmentId: EnvironmentId;
@@ -11,14 +10,20 @@ export interface ScopedParticipantRef {
   readonly connected: boolean;
 }
 
+export interface ScopedParticipantLabels {
+  readonly labels: ReadonlyMap<EnvironmentId, ReadonlyMap<string, string>>;
+  /** Whether the sender's name is still on its way from its connected server. */
+  readonly isPending: (environmentId: EnvironmentId, participantId: string) => boolean;
+}
+
 /**
  * Names for senders spread across servers, as web's merged inbox reads them: each connected
- * server names its own senders once, so saved items shown while offline pick up names on
- * reconnect. Earlier names stay shown while a changed set reloads.
+ * server names its own senders once a connection, and the names are kept per server and paired
+ * credential, so a revisit shows them on its first frame.
  */
 export function useScopedParticipantLabels(
   refs: ReadonlyArray<ScopedParticipantRef>,
-): ReadonlyMap<EnvironmentId, ReadonlyMap<string, string>> {
+): ScopedParticipantLabels {
   const key = Array.from(
     new Set(
       refs
@@ -28,36 +33,40 @@ export function useScopedParticipantLabels(
   )
     .sort()
     .join("\n");
-  const [labels, setLabels] = useState<ReadonlyMap<EnvironmentId, ReadonlyMap<string, string>>>(
-    () => new Map(),
+  const snapshot = useSyncExternalStore(
+    connectionMemory.subscribe,
+    connectionMemory.getSnapshot,
+    connectionMemory.getSnapshot,
   );
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reads names from each server for the senders on screen, and drops a stale answer when they change.
-  useEffect(() => {
-    const byEnvironment = new Map<EnvironmentId, Array<string>>();
+  const byEnvironment = useMemo(() => {
+    const ids = new Map<EnvironmentId, Array<string>>();
     for (const entry of key === "" ? [] : key.split("\n")) {
       const [environmentId, participantId] = JSON.parse(entry) as [EnvironmentId, string];
-      byEnvironment.set(environmentId, [
-        ...(byEnvironment.get(environmentId) ?? []),
-        participantId,
-      ]);
+      ids.set(environmentId, [...(ids.get(environmentId) ?? []), participantId]);
     }
-    let active = true;
-    void Promise.all(
-      Array.from(byEnvironment, async ([environmentId, ids]) => {
-        const identities = await readParticipantIdentities(
-          j5Environment,
-          appAtomRegistry,
-          environmentId,
-          ids,
-        );
-        return [environmentId, identities.labels] as const;
-      }),
-    ).then((entries) => {
-      if (active) setLabels((current) => new Map([...current, ...entries]));
-    });
-    return () => {
-      active = false;
-    };
+    return ids;
   }, [key]);
-  return labels;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- asks each server for the senders on screen it has not named this connection.
+  useEffect(() => {
+    for (const [environmentId, ids] of byEnvironment)
+      void connectionMemory.readNames(environmentId, ids);
+  }, [byEnvironment]);
+  return useMemo(
+    () => ({
+      labels: new Map(
+        [...snapshot.memory].map(([environmentId, connection]) => [
+          environmentId,
+          connection.names.labels,
+        ]),
+      ),
+      isPending: (environmentId: EnvironmentId, participantId: string) =>
+        pendingParticipants(
+          snapshot,
+          environmentId,
+          [participantId],
+          byEnvironment.has(environmentId),
+        ).size > 0,
+    }),
+    [snapshot, byEnvironment],
+  );
 }

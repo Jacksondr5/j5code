@@ -1,0 +1,180 @@
+import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { AsyncResult } from "effect/reactivity";
+import { describe, expect, it } from "vite-plus/test";
+
+import {
+  answeredSince,
+  credentialKey,
+  crewListedThreads,
+  decodeMemory,
+  encodeMemory,
+  observeCredential,
+  rememberIdentities,
+  rememberSpawned,
+  type ConnectionMemory,
+} from "./memory.logic";
+
+const server = EnvironmentId.make("server-1");
+const owner = "bearer:owner";
+const viewer = "bearer:viewer";
+const id = (value: string) => ThreadId.make(value);
+const row = (threadId: string, pinnedAt: string | null = null) => ({
+  environmentId: server,
+  id: id(threadId),
+  archivedAt: null,
+  pinnedAt,
+});
+const titles = (threads: ReadonlyArray<{ readonly id: ThreadId }>) =>
+  threads.map((thread) => thread.id);
+const answering = new Set([server]);
+const nobodyAnswering = new Set<EnvironmentId>();
+
+/** What a launch remembers after one spawned-children read answered for these threads. */
+const heard = (spawned: ReadonlyArray<string>, notSpawned: ReadonlyArray<string>) =>
+  rememberSpawned(
+    observeCredential(new Map(), server, owner),
+    server,
+    owner,
+    [...spawned, ...notSpawned].map(id),
+    spawned.map(id),
+  );
+
+describe("crewListedThreads", () => {
+  it("leaves spawned threads out of a cold start's first paint, from the saved answers", () => {
+    const saved = encodeMemory(heard(["seat", "peer"], ["captain", "human"]));
+    const threads = [row("captain"), row("seat"), row("human"), row("peer")];
+
+    expect(titles(crewListedThreads(threads, decodeMemory(saved), answering))).toEqual([
+      id("captain"),
+      id("human"),
+    ]);
+  });
+
+  it("holds back a thread nobody has answered for while its server's answer is on its way", () => {
+    const memory = heard([], ["captain"]);
+    const threads = [row("captain"), row("new-peer")];
+
+    expect(titles(crewListedThreads(threads, memory, answering))).toEqual([id("captain")]);
+    // Offline, refused or failed: no answer is coming, so the thread shows.
+    expect(crewListedThreads(threads, memory, nobodyAnswering)).toBe(threads);
+    // A server never heard from (a first launch, a new pairing) lists everything, not nothing.
+    expect(crewListedThreads(threads, new Map(), answering)).toBe(threads);
+  });
+
+  it("keeps the Captain listed through a spawn, and the new agent never shows", () => {
+    const threads = [row("captain"), row("new-peer")];
+    const before = heard([], ["captain"]);
+    const after = rememberSpawned(
+      before,
+      server,
+      owner,
+      [id("captain"), id("new-peer")],
+      [id("new-peer")],
+    );
+
+    expect(titles(crewListedThreads(threads, before, answering))).toEqual([id("captain")]);
+    expect(titles(crewListedThreads(threads, after, answering))).toEqual([id("captain")]);
+  });
+
+  it("lists a pinned spawned thread, even before anyone answers for it", () => {
+    const threads = [
+      row("pinned-seat", "2026-11-19T00:00:00.000Z"),
+      row("seat"),
+      row("pinned-new-seat", "2026-11-19T00:00:00.000Z"),
+    ];
+    const memory = heard(["seat", "pinned-seat"], []);
+
+    expect(titles(crewListedThreads(threads, memory, answering))).toEqual([
+      id("pinned-seat"),
+      id("pinned-new-seat"),
+    ]);
+  });
+});
+
+describe("participant names", () => {
+  const names = (memory: ConnectionMemory) => memory.get(server)?.names.labels;
+  const named = (labels: ReadonlyArray<readonly [string, string]>) => ({
+    labels: new Map(labels),
+    threads: new Map(),
+  });
+
+  it("keeps the names on screen when a new sender's name arrives", () => {
+    const first = rememberIdentities(
+      observeCredential(new Map(), server, owner),
+      server,
+      owner,
+      ["agent:a"],
+      named([["agent:a", "Sender A"]]),
+    );
+    const second = rememberIdentities(first, server, owner, ["agent:b"], named([["agent:b", "B"]]));
+
+    expect(names(second)).toEqual(
+      new Map([
+        ["agent:a", "Sender A"],
+        ["agent:b", "B"],
+      ]),
+    );
+  });
+
+  it("survives a reconnect and a cold start on the same credential", () => {
+    const memory = rememberIdentities(
+      heard(["seat"], []),
+      server,
+      owner,
+      ["agent:a"],
+      named([["agent:a", "Sender A"]]),
+    );
+
+    expect(observeCredential(memory, server, owner)).toBe(memory);
+    const restored = observeCredential(decodeMemory(encodeMemory(memory)), server, owner);
+    expect(names(restored)).toEqual(new Map([["agent:a", "Sender A"]]));
+    expect(restored.get(server)?.spawned.get(id("seat"))).toBe(true);
+  });
+
+  it("drops what the last person heard as soon as another person pairs, and their late answers", () => {
+    const memory = rememberIdentities(
+      heard(["seat"], []),
+      server,
+      owner,
+      ["agent:captain"],
+      named([["agent:captain", "Captain"]]),
+    );
+    const repaired = observeCredential(memory, server, viewer);
+
+    expect(names(repaired)).toEqual(new Map());
+    expect(repaired.get(server)?.spawned.size).toBe(0);
+    const late = rememberIdentities(
+      repaired,
+      server,
+      owner,
+      ["agent:captain"],
+      named([["agent:captain", "Captain"]]),
+    );
+    expect(late).toBe(repaired);
+  });
+});
+
+describe("credentialKey", () => {
+  it("tells two pairings apart without keeping the token", () => {
+    const prepared = (token: string) => ({
+      httpAuthorization: { _tag: "Bearer" as const, token },
+      target: { environmentId: server },
+    });
+    const first = credentialKey(prepared("secret-token-one"));
+
+    expect(first).toBe(credentialKey(prepared("secret-token-one")));
+    expect(first).not.toBe(credentialKey(prepared("secret-token-two")));
+    expect(first).not.toContain("secret");
+  });
+});
+
+describe("answeredSince", () => {
+  it("waits for the access answer the new connection settles, even when it reuses the value", () => {
+    const owner = { kind: "person", wide: true };
+    const baseline = AsyncResult.success(owner);
+
+    expect(answeredSince(baseline, baseline)).toBe(false);
+    expect(answeredSince(baseline, AsyncResult.success(owner, { waiting: true }))).toBe(false);
+    expect(answeredSince(baseline, AsyncResult.success(owner))).toBe(true);
+  });
+});

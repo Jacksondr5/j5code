@@ -51,9 +51,12 @@ export function WorkLogPressable({
 export function WorkLogLabel({
   children,
   tone = "default",
+  fitText = false,
 }: {
   children: ReactNode;
   tone?: "default" | "danger" | "warning";
+  /** J5 (case 99): the label ends with its text, and what follows it takes the spare width. */
+  fitText?: boolean;
 }) {
   return (
     <Text
@@ -61,7 +64,8 @@ export function WorkLogLabel({
       numberOfLines={1}
       ellipsizeMode="tail"
       className={cn(
-        "min-w-0 flex-1 text-sm text-foreground-muted",
+        "min-w-0 text-sm text-foreground-muted",
+        fitText ? "shrink" : "flex-1",
         tone === "danger" && "font-t3-medium text-adaptive-rose-600-400",
         tone === "warning" && "font-t3-medium text-warning-foreground",
       )}

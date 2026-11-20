@@ -13,6 +13,7 @@ import type { ThreadAuthors } from "@t3tools/contracts/j5";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { useEffect, useState } from "react";
+import { View } from "react-native";
 
 import { AppText as Text } from "../../components/ui/AppText";
 import type { ThreadFeedEntry } from "../../lib/threadActivity";
@@ -151,12 +152,22 @@ export function PromptAnsweredBy(props: {
 }) {
   const { answers } = useThreadAuthorIndex(props.environmentId, props.item.threadId);
   const by = isSettledPrompt(props.item) ? answers.get(props.item.requestId) : undefined;
-  if (by === undefined && !props.alone && !props.answered) return null;
+  if (by === undefined && !props.alone && !props.answered)
+    // The label fits its text on a prompt's row, so the row's end stays where it was.
+    return answeredByFollowsLabel(props.item, false) ? <View className="flex-1" /> : null;
   // Lowercase in every state, as web's "· answered by Priya" is.
   const said = props.alone ? "answered" : "· answered";
   return (
-    <Text numberOfLines={1} className="shrink-0 pl-1 pr-1.5 text-sm text-foreground-muted">
+    <Text
+      numberOfLines={1}
+      // Alone, the empty label before it would add a second gap after the icon.
+      className={`grow shrink-0 pr-1.5 text-sm text-foreground-muted ${props.alone ? "-ml-1.5" : "pl-1"}`}
+    >
       {by === undefined ? said : `${said} by ${by.you ? "you" : (by.name ?? "someone")}`}
     </Text>
   );
 }
+
+/** A prompt's row whose label `PromptAnsweredBy` follows, right after the text (IN-29). */
+export const answeredByFollowsLabel = (item: unknown, answered: boolean) =>
+  answered || isSettledPrompt(item);

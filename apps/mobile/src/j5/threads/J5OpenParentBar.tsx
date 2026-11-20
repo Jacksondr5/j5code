@@ -10,6 +10,7 @@ import { Button } from "../../components/ui/Button";
 import { useOpenLinkedThread } from "../../features/threads/useOpenLinkedThread";
 import { useEnvironmentServerConfig, useQuietThreadShell } from "../../state/entities";
 import { useEnvironmentQuery } from "../../state/query";
+import { accessConfirmedAtom } from "../connection/memory";
 import { j5Sharing } from "../sharing/guestAccess";
 import { j5Environment } from "../state";
 
@@ -17,9 +18,11 @@ import { j5Environment } from "../state";
 function useJ5ParentRow(environmentId: EnvironmentId, threadId: ThreadId): J5LineageRow | null {
   const supported = j5LedgerSupported(useEnvironmentServerConfig(environmentId)) !== false;
   // The roster is a server-wide read, refused to a person who reaches less (web's Lineage too).
+  // After a re-pair it waits for the server to say who the new person is.
   const narrow = useAtomValue(j5Sharing.isNarrow(environmentId));
+  const confirmed = useAtomValue(accessConfirmedAtom(environmentId));
   const fleet = useEnvironmentQuery(
-    supported && !narrow ? j5Environment.fleet({ environmentId, input: {} }) : null,
+    supported && !narrow && confirmed ? j5Environment.fleet({ environmentId, input: {} }) : null,
   );
   return (
     deriveJ5LineageRows(fleet.data?.projects ?? [], threadId).find(
