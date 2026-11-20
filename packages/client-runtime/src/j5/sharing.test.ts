@@ -601,7 +601,7 @@ describe("whether the person owns a connected server", () => {
 describe("an Owner's Settings page, reached by someone who owns no server", () => {
   it("names the server and says who to ask", () => {
     expect(ownerOnlySettingsNotice({ serverName: "openclaw", writesSomewhere: true })).toEqual({
-      title: "Coming soon",
+      title: "Only an Owner can change this",
       body: "Only an Owner of openclaw can change this here for now. Ask an Owner, or ask an agent on a thread you can write to.",
     });
   });
