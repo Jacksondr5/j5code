@@ -470,6 +470,7 @@ it.effect(
                   exchangeState: "none" as const,
                   joinedExistingExchange: false,
                   durableAtSeq: 1,
+                  ...(input.expectReply === true ? { ifAnsweredInThread: "withdraw hint" } : {}),
                 }),
               ),
             sendAsMachine: () => Effect.die("unused"),
@@ -621,16 +622,17 @@ it.effect(
         });
         assert.isTrue(notAnAsk.isFailure);
         assert.include(JSON.stringify(notAnAsk.encodedResult), "only on an ask to a person");
-        assert.isFalse(
-          (yield* call({
-            to: personParticipantId,
-            message: "May reviewer run?",
-            expect_reply: true,
-            intent: "Re-enable reviewer?",
-            urgency: "soon",
-            escalation_id: escalationId,
-          })).isFailure,
-        );
+        const escalationAsk = yield* call({
+          to: personParticipantId,
+          message: "May reviewer run?",
+          expect_reply: true,
+          intent: "Re-enable reviewer?",
+          urgency: "soon",
+          escalation_id: escalationId,
+        });
+        assert.isFalse(escalationAsk.isFailure);
+        // Only the Inbox button acts on this ask, so the agent is not told to withdraw it.
+        assert.notInclude(JSON.stringify(escalationAsk.encodedResult), "ifAnsweredInThread");
         const ask = (yield* Ref.get(sends)).at(-1)!;
         assert.equal(ask.message, "May reviewer run?");
         // J5's record stays on the ask that opened the Inbox item, so a follow-up to another ask
@@ -699,7 +701,11 @@ it.effect(
         });
         assert.isTrue(both.isFailure);
         assert.include(JSON.stringify(both.encodedResult), "not both");
-        assert.isFalse((yield* call({ ...personAsk, persona_draft_id: draftId })).isFailure);
+        const plainAsk = yield* call(personAsk);
+        assert.include(JSON.stringify(plainAsk.encodedResult), "withdraw hint");
+        const draftAskResult = yield* call({ ...personAsk, persona_draft_id: draftId });
+        assert.isFalse(draftAskResult.isFailure);
+        assert.notInclude(JSON.stringify(draftAskResult.encodedResult), "ifAnsweredInThread");
         // J5's summary rides on the Inbox item, not in the agent's words.
         const draftAsk = (yield* Ref.get(sends)).at(-1)!;
         assert.equal(draftAsk.message, "Save release-notes?");

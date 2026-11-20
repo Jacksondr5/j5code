@@ -114,6 +114,7 @@ it.effect("opens once per sender-receiver pair, joins follow-ups, and one reply 
     });
     assert.equal(followup.exchangeId, first.exchangeId);
     assert.isTrue(followup.joinedExistingExchange);
+    assert.notProperty(first, "ifAnsweredInThread");
 
     const reply = yield* service.send({
       commandId: CommCommandId.make("command:exchange:reply"),
@@ -561,6 +562,11 @@ it.effect("keeps asks to a person distinct and joins a follow-up only when it na
     const second = yield* ask("second", asking);
     assert.notEqual(first.exchangeId, second.exchangeId);
     assert.isFalse(second.joinedExistingExchange);
+    assert.include(first.ifAnsweredInThread, `exchange_id "${first.exchangeId}"`);
+    assert.include(second.ifAnsweredInThread, `exchange_id "${second.exchangeId}"`);
+    // A retry of the ask, even one naming another receiver, replays what was committed.
+    const retried = yield* ask("first", { ...asking, to: receiver.id });
+    assert.equal(retried.ifAnsweredInThread, first.ifAnsweredInThread);
 
     const unspecified = yield* Effect.flip(ask("no-urgency", { expectReply: true, intent: "X" }));
     assert.equal(unspecified._tag, "A2AUrgencyRequiredError");
@@ -573,6 +579,8 @@ it.effect("keeps asks to a person distinct and joins a follow-up only when it na
     const replayed = yield* ask("follow-up", { regarding: first.exchangeId! });
     assert.equal(replayed.messageId, followUp.messageId);
     assert.isTrue(replayed.joinedExistingExchange);
+    assert.notProperty(followUp, "ifAnsweredInThread");
+    assert.notProperty(replayed, "ifAnsweredInThread");
 
     // Written as a full ask, a follow-up is told what to drop rather than sent to a new ask.
     const asFullAsk = yield* Effect.flip(

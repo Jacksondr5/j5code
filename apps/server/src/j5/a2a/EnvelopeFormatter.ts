@@ -179,3 +179,6 @@ export const formatReceiverLimitNotice = (input: {
 /** Told to a sender whose message waits until a person resumes the receiver's held queue. */
 export const formatReceiverQueueHeldNotice = (input: { readonly receiverId: ParticipantId }) =>
   render(config.receiverQueueHeldNotice, { receiverId: input.receiverId });
+
+export const formatAskWithdrawInstruction = (input: { readonly exchangeId: ExchangeId }) =>
+  render(config.askWithdrawInstruction, { exchangeId: input.exchangeId });

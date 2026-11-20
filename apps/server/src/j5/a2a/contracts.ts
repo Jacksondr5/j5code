@@ -492,6 +492,8 @@ export const SendMessageResult = Schema.Struct({
   recipientLastAvailableAt: Schema.optionalKey(Schema.String),
   /** The same facts in one sentence an agent reads at a glance. */
   note: Schema.optionalKey(Schema.String),
+  /** On a new ask to a person: withdraw it with j5_clear_own_ask if the thread settles it instead. */
+  ifAnsweredInThread: Schema.optionalKey(Schema.String),
 });
 export type SendMessageResult = typeof SendMessageResult.Type;
 
