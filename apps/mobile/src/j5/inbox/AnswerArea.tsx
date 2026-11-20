@@ -27,6 +27,8 @@ export function AnswerArea(props: {
   readonly canAnswer: boolean;
   readonly error?: string | null;
   readonly onAnswer: () => void;
+  /** Below the actions; `held` while anything here sends, so it can ignore taps too. */
+  readonly footer?: (held: boolean) => ReactNode;
 }) {
   const { item } = props;
   const owner = useOwnerAskAction(item.environmentId, item);
@@ -87,6 +89,7 @@ export function AnswerArea(props: {
           </View>
         )}
       </View>
+      {props.footer?.(held)}
     </>
   );
 }
