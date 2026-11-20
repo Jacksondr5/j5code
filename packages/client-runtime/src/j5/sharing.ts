@@ -427,8 +427,8 @@ export function ownerOnlySettingsNotice(input: {
   return {
     title: "Only an Owner can change this",
     body: input.writesSomewhere
-      ? `Only an Owner of ${server} can change this here for now. Ask an Owner, or ask an agent on a thread you can write to.`
-      : `Only an Owner of ${server} can change this here for now. Ask an Owner.`,
+      ? `Ask an Owner of ${server}, or an agent on a thread you can write to.`
+      : `Ask an Owner of ${server}.`,
   };
 }
 

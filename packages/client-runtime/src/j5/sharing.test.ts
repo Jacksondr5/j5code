@@ -602,19 +602,19 @@ describe("an Owner's Settings page, reached by someone who owns no server", () =
   it("names the server and says who to ask", () => {
     expect(ownerOnlySettingsNotice({ serverName: "openclaw", writesSomewhere: true })).toEqual({
       title: "Only an Owner can change this",
-      body: "Only an Owner of openclaw can change this here for now. Ask an Owner, or ask an agent on a thread you can write to.",
+      body: "Ask an Owner of openclaw, or an agent on a thread you can write to.",
     });
   });
 
   it("does not send someone who writes nowhere to an agent", () => {
     expect(ownerOnlySettingsNotice({ serverName: "openclaw", writesSomewhere: false }).body).toBe(
-      "Only an Owner of openclaw can change this here for now. Ask an Owner.",
+      "Ask an Owner of openclaw.",
     );
   });
 
   it("says this server when the server has no name to show", () => {
     expect(ownerOnlySettingsNotice({ serverName: null, writesSomewhere: false }).body).toBe(
-      "Only an Owner of this server can change this here for now. Ask an Owner.",
+      "Ask an Owner of this server.",
     );
   });
 });
