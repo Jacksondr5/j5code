@@ -58,7 +58,7 @@ export const HIGHLIGHTS: ReadonlyArray<Highlight> = [
     title: "Agents across your machines",
     description:
       "Peer J5 on more than one machine, and agents on each can message the others as easily as the one next to them.",
-    learnMoreUrl: "https://j5.codes/peering",
+    learnMoreUrl: "https://j5.codes/linking",
     art: "peering",
     clients: ["web", "desktop"],
   },

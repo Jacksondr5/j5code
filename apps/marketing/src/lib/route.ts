@@ -1,5 +1,5 @@
 /**
- * A one-way route between two points, drawn as a quadratic curve. The peering
+ * A one-way route between two points, drawn as a quadratic curve. The linking
  * page marks each direct route with chevrons that point at the receiver, and
  * flies its messages along the same curve.
  */

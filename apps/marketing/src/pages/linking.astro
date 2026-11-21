@@ -6,17 +6,18 @@ import { INSTALL_DOCS_URL } from "../lib/site";
 ---
 
 <Layout
-  title="Peering — J5 Code"
-  description="Peer J5 on more than one machine so agents on each can message each other, directly or by polling when a device can't be reached."
+  title="Linking — J5 Code"
+  description="Link J5 on more than one machine so agents on each can message each other and use tools on the other, directly or by polling when a device can't be reached."
 >
-  <div class="peering">
+  <div class="linking">
     <section class="hero">
       <div class="container hero-inner">
-        <p class="eyebrow">Peering</p>
+        <p class="eyebrow">Linking</p>
         <h1 class="display">Your agents can work together across all your devices.</h1>
         <p class="lead">
-          Run J5 on more than one machine and peer them. Agents on each machine see the others in
-          their address book and message them the way they message the agent next to them.
+          Run J5 on more than one machine and link them. Agents on each machine see the others in
+          their address book and message them the way they message the agent next to them, and
+          they can use tools on the other machine at the level you choose.
         </p>
       </div>
     </section>
@@ -26,8 +27,9 @@ import { INSTALL_DOCS_URL } from "../lib/site";
         <div class="section-head">
           <h2 class="display">Different machines can do different things.</h2>
           <p>
-            Most people already work across a few machines. Peering lets each agent reach the colleague
-            that has what it needs, instead of you copying messages between windows.
+            Most people already work across a few machines. A link lets each agent reach the colleague
+            that has what it needs, instead of you copying messages between windows. You set it up
+            once, for messages and tools together.
           </p>
         </div>
         <div class="why">
@@ -74,8 +76,9 @@ import { INSTALL_DOCS_URL } from "../lib/site";
         <div class="section-head">
           <h2 class="display">Two ways to get a message across.</h2>
           <p>
-            When you peer two devices, J5 works out how messages can get between them. Each direction is
-            set up on its own, so a pair can send directly one way and poll the other.
+            When you link two devices, J5 checks how messages can get between them and picks a way that
+            loses none. You can change it before you link. Each direction is set up on its own, so a
+            pair can send directly one way and poll the other.
           </p>
         </div>
 
@@ -182,38 +185,103 @@ import { INSTALL_DOCS_URL } from "../lib/site";
       </div>
     </section>
 
+    <section class="deep">
+      <div class="container">
+        <div class="section-head">
+          <h2 class="display">Tools on the other machine.</h2>
+          <p>
+            A link also lets agents on one machine use tools on the other: read its threads, start
+            work there, hand a task to an agent that lives there. You choose how much, separately for
+            each direction.
+          </p>
+        </div>
+        <div class="why">
+          <ol class="steps">
+            <li>
+              <span class="num">1</span>
+              <div>
+                <h3>A level for each direction</h3>
+                <p>
+                  Both start at Supervised. Set a direction to Off and agents there can still
+                  message, and nothing more.
+                </p>
+              </div>
+            </li>
+            <li>
+              <span class="num">2</span>
+              <div>
+                <h3>Tools take the route messages take</h3>
+                <p>
+                  A machine that can be reached is called directly. A machine that polls keeps a
+                  connection open to the other, so the other machine's agents can use tools on it
+                  only while it is running.
+                </p>
+              </div>
+            </li>
+            <li>
+              <span class="num">3</span>
+              <div>
+                <h3>Renewed every 30 days</h3>
+                <p>
+                  Tool access runs out after 30 days, and one click renews both directions. Messages
+                  keep working in the meantime.
+                </p>
+              </div>
+            </li>
+          </ol>
+          <figure class="note">
+            <figcaption>Tools levels</figcaption>
+            <div class="note-body">
+              <dl class="levels">
+                <div><dt>Off</dt><dd>messages only</dd></div>
+                <div><dt>Read only</dt><dd>read projects and threads</dd></div>
+                <div><dt>Supervised</dt><dd>start and drive work; asks before commands and file changes</dd></div>
+                <div><dt>Auto-accept edits</dt><dd>edits go ahead; other actions still ask</dd></div>
+                <div><dt>Auto</dt><dd>routine actions go ahead where the provider supports it</dd></div>
+                <div><dt>Full access</dt><dd>commands and edits without prompts; needed to start Peer Agents on the other machine</dd></div>
+              </dl>
+            </div>
+          </figure>
+        </div>
+      </div>
+    </section>
+
     <section class="start">
       <div class="container start-inner">
         <div class="section-head start-head">
-          <h2 class="display">Peer your first two devices.</h2>
+          <h2 class="display">Link your first two devices.</h2>
           <p>
-            Once J5 is running on both machines, you set it up from one J5 window, in about a
-            minute.
+            Once J5 is running on both machines and both are added to one J5 window, you link them
+            from there in about a minute. J5 also offers it when you add a machine.
           </p>
         </div>
         <ol class="steps start-steps">
           <li>
             <span class="num">1</span>
             <div>
-              <h3>Open Peer servers</h3>
-              <p>It's under <b>Settings → Connections → Peer servers</b>.</p>
+              <h3>Open Linked environments</h3>
+              <p>
+                It's under <b>Settings → Environments → Linked environments</b>. Choose <b>Link</b>.
+              </p>
             </div>
           </li>
           <li>
             <span class="num">2</span>
             <div>
-              <h3>Add the other machine as a peer</h3>
-              <p>Choose <b>Add peer</b> and pick the other server.</p>
+              <h3>Tick the machines to link</h3>
+              <p>
+                J5 checks which way each one can be reached and says how messages will travel.
+                Choose <b>Change</b> to pick another way.
+              </p>
             </div>
           </li>
           <li>
             <span class="num">3</span>
             <div>
-              <h3>Confirm how messages will travel</h3>
+              <h3>Choose what agents may do</h3>
               <p>
-                J5 checks which way each server can reach the other and spells out the setup it
-                proposes. Choose <b>Peer</b> to accept it, or <b>Set up differently</b> to pick the
-                direction and addresses yourself.
+                Pick a Tools level for each direction, then choose <b>Link</b>. Each pair says
+                whether it was linked.
               </p>
             </div>
           </li>
@@ -410,6 +478,15 @@ import { INSTALL_DOCS_URL } from "../lib/site";
   .note dt {
     color: var(--msg-reply);
     font-weight: 600;
+  }
+
+  /* Level names are longer than device names, and their meanings wrap. */
+  .note .levels div {
+    grid-template-columns: 19ch minmax(0, 1fr);
+  }
+
+  .note .levels div + div {
+    margin-top: 6px;
   }
 
   .use b {
@@ -612,7 +689,8 @@ import { INSTALL_DOCS_URL } from "../lib/site";
       gap: 36px;
     }
 
-    .note dl div {
+    .note dl div,
+    .note .levels div {
       grid-template-columns: 1fr;
       margin-top: 8px;
     }
