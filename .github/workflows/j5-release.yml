@@ -17,7 +17,9 @@ name: J5 Release
 #     the background service, and SSH remote launch all download from here.
 # J5 no longer publishes to npm (FORK.md release-archive case).
 #
-# A build whose version is `<x.y.z>-preview.<yyyymmdd>.<n>` publishes a preview:
+# A manual run publishes only a preview, from the J5 Signed macOS Build run it
+# names, at the version that run's branch commits. A version
+# `<x.y.z>-preview.<yyyymmdd>.<n>` is a preview:
 # a GitHub pre-release that never becomes "latest", so the stable installer
 # URL, `j5 update`, and desktop updates never pick it up. Maintainers cut one
 # from an unmerged branch to test installs and updates before a release; see
@@ -26,10 +28,11 @@ name: J5 Release
 # A version `<x.y.z>-nightly.<yyyymmdd>.<n>` publishes a nightly: also a
 # pre-release that never becomes "latest", but with `nightly-mac.yml`, the feed
 # desktop apps on the nightly update track follow. Nightlies come only from J5
-# Nightly, which calls this workflow with a commit and a version; a manual run
-# refuses a nightly version, and a call refuses any other. The version is
-# then stamped into the manifests at build time instead of being read from them,
-# and the desktop app is built by this run's `desktop` job.
+# Nightly, and stable releases only from J5 Stable, which promotes a nightly's
+# commit. Both call this workflow with a commit and a version, which is stamped
+# into the manifests at build time instead of being read from them, and the
+# desktop app is built by this run's `desktop` job. A call with `draft` leaves
+# the release as a draft, for a dry run.
 #
 # The builds run side by side and only `release` waits for all of them. Each
 # macOS job is one more wait for a scarce macOS runner, so there are two:
@@ -58,6 +61,10 @@ on:
         description: Version to stamp and publish
         type: string
         required: true
+      draft:
+        description: Leave the release as a draft
+        type: boolean
+        default: false
     secrets:
       CSC_LINK:
         required: true
@@ -139,15 +146,15 @@ jobs:
             if (channel === null) {
               throw new Error(`This workflow requires a stable (x.y.z), preview (x.y.z-preview.<date>.<n>) or nightly (x.y.z-nightly.<date>.<n>) version; found ${version}.`);
             }
-            // A nightly reaches every install on the nightly track, so it comes only from J5
-            // Nightly, which builds j5/main. A manual run never publishes one, whatever version
-            // the branch commits.
-            if (!stamp && channel === 'nightly') {
-              throw new Error(`Nightlies are published by J5 Nightly, not by a manual J5 Release; found ${version}.`);
+            // A nightly reaches every install on the nightly track and a stable release every
+            // install, so they come only from J5 Nightly, which builds j5/main, and J5 Stable,
+            // which promotes a nightly. A manual run never publishes one, whatever version the
+            // branch commits.
+            if (!stamp && channel !== 'preview') {
+              throw new Error(`A manual J5 Release publishes only a preview; nightlies come from J5 Nightly and stable releases from J5 Stable. Found ${version}.`);
             }
-            // Nothing calls this workflow with a stable or preview version until promotion exists.
-            if (stamp && channel !== 'nightly') {
-              throw new Error(`A calling workflow can publish only a nightly; found ${version}.`);
+            if (stamp && channel === 'preview') {
+              throw new Error(`A calling workflow publishes a nightly or a stable release; found ${version}.`);
             }
             // Release archives replace the npm package from 0.0.44 on; an older
             // version number would be offered as a downgrade to every installed
@@ -519,6 +526,7 @@ jobs:
       RELEASE_VERSION: ${{ needs.resolve.outputs.version }}
       RELEASE_SHA: ${{ needs.resolve.outputs.ref }}
       RELEASE_CHANNEL: ${{ needs.resolve.outputs.channel }}
+      RELEASE_DRAFT: ${{ inputs.draft == true }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -591,6 +599,13 @@ jobs:
           if tag_sha="$(gh api "repos/$GH_REPO/commits/$tag" --jq .sha 2>/dev/null)"; then
             test "$tag_sha" = "$RELEASE_SHA"
           fi
+          # A draft has no tag yet, so a draft a failed run left for another commit
+          # passes the check above; publishing into it would mislabel this build.
+          if target="$(gh release view "$tag" --json targetCommitish --jq .targetCommitish 2>/dev/null)" \
+            && [[ "$target" != "$RELEASE_SHA" ]]; then
+            echo "::error::A release for $tag already targets $target, not $RELEASE_SHA. Delete that draft, or promote a newer nightly."
+            exit 1
+          fi
           if ! gh release view "$tag" >/dev/null 2>&1; then
             if [[ "$RELEASE_CHANNEL" == nightly ]]; then
               cat > "$RUNNER_TEMP/release-notes.md" <<EOF
@@ -650,6 +665,10 @@ jobs:
             gh release create "$tag" --target "$RELEASE_SHA" --title "J5 Code $RELEASE_VERSION" --notes-file "$RUNNER_TEMP/release-notes.md" --draft "${prerelease[@]}"
           fi
           gh release upload "$tag" release-assets/* --clobber
+          if [[ "$RELEASE_DRAFT" == true ]]; then
+            echo "::notice::Left $tag as a draft. Delete it with: gh release delete $tag -R $GH_REPO --yes"
+            exit 0
+          fi
           # A preview or nightly must never become "latest": the stable installer
           # URL and stable desktop updates resolve through it.
           if [[ "$RELEASE_CHANNEL" != stable ]]; then
