@@ -18,6 +18,7 @@ import {
   type CrewRuntimeRequestRespondRequest,
   type CrewStopRequest,
   type CrewWorktreeCleanupAnswerRequest,
+  type ForgetEnvironmentLinkRequest,
   type IssuePeerCredentialRequest,
   type PeerProbeRequest,
   type RemovePeerRequest,
@@ -33,6 +34,7 @@ import { SharedConversation } from "../sharing/SharedConversation.ts";
 import { SharedThreads } from "../sharing/SharedThreads.ts";
 import { ClientActionsService } from "./ClientActionsService.ts";
 import { crewCaptainThread } from "./crewCaptainThread.ts";
+import { EnvironmentLinkService } from "./EnvironmentLinkService.ts";
 import { PeerAdminService, peerAdminRefusal } from "./PeerAdminService.ts";
 
 const METHODS = J5_CLIENT_ACTION_WS_METHODS;
@@ -58,6 +60,7 @@ export const CLIENT_ACTION_RPC_SCOPES = {
   [METHODS.changePeerOrigin]: AuthAccessWriteScope,
   [METHODS.listPeerAddresses]: AuthAccessWriteScope,
   [METHODS.probePeer]: AuthAccessWriteScope,
+  [METHODS.forgetEnvironmentLink]: AuthAccessWriteScope,
 } as const;
 
 const proposalFailure = failAsJ5ActionError({
@@ -90,6 +93,7 @@ export const makeClientActionRpcHandlers = Effect.fn("j5.makeClientActionRpcHand
 ) {
   const actions = yield* ClientActionsService;
   const peers = yield* PeerAdminService;
+  const links = yield* EnvironmentLinkService;
   const people = yield* PersonAccess;
   const shared = yield* SharedThreads;
   const conversation = yield* SharedConversation;
@@ -255,5 +259,13 @@ export const makeClientActionRpcHandlers = Effect.fn("j5.makeClientActionRpcHand
       peers.changeOrigin(input).pipe(Effect.catch(peerFailure("address change"))),
     [METHODS.listPeerAddresses]: () => peers.addresses,
     [METHODS.probePeer]: (input: PeerProbeRequest) => peers.probe(input),
+    [METHODS.forgetEnvironmentLink]: (input: ForgetEnvironmentLinkRequest) =>
+      links
+        .forget(input)
+        .pipe(
+          Effect.mapError(
+            (error) => new J5ActionError({ code: error.reason, message: error.message }),
+          ),
+        ),
   };
 });

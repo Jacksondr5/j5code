@@ -13,6 +13,7 @@ import { makeClientActionRpcHandlers } from "./clientActionRpc.ts";
 import { ClientActionsService } from "./ClientActionsService.ts";
 import { makeClientReadRpcHandlers } from "./clientReadRpc.ts";
 import { ClientReadsService } from "./ClientReadsService.ts";
+import { EnvironmentLinkService } from "./EnvironmentLinkService.ts";
 import { PeerAdminService } from "./PeerAdminService.ts";
 import { layer as readChangesLayer } from "./ReadChanges.ts";
 
@@ -59,6 +60,7 @@ const crewServices = Layer.mergeAll(
       }),
   }),
   Layer.mock(PeerAdminService)({}),
+  Layer.mock(EnvironmentLinkService)({}),
   readChangesLayer,
 );
 

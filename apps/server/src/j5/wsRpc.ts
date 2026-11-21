@@ -25,6 +25,7 @@ import { makeClientActionRpcHandlers } from "./a2a/clientActionRpc.ts";
 import { ClientActionsService } from "./a2a/ClientActionsService.ts";
 import { makeClientReadRpcHandlers } from "./a2a/clientReadRpc.ts";
 import { ClientReadsService } from "./a2a/ClientReadsService.ts";
+import { EnvironmentLinkService } from "./a2a/EnvironmentLinkService.ts";
 import { PeerAdminService } from "./a2a/PeerAdminService.ts";
 import { ReadChanges } from "./a2a/ReadChanges.ts";
 import { makeAgentPersonaRpcHandlers } from "./agents/agentPersonaRpc.ts";
@@ -67,6 +68,7 @@ type J5WsRpcServices =
   | ClientActionsService
   | ClientReadsService
   | PeerAdminService
+  | EnvironmentLinkService
   | ReadChanges
   | ArtifactDeletion
   | PersonAccess
@@ -87,6 +89,7 @@ export const j5WsRpcServices = Effect.context<J5WsRpcServices>().pipe(
       ClientActionsService,
       ClientReadsService,
       PeerAdminService,
+      EnvironmentLinkService,
       ReadChanges,
       ArtifactDeletion,
       PersonAccess,

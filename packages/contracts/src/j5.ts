@@ -944,6 +944,32 @@ export const ChangePeerOriginResponse = Schema.Struct({ peer: PeerRecord });
 export type ChangePeerOriginResponse = typeof ChangePeerOriginResponse.Type;
 
 /**
+ * Where a server that holds upstream's link to this one speaks for that link's own session, with
+ * the link's token: PUT says which server holds it, DELETE revokes it. Upstream's session names
+ * no environment, so this is how the session a link holds here is found and ended.
+ */
+export const J5_LINK_SESSION_API_PATH = "/api/j5/links/session";
+
+export const ClaimLinkSessionRequest = Schema.Struct({
+  environmentId: Schema.String.check(Schema.isNonEmpty()),
+});
+export type ClaimLinkSessionRequest = typeof ClaimLinkSessionRequest.Type;
+
+/** Forget this server's link to the named one, revoking the session the link held there first. */
+export const ForgetEnvironmentLinkRequest = Schema.Struct({
+  environmentId: Schema.String.check(Schema.isNonEmpty()),
+});
+export type ForgetEnvironmentLinkRequest = typeof ForgetEnvironmentLinkRequest.Type;
+export const ForgetEnvironmentLinkResponse = Schema.Struct({
+  /** Whether this server held a link to forget. */
+  removed: Schema.Boolean,
+  /** Whether the other server revoked the link's session; when not, `detail` says why. */
+  sessionRevoked: Schema.Boolean,
+  detail: Schema.NullOr(Schema.String),
+});
+export type ForgetEnvironmentLinkResponse = typeof ForgetEnvironmentLinkResponse.Type;
+
+/**
  * Peer servers' own wire protocol. A breaking change bumps the version and a
  * mismatch stops peering until both servers match; an additive change is an
  * optional field or a capability and never bumps it. A server from before
@@ -1204,6 +1230,7 @@ export const J5_CLIENT_ACTION_WS_METHODS = {
   changePeerOrigin: "j5.peers.changeOrigin",
   listPeerAddresses: "j5.peers.addresses",
   probePeer: "j5.peers.probe",
+  forgetEnvironmentLink: "j5.links.forget",
 } as const;
 
 const clientActionError = Schema.Union([J5ActionError, EnvironmentAuthorizationError]);
@@ -1282,6 +1309,11 @@ export const J5ClientActionRpcGroup = RpcGroup.make(
   Rpc.make(J5_CLIENT_ACTION_WS_METHODS.probePeer, {
     payload: PeerProbeRequest,
     success: PeerProbeResponse,
+    error: clientActionError,
+  }),
+  Rpc.make(J5_CLIENT_ACTION_WS_METHODS.forgetEnvironmentLink, {
+    payload: ForgetEnvironmentLinkRequest,
+    success: ForgetEnvironmentLinkResponse,
     error: clientActionError,
   }),
 );

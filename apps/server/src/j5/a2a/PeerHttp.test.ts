@@ -29,6 +29,7 @@ import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ServerConfig } from "../../config.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
+import { LinkSessionService } from "./LinkSessionService.ts";
 import { layer as peerAdminLayer } from "./PeerAdminService.ts";
 import { peerHttpRouteLayer } from "./PeerHttp.ts";
 import { layer as lineRegistryLayer } from "./line/LineRegistry.ts";
@@ -155,6 +156,16 @@ const makeHandler = (input: {
   const routes = peerHttpRouteLayer.pipe(
     // The real administrative service, over the same registry, removal and sessions the routes see.
     Layer.provide(peerAdminLayer),
+    Layer.provide(
+      Layer.mock(LinkSessionService)({
+        revokeFor: (environmentId) =>
+          Effect.sync(() => {
+            if (environmentId !== home) return 0;
+            input.revoked?.push(`link-sessions:${environmentId}`);
+            return 1;
+          }),
+      }),
+    ),
     Layer.provide(
       Layer.mock(PeerRegistryService)({
         add: (request) =>
@@ -566,11 +577,11 @@ it("lists peers with access:read and removes one after revoking every session it
 
     const response = await admin.handler(post(J5_PEER_API_PATHS.remove, { environmentId: home }));
     assert.equal(response.status, 200);
-    assert.deepStrictEqual(await response.json(), { removed: true, revokedSessions: 2 });
+    assert.deepStrictEqual(await response.json(), { removed: true, revokedSessions: 3 });
     assert.deepStrictEqual(
       operations,
-      ["auth-session:home", "auth-session:home-rotated", home],
-      "the peer can no longer deliver or poll before the wipe begins",
+      ["auth-session:home", "auth-session:home-rotated", `link-sessions:${home}`, home],
+      "the peer can no longer deliver, poll or act through a link before the wipe begins",
     );
 
     const missing = await admin.handler(

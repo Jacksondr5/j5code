@@ -66,6 +66,7 @@ export const J5_CLIENT_GUARDED_RPC_SCOPES = {
   [J5_CLIENT_ACTION_WS_METHODS.changePeerOrigin]: AuthAccessWriteScope,
   [J5_CLIENT_ACTION_WS_METHODS.listPeerAddresses]: AuthAccessWriteScope,
   [J5_CLIENT_ACTION_WS_METHODS.probePeer]: AuthAccessWriteScope,
+  [J5_CLIENT_ACTION_WS_METHODS.forgetEnvironmentLink]: AuthAccessWriteScope,
 
   // A connection's own place on the server: saying whose its device is, naming the first owner,
   // leaving a scope, renaming oneself, an Owner marking a notice seen. Every device holds what
