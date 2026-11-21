@@ -258,6 +258,3 @@ turn it on.
 
 - `J5 CI` runs formatting, lint, typecheck, and unit-test gates on every PR, and on
   pushes to `j5/main`, `j5/release-<version>`, and `j5/preview-<x.y.z>-<n>`.
-- `J5 Weekly Full Build` runs Mondays at 08:23 UTC and on manual dispatch. It runs the full suite,
-  full build, produces the ad-hoc signed Apple Silicon DMG/ZIP, verifies the mounted app, and uploads
-  the artifacts for 30 days.
