@@ -1,4 +1,5 @@
 import type { EnvironmentId } from "@t3tools/contracts";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Equal from "effect/Equal";
 import * as Option from "effect/Option";
@@ -22,30 +23,59 @@ export const replacesCredential = Effect.fn("j5.replacedCredential.replacesCrede
   return !Option.exists(stored, (credential) => Equal.equals(credential, registration.credential));
 });
 
-// Bumped each time a re-pair replaces an environment's credential.
-const replacements = new Map<EnvironmentId, number>();
-
-/**
- * Whether the environment's credential is still the one it had when this was called. A shell made
- * under a replaced one stops saving, since it lives in its follower's scope and outlasts the
- * registry's teardown: its last flush would put the last person's rows back.
- */
-export const credentialStillCurrent = (environmentId: EnvironmentId) => {
-  const seen = replacements.get(environmentId) ?? 0;
-  return () => (replacements.get(environmentId) ?? 0) === seen;
+interface CredentialSaves {
+  /** Bumped each time a re-pair replaces the environment's credential. */
+  replaced: number;
+  readonly inFlight: Set<Deferred.Deferred<void>>;
+}
+const environments = new Map<EnvironmentId, CredentialSaves>();
+const savesOf = (environmentId: EnvironmentId) => {
+  let saves = environments.get(environmentId);
+  if (saves === undefined) {
+    saves = { replaced: 0, inFlight: new Set() };
+    environments.set(environmentId, saves);
+  }
+  return saves;
 };
 
 /**
- * Closes the environment's old scope with what the last credential cached forgotten: its shells
- * stop saving first, and the cache is cleared after, so the next credential starts from its own.
+ * Cache saves held to the environment's credential as it is now. A shell or thread made under a
+ * replaced one lives in its follower's scope and outlasts the registry's teardown, so its last
+ * flush would put the last person's rows back; once replaced, its saves do nothing.
+ */
+export const savesUnderCurrentCredential = (environmentId: EnvironmentId) => {
+  const saves = savesOf(environmentId);
+  const seen = saves.replaced;
+  return <E, R>(save: Effect.Effect<void, E, R>) =>
+    Effect.suspend(() => {
+      if (saves.replaced !== seen) return Effect.void;
+      // Recorded in the same step as the check, so a replacement waits for every save it let by.
+      const done = Deferred.makeUnsafe<void>();
+      saves.inFlight.add(done);
+      return save.pipe(
+        Effect.ensuring(
+          Effect.sync(() => {
+            saves.inFlight.delete(done);
+            Deferred.doneUnsafe(done, Effect.void);
+          }),
+        ),
+      );
+    });
+};
+
+/**
+ * Closes the environment's old scope with what the last credential cached forgotten: its saves
+ * stop first, the ones already writing finish, then the cache is cleared for the next credential.
  */
 export const forgetReplacedCredential = Effect.fn("j5.replacedCredential.forget")(function* <E>(
   cache: Pick<EnvironmentCacheStore["Service"], "clear">,
   environmentId: EnvironmentId,
   closeOldScope: Effect.Effect<void, E>,
 ) {
-  replacements.set(environmentId, (replacements.get(environmentId) ?? 0) + 1);
+  const saves = savesOf(environmentId);
+  saves.replaced += 1;
   yield* closeOldScope;
+  yield* Effect.forEach([...saves.inFlight], Deferred.await, { discard: true });
   yield* cache.clear(environmentId).pipe(
     Effect.catch((error) =>
       Effect.logWarning("Could not clear the cached data of a replaced credential.", {

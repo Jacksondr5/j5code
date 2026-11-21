@@ -406,6 +406,37 @@ describe("environment shell synchronization", () => {
     }),
   );
 
+  it.effect("clears a replaced credential's cache only after a save already writing ends", () =>
+    Effect.gen(function* () {
+      const writes = yield* Ref.make<ReadonlyArray<string>>([]);
+      const saveStarted = yield* Deferred.make<void>();
+      const releaseSave = yield* Deferred.make<void>();
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* makePersistenceHarness(() =>
+            Deferred.succeed(saveStarted, undefined).pipe(
+              Effect.andThen(Deferred.await(releaseSave)),
+              Effect.andThen(Ref.update(writes, (values) => [...values, "save"])),
+            ),
+          );
+          yield* TestClock.adjust("500 millis");
+          yield* Deferred.await(saveStarted);
+          const replacement = yield* Effect.forkChild(
+            forgetReplacedCredential(
+              { clear: () => Ref.update(writes, (values) => [...values, "clear"]) },
+              TARGET.environmentId,
+              Effect.void,
+            ),
+            { startImmediately: true },
+          );
+          yield* Deferred.succeed(releaseSave, undefined);
+          yield* Fiber.join(replacement);
+        }),
+      );
+      expect(yield* Ref.get(writes)).toEqual(["save", "clear"]);
+    }),
+  );
+
   it.effect("retries a failed shell save after a cursor-only update", () =>
     Effect.gen(function* () {
       const attempts = yield* Ref.make<ReadonlyArray<number>>([]);
