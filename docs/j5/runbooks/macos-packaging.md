@@ -85,9 +85,16 @@ The next nightly counts up from `x.y.z` (after `0.0.52`, `0.0.53-nightly.*`) whe
 pull request has merged: `J5 Nightly` reads the latest stable release as well as the committed
 version.
 
+If publishing the draft fails, for example because GitHub refuses to let the Actions token tag an
+older commit, publish it by hand with `gh release edit v<x.y.z> -R Jacksondr5/j5code --draft=false --latest`,
+then make the bump branch by hand: `node scripts/update-release-package-versions.ts <x.y.z>` on
+`j5/main`, set FORK.md's `Released pin:` from the nightly commit's `Current pin:`, and push it as
+`j5/release-<x.y.z>`.
+
 To try it without publishing, add `-f dry_run=true`, with `--ref <branch>` to try a branch's changes
 to the workflows. A dry run builds everything into a draft release that nothing reads and pushes no
-branch. Delete the draft afterwards with `gh release delete v<x.y.z> -R Jacksondr5/j5code --yes`.
+branch. A dry run of a version that is already published makes no draft, so delete only a draft:
+`[[ "$(gh release view v<x.y.z> -R Jacksondr5/j5code --json isDraft --jq .isDraft)" == true ]] && gh release delete v<x.y.z> -R Jacksondr5/j5code --yes`.
 
 For a preview, to test installs and updates from a branch before it merges:
 
@@ -228,7 +235,8 @@ the time to repeat step 2.
   `t3-<version>-linux-x64.tar.gz` and `t3-<version>-win32-x64.zip` (unsigned), built and
   smoke-tested in the release run from the same commit. The executable embeds a newer Node than the
   one tests run on, so the run also runs the database startup tests on that Node, on Linux and macOS;
-- `install.sh`, `install.ps1`, and `SHA256SUMS` over the archives and both installers.
+- `install.sh`, `install.ps1`, and `SHA256SUMS` over the archives and both installers;
+- `release-metadata.json`, the database migration levels the release carries.
 
 Run by hand with a build's run ID, its resolve job reads the version from the build commit's four
 manifests, which must agree, and publishes only a preview. Called by `J5 Nightly` or `J5 Stable`,

@@ -188,6 +188,10 @@ jobs:
               if (tagSha !== null && tagSha !== sha) {
                 throw new Error(`Release ${tag} already exists at ${tagSha}, but this build is ${sha}. Bump the version before releasing.`);
               }
+              // A draft has no tag, so a draft a failed run left for another commit passes the check above.
+              if (release.draft && release.target_commitish !== sha) {
+                throw new Error(`A draft release for ${tag} targets ${release.target_commitish}, not ${sha}. Delete it with \`gh release delete ${tag} --yes\` and run again.`);
+              }
               published = tagSha === sha && !release.draft && release.assets.some(asset => asset.name === 'SHA256SUMS');
             }
             core.setOutput('ref', sha);
@@ -664,10 +668,31 @@ jobs:
             if [[ "$RELEASE_CHANNEL" != stable ]]; then prerelease=(--prerelease); fi
             gh release create "$tag" --target "$RELEASE_SHA" --title "J5 Code $RELEASE_VERSION" --notes-file "$RUNNER_TEMP/release-notes.md" --draft "${prerelease[@]}"
           fi
+          # A re-run job reuses the resolve job's outputs, so read the release as it is now.
+          if [[ "$(gh release view "$tag" --json isDraft --jq .isDraft)" != true ]]; then
+            echo "::error::$tag is already published; this run leaves it unchanged."
+            exit 1
+          fi
           gh release upload "$tag" release-assets/* --clobber
           if [[ "$RELEASE_DRAFT" == true ]]; then
             echo "::notice::Left $tag as a draft. Delete it with: gh release delete $tag -R $GH_REPO --yes"
             exit 0
+          fi
+          if tag_sha="$(gh api "repos/$GH_REPO/commits/$tag" --jq .sha 2>/dev/null)" && [[ "$tag_sha" != "$RELEASE_SHA" ]]; then
+            echo "::error::$tag now exists at $tag_sha, not $RELEASE_SHA."
+            exit 1
+          fi
+          if [[ "$RELEASE_CHANNEL" == stable ]]; then
+            # Marked latest, an older version would be offered to every install as a downgrade.
+            if ! latest="$(gh api "repos/$GH_REPO/releases/latest" --jq .tag_name 2>"$RUNNER_TEMP/latest.err")"; then
+              grep -q 'HTTP 404' "$RUNNER_TEMP/latest.err" || { cat "$RUNNER_TEMP/latest.err" >&2; exit 1; }
+              latest=""
+            fi
+            latest="${latest#v}"
+            if [[ "$(printf '%s\n' "$latest" "$RELEASE_VERSION" | sort -V | tail -n 1)" != "$RELEASE_VERSION" ]]; then
+              echo "::error::$RELEASE_VERSION is older than the latest stable release, $latest; $tag stays a draft."
+              exit 1
+            fi
           fi
           # A preview or nightly must never become "latest": the stable installer
           # URL and stable desktop updates resolve through it.

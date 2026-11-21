@@ -29,9 +29,11 @@ on:
 permissions: {}
 
 # Shared with J5 Nightly, which reads the newest stable release to pick its version.
+# `queue: max` keeps every waiting run instead of only the newest.
 concurrency:
   group: j5-publish
   cancel-in-progress: false
+  queue: max
 
 jobs:
   resolve:
@@ -85,7 +87,11 @@ jobs:
             exit 1
           fi
           # Published as latest, an older version would be offered to every install as a downgrade.
-          latest="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name')"
+          # A 404 means no stable release yet; any other error stops the run.
+          if ! latest="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name' 2>"$RUNNER_TEMP/latest.err")"; then
+            grep -q 'HTTP 404' "$RUNNER_TEMP/latest.err" || { cat "$RUNNER_TEMP/latest.err" >&2; exit 1; }
+            latest=""
+          fi
           latest="${latest#v}"
           if [[ "$latest" != "$version" && "$(printf '%s\n' "$latest" "$version" | sort -V | tail -n 1)" != "$version" ]]; then
             echo "::error::$version is older than the latest stable release, $latest. Promote a newer nightly."
@@ -144,6 +150,16 @@ jobs:
       - name: Commit and push the version bump
         run: |
           set -euo pipefail
+          committed="$(jq -r .version apps/desktop/package.json)"
+          if [[ "$(printf '%s\n' "$committed" "$RELEASE_VERSION" | sort -V | tail -n 1)" == "$committed" ]]; then
+            echo "::notice::j5/main already reports J5 Code $committed; no version bump needed."
+            exit 0
+          fi
+          branch="j5/release-$RELEASE_VERSION"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
+            echo "::error::$branch already exists. Open or merge its pull request, or delete the branch and re-run this job."
+            exit 1
+          fi
           for manifest in apps/server/package.json apps/desktop/package.json apps/web/package.json packages/contracts/package.json; do
             sed -i -E "0,/\"version\": \"[^\"]*\"/s//\"version\": \"$RELEASE_VERSION\"/" "$manifest"
           done
@@ -161,8 +177,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -am "chore(release): j5/main reports J5 Code $RELEASE_VERSION"
-          branch="j5/release-$RELEASE_VERSION"
-          git push --force origin "HEAD:refs/heads/$branch"
+          git push origin "HEAD:refs/heads/$branch"
           url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/j5/main...$branch?expand=1"
           echo "::notice::Open the version bump pull request: $url"
           echo "Open the version bump pull request: $url" >> "$GITHUB_STEP_SUMMARY"

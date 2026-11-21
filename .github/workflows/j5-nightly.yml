@@ -19,10 +19,12 @@ on:
 permissions: {}
 
 # Shared with J5 Stable, so no stable release lands between this run reading
-# the latest one and publishing.
+# the latest one and publishing. `queue: max` keeps every waiting run; by
+# default a group holds one pending run and a newer one cancels it.
 concurrency:
   group: j5-publish
   cancel-in-progress: false
+  queue: max
 
 jobs:
   resolve:
@@ -68,7 +70,11 @@ jobs:
         run: |
           set -euo pipefail
           committed="$(jq -r .version apps/desktop/package.json)"
-          latest="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name')"
+          # A 404 means no stable release yet; any other error stops the run.
+          if ! latest="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name' 2>"$RUNNER_TEMP/latest.err")"; then
+            grep -q 'HTTP 404' "$RUNNER_TEMP/latest.err" || { cat "$RUNNER_TEMP/latest.err" >&2; exit 1; }
+            latest=""
+          fi
           base="$(printf '%s\n' "$committed" "${latest#v}" | sort -V | tail -n 1)"
           mkdir -p "$RUNNER_TEMP/base/apps/desktop"
           jq -n --arg version "$base" '{$version}' > "$RUNNER_TEMP/base/apps/desktop/package.json"
