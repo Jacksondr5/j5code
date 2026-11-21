@@ -312,14 +312,16 @@ export function pairRouteOf(input: {
     localOrigin: { level: input.levels?.remoteLevel ?? "off", agents: remote },
   };
   const fields = NEEDS[connections].flatMap((field): ReadonlyArray<RouteField> => {
-    const value = choice[field].trim();
+    const value = choice[field];
     const { level, agents } = toolsOver[field];
     const error =
-      value === ""
+      value.trim() === ""
         ? "The check couldn't find this address. Enter it to link."
-        : level !== "off" && isPeerOrigin(value) && !linkTakesOrigin(value)
-          ? `Plain http works for messages, not for tools. Enter an https address or a Tailscale name (ending .ts.net), or set ${agents.label}'s agents to Off.`
-          : null;
+        : !isPeerOrigin(value)
+          ? "Enter an address such as https://host:3773, with no path or trailing slash."
+          : level !== "off" && !linkTakesOrigin(value)
+            ? `Plain http works for messages, not for tools. Enter an https address or a Tailscale name (ending .ts.net), or set ${agents.label}'s agents to Off.`
+            : null;
     return asks.includes(field) || edits[field] !== undefined || error !== null
       ? [{ field, error }]
       : [];

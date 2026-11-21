@@ -304,6 +304,11 @@ describe("pairRouteOf", () => {
       });
     }
     expect(routed(on, { remoteOrigin: "http://100.101.102.103:3773" }).ready).toBe(false);
+    // An address the server would not take says why Link waits.
+    expect(routed(on, { remoteOrigin: "https://work.example/" })).toMatchObject({
+      ready: false,
+      fields: [{ field: "remoteOrigin", error: expect.stringContaining("no path") }],
+    });
   });
 
   it("offers every way, each needing an address, when the check found no route", () => {
