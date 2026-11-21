@@ -69,7 +69,6 @@ export async function persistInboxAnswerImages(itemKey: string) {
   const serialized = await serializeComposerImages(draft.images, draft.persistedAttachments);
   // A later save saw more images; this one's list would drop them.
   if (latestImageSave.get(itemKey) !== save) return;
-  latestImageSave.delete(itemKey);
   const current = new Set((read()?.images ?? []).map((image) => image.id));
   await useComposerDraftStore.getState().syncPersistedAttachments(
     target,

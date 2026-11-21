@@ -91,6 +91,12 @@ it("keeps a newer image save when an older one finishes after it", async () => {
     }),
   );
   serializeComposerImages.mockResolvedValueOnce([saved("a"), saved("b")]);
+  let finishThird: (value: ReturnType<typeof saved>[]) => void = () => {};
+  serializeComposerImages.mockReturnValueOnce(
+    new Promise((resolve) => {
+      finishThird = resolve;
+    }),
+  );
   // The store checks each save against localStorage, which this environment lacks.
   const { syncPersistedAttachments } = useComposerDraftStore.getState();
   const sync = vi.fn(async () => {});
@@ -100,11 +106,18 @@ it("keeps a newer image save when an older one finishes after it", async () => {
     const first = persistInboxAnswerImages(itemKey);
     useComposerDraftStore.getState().addImages(target, [image("b")]);
     await persistInboxAnswerImages(itemKey);
+    useComposerDraftStore.getState().addImages(target, [image("c")]);
+    const third = persistInboxAnswerImages(itemKey);
 
     finishOlder([saved("a")]);
     await first;
+    finishThird([saved("a"), saved("b"), saved("c")]);
+    await third;
 
-    expect(sync.mock.calls).toEqual([[target, [saved("a"), saved("b")]]]);
+    expect(sync.mock.calls).toEqual([
+      [target, [saved("a"), saved("b")]],
+      [target, [saved("a"), saved("b"), saved("c")]],
+    ]);
   } finally {
     useComposerDraftStore.setState({ syncPersistedAttachments });
   }
