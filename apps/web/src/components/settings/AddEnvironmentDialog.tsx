@@ -64,6 +64,7 @@ import {
   parseRemotePairingFields,
   formatDesktopSshConnectionError,
 } from "./ConnectionsSettings.logic";
+import { noteEnvironmentAdded } from "../../j5/links/addedEnvironment";
 
 const EMPTY_DISCOVERED_SSH_HOSTS: ReadonlyArray<DesktopDiscoveredSshHost> = [];
 
@@ -177,6 +178,8 @@ export function AddEnvironmentDialog({
     }
 
     handleOpenChange(false);
+    // J5: a new server is offered a link once it connects (FORK.md case 123).
+    if (!routeTarget) noteEnvironmentAdded(result.value);
     toastManager.add({
       type: "success",
       title: routeTarget ? "Route added" : "Environment connected",
@@ -249,6 +252,7 @@ export function AddEnvironmentDialog({
     }
 
     handleOpenChange(false);
+    if (!routeTarget) noteEnvironmentAdded(result.value);
     toastManager.add(
       routeTarget
         ? {

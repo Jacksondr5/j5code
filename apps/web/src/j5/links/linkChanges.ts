@@ -47,6 +47,12 @@ export type LevelChangePlan =
 
 const errorText = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
 
+/** Why this client cannot act on a server: it is away just now, or its session may not manage access. */
+export const unmanagedReason = (label: string, away: boolean) =>
+  away
+    ? `This app isn't connected to ${label} right now`
+    : `This app can't manage access on ${label}`;
+
 /**
  * What setting `holder`'s agents' level on the other server takes. The link is made at the
  * address the holder's messages already go to, so the pair is never checked again; a pair with
@@ -58,22 +64,20 @@ export function planLevelChange(input: {
   readonly holder: LinkPairSide;
   readonly level: ToolsLevel;
   readonly factsOf: (environmentId: EnvironmentId) => LinkServerFacts | null;
+  /** A server this client has but is not connected to now. */
+  readonly awayOf?: (environmentId: EnvironmentId) => boolean;
   readonly address?: string;
 }): LevelChangePlan {
   const { holder, level } = input;
   const other = otherSideOf(input.pair, holder);
+  const unmanaged = (side: LinkPairSide) =>
+    unmanagedReason(side.label, input.awayOf?.(side.environmentId) === true);
   if (!holder.managed) {
-    return {
-      kind: "blocked",
-      reason: `This app can't manage access on ${holder.label}, so it can't change this.`,
-    };
+    return { kind: "blocked", reason: `${unmanaged(holder)}, so it can't change this.` };
   }
   if (level === "off") return { kind: "off" };
   if (!other.managed) {
-    return {
-      kind: "blocked",
-      reason: `This app can't manage access on ${other.label}, so it can't change or renew this.`,
-    };
+    return { kind: "blocked", reason: `${unmanaged(other)}, so it can't change or renew this.` };
   }
   const messageAddress = input.address ?? toolsAddressOf(holder.record);
   const [first, ...rest] = messageAddress === null ? (holder.link?.urls ?? []) : [messageAddress];
@@ -96,6 +100,29 @@ export function planLevelChange(input: {
   };
 }
 
+/**
+ * Makes `holder`'s link to the other server: a one-use code minted there for the level, then
+ * upstream's link here at the addresses given, kept only where they answer as that server.
+ */
+export async function makeLink(input: {
+  readonly holder: EnvironmentId;
+  readonly other: { readonly environmentId: EnvironmentId; readonly label: string };
+  readonly level: AuthMcpClientAccess;
+  readonly urls: readonly [string, ...Array<string>];
+  readonly ops: Pick<LinkOps, "mintPairingCode" | "link">;
+}): Promise<void> {
+  const pairingCode = await input.ops.mintPairingCode(input.other.environmentId, input.level);
+  const [url, ...alternateUrls] = input.urls;
+  await input.ops.link(input.holder, {
+    url,
+    ...(alternateUrls.length === 0 ? {} : { alternateUrls }),
+    expectedEnvironmentId: input.other.environmentId,
+    expectedLabel: input.other.label,
+    pairingCode,
+    access: input.level,
+  });
+}
+
 export type LinkChangeOutcome =
   | { readonly ok: true; readonly note: string | null }
   | { readonly ok: false; readonly reason: string };
@@ -115,15 +142,12 @@ export async function applyLevelChange(input: {
       return { ok: true, note: forgotten.detail };
     }
     for (const server of plan.turnOn) await ops.enableLinkedEnvironments(server.environmentId);
-    const pairingCode = await ops.mintPairingCode(other.environmentId, plan.level);
-    const [url, ...alternateUrls] = plan.urls;
-    await ops.link(holder.environmentId, {
-      url,
-      ...(alternateUrls.length === 0 ? {} : { alternateUrls }),
-      expectedEnvironmentId: other.environmentId,
-      expectedLabel: other.label,
-      pairingCode,
-      access: plan.level,
+    await makeLink({
+      holder: holder.environmentId,
+      other,
+      level: plan.level,
+      urls: plan.urls,
+      ops,
     });
     return { ok: true, note: null };
   } catch (cause) {
@@ -136,8 +160,8 @@ export const renewableSides = (pair: LinkPair): ReadonlyArray<LinkPairSide> =>
   pair.sides.filter((side) => side.link !== null);
 
 /**
- * The sides a removal acts on: each one this client manages that holds, or may hold, its part.
- * A server whose records could not be read may still hold them, so it is tried too.
+ * The sides the row shows something to remove on: each one this client manages that holds, or
+ * may hold, its part. It words the confirmation; the removal itself acts on every managed side.
  */
 export const removableSides = (pair: LinkPair): ReadonlyArray<LinkPairSide> =>
   pair.sides.filter(
@@ -178,25 +202,25 @@ export interface RemovalOutcome {
 }
 
 /**
- * Ends both parts on every side this client manages. Every link is forgotten before any peer is
- * removed: removing a peer revokes the sessions its links hold here, and a link revokes its own
- * session with the token that would by then be dead. A side that fails never stops the others.
+ * Ends both parts on every managed side, whatever the row last read: it can be behind a link just
+ * made, and a side with no record may hold sessions for the other's links. Links go before peers,
+ * since removing a peer revokes the token a link needs to revoke its own session. A side that
+ * fails never stops the others.
  */
 export async function removePair(pair: LinkPair, ops: LinkOps): Promise<RemovalOutcome> {
-  const sides = removableSides(pair);
+  const sides = pair.sides.filter((side) => side.managed);
   const failed = new Map<LinkPairSide, string>();
   const notes: Array<string> = [];
   for (const side of sides) {
-    if (side.link === null && side.linksRead) continue;
     try {
       const forgotten = await ops.forget(side.environmentId, otherSideOf(pair, side).environmentId);
       if (forgotten.detail !== null) notes.push(forgotten.detail);
     } catch (cause) {
+      // Reported even where the row showed no link: nothing here can prove one was not just made.
       failed.set(side, errorText(cause));
     }
   }
   for (const side of sides) {
-    if (side.record === null && side.read) continue;
     try {
       await ops.removePeer(side.environmentId, otherSideOf(pair, side).environmentId);
     } catch (cause) {

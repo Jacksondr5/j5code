@@ -17,6 +17,7 @@ import { pairTitle } from "../peering/peerPairs";
 import {
   applyLevelChange,
   planLevelChange,
+  unmanagedReason,
   removableSides,
   removalOf,
   removePair,
@@ -45,10 +46,9 @@ export interface LinkRowServerFacts extends LinkServerFacts {
 interface DirectionState {
   readonly busy: boolean;
   readonly error: string | null;
-  readonly note: string | null;
 }
 
-const IDLE: DirectionState = { busy: false, error: null, note: null };
+const IDLE: DirectionState = { busy: false, error: null };
 
 /** The real time, read when the minute clock ticks. */
 const timeAtMinute = (_minute: string) => Date.now();
@@ -85,10 +85,13 @@ const confirmTurnOn = (servers: ReadonlyArray<{ readonly label: string }>) =>
 export function LinkPairRow({
   pair,
   factsOf,
+  awayOf,
   onSetUpMessaging,
 }: {
   readonly pair: LinkPair;
   readonly factsOf: (environmentId: EnvironmentId) => LinkRowServerFacts | null;
+  /** A server this client has but is not connected to now. */
+  readonly awayOf: (environmentId: EnvironmentId) => boolean;
   readonly onSetUpMessaging: (pair: LinkPair) => void;
 }) {
   const [directions, setDirections] = useState<Readonly<Record<string, DirectionState>>>({});
@@ -100,7 +103,9 @@ export function LinkPairRow({
   const messaging = messagesStatusOf(pair, nowMs);
   const expiry = toolsExpiryOf(pair, DateTime.makeUnsafe(nowMs));
   const expiryLine = toolsExpiryLine(expiry, nowMs, messaging !== null);
-  const busy = renewing || removing;
+  // A level change in flight makes a link the row has not read yet, which a removal would miss.
+  const busy =
+    renewing || removing || Object.values(directions).some((direction) => direction.busy);
   const title = pairTitle(pair);
 
   const stateOf = (side: LinkPairSide) => directions[side.environmentId] ?? IDLE;
@@ -119,14 +124,22 @@ export function LinkPairRow({
     plan: Exclude<LevelChangePlan, { readonly kind: "blocked" }>,
     failed: string,
   ) => {
-    setState(holder, { busy: true, error: null, note: null });
+    setState(holder, { busy: true, error: null });
     const outcome = await applyLevelChange({ pair, holder, plan, ops: linkOps });
     setState(
       holder,
       outcome.ok
-        ? { busy: false, error: null, note: outcome.note }
-        : { busy: false, error: `${failed}: ${outcome.reason}`, note: null },
+        ? { busy: false, error: null }
+        : { busy: false, error: `${failed}: ${outcome.reason}` },
     );
+    // A toast, not the row: turning off a pair's only part takes the row away with what it said.
+    if (outcome.ok && outcome.note !== null) {
+      toastManager.add({
+        type: "warning",
+        title: "A session was left on the other server",
+        description: outcome.note,
+      });
+    }
     return outcome.ok;
   };
 
@@ -136,10 +149,11 @@ export function LinkPairRow({
       holder,
       level,
       factsOf,
+      awayOf,
       ...(address === undefined ? {} : { address }),
     });
     if (plan.kind === "blocked") {
-      setState(holder, { busy: false, error: plan.reason, note: null });
+      setState(holder, { busy: false, error: plan.reason });
       return;
     }
     if (plan.kind === "link" && plan.turnOn.length > 0 && !(await confirmTurnOn(plan.turnOn))) {
@@ -156,7 +170,7 @@ export function LinkPairRow({
   const renew = async () => {
     const plans = renewableSides(pair).map((holder) => ({
       holder,
-      plan: planLevelChange({ pair, holder, level: toolsLevelOf(holder), factsOf }),
+      plan: planLevelChange({ pair, holder, level: toolsLevelOf(holder), factsOf, awayOf }),
     }));
     const turnOn = new Map(
       plans.flatMap(({ plan }) =>
@@ -168,7 +182,7 @@ export function LinkPairRow({
     let renewed = 0;
     for (const { holder, plan } of plans) {
       if (plan.kind === "blocked") {
-        setState(holder, { busy: false, error: plan.reason, note: null });
+        setState(holder, { busy: false, error: plan.reason });
       } else if (await apply(holder, plan, "Couldn't renew this")) {
         renewed += 1;
       }
@@ -238,9 +252,9 @@ export function LinkPairRow({
                       messages fail.
                     </span>
                     <span>
-                      If {other.label} linked to {holder.label} on an older version of J5 Code, that
-                      session stays in {holder.label}'s Settings → Sharing & access until you revoke
-                      it there or it runs out.
+                      If {other.label} linked to {holder.label} from the command line, or on an
+                      older version of J5 Code, that session stays in {holder.label}'s Settings →
+                      Sharing & access until you revoke it there or it runs out.
                     </span>
                   </span>
                 ),
@@ -280,6 +294,14 @@ export function LinkPairRow({
     health.some((each) => each?.kind === "failing") ||
     pair.sides.some((side) => stateOf(side).error !== null);
   const renewDue = expiry.kind === "expired" || (expiry.kind === "running" && expiry.soon);
+  // A saved level says nothing of upstream's setting, which refuses every tool call while off.
+  const pausedBy = (holder: LinkPairSide) =>
+    holder.link === null
+      ? []
+      : [holder, otherSideOf(pair, holder)].filter(
+          (side) => factsOf(side.environmentId)?.linkedEnvironmentsEnabled === false,
+        );
+  const paused = pair.sides.some((side) => pausedBy(side).length > 0);
   const missingMessaging = pair.sides.find(
     (side) => factsOf(side.environmentId)?.supportsMessaging === false,
   );
@@ -295,13 +317,14 @@ export function LinkPairRow({
           <ConnectionStatusDot
             tooltipText={
               messaging?.problems[0] ??
+              (paused ? "Tools are paused: Linked environments is off" : null) ??
               expiryLine ??
               (messaging === null ? "Messaging isn't set up" : "Linked")
             }
             dotClassName={
               wrong
                 ? "bg-destructive"
-                : renewDue || messaging === null
+                : renewDue || messaging === null || paused
                   ? "bg-warning"
                   : "bg-success"
             }
@@ -423,15 +446,24 @@ export function LinkPairRow({
                   </div>
                   {!holder.managed ? (
                     <Detail>
-                      This app can't manage access on {holder.label}, so it can't show or change
-                      this.
+                      {unmanagedReason(holder.label, awayOf(holder.environmentId))}, so it can't
+                      show or change this.
                     </Detail>
                   ) : !holder.linksRead ? (
                     <Detail>Couldn't read {holder.label}'s links.</Detail>
                   ) : !other.managed ? (
                     <Detail>
-                      This app can't manage access on {other.label}, so it can't{" "}
+                      {unmanagedReason(other.label, awayOf(other.environmentId))}, so it can't{" "}
                       {toolsLevelOf(holder) === "off" ? "turn this on" : "change or renew this"}.
+                    </Detail>
+                  ) : null}
+                  {pausedBy(holder).length > 0 ? (
+                    <Detail tone="warning">
+                      Paused: Linked environments is off on{" "}
+                      {pausedBy(holder)
+                        .map((side) => side.label)
+                        .join(" and ")}
+                      . Turn it on there in Settings → Labs.
                     </Detail>
                   ) : null}
                   {linkHealth?.kind === "unreachable" ? (
@@ -443,7 +475,6 @@ export function LinkPairRow({
                     <Detail tone="destructive">{linkHealth.detail}</Detail>
                   ) : null}
                   {state.error === null ? null : <Detail tone="destructive">{state.error}</Detail>}
-                  {state.note === null ? null : <Detail>{state.note}</Detail>}
                 </div>
               );
             })}
@@ -466,8 +497,14 @@ export function LinkPairRow({
           onClose={() => setEditing(false)}
           onOriginChanged={(changed, origin) => {
             const holder = pair.sides.find((side) => side.environmentId === changed.environmentId);
-            // The link was made at the address messages took; it follows them to the new one.
-            if (holder?.link != null) void changeLevel(holder, holder.link.access, origin);
+            // The link was made at the address messages took; it follows them to the new one. One
+            // that ran out is left alone: only the person renews a link.
+            if (
+              holder?.link != null &&
+              peerLinkHealth(holder.link, DateTime.makeUnsafe(Date.now())).kind !== "expired"
+            ) {
+              void changeLevel(holder, holder.link.access, origin);
+            }
           }}
         />
       ) : null}

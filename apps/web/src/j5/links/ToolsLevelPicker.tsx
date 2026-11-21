@@ -29,6 +29,7 @@ export function ToolsLevelPicker({
   other,
   disabled = false,
   onlyOff = false,
+  withoutOff = false,
   onChange,
 }: {
   readonly value: ToolsLevel;
@@ -38,6 +39,8 @@ export function ToolsLevelPicker({
   readonly disabled?: boolean;
   /** Raising a level needs something this client cannot do; turning it off does not. */
   readonly onlyOff?: boolean;
+  /** The level is being asked for, so Off is not one of the answers. */
+  readonly withoutOff?: boolean;
   readonly onChange: (level: ToolsLevel) => void;
 }) {
   return (
@@ -52,7 +55,7 @@ export function ToolsLevelPicker({
         <SelectValue>{toolsLevelLabel(value)}</SelectValue>
       </SelectTrigger>
       <SelectPopup align="end" alignItemWithTrigger={false}>
-        {LEVELS.map((level) => (
+        {LEVELS.filter((level) => !withoutOff || level !== "off").map((level) => (
           <SelectItem
             key={level}
             value={level}

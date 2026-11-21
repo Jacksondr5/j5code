@@ -27,13 +27,7 @@ import {
   SelectValue,
 } from "../../components/ui/select";
 import { useEnvironmentHttpBaseUrl } from "../../state/environments";
-import {
-  EXPLAINER_URL,
-  OriginField,
-  ReachLine,
-  StepList,
-  type StepReport,
-} from "./PeerIntroductionDialog";
+import { EXPLAINER_URL, OriginField, ReachLine, StepList, type StepReport } from "./peeringParts";
 import { runReachCheck } from "./peeringCheck";
 import { changePeerOrigin, refreshPeers, type PeerRecord } from "./peeringClient";
 import type { PeerPair, PeerPairSide } from "./peerPairs";
@@ -194,9 +188,10 @@ export function PeerEditDialog({
         <DialogHeader>
           <DialogTitle>Edit address</DialogTitle>
           <DialogDescription>
-            Change the address each server reaches the other at. Each server keeps its credential,
-            so messages waiting and open Exchanges carry on, and tools follow the new address. To
-            change how messages travel, remove the link and link the servers again.
+            Change the address each server reaches the other at. Messages waiting and open Exchanges
+            carry on. A direction that has tools is linked again at the new address, which starts
+            its 30 days again; one that has run out is left for you to renew. To change how messages
+            travel, remove the link and link the servers again.
           </DialogDescription>
         </DialogHeader>
         <DialogPanel>

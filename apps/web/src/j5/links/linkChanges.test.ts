@@ -164,11 +164,25 @@ describe("planLevelChange", () => {
     expect(planLevelChange({ pair, holder: mine, level: "off", factsOf: allOn })).toEqual({
       kind: "off",
     });
-    expect(planLevelChange({ pair, holder: mine, level: "auto", factsOf: allOn })).toMatchObject({
+    expect(planLevelChange({ pair, holder: mine, level: "auto", factsOf: allOn })).toEqual({
       kind: "blocked",
+      reason: "This app can't manage access on Work, so it can't change or renew this.",
     });
     expect(planLevelChange({ pair, holder: theirs, level: "off", factsOf: allOn })).toMatchObject({
       kind: "blocked",
+    });
+    // A server that is only stopped is not one this app lacks the right to manage.
+    expect(
+      planLevelChange({
+        pair,
+        holder: mine,
+        level: "auto",
+        factsOf: allOn,
+        awayOf: (id) => id === WORK,
+      }),
+    ).toEqual({
+      kind: "blocked",
+      reason: "This app isn't connected to Work right now, so it can't change or renew this.",
     });
   });
 });
@@ -242,12 +256,14 @@ describe("removePair", () => {
     ]);
   });
 
-  it("tries every side and step when one fails, and skips what a side does not hold", async () => {
+  it("tries every side and step when one fails, whatever the row last read", async () => {
+    // Work's link is missing from the row, as one made a moment ago is until the list is re-read.
     const pair = pairOf(home({ links: [link(WORK, "Work")] }), work());
     const { calls, ops } = recordingOps([`forget ${HOME} ${WORK}`]);
     const outcome = await removePair(pair, ops);
     expect(calls).toEqual([
       `forget ${HOME} ${WORK}`,
+      `forget ${WORK} ${HOME}`,
       `removePeer ${HOME} ${WORK}`,
       `removePeer ${WORK} ${HOME}`,
     ]);
@@ -255,14 +271,19 @@ describe("removePair", () => {
       ["Home", `forget ${HOME} ${WORK} failed`],
     ]);
 
-    const unread = pairOf(home(), work({ peers: null, links: null }));
-    const second = recordingOps();
-    await removePair(unread, second.ops);
-    expect(second.calls, "a server that could not be read may still hold its part").toEqual([
-      `forget ${WORK} ${HOME}`,
-      `removePeer ${HOME} ${WORK}`,
-      `removePeer ${WORK} ${HOME}`,
+    // A refusal on a side the row showed no link on is reported too: one may have just been made.
+    const swept = recordingOps([`forget ${WORK} ${HOME}`]);
+    expect((await removePair(pair, swept.ops)).failures.map(({ side }) => side.label)).toEqual([
+      "Work",
     ]);
+  });
+
+  it("revokes the other server's sessions here when this side holds only tools", async () => {
+    // Tools both ways and no messaging, with Work out of this client's reach: "here only".
+    const pair = pairOf(home({ peers: [], links: [link(WORK, "Work")] }));
+    const { calls, ops } = recordingOps();
+    await removePair(pair, ops);
+    expect(calls).toEqual([`forget ${HOME} ${WORK}`, `removePeer ${HOME} ${WORK}`]);
   });
 });
 
