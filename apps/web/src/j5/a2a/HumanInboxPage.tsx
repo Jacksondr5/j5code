@@ -277,7 +277,7 @@ function OpenInboxItem({
   const itemKey = scopedInboxItemKey(item);
   const answerId = `inbox-answer-${encodeURIComponent(itemKey)}`;
   const support = useAnswerAttachmentSupport(item.environmentId);
-  useRestoredAnswerUploads(itemKey, item.environmentId, canAnswer);
+  useRestoredAnswerUploads(itemKey, item.environmentId, canAnswer && closed === undefined);
   const addFiles =
     support === null || closedText !== null || pendingExchangeId !== null
       ? null
