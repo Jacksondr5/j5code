@@ -117,28 +117,39 @@ export function QuestionPanel(props: {
   /** The slot's measured height above the keyboard, this panel included; 0 until measured. */
   readonly overlayHeight: number;
   readonly onFold: () => void;
+  /** Upstream's owned-input focus report, which keeps the slot following the keyboard on Android. */
+  readonly onInputFocusChange: (focused: boolean) => void;
 }) {
   const { questions, maxHeight, composerBottomInset, overlayHeight } = props;
   const { answers } = questions;
   // Pinned on opening, so an ask that arrives sorted ahead never swaps the question being answered.
   const [picked, setPicked] = useState(() => questions.asks[0]?.exchangeId ?? null);
-  const [questionHeight, setQuestionHeight] = useState(0);
+  const [heights, setHeights] = useState({ question: 0, panel: 0 });
+  const measure = (part: keyof typeof heights) => (event: LayoutChangeEvent) => {
+    const height = event.nativeEvent.layout.height;
+    setHeights((current) => (current[part] === height ? current : { ...current, [part]: height }));
+  };
   // The slot's bottom inset hides under the keyboard, which upstream's room doesn't count.
   const { progress: keyboardProgress } = useReanimatedKeyboardAnimation();
-  const measured = overlayHeight > 0 && questionHeight > 0;
+  const measured = overlayHeight > 0 && heights.question > 0 && heights.panel > 0;
   const questionStyle = useAnimatedStyle(
     () => ({
       maxHeight: measured
         ? Math.max(
             QUESTION_MIN_HEIGHT,
-            questionHeight +
-              maxHeight.value +
-              composerBottomInset * (1 + keyboardProgress.value) -
-              overlayHeight,
+            heights.question +
+              Math.min(
+                maxHeight.value +
+                  composerBottomInset * (1 + keyboardProgress.value) -
+                  overlayHeight,
+                // The panel alone never outgrows upstream's room: Android scrolls the slot at that
+                // height, and the overlay then stops measuring what it holds.
+                maxHeight.value - heights.panel,
+              ),
           )
         : QUESTION_MIN_HEIGHT,
     }),
-    [measured, questionHeight, composerBottomInset, overlayHeight],
+    [measured, heights, composerBottomInset, overlayHeight],
   );
   const view = pickShownAsk(questions.asks, picked);
   // Answered, it falls back to the first still open, which is pinned in turn.
@@ -177,7 +188,7 @@ export function QuestionPanel(props: {
     );
 
   return (
-    <View className="px-4 pb-3" testID="adjudication-dock">
+    <View className="px-4 pb-3" testID="adjudication-dock" onLayout={measure("panel")}>
       <J5Card className="gap-2.5">
         <Pressable
           accessibilityRole="button"
@@ -209,10 +220,7 @@ export function QuestionPanel(props: {
           // Hidden, not removed, until the room is measured, so no frame shows it unsized.
           style={[questionStyle, measured ? null : { opacity: 0 }]}
           nestedScrollEnabled
-          onLayout={(event: LayoutChangeEvent) => {
-            const height = event.nativeEvent.layout.height;
-            setQuestionHeight((current) => (current === height ? current : height));
-          }}
+          onLayout={measure("question")}
         >
           <View className="gap-2">
             {markdown(shown.message)}
@@ -248,6 +256,7 @@ export function QuestionPanel(props: {
             canAnswer={shown.sourceReady}
             error={answers.errorFor(shown)}
             onAnswer={() => void answers.answer(shown)}
+            onFocusChange={props.onInputFocusChange}
             footer={footer}
           />
         )}
