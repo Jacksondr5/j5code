@@ -1,9 +1,10 @@
 import { J5_A2A_DELIVERY_MESSAGE_PREFIX } from "@t3tools/client-runtime/j5/user-message";
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
   j5FoldHeader,
+  j5TimelineSenderRef,
   presentJ5QueuedMessage,
   presentJ5TimelineNotice,
   resolveJ5FeedMessage,
@@ -21,6 +22,10 @@ const timeline = (viewerParticipantId: string | null): J5Timeline => ({
   viewerParticipantId,
   labels: new Map(),
   threads: new Map(),
+  pending: new Set(),
+  accessConfirmed: true,
+  narrow: false,
+  threadListLive: true,
   sharedAuthors: new Map(),
 });
 
@@ -278,5 +283,35 @@ describe("j5FoldHeader", () => {
     expect(j5FoldHeader(row, timeline(null), true, row.preview ?? "")).toEqual({
       summary: "Build the timeline.",
     });
+  });
+});
+
+describe("j5TimelineSenderRef", () => {
+  const here = EnvironmentId.make("environment-here");
+  const letter = { ...delivery("agent", askRaw), senderThreadId: "thread-captain" };
+  const sender = (overrides: Partial<J5Timeline>) =>
+    j5TimelineSenderRef(letter, resolveJ5FeedMessage(letter, timeline(null)).j5, {
+      ...timeline(null),
+      ...overrides,
+    });
+
+  it("gives a narrower person only the sender thread the server named for them", () => {
+    // After a re-pair the thread list can still hold the last person's Captain thread.
+    expect(sender({ narrow: true })).toBeNull();
+    const named = { environmentId: here, threadId: ThreadId.make("thread-named") };
+    expect(sender({ narrow: true, threads: new Map([["agent:captain", named]]) })).toEqual(named);
+    expect(sender({})).toEqual({ environmentId: here, threadId: "thread-captain" });
+  });
+
+  it("names no sender thread until the server says who the new person is", () => {
+    expect(sender({ accessConfirmed: false })).toBeNull();
+  });
+
+  it("links a narrower person's sender only once the thread list was read for them", () => {
+    const named = { environmentId: here, threadId: ThreadId.make("thread-captain") };
+    const threads = new Map([["agent:captain", named]]);
+    // Re-paired as a Viewer, the list still holds the Owner's threads while it resyncs.
+    expect(sender({ narrow: true, threads, threadListLive: false })).toBeNull();
+    expect(sender({ narrow: true, threads, threadListLive: true })).toEqual(named);
   });
 });

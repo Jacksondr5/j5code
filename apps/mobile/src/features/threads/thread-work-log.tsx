@@ -59,7 +59,7 @@ import { useMarkdownCodeHighlight } from "./markdownCodeHighlightState";
 
 import { AppText as Text } from "../../components/ui/AppText";
 import { J5Wordmark } from "../../j5/branding/J5Wordmark";
-import { PromptAnsweredBy } from "../../j5/sharing/sharedConversation";
+import { answeredByFollowsLabel, PromptAnsweredBy } from "../../j5/sharing/sharedConversation";
 import { BrowserAppIcon } from "./BrowserAppIcon";
 import { useAppActive, useReduceMotionEnabled } from "../../lib/appState";
 import { cn } from "../../lib/cn";
@@ -1158,6 +1158,7 @@ const ThreadWorkLogRow = function ThreadWorkLogRow(
             </WorkLogIconSlot>
             <WorkLogLabel
               tone={isUsageLimit ? "warning" : iconIsDestructive ? "danger" : "default"}
+              fitText={answeredByFollowsLabel(row.projectedItem.item, answered)}
             >
               {historyHasQuestion && expanded ? null : displayText}
               {answerPreview && !answered ? (

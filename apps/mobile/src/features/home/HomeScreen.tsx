@@ -51,6 +51,7 @@ import { useThreadSearch } from "../../state/queries";
 import { requestThreadMessageJump } from "../threads/threadMessageJump";
 import { useThreadListSearchMatches } from "../threads/useThreadListSearchMatches";
 import { useThreadListV2 } from "../threads/useThreadListV2";
+import { connectingWorkspace, useCrewListWaiting } from "../../j5/crew/spawnedChildren";
 import { useThreadListNow } from "../threads/use-thread-list-now";
 import { useSearchScrollRestoration } from "../workspace/useSearchScrollRestoration";
 import { useThreadJumpShortcuts } from "../keyboard/threadKeyboardShortcuts";
@@ -652,8 +653,10 @@ export function HomeScreen(props: HomeScreenProps) {
     workingShelfEnabled,
   };
 
+  // J5 (case 115): threads waiting for their first spawned-children answer are still loading.
+  const j5ListWaiting = useCrewListWaiting(props.threads);
   const hasAnyThreads =
-    props.threads.some((thread) => thread.archivedAt === null) ||
+    (!j5ListWaiting && props.threads.some((thread) => thread.archivedAt === null)) ||
     props.pendingTasks.length > 0 ||
     threadListV2Layout.settledCount > 0;
   const selectedEnvironmentLabel =
@@ -662,7 +665,7 @@ export function HomeScreen(props: HomeScreenProps) {
       : (props.savedConnectionsById[props.selectedEnvironmentId]?.environmentLabel ??
         "this environment");
   const emptyState = deriveEmptyState({
-    catalogState: props.catalogState,
+    catalogState: j5ListWaiting ? connectingWorkspace(props.catalogState) : props.catalogState,
     projectCount: props.projects.length,
   });
 
