@@ -39,11 +39,9 @@ import { LocalEnvironmentSetting } from "./LocalEnvironmentSetting";
 import { searchableSetting } from "./settingsSearch";
 import { EnvironmentIconMenu } from "./EnvironmentIconPicker";
 import { FoldedSettingsSection } from "./FoldedSettingsSection";
-import { LinkedEnvironmentsSettings } from "./LinkedEnvironmentsSettings";
-import { usePeerLinkHosts } from "~/state/peerLinks";
 import { LoadBalancingSettings } from "./LoadBalancingSettings";
 import { PullRequestRoutingSettings } from "./PullRequestRoutingSettings";
-import { PeerServersSettings } from "../../j5/peering/PeerServersSettings";
+import { LinkedEnvironmentsSection } from "../../j5/links/LinkedEnvironmentsSection";
 import { Input } from "../ui/input";
 import {
   Dialog,
@@ -160,7 +158,6 @@ export function ConnectionsSettings({ view }: { readonly view: "environments" | 
   const desktopBridge = window.desktopBridge;
   const { environments } = useEnvironments();
   const primaryEnvironment = usePrimaryEnvironment();
-  const peerLinkHosts = usePeerLinkHosts();
   const removeEnvironment = useAtomCommand(environmentCatalog.remove, { reportFailure: false });
   const setEnvironmentEnabled = useAtomCommand(environmentCatalog.setEnabled, {
     reportFailure: false,
@@ -1549,18 +1546,10 @@ export function ConnectionsSettings({ view }: { readonly view: "environments" | 
           }}
         />
       ) : null}
-      {peerLinkHosts.map((environment, index) => (
-        <LinkedEnvironmentsSettings
-          key={environment.environmentId}
-          environmentId={environment.environmentId}
-          environmentLabel={peerLinkHosts.length > 1 ? environment.label : null}
-          isSearchTarget={index === 0}
-        />
-      ))}
+      {/* J5: one section for upstream's links and J5's peering (FORK.md case 122). */}
+      <LinkedEnvironmentsSection primaryEnvironmentId={primaryEnvironmentId} />
       <LoadBalancingSettings environments={loadBalancingEnvironments} />
       <PullRequestRoutingSettings environments={loadBalancingEnvironments} />
-      {/* J5: peering between any two environments the client is connected to and manages. */}
-      <PeerServersSettings primaryEnvironmentId={primaryEnvironmentId} />
     </SettingsPageContainer>
   );
 }

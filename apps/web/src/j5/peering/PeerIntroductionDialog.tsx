@@ -75,6 +75,7 @@ export function PeerIntroductionDialog({
   onOpenChange,
   servers,
   defaultServerId,
+  defaultOtherId = null,
   onPeered,
 }: {
   readonly open: boolean;
@@ -82,12 +83,14 @@ export function PeerIntroductionDialog({
   /** The connected servers this client manages, any of which can be the first of the pair. */
   readonly servers: ReadonlyArray<EnvironmentId>;
   readonly defaultServerId: EnvironmentId;
+  /** The server to pair it with, when the dialog is opened for a pair that already exists. */
+  readonly defaultOtherId?: EnvironmentId | null;
   readonly onPeered: (first: EnvironmentId, second: EnvironmentId) => void;
 }) {
   const { environments } = useEnvironments();
   const [thisServerId, setThisServerId] = useState(defaultServerId);
   const thisServer = useEnvironment(thisServerId);
-  const [otherId, setOtherId] = useState<EnvironmentId | null>(null);
+  const [otherId, setOtherId] = useState<EnvironmentId | null>(defaultOtherId);
   const thisServerBaseUrl = useEnvironmentHttpBaseUrl(thisServerId);
   const otherBaseUrl = useEnvironmentHttpBaseUrl(otherId);
   const otherCanWriteAccess = useAtomValue(j5Environment.addPeer.permissionAtom(otherId));
