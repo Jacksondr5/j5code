@@ -120,6 +120,8 @@ function OpenLinkRequestDialog(props: {
     selected.blocked === null &&
     selected.support === "full" &&
     !selected.messaging &&
+    // A half-recorded pair is refused below, so it is shown no route to change.
+    selected.clearLeftover === null &&
     state !== "existing";
   const checks = usePairChecks(local, needsMessaging ? [selected.server] : []);
   const route =

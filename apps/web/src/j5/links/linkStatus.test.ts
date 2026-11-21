@@ -80,7 +80,7 @@ it("reports a server that ended messaging, and one that holds no record, as prob
     { environmentId: WORK, label: "Work", peers: [], links: [] },
   ])[0]!;
   const status = messagesStatusOf(ended, NOW)!;
-  expect(status.travel).toBe("Sent directly both ways");
+  expect(status.travel).toBe("Not travelling: only Laptop records Work");
   expect(status.problems).toEqual([
     "Work ended messaging with Laptop. Remove the link, then link them again.",
     "Work holds no record of Laptop",

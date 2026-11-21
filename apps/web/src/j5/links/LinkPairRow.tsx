@@ -1,7 +1,7 @@
 import { peerLinkHealth } from "@t3tools/client-runtime/state/peerLinks";
 import type { EnvironmentId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
-import { EllipsisIcon, PencilIcon, RefreshCwIcon } from "lucide-react";
+import { EllipsisIcon, PencilIcon, RefreshCwIcon, Trash2Icon } from "lucide-react";
 import { useState, type ReactNode } from "react";
 
 import { ConnectionStatusDot } from "../../components/ConnectionStatusDot";
@@ -302,6 +302,10 @@ export function LinkPairRow({
           (side) => factsOf(side.environmentId)?.linkedEnvironmentsEnabled === false,
         );
   const paused = pair.sides.some((side) => pausedBy(side).length > 0);
+  // A server this app has lost, or a link whose server does not answer: not healthy, not broken.
+  const absent =
+    pair.sides.some((side) => awayOf(side.environmentId)) ||
+    health.some((each) => each?.kind === "unreachable");
   const missingMessaging = pair.sides.find(
     (side) => factsOf(side.environmentId)?.supportsMessaging === false,
   );
@@ -318,13 +322,14 @@ export function LinkPairRow({
             tooltipText={
               messaging?.problems[0] ??
               (paused ? "Tools are paused: Linked environments is off" : null) ??
+              (absent ? "A server isn't answering right now" : null) ??
               expiryLine ??
               (messaging === null ? "Messaging isn't set up" : "Linked")
             }
             dotClassName={
               wrong
                 ? "bg-destructive"
-                : renewDue || messaging === null || paused
+                : renewDue || messaging === null || paused || absent
                   ? "bg-warning"
                   : "bg-success"
             }
@@ -386,6 +391,7 @@ export function LinkPairRow({
                 disabled={removableSides(pair).length === 0}
                 onClick={() => void remove()}
               >
+                <Trash2Icon />
                 {removing ? "Removing…" : "Remove…"}
               </MenuItem>
             </MenuPopup>
@@ -419,7 +425,7 @@ export function LinkPairRow({
             )}
           </dd>
 
-          <dt className="pt-1 text-muted-foreground">Tools</dt>
+          <dt className="pt-1.5 text-muted-foreground">Tools</dt>
           <dd className="flex min-w-0 flex-col gap-2">
             {shown.map((holder, index) => {
               const other = otherSideOf(pair, holder);
@@ -433,16 +439,18 @@ export function LinkPairRow({
                       <span className="font-medium">{holder.label}</span>'s agents on{" "}
                       <span className="font-medium">{other.label}</span>
                     </span>
-                    {readable ? (
-                      <ToolsLevelPicker
-                        value={toolsLevelOf(holder)}
-                        holder={holder.label}
-                        other={other.label}
-                        disabled={busy || state.busy}
-                        onlyOff={!other.managed}
-                        onChange={(level) => void changeLevel(holder, level)}
-                      />
-                    ) : null}
+                    <ToolsLevelPicker
+                      value={toolsLevelOf(holder)}
+                      holder={holder.label}
+                      other={other.label}
+                      unknown={!readable}
+                      // Off is all that can be chosen without the other server, so Off has no choice left.
+                      disabled={
+                        busy || state.busy || (!other.managed && toolsLevelOf(holder) === "off")
+                      }
+                      onlyOff={!other.managed}
+                      onChange={(level) => void changeLevel(holder, level)}
+                    />
                   </div>
                   {!holder.managed ? (
                     <Detail>
@@ -453,8 +461,11 @@ export function LinkPairRow({
                     <Detail>Couldn't read {holder.label}'s links.</Detail>
                   ) : !other.managed ? (
                     <Detail>
-                      {unmanagedReason(other.label, awayOf(other.environmentId))}, so it can't{" "}
-                      {toolsLevelOf(holder) === "off" ? "turn this on" : "change or renew this"}.
+                      {unmanagedReason(other.label, awayOf(other.environmentId))}, so this{" "}
+                      {toolsLevelOf(holder) === "off"
+                        ? "can't be turned on"
+                        : "can only be turned off"}
+                      .
                     </Detail>
                   ) : null}
                   {pausedBy(holder).length > 0 ? (
