@@ -58,7 +58,7 @@ const render = () => (
     composerBottomInset={20}
     popoverHeight={{ value: 0 } as never}
     slot={{ overlayHeight: 0, setHidesComposer: () => undefined }}
-    onInputFocusChange={() => undefined}
+    onAnswerFocusChange={() => undefined}
   />
 );
 const carousel = () => renderer.root.findByType("AttentionCarousel" as never);
