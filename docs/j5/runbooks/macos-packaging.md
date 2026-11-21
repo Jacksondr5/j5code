@@ -85,9 +85,11 @@ The next nightly counts up from `x.y.z` (after `0.0.52`, `0.0.53-nightly.*`) whe
 pull request has merged: `J5 Nightly` reads the latest stable release as well as the committed
 version.
 
-If the release was published but a later step failed, use **Re-run all jobs**. The run sees the
-release is published, skips the builds, and pushes the bump branch. **Re-run failed jobs** stops at
-"already published" instead.
+If only the bump job failed, use **Re-run failed jobs**. If the release was published but another
+job failed, dispatch J5 Stable again with `-f nightly=<tag>`, using the tag named in the failed
+run's summary: the run sees the release is published, skips the builds, and pushes the bump branch.
+Don't use **Re-run all jobs** on a run started without `nightly`: it picks the newest nightly
+again, which may be a newer one.
 
 If publishing the draft fails, for example because GitHub refuses to let the Actions token tag an
 older commit, publish it by hand. First check that no newer stable release exists, since `--latest`

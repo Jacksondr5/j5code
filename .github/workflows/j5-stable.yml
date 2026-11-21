@@ -62,8 +62,9 @@ jobs:
           fi
           tag="$NIGHTLY"
           if [[ -z "$tag" ]]; then
-            tag="$(gh api "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
-              --jq '[.[] | select(.draft | not) | select(.tag_name | test("-nightly\\."))] | sort_by(.published_at) | last | .tag_name // empty')"
+            tag="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+              --jq '.[] | select(.draft | not) | select(.tag_name | test("-nightly\\.")) | [.published_at, .tag_name] | @tsv' \
+              | sort | tail -n 1 | cut -f 2)"
             if [[ -z "$tag" ]]; then
               echo "::error::No published nightly found. Run J5 Nightly first."
               exit 1
@@ -82,14 +83,14 @@ jobs:
           fi
           ref="$(gh api "repos/$GITHUB_REPOSITORY/commits/$tag" --jq '.sha')"
           # Fail before the signed builds when this version is already released from another commit.
-          # A missing tag is HTTP 422 (or 404); any other error stops the run.
+          # A missing tag is HTTP 404, or 422 "No commit found"; any other error stops the run.
           if taken="$(gh api "repos/$GITHUB_REPOSITORY/commits/v$version" --jq '.sha' 2>"$RUNNER_TEMP/taken.err")"; then
             if [[ "$taken" != "$ref" ]]; then
               echo "::error::v$version is already released from $taken, not $tag ($ref). Promote a newer nightly."
               exit 1
             fi
           else
-            grep -qE 'HTTP (404|422)' "$RUNNER_TEMP/taken.err" || { cat "$RUNNER_TEMP/taken.err" >&2; exit 1; }
+            grep -qE 'HTTP 404|No commit found' "$RUNNER_TEMP/taken.err" || { cat "$RUNNER_TEMP/taken.err" >&2; exit 1; }
           fi
           # Published as latest, an older version would be offered to every install as a downgrade.
           # A 404 means no stable release yet; any other error stops the run.
@@ -105,6 +106,7 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
           echo "::notice::Promoting $tag ($ref) to J5 Code $version$([[ "$DRY_RUN" == true ]] && echo ' as a draft')."
+          echo "Promoting \`$tag\` (\`$ref\`) to J5 Code $version. To finish a failed run, dispatch J5 Stable again with \`-f nightly=$tag\`." >> "$GITHUB_STEP_SUMMARY"
 
   release:
     name: Release

@@ -186,7 +186,7 @@ jobs:
                 ({ data: { sha: tagSha } } = await github.rest.repos.getCommit({ ...context.repo, ref: tag }));
               } catch (error) {
                 // A draft release may not have created its tag yet.
-                if (error.status !== 404 && error.status !== 422) throw error;
+                if (error.status !== 404 && !(error.status === 422 && /No commit found/.test(error.message))) throw error;
               }
               if (tagSha !== null && tagSha !== sha) {
                 throw new Error(`Release ${tag} already exists at ${tagSha}, but this build is ${sha}. Bump the version before releasing.`);
@@ -603,14 +603,14 @@ jobs:
         run: |
           set -euo pipefail
           tag="v$RELEASE_VERSION"
-          # Prints the tag's commit, or nothing when the tag does not exist (HTTP 422, or 404).
+          # Prints the tag's commit, or nothing when the tag does not exist (HTTP 404, or 422 "No commit found").
           # Any other error, such as a 403, stops the run.
           tag_commit() {
             local sha
             if sha="$(gh api "repos/$GH_REPO/commits/$tag" --jq .sha 2>"$RUNNER_TEMP/tag.err")"; then
               echo "$sha"
             else
-              grep -qE 'HTTP (404|422)' "$RUNNER_TEMP/tag.err" || { cat "$RUNNER_TEMP/tag.err" >&2; return 1; }
+              grep -qE 'HTTP 404|No commit found' "$RUNNER_TEMP/tag.err" || { cat "$RUNNER_TEMP/tag.err" >&2; return 1; }
             fi
           }
           tag_sha="$(tag_commit)"
@@ -620,10 +620,13 @@ jobs:
           fi
           # A draft has no tag yet, so a draft a failed run left for another commit
           # passes the check above; publishing into it would mislabel this build.
-          if target="$(gh release view "$tag" --json targetCommitish --jq .targetCommitish 2>/dev/null)" \
-            && [[ "$target" != "$RELEASE_SHA" ]]; then
-            echo "::error::A release for $tag already targets $target, not $RELEASE_SHA. Delete that draft, or promote a newer nightly."
-            exit 1
+          if target="$(gh release view "$tag" --json targetCommitish --jq .targetCommitish 2>"$RUNNER_TEMP/view.err")"; then
+            if [[ "$target" != "$RELEASE_SHA" ]]; then
+              echo "::error::A release for $tag already targets $target, not $RELEASE_SHA. Delete that draft, or promote a newer nightly."
+              exit 1
+            fi
+          else
+            grep -q 'release not found' "$RUNNER_TEMP/view.err" || { cat "$RUNNER_TEMP/view.err" >&2; exit 1; }
           fi
           if ! gh release view "$tag" >/dev/null 2>&1; then
             if [[ "$RELEASE_CHANNEL" == nightly ]]; then
@@ -685,7 +688,7 @@ jobs:
           fi
           # A re-run job reuses the resolve job's outputs, so read the release as it is now.
           if [[ "$(gh release view "$tag" --json isDraft --jq .isDraft)" != true ]]; then
-            echo "::error::$tag is already published; this run leaves it unchanged. If a later job failed, use \"Re-run all jobs\": it skips the builds and runs only what is left."
+            echo "::error::$tag is already published; this run leaves it unchanged. If a later job failed, dispatch the caller again with the same version (J5 Stable: -f nightly=<the tag in its summary>); it skips the builds and runs only what is left."
             exit 1
           fi
           gh release upload "$tag" release-assets/* --clobber
