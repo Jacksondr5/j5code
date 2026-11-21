@@ -83,6 +83,8 @@ export function AttentionCarousel(props: {
         decelerationRate="fast"
         disableIntervalMomentum
         onMomentumScrollEnd={settle}
+        // A card added ahead widens the row after the scroll above, which the old width clamped.
+        onContentSizeChange={() => scroll.current?.scrollTo({ x: offset, animated: false })}
         contentContainerStyle={{ paddingHorizontal: CAROUSEL_INSET, gap: CAROUSEL_GAP }}
       >
         {width === 0 ? null : (
