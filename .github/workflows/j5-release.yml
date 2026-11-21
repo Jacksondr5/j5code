@@ -620,7 +620,9 @@ jobs:
           fi
           # A draft has no tag yet, so a draft a failed run left for another commit
           # passes the check above; publishing into it would mislabel this build.
+          release_exists=false
           if target="$(gh release view "$tag" --json targetCommitish --jq .targetCommitish 2>"$RUNNER_TEMP/view.err")"; then
+            release_exists=true
             if [[ "$target" != "$RELEASE_SHA" ]]; then
               echo "::error::A release for $tag already targets $target, not $RELEASE_SHA. Delete that draft, or promote a newer nightly."
               exit 1
@@ -628,7 +630,7 @@ jobs:
           else
             grep -q 'release not found' "$RUNNER_TEMP/view.err" || { cat "$RUNNER_TEMP/view.err" >&2; exit 1; }
           fi
-          if ! gh release view "$tag" >/dev/null 2>&1; then
+          if [[ "$release_exists" != true ]]; then
             if [[ "$RELEASE_CHANNEL" == nightly ]]; then
               cat > "$RUNNER_TEMP/release-notes.md" <<EOF
           J5 Code $RELEASE_VERSION (nightly)

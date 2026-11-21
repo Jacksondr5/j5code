@@ -134,7 +134,8 @@ jobs:
   version_bump:
     name: Push the version bump for j5/main
     needs: [resolve, release]
-    if: inputs.dry_run != true
+    # Explicit, because a re-dispatch whose release jobs all skip can skip this job under the implicit success().
+    if: ${{ !cancelled() && !failure() && needs.resolve.result == 'success' && inputs.dry_run != true }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
