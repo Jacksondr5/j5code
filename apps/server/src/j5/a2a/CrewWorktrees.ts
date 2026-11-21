@@ -489,8 +489,8 @@ const makeLayer = (daemon: boolean) =>
       });
 
       /**
-       * Merged into the project's default branch as last fetched, or named by a merged pull
-       * request as exactly this commit, which is how a squash or rebase merge shows.
+       * Merged into the project's default branch as last fetched, by commit or by content, or
+       * named by a merged pull request as exactly this commit.
        */
       const mergeKeepReason = Effect.fnUntraced(function* (input: {
         readonly worktreePath: string;
@@ -524,6 +524,22 @@ const makeLayer = (daemon: boolean) =>
         });
         if (ancestor.exitCode === 0) return null;
         if (ancestor.exitCode !== 1) return "unverified" as const;
+        // A squash merge leaves HEAD off the default branch, but merging it in changes nothing.
+        const [merged, baseTree] = yield* Effect.all([
+          git.execute({
+            operation: "CrewWorktrees.contentMerged",
+            cwd: input.worktreePath,
+            args: ["merge-tree", "--write-tree", base.commitSha, head.commitSha],
+            allowNonZeroExit: true,
+          }),
+          git.execute({
+            operation: "CrewWorktrees.baseTree",
+            cwd: input.worktreePath,
+            args: ["rev-parse", `${base.commitSha}^{tree}`],
+          }),
+        ]);
+        if (merged.exitCode === 0 && merged.stdout.split("\n", 1)[0] === baseTree.stdout.trim())
+          return null;
         if (input.branch === null) return "unmerged_commits" as const;
         const pullRequest = yield* gitManager.branchPullRequest(
           { cwd: input.worktreePath, branch: input.branch },
