@@ -489,8 +489,8 @@ const makeLayer = (daemon: boolean) =>
       });
 
       /**
-       * Merged into the project's default branch as last fetched, by commit or by content, or
-       * named by a merged pull request as exactly this commit.
+       * Merged into the project's default branch as last fetched, by commit or, while a branch or
+       * tag holds the commit, by content, or named by a merged pull request as exactly this commit.
        */
       const mergeKeepReason = Effect.fnUntraced(function* (input: {
         readonly worktreePath: string;
@@ -536,10 +536,37 @@ const makeLayer = (daemon: boolean) =>
             operation: "CrewWorktrees.baseTree",
             cwd: input.worktreePath,
             args: ["rev-parse", `${base.commitSha}^{tree}`],
+            allowNonZeroExit: true,
           }),
         ]);
-        if (merged.exitCode === 0 && merged.stdout.split("\n", 1)[0] === baseTree.stdout.trim())
-          return null;
+        // merge-tree exits 1 on a conflict; above that, git refused (before 2.38, or shallow history).
+        if (merged.exitCode > 1 || baseTree.exitCode !== 0)
+          yield* Effect.logDebug("J5 Crew worktree content check could not run", {
+            worktreePath: input.worktreePath,
+            mergeTree: merged.exitCode > 1 ? merged.stderr : undefined,
+            revParse: baseTree.exitCode !== 0 ? baseTree.stderr : undefined,
+          });
+        if (
+          merged.exitCode === 0 &&
+          baseTree.exitCode === 0 &&
+          merged.stdout.split("\n", 1)[0] === baseTree.stdout.trim()
+        ) {
+          // The worktree's HEAD goes with it, so a commit no branch or tag holds would be lost.
+          const holders = yield* git.execute({
+            operation: "CrewWorktrees.headHeld",
+            cwd: input.worktreePath,
+            args: [
+              "for-each-ref",
+              "--count=1",
+              "--contains",
+              head.commitSha,
+              "refs/heads",
+              "refs/tags",
+            ],
+            allowNonZeroExit: true,
+          });
+          if (holders.exitCode === 0 && holders.stdout.trim() !== "") return null;
+        }
         if (input.branch === null) return "unmerged_commits" as const;
         const pullRequest = yield* gitManager.branchPullRequest(
           { cwd: input.worktreePath, branch: input.branch },

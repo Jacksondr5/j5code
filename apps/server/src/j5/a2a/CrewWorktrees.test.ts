@@ -456,6 +456,23 @@ it.effect(
         yield* f.run(beyond.worktree, ["reset", "--hard", head]);
         yield* f.fs.writeFileString(f.path.join(beyond.worktree, "tracked.txt"), "more\n");
         yield* f.run(beyond.worktree, ["commit", "-am", "after the merge"]);
+        // Detached commits no branch holds, whose merge changes nothing: one the merge driver
+        // discards, and an edit and its revert.
+        const ours = yield* f.seat("ours");
+        const reverted = yield* f.seat("reverted");
+        yield* f.run(f.repo, ["config", "merge.ours.driver", "true"]);
+        yield* f.fs.writeFileString(
+          f.path.join(f.repo, ".git", "info", "attributes"),
+          "other.txt merge=ours\n",
+        );
+        yield* f.run(ours.worktree, ["checkout", "--detach"]);
+        yield* f.fs.writeFileString(f.path.join(ours.worktree, "other.txt"), "unique\n");
+        yield* f.run(ours.worktree, ["add", "other.txt"]);
+        yield* f.run(ours.worktree, ["commit", "-m", "unique"]);
+        yield* f.run(reverted.worktree, ["checkout", "--detach"]);
+        yield* f.fs.writeFileString(f.path.join(reverted.worktree, "tracked.txt"), "brief\n");
+        yield* f.run(reverted.worktree, ["commit", "-am", "edit"]);
+        yield* f.run(reverted.worktree, ["revert", "--no-edit", "HEAD"]);
         // The default branch moved on, then took the work as one squash commit.
         yield* f.fs.writeFileString(f.path.join(f.repo, "other.txt"), "other\n");
         yield* f.run(f.repo, ["add", "other.txt"]);
@@ -464,16 +481,20 @@ it.effect(
         yield* f.run(f.repo, ["commit", "-m", "work (#1)"]);
         yield* f.run(f.repo, ["push", "origin", "main"]);
         // The host names no pull request, as in a fork checkout whose lookup reads upstream's repository.
-        const result = yield* cleanup(f, [builder, tester, beyond]);
+        const result = yield* cleanup(f, [builder, tester, beyond, ours, reverted]);
         assert.deepStrictEqual(
           result.map((entry) => [entry.outcome, entry.reason]),
           [
             ["removed", null],
             ["removed", null],
             ["kept", "unmerged_commits"],
+            ["kept", "unverified"],
+            ["kept", "unverified"],
           ],
         );
         assert.isTrue(yield* f.fs.exists(beyond.worktree));
+        assert.isTrue(yield* f.fs.exists(ours.worktree));
+        assert.isTrue(yield* f.fs.exists(reverted.worktree));
       }),
     ),
 );
