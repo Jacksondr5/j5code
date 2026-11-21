@@ -7,6 +7,7 @@ import { credentialMissingError } from "@t3tools/client-runtime/connection";
 import {
   answeredSince,
   answerOnItsWay,
+  createCredentialTickets,
   credentialKey,
   crewListedThreads,
   crewListWaiting,
@@ -224,6 +225,25 @@ describe("credentialKey", () => {
     // Re-pairing stores another token: the last person's names go at once.
     const repaired = observeCredential(named, server, credentialKey(prepared("viewer-token")));
     expect(repaired.get(server)?.names.labels.size).toBe(0);
+  });
+});
+
+describe("createCredentialTickets", () => {
+  it("refuses a read that set out under the last person, even when a late report brings their key back", () => {
+    const tickets = createCredentialTickets();
+    expect(tickets.move(server, owner)).toBeUndefined();
+    // The Owner's name read sets out.
+    const ownerRead = tickets.current(server)!;
+    // The re-pair's stored token moves the server to the Viewer.
+    expect(tickets.move(server, viewer)?.key).toBe(owner);
+    // The old connection's late report names the Owner's credential again.
+    expect(tickets.move(server, owner)?.key).toBe(viewer);
+    // The Owner's read answers now: it is not taken, though the key matches.
+    expect(tickets.isCurrent(server, ownerRead)).toBe(false);
+    // A reconnect on the same credential issues nothing new, so a read in flight still lands.
+    const current = tickets.current(server)!;
+    expect(tickets.move(server, owner)).toBeNull();
+    expect(tickets.isCurrent(server, current)).toBe(true);
   });
 });
 

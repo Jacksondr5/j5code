@@ -26,7 +26,7 @@ import { j5Environment } from "../state";
 
 const store = createScopedThreadReadStore<SpawnedChildrenRow, SpawnedChildrenRowEntry>({
   load: async (environmentId, threadIds) => {
-    const credential = connectionMemory.credentialOf(environmentId);
+    const ticket = connectionMemory.ticketOf(environmentId);
     const result = await j5Environment.listSpawnedChildren.run(appAtomRegistry, {
       environmentId,
       input: { threadIds },
@@ -35,10 +35,10 @@ const store = createScopedThreadReadStore<SpawnedChildrenRow, SpawnedChildrenRow
       connectionMemory.spawnedReadFailed(environmentId);
       throw Cause.squash(result.cause);
     }
-    if (credential !== null)
+    if (ticket !== null)
       connectionMemory.rememberSpawned(
         environmentId,
-        credential,
+        ticket,
         threadIds,
         result.value.spawnedByAgent,
       );

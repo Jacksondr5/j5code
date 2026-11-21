@@ -25,6 +25,7 @@ import { j5Environment } from "../state";
 import {
   answeredSince,
   answerOnItsWay,
+  createCredentialTickets,
   credentialKey,
   decodeMemory,
   encodeMemory,
@@ -34,6 +35,7 @@ import {
   retainSpawned,
   settleNames,
   type ConnectionMemory,
+  type CredentialTicket,
   type SettledNames,
 } from "./memory.logic";
 
@@ -53,7 +55,8 @@ const loadSaved = (): ConnectionMemory => {
   try {
     const saved = file();
     return decodeMemory(saved.exists ? saved.textSync() : null);
-  } catch {
+  } catch (cause) {
+    console.warn("J5 could not read its saved connection memory", cause);
     return decodeMemory(null);
   }
 };
@@ -66,8 +69,7 @@ const namesOf = (memory: ConnectionMemory) =>
 let state: MemoryState = { memory: loadSaved(), settled: new Map(), failedReads: new Set() };
 let snapshot: MemorySnapshot = { ...state, names: namesOf(state.memory) };
 const listeners = new Set<() => void>();
-/** The credential each server's connection uses this launch. */
-const credentials = new Map<EnvironmentId, string>();
+const tickets = createCredentialTickets();
 /** The threads each server's lists asked about this launch; the saved file keeps only those. */
 const asked = new Map<EnvironmentId, Set<ThreadId>>();
 const namesInFlight = new Map<EnvironmentId, Set<string>>();
@@ -82,7 +84,9 @@ const scheduleSave = () => {
     const saved = new Set(appAtomRegistry.get(environmentCatalog.catalogValueAtom).entries.keys());
     const memory = new Map([...state.memory].filter(([id]) => saved.has(id)));
     const contents = encodeMemory(retainSpawned(memory, asked));
-    writing = writing.then(() => writeFileAtomically(file(), contents)).catch(() => undefined);
+    writing = writing
+      .then(() => writeFileAtomically(file(), contents))
+      .catch((cause) => console.warn("J5 could not save its connection memory", cause));
   }, 500);
 };
 
@@ -135,9 +139,8 @@ const awaitNewAccess = (environmentIds: ReadonlyArray<EnvironmentId>) => {
 
 /** A server moves to a credential; a different one is another person, who starts with nothing. */
 const applyCredential = (environmentId: EnvironmentId, key: string) => {
-  const previous = credentials.get(environmentId);
-  if (previous === key) return;
-  credentials.set(environmentId, key);
+  const previous = tickets.move(environmentId, key);
+  if (previous === null) return;
   const memory = observeCredential(state.memory, environmentId, key);
   if (previous === undefined) {
     if (memory !== state.memory) publish({ memory });
@@ -238,19 +241,21 @@ export const connectionMemory = {
     };
   },
   getSnapshot: () => snapshot,
-  credentialOf: (environmentId: EnvironmentId) => credentials.get(environmentId) ?? null,
+  /** The ticket a read carries out and hands back with its answer. */
+  ticketOf: (environmentId: EnvironmentId) => tickets.current(environmentId),
 
   rememberSpawned: (
     environmentId: EnvironmentId,
-    credential: string,
+    ticket: CredentialTicket,
     requested: ReadonlyArray<ThreadId>,
     spawnedByAgent: ReadonlyArray<ThreadId>,
   ) => {
+    if (!tickets.isCurrent(environmentId, ticket)) return;
     const listed = asked.get(environmentId) ?? new Set();
     for (const threadId of requested) listed.add(threadId);
     asked.set(environmentId, listed);
     publish({
-      memory: rememberSpawned(state.memory, environmentId, credential, requested, spawnedByAgent),
+      memory: rememberSpawned(state.memory, environmentId, ticket.key, requested, spawnedByAgent),
       failedReads: new Set([...state.failedReads].filter((id) => id !== environmentId)),
     });
   },
@@ -265,8 +270,8 @@ export const connectionMemory = {
    * change after a spawn. The remembered names stay shown meanwhile.
    */
   readNames: async (environmentId: EnvironmentId, participantIds: ReadonlyArray<string>) => {
-    const credential = credentials.get(environmentId);
-    if (credential === undefined) return;
+    const ticket = tickets.current(environmentId);
+    if (ticket === null) return;
     const inFlight = namesInFlight.get(environmentId) ?? new Set<string>();
     const ids = [...new Set(participantIds)].filter((id) => !inFlight.has(id));
     if (ids.length === 0) return;
@@ -277,7 +282,7 @@ export const connectionMemory = {
         environmentId,
         input: { participantIds: ids },
       });
-      if (credentials.get(environmentId) !== credential) return;
+      if (!tickets.isCurrent(environmentId, ticket)) return;
       // A failed read still settles, so its senders fall back to a stand-in until the next one.
       const settled = settleNames(state.settled, environmentId, ids);
       if (result._tag === "Failure") return publish({ settled });
@@ -285,7 +290,7 @@ export const connectionMemory = {
         memory: rememberIdentities(
           state.memory,
           environmentId,
-          credential,
+          ticket.key,
           ids,
           participantIdentitiesFromResponse(environmentId, result.value),
         ),

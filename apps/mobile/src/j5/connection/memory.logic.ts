@@ -283,3 +283,28 @@ export function crewListWaiting(
       memory.get(thread.environmentId)?.spawned.get(thread.id) === undefined,
   );
 }
+
+/** One server's credential as a read saw it when it set out. */
+export interface CredentialTicket {
+  readonly key: string;
+}
+
+/**
+ * The credential each server uses this launch. Every change issues a new ticket, so a read that
+ * set out under an earlier one is refused even when a late report brings the same key back.
+ */
+export function createCredentialTickets() {
+  const tickets = new Map<EnvironmentId, CredentialTicket>();
+  return {
+    current: (environmentId: EnvironmentId) => tickets.get(environmentId) ?? null,
+    /** The previous ticket when the key changed, `undefined` when it is the first, null when unchanged. */
+    move: (environmentId: EnvironmentId, key: string): CredentialTicket | undefined | null => {
+      const previous = tickets.get(environmentId);
+      if (previous?.key === key) return null;
+      tickets.set(environmentId, { key });
+      return previous;
+    },
+    isCurrent: (environmentId: EnvironmentId, ticket: CredentialTicket) =>
+      tickets.get(environmentId) === ticket,
+  };
+}
