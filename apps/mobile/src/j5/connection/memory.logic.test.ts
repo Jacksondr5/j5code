@@ -35,6 +35,7 @@ const titles = (threads: ReadonlyArray<{ readonly id: ThreadId }>) =>
   threads.map((thread) => thread.id);
 const answering = new Set([server]);
 const nobodyAnswering = new Set<EnvironmentId>();
+const noneNarrow = new Set<EnvironmentId>();
 
 /** What a launch remembers after one spawned-children read answered for these threads. */
 const heard = (spawned: ReadonlyArray<string>, notSpawned: ReadonlyArray<string>) =>
@@ -51,7 +52,7 @@ describe("crewListedThreads", () => {
     const saved = encodeMemory(heard(["seat", "peer"], ["captain", "human"]));
     const threads = [row("captain"), row("seat"), row("human"), row("peer")];
 
-    expect(titles(crewListedThreads(threads, decodeMemory(saved), answering))).toEqual([
+    expect(titles(crewListedThreads(threads, decodeMemory(saved), answering, noneNarrow))).toEqual([
       id("captain"),
       id("human"),
     ]);
@@ -61,21 +62,25 @@ describe("crewListedThreads", () => {
     const memory = heard([], ["captain"]);
     const threads = [row("captain"), row("new-peer")];
 
-    expect(titles(crewListedThreads(threads, memory, answering))).toEqual([id("captain")]);
+    expect(titles(crewListedThreads(threads, memory, answering, noneNarrow))).toEqual([
+      id("captain"),
+    ]);
     // Offline, refused or failed: no answer is coming, so the thread shows.
-    expect(crewListedThreads(threads, memory, nobodyAnswering)).toBe(threads);
+    expect(crewListedThreads(threads, memory, nobodyAnswering, noneNarrow)).toBe(threads);
     // A first launch or new pairing has nothing saved: every row waits for the first answer.
-    expect(crewListedThreads(threads, new Map(), answering)).toEqual([]);
+    expect(crewListedThreads(threads, new Map(), answering, noneNarrow)).toEqual([]);
   });
 
   it("calls a first launch's list loading until the first answer, and empty only when it is", () => {
     const threads = [row("captain"), row("seat")];
 
-    expect(crewListWaiting(threads, new Map(), answering)).toBe(true);
-    expect(crewListWaiting(threads, new Map(), nobodyAnswering)).toBe(false);
+    expect(crewListWaiting(threads, new Map(), answering, noneNarrow)).toBe(true);
+    expect(crewListWaiting(threads, new Map(), nobodyAnswering, noneNarrow)).toBe(false);
     // Every thread was spawned: the list is truly empty, not loading.
-    expect(crewListWaiting(threads, heard(["captain", "seat"], []), answering)).toBe(false);
-    expect(crewListWaiting(threads, heard([], ["captain"]), answering)).toBe(false);
+    expect(crewListWaiting(threads, heard(["captain", "seat"], []), answering, noneNarrow)).toBe(
+      false,
+    );
+    expect(crewListWaiting(threads, heard([], ["captain"]), answering, noneNarrow)).toBe(false);
   });
 
   it("keeps the Captain listed through a spawn, and the new agent never shows", () => {
@@ -89,8 +94,22 @@ describe("crewListedThreads", () => {
       [id("new-peer")],
     );
 
-    expect(titles(crewListedThreads(threads, before, answering))).toEqual([id("captain")]);
-    expect(titles(crewListedThreads(threads, after, answering))).toEqual([id("captain")]);
+    expect(titles(crewListedThreads(threads, before, answering, noneNarrow))).toEqual([
+      id("captain"),
+    ]);
+    expect(titles(crewListedThreads(threads, after, answering, noneNarrow))).toEqual([
+      id("captain"),
+    ]);
+  });
+
+  it("lists every thread on a server that answers this person nothing, whatever it said before", () => {
+    // Heard while the credential still read the whole server; then its level narrowed to the peer.
+    const memory = heard(["peer"], ["captain"]);
+    const threads = [row("peer")];
+    const narrow = new Set([server]);
+
+    expect(crewListedThreads(threads, memory, nobodyAnswering, narrow)).toBe(threads);
+    expect(crewListWaiting(threads, memory, nobodyAnswering, narrow)).toBe(false);
   });
 
   it("lists a pinned spawned thread, even before anyone answers for it", () => {
@@ -101,7 +120,7 @@ describe("crewListedThreads", () => {
     ];
     const memory = heard(["seat", "pinned-seat"], []);
 
-    expect(titles(crewListedThreads(threads, memory, answering))).toEqual([
+    expect(titles(crewListedThreads(threads, memory, answering, noneNarrow))).toEqual([
       id("pinned-seat"),
       id("pinned-new-seat"),
     ]);

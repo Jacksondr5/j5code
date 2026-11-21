@@ -197,15 +197,18 @@ export interface ListedThread {
 /**
  * The list's threads without the ones an agent spawned (register D22). A thread its server has
  * not answered for yet waits while the answer is on its way, so it never shows and then leaves.
- * Where no answer is coming (offline, a narrower person, a failed read) it shows.
+ * Where no answer is coming (offline, a failed read) it shows. A `narrow` server refuses the read
+ * to this person, who may not see the spawner, so what it said while they were wider is ignored.
  */
 export function crewListedThreads<T extends ListedThread>(
   threads: ReadonlyArray<T>,
   memory: ConnectionMemory,
   answerExpected: ReadonlySet<EnvironmentId>,
+  narrow: ReadonlySet<EnvironmentId>,
 ): ReadonlyArray<T> {
   const listed = threads.filter((thread) => {
     if (thread.archivedAt !== null || thread.pinnedAt != null) return true;
+    if (narrow.has(thread.environmentId)) return true;
     const spawned = memory.get(thread.environmentId)?.spawned.get(thread.id);
     if (spawned === undefined) return !answerExpected.has(thread.environmentId);
     return isSidebarMember(thread, spawned);
@@ -273,10 +276,11 @@ export function crewListWaiting(
   threads: ReadonlyArray<ListedThread>,
   memory: ConnectionMemory,
   answerExpected: ReadonlySet<EnvironmentId>,
+  narrow: ReadonlySet<EnvironmentId>,
 ): boolean {
   const live = threads.filter((thread) => thread.archivedAt === null);
   if (live.length === 0) return false;
-  if (crewListedThreads(live, memory, answerExpected).length > 0) return false;
+  if (crewListedThreads(live, memory, answerExpected, narrow).length > 0) return false;
   return live.some(
     (thread) =>
       answerExpected.has(thread.environmentId) &&

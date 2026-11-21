@@ -19,7 +19,7 @@ import { environmentCatalog } from "../../connection/catalog";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { environmentSession } from "../../state/session";
 import type { WorkspaceState } from "../../state/workspaceModel";
-import { answerExpectedAtom, connectionMemory } from "../connection/memory";
+import { answerExpectedAtom, connectionMemory, narrowServersAtom } from "../connection/memory";
 import { crewListedThreads, crewListWaiting, type ListedThread } from "../connection/memory.logic";
 import { j5Sharing } from "../sharing/guestAccess";
 import { j5Environment } from "../state";
@@ -97,6 +97,7 @@ const requestRows = (refs: ReadonlyArray<ScopedThreadRef>, revisions: string) =>
 /** The remembered answers, and the servers whose answer is on its way (a failed read is not). */
 const useAnswers = () => {
   const expected = useAtomValue(answerExpectedAtom);
+  const narrow = useAtomValue(narrowServersAtom);
   const { memory, failedReads } = useSyncExternalStore(
     connectionMemory.subscribe,
     connectionMemory.getSnapshot,
@@ -106,7 +107,7 @@ const useAnswers = () => {
     () => new Set([...expected].filter((id) => !failedReads.has(id))),
     [expected, failedReads],
   );
-  return { memory, answerExpected };
+  return { memory, answerExpected, narrow };
 };
 
 /**
@@ -119,7 +120,7 @@ export function useCrewListedThreads<T extends ListedThread>(
 ): ReadonlyArray<T> {
   const connections = useAtomValue(threadReadConnectionsAtom);
   const revisions = useAtomValue(placementRevisionsAtom);
-  const { memory, answerExpected } = useAnswers();
+  const { memory, answerExpected, narrow } = useAnswers();
   // The list re-renders while turns stream, so the effect keys on the serialized row set.
   const key = JSON.stringify(
     threads.flatMap((thread) =>
@@ -135,8 +136,8 @@ export function useCrewListedThreads<T extends ListedThread>(
     requestRows(refs, revisions);
   }, [connections, key, revisions]);
   return useMemo(
-    () => crewListedThreads(threads, memory, answerExpected),
-    [threads, memory, answerExpected],
+    () => crewListedThreads(threads, memory, answerExpected, narrow),
+    [threads, memory, answerExpected, narrow],
   );
 }
 
@@ -145,10 +146,10 @@ export function useCrewListedThreads<T extends ListedThread>(
  * answer (a first launch or new pairing), so it shows upstream's loading state, not "No threads".
  */
 export function useCrewListWaiting(threads: ReadonlyArray<ListedThread>): boolean {
-  const { memory, answerExpected } = useAnswers();
+  const { memory, answerExpected, narrow } = useAnswers();
   return useMemo(
-    () => crewListWaiting(threads, memory, answerExpected),
-    [threads, memory, answerExpected],
+    () => crewListWaiting(threads, memory, answerExpected, narrow),
+    [threads, memory, answerExpected, narrow],
   );
 }
 

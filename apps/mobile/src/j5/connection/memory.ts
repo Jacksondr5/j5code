@@ -224,6 +224,14 @@ export const answerExpectedAtom = Atom.make((get) => {
   return expected;
 }).pipe(Atom.withLabel("mobile-j5:answer-expected"));
 
+/** Servers that refuse this person the spawned-children read: they reach less than the server. */
+export const narrowServersAtom = Atom.make((get) => {
+  const narrow = new Set<EnvironmentId>();
+  for (const id of get(environmentCatalog.catalogValueAtom).entries.keys())
+    if (get(j5Sharing.isNarrow(id))) narrow.add(id);
+  return narrow;
+}).pipe(Atom.withLabel("mobile-j5:narrow-servers"));
+
 /** Servers whose answers are on its way to anyone, a narrower person's name reads included. */
 export const namesExpectedAtom = Atom.make((get) => {
   const expected = new Set<EnvironmentId>();
