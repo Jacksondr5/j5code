@@ -255,7 +255,7 @@ export const answerOnItsWay = (
  * replace.
  */
 export const pendingParticipants = (
-  memory: ConnectionMemory,
+  names: ReadonlyMap<EnvironmentId, ParticipantIdentities>,
   settled: SettledNames,
   environmentId: EnvironmentId,
   participantIds: ReadonlyArray<string>,
@@ -263,7 +263,7 @@ export const pendingParticipants = (
 ): ReadonlySet<string> => {
   if (!answerOnItsWay) return NO_ONE;
   const done = settled.get(environmentId);
-  const labels = memory.get(environmentId)?.names.labels;
+  const labels = names.get(environmentId)?.labels;
   const pending = participantIds.filter((id) => !done?.has(id) && !labels?.has(id));
   return pending.length === 0 ? NO_ONE : new Set(pending);
 };
@@ -283,3 +283,20 @@ export function crewListWaiting(
       memory.get(thread.environmentId)?.spawned.get(thread.id) === undefined,
   );
 }
+
+/**
+ * The names and settled reads screens may show. A server whose credential is in question (re-paired,
+ * its new connection not yet open) shows none, so its names read as on their way.
+ */
+export const heldNames = (
+  memory: ConnectionMemory,
+  settled: SettledNames,
+  uncertain: ReadonlySet<EnvironmentId>,
+) => ({
+  names: new Map(
+    [...memory].flatMap(([environmentId, connection]) =>
+      uncertain.has(environmentId) ? [] : [[environmentId, connection.names] as const],
+    ),
+  ),
+  settled: new Map([...settled].filter(([environmentId]) => !uncertain.has(environmentId))),
+});

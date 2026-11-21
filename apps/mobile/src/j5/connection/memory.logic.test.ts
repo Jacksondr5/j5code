@@ -12,6 +12,7 @@ import {
   crewListWaiting,
   decodeMemory,
   encodeMemory,
+  heldNames,
   observeCredential,
   pendingParticipants,
   rememberIdentities,
@@ -171,22 +172,18 @@ describe("participant names", () => {
 });
 
 describe("pendingParticipants", () => {
-  const memory = rememberIdentities(
-    observeCredential(new Map(), server, owner),
-    server,
-    owner,
-    ["agent:a"],
-    { labels: new Map([["agent:a", "Sender A"]]), threads: new Map() },
-  );
+  const names = new Map([
+    [server, { labels: new Map([["agent:a", "Sender A"]]), threads: new Map() }],
+  ]);
 
   it("says a new sender's name is on its way until a read settles, even a failed one", () => {
     const ids = ["agent:a", "agent:b"];
 
-    expect([...pendingParticipants(memory, new Map(), server, ids, true)]).toEqual(["agent:b"]);
+    expect([...pendingParticipants(names, new Map(), server, ids, true)]).toEqual(["agent:b"]);
     const failed = settleNames(new Map(), server, ["agent:b"]);
-    expect(pendingParticipants(memory, failed, server, ids, true).size).toBe(0);
+    expect(pendingParticipants(names, failed, server, ids, true).size).toBe(0);
     // Offline, no read is coming: the stand-in shows.
-    expect(pendingParticipants(memory, new Map(), server, ids, false).size).toBe(0);
+    expect(pendingParticipants(names, new Map(), server, ids, false).size).toBe(0);
   });
 
   it("counts a re-pair's first connection as an answer on its way, and a retry after a failure not", () => {
@@ -197,6 +194,31 @@ describe("pendingParticipants", () => {
     expect(answerOnItsWay({ phase: "connecting", lastFailure: failure })).toBe(false);
     expect(answerOnItsWay({ phase: "backoff", lastFailure: failure })).toBe(false);
     expect(answerOnItsWay(null)).toBe(false);
+  });
+});
+
+describe("heldNames", () => {
+  it("holds back a re-paired server's names until its new credential shows, so they read as on their way", () => {
+    const memory = rememberIdentities(
+      observeCredential(new Map(), server, owner),
+      server,
+      owner,
+      ["agent:captain"],
+      { labels: new Map([["agent:captain", "Captain"]]), threads: new Map() },
+    );
+    const settled = settleNames(new Map(), server, ["agent:captain"]);
+
+    const held = heldNames(memory, settled, new Set([server]));
+    expect(held.names.size).toBe(0);
+    expect([
+      ...pendingParticipants(held.names, held.settled, server, ["agent:captain"], true),
+    ]).toEqual(["agent:captain"]);
+    // Once the new connection shows the same credential, the names are back as they were.
+    const shown = heldNames(memory, settled, new Set());
+    expect(shown.names.get(server)?.labels.get("agent:captain")).toBe("Captain");
+    expect(
+      pendingParticipants(shown.names, shown.settled, server, ["agent:captain"], true).size,
+    ).toBe(0);
   });
 });
 

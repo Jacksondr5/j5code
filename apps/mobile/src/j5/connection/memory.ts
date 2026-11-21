@@ -19,6 +19,7 @@ import {
   credentialKey,
   decodeMemory,
   encodeMemory,
+  heldNames,
   observeCredential,
   rememberIdentities,
   rememberSpawned,
@@ -49,16 +50,13 @@ const loadSaved = (): ConnectionMemory => {
   }
 };
 
-const namesOf = (memory: ConnectionMemory) =>
-  new Map([...memory].map(([environmentId, connection]) => [environmentId, connection.names]));
+type MemoryState = Omit<MemorySnapshot, "names">;
 
-const loaded = loadSaved();
-let snapshot: MemorySnapshot = {
-  memory: loaded,
-  names: namesOf(loaded),
-  settled: new Map(),
-  failedReads: new Set(),
-};
+let state: MemoryState = { memory: loadSaved(), settled: new Map(), failedReads: new Set() };
+/** Servers re-paired or re-routed this launch whose new credential has not shown itself yet. */
+const uncertain = new Set<EnvironmentId>();
+const heldState = () => heldNames(state.memory, state.settled, uncertain);
+let snapshot: MemorySnapshot = { ...state, ...heldState() };
 const listeners = new Set<() => void>();
 /** The credential each server's connection uses this launch. */
 const credentials = new Map<EnvironmentId, string>();
@@ -74,18 +72,19 @@ const scheduleSave = () => {
     saveTimer = null;
     // Saves follow a credential seen this launch, so the catalog has loaded: a removed server goes.
     const saved = new Set(appAtomRegistry.get(environmentCatalog.catalogValueAtom).entries.keys());
-    const memory = new Map([...snapshot.memory].filter(([id]) => saved.has(id)));
+    const memory = new Map([...state.memory].filter(([id]) => saved.has(id)));
     const contents = encodeMemory(retainSpawned(memory, asked));
     writing = writing.then(() => writeFileAtomically(file(), contents)).catch(() => undefined);
   }, 500);
 };
 
-const publish = (next: Partial<Omit<MemorySnapshot, "names">>) => {
-  const names = next.memory === undefined ? snapshot.names : namesOf(next.memory);
+const publish = (next: Partial<MemoryState>) => {
+  state = { ...state, ...next };
+  const { names, settled } = heldState();
   const sameNames =
     names.size === snapshot.names.size &&
     [...names].every(([environmentId, known]) => snapshot.names.get(environmentId) === known);
-  snapshot = { ...snapshot, ...next, names: sameNames ? snapshot.names : names };
+  snapshot = { ...state, settled, names: sameNames ? snapshot.names : names };
   if (next.memory !== undefined) scheduleSave();
   listeners.forEach((listener) => listener());
 };
@@ -96,11 +95,16 @@ const without = <K, V>(map: ReadonlyMap<K, V>, key: K) => {
   return next;
 };
 
+const preparedOf = (environmentId: EnvironmentId) =>
+  Option.getOrNull(
+    appAtomRegistry.get(environmentSession.preparedConnectionValueAtom(environmentId)),
+  );
+
 const credentialKeysAtom = Atom.make((get) => {
-  const keys = new Map<EnvironmentId, string>();
+  const keys = new Map<EnvironmentId, { readonly key: string; readonly prepared: unknown }>();
   for (const id of get(environmentCatalog.catalogValueAtom).entries.keys()) {
     const prepared = Option.getOrNull(get(environmentSession.preparedConnectionValueAtom(id)));
-    if (prepared !== null) keys.set(id, credentialKey(prepared));
+    if (prepared !== null) keys.set(id, { key: credentialKey(prepared), prepared });
   }
   return keys;
 }).pipe(Atom.withLabel("mobile-j5:credential-keys"));
@@ -117,14 +121,30 @@ const accessBaselinesAtom = Atom.make<ReadonlyMap<EnvironmentId, unknown>>(new M
 const accessQuery = (environmentId: EnvironmentId) =>
   j5Sharing.connectionAccessQuery({ environmentId, input: {} });
 
+/** Lineage on these servers waits for an access answer newer than the one they hold now. */
+const awaitNewAccess = (environmentIds: ReadonlyArray<EnvironmentId>) => {
+  if (environmentIds.length === 0) return;
+  const baselines = new Map(appAtomRegistry.get(accessBaselinesAtom));
+  for (const environmentId of environmentIds)
+    baselines.set(environmentId, appAtomRegistry.get(accessQuery(environmentId)));
+  appAtomRegistry.set(accessBaselinesAtom, baselines);
+};
+
+/** The prepared connection each uncertain server had when it became uncertain. */
+const preparedWhenUncertain = new Map<EnvironmentId, unknown>();
+
 // A missing key is a connection between attempts, which keeps its credential.
 appAtomRegistry.subscribe(
   credentialKeysAtom,
   (keys) => {
-    let memory = snapshot.memory;
-    let { settled, failedReads } = snapshot;
+    let { memory, settled, failedReads } = state;
+    let settledUncertainty = false;
     const changed: Array<EnvironmentId> = [];
-    for (const [environmentId, key] of keys) {
+    for (const [environmentId, { key, prepared }] of keys) {
+      if (uncertain.has(environmentId) && prepared !== preparedWhenUncertain.get(environmentId)) {
+        uncertain.delete(environmentId);
+        settledUncertainty = true;
+      }
       const previous = credentials.get(environmentId);
       if (previous === key) continue;
       credentials.set(environmentId, key);
@@ -135,12 +155,30 @@ appAtomRegistry.subscribe(
       failedReads = new Set([...failedReads].filter((id) => id !== environmentId));
       namesInFlight.delete(environmentId);
     }
-    if (memory !== snapshot.memory) publish({ memory, settled, failedReads });
-    if (changed.length === 0) return;
-    const baselines = new Map(appAtomRegistry.get(accessBaselinesAtom));
-    for (const environmentId of changed)
-      baselines.set(environmentId, appAtomRegistry.get(accessQuery(environmentId)));
-    appAtomRegistry.set(accessBaselinesAtom, baselines);
+    if (memory !== state.memory || settledUncertainty) publish({ memory, settled, failedReads });
+    awaitNewAccess(changed);
+  },
+  { immediate: true },
+);
+
+const entries = new Map<EnvironmentId, unknown>();
+// Re-pairing replaces a server's saved entry at once, while its new connection reports the
+// credential only once it opens: until then, the last person's names and lineage are held back.
+appAtomRegistry.subscribe(
+  environmentCatalog.catalogValueAtom,
+  (catalog) => {
+    const replaced: Array<EnvironmentId> = [];
+    for (const [environmentId, entry] of catalog.entries) {
+      const previous = entries.get(environmentId);
+      entries.set(environmentId, entry);
+      if (previous === undefined || previous === entry) continue;
+      replaced.push(environmentId);
+      uncertain.add(environmentId);
+      preparedWhenUncertain.set(environmentId, preparedOf(environmentId));
+    }
+    if (replaced.length === 0) return;
+    publish({});
+    awaitNewAccess(replaced);
   },
   { immediate: true },
 );
@@ -195,20 +233,14 @@ export const connectionMemory = {
     for (const threadId of requested) listed.add(threadId);
     asked.set(environmentId, listed);
     publish({
-      memory: rememberSpawned(
-        snapshot.memory,
-        environmentId,
-        credential,
-        requested,
-        spawnedByAgent,
-      ),
-      failedReads: new Set([...snapshot.failedReads].filter((id) => id !== environmentId)),
+      memory: rememberSpawned(state.memory, environmentId, credential, requested, spawnedByAgent),
+      failedReads: new Set([...state.failedReads].filter((id) => id !== environmentId)),
     });
   },
 
   spawnedReadFailed: (environmentId: EnvironmentId) => {
-    if (!snapshot.failedReads.has(environmentId))
-      publish({ failedReads: new Set(snapshot.failedReads).add(environmentId) });
+    if (!state.failedReads.has(environmentId))
+      publish({ failedReads: new Set(state.failedReads).add(environmentId) });
   },
 
   /**
@@ -230,11 +262,11 @@ export const connectionMemory = {
       });
       if (credentials.get(environmentId) !== credential) return;
       // A failed read still settles, so its senders fall back to a stand-in until the next one.
-      const settled = settleNames(snapshot.settled, environmentId, ids);
+      const settled = settleNames(state.settled, environmentId, ids);
       if (result._tag === "Failure") return publish({ settled });
       publish({
         memory: rememberIdentities(
-          snapshot.memory,
+          state.memory,
           environmentId,
           credential,
           ids,

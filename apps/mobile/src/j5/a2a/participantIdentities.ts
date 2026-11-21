@@ -39,11 +39,7 @@ export function useParticipantIdentities(
   const connected = useConnectedEnvironmentIds().has(environmentId);
   // Through a re-pair's first connection too, so the line never swaps a stand-in for the name.
   const expected = useAtomValue(namesExpectedAtom).has(environmentId);
-  const {
-    memory,
-    names: known,
-    settled,
-  } = useSyncExternalStore(
+  const { names: known, settled } = useSyncExternalStore(
     connectionMemory.subscribe,
     connectionMemory.getSnapshot,
     connectionMemory.getSnapshot,
@@ -56,7 +52,7 @@ export function useParticipantIdentities(
   const names = known.get(environmentId) ?? NO_IDENTITIES;
   const pendingKey = [
     ...pendingParticipants(
-      memory,
+      known,
       settled,
       environmentId,
       idsKey === "" ? [] : idsKey.split("\0"),

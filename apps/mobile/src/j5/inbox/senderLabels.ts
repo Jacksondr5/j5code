@@ -34,7 +34,7 @@ export function useScopedParticipantLabels(
   )
     .sort()
     .join("\n");
-  const { memory, names, settled } = useSyncExternalStore(
+  const { names, settled } = useSyncExternalStore(
     connectionMemory.subscribe,
     connectionMemory.getSnapshot,
     connectionMemory.getSnapshot,
@@ -62,7 +62,7 @@ export function useScopedParticipantLabels(
   const pendingKey = refs
     .flatMap((ref) =>
       pendingParticipants(
-        memory,
+        names,
         settled,
         ref.environmentId,
         [ref.participantId],
