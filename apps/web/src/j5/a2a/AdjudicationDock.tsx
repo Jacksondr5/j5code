@@ -28,10 +28,13 @@ import {
   answerAttachmentInputHandlers,
   useAnswerAttachmentSupport,
   useAnswerAttachments,
+  useRestoredAnswerUploads,
 } from "./AnswerAttachments";
 import { J5RecordPanel } from "./J5RecordPanel";
 import { OwnerAskAction } from "./OwnerAskAction";
 import { answerHumanExchange, type HumanInboxItem } from "./humanInboxClient";
+import { setInboxAnswerText, useInboxAnswerTexts } from "./inboxAnswerDrafts";
+import { scopedInboxItemKey } from "@t3tools/contracts/j5";
 import { notifyHumanInboxChanged } from "./humanInboxRefresh";
 
 const urgencyBadge = {
@@ -64,7 +67,11 @@ export function AdjudicationDock(props: {
   const mayAnswer = useAtomValue(
     j5Environment.answerHumanExchange.permissionAtom(environmentId ?? null),
   );
-  const [answers, setAnswers] = useState<Readonly<Record<string, string>>>({});
+  // The same saved draft the Inbox page shows for this ask, so words typed in either place stay.
+  const texts = useInboxAnswerTexts((state) => state.byItemKey);
+  const keyOf = (item: HumanInboxItem) =>
+    environmentId === undefined ? "" : scopedInboxItemKey({ ...item, environmentId });
+  const wordsOf = (item: HumanInboxItem) => texts[keyOf(item)] ?? "";
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [picked, setPicked] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -76,31 +83,42 @@ export function AdjudicationDock(props: {
     attachmentIds: string;
     clientRequestId: string;
   } | null>(null);
-  const attachments = useAnswerAttachments();
   const support = useAnswerAttachmentSupport(environmentId);
 
   const asks = adjudicationAsks({
     items: query.data?.items ?? [],
     refused,
     threadId,
-    hasWords: (exchangeId) => (answers[exchangeId] ?? "") !== "",
+    hasWords: (exchangeId) => {
+      const item = [...(query.data?.items ?? []), ...refused].find(
+        (candidate) => candidate.exchangeId === exchangeId,
+      );
+      return item !== undefined && wordsOf(item) !== "";
+    },
   });
   const view = pickShownAsk(asks, picked);
+  const attachments = useAnswerAttachments();
+  useRestoredAnswerUploads(
+    view === null ? "" : keyOf(view.shown),
+    environmentId,
+    captain && mayAnswer && view !== null,
+  );
   if (!captain || !mayAnswer || environmentId === undefined || view === null) return null;
   const { shown, others, next: nextAsk } = view;
   const isOpen = (query.data?.items ?? []).some((item) => item.exchangeId === shown.exchangeId);
-  const message = answers[shown.exchangeId] ?? "";
+  const answerKey = keyOf(shown);
+  const message = wordsOf(shown);
   const urgency = urgencyBadge[shown.urgency];
   const openFor = formatElapsedDurationLabel(shown.openedAt);
   const threadRef = threadId == null ? undefined : scopeThreadRef(environmentId, threadId);
 
-  const readiness = attachments.ready(shown.exchangeId, environmentId);
+  const readiness = attachments.ready(answerKey, environmentId);
   const waitingOn = "blocked" in readiness ? readiness.blocked : null;
   const addFiles =
     support === null || !isOpen || pending
       ? null
       : (files: ReadonlyArray<File>) =>
-          attachments.add(shown.exchangeId, environmentId, support.maxFileBytes, files);
+          attachments.add(answerKey, environmentId, support.maxFileBytes, files);
   const answerId = `adjudication-answer-${encodeURIComponent(shown.exchangeId)}`;
 
   const answer = async () => {
@@ -124,11 +142,8 @@ export function AdjudicationDock(props: {
         clientRequestId: request.clientRequestId,
       });
       attempt.current = null;
-      attachments.delivered(shown.exchangeId);
+      attachments.delivered(answerKey);
       notifyHumanInboxChanged(environmentId);
-      setAnswers((current) =>
-        Object.fromEntries(Object.entries(current).filter(([id]) => id !== shown.exchangeId)),
-      );
       query.refresh();
     } catch (cause) {
       if (isAskAlreadyClosed(cause)) {
@@ -201,19 +216,17 @@ export function AdjudicationDock(props: {
             aria-label={`Answer ${shown.intent}`}
             className="min-h-9"
             id={answerId}
-            onChange={(event) => {
-              const value = event.currentTarget.value;
-              setAnswers((current) => ({ ...current, [shown.exchangeId]: value }));
-            }}
+            onChange={(event) => setInboxAnswerText(answerKey, event.currentTarget.value)}
             placeholder="Type the answer exactly as it should be delivered"
             value={message}
             {...(addFiles === null ? {} : answerAttachmentInputHandlers(addFiles))}
           />
           <AnswerAttachmentList
-            attachments={attachments.list(shown.exchangeId)}
+            answerKey={answerKey}
+            attachments={attachments.list(answerKey)}
             environmentId={environmentId}
-            error={attachments.error(shown.exchangeId)}
-            onRemove={pending ? null : (id) => attachments.remove(shown.exchangeId, id)}
+            error={attachments.error(answerKey)}
+            onRemove={pending ? null : (id) => attachments.remove(answerKey, id)}
           />
           {error ? (
             <p className="text-sm text-destructive" role="alert">
