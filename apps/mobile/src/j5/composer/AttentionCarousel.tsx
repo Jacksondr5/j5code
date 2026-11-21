@@ -84,7 +84,10 @@ export function AttentionCarousel(props: {
         disableIntervalMomentum
         onMomentumScrollEnd={settle}
         // A card added ahead widens the row after the scroll above, which the old width clamped.
-        onContentSizeChange={() => scroll.current?.scrollTo({ x: offset, animated: false })}
+        // Android's horizontal scroll view takes the new width a frame after it reports it.
+        onContentSizeChange={() =>
+          requestAnimationFrame(() => scroll.current?.scrollTo({ x: offset, animated: false }))
+        }
         contentContainerStyle={{ paddingHorizontal: CAROUSEL_INSET, gap: CAROUSEL_GAP }}
       >
         {width === 0 ? null : (
