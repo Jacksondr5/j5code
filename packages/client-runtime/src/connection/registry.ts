@@ -35,6 +35,7 @@ import type {
 } from "./model.ts";
 import { ConnectionBlockedError } from "./model.ts";
 import * as Persistence from "../platform/persistence.ts";
+import { forgetCachedData, replacesCredential } from "../j5/replacedCredential.ts";
 import * as EnvironmentSupervisor from "./supervisor.ts";
 import * as ConnectionDriver from "./driver.ts";
 import * as ConnectionWakeups from "./wakeups.ts";
@@ -487,7 +488,7 @@ export const make = Effect.gen(function* () {
 
   const installEntryLocked = Effect.fn("EnvironmentRegistry.installEntryLocked")(function* (
     entry: ConnectionCatalogEntry,
-    options?: { readonly retainEquivalentRuntime?: boolean },
+    options?: { readonly retainEquivalentRuntime?: boolean; readonly forgetCache?: boolean },
   ) {
     const target = entry.target;
     const previous = (yield* SubscriptionRef.get(entries)).get(target.environmentId);
@@ -503,6 +504,8 @@ export const make = Effect.gen(function* () {
     }
 
     yield* closeServiceScope(target.environmentId);
+    // J5 (case 125): after the old scope's last cache write, before the new one loads it.
+    if (options?.forgetCache === true) yield* forgetCachedData(cache, target.environmentId);
     yield* SubscriptionRef.update(entries, (current) => {
       const next = new Map(current);
       next.set(target.environmentId, entry);
@@ -575,6 +578,8 @@ export const make = Effect.gen(function* () {
           yield* assertKnownAddress(route);
         }
         const previous = (yield* SubscriptionRef.get(entries)).get(environmentId);
+        const forgetCache =
+          previous !== undefined && (yield* replacesCredential(credentials, registration));
         let entry = registered;
         if (previous !== undefined) {
           const existing = connectionRoutes(previous);
@@ -594,7 +599,7 @@ export const make = Effect.gen(function* () {
         yield* Ref.update(persistedEnvironmentIds, (current) =>
           new Set(current).add(environmentId),
         );
-        yield* installEntryLocked(entry);
+        yield* installEntryLocked(entry, { forgetCache });
         return true;
       }),
     );

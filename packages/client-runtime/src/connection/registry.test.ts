@@ -1331,13 +1331,13 @@ describe("EnvironmentRegistry", () => {
           RELAY_TARGET.environmentId,
           (state) => state.phase === "connected",
         );
-        yield* registry.register(
+        const bearerRegistration = (credential: BearerConnectionCredential) =>
           new BearerConnectionRegistration({
             target: new BearerConnectionTarget({ ...BEARER_TARGET }),
             profile: new BearerConnectionProfile({ ...BEARER_PROFILE }),
-            credential: replacementCredential,
-          }),
-        );
+            credential,
+          });
+        yield* registry.register(bearerRegistration(replacementCredential));
         yield* Deferred.await(replacementObserved);
         yield* Fiber.interrupt(subscription);
 
@@ -1346,6 +1346,11 @@ describe("EnvironmentRegistry", () => {
           replacementCredential.token,
         ]);
         expect(yield* Ref.get(followedSupervisors)).toBe(2);
+        // J5: a new credential can be a narrower person, who must not see the last one's threads.
+        expect(yield* Ref.get(harness.cacheClears)).toEqual([BEARER_TARGET.environmentId]);
+        // The same credential again, as editing the connection does, keeps what it cached.
+        yield* registry.register(bearerRegistration(replacementCredential));
+        expect(yield* Ref.get(harness.cacheClears)).toEqual([BEARER_TARGET.environmentId]);
       }).pipe(Effect.provide(harness.layer), Effect.scoped);
     }),
   );
