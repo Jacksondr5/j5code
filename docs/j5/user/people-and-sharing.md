@@ -68,7 +68,7 @@ menu.
 
 ## When a device is asked your name
 
-A server asks "What should people and agents on <server> call you?" before a device it cannot place
+A server asks what people and agents on it should call you before a device it cannot place
 uses it, and before the first owner's first device does. Pick yourself from the list, or name
 someone new. On the mobile app you can also choose **Remove this server** to forget it on that
 phone, and a phone the server does not know can choose **Not now**, which asks again the next time

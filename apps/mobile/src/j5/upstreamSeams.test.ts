@@ -336,7 +336,31 @@ const SEAMS: ReadonlyArray<Seam> = [
     file: "features/threads/NewTaskRouteScreen.tsx",
     record: "case 90: starting follows the person's level",
     from: "../../j5/sharing/startAccess",
-    reaches: ["noStartableProjectState({"],
+    reaches: [
+      "noStartableProjectState({",
+      "useAddsProjectSomewhere() && catalogState.hasReadyEnvironment",
+      "canAddProject={canAddProject}",
+      "useCanAddProject(scratchOption?.environmentId ?? null)",
+      "scratchOption !== null && canAddScratch &&",
+    ],
+  },
+  {
+    file: "features/home/AndroidHomeFab.android.tsx",
+    record: "case 90: starting follows the person's level",
+    from: "../../j5/sharing/startAccess",
+    reaches: ["const startsSomewhere = useStartsSomewhere();", "startsSomewhere &&"],
+  },
+  {
+    file: "features/workspace/WorkspaceToolbar.ios.tsx",
+    record: "case 90: starting follows the person's level",
+    from: "../../j5/sharing/startAccess",
+    reaches: ["const startsSomewhere = useStartsSomewhere();", "!startsSomewhere ||"],
+  },
+  {
+    file: "features/workspace/WorkspaceNativeTabs.ios.tsx",
+    record: "case 90: starting follows the person's level",
+    from: "../../j5/sharing/startAccess",
+    reaches: ["const startsSomewhere = useStartsSomewhere();", "startsSomewhere &&"],
   },
   {
     file: "features/threads/NewTaskDraftScreen.tsx",

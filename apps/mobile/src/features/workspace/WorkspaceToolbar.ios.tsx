@@ -10,6 +10,7 @@ import type { SearchBarCommands } from "react-native-screens";
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { InboxBell } from "../../j5/inbox/InboxBell";
+import { useStartsSomewhere } from "../../j5/sharing/startAccess";
 import {
   NativePrimaryColumnContext,
   NativeWorkspaceTabActivityContext,
@@ -36,6 +37,8 @@ export function WorkspaceToolbar(props: {
   const deviceType = useDeviceType();
   const sidebarTabs = useSidebarWorkspaceTabs();
   const floatingTabs = useFloatingWorkspaceTabs();
+  // J5: compose is offered only to someone who may start a thread (FORK.md case 90).
+  const startsSomewhere = useStartsSomewhere();
   const duoSearch = NATIVE_LIQUID_GLASS_SUPPORTED && isDuoDevice(deviceType);
   const bottomSearch = duoSearch && sidebarTabs !== "picker";
   // On the Duo, compose belongs to the threads tab, in the detail column's bar when unfolded.
@@ -44,7 +47,8 @@ export function WorkspaceToolbar(props: {
     deviceType === "duo-folded" &&
     !workspace.settingsOpen &&
     workspace.state.selectedTab === "threads" &&
-    activeNewTask === null;
+    activeNewTask === null &&
+    startsSomewhere;
   const tabActive = use(NativeWorkspaceTabActivityContext)?.active ?? true;
   const focused = useIsFocused();
   const { layout, panes, togglePrimarySidebar } = useAdaptiveWorkspaceLayout();
@@ -196,6 +200,7 @@ export function WorkspaceToolbar(props: {
           {nativeToolbarCompose && foldedSearch ? <Toolbar.Spacer width={8} /> : null}
           {composeButton}
           {selectedTab !== "threads" ||
+          !startsSomewhere ||
           isDuoDevice(deviceType) ||
           (deviceType === "pad" && layout.usesSplitView) ||
           sidebarTabs === "picker" ||

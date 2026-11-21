@@ -1,19 +1,29 @@
 import { useAtomValue } from "@effect/atom-react";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { type KnownConnectionAccess, sharingAllowsStart } from "@t3tools/client-runtime/j5/sharing";
+import {
+  type KnownConnectionAccess,
+  sharingAllowsStart,
+  sharingAllowsStartAnywhere,
+  someServerAllowsStart,
+} from "@t3tools/client-runtime/j5/sharing";
 import {
   AuthOrchestrationOperateScope,
   type EnvironmentId,
   type ProjectId,
   type ThreadId,
 } from "@t3tools/contracts";
-import { Atom } from "effect/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 import { useMemo } from "react";
 
 import { environmentCatalog } from "../../connection/catalog";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { useThreadShell } from "../../state/entities";
-import { readEnvironmentScope, useEnvironmentScope } from "../../state/session";
+import {
+  environmentSession,
+  readEnvironmentScope,
+  sessionHasScope,
+  useEnvironmentScope,
+} from "../../state/session";
 import { j5Sharing } from "./guestAccess";
 
 // Where this connection may start something, read across every saved server at once. A server
@@ -26,6 +36,44 @@ const startsAtom = Atom.make((get) => {
   return (environmentId: EnvironmentId, projectId: ProjectId | null) =>
     sharingAllowsStart(accessById.get(environmentId) ?? null, projectId);
 }).pipe(Atom.withLabel("mobile-j5:access:starts"));
+
+// A session not yet read withholds nothing, as access not yet answered doesn't.
+const savedServersAllow = (label: string, allows: (access: KnownConnectionAccess) => boolean) =>
+  Atom.make((get) =>
+    someServerAllowsStart(
+      [...get(environmentCatalog.catalogValueAtom).entries.keys()].map((id) => {
+        const session = get(environmentSession.sessionStateAtom(id));
+        return {
+          access: get(j5Sharing.connectionAccess(id)),
+          operates:
+            AsyncResult.isInitial(session) ||
+            sessionHasScope(session, AuthOrchestrationOperateScope),
+        };
+      }),
+      allows,
+    ),
+  ).pipe(Atom.withLabel(label));
+
+const addsProjectSomewhereAtom = savedServersAllow("mobile-j5:access:adds-project", (access) =>
+  sharingAllowsStart(access, null),
+);
+const startsSomewhereAtom = savedServersAllow(
+  "mobile-j5:access:starts-somewhere",
+  sharingAllowsStartAnywhere,
+);
+
+/**
+ * Whether New thread's doors are offered: some saved server lets this connection add a project or
+ * start a thread in one. A thread-only Viewer is offered none.
+ */
+export function useStartsSomewhere(): boolean {
+  return useAtomValue(startsSomewhereAtom);
+}
+
+/** Whether Add project is offered: some saved server lets this connection add one (AC19). */
+export function useAddsProjectSomewhere(): boolean {
+  return useAtomValue(addsProjectSomewhereAtom);
+}
 
 /**
  * Whether this connection may start a thread in a project: upstream's "Operate tasks", and a
