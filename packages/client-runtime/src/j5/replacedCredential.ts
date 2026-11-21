@@ -70,6 +70,7 @@ export const savesUnderCurrentCredential = (environmentId: EnvironmentId) => {
 /**
  * Closes the environment's old scope with what the last credential cached forgotten: its saves
  * stop first, the ones already writing finish, then the cache is cleared for the next credential.
+ * A failed clear fails the re-pair, before the new credential is stored, so trying again clears.
  */
 export const forgetReplacedCredential = Effect.fn("j5.replacedCredential.forget")(function* <E>(
   cache: Pick<EnvironmentCacheStore["Service"], "clear">,
@@ -80,12 +81,5 @@ export const forgetReplacedCredential = Effect.fn("j5.replacedCredential.forget"
   saves.replaced += 1;
   yield* closeOldScope;
   yield* Effect.forEach([...saves.inFlight], Deferred.await, { discard: true });
-  yield* cache.clear(environmentId).pipe(
-    Effect.catch((error) =>
-      Effect.logWarning("Could not clear the cached data of a replaced credential.", {
-        environmentId,
-        error,
-      }),
-    ),
-  );
+  yield* cache.clear(environmentId);
 });
