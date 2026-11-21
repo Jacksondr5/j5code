@@ -557,7 +557,8 @@ const makeLayer = (daemon: boolean) =>
             cwd: input.worktreePath,
             args: [
               "for-each-ref",
-              "--count=1",
+              // Only a direct ref holds it: a symbolic tag may point into this worktree's refs.
+              "--format=%(if)%(symref)%(then)%(else)%(refname)%(end)",
               "--contains",
               head.commitSha,
               "refs/heads",

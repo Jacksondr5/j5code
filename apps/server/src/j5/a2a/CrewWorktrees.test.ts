@@ -457,7 +457,7 @@ it.effect(
         yield* f.fs.writeFileString(f.path.join(beyond.worktree, "tracked.txt"), "more\n");
         yield* f.run(beyond.worktree, ["commit", "-am", "after the merge"]);
         // Detached commits no branch holds, whose merge changes nothing: one the merge driver
-        // discards, and an edit and its revert.
+        // discards, and an edit and its revert, held only by a symbolic tag into the worktree's own refs.
         const ours = yield* f.seat("ours");
         const reverted = yield* f.seat("reverted");
         yield* f.run(f.repo, ["config", "merge.ours.driver", "true"]);
@@ -473,6 +473,8 @@ it.effect(
         yield* f.fs.writeFileString(f.path.join(reverted.worktree, "tracked.txt"), "brief\n");
         yield* f.run(reverted.worktree, ["commit", "-am", "edit"]);
         yield* f.run(reverted.worktree, ["revert", "--no-edit", "HEAD"]);
+        yield* f.run(reverted.worktree, ["update-ref", "refs/worktree/pin", "HEAD"]);
+        yield* f.run(reverted.worktree, ["symbolic-ref", "refs/tags/pin", "refs/worktree/pin"]);
         // The default branch moved on, then took the work as one squash commit.
         yield* f.fs.writeFileString(f.path.join(f.repo, "other.txt"), "other\n");
         yield* f.run(f.repo, ["add", "other.txt"]);
