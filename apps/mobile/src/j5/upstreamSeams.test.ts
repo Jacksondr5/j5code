@@ -90,12 +90,6 @@ const SEAMS: ReadonlyArray<Seam> = [
     reaches: ["expandPlaybookPrompt(draft.text.trim())"],
   },
   {
-    file: "features/threads/ThreadDetailScreen.tsx",
-    record: "case 45: native playbook composer control",
-    from: "../../j5/playbooks/PlaybookComposerControl",
-    reaches: ["<PlaybookComposerControl", "hasServerThread={"],
-  },
-  {
     file: "features/threads/ThreadComposer.tsx",
     record:
       "PR #75–#86 role library; saved-agent mentions: handoff artifacts, draft-as-agent; case 49",
@@ -293,14 +287,33 @@ const SEAMS: ReadonlyArray<Seam> = [
   },
   {
     file: "features/threads/ThreadDetailScreen.tsx",
-    record: "case 114: J5 rows above the composer",
+    record: "case 114: J5's attention carousel above the composer",
     from: "../../j5/composer/J5ComposerControls",
     reaches: [
       "<J5ComposerControls",
       "maxHeight={pendingUserInputMaxHeight}",
-      "composerHeight={composerOverlapHeight - composerBottomInset}",
       "composerBottomInset={composerBottomInset}",
+      "popoverHeight={composerPopoverHeight}",
+      "slot={j5Slot.controls}",
+      "onAnswerFocusChange={handleOwnedInputFocusChange}",
     ],
+  },
+  {
+    file: "features/threads/ThreadDetailScreen.tsx",
+    record: "case 114: J5's answer panel takes the composer's place",
+    from: "../../j5/composer/composerSlot",
+    reaches: [
+      "const j5Slot = useJ5ComposerSlot();",
+      "j5Slot.hidesComposer;",
+      "j5Slot.onOverlayLayout(event);",
+      "{j5Slot.hidesComposer ? <View style={{ height: composerBottomInset }} /> : null}",
+    ],
+  },
+  {
+    file: "features/threads/ComposerCommandPopover.tsx",
+    record: "case 124: the @ popover heads its leading personas",
+    from: "../../j5/composer/PopoverPersonaGroup",
+    reaches: ["leadingPersonaCount(props.triggerKind, props.items)", "<PopoverGroupHeading"],
   },
   {
     file: "features/threads/ThreadFeed.tsx",
