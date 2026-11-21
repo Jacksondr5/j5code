@@ -4,6 +4,7 @@ import {
 } from "@t3tools/client-runtime/j5/participant-identity";
 import {
   crewApprovalSummary,
+  crewDeclinedDetail,
   crewDeclinedSummary,
   crewNoticeLines,
   type CrewNoticePresentation,
@@ -206,9 +207,6 @@ function CrewNotice(props: {
 }) {
   const { notice, timestampLabel, environmentId } = props;
   if (notice.kind === "gate" && notice.decision === "declined") {
-    const requested = notice.requestedSeats
-      .map((seat) => `${seat.seat} (${seat.agentId})`)
-      .join(", ");
     return (
       <View className="mb-5 items-start px-1">
         <J5NoticeLine
@@ -216,9 +214,7 @@ function CrewNotice(props: {
           summary={crewDeclinedSummary(notice)}
           timestampLabel={timestampLabel}
         >
-          <J5NoticeDetailText
-            text={`${requested.length === 0 ? "" : `Requested: ${requested}\n\n`}The Captain can revise the request and propose again.`}
-          />
+          <J5NoticeDetailText text={crewDeclinedDetail(notice)} />
         </J5NoticeLine>
       </View>
     );

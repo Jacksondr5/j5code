@@ -126,3 +126,71 @@ export const crewPreviewRuntimeForSeats = (
       seatSettings(current) === seatSettings(previous)
     );
   });
+
+/**
+ * Every seat's latest previewed runtime, so a seat removed and then restored shows its runtime
+ * again. Read it back through `crewPreviewRuntimeForSeats`, which drops a seat whose settings
+ * changed since.
+ */
+export const rememberPreviewedSeats = (
+  remembered: ReadonlyArray<{
+    readonly seat: CrewProposalSeat;
+    readonly runtime: CrewProposalSeatRuntime;
+  }>,
+  previewedSeats: ReadonlyArray<CrewProposalSeat>,
+  previewRows: ReadonlyArray<CrewProposalSeatRuntime>,
+) => [
+  ...remembered.filter((row) => !previewRows.some((runtime) => runtime.seat === row.seat.seat)),
+  ...previewRows.flatMap((runtime) => {
+    const seat = previewedSeats.find((candidate) => candidate.seat === runtime.seat);
+    return seat === undefined ? [] : [{ seat, runtime }];
+  }),
+];
+
+/**
+ * Whether an Approve tapped before its token arrived may send with this preview: only one of the
+ * seats the person was shown, resolving each exactly as it was shown. Otherwise the review shows
+ * the new runtime and the person approves again.
+ */
+export const heldCrewApprovalSends = (
+  held: {
+    readonly proposalId: string;
+    readonly seats: ReadonlyArray<CrewProposalSeat>;
+    readonly runtime: ReadonlyArray<CrewProposalSeatRuntime>;
+  },
+  preview: Pick<CrewProposalPreviewResponse, "proposalId" | "approvalToken" | "seats"> | null,
+): boolean =>
+  preview !== null &&
+  crewPreviewIsComplete(preview, held.proposalId, held.seats) &&
+  held.seats.every((seat) => {
+    const shown = held.runtime.find((row) => row.seat === seat.seat);
+    const fresh = preview.seats.find((row) => row.seat === seat.seat);
+    return shown !== undefined && JSON.stringify(shown) === JSON.stringify(fresh);
+  });
+
+export type CrewProposalReview<T> =
+  | { readonly kind: "loading" }
+  | { readonly kind: "open"; readonly proposal: T }
+  | { readonly kind: "answered"; readonly detail: string };
+
+/**
+ * What the review page shows. A proposal this page is answering stays on screen until it pops,
+ * however the list changes meanwhile; the list's own state shows otherwise.
+ */
+export const crewProposalReview = <T extends { readonly id: string; readonly status: string }>(
+  listed: ReadonlyArray<T> | null,
+  proposalId: string,
+  answering: T | null,
+): CrewProposalReview<T> => {
+  if (answering !== null) return { kind: "open", proposal: answering };
+  if (listed === null) return { kind: "loading" };
+  const proposal = listed.find((candidate) => candidate.id === proposalId);
+  if (proposal?.status === "open") return { kind: "open", proposal };
+  return {
+    kind: "answered",
+    detail:
+      proposal === undefined
+        ? "This Crew proposal is no longer open."
+        : `This Crew proposal was ${proposal.status}.`,
+  };
+};

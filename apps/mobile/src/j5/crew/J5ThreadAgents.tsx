@@ -21,10 +21,12 @@ import type { SpawnedChild } from "@t3tools/contracts/j5";
 import * as Cause from "effect/Cause";
 import { Atom } from "effect/reactivity";
 import { useState } from "react";
-import { Alert, Pressable, View } from "react-native";
+import { Platform, Pressable, View } from "react-native";
 
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { AppText as Text } from "../../components/ui/AppText";
+import { Button } from "../../components/ui/Button";
+import * as Dialog from "../../components/ui/Dialog";
 import {
   SUBAGENT_TONE_TEXT_CLASS,
   SubagentStatusDot,
@@ -151,17 +153,40 @@ function SpawnedAgentGroup(props: {
         if (result._tag === "Failure") throw Cause.squash(result.cause);
       })
       .catch((error: unknown) => {
-        Alert.alert(
+        // The server names the Crew by its id, which agents need; the person knows it by name.
+        Dialog.alert(
           `Couldn't stop crew ${crew.crewName}`,
-          error instanceof Error ? error.message : String(error),
+          (error instanceof Error ? error.message : String(error)).replaceAll(
+            crew.crewInstanceId,
+            crew.crewName,
+          ),
         );
       })
       .finally(() => setStopping(false));
   };
+  const confirmStop = (crew: { readonly crewInstanceId: string; readonly crewName: string }) =>
+    Dialog.confirm({
+      title: `Stop crew ${crew.crewName}?`,
+      message: "Its running seats stop their turns. The Crew and its seats stay.",
+      confirmText: "Stop",
+      destructive: true,
+      onConfirm: () => stop(crew),
+    });
   return (
     <View>
-      <View className="min-h-11 flex-row items-center border-b border-border pt-3">
-        <Text className="min-w-0 shrink text-xs text-foreground-muted" numberOfLines={1}>
+      <View
+        className={cn(
+          "flex-row items-center gap-3 border-b border-border pt-3",
+          // Room for Stop crew (35 pt; Compose's 48-dp minimum on Android) plus pt-3 and the
+          // border, so seats starting and stopping don't move the rows.
+          canStop && group.crew !== null
+            ? Platform.OS === "android"
+              ? "min-h-[59.5px]"
+              : "min-h-[46.5px]"
+            : "min-h-11",
+        )}
+      >
+        <Text className="min-w-0 flex-1 text-xs text-foreground-muted" numberOfLines={1}>
           <Text className="text-xs font-t3-medium text-foreground">
             {group.crew === null ? "Peer Agents" : group.crew.crewName}
           </Text>
@@ -169,17 +194,15 @@ function SpawnedAgentGroup(props: {
         </Text>
         {stoppable === null ? null : (
           // Interrupts this Crew's running seats; it retires nothing.
-          <Pressable
-            className="ml-auto rounded-md border border-border px-2 py-1"
-            accessibilityRole="button"
+          <Button
+            label="Stop crew"
             accessibilityLabel={`Stop crew ${stoppable.crewName}`}
-            accessibilityState={{ disabled: stopDisabled }}
+            tone="danger"
+            size="compact"
+            loading={stopping}
             disabled={stopDisabled}
-            onPress={() => stop(stoppable)}
-            style={({ pressed }) => ({ opacity: stopDisabled ? 0.5 : pressed ? 0.6 : 1 })}
-          >
-            <Text className="text-xs font-t3-medium text-foreground">Stop crew</Text>
-          </Pressable>
+            onPress={() => confirmStop(stoppable)}
+          />
         )}
       </View>
       {stoppable !== null && !server.connected ? (

@@ -334,6 +334,14 @@ export const crewApprovalSummary = (notice: CrewNoticePresentation): string | nu
 export const crewDeclinedSummary = (notice: Extract<CrewNoticePresentation, { kind: "gate" }>) =>
   `Crew ${notice.crewName === null ? "" : `${notice.crewName} `}· ${notice.requestKind === "roster" ? "roster" : "seat"} declined${notice.decidedBy === null ? "" : ` by ${notice.decidedBy}`}`;
 
+/** A declined request's detail; a custom seat has no agent id, so it is named alone. */
+export const crewDeclinedDetail = (notice: Extract<CrewNoticePresentation, { kind: "gate" }>) => {
+  const requested = notice.requestedSeats
+    .map(({ seat, agentId }) => (agentId === "" ? seat : `${seat} (${agentId})`))
+    .join(", ");
+  return `${requested === "" ? "" : `Requested: ${requested}\n\n`}The Captain can revise the request and propose again.`;
+};
+
 /** The notice's own line, beside the lines of the seats in it; null when it has none. */
 export const crewNoticeSummary = (notice: CrewNoticePresentation): string | null =>
   notice.kind === "gate" && notice.decision === "declined"
