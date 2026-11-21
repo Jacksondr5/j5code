@@ -148,6 +148,10 @@ function Controls(props: Props & { readonly questions: CaptainQuestions | null }
       },
       face: <PlaybookCardFace card={playbook} />,
     });
+  // The row holds on to the card it shows, so a card added ahead never takes its place; when the
+  // shown card leaves, the row shows the first.
+  const shownKey = cards.some((card) => card.key === pageKey) ? pageKey : (cards[0]?.key ?? null);
+  if (shownKey !== pageKey) setPageKey(shownKey);
 
   if (questionsOpen)
     return (
@@ -178,7 +182,7 @@ function Controls(props: Props & { readonly questions: CaptainQuestions | null }
       style={popoverOpen ? { opacity: 0 } : undefined}
       pointerEvents={popoverOpen ? "none" : "auto"}
     >
-      <AttentionCarousel cards={cards} shownKey={pageKey} onShownChange={setPageKey} />
+      <AttentionCarousel cards={cards} shownKey={shownKey} onShownChange={setPageKey} />
     </Animated.View>
   );
 }

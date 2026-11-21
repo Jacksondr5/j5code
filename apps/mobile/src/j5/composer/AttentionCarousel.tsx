@@ -53,10 +53,12 @@ export function AttentionCarousel(props: {
   const offsets = carouselOffsets(count, cardWidth);
   const offset = offsets[page] ?? 0;
   const placed = useRef(shownKey);
+  const placedOffset = useRef(offset);
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- moves the native scroll view: at once, before paint, when cards around the shown one change; animated when the row moves to another card
   useLayoutEffect(() => {
     const paging = placed.current !== shownKey;
     placed.current = shownKey;
+    placedOffset.current = offset;
     scroll.current?.scrollTo({ x: offset, animated: paging });
   }, [offset, shownKey]);
   const settle = (event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -65,6 +67,7 @@ export function AttentionCarousel(props: {
     if (key !== undefined && key !== shownKey) {
       // The swipe already put it there.
       placed.current = key;
+      placedOffset.current = offsets[index] ?? 0;
       props.onShownChange(key);
     }
   };
@@ -86,7 +89,9 @@ export function AttentionCarousel(props: {
         // A card added ahead widens the row after the scroll above, which the old width clamped.
         // Android's horizontal scroll view takes the new width a frame after it reports it.
         onContentSizeChange={() =>
-          requestAnimationFrame(() => scroll.current?.scrollTo({ x: offset, animated: false }))
+          requestAnimationFrame(() =>
+            scroll.current?.scrollTo({ x: placedOffset.current, animated: false }),
+          )
         }
         contentContainerStyle={{ paddingHorizontal: CAROUSEL_INSET, gap: CAROUSEL_GAP }}
       >

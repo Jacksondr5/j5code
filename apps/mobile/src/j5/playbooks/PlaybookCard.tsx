@@ -55,9 +55,15 @@ export function usePlaybookCard(environmentId: EnvironmentId, threadId: ThreadId
   });
   const runs = query.data?.runs ?? [];
   const active = runs.find((run) => run.status === "active");
-  // A run that ends folds its card, so the next run's card starts folded.
-  if (active === undefined && query.data !== undefined && view.expanded) {
-    setView({ ...view, expanded: false });
+  const activeRunId = active?.runId ?? null;
+  // The steps fold when their run ends or gives way to the next, even within one read, so the
+  // next run's card starts folded; a first read keeps the view remembered across unmounts.
+  const [seenRunId, setSeenRunId] = useState<string | null>(null);
+  if (query.data !== null) {
+    if (activeRunId !== seenRunId) setSeenRunId(activeRunId);
+    const runChanged = seenRunId !== null && seenRunId !== activeRunId;
+    if (view.expanded && (activeRunId === null || runChanged))
+      setView({ ...view, expanded: false });
   }
   if (active === undefined) return null;
   return {
