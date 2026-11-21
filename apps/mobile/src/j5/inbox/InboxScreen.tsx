@@ -61,9 +61,9 @@ import {
   worktreeCleanupSourcesAtom,
 } from "./inboxSources";
 import { createPullRefresh } from "./inboxPullRefresh.logic";
-import { useScopedParticipantLabels } from "./senderLabels";
+import { useScopedParticipantLabels, type ScopedParticipantLabels } from "./senderLabels";
 
-type SenderLabels = ReadonlyMap<EnvironmentId, ReadonlyMap<string, string>>;
+type SenderLabels = ScopedParticipantLabels;
 
 const NO_LABELS: ReadonlyMap<string, string> = new Map();
 
@@ -73,11 +73,14 @@ const URGENCY = {
   fyi: { label: "FYI", className: "text-foreground-muted" },
 } as const;
 
+/** Null while the name is on its way, so the line does not swap a stand-in for it. */
 const senderName = (item: PresentedHumanInboxItem, labels: SenderLabels) =>
-  presentParticipantIdentity({
-    participantId: item.senderId,
-    participantLabels: labels.get(item.environmentId) ?? NO_LABELS,
-  }).label;
+  labels.isPending(item.environmentId, item.senderId)
+    ? null
+    : presentParticipantIdentity({
+        participantId: item.senderId,
+        participantLabels: labels.labels.get(item.environmentId) ?? NO_LABELS,
+      }).label;
 
 /** The reader's own name on an item's server, so "Priya answered" can read "You answered". */
 function useOwnName(environmentId: EnvironmentId): string | null {

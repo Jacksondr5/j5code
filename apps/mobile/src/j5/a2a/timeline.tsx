@@ -1,7 +1,4 @@
-import {
-  j5MessageAuthorName,
-  j5SenderThreadRef,
-} from "@t3tools/client-runtime/j5/participant-identity";
+import { j5MessageAuthorName } from "@t3tools/client-runtime/j5/participant-identity";
 import {
   crewApprovalSummary,
   crewDeclinedDetail,
@@ -27,6 +24,7 @@ import { useQuietThreadShell } from "../../state/entities";
 import { PersonAvatar } from "../sharing/PersonAvatar";
 import { SharedConversationNote } from "../sharing/SharedConversationNote";
 import {
+  j5TimelineSenderRef,
   presentJ5TimelineNotice,
   type J5FeedMessagePresentation,
   type J5Timeline,
@@ -301,15 +299,10 @@ function useSenderThread(
   presentation: J5FeedMessagePresentation,
   timeline: J5Timeline,
 ) {
-  const ref = j5SenderThreadRef({
-    environmentId: timeline.environmentId,
-    presentation: presentation.j5,
-    messageSenderThreadId: message.senderThreadId,
-    participantThreads: timeline.threads,
-  });
+  const ref = j5TimelineSenderRef(message, presentation.j5, timeline);
   // A peer's thread opens only from a client connected to that peer, and only if the person can
   // see it there; the client's own thread list answers both.
-  const shell = useQuietThreadShell(presentation.j5?.group === "participant" ? ref : null);
+  const shell = useQuietThreadShell(ref);
   return { ref: shell === null ? null : ref, title: shell?.title };
 }
 
@@ -385,11 +378,16 @@ function ParticipantAuthorLine(props: {
   const { j5 } = props;
   const openLinkedThread = useOpenLinkedThread();
   const sender = useSenderThread(props.message, props.presentation, props.timeline);
-  const name = j5MessageAuthorName({
-    presentation: j5,
-    participantLabels: props.timeline.labels,
-    senderThreadTitle: sender.title,
-  });
+  // A sender whose name is on its way keeps the line's height without a stand-in word.
+  const named =
+    j5.senderId === null || !props.timeline.pending.has(j5.senderId) || !!sender.title?.trim();
+  const name = named
+    ? j5MessageAuthorName({
+        presentation: j5,
+        participantLabels: props.timeline.labels,
+        senderThreadTitle: sender.title,
+      })
+    : " ";
   const { ref } = sender;
   return (
     <View className="mb-1 max-w-[85%] flex-row items-center gap-1.5 pl-1">

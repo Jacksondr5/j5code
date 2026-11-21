@@ -4,6 +4,7 @@ import {
   type CrewNoticePresentation,
 } from "@t3tools/client-runtime/j5/crew-notices";
 import {
+  j5SenderThreadRef,
   nameJ5NoticeParticipants,
   type ParticipantIdentities,
 } from "@t3tools/client-runtime/j5/participant-identity";
@@ -14,6 +15,7 @@ import {
   type J5NoticeKind,
   type J5PromptKind,
   type J5UserMessageInput,
+  type J5UserMessagePresentation,
 } from "@t3tools/client-runtime/j5/user-message";
 import type { EnvironmentId } from "@t3tools/contracts";
 import type { MessageAuthor } from "@t3tools/contracts/j5";
@@ -23,6 +25,14 @@ import type { MessageAuthor } from "@t3tools/contracts/j5";
  * who sent each message of a shared conversation.
  */
 export interface J5Timeline extends ParticipantIdentities {
+  /** Senders whose name is still on its way. */
+  readonly pending: ReadonlySet<string>;
+  /** False after a re-pair until the server says who the new person is: no sender threads yet. */
+  readonly accessConfirmed: boolean;
+  /** The person reaches less than the whole server. */
+  readonly narrow: boolean;
+  /** The server's thread list was read over this connection, not kept from an earlier one. */
+  readonly threadListLive: boolean;
   readonly environmentId: EnvironmentId;
   readonly viewerParticipantId: string | null;
   readonly sharedAuthors: ReadonlyMap<string, MessageAuthor>;
@@ -133,4 +143,27 @@ export function presentJ5TimelineNotice(
     summary: named(notice.summary),
     detail: notice.detail === null ? null : named(notice.detail),
   };
+}
+
+/**
+ * The thread a letter's sender works in, as far as this person may know it. A narrower person
+ * gets only what the server's identity read names for them, and only once the thread list is
+ * live: until then it can still hold the last person's threads after a re-pair.
+ */
+export function j5TimelineSenderRef(
+  message: J5UserMessageInput & { readonly senderThreadId?: string | undefined },
+  presentation: J5UserMessagePresentation | null,
+  timeline: J5Timeline,
+) {
+  if (presentation?.group !== "participant" || !timeline.accessConfirmed) return null;
+  if (timeline.narrow)
+    return presentation.senderId === null || !timeline.threadListLive
+      ? null
+      : (timeline.threads.get(presentation.senderId) ?? null);
+  return j5SenderThreadRef({
+    environmentId: timeline.environmentId,
+    presentation,
+    messageSenderThreadId: message.senderThreadId,
+    participantThreads: timeline.threads,
+  });
 }

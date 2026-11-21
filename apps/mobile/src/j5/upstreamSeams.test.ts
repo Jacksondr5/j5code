@@ -167,6 +167,7 @@ const SEAMS: ReadonlyArray<Seam> = [
     from: "../../j5/sharing/sharedConversation",
     reaches: [
       "<PromptAnsweredBy",
+      "fitText={answeredByFollowsLabel(row.projectedItem.item, answered)}",
       "alone={historyHasQuestion && expanded}",
       "answered={answered}",
       "!row.workEntry.questionAnswer",
@@ -204,6 +205,25 @@ const SEAMS: ReadonlyArray<Seam> = [
     record: "case 115: agent-spawned threads leave the top level",
     from: "../../j5/crew/spawnedChildren",
     reaches: ["const threads = useCrewListedThreads(input.threads);"],
+  },
+  {
+    file: "features/home/HomeScreen.tsx",
+    record: "case 115: a list waiting for its first answer is loading",
+    from: "../../j5/crew/spawnedChildren",
+    reaches: [
+      "const j5ListWaiting = useCrewListWaiting(props.threads);",
+      "(!j5ListWaiting && props.threads.some(",
+      "j5ListWaiting ? connectingWorkspace(props.catalogState) : props.catalogState",
+    ],
+  },
+  {
+    file: "features/threads/ThreadNavigationSidebar.tsx",
+    record: "case 115: a list waiting for its first answer is loading",
+    from: "../../j5/crew/spawnedChildren",
+    reaches: [
+      "const j5ListWaiting = useCrewListWaiting(threads);",
+      "catalogState.isLoadingConnections || j5ListWaiting",
+    ],
   },
   {
     file: "features/settings/SettingsAgentsRouteScreen.tsx",
