@@ -179,10 +179,15 @@ export function LinkServersDialog({
 
   const ready =
     local !== null &&
+    // Still managed: a server that lost that since the dialog opened would refuse every step.
+    servers.includes(sharedId) &&
     chosen.length > 0 &&
     chosen.every((candidate) => {
-      const { route } = setupOf(candidate);
-      return route === null || route.ready;
+      const { route, localLevel, remoteLevel } = setupOf(candidate);
+      // A server linked for tools alone has nothing to make with both directions Off.
+      const makesSomething =
+        candidate.support === "full" || localLevel !== "off" || remoteLevel !== "off";
+      return makesSomething && (route === null || route.ready);
     });
   const turnsOn =
     local === null

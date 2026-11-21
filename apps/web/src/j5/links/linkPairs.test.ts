@@ -181,5 +181,15 @@ describe("toolsExpiryOf", () => {
       toolsExpiryOf(pairWith({ status: "expired" }, null), NOW),
       "a link from before fencing counts as expired whatever its date",
     ).toMatchObject({ kind: "expired" });
+    expect(
+      toolsExpiryOf(
+        pairWith(at("2026-12-01T00:00:00.000Z"), {
+          ...at("2026-12-10T00:00:00.000Z"),
+          status: "expired",
+        }),
+        NOW,
+      ),
+      "the later direction's expired status counts too",
+    ).toMatchObject({ kind: "expired" });
   });
 });

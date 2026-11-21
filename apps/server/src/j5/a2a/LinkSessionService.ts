@@ -3,6 +3,7 @@ import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Semaphore from "effect/Semaphore";
 import * as SqlClient from "effect/sql/SqlClient";
 import type { SqlError } from "effect/sql/SqlError";
 
@@ -36,6 +37,9 @@ export class LinkSessionService extends Context.Service<
 const make = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
   const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
+  // Claims and revocations read the records and then act on them; two at once for one server
+  // could each revoke the session the other had just recorded.
+  const serial = yield* Semaphore.make(1);
 
   /** A session's record goes only once it is revoked, so a revocation that fails can be tried again. */
   const revokeAndForget = Effect.fn("j5.a2a.linkSessions.revokeAndForget")(function* (
@@ -68,17 +72,17 @@ const make = Effect.gen(function* () {
           WHERE environment_id = ${input.environmentId} AND session_id <> ${input.sessionId}
         `,
       );
-    }),
+    }, serial.withPermit),
     release: Effect.fn("j5.a2a.linkSessions.release")(function* (sessionId) {
       yield* revokeAndForget(sessionId);
-    }),
+    }, serial.withPermit),
     revokeFor: Effect.fn("j5.a2a.linkSessions.revokeFor")(function* (environmentId) {
       return yield* revokeEach(
         yield* sql<{ readonly session_id: string }>`
           SELECT session_id FROM j5_link_session WHERE environment_id = ${environmentId}
         `,
       );
-    }),
+    }, serial.withPermit),
   });
 });
 

@@ -27,7 +27,7 @@ A server's name is its computer name; on Windows, or where the machine has none,
 
 ## When a server's address changes
 
-If you move a server to a new address, such as a new port or hostname, the servers linked with it keep trying the old one, and the pair's row under **Settings → Environments → Linked environments** shows the error. Open the row's menu (**⋯**) and choose **Edit address**. J5 checks where each server can reach the other, fills in the address it found, and switches only once the server answers there. Nothing waiting is cancelled, so there's no need to remove the link. A direction that has tools is linked again at the new address, which starts its 30 days again; one whose tools have run out is left for you to renew.
+If you move a server to a new address, such as a new port or hostname, the servers linked with it keep trying the old one, and the pair's row under **Settings → Environments → Linked environments** shows the error. Open the row's menu (**⋯**) and choose **Edit address**. J5 checks where each server can reach the other, fills in the address it found, and switches only once the server answers there. Nothing waiting is cancelled, so there's no need to remove the link. A direction that has tools is linked again at the new address, which starts its 30 days again; one whose tools have run out is left for you to renew. A pair that has tools and no messaging has no **Edit address**: turn its tools **Off**, then link the two servers again with **Link**.
 
 ## Checking and removing a link
 
@@ -38,6 +38,6 @@ Removing a link ends both of its parts:
 - **Messages.** Every message waiting on a server for the other is cancelled, every open Exchange between their agents is ended, and each agent involved is told. Each server revokes the credential the other held for messages, which was listed under **Settings → Sharing & access** as _Peer: <name>_.
 - **Tools.** Each server forgets what its agents could do on the other and ends the session it held there. Work one server's agents started on the other keeps running there, but is no longer followed.
 
-If this app can manage both servers, **Remove** does this on both. If it can't, J5 warns that the other server will keep its side, and its messages to this server's agents will fail until you remove the link there too; choose **Remove here only** only if that's what you want. Linking again starts empty.
+If this app can manage both servers, **Remove** does this on both. If it can't, J5 warns that the other server will keep its side, and its messages to this server's agents will fail until you remove the link there too; choose **Remove here only** only if that's what you want. If the other server linked to this one from the command line, or on an older version of J5 Code, its Tools session here also stays: revoke it under **Settings → Sharing & access**. Linking again starts empty.
 
 To stop only what one server's agents may do on the other, set that direction's Tools level to **Off**. Messages are unaffected.

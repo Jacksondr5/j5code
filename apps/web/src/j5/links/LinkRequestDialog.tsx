@@ -89,8 +89,9 @@ function OpenLinkRequestDialog(props: {
   const [report, setReport] = useState<ReadonlyArray<StepReport> | null>(null);
 
   const { local, candidates } = linkCandidatesFor(links, props.environmentId);
-  // An address alone names no server this client has; the agent's own name for it is all there is.
-  const picks = item.environmentId === undefined && item.url === undefined;
+  // A request that names no server is answered by picking one. That includes an address the
+  // agent's server could not put a name to: the person may have added that server since.
+  const picks = item.environmentId === undefined;
   const ranked = rankMachinesByHint(candidates, item.hint);
   const hinted = picks ? linkRequestInitialMachine(item, machines) : null;
   const selectedId =

@@ -103,7 +103,8 @@ use tools on another. In J5 Code on web and desktop, a link does more, and you s
 2. Pick the server to link, and tick the servers to link it with. A server that can't be linked
    says why.
 3. Each ticked server says how messages will travel between the two. J5 Code checks which server
-   can reach which and picks a way that loses no message. Choose **Change** to pick another way,
+   can reach which and picks the safer way: a server that may be off polls, so messages for it
+   wait until it does. Choose **Change** to pick another way,
    or to give that pair its own Tools levels.
 4. Choose the two Tools levels, then **Link**. Each pair then says whether it was linked. If
    tools could not be set up in one direction, messages still work and that direction is left

@@ -403,9 +403,11 @@ export function LinkPairRow({
           <dd className="flex min-w-0 flex-col gap-0.5 text-sm text-foreground">
             {messaging === null ? (
               <span className="text-warning-foreground">
+                {/* "Tools work" would contradict a paused or unanswered direction below. */}
+                {paused || absent ? "" : "Tools work. "}
                 {missingMessaging === undefined
-                  ? "Tools work. Messaging isn't set up."
-                  : `Tools work. Messaging needs J5 Code on ${missingMessaging.label}.`}
+                  ? "Messaging isn't set up."
+                  : `Messaging needs J5 Code on ${missingMessaging.label}.`}
               </span>
             ) : (
               <>
