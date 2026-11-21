@@ -754,6 +754,10 @@ describe("parseCommand", () => {
       mode: "peer-poll",
     });
     assert.deepEqual(parseCommand(["--poll", "--peer"]), { command: "start", mode: "peer-poll" });
+    assert.deepEqual(parseCommand(["--peer", "--reachable"]), {
+      command: "start",
+      mode: "peer-reachable",
+    });
     assert.deepEqual(parseCommand(["rebuild", "--for-dev"]), {
       command: "rebuild",
       mode: "for-dev",
@@ -779,6 +783,8 @@ describe("parseCommand", () => {
       ["--base", "--fresh"],
       ["--base", "main", "--fresh"],
       ["--base", "main", "--peer"],
+      ["--reachable"],
+      ["--peer", "--poll", "--reachable"],
       ["status", "--base", "main"],
       // The ref is printed inside commands; git allows these characters in ref names.
       ["--base", "main;rm"],
