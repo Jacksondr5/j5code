@@ -22,11 +22,30 @@ export const replacesCredential = Effect.fn("j5.replacedCredential.replacesCrede
   return !Option.exists(stored, (credential) => Equal.equals(credential, registration.credential));
 });
 
-/** Drops what the last credential cached, so the next one starts from its own answers. */
-export const forgetCachedData = Effect.fn("j5.replacedCredential.forgetCachedData")(function* (
-  cache: EnvironmentCacheStore["Service"],
+// Bumped each time a re-pair replaces an environment's credential.
+const replacements = new Map<EnvironmentId, number>();
+
+/**
+ * Whether the environment's credential is still the one it had when this was called. A shell made
+ * under a replaced one stops saving, since it lives in its follower's scope and outlasts the
+ * registry's teardown: its last flush would put the last person's rows back.
+ */
+export const credentialStillCurrent = (environmentId: EnvironmentId) => {
+  const seen = replacements.get(environmentId) ?? 0;
+  return () => (replacements.get(environmentId) ?? 0) === seen;
+};
+
+/**
+ * Closes the environment's old scope with what the last credential cached forgotten: its shells
+ * stop saving first, and the cache is cleared after, so the next credential starts from its own.
+ */
+export const forgetReplacedCredential = Effect.fn("j5.replacedCredential.forget")(function* <E>(
+  cache: Pick<EnvironmentCacheStore["Service"], "clear">,
   environmentId: EnvironmentId,
+  closeOldScope: Effect.Effect<void, E>,
 ) {
+  replacements.set(environmentId, (replacements.get(environmentId) ?? 0) + 1);
+  yield* closeOldScope;
   yield* cache.clear(environmentId).pipe(
     Effect.catch((error) =>
       Effect.logWarning("Could not clear the cached data of a replaced credential.", {

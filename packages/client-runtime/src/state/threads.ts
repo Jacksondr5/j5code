@@ -30,6 +30,7 @@ import { connectionProjectionPhase } from "../connection/model.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import * as ConnectionWakeups from "../connection/wakeups.ts";
 import * as Persistence from "../platform/persistence.ts";
+import { credentialStillCurrent } from "../j5/replacedCredential.ts";
 import { runCachePersistence } from "./cachePersistence.ts";
 import * as ManagedRelay from "../relay/managedRelay.ts";
 import { request, subscribeDynamic } from "../rpc/client.ts";
@@ -205,6 +206,8 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
   );
   const wakeups = yield* Effect.serviceOption(ConnectionWakeups.ConnectionWakeups);
   const environmentId = supervisor.target.environmentId;
+  // J5 (case 125): a thread state made under a replaced credential stops saving.
+  const credentialCurrent = credentialStillCurrent(environmentId);
   const retained = resumeCache?.snapshot;
   const owner = {};
   if (resumeCache) resumeCache.owner = owner;
@@ -291,6 +294,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
   ) {
     if (resumeCache !== undefined && resumeCache.owner !== owner) return;
     if (committed.state.status === "deleted") return;
+    if (!credentialCurrent()) return;
     if (
       committed.persisted &&
       matchesThreadSnapshot(

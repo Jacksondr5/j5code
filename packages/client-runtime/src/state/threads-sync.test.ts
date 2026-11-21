@@ -50,6 +50,7 @@ import { v2Now, v2Projection, v2ThreadId } from "./orchestrationV2TestFixtures.t
 import { onThreadRequestsResolved, type ThreadRequestsResolved } from "./threadRequests.ts";
 import { EMPTY_THREAD_HISTORY_META } from "./threadHistoryMerge.ts";
 import * as ThreadHistoryController from "./threadHistoryController.ts";
+import { forgetReplacedCredential } from "../j5/replacedCredential.ts";
 import {
   EMPTY_ENVIRONMENT_THREAD_STATE,
   makeEnvironmentThreadState,
@@ -2063,6 +2064,30 @@ describe("EnvironmentThreads", () => {
 
       yield* TestClock.adjust("10 seconds");
       expect(yield* Ref.get(harness.savedThreads)).toHaveLength(1);
+      yield* Scope.close(scope, Exit.void);
+      expect(yield* Ref.get(harness.savedThreads)).toHaveLength(1);
+    }),
+  );
+
+  it.effect("does not recreate a cache a re-pair cleared from its finalizer", () =>
+    Effect.gen(function* () {
+      const scope = yield* Scope.make();
+      const harness = yield* makeHarness().pipe(Effect.provideService(Scope.Scope, scope));
+      yield* Queue.offer(harness.inputs, snapshot(BASE_PROJECTION));
+      yield* awaitThreadState(harness.observed, (value) => value.status === "live");
+      yield* TestClock.adjust("500 millis");
+      expect(yield* Ref.get(harness.savedThreads)).toHaveLength(1);
+
+      yield* Queue.offer(harness.inputs, titleUpdated("The last person's title"));
+      yield* awaitThreadState(
+        harness.observed,
+        (value) => Option.getOrNull(value.data)?.thread.title === "The last person's title",
+      );
+      yield* forgetReplacedCredential(
+        { clear: () => Effect.void },
+        TARGET.environmentId,
+        Effect.void,
+      );
       yield* Scope.close(scope, Exit.void);
       expect(yield* Ref.get(harness.savedThreads)).toHaveLength(1);
     }),

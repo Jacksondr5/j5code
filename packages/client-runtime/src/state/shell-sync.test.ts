@@ -28,6 +28,7 @@ import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import * as Persistence from "../platform/persistence.ts";
 import * as RpcSession from "../rpc/session.ts";
 import type { WsRpcProtocolClient } from "../rpc/protocol.ts";
+import { forgetReplacedCredential } from "../j5/replacedCredential.ts";
 import { type EnvironmentShellState, makeEnvironmentShellState } from "./shell.ts";
 import * as ShellSnapshotLoader from "./shellSnapshotHttp.ts";
 import { v2Project, v2ShellSnapshot, v2ThreadShell } from "./orchestrationV2TestFixtures.ts";
@@ -370,6 +371,38 @@ describe("environment shell synchronization", () => {
         [4, v2Project.title],
         [4, "Changed at same sequence"],
       ]);
+    }),
+  );
+
+  it.effect("saves nothing more once a re-pair has replaced the environment's credential", () =>
+    Effect.gen(function* () {
+      const saved = yield* SubscriptionRef.make<ReadonlyArray<number>>([]);
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const h = yield* makePersistenceHarness((_id, snapshot) =>
+            SubscriptionRef.update(saved, (values) => [...values, snapshot.snapshotSequence]),
+          );
+          yield* TestClock.adjust("500 millis");
+          yield* h.send(
+            {
+              kind: "snapshot",
+              snapshot: {
+                ...LIVE_SHELL_SNAPSHOT,
+                snapshotSequence: 10,
+                projects: [{ ...v2Project, title: "The last person's project" }],
+              },
+            },
+            (snapshot) => snapshot.snapshotSequence === 10,
+          );
+          yield* forgetReplacedCredential(
+            { clear: () => Effect.void },
+            TARGET.environmentId,
+            Effect.void,
+          );
+        }),
+      );
+      // The teardown flush would save sequence 10, the last person's rows, after the cache cleared.
+      expect(yield* SubscriptionRef.get(saved)).toEqual([1]);
     }),
   );
 

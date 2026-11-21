@@ -35,7 +35,7 @@ import type {
 } from "./model.ts";
 import { ConnectionBlockedError } from "./model.ts";
 import * as Persistence from "../platform/persistence.ts";
-import { forgetCachedData, replacesCredential } from "../j5/replacedCredential.ts";
+import { forgetReplacedCredential, replacesCredential } from "../j5/replacedCredential.ts";
 import * as EnvironmentSupervisor from "./supervisor.ts";
 import * as ConnectionDriver from "./driver.ts";
 import * as ConnectionWakeups from "./wakeups.ts";
@@ -503,9 +503,14 @@ export const make = Effect.gen(function* () {
       return;
     }
 
-    yield* closeServiceScope(target.environmentId);
-    // J5 (case 125): after the old scope's last cache write, before the new one loads it.
-    if (options?.forgetCache === true) yield* forgetCachedData(cache, target.environmentId);
+    // J5 (case 125): a replaced credential's cache is cleared before the new scope loads it.
+    yield* options?.forgetCache === true
+      ? forgetReplacedCredential(
+          cache,
+          target.environmentId,
+          closeServiceScope(target.environmentId),
+        )
+      : closeServiceScope(target.environmentId);
     yield* SubscriptionRef.update(entries, (current) => {
       const next = new Map(current);
       next.set(target.environmentId, entry);
