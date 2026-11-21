@@ -7,6 +7,7 @@ import {
   J5_CLIENT_READ_WS_METHODS,
   type PersonLevel,
 } from "@t3tools/contracts/j5";
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -571,11 +572,17 @@ describe("upstream's notice to pair again", () => {
     expect(permissionNoticeApplies(AsyncResult.success({ kind: "unknown" as const }))).toBe(false);
   });
 
-  it("waits for the server's answer", () => {
+  it("waits for the server's answer, and a read that failed on the way is no answer", () => {
     expect(permissionNoticeApplies(AsyncResult.initial())).toBe(false);
+    expect(
+      permissionNoticeApplies(AsyncResult.failure(Cause.fail(new Error("socket closed")))),
+    ).toBe(false);
   });
 
   it("stays upstream's for a server from before people and for a session that is no person's", () => {
+    expect(
+      permissionNoticeApplies(AsyncResult.failure(Cause.die("Unknown request tag: j5.access"))),
+    ).toBe(true);
     expect(permissionNoticeApplies(AsyncResult.success(null))).toBe(true);
     expect(permissionNoticeApplies(AsyncResult.success({ kind: "service" as const }))).toBe(true);
   });
