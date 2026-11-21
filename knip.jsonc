@@ -57,6 +57,15 @@
       // knip run beside it in check:changed must not report.
       "ignore": ["npm-launcher/**", ".knip-test-*/**"],
     },
+    "evals": {
+      // J5: run by hand, or by launch.ts by path inside its container.
+      "entry": [
+        "j5-cli/launch.ts",
+        "j5-cli/run.ts",
+        "j5-cli/egress-proxy.ts",
+        "j5-cli/codex-hook.mjs",
+      ],
+    },
     "apps/server": {
       // Vite+ pack entries and the launcher used by installed background services.
       "entry": [
