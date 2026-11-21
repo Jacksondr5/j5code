@@ -53,7 +53,12 @@ import {
   useAnswerAttachments,
 } from "./AnswerAttachments";
 import { answerHumanExchange } from "./humanInboxClient";
-import { inboxAnswerDrafts, pruneInboxAnswerDrafts, setInboxAnswerText } from "./inboxAnswerDrafts";
+import {
+  inboxAnswerDrafts,
+  inboxAnswerText,
+  pruneInboxAnswerDrafts,
+  setInboxAnswerText,
+} from "./inboxAnswerDrafts";
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { J5RecordPanel } from "./J5RecordPanel";
 import { OwnerAskAction } from "./OwnerAskAction";
@@ -343,6 +348,7 @@ function OpenInboxItem({
                 {...(addFiles === null ? {} : answerAttachmentInputHandlers(addFiles))}
               />
               <AnswerAttachmentList
+                answerKey={itemKey}
                 attachments={attachments.list(itemKey)}
                 environmentId={item.environmentId}
                 error={attachments.error(itemKey)}
@@ -516,7 +522,7 @@ export function HumanInboxPage() {
     projectOf(item.environmentId, item.projectId)?.displayName ?? item.projectTitle;
   const draftsByThreadKey = useComposerDraftStore((state) => state.draftsByThreadKey);
   const answers: HumanInboxAnswers = Object.fromEntries(
-    [...inboxAnswerDrafts(draftsByThreadKey)].map(([key, draft]) => [key, draft.prompt]),
+    [...inboxAnswerDrafts(draftsByThreadKey)].map(([key, draft]) => [key, inboxAnswerText(draft)]),
   );
   const answerAttachments = useAnswerAttachments();
   const personScopes = JSON.stringify(

@@ -193,6 +193,7 @@ export function AnswerAttachButton(props: {
 }
 
 export function AnswerAttachmentList(props: {
+  readonly answerKey: string;
   readonly environmentId: EnvironmentId;
   readonly attachments: ReadonlyArray<AnswerAttachment>;
   readonly error: string | null;
@@ -245,6 +246,7 @@ export function AnswerAttachmentList(props: {
                       retryAttachmentUpload({
                         environmentId: props.environmentId,
                         image: attachment,
+                        draftTarget: inboxAnswerDraftId(props.answerKey),
                       })
                     }
                     size="icon-xs"

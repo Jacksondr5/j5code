@@ -9,6 +9,8 @@ import {
 } from "../../composerDraftStore";
 import { serializeComposerImages } from "../../components/chat/composerImagePersistence";
 import { releaseDraftAttachments } from "../../lib/attachmentUploadQueue";
+import { removeInlineContextReference } from "../../lib/composerContextReferences";
+import { toKindScopedComposerContextId } from "@t3tools/shared/composerContextReferences";
 
 // Each answer is a composer draft of its own, as upstream keeps a pending question's attachments,
 // so its words and files outlive the page and a reload the way an unsent message does.
@@ -35,9 +37,26 @@ export function inboxAnswerDrafts(
   return drafts;
 }
 
+/**
+ * The answer as typed. Rehydrating a draft appends a reference token for each file, which the
+ * composer wants and an answer, delivered word for word, must not carry.
+ */
+export function inboxAnswerText(draft: ComposerThreadDraftState): string {
+  let text = draft.prompt;
+  for (const file of draft.files) {
+    text = removeInlineContextReference(
+      text,
+      toKindScopedComposerContextId("file", file.id),
+    ).prompt;
+  }
+  return text;
+}
+
 export function setInboxAnswerText(itemKey: string, text: string) {
   useComposerDraftStore.getState().setPrompt(inboxAnswerDraftId(itemKey), text);
 }
+
+const latestImageSave = new Map<string, number>();
 
 /** Saves the answer's images as data URLs, as the composer does, so a reload brings them back. */
 export async function persistInboxAnswerImages(itemKey: string) {
@@ -45,7 +64,12 @@ export async function persistInboxAnswerImages(itemKey: string) {
   const read = () => useComposerDraftStore.getState().getComposerDraft(target);
   const draft = read();
   if (draft === null) return;
+  const save = (latestImageSave.get(itemKey) ?? 0) + 1;
+  latestImageSave.set(itemKey, save);
   const serialized = await serializeComposerImages(draft.images, draft.persistedAttachments);
+  // A later save saw more images; this one's list would drop them.
+  if (latestImageSave.get(itemKey) !== save) return;
+  latestImageSave.delete(itemKey);
   const current = new Set((read()?.images ?? []).map((image) => image.id));
   await useComposerDraftStore.getState().syncPersistedAttachments(
     target,
