@@ -365,5 +365,10 @@ export function createJ5EnvironmentAtoms<R, E>(
       "j5:change-peer-origin",
       J5_CLIENT_ACTION_WS_METHODS.changePeerOrigin,
     ),
+    forgetEnvironmentLink: createJ5ActionCommand(
+      runtime,
+      "j5:forget-environment-link",
+      J5_CLIENT_ACTION_WS_METHODS.forgetEnvironmentLink,
+    ),
   };
 }

@@ -14,6 +14,15 @@ export const lineAddressForSlot = (slot: number): string | null =>
     ? `http://${LINE_HOST_PREFIX}${String(slot >> 8)}.${String(slot & 0xff)}:${String(LINE_PORT)}`
     : null;
 
+/**
+ * " at <addresses>" for a message a person or an agent reads, without any line address: nothing
+ * else ever shows one. Empty when a line is the only way to the server.
+ */
+export const atReadableAddresses = (urls: ReadonlyArray<string>): string => {
+  const shown = urls.filter((url) => !isLineHost(URL.parse(url)?.hostname ?? ""));
+  return shown.length === 0 ? "" : ` at ${shown.join(", ")}`;
+};
+
 /** Whether a URL's hostname is a line host; such a request may only travel through a line. */
 export const isLineHost = (hostname: string): boolean => {
   if (!hostname.startsWith(LINE_HOST_PREFIX)) return false;

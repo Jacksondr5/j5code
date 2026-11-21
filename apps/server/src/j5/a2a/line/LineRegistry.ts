@@ -50,6 +50,8 @@ export interface LineRegistryShape {
    * make each connection, so it answers at once.
    */
   readonly connect: (host: string) => LineStream | LineClosedError;
+  /** Whether a line is up behind a line host now. */
+  readonly isUp: (host: string) => boolean;
   /** The id of the line a peer holds here now, or null when none is up. */
   readonly currentLineId: (environmentId: string) => string | null;
   /** Each line as it comes up, from the moment of subscribing. */
@@ -164,6 +166,7 @@ const make = Effect.gen(function* () {
   return LineRegistry.of({
     serve,
     connect,
+    isUp: (host) => byHost.has(host),
     currentLineId,
     subscribeUps: Effect.map(PubSub.subscribe(ups), Stream.fromSubscription),
   });

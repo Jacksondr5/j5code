@@ -61,6 +61,7 @@ const setup = Effect.gen(function* () {
       Layer.provide(
         Layer.mock(LineRegistry)({
           connect: () => new LineClosedError("Not used here."),
+          isUp: () => false,
           currentLineId: (environmentId) => current.get(environmentId) ?? null,
           subscribeUps: Effect.map(PubSub.subscribe(ups), Stream.fromSubscription),
         }),

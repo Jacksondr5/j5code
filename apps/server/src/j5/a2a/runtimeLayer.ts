@@ -55,6 +55,7 @@ import { layer as humanInboxLayer } from "./HumanInboxService.ts";
 import { layer as clientActionsLayer } from "./ClientActionsService.ts";
 import { layer as clientReadsLayer } from "./ClientReadsService.ts";
 import { layer as peerAdminLayer } from "./PeerAdminService.ts";
+import { layer as linkSessionLayer } from "./LinkSessionService.ts";
 import { layer as threadRegistrationLayer } from "./ThreadRegistration.ts";
 import { layer as spawnCompositionLayer } from "./SpawnCompositionService.ts";
 import { layer as spawnWorkspaceLayer } from "./spawnWorkspace.ts";
@@ -270,7 +271,8 @@ const makeJ5A2AAuxiliaryLayer = (
   return Layer.mergeAll(
     clientReadsLayer,
     clientActionsLayer,
-    peerAdminLayer,
+    // Removing a peer also ends the sessions its links hold here; the link routes share the service.
+    peerAdminLayer.pipe(Layer.provideMerge(linkSessionLayer)),
     artifactDeletionProvided,
   ).pipe(Layer.provideMerge(runtimeWithoutClientReads));
 };

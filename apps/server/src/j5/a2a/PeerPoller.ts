@@ -391,7 +391,8 @@ const make = Effect.fn("j5.a2a.peer.poller.make")(function* (daemon: boolean) {
   });
 
   /**
-   * After a poll the storing server answered, its line is opened if it takes one and none is up. The
+   * When the loop starts, and after each poll the storing server answered, its line is opened if it
+   * takes one and none is up. The
    * line lives in the loop's fiber, so it ends with the loop; a refused credential stops it until
    * the loop restarts, as it stops polling.
    */
@@ -434,6 +435,9 @@ const make = Effect.fn("j5.a2a.peer.poller.make")(function* (daemon: boolean) {
     let backoff = BACKOFF_START;
     let cuts = 0;
     const keepLine = yield* lineKeeper;
+    // Before the first poll, whose answer may be held for the whole hold: a link to this server is
+    // made through the line seconds after it is set up to poll, and after a restart.
+    yield* keepLine(environmentId);
     while (true) {
       // Each poll listens for a roster change only while it is held, then lets go.
       const outcome = yield* Effect.scoped(
