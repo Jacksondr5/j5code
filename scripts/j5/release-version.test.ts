@@ -41,7 +41,7 @@ describe("J5 date versions", () => {
 
   it("refuses to promote a nightly from before the current stable release", () => {
     const nightly = "v202610.15.0-nightly.20261015.12";
-    expect(stableVersionOf(nightly, "v0.0.48")).toBe("202610.15.0");
+    expect(stableVersionOf(nightly, "v0.0.51")).toBe("202610.15.0");
     expect(stableVersionOf(nightly, "v202610.14.2")).toBe("202610.15.0");
     // The same version again is the release workflow's call: it resumes or refuses by commit.
     expect(stableVersionOf(nightly, "v202610.15.0")).toBe("202610.15.0");
@@ -58,8 +58,8 @@ describe("J5 date versions", () => {
     const nextDay = nightlyVersion({ date: "20261016", runNumber: 14, tags: [`v${stable}`] });
     const nextYear = nightlyVersion({ date: "20270101", runNumber: 90, tags: [] });
     const ascending = [
-      "0.0.48",
-      "0.0.49-nightly.20261010.3",
+      "0.0.51",
+      "0.0.52-nightly.20261117.18",
       first,
       stable,
       sameDay,

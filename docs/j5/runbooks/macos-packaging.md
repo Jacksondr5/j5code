@@ -71,8 +71,8 @@ T3 Code.
 
 ### Version numbers
 
-A J5 version is a date: `<yyyymm>.<d>.<n>`, the UTC day the build was made and a counter for that
-day's stable releases. `202610.15.0` is the first stable release of 15 October 2026 and
+A J5 version is a date: `<yyyymm>.<d>.<n>`, the UTC day its nightly was built and a counter for that
+day's stable releases. A nightly from the 15th promoted on the 17th is still `202610.15.0`. `202610.15.0` is the first stable release of 15 October 2026 and
 `202610.15.1` a second one that day. Month and day carry no leading zero beyond the month's own
 (`202701.5.0`), because version numbers may not. A nightly is
 `<yyyymm>.<d>.<n>-nightly.<yyyymmdd>.<run>`, where `n` is the next number no stable release of that
@@ -80,7 +80,7 @@ day has taken, so it sorts above every stable release that exists and below the 
 it. `scripts/j5/release-version.ts` computes both. The numbers say nothing about upstream: the
 T3 Code release J5 is built on is `J5_UPSTREAM_T3_CODE_VERSION` (FORK.md case 59).
 
-Releases through 0.0.48, and nightlies named `0.0.49-nightly.*`, predate this. Every date version
+Releases through 0.0.51, and nightlies named `0.0.52-nightly.*`, predate this. Every date version
 sorts above them.
 
 Nothing is committed for a nightly or a stable release: the version is stamped into the four
@@ -242,7 +242,7 @@ the time to repeat step 2.
 - `install.sh`, `install.ps1`, and `SHA256SUMS` over the archives and both installers.
 
 Called by `J5 Nightly` or `J5 Stable`, it is given the commit and the version, stamps the version
-before building the CLI archives, and publishes the desktop build made earlier in the same run. It
+before building, and builds the desktop app itself. It
 accepts only a date version from a caller. Run by hand with a build's run ID, its resolve job reads
 the version from the build commit's four manifests, which must agree, and publishes only a preview:
 a nightly comes only from `J5 Nightly` and a stable release only from `J5 Stable`, whatever the
@@ -262,8 +262,8 @@ link beside it so a server from before the rename can run the update check that 
 signs with Developer ID, and notarizes the app. It verifies the mounted app's identity (J5 Code, or
 J5 Code (Nightly) for a nightly version), signature, notarization ticket, and Gatekeeper assessment
 before uploading artifacts for 30 days. It does not create a GitHub Release. Run by hand it builds
-the branch it was started on at the version that branch commits; `J5 Nightly` and `J5 Stable` call
-it with a commit and a version to stamp. The workflow uses the Apple signing secrets and
+the branch it was started on at the version that branch commits; `J5 Release` calls it with a
+commit and a version to stamp when `J5 Nightly` or `J5 Stable` runs. The workflow uses the Apple signing secrets and
 `APPLE_TEAM_ID` repository variable; it converts the P12 export to a Keychain-compatible format.
 Clerk passkey provisioning is only required when Clerk/passkey configuration is supplied.
 

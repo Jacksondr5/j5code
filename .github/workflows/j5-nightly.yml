@@ -17,8 +17,10 @@ on:
 
 permissions: {}
 
+# Shared with J5 Stable, so no stable release of today lands between this run
+# picking its number and publishing.
 concurrency:
-  group: j5-nightly
+  group: j5-publish
   cancel-in-progress: false
 
 jobs:

@@ -3,11 +3,9 @@ import * as NodeFS from "node:fs";
 import * as NodeUtil from "node:util";
 
 /**
- * J5 versions are dates: `<yyyymm>.<d>.<n>`, the UTC day a build was made and a counter for the
- * stable releases of that day. `202610.15.0` is the first stable release of 15 October 2026.
- * A nightly is `<yyyymm>.<d>.<n>-nightly.<yyyymmdd>.<run>`, where `n` is the next number no
- * stable release of that day has taken, so it sorts above every stable release that already
- * exists and below the stable release promoted from it.
+ * J5 versions are dates, `<yyyymm>.<d>.<n>`: a nightly's UTC build day and a counter for that
+ * day's stable releases. A nightly takes the next `n` no stable release of its day has, so it sorts
+ * above every existing stable release and below the one promoted from it.
  */
 const STABLE = /^(\d{6})\.([1-9]|[12]\d|3[01])\.(0|[1-9]\d*)$/;
 const NIGHTLY = /^(\d{6}\.(?:[1-9]|[12]\d|3[01])\.(?:0|[1-9]\d*))-nightly\.\d{8}\.\d+$/;

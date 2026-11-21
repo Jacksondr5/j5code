@@ -600,6 +600,13 @@ jobs:
           if tag_sha="$(gh api "repos/$GH_REPO/commits/$tag" --jq .sha 2>/dev/null)"; then
             test "$tag_sha" = "$RELEASE_SHA"
           fi
+          # A draft has no tag yet, so a draft a failed run left for another commit
+          # passes the check above; publishing into it would mislabel this build.
+          if target="$(gh release view "$tag" --json targetCommitish --jq .targetCommitish 2>/dev/null)" \
+            && [[ "$target" != "$RELEASE_SHA" ]]; then
+            echo "::error::A release for $tag already targets $target, not $RELEASE_SHA. Delete that draft, or promote a newer nightly."
+            exit 1
+          fi
           if ! gh release view "$tag" >/dev/null 2>&1; then
             if [[ "$RELEASE_CHANNEL" == nightly ]]; then
               cat > "$RUNNER_TEMP/release-notes.md" <<EOF

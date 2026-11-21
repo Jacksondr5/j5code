@@ -4,7 +4,8 @@ name: J5 Stable
 # again as `<yyyymm>.<d>.<n>` (the nightly's version without its suffix) and
 # published as "latest". The stable build is of a commit nightly users already
 # ran. Nothing is committed: the version is stamped into the manifests during
-# each build.
+# each build. J5 Release builds the desktop app and the CLI archives and
+# publishes them.
 
 on:
   workflow_dispatch:
@@ -16,8 +17,10 @@ on:
 
 permissions: {}
 
+# Shared with J5 Nightly: a nightly picks its number before its builds, so a
+# stable release of the same day published meanwhile would sort above it.
 concurrency:
-  group: j5-stable
+  group: j5-publish
   cancel-in-progress: false
 
 jobs:
@@ -70,6 +73,11 @@ jobs:
           latest="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name')"
           version="$(node scripts/j5/release-version.ts stable "$tag" --latest "$latest")"
           ref="$(gh api "repos/$GITHUB_REPOSITORY/commits/$tag" --jq '.sha')"
+          # Fail before the signed builds when another nightly already took this number.
+          if taken="$(gh api "repos/$GITHUB_REPOSITORY/commits/v$version" --jq '.sha' 2>/dev/null)" && [[ "$taken" != "$ref" ]]; then
+            echo "::error::v$version is already released from $taken, not $tag ($ref). Promote a newer nightly."
+            exit 1
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "ref=$ref" >> "$GITHUB_OUTPUT"
           echo "::notice::Promoting $tag ($ref) to J5 Code $version."
@@ -87,26 +95,9 @@ jobs:
               subprocess.run(["git", "update-index", "--force-remove", "-z", "--stdin"], input=b"\0".join(paths) + b"\0", check=True)
           PYTHON
 
-  build:
-    name: Desktop build
-    needs: resolve
-    permissions:
-      contents: read
-    uses: ./.github/workflows/j5-macos-build.yml
-    with:
-      ref: ${{ needs.resolve.outputs.ref }}
-      version: ${{ needs.resolve.outputs.version }}
-    secrets:
-      CSC_LINK: ${{ secrets.CSC_LINK }}
-      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
-      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-
-  # Builds the CLI archives and publishes them with the desktop build above.
   release:
     name: Release
-    needs: [resolve, build]
+    needs: resolve
     permissions:
       contents: write
       actions: read
