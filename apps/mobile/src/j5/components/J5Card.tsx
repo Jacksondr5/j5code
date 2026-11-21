@@ -7,7 +7,9 @@ import { cn } from "../../lib/cn";
 
 // Upstream's question-card chrome, with an edge derived from the text colour so a J5 card stands
 // off the sheet on every theme.
-const CARD = "rounded-[20px] border border-foreground/15 bg-card-alt p-4";
+/** J5's card chrome, shared by every J5 card so D12's edge is tuned in one place. */
+export const J5_CARD_CHROME = "rounded-[20px] border border-foreground/15 bg-card-alt";
+const CARD = `${J5_CARD_CHROME} p-4`;
 
 /** A J5 card: upstream's question-card chrome around J5's own compact content. */
 export function J5Card(props: { readonly children: ReactNode; readonly className?: string }) {

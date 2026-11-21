@@ -31,6 +31,7 @@ import {
   selectedPlaybookRun,
   sortPlaybookRuns,
   playbookWorkspaces,
+  stepsExpandedFor,
 } from "./playbooks.ts";
 
 const author: OrchestrationV2AgentPersonaCatalogEntry = {
@@ -513,7 +514,7 @@ it("ranks playbook suggestions by exact name, then prefix, then name or title ma
     { name: "review-plan", title: "Plan", issue: null },
     { name: "review", title: "Review", issue: null },
     { name: "review-broken", title: "Broken", issue },
-  ];
+  ].map((playbook) => ({ ...playbook, description: "" }));
   expect(matchPlaybookSuggestions(playbooks, " Review ").map(({ name }) => name)).toEqual([
     "review",
     "review-plan",
@@ -540,10 +541,10 @@ describe("playbook mention picker", () => {
     availableStepIds: [],
   });
   const playbooks = [
-    { name: "release-broken", title: "Broken release", issue: broken },
-    { name: "Release Plan", title: "Release Plan", issue: badName },
-    { name: "code-release", title: "Code release", issue: null },
-    { name: "release", title: "Release", issue: null },
+    { name: "release-broken", title: "Broken release", description: "", issue: broken },
+    { name: "Release Plan", title: "Release Plan", description: "", issue: badName },
+    { name: "code-release", title: "Code release", description: "Tag and ship", issue: null },
+    { name: "release", title: "Release", description: "Cut a release", issue: null },
   ];
   const mention = (text: string) => ({
     kind: "slash-playbook",
@@ -555,14 +556,19 @@ describe("playbook mention picker", () => {
   it("lists valid playbooks first, then invalid ones with their error, but no misnamed file", () => {
     const text = "Use @playbook:rel";
     expect(
-      playbookMenuItems(playbooks, mention(text), text).map(({ name, description }) => ({
+      playbookMenuItems(playbooks, mention(text), text).map(({ name, label, description }) => ({
         name,
+        label,
         description,
       })),
     ).toEqual([
-      { name: "release", description: "Release" },
-      { name: "code-release", description: "Code release" },
-      { name: "release-broken", description: "Step report is missing a prompt." },
+      { name: "release", label: "Release", description: "Cut a release" },
+      { name: "code-release", label: "Code release", description: "Tag and ship" },
+      {
+        name: "release-broken",
+        label: "Broken release",
+        description: "Step report is missing a prompt.",
+      },
     ]);
   });
 
@@ -643,4 +649,14 @@ it("keeps a thread's stage view while the bar is away for a question", () => {
   rememberPlaybookStagesView("env:thread-a", { expanded: true, selectedRunId: "run-1" });
   expect(playbookStagesView("env:thread-a")).toEqual({ expanded: true, selectedRunId: "run-1" });
   expect(playbookStagesView("env:thread-b")).toEqual({ expanded: false, selectedRunId: null });
+});
+
+it("keeps steps expanded only for the run they were opened on", () => {
+  const opened = { expanded: true, selectedRunId: null, expandedRunId: "run-a" };
+  // A cold load of the same run, from the remembered view.
+  expect(stepsExpandedFor(opened, "run-a")).toBe(true);
+  // Run A gave way to run B while the bar was away.
+  expect(stepsExpandedFor(opened, "run-b")).toBe(false);
+  // Run A ended with no run after it.
+  expect(stepsExpandedFor(opened, null)).toBe(false);
 });

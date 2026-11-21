@@ -226,7 +226,10 @@ export function isPlaybookSlashCommandVisible(command: string, atMessageStart: b
   return command !== "playbook" || atMessageStart;
 }
 
-/** `/playbook <query>` suggestions: exact name, then name prefix, then name or title substring. */
+/**
+ * `/playbook <query>` suggestions: exact name, then name prefix, then name or title substring. A row
+ * shows the title and the description; the name, which the title repeats, is only inserted.
+ */
 export function matchPlaybookSuggestions(
   playbooks: ReadonlyArray<PlaybookSuggestionInput>,
   query: string,
@@ -248,12 +251,17 @@ export function matchPlaybookSuggestions(
       id: `playbook:${playbook.name}`,
       type: "playbook" as const,
       name: playbook.name,
-      label: playbook.name,
-      description: playbook.title,
+      label: playbook.title || playbook.name,
+      description: playbook.description,
     }));
 }
 
-type PlaybookSuggestionInput = { name: string; title: string; issue: { message: string } | null };
+type PlaybookSuggestionInput = {
+  name: string;
+  title: string;
+  description: string;
+  issue: { message: string } | null;
+};
 type PlaybookTriggerRange = { rangeStart: number; rangeEnd: number };
 
 /** `@playbook:` and `/playbook` share one trigger kind; the text at `rangeStart` tells them apart. */
@@ -360,7 +368,16 @@ export interface PlaybookStagesView {
   readonly expanded: boolean;
   /** An earlier run the person picked; `null` follows the latest run. */
   readonly selectedRunId: string | null;
+  /** The run the steps were expanded on; mobile's card keeps them expanded for that run only. */
+  readonly expandedRunId?: string | null;
 }
+
+/**
+ * Whether the steps show expanded for the active run: only the run they were opened on, so a run
+ * that ends, or another that takes its place, even while the bar was away, folds them.
+ */
+export const stepsExpandedFor = (view: PlaybookStagesView, activeRunId: string | null) =>
+  view.expanded && activeRunId !== null && view.expandedRunId === activeRunId;
 
 const playbookStagesViews = new Map<string, PlaybookStagesView>();
 

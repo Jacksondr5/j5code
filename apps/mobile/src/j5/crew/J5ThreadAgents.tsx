@@ -37,6 +37,7 @@ import { appAtomRegistry } from "../../state/atom-registry";
 import { useThreadShells } from "../../state/entities";
 import { environmentThreadShells } from "../../state/threads";
 import { j5Environment } from "../state";
+import { J5ParentRow, parentRoleLabel, useJ5ParentRow } from "./J5ParentRow";
 import { useServerConnection } from "./serverConnection";
 import { useThreadSpawnedChildren } from "./spawnedChildren";
 
@@ -76,32 +77,48 @@ function useJ5AgentCounts(ref: ScopedThreadRef | null) {
   return { running, total };
 }
 
-/** Upstream's Agents pill segment, counting the Crew seats and Peer Agents the thread spawned. */
+/**
+ * Upstream's Agents pill segment, counting the Crew seats and Peer Agents the thread spawned. A
+ * member thread with none of its own still shows the pill, named for its parent (D11).
+ */
 export function useJ5AgentsPillSegment(
   ref: ScopedThreadRef | null,
   turn: ThreadTurnSubagents | null,
   upstream: SubagentPillSegment | null,
 ): SubagentPillSegment | null {
-  return j5AgentsPillSegment(turn, upstream, useJ5AgentCounts(ref));
+  const parent = useJ5ParentRow(ref);
+  const segment = j5AgentsPillSegment(turn, upstream, useJ5AgentCounts(ref));
+  if (segment !== null || parent === null) return segment;
+  const role = parentRoleLabel(parent);
+  return { label: role, accessibilityLabel: role };
 }
 
-/** Whether the sheet lists spawned agents, so upstream's empty text stays only for an empty sheet. */
+/** Whether the sheet lists J5 rows, so upstream's empty text stays only for an empty sheet. */
 export function useHasJ5Agents(ref: ScopedThreadRef): boolean {
-  return useJ5AgentCounts(ref).total > 0;
+  const parent = useJ5ParentRow(ref);
+  return useJ5AgentCounts(ref).total > 0 || parent !== null;
 }
 
 /**
- * The thread's Crew seats and Peer Agents in upstream's Agents sheet: one block per Crew, with
- * Stop crew while a seat runs, and one for agents spawned outside a Crew.
+ * The thread's parent, then its Crew seats and Peer Agents, in upstream's Agents sheet: one block
+ * per Crew, with Stop crew while a seat runs, and one for agents spawned outside a Crew.
  */
 export function J5ThreadAgents(props: {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
   readonly onOpen: (child: ChildTarget) => void;
 }) {
-  const children = useThreadSpawnedChildren(scopeThreadRef(props.environmentId, props.threadId));
-  if (children.length === 0) return null;
-  return <SpawnedAgentGroups {...props} spawned={children} />;
+  const ref = scopeThreadRef(props.environmentId, props.threadId);
+  const parent = useJ5ParentRow(ref);
+  const children = useThreadSpawnedChildren(ref);
+  return (
+    <>
+      {parent === null ? null : (
+        <J5ParentRow environmentId={props.environmentId} parent={parent} onOpen={props.onOpen} />
+      )}
+      {children.length === 0 ? null : <SpawnedAgentGroups {...props} spawned={children} />}
+    </>
+  );
 }
 
 function SpawnedAgentGroups(props: {
