@@ -36,30 +36,38 @@ afterEach(async () => {
 
 it("keeps a half-typed answer and its uploaded file through leaving the page and reloading", async () => {
   vi.useFakeTimers();
+  const file = (id: string) => ({
+    type: "file" as const,
+    id,
+    name: `${id}.pdf`,
+    mimeType: "application/pdf",
+    sizeBytes: 10,
+    file: null,
+    uploadedAttachmentId: `upload-${id}`,
+    uploadEnvironmentId: local,
+  });
   try {
-    setInboxAnswerText(key(local, "ask-1"), "Use the staging database");
-    useComposerDraftStore.getState().addFiles(inboxAnswerDraftId(key(local, "ask-1")), [
-      {
-        type: "file",
-        id: "file-1",
-        name: "report.pdf",
-        mimeType: "application/pdf",
-        sizeBytes: 10,
-        file: null,
-        uploadedAttachmentId: "upload-1",
-        uploadEnvironmentId: local,
-      },
-    ]);
-    await vi.advanceTimersByTimeAsync(300);
-    useComposerDraftStore.setState({ draftsByThreadKey: {} });
+    for (const typed of ["Use the staging database", "Use the [staging database\n  ", ""]) {
+      setInboxAnswerText(key(local, "ask-1"), typed);
+      useComposerDraftStore
+        .getState()
+        .addFiles(inboxAnswerDraftId(key(local, "ask-1")), [file("a"), file("b")]);
+      await vi.advanceTimersByTimeAsync(300);
+      useComposerDraftStore.setState({ draftsByThreadKey: {} });
 
-    await useComposerDraftStore.persist.rehydrate();
+      await useComposerDraftStore.persist.rehydrate();
 
-    expect(answers()).toEqual({ [key(local, "ask-1")]: "Use the staging database" });
-    expect(
-      useComposerDraftStore.getState().getComposerDraft(inboxAnswerDraftId(key(local, "ask-1")))
-        ?.files,
-    ).toMatchObject([{ id: "file-1", uploadedAttachmentId: "upload-1" }]);
+      expect(answers()).toEqual({ [key(local, "ask-1")]: typed });
+      expect(
+        useComposerDraftStore.getState().getComposerDraft(inboxAnswerDraftId(key(local, "ask-1")))
+          ?.files,
+      ).toMatchObject([
+        { id: "a", uploadedAttachmentId: "upload-a" },
+        { id: "b", uploadedAttachmentId: "upload-b" },
+      ]);
+      useComposerDraftStore.setState({ draftsByThreadKey: {} });
+      await useComposerDraftStore.persist.clearStorage();
+    }
   } finally {
     vi.useRealTimers();
   }

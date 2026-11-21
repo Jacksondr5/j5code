@@ -9,8 +9,8 @@ import {
 } from "../../composerDraftStore";
 import { serializeComposerImages } from "../../components/chat/composerImagePersistence";
 import { releaseDraftAttachments } from "../../lib/attachmentUploadQueue";
-import { removeInlineContextReference } from "../../lib/composerContextReferences";
-import { toKindScopedComposerContextId } from "@t3tools/shared/composerContextReferences";
+import { fileContextReference } from "../../lib/composerContextRecords";
+import { formatInlineContextReference } from "../../lib/composerContextReferences";
 
 // Each answer is a composer draft of its own, as upstream keeps a pending question's attachments,
 // so its words and files outlive the page and a reload the way an unsent message does.
@@ -38,18 +38,20 @@ export function inboxAnswerDrafts(
 }
 
 /**
- * The answer as typed. Rehydrating a draft appends a reference token for each file, which the
- * composer wants and an answer, delivered word for word, must not carry.
+ * The answer as typed. Rehydrating a draft appends `<token> ` for each file, after a space when
+ * the text ended in a non-space; an answer is delivered word for word, so those exact strings are
+ * peeled off the end rather than parsed out, which could mistake a typed `[` for a token.
  */
 export function inboxAnswerText(draft: ComposerThreadDraftState): string {
   let text = draft.prompt;
-  for (const file of draft.files) {
-    text = removeInlineContextReference(
-      text,
-      toKindScopedComposerContextId("file", file.id),
-    ).prompt;
+  let peeled = false;
+  for (const file of draft.files.toReversed()) {
+    const appended = `${formatInlineContextReference(fileContextReference(file))} `;
+    if (!text.endsWith(appended)) continue;
+    text = text.slice(0, -appended.length);
+    peeled = true;
   }
-  return text;
+  return peeled && /[^ \t\r\n] $/.test(text) ? text.slice(0, -1) : text;
 }
 
 export function setInboxAnswerText(itemKey: string, text: string) {
