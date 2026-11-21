@@ -42,8 +42,8 @@ vi.mock("../playbooks/PlaybookCard", async () => {
   const { useState } = await import("react");
   return {
     usePlaybookCard: () => {
-      const [view, setView] = useState({ expanded: false, selectedRunId: null });
-      return { view, setView };
+      const [expanded, setExpanded] = useState(false);
+      return { expanded, setExpanded };
     },
     PlaybookCardFace: "Face",
     PlaybookSteps: "PlaybookSteps",

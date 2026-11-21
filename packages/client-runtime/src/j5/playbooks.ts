@@ -368,7 +368,16 @@ export interface PlaybookStagesView {
   readonly expanded: boolean;
   /** An earlier run the person picked; `null` follows the latest run. */
   readonly selectedRunId: string | null;
+  /** The run the steps were expanded on; mobile's card keeps them expanded for that run only. */
+  readonly expandedRunId?: string | null;
 }
+
+/**
+ * Whether the steps show expanded for the active run: only the run they were opened on, so a run
+ * that ends, or another that takes its place, even while the bar was away, folds them.
+ */
+export const stepsExpandedFor = (view: PlaybookStagesView, activeRunId: string | null) =>
+  view.expanded && activeRunId !== null && view.expandedRunId === activeRunId;
 
 const playbookStagesViews = new Map<string, PlaybookStagesView>();
 

@@ -31,6 +31,7 @@ import {
   selectedPlaybookRun,
   sortPlaybookRuns,
   playbookWorkspaces,
+  stepsExpandedFor,
 } from "./playbooks.ts";
 
 const author: OrchestrationV2AgentPersonaCatalogEntry = {
@@ -648,4 +649,14 @@ it("keeps a thread's stage view while the bar is away for a question", () => {
   rememberPlaybookStagesView("env:thread-a", { expanded: true, selectedRunId: "run-1" });
   expect(playbookStagesView("env:thread-a")).toEqual({ expanded: true, selectedRunId: "run-1" });
   expect(playbookStagesView("env:thread-b")).toEqual({ expanded: false, selectedRunId: null });
+});
+
+it("keeps steps expanded only for the run they were opened on", () => {
+  const opened = { expanded: true, selectedRunId: null, expandedRunId: "run-a" };
+  // A cold load of the same run, from the remembered view.
+  expect(stepsExpandedFor(opened, "run-a")).toBe(true);
+  // Run A gave way to run B while the bar was away.
+  expect(stepsExpandedFor(opened, "run-b")).toBe(false);
+  // Run A ended with no run after it.
+  expect(stepsExpandedFor(opened, null)).toBe(false);
 });

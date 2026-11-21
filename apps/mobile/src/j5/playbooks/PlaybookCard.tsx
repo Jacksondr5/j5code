@@ -5,6 +5,7 @@ import {
   presentPlaybookStages,
   rememberPlaybookStagesView,
   selectedPlaybookRun,
+  stepsExpandedFor,
 } from "@t3tools/client-runtime/j5/playbooks";
 import { j5LedgerSupported } from "@t3tools/client-runtime/j5/readSources";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
@@ -24,8 +25,9 @@ import { usePlaybookRefresh } from "./usePlaybookRefresh";
 
 /**
  * The thread's running Playbook, for its carousel: null once no run is active, so the card leaves
- * when its run completes (D9). The expanded steps keep the run the person picked across the
- * moments the composer unmounts the carousel.
+ * when its run completes (D9). The expanded steps and the run the person picked last across the
+ * moments the composer unmounts the carousel, but steps stay expanded only for the run they were
+ * opened on.
  */
 export function usePlaybookCard(environmentId: EnvironmentId, threadId: ThreadId) {
   const focused = useIsFocused();
@@ -55,16 +57,6 @@ export function usePlaybookCard(environmentId: EnvironmentId, threadId: ThreadId
   });
   const runs = query.data?.runs ?? [];
   const active = runs.find((run) => run.status === "active");
-  const activeRunId = active?.runId ?? null;
-  // The steps fold when their run ends or gives way to the next, even within one read, so the
-  // next run's card starts folded; a first read keeps the view remembered across unmounts.
-  const [seenRunId, setSeenRunId] = useState<string | null>(null);
-  if (query.data !== null) {
-    if (activeRunId !== seenRunId) setSeenRunId(activeRunId);
-    const runChanged = seenRunId !== null && seenRunId !== activeRunId;
-    if (view.expanded && (activeRunId === null || runChanged))
-      setView({ ...view, expanded: false });
-  }
   if (active === undefined) return null;
   return {
     active,
@@ -73,6 +65,9 @@ export function usePlaybookCard(environmentId: EnvironmentId, threadId: ThreadId
     outOfDate: query.error !== null && query.error !== undefined,
     view,
     setView,
+    expanded: stepsExpandedFor(view, active.runId),
+    setExpanded: (expanded: boolean) =>
+      setView({ ...view, expanded, expandedRunId: expanded ? active.runId : null }),
   };
 }
 

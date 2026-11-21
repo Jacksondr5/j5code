@@ -93,10 +93,8 @@ function Controls(props: Props & { readonly questions: CaptainQuestions | null }
   const questionsOpen = questionsFocused && questions !== null;
   // A composer popover folds the steps and hides the row while it's open, so no card shows beside
   // or above a short one (AC-13).
-  const playbookOpen =
-    playbook !== null && playbook.view.expanded && !questionsOpen && !popoverOpen;
-  const setPlaybookExpanded = (expanded: boolean) =>
-    playbook?.setView({ ...playbook.view, expanded });
+  const playbookOpen = playbook !== null && playbook.expanded && !questionsOpen && !popoverOpen;
+  const setPlaybookExpanded = (expanded: boolean) => playbook?.setExpanded(expanded);
 
   const { setHidesComposer } = slot;
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- the thread screen hides upstream's composer while the panel holds its place, before paint, and gets it back when the panel or this row goes
