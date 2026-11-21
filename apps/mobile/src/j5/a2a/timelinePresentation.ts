@@ -31,6 +31,8 @@ export interface J5Timeline extends ParticipantIdentities {
   readonly accessConfirmed: boolean;
   /** The person reaches less than the whole server. */
   readonly narrow: boolean;
+  /** The server's thread list was read over this connection, not kept from an earlier one. */
+  readonly threadListLive: boolean;
   readonly environmentId: EnvironmentId;
   readonly viewerParticipantId: string | null;
   readonly sharedAuthors: ReadonlyMap<string, MessageAuthor>;
@@ -145,8 +147,8 @@ export function presentJ5TimelineNotice(
 
 /**
  * The thread a letter's sender works in, as far as this person may know it. A narrower person
- * gets only what the server's identity read names for them: the letter's own thread id would be
- * looked up in a thread list that can still hold the last person's threads after a re-pair.
+ * gets only what the server's identity read names for them, and only once the thread list is
+ * live: until then it can still hold the last person's threads after a re-pair.
  */
 export function j5TimelineSenderRef(
   message: J5UserMessageInput & { readonly senderThreadId?: string | undefined },
@@ -155,7 +157,7 @@ export function j5TimelineSenderRef(
 ) {
   if (presentation?.group !== "participant" || !timeline.accessConfirmed) return null;
   if (timeline.narrow)
-    return presentation.senderId === null
+    return presentation.senderId === null || !timeline.threadListLive
       ? null
       : (timeline.threads.get(presentation.senderId) ?? null);
   return j5SenderThreadRef({

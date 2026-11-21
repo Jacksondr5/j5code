@@ -5,6 +5,7 @@ import {
 } from "@t3tools/client-runtime/j5/user-message";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 
+import { environmentShell } from "../../state/shell";
 import { accessConfirmedAtom } from "../connection/memory";
 import { j5Sharing } from "../sharing/guestAccess";
 import { useThreadAuthorIndex } from "../sharing/sharedConversation";
@@ -20,6 +21,7 @@ export function useJ5Timeline(
   const access = useAtomValue(j5Sharing.connectionAccess(environmentId));
   const accessConfirmed = useAtomValue(accessConfirmedAtom(environmentId));
   const narrow = useAtomValue(j5Sharing.isNarrow(environmentId));
+  const threadListLive = useAtomValue(environmentShell.statusAtom(environmentId)) === "live";
   const { authors } = useThreadAuthorIndex(environmentId, threadId);
   const identities = useParticipantIdentities(
     environmentId,
@@ -29,6 +31,7 @@ export function useJ5Timeline(
     ...identities,
     accessConfirmed,
     narrow,
+    threadListLive,
     environmentId,
     viewerParticipantId: access?.kind === "person" ? access.personId : null,
     sharedAuthors: authors,

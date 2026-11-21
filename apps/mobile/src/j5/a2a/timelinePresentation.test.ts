@@ -25,6 +25,7 @@ const timeline = (viewerParticipantId: string | null): J5Timeline => ({
   pending: new Set(),
   accessConfirmed: true,
   narrow: false,
+  threadListLive: true,
   sharedAuthors: new Map(),
 });
 
@@ -304,5 +305,13 @@ describe("j5TimelineSenderRef", () => {
 
   it("names no sender thread until the server says who the new person is", () => {
     expect(sender({ accessConfirmed: false })).toBeNull();
+  });
+
+  it("links a narrower person's sender only once the thread list was read for them", () => {
+    const named = { environmentId: here, threadId: ThreadId.make("thread-captain") };
+    const threads = new Map([["agent:captain", named]]);
+    // Re-paired as a Viewer, the list still holds the Owner's threads while it resyncs.
+    expect(sender({ narrow: true, threads, threadListLive: false })).toBeNull();
+    expect(sender({ narrow: true, threads, threadListLive: true })).toEqual(named);
   });
 });
