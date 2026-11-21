@@ -87,10 +87,10 @@ it("opens an Inbox message's web links outside the sender thread's panel", async
     browserLinkTarget: "app",
     pullRequestLinksOpenInApp: true,
   });
+  await using screen = await render(<InboxMessage item={item} />, { router: "/inbox" });
   using openPullRequest = vi
     .spyOn(useRightPanelStore.getState(), "openPullRequest")
     .mockImplementation(() => {});
-  await using screen = await render(<InboxMessage item={item} />, { router: "/inbox" });
   const defaults: boolean[] = [];
   // Records whether the app took over the click, then keeps the browser from opening a tab.
   const recordDefault = (event: MouseEvent) => {
@@ -100,11 +100,11 @@ it("opens an Inbox message's web links outside the sender thread's panel", async
   window.addEventListener("click", recordDefault);
   using _listener = { [Symbol.dispose]: () => window.removeEventListener("click", recordDefault) };
 
+  const docsLink = screen.getByRole("link", { name: /the docs/ }).element();
+  expect(docsLink.getAttribute("target")).toBe("_blank");
+  expect(docsLink.getAttribute("rel")).toBe("noopener noreferrer");
   await act(() =>
-    screen
-      .getByRole("link", { name: /the docs/ })
-      .element()
-      .dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })),
+    docsLink.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true })),
   );
   expect(defaults).toEqual([false]);
   expect(openUrlInPreview).not.toHaveBeenCalled();
@@ -117,4 +117,10 @@ it("opens an Inbox message's web links outside the sender thread's panel", async
   );
   expect(openPullRequest).not.toHaveBeenCalled();
   expect(screen.router?.state.location.pathname).toBe("/pull-requests");
+  expect(screen.router?.state.location.search).toMatchObject({
+    repository: "effect-ts/effect",
+    number: 7,
+    selectedProjectId: project.id,
+    selectedEnvironmentId: environmentId,
+  });
 });

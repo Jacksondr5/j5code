@@ -715,7 +715,7 @@ function useChatMarkdownState({
     await pullRequestLinking.changeLink(threadRef, href, linked);
   };
   const openExternalLinkInPreview = (url: string) => {
-    if (!linkThreadRef || !canOperatePreview) {
+    if (!threadRef || !canOperatePreview) {
       return Promise.resolve(
         AsyncResult.failure<void, BrowserPreviewUnavailableError>(
           Cause.fail(
@@ -726,8 +726,8 @@ function useChatMarkdownState({
         ),
       );
     }
-    return openUrlInPreview({ threadRef: linkThreadRef, url, openPreview }).then((result) => {
-      if (result._tag === "Success") recordVisitForThread(linkThreadRef, url);
+    return openUrlInPreview({ threadRef, url, openPreview }).then((result) => {
+      if (result._tag === "Success") recordVisitForThread(threadRef, url);
       else if (!isAtomCommandInterrupted(result)) {
         const error = squashAtomCommandFailure(result);
         if (error instanceof BrowserSettingsReadError) {
