@@ -1,0 +1,21 @@
+# Managed hooks are trusted by policy, so they run under `codex app-server` without a review.
+[features]
+hooks = true
+# ChatGPT apps and plugins reach the account's connectors through chatgpt.com, which the egress
+# allowlist must admit, so they are off: a connector can lead to a live server.
+apps = false
+plugins = false
+remote_plugin = false
+plugin_sharing = false
+tool_suggest = false
+
+[hooks]
+managed_dir = "/etc/codex/hooks"
+
+[[hooks.PreToolUse]]
+matcher = "^Bash$"
+
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "node /etc/codex/hooks/eval-hook.mjs"
+timeout = 180
