@@ -92,7 +92,9 @@ use tools on another. In J5 Code on web and desktop, a link does more, and you s
 - **You don't paste a pairing code, and rarely type an address.** Add the other server to this app
   first, with **Add environment** and a pairing link that manages access. J5 Code finds the
   address each server reaches the other at; when it can't, or you know a better one, enter it
-  under **Change**. You also don't need to visit
+  under **Change**. Tools need an https address or a Tailscale name (ending `.ts.net`): where J5
+  Code finds only a plain http address, it asks for one of those, or for that direction's tools
+  to be Off. You also don't need to visit
   **Settings → Labs**: choosing a level turns on the Linked environments beta on the servers
   involved, and says which.
 

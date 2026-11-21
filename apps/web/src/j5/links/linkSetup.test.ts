@@ -266,6 +266,46 @@ describe("pairRouteOf", () => {
     ).toMatchObject({ ready: true, choice: { localOrigin: "https://laptop.ts.net" } });
   });
 
+  it("asks for another address where tools are on and the one found is plain http", () => {
+    const lan = {
+      localToRemote: reached("http://10.0.0.7:3773"),
+      remoteToLocal: reached("https://laptop.example"),
+    };
+    const on = { localLevel: "auto", remoteLevel: "auto" } as const;
+    const routed = (levels: Parameters<typeof pairRouteOf>[0]["levels"], edits = {}) =>
+      pairRouteOf({
+        local: laptop,
+        remote: work,
+        check: lan,
+        edits: { connections: "both", ...edits },
+        ...(levels === undefined ? {} : { levels }),
+      });
+    const refused = routed(on);
+    expect(refused).toMatchObject({
+      ready: false,
+      problem: true,
+      line: "Messages are sent directly both ways · tools need another address",
+    });
+    expect(refused.fields.map((field) => [field.field, field.error !== null])).toEqual([
+      ["remoteOrigin", true],
+    ]);
+    expect(refused.fields[0]?.error).toContain("set Laptop's agents to Off");
+    // Messages alone take the address, and so does a direction whose tools go another way.
+    expect(routed({ localLevel: "off", remoteLevel: "auto" })).toMatchObject({
+      ready: true,
+      fields: [],
+    });
+    expect(routed(on, { connections: "remote-only" })).toMatchObject({ ready: true, fields: [] });
+    // A typed address stays on its field once it is one tools can use.
+    for (const remoteOrigin of ["https://work.example", "http://work.tail1234.ts.net:3773"]) {
+      expect(routed(on, { remoteOrigin })).toMatchObject({
+        ready: true,
+        fields: [{ field: "remoteOrigin", error: null }],
+      });
+    }
+    expect(routed(on, { remoteOrigin: "http://100.101.102.103:3773" }).ready).toBe(false);
+  });
+
   it("offers every way, each needing an address, when the check found no route", () => {
     const none = route({ localToRemote: failed, remoteToLocal: failed });
     expect(none).toMatchObject({

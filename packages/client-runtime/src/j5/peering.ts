@@ -1,6 +1,6 @@
 import type { EnvironmentId, ServerSelfUpdateCapability } from "@t3tools/contracts";
 import { PeerOrigin, type PeerProbeResponse } from "@t3tools/contracts/j5";
-import { isTailnetHost } from "@t3tools/shared/hostClassification";
+import { isLocalLoopbackHost, isTailnetHost } from "@t3tools/shared/hostClassification";
 import * as Schema from "effect/Schema";
 
 /**
@@ -197,10 +197,16 @@ export type PeeringReach =
    */
   | { readonly kind: "untested"; readonly error: string | null };
 
-/** Whether upstream's link takes an address, as `peerOrigin` in the server's `PeerLinks.ts` decides. */
-const carriesTools = (origin: string) => {
+/**
+ * Whether upstream's link takes a peer origin, as `peerOrigin` in the server's `PeerLinks.ts`
+ * decides: plain http only on the machine itself or at a Tailscale name or IPv6 address.
+ */
+export const linkTakesOrigin = (origin: string): boolean => {
+  if (!isPeerOrigin(origin)) return false;
   const url = new URL(origin);
-  return url.protocol === "https:" || isTailnetHost(url.hostname);
+  return (
+    url.protocol === "https:" || isLocalLoopbackHost(url.hostname) || isTailnetHost(url.hostname)
+  );
 };
 
 /**
@@ -217,8 +223,8 @@ export const peeringCandidates = (input: {
   ].filter((origin) => isPeerOrigin(origin) && peerOriginWarning(origin) === null);
   return [
     ...new Set([
-      ...candidates.filter(carriesTools),
-      ...candidates.filter((origin) => !carriesTools(origin)),
+      ...candidates.filter(linkTakesOrigin),
+      ...candidates.filter((origin) => !linkTakesOrigin(origin)),
     ]),
   ];
 };

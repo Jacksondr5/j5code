@@ -125,6 +125,8 @@ function OpenLinkRequestDialog(props: {
     selected.clearLeftover === null &&
     state !== "existing";
   const checks = usePairChecks(local, needsMessaging ? [selected.server] : []);
+  const level =
+    access ?? (state === "renew" ? link?.access : null) ?? linkRequestDefaultAccess(item);
   const route =
     local === null || !needsMessaging
       ? null
@@ -134,9 +136,9 @@ function OpenLinkRequestDialog(props: {
           check: checks[selected.environmentId] ?? null,
           edits,
           changing,
+          // A request makes this server's direction alone.
+          levels: { localLevel: level, remoteLevel: "off" },
         });
-  const level =
-    access ?? (state === "renew" ? link?.access : null) ?? linkRequestDefaultAccess(item);
   // Setting up messaging issues a credential on this server too, which answering alone does not.
   const cannotPeer =
     local === null || selected === null

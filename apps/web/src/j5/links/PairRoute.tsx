@@ -6,13 +6,7 @@ import { Radio, RadioGroup } from "../../components/ui/radio-group";
 import { readPreparedConnection } from "../../state/session";
 import { runPeeringCheck, type PeeringCheck } from "../peering/peeringCheck";
 import { OriginField } from "../peering/peeringParts";
-import {
-  routeWording,
-  type LinkSetupServer,
-  type PairEdits,
-  type PairRoute,
-  type RouteOption,
-} from "./linkSetup";
+import { routeWording, type LinkSetupServer, type PairEdits, type PairRoute } from "./linkSetup";
 
 const clientUrlOf = (environmentId: EnvironmentId) =>
   readPreparedConnection(environmentId)?.httpBaseUrl ?? null;
@@ -53,7 +47,7 @@ export function usePairChecks(
 
 /**
  * Change, for one pair: the ways its messages can travel, the check's pick marked, and an
- * address field only where the check could not prove one.
+ * address field only where the route says one is needed.
  */
 export function PairRouteChange({
   local,
@@ -69,9 +63,6 @@ export function PairRouteChange({
   readonly disabled: boolean;
 }) {
   const labelId = useId();
-  const chosen: RouteOption | undefined = route.options.find(
-    (option) => option.connections === route.choice?.connections,
-  );
   return (
     <div className="space-y-2">
       <p id={labelId} className="text-xs font-medium text-foreground">
@@ -106,26 +97,20 @@ export function PairRouteChange({
           );
         })}
       </RadioGroup>
-      {route.choice === null || chosen === undefined
-        ? null
-        : chosen.asks.map((field) => (
-            <OriginField
-              key={field}
-              title={
-                field === "remoteOrigin"
-                  ? `${local.label} reaches ${remote.label} at`
-                  : `${remote.label} reaches ${local.label} at`
-              }
-              value={route.choice?.[field] ?? ""}
-              error={
-                (route.choice?.[field] ?? "").trim() === ""
-                  ? "The check couldn't find this address. Enter it to link."
-                  : null
-              }
-              onChange={(value) => onEdits({ [field]: value })}
-              disabled={disabled}
-            />
-          ))}
+      {route.fields.map(({ field, error }) => (
+        <OriginField
+          key={field}
+          title={
+            field === "remoteOrigin"
+              ? `${local.label} reaches ${remote.label} at`
+              : `${remote.label} reaches ${local.label} at`
+          }
+          value={route.choice?.[field] ?? ""}
+          error={error}
+          onChange={(value) => onEdits({ [field]: value })}
+          disabled={disabled}
+        />
+      ))}
     </div>
   );
 }
