@@ -47,20 +47,24 @@ export const savesUnderCurrentCredential = (environmentId: EnvironmentId) => {
   const saves = savesOf(environmentId);
   const seen = saves.replaced;
   return <E, R>(save: Effect.Effect<void, E, R>) =>
-    Effect.suspend(() => {
-      if (saves.replaced !== seen) return Effect.void;
-      // Recorded in the same step as the check, so a replacement waits for every save it let by.
-      const done = Deferred.makeUnsafe<void>();
-      saves.inFlight.add(done);
-      return save.pipe(
-        Effect.ensuring(
-          Effect.sync(() => {
-            saves.inFlight.delete(done);
-            Deferred.doneUnsafe(done, Effect.void);
-          }),
-        ),
-      );
-    });
+    // Uninterruptible until the release is attached, so an interrupted save never leaves a record
+    // a replacement would wait on forever.
+    Effect.uninterruptibleMask((restore) =>
+      Effect.suspend(() => {
+        if (saves.replaced !== seen) return Effect.void;
+        // Recorded in the same step as the check, so a replacement waits for every save it let by.
+        const done = Deferred.makeUnsafe<void>();
+        saves.inFlight.add(done);
+        return restore(save).pipe(
+          Effect.ensuring(
+            Effect.sync(() => {
+              saves.inFlight.delete(done);
+              Deferred.doneUnsafe(done, Effect.void);
+            }),
+          ),
+        );
+      }),
+    );
 };
 
 /**
