@@ -49,33 +49,33 @@ export function useAnswerAttachmentSupport(environmentId: EnvironmentId | undefi
 }
 
 /**
+ * Uploads a shown answer's files again after a reload, once the person may answer it: the upload
+ * queue lives in memory, and it refuses to start before the environment's grant arrives.
+ */
+export function useRestoredAnswerUploads(
+  key: string,
+  environmentId: EnvironmentId | undefined,
+  mayAnswer: boolean,
+) {
+  const target = inboxAnswerDraftId(key);
+  const draft = useComposerDraftStore((state) => state.draftsByThreadKey[target]);
+  const supported = useAnswerAttachmentSupport(environmentId) !== null;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- restarts uploads held only in memory for files restored from a saved draft; repeat calls are no-ops.
+  useEffect(() => {
+    if (!mayAnswer || !supported || draft === undefined || environmentId === undefined) return;
+    for (const attachment of [...draft.images, ...draft.files]) {
+      if (needsReattach(attachment)) continue;
+      startAttachmentUpload({ environmentId, image: attachment, draftTarget: target });
+    }
+  }, [mayAnswer, supported, draft, environmentId, target]);
+}
+
+/**
  * The files on each open answer, by the answer's key, kept in its saved draft and uploaded to the
  * asking environment as they are added. An answer that is delivered or removed releases them.
- * `shownKeys` are the answers the caller shows; only their restored files upload again.
  */
-export function useAnswerAttachments(shownKeys: ReadonlyArray<string>) {
-  const draftsByThreadKey = useComposerDraftStore((state) => state.draftsByThreadKey);
-  const drafts = inboxAnswerDrafts(draftsByThreadKey);
-  const configs = useServerConfigs();
-  const shown = shownKeys.join("\n");
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- the upload queue lives in memory, so files restored from a saved draft after a reload start uploading again; repeat calls are no-ops.
-  useEffect(() => {
-    const keys = new Set(shown.split("\n"));
-    for (const [key, draft] of inboxAnswerDrafts(draftsByThreadKey)) {
-      if (!keys.has(key)) continue;
-      const environmentId = (JSON.parse(key) as [EnvironmentId])[0];
-      const support = answerAttachmentSupport(configs.get(environmentId)?.environment.capabilities);
-      if (support === null) continue;
-      for (const attachment of [...draft.images, ...draft.files]) {
-        if (needsReattach(attachment)) continue;
-        startAttachmentUpload({
-          environmentId,
-          image: attachment,
-          draftTarget: inboxAnswerDraftId(key),
-        });
-      }
-    }
-  }, [draftsByThreadKey, configs, shown]);
+export function useAnswerAttachments() {
+  const drafts = inboxAnswerDrafts(useComposerDraftStore((state) => state.draftsByThreadKey));
   const [errors, setErrors] = useState<Readonly<Record<string, string>>>({});
   const uploadsByImageId = useAttachmentUploadStore((state) => state.uploadsByImageId);
   const setError = (key: string, error: string | null) =>

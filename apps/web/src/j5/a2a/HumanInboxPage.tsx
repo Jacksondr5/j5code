@@ -51,6 +51,7 @@ import {
   answerAttachmentInputHandlers,
   useAnswerAttachmentSupport,
   useAnswerAttachments,
+  useRestoredAnswerUploads,
 } from "./AnswerAttachments";
 import { answerHumanExchange } from "./humanInboxClient";
 import {
@@ -276,6 +277,7 @@ function OpenInboxItem({
   const itemKey = scopedInboxItemKey(item);
   const answerId = `inbox-answer-${encodeURIComponent(itemKey)}`;
   const support = useAnswerAttachmentSupport(item.environmentId);
+  useRestoredAnswerUploads(itemKey, item.environmentId, canAnswer);
   const addFiles =
     support === null || closedText !== null || pendingExchangeId !== null
       ? null
@@ -553,7 +555,7 @@ export function HumanInboxPage() {
   }, [openSources, kept]);
   const shownItems =
     kept.size === 0 ? items : [...items, ...kept.values()].toSorted(compareInboxItems);
-  const answerAttachments = useAnswerAttachments(shownItems.map(scopedInboxItemKey));
+  const answerAttachments = useAnswerAttachments();
   const answeredByKey = new Map(answeredItems.map((item) => [scopedInboxItemKey(item), item]));
   const closedOf = (item: HumanInboxItem) => {
     const key = scopedInboxItemKey(item);

@@ -28,6 +28,7 @@ import {
   answerAttachmentInputHandlers,
   useAnswerAttachmentSupport,
   useAnswerAttachments,
+  useRestoredAnswerUploads,
 } from "./AnswerAttachments";
 import { J5RecordPanel } from "./J5RecordPanel";
 import { OwnerAskAction } from "./OwnerAskAction";
@@ -96,8 +97,11 @@ export function AdjudicationDock(props: {
     },
   });
   const view = pickShownAsk(asks, picked);
-  const attachments = useAnswerAttachments(
-    captain && mayAnswer && view !== null ? [keyOf(view.shown)] : [],
+  const attachments = useAnswerAttachments();
+  useRestoredAnswerUploads(
+    view === null ? "" : keyOf(view.shown),
+    environmentId,
+    captain && mayAnswer && view !== null,
   );
   if (!captain || !mayAnswer || environmentId === undefined || view === null) return null;
   const { shown, others, next: nextAsk } = view;
