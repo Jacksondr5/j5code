@@ -51,11 +51,14 @@ const MODE_FLAGS = {
   fresh: "--fresh",
   peer: "--peer",
   "peer-poll": "--peer --poll",
+  "peer-reachable": "--peer --reachable",
   "for-dev": "--for-dev",
   base: "--base",
 } as const;
 export type LiveTestMode = keyof typeof MODE_FLAGS;
-const isPeerMode = (mode: LiveTestMode) => mode === "peer" || mode === "peer-poll";
+type PeerMode = "peer" | "peer-poll" | "peer-reachable";
+const isPeerMode = (mode: LiveTestMode | undefined): mode is PeerMode =>
+  mode === "peer" || mode === "peer-poll" || mode === "peer-reachable";
 /** The flags that ask for `mode`; the base mode's flag carries the ref it was given. */
 const modeFlags = (mode: LiveTestMode, baseRef: string | undefined) =>
   mode === "base" ? `${MODE_FLAGS.base} ${baseRef ?? "<ref>"}` : MODE_FLAGS[mode];
@@ -63,7 +66,7 @@ const modeFlags = (mode: LiveTestMode, baseRef: string | undefined) =>
 /** What the generator records about a default build. Paths are never read from it: see LiveTestPaths. */
 interface DefaultManifest {
   /** Absent in the generator's file; the script adds it for the peer and base modes. */
-  readonly mode?: "default" | "skills" | "peer" | "peer-poll" | "base";
+  readonly mode?: "default" | "skills" | PeerMode | "base";
   /** In base mode: the ref as it was given, and the commit it named then. */
   readonly baseRef?: string;
   readonly baseCommit?: string;
@@ -635,7 +638,7 @@ export const selfCommand = (paths: ServerPaths, command: string) =>
   `node ${NodePath.join(paths.worktree, "scripts/j5/setup-agent-live-test.ts")} ${command}`.trimEnd();
 
 /** What the peer lists say, and the command that repairs it when they say something is wrong. */
-function formatPeering(paths: ServerPaths, mode: "peer" | "peer-poll", peering: PeerStatus) {
+function formatPeering(paths: ServerPaths, mode: PeerMode, peering: PeerStatus) {
   switch (peering.kind) {
     case "peered":
       return `The two are peered: each records the other, and neither has reported a delivery error.${mode === "peer-poll" ? " Remote polls Local for its messages, and Local never connects to Remote." : ""} Only a delivery shows that they reach each other.`;
@@ -700,8 +703,16 @@ Remote, which has no web server of its own:
   A rebuild gives both servers new ids. If the browser still lists a Remote from
   an earlier build, remove that one first (Settings > Connections).
 
-${formatPeering(paths, manifest.mode === "peer-poll" ? "peer-poll" : "peer", remote.peering)}
+${formatPeering(paths, isPeerMode(manifest.mode) ? manifest.mode : "peer", remote.peering)}
+${
+  manifest.mode === "peer-reachable"
+    ? `
+Both servers listen on every interface of this machine, its LAN and Docker networks included,
+so the peering check finds a route between them. They are isolated and admit only a device
+with a pairing link.
 `
+    : ""
+}`
 }
 ${
   owner === undefined
@@ -765,7 +776,7 @@ Commands:
   }
   ${selfCommand(paths, "rebuild")}   stop, delete ${paths.root}, build and start again
                                       (flags: none for the test project, --fresh for an empty home,
-                                      --peer or --peer --poll for two peered servers,
+                                      --peer, --peer --poll or --peer --reachable for two peered servers,
                                       --for-dev for a server the developer uses,
                                       --base <ref> for a second server at that ref)
   ${selfCommand(paths, "remove")}    stop, then delete ${paths.root}
@@ -1923,7 +1934,16 @@ async function start(
     return printRunning(paths, await startServer(paths, "dev", {}, deadline), undefined);
   }
   console.log("Starting the two dev servers...");
-  const local = await startServer(paths, "dev", { J5CODE_SERVER_NAME: "Local" }, deadline);
+  // A server on loopback offers the peering check no address; one on every interface (the dev
+  // runner binds loopback or all of them) offers this machine's network addresses.
+  const runnerArgs = mode === "peer-reachable" ? ["--host", "0.0.0.0"] : [];
+  const local = await startServer(
+    paths,
+    "dev",
+    { J5CODE_SERVER_NAME: "Local" },
+    deadline,
+    runnerArgs,
+  );
   const remote = await startServer(
     paths.remote,
     "dev:server",
@@ -1935,6 +1955,7 @@ async function start(
       T3CODE_DEV_ALLOWED_ORIGINS: `http://localhost:${local.webPort}`,
     },
     deadline,
+    runnerArgs,
   );
   if (local.serverPort === undefined || remote.serverPort === undefined) {
     throw new LiveTestRefusal("A server is running without a reported port; cannot peer.");
@@ -2999,8 +3020,8 @@ function guest(paths: LiveTestPaths, request: GuestRequest): void {
   print({ kind: "new", name: request.name, level, scope }, pairingUrl);
 }
 
-const USAGE = `Usage: node scripts/j5/setup-agent-live-test.ts [--skills | --fresh | --peer [--poll] | --for-dev | --base <ref> | --mobile ios|android|phone]
-       node scripts/j5/setup-agent-live-test.ts rebuild [--skills | --fresh | --peer [--poll] | --for-dev | --base <ref> | --mobile ios|android|phone]
+const USAGE = `Usage: node scripts/j5/setup-agent-live-test.ts [--skills | --fresh | --peer [--poll | --reachable] | --for-dev | --base <ref> | --mobile ios|android|phone]
+       node scripts/j5/setup-agent-live-test.ts rebuild [--skills | --fresh | --peer [--poll | --reachable] | --for-dev | --base <ref> | --mobile ios|android|phone]
        node scripts/j5/setup-agent-live-test.ts status | restart | stop | remove | upgrade | mobile-open
        node scripts/j5/setup-agent-live-test.ts mobile-build ios|android
        ${GUEST_USAGE.slice("Usage: ".length)}`;
