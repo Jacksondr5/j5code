@@ -245,6 +245,21 @@ describe("pairRouteOf", () => {
     expect(route(unproven, { connections: "both" })).toMatchObject({
       ready: false,
       problem: true,
+      line: "Messages are sent directly both ways · needs an address",
+    });
+    // With Change open the field itself asks, so the line carries no error.
+    expect(
+      pairRouteOf({
+        local: laptop,
+        remote: work,
+        check: unproven,
+        edits: { connections: "both" },
+        changing: true,
+      }),
+    ).toMatchObject({
+      ready: false,
+      problem: false,
+      line: "Messages are sent directly both ways",
     });
     expect(
       route(unproven, { connections: "both", localOrigin: "https://laptop.ts.net" }),

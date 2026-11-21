@@ -68,7 +68,7 @@ const confirmTurnOn = (servers: ReadonlyArray<{ readonly label: string }>) =>
         confirmLabel: "Turn on and link",
         content: (
           <span>
-            Agents use tools on another server through Linked environments, a T3 Code beta. It is
+            Agents use tools on another server through Linked environments, a J5 Code beta. It is
             off on <span className="font-medium text-foreground">{names(servers)}</span>, and this
             turns it on there.
           </span>

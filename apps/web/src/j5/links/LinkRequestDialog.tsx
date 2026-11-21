@@ -133,6 +133,7 @@ function OpenLinkRequestDialog(props: {
           remote: selected.server,
           check: checks[selected.environmentId] ?? null,
           edits,
+          changing,
         });
   const level =
     access ?? (state === "renew" ? link?.access : null) ?? linkRequestDefaultAccess(item);

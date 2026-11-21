@@ -166,6 +166,7 @@ export function LinkServersDialog({
               remote: candidate.server,
               check: checks[candidate.environmentId] ?? null,
               edits: pairEdits,
+              changing: changing === candidate.environmentId,
             }),
       localLevel,
       remoteLevel,

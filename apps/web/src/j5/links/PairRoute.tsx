@@ -117,6 +117,11 @@ export function PairRouteChange({
                   : `${remote.label} reaches ${local.label} at`
               }
               value={route.choice?.[field] ?? ""}
+              error={
+                (route.choice?.[field] ?? "").trim() === ""
+                  ? "The check couldn't find this address. Enter it to link."
+                  : null
+              }
               onChange={(value) => onEdits({ [field]: value })}
               disabled={disabled}
             />

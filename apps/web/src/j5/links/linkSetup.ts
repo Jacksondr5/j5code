@@ -253,6 +253,8 @@ export function pairRouteOf(input: {
   /** Null while the check runs. */
   readonly check: PeeringCheck | null;
   readonly edits: PairEdits;
+  /** Change is open for this pair, so its address fields say what is missing. */
+  readonly changing?: boolean;
 }): PairRoute {
   const { check, edits } = input;
   if (check === null) {
@@ -284,8 +286,9 @@ export function pairRouteOf(input: {
     options,
     choice,
     ready,
-    line: ready ? line : `${line} · needs an address`,
-    problem: !ready,
+    // With Change open, each address still needed is asked for on its own field.
+    line: ready || input.changing === true ? line : `${line} · needs an address`,
+    problem: !ready && input.changing !== true,
   };
 }
 
