@@ -1622,7 +1622,7 @@ function ThreadDetailBody(
                           composerBottomInset={composerBottomInset}
                           popoverHeight={composerPopoverHeight}
                           slot={j5Slot.controls}
-                          onInputFocusChange={handleOwnedInputFocusChange}
+                          onAnswerFocusChange={handleOwnedInputFocusChange}
                         />
                       )}
                     {props.queuedRunEdit !== null ? (

@@ -295,7 +295,7 @@ const SEAMS: ReadonlyArray<Seam> = [
       "composerBottomInset={composerBottomInset}",
       "popoverHeight={composerPopoverHeight}",
       "slot={j5Slot.controls}",
-      "onInputFocusChange={handleOwnedInputFocusChange}",
+      "onAnswerFocusChange={handleOwnedInputFocusChange}",
     ],
   },
   {
