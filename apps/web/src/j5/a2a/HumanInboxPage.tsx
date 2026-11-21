@@ -54,12 +54,10 @@ import {
 } from "./AnswerAttachments";
 import { answerHumanExchange } from "./humanInboxClient";
 import {
-  inboxAnswerDrafts,
-  inboxAnswerText,
   pruneInboxAnswerDrafts,
   setInboxAnswerText,
+  useInboxAnswerTexts,
 } from "./inboxAnswerDrafts";
-import { useComposerDraftStore } from "../../composerDraftStore";
 import { J5RecordPanel } from "./J5RecordPanel";
 import { OwnerAskAction } from "./OwnerAskAction";
 import { useScopedParticipantLabels } from "./ParticipantIdentitiesClient";
@@ -520,10 +518,7 @@ export function HumanInboxPage() {
   const projectOf = useLogicalProjects();
   const projectNameOf = (item: HumanInboxItem) =>
     projectOf(item.environmentId, item.projectId)?.displayName ?? item.projectTitle;
-  const draftsByThreadKey = useComposerDraftStore((state) => state.draftsByThreadKey);
-  const answers: HumanInboxAnswers = Object.fromEntries(
-    [...inboxAnswerDrafts(draftsByThreadKey)].map(([key, draft]) => [key, inboxAnswerText(draft)]),
-  );
+  const answers: HumanInboxAnswers = useInboxAnswerTexts((state) => state.byItemKey);
   const answerAttachments = useAnswerAttachments();
   const personScopes = JSON.stringify(
     openSources.sources.map((source) => [source.environmentId, source.data?.personId ?? null]),
@@ -535,12 +530,12 @@ export function HumanInboxPage() {
   const [retention, setRetention] = useState(() => ({
     openSources,
     items,
-    draftsByThreadKey,
+    answers,
     kept: new Map() as ReadonlyMap<string, HumanInboxItem>,
     closedWith: new Map() as ReadonlyMap<string, typeof answeredSources>,
   }));
   let { kept, closedWith } = retention;
-  if (retention.openSources !== openSources || retention.draftsByThreadKey !== draftsByThreadKey) {
+  if (retention.openSources !== openSources || retention.answers !== answers) {
     kept = nextKeptItems({
       previous: retention.items,
       current: items,
@@ -551,7 +546,7 @@ export function HumanInboxPage() {
     closedWith = new Map(
       [...kept.keys()].map((key) => [key, retention.closedWith.get(key) ?? answeredSources]),
     );
-    setRetention({ openSources, items, draftsByThreadKey, kept, closedWith });
+    setRetention({ openSources, items, answers, kept, closedWith });
   }
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- saved answers outlive the page, so a read showing their ask closed, here or while away, drops them.
   useEffect(() => {

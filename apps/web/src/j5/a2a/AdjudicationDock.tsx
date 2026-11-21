@@ -32,8 +32,7 @@ import {
 import { J5RecordPanel } from "./J5RecordPanel";
 import { OwnerAskAction } from "./OwnerAskAction";
 import { answerHumanExchange, type HumanInboxItem } from "./humanInboxClient";
-import { inboxAnswerDrafts, inboxAnswerText, setInboxAnswerText } from "./inboxAnswerDrafts";
-import { useComposerDraftStore } from "../../composerDraftStore";
+import { setInboxAnswerText, useInboxAnswerTexts } from "./inboxAnswerDrafts";
 import { scopedInboxItemKey } from "@t3tools/contracts/j5";
 import { notifyHumanInboxChanged } from "./humanInboxRefresh";
 
@@ -68,13 +67,10 @@ export function AdjudicationDock(props: {
     j5Environment.answerHumanExchange.permissionAtom(environmentId ?? null),
   );
   // The same saved draft the Inbox page shows for this ask, so words typed in either place stay.
-  const drafts = inboxAnswerDrafts(useComposerDraftStore((state) => state.draftsByThreadKey));
+  const texts = useInboxAnswerTexts((state) => state.byItemKey);
   const keyOf = (item: HumanInboxItem) =>
     environmentId === undefined ? "" : scopedInboxItemKey({ ...item, environmentId });
-  const wordsOf = (item: HumanInboxItem) => {
-    const draft = drafts.get(keyOf(item));
-    return draft === undefined ? "" : inboxAnswerText(draft);
-  };
+  const wordsOf = (item: HumanInboxItem) => texts[keyOf(item)] ?? "";
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [picked, setPicked] = useState<string | null>(null);
   const [pending, setPending] = useState(false);

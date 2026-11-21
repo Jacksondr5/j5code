@@ -1,6 +1,8 @@
 import type { J5ReadSources } from "@t3tools/client-runtime/j5/readSources";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { type HumanInboxResponse, scopedInboxItemKey } from "@t3tools/contracts/j5";
+import { create } from "zustand";
+import { persist, type StorageValue } from "zustand/middleware";
 
 import {
   type ComposerThreadDraftState,
@@ -9,11 +11,10 @@ import {
 } from "../../composerDraftStore";
 import { serializeComposerImages } from "../../components/chat/composerImagePersistence";
 import { releaseDraftAttachments } from "../../lib/attachmentUploadQueue";
-import { fileContextReference } from "../../lib/composerContextRecords";
-import { formatInlineContextReference } from "../../lib/composerContextReferences";
+import { createDeferredStorage, createMemoryStorage } from "../../lib/storage";
 
-// Each answer is a composer draft of its own, as upstream keeps a pending question's attachments,
-// so its words and files outlive the page and a reload the way an unsent message does.
+// An answer's files are a composer draft of their own, as upstream keeps a pending question's
+// attachments, so they outlive the page and a reload the way an unsent message's do.
 const PREFIX = "j5-inbox-answer:";
 
 export const inboxAnswerDraftId = (itemKey: string) =>
@@ -25,7 +26,7 @@ function itemKeyOf(draftKey: string): string | null {
 
 const environmentOf = (itemKey: string) => (JSON.parse(itemKey) as [EnvironmentId])[0];
 
-/** Every saved answer, by its item's `scopedInboxItemKey`. */
+/** Every answer's saved files, by its item's `scopedInboxItemKey`. */
 export function inboxAnswerDrafts(
   draftsByThreadKey: Readonly<Record<string, ComposerThreadDraftState>>,
 ): ReadonlyMap<string, ComposerThreadDraftState> {
@@ -37,25 +38,50 @@ export function inboxAnswerDrafts(
   return drafts;
 }
 
-/**
- * The answer as typed. Rehydrating a draft appends `<token> ` for each file, after a space when
- * the text ended in a non-space; an answer is delivered word for word, so those exact strings are
- * peeled off the end rather than parsed out, which could mistake a typed `[` for a token.
- */
-export function inboxAnswerText(draft: ComposerThreadDraftState): string {
-  let text = draft.prompt;
-  let peeled = false;
-  for (const file of draft.files.toReversed()) {
-    const appended = `${formatInlineContextReference(fileContextReference(file))} `;
-    if (!text.endsWith(appended)) continue;
-    text = text.slice(0, -appended.length);
-    peeled = true;
-  }
-  return peeled && /[^ \t\r\n] $/.test(text) ? text.slice(0, -1) : text;
+interface InboxAnswerTexts {
+  readonly byItemKey: Readonly<Record<string, string>>;
+}
+
+// The words are kept apart from the composer draft: its prompt carries inline file tokens that the
+// store adds, rewrites and removes, and an answer is delivered exactly as typed.
+const textStorage = createDeferredStorage<StorageValue<InboxAnswerTexts>>(
+  typeof localStorage !== "undefined" ? localStorage : createMemoryStorage(),
+  (value) => JSON.stringify(value),
+);
+if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+  window.addEventListener("beforeunload", () => textStorage.flush());
+}
+
+/** Each open answer's words, by its item's `scopedInboxItemKey`. */
+export const useInboxAnswerTexts = create<InboxAnswerTexts>()(
+  persist(() => ({ byItemKey: {} }), {
+    name: "j5:inbox-answer-texts:v1",
+    storage: {
+      getItem: (name) => {
+        const raw = textStorage.getItem(name);
+        return typeof raw === "string" ? (JSON.parse(raw) as StorageValue<InboxAnswerTexts>) : null;
+      },
+      setItem: (name, value) => textStorage.setItem(name, value),
+      removeItem: (name) => textStorage.removeItem(name),
+    },
+  }),
+);
+
+function withoutText(itemKey: string) {
+  useInboxAnswerTexts.setState(({ byItemKey }) => {
+    if (!(itemKey in byItemKey)) return {};
+    const rest = { ...byItemKey };
+    delete rest[itemKey];
+    return { byItemKey: rest };
+  });
 }
 
 export function setInboxAnswerText(itemKey: string, text: string) {
-  useComposerDraftStore.getState().setPrompt(inboxAnswerDraftId(itemKey), text);
+  if (text === "") withoutText(itemKey);
+  else
+    useInboxAnswerTexts.setState(({ byItemKey }) => ({
+      byItemKey: { ...byItemKey, [itemKey]: text },
+    }));
 }
 
 const latestImageSave = new Map<string, number>();
@@ -80,6 +106,7 @@ export async function persistInboxAnswerImages(itemKey: string) {
 
 /** Drops an answer's words and releases its uploads. */
 export function clearInboxAnswerDraft(itemKey: string) {
+  withoutText(itemKey);
   const target = inboxAnswerDraftId(itemKey);
   const store = useComposerDraftStore.getState();
   const draft = store.getComposerDraft(target);
@@ -108,8 +135,11 @@ export function pruneInboxAnswerDrafts(
       new Set(source.data.items.map((item) => scopedInboxItemKey({ ...item, environmentId }))),
     );
   }
-  const drafts = inboxAnswerDrafts(useComposerDraftStore.getState().draftsByThreadKey);
-  for (const itemKey of drafts.keys()) {
+  const itemKeys = new Set([
+    ...inboxAnswerDrafts(useComposerDraftStore.getState().draftsByThreadKey).keys(),
+    ...Object.keys(useInboxAnswerTexts.getState().byItemKey),
+  ]);
+  for (const itemKey of itemKeys) {
     const open = openByEnvironment.get(environmentOf(itemKey));
     if (open !== undefined && !open.has(itemKey) && !kept.has(itemKey)) {
       clearInboxAnswerDraft(itemKey);

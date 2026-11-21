@@ -6,11 +6,10 @@ import { afterEach, expect, it, vi } from "vite-plus/test";
 import { useComposerDraftStore } from "../../composerDraftStore";
 import {
   inboxAnswerDraftId,
-  inboxAnswerDrafts,
-  inboxAnswerText,
   persistInboxAnswerImages,
   pruneInboxAnswerDrafts,
   setInboxAnswerText,
+  useInboxAnswerTexts,
 } from "./inboxAnswerDrafts";
 
 vi.mock("../../lib/attachmentUploadQueue", () => ({ releaseDraftAttachments: vi.fn() }));
@@ -22,19 +21,16 @@ const remote = EnvironmentId.make("remote");
 const projectId = ProjectId.make("project-1");
 const key = (environmentId: EnvironmentId, exchangeId: string, personId = "owner") =>
   JSON.stringify([environmentId, personId, projectId, exchangeId]);
-const answers = () =>
-  Object.fromEntries(
-    [...inboxAnswerDrafts(useComposerDraftStore.getState().draftsByThreadKey)].map(
-      ([itemKey, draft]) => [itemKey, inboxAnswerText(draft)],
-    ),
-  );
+const answers = () => useInboxAnswerTexts.getState().byItemKey;
 
 afterEach(async () => {
   useComposerDraftStore.setState({ draftsByThreadKey: {} });
+  useInboxAnswerTexts.setState({ byItemKey: {} });
   await useComposerDraftStore.persist.clearStorage();
+  await useInboxAnswerTexts.persist.clearStorage();
 });
 
-it("keeps a half-typed answer and its uploaded file through leaving the page and reloading", async () => {
+it("keeps a half-typed answer exactly, with its uploaded files, through reloads and edits to the files", async () => {
   vi.useFakeTimers();
   const file = (id: string) => ({
     type: "file" as const,
@@ -46,28 +42,31 @@ it("keeps a half-typed answer and its uploaded file through leaving the page and
     uploadedAttachmentId: `upload-${id}`,
     uploadEnvironmentId: local,
   });
+  const reload = async () => {
+    await vi.advanceTimersByTimeAsync(300);
+    useComposerDraftStore.setState({ draftsByThreadKey: {} });
+    useInboxAnswerTexts.setState({ byItemKey: {} });
+    await useComposerDraftStore.persist.rehydrate();
+    await useInboxAnswerTexts.persist.rehydrate();
+    // A real reload starts empty without saving; replace the pending save of the cleared state.
+    useInboxAnswerTexts.setState((state) => state);
+  };
+  const target = inboxAnswerDraftId(key(local, "ask-1"));
+  const typed = "Use the [staging database\n  ";
   try {
-    for (const typed of ["Use the staging database", "Use the [staging database\n  ", ""]) {
-      setInboxAnswerText(key(local, "ask-1"), typed);
-      useComposerDraftStore
-        .getState()
-        .addFiles(inboxAnswerDraftId(key(local, "ask-1")), [file("a"), file("b")]);
-      await vi.advanceTimersByTimeAsync(300);
-      useComposerDraftStore.setState({ draftsByThreadKey: {} });
+    setInboxAnswerText(key(local, "ask-1"), typed);
+    useComposerDraftStore.getState().addFiles(target, [file("a"), file("b")]);
+    await reload();
+    // Another answer's files save the whole store, this answer's rehydrated draft included.
+    useComposerDraftStore.getState().addFiles(inboxAnswerDraftId(key(local, "ask-2")), [file("c")]);
+    await reload();
+    useComposerDraftStore.getState().removeFile(target, "a");
+    await reload();
 
-      await useComposerDraftStore.persist.rehydrate();
-
-      expect(answers()).toEqual({ [key(local, "ask-1")]: typed });
-      expect(
-        useComposerDraftStore.getState().getComposerDraft(inboxAnswerDraftId(key(local, "ask-1")))
-          ?.files,
-      ).toMatchObject([
-        { id: "a", uploadedAttachmentId: "upload-a" },
-        { id: "b", uploadedAttachmentId: "upload-b" },
-      ]);
-      useComposerDraftStore.setState({ draftsByThreadKey: {} });
-      await useComposerDraftStore.persist.clearStorage();
-    }
+    expect(answers()).toEqual({ [key(local, "ask-1")]: typed });
+    expect(useComposerDraftStore.getState().getComposerDraft(target)?.files).toMatchObject([
+      { id: "b", uploadedAttachmentId: "upload-b" },
+    ]);
   } finally {
     vi.useRealTimers();
   }
