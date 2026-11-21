@@ -40,9 +40,9 @@ name: J5 Release
 # monitor.
 #
 # No checkout here sets `persist-credentials: false`: it makes checkout fail on
-# the vendored gitlinks (FORK.md, "J5 CI and packaging"). The one job with a
-# write token, `release`, runs no code from the repository, and the jobs that
-# do run repository code hold a read-only token.
+# the vendored gitlinks (FORK.md, "J5 CI and packaging"). The jobs with a
+# write token, `resolve` and `release`, run no code from the repository, and
+# the jobs that do run repository code hold a read-only token.
 
 on:
   workflow_dispatch:
@@ -84,10 +84,16 @@ permissions:
 concurrency:
   group: j5-release
   cancel-in-progress: false
+  # Without it a manual preview queued behind a waiting stable call cancels that call.
+  queue: max
 
 jobs:
   resolve:
     runs-on: ubuntu-24.04
+    # A read-only token is not shown draft releases, and this job looks for a stray one.
+    permissions:
+      contents: write
+      actions: read
     outputs:
       ref: ${{ steps.source.outputs.ref }}
       version: ${{ steps.source.outputs.version }}
@@ -170,12 +176,9 @@ jobs:
             // rather than report "already published".
             const tag = `v${version}`;
             let published = false;
-            let release = null;
-            try {
-              ({ data: release } = await github.rest.repos.getReleaseByTag({ ...context.repo, tag }));
-            } catch (error) {
-              if (error.status !== 404) throw error;
-            }
+            // The get-by-tag endpoint never returns a draft, so read the list, which does.
+            const releases = await github.paginate(github.rest.repos.listReleases, { ...context.repo, per_page: 100 });
+            const release = releases.find(candidate => candidate.tag_name === tag) ?? null;
             if (release !== null) {
               let tagSha = null;
               try {
@@ -600,8 +603,20 @@ jobs:
         run: |
           set -euo pipefail
           tag="v$RELEASE_VERSION"
-          if tag_sha="$(gh api "repos/$GH_REPO/commits/$tag" --jq .sha 2>/dev/null)"; then
-            test "$tag_sha" = "$RELEASE_SHA"
+          # Prints the tag's commit, or nothing when the tag does not exist (HTTP 422, or 404).
+          # Any other error, such as a 403, stops the run.
+          tag_commit() {
+            local sha
+            if sha="$(gh api "repos/$GH_REPO/commits/$tag" --jq .sha 2>"$RUNNER_TEMP/tag.err")"; then
+              echo "$sha"
+            else
+              grep -qE 'HTTP (404|422)' "$RUNNER_TEMP/tag.err" || { cat "$RUNNER_TEMP/tag.err" >&2; return 1; }
+            fi
+          }
+          tag_sha="$(tag_commit)"
+          if [[ -n "$tag_sha" && "$tag_sha" != "$RELEASE_SHA" ]]; then
+            echo "::error::$tag already exists at $tag_sha, not $RELEASE_SHA."
+            exit 1
           fi
           # A draft has no tag yet, so a draft a failed run left for another commit
           # passes the check above; publishing into it would mislabel this build.
@@ -670,7 +685,7 @@ jobs:
           fi
           # A re-run job reuses the resolve job's outputs, so read the release as it is now.
           if [[ "$(gh release view "$tag" --json isDraft --jq .isDraft)" != true ]]; then
-            echo "::error::$tag is already published; this run leaves it unchanged."
+            echo "::error::$tag is already published; this run leaves it unchanged. If a later job failed, use \"Re-run all jobs\": it skips the builds and runs only what is left."
             exit 1
           fi
           gh release upload "$tag" release-assets/* --clobber
@@ -678,7 +693,8 @@ jobs:
             echo "::notice::Left $tag as a draft. Delete it with: gh release delete $tag -R $GH_REPO --yes"
             exit 0
           fi
-          if tag_sha="$(gh api "repos/$GH_REPO/commits/$tag" --jq .sha 2>/dev/null)" && [[ "$tag_sha" != "$RELEASE_SHA" ]]; then
+          tag_sha="$(tag_commit)"
+          if [[ -n "$tag_sha" && "$tag_sha" != "$RELEASE_SHA" ]]; then
             echo "::error::$tag now exists at $tag_sha, not $RELEASE_SHA."
             exit 1
           fi

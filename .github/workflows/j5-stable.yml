@@ -82,9 +82,14 @@ jobs:
           fi
           ref="$(gh api "repos/$GITHUB_REPOSITORY/commits/$tag" --jq '.sha')"
           # Fail before the signed builds when this version is already released from another commit.
-          if taken="$(gh api "repos/$GITHUB_REPOSITORY/commits/v$version" --jq '.sha' 2>/dev/null)" && [[ "$taken" != "$ref" ]]; then
-            echo "::error::v$version is already released from $taken, not $tag ($ref). Promote a newer nightly."
-            exit 1
+          # A missing tag is HTTP 422 (or 404); any other error stops the run.
+          if taken="$(gh api "repos/$GITHUB_REPOSITORY/commits/v$version" --jq '.sha' 2>"$RUNNER_TEMP/taken.err")"; then
+            if [[ "$taken" != "$ref" ]]; then
+              echo "::error::v$version is already released from $taken, not $tag ($ref). Promote a newer nightly."
+              exit 1
+            fi
+          else
+            grep -qE 'HTTP (404|422)' "$RUNNER_TEMP/taken.err" || { cat "$RUNNER_TEMP/taken.err" >&2; exit 1; }
           fi
           # Published as latest, an older version would be offered to every install as a downgrade.
           # A 404 means no stable release yet; any other error stops the run.
@@ -164,7 +169,9 @@ jobs:
             sed -i -E "0,/\"version\": \"[^\"]*\"/s//\"version\": \"$RELEASE_VERSION\"/" "$manifest"
           done
           git fetch --depth=1 origin "$RELEASE_SHA"
-          pin_line="$(git show "$RELEASE_SHA:FORK.md" | grep -m 1 '^Current pin: ')"
+          # Read to a file first: `grep -m 1` on a pipe exits early, and the writer's SIGPIPE fails the step under pipefail.
+          git show "$RELEASE_SHA:FORK.md" > "$RUNNER_TEMP/FORK.md"
+          pin_line="$(grep -m 1 '^Current pin: ' "$RUNNER_TEMP/FORK.md" || true)"
           pin_sha="$(sed -nE 's/^Current pin: `([0-9a-f]{40})`.*/\1/p' <<<"$pin_line")"
           pin_branch="$(sed -nE 's/^Current pin: .* (on|from) `([^`]+)`.*/\2/p' <<<"$pin_line")"
           pin_frozen="$(sed -nE 's/^Current pin: .*frozen ([0-9]{4}-[0-9]{2}-[0-9]{2}).*/\1/p' <<<"$pin_line")"

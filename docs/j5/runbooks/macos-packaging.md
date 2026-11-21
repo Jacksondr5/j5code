@@ -85,11 +85,18 @@ The next nightly counts up from `x.y.z` (after `0.0.52`, `0.0.53-nightly.*`) whe
 pull request has merged: `J5 Nightly` reads the latest stable release as well as the committed
 version.
 
+If the release was published but a later step failed, use **Re-run all jobs**. The run sees the
+release is published, skips the builds, and pushes the bump branch. **Re-run failed jobs** stops at
+"already published" instead.
+
 If publishing the draft fails, for example because GitHub refuses to let the Actions token tag an
-older commit, publish it by hand with `gh release edit v<x.y.z> -R Jacksondr5/j5code --draft=false --latest`,
-then make the bump branch by hand: `node scripts/update-release-package-versions.ts <x.y.z>` on
-`j5/main`, set FORK.md's `Released pin:` from the nightly commit's `Current pin:`, and push it as
-`j5/release-<x.y.z>`.
+older commit, publish it by hand. First check that no newer stable release exists, since `--latest`
+would move every install back to `x.y.z`:
+`gh api repos/Jacksondr5/j5code/releases/latest --jq .tag_name`. Only if that prints an older
+version (or nothing), run `gh release edit v<x.y.z> -R Jacksondr5/j5code --draft=false --latest`;
+otherwise promote a newer nightly instead. Then make the bump branch by hand:
+`node scripts/update-release-package-versions.ts <x.y.z>` on `j5/main`, set FORK.md's
+`Released pin:` from the nightly commit's `Current pin:`, and push it as `j5/release-<x.y.z>`.
 
 To try it without publishing, add `-f dry_run=true`, with `--ref <branch>` to try a branch's changes
 to the workflows. A dry run builds everything into a draft release that nothing reads and pushes no
