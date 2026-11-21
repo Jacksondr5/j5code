@@ -50,6 +50,8 @@ interface Props {
   /** The open composer popover's height, 0 while none is open. */
   readonly popoverHeight: SharedValue<number>;
   readonly slot: J5ComposerSlot;
+  /** Upstream's `handleOwnedInputFocusChange`, which its own question card reports to as well. */
+  readonly onInputFocusChange: (focused: boolean) => void;
 }
 
 /**
@@ -156,6 +158,7 @@ function Controls(props: Props & { readonly questions: CaptainQuestions | null }
           composerBottomInset={props.composerBottomInset}
           overlayHeight={slot.overlayHeight}
           onFold={() => setQuestionsFocused(false)}
+          onInputFocusChange={props.onInputFocusChange}
         />
       </Animated.View>
     );
