@@ -76,7 +76,7 @@ Read-only; no events.
 
 ### `j5_spawn_agent`
 
-Agents have two ways to get help: a helper that reports back to them (their provider's own subagent, or a delegate from `delegate_task`) or members on a Crew (`j5_propose_crew`, `j5_request_crew_member`). `j5_spawn_agent` serves neither. Its description keeps it for a Peer Agent, a standalone agent or a new or separate thread the person explicitly asks for, and for callers that name it, such as an outside agent or a skill; when nobody asked for one it says to use a subagent or a Crew. Nothing a caller depends on was removed.
+Agents have two ways to get help: a helper that reports back to them (their provider's own subagent, or a delegate from `delegate_task`) or members on a Crew (`j5_propose_crew`, `j5_request_crew_member`). `j5_spawn_agent` serves neither. Its description keeps it for a Peer Agent, a standalone agent they will talk to, or a new or separate thread the person explicitly asks for, and for callers that name it, such as an outside agent or a skill; when nobody asked for one it says to use a subagent or a Crew. Nothing a caller depends on was removed.
 
 **Description (contract):** "Use this when the user explicitly asks for a Peer Agent, a standalone
 agent they will talk to, or a new or separate thread (whatever its model, project or checkout), or
@@ -578,3 +578,4 @@ run; `j5_stop_crew` doesn't, and unarchiving doesn't restart it.
 - 2026-11-16 — `j5_spawn_agent` on a machine it cannot reach now fails with `peer_unreachable`, the code every unanswered link call has ([Cross-device](../cross-device.md), divergence D46; Jackson, 2026-11-10; [record](../../worklog/2026-11-10-line-to-unreachable-server-session.md)).
 - 2026-11-19 — the link tools cover the actions part of a link: approving a request on web or desktop sets up messages too, and forgetting one leaves them ([Cross-device](../cross-device.md), divergence D47; Jackson, 2026-11-09; [record](../../worklog/2026-11-09-one-link-flow-session.md)).
 - 2026-11-19 — a new ask to a person returns `ifAnsweredInThread`, so the agent learns to withdraw an ask the person settles in its thread; `j5_clear_own_ask`'s own description is unseen until a harness loads the deferred tool (Jackson, 2026-11-19; [#1107](https://github.com/Jacksondr5/j5code/issues/1107)).
+- 2026-11-21 — `j5_spawn_agent` also covers a new or separate thread the person asks for, whatever its model, project or checkout, after Claude sent those requests to `delegate_task` in every eval sample ([#950](https://github.com/Jacksondr5/j5code/issues/950), [#1128](https://github.com/Jacksondr5/j5code/pull/1128)).
