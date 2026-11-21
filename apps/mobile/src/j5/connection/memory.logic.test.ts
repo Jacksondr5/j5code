@@ -12,7 +12,6 @@ import {
   crewListWaiting,
   decodeMemory,
   encodeMemory,
-  heldNames,
   observeCredential,
   pendingParticipants,
   rememberIdentities,
@@ -197,42 +196,34 @@ describe("pendingParticipants", () => {
   });
 });
 
-describe("heldNames", () => {
-  it("holds back a re-paired server's names until its new credential shows, so they read as on their way", () => {
-    const memory = rememberIdentities(
-      observeCredential(new Map(), server, owner),
-      server,
-      owner,
-      ["agent:captain"],
-      { labels: new Map([["agent:captain", "Captain"]]), threads: new Map() },
-    );
-    const settled = settleNames(new Map(), server, ["agent:captain"]);
-
-    const held = heldNames(memory, settled, new Set([server]));
-    expect(held.names.size).toBe(0);
-    expect([
-      ...pendingParticipants(held.names, held.settled, server, ["agent:captain"], true),
-    ]).toEqual(["agent:captain"]);
-    // Once the new connection shows the same credential, the names are back as they were.
-    const shown = heldNames(memory, settled, new Set());
-    expect(shown.names.get(server)?.labels.get("agent:captain")).toBe("Captain");
-    expect(
-      pendingParticipants(shown.names, shown.settled, server, ["agent:captain"], true).size,
-    ).toBe(0);
-  });
-});
-
 describe("credentialKey", () => {
+  const prepared = (token: string, address = "https://server-1") => ({
+    httpAuthorization: { _tag: "Bearer" as const, token },
+    target: { environmentId: server, address },
+  });
+
   it("tells two pairings apart without keeping the token", () => {
-    const prepared = (token: string) => ({
-      httpAuthorization: { _tag: "Bearer" as const, token },
-      target: { environmentId: server },
-    });
     const first = credentialKey(prepared("secret-token-one"));
 
     expect(first).toBe(credentialKey(prepared("secret-token-one")));
     expect(first).not.toBe(credentialKey(prepared("secret-token-two")));
     expect(first).not.toContain("secret");
+  });
+
+  it("keeps a server's names through a learned route, and drops them on a re-pair", () => {
+    const named = rememberIdentities(
+      observeCredential(new Map(), server, credentialKey(prepared("owner-token"))),
+      server,
+      credentialKey(prepared("owner-token")),
+      ["agent:captain"],
+      { labels: new Map([["agent:captain", "Captain"]]), threads: new Map() },
+    );
+    // A learned route replaces the saved entry but keeps the paired token.
+    const rerouted = credentialKey(prepared("owner-token", "http://100.64.0.7:3773"));
+    expect(observeCredential(named, server, rerouted)).toBe(named);
+    // Re-pairing stores another token: the last person's names go at once.
+    const repaired = observeCredential(named, server, credentialKey(prepared("viewer-token")));
+    expect(repaired.get(server)?.names.labels.size).toBe(0);
   });
 });
 
