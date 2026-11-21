@@ -82,7 +82,6 @@ export function AdjudicationDock(props: {
     attachmentIds: string;
     clientRequestId: string;
   } | null>(null);
-  const attachments = useAnswerAttachments();
   const support = useAnswerAttachmentSupport(environmentId);
 
   const asks = adjudicationAsks({
@@ -97,6 +96,9 @@ export function AdjudicationDock(props: {
     },
   });
   const view = pickShownAsk(asks, picked);
+  const attachments = useAnswerAttachments(
+    captain && mayAnswer && view !== null ? [keyOf(view.shown)] : [],
+  );
   if (!captain || !mayAnswer || environmentId === undefined || view === null) return null;
   const { shown, others, next: nextAsk } = view;
   const isOpen = (query.data?.items ?? []).some((item) => item.exchangeId === shown.exchangeId);

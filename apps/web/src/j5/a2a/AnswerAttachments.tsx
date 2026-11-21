@@ -51,14 +51,18 @@ export function useAnswerAttachmentSupport(environmentId: EnvironmentId | undefi
 /**
  * The files on each open answer, by the answer's key, kept in its saved draft and uploaded to the
  * asking environment as they are added. An answer that is delivered or removed releases them.
+ * `shownKeys` are the answers the caller shows; only their restored files upload again.
  */
-export function useAnswerAttachments() {
+export function useAnswerAttachments(shownKeys: ReadonlyArray<string>) {
   const draftsByThreadKey = useComposerDraftStore((state) => state.draftsByThreadKey);
   const drafts = inboxAnswerDrafts(draftsByThreadKey);
   const configs = useServerConfigs();
+  const shown = shownKeys.join("\n");
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- the upload queue lives in memory, so files restored from a saved draft after a reload start uploading again; repeat calls are no-ops.
   useEffect(() => {
+    const keys = new Set(shown.split("\n"));
     for (const [key, draft] of inboxAnswerDrafts(draftsByThreadKey)) {
+      if (!keys.has(key)) continue;
       const environmentId = (JSON.parse(key) as [EnvironmentId])[0];
       const support = answerAttachmentSupport(configs.get(environmentId)?.environment.capabilities);
       if (support === null) continue;
@@ -71,7 +75,7 @@ export function useAnswerAttachments() {
         });
       }
     }
-  }, [draftsByThreadKey, configs]);
+  }, [draftsByThreadKey, configs, shown]);
   const [errors, setErrors] = useState<Readonly<Record<string, string>>>({});
   const uploadsByImageId = useAttachmentUploadStore((state) => state.uploadsByImageId);
   const setError = (key: string, error: string | null) =>

@@ -519,7 +519,6 @@ export function HumanInboxPage() {
   const projectNameOf = (item: HumanInboxItem) =>
     projectOf(item.environmentId, item.projectId)?.displayName ?? item.projectTitle;
   const answers: HumanInboxAnswers = useInboxAnswerTexts((state) => state.byItemKey);
-  const answerAttachments = useAnswerAttachments();
   const personScopes = JSON.stringify(
     openSources.sources.map((source) => [source.environmentId, source.data?.personId ?? null]),
   );
@@ -554,6 +553,7 @@ export function HumanInboxPage() {
   }, [openSources, kept]);
   const shownItems =
     kept.size === 0 ? items : [...items, ...kept.values()].toSorted(compareInboxItems);
+  const answerAttachments = useAnswerAttachments(shownItems.map(scopedInboxItemKey));
   const answeredByKey = new Map(answeredItems.map((item) => [scopedInboxItemKey(item), item]));
   const closedOf = (item: HumanInboxItem) => {
     const key = scopedInboxItemKey(item);

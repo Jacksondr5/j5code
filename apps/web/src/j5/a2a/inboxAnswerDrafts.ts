@@ -68,12 +68,12 @@ export const useInboxAnswerTexts = create<InboxAnswerTexts>()(
 );
 
 function withoutText(itemKey: string) {
-  useInboxAnswerTexts.setState(({ byItemKey }) => {
-    if (!(itemKey in byItemKey)) return {};
-    const rest = { ...byItemKey };
-    delete rest[itemKey];
-    return { byItemKey: rest };
-  });
+  const { byItemKey } = useInboxAnswerTexts.getState();
+  // Every set saves the whole map, which would overwrite another tab's words for nothing.
+  if (!(itemKey in byItemKey)) return;
+  const rest = { ...byItemKey };
+  delete rest[itemKey];
+  useInboxAnswerTexts.setState({ byItemKey: rest });
 }
 
 export function setInboxAnswerText(itemKey: string, text: string) {
