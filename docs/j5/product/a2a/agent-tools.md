@@ -76,10 +76,11 @@ Read-only; no events.
 
 ### `j5_spawn_agent`
 
-Agents have two ways to get help: a helper that reports back to them (their provider's own subagent, or a delegate from `delegate_task`) or members on a Crew (`j5_propose_crew`, `j5_request_crew_member`). `j5_spawn_agent` serves neither. Its description keeps it for a Peer Agent or standalone agent the person explicitly asks for, and for callers that name it, such as an outside agent or a skill; when nobody asked for one it says to use a subagent or a Crew. Nothing a caller depends on was removed.
+Agents have two ways to get help: a helper that reports back to them (their provider's own subagent, or a delegate from `delegate_task`) or members on a Crew (`j5_propose_crew`, `j5_request_crew_member`). `j5_spawn_agent` serves neither. Its description keeps it for a Peer Agent, a standalone agent or a new or separate thread the person explicitly asks for, and for callers that name it, such as an outside agent or a skill; when nobody asked for one it says to use a subagent or a Crew. Nothing a caller depends on was removed.
 
-**Description (contract):** "Use this when the user explicitly asks for a Peer Agent or a standalone
-agent they will talk to, or when an outside agent or a skill you are following names it. When nobody
+**Description (contract):** "Use this when the user explicitly asks for a Peer Agent, a standalone
+agent they will talk to, or a new or separate thread (whatever its model, project or checkout), or
+when an outside agent or a skill you are following names it. When nobody
 asked for one, it is not a way to get help with your own work: create a subagent (your native
 Subagent tool, or delegate_task) or put members on a Crew (j5_propose_crew). Spawn a Peer Agent: a
 full-citizen teammate with its own top-level thread, starting on your brief as its first turn. It

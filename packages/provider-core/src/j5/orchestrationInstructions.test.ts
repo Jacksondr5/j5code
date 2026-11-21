@@ -133,7 +133,7 @@ describe("J5 orchestration instructions", () => {
     assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "your provider's native Subagent mechanism");
     assert.include(
       J5_ORCHESTRATION_INSTRUCTIONS,
-      "Use `j5_spawn_agent` when the user explicitly asks for a Peer Agent or a standalone agent they will talk to",
+      "Use `j5_spawn_agent` when the user explicitly asks for a Peer Agent, a standalone agent they will talk to, or a new or separate thread (whatever its model, project or checkout: never `delegate_task`)",
     );
     assert.include(
       J5_ORCHESTRATION_INSTRUCTIONS,
