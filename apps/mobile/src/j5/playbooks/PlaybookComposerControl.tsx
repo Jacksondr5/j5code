@@ -74,7 +74,7 @@ export function PlaybookComposerControl(props: {
           className="min-h-11 flex-row items-center gap-2"
         >
           <SymbolView
-            name={run.issue || query.error ? "exclamationmark.triangle" : "doc.text"}
+            name={query.error ? "exclamationmark.triangle" : "doc.text"}
             size={14}
             tintColorClassName="accent-icon-muted"
           />
@@ -82,10 +82,7 @@ export function PlaybookComposerControl(props: {
             <Text numberOfLines={1} className="text-xs text-foreground">
               {run.title}
             </Text>
-            {(run.status !== "active" ||
-              run.issue ||
-              query.error ||
-              run.runId !== runs[0]?.runId) && (
+            {(run.status !== "active" || query.error || run.runId !== runs[0]?.runId) && (
               <Text className="text-xs text-foreground-muted">
                 {run.runId !== runs[0]?.runId ? "Earlier run · " : ""}
                 {query.error ? "Out of date" : display.status}
@@ -96,7 +93,7 @@ export function PlaybookComposerControl(props: {
             <Text
               className={`text-xs ${run.status === "completed" ? "text-adaptive-emerald-600-400" : "text-foreground-muted"}`}
             >
-              {display.completedSteps}/{run.total}
+              {run.total === 0 ? display.position : `${display.completedSteps}/${run.total}`}
             </Text>
             {display.steps.length > 1 && display.steps.length <= 10 && (
               <View
@@ -152,9 +149,9 @@ export function PlaybookComposerControl(props: {
                 Progress could not refresh. Showing the last received state.
               </Text>
             )}
-            {run.issue && (
+            {run.cancelReason && (
               <Text accessibilityRole="alert" className="my-2 text-xs text-foreground-muted">
-                {run.issue.message}
+                {run.cancelReason}
               </Text>
             )}
             {display.steps.map((step, index) => (

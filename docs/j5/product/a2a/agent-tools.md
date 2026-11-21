@@ -424,11 +424,17 @@ seats retired so far and the seat that failed; retry with the same `client_reque
 reported to its Captain; the platform never settles a seat because its run finished, and settlement is not archive. `t3_thread_interrupt` on a member is still allowed;
 stopping retires nothing.
 
+### `j5_playbook_cancel`
+
+**Description (contract):** "Cancel your playbook. This does not interrupt or archive your agent. Reuse client_request_id only to retry this exact operation; use a fresh ID for each new action. Active-run retries return current live progress without moving again. After completion or cancellation, only start and finish retries are retained."
+
+Cancellation preserves the run and its saved procedure in history.
+
 ### Crew playbook runs
 
 A Captain runs the playbook its Crew follows with `j5_playbook_start(name, client_request_id,
 crew_instance_id)`. The call is refused with `crew_not_linkable` unless the Crew is the caller's,
-is live, and follows that playbook. Each landing (start, next, back, reselect) hands the step's live
+is live, and follows that playbook. Each landing (start, next, back) hands the step's saved
 prompt to the seat that owns it, once per landing, as a `<j5_playbook_step>` notice in the seat's
 thread. A step no live seat owns is the Captain's, and no notice is sent for it.
 
@@ -436,7 +442,7 @@ Every step tool on a Crew-linked run returns `delivery`: `{ state, seat, thread_
 is `delivered` (the seat has the step), `captain` (the Captain does it from `currentStep.prompt`),
 or `pending` (the hand-off hasn't finished; nobody should start the step). Only `captain` means
 the Captain does it. `j5_playbook_current` reports the same `delivery` without handing off again.
-While an earlier hand-off is still pending, `j5_playbook_next`, `j5_playbook_back`, `j5_playbook_reselect`,
+While an earlier hand-off is still pending, `j5_playbook_next`, `j5_playbook_back`,
 and `j5_playbook_complete` refuse with `delivery_pending` and don't move; retry the same call. Nothing
 retries a pending hand-off in the background, including after a restart: the Captain's next step
 call, or a retry of the same one, finishes it.

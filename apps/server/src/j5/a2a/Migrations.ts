@@ -60,6 +60,8 @@ import Migration0056 from "./migrations/056_PromptAnswerSettled.ts";
 import Migration0057 from "./migrations/057_ParticipantMoved.ts";
 import Migration0058 from "./migrations/058_PeerLines.ts";
 
+import Migration0059 from "./migrations/059_PlaybookRunSnapshots.ts";
+
 export const J5_A2A_MIGRATIONS_TABLE = "j5_a2a_migrations";
 
 // Every entry already in this list is persisted migration history: keep its id, file, and
@@ -128,6 +130,7 @@ export const migrationEntries = [
   [56, "PromptAnswerSettled", Migration0056],
   [57, "ParticipantMoved", Migration0057],
   [58, "PeerLines", Migration0058],
+  [59, "PlaybookRunSnapshots", Migration0059],
 ] as const;
 
 const makeMigrationLoader = (throughId?: number) =>

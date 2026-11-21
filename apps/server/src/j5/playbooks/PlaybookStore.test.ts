@@ -123,13 +123,17 @@ it.effect(
         { operation: "next", expectedStepId: "research", step: "implement", status: "active" },
         { operation: "back", expectedStepId: "implement", step: "research", status: "active" },
         {
-          operation: "reselect",
+          operation: "next",
           expectedStepId: "research",
-          stepId: "review",
-          step: "review",
+          step: "implement",
           status: "active",
         },
-        { operation: "complete", expectedStepId: "review", step: "review", status: "completed" },
+        {
+          operation: "complete",
+          expectedStepId: "implement",
+          step: "implement",
+          status: "completed",
+        },
       ] as const;
       for (const [index, { step, status, ...movement }] of moves.entries()) {
         const input = { ...movement, runId: run.runId, client_request_id: `move-${index}` };
@@ -157,7 +161,7 @@ it.effect(
 );
 
 it.effect(
-  "lists owners together, filters active runs, and reads shared live definitions once per page",
+  "lists owners together, filters active runs, and reads saved definitions without filesystem access",
   () =>
     Effect.gen(function* () {
       const { workspaceRoot, fs, write, filename } = yield* makeFixture;
@@ -181,7 +185,7 @@ it.effect(
       });
       reads = 0;
       const all = yield* store.listAll({});
-      assert.equal(reads, 1);
+      assert.equal(reads, 0);
       assert.equal(all.total, 2);
       assert.deepStrictEqual(
         all.runs.map((run) => run.runId),
@@ -200,20 +204,18 @@ it.effect(
         [first.runId],
       );
       yield* write("demo", { ...definition(), title: "Edited live" });
-      assert.isTrue((yield* store.listAll({})).runs.every((run) => run.title === "Edited live"));
+      assert.isTrue((yield* store.listAll({})).runs.every((run) => run.title === "Test playbook"));
       yield* write("healthy");
       yield* store.start(ThreadId.make("healthy-owner"), workspaceRoot, "healthy", "healthy");
       yield* fs.writeFileString(filename("demo"), "title: [invalid");
       reads = 0;
       const broken = yield* store.listAll({});
-      assert.equal(reads, 2);
+      assert.equal(reads, 0);
       assert.equal(broken.runs.length, 3);
-      assert.equal(broken.runs.filter((run) => run.issue?.code === "invalid_definition").length, 1);
-      assert.equal(broken.runs.filter((run) => run.issue === null).length, 2);
     }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );
 
-it.effect("reads one definition for twenty thread runs on each request", () =>
+it.effect("reads no files for twenty thread runs", () =>
   Effect.gen(function* () {
     const { workspaceRoot, fs, write, filename } = yield* makeFixture;
     let reads = 0;
@@ -238,16 +240,16 @@ it.effect("reads one definition for twenty thread runs on each request", () =>
     reads = 0;
     const first = yield* store.listForThread(owner);
     assert.equal(first.runs.length, 20);
-    assert.equal(reads, 1);
+    assert.equal(reads, 0);
     assert.isFalse(first.runs.some((run) => "currentStep" in run));
     yield* write("demo", { ...definition(), title: "Changed title" });
     const second = yield* store.listForThread(owner);
-    assert.equal(reads, 2);
-    assert.isTrue(second.runs.every((run) => run.title === "Changed title"));
+    assert.equal(reads, 0);
+    assert.isTrue(second.runs.every((run) => run.title === "Test playbook"));
     yield* fs.writeFileString(filename("demo"), "title: [invalid");
     const broken = yield* store.listForThread(owner);
-    assert.equal(reads, 3);
-    assert.isTrue(broken.runs.every((run) => run.issue === null));
+    assert.equal(broken.runs.length, 20);
+    assert.equal(reads, 0);
   }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );
 
@@ -389,123 +391,78 @@ it.effect("reports each run's start and its end once, with how far it got", () =
   }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );
 
-it.effect(
-  "reads prompt edits live and navigates the latest order without changing the current ID",
-  () =>
-    Effect.gen(function* () {
-      const { store, workspaceRoot, write } = yield* makeFixture;
-      const run = yield* store.start(owner, workspaceRoot, "demo", "start");
-      yield* store.mutate(owner, {
-        operation: "next",
-        runId: run.runId,
-        expectedStepId: "research",
-        client_request_id: "next",
-      });
-      const edited = definition(["review", "implement", "research"]);
-      yield* write("demo", {
-        ...edited,
-        description: "Updated purpose.",
-        steps: edited.steps.map((step) =>
-          step.id === "implement"
-            ? { ...step, prompt: "Use the revised implementation instructions." }
-            : step,
-        ),
-      });
-      const current = yield* store.current(owner, run.runId);
-      assert.equal(current.currentStepId, "implement");
-      assert.equal(current.position, 2);
-      assert.equal(current.description, "Updated purpose.");
-      assert.equal(current.currentStep?.prompt, "Use the revised implementation instructions.");
-
-      const next = yield* store.mutate(owner, {
-        operation: "next",
-        runId: run.runId,
-        expectedStepId: "implement",
-        client_request_id: "next-edited",
-      });
-      assert.equal(next.currentStepId, "research");
-      assert.equal(next.position, 3);
-      const back = yield* store.mutate(owner, {
-        operation: "back",
-        runId: run.runId,
-        expectedStepId: "research",
-        client_request_id: "back-edited",
-      });
-      assert.equal(back.currentStep?.prompt, "Use the revised implementation instructions.");
-      const board = (yield* store.listForThread(owner)).runs[0]!;
-      assert.deepStrictEqual(
-        board.steps.map(({ id }) => id),
-        ["review", "implement", "research"],
-      );
-      assert.notProperty(board, "currentStep");
-      assert.isFalse(board.steps.some((step) => "prompt" in step));
-    }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
-);
-
-it.effect("requires explicit recovery when the current step disappears", () =>
+it.effect("keeps prompts, purpose and step order from start despite library edits", () =>
   Effect.gen(function* () {
     const { store, workspaceRoot, write } = yield* makeFixture;
     const run = yield* store.start(owner, workspaceRoot, "demo", "start");
-    yield* write("demo", definition(["implement", "review"]));
-    const missing = yield* Effect.flip(store.current(owner));
-    assert.equal(missing.code, "step_missing");
-    assert.include(missing.message, run.runId);
-    assert.include(missing.message, "research");
-    assert.include(missing.message, "j5_playbook_reselect");
-    assert.deepStrictEqual(missing.availableStepIds, ["implement", "review"]);
-    for (const operation of ["next", "back", "complete"] as const) {
-      assert.equal(
-        (yield* Effect.flip(
-          store.mutate(owner, {
-            operation,
-            runId: run.runId,
-            expectedStepId: "research",
-            client_request_id: operation,
-          }),
-        )).code,
-        "step_missing",
-      );
-    }
-    const before = (yield* store.listForThread(owner)).runs[0]!;
-    assert.equal(before.currentStepId, "research");
-    assert.equal(before.status, "active");
-    assert.isNull(before.position);
-    assert.equal(before.issue?.code, "step_missing");
-    assert.equal(
-      (yield* Effect.flip(
-        store.mutate(owner, {
-          operation: "reselect",
-          runId: run.runId,
-          expectedStepId: "research",
-          stepId: "unknown",
-          client_request_id: "invalid-reselect",
-        }),
-      )).code,
-      "step_missing",
-    );
-    assert.equal(
-      (yield* Effect.flip(
-        store.mutate(owner, {
-          operation: "reselect",
-          runId: run.runId,
-          expectedStepId: "implement",
-          stepId: "review",
-          client_request_id: "stale-reselect",
-        }),
-      )).code,
-      "step_conflict",
-    );
-    const recovered = yield* store.mutate(owner, {
-      operation: "reselect",
+    yield* store.mutate(owner, {
+      operation: "next",
       runId: run.runId,
       expectedStepId: "research",
-      stepId: "review",
-      client_request_id: "recover",
+      client_request_id: "next",
     });
-    assert.equal(recovered.currentStepId, "review");
-    assert.equal(recovered.position, 2);
-    assert.equal(recovered.currentStep?.prompt, "Follow review.");
-    assert.isNull(recovered.issue);
+    const edited = definition(["review", "implement", "research"]);
+    yield* write("demo", {
+      ...edited,
+      description: "Updated purpose.",
+      steps: edited.steps.map((step) =>
+        step.id === "implement"
+          ? { ...step, prompt: "Use the revised implementation instructions." }
+          : step,
+      ),
+    });
+    const current = yield* store.current(owner, run.runId);
+    assert.equal(current.currentStepId, "implement");
+    assert.equal(current.position, 2);
+    assert.equal(current.description, definition().description);
+    assert.equal(current.currentStep?.prompt, "Follow implement.");
+
+    const next = yield* store.mutate(owner, {
+      operation: "next",
+      runId: run.runId,
+      expectedStepId: "implement",
+      client_request_id: "next-edited",
+    });
+    assert.equal(next.currentStepId, "review");
+    assert.equal(next.position, 3);
+    const back = yield* store.mutate(owner, {
+      operation: "back",
+      runId: run.runId,
+      expectedStepId: "review",
+      client_request_id: "back-edited",
+    });
+    assert.equal(back.currentStep?.prompt, "Follow implement.");
+    const board = (yield* store.listForThread(owner)).runs[0]!;
+    assert.deepStrictEqual(
+      board.steps.map(({ id }) => id),
+      ["research", "implement", "review"],
+    );
+    assert.notProperty(board, "currentStep");
+    assert.isFalse(board.steps.some((step) => "prompt" in step));
+    assert.notProperty(board, "definition");
+    assert.notProperty(current, "definition");
+    yield* store.mutate(owner, {
+      operation: "cancel",
+      runId: run.runId,
+      client_request_id: "cancel",
+    });
+    const future = yield* store.start(owner, workspaceRoot, "demo", "future");
+    assert.equal(future.description, "Updated purpose.");
+    assert.equal(future.currentStepId, "review");
+  }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
+);
+
+it.effect("keeps the current step after the library removes it, including start retries", () =>
+  Effect.gen(function* () {
+    const { store, workspaceRoot, write, fs, filename } = yield* makeFixture;
+    const run = yield* store.start(owner, workspaceRoot, "demo", "start");
+    yield* write("demo", definition(["implement", "review"]));
+    assert.equal((yield* store.current(owner)).currentStep?.prompt, "Follow research.");
+    yield* fs.remove(filename("demo"));
+    const replayed = yield* store.start(owner, workspaceRoot, "demo", "start");
+    assert.equal(replayed.runId, run.runId);
+    assert.isTrue(replayed.replayed);
+    assert.equal(replayed.currentStep?.prompt, "Follow research.");
   }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );
 
@@ -518,33 +475,27 @@ it.effect("preserves progress for invalid or missing YAML and always permits can
       if (broken === "invalid") yield* fs.writeFileString(filename("demo"), "title: [broken");
       else yield* fs.remove(filename("demo"));
       assert.equal(
-        (yield* Effect.flip(store.current(owner, run.runId))).code,
-        "invalid_definition",
+        (yield* store.current(owner, run.runId)).currentStep?.prompt,
+        "Follow research.",
       );
-      for (const operation of ["next", "back", "complete"] as const) {
-        assert.equal(
-          (yield* Effect.flip(
-            store.mutate(owner, {
-              operation,
-              runId: run.runId,
-              expectedStepId: "research",
-              client_request_id: `${operation}-${broken}`,
-            }),
-          )).code,
-          "invalid_definition",
-        );
-      }
+      const moved = yield* store.mutate(owner, {
+        operation: "next",
+        runId: run.runId,
+        expectedStepId: "research",
+        client_request_id: `next-${broken}`,
+      });
+      assert.equal(moved.currentStepId, "implement");
       const board = (yield* store.listForThread(owner)).runs[0]!;
-      assert.equal(board.currentStepId, "research");
+      assert.equal(board.currentStepId, "implement");
       assert.equal(board.status, "active");
-      assert.equal(board.issue?.code, "invalid_definition");
+
       const cancelled = yield* store.mutate(owner, {
         operation: "cancel",
         runId: run.runId,
         client_request_id: `cancel-${broken}`,
       });
       assert.equal(cancelled.status, "cancelled");
-      assert.isNull(cancelled.issue);
+
       assert.equal((yield* store.current(owner, run.runId)).status, "cancelled");
     }
   }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
@@ -803,11 +754,10 @@ it.effect(
           client_request_id: "foreign-complete",
         },
         {
-          operation: "reselect",
+          operation: "next",
           runId: run.runId,
           expectedStepId: "implement",
-          stepId: "review",
-          client_request_id: "foreign-reselect",
+          client_request_id: "foreign-next",
         },
         { operation: "cancel", runId: run.runId, client_request_id: "foreign-cancel" },
       ];
@@ -872,7 +822,7 @@ it.effect(
         const current = yield* store.current(owner);
         assert.equal(current.runId, runId);
         assert.equal(current.currentStepId, "research");
-        assert.equal(current.currentStep?.prompt, "After restart: research");
+        assert.equal(current.currentStep?.prompt, "Follow research.");
         const retry = yield* store.mutate(owner, {
           operation: "next",
           runId,
@@ -881,7 +831,7 @@ it.effect(
         });
         assert.isTrue(retry.replayed);
         assert.equal(retry.currentStepId, "research");
-        assert.equal(retry.currentStep?.prompt, "After restart: research");
+        assert.equal(retry.currentStep?.prompt, "Follow research.");
         assert.equal((yield* store.current(owner)).currentStepId, "research");
         assert.equal((yield* store.listForThread(owner)).runs.length, 1);
         const moved = yield* store.mutate(owner, {
@@ -929,7 +879,7 @@ it.effect(
           assert.isFalse(yield* fs.exists(filename("demo")));
           const history = yield* store.current(owner, run.runId);
           assert.equal(history.status, "cancelled");
-          assert.isNull(history.issue);
+
           yield* write("demo");
           assert.equal(
             (yield* Effect.flip(
@@ -940,33 +890,55 @@ it.effect(
         }
       }
       assert.equal((yield* store.current(otherOwner, archived.runId)).status, "active");
-      assert.equal(
-        (yield* Effect.flip(store.removeDefinition(workspaceRoot, "archived"))).code,
-        "in_use",
-      );
+      assert.deepStrictEqual(yield* store.removeDefinition(workspaceRoot, "archived"), {
+        deleted: true,
+      });
     }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );
 
-it.effect("keeps completed and cancelled history warning-free after steps or files disappear", () =>
-  Effect.gen(function* () {
-    const { store, workspaceRoot, write, fs, filename } = yield* makeFixture;
-    for (const operation of ["complete", "cancel"] as const) {
-      yield* write("demo");
-      const run = yield* store.start(owner, workspaceRoot, "demo", `start-${operation}`);
-      yield* store.mutate(owner, {
-        operation,
-        runId: run.runId,
-        expectedStepId: "research",
-        client_request_id: operation,
-      });
-      yield* write("demo", definition(["review"]));
-      assert.isNull((yield* store.current(owner, run.runId)).issue);
-      yield* fs.remove(filename("demo"));
-      assert.isNull((yield* store.current(owner, run.runId)).issue);
-      assert.isTrue((yield* store.listForThread(owner)).runs.every((run) => run.issue === null));
-      assert.isTrue((yield* store.listAll({})).runs.every((run) => run.issue === null));
-    }
-  }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
+it.effect(
+  "keeps completed and cancelled snapshots available after library edits and deletion",
+  () =>
+    Effect.gen(function* () {
+      const { store, workspaceRoot, write, fs, filename } = yield* makeFixture;
+      for (const operation of ["complete", "cancel"] as const) {
+        yield* write("demo");
+        const run = yield* store.start(owner, workspaceRoot, "demo", `start-${operation}`);
+        yield* store.mutate(owner, {
+          operation,
+          runId: run.runId,
+          expectedStepId: "research",
+          client_request_id: operation,
+        });
+        yield* write("demo", { ...definition(["review"]), title: "Edited library title" });
+        for (const change of ["edited", "deleted"] as const) {
+          if (change === "deleted") yield* fs.remove(filename("demo"));
+          const current = yield* store.current(owner, run.runId);
+          const threadHistory = (yield* store.listForThread(owner)).runs.find(
+            (entry) => entry.runId === run.runId,
+          )!;
+          const allHistory = (yield* store.listAll({})).runs.find(
+            (entry) => entry.runId === run.runId,
+          )!;
+          for (const entry of [current, threadHistory, allHistory]) {
+            assert.equal(entry.status, operation === "complete" ? "completed" : "cancelled");
+            assert.equal(entry.title, definition().title);
+            assert.equal(entry.description, definition().description);
+            assert.equal(entry.currentStepId, "research");
+            assert.equal(entry.position, 1);
+            assert.equal(entry.total, 3);
+            assert.deepStrictEqual(
+              entry.steps,
+              definition().steps.map(({ id, title }) => ({ id, title })),
+            );
+            assert.notProperty(entry, "definition");
+          }
+          assert.deepStrictEqual(current.currentStep, definition().steps[0]);
+          assert.notProperty(threadHistory, "currentStep");
+          assert.notProperty(allHistory, "currentStep");
+        }
+      }
+    }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );
 
 it.effect(
@@ -1016,49 +988,36 @@ it.effect(
     }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );
 
-it.effect("reads YAML outside SQL transactions and rechecks the pointer after the read", () =>
-  Effect.gen(function* () {
-    const { workspaceRoot, fs } = yield* makeFixture;
-    const sql = yield* SqlClient.SqlClient;
-    let moveDuringRead = false;
-    const store = yield* makePlaybookStore.pipe(
-      Effect.provideService(FileSystem.FileSystem, {
-        ...fs,
-        readFileString: (file, encoding) =>
-          Effect.gen(function* () {
-            assert.isTrue(Option.isNone(yield* Effect.serviceOption(sql.transactionService)));
-            if (moveDuringRead) {
-              moveDuringRead = false;
-              yield* sql`UPDATE j5_playbook_run SET current_step_id = 'review' WHERE owner_thread_id = ${owner}`;
-            }
-            return yield* fs.readFileString(file, encoding);
-          }),
-      }),
-    );
-    const run = yield* store.start(owner, workspaceRoot, "demo", "start");
-    yield* store.start(owner, workspaceRoot, "demo", "start");
-    const next = {
-      operation: "next",
-      runId: run.runId,
-      expectedStepId: "research",
-      client_request_id: "next",
-    } as const;
-    yield* store.mutate(owner, next);
-    yield* store.mutate(owner, next);
-    moveDuringRead = true;
-    assert.equal(
-      (yield* Effect.flip(
-        store.mutate(owner, { ...next, expectedStepId: "implement", client_request_id: "stale" }),
-      )).code,
-      "step_conflict",
-    );
-    assert.equal((yield* store.current(owner)).currentStepId, "review");
-    yield* store.mutate(owner, {
-      operation: "cancel",
-      runId: run.runId,
-      client_request_id: "cancel",
-    });
-  }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
+it.effect(
+  "reads the source once outside the writer transaction and keeps the snapshot on replay and movement",
+  () =>
+    Effect.gen(function* () {
+      const { workspaceRoot, fs } = yield* makeFixture;
+      const sql = yield* SqlClient.SqlClient;
+      let reads = 0;
+      const store = yield* makePlaybookStore.pipe(
+        Effect.provideService(FileSystem.FileSystem, {
+          ...fs,
+          readFileString: (file, encoding) =>
+            Effect.gen(function* () {
+              assert.isTrue(Option.isNone(yield* Effect.serviceOption(sql.transactionService)));
+              reads += 1;
+              return yield* fs.readFileString(file, encoding);
+            }),
+        }),
+      );
+      const run = yield* store.start(owner, workspaceRoot, "demo", "start");
+      assert.equal(reads, 1);
+      yield* store.start(owner, workspaceRoot, "demo", "start");
+      yield* store.mutate(owner, {
+        operation: "next",
+        runId: run.runId,
+        expectedStepId: "research",
+        client_request_id: "next",
+      });
+      yield* store.current(owner);
+      assert.equal(reads, 1);
+    }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );
 
 it.effect("enforces the shared byte and step limits at their boundaries", () =>
@@ -1239,16 +1198,15 @@ it.effect("returns step personas from discover, read, and every step tool", () =
       client_request_id: "back",
     });
     assert.equal(back.currentStep?.persona, "planner");
-    const reselected = yield* store.mutate(owner, {
-      operation: "reselect",
+    const advanced = yield* store.mutate(owner, {
+      operation: "next",
       runId: run.runId,
       expectedStepId: "research",
-      stepId: "implement",
-      client_request_id: "reselect",
+      client_request_id: "next-again",
     });
-    assert.equal(reselected.currentStep?.persona, "builder-bot");
+    assert.equal(advanced.currentStep?.persona, "builder-bot");
     // Progress on the board stays titles only.
-    assert.deepStrictEqual(reselected.steps[0], { id: "research", title: "Research" });
+    assert.deepStrictEqual(advanced.steps[0], { id: "research", title: "Research" });
   }).pipe(Effect.scoped, Effect.provide(CatalogLayer)),
 );
 
@@ -1392,7 +1350,7 @@ it.effect(
   "moves its revision for each change a run's views show, and for no read that changed nothing",
   () =>
     Effect.gen(function* () {
-      const { store, workspaceRoot, path, write } = yield* makeFixture;
+      const { store, workspaceRoot, write } = yield* makeFixture;
       const sql = yield* SqlClient.SqlClient;
       const revision = store.changes.pipe(Stream.runHead, Effect.map(Option.getOrThrow));
       /** Runs a store call and says how far it moved the revision. */
@@ -1403,7 +1361,7 @@ it.effect(
           return (yield* revision) - before;
         });
 
-      // A playbook's title is shown on every run of it, active or finished.
+      // Library edits refresh discovery.
       assert.equal(yield* moved(store.renameDefinition(workspaceRoot, "demo", "Renamed")), 1);
       assert.equal(yield* moved(store.renameDefinition(workspaceRoot, "demo", "Renamed")), 0);
       yield* write("unused");
@@ -1411,13 +1369,10 @@ it.effect(
       assert.equal(yield* moved(Effect.flip(store.removeDefinition(workspaceRoot, "unused"))), 0);
 
       // A Crew-linked run's landing gets its target once; Fleet shows the seat it is headed to.
-      assert.deepStrictEqual(yield* store.activeDefinitionDirectories(), []);
       const run = yield* store.start(owner, workspaceRoot, "demo", "start", {
         crewInstanceId: "crew:watch",
       });
-      assert.deepStrictEqual(yield* store.activeDefinitionDirectories(), [
-        path.join(workspaceRoot, ".j5", "playbooks"),
-      ]);
+
       const target = { seat: "builder", threadId: "thread:builder" };
       assert.equal(yield* moved(store.targetLanding(run.runId, "start", target)), 1);
       assert.equal(
@@ -1433,10 +1388,6 @@ it.effect(
       yield* sql`UPDATE orchestration_v2_projection_threads SET deleted_at = '2026-09-23' WHERE thread_id = ${owner}`;
       assert.equal(yield* moved(store.listAll({})), 1);
       assert.equal(yield* moved(store.listAll({})), 0);
-      assert.deepStrictEqual(yield* store.activeDefinitionDirectories(), []);
-
-      // A file changed on disk is said by whoever watches it.
-      assert.equal(yield* moved(store.definitionsChanged), 1);
     }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );
 
@@ -1470,13 +1421,10 @@ it.effect(
       );
       const run = yield* store.start(owner, workspaceRoot, "shared", "start-shared");
       assert.equal(run.definitionPath, path.join(stateDir, "playbooks/shared.yaml"));
-      assert.deepStrictEqual(yield* store.activeDefinitionDirectories(), [
-        path.join(stateDir, "playbooks"),
-      ]);
-      assert.equal(
-        (yield* Effect.flip(store.removeDefinition("", "shared", { kind: "environment" }))).code,
-        "in_use",
-      );
+
+      assert.deepStrictEqual(yield* store.removeDefinition("", "shared", { kind: "environment" }), {
+        deleted: true,
+      });
     }).pipe(Effect.scoped, Effect.provide(CatalogLayer)),
 );
 
@@ -1504,7 +1452,6 @@ it.effect(
       yield* store.saveDefinition({ name: "demo", yaml: stringify(definition(["new"])) });
       const legacyReplay = yield* store.start(otherOwner, workspaceRoot, "demo", "legacy");
       assert.equal(legacyReplay.definitionPath, legacy.definitionPath);
-      assert.isNotNull(legacyReplay.issue);
     }).pipe(Effect.scoped, Effect.provide(CatalogLayer)),
 );
 
@@ -1590,7 +1537,7 @@ it.effect(
         (yield* store.current(owner, run.runId)).definitionPath,
         path.join(folder, "shared.yaml"),
       );
-      assert.isNull((yield* store.current(owner, run.runId)).issue);
+
       assert.equal(
         (yield* store.start(owner, workspaceRoot, "shared", "folder-run")).runId,
         run.runId,
@@ -1713,4 +1660,59 @@ it.effect(
       const restarted = yield* makePlaybookStore;
       assert.equal((yield* restarted.read("", "shared")).title, "Test playbook");
     }).pipe(Effect.scoped, Effect.provide(CatalogLayer)),
+);
+
+it.effect("isolates unreadable snapshots and allows their cancellation", () =>
+  Effect.gen(function* () {
+    const { store, workspaceRoot } = yield* makeFixture;
+    const sql = yield* SqlClient.SqlClient;
+    yield* store.start(otherOwner, workspaceRoot, "demo", "healthy");
+    const run = yield* store.start(owner, workspaceRoot, "demo", "damaged");
+    for (const snapshot of ["{", '{"steps":["invalid"]}']) {
+      yield* sql`UPDATE j5_playbook_run SET definition_json = ${snapshot} WHERE run_id = ${run.runId}`;
+      const history = (yield* store.listForThread(owner)).runs[0]!;
+      assert.equal(history.title, "demo");
+      assert.isNull(history.issue);
+      assert.deepEqual(history.steps, []);
+      assert.equal((yield* store.listAll({ status: "all" })).runs.length, 2);
+      assert.isNull((yield* store.current(owner)).currentStep);
+      const failure = yield* Effect.flip(
+        store.mutate(owner, {
+          operation: "complete",
+          runId: run.runId,
+          expectedStepId: "research",
+          client_request_id: "complete",
+        }),
+      );
+      assert.equal(failure.code, "invalid_snapshot");
+    }
+    assert.equal(
+      (yield* store.mutate(owner, {
+        operation: "cancel",
+        runId: run.runId,
+        client_request_id: "cancel",
+      })).status,
+      "cancelled",
+    );
+  }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
+);
+
+it.effect("shows legacy terminal history without consulting its definition file", () =>
+  Effect.gen(function* () {
+    const { store, workspaceRoot, fs, filename } = yield* makeFixture;
+    const sql = yield* SqlClient.SqlClient;
+    const run = yield* store.start(owner, workspaceRoot, "demo", "legacy-history");
+    yield* sql`UPDATE j5_playbook_run SET status = 'cancelled', definition_json = NULL,
+      cancel_reason = 'started before runs kept their own copy; start it again.' WHERE run_id = ${run.runId}`;
+    yield* fs.remove(filename("demo"));
+    const history = (yield* store.listForThread(owner)).runs[0]!;
+    assert.equal(history.title, "demo");
+    assert.equal(history.status, "cancelled");
+    assert.equal(history.currentStepId, "research");
+    assert.equal(history.cancelReason, "started before runs kept their own copy; start it again.");
+    assert.deepStrictEqual(history.steps, []);
+    assert.isNull(history.position);
+    assert.notProperty(history, "definition");
+    assert.notProperty(history, "currentStep");
+  }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );

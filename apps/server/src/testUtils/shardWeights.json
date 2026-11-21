@@ -86,7 +86,6 @@
   "src/j5/persistence/UpstreamMigrationCompatibility.test.ts": 1.4,
   "src/j5/persistence/neutraliseCopiedDatabase.test.ts": 5.3,
   "src/j5/playbooks/PlaybookCrewRelay.test.ts": 3.6,
-  "src/j5/playbooks/PlaybookDefinitionWatch.test.ts": 0.7,
   "src/j5/playbooks/PlaybookStore.test.ts": 9,
   "src/j5/playbooks/mcp.test.ts": 1.4,
   "src/j5/playbooks/playbookRpc.test.ts": 2.6,

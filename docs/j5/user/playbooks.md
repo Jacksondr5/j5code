@@ -38,10 +38,12 @@ repository and configure each environment to read its local clone's matching fol
 Commit, push, and pull with your usual git tools, then refresh the library. Creating a
 playbook does not automatically publish it to other environments.
 
-Runs keep the exact file they started with. Removing a source does not redirect a
-running procedure. Changes to that file's contents still apply live. Complete or
-cancel active runs before deleting their managed definition; completed run history
-remains.
+Runs keep a copy of the procedure they started with. Editing or deleting a saved
+playbook affects future runs only. Existing runs continue from their copy, and
+completed or cancelled runs remain in history. Upgrading cancels active runs created before
+saved copies were introduced. Start those runs again to continue their work.
+Older runs that predate saved copies
+show their last recorded step and any cancellation reason without a step list.
 
 On web and desktop, open **Fleet** and use its **Playbook runs** section to follow
 runs across your connected environments. The overview shows
@@ -88,10 +90,9 @@ Type `@playbook:` anywhere in a message to pick a playbook by name. On its own, 
 mention asks the agent to start that playbook in the thread. Invalid playbooks appear in the
 list with their error.
 
-You can edit prompts and reorder steps while the run is active. The next retrieval
-uses the latest file. Keep step IDs stable: if you remove the current step, ask the
-agent to select an available step explicitly. A missing or invalid file leaves
-progress unchanged; restore the file or ask the agent to cancel the run.
+Editing prompts or reordering steps in a saved playbook changes the procedure for
+future runs. The current run keeps the copy it started with, even if the saved
+playbook is deleted.
 
 Ask the agent to go back when you want to revisit a phase. Going back changes its
 position, not your files or previous work. Progress survives context compaction and
@@ -108,7 +109,7 @@ you return to it.
 
 A Crew can follow a playbook. Its Captain starts the playbook in its own thread, and
 each step goes to the seat that owns it. The Captain moves to the next step after that
-seat reports back. Steps no seat owns are the Captain's. Going back or reselecting a
+seat reports back. Steps no seat owns are the Captain's. Going back to a
 step hands it to its owner again. Fleet shows each Crew's current step and who has it,
 or "handing off" while a step is on its way to a seat. Archiving the Crew or its
 Captain cancels the run; stopping the Crew doesn't.

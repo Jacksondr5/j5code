@@ -266,11 +266,11 @@ it.effect(
     }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );
 
-it.effect("advancing hands the new step's live prompt to exactly the seat that owns it", () =>
+it.effect("advancing hands the new step's saved prompt to exactly the seat that owns it", () =>
   Effect.gen(function* () {
     const { start, move, notices, write } = yield* fixture;
     const run = yield* start("start-1");
-    // The prompt is read live at hand-off time.
+    // Editing the library leaves the pending run's saved prompt unchanged.
     yield* write("review", {
       ...review,
       steps: review.steps.map((step) =>
@@ -284,7 +284,7 @@ it.effect("advancing hands the new step's live prompt to exactly the seat that o
       sent.map(({ threadId }) => threadId),
       [seatAThread, seatBThread],
     );
-    assert.include(sent[1]?.text, "Review the edited change.");
+    assert.include(sent[1]?.text, review.steps[1]!.prompt);
     assert.include(sent[1]?.text, "position: 2 of 3");
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );
@@ -420,21 +420,20 @@ it.effect("a seat that refuses the notice leaves the step to the Captain", () =>
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );
 
-it.effect("back and reselect hand the step to its owner again", () =>
+it.effect("back and next hand the step to its owner again", () =>
   Effect.gen(function* () {
     const { start, move, relay, notices } = yield* fixture;
     const run = yield* start("start-1");
     yield* move(run.runId, "next", "inspect", "next-1");
     const back = yield* move(run.runId, "back", "review", "back-1");
     assert.equal(back.delivery?.seat, "a");
-    const reselected = yield* relay.mutate(captainThread, {
+    const advanced = yield* relay.mutate(captainThread, {
       runId: run.runId,
-      operation: "reselect",
+      operation: "next",
       expectedStepId: "inspect",
-      stepId: "review",
-      client_request_id: "reselect-1",
+      client_request_id: "next-again",
     });
-    assert.equal(reselected.delivery?.seat, "b");
+    assert.equal(advanced.delivery?.seat, "b");
     assert.deepStrictEqual(
       (yield* notices).map(({ threadId }) => threadId),
       [seatAThread, seatBThread, seatAThread, seatBThread],
@@ -548,61 +547,20 @@ it.effect("a retry after later moves reports who holds the step it shows, and se
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );
 
-it.effect("an unreadable playbook keeps a hand-off pending until the YAML is repaired", () =>
-  Effect.gen(function* () {
-    const { start, move, relay, store, write, root, notices, dispatchFault } = yield* fixture;
-    yield* Ref.set(dispatchFault, "transient");
-    const run = yield* start("start-1");
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    yield* fs.writeFileString(path.join(root, ".j5/playbooks/review.yaml"), "title: [unclosed");
-    yield* Ref.set(dispatchFault, null);
-    const blocked = yield* move(run.runId, "next", "inspect", "next-1").pipe(Effect.flip);
-    assert.equal(failureCode(blocked), "delivery_pending");
-    assert.include(blocked.message, "can't be read");
-    assert.isNull((yield* store.landing(run.runId, "start-1"))?.resolvedAt);
-    // Fleet still shows the run at its recorded step, marked as needing attention.
-    const flagged = yield* relay.fleetRun(crewId);
-    assert.deepStrictEqual(
-      flagged === null ? null : { ...flagged, issue: flagged.issue?.slice(0, 29) },
-      {
-        runId: run.runId,
-        position: 0,
-        total: 0,
-        stepId: "inspect",
-        stepTitle: "inspect",
-        state: "pending",
-        seat: "a",
-        issue: "Cannot read the live playbook",
-      },
-    );
-    assert.equal((yield* store.runById(run.runId))?.currentStepId, "inspect");
-    assert.lengthOf(yield* notices, 0);
-
-    // Repaired: a's step goes out first, then the move hands b its step.
-    yield* write("review", review);
-    const next = yield* move(run.runId, "next", "inspect", "next-1");
-    assert.equal(next.delivery?.seat, "b");
-    assert.deepStrictEqual(
-      (yield* notices).map(({ threadId }) => threadId),
-      [seatAThread, seatBThread],
-    );
-    assert.equal((yield* store.landing(run.runId, "start-1"))?.outcome, "delivered");
-  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
-);
-
-it.effect("a live definition without the landed step skips that hand-off", () =>
+it.effect("delivers saved steps after the library becomes unreadable or removes them", () =>
   Effect.gen(function* () {
     const { start, move, write, store, dispatchFault, notices } = yield* fixture;
     yield* Ref.set(dispatchFault, "transient");
     const run = yield* start("start-1");
     yield* Ref.set(dispatchFault, null);
     yield* write("review", { ...review, steps: review.steps.filter(({ id }) => id !== "inspect") });
-    // The step is gone, so its landing is skipped; the move itself reports step_missing.
-    const moved = yield* move(run.runId, "next", "inspect", "next-1").pipe(Effect.flip);
-    assert.equal(failureCode(moved), "step_missing");
-    assert.equal((yield* store.landing(run.runId, "start-1"))?.outcome, "skipped");
-    assert.lengthOf(yield* notices, 0);
+    const next = yield* move(run.runId, "next", "inspect", "next-1");
+    assert.equal(next.delivery?.seat, "b");
+    assert.equal((yield* store.landing(run.runId, "start-1"))?.outcome, "delivered");
+    assert.deepStrictEqual(
+      (yield* notices).map(({ threadId }) => threadId),
+      [seatAThread, seatBThread],
+    );
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );
 

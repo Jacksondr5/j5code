@@ -404,7 +404,6 @@ const run: PlaybookProgress = {
   ],
   position: 2,
   total: 3,
-  issue: null,
 };
 it("presents the current phase without inventing success for earlier steps", () => {
   const display = presentPlaybook(run);
@@ -436,9 +435,9 @@ it.each(["completed", "cancelled"] as const)(
   },
 );
 
-it("shows available steps without guessing progress when the live definition loses the current step", () => {
+it("shows the last recorded step for legacy history without a snapshot", () => {
   const display = presentPlaybook({ ...run, currentStepId: "removed", position: null });
-  expect(display.position).toBe("Step unavailable");
+  expect(display.position).toBe("Last step: removed");
   expect(display.currentTitle).toBe("removed");
   expect(display.steps.every((step) => step.state === "available" && !step.current)).toBe(true);
   expect(presentPlaybook({ ...run, steps: [], position: null, total: 0 }).steps).toEqual([]);
@@ -468,12 +467,7 @@ it("retains all 100 step names and identifies the current position by stable ID"
   expect(display.steps[50]?.state).toBe("later");
 });
 
-it("prioritizes active issues, then active runs and recency, without changing the fetched page", () => {
-  const issue = new PlaybookError({
-    code: "step_missing",
-    message: "Step removed",
-    availableStepIds: [],
-  });
+it("prioritizes active runs and recency, without changing the fetched page", () => {
   const runs = Object.freeze([
     { ...run, runId: "completed", status: "completed" as const, updatedAt: "2026-09-21T14:00:00Z" },
     { ...run, runId: "older-active" },
@@ -481,19 +475,18 @@ it("prioritizes active issues, then active runs and recency, without changing th
       ...run,
       runId: "cancelled-issue",
       status: "cancelled" as const,
-      issue,
       updatedAt: "2026-09-21T15:00:00Z",
     },
-    { ...run, runId: "active-issue", issue },
+    { ...run, runId: "active-issue" },
     { ...run, runId: "recent-active", updatedAt: "2026-09-21T11:00:00Z" },
     { ...run, runId: "tied-active", updatedAt: "2026-09-21T11:00:00Z" },
   ]);
   const original = [...runs];
   expect(sortPlaybookRuns(runs).map(({ runId }) => runId)).toEqual([
-    "active-issue",
     "recent-active",
     "tied-active",
     "older-active",
+    "active-issue",
     "cancelled-issue",
     "completed",
   ]);
@@ -503,7 +496,7 @@ it("prioritizes active issues, then active runs and recency, without changing th
 
 it("ranks playbook suggestions by exact name, then prefix, then name or title match", () => {
   const issue = new PlaybookError({
-    code: "step_missing",
+    code: "invalid_definition",
     message: "Broken",
     availableStepIds: [],
   });
@@ -530,7 +523,7 @@ it("ranks playbook suggestions by exact name, then prefix, then name or title ma
 
 describe("playbook mention picker", () => {
   const broken = new PlaybookError({
-    code: "step_missing",
+    code: "invalid_definition",
     message: "Step report is missing a prompt.",
     availableStepIds: [],
   });

@@ -47,7 +47,7 @@ export function PlaybookStages({
   if (!run) return null;
   const display = presentPlaybookStages(run);
   const historical = run.runId !== runs[0]?.runId;
-  const warning = stale || Boolean(run.issue);
+  const warning = stale;
   const runItems = runs.map((entry, index) => ({
     value: entry.runId,
     label: `${index === 0 ? "Latest: " : ""}${entry.title} · ${entry.status} · ${new Date(entry.createdAt).toLocaleString()}`,
@@ -77,7 +77,7 @@ export function PlaybookStages({
             )}
             {stale ? (
               <span className="text-warning">Out of date</span>
-            ) : run.status !== "active" || run.issue ? (
+            ) : run.status !== "active" ? (
               <span
                 className={
                   warning
@@ -91,11 +91,21 @@ export function PlaybookStages({
               </span>
             ) : null}
             <ComposerBanner.Count
-              aria-label={`${display.completedSteps} of ${run.total} stages complete`}
+              aria-label={
+                run.total === 0
+                  ? display.position
+                  : `${display.completedSteps} of ${run.total} stages complete`
+              }
               className={run.status === "completed" ? "text-success" : undefined}
             >
-              <span className="sr-only">Stage </span>
-              {display.completedSteps}/{run.total}
+              {run.total === 0 ? (
+                display.position
+              ) : (
+                <>
+                  <span className="sr-only">Stage </span>
+                  {display.completedSteps}/{run.total}
+                </>
+              )}
             </ComposerBanner.Count>
             {display.steps.length > 1 && display.steps.length <= 10 && (
               <span
@@ -156,54 +166,56 @@ export function PlaybookStages({
                   Progress could not refresh. Showing the last received state.
                 </p>
               )}
-              {run.issue && (
+              {run.cancelReason && (
                 <p role="status" className="my-2 text-warning">
-                  {run.issue.message}
+                  {run.cancelReason}
                 </p>
               )}
             </ComposerBanner.Body>
-            <ComposerBanner.Children render={<ol />} aria-label="Playbook stage list">
-              {display.steps.map((step, index) => (
-                <ComposerBanner.Row
-                  key={step.id}
-                  render={<li />}
-                  className="items-start py-1 pe-2"
-                  aria-current={step.current ? "step" : undefined}
-                >
-                  <ComposerBanner.Icon
-                    className={cn(
-                      "h-4",
-                      step.status === "completed"
-                        ? "text-success"
-                        : step.status === "inProgress"
-                          ? "text-primary"
-                          : "text-muted-foreground/40",
-                    )}
+            {display.steps.length > 0 && (
+              <ComposerBanner.Children render={<ol />} aria-label="Playbook stage list">
+                {display.steps.map((step, index) => (
+                  <ComposerBanner.Row
+                    key={step.id}
+                    render={<li />}
+                    className="items-start py-1 pe-2"
+                    aria-current={step.current ? "step" : undefined}
                   >
-                    {step.status === "completed" ? (
-                      <CheckIcon />
-                    ) : step.status === "inProgress" ? (
-                      <CircleDotIcon />
-                    ) : (
-                      <CircleIcon />
-                    )}
-                  </ComposerBanner.Icon>
-                  <ComposerBanner.Content
-                    className={cn(
-                      "block wrap-anywhere",
-                      step.status === "completed"
-                        ? "text-muted-foreground/55"
-                        : step.status === "inProgress"
-                          ? "text-foreground/90"
-                          : "text-muted-foreground/70",
-                    )}
-                  >
-                    <span className="sr-only">{step.label}: </span>
-                    {index + 1}. {step.title}
-                  </ComposerBanner.Content>
-                </ComposerBanner.Row>
-              ))}
-            </ComposerBanner.Children>
+                    <ComposerBanner.Icon
+                      className={cn(
+                        "h-4",
+                        step.status === "completed"
+                          ? "text-success"
+                          : step.status === "inProgress"
+                            ? "text-primary"
+                            : "text-muted-foreground/40",
+                      )}
+                    >
+                      {step.status === "completed" ? (
+                        <CheckIcon />
+                      ) : step.status === "inProgress" ? (
+                        <CircleDotIcon />
+                      ) : (
+                        <CircleIcon />
+                      )}
+                    </ComposerBanner.Icon>
+                    <ComposerBanner.Content
+                      className={cn(
+                        "block wrap-anywhere",
+                        step.status === "completed"
+                          ? "text-muted-foreground/55"
+                          : step.status === "inProgress"
+                            ? "text-foreground/90"
+                            : "text-muted-foreground/70",
+                      )}
+                    >
+                      <span className="sr-only">{step.label}: </span>
+                      {index + 1}. {step.title}
+                    </ComposerBanner.Content>
+                  </ComposerBanner.Row>
+                ))}
+              </ComposerBanner.Children>
+            )}
           </ComposerBanner.Scroll>
         )}
       </ComposerBanner.Root>

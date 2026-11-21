@@ -132,15 +132,8 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
     const instance = run.crewInstanceId ? yield* readCrew(run.crewInstanceId) : null;
     if (run.status !== "active" || instance === null || instance.archivedAt !== null)
       return settled(yield* store.resolveLanding(runId, requestId, "skipped"));
-    const live = yield* store.liveStep(run, landing.stepId).pipe(Effect.result);
-    if (live._tag === "Failure")
-      return pending(
-        `the playbook can't be read (${live.failure.message}). Fix its YAML, then retry; j5_playbook_cancel still works`,
-      );
-    // The Captain's own response already reports the step_missing issue.
-    if (live.success.step === null)
-      return settled(yield* store.resolveLanding(runId, requestId, "skipped"));
-    const { step, ...playbook } = live.success;
+    const { step, ...playbook } = yield* store.snapshotStep(run, landing.stepId);
+    if (step === null) return settled(yield* store.resolveLanding(runId, requestId, "skipped"));
     if (landing.targetThreadId === null) {
       // Persisted before dispatch, so a retry reuses this target and its command id.
       const target = yield* resolveTarget(instance, step.id).pipe(Effect.option);
@@ -330,7 +323,7 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
 
   /**
    * After a seat is replaced, hands a current step the old member held to its new owner, by
-   * reselecting it as `j5_playbook_reselect` does. A hand-off pending toward the old thread is
+   * recording a new landing. A hand-off pending toward the old thread is
    * skipped first so no drain sends it there; `requestKey` makes a retry replay. Null: nothing held.
    */
   const handOver = Effect.fn("j5.playbooks.playbookCrewRelay.handOver")(function* (input: {
@@ -356,16 +349,15 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
         const response = yield* store.mutate(active.ownerThreadId, {
           runId: active.runId,
           client_request_id: input.requestKey,
-          operation: "reselect",
+          operation: "handoff",
           expectedStepId: active.currentStepId,
-          stepId: active.currentStepId,
         });
         return yield* respond(response, input.requestKey);
       }),
     );
   }, Effect.mapError(operationFailed));
 
-  /** The run's live prompt and progress, with who holds a Crew-linked run's current step. */
+  /** The run's saved prompt and progress, with who holds a Crew-linked run's current step. */
   const current = Effect.fn("j5.playbooks.playbookCrewRelay.current")(function* (
     owner: ThreadId,
     runId?: string,
@@ -385,26 +377,13 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
     const run = yield* store.activeRunForCrew(crewInstanceId);
     if (run === null) return null;
     const delivery = yield* currentDelivery(run.runId, run.currentStepId);
-    // The live YAML can't be read, or no longer has the recorded step: Fleet still shows the run
-    // at that step, marked as needing attention.
-    if (run.position === null)
-      return {
-        runId: run.runId,
-        position: 0,
-        total: run.total,
-        stepId: run.currentStepId,
-        stepTitle: run.currentStepId,
-        state: delivery?.state ?? "pending",
-        seat: delivery?.seat ?? null,
-        issue: run.issue?.message ?? "The playbook's current step can't be read.",
-      } satisfies NonNullable<FleetCrew["playbookRun"]>;
     if (delivery === null) return null;
     return {
       runId: run.runId,
-      position: run.position,
+      position: run.position!,
       total: run.total,
       stepId: run.currentStepId,
-      stepTitle: run.steps[run.position - 1]?.title ?? run.currentStepId,
+      stepTitle: run.steps[run.position! - 1]?.title ?? run.currentStepId,
       state: delivery.state,
       seat: delivery.seat,
     } satisfies NonNullable<FleetCrew["playbookRun"]>;

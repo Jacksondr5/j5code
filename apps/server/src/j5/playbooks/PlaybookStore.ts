@@ -5,7 +5,7 @@ import {
   PLAYBOOK_MAX_BYTES,
   PLAYBOOK_NAME_PATTERN,
   suggestPlaybookName,
-  type PlaybookDefinition,
+  PlaybookDefinition,
   type PlaybookReadResponse,
   type PlaybookRun,
   type PlaybookRunsRequest,
@@ -91,6 +91,11 @@ const stepPersonaWarnings = (
     ];
   });
 
+export type StoredPlaybookRun = PlaybookRun & { readonly definition: PlaybookDefinition | null };
+const DefinitionJson = Schema.fromJsonString(PlaybookDefinition);
+const decodeDefinition = Schema.decodeUnknownOption(DefinitionJson);
+const encodeDefinition = Schema.encodeSync(DefinitionJson);
+
 type RunRow = {
   run_id: string;
   owner_thread_id: string;
@@ -100,8 +105,13 @@ type RunRow = {
   created_at: string;
   updated_at: string;
   crew_instance_id: string | null;
+  definition_json: string | null;
+  cancel_reason: string | null;
 };
-const fromRow = (row: RunRow): PlaybookRun => ({
+const fromRow = (row: RunRow): StoredPlaybookRun => ({
+  definition:
+    row.definition_json === null ? null : Option.getOrNull(decodeDefinition(row.definition_json)),
+  cancelReason: row.cancel_reason,
   runId: row.run_id,
   ownerThreadId: ThreadId.make(row.owner_thread_id),
   definitionPath: row.definition_path,
@@ -149,7 +159,7 @@ export type PlaybookMutation = {
   readonly client_request_id: string;
 } & (
   | { readonly operation: "next" | "back" | "complete"; readonly expectedStepId: string }
-  | { readonly operation: "reselect"; readonly expectedStepId: string; readonly stepId: string }
+  | { readonly operation: "handoff"; readonly expectedStepId: string }
   | { readonly operation: "cancel" }
 );
 
@@ -170,7 +180,7 @@ export const makePlaybookStore = Effect.gen(function* () {
   const recordAnalytics = yield* j5AnalyticsRecorder;
 
   /** `unreadable` replaces the default read-failure message, which names the file's absolute path. */
-  const readDefinitionDocument = Effect.fn("PlaybookStore.readDefinitionDocument")(
+  const readDefinitionText = Effect.fn("PlaybookStore.readDefinitionText")(
     function* (definitionPath: string, _unreadable?: string) {
       const root = path.resolve(definitionPath, "../../..");
       const realRoot = yield* fs.realPath(root);
@@ -198,17 +208,7 @@ export const makePlaybookStore = Effect.gen(function* () {
           "invalid_path",
           "Playbook files must stay inside their source folder.",
         );
-      const text = yield* fs.readFileString(realFile);
-      return yield* decodePlaybookDocument(text).pipe(
-        Effect.mapError((error) =>
-          playbookError(
-            error.code,
-            _unreadable ??
-              `Cannot read the live playbook. Restore or fix its YAML and retry; cancellation remains available. ${error.message}`,
-            error.availableStepIds,
-          ),
-        ),
-      );
+      return yield* fs.readFileString(realFile);
     },
     (effect, _definitionPath: string, unreadable?: string) =>
       Effect.mapError(effect, (error) =>
@@ -217,10 +217,29 @@ export const makePlaybookStore = Effect.gen(function* () {
           : playbookError(
               "invalid_definition",
               unreadable ??
-                `Cannot read the live playbook. Restore or fix its YAML and retry; cancellation remains available. ${error instanceof Error ? error.message : String(error)}`,
+                `Cannot read this playbook. Fix its YAML and retry. ${error instanceof Error ? error.message : String(error)}`,
             ),
       ),
   );
+  const parseDefinitionText = (text: string, unreadable?: string) =>
+    decodePlaybookDocument(text).pipe(
+      Effect.mapError((error) =>
+        playbookError(
+          error.code,
+          unreadable ?? `Cannot read this playbook. Fix its YAML and retry. ${error.message}`,
+          error.availableStepIds,
+        ),
+      ),
+    );
+  const readDefinitionDocument = Effect.fn("PlaybookStore.readDefinitionDocument")(function* (
+    definitionPath: string,
+    unreadable?: string,
+  ) {
+    return yield* parseDefinitionText(
+      yield* readDefinitionText(definitionPath, unreadable),
+      unreadable,
+    );
+  });
   const readDefinition = Effect.fn("PlaybookStore.readDefinition")(function* (
     definitionPath: string,
   ) {
@@ -266,52 +285,26 @@ export const makePlaybookStore = Effect.gen(function* () {
   });
 
   const present = (
-    run: PlaybookRun,
-    definition: PlaybookDefinition,
+    { definition: _snapshot, ...run }: StoredPlaybookRun,
+    definition: PlaybookDefinition | null,
     replayed = false,
   ): PlaybookStepResponse => {
-    const index = definition.steps.findIndex((step) => step.id === run.currentStepId);
+    const index = definition?.steps.findIndex((step) => step.id === run.currentStepId) ?? -1;
     return {
       ...run,
-      title: definition.title,
-      description: definition.description,
-      steps: definition.steps.map(({ id, title }) => ({ id, title })),
+      issue: null,
+      title: definition?.title ?? path.basename(run.definitionPath, ".yaml"),
+      description: definition?.description ?? "",
+      steps: definition?.steps.map(({ id, title }) => ({ id, title })) ?? [],
       position: index < 0 ? null : index + 1,
-      total: definition.steps.length,
-      currentStep: definition.steps[index] ?? null,
+      total: definition?.steps.length ?? 0,
+      currentStep: definition?.steps[index] ?? null,
       replayed,
-      issue:
-        run.status === "active" && index < 0
-          ? playbookError(
-              "step_missing",
-              `Step '${run.currentStepId}' no longer exists. Call j5_playbook_reselect with expectedStepId '${run.currentStepId}' and one of the available step IDs, or cancel.`,
-              definition.steps.map((step) => step.id),
-            )
-          : null,
     };
   };
-  const view = Effect.fn("PlaybookStore.view")(function* (
-    run: PlaybookRun,
-    replayed = false,
-    definition: ReturnType<typeof readDefinition> = readDefinition(run.definitionPath),
-  ) {
-    return yield* definition.pipe(
-      Effect.map((definition) => present(run, definition, replayed)),
-      Effect.catch((issue) =>
-        Effect.succeed({
-          ...run,
-          title: path.basename(run.definitionPath, ".yaml"),
-          description: "",
-          steps: [],
-          position: null,
-          total: 0,
-          currentStep: null,
-          issue: run.status === "active" ? issue : null,
-          replayed,
-        } satisfies PlaybookStepResponse),
-      ),
-    );
-  });
+  const view = Effect.fn("PlaybookStore.view")((run: StoredPlaybookRun, replayed = false) =>
+    Effect.succeed(present(run, run.definition, replayed)),
+  );
   const replay = Effect.fn("PlaybookStore.replay")(function* (
     owner: ThreadId,
     key: string,
@@ -506,16 +499,7 @@ export const makePlaybookStore = Effect.gen(function* () {
       const info = yield* fs.stat(filename);
       if (info.type !== "File")
         return yield* playbookError("invalid_path", "Only playbook YAML files can be deleted.");
-      yield* cancelOrphans();
-      const active = yield* sql<{ run_id: string }>`SELECT run_id FROM j5_playbook_run
-        WHERE definition_path = ${filename} AND status = 'active' LIMIT 1`;
-      if (active[0])
-        return yield* playbookError(
-          "in_use",
-          `Run '${active[0].run_id}' is active. Complete or cancel it before deleting this playbook.`,
-        );
       yield* fs.remove(filename);
-      // A finished run is still shown by its playbook's title, which went with the file.
       yield* bumpRevision;
       return { deleted: true };
     }).pipe(permit.withPermits(1));
@@ -563,7 +547,6 @@ export const makePlaybookStore = Effect.gen(function* () {
       if (definition.title === nextTitle) return { renamed: false };
       document.set("title", nextTitle);
       yield* fs.writeFileString(filename, document.toString());
-      // Every run of this playbook is shown by its title.
       yield* bumpRevision;
       return { renamed: true };
     }).pipe(permit.withPermits(1));
@@ -594,8 +577,8 @@ export const makePlaybookStore = Effect.gen(function* () {
       yield* cancelOrphans();
       const previous = yield* replay(owner, key, request);
       if (previous) return yield* view(previous, true);
-      // Capture the live file before taking the shared SQLite write transaction.
-      const definition = yield* readDefinition(definitionPath);
+      // Capture the file before taking SQLite's writer lock. Decode these exact bytes in the insert transaction.
+      const source = yield* Effect.result(readDefinitionText(definitionPath));
       const result = yield* sql.withTransaction(
         Effect.gen(function* () {
           const previous = yield* replay(owner, key, request);
@@ -608,8 +591,12 @@ export const makePlaybookStore = Effect.gen(function* () {
               "already_active",
               `Run '${active[0].run_id}' is active. Retrieve, complete, or cancel it before starting another.`,
             );
+          if (source._tag === "Failure") return yield* source.failure;
+          const { definition } = yield* parseDefinitionText(source.success);
           const timestamp = yield* now;
-          const run: PlaybookRun = {
+          const run: StoredPlaybookRun = {
+            definition,
+            cancelReason: null,
             runId: yield* crypto.uuidV4().pipe(Effect.orDie),
             ownerThreadId: owner,
             definitionPath,
@@ -619,14 +606,15 @@ export const makePlaybookStore = Effect.gen(function* () {
             updatedAt: timestamp,
             ...(crewInstanceId === null ? {} : { crewInstanceId }),
           };
-          yield* sql`INSERT INTO j5_playbook_run (run_id, owner_thread_id, definition_path, current_step_id, status, created_at, updated_at, crew_instance_id)
-          VALUES (${run.runId}, ${owner}, ${definitionPath}, ${run.currentStepId}, ${run.status}, ${timestamp}, ${timestamp}, ${crewInstanceId})`;
+          yield* sql`INSERT INTO j5_playbook_run (run_id, owner_thread_id, definition_path, current_step_id, status, created_at, updated_at, crew_instance_id, definition_json)
+          VALUES (${run.runId}, ${owner}, ${definitionPath}, ${run.currentStepId}, ${run.status}, ${timestamp}, ${timestamp}, ${crewInstanceId}, ${encodeDefinition(definition)})`;
           if (crewInstanceId !== null) yield* land(run.runId, key, run.currentStepId, timestamp);
           yield* remember(owner, key, request, run.runId);
           return { run, replayed: false };
         }),
       );
       if (result.replayed) return yield* view(result.run, true);
+      const definition = result.run.definition!;
       yield* recordAnalytics("j5.playbook.run.started", {
         stepCount: definition.steps.length,
         stepsWithPersona: definition.steps.filter((step) => step.persona !== undefined).length,
@@ -638,15 +626,13 @@ export const makePlaybookStore = Effect.gen(function* () {
 
   /**
    * `j5.playbook.run.finished`, recorded once a run's end has committed. How far it got is read
-   * from the live file, and is left out when the file can no longer be read.
+   * from the saved copy.
    */
   const recordFinished = Effect.fn("PlaybookStore.recordFinished")(function* (
-    run: PlaybookRun,
+    run: StoredPlaybookRun,
     cause: "agent" | "crew_archive",
-    known: PlaybookDefinition | null,
   ) {
-    const definition =
-      known ?? Option.getOrNull(yield* Effect.option(readDefinition(run.definitionPath)));
+    const definition = run.definition;
     const position =
       definition === null
         ? -1
@@ -669,26 +655,27 @@ export const makePlaybookStore = Effect.gen(function* () {
       input.operation,
       input.runId,
       "expectedStepId" in input ? input.expectedStepId : null,
-      "stepId" in input ? input.stepId : null,
+      null,
     ]);
     return yield* Effect.gen(function* () {
       yield* cancelOrphans();
       const previous = yield* replay(owner, input.client_request_id, request);
       if (previous) return yield* view(previous, true);
-      const before = yield* readRun(owner, input.runId);
-      const definition =
-        input.operation === "cancel" || before.status !== "active"
-          ? null
-          : yield* readDefinition(before.definitionPath);
       const result = yield* sql.withTransaction(
         Effect.gen(function* () {
           const previous = yield* replay(owner, input.client_request_id, request);
           if (previous) return { run: previous, replayed: true };
           const run = yield* readRun(owner, input.runId);
+          const definition = run.definition;
           if (run.status !== "active")
             return yield* playbookError(
               "run_terminal",
               `This run is ${run.status}. Start a new run to continue.`,
+            );
+          if (definition === null && input.operation !== "cancel")
+            return yield* playbookError(
+              "invalid_snapshot",
+              "This run has no readable saved procedure. Cancel it and start again.",
             );
           yield* requireOwner(owner);
           if ("expectedStepId" in input && input.expectedStepId !== run.currentStepId) {
@@ -703,25 +690,20 @@ export const makePlaybookStore = Effect.gen(function* () {
           else if (definition) {
             const ids = definition.steps.map((step) => step.id);
             const index = ids.indexOf(run.currentStepId);
-            if (input.operation === "reselect") {
-              if (!ids.includes(input.stepId))
-                return yield* playbookError("step_missing", "Choose an available step ID.", ids);
-              currentStepId = input.stepId;
-            } else {
-              if (index < 0) return yield* present(run, definition).issue!;
-              if (input.operation === "complete") status = "completed";
-              else {
-                const target = ids[index + (input.operation === "next" ? 1 : -1)];
-                if (!target)
-                  return yield* playbookError(
-                    "step_boundary",
-                    input.operation === "next"
-                      ? "This is the last step. Call j5_playbook_complete when the work is finished."
-                      : "This is the first step. Retrieve it or choose an available step explicitly.",
-                    ids,
-                  );
-                currentStepId = target;
-              }
+            if (index < 0)
+              return yield* playbookError("invalid_snapshot", "The run has no current step.");
+            if (input.operation === "complete") status = "completed";
+            else if (input.operation !== "handoff") {
+              const target = ids[index + (input.operation === "next" ? 1 : -1)];
+              if (!target)
+                return yield* playbookError(
+                  "step_boundary",
+                  input.operation === "next"
+                    ? "This is the last step. Call j5_playbook_complete when the work is finished."
+                    : "This is the first step.",
+                  ids,
+                );
+              currentStepId = target;
             }
           }
           const updatedAt = yield* now;
@@ -738,41 +720,26 @@ export const makePlaybookStore = Effect.gen(function* () {
         }),
       );
       if (!result.replayed && result.run.status !== "active")
-        yield* recordFinished(result.run, "agent", definition);
-      return definition && !result.replayed
-        ? present(result.run, definition)
-        : yield* view(result.run, result.replayed);
+        yield* recordFinished(result.run, "agent");
+      return yield* view(result.run, result.replayed);
     }).pipe(Effect.tap(notifyChange), permit.withPermits(1));
   }, Effect.mapError(storageError));
 
   const current = Effect.fn("PlaybookStore.current")(function* (owner: ThreadId, runId?: string) {
     yield* cancelOrphans();
-    const result = yield* view(yield* readRun(owner, runId));
-    if (result.issue && result.status === "active")
-      return yield* playbookError(
-        result.issue.code,
-        `Run '${result.runId}' is at '${result.currentStepId}'. ${result.issue.message}`,
-        result.issue.availableStepIds,
-      );
-    return result;
+    return yield* view(yield* readRun(owner, runId));
   }, Effect.mapError(storageError));
   const progressRows = Effect.fn("j5.playbooks.playbookStore.progressRows")(function* (
     rows: ReadonlyArray<RunRow>,
   ) {
-    // Keep the cache inside the request, including failed reads; the next request sees live YAML.
-    const definitions = new Map<string, ReturnType<typeof readDefinition>>();
-    return yield* Effect.forEach(rows, (row) =>
-      Effect.gen(function* () {
-        let definition = definitions.get(row.definition_path);
-        if (!definition) {
-          definition = yield* Effect.cached(readDefinition(row.definition_path));
-          definitions.set(row.definition_path, definition);
-        }
+    return yield* Effect.succeed(
+      rows.map((row) => {
+        const run = fromRow(row);
         const {
           currentStep: _prompt,
           replayed: _replayed,
           ...progress
-        } = yield* view(fromRow(row), false, definition);
+        } = present(run, run.definition);
         return progress;
       }),
     );
@@ -801,12 +768,14 @@ export const makePlaybookStore = Effect.gen(function* () {
     const rows = yield* sql<RunRow>`SELECT * FROM j5_playbook_run WHERE run_id = ${runId}`;
     return rows[0] ? fromRow(rows[0]) : null;
   }, Effect.mapError(storageError));
-  /** The live step a landing hands off, with its playbook; fails when the YAML can't be read. */
-  const liveStep = Effect.fn("PlaybookStore.liveStep")(function* (
-    run: PlaybookRun,
+  /** The saved step a landing hands off, with its playbook. */
+  const snapshotStep = Effect.fn("PlaybookStore.snapshotStep")(function* (
+    run: StoredPlaybookRun,
     stepId: string,
   ) {
-    const definition = yield* readDefinition(run.definitionPath);
+    const definition = run.definition;
+    if (definition === null)
+      return yield* playbookError("invalid_snapshot", "This run has no saved playbook copy.");
     const index = definition.steps.findIndex((step) => step.id === stepId);
     return {
       name: path.basename(run.definitionPath, ".yaml"),
@@ -887,7 +856,7 @@ export const makePlaybookStore = Effect.gen(function* () {
       .pipe(
         Effect.tap((runs) => (runs.length > 0 ? bumpRevision : Effect.void)),
         Effect.tap((runs) =>
-          Effect.forEach(runs, (run) => recordFinished(run, "crew_archive", null), {
+          Effect.forEach(runs, (run) => recordFinished(run, "crew_archive"), {
             discard: true,
           }),
         ),
@@ -895,7 +864,7 @@ export const makePlaybookStore = Effect.gen(function* () {
         permit.withPermits(1),
       );
   }, Effect.mapError(storageError));
-  /** A Crew's active run with its live progress, or null. */
+  /** A Crew's active run with its saved progress, or null. */
   const activeRunForCrew = Effect.fn("PlaybookStore.activeRunForCrew")(function* (
     crewInstanceId: string,
   ) {
@@ -903,23 +872,9 @@ export const makePlaybookStore = Effect.gen(function* () {
       WHERE crew_instance_id = ${crewInstanceId} AND status = 'active' LIMIT 1`;
     return rows[0] ? yield* view(fromRow(rows[0])) : null;
   }, Effect.mapError(storageError));
-  /** The directories that hold the definition of an active run, each once. */
-  const activeDefinitionDirectories = Effect.fn("PlaybookStore.activeDefinitionDirectories")(
-    function* () {
-      const rows = yield* sql<{ definition_path: string }>`SELECT DISTINCT definition_path
-        FROM j5_playbook_run WHERE status = 'active'`;
-      return [...new Set(rows.map((row) => path.dirname(row.definition_path)))];
-    },
-    Effect.mapError(storageError),
-  );
   return {
     // Include the current revision so subscribing after a mutation still refreshes the view.
     changes: SubscriptionRef.changes(revision),
-    /**
-     * Says a definition file changed outside this store: a run is shown from its live YAML, so
-     * its views read again. `PlaybookDefinitionWatch` calls it for the directories it watches.
-     */
-    definitionsChanged: bumpRevision,
     sources: () =>
       library.sources(undefined).pipe(
         Effect.map((folders) => ({
@@ -931,7 +886,6 @@ export const makePlaybookStore = Effect.gen(function* () {
     setFolders: (input: PlaybookFoldersInput) =>
       library.setFolders(input).pipe(permit.withPermits(1), Effect.tap(bumpRevision)),
     startDefinitionPathFor,
-    activeDefinitionDirectories,
     discover,
     definitionPathFor,
     read,
@@ -945,7 +899,7 @@ export const makePlaybookStore = Effect.gen(function* () {
     listForThread,
     listAll,
     runById,
-    liveStep,
+    snapshotStep,
     landing,
     latestLanding,
     pendingLandings,
