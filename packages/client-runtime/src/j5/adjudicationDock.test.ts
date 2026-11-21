@@ -13,29 +13,33 @@ const ask = (
   overrides: Partial<{
     senderThreadId: string | null;
     status: "open" | "answered";
+    urgency: "blocking" | "soon" | "fyi";
     openedAt: string;
   }> = {},
 ) => ({
   exchangeId,
   senderThreadId: "captain",
   status: "open" as const,
+  urgency: "soon" as const,
   openedAt: "2026-10-27T10:00:00.000Z",
   ...overrides,
 });
 
-it("pins only this thread's open asks, oldest first", () => {
+it("pins only this thread's open asks, most urgent first, then oldest", () => {
   const asks = adjudicationAsks({
     items: [
       ask("later", { openedAt: "2026-10-27T10:05:00.000Z" }),
       ask("other-thread", { senderThreadId: "builder" }),
       ask("answered", { status: "answered" }),
+      ask("fyi", { urgency: "fyi", openedAt: "2026-10-27T09:00:00.000Z" }),
+      ask("blocking", { urgency: "blocking", openedAt: "2026-10-27T11:00:00.000Z" }),
       ask("first"),
     ],
     refused: [],
     threadId: "captain",
     hasWords: () => false,
   });
-  expect(asks.map((item) => item.exchangeId)).toEqual(["first", "later"]);
+  expect(asks.map((item) => item.exchangeId)).toEqual(["blocking", "first", "later", "fyi"]);
   expect(
     adjudicationAsks({ items: [ask("first")], refused: [], threadId: null, hasWords: () => true }),
   ).toEqual([]);

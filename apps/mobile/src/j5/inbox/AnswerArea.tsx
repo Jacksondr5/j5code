@@ -27,6 +27,9 @@ export function AnswerArea(props: {
   readonly canAnswer: boolean;
   readonly error?: string | null;
   readonly onAnswer: () => void;
+  /** Below the actions; `held` while anything here sends, so it can ignore taps too. */
+  readonly footer?: (held: boolean) => ReactNode;
+  readonly onFocusChange?: (focused: boolean) => void;
 }) {
   const { item } = props;
   const owner = useOwnerAskAction(item.environmentId, item);
@@ -46,6 +49,8 @@ export function AnswerArea(props: {
           placeholder="Type the answer exactly as it should be delivered"
           value={props.text}
           onChangeText={props.onChangeText}
+          onFocus={() => props.onFocusChange?.(true)}
+          onBlur={() => props.onFocusChange?.(false)}
           style={props.inputStyle}
         />
       </AnswerPasteTarget>
@@ -87,6 +92,7 @@ export function AnswerArea(props: {
           </View>
         )}
       </View>
+      {props.footer?.(held)}
     </>
   );
 }

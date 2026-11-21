@@ -3,8 +3,8 @@
 Playbooks give an agent an ordered sequence of prompts. The agent does the work
 in its existing thread and decides when to advance. The progress bar above the
 chat box shows the current stage and whether the run is active, completed, or
-cancelled. A checked stage means the agent moved past it, not that its work was
-verified.
+cancelled. On the phone it is a card that shows only while a run is active. A
+checked stage means the agent moved past it, not that its work was verified.
 
 Open **Settings → Agent Setup** to manage playbooks. Playbooks in the environment
 library are available across all projects and worktrees on its environment. Choose

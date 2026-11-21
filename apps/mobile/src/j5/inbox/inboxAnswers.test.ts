@@ -111,6 +111,17 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
+it("keeps a draft per ask, so stepping between a Captain's asks never mixes their words", async () => {
+  const second = { ...ask, exchangeId: "exchange:2", intent: "Name it?" };
+  await render([ask, second], []);
+  const [first, next] = answers.shownItems;
+  if (first === undefined || next === undefined) throw new Error("the asks are not shown");
+  await act(async () => answers.setAnswerText(first, "Yes, ship it"));
+  await act(async () => answers.setAnswerText(next, "Call it Beacon"));
+  expect(answers.answerText(first)).toBe("Yes, ship it");
+  expect(answers.answerText(next)).toBe("Call it Beacon");
+});
+
 it("keeps the sent words on the card until the re-read takes it away, without keeping it as answered elsewhere", async () => {
   await render([ask], []);
   const [item] = answers.shownItems;
