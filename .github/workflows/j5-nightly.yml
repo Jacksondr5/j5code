@@ -2,9 +2,11 @@ name: J5 Nightly
 
 # Publishes a nightly of `j5/main`: a pre-release tagged
 # `v<x.y.z>-nightly.<yyyymmdd>.<run>`, where `x.y.z` is the next patch after the
-# version the manifests commit. Servers on the nightly channel and desktop apps
-# on the nightly update track follow it. Nothing is committed: the version is
-# stamped into the manifests during each build.
+# newer of the version the manifests commit and the latest stable release, so a
+# nightly cut before a stable's version bump merges still sorts above it.
+# Servers on the nightly channel and desktop apps on the nightly update track
+# follow it. Nothing is committed: the version is stamped into the manifests
+# during each build. J5 Stable promotes a nightly to a stable release.
 #
 # Started by hand for now. To run it on a schedule, add a `schedule` trigger and
 # set `due` in the `resolve` job from `shouldReleaseNightly` in upstream's
@@ -16,9 +18,13 @@ on:
 
 permissions: {}
 
+# Shared with J5 Stable, so no stable release lands between this run reading
+# the latest one and publishing. `queue: max` keeps every waiting run; by
+# default a group holds one pending run and a newer one cancels it.
 concurrency:
-  group: j5-nightly
+  group: j5-publish
   cancel-in-progress: false
+  queue: max
 
 jobs:
   resolve:
@@ -54,14 +60,26 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # Upstream's script; its `name` output says "T3 Code" and is not used.
+      # Upstream's script; its `name` output says "T3 Code" and is not used. It
+      # reads the base from apps/desktop/package.json under `--root`.
       - name: Resolve the nightly version
         id: version
         env:
+          GH_TOKEN: ${{ github.token }}
           NIGHTLY_DATE: ${{ github.run_started_at }}
         run: |
           set -euo pipefail
+          committed="$(jq -r .version apps/desktop/package.json)"
+          # A 404 means no stable release yet; any other error stops the run.
+          if ! latest="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name' 2>"$RUNNER_TEMP/latest.err")"; then
+            grep -q 'HTTP 404' "$RUNNER_TEMP/latest.err" || { cat "$RUNNER_TEMP/latest.err" >&2; exit 1; }
+            latest=""
+          fi
+          base="$(printf '%s\n' "$committed" "${latest#v}" | sort -V | tail -n 1)"
+          mkdir -p "$RUNNER_TEMP/base/apps/desktop"
+          jq -n --arg version "$base" '{$version}' > "$RUNNER_TEMP/base/apps/desktop/package.json"
           pnpm exec node scripts/resolve-nightly-release.ts \
+            --root "$RUNNER_TEMP/base" \
             --date "$(date -u -d "$NIGHTLY_DATE" +%Y%m%d)" \
             --run-number "$GITHUB_RUN_NUMBER" \
             --sha "$GITHUB_SHA" \
