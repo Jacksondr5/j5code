@@ -191,7 +191,7 @@ function OpenThreadButton({
  * An agent's message, rendered as the sender's thread renders it. Relative file links resolve
  * against the sender's worktree, or the project's root once the sender has left the roster.
  */
-function InboxMessage({ item }: { readonly item: HumanInboxItem }) {
+export function InboxMessage({ item }: { readonly item: HumanInboxItem }) {
   const threadRef =
     item.senderThreadId === null
       ? null
@@ -205,7 +205,8 @@ function InboxMessage({ item }: { readonly item: HumanInboxItem }) {
       })
     : undefined;
   const navigate = useNavigate();
-  // The Inbox shows no thread panel, so artifact links open the Artifacts page.
+  // The Inbox shows no thread panel, so artifact links open the Artifacts page and web links
+  // open as they do outside a thread.
   const openArtifact = (path: string) =>
     void navigate({
       to: "/artifacts",
@@ -224,6 +225,7 @@ function InboxMessage({ item }: { readonly item: HumanInboxItem }) {
       text={text}
       threadRef={threadRef ?? undefined}
       onOpenArtifact={openArtifact}
+      noThreadPanel
     />
   );
   return (
