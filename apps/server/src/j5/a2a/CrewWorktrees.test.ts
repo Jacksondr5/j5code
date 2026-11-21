@@ -439,6 +439,68 @@ it.effect(
     ),
 );
 
+it.effect(
+  "removes a squash-merged worktree, and a tester detached at its commit, with no pull request found",
+  () =>
+    run(
+      Effect.gen(function* () {
+        const f = yield* fixture;
+        const builder = yield* f.seat("builder");
+        const tester = yield* f.seat("tester");
+        const beyond = yield* f.seat("beyond");
+        yield* f.fs.writeFileString(f.path.join(builder.worktree, "tracked.txt"), "squashed\n");
+        yield* f.run(builder.worktree, ["commit", "-am", "work"]);
+        const head = (yield* f.run(builder.worktree, ["rev-parse", "HEAD"])).stdout.trim();
+        // A tester checks out the pull request's head; its own branch stays on the base.
+        yield* f.run(tester.worktree, ["checkout", "--detach", head]);
+        yield* f.run(beyond.worktree, ["reset", "--hard", head]);
+        yield* f.fs.writeFileString(f.path.join(beyond.worktree, "tracked.txt"), "more\n");
+        yield* f.run(beyond.worktree, ["commit", "-am", "after the merge"]);
+        // Detached commits no branch holds, whose merge changes nothing: one the merge driver
+        // discards, and an edit and its revert, held only by a symbolic tag into the worktree's own refs.
+        const ours = yield* f.seat("ours");
+        const reverted = yield* f.seat("reverted");
+        yield* f.run(f.repo, ["config", "merge.ours.driver", "true"]);
+        yield* f.fs.writeFileString(
+          f.path.join(f.repo, ".git", "info", "attributes"),
+          "other.txt merge=ours\n",
+        );
+        yield* f.run(ours.worktree, ["checkout", "--detach"]);
+        yield* f.fs.writeFileString(f.path.join(ours.worktree, "other.txt"), "unique\n");
+        yield* f.run(ours.worktree, ["add", "other.txt"]);
+        yield* f.run(ours.worktree, ["commit", "-m", "unique"]);
+        yield* f.run(reverted.worktree, ["checkout", "--detach"]);
+        yield* f.fs.writeFileString(f.path.join(reverted.worktree, "tracked.txt"), "brief\n");
+        yield* f.run(reverted.worktree, ["commit", "-am", "edit"]);
+        yield* f.run(reverted.worktree, ["revert", "--no-edit", "HEAD"]);
+        yield* f.run(reverted.worktree, ["update-ref", "refs/worktree/pin", "HEAD"]);
+        yield* f.run(reverted.worktree, ["symbolic-ref", "refs/tags/pin", "refs/worktree/pin"]);
+        // The default branch moved on, then took the work as one squash commit.
+        yield* f.fs.writeFileString(f.path.join(f.repo, "other.txt"), "other\n");
+        yield* f.run(f.repo, ["add", "other.txt"]);
+        yield* f.run(f.repo, ["commit", "-m", "other work"]);
+        yield* f.run(f.repo, ["merge", "--squash", builder.branch]);
+        yield* f.run(f.repo, ["commit", "-m", "work (#1)"]);
+        yield* f.run(f.repo, ["push", "origin", "main"]);
+        // The host names no pull request, as in a fork checkout whose lookup reads upstream's repository.
+        const result = yield* cleanup(f, [builder, tester, beyond, ours, reverted]);
+        assert.deepStrictEqual(
+          result.map((entry) => [entry.outcome, entry.reason]),
+          [
+            ["removed", null],
+            ["removed", null],
+            ["kept", "unmerged_commits"],
+            ["kept", "unverified"],
+            ["kept", "unverified"],
+          ],
+        );
+        assert.isTrue(yield* f.fs.exists(beyond.worktree));
+        assert.isTrue(yield* f.fs.exists(ours.worktree));
+        assert.isTrue(yield* f.fs.exists(reverted.worktree));
+      }),
+    ),
+);
+
 it.effect("keeps a worktree whose pull request merged a different commit", () =>
   run(
     Effect.gen(function* () {
