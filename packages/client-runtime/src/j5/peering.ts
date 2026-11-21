@@ -1,5 +1,6 @@
 import type { EnvironmentId, ServerSelfUpdateCapability } from "@t3tools/contracts";
 import { PeerOrigin, type PeerProbeResponse } from "@t3tools/contracts/j5";
+import { isTailnetHost } from "@t3tools/shared/hostClassification";
 import * as Schema from "effect/Schema";
 
 /**
@@ -196,7 +197,16 @@ export type PeeringReach =
    */
   | { readonly kind: "untested"; readonly error: string | null };
 
-/** The origins to try for a server: the one this client uses first, then what the server offers. */
+/** Whether upstream's link takes an address, as `peerOrigin` in the server's `PeerLinks.ts` decides. */
+const carriesTools = (origin: string) => {
+  const url = new URL(origin);
+  return url.protocol === "https:" || isTailnetHost(url.hostname);
+};
+
+/**
+ * The origins to try for a server: the one this client uses first, then what the server offers.
+ * Those a link's tools can use come before the rest, since tools take the address messages take.
+ */
 export const peeringCandidates = (input: {
   readonly addresses: ReadonlyArray<string>;
   readonly clientUrl: string | null;
@@ -205,7 +215,12 @@ export const peeringCandidates = (input: {
     ...(input.clientUrl === null ? [] : [defaultPeerOrigin(input.clientUrl)]),
     ...input.addresses,
   ].filter((origin) => isPeerOrigin(origin) && peerOriginWarning(origin) === null);
-  return [...new Set(candidates)];
+  return [
+    ...new Set([
+      ...candidates.filter(carriesTools),
+      ...candidates.filter((origin) => !carriesTools(origin)),
+    ]),
+  ];
 };
 
 /** Who answered each probe decides the reach: a different server answering is a miss, and says who did. */

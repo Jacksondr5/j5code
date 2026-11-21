@@ -94,7 +94,7 @@ export function PairRouteChange({
               className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground"
             >
               <Radio value={option.connections} />
-              <span>
+              <span className="text-pretty">
                 <span className="text-foreground">{wording.title}</span> · {wording.when}
               </span>
               {option.recommended ? (

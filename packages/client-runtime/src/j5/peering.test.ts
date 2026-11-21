@@ -170,6 +170,26 @@ describe("peeringCandidates and peeringReachFrom", () => {
     expect(peeringCandidates({ clientUrl: "http://localhost:3773", addresses: [] })).toEqual([]);
   });
 
+  it("tries an address a link's tools can use before one only messages can", () => {
+    expect(
+      peeringCandidates({
+        clientUrl: "http://10.0.0.5:3773",
+        addresses: [
+          "http://100.101.102.103:3773",
+          "http://[fd7a:115c:a1e0::1]:3773",
+          "http://work.tail1234.ts.net:3773",
+          vmOrigin,
+        ],
+      }),
+    ).toEqual([
+      "http://[fd7a:115c:a1e0::1]:3773",
+      "http://work.tail1234.ts.net:3773",
+      vmOrigin,
+      "http://10.0.0.5:3773",
+      "http://100.101.102.103:3773",
+    ]);
+  });
+
   it("counts a probe only when the expected server answers, and keeps each error verbatim", () => {
     const candidates = ["http://127.0.0.2:3773", laptopOrigin];
     expect(peeringReachFrom({ expected: laptop, candidates: [], probes: [] })).toEqual({
