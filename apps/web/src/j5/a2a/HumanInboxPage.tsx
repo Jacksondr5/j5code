@@ -53,6 +53,8 @@ import {
   useAnswerAttachments,
 } from "./AnswerAttachments";
 import { answerHumanExchange } from "./humanInboxClient";
+import { inboxAnswerDrafts, pruneInboxAnswerDrafts, setInboxAnswerText } from "./inboxAnswerDrafts";
+import { useComposerDraftStore } from "../../composerDraftStore";
 import { J5RecordPanel } from "./J5RecordPanel";
 import { OwnerAskAction } from "./OwnerAskAction";
 import { useScopedParticipantLabels } from "./ParticipantIdentitiesClient";
@@ -142,18 +144,6 @@ const urgencyPresentation = {
   soon: { label: "Soon", variant: "warning" as const },
   fyi: { label: "FYI", variant: "secondary" as const },
 };
-
-export function captureHumanInboxAnswer(
-  event: { readonly currentTarget: { readonly value: string } },
-  exchangeId: string,
-  setAnswers: (update: (current: HumanInboxAnswers) => HumanInboxAnswers) => void,
-) {
-  const value = event.currentTarget.value;
-  setAnswers((current) => ({
-    ...current,
-    [exchangeId]: value,
-  }));
-}
 
 function OpenThreadButton({
   item,
@@ -247,7 +237,6 @@ function OpenInboxItem({
   answerText,
   attachments,
   pendingExchangeId,
-  setAnswers,
   onOpenThread,
   senderLabels,
   projectNameOf,
@@ -272,7 +261,6 @@ function OpenInboxItem({
   readonly attachments: AnswerAttachmentsState;
   readonly pendingExchangeId: string | null;
   readonly showEnvironment: boolean;
-  readonly setAnswers: (update: (current: HumanInboxAnswers) => HumanInboxAnswers) => void;
   readonly onOpenThread: (item: HumanInboxItem) => void;
 }) {
   const urgency = urgencyPresentation[item.urgency];
@@ -349,7 +337,7 @@ function OpenInboxItem({
                 aria-label={`Answer ${item.intent}`}
                 className="min-h-24 resize-y"
                 id={answerId}
-                onChange={(event) => captureHumanInboxAnswer(event, itemKey, setAnswers)}
+                onChange={(event) => setInboxAnswerText(itemKey, event.currentTarget.value)}
                 placeholder="Type the answer exactly as it should be delivered"
                 value={answerText}
                 {...(addFiles === null ? {} : answerAttachmentInputHandlers(addFiles))}
@@ -526,19 +514,14 @@ export function HumanInboxPage() {
   const projectOf = useLogicalProjects();
   const projectNameOf = (item: HumanInboxItem) =>
     projectOf(item.environmentId, item.projectId)?.displayName ?? item.projectTitle;
-  const [answers, setAnswers] = useState<HumanInboxAnswers>({});
+  const draftsByThreadKey = useComposerDraftStore((state) => state.draftsByThreadKey);
+  const answers: HumanInboxAnswers = Object.fromEntries(
+    [...inboxAnswerDrafts(draftsByThreadKey)].map(([key, draft]) => [key, draft.prompt]),
+  );
   const answerAttachments = useAnswerAttachments();
-  // Removing a connection or changing its person must also discard that inbox's unsent replies.
   const personScopes = JSON.stringify(
     openSources.sources.map((source) => [source.environmentId, source.data?.personId ?? null]),
   );
-  const [answersPersonScopes, setAnswersPersonScopes] = useState(personScopes);
-  if (answersPersonScopes !== personScopes) {
-    setAnswersPersonScopes(personScopes);
-    const keep = keepForPersonScopes(personScopes);
-    const entries = Object.entries(answers).filter(([key]) => keep(key));
-    if (entries.length !== Object.keys(answers).length) setAnswers(Object.fromEntries(entries));
-  }
   const [pendingExchangeId, setPendingExchangeId] = useState<string | null>(null);
   // An item that closed while the person was answering it stays in place with their words. It is
   // kept in the render it closes in, so its open row is never unmounted and drawn again closed;
@@ -546,12 +529,12 @@ export function HumanInboxPage() {
   const [retention, setRetention] = useState(() => ({
     openSources,
     items,
-    answers,
+    draftsByThreadKey,
     kept: new Map() as ReadonlyMap<string, HumanInboxItem>,
     closedWith: new Map() as ReadonlyMap<string, typeof answeredSources>,
   }));
   let { kept, closedWith } = retention;
-  if (retention.openSources !== openSources || retention.answers !== answers) {
+  if (retention.openSources !== openSources || retention.draftsByThreadKey !== draftsByThreadKey) {
     kept = nextKeptItems({
       previous: retention.items,
       current: items,
@@ -562,8 +545,12 @@ export function HumanInboxPage() {
     closedWith = new Map(
       [...kept.keys()].map((key) => [key, retention.closedWith.get(key) ?? answeredSources]),
     );
-    setRetention({ openSources, items, answers, kept, closedWith });
+    setRetention({ openSources, items, draftsByThreadKey, kept, closedWith });
   }
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- saved answers outlive the page, so a read showing their ask closed, here or while away, drops them.
+  useEffect(() => {
+    pruneInboxAnswerDrafts(openSources, new Set(kept.keys()));
+  }, [openSources, kept]);
   const shownItems =
     kept.size === 0 ? items : [...items, ...kept.values()].toSorted(compareInboxItems);
   const answeredByKey = new Map(answeredItems.map((item) => [scopedInboxItemKey(item), item]));
@@ -662,14 +649,7 @@ export function HumanInboxPage() {
       send: answerHumanExchange,
       refresh,
       notifyChanged: notifyHumanInboxChanged,
-      onAccepted: () => {
-        setAnswers((current) => {
-          const next = { ...current };
-          delete next[itemKey];
-          return next;
-        });
-        answerAttachments.delivered(itemKey);
-      },
+      onAccepted: () => answerAttachments.delivered(itemKey),
       setPendingExchangeId,
       setError,
     });
@@ -789,7 +769,6 @@ export function HumanInboxPage() {
                     pendingExchangeId={pendingExchangeId}
                     senderLabels={senderLabels}
                     projectNameOf={projectNameOf}
-                    setAnswers={setAnswers}
                     showEnvironment={showEnvironment}
                   />
                 ))}

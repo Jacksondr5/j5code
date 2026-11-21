@@ -2,11 +2,12 @@ import type { ChatAttachment, EnvironmentId } from "@t3tools/contracts";
 import { answerAttachmentSupport } from "@t3tools/client-runtime/j5/inbox";
 import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
 import { FileIcon, RefreshCwIcon, XIcon } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import { ComposerAttachButton } from "../../components/chat/ComposerAttachmentStrip";
 import { shouldHandleComposerAttachmentPaste } from "../../components/chat/composerAttachmentFiles";
 import { Button } from "../../components/ui/button";
+import { composerFileNeedsReattach, useComposerDraftStore } from "../../composerDraftStore";
 import {
   getUploadedAttachments,
   releaseDraftAttachment,
@@ -21,6 +22,12 @@ import {
 import { randomUUID } from "../../lib/utils";
 import { useServerConfigs } from "../../state/entities";
 import { type AnswerAttachment, stageAnswerAttachments } from "./answerAttachments.logic";
+import {
+  clearInboxAnswerDraft,
+  inboxAnswerDraftId,
+  inboxAnswerDrafts,
+  persistInboxAnswerImages,
+} from "./inboxAnswerDrafts";
 
 const NO_ATTACHMENTS: ReadonlyArray<AnswerAttachment> = [];
 
@@ -30,10 +37,8 @@ function without<T>(record: Readonly<Record<string, T>>, key: string): Record<st
   return rest;
 }
 
-function forget(attachment: AnswerAttachment) {
-  releaseDraftAttachment(attachment);
-  if (attachment.type === "image") URL.revokeObjectURL(attachment.previewUrl);
-}
+const needsReattach = (attachment: AnswerAttachment) =>
+  attachment.type === "file" && composerFileNeedsReattach(attachment);
 
 /** Whether an environment takes answer attachments: only uploads can go with an answer. */
 export function useAnswerAttachmentSupport(environmentId: EnvironmentId | undefined) {
@@ -44,22 +49,39 @@ export function useAnswerAttachmentSupport(environmentId: EnvironmentId | undefi
 }
 
 /**
- * The files on each open answer, by the answer's key, uploaded to the asking environment as
- * they are added. An answer that is delivered or removed releases its uploads.
+ * The files on each open answer, by the answer's key, kept in its saved draft and uploaded to the
+ * asking environment as they are added. An answer that is delivered or removed releases them.
  */
 export function useAnswerAttachments() {
-  const [byKey, setByKey] = useState<Readonly<Record<string, ReadonlyArray<AnswerAttachment>>>>({});
-  const staged = useRef(new Map<string, AnswerAttachment>());
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- releases unsent uploads and previews when the page closes.
+  const draftsByThreadKey = useComposerDraftStore((state) => state.draftsByThreadKey);
+  const drafts = inboxAnswerDrafts(draftsByThreadKey);
+  const configs = useServerConfigs();
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- the upload queue lives in memory, so files restored from a saved draft after a reload start uploading again; repeat calls are no-ops.
   useEffect(() => {
-    const live = staged.current;
-    return () => live.forEach(forget);
-  }, []);
+    for (const [key, draft] of inboxAnswerDrafts(draftsByThreadKey)) {
+      const environmentId = (JSON.parse(key) as [EnvironmentId])[0];
+      const support = answerAttachmentSupport(configs.get(environmentId)?.environment.capabilities);
+      if (support === null) continue;
+      for (const attachment of [...draft.images, ...draft.files]) {
+        if (needsReattach(attachment)) continue;
+        startAttachmentUpload({
+          environmentId,
+          image: attachment,
+          draftTarget: inboxAnswerDraftId(key),
+        });
+      }
+    }
+  }, [draftsByThreadKey, configs]);
   const [errors, setErrors] = useState<Readonly<Record<string, string>>>({});
   const uploadsByImageId = useAttachmentUploadStore((state) => state.uploadsByImageId);
   const setError = (key: string, error: string | null) =>
     setErrors((current) => (error === null ? without(current, key) : { ...current, [key]: error }));
-  const list = (key: string) => byKey[key] ?? NO_ATTACHMENTS;
+  const list = (key: string): ReadonlyArray<AnswerAttachment> => {
+    const draft = drafts.get(key);
+    return draft === undefined || (draft.images.length === 0 && draft.files.length === 0)
+      ? NO_ATTACHMENTS
+      : [...draft.images, ...draft.files];
+  };
   return {
     list,
     error: (key: string) => errors[key] ?? null,
@@ -81,30 +103,31 @@ export function useAnswerAttachments() {
         return;
       }
       setError(key, null);
-      for (const image of result.attachments) {
-        staged.current.set(image.id, image);
-        startAttachmentUpload({ environmentId, image });
+      const target = inboxAnswerDraftId(key);
+      const store = useComposerDraftStore.getState();
+      const images = result.attachments.filter((attachment) => attachment.type === "image");
+      store.addImages(target, images, { allowDuplicates: true });
+      store.addFiles(
+        target,
+        result.attachments.filter((attachment) => attachment.type === "file"),
+        { allowDuplicates: true },
+      );
+      for (const attachment of result.attachments) {
+        startAttachmentUpload({ environmentId, image: attachment, draftTarget: target });
       }
-      setByKey((current) => ({ ...current, [key]: [...list(key), ...result.attachments] }));
+      if (images.length > 0) void persistInboxAnswerImages(key);
     },
     remove: (key: string, id: string) => {
       const attachment = list(key).find((candidate) => candidate.id === id);
-      if (attachment !== undefined) {
-        staged.current.delete(id);
-        forget(attachment);
-      }
-      setByKey((current) => ({
-        ...current,
-        [key]: (current[key] ?? []).filter((candidate) => candidate.id !== id),
-      }));
+      if (attachment === undefined) return;
+      releaseDraftAttachment(attachment);
+      const store = useComposerDraftStore.getState();
+      if (attachment.type === "image") store.removeImage(inboxAnswerDraftId(key), id);
+      else store.removeFile(inboxAnswerDraftId(key), id);
     },
     /** The server copied the files into the agent's thread; the uploads are no longer needed. */
     delivered: (key: string) => {
-      for (const attachment of list(key)) {
-        staged.current.delete(attachment.id);
-        forget(attachment);
-      }
-      setByKey((current) => without(current, key));
+      clearInboxAnswerDraft(key);
       setError(key, null);
     },
     /** The uploaded files to send, or why the answer must wait. */
@@ -114,6 +137,8 @@ export function useAnswerAttachments() {
     ): { readonly attachments: ReadonlyArray<ChatAttachment> } | { readonly blocked: string } => {
       const attachments = list(key);
       if (attachments.length === 0) return { attachments: [] };
+      const lost = attachments.find(needsReattach);
+      if (lost !== undefined) return { blocked: `Remove ${lost.name} and attach it again.` };
       const uploaded = getUploadedAttachments({ environmentId, images: attachments });
       if (uploaded !== null) return { attachments: uploaded };
       return {
@@ -182,8 +207,9 @@ export function AnswerAttachmentList(props: {
         <ul aria-label="Attachments" className="flex flex-wrap gap-2">
           {props.attachments.map((attachment) => {
             const upload = uploadsByImageId[attachment.id];
-            const status =
-              upload?.status === "uploading"
+            const status = needsReattach(attachment)
+              ? "Attach it again"
+              : upload?.status === "uploading"
                 ? `Uploading ${formatAttachmentUploadProgress(upload.progress)}`
                 : upload?.status === "failed"
                   ? "Upload failed"
