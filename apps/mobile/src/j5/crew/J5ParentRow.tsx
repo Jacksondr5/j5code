@@ -9,6 +9,7 @@ import { Pressable, View } from "react-native";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { AppText as Text } from "../../components/ui/AppText";
 import { useEnvironmentServerConfig, useQuietThreadShell } from "../../state/entities";
+import { accessConfirmedAtom } from "../connection/memory";
 import { j5Sharing } from "../sharing/guestAccess";
 import { j5Environment } from "../state";
 
@@ -22,7 +23,9 @@ const parentAtom = Atom.family((key: string) => {
   const [environmentId, threadId] = JSON.parse(key) as [EnvironmentId, ThreadId];
   return Atom.make((get) => {
     // The roster is a server-wide read, refused to a person who reaches less (web's Lineage too).
-    if (get(j5Sharing.isNarrow(environmentId))) return null;
+    // After a re-pair it waits for the server to say who the new person is.
+    if (get(j5Sharing.isNarrow(environmentId)) || !get(accessConfirmedAtom(environmentId)))
+      return null;
     const fleet = AsyncResult.getOrElse(
       get(j5Environment.fleet({ environmentId, input: {} })),
       () => null,
