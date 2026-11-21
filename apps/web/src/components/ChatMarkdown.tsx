@@ -241,6 +241,8 @@ interface ChatMarkdownProps {
   onRunShellCommand?: ((command: string) => void) | undefined;
   /** J5 (case 33): opens `artifacts/…` links where the thread's right panel isn't on screen. */
   onOpenArtifact?: ((artifactPath: string) => void) | undefined;
+  /** J5 (case 33): the thread's right panel isn't on screen, so web links open as outside a thread. */
+  noThreadPanel?: boolean | undefined;
   imageBaseDir?: string | undefined;
   workspaceMutationId?: string | null | undefined;
   onImageExpand?: ((preview: ExpandedImagePreview) => void) | undefined;
@@ -508,6 +510,7 @@ function useChatMarkdownState({
   headingLevelOffset = 0,
   sourceControlMedia = false,
   onOpenArtifact,
+  noThreadPanel = false,
 }: ChatMarkdownProps) {
   const resolvedTheme = useRenderedAppearance();
   const markdownRef = useRef<HTMLElement>(null);
@@ -676,8 +679,9 @@ function useChatMarkdownState({
         : payload.html,
     );
   };
-  const openChangeRequestLink = useOpenChangeRequestLink(threadRef, pullRequestPanelRef);
-  const openDeferredMarkdownLink = useOpenLink(threadRef);
+  const linkThreadRef = noThreadPanel ? undefined : threadRef;
+  const openChangeRequestLink = useOpenChangeRequestLink(linkThreadRef, pullRequestPanelRef);
+  const openDeferredMarkdownLink = useOpenLink(linkThreadRef);
   // Subscribe so hydrated settings apply before the anchor synchronously decides whether to intercept _blank.
   const linkTargetPreference = useClientSettings((settings) => settings.browserLinkTarget);
   const mathEnabled = useClientSettings((settings) => settings.mathRenderingEnabled);
@@ -904,9 +908,9 @@ function useChatMarkdownState({
         revealLabel={revealInFileManagerLabel}
         onOpenInBrowser={
           artifactPath === null &&
-          threadRef &&
+          linkThreadRef &&
           canOperatePreview &&
-          isPreviewAvailableFor(threadRef.environmentId) &&
+          isPreviewAvailableFor(linkThreadRef.environmentId) &&
           isBrowserPreviewFile(fileLinkMeta.filePath)
             ? () => openMarkdownFileInPreview(fileLinkMeta.filePath)
             : undefined
@@ -933,6 +937,7 @@ function useChatMarkdownState({
     inline,
     mathEnabled,
     isStreaming,
+    linkThreadRef,
     linkTargetPreference,
     markdownFileLinkMetaByHref,
     onTaskListChange,
@@ -1090,7 +1095,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
       environmentId,
       imageBaseDir,
       markdownFileLinkMetaByHref,
-      threadRef,
+      linkThreadRef,
       openMarkdownMedia,
       openChangeRequestLink,
       openDeferredMarkdownLink,
@@ -1161,7 +1166,8 @@ const CHAT_MARKDOWN_COMPONENTS = {
       const isSameDocumentLink = href?.startsWith("#") ?? false;
       const onClick = props.onClick;
       const canOpenInPreview =
-        canOperatePreview && Boolean(threadRef && isPreviewAvailableFor(threadRef.environmentId));
+        canOperatePreview &&
+        Boolean(linkThreadRef && isPreviewAvailableFor(linkThreadRef.environmentId));
       const linkChildren = <MarkdownLinkContext value>{children}</MarkdownLinkContext>;
       const link = (
         <a
