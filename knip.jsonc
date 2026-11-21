@@ -9,9 +9,13 @@
   "ignoreFiles": [
     "apps/mobile/src/components/T3Wordmark.tsx",
     "apps/web/src/components/T3Wordmark.tsx",
+    // J5's link section stands in for upstream's (FORK.md case 122).
+    "apps/web/src/components/settings/LinkedEnvironmentsSettings.tsx",
   ],
   "ignoreIssues": {
     "apps/server/src/cli/thread.ts": ["exports"],
+    // Its dropdown was only upstream's link dialog's; the request card still uses the rest.
+    "apps/web/src/components/settings/LinkMachineSelect.tsx": ["exports"],
     // J5 answers release lookups from its own releases (FORK.md case 40).
     "apps/server/src/cloud/npmRelease.ts": ["exports"],
     "packages/shared/src/t3ProjectFile.ts": ["exports"],

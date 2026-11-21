@@ -85,9 +85,12 @@ const choiceOf = (pair: PeerPair, origins: ReadonlyMap<string, string>): Peering
 export function PeerEditDialog({
   pair,
   onClose,
+  onOriginChanged,
 }: {
   readonly pair: PeerPair;
   readonly onClose: () => void;
+  /** A side now reaches the other at a new address; what else was made at the old one follows. */
+  readonly onOriginChanged?: (side: PeerPairSide, origin: string) => void;
 }) {
   const sides = editableSides(pair);
   const other = (side: PeerPairSide) =>
@@ -160,13 +163,11 @@ export function PeerEditDialog({
     // Each side is its own server's change, so one that is refused never keeps the other from being tried.
     for (const side of changed) {
       const title = `Change the address ${side.label} reaches ${other(side).label} at`;
+      const origin = cleanOrigin(valueOf(side));
       try {
-        await changePeerOrigin(
-          side.environmentId,
-          other(side).environmentId,
-          cleanOrigin(valueOf(side)),
-        );
+        await changePeerOrigin(side.environmentId, other(side).environmentId, origin);
         steps.push({ title, status: "done", detail: null });
+        onOriginChanged?.(side, origin);
       } catch (cause) {
         steps.push({
           title,
@@ -191,18 +192,18 @@ export function PeerEditDialog({
     >
       <DialogPopup className="sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle>Edit peering</DialogTitle>
+          <DialogTitle>Edit address</DialogTitle>
           <DialogDescription>
             Change the address each server reaches the other at. Each server keeps its credential,
-            so messages waiting and open Exchanges carry on. To change how messages travel, remove
-            the peer and peer again.
+            so messages waiting and open Exchanges carry on, and tools follow the new address. To
+            change how messages travel, remove the link and link the servers again.
           </DialogDescription>
         </DialogHeader>
         <DialogPanel>
           <div className="space-y-4">
             <div className="grid gap-3 sm:grid-cols-2">
               <FixedServer title="Server" label={pair.sides[0].label} />
-              <FixedServer title="Peer with" label={pair.sides[1].label} />
+              <FixedServer title="Linked with" label={pair.sides[1].label} />
             </div>
 
             {reaches === null ? (
