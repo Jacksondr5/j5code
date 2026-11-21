@@ -54,7 +54,7 @@ export function LinkExplainer({ children }: { readonly children: ReactNode }) {
         href={EXPLAINER_URL}
         target="_blank"
         rel="noreferrer"
-        className="text-primary hover:underline"
+        className="whitespace-nowrap text-primary hover:underline"
       >
         How does this work?
       </a>
@@ -166,6 +166,8 @@ export function LinkServersDialog({
               remote: candidate.server,
               check: checks[candidate.environmentId] ?? null,
               edits: pairEdits,
+              changing: changing === candidate.environmentId,
+              levels: { localLevel, remoteLevel },
             }),
       localLevel,
       remoteLevel,
@@ -179,10 +181,15 @@ export function LinkServersDialog({
 
   const ready =
     local !== null &&
+    // Still managed: a server that lost that since the dialog opened would refuse every step.
+    servers.includes(sharedId) &&
     chosen.length > 0 &&
     chosen.every((candidate) => {
-      const { route } = setupOf(candidate);
-      return route === null || route.ready;
+      const { route, localLevel, remoteLevel } = setupOf(candidate);
+      // A server linked for tools alone has nothing to make with both directions Off.
+      const makesSomething =
+        candidate.support === "full" || localLevel !== "off" || remoteLevel !== "off";
+      return makesSomething && (route === null || route.ready);
     });
   const turnsOn =
     local === null
@@ -349,6 +356,19 @@ export function LinkServersDialog({
                     (candidate.support === "tools-only"
                       ? "T3 Code · tools only"
                       : (setup?.route?.line ?? null));
+                  // A level set under Change still applies once Change is closed, so the line says it.
+                  const ownLevels =
+                    setup === null || local === null || isChanging || !levelsOf(candidate).own
+                      ? []
+                      : [
+                          setup.pairEdits.localLevel === undefined || candidate.localLevel !== null
+                            ? null
+                            : `${local.label}'s agents: ${toolsLevelLabel(setup.pairEdits.localLevel)}`,
+                          setup.pairEdits.remoteLevel === undefined ||
+                          candidate.remoteLevel !== null
+                            ? null
+                            : `${candidate.label}'s agents: ${toolsLevelLabel(setup.pairEdits.remoteLevel)}`,
+                        ].filter((part) => part !== null);
                   return (
                     <div
                       key={candidate.environmentId}
@@ -387,6 +407,11 @@ export function LinkServersDialog({
                                 }
                               >
                                 {line}
+                              </span>
+                            )}
+                            {ownLevels.length === 0 ? null : (
+                              <span className="block text-xs text-muted-foreground">
+                                Its own Tools levels · {ownLevels.join(" · ")}
                               </span>
                             )}
                           </span>

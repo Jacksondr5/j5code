@@ -1,4 +1,5 @@
 import {
+  linkTakesOrigin,
   peeringChoiceReady,
   recommendPeering,
   type PeeringChoice,
@@ -6,6 +7,8 @@ import {
   type PeeringServer,
 } from "@t3tools/client-runtime/j5/peering";
 import type { AuthMcpClientAccess, EnvironmentId, PeerLinkSummary } from "@t3tools/contracts";
+import { PeerOrigin } from "@t3tools/contracts/j5";
+import * as Schema from "effect/Schema";
 
 import type { PeeringCheck } from "../peering/peeringCheck";
 import type { PeerRecord } from "../peering/peeringClient";
@@ -141,9 +144,10 @@ export const requestLinkStateOf = (
 
 type Connections = PeeringChoice["connections"];
 type OriginField = "localOrigin" | "remoteOrigin";
+const isPeerOrigin = Schema.is(PeerOrigin);
 
 /** One way a pair's messages can travel, as Change offers it. */
-export interface RouteOption {
+interface RouteOption {
   readonly connections: Connections;
   /** The check's own pick. */
   readonly recommended: boolean;
@@ -236,12 +240,23 @@ export const routeWording = (connections: Connections, local: Named, remote: Nam
       : polls(remote, local);
 };
 
+/** An address Change asks for, and why the pair cannot be linked with what it holds. */
+export interface RouteField {
+  readonly field: OriginField;
+  readonly error: string | null;
+}
+
 /** How a pair's messages will travel, as its one line says it and as Change lets it be picked. */
 export interface PairRoute {
   readonly options: ReadonlyArray<RouteOption>;
   /** The person's pick, else the check's; null while checking and when the check found no way. */
   readonly choice: PeeringChoice | null;
-  /** Every address the choice needs is there, so messaging can be set up. */
+  /**
+   * The addresses Change shows for the choice: each the check did not prove, each the person
+   * typed, and each proven one that tools cannot use while its direction's tools are on.
+   */
+  readonly fields: ReadonlyArray<RouteField>;
+  /** Every address the choice needs is there and carries what is asked of it. */
   readonly ready: boolean;
   readonly line: string;
   readonly problem: boolean;
@@ -253,10 +268,21 @@ export function pairRouteOf(input: {
   /** Null while the check runs. */
   readonly check: PeeringCheck | null;
   readonly edits: PairEdits;
+  /** Change is open for this pair, so its address fields say what is missing. */
+  readonly changing?: boolean;
+  /** The tools this linking makes each way; a direction that is Off or keeps its link makes none. */
+  readonly levels?: { readonly localLevel: ToolsLevel; readonly remoteLevel: ToolsLevel };
 }): PairRoute {
-  const { check, edits } = input;
+  const { check, edits, local, remote } = input;
   if (check === null) {
-    return { options: [], choice: null, ready: false, line: "Checking…", problem: false };
+    return {
+      options: [],
+      choice: null,
+      fields: [],
+      ready: false,
+      line: "Checking…",
+      problem: false,
+    };
   }
   const options = routeOptionsOf({ local: input.local, remote: input.remote, check });
   const connections =
@@ -265,6 +291,7 @@ export function pairRouteOf(input: {
     return {
       options,
       choice: null,
+      fields: [],
       ready: false,
       line:
         check.localToRemote.kind === "failed" && check.remoteToLocal.kind === "failed"
@@ -278,14 +305,41 @@ export function pairRouteOf(input: {
     localOrigin: edits.localOrigin ?? provenOrigin(check.remoteToLocal),
     remoteOrigin: edits.remoteOrigin ?? provenOrigin(check.localToRemote),
   };
-  const ready = peeringChoiceReady(choice);
-  const { line } = routeWording(connections, input.local, input.remote);
+  const asks = options.find((option) => option.connections === connections)?.asks ?? [];
+  // Tools take the address messages take: this server's agents reach the other at remoteOrigin.
+  const toolsOver = {
+    remoteOrigin: { level: input.levels?.localLevel ?? "off", agents: local },
+    localOrigin: { level: input.levels?.remoteLevel ?? "off", agents: remote },
+  };
+  const fields = NEEDS[connections].flatMap((field): ReadonlyArray<RouteField> => {
+    const value = choice[field];
+    const { level, agents } = toolsOver[field];
+    const error =
+      value.trim() === ""
+        ? "The check couldn't find this address. Enter it to link."
+        : !isPeerOrigin(value)
+          ? "Enter an address such as https://host:3773, with no path or trailing slash."
+          : level !== "off" && !linkTakesOrigin(value)
+            ? `Plain http works for messages, not for tools. Enter an https address or a Tailscale name (ending .ts.net), or set ${agents.label}'s agents to Off.`
+            : null;
+    return asks.includes(field) || edits[field] !== undefined || error !== null
+      ? [{ field, error }]
+      : [];
+  });
+  const toolsRefused = peeringChoiceReady(choice) && fields.some((field) => field.error !== null);
+  const ready = peeringChoiceReady(choice) && !toolsRefused;
+  const { line } = routeWording(connections, local, remote);
   return {
     options,
     choice,
+    fields,
     ready,
-    line: ready ? line : `${line} · needs an address`,
-    problem: !ready,
+    // With Change open, each address still needed is asked for on its own field.
+    line:
+      ready || input.changing === true
+        ? line
+        : `${line} · ${toolsRefused ? "tools need another address" : "needs an address"}`,
+    problem: !ready && input.changing !== true,
   };
 }
 

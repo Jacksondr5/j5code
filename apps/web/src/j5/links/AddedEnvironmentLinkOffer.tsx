@@ -18,8 +18,11 @@ export function AddedEnvironmentLinkOffer({ links }: { readonly links: ManagedLi
     readonly environmentId: EnvironmentId;
     readonly others: ReadonlyArray<EnvironmentId>;
   } | null>(null);
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- the offer belongs to the visit that added the server: leaving the page drops it, so it cannot open on a later visit
-  useEffect(() => () => void noteEnvironmentAdded(null), []);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- the offer belongs to the visit that added the server: arriving and leaving both drop it, so an add that finished after the page closed cannot open one on a later visit
+  useEffect(() => {
+    noteEnvironmentAdded(null);
+    return () => void noteEnvironmentAdded(null);
+  }, []);
   if (addedId === null) return null;
 
   if (offer?.environmentId !== addedId) {

@@ -96,6 +96,9 @@ export function toolsExpiryOf(pair: LinkPair, now: DateTime.Utc): ToolsExpiry {
   )[0];
   if (first === undefined) return { kind: "none" };
   const left = first.expiresAt.epochMilliseconds - now.epochMilliseconds;
-  if (first.status === "expired" || left <= 0) return { kind: "expired", at: first.expiresAt };
+  // The server's own verdict counts for either direction, whatever this client's clock says.
+  const expired = links.find((link) => link.status === "expired");
+  if (expired !== undefined) return { kind: "expired", at: expired.expiresAt };
+  if (left <= 0) return { kind: "expired", at: first.expiresAt };
   return { kind: "running", at: first.expiresAt, soon: left <= RENEW_SOON_DAYS * 86_400_000 };
 }

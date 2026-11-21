@@ -75,9 +75,11 @@ export function messagesStatusOf(pair: LinkPair, nowMs: number): MessagesStatus 
   const poller = storer === null ? null : otherSideOf(pair, storer);
   // A storer's record carries its poller's heartbeat and what waits for it, so it speaks first.
   const speaker = recorded.find((side) => side === storer) ?? holder;
+  const halfRecorded = pair.sides.some((side) => side.read && !isRecorded(side));
   return {
-    travel:
-      storer === null || poller === null
+    travel: halfRecorded
+      ? `Not travelling: only ${holder.label} records ${otherSideOf(pair, holder).label}`
+      : storer === null || poller === null
         ? "Sent directly both ways"
         : `${poller.label} polls ${storer.label} for messages`,
     state: sideState(speaker, otherSideOf(pair, speaker).label, nowMs),
@@ -88,7 +90,13 @@ export function messagesStatusOf(pair: LinkPair, nowMs: number): MessagesStatus 
     problems: pair.sides.flatMap((side) => {
       const other = otherSideOf(pair, side).label;
       if (isRecorded(side)) return sideProblem(side, other) ?? [];
-      return side.read ? [`${side.label} holds no record of ${other}`] : [];
+      if (!side.read) return [];
+      // A server that ended messaging already says what to do; this one adds only the fact.
+      return [
+        recorded.some((each) => isPeerCredentialRejected(each.record))
+          ? `${side.label} holds no record of ${other}`
+          : `${side.label} holds no record of ${other}. Link them again to repair it, or remove the link.`,
+      ];
     }),
   };
 }
