@@ -19,6 +19,8 @@ export const config: VercelConfig = {
       destination: "/new/index.html",
     },
   ],
+  // The linking page was /peering, and released apps still link there.
+  redirects: [{ source: "/peering", destination: "/linking", permanent: true }],
   // `curl … | sh` needs the installer served as a plain shell script. Caches may
   // keep it for up to five minutes, so a changed installer reaches everyone
   // within five minutes of a deploy.

@@ -275,7 +275,7 @@ export function PeerEditDialog({
           >
             How does this work?
           </a>
-          <Button variant="ghost" disabled={busy} onClick={onClose}>
+          <Button variant="outline" disabled={busy} onClick={onClose}>
             Cancel
           </Button>
           <Button disabled={!ready} onClick={() => void save()}>

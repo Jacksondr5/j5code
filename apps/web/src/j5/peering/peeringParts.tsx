@@ -64,11 +64,14 @@ export function OriginField({
   value,
   onChange,
   disabled,
+  error = null,
 }: {
   readonly title: string;
   readonly value: string;
   readonly onChange: (value: string) => void;
   readonly disabled: boolean;
+  /** Why this field must be filled in before the pair can be linked. */
+  readonly error?: string | null;
 }) {
   const warning = peerOriginWarning(value);
   return (
@@ -78,9 +81,13 @@ export function OriginField({
         nativeInput
         value={value}
         disabled={disabled}
+        aria-invalid={error !== null}
         placeholder="https://host:3773"
         onChange={(event) => onChange(event.currentTarget.value)}
       />
+      {error !== null ? (
+        <span className="text-xs font-normal text-destructive">{error}</span>
+      ) : null}
       {warning !== null ? (
         <span className="text-xs font-normal text-warning-foreground">{warning}</span>
       ) : null}

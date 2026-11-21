@@ -89,8 +89,9 @@ function OpenLinkRequestDialog(props: {
   const [report, setReport] = useState<ReadonlyArray<StepReport> | null>(null);
 
   const { local, candidates } = linkCandidatesFor(links, props.environmentId);
-  // An address alone names no server this client has; the agent's own name for it is all there is.
-  const picks = item.environmentId === undefined && item.url === undefined;
+  // A request that names no server is answered by picking one. That includes an address the
+  // agent's server could not put a name to: the person may have added that server since.
+  const picks = item.environmentId === undefined;
   const ranked = rankMachinesByHint(candidates, item.hint);
   const hinted = picks ? linkRequestInitialMachine(item, machines) : null;
   const selectedId =
@@ -120,8 +121,12 @@ function OpenLinkRequestDialog(props: {
     selected.blocked === null &&
     selected.support === "full" &&
     !selected.messaging &&
+    // A half-recorded pair is refused below, so it is shown no route to change.
+    selected.clearLeftover === null &&
     state !== "existing";
   const checks = usePairChecks(local, needsMessaging ? [selected.server] : []);
+  const level =
+    access ?? (state === "renew" ? link?.access : null) ?? linkRequestDefaultAccess(item);
   const route =
     local === null || !needsMessaging
       ? null
@@ -130,9 +135,10 @@ function OpenLinkRequestDialog(props: {
           remote: selected.server,
           check: checks[selected.environmentId] ?? null,
           edits,
+          changing,
+          // A request makes this server's direction alone.
+          levels: { localLevel: level, remoteLevel: "off" },
         });
-  const level =
-    access ?? (state === "renew" ? link?.access : null) ?? linkRequestDefaultAccess(item);
   // Setting up messaging issues a credential on this server too, which answering alone does not.
   const cannotPeer =
     local === null || selected === null

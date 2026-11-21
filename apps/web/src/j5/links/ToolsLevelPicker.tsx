@@ -30,8 +30,11 @@ export function ToolsLevelPicker({
   disabled = false,
   onlyOff = false,
   withoutOff = false,
+  unknown = false,
   onChange,
 }: {
+  /** This client could not read the level, so the picker says so and cannot be used. */
+  readonly unknown?: boolean;
   readonly value: ToolsLevel;
   /** The server whose agents the level is for, and the server they would act on. */
   readonly holder: string;
@@ -46,13 +49,13 @@ export function ToolsLevelPicker({
   return (
     <Select
       value={value}
-      disabled={disabled}
+      disabled={disabled || unknown}
       onValueChange={(next) => {
         if (next !== null && next !== value) onChange(next as ToolsLevel);
       }}
     >
       <SelectTrigger size="xs" className="w-40" aria-label={`${holder}'s agents on ${other}`}>
-        <SelectValue>{toolsLevelLabel(value)}</SelectValue>
+        <SelectValue>{unknown ? "Unknown" : toolsLevelLabel(value)}</SelectValue>
       </SelectTrigger>
       <SelectPopup align="end" alignItemWithTrigger={false}>
         {LEVELS.filter((level) => !withoutOff || level !== "off").map((level) => (
