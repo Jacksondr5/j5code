@@ -179,7 +179,9 @@ A worktree holds one setup at a time. Pass a flag to the first start, or to
   `http://127.0.0.1:<its server port>`.
 - **`--peer --reachable`.** Both servers listen on every interface of this
   machine, so the check finds a route and the dialogs ask for nothing. Use it
-  to test or capture peering and linking as a person usually meets them.
+  to test or capture peering and linking as a person usually meets them. A
+  link's tools take plain http only at a Tailscale address, so tools work
+  between the two only when this machine is on a tailnet.
 - **`--base <ref>`.** See "PR screenshots".
 - **`upgrade`.** To test a change that acts on old state, make that state on
   Base, in its tab or with the base checkout's own `guest`

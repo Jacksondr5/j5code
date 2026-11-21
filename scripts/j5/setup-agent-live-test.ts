@@ -709,7 +709,8 @@ ${
     ? `
 Both servers listen on every interface of this machine, its LAN and Docker networks included,
 so the peering check finds a route between them. They are isolated and admit only a device
-with a pairing link.
+with a pairing link. A link's tools take plain http only at a Tailscale address, so tools
+work between them only when this machine is on a tailnet.
 `
     : ""
 }`
@@ -1935,8 +1936,9 @@ async function start(
   }
   console.log("Starting the two dev servers...");
   // A server on loopback offers the peering check no address; one on every interface (the dev
-  // runner binds loopback or all of them) offers this machine's network addresses.
-  const runnerArgs = mode === "peer-reachable" ? ["--host", "0.0.0.0"] : [];
+  // runner binds loopback or all of them) offers this machine's network addresses. `::` adds
+  // the IPv6 ones: a link's tools take plain http only at a Tailscale name or IPv6 address.
+  const runnerArgs = mode === "peer-reachable" ? ["--host", "::"] : [];
   const local = await startServer(
     paths,
     "dev",
