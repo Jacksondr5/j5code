@@ -16,6 +16,8 @@
     "apps/server/src/cli/thread.ts": ["exports"],
     // Its dropdown was only upstream's link dialog's; the request card still uses the rest.
     "apps/web/src/components/settings/LinkMachineSelect.tsx": ["exports"],
+    // J5's dialog answers the request card; upstream's is exported so it stays (FORK.md case 123).
+    "apps/web/src/components/chat/LinkRequestCard.tsx": ["exports"],
     // J5 answers release lookups from its own releases (FORK.md case 40).
     "apps/server/src/cloud/npmRelease.ts": ["exports"],
     "packages/shared/src/t3ProjectFile.ts": ["exports"],

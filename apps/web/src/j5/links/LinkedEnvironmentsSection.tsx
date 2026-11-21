@@ -1,56 +1,16 @@
-import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId } from "@t3tools/contracts";
-import { Atom } from "effect/reactivity";
 import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 
 import { searchableSetting } from "../../components/settings/settingsSearch";
 import { SettingsRow, SettingsSection } from "../../components/settings/settingsLayout";
 import { Button } from "../../components/ui/button";
-import { useEnvironments } from "../../state/environments";
-import { peerLinkEnvironment } from "../../state/peerLinks";
-import { environmentPresentations } from "../../state/presentation";
-import { formatEnvironmentQueryError } from "../../state/query";
-import { PeerIntroductionDialog } from "../peering/PeerIntroductionDialog";
-import { refreshPeers } from "../peering/peeringClient";
-import { j5Environment, peersQueryAtom } from "../state";
 import { useVisibleRefresh } from "../useVisibleRefresh";
+import { AddedEnvironmentLinkOffer } from "./AddedEnvironmentLinkOffer";
 import { LinkPairRow, type LinkRowServerFacts } from "./LinkPairRow";
-import { linkPairs, type LinkPair } from "./linkPairs";
-import { refreshLinks } from "./linksClient";
-
-/**
- * Each connected server this client can link from, with its peer records and its links; the key
- * is the connected servers' ids, joined with commas. A server from before upstream's links holds
- * none, so its links are not read.
- */
-const managedLinkListsAtom = Atom.family((ids: string) =>
-  Atom.make((get) =>
-    ids
-      .split(",")
-      .filter(
-        (id): id is EnvironmentId =>
-          id !== "" && get(j5Environment.addPeer.permissionAtom(id as EnvironmentId)),
-      )
-      .map((environmentId) => ({
-        environmentId,
-        peers: get(peersQueryAtom(environmentId)),
-        links:
-          get(environmentPresentations.serverConfigsAtom).get(environmentId)?.environment
-            .capabilities.peerLinks === true
-            ? get(peerLinkEnvironment.list({ environmentId, input: {} }))
-            : null,
-      })),
-  ),
-);
-
-const refreshLists = (serversKey: string) => {
-  for (const id of serversKey.split(",")) {
-    if (id === "") continue;
-    refreshPeers(id as EnvironmentId);
-    refreshLinks(id as EnvironmentId);
-  }
-};
+import type { LinkPair } from "./linkPairs";
+import { LinkServersDialog } from "./LinkServersDialog";
+import { refreshManagedLinks, useManagedLinks } from "./managedLinks";
 
 /**
  * Every link among the servers this client manages, one row for each pair: the messages its
@@ -63,21 +23,13 @@ export function LinkedEnvironmentsSection({
 }: {
   readonly primaryEnvironmentId: EnvironmentId | null;
 }) {
-  const { environments } = useEnvironments();
-  const connected = environments
-    .filter((environment) => environment.connection.phase === "connected")
-    .toSorted((left, right) => left.label.localeCompare(right.label));
-  // Linking is an administrative act on a server, like pairing links and sessions.
-  const managed = useAtomValue(
-    managedLinkListsAtom(connected.map((environment) => environment.environmentId).join(",")),
-  );
-  const servers = managed.map(({ environmentId }) => environmentId);
+  const links = useManagedLinks();
+  const { environments, servers, lists, pairs } = links;
   // A session revoked or expired on another server moves no revision here, and a link's reach is
   // only known when it is listed; reading again on focus covers both.
-  const serversKey = servers.join(",");
-  const refreshOnFocus = () => refreshLists(serversKey);
+  const refreshOnFocus = () => refreshManagedLinks(servers);
   useVisibleRefresh(refreshOnFocus, servers.length > 0);
-  // Each opening mounts a fresh dialog, so an earlier one's fields and steps never carry over.
+  // Each opening mounts a fresh dialog, so an earlier one's choices and results never carry over.
   const [dialog, setDialog] = useState<{
     readonly generation: number;
     readonly open: boolean;
@@ -99,8 +51,6 @@ export function LinkedEnvironmentsSection({
     openDialog(first.environmentId, second.environmentId);
   };
 
-  const labelOf = (id: EnvironmentId) =>
-    connected.find((environment) => environment.environmentId === id)?.label ?? id;
   const factsOf = (id: EnvironmentId): LinkRowServerFacts | null => {
     const config = environments.find(
       (environment) => environment.environmentId === id,
@@ -112,16 +62,11 @@ export function LinkedEnvironmentsSection({
           supportsMessaging: config.environment.capabilities.j5PeerPoll === true,
         };
   };
-  const lists = managed.map(({ environmentId, peers, links }) => ({
-    environmentId,
-    label: labelOf(environmentId),
-    peers: peers._tag === "Success" ? peers.value : null,
-    links: links === null ? [] : links._tag === "Success" ? links.value.links : null,
-    peersError: peers._tag === "Failure" ? formatEnvironmentQueryError(peers.cause) : null,
-    linksError:
-      links !== null && links._tag === "Failure" ? formatEnvironmentQueryError(links.cause) : null,
-  }));
-  const pairs = linkPairs(lists);
+  const awayOf = (id: EnvironmentId) =>
+    environments.some(
+      (environment) =>
+        environment.environmentId === id && environment.connection.phase !== "connected",
+    );
   const search = searchableSetting("linked-environments");
 
   return (
@@ -141,6 +86,7 @@ export function LinkedEnvironmentsSection({
           key={pair.key}
           pair={pair}
           factsOf={factsOf}
+          awayOf={awayOf}
           onSetUpMessaging={setUpMessaging}
         />
       ))}
@@ -160,18 +106,15 @@ export function LinkedEnvironmentsSection({
               ],
         ),
       )}
-      <PeerIntroductionDialog
+      <LinkServersDialog
         key={dialog.generation}
         open={dialog.open}
         onOpenChange={(open) => setDialog((current) => ({ ...current, open }))}
-        servers={servers}
+        links={links}
         defaultServerId={dialog.serverId ?? defaultServerId}
-        defaultOtherId={dialog.otherId}
-        onPeered={(first, second) => {
-          refreshPeers(first);
-          refreshPeers(second);
-        }}
+        initialOtherIds={dialog.otherId === null ? [] : [dialog.otherId]}
       />
+      <AddedEnvironmentLinkOffer links={links} />
     </SettingsSection>
   );
 }
