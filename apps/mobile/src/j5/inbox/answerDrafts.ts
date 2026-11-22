@@ -9,6 +9,7 @@ import { questionAttachmentPreparationAtom } from "../../state/question-attachme
 import {
   clearComposerDraft,
   composerDraftsAtom,
+  composerDraftsLoadedAtom,
   ensureComposerDraftsLoaded,
   setComposerDraftText,
 } from "../../state/use-composer-drafts";
@@ -52,6 +53,9 @@ export function useAnswerTexts(): Readonly<Record<string, string>> {
   ensureComposerDraftsLoaded();
   return useAtomValue(answerTextsAtom);
 }
+
+/** Whether saved drafts have been read back, so pruning sees the ones a restart restores. */
+export const useAnswerDraftsLoaded = () => useAtomValue(composerDraftsLoadedAtom);
 
 export function setAnswerText(target: AnswerTarget, text: string) {
   setComposerDraftText(answerAttachmentDraftKey(target), text);

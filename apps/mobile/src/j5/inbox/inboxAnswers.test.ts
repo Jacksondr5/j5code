@@ -8,7 +8,11 @@ import { act, create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, expect, it, vi } from "vite-plus/test";
 
 import { appAtomRegistry } from "../../state/atom-registry";
-import { composerDraftsAtom } from "../../state/use-composer-drafts";
+import {
+  composerDraftsAtom,
+  composerDraftsLoadedAtom,
+  waitForComposerDraftsLoaded,
+} from "../../state/use-composer-drafts";
 import { answerAttachmentDraftKey } from "./answerAttachments.logic";
 import { useInboxAnswers } from "./inboxAnswers";
 
@@ -124,7 +128,8 @@ async function render(
   });
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  await waitForComposerDraftsLoaded();
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   server.send = server.deferred();
   server.reread = server.deferred();
@@ -201,4 +206,21 @@ it("keeps the sent words on the card until the re-read takes it away, without ke
   expect(answers.pendingKey).toBeNull();
   expect(answers.answerText(item)).toBe("");
   expect(server.cleared).toHaveBeenCalledOnce();
+});
+
+it("drops a closed ask's saved answer that a restart reads back after the Inbox's first read", async () => {
+  appAtomRegistry.set(composerDraftsLoadedAtom, false);
+  await render([], []);
+
+  await act(async () => {
+    appAtomRegistry.set(composerDraftsAtom, {
+      [answerAttachmentDraftKey({ ...ask, environmentId: EnvironmentId.make("alpha") })]: {
+        text: "Yes, ship it",
+        attachments: [],
+      },
+    });
+    appAtomRegistry.set(composerDraftsLoadedAtom, true);
+  });
+
+  expect(appAtomRegistry.get(composerDraftsAtom)).toEqual({});
 });

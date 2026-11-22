@@ -17,7 +17,12 @@ import { uuidv4 } from "../../lib/uuid";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { j5Environment } from "../state";
 import { clearAnswerAttachments, readyAnswerAttachments } from "./answerAttachmentDrafts";
-import { pruneAnswerDrafts, setAnswerText, useAnswerTexts } from "./answerDrafts";
+import {
+  pruneAnswerDrafts,
+  setAnswerText,
+  useAnswerDraftsLoaded,
+  useAnswerTexts,
+} from "./answerDrafts";
 import { answeredInboxQueryAtom, inboxCountQueryAtom, openInboxQueryAtom } from "./inboxSources";
 
 type Sources = J5ReadSources<HumanInboxResponse>;
@@ -76,6 +81,7 @@ export function useInboxAnswers(input: {
 }) {
   const { openSources, items, answeredSources, answered, pruneClosed = false } = input;
   const savedAnswers = useAnswerTexts();
+  const draftsLoaded = useAnswerDraftsLoaded();
   const personScopes = JSON.stringify(
     openSources.sources.map((source) => [source.environmentId, source.data?.personId ?? null]),
   );
@@ -112,8 +118,8 @@ export function useInboxAnswers(input: {
   }
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- saved answers outlive the screen, so a read showing their ask closed, here or while away, drops them.
   useEffect(() => {
-    if (pruneClosed) pruneAnswerDrafts(openSources, new Set(kept.keys()));
-  }, [pruneClosed, openSources, kept]);
+    if (pruneClosed && draftsLoaded) pruneAnswerDrafts(openSources, new Set(kept.keys()));
+  }, [pruneClosed, draftsLoaded, openSources, kept]);
   const shownItems = kept.size === 0 ? items : [...items, ...kept.values()].sort(compareInboxItems);
   const answeredByKey = new Map(answered.map((item) => [scopedInboxItemKey(item), item]));
   const closedOf = (item: PresentedHumanInboxItem): ClosedItem | undefined => {
