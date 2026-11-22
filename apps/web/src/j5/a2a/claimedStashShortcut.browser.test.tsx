@@ -29,6 +29,7 @@ function pressModS(target: Element) {
 }
 
 it("keeps Mod+S typed in a pinned ask from stashing the Captain's prompt", async () => {
+  // Nothing here links or navigates.
   await using screen = await render(<PinnedAsk />, { router: false });
   // The composer's stash scope, registered when it mounted, before the ask took focus.
   const stash = vi.fn((event: KeyboardEvent) => event.preventDefault());

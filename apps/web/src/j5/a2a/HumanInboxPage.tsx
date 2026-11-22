@@ -63,7 +63,12 @@ import {
   useAnswerAttachments,
   useRestoredAnswerUploads,
 } from "./AnswerAttachments";
-import { type AnswerSendError, useAnswerSends } from "./answerSends";
+import {
+  type AnswerSendError,
+  answerSendCallbacks,
+  retryAnswer,
+  useAnswerSends,
+} from "./answerSends";
 import { answerHumanExchange } from "./humanInboxClient";
 import {
   pruneInboxAnswerDrafts,
@@ -361,6 +366,8 @@ function OpenInboxItem({
           attachments.add(itemKey, item.environmentId, support.maxFileBytes, files);
   const readiness = attachments.ready(itemKey, item.environmentId);
   const waitingOn = "blocked" in readiness ? readiness.blocked : null;
+  const sendable =
+    canAnswer && closedText === null && answerText.trim().length > 0 && waitingOn === null;
   return (
     <li className="border-b border-border/70 last:border-b-0">
       <details
@@ -439,7 +446,7 @@ function OpenInboxItem({
                 id={answerId}
                 onChange={(event) => setInboxAnswerText(itemKey, event.currentTarget.value)}
                 placeholder="Type the answer exactly as it should be delivered"
-                readOnly={!mayAnswer || closedText !== null}
+                readOnly={!canAnswer || closedText !== null}
                 value={answerText}
                 {...(addFiles === null ? {} : answerAttachmentInputHandlers(addFiles))}
               />
@@ -456,15 +463,18 @@ function OpenInboxItem({
                   role="alert"
                 >
                   <span>{error.message}</span>
-                  <Button
-                    disabled={pending}
-                    onClick={() => onRetry(item)}
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                  >
-                    Try again
-                  </Button>
+                  {/* A delivered answer only re-reads; a resend needs an ask that can still take it. */}
+                  {error.delivered || (sendable && !pending) ? (
+                    <Button
+                      disabled={pending}
+                      onClick={() => onRetry(item)}
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                    >
+                      Try again
+                    </Button>
+                  ) : null}
                 </div>
               )}
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -494,12 +504,7 @@ function OpenInboxItem({
                       size="default"
                     />
                     <Button
-                      disabled={
-                        !canAnswer ||
-                        pending ||
-                        answerText.trim().length === 0 ||
-                        waitingOn !== null
-                      }
+                      disabled={!sendable || pending}
                       title={
                         canAnswer
                           ? (waitingOn ?? undefined)
@@ -753,8 +758,9 @@ export function HumanInboxPage() {
     // Sent trimmed, as the composer sends; words are still required.
     const message = (answers[itemKey] ?? "").trim();
     const readiness = answerAttachments.ready(itemKey, item.environmentId);
-    if (message.length === 0 || !item.sourceReady || "blocked" in readiness) return;
-    let delivered = false;
+    // A kept ask has closed (AC17); its words stay to read, not to send.
+    if (message.length === 0 || !item.sourceReady || kept.has(itemKey) || "blocked" in readiness)
+      return;
     await submitHumanInboxAnswer({
       item,
       message,
@@ -764,23 +770,15 @@ export function HumanInboxPage() {
       send: answerHumanExchange,
       refresh,
       notifyChanged: notifyHumanInboxChanged,
-      onAccepted: () => {
-        delivered = true;
-        answerAttachments.delivered(itemKey);
-      },
-      setPendingExchangeId: (key) => sends.setPending(itemKey, key !== null),
-      setError: (error) =>
-        sends.setError(itemKey, error === null ? null : { message: error, delivered }),
+      ...answerSendCallbacks(sends, itemKey, () => answerAttachments.delivered(itemKey)),
     });
   };
 
-  // Delivered already: only the re-read failed, so trying again reads again rather than resending.
-  const retry = (item: HumanInboxItem) => {
-    const error = sends.errorOf(scopedInboxItemKey(item));
-    if (error?.delivered !== true) return void answer(item);
-    sends.setError(scopedInboxItemKey(item), null);
-    void refresh(item.environmentId).catch(() => sends.setError(scopedInboxItemKey(item), error));
-  };
+  const retry = (item: HumanInboxItem) =>
+    retryAnswer(sends, scopedInboxItemKey(item), {
+      resend: () => void answer(item),
+      reread: () => refresh(item.environmentId),
+    });
 
   const openCrewThread = (
     request: Pick<ScopedCrewRuntimeRequest, "environmentId" | "threadId">,

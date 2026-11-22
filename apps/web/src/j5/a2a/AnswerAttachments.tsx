@@ -162,17 +162,17 @@ export type AnswerAttachmentsState = ReturnType<typeof useAnswerAttachments>;
 /** Paste and drop handlers that turn files into attachments and leave plain text alone. */
 export function answerAttachmentInputHandlers(onFiles: (files: ReadonlyArray<File>) => void) {
   return {
-    onPaste: (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    onPaste: (event: React.ClipboardEvent<HTMLElement>) => {
       const files = Array.from(event.clipboardData.files);
       const plainText = event.clipboardData.getData("text/plain");
       if (files.length === 0 || !shouldHandleComposerAttachmentPaste({ files, plainText })) return;
       event.preventDefault();
       onFiles(files);
     },
-    onDragOver: (event: React.DragEvent<HTMLTextAreaElement>) => {
+    onDragOver: (event: React.DragEvent<HTMLElement>) => {
       if (event.dataTransfer.types.includes("Files")) event.preventDefault();
     },
-    onDrop: (event: React.DragEvent<HTMLTextAreaElement>) => {
+    onDrop: (event: React.DragEvent<HTMLElement>) => {
       const files = Array.from(event.dataTransfer.files);
       if (files.length === 0) return;
       event.preventDefault();

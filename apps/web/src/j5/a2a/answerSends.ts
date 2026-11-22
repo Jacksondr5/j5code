@@ -38,3 +38,32 @@ export function useAnswerSends() {
 }
 
 export type AnswerSends = ReturnType<typeof useAnswerSends>;
+
+/**
+ * The callbacks `submitHumanInboxAnswer` reports one send of the ask `key` through. An error after
+ * the server took the answer is marked `delivered`, so trying again never sends it twice.
+ */
+export function answerSendCallbacks(sends: AnswerSends, key: string, onAccepted: () => void) {
+  let delivered = false;
+  return {
+    onAccepted: () => {
+      delivered = true;
+      onAccepted();
+    },
+    setPendingExchangeId: (pendingKey: string | null) => sends.setPending(key, pendingKey !== null),
+    setError: (message: string | null) =>
+      sends.setError(key, message === null ? null : { message, delivered }),
+  };
+}
+
+/** Try again: resend, or, once the server took the answer, only read the Inbox again. */
+export function retryAnswer(
+  sends: AnswerSends,
+  key: string,
+  input: { readonly resend: () => void; readonly reread: () => Promise<void> },
+) {
+  const error = sends.errorOf(key);
+  if (error?.delivered !== true) return input.resend();
+  sends.setError(key, null);
+  void input.reread().catch(() => sends.setError(key, error));
+}

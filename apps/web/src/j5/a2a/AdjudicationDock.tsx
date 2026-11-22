@@ -125,9 +125,17 @@ export function AdjudicationDock(props: {
       : (files: ReadonlyArray<File>) =>
           attachments.add(answerKey, environmentId, support.maxFileBytes, files);
   const answerId = `adjudication-answer-${encodeURIComponent(shown.exchangeId)}`;
+  const sendable = isOpen && message !== "" && waitingOn === null;
+  // The whole ask takes a dropped file while it can, so the thread never takes it too; when it
+  // can't, a drop on it goes to the thread as anywhere else.
+  const fileInput = addFiles === null ? null : answerAttachmentInputHandlers(addFiles);
+  const dropTarget =
+    fileInput === null
+      ? {}
+      : { ...ownFileDropTargetProps, onDragOver: fileInput.onDragOver, onDrop: fileInput.onDrop };
 
   const answer = async () => {
-    if (message === "" || "blocked" in readiness) return;
+    if (!sendable || "blocked" in readiness) return;
     const attachmentIds = readiness.attachments.map((attachment) => attachment.id).join("\n");
     // A retry of the same words and files reuses its request id, so a lost reply cannot answer twice.
     const previous = attempts.current.get(shown.exchangeId);
@@ -177,11 +185,7 @@ export function AdjudicationDock(props: {
   return (
     <ComposerBanner.Attachment>
       <ComposerBanner.Root density="comfortable" data-testid="adjudication-dock">
-        <div
-          className="flex flex-col gap-2 px-2 py-1"
-          {...ownFileDropTargetProps}
-          {...claimStashShortcut}
-        >
+        <div className="flex flex-col gap-2 px-2 py-1" {...dropTarget} {...claimStashShortcut}>
           <div className="flex flex-wrap items-center gap-2 text-muted-foreground">
             <span>Question for you</span>
             {openFor ? <span>· open {openFor}</span> : null}
@@ -231,7 +235,7 @@ export function AdjudicationDock(props: {
             placeholder="Type the answer exactly as it should be delivered"
             readOnly={!isOpen}
             value={words}
-            {...(addFiles === null ? {} : answerAttachmentInputHandlers(addFiles))}
+            {...(fileInput === null ? {} : { onPaste: fileInput.onPaste })}
           />
           <AnswerAttachmentList
             answerKey={answerKey}
@@ -241,9 +245,14 @@ export function AdjudicationDock(props: {
             onRemove={pending ? null : (id) => attachments.remove(answerKey, id)}
           />
           {error ? (
-            <p className="text-sm text-destructive" role="alert">
-              {error}
-            </p>
+            <div className="flex flex-wrap items-center justify-between gap-2" role="alert">
+              <p className="text-sm text-destructive">{error}</p>
+              {sendable && !pending ? (
+                <Button onClick={() => void answer()} size="sm" type="button" variant="outline">
+                  Try again
+                </Button>
+              ) : null}
+            </div>
           ) : null}
           <div className="flex items-center justify-end gap-2">
             {addFiles === null ? null : (
@@ -265,7 +274,7 @@ export function AdjudicationDock(props: {
             ) : null}
             {isOpen ? (
               <Button
-                disabled={pending || message === "" || waitingOn !== null}
+                disabled={!sendable || pending}
                 onClick={() => void answer()}
                 size="sm"
                 title={waitingOn ?? undefined}
