@@ -286,6 +286,7 @@ function InboxThreadPanel(props: {
           </div>
         );
       default:
+        // v0.1.11 makes `issuesSupported` required here: pass `serverConfig !== null`, as for pull requests.
         return (
           <RightPanelSurfaceContent
             surface={surface}
