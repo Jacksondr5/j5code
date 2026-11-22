@@ -41,7 +41,7 @@ import {
   artifactPreviewKind,
   artifactPreviewRevision,
 } from "@t3tools/client-runtime/j5/artifacts";
-import { artifactsSurfaceProps } from "./artifactFind";
+import { artifactFindAreaProps, artifactsSurfaceProps } from "./artifactFind";
 import { nextArtifactRefreshGeneration } from "./artifactRefresh";
 
 const isJ5ActionError = Schema.is(J5ActionError);
@@ -581,7 +581,7 @@ export function ArtifactsPage({
               </p>
             ) : null}
             {/* Focusable so a click on the preview puts focus in the surface, and Cmd/Ctrl+F finds in it. */}
-            <ScrollArea className="min-h-0 flex-1" viewportTabIndex={-1}>
+            <ScrollArea {...artifactFindAreaProps} className="min-h-0 flex-1" viewportTabIndex={-1}>
               <div className={cn("min-h-full", embedded ? "p-4" : "p-5 md:p-8")}>
                 {contentState === "loading" ? (
                   <p className="text-sm text-muted-foreground">Opening artifact…</p>

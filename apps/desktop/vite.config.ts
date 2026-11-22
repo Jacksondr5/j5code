@@ -140,6 +140,15 @@ export default defineConfig({
       outExtensions: () => ({ js: ".cjs" }),
       entry: ["src/mac-permission-preload.ts"],
     },
+    {
+      // J5: the find bar's preload, sandboxed and self-contained like the one above.
+      format: "cjs",
+      outDir: "dist-electron",
+      dts: false,
+      sourcemap: true,
+      outExtensions: () => ({ js: ".cjs" }),
+      entry: { "j5-find-bar-preload": "src/j5/findBarPreload.ts" },
+    },
   ],
   test: {
     include: [...defaultInclude, "../../native/kde-snap-shot/src/*.test.ts"],

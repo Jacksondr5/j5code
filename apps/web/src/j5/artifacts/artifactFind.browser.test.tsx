@@ -3,10 +3,10 @@ import { useEffect } from "react";
 import { expect, it } from "vite-plus/test";
 import { userEvent } from "vite-plus/test/browser";
 
-import { render } from "../../../test/render";
+import { render, stubGlobal } from "../../../test/render";
 import type { ChatComposerHandle } from "../../components/chat/ChatComposer";
 import { useChatShortcuts } from "../../components/chat/useChatShortcuts";
-import { artifactsSurfaceProps, isArtifactFindKey } from "./artifactFind";
+import { artifactFindAreaProps, artifactsSurfaceProps, isArtifactFindKey } from "./artifactFind";
 
 const findKeybindings: ResolvedKeybindingsConfig = [
   {
@@ -61,7 +61,7 @@ function Page(props: { threadFinds: string[]; reachedPage: string[] }) {
       <textarea aria-label="Composer" />
       <main {...artifactsSurfaceProps}>
         <button type="button">Artifact file</button>
-        <div aria-label="Artifact preview" tabIndex={-1}>
+        <div {...artifactFindAreaProps} aria-label="Artifact preview" tabIndex={-1}>
           <p>Artifact text</p>
         </div>
       </main>
@@ -92,4 +92,30 @@ it.each([
   expect(finds).toEqual(threadFinds);
   // The browser opens its own find only for a key nobody prevented.
   expect(reachedPage.includes("f")).toBe(native);
+});
+
+it("Ctrl+F in an artifact on desktop opens the find bar over the preview", async () => {
+  const opened: unknown[] = [];
+  using _bridge = stubGlobal("desktopBridge", {
+    getClientPlatform: () => "linux",
+    openFindBar: async (area: unknown) => {
+      opened.push(area);
+    },
+  });
+  const finds: string[] = [];
+  const reachedPage: string[] = [];
+  await using screen = await render(
+    <Page threadFinds={finds} reachedPage={reachedPage} />,
+    options,
+  );
+
+  await userEvent.click(screen.getByText("Artifact text"));
+  await userEvent.keyboard("{Control>}f{/Control}");
+
+  const preview = screen.getByLabelText("Artifact preview").element().getBoundingClientRect();
+  expect(opened).toEqual([
+    { x: preview.x, y: preview.y, width: preview.width, height: preview.height },
+  ]);
+  expect(finds).toEqual([]);
+  expect(reachedPage.includes("f")).toBe(false);
 });
