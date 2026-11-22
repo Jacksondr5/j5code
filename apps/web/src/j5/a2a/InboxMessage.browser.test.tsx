@@ -199,9 +199,12 @@ it("keeps links that need no panel when the asker has no thread here", async () 
 it("loads the sender's thread for an open ask when the client holds no shell for it", async () => {
   setup(null);
   threads.detail = null;
-  const message = (expanded: boolean) => (
+  const message = (expanded: boolean, connected = true) => (
     <InboxMessage
-      item={item({ message: "See [app](src/app.ts)." })}
+      item={item({
+        message: "See [app](src/app.ts) and [the docs](https://example.com/docs).",
+        connected,
+      })}
       agentLabel="Builder"
       expanded={expanded}
     />
@@ -211,16 +214,30 @@ it("loads the sender's thread for an open ask when the client holds no shell for
   await expect.element(screen.getByText(/See/)).toBeInTheDocument();
   expect(threads.detailReads).toEqual([]);
 
-  // Opened, its links wait while the thread loads rather than open against the project root.
+  // An open ask from a server that is down asks it nothing, and its links work as they can.
+  await screen.rerender(message(true, false));
+  expect(threads.detailReads).toEqual([]);
+  expect(screen.container.querySelector("[aria-busy]")).toBeNull();
+
+  // Connected, its links wait while the thread loads rather than open against the project
+  // root; the text stays readable.
   await screen.rerender(message(true));
   expect(threads.detailReads).toContain(senderThread.id);
-  const body = screen.container.querySelector("[aria-busy]");
-  expect(body?.hasAttribute("inert")).toBe(true);
+  expect(screen.container.querySelector("[aria-busy]")).not.toBeNull();
+  const docsClick = new MouseEvent("click", { bubbles: true, cancelable: true });
+  await act(() =>
+    screen
+      .getByRole("link", { name: /the docs/ })
+      .element()
+      .dispatchEvent(docsClick),
+  );
+  expect(docsClick.defaultPrevented).toBe(true);
+  expect(openUrlInPreview).not.toHaveBeenCalled();
 
   threads.detail = { ...senderThread, worktreePath: "/worktrees/sender" };
   await screen.rerender(message(true));
   await expect
     .element(screen.getByRole("link", { name: /app/ }))
     .toHaveAttribute("href", expect.stringContaining("/worktrees/sender/src/app.ts"));
-  expect(screen.container.querySelector("[inert]")).toBeNull();
+  expect(screen.container.querySelector("[aria-busy]")).toBeNull();
 });

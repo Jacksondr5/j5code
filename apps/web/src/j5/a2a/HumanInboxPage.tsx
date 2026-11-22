@@ -27,7 +27,7 @@ import {
   InboxIcon,
   RefreshCwIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { type SyntheticEvent, useEffect, useRef, useState } from "react";
 
 import ChatMarkdown from "../../components/ChatMarkdown";
 import { WorkspaceBreadcrumb, WorkspaceBreadcrumbItem } from "../../components/WorkspaceBreadcrumb";
@@ -204,7 +204,8 @@ export function InboxMessage({
     item.senderThreadId === null
       ? null
       : scopeThreadRef(item.environmentId, ThreadId.make(item.senderThreadId));
-  const sender = useSenderThread(threadRef, expanded);
+  // A server that is down answers nothing, so only a connected one is asked.
+  const sender = useSenderThread(threadRef, expanded && item.connected);
   const access = useConnectionAccess(item.environmentId);
   const operable = useAtomValue(
     j5Sharing.threadOperable(item.environmentId, threadRef?.threadId ?? null),
@@ -244,15 +245,25 @@ export function InboxMessage({
       {...(panelRef === undefined ? { onOpenArtifact: openArtifact } : {})}
     />
   );
-  const arm =
-    panelRef === undefined ? undefined : () => armInboxThreadPanel({ ref: panelRef, agentLabel });
+  // While the sender's thread loads, its links wait rather than open as an ask with no thread;
+  // the text stays readable and selectable.
+  const hold = (event: SyntheticEvent) => {
+    if (!(event.target instanceof Element) || event.target.closest("a, button") === null) return;
+    event.preventDefault();
+    event.stopPropagation();
+  };
+  const arm = sender.pending
+    ? hold
+    : panelRef === undefined
+      ? undefined
+      : () => armInboxThreadPanel({ ref: panelRef, agentLabel });
   return (
     // The context menu arms too: its items, "Open in integrated browser" among them, can come
-    // from a native menu that sends no click. Links wait, inert, while the sender's thread loads.
+    // from a native menu that sends no click.
     <div
       aria-busy={sender.pending || undefined}
       className="flex flex-col gap-4"
-      inert={sender.pending}
+      onAuxClickCapture={sender.pending ? hold : undefined}
       onClickCapture={arm}
       onContextMenuCapture={arm}
     >
