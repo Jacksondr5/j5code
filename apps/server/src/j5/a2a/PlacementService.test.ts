@@ -217,6 +217,52 @@ it.effect("keeps a moved child's placement: still under its spawner, still spawn
   }).pipe(Effect.provide(TestLayer)),
 );
 
+it.effect("leaves a child at the top level while its spawner is archived or deleted", () =>
+  Effect.gen(function* () {
+    const threadAgent = (name: string) => {
+      const threadId = ThreadId.make(`thread:${name}`);
+      return { kind: "agent" as const, id: participantIdForThread(threadId), threadId };
+    };
+    const spawner = threadAgent("gone-spawner");
+    const child = threadAgent("gone-child");
+    yield* prepare([spawner, child]);
+    yield* record({ index: 1, participant: child, provenance: spawnedBy(spawner) });
+    const read = yield* makeSpawnedChildrenRead.pipe(
+      Effect.provide(
+        Layer.mock(AgentCrewInstanceService)({ listInvolving: () => Effect.succeed([]) }),
+      ),
+    );
+    const ledger = yield* A2ALedger;
+    const spawnerEvent = (
+      kind: "participant.archived" | "participant.unarchived" | "participant.deleted",
+    ) =>
+      ledger.append({
+        commandId: CommCommandId.make(`${kind}:gone-spawner`),
+        projectId,
+        acceptedAt: timestamp,
+        event: {
+          kind,
+          sender: null,
+          receiver: spawner.id,
+          exchangeId: null,
+          correlationId: null,
+          payload: { participant: spawner },
+          createdAt: timestamp,
+        },
+      });
+    const spawned = read([child.threadId]).pipe(Effect.map((answer) => answer.spawnedByAgent));
+
+    assert.deepStrictEqual(yield* spawned, [child.threadId]);
+    // No live row would hold it, so hiding it from the top level would lose it.
+    yield* spawnerEvent("participant.archived");
+    assert.deepStrictEqual(yield* spawned, []);
+    yield* spawnerEvent("participant.unarchived");
+    assert.deepStrictEqual(yield* spawned, [child.threadId]);
+    yield* spawnerEvent("participant.deleted");
+    assert.deepStrictEqual(yield* spawned, []);
+  }).pipe(Effect.provide(TestLayer)),
+);
+
 it.effect(
   "tells a person who reaches some threads only of the spawners and agents they reach",
   () =>
@@ -253,6 +299,19 @@ it.effect(
             reason: null,
           },
         ],
+        // The shown child once held a seat; the agent that took it over is hidden.
+        replaced: [
+          {
+            seatName: "old-seat",
+            agentId: null,
+            participantId: shown.id,
+            threadId: shown.threadId,
+            playbookStepIds: [],
+            replacedBySeat: "hidden-replacement",
+            replacedByParticipantId: hidden.id,
+            replacedAt: timestamp,
+          },
+        ],
       };
       const read = yield* makeSpawnedChildrenRead.pipe(
         Effect.provide(
@@ -275,8 +334,13 @@ it.effect(
         [[captain.threadId, [shown.threadId, hidden.threadId, seat.threadId]]],
       );
       assert.deepStrictEqual(everything.spawnedByAgent, [shown.threadId, hidden.threadId]);
+      assert.strictEqual(
+        everything.entries[0]?.children[0]?.replaced?.replacedBy,
+        "hidden-replacement",
+      );
 
-      // Reaching the Captain and one child: that child, under its Captain, and nothing else.
+      // Reaching the Captain and one child: that child, under its Captain, and nothing else,
+      // not even the seat it held, since what replaced it is out of reach.
       const narrowed = yield* read(requested, reaching(captain, shown));
       assert.deepStrictEqual(narrowed, {
         entries: [
@@ -294,7 +358,13 @@ it.effect(
 
       for (const answer of [narrowed, childOnly]) {
         const told = JSON.stringify(answer);
-        for (const unseen of ["reach-hidden", "reach-seat", "Hidden Crew", "hidden-seat"])
+        for (const unseen of [
+          "reach-hidden",
+          "reach-seat",
+          "Hidden Crew",
+          "hidden-seat",
+          "hidden-replacement",
+        ])
           assert.notInclude(told, unseen);
       }
     }).pipe(Effect.provide(TestLayer)),

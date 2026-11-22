@@ -63,11 +63,17 @@ export const threadReadConnectionsAtom = Atom.make((get) => {
   return connections;
 }).pipe(Atom.withLabel("mobile-j5:thread-read-connections"));
 
-/** Each environment's Crew and Fleet revisions; a moved pair means placements may have changed. */
+/**
+ * Each environment's Crew, Fleet and sharing revisions: placements, or what the person reaches of
+ * them (a level that goes can take a child's spawner out of reach), may have changed.
+ */
 const placementRevisionsAtom = Atom.make((get) => {
   const revisions: Array<readonly [EnvironmentId, string | null]> = [];
   for (const id of get(threadReadConnectionsAtom).keys())
-    revisions.push([id, get(j5Environment.rereadOn("crew", "fleet")({ environmentId: id }))]);
+    revisions.push([
+      id,
+      get(j5Environment.rereadOn("crew", "fleet", "sharing")({ environmentId: id })),
+    ]);
   return JSON.stringify(revisions);
 }).pipe(Atom.withLabel("mobile-j5:placement-revisions"));
 
@@ -180,7 +186,7 @@ export function useThreadSpawnedChildren(ref: ScopedThreadRef | null): ReadonlyA
     read();
     const offConnections = appAtomRegistry.subscribe(threadReadConnectionsAtom, read);
     const offPlacements = appAtomRegistry.subscribe(
-      j5Environment.rereadOn("crew", "fleet")({ environmentId }),
+      j5Environment.rereadOn("crew", "fleet", "sharing")({ environmentId }),
       read,
     );
     return () => {

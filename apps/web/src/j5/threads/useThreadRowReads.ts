@@ -27,15 +27,19 @@ const threadReadConnectionsAtom = Atom.make((get) => {
 });
 
 /**
- * The Crew and Fleet revisions of each server where the person reaches less than all of it. The
- * Fleet roster bounds everyone else's re-reads (`useFleetRefresh`), but it is the server's own
- * read, so these servers re-read the rows on screen when a revision moves.
+ * The Crew, Fleet and sharing revisions of each server where the person reaches less than all of
+ * it. The Fleet roster bounds everyone else's re-reads (`useFleetRefresh`), but it is the server's
+ * own read, so these servers re-read the rows on screen when a revision moves. Sharing is there
+ * because a level that goes can take a child's spawner out of reach.
  */
 const narrowPlacementRevisionsAtom = Atom.make((get) => {
   const revisions: Array<readonly [EnvironmentId, string | null]> = [];
   for (const id of get(environmentCatalog.catalogValueAtom).entries.keys())
     if (get(j5Sharing.isNarrow(id)))
-      revisions.push([id, get(j5Environment.rereadOn("crew", "fleet")({ environmentId: id }))]);
+      revisions.push([
+        id,
+        get(j5Environment.rereadOn("crew", "fleet", "sharing")({ environmentId: id })),
+      ]);
   return JSON.stringify(revisions);
 });
 
