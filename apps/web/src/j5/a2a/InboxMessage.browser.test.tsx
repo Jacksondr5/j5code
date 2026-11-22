@@ -1,6 +1,7 @@
 import type { EnvironmentId } from "@t3tools/contracts";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 import type { PresentedHumanInboxItem } from "@t3tools/client-runtime/j5/inbox";
+import { AsyncResult } from "effect/reactivity";
 import { expect, it, vi } from "vite-plus/test";
 
 import { act, render } from "../../../test/render";
@@ -67,6 +68,7 @@ vi.mock(import("../../state/session"), async (original) => {
 import { __setClientSettingsForTests } from "../../hooks/useSettings";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { InboxMessage } from "./HumanInboxPage";
+import { inboxBrowserRef } from "./inboxBrowser";
 
 const item = {
   environmentId,
@@ -79,12 +81,45 @@ const item = {
   ].join("\n"),
 } as PresentedHumanInboxItem;
 
+/** Whether the app took over the click; the event stops at the link when it did. */
+const clickTakenOver = async (element: Element) => {
+  let defaultRan = true;
+  await act(() => {
+    defaultRan = element.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true }),
+    );
+  });
+  return !defaultRan;
+};
+
+it("opens an Inbox message's links, pull requests too, in the Inbox's own browser", async () => {
+  openUrlInPreview.mockReset().mockResolvedValue(AsyncResult.success(undefined));
+  __setClientSettingsForTests({
+    ...DEFAULT_CLIENT_SETTINGS,
+    browserLinkTarget: "app",
+    pullRequestLinksOpenInApp: true,
+  });
+  await using screen = await render(<InboxMessage item={item} />, { router: "/inbox" });
+
+  expect(await clickTakenOver(screen.getByRole("link", { name: /the docs/ }).element())).toBe(true);
+  expect(
+    await clickTakenOver(
+      screen.getByRole("link", { name: "https://github.com/Effect-TS/effect/pull/7" }).element(),
+    ),
+  ).toBe(true);
+  expect(openUrlInPreview.mock.calls.map(([input]) => [input.threadRef, input.url])).toEqual([
+    [inboxBrowserRef(environmentId), "https://example.com/docs"],
+    [inboxBrowserRef(environmentId), "https://github.com/Effect-TS/effect/pull/7"],
+  ]);
+  expect(screen.router?.state.location.pathname).toBe("/inbox");
+});
+
 // The Inbox renders a message with its sender's thread, whose right panel isn't on screen.
 it("opens an Inbox message's web links outside the sender thread's panel", async () => {
   openUrlInPreview.mockReset();
   __setClientSettingsForTests({
     ...DEFAULT_CLIENT_SETTINGS,
-    browserLinkTarget: "app",
+    browserLinkTarget: "system",
     pullRequestLinksOpenInApp: true,
   });
   await using screen = await render(<InboxMessage item={item} />, { router: "/inbox" });

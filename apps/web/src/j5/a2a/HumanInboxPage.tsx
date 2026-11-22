@@ -59,6 +59,12 @@ import {
   setInboxAnswerText,
   useInboxAnswerTexts,
 } from "./inboxAnswerDrafts";
+import {
+  InboxBrowserPane,
+  InboxBrowserShowButton,
+  useInboxBrowserShown,
+  useOpenInInboxBrowser,
+} from "./InboxBrowserPane";
 import { J5RecordPanel } from "./J5RecordPanel";
 import { OwnerAskAction } from "./OwnerAskAction";
 import { useScopedParticipantLabels } from "./ParticipantIdentitiesClient";
@@ -199,8 +205,9 @@ export function InboxMessage({ item }: { readonly item: HumanInboxItem }) {
       })
     : undefined;
   const navigate = useNavigate();
+  const openWebLink = useOpenInInboxBrowser(item.environmentId);
   // The Inbox shows no thread panel, so artifact links open the Artifacts page and web links
-  // open as they do outside a thread.
+  // open in the Inbox's own browser, or as they do outside a thread.
   const openArtifact = (path: string) =>
     void navigate({
       to: "/artifacts",
@@ -219,6 +226,7 @@ export function InboxMessage({ item }: { readonly item: HumanInboxItem }) {
       text={text}
       threadRef={threadRef ?? undefined}
       onOpenArtifact={openArtifact}
+      onOpenWebLink={openWebLink}
       noThreadPanel
     />
   );
@@ -506,6 +514,7 @@ const useInboxRefresh = createVisibleRefreshHook(() => {
 
 export function HumanInboxPage() {
   const navigate = useNavigate();
+  const browserShown = useInboxBrowserShown();
   const openSources = useAtomValue(openInboxSourcesAtom);
   const answeredSources = useAtomValue(answeredInboxSourcesAtom);
   const items = mergeHumanInboxSources(openSources);
@@ -681,123 +690,138 @@ export function HumanInboxPage() {
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <WorkspacePageHeader electron={isElectron}>
-          <WorkspaceBreadcrumb ariaLabel="Inbox breadcrumb">
-            <WorkspaceBreadcrumbItem current>Inbox</WorkspaceBreadcrumbItem>
-          </WorkspaceBreadcrumb>
-        </WorkspacePageHeader>
-        <ScrollArea className="min-h-0 flex-1">
-          <main className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-8 sm:py-10">
-            <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border pb-5">
-              <div>
-                <h1 className="text-balance text-2xl font-semibold tracking-tight">Inbox</h1>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {loading && items.length === 0
-                    ? "Loading questions waiting on you…"
-                    : inboxSummary({
-                        questions: items.length,
-                        complete,
-                        agentRequests: runtimeRequests.length + nativeQuestions.length,
-                        worktreeCleanups: cleanups.openCount,
-                      })}
-                </p>
+      <div className="flex min-h-0 min-w-0 flex-1">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          <WorkspacePageHeader
+            electron={isElectron}
+            reserveNativeControls={isElectron && !browserShown}
+          >
+            <WorkspaceBreadcrumb ariaLabel="Inbox breadcrumb">
+              <WorkspaceBreadcrumbItem current>Inbox</WorkspaceBreadcrumbItem>
+            </WorkspaceBreadcrumb>
+          </WorkspacePageHeader>
+          <ScrollArea className="min-h-0 flex-1">
+            <main className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-8 sm:py-10">
+              <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border pb-5">
+                <div>
+                  <h1 className="text-balance text-2xl font-semibold tracking-tight">Inbox</h1>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {loading && items.length === 0
+                      ? "Loading questions waiting on you…"
+                      : inboxSummary({
+                          questions: items.length,
+                          complete,
+                          agentRequests: runtimeRequests.length + nativeQuestions.length,
+                          worktreeCleanups: cleanups.openCount,
+                        })}
+                  </p>
+                </div>
+                <div className="flex items-center gap-1">
+                  <InboxBrowserShowButton />
+                  <Button
+                    aria-label="Refresh inbox"
+                    disabled={refreshing}
+                    onClick={() => void refresh().catch(() => undefined)}
+                    size="sm"
+                    type="button"
+                    variant="ghost"
+                  >
+                    <RefreshCwIcon aria-hidden className="size-4" />
+                    Refresh
+                  </Button>
+                </div>
               </div>
-              <Button
-                aria-label="Refresh inbox"
-                disabled={refreshing}
-                onClick={() => void refresh().catch(() => undefined)}
-                size="sm"
-                type="button"
-                variant="ghost"
-              >
-                <RefreshCwIcon aria-hidden className="size-4" />
-                Refresh
-              </Button>
-            </div>
 
-            {notices.length > 0 ? (
-              <ul aria-live="polite" className="mt-4 space-y-1 text-sm text-muted-foreground">
-                {notices.map((notice) => (
-                  <li key={notice}>{notice}</li>
-                ))}
-              </ul>
-            ) : null}
+              {notices.length > 0 ? (
+                <ul aria-live="polite" className="mt-4 space-y-1 text-sm text-muted-foreground">
+                  {notices.map((notice) => (
+                    <li key={notice}>{notice}</li>
+                  ))}
+                </ul>
+              ) : null}
 
-            {error ? (
-              <div
-                aria-live="polite"
-                className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-md bg-destructive/8 px-4 py-3 text-sm text-destructive-foreground"
-              >
-                <span>{error}</span>
-                <Button
-                  onClick={() => void refresh().catch(() => undefined)}
-                  size="sm"
-                  type="button"
-                  variant="outline"
+              {error ? (
+                <div
+                  aria-live="polite"
+                  className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-md bg-destructive/8 px-4 py-3 text-sm text-destructive-foreground"
                 >
-                  Try again
-                </Button>
-              </div>
-            ) : null}
+                  <span>{error}</span>
+                  <Button
+                    onClick={() => void refresh().catch(() => undefined)}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    Try again
+                  </Button>
+                </div>
+              ) : null}
 
-            <CrewRuntimeRequestsSection requests={runtimeRequests} onOpenThread={openCrewThread} />
-            <NativeQuestionInboxSection questions={nativeQuestions} onOpenThread={openCrewThread} />
+              <CrewRuntimeRequestsSection
+                requests={runtimeRequests}
+                onOpenThread={openCrewThread}
+              />
+              <NativeQuestionInboxSection
+                questions={nativeQuestions}
+                onOpenThread={openCrewThread}
+              />
 
-            {complete &&
-            !loading &&
-            error === null &&
-            shownItems.length === 0 &&
-            cleanups.inPlace.length === 0 &&
-            runtimeRequests.length === 0 &&
-            nativeQuestions.length === 0 ? (
-              <div className="flex min-h-56 flex-col items-center justify-center px-6 py-12 text-center">
-                <span className="flex size-10 items-center justify-center rounded-full bg-success/10 text-success">
-                  <InboxIcon aria-hidden className="size-5" />
-                </span>
-                <h2 className="mt-4 text-base font-medium">Nothing is waiting on you</h2>
-                <p className="mt-1 max-w-sm text-sm leading-relaxed text-muted-foreground">
-                  New questions from agents will arrive here in urgency order.
-                </p>
-              </div>
-            ) : (
-              <ol className="divide-y divide-border/70">
-                {shownItems.map((item) => (
-                  <OpenInboxItem
-                    closed={closedOf(item)}
-                    answer={answer}
-                    answerText={answers[scopedInboxItemKey(item)] ?? ""}
-                    attachments={answerAttachments}
-                    item={item}
-                    key={scopedInboxItemKey(item)}
-                    onOpenThread={openThread}
-                    pendingExchangeId={pendingExchangeId}
-                    senderLabels={senderLabels}
-                    projectNameOf={projectNameOf}
-                    showEnvironment={showEnvironment}
-                  />
-                ))}
-              </ol>
-            )}
+              {complete &&
+              !loading &&
+              error === null &&
+              shownItems.length === 0 &&
+              cleanups.inPlace.length === 0 &&
+              runtimeRequests.length === 0 &&
+              nativeQuestions.length === 0 ? (
+                <div className="flex min-h-56 flex-col items-center justify-center px-6 py-12 text-center">
+                  <span className="flex size-10 items-center justify-center rounded-full bg-success/10 text-success">
+                    <InboxIcon aria-hidden className="size-5" />
+                  </span>
+                  <h2 className="mt-4 text-base font-medium">Nothing is waiting on you</h2>
+                  <p className="mt-1 max-w-sm text-sm leading-relaxed text-muted-foreground">
+                    New questions from agents will arrive here in urgency order.
+                  </p>
+                </div>
+              ) : (
+                <ol className="divide-y divide-border/70">
+                  {shownItems.map((item) => (
+                    <OpenInboxItem
+                      closed={closedOf(item)}
+                      answer={answer}
+                      answerText={answers[scopedInboxItemKey(item)] ?? ""}
+                      attachments={answerAttachments}
+                      item={item}
+                      key={scopedInboxItemKey(item)}
+                      onOpenThread={openThread}
+                      pendingExchangeId={pendingExchangeId}
+                      senderLabels={senderLabels}
+                      projectNameOf={projectNameOf}
+                      showEnvironment={showEnvironment}
+                    />
+                  ))}
+                </ol>
+              )}
 
-            <CrewWorktreeCleanupSection
-              errors={cleanups.errors}
-              items={cleanups.inPlace}
-              onAnswer={cleanups.answer}
-              pendingKey={cleanups.pendingKey}
-              showEnvironment={showEnvironment}
-            />
+              <CrewWorktreeCleanupSection
+                errors={cleanups.errors}
+                items={cleanups.inPlace}
+                onAnswer={cleanups.answer}
+                pendingKey={cleanups.pendingKey}
+                showEnvironment={showEnvironment}
+              />
 
-            <AnsweredShelf
-              cleanups={cleanups.shelf}
-              items={answeredItems}
-              onOpenThread={openThread}
-              senderLabels={senderLabels}
-              projectNameOf={projectNameOf}
-              showEnvironment={showEnvironment}
-            />
-          </main>
-        </ScrollArea>
+              <AnsweredShelf
+                cleanups={cleanups.shelf}
+                items={answeredItems}
+                onOpenThread={openThread}
+                senderLabels={senderLabels}
+                projectNameOf={projectNameOf}
+                showEnvironment={showEnvironment}
+              />
+            </main>
+          </ScrollArea>
+        </div>
+        <InboxBrowserPane />
       </div>
     </SidebarInset>
   );

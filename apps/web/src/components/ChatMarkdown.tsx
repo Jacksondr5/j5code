@@ -243,6 +243,10 @@ interface ChatMarkdownProps {
   onOpenArtifact?: ((artifactPath: string) => void) | undefined;
   /** J5 (case 33): the thread's right panel isn't on screen, so web links open as outside a thread. */
   noThreadPanel?: boolean | undefined;
+  /** J5 (case 33): takes a web link's click, pull request links included, when it returns true. */
+  onOpenWebLink?:
+    | ((url: string, event: { readonly metaKey: boolean; readonly ctrlKey: boolean }) => boolean)
+    | undefined;
   imageBaseDir?: string | undefined;
   workspaceMutationId?: string | null | undefined;
   onImageExpand?: ((preview: ExpandedImagePreview) => void) | undefined;
@@ -511,6 +515,7 @@ function useChatMarkdownState({
   sourceControlMedia = false,
   onOpenArtifact,
   noThreadPanel = false,
+  onOpenWebLink,
 }: ChatMarkdownProps) {
   const resolvedTheme = useRenderedAppearance();
   const markdownRef = useRef<HTMLElement>(null);
@@ -947,6 +952,7 @@ function useChatMarkdownState({
     openDeferredMarkdownLink,
     openExternalLinkInPreview,
     openMarkdownMedia,
+    onOpenWebLink,
     projects,
     linkedThreadPullRequestFor,
     resolveThreadPullRequest,
@@ -1099,6 +1105,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
       openMarkdownMedia,
       openChangeRequestLink,
       openDeferredMarkdownLink,
+      onOpenWebLink,
       linkTargetPreference,
       openExternalLinkInPreview,
       projects,
@@ -1204,6 +1211,11 @@ const CHAT_MARKDOWN_COMPONENTS = {
                   ? event.target
                   : event.currentTarget.querySelector("img"),
               );
+              return;
+            }
+            if (href && !event.defaultPrevented && onOpenWebLink?.(href, event)) {
+              event.preventDefault();
+              event.stopPropagation();
               return;
             }
             if (
@@ -1320,6 +1332,7 @@ const CHAT_MARKDOWN_COMPONENTS = {
             target={pullRequestPreviewTarget}
             confirmBeforeOpen={confirmBeforeOpen}
             onOpenPullRequest={(targetUrl) =>
+              onOpenWebLink?.(targetUrl, { metaKey: false, ctrlKey: false }) === true ||
               openChangeRequestLink(
                 {
                   metaKey: false,
