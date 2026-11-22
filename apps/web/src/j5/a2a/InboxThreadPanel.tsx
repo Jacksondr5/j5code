@@ -25,7 +25,11 @@ import { addBrowserSurface } from "../../components/preview/addBrowserSurface";
 import { usePreviewSession } from "../../components/preview/usePreviewSession";
 import { threadPullRequestPanelTarget } from "../../components/pullRequest/pullRequestDetail.logic";
 import { BrowserSettingsReadError } from "../../browser/openFileInPreview";
+import { recallCheckoutIsRepo } from "../../components/ChatView.logic";
+import { useDiffPanelStore } from "../../diffPanelStore";
 import { previewEnvironment } from "../../state/preview";
+import { useEnvironmentQuery } from "../../state/query";
+import { vcsEnvironment } from "../../state/vcs";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../../components/ui/button";
 import { toastManager } from "../../components/ui/toast";
@@ -253,8 +257,16 @@ function InboxThreadPanel(props: {
     void navigate({ to: "/$environmentId/$threadId", params: buildThreadRouteParams(ref) });
   const visible = open;
   // The add-tab menu offers what the thread's own does, less what the Inbox does not mirror
-  // (terminal, side chats, devices) and the Diff tab, which needs the thread's git status.
+  // (terminal, side chats, devices). Diff asks the same git status the thread does.
   const openPreview = useAtomCommand(previewEnvironment.open, { reportFailure: false });
+  const gitStatus = useEnvironmentQuery(
+    workspaceRoot === undefined
+      ? null
+      : vcsEnvironment.status({ environmentId: ref.environmentId, input: { cwd: workspaceRoot } }),
+  );
+  const isGitRepo =
+    workspaceRoot !== undefined &&
+    (gitStatus.data?.isRepo ?? recallCheckoutIsRepo(ref.environmentId, workspaceRoot) ?? true);
   const browserAvailable = canOperatePreview && (isPreviewSupportedInRuntime() || serverBrowser);
   const pullRequests = visibleThreadPullRequests(sender.pullRequests);
   const pullRequestTarget =
@@ -422,7 +434,10 @@ function InboxThreadPanel(props: {
         onAddBrowser={() => addBrowser()}
         onAddBrowserInProfile={addBrowser}
         onAddTerminal={NOOP}
-        onAddDiff={NOOP}
+        onAddDiff={() => {
+          useDiffPanelStore.getState().selectGitScope(ref, "branch");
+          useRightPanelStore.getState().open(ref, "diff");
+        }}
         onAddFiles={() => useRightPanelStore.getState().open(ref, "files")}
         onAddArtifacts={() => useRightPanelStore.getState().open(ref, "artifacts")}
         onAddPullRequest={() => {
@@ -433,7 +448,7 @@ function InboxThreadPanel(props: {
         onAddDevice={NOOP}
         browserAvailable={browserAvailable}
         terminalAvailable={false}
-        diffAvailable={false}
+        diffAvailable={sender.known && isGitRepo}
         filesAvailable={project !== null}
         artifactsAvailable={project !== null}
         pullRequestAvailable={pullRequestTarget !== null}
