@@ -35,6 +35,13 @@ it("shows the panel a link in an ask opened, and switches when a link in another
   store.openArtifact(refA, "plan.md");
   expect(useInboxThreadPanelStore.getState().shown).toEqual(askA);
 
+  // B's panel is open in its own thread. A commit lookup in B's ask marks a user action before it
+  // resolves, and falling back to the browser changes no panel.
+  store.open(refB, "artifacts");
+  armInboxThreadPanel(askB);
+  store.markUserAction(refB);
+  expect(useInboxThreadPanelStore.getState().shown).toEqual(askA);
+
   // A click that opens nothing in its thread's panel (a link to a new tab) leaves the panel.
   armInboxThreadPanel(askB);
   expect(useInboxThreadPanelStore.getState().shown).toEqual(askA);
@@ -44,15 +51,23 @@ it("shows the panel a link in an ask opened, and switches when a link in another
   expect(useInboxThreadPanelStore.getState().shown).toEqual(askA);
 
   // A lookup that resolves after the click still counts as the click's.
-  armInboxThreadPanel(askB);
   store.openFile(refB, "src/index.ts", 3);
   expect(useInboxThreadPanelStore.getState().shown).toEqual(askB);
 });
 
-it("leaves the panel shown when the armed thread's action closes its panel", () => {
+it("shows no panel when the armed thread's action closes it", () => {
   using _follow = setup();
   armInboxThreadPanel(askA);
   useRightPanelStore.getState().close(refA);
+  expect(useInboxThreadPanelStore.getState().shown).toBeNull();
+});
+
+it("forgets a click once the Inbox stops following, so a later action elsewhere is not its", () => {
+  const follow = setup();
+  armInboxThreadPanel(askA);
+  follow[Symbol.dispose]();
+  using _again = { [Symbol.dispose]: followInboxThreadPanelOpens() };
+  useRightPanelStore.getState().openArtifact(refA, "plan.md");
   expect(useInboxThreadPanelStore.getState().shown).toBeNull();
 });
 

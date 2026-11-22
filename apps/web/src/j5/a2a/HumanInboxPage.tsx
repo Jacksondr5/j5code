@@ -193,15 +193,18 @@ function OpenThreadButton({
 export function InboxMessage({
   item,
   agentLabel,
+  expanded,
 }: {
   readonly item: HumanInboxItem;
   readonly agentLabel: string;
+  /** Whether the ask is open for reading; a collapsed ask loads nothing of its thread. */
+  readonly expanded: boolean;
 }) {
   const threadRef =
     item.senderThreadId === null
       ? null
       : scopeThreadRef(item.environmentId, ThreadId.make(item.senderThreadId));
-  const sender = useSenderThread(threadRef);
+  const sender = useSenderThread(threadRef, expanded);
   const access = useConnectionAccess(item.environmentId);
   const operable = useAtomValue(
     j5Sharing.threadOperable(item.environmentId, threadRef?.threadId ?? null),
@@ -210,7 +213,10 @@ export function InboxMessage({
     threadRef !== null && sender.known && reachesAskingThreadPanel(access, operable)
       ? threadRef
       : undefined;
-  const project = useProject(scopeProjectRef(item.environmentId, ProjectId.make(item.projectId)));
+  // The sender's project, which a move into another project changes after the ask was sent.
+  const project = useProject(
+    scopeProjectRef(item.environmentId, ProjectId.make(sender.projectId ?? item.projectId)),
+  );
   const cwd = project
     ? projectScriptCwd({
         project: { cwd: project.workspaceRoot },
@@ -238,15 +244,12 @@ export function InboxMessage({
       {...(panelRef === undefined ? { onOpenArtifact: openArtifact } : {})}
     />
   );
+  const arm =
+    panelRef === undefined ? undefined : () => armInboxThreadPanel({ ref: panelRef, agentLabel });
   return (
-    <div
-      className="flex flex-col gap-4"
-      onClickCapture={
-        panelRef === undefined
-          ? undefined
-          : () => armInboxThreadPanel({ ref: panelRef, agentLabel })
-      }
-    >
+    // The context menu arms too: its items, "Open in integrated browser" among them, can come
+    // from a native menu that sends no click.
+    <div className="flex flex-col gap-4" onClickCapture={arm} onContextMenuCapture={arm}>
       {markdown(item.message)}
       {item.escalation === undefined ? null : <J5RecordPanel text={item.escalation.summary} />}
       {item.personaDraft === undefined ? null : <J5RecordPanel text={item.personaDraft.summary} />}
@@ -293,6 +296,7 @@ function OpenInboxItem({
   readonly onOpenThread: (item: HumanInboxItem) => void;
 }) {
   const urgency = urgencyPresentation[item.urgency];
+  const [expanded, setExpanded] = useState(false);
   const mayAnswer = useAtomValue(
     j5Environment.answerHumanExchange.permissionAtom(item.environmentId),
   );
@@ -312,7 +316,10 @@ function OpenInboxItem({
   const waitingOn = "blocked" in readiness ? readiness.blocked : null;
   return (
     <li className="border-b border-border/70 last:border-b-0">
-      <details className="group/details">
+      <details
+        className="group/details"
+        onToggle={(event) => setExpanded(event.currentTarget.open)}
+      >
         <summary className="flex cursor-pointer list-none items-start gap-3 px-1 py-4 outline-hidden marker:hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:gap-4 [&::-webkit-details-marker]:hidden">
           <Badge className="mt-0.5" variant={urgency.variant}>
             <span className="uppercase tracking-wide">{urgency.label}</span>
@@ -356,6 +363,7 @@ function OpenInboxItem({
         </summary>
         <div className="border-t border-border/50 px-1 pb-5 pt-4 sm:ms-24 sm:px-0 sm:pe-1">
           <InboxMessage
+            expanded={expanded}
             item={item}
             agentLabel={
               presentParticipantIdentity({

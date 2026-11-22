@@ -1,4 +1,6 @@
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
+import { formatFilePathForClipboard } from "@t3tools/client-runtime/media-actions";
+import { resolvePathLinkTarget } from "@t3tools/shared/fileLinks";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import {
   AuthPreviewOperateScope,
@@ -17,6 +19,8 @@ import {
 import { RightPanelSurfaceContent } from "../../components/chat/RightPanelSurfaceContent";
 import { usePreviewSession } from "../../components/preview/usePreviewSession";
 import { Button } from "../../components/ui/button";
+import { toastManager } from "../../components/ui/toast";
+import { writeTextToClipboard } from "../../hooks/useCopyToClipboard";
 import { previewRuntimeTabId } from "../../browser/previewRuntimeTabId";
 import { isCommandPaletteOpen } from "../../commandPaletteBus";
 import { isElectron } from "../../env";
@@ -220,7 +224,7 @@ function InboxThreadPanel(props: {
 }) {
   const { thread, activeSurface, open, keybindings } = props;
   const ref = thread.ref;
-  const sender = useSenderThread(ref);
+  const sender = useSenderThread(ref, true);
   const project = useProject(
     sender.projectId === null
       ? null
@@ -374,7 +378,7 @@ function InboxThreadPanel(props: {
         onMoveSurface={(surfaceId, toIndex) =>
           useRightPanelStore.getState().moveSurface(ref, surfaceId, toIndex)
         }
-        onCopyFilePath={NOOP}
+        onCopyFilePath={(relativePath) => copyFilePath(relativePath, workspaceRoot)}
         onAddBrowser={NOOP}
         onAddBrowserInProfile={NOOP}
         onAddTerminal={NOOP}
@@ -402,6 +406,25 @@ function InboxThreadPanel(props: {
   );
 }
 
+/** The file tab's "Copy file path", as the thread's panel copies it. */
+function copyFilePath(relativePath: string, workspaceRoot: string | undefined) {
+  const path = formatFilePathForClipboard(
+    relativePath,
+    resolvePathLinkTarget(relativePath, workspaceRoot ?? ""),
+  );
+  void writeTextToClipboard(path, "path").then(
+    (copied) => {
+      if (copied) toastManager.add({ type: "success", title: "Path copied", description: path });
+    },
+    (error: unknown) =>
+      toastManager.add({
+        type: "error",
+        title: "Failed to copy path",
+        description: error instanceof Error ? error.message : "An error occurred.",
+      }),
+  );
+}
+
 function shortcutContext() {
   return {
     terminalFocus: false,
@@ -421,7 +444,8 @@ function InboxThreadPanelHeader(props: {
   return (
     <div className="flex h-8 shrink-0 items-center gap-2 border-b border-border px-3 text-xs text-muted-foreground">
       <span className="truncate font-medium text-foreground/80">{props.agentLabel}</span>
-      {props.threadTitle === null ? null : (
+      {/* An agent with no name of its own is labelled by its thread's title. */}
+      {props.threadTitle === null || props.threadTitle === props.agentLabel ? null : (
         <>
           <span aria-hidden>·</span>
           <span className="truncate">{props.threadTitle}</span>

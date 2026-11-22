@@ -31,7 +31,11 @@ const { environmentId, project, senderThread, threads } = vi.hoisted(() => {
     worktreePath: null as string | null,
   };
   // What the client holds for the sender thread: its shell, or only its loaded detail.
-  const threads = { shell: senderThread as typeof senderThread | null, detail: senderThread };
+  const threads = {
+    shell: senderThread as typeof senderThread | null,
+    detail: senderThread,
+    detailReads: [] as string[],
+  };
   return { environmentId, project, senderThread, threads };
 });
 
@@ -57,13 +61,11 @@ vi.mock(import("../../state/threads"), async (original) => {
   const { EMPTY_ENVIRONMENT_THREAD_STATE } = await import("@t3tools/client-runtime/state/threads");
   return {
     ...(await original()),
-    useEnvironmentThread: ((_environmentId: unknown, threadId: unknown) =>
-      threadId === null
-        ? EMPTY_ENVIRONMENT_THREAD_STATE
-        : {
-            ...EMPTY_ENVIRONMENT_THREAD_STATE,
-            data: Option.some({ thread: threads.detail }),
-          }) as never,
+    useEnvironmentThread: ((_environmentId: unknown, threadId: string | null) => {
+      if (threadId === null) return EMPTY_ENVIRONMENT_THREAD_STATE;
+      threads.detailReads.push(threadId);
+      return { ...EMPTY_ENVIRONMENT_THREAD_STATE, data: Option.some({ thread: threads.detail }) };
+    }) as never,
   };
 });
 vi.mock(import("../../state/server"), async (original) => {
@@ -110,6 +112,7 @@ function item(overrides: Partial<PresentedHumanInboxItem> = {}) {
 function setup(shell: typeof threads.shell = senderThread) {
   threads.shell = shell;
   threads.detail = senderThread;
+  threads.detailReads = [];
   openUrlInPreview.mockReset();
   openUrlInPreview.mockResolvedValue({ _tag: "Success", value: undefined });
   __setClientSettingsForTests({
@@ -135,7 +138,7 @@ const click = (element: Element) =>
 
 it("opens an Inbox message's links in the asking thread's own panel", async () => {
   setup();
-  await using screen = await render(<InboxMessage item={item()} agentLabel="Builder" />, {
+  await using screen = await render(<InboxMessage item={item()} agentLabel="Builder" expanded />, {
     router: "/inbox",
   });
   using openPullRequest = vi
@@ -163,7 +166,7 @@ it("opens an Inbox message's links in the asking thread's own panel", async () =
 it("keeps links that need no panel when the asker has no thread here", async () => {
   setup();
   await using screen = await render(
-    <InboxMessage item={item({ senderThreadId: null })} agentLabel="Builder" />,
+    <InboxMessage item={item({ senderThreadId: null })} agentLabel="Builder" expanded />,
     { router: "/inbox" },
   );
   using openPullRequest = vi
@@ -190,14 +193,24 @@ it("keeps links that need no panel when the asker has no thread here", async () 
   });
 });
 
-it("resolves file links in the sender's worktree when the client holds no shell for its thread", async () => {
+it("loads the sender's thread for an open ask when the client holds no shell for it", async () => {
   setup(null);
   threads.detail = { ...senderThread, worktreePath: "/worktrees/sender" };
-  await using screen = await render(
-    <InboxMessage item={item({ message: "See [app](src/app.ts)." })} agentLabel="Builder" />,
-    { router: "/inbox" },
+  const message = (expanded: boolean) => (
+    <InboxMessage
+      item={item({ message: "See [app](src/app.ts)." })}
+      agentLabel="Builder"
+      expanded={expanded}
+    />
   );
+  // A collapsed ask reads nothing of its thread.
+  await using screen = await render(message(false), { router: "/inbox" });
+  await expect.element(screen.getByText(/See/)).toBeInTheDocument();
+  expect(threads.detailReads).toEqual([]);
+
+  await screen.rerender(message(true));
   await expect
     .element(screen.getByRole("link", { name: /app/ }))
     .toHaveAttribute("href", expect.stringContaining("/worktrees/sender/src/app.ts"));
+  expect(threads.detailReads).toContain(senderThread.id);
 });

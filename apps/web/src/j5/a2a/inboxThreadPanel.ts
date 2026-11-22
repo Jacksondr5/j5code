@@ -24,8 +24,9 @@ export const useInboxThreadPanelStore = create<InboxThreadPanelState>(() => ({
 }));
 
 /**
- * Called on every click inside an ask, before its link handles it. A link that opens something in
- * the asking thread's panel, now or after a lookup, then shows that panel beside the Inbox.
+ * Called on every click or context menu inside an ask, before its link handles it. A link that
+ * opens something in the asking thread's panel, now, after a lookup, or from a native menu, then
+ * shows that panel beside the Inbox.
  */
 export function armInboxThreadPanel(thread: InboxPanelThread): void {
   const revision = useRightPanelStore.getState().getUserActionRevision(thread.ref);
@@ -33,21 +34,28 @@ export function armInboxThreadPanel(thread: InboxPanelThread): void {
 }
 
 /**
- * Shows the armed thread's panel once a user action opens it. Agent-driven and automatic opens
- * are not user actions, so they never pull a panel beside the Inbox.
+ * Shows the armed thread's panel once a user action changes it and leaves it open. Agent-driven
+ * and automatic opens are not user actions, and a link that only marks one (a commit lookup that
+ * falls back to the browser) changes no panel, so neither pulls a panel beside the Inbox.
  */
 export function followInboxThreadPanelOpens(): () => void {
-  return useRightPanelStore.subscribe((state) => {
+  const unsubscribe = useRightPanelStore.subscribe((state, previous) => {
     const { armed } = useInboxThreadPanelStore.getState();
     if (armed === null) return;
-    const revision = state.userActionRevisionByThreadKey[scopedThreadKey(armed.ref)] ?? 0;
-    if (revision === armed.revision) return;
+    const key = scopedThreadKey(armed.ref);
+    if ((state.userActionRevisionByThreadKey[key] ?? 0) === armed.revision) return;
+    if (state.byThreadKey[key] === previous.byThreadKey[key]) return;
     if (!selectThreadRightPanelState(state.byThreadKey, armed.ref).isOpen) return;
     useInboxThreadPanelStore.setState({
       shown: { ref: armed.ref, agentLabel: armed.agentLabel },
       armed: null,
     });
   });
+  return () => {
+    unsubscribe();
+    // An action taken after leaving the Inbox is not the click's.
+    useInboxThreadPanelStore.setState({ armed: null });
+  };
 }
 
 /**

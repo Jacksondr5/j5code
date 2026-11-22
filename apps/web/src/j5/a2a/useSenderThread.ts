@@ -12,13 +12,16 @@ const NO_PULL_REQUESTS: ReadonlyArray<ThreadPullRequestLink> = [];
 
 /**
  * The asking agent's thread as an ask needs it: its shell, or, when the client holds no shell for
- * it, the thread itself, loaded rather than guessed from the project root.
+ * it and `load` is set, the thread itself, loaded rather than guessed from the project root. The
+ * only read that has it is the thread's whole detail stream, so callers set `load` only for an ask
+ * someone is reading.
  */
-export function useSenderThread(ref: ScopedThreadRef | null) {
+export function useSenderThread(ref: ScopedThreadRef | null, load: boolean) {
   const shell = useThreadShell(ref);
+  const loadDetail = shell === null && load && ref !== null;
   const detail = useEnvironmentThread(
-    shell === null ? (ref?.environmentId ?? null) : null,
-    shell === null ? (ref?.threadId ?? null) : null,
+    loadDetail ? ref.environmentId : null,
+    loadDetail ? ref.threadId : null,
   );
   const thread = shell ?? Option.getOrNull(detail.data)?.thread ?? null;
   return {

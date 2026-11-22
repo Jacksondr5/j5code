@@ -202,7 +202,7 @@ interface DiffPanelProps {
   composerDraftTarget: ScopedThreadRef | DraftId;
   workspaceMutationId: string | null;
   visible: boolean;
-  /** J5 (FORK.md): the thread whose diff to show where the route names none, such as the Inbox. */
+  /** J5 (case 127): the thread whose diff to show where the route names none, such as the Inbox. */
   threadRef?: ScopedThreadRef | undefined;
 }
 
