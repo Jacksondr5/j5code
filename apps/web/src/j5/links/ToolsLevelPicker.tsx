@@ -19,7 +19,7 @@ const describe = (level: ToolsLevel, holder: string, other: string) =>
   level === "off"
     ? `Messages only. ${holder}'s agents can't use tools on ${other}.`
     : level === "full-access"
-      ? `${accessConfig[level].description} Also needed to start Peer Agents on ${other} and act on ${other}'s own threads.`
+      ? `${accessConfig[level].description} Also needed to act on ${other}'s own threads.`
       : accessConfig[level].description;
 
 /** What one server's agents may do on the other: Off, then upstream's access levels. */

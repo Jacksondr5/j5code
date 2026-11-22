@@ -77,7 +77,7 @@ additions:
 
 In [Remote access](../../user/remote-access.md), the desktop app's first SSH launch downloads the
 J5 Code server release for the desktop app's version to `~/.j5code/runtime` on the host. The host
-must be Linux x64 or an Apple Silicon Mac, the platforms J5 Code publishes.
+must be Linux x64 or an Apple Silicon Mac.
 
 ## Linked environments
 
@@ -88,7 +88,7 @@ use tools on another. In J5 Code on web and desktop, a link does more, and you s
   in both directions. [Connecting two J5 servers](./j5-peering.md) explains how messages travel.
 - **Each direction has its own Tools level.** You choose what agents on each server may do on the
   other: **Off**, which leaves messages only, or one of T3 Code's access levels. Both start at
-  Supervised. Starting Peer Agents on the other server needs **Full access**.
+  Supervised.
 - **You don't paste a pairing code, and rarely type an address.** Add the other server to this app
   first, with **Add environment** and a pairing link that manages access. J5 Code finds the
   address each server reaches the other at; when it can't, or you know a better one, enter it

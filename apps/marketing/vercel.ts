@@ -19,8 +19,17 @@ export const config: VercelConfig = {
       destination: "/new/index.html",
     },
   ],
-  // The linking page was /peering, and released apps still link there.
-  redirects: [{ source: "/peering", destination: "/linking", permanent: true }],
+  // The linking page was /peering, and released apps still link there. Released apps also link to
+  // /whats-new/0-1-3, whose T3 Code roundup is now a section of the 0.0.52 page.
+  redirects: [
+    { source: "/peering", destination: "/linking", permanent: true },
+    { source: "/whats-new/0-1-3", destination: "/whats-new/0-0-52#t3-code", permanent: true },
+    {
+      source: "/whats-new/0-1-3/:rest*",
+      destination: "/whats-new/0-0-52#t3-code",
+      permanent: true,
+    },
+  ],
   // `curl … | sh` needs the installer served as a plain shell script. Caches may
   // keep it for up to five minutes, so a changed installer reaches everyone
   // within five minutes of a deploy.

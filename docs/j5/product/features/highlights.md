@@ -34,3 +34,4 @@ Mobile shows no highlights yet. Entries already say which clients they are for, 
 
 - 2026-10-17 — defined, designed and built; launched with Peering ([#624](https://github.com/Jacksondr5/j5code/issues/624)).
 - 2026-10-24 — an upstream advance proposes its own highlights, and may add one roundup entry for smaller upstream changes (Jackson).
+- 2026-11-21 — the 0.0.52 stable retired every earlier entry for three under new ids that cover the whole release, J5's and T3 Code's together, because someone updating from 0.0.51 had seen at most one of them (Jackson).
