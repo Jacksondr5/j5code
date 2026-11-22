@@ -37,6 +37,7 @@ import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as DesktopRendererHistory from "../telemetry/DesktopRendererHistory.ts";
 import { makeQuitShortcutHandler } from "./QuitHold.ts";
 import { copyContextMenuImage } from "./ContextMenuImage.ts";
+import { installFindBar } from "../j5/FindBar.ts";
 
 const TITLEBAR_HEIGHT = 40;
 // Match --workspace-topbar-height in apps/web/src/index.css; native macOS buttons stay 14 points at any zoom.
@@ -417,6 +418,7 @@ export const make = Effect.gen(function* () {
 
     pendingMainReveals.set(window, Effect.void);
     yield* rendererHistory.register(window.webContents, { surface: "main" });
+    installFindBar(window, environment);
     if (environment.platform === "darwin") {
       window.setAutoHideCursor(false);
     }
