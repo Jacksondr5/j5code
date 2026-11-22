@@ -11,12 +11,13 @@ import { executeAtomQuery } from "@t3tools/client-runtime/state/runtime";
 import type { ChatAttachment, EnvironmentId } from "@t3tools/contracts";
 import { type HumanInboxResponse, scopedInboxItemKey } from "@t3tools/contracts/j5";
 import * as Cause from "effect/Cause";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { uuidv4 } from "../../lib/uuid";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { j5Environment } from "../state";
 import { clearAnswerAttachments, readyAnswerAttachments } from "./answerAttachmentDrafts";
+import { pruneAnswerDrafts, setAnswerText, useAnswerTexts } from "./answerDrafts";
 import { answeredInboxQueryAtom, inboxCountQueryAtom, openInboxQueryAtom } from "./inboxSources";
 
 type Sources = J5ReadSources<HumanInboxResponse>;
@@ -58,29 +59,33 @@ const notifyCountChanged = (environmentId: EnvironmentId) =>
   appAtomRegistry.refresh(inboxCountQueryAtom(environmentId));
 
 /**
- * The answers being typed and sent on the Inbox, as web's Inbox keeps them: words survive until
- * the server takes the answer; an item that closes while the person has typed into it stays with
- * their words and who answered (AC17); a retry with the same words reuses its request id; and a
- * server whose person changes drops its unsent words.
+ * The Inbox's answers, as web keeps them: words are saved with the attachments until the server
+ * takes the answer or a read shows the ask closed; an ask that closes while typed into stays (AC17);
+ * a retry with the same words reuses its request id; another person's words are never shown.
  */
 export function useInboxAnswers(input: {
   readonly openSources: Sources;
   readonly items: ReadonlyArray<PresentedHumanInboxItem>;
   readonly answeredSources: Sources;
   readonly answered: ReadonlyArray<PresentedHumanInboxItem>;
+  /**
+   * Drop saved answers whose ask closed. Only the Inbox does, as on web: it shows every server's
+   * asks, so its kept items are all of them, where a Captain's pinned asks see one server's.
+   */
+  readonly pruneClosed?: boolean;
 }) {
-  const { openSources, items, answeredSources, answered } = input;
-  const [answers, setAnswers] = useState<Readonly<Record<string, string>>>({});
+  const { openSources, items, answeredSources, answered, pruneClosed = false } = input;
+  const savedAnswers = useAnswerTexts();
   const personScopes = JSON.stringify(
     openSources.sources.map((source) => [source.environmentId, source.data?.personId ?? null]),
   );
-  const [answersPersonScopes, setAnswersPersonScopes] = useState(personScopes);
-  if (answersPersonScopes !== personScopes) {
-    setAnswersPersonScopes(personScopes);
+  const answers = useMemo(() => {
     const keep = keepForPersonScopes(personScopes);
-    const entries = Object.entries(answers).filter(([key]) => keep(key));
-    if (entries.length !== Object.keys(answers).length) setAnswers(Object.fromEntries(entries));
-  }
+    const entries = Object.entries(savedAnswers).filter(([key]) => keep(key));
+    return entries.length === Object.keys(savedAnswers).length
+      ? savedAnswers
+      : Object.fromEntries(entries);
+  }, [savedAnswers, personScopes]);
   // An item that closed while the person was answering stays in place with their words. It is
   // kept in the render it closes in, so its row is never unmounted and drawn again closed;
   // `closedWith` is the answered list as it was then, to tell a later read of it.
@@ -105,6 +110,10 @@ export function useInboxAnswers(input: {
     );
     setRetention({ openSources, items, answers, kept, closedWith });
   }
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- saved answers outlive the screen, so a read showing their ask closed, here or while away, drops them.
+  useEffect(() => {
+    if (pruneClosed) pruneAnswerDrafts(openSources, new Set(kept.keys()));
+  }, [pruneClosed, openSources, kept]);
   const shownItems = kept.size === 0 ? items : [...items, ...kept.values()].sort(compareInboxItems);
   const answeredByKey = new Map(answered.map((item) => [scopedInboxItemKey(item), item]));
   const closedOf = (item: PresentedHumanInboxItem): ClosedItem | undefined => {
@@ -182,13 +191,7 @@ export function useInboxAnswers(input: {
       refresh: (environmentId) =>
         refreshAfterAnswer(environmentId).finally(() => clearAnswerAttachments(item)),
       notifyChanged: notifyCountChanged,
-      onAccepted: () => {
-        setAnswers((current) => {
-          const next = { ...current };
-          delete next[itemKey];
-          return next;
-        });
-      },
+      onAccepted: () => setAnswerText(item, ""),
       setPendingExchangeId: setPendingKey,
       setError: (message) => setError(message === null ? null : { key: itemKey, message }),
     });
@@ -201,10 +204,7 @@ export function useInboxAnswers(input: {
       const key = scopedInboxItemKey(item);
       return answers[key] ?? (key === pendingKey ? (sentText ?? "") : "");
     },
-    setAnswerText: (item: PresentedHumanInboxItem, text: string) => {
-      const key = scopedInboxItemKey(item);
-      setAnswers((current) => ({ ...current, [key]: text }));
-    },
+    setAnswerText,
     answer,
     pendingKey,
     errorFor: (item: PresentedHumanInboxItem) =>

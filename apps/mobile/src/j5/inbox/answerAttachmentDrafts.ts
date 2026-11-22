@@ -9,12 +9,13 @@ import {
   questionAttachmentPreparationAtom,
 } from "../../state/question-attachments";
 import { environmentServerConfigsAtom } from "../../state/server";
-import { clearComposerDraft, composerDraftsAtom } from "../../state/use-composer-drafts";
+import { composerDraftsAtom } from "../../state/use-composer-drafts";
 import {
   answerAttachmentDraftKey,
   answerAttachmentsReadiness,
   type AnswerTarget,
 } from "./answerAttachments.logic";
+import { clearAnswerDraft } from "./answerDrafts";
 
 export { answerAttachmentDraftKey, type AnswerTarget } from "./answerAttachments.logic";
 
@@ -62,9 +63,4 @@ export function readyAnswerAttachments(
 }
 
 /** The answer was delivered: the server copied its files into the agent's thread. */
-export function clearAnswerAttachments(target: AnswerTarget) {
-  const key = answerAttachmentDraftKey(target);
-  clearComposerDraft(key);
-  const { [key]: _dropped, ...rest } = appAtomRegistry.get(questionAttachmentPreparationAtom);
-  appAtomRegistry.set(questionAttachmentPreparationAtom, rest);
-}
+export const clearAnswerAttachments = clearAnswerDraft;
