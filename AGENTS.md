@@ -36,6 +36,8 @@ Channel both "measure twice, cut once" and "yagni". Fight scope creep. Try to ho
 - **Error out instead of building machinery for rare cases.** Guards, retries, reconciliation sweeps, and extra states for edge cases that are rare or nearly impossible cost more than they return. Fail visibly and let the person fix it.
 - **Prefer giving the person and agents a tool to repair a problem** over making the platform recover on its own.
 - **Follow upstream** for shared concepts: its names, its semantics (settle, archive, runtime modes), and its UI conventions. Measure an upstream surface before inventing a style.
+- **Don't fix or guard upstream's behavior without evidence it hits J5.** Correctness and edge cases aren't enough. Before calling a finding blocking, ask whether it is J5's bug or upstream's behavior reached through J5, and check how often it really happens: the developer's live database can be read, read-only. Keep review findings to J5's code and to the choice between following upstream and diverging. Send problems with upstream's own design to the give-back list, not to J5 work. Editing an upstream file to extend a J5 feature is fine.
+- **J5 skills link to upstream's skills;** don't edit upstream's skills in place.
 
 The rest of this document is meant to help you navigate the codebase and make changes effectively. Think of these instructions less as "hard rules", more as "good defaults". The developer's preferences should be able to override anything here.
 
