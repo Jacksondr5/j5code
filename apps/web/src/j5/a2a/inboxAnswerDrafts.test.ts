@@ -10,7 +10,25 @@ import {
   pruneInboxAnswerDrafts,
   setInboxAnswerText,
   useInboxAnswerTexts,
+  useUnsavedInboxAnswerTexts,
 } from "./inboxAnswerDrafts";
+
+// The stores pick their storage when loaded; this one can be filled up like a real localStorage.
+const storage = vi.hoisted(() => {
+  const items = new Map<string, string>();
+  const storage = {
+    full: false,
+    getItem: (name: string) => items.get(name) ?? null,
+    setItem: (name: string, value: string) => {
+      if (storage.full)
+        throw new DOMException("The quota has been exceeded.", "QuotaExceededError");
+      items.set(name, value);
+    },
+    removeItem: (name: string) => void items.delete(name),
+  };
+  vi.stubGlobal("localStorage", storage);
+  return storage;
+});
 
 vi.mock("../../lib/attachmentUploadQueue", () => ({ releaseDraftAttachments: vi.fn() }));
 const { serializeComposerImages } = vi.hoisted(() => ({ serializeComposerImages: vi.fn() }));
@@ -68,6 +86,29 @@ it("keeps a half-typed answer exactly, with its uploaded files, through reloads 
       { id: "b", uploadedAttachmentId: "upload-b" },
     ]);
   } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("marks the answers whose words a full localStorage couldn't save, until a save succeeds", async () => {
+  vi.useFakeTimers();
+  const unsaved = () => [...useUnsavedInboxAnswerTexts.getState().itemKeys];
+  try {
+    setInboxAnswerText(key(local, "ask-1"), "Saved before it filled up");
+    await vi.advanceTimersByTimeAsync(300);
+    storage.full = true;
+    setInboxAnswerText(key(local, "ask-2"), "Typed once it was full");
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(unsaved()).toEqual([key(local, "ask-2")]);
+
+    storage.full = false;
+    setInboxAnswerText(key(local, "ask-2"), "Typed once it was full, then freed");
+    await vi.advanceTimersByTimeAsync(300);
+
+    expect(unsaved()).toEqual([]);
+  } finally {
+    storage.full = false;
     vi.useRealTimers();
   }
 });

@@ -1,12 +1,13 @@
 import type { ChatAttachment, EnvironmentId } from "@t3tools/contracts";
 import { answerAttachmentSupport } from "@t3tools/client-runtime/j5/inbox";
 import { formatAttachmentSize } from "@t3tools/client-runtime/state/attachments";
-import { FileIcon, RefreshCwIcon, XIcon } from "lucide-react";
+import { CircleAlertIcon, FileIcon, RefreshCwIcon, XIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { ComposerAttachButton } from "../../components/chat/ComposerAttachmentStrip";
 import { shouldHandleComposerAttachmentPaste } from "../../components/chat/composerAttachmentFiles";
 import { Button } from "../../components/ui/button";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip";
 import { composerFileNeedsReattach, useComposerDraftStore } from "../../composerDraftStore";
 import {
   getUploadedAttachments,
@@ -27,6 +28,7 @@ import {
   inboxAnswerDraftId,
   inboxAnswerDrafts,
   persistInboxAnswerImages,
+  useUnsavedInboxAnswerTexts,
 } from "./inboxAnswerDrafts";
 
 const NO_ATTACHMENTS: ReadonlyArray<AnswerAttachment> = [];
@@ -205,7 +207,11 @@ export function AnswerAttachmentList(props: {
   readonly onRemove: ((id: string) => void) | null;
 }) {
   const uploadsByImageId = useAttachmentUploadStore((state) => state.uploadsByImageId);
-  if (props.attachments.length === 0 && props.error === null) return null;
+  const nonPersistedImageIds = useComposerDraftStore(
+    (state) => state.draftsByThreadKey[inboxAnswerDraftId(props.answerKey)]?.nonPersistedImageIds,
+  );
+  const textUnsaved = useUnsavedInboxAnswerTexts((state) => state.itemKeys.has(props.answerKey));
+  if (props.attachments.length === 0 && props.error === null && !textUnsaved) return null;
   return (
     <div className="flex flex-col gap-2">
       {props.attachments.length > 0 ? (
@@ -225,11 +231,31 @@ export function AnswerAttachmentList(props: {
                 key={attachment.id}
               >
                 {attachment.type === "image" ? (
-                  <img
-                    alt=""
-                    className="size-8 shrink-0 rounded-sm object-cover"
-                    src={attachment.previewUrl}
-                  />
+                  <span className="relative shrink-0">
+                    <img
+                      alt=""
+                      className="size-8 rounded-sm object-cover"
+                      src={attachment.previewUrl}
+                    />
+                    {nonPersistedImageIds?.includes(attachment.id) ? (
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <span
+                              role="img"
+                              aria-label="Draft attachment may not persist"
+                              className="absolute left-0.5 top-0.5 inline-flex items-center justify-center rounded bg-background/85 p-0.5 text-warning-foreground"
+                            >
+                              <CircleAlertIcon className="size-3" />
+                            </span>
+                          }
+                        />
+                        <TooltipPopup side="top">
+                          Draft attachment could not be saved locally and may be lost on navigation.
+                        </TooltipPopup>
+                      </Tooltip>
+                    ) : null}
+                  </span>
                 ) : (
                   <FileIcon aria-hidden className="size-4 shrink-0 text-muted-foreground" />
                 )}
@@ -274,6 +300,11 @@ export function AnswerAttachmentList(props: {
             );
           })}
         </ul>
+      ) : null}
+      {textUnsaved ? (
+        <p className="text-sm text-warning-foreground">
+          This reply isn't saved on this device. Send it or copy it before reloading.
+        </p>
       ) : null}
       {props.error === null ? null : (
         <p className="text-sm text-destructive" role="alert">

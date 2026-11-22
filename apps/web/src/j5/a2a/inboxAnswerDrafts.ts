@@ -42,10 +42,37 @@ interface InboxAnswerTexts {
   readonly byItemKey: Readonly<Record<string, string>>;
 }
 
+/** The asks whose words the last save couldn't write, as when localStorage is full. */
+export const useUnsavedInboxAnswerTexts = create<{ readonly itemKeys: ReadonlySet<string> }>(
+  () => ({ itemKeys: new Set() }),
+);
+
+const baseTextStorage = typeof localStorage !== "undefined" ? localStorage : createMemoryStorage();
+// The words as the last successful write left them in storage, which a reload brings back.
+let savedTexts: Readonly<Record<string, string>> = {};
+
 // The words are kept apart from the composer draft: its prompt carries inline file tokens that the
 // store adds, rewrites and removes, and an answer is delivered exactly as typed.
 const textStorage = createDeferredStorage<StorageValue<InboxAnswerTexts>>(
-  typeof localStorage !== "undefined" ? localStorage : createMemoryStorage(),
+  {
+    getItem: (name) => baseTextStorage.getItem(name),
+    setItem: (name, raw) => {
+      const { byItemKey } = (JSON.parse(raw) as StorageValue<InboxAnswerTexts>).state;
+      try {
+        baseTextStorage.setItem(name, raw);
+      } catch {
+        useUnsavedInboxAnswerTexts.setState({
+          itemKeys: new Set(Object.keys(byItemKey).filter((k) => byItemKey[k] !== savedTexts[k])),
+        });
+        return;
+      }
+      savedTexts = byItemKey;
+      if (useUnsavedInboxAnswerTexts.getState().itemKeys.size > 0) {
+        useUnsavedInboxAnswerTexts.setState({ itemKeys: new Set() });
+      }
+    },
+    removeItem: (name) => baseTextStorage.removeItem(name),
+  },
   (value) => JSON.stringify(value),
 );
 if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
@@ -59,7 +86,10 @@ export const useInboxAnswerTexts = create<InboxAnswerTexts>()(
     storage: {
       getItem: (name) => {
         const raw = textStorage.getItem(name);
-        return typeof raw === "string" ? (JSON.parse(raw) as StorageValue<InboxAnswerTexts>) : null;
+        const value =
+          typeof raw === "string" ? (JSON.parse(raw) as StorageValue<InboxAnswerTexts>) : null;
+        savedTexts = value?.state.byItemKey ?? {};
+        return value;
       },
       setItem: (name, value) => textStorage.setItem(name, value),
       removeItem: (name) => textStorage.removeItem(name),
