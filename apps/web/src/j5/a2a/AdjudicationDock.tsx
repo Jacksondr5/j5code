@@ -86,7 +86,7 @@ export function AdjudicationDock(props: {
     new Map<string, { message: string; attachmentIds: string; clientRequestId: string }>(),
   );
   const support = useAnswerAttachmentSupport(environmentId);
-  const claimStashShortcut = useClaimedComposerShortcuts();
+  const claimComposerShortcuts = useClaimedComposerShortcuts();
   const editorRef = useRef<ComposerPromptEditorHandle>(null);
 
   const asks = adjudicationAsks({
@@ -186,7 +186,7 @@ export function AdjudicationDock(props: {
   return (
     <ComposerBanner.Attachment>
       <ComposerBanner.Root density="comfortable" data-testid="adjudication-dock">
-        <div className="flex flex-col gap-2 px-2 py-1" {...dropTarget} {...claimStashShortcut}>
+        <div className="flex flex-col gap-2 px-2 py-1" {...dropTarget} {...claimComposerShortcuts}>
           <div className="flex flex-wrap items-center gap-2 text-muted-foreground">
             <span>Question for you</span>
             {openFor ? <span>· open {openFor}</span> : null}
