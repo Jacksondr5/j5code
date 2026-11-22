@@ -1,8 +1,11 @@
 import type { EnvironmentId } from "@t3tools/contracts";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 import type { PresentedHumanInboxItem } from "@t3tools/client-runtime/j5/inbox";
+import type { KnownConnectionAccess } from "@t3tools/client-runtime/j5/sharing";
+import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/reactivity";
 import { expect, it, vi } from "vite-plus/test";
+import { page } from "vite-plus/test/browser";
 
 import { act, render } from "../../../test/render";
 
@@ -27,7 +30,14 @@ const { environmentId, project, senderThread } = vi.hoisted(() => {
   return { environmentId, project, senderThread };
 });
 
-const { openUrlInPreview } = vi.hoisted(() => ({ openUrlInPreview: vi.fn() }));
+const { openUrlInPreview, connection } = vi.hoisted(() => ({
+  openUrlInPreview: vi.fn(),
+  connection: { access: null as KnownConnectionAccess },
+}));
+vi.mock(import("../sharing/access"), async (original) => ({
+  ...(await original()),
+  useConnectionAccess: () => connection.access,
+}));
 vi.mock(import("../../browser/openFileInPreview"), async (original) => ({
   ...(await original()),
   openUrlInPreview: openUrlInPreview as never,
@@ -68,7 +78,20 @@ vi.mock(import("../../state/session"), async (original) => {
 import { __setClientSettingsForTests } from "../../hooks/useSettings";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { InboxMessage } from "./HumanInboxPage";
-import { inboxBrowserRef } from "./inboxBrowser";
+import { inboxBrowserRef, useInboxBrowserStore } from "./inboxBrowser";
+
+const setup = async (browserLinkTarget: "app" | "system", access: KnownConnectionAccess = null) => {
+  // Wider than RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY, where the Inbox has room for its browser.
+  await page.viewport(1280, 800);
+  openUrlInPreview.mockReset();
+  connection.access = access;
+  useInboxBrowserStore.setState({ environmentId: null });
+  __setClientSettingsForTests({
+    ...DEFAULT_CLIENT_SETTINGS,
+    browserLinkTarget,
+    pullRequestLinksOpenInApp: true,
+  });
+};
 
 const item = {
   environmentId,
@@ -93,12 +116,8 @@ const clickTakenOver = async (element: Element) => {
 };
 
 it("opens an Inbox message's links, pull requests too, in the Inbox's own browser", async () => {
-  openUrlInPreview.mockReset().mockResolvedValue(AsyncResult.success(undefined));
-  __setClientSettingsForTests({
-    ...DEFAULT_CLIENT_SETTINGS,
-    browserLinkTarget: "app",
-    pullRequestLinksOpenInApp: true,
-  });
+  await setup("app");
+  openUrlInPreview.mockResolvedValue(AsyncResult.success(undefined));
   await using screen = await render(<InboxMessage item={item} />, { router: "/inbox" });
 
   expect(await clickTakenOver(screen.getByRole("link", { name: /the docs/ }).element())).toBe(true);
@@ -112,15 +131,38 @@ it("opens an Inbox message's links, pull requests too, in the Inbox's own browse
     [inboxBrowserRef(environmentId), "https://github.com/Effect-TS/effect/pull/7"],
   ]);
   expect(screen.router?.state.location.pathname).toBe("/inbox");
+  await vi.waitFor(() => expect(useInboxBrowserStore.getState().environmentId).toBe(environmentId));
 });
 
-// The Inbox renders a message with its sender's thread, whose right panel isn't on screen.
+it("keeps the shown Inbox browser and reports the failure when a link fails to open", async () => {
+  await setup("app");
+  openUrlInPreview.mockResolvedValue(AsyncResult.failure(Cause.fail(new Error("refused"))));
+  using consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+  await using screen = await render(<InboxMessage item={item} />, { router: "/inbox" });
+
+  expect(await clickTakenOver(screen.getByRole("link", { name: /the docs/ }).element())).toBe(true);
+  await vi.waitFor(() =>
+    expect(consoleError).toHaveBeenCalledWith(
+      "[chat-markdown] action failed",
+      { operation: "open-link-in-preview", target: "https://example.com/docs" },
+      expect.anything(),
+    ),
+  );
+  expect(useInboxBrowserStore.getState().environmentId).toBeNull();
+});
+
+// The Inbox renders a message with its sender's thread, whose right panel isn't on screen. A
+// person shared only some threads gets no Inbox browser, and links open as outside a thread.
 it("opens an Inbox message's web links outside the sender thread's panel", async () => {
-  openUrlInPreview.mockReset();
-  __setClientSettingsForTests({
-    ...DEFAULT_CLIENT_SETTINGS,
-    browserLinkTarget: "system",
-    pullRequestLinksOpenInApp: true,
+  await setup("app", {
+    kind: "person",
+    personId: "person-1",
+    name: "Priya",
+    firstOwner: false,
+    levels: [],
+    wide: false,
+    owner: false,
+    retiredLinks: null,
   });
   await using screen = await render(<InboxMessage item={item} />, { router: "/inbox" });
   using openPullRequest = vi

@@ -23,6 +23,7 @@ const opens = {
   previewAvailable: true,
   canOperatePreview: true,
   access: person(true),
+  sheetLayout: false,
 };
 
 it.each([
@@ -38,6 +39,7 @@ it.each([
   ["a pairing without preview access", { canOperatePreview: false }, false],
   ["a person shared only some threads", { access: person(false) }, false],
   ["an unplaced device", { access: { kind: "unknown" } as const }, false],
+  ["a window where a thread's panel is a sheet", { sheetLayout: true }, false],
   ["a mailto link", { url: "mailto:someone@example.com" }, false],
 ])("in the Inbox browser? %s", (_case, change, expected) => {
   expect(opensInInboxBrowser({ ...opens, ...change })).toBe(expected);

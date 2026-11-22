@@ -7,6 +7,7 @@ import { AuthPreviewOperateScope, type EnvironmentId } from "@t3tools/contracts"
 import { Globe2Icon, XIcon } from "lucide-react";
 import { lazy, Suspense } from "react";
 
+import { reportMarkdownActionFailure } from "../../components/chat/markdownActionFailure";
 import { addBrowserSurface } from "../../components/preview/addBrowserSurface";
 import { RightPanelTabs } from "../../components/RightPanelTabs";
 import { Button } from "../../components/ui/button";
@@ -14,10 +15,12 @@ import { BrowserSettingsReadError, openUrlInPreview } from "../../browser/openFi
 import { isPreviewAvailableFor, usePreviewAvailable } from "../../browser/previewRuntime";
 import { previewRuntimeTabId } from "../../browser/previewRuntimeTabId";
 import { isElectron } from "../../env";
+import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useClientSettings } from "../../hooks/useSettings";
 import { useRightPanelSurfaceClose } from "../../hooks/useRightPanelSurfaceClose";
 import { readLocalApi } from "../../localApi";
 import { setActivePreviewTab, useThreadPreviewState } from "../../previewStateStore";
+import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../../rightPanelLayout";
 import { selectThreadRightPanelState, useRightPanelStore } from "../../rightPanelStore";
 import { previewEnvironment } from "../../state/preview";
 import { primaryServerKeybindingsAtom } from "../../state/server";
@@ -67,13 +70,21 @@ export function useOpenInInboxBrowser(environmentId: EnvironmentId) {
         previewAvailable: isPreviewAvailableFor(environmentId),
         canOperatePreview: readEnvironmentScope(environmentId, AuthPreviewOperateScope),
         access,
+        sheetLayout: window.matchMedia(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY).matches,
       })
     )
       return false;
-    useInboxBrowserStore.setState({ environmentId });
     void openUrlInPreview({ threadRef: inboxBrowserRef(environmentId), url, openPreview }).then(
       (result) => {
-        if (result._tag === "Success" || isAtomCommandInterrupted(result)) return;
+        if (result._tag === "Success") {
+          useInboxBrowserStore.setState({ environmentId });
+          return;
+        }
+        if (isAtomCommandInterrupted(result)) return;
+        reportMarkdownActionFailure(
+          { operation: "open-link-in-preview", target: url },
+          result.cause,
+        );
         const error = squashAtomCommandFailure(result);
         if (error instanceof BrowserSettingsReadError) {
           toastManager.add(
@@ -92,8 +103,11 @@ export function useOpenInInboxBrowser(environmentId: EnvironmentId) {
   };
 }
 
+/** The server whose Inbox browser the page shows; none where a thread's panel would be a sheet. */
 function useShownInboxBrowser() {
-  const environmentId = useInboxBrowserStore((state) => state.environmentId);
+  const sheetLayout = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
+  const storedEnvironmentId = useInboxBrowserStore((state) => state.environmentId);
+  const environmentId = sheetLayout ? null : storedEnvironmentId;
   const ref = environmentId === null ? null : inboxBrowserRef(environmentId);
   const panel = useRightPanelStore((state) => selectThreadRightPanelState(state.byThreadKey, ref));
   return { environmentId, panel };
@@ -101,8 +115,8 @@ function useShownInboxBrowser() {
 
 /** Whether the Inbox browser is beside the asks, so the page header leaves the title bar to it. */
 export function useInboxBrowserShown(): boolean {
-  const { panel } = useShownInboxBrowser();
-  return panel.isOpen && panel.surfaces.length > 0;
+  const { environmentId, panel } = useShownInboxBrowser();
+  return environmentId !== null && panel.isOpen && panel.surfaces.length > 0;
 }
 
 /** Brings back an Inbox browser that was closed with tabs still open. */
@@ -124,7 +138,7 @@ export function InboxBrowserShowButton() {
 
 /** The Inbox's browser for the server a link was last opened on, beside the asks. */
 export function InboxBrowserPane() {
-  const environmentId = useInboxBrowserStore((state) => state.environmentId);
+  const { environmentId } = useShownInboxBrowser();
   if (environmentId === null) return null;
   return <InboxBrowserPanel environmentId={environmentId} key={environmentId} />;
 }

@@ -1332,7 +1332,6 @@ const CHAT_MARKDOWN_COMPONENTS = {
             target={pullRequestPreviewTarget}
             confirmBeforeOpen={confirmBeforeOpen}
             onOpenPullRequest={(targetUrl) =>
-              onOpenWebLink?.(targetUrl, { metaKey: false, ctrlKey: false }) === true ||
               openChangeRequestLink(
                 {
                   metaKey: false,

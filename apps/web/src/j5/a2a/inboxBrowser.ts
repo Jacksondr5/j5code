@@ -22,10 +22,10 @@ export const inboxBrowserRef = (environmentId: EnvironmentId): ScopedThreadRef =
   scopeThreadRef(environmentId, INBOX_BROWSER_THREAD_ID);
 
 /**
- * Whether a link in an Inbox message opens in the Inbox's browser: exactly when the same link in a
- * thread would open in the thread's browser, pull request links included. A connection narrower
- * than the server may drive previews only on threads it collaborates on, so it opens links as
- * before.
+ * Whether a link in an Inbox message opens in the Inbox's browser: when the same link in a thread
+ * would open in the thread's browser, and pull request links too. A connection narrower than the
+ * server may drive previews only on threads it collaborates on, and a window too narrow for a pane
+ * beside the asks has no room for one, so both open links as before.
  */
 export function opensInInboxBrowser(input: {
   readonly url: string;
@@ -34,6 +34,7 @@ export function opensInInboxBrowser(input: {
   readonly previewAvailable: boolean;
   readonly canOperatePreview: boolean;
   readonly access: KnownConnectionAccess;
+  readonly sheetLayout: boolean;
 }): boolean {
   const { access } = input;
   // `null` is no answer yet or a server from before people: nothing is withheld, as elsewhere.
@@ -44,7 +45,7 @@ export function opensInInboxBrowser(input: {
       url: input.url,
       event: input.event,
       preference: input.preference,
-      canOpenInApp: input.previewAvailable && input.canOperatePreview && wide,
+      canOpenInApp: input.previewAvailable && input.canOperatePreview && wide && !input.sheetLayout,
     }) === "app"
   );
 }
