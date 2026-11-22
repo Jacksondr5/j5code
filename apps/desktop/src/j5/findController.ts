@@ -125,7 +125,8 @@ export function makeFindController(target: FindTarget, view: FindBarView) {
   };
   /**
    * `forget` drops the query too, when the page or surface it searched is gone. Focus goes back to
-   * the preview only from the bar itself, so a close for navigation or zoom leaves it where it is.
+   * the preview only when the bar held it at close, so it never leaves a view just removed; a close
+   * after the person clicked elsewhere leaves focus where it is.
    */
   const close = (options: { readonly forget?: boolean } = {}) => {
     if (options.forget === true) query = "";

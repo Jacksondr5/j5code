@@ -35,7 +35,11 @@ function setup(options: { zoomFactor?: number } = {}) {
     {
       show: (bounds) => shown.push(bounds),
       place: (bounds) => calls.push(`place at ${bounds.x},${bounds.y}`),
-      hide: () => calls.push("hide"),
+      // A removed view reports no focus, so the close must read focus before hiding.
+      hide: () => {
+        bar.focused = false;
+        calls.push("hide");
+      },
       focus: (query, isCurrent) => {
         focusIsCurrent.push(isCurrent);
         calls.push(query === "" ? "focus bar" : `focus bar with ${query}`);
@@ -123,7 +127,7 @@ describe("makeFindController", () => {
     ]);
   });
 
-  it("refocuses the preview only on a close from the bar, not one for navigation or zoom elsewhere", () => {
+  it("refocuses the preview only when the bar held focus at close", () => {
     const { controller, calls, bar } = setup();
     controller.open(panel);
     bar.focused = false;
