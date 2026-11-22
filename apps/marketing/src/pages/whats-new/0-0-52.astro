@@ -35,11 +35,11 @@ const groups: ReadonlyArray<Group> = [
     items: [
       {
         title: "One link sets it up",
-        body: "Link two servers from Settings → Environments → Linked environments, right after you add a server, or by approving an agent's request to link. J5 finds the address each server reaches the other at.",
+        body: "Link two servers from Settings → Environments → Linked environments, right after you add a server, or by approving an agent's request to link. J5 finds the address each server reaches the other at, and you can enter another.",
       },
       {
         title: "A level for each direction",
-        body: "Each direction has its own Tools level, from Off, which leaves messages only, to Full access. Tools last 30 days, and the row offers Renew.",
+        body: "Each direction has its own Tools level, from Off, which leaves messages only, to Full access. Tools last 30 days, and you can renew them.",
       },
       {
         title: "Through a firewall",
@@ -47,11 +47,11 @@ const groups: ReadonlyArray<Group> = [
       },
       {
         title: "Agents know when a machine is away",
-        body: "A call to a linked machine that isn't answering says so, and the agent is told when the machine is back.",
+        body: "A call to a linked machine that isn't answering fails with a reason that says so.",
       },
       {
         title: "Remove means remove",
-        body: "Removing a link ends both parts, messages and tools, including the session on the other server.",
+        body: "Removing a link ends its messages and its tools access.",
       },
     ],
     more: { label: "How linking works", href: "/linking" },
@@ -122,7 +122,7 @@ const groups: ReadonlyArray<Group> = [
       },
       {
         title: "Allow this once",
-        body: "A persona that can't start says why and asks you in the Inbox. An Owner can allow it once, and the next launch meets the usual limits again.",
+        body: "A persona an agent can't start says why and asks you in the Inbox. When one limit stood in the way, such as a model you haven't allowed, an Owner can allow it once. The next launch meets the usual limits again.",
       },
       {
         title: "Agents draft, you save",
@@ -130,11 +130,11 @@ const groups: ReadonlyArray<Group> = [
       },
       {
         title: "An ordered model list",
-        body: "A persona tries its models in order and skips a provider that has run out of quota.",
+        body: "A persona tries its models in order and skips a provider account that has reported running out of quota.",
       },
       {
         title: "Three access levels",
-        body: "Read-only, workspace write or full access, enforced by the provider's sandbox.",
+        body: "Read-only, workspace write or full access.",
       },
       {
         title: "Independent reviewers",
@@ -161,7 +161,7 @@ const groups: ReadonlyArray<Group> = [
       },
       {
         title: "Settled is settled",
-        body: "Settle a question in the agent's own thread, and the agent withdraws it from your Inbox.",
+        body: "Settle a question in the agent's own thread, and the agent is told to take it off your Inbox.",
       },
       {
         title: "Links that open",
@@ -180,11 +180,11 @@ const groups: ReadonlyArray<Group> = [
     items: [
       {
         title: "One switch for every machine",
-        body: "Settings → About → Update track moves this app and every connected machine to Stable or Nightly.",
+        body: "In the desktop app, Settings → About → Update track moves the app and the connected machines it can update to Stable or Nightly.",
       },
       {
         title: "Safer updates",
-        body: "An update won't move a server onto a build that can't read its database.",
+        body: "An update or track switch started from the app first checks that the new build can read the server's database.",
       },
       {
         title: "For your agents",
@@ -222,7 +222,7 @@ const upstream: ReadonlyArray<Item> = [
   },
   {
     title: "Compact idle Claude threads",
-    body: "Choose when an idle Claude thread over 200,000 tokens is compacted, under Settings → General → Compact idle threads.",
+    body: "Choose when an idle Claude thread over 200,000 tokens is compacted, under Settings → Providers → Advanced.",
   },
 ];
 ---

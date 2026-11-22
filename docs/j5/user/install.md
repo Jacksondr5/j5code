@@ -37,8 +37,8 @@ irm https://github.com/Jacksondr5/j5code/releases/latest/download/install.ps1 | 
 ```
 
 This puts `j5.cmd` in `~\.local\bin` and keeps downloaded versions and your data
-in `~\.j5code`. If that folder isn't on your `PATH`, the installer says so; add it
-yourself. Windows has no background service, so run `j5` or `j5 serve` when you
+in `~\.j5code`. If `~\.local\bin` isn't on your `PATH`, the installer says so; add
+it yourself. Windows has no background service, so run `j5` or `j5 serve` when you
 want the server up.
 
 Upgrading a server that was installed from npm (`@jacksondr5/j5code` 0.0.43 or

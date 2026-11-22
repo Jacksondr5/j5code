@@ -24,6 +24,11 @@ export const config: VercelConfig = {
   redirects: [
     { source: "/peering", destination: "/linking", permanent: true },
     { source: "/whats-new/0-1-3", destination: "/whats-new/0-0-52#t3-code", permanent: true },
+    {
+      source: "/whats-new/0-1-3/:rest*",
+      destination: "/whats-new/0-0-52#t3-code",
+      permanent: true,
+    },
   ],
   // `curl … | sh` needs the installer served as a plain shell script. Caches may
   // keep it for up to five minutes, so a changed installer reaches everyone
