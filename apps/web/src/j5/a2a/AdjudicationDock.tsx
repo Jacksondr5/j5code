@@ -31,6 +31,9 @@ import {
   useRestoredAnswerUploads,
 } from "./AnswerAttachments";
 import { J5RecordPanel } from "./J5RecordPanel";
+import { useAnswerSends } from "./answerSends";
+import { ownFileDropTargetProps } from "./answerFileDrop";
+import { useClaimedStashShortcut } from "./claimedStashShortcut";
 import { OwnerAskAction } from "./OwnerAskAction";
 import { answerHumanExchange, type HumanInboxItem } from "./humanInboxClient";
 import { setInboxAnswerText, useInboxAnswerTexts } from "./inboxAnswerDrafts";
@@ -74,16 +77,14 @@ export function AdjudicationDock(props: {
   const wordsOf = (item: HumanInboxItem) => texts[keyOf(item)] ?? "";
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [picked, setPicked] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const sends = useAnswerSends();
   const [refused, setRefused] = useState<ReadonlyArray<HumanInboxItem>>([]);
-  const attempt = useRef<{
-    exchangeId: string;
-    message: string;
-    attachmentIds: string;
-    clientRequestId: string;
-  } | null>(null);
+  // By exchange, so a send on one ask never replaces another's request id.
+  const attempts = useRef(
+    new Map<string, { message: string; attachmentIds: string; clientRequestId: string }>(),
+  );
   const support = useAnswerAttachmentSupport(environmentId);
+  const claimStashShortcut = useClaimedStashShortcut();
 
   const asks = adjudicationAsks({
     items: query.data?.items ?? [],
@@ -107,7 +108,11 @@ export function AdjudicationDock(props: {
   const { shown, others, next: nextAsk } = view;
   const isOpen = (query.data?.items ?? []).some((item) => item.exchangeId === shown.exchangeId);
   const answerKey = keyOf(shown);
-  const message = wordsOf(shown);
+  const words = wordsOf(shown);
+  // Sent trimmed, as the composer sends; words are still required.
+  const message = words.trim();
+  const pending = sends.isPending(answerKey);
+  const error = sends.errorOf(answerKey)?.message ?? null;
   const urgency = urgencyBadge[shown.urgency];
   const openFor = formatElapsedDurationLabel(shown.openedAt);
   const threadRef = threadId == null ? undefined : scopeThreadRef(environmentId, threadId);
@@ -125,23 +130,22 @@ export function AdjudicationDock(props: {
     if (message === "" || "blocked" in readiness) return;
     const attachmentIds = readiness.attachments.map((attachment) => attachment.id).join("\n");
     // A retry of the same words and files reuses its request id, so a lost reply cannot answer twice.
+    const previous = attempts.current.get(shown.exchangeId);
     const request =
-      attempt.current?.exchangeId === shown.exchangeId &&
-      attempt.current.message === message &&
-      attempt.current.attachmentIds === attachmentIds
-        ? attempt.current
-        : { exchangeId: shown.exchangeId, message, attachmentIds, clientRequestId: randomUUID() };
-    attempt.current = request;
-    setPending(true);
-    setError(null);
+      previous?.message === message && previous.attachmentIds === attachmentIds
+        ? previous
+        : { message, attachmentIds, clientRequestId: randomUUID() };
+    attempts.current.set(shown.exchangeId, request);
+    sends.setPending(answerKey, true);
+    sends.setError(answerKey, null);
     try {
       await answerHumanExchange(environmentId, {
-        exchangeId: request.exchangeId,
+        exchangeId: shown.exchangeId,
         message: request.message,
         ...(readiness.attachments.length === 0 ? {} : { attachments: readiness.attachments }),
         clientRequestId: request.clientRequestId,
       });
-      attempt.current = null;
+      attempts.current.delete(shown.exchangeId);
       attachments.delivered(answerKey);
       notifyHumanInboxChanged(environmentId);
       query.refresh();
@@ -150,10 +154,13 @@ export function AdjudicationDock(props: {
         setRefused((current) => [...current, shown]);
         query.refresh();
       } else {
-        setError(cause instanceof Error ? cause.message : "Could not deliver the answer.");
+        sends.setError(answerKey, {
+          message: cause instanceof Error ? cause.message : "Could not deliver the answer.",
+          delivered: false,
+        });
       }
     }
-    setPending(false);
+    sends.setPending(answerKey, false);
   };
 
   const questionText = (text: string) => (
@@ -170,7 +177,11 @@ export function AdjudicationDock(props: {
   return (
     <ComposerBanner.Attachment>
       <ComposerBanner.Root density="comfortable" data-testid="adjudication-dock">
-        <div className="flex flex-col gap-2 px-2 py-1">
+        <div
+          className="flex flex-col gap-2 px-2 py-1"
+          {...ownFileDropTargetProps}
+          {...claimStashShortcut}
+        >
           <div className="flex flex-wrap items-center gap-2 text-muted-foreground">
             <span>Question for you</span>
             {openFor ? <span>· open {openFor}</span> : null}
@@ -218,7 +229,8 @@ export function AdjudicationDock(props: {
             id={answerId}
             onChange={(event) => setInboxAnswerText(answerKey, event.currentTarget.value)}
             placeholder="Type the answer exactly as it should be delivered"
-            value={message}
+            readOnly={!isOpen}
+            value={words}
             {...(addFiles === null ? {} : answerAttachmentInputHandlers(addFiles))}
           />
           <AnswerAttachmentList

@@ -63,6 +63,7 @@ import {
   useAnswerAttachments,
   useRestoredAnswerUploads,
 } from "./AnswerAttachments";
+import { type AnswerSendError, useAnswerSends } from "./answerSends";
 import { answerHumanExchange } from "./humanInboxClient";
 import {
   pruneInboxAnswerDrafts,
@@ -308,7 +309,9 @@ function OpenInboxItem({
   answer,
   answerText,
   attachments,
-  pendingExchangeId,
+  pending,
+  error,
+  onRetry,
   onOpenThread,
   senderLabels,
   projectNameOf,
@@ -331,7 +334,10 @@ function OpenInboxItem({
   readonly projectNameOf: ProjectNameOf;
   readonly answerText: string;
   readonly attachments: AnswerAttachmentsState;
-  readonly pendingExchangeId: string | null;
+  /** This ask's answer is being delivered; other asks stay answerable meanwhile. */
+  readonly pending: boolean;
+  readonly error: AnswerSendError | null;
+  readonly onRetry: (item: HumanInboxItem) => void;
   readonly showEnvironment: boolean;
   readonly onOpenThread: (item: HumanInboxItem) => void;
 }) {
@@ -349,7 +355,7 @@ function OpenInboxItem({
   const support = useAnswerAttachmentSupport(item.environmentId);
   useRestoredAnswerUploads(itemKey, item.environmentId, canAnswer && closed === undefined);
   const addFiles =
-    support === null || closedText !== null || pendingExchangeId !== null
+    support === null || closedText !== null || pending
       ? null
       : (files: ReadonlyArray<File>) =>
           attachments.add(itemKey, item.environmentId, support.maxFileBytes, files);
@@ -433,6 +439,7 @@ function OpenInboxItem({
                 id={answerId}
                 onChange={(event) => setInboxAnswerText(itemKey, event.currentTarget.value)}
                 placeholder="Type the answer exactly as it should be delivered"
+                readOnly={!mayAnswer || closedText !== null}
                 value={answerText}
                 {...(addFiles === null ? {} : answerAttachmentInputHandlers(addFiles))}
               />
@@ -441,10 +448,25 @@ function OpenInboxItem({
                 attachments={attachments.list(itemKey)}
                 environmentId={item.environmentId}
                 error={attachments.error(itemKey)}
-                onRemove={
-                  pendingExchangeId === null ? (id) => attachments.remove(itemKey, id) : null
-                }
+                onRemove={pending ? null : (id) => attachments.remove(itemKey, id)}
               />
+              {error === null ? null : (
+                <div
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-destructive/8 px-3 py-2 text-sm text-destructive-foreground"
+                  role="alert"
+                >
+                  <span>{error.message}</span>
+                  <Button
+                    disabled={pending}
+                    onClick={() => onRetry(item)}
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                  >
+                    Try again
+                  </Button>
+                </div>
+              )}
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-1">
                   <OpenThreadButton
@@ -466,7 +488,7 @@ function OpenInboxItem({
                 ) : (
                   <div className="flex flex-wrap items-center justify-end gap-2">
                     <OwnerAskAction
-                      disabled={!item.sourceReady || pendingExchangeId !== null}
+                      disabled={!item.sourceReady || pending}
                       environmentId={item.environmentId}
                       item={item}
                       size="default"
@@ -474,8 +496,8 @@ function OpenInboxItem({
                     <Button
                       disabled={
                         !canAnswer ||
-                        pendingExchangeId !== null ||
-                        answerText.length === 0 ||
+                        pending ||
+                        answerText.trim().length === 0 ||
                         waitingOn !== null
                       }
                       title={
@@ -486,7 +508,7 @@ function OpenInboxItem({
                       onClick={() => answer(item)}
                       type="button"
                     >
-                      {pendingExchangeId === scopedInboxItemKey(item) ? "Delivering…" : "Answer"}
+                      {pending ? "Delivering…" : "Answer"}
                     </Button>
                   </div>
                 )}
@@ -613,7 +635,7 @@ export function HumanInboxPage() {
   const personScopes = JSON.stringify(
     openSources.sources.map((source) => [source.environmentId, source.data?.personId ?? null]),
   );
-  const [pendingExchangeId, setPendingExchangeId] = useState<string | null>(null);
+  const sends = useAnswerSends();
   // An item that closed while the person was answering it stays in place with their words. It is
   // kept in the render it closes in, so its open row is never unmounted and drawn again closed;
   // `closedWith` is the answered list as it was then, to tell a later read of it.
@@ -659,7 +681,6 @@ export function HumanInboxPage() {
         closedWith.get(key) !== answeredSources && source?.status === "ready" && !source.refreshing,
     };
   };
-  const [error, setError] = useState<string | null>(null);
   const answerAttempts = useRef(new Map<string, HumanInboxAnswerAttempt>());
   useInboxRefresh();
   const runtimeRequests = useCrewRuntimeRequests();
@@ -729,9 +750,11 @@ export function HumanInboxPage() {
 
   const answer = async (item: HumanInboxItem) => {
     const itemKey = scopedInboxItemKey(item);
-    const message = answers[itemKey] ?? "";
+    // Sent trimmed, as the composer sends; words are still required.
+    const message = (answers[itemKey] ?? "").trim();
     const readiness = answerAttachments.ready(itemKey, item.environmentId);
     if (message.length === 0 || !item.sourceReady || "blocked" in readiness) return;
+    let delivered = false;
     await submitHumanInboxAnswer({
       item,
       message,
@@ -741,10 +764,22 @@ export function HumanInboxPage() {
       send: answerHumanExchange,
       refresh,
       notifyChanged: notifyHumanInboxChanged,
-      onAccepted: () => answerAttachments.delivered(itemKey),
-      setPendingExchangeId,
-      setError,
+      onAccepted: () => {
+        delivered = true;
+        answerAttachments.delivered(itemKey);
+      },
+      setPendingExchangeId: (key) => sends.setPending(itemKey, key !== null),
+      setError: (error) =>
+        sends.setError(itemKey, error === null ? null : { message: error, delivered }),
     });
+  };
+
+  // Delivered already: only the re-read failed, so trying again reads again rather than resending.
+  const retry = (item: HumanInboxItem) => {
+    const error = sends.errorOf(scopedInboxItemKey(item));
+    if (error?.delivered !== true) return void answer(item);
+    sends.setError(scopedInboxItemKey(item), null);
+    void refresh(item.environmentId).catch(() => sends.setError(scopedInboxItemKey(item), error));
   };
 
   const openCrewThread = (
@@ -811,29 +846,11 @@ export function HumanInboxPage() {
               </ul>
             ) : null}
 
-            {error ? (
-              <div
-                aria-live="polite"
-                className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-md bg-destructive/8 px-4 py-3 text-sm text-destructive-foreground"
-              >
-                <span>{error}</span>
-                <Button
-                  onClick={() => void refresh().catch(() => undefined)}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  Try again
-                </Button>
-              </div>
-            ) : null}
-
             <CrewRuntimeRequestsSection requests={runtimeRequests} onOpenThread={openCrewThread} />
             <NativeQuestionInboxSection questions={nativeQuestions} onOpenThread={openCrewThread} />
 
             {complete &&
             !loading &&
-            error === null &&
             shownItems.length === 0 &&
             cleanups.inPlace.length === 0 &&
             runtimeRequests.length === 0 &&
@@ -858,7 +875,9 @@ export function HumanInboxPage() {
                     item={item}
                     key={scopedInboxItemKey(item)}
                     onOpenThread={openThread}
-                    pendingExchangeId={pendingExchangeId}
+                    pending={sends.isPending(scopedInboxItemKey(item))}
+                    error={sends.errorOf(scopedInboxItemKey(item))}
+                    onRetry={retry}
                     senderLabels={senderLabels}
                     projectNameOf={projectNameOf}
                     showEnvironment={showEnvironment}
