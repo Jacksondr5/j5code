@@ -284,7 +284,13 @@ export function ThreadArtifactScreen(props: ThreadArtifactParams) {
           ) : artifactPreviewKind(load.value) === "markdown" && workspaceRoot !== null ? (
             <WorkspaceMarkdown
               markdown={load.value.content}
-              links={{ navigation, environmentId, threadId, workspaceRoot }}
+              links={{
+                navigation,
+                environmentId,
+                threadId,
+                workspaceRoot,
+                projectId: project.projectId,
+              }}
             />
           ) : (
             <ArtifactBody content={load.value} frameHeight={frameHeight} />
