@@ -1,4 +1,8 @@
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
+import {
+  isAtomCommandInterrupted,
+  squashAtomCommandFailure,
+} from "@t3tools/client-runtime/state/runtime";
 import { formatFilePathForClipboard } from "@t3tools/client-runtime/media-actions";
 import { resolvePathLinkTarget } from "@t3tools/shared/fileLinks";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
@@ -17,7 +21,12 @@ import {
   RightPanelMaximizeControl,
 } from "../../components/chat/PanelLayoutControls";
 import { RightPanelSurfaceContent } from "../../components/chat/RightPanelSurfaceContent";
+import { addBrowserSurface } from "../../components/preview/addBrowserSurface";
 import { usePreviewSession } from "../../components/preview/usePreviewSession";
+import { threadPullRequestPanelTarget } from "../../components/pullRequest/pullRequestDetail.logic";
+import { BrowserSettingsReadError } from "../../browser/openFileInPreview";
+import { previewEnvironment } from "../../state/preview";
+import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../../components/ui/button";
 import { toastManager } from "../../components/ui/toast";
 import { writeTextToClipboard } from "../../hooks/useCopyToClipboard";
@@ -31,7 +40,7 @@ import { isEditableFocused } from "../../lib/editableFocus";
 import { isPreviewFocused } from "../../lib/previewFocus";
 import { cn } from "../../lib/utils";
 import { usePanelAnimationSettings, usePanelPresence } from "../../panelAnimations";
-import { useThreadPreviewState } from "../../previewStateStore";
+import { isPreviewSupportedInRuntime, useThreadPreviewState } from "../../previewStateStore";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../../rightPanelLayout";
 import {
   type RightPanelSurface,
@@ -243,6 +252,37 @@ function InboxThreadPanel(props: {
   const openThread = () =>
     void navigate({ to: "/$environmentId/$threadId", params: buildThreadRouteParams(ref) });
   const visible = open;
+  // The add-tab menu offers what the thread's own does, less what the Inbox does not mirror
+  // (terminal, side chats, devices) and the Diff tab, which needs the thread's git status.
+  const openPreview = useAtomCommand(previewEnvironment.open, { reportFailure: false });
+  const browserAvailable = canOperatePreview && (isPreviewSupportedInRuntime() || serverBrowser);
+  const pullRequests = visibleThreadPullRequests(sender.pullRequests);
+  const pullRequestTarget =
+    sender.projectId === null || serverConfig === null
+      ? null
+      : threadPullRequestPanelTarget({
+          projectId: sender.projectId,
+          pullRequests,
+          linkedPullRequest: sender.linkedPullRequest,
+          branchPullRequest: sender.branchPullRequest,
+        });
+  const addBrowser = (profileId?: string) => {
+    if (!browserAvailable) return;
+    void addBrowserSurface({
+      threadRef: ref,
+      openPreview,
+      ...(profileId === undefined ? {} : { profileId }),
+    }).then((result) => {
+      if (result._tag !== "Failure" || isAtomCommandInterrupted(result)) return;
+      const error = squashAtomCommandFailure(result);
+      if (error instanceof BrowserSettingsReadError)
+        toastManager.add({
+          type: "error",
+          title: "Unable to open browser",
+          description: error.message,
+        });
+    });
+  };
 
   const content = (() => {
     const surface = activeSurface;
@@ -321,7 +361,7 @@ function InboxThreadPanel(props: {
               capabilityKnown: serverConfig !== null,
               supported: serverConfig !== null,
               projectId: sender.projectId,
-              pullRequests: visibleThreadPullRequests(sender.pullRequests),
+              pullRequests,
               linkedPullRequest: sender.linkedPullRequest,
               branchPullRequest: sender.branchPullRequest,
               onBack: undefined,
@@ -379,22 +419,25 @@ function InboxThreadPanel(props: {
           useRightPanelStore.getState().moveSurface(ref, surfaceId, toIndex)
         }
         onCopyFilePath={(relativePath) => copyFilePath(relativePath, workspaceRoot)}
-        onAddBrowser={NOOP}
-        onAddBrowserInProfile={NOOP}
+        onAddBrowser={() => addBrowser()}
+        onAddBrowserInProfile={addBrowser}
         onAddTerminal={NOOP}
         onAddDiff={NOOP}
-        onAddFiles={NOOP}
-        onAddArtifacts={NOOP}
-        onAddPullRequest={NOOP}
-        onAddPullRequests={NOOP}
+        onAddFiles={() => useRightPanelStore.getState().open(ref, "files")}
+        onAddArtifacts={() => useRightPanelStore.getState().open(ref, "artifacts")}
+        onAddPullRequest={() => {
+          if (pullRequestTarget !== null)
+            useRightPanelStore.getState().openPullRequest(ref, pullRequestTarget);
+        }}
+        onAddPullRequests={() => useRightPanelStore.getState().open(ref, "pull-requests")}
         onAddDevice={NOOP}
-        browserAvailable={false}
+        browserAvailable={browserAvailable}
         terminalAvailable={false}
         diffAvailable={false}
-        filesAvailable={false}
-        artifactsAvailable={false}
-        pullRequestAvailable={false}
-        pullRequestsAvailable={false}
+        filesAvailable={project !== null}
+        artifactsAvailable={project !== null}
+        pullRequestAvailable={pullRequestTarget !== null}
+        pullRequestsAvailable={serverConfig !== null && pullRequests.length > 0}
         deviceAvailable={false}
       >
         <div className="flex min-h-0 flex-1 flex-col">
