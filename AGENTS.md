@@ -171,7 +171,7 @@ For mobile verification, a missing or outdated native client is an install step,
 
 ## Evals
 
-`evals/` checks how real models behave with upstream's model-facing text: agent instructions, MCP tool descriptions and schemas, and generated titles. Before you change that text, read [evals/README.md](evals/README.md) and run the evals it names. When you fix a model behavior bug, add a case that fails before the fix. Evals call paid models, so ask the developer before running one. [evals/j5-cli](evals/j5-cli/README.md) runs the `mcp-tool-use` cases, plus J5's own, on the real Claude Code and Codex CLIs with J5's tools, on subscriptions instead of an API key.
+`evals/` checks how real models behave with upstream's model-facing text: agent instructions, MCP tool descriptions and schemas, and generated titles. Before you change that text, read [evals/README.md](evals/README.md) and run the evals it names. When you fix a model behavior bug, add a case that fails before the fix. Evals call paid models, so ask the developer before running one. Upstream's `evals/mcp-tool-use` needs an Anthropic API key: skip it unless the developer has one, and say so in the PR. [evals/j5-cli](evals/j5-cli/README.md) runs the same cases, plus J5's own, on the real Claude Code and Codex CLIs with J5's tools, on subscriptions instead of an API key. Ask before large runs.
 
 ## Pull requests
 
