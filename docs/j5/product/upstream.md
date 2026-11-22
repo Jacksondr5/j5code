@@ -572,6 +572,18 @@ Recorded in `FORK.md` cases 69 to 73, 78 and 80.
 
 **Decided:** Abraham, 2026-10-30, approved implementation and a PR in the notification-volume conversation.
 
+#### D48. Returning to the app keeps focus in an artifact
+
+**Upstream:** when the app window regains focus, `shouldRefocusComposerOnWindowFocus` moves focus to the composer unless it's in a text field, an iframe, a dialog, a menu or a few other places. Focus on other content, such as a panel's scroll area, goes to the composer.
+
+**J5:** focus inside the Artifacts surface (`[data-j5-artifacts-surface]`, the right-panel tab and the `/artifacts` page) stays where it is when the window regains focus.
+
+**Why:** reading an artifact and finding text in it with Cmd/Ctrl+F should survive switching to another app and back. With upstream's rule, the next Cmd/Ctrl+F after returning opened thread find instead of the artifact's find. J5's desktop find bar also triggers this: it's a view of its own, so closing it with Esc returns to the page as a window focus.
+
+**Consequences:** one selector in upstream's `ChatView.logic.ts` exclusion list, imported from J5's `artifactFind.ts` (FORK.md case 126). Check the list at each advance. It can retire if upstream stops refocusing the composer when focus is on panel content.
+
+**Decided:** Jackson, 2026-11-22 ([#1152](https://github.com/Jacksondr5/j5code/issues/1152), PR [#1153](https://github.com/Jacksondr5/j5code/pull/1153)). Recorded in FORK.md case 126.
+
 ### Awaiting a decision
 
 These already diverge on `j5/main`, but no human ruling is on record. Each landed as an implementer's call inside a merged PR. The person rules on each one; an approved entry moves up into its section, and a rejected one becomes a fix. None is waiting now.
@@ -709,3 +721,4 @@ J5 kept a run from resuming after a usage-limit reset when the person had presse
 - 2026-11-16 — D46: the mapping sits in `PeerMcpClient.ts` and the hook in `McpToolAccess.routed` and J5's `delegate_task` handler, where the build found the cause and the agent's tool name; held calls are forgotten on a restart (council review of the build plan, [#951](https://github.com/Jacksondr5/j5code/issues/951)).
 - 2026-11-19 — D47 added: on web and desktop, linking two servers is one flow that sets up messages (peering) and a level for actions in each direction (upstream's links), in place of upstream's Linked environments section, its link dialog and J5's Peer servers section; upstream's mechanism, mobile and the command line are unchanged (Jackson, 2026-11-09; [record](../worklog/2026-11-09-one-link-flow-session.md)).
 - 2026-11-19 — D47 as built: upstream's card and its `linked` answer on a live link are kept, so a level changes only on the pair's row; a link's holder tells the other server which server it is and asks it to revoke the link's session when the link is forgotten; a line's address is left out of what a person or agent reads (Jackson, 2026-11-19; [#1004](https://github.com/Jacksondr5/j5code/issues/1004)).
+- 2026-11-22 — D48 added: returning to the app keeps focus inside the Artifacts surface instead of moving it to the composer (Jackson, [#1152](https://github.com/Jacksondr5/j5code/issues/1152)).
