@@ -33,6 +33,8 @@ export function useSenderThread(ref: ScopedThreadRef | null, load: boolean) {
     projectId: thread?.projectId ?? null,
     worktreePath: thread?.worktreePath ?? null,
     title: thread?.title ?? null,
+    /** The provider instance the thread runs on, whose skills its messages name. */
+    providerInstanceId: thread?.modelSelection.instanceId ?? null,
     pullRequests: thread?.pullRequests ?? NO_PULL_REQUESTS,
     linkedPullRequest: (thread?.linkedPullRequest ?? null) as ThreadLinkedPullRequest | null,
     branchPullRequest: (shell?.branchPullRequest ?? null) as ThreadLinkedPullRequest | null,
