@@ -357,7 +357,6 @@ import { ThreadVisitWatermark } from "./chat/ThreadVisitWatermark";
 import { ChatTerminalDrawers } from "./chat/ChatTerminalDrawers";
 import { ChatRightPanel } from "./chat/ChatRightPanel";
 import { AdjudicationDock } from "../j5/a2a/AdjudicationDock";
-import { isArtifactFindKey } from "../j5/artifacts/artifactFind";
 import { CrewRosterGate } from "../j5/crew/CrewRosterGate";
 import {
   composerProviderCandidates,
@@ -2728,8 +2727,7 @@ export default function ChatView(props: ChatViewProps) {
       "thread.copyReference": ({ event }) => {
         if (!event.repeat) copyActiveThreadReference();
       },
-      "chat.find": ({ event }) => {
-        if (isArtifactFindKey(event, document.activeElement)) return false;
+      "chat.find": () => {
         if (!isServerThread || serverConfig?.threadFind !== true || activeThreadKey === null)
           return false;
         openThreadFind(activeThreadKey);

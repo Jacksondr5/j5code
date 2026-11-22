@@ -13,6 +13,7 @@ import * as Option from "effect/Option";
 import type { SetStateAction } from "react";
 import { applyClaudePromptEffortPrefix, resolvePromptInjectedEffort } from "@t3tools/shared/model";
 import { getProviderModelCapabilities } from "../providerModels";
+import { ARTIFACTS_SURFACE_SELECTOR } from "../j5/artifacts/artifactFind";
 import { sanitizeThreadErrorMessage } from "@t3tools/client-runtime/errors";
 import type {
   EnvironmentThread,
@@ -1166,7 +1167,7 @@ export function shouldRefocusComposerOnWindowFocus(
   }
   return (
     activeElement.closest(
-      '[data-workspace-area]:focus-visible, [data-sidebar-row]:focus-visible, [role="dialog"], [role="alertdialog"], [role="application"], [role="menu"], [role="listbox"], [data-slot$="-popup"], [data-terminal-owner]',
+      `[data-workspace-area]:focus-visible, [data-sidebar-row]:focus-visible, [role="dialog"], [role="alertdialog"], [role="application"], [role="menu"], [role="listbox"], [data-slot$="-popup"], [data-terminal-owner], ${ARTIFACTS_SURFACE_SELECTOR}`,
     ) === null
   );
 }

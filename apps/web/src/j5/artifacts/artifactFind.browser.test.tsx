@@ -1,50 +1,28 @@
-import type { ResolvedKeybindingsConfig } from "@t3tools/contracts";
+import { DEFAULT_RESOLVED_KEYBINDINGS } from "@t3tools/shared/keybindings";
 import { useEffect } from "react";
 import { expect, it } from "vite-plus/test";
 import { userEvent } from "vite-plus/test/browser";
 
 import { render, stubGlobal } from "../../../test/render";
+import { shouldRefocusComposerOnWindowFocus } from "../../components/ChatView.logic";
 import type { ChatComposerHandle } from "../../components/chat/ChatComposer";
 import { useChatShortcuts } from "../../components/chat/useChatShortcuts";
 import { ScrollArea } from "../../components/ui/scroll-area";
-import { artifactFindAreaProps, artifactsSurfaceProps, isArtifactFindKey } from "./artifactFind";
+import { isPreviewFocused } from "../../lib/previewFocus";
+import { artifactFindAreaProps, artifactsSurfaceProps } from "./artifactFind";
 
-const findKeybindings: ResolvedKeybindingsConfig = [
-  {
-    command: "chat.find",
-    shortcut: {
-      key: "f",
-      metaKey: false,
-      ctrlKey: true,
-      shiftKey: false,
-      altKey: false,
-      modKey: false,
-    },
-  },
-  {
-    command: "chat.find",
-    shortcut: {
-      key: "g",
-      metaKey: false,
-      ctrlKey: true,
-      shiftKey: false,
-      altKey: false,
-      modKey: false,
-    },
-  },
-];
-
-// The chat's find handler as ChatView wires it, with the page's own keydown listener after it.
+// ChatView's shortcuts with the default bindings, the Artifacts tab inside the right panel, and
+// the page's own keydown listener after them.
 function Page(props: { threadFinds: string[]; reachedPage: string[] }) {
   useChatShortcuts({
     enabled: true,
-    keybindings: findKeybindings,
+    keybindings: DEFAULT_RESOLVED_KEYBINDINGS,
     scriptKeybindings: [],
     getShortcutContext: () => ({
       terminalFocus: false,
       terminalOpen: false,
-      previewFocus: false,
-      previewOpen: false,
+      previewFocus: isPreviewFocused(),
+      previewOpen: true,
       isWeb: true,
       isDesktop: false,
       modelPickerOpen: false,
@@ -54,8 +32,7 @@ function Page(props: { threadFinds: string[]; reachedPage: string[] }) {
     branchToolbarRef: { current: null },
     closeThreadFind: () => {},
     commands: {
-      "chat.find": ({ event }) => {
-        if (isArtifactFindKey(event, document.activeElement)) return false;
+      "chat.find": () => {
         props.threadFinds.push("thread");
       },
     },
@@ -71,13 +48,15 @@ function Page(props: { threadFinds: string[]; reachedPage: string[] }) {
   return (
     <>
       <textarea aria-label="Composer" />
-      <main {...artifactsSurfaceProps}>
-        <button type="button">Artifact file</button>
-        {/* ArtifactsPage's preview: Base UI's viewport is what a click on the text focuses. */}
-        <ScrollArea {...artifactFindAreaProps} aria-label="Artifact preview">
-          <p>Artifact text</p>
-        </ScrollArea>
-      </main>
+      <aside data-preview-panel-mode="sidebar">
+        <main {...artifactsSurfaceProps}>
+          <button type="button">Artifact file</button>
+          {/* ArtifactsPage's preview: Base UI's viewport is what a click on the text focuses. */}
+          <ScrollArea {...artifactFindAreaProps} aria-label="Artifact preview">
+            <p>Artifact text</p>
+          </ScrollArea>
+        </main>
+      </aside>
     </>
   );
 }
@@ -95,15 +74,7 @@ it.each([
     native: true,
   },
   { click: "the composer", target: "Composer", key: "f", threadFinds: ["thread"], native: false },
-  // Another chord bound to thread find keeps it in the artifact.
-  {
-    click: "the artifact's text",
-    target: "Artifact text",
-    key: "g",
-    threadFinds: ["thread"],
-    native: false,
-  },
-])("Ctrl+$key after clicking $click", async ({ target, key, threadFinds, native }) => {
+])("Ctrl+$key on web after clicking $click", async ({ target, key, threadFinds, native }) => {
   const finds: string[] = [];
   const reachedPage: string[] = [];
   await using screen = await render(
@@ -121,15 +92,33 @@ it.each([
   expect(reachedPage.includes(key)).toBe(native);
 });
 
-it("matches the physical F key only on a non-Latin layout", async () => {
+it("on desktop, opens the find bar by the physical F key only on a non-Latin layout", async () => {
+  let opened = 0;
+  using _bridge = stubGlobal("desktopBridge", {
+    setFindBar: async () => {
+      opened += 1;
+    },
+  });
   await using screen = await render(<Page threadFinds={[]} reachedPage={[]} />, options);
-  const preview = screen.getByText("Artifact text").element();
-  const key = (init: KeyboardEventInit) =>
-    isArtifactFindKey(new KeyboardEvent("keydown", { ctrlKey: true, ...init }), preview);
+  await userEvent.click(screen.getByText("Artifact text"));
+  const press = (init: KeyboardEventInit) =>
+    document.activeElement!.dispatchEvent(
+      new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ctrlKey: true, ...init }),
+    );
 
-  expect(key({ key: "а", code: "KeyF" })).toBe(true);
+  expect(press({ key: "а", code: "KeyF" })).toBe(false);
+  expect(opened).toBe(1);
   // Dvorak's "u" sits on the physical F key.
-  expect(key({ key: "u", code: "KeyF" })).toBe(false);
+  expect(press({ key: "u", code: "KeyF" })).toBe(true);
+  expect(opened).toBe(1);
+});
+
+it("keeps focus in the artifact's preview when the window regains focus", async () => {
+  await using screen = await render(<Page threadFinds={[]} reachedPage={[]} />, options);
+  await userEvent.click(screen.getByText("Artifact text"));
+
+  expect(document.activeElement?.getAttribute("data-slot")).toBe("scroll-area-viewport");
+  expect(shouldRefocusComposerOnWindowFocus(document.activeElement)).toBe(false);
 });
 
 it("Ctrl+F in an artifact on desktop opens the find bar over the preview", async () => {

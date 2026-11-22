@@ -126,6 +126,8 @@ export function installFindBar(
           bar.send(FIND_BAR_FOCUS_CHANNEL, query);
         }),
       matches: (matches) => whenLoaded((bar) => bar.send(FIND_BAR_MATCHES_CHANNEL, matches)),
+      isFocused: () =>
+        view !== null && !view.webContents.isDestroyed() && view.webContents.isFocused(),
     },
   );
   controllers.set(contents, controller);

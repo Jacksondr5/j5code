@@ -18,6 +18,7 @@ function setup(options: { zoomFactor?: number } = {}) {
   const matches: (FindMatches | null)[] = [];
   const shown: FindBounds[] = [];
   const focusIsCurrent: (() => boolean)[] = [];
+  const bar = { focused: true };
   let nextRequestId = 0;
   const controller = makeFindController(
     {
@@ -40,9 +41,10 @@ function setup(options: { zoomFactor?: number } = {}) {
         calls.push(query === "" ? "focus bar" : `focus bar with ${query}`);
       },
       matches: (value) => matches.push(value),
+      isFocused: () => bar.focused,
     },
   );
-  return { controller, calls, matches, shown, content, zoom, focusIsCurrent };
+  return { controller, calls, matches, shown, content, zoom, focusIsCurrent, bar };
 }
 
 const panel = { x: 700, y: 48, width: 500, height: 700 };
@@ -118,6 +120,26 @@ describe("makeFindController", () => {
       "hide",
       "restore page focus",
       "focus bar",
+    ]);
+  });
+
+  it("refocuses the preview only on a close from the bar, not one for navigation or zoom elsewhere", () => {
+    const { controller, calls, bar } = setup();
+    controller.open(panel);
+    bar.focused = false;
+    controller.close({ forget: true });
+    controller.open(panel);
+    bar.focused = true;
+    controller.close();
+
+    expect(calls).toEqual([
+      "focus bar",
+      "stop",
+      "hide",
+      "focus bar",
+      "stop",
+      "hide",
+      "restore page focus",
     ]);
   });
 

@@ -4,6 +4,8 @@ import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 // apps/desktop/src/j5/FindBar.ts reads both markers and the frame name.
 const SURFACE_ATTRIBUTE = "data-j5-artifacts-surface";
 const FIND_AREA_ATTRIBUTE = "data-j5-artifact-find-area";
+/** Returning to the window leaves focus in the artifact rather than moving it to the composer. */
+export const ARTIFACTS_SURFACE_SELECTOR = `[${SURFACE_ATTRIBUTE}]`;
 /** The HTML artifact's iframe, whose Cmd/Ctrl+F the desktop app takes before it reaches the frame. */
 export const ARTIFACT_PREVIEW_FRAME_NAME = "j5-artifact-preview";
 
@@ -41,15 +43,3 @@ export const artifactsSurfaceProps = { [SURFACE_ATTRIBUTE]: "", onKeyDown: openD
 
 /** Spread on the artifact's preview: the desktop find bar sits at its top right. */
 export const artifactFindAreaProps = { [FIND_AREA_ATTRIBUTE]: "" };
-
-function isInArtifactsSurface(node: EventTarget | null): boolean {
-  return node instanceof Element && node.closest(`[${SURFACE_ATTRIBUTE}]`) !== null;
-}
-
-/**
- * Whether a key bound to thread find belongs to the artifact instead: Cmd/Ctrl+F, started in the
- * Artifacts surface or with the surface focused. Any other chord bound to `chat.find` stays thread find.
- */
-export function isArtifactFindKey(event: KeyboardEvent, focused: Element | null): boolean {
-  return isFindKey(event) && (isInArtifactsSurface(event.target) || isInArtifactsSurface(focused));
-}

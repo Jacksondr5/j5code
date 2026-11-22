@@ -42,6 +42,8 @@ export interface FindBarView {
    */
   readonly focus: (query: string, isCurrent: () => boolean) => void;
   readonly matches: (matches: FindMatches | null) => void;
+  /** Whether the bar holds the keyboard focus, as it does when the person presses Esc or ×. */
+  readonly isFocused: () => boolean;
 }
 
 export interface FoundInPage {
@@ -121,15 +123,19 @@ export function makeFindController(target: FindTarget, view: FindBarView) {
   const step = (forward: boolean) => {
     if (anchor !== null && query !== "") search(false, forward);
   };
-  /** `forget` drops the query too, when the page or surface it searched is gone. */
+  /**
+   * `forget` drops the query too, when the page or surface it searched is gone. Focus goes back to
+   * the preview only from the bar itself, so a close for navigation or zoom leaves it where it is.
+   */
   const close = (options: { readonly forget?: boolean } = {}) => {
     if (options.forget === true) query = "";
     if (anchor === null) return;
     anchor = null;
     closes += 1;
+    const barHadFocus = view.isFocused();
     stop();
     view.hide();
-    target.restoreFocus();
+    if (barHadFocus) target.restoreFocus();
   };
 
   return {
