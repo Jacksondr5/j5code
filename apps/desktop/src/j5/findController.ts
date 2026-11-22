@@ -29,9 +29,13 @@ export interface FindTarget {
 }
 
 export interface FindBarView {
+  /** Adds the bar above the page's other views. */
   readonly show: (bounds: FindBounds) => void;
+  /** Only moves it: re-adding the view can drop its focus on macOS. */
+  readonly place: (bounds: FindBounds) => void;
   readonly hide: () => void;
-  readonly focus: () => void;
+  /** Focuses the field with `query` in it, selected. */
+  readonly focus: (query: string) => void;
   readonly matches: (matches: FindMatches | null) => void;
 }
 
@@ -77,6 +81,7 @@ export type FindController = ReturnType<typeof makeFindController>;
 
 export function makeFindController(target: FindTarget, view: FindBarView) {
   let anchor: FindAnchor | null = null;
+  let openZoomFactor = 1;
   let query = "";
   let requestId: number | null = null;
 
@@ -91,6 +96,15 @@ export function makeFindController(target: FindTarget, view: FindBarView) {
   const step = (forward: boolean) => {
     if (anchor !== null && query !== "") search(false, forward);
   };
+  /** `forget` drops the query too, when the page or surface it searched is gone. */
+  const close = (options: { readonly forget?: boolean } = {}) => {
+    if (options.forget === true) query = "";
+    if (anchor === null) return;
+    anchor = null;
+    stop();
+    view.hide();
+    target.restoreFocus();
+  };
 
   return {
     isOpen: () => anchor !== null,
@@ -98,9 +112,10 @@ export function makeFindController(target: FindTarget, view: FindBarView) {
     open: (area: FindArea) => {
       if (anchor === null) target.rememberFocus();
       const content = target.contentSize();
-      anchor = findAnchor(area, target.zoomFactor(), content);
+      openZoomFactor = target.zoomFactor();
+      anchor = findAnchor(area, openZoomFactor, content);
       view.show(findBarBounds(anchor, content));
-      view.focus();
+      view.focus(query);
       if (query !== "") search(true, true);
     },
     query: (text: string) => {
@@ -111,15 +126,12 @@ export function makeFindController(target: FindTarget, view: FindBarView) {
     },
     next: () => step(true),
     previous: () => step(false),
-    close: () => {
-      if (anchor === null) return;
-      anchor = null;
-      stop();
-      view.hide();
-      target.restoreFocus();
-    },
+    close,
+    /** The anchor came from the zoom at open, so a zoom change closes the bar instead. */
     relayout: () => {
-      if (anchor !== null) view.show(findBarBounds(anchor, target.contentSize()));
+      if (anchor === null) return;
+      if (target.zoomFactor() !== openZoomFactor) close();
+      else view.place(findBarBounds(anchor, target.contentSize()));
     },
     /** Results of an earlier request, overtaken while typing, are dropped. */
     found: (result: FoundInPage) => {

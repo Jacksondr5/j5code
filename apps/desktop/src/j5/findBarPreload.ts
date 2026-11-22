@@ -31,7 +31,8 @@ window.addEventListener("DOMContentLoaded", () => {
   });
   document.querySelector("form")?.addEventListener("submit", (event) => event.preventDefault());
 
-  ipcRenderer.on(FIND_BAR_FOCUS_CHANNEL, () => {
+  ipcRenderer.on(FIND_BAR_FOCUS_CHANNEL, (_event, query: string) => {
+    input.value = query;
     input.focus();
     input.select();
   });

@@ -20,6 +20,17 @@ const findKeybindings: ResolvedKeybindingsConfig = [
       modKey: false,
     },
   },
+  {
+    command: "chat.find",
+    shortcut: {
+      key: "g",
+      metaKey: false,
+      ctrlKey: true,
+      shiftKey: false,
+      altKey: false,
+      modKey: false,
+    },
+  },
 ];
 
 // The chat's find handler as ChatView wires it, with the page's own keydown listener after it.
@@ -73,10 +84,24 @@ function Page(props: { threadFinds: string[]; reachedPage: string[] }) {
 const options = { router: false } as const;
 
 it.each([
-  { click: "the artifact list", target: "Artifact file", threadFinds: [], native: true },
-  { click: "the artifact's text", target: "Artifact text", threadFinds: [], native: true },
-  { click: "the composer", target: "Composer", threadFinds: ["thread"], native: false },
-])("Ctrl+F after clicking $click", async ({ target, threadFinds, native }) => {
+  { click: "the artifact list", target: "Artifact file", key: "f", threadFinds: [], native: true },
+  {
+    click: "the artifact's text",
+    target: "Artifact text",
+    key: "f",
+    threadFinds: [],
+    native: true,
+  },
+  { click: "the composer", target: "Composer", key: "f", threadFinds: ["thread"], native: false },
+  // Another chord bound to thread find keeps it in the artifact.
+  {
+    click: "the artifact's text",
+    target: "Artifact text",
+    key: "g",
+    threadFinds: ["thread"],
+    native: false,
+  },
+])("Ctrl+$key after clicking $click", async ({ target, key, threadFinds, native }) => {
   const finds: string[] = [];
   const reachedPage: string[] = [];
   await using screen = await render(
@@ -87,18 +112,17 @@ it.each([
   await userEvent.click(
     target === "Composer" ? screen.getByLabelText(target) : screen.getByText(target),
   );
-  await userEvent.keyboard("{Control>}f{/Control}");
+  await userEvent.keyboard(`{Control>}${key}{/Control}`);
 
   expect(finds).toEqual(threadFinds);
   // The browser opens its own find only for a key nobody prevented.
-  expect(reachedPage.includes("f")).toBe(native);
+  expect(reachedPage.includes(key)).toBe(native);
 });
 
 it("Ctrl+F in an artifact on desktop opens the find bar over the preview", async () => {
   const opened: unknown[] = [];
   using _bridge = stubGlobal("desktopBridge", {
-    getClientPlatform: () => "linux",
-    openFindBar: async (area: unknown) => {
+    setFindBar: async (area: unknown) => {
       opened.push(area);
     },
   });

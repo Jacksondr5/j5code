@@ -41,7 +41,12 @@ import {
   artifactPreviewKind,
   artifactPreviewRevision,
 } from "@t3tools/client-runtime/j5/artifacts";
-import { artifactFindAreaProps, artifactsSurfaceProps } from "./artifactFind";
+import {
+  ARTIFACT_PREVIEW_FRAME_NAME,
+  artifactFindAreaProps,
+  artifactsSurfaceProps,
+  closeDesktopFind,
+} from "./artifactFind";
 import { nextArtifactRefreshGeneration } from "./artifactRefresh";
 
 const isJ5ActionError = Schema.is(J5ActionError);
@@ -381,6 +386,8 @@ export function ArtifactsPage({
     setListGeneration((generation) => generation + 1);
     setDeleting(false);
   };
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- the desktop find bar lives in the main process; leaving the surface closes it.
+  useEffect(() => closeDesktopFind, []);
   const selectedName = selectedPath?.split("/").at(-1) ?? null;
   const previewKind = content === null ? null : artifactPreviewKind(content);
 
@@ -601,6 +608,7 @@ export function ArtifactsPage({
                 ) : previewKind === "html" ? (
                   <iframe
                     className="h-[calc(100dvh-8rem)] min-h-96 w-full border-0 bg-transparent"
+                    name={ARTIFACT_PREVIEW_FRAME_NAME}
                     referrerPolicy="no-referrer"
                     sandbox=""
                     srcDoc={content.content}

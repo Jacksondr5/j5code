@@ -11,6 +11,7 @@ import {
 } from "./findController.ts";
 
 function setup(options: { zoomFactor?: number } = {}) {
+  const zoom = { factor: options.zoomFactor ?? 1 };
   const content = { width: 1200, height: 800 };
   const calls: string[] = [];
   const matches: (FindMatches | null)[] = [];
@@ -26,17 +27,18 @@ function setup(options: { zoomFactor?: number } = {}) {
       stopFindInPage: () => calls.push("stop"),
       rememberFocus: () => calls.push("remember page focus"),
       restoreFocus: () => calls.push("restore page focus"),
-      zoomFactor: () => options.zoomFactor ?? 1,
+      zoomFactor: () => zoom.factor,
       contentSize: () => content,
     },
     {
       show: (bounds) => shown.push(bounds),
+      place: (bounds) => calls.push(`place at ${bounds.x},${bounds.y}`),
       hide: () => calls.push("hide"),
-      focus: () => calls.push("focus bar"),
+      focus: (query) => calls.push(query === "" ? "focus bar" : `focus bar with ${query}`),
       matches: (value) => matches.push(value),
     },
   );
-  return { controller, calls, matches, shown, content };
+  return { controller, calls, matches, shown, content, zoom };
 }
 
 const panel = { x: 700, y: 48, width: 500, height: 700 };
@@ -80,6 +82,27 @@ describe("makeFindController", () => {
       "remember page focus",
       "focus bar",
       "find alpha new",
+      "focus bar with alpha",
+      "find alpha new",
+      "stop",
+      "hide",
+      "restore page focus",
+      "remember page focus",
+      "focus bar with alpha",
+      "find alpha new",
+    ]);
+    expect(controller.isOpen()).toBe(true);
+  });
+
+  it("forgets the query when the page it searched goes away, so it never searches the next one", () => {
+    const { controller, calls } = setup();
+    controller.open(panel);
+    controller.query("alpha");
+    controller.close({ forget: true });
+    controller.open(panel);
+
+    expect(calls).toEqual([
+      "remember page focus",
       "focus bar",
       "find alpha new",
       "stop",
@@ -87,9 +110,7 @@ describe("makeFindController", () => {
       "restore page focus",
       "remember page focus",
       "focus bar",
-      "find alpha new",
     ]);
-    expect(controller.isOpen()).toBe(true);
   });
 
   it("forwards only the latest request's result", () => {
@@ -108,7 +129,7 @@ describe("makeFindController", () => {
   });
 
   it("places the bar at the area's top right and keeps it against the right edge on resize", () => {
-    const { controller, shown, content } = setup({ zoomFactor: 1.25 });
+    const { controller, calls, shown, content } = setup({ zoomFactor: 1.25 });
     controller.open({ x: 560, y: 40, width: 400, height: 600 });
     content.width = 1000;
     controller.relayout();
@@ -116,7 +137,30 @@ describe("makeFindController", () => {
     // At 1.25 the area's right edge is 1200 DIPs, flush with the content, and its top is 50.
     expect(shown).toEqual([
       { x: 1200 - 8 - FIND_BAR_WIDTH, y: 58, width: FIND_BAR_WIDTH, height: FIND_BAR_HEIGHT },
-      { x: 1000 - 8 - FIND_BAR_WIDTH, y: 58, width: FIND_BAR_WIDTH, height: FIND_BAR_HEIGHT },
+    ]);
+    expect(calls.at(-1)).toBe(`place at ${1000 - 8 - FIND_BAR_WIDTH},58`);
+  });
+
+  it("closes, keeping its query, when the zoom changed since it opened", () => {
+    const { controller, calls, shown, zoom } = setup();
+    controller.open(panel);
+    controller.query("alpha");
+    zoom.factor = 1.25;
+    controller.relayout();
+    controller.relayout();
+    controller.open(panel);
+
+    expect(shown).toHaveLength(2);
+    expect(calls).toEqual([
+      "remember page focus",
+      "focus bar",
+      "find alpha new",
+      "stop",
+      "hide",
+      "restore page focus",
+      "remember page focus",
+      "focus bar with alpha",
+      "find alpha new",
     ]);
   });
 });
