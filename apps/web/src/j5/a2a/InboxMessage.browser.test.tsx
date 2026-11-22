@@ -4,10 +4,11 @@ import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 import type { PresentedHumanInboxItem } from "@t3tools/client-runtime/j5/inbox";
 import * as Option from "effect/Option";
 import { expect, it, vi } from "vite-plus/test";
+import { page, userEvent } from "vite-plus/test/browser";
 
 import { act, render } from "../../../test/render";
 
-const { environmentId, project, senderThread, threads } = vi.hoisted(() => {
+const { environmentId, project, senderThread, threads, providers, skill } = vi.hoisted(() => {
   const environmentId = "env-inbox" as EnvironmentId;
   const project = {
     id: "project-inbox",
@@ -29,7 +30,19 @@ const { environmentId, project, senderThread, threads } = vi.hoisted(() => {
     projectId: project.id,
     title: "Sender",
     worktreePath: null as string | null,
+    modelSelection: { instanceId: "claude-sender", model: "claude-haiku-5-5" },
   };
+  // The sender's provider, whose skill the message names; another instance has one by the same name.
+  const skill = { name: "review-notes", path: "/skills/review-notes/SKILL.md", enabled: true };
+  const providers = new Map([
+    [
+      environmentId,
+      [
+        { instanceId: "codex-other", skills: [{ ...skill, path: "/other/SKILL.md" }] },
+        { instanceId: "claude-sender", skills: [skill] },
+      ],
+    ],
+  ]);
   // What the client holds for the sender thread: its shell, or only its loaded detail.
   const threads = {
     shell: senderThread as typeof senderThread | null,
@@ -37,8 +50,12 @@ const { environmentId, project, senderThread, threads } = vi.hoisted(() => {
     detail: senderThread as typeof senderThread | null,
     detailReads: [] as string[],
   };
-  return { environmentId, project, senderThread, threads };
+  return { environmentId, project, senderThread, threads, providers, skill };
 });
+vi.mock(import("../../state/environments"), async (original) => ({
+  ...(await original()),
+  useEnvironmentProviders: (() => providers) as never,
+}));
 
 const { openUrlInPreview } = vi.hoisted(() => ({ openUrlInPreview: vi.fn() }));
 vi.mock(import("../../browser/openFileInPreview"), async (original) => ({
@@ -100,6 +117,8 @@ const links = [
   "[the docs](https://example.com/docs)",
   "",
   "https://github.com/Effect-TS/effect/pull/7",
+  "",
+  "Start with $review-notes before answering.",
 ];
 
 function item(overrides: Partial<PresentedHumanInboxItem> = {}) {
@@ -164,6 +183,13 @@ it("opens an Inbox message's links in the asking thread's own panel", async () =
     expect.objectContaining({ repository: "effect-ts/effect", number: 7, projectId: project.id }),
   );
   expect(screen.router?.state.location.pathname).toBe("/inbox");
+
+  // A skill is the sender's provider's, and its instructions open in the sender's panel.
+  using openFile = vi.spyOn(useRightPanelStore.getState(), "openFile").mockImplementation(() => {});
+  await userEvent.click(screen.getByText("review-notes"));
+  // The popover is portaled outside the rendered container.
+  await userEvent.click(page.getByRole("button", { name: "View instructions" }));
+  expect(openFile).toHaveBeenCalledWith(senderRef, skill.path);
 });
 
 it("keeps links that need no panel when the asker has no thread here", async () => {
