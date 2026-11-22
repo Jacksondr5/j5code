@@ -14,8 +14,8 @@ export interface InboxPanelThread {
 interface InboxThreadPanelState {
   /** The last panel shown, which the toggle reopens. `null` until a link in an ask opens one. */
   readonly shown: InboxPanelThread | null;
-  /** The ask clicked last, with its thread's user-action count at the click. */
-  readonly armed: (InboxPanelThread & { readonly revision: number }) | null;
+  /** The ask clicked last, until a user action opens its thread's panel. */
+  readonly armed: InboxPanelThread | null;
 }
 
 export const useInboxThreadPanelStore = create<InboxThreadPanelState>(() => ({
@@ -29,8 +29,7 @@ export const useInboxThreadPanelStore = create<InboxThreadPanelState>(() => ({
  * shows that panel beside the Inbox.
  */
 export function armInboxThreadPanel(thread: InboxPanelThread): void {
-  const revision = useRightPanelStore.getState().getUserActionRevision(thread.ref);
-  useInboxThreadPanelStore.setState({ armed: { ...thread, revision } });
+  useInboxThreadPanelStore.setState({ armed: thread });
 }
 
 /**
@@ -43,8 +42,11 @@ export function followInboxThreadPanelOpens(): () => void {
     const { armed } = useInboxThreadPanelStore.getState();
     if (armed === null) return;
     const key = scopedThreadKey(armed.ref);
-    if ((state.userActionRevisionByThreadKey[key] ?? 0) === armed.revision) return;
-    if (state.byThreadKey[key] === previous.byThreadKey[key]) return;
+    // A user action that changes the panel in one update; a lone mark followed by an automatic
+    // change is two updates, neither of which counts.
+    const revisionMoved =
+      state.userActionRevisionByThreadKey[key] !== previous.userActionRevisionByThreadKey[key];
+    if (!revisionMoved || state.byThreadKey[key] === previous.byThreadKey[key]) return;
     if (!selectThreadRightPanelState(state.byThreadKey, armed.ref).isOpen) return;
     useInboxThreadPanelStore.setState({
       shown: { ref: armed.ref, agentLabel: armed.agentLabel },

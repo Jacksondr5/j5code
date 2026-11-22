@@ -2,7 +2,7 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { type EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { expect, it } from "vite-plus/test";
 
-import { useRightPanelStore } from "../../rightPanelStore";
+import { selectThreadRightPanelState, useRightPanelStore } from "../../rightPanelStore";
 import {
   armInboxThreadPanel,
   followInboxThreadPanelOpens,
@@ -41,13 +41,15 @@ it("shows the panel a link in an ask opened, and switches when a link in another
   armInboxThreadPanel(askB);
   store.markUserAction(refB);
   expect(useInboxThreadPanelStore.getState().shown).toEqual(askA);
-
-  // A click that opens nothing in its thread's panel (a link to a new tab) leaves the panel.
-  armInboxThreadPanel(askB);
-  expect(useInboxThreadPanelStore.getState().shown).toEqual(askA);
-  // Nor does the thread's panel opening on its own afterwards.
-  store.revealSurface(refB, "artifacts");
-  store.openProactive(refB, { id: "pull-requests", kind: "pull-requests" }, 0);
+  // Nor does B's panel changing on its own afterwards, with the click still armed.
+  store.openProactive(
+    refB,
+    { id: "pull-requests", kind: "pull-requests" },
+    store.getUserActionRevision(refB),
+  );
+  expect(
+    selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refB).surfaces,
+  ).toContainEqual({ id: "pull-requests", kind: "pull-requests" });
   expect(useInboxThreadPanelStore.getState().shown).toEqual(askA);
 
   // A lookup that resolves after the click still counts as the click's.

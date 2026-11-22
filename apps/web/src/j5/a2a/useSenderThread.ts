@@ -24,8 +24,12 @@ export function useSenderThread(ref: ScopedThreadRef | null, load: boolean) {
     loadDetail ? ref.threadId : null,
   );
   const thread = shell ?? Option.getOrNull(detail.data)?.thread ?? null;
+  const settled =
+    detail.status === "live" || detail.status === "deleted" || Option.isSome(detail.error);
   return {
     known: thread !== null,
+    /** The thread is being loaded; what its links open depends on it. */
+    pending: loadDetail && thread === null && !settled,
     projectId: thread?.projectId ?? null,
     worktreePath: thread?.worktreePath ?? null,
     title: thread?.title ?? null,

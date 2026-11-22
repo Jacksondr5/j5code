@@ -33,7 +33,8 @@ const { environmentId, project, senderThread, threads } = vi.hoisted(() => {
   // What the client holds for the sender thread: its shell, or only its loaded detail.
   const threads = {
     shell: senderThread as typeof senderThread | null,
-    detail: senderThread,
+    // `null` while the thread's detail is still loading.
+    detail: senderThread as typeof senderThread | null,
     detailReads: [] as string[],
   };
   return { environmentId, project, senderThread, threads };
@@ -64,7 +65,9 @@ vi.mock(import("../../state/threads"), async (original) => {
     useEnvironmentThread: ((_environmentId: unknown, threadId: string | null) => {
       if (threadId === null) return EMPTY_ENVIRONMENT_THREAD_STATE;
       threads.detailReads.push(threadId);
-      return { ...EMPTY_ENVIRONMENT_THREAD_STATE, data: Option.some({ thread: threads.detail }) };
+      return threads.detail === null
+        ? { ...EMPTY_ENVIRONMENT_THREAD_STATE, status: "synchronizing" }
+        : { ...EMPTY_ENVIRONMENT_THREAD_STATE, data: Option.some({ thread: threads.detail }) };
     }) as never,
   };
 });
@@ -195,7 +198,7 @@ it("keeps links that need no panel when the asker has no thread here", async () 
 
 it("loads the sender's thread for an open ask when the client holds no shell for it", async () => {
   setup(null);
-  threads.detail = { ...senderThread, worktreePath: "/worktrees/sender" };
+  threads.detail = null;
   const message = (expanded: boolean) => (
     <InboxMessage
       item={item({ message: "See [app](src/app.ts)." })}
@@ -208,9 +211,16 @@ it("loads the sender's thread for an open ask when the client holds no shell for
   await expect.element(screen.getByText(/See/)).toBeInTheDocument();
   expect(threads.detailReads).toEqual([]);
 
+  // Opened, its links wait while the thread loads rather than open against the project root.
+  await screen.rerender(message(true));
+  expect(threads.detailReads).toContain(senderThread.id);
+  const body = screen.container.querySelector("[aria-busy]");
+  expect(body?.hasAttribute("inert")).toBe(true);
+
+  threads.detail = { ...senderThread, worktreePath: "/worktrees/sender" };
   await screen.rerender(message(true));
   await expect
     .element(screen.getByRole("link", { name: /app/ }))
     .toHaveAttribute("href", expect.stringContaining("/worktrees/sender/src/app.ts"));
-  expect(threads.detailReads).toContain(senderThread.id);
+  expect(screen.container.querySelector("[inert]")).toBeNull();
 });

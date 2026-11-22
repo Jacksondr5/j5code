@@ -248,8 +248,14 @@ export function InboxMessage({
     panelRef === undefined ? undefined : () => armInboxThreadPanel({ ref: panelRef, agentLabel });
   return (
     // The context menu arms too: its items, "Open in integrated browser" among them, can come
-    // from a native menu that sends no click.
-    <div className="flex flex-col gap-4" onClickCapture={arm} onContextMenuCapture={arm}>
+    // from a native menu that sends no click. Links wait, inert, while the sender's thread loads.
+    <div
+      aria-busy={sender.pending || undefined}
+      className="flex flex-col gap-4"
+      inert={sender.pending}
+      onClickCapture={arm}
+      onContextMenuCapture={arm}
+    >
       {markdown(item.message)}
       {item.escalation === undefined ? null : <J5RecordPanel text={item.escalation.summary} />}
       {item.personaDraft === undefined ? null : <J5RecordPanel text={item.personaDraft.summary} />}
