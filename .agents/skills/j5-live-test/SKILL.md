@@ -279,8 +279,10 @@ sent through the UI.
 Use `--base <ref>` so base and head show the same data. The ref is the PR's
 own base, which for a stacked PR is the layer beneath it. Fetch, then name the
 remote branch, such as `origin/j5/main`: a local branch can be behind. Open
-each server in its own tab. Capture at 1280x800 as test-t3-app describes,
-then upload:
+each server in its own tab. Capture at 1280x800 as test-t3-app describes.
+Every pair shows the full screen, plus a crop when the change is small:
+reviewers judge each "after" screen as a whole, not only the part that
+changed. Then upload:
 
 ```bash
 node scripts/j5/pr-evidence.ts <pr> --pair "<caption>" <before.png> <after.png>
