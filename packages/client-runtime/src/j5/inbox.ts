@@ -173,6 +173,31 @@ export function nextKeptItems<Item>(input: {
 }
 
 /**
+ * The saved answers, by `scopedInboxItemKey`, whose ask a server's latest read no longer lists for
+ * this person: answered, withdrawn, or asked of someone else. An ask kept on the page with its
+ * words (AC17) keeps them, and so does every ask on a server without a current read.
+ */
+export function closedInboxAnswerKeys(input: {
+  readonly openSources: J5ReadSources<HumanInboxResponse>;
+  readonly itemKeys: Iterable<string>;
+  readonly kept: ReadonlySet<string>;
+}): ReadonlyArray<string> {
+  const openByEnvironment = new Map<string, ReadonlySet<string>>();
+  for (const source of input.openSources.sources) {
+    if (source.status !== "ready" || source.data === null) continue;
+    const { environmentId } = source;
+    openByEnvironment.set(
+      environmentId,
+      new Set(source.data.items.map((item) => scopedInboxItemKey({ ...item, environmentId }))),
+    );
+  }
+  return [...input.itemKeys].filter((itemKey) => {
+    const open = openByEnvironment.get((JSON.parse(itemKey) as [string])[0]);
+    return open !== undefined && !open.has(itemKey) && !input.kept.has(itemKey);
+  });
+}
+
+/**
  * Who answered an ask, as the Replied shelf and a kept item say it: "You answered", "Priya
  * answered" (Inbox AC16). `null` when the server names no one.
  */

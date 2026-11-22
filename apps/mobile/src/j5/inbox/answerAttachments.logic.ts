@@ -14,16 +14,28 @@ export type AnswerTarget = Pick<
 
 type UploadInput = Parameters<typeof composerAttachmentsStillUploading>[0];
 
+const ANSWER_DRAFT_MARK = ":j5-answer-";
+
 /**
- * An answer's attachments are a composer draft on the asking environment, as a pending question's
- * are, so the composer's upload worker sends them as they are added and they survive a restart.
- * The key names the answering person as the answer's words do, so another person on this device
- * never sends them.
+ * An answer is a composer draft on the asking environment, as a pending question's attachments
+ * are, so the composer's upload worker sends its files as they are added, and its words and files
+ * survive leaving the screen and a restart. The key names the answering person, so another person
+ * on this device never sends them.
  */
 export const answerAttachmentDraftKey = (target: AnswerTarget) =>
-  `${target.environmentId}:j5-answer-${encodeURIComponent(
+  `${target.environmentId}${ANSWER_DRAFT_MARK}${encodeURIComponent(
     JSON.stringify([target.personId, target.projectId, target.exchangeId]),
   )}`;
+
+/** The `scopedInboxItemKey` of the ask a composer draft answers, or null for any other draft. */
+export function answerDraftItemKey(draftKey: string): string | null {
+  const at = draftKey.indexOf(ANSWER_DRAFT_MARK);
+  if (at < 0) return null;
+  const [personId, projectId, exchangeId] = JSON.parse(
+    decodeURIComponent(draftKey.slice(at + ANSWER_DRAFT_MARK.length)),
+  ) as [string, string, string];
+  return JSON.stringify([draftKey.slice(0, at), personId, projectId, exchangeId]);
+}
 
 /**
  * The uploaded attachments an answer sends, or why it must wait: one still being picked or pasted,

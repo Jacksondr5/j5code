@@ -1,6 +1,6 @@
+import { closedInboxAnswerKeys } from "@t3tools/client-runtime/j5/inbox";
 import type { J5ReadSources } from "@t3tools/client-runtime/j5/readSources";
-import type { EnvironmentId } from "@t3tools/contracts";
-import { type HumanInboxResponse, scopedInboxItemKey } from "@t3tools/contracts/j5";
+import type { HumanInboxResponse } from "@t3tools/contracts/j5";
 import { create } from "zustand";
 import { persist, type StorageValue } from "zustand/middleware";
 
@@ -23,8 +23,6 @@ export const inboxAnswerDraftId = (itemKey: string) =>
 function itemKeyOf(draftKey: string): string | null {
   return draftKey.startsWith(PREFIX) ? decodeURIComponent(draftKey.slice(PREFIX.length)) : null;
 }
-
-const environmentOf = (itemKey: string) => (JSON.parse(itemKey) as [EnvironmentId])[0];
 
 /** Every answer's saved files, by its item's `scopedInboxItemKey`. */
 export function inboxAnswerDrafts(
@@ -118,31 +116,16 @@ export function clearInboxAnswerDraft(itemKey: string) {
   store.clearComposerContent(target);
 }
 
-/**
- * Drops the answers to asks a server's latest read no longer lists for this person: answered,
- * withdrawn, or asked of someone else. An ask kept on the page with its words (AC17) keeps them.
- */
+/** Drops the answers to asks that closed, as `closedInboxAnswerKeys` decides. */
 export function pruneInboxAnswerDrafts(
   openSources: J5ReadSources<HumanInboxResponse>,
   kept: ReadonlySet<string>,
 ) {
-  const openByEnvironment = new Map<EnvironmentId, ReadonlySet<string>>();
-  for (const source of openSources.sources) {
-    if (source.status !== "ready" || source.data === null) continue;
-    const { environmentId } = source;
-    openByEnvironment.set(
-      environmentId,
-      new Set(source.data.items.map((item) => scopedInboxItemKey({ ...item, environmentId }))),
-    );
-  }
   const itemKeys = new Set([
     ...inboxAnswerDrafts(useComposerDraftStore.getState().draftsByThreadKey).keys(),
     ...Object.keys(useInboxAnswerTexts.getState().byItemKey),
   ]);
-  for (const itemKey of itemKeys) {
-    const open = openByEnvironment.get(environmentOf(itemKey));
-    if (open !== undefined && !open.has(itemKey) && !kept.has(itemKey)) {
-      clearInboxAnswerDraft(itemKey);
-    }
+  for (const itemKey of closedInboxAnswerKeys({ openSources, itemKeys, kept })) {
+    clearInboxAnswerDraft(itemKey);
   }
 }

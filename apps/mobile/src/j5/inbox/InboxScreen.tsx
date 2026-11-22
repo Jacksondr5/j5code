@@ -127,7 +127,13 @@ export function InboxScreen() {
       connected: item.connected,
     })),
   );
-  const answers = useInboxAnswers({ openSources, items, answeredSources, answered });
+  const answers = useInboxAnswers({
+    openSources,
+    items,
+    answeredSources,
+    answered,
+    pruneClosed: true,
+  });
   // Reads again each time the Inbox comes into view; between visits the server's inbox signal
   // rereads it. No timer.
   useFocusEffect(useCallback(() => refreshAll(), []));

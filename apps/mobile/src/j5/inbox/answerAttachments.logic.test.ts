@@ -3,7 +3,11 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { composerAttachmentUploadKey } from "../../lib/composerAttachmentUploadQueue";
 import type { DraftComposerAttachment } from "../../lib/composerImages";
-import { answerAttachmentDraftKey, answerAttachmentsReadiness } from "./answerAttachments.logic";
+import {
+  answerAttachmentDraftKey,
+  answerAttachmentsReadiness,
+  answerDraftItemKey,
+} from "./answerAttachments.logic";
 
 const environmentId = EnvironmentId.make("environment-1");
 const target = {
@@ -52,6 +56,11 @@ describe("answer attachments", () => {
     expect(answerAttachmentDraftKey({ ...target, personId: "person-b" })).not.toBe(own);
     expect(answerAttachmentDraftKey({ ...target, projectId: "project-2" })).not.toBe(own);
     expect(own.startsWith(`${environmentId}:`)).toBe(true);
+    // An ask's `scopedInboxItemKey`.
+    expect(answerDraftItemKey(own)).toBe(
+      JSON.stringify([environmentId, "person-a", "project-1", "exchange-1"]),
+    );
+    expect(answerDraftItemKey(`${environmentId}:thread-1`)).toBeNull();
   });
 
   it("sends the uploaded references, and holds the answer until every attachment is uploaded", () => {

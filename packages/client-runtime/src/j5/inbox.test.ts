@@ -10,6 +10,7 @@ import {
 import type { J5ReadSource } from "./readSources.ts";
 import {
   answeredByLine,
+  closedInboxAnswerKeys,
   closedLine,
   inboxBellPresentation,
   mergeHumanInboxSources,
@@ -176,6 +177,32 @@ describe("an inbox item someone was answering when it closed", () => {
       }),
     ).toBe("Priya answered");
   });
+});
+
+it("drops saved answers whose ask a server's read no longer lists, unless kept on the page", () => {
+  const key = (environmentId: string, exchangeId: string, personId = "human:alpha") =>
+    JSON.stringify([environmentId, personId, "project:shared", exchangeId]);
+  const open = (exchangeId: string) => ({ ...item, exchangeId });
+
+  const closed = closedInboxAnswerKeys({
+    openSources: {
+      isReady: true,
+      sources: [
+        source("local", { personId: "human:alpha", items: [open("open")] }),
+        source("remote", { personId: "human:alpha", items: [] }, { status: "offline" }),
+      ],
+    },
+    itemKeys: [
+      key("local", "open"),
+      key("local", "answered"),
+      key("local", "kept"),
+      key("local", "open", "human:previous"),
+      key("remote", "offline-server"),
+    ],
+    kept: new Set([key("local", "kept")]),
+  });
+
+  expect(closed).toEqual([key("local", "answered"), key("local", "open", "human:previous")]);
 });
 
 describe("what a kept item says", () => {

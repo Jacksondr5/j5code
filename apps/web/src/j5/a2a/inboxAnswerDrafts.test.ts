@@ -1,13 +1,10 @@
-import type { J5ReadSource, J5ReadSources } from "@t3tools/client-runtime/j5/readSources";
 import { EnvironmentId, ProjectId } from "@t3tools/contracts";
-import type { HumanInboxResponse } from "@t3tools/contracts/j5";
 import { afterEach, expect, it, vi } from "vite-plus/test";
 
 import { useComposerDraftStore } from "../../composerDraftStore";
 import {
   inboxAnswerDraftId,
   persistInboxAnswerImages,
-  pruneInboxAnswerDrafts,
   setInboxAnswerText,
   useInboxAnswerTexts,
 } from "./inboxAnswerDrafts";
@@ -17,7 +14,6 @@ const { serializeComposerImages } = vi.hoisted(() => ({ serializeComposerImages:
 vi.mock("../../components/chat/composerImagePersistence", () => ({ serializeComposerImages }));
 
 const local = EnvironmentId.make("local");
-const remote = EnvironmentId.make("remote");
 const projectId = ProjectId.make("project-1");
 const key = (environmentId: EnvironmentId, exchangeId: string, personId = "owner") =>
   JSON.stringify([environmentId, personId, projectId, exchangeId]);
@@ -128,44 +124,4 @@ it("keeps a newer image save when an older one finishes after it", async () => {
   } finally {
     useComposerDraftStore.setState({ syncPersistedAttachments });
   }
-});
-
-it("drops answers whose ask a server's read no longer lists, unless kept on the page", () => {
-  const source = (
-    environmentId: EnvironmentId,
-    status: J5ReadSource<HumanInboxResponse>["status"],
-    exchangeIds: ReadonlyArray<string>,
-  ): J5ReadSource<HumanInboxResponse> => ({
-    environmentId,
-    environmentLabel: environmentId,
-    connected: status === "ready",
-    status,
-    error: null,
-    refreshing: false,
-    data: {
-      personId: "owner",
-      items: exchangeIds.map(
-        (exchangeId) => ({ exchangeId, projectId, personId: "owner" }) as never,
-      ),
-    },
-  });
-  for (const itemKey of [
-    key(local, "open"),
-    key(local, "answered"),
-    key(local, "kept"),
-    key(local, "open", "previous-person"),
-    key(remote, "offline-server"),
-  ]) {
-    setInboxAnswerText(itemKey, "Words");
-  }
-  const sources: J5ReadSources<HumanInboxResponse> = {
-    isReady: true,
-    sources: [source(local, "ready", ["open"]), source(remote, "offline", [])],
-  };
-
-  pruneInboxAnswerDrafts(sources, new Set([key(local, "kept")]));
-
-  expect(Object.keys(answers()).toSorted()).toEqual(
-    [key(local, "open"), key(local, "kept"), key(remote, "offline-server")].toSorted(),
-  );
 });
