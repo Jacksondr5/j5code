@@ -8,12 +8,15 @@ name: J5 Nightly
 # follow it. Nothing is committed: the version is stamped into the manifests
 # during each build. J5 Stable promotes a nightly to a stable release.
 #
-# Started by hand for now. To run it on a schedule, add a `schedule` trigger and
-# set `due` in the `resolve` job from `shouldReleaseNightly` in upstream's
-# .github/scripts/check-nightly-release.cjs when the event is `schedule`, so a
-# scheduled run with no new commits since the last nightly builds nothing.
+# Runs once a day, and by hand. A scheduled run builds only when upstream's
+# `shouldReleaseNightly` (.github/scripts/check-nightly-release.cjs) says one is
+# due: `j5/main` has moved since the last nightly, at least six hours ago.
 
 on:
+  schedule:
+    # 09:17 UTC, overnight in the Americas, so a fresh nightly waits each morning.
+    # Off the hour, when GitHub's scheduled jobs are busiest.
+    - cron: "17 9 * * *"
   workflow_dispatch:
 
 permissions: {}
@@ -87,7 +90,12 @@ jobs:
 
       - name: Decide whether a nightly is due
         id: due
-        run: echo "due=true" >> "$GITHUB_OUTPUT"
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const { shouldReleaseNightly } = require('./.github/scripts/check-nightly-release.cjs');
+            const due = context.eventName !== 'schedule' || (await shouldReleaseNightly({ github, context, core }));
+            core.setOutput('due', due ? 'true' : 'false');
 
       # These gitlinks belong to vendored manifests, not this repository.
       # Remove them only from the disposable index before checkout's cleanup.
