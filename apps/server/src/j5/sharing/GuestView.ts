@@ -25,7 +25,6 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import { identity } from "effect/Function";
-import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import type * as SqlClient from "effect/sql/SqlClient";
@@ -536,34 +535,19 @@ const narrowedView = (
     /**
      * A tab is told only on a thread the person holds Collaborator on, as `AccessGate`'s preview
      * rules ask; a tab of no thread, such as the Inbox browser's, never (only a server level covers
-     * it, and a narrowed one is below Collaborator). Each thread is read once and forgotten when
-     * anyone's reach changes; a lowered level also renews the person's session, ending this feed.
+     * it, and a narrowed one is below Collaborator). Reach is read on each event, so a share taken
+     * away, or a thread moved to a project the person doesn't reach, ends with the next one.
      */
     previewEvents: (stream) =>
       personId === null
         ? Stream.empty
-        : Stream.unwrap(
-            Effect.gen(function* () {
-              const changes = yield* access.subscribeChanges;
-              const drives = new Map<string, boolean>();
-              // Untraced: it runs on every tab event, and the feed's request is traced already.
-              const drivesTabsOn = Effect.fnUntraced(function* (threadId: string) {
-                const changed = yield* PubSub.takeUpTo(changes, Number.POSITIVE_INFINITY);
-                if (changed.length > 0) drives.clear();
-                const known = drives.get(threadId);
-                if (known !== undefined) return known;
-                const level = yield* access.threadLevel(personId, ThreadId.make(threadId));
-                const drivesTabs = levelReaches(level, "collaborator");
-                drives.set(threadId, drivesTabs);
-                return drivesTabs;
-              });
-              // A failed read is not kept, so the thread's next event reads it again.
-              return stream.pipe(
-                Stream.filterEffect((event) =>
-                  drivesTabsOn(event.threadId).pipe(Effect.orElseSucceed(() => false)),
-                ),
-              );
-            }),
+        : stream.pipe(
+            Stream.filterEffect((event) =>
+              access.threadLevel(personId, ThreadId.make(event.threadId)).pipe(
+                Effect.map((level) => levelReaches(level, "collaborator")),
+                Effect.orElseSucceed(() => false),
+              ),
+            ),
           ),
     threadProjection: (load) => load.pipe(Effect.map(narrowProjection)),
     // Reach is read on each search, so a share taken away ends with the next one. A narrowed

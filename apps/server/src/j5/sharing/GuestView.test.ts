@@ -1387,6 +1387,15 @@ live(
     });
     yield* Queue.offer(source, tabEvent("thread:later"));
     assert.strictEqual(yield* Queue.take(told), "thread:later");
+
+    // A level taken away stops the next event, even on a feed that already told that thread.
+    yield* access.removeLevel({
+      personId,
+      scope: { kind: "thread", threadId: ThreadId.make("thread:later") },
+    });
+    yield* Queue.offer(source, tabEvent("thread:later"));
+    yield* Queue.offer(source, tabEvent("thread:theirs"));
+    assert.strictEqual(yield* Queue.take(told), "thread:theirs");
   }).pipe(Effect.scoped),
 );
 
