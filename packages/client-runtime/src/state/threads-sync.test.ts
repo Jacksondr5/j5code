@@ -2071,8 +2071,14 @@ describe("EnvironmentThreads", () => {
 
   it.effect("does not recreate a cache a re-pair cleared from its finalizer", () =>
     Effect.gen(function* () {
+      const resumeCache: NonNullable<Parameters<typeof makeEnvironmentThreadState>[1]> = {
+        snapshot: undefined,
+        owner: undefined,
+      };
       const scope = yield* Scope.make();
-      const harness = yield* makeHarness().pipe(Effect.provideService(Scope.Scope, scope));
+      const harness = yield* makeHarness({ resumeCache }).pipe(
+        Effect.provideService(Scope.Scope, scope),
+      );
       yield* Queue.offer(harness.inputs, snapshot(BASE_PROJECTION));
       yield* awaitThreadState(harness.observed, (value) => value.status === "live");
       yield* TestClock.adjust("500 millis");
@@ -2090,6 +2096,9 @@ describe("EnvironmentThreads", () => {
       );
       yield* Scope.close(scope, Exit.void);
       expect(yield* Ref.get(harness.savedThreads)).toHaveLength(1);
+      // The state kept in memory for a quick reopen was the last person's too.
+      const successor = yield* makeHarness({ resumeCache });
+      expect(Option.isNone((yield* SubscriptionRef.get(successor.threadState)).data)).toBe(true);
     }),
   );
 

@@ -67,6 +67,23 @@ export const savesUnderCurrentCredential = (environmentId: EnvironmentId) => {
     );
 };
 
+// The replacement count each thread's retained state was last read under.
+const retainedReads = new WeakMap<object, number>();
+
+/**
+ * Drops a thread's retained state (kept in memory so a reopen paints at once) when the
+ * environment's credential was replaced since it was last read: it is the last person's.
+ */
+export const dropReplacedRetainedState = (
+  environmentId: EnvironmentId,
+  retained: { snapshot: unknown },
+) => {
+  const current = savesOf(environmentId).replaced;
+  const seen = retainedReads.get(retained);
+  retainedReads.set(retained, current);
+  if (seen !== undefined && seen !== current) retained.snapshot = undefined;
+};
+
 /**
  * Closes the environment's old scope with what the last credential cached forgotten: its saves
  * stop first, the ones already writing finish, then the cache is cleared for the next credential.

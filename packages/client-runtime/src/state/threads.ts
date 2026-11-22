@@ -30,7 +30,10 @@ import { connectionProjectionPhase } from "../connection/model.ts";
 import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import * as ConnectionWakeups from "../connection/wakeups.ts";
 import * as Persistence from "../platform/persistence.ts";
-import { savesUnderCurrentCredential } from "../j5/replacedCredential.ts";
+import {
+  dropReplacedRetainedState,
+  savesUnderCurrentCredential,
+} from "../j5/replacedCredential.ts";
 import { runCachePersistence } from "./cachePersistence.ts";
 import * as ManagedRelay from "../relay/managedRelay.ts";
 import { request, subscribeDynamic } from "../rpc/client.ts";
@@ -208,6 +211,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
   const environmentId = supervisor.target.environmentId;
   // J5 (case 125): a thread state made under a replaced credential stops saving.
   const underCredential = savesUnderCurrentCredential(environmentId);
+  if (resumeCache) dropReplacedRetainedState(environmentId, resumeCache);
   const retained = resumeCache?.snapshot;
   const owner = {};
   if (resumeCache) resumeCache.owner = owner;
@@ -1083,6 +1087,8 @@ export function createEnvironmentThreadStateAtoms<R, E>(
         (get) => {
           get.mount(resumeAtom);
           const resume = get.once(resumeAtom);
+          // J5 (case 125): a re-pair with another credential drops the last person's state.
+          dropReplacedRetainedState(environmentId, resume);
           const live = threadStateChanges(environmentId, threadId, resume);
           return resume.snapshot === undefined
             ? live
