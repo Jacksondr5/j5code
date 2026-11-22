@@ -72,16 +72,19 @@ const retainedReads = new WeakMap<object, number>();
 
 /**
  * Drops a thread's retained state (kept in memory so a reopen paints at once) when the
- * environment's credential was replaced since it was last read: it is the last person's.
+ * environment's credential was replaced since it was last read: it is the last person's. Its
+ * owner goes too, so the old thread state can't write it back before a new one owns it.
  */
 export const dropReplacedRetainedState = (
   environmentId: EnvironmentId,
-  retained: { snapshot: unknown },
+  retained: { snapshot: unknown; owner: unknown },
 ) => {
   const current = savesOf(environmentId).replaced;
   const seen = retainedReads.get(retained);
   retainedReads.set(retained, current);
-  if (seen !== undefined && seen !== current) retained.snapshot = undefined;
+  if (seen === undefined || seen === current) return;
+  retained.snapshot = undefined;
+  retained.owner = undefined;
 };
 
 /**

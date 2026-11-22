@@ -50,7 +50,7 @@ import { v2Now, v2Projection, v2ThreadId } from "./orchestrationV2TestFixtures.t
 import { onThreadRequestsResolved, type ThreadRequestsResolved } from "./threadRequests.ts";
 import { EMPTY_THREAD_HISTORY_META } from "./threadHistoryMerge.ts";
 import * as ThreadHistoryController from "./threadHistoryController.ts";
-import { forgetReplacedCredential } from "../j5/replacedCredential.ts";
+import { dropReplacedRetainedState, forgetReplacedCredential } from "../j5/replacedCredential.ts";
 import {
   EMPTY_ENVIRONMENT_THREAD_STATE,
   makeEnvironmentThreadState,
@@ -2094,6 +2094,8 @@ describe("EnvironmentThreads", () => {
         TARGET.environmentId,
         Effect.void,
       );
+      // The thread's atom reads the retained state before the old state's finalizer has run.
+      dropReplacedRetainedState(TARGET.environmentId, resumeCache);
       yield* Scope.close(scope, Exit.void);
       expect(yield* Ref.get(harness.savedThreads)).toHaveLength(1);
       // The state kept in memory for a quick reopen was the last person's too.
