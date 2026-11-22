@@ -8,6 +8,7 @@ import {
   EventId,
   GuestShareId,
   type OrchestrationV2DomainEvent,
+  type OrchestrationV2ServerCommand,
   type OrchestrationV2ThreadOpens,
   type OrchestrationV2ShellStreamItem,
   type OrchestrationV2ThreadStreamItem,
@@ -42,11 +43,14 @@ import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import * as ProjectEnrichmentService from "../../project/ProjectEnrichmentService.ts";
 import * as ProjectService from "../../project/ProjectService.ts";
 import { subscribeOrchestrationV2Shell, subscribeOrchestrationV2Thread } from "../../ws.ts";
-import type { PersonScope } from "@t3tools/contracts/j5";
+import { J5_ACCESS_WS_METHODS, type PersonScope } from "@t3tools/contracts/j5";
 
 import { humanPersonRegistryLayer } from "../a2a/HumanPersonRegistry.ts";
+import { Access } from "./Access.ts";
+import { makeAccessRpcHandlers } from "./accessRpc.ts";
 import * as GuestView from "./GuestView.ts";
 import * as PersonAccess from "./PersonAccess.ts";
+import * as ThreadMoves from "./ThreadMoves.ts";
 
 const AT = "2026-10-12T00:00:00.000Z";
 const NOW = DateTime.makeUnsafe(AT);
@@ -122,6 +126,7 @@ const layerTest = Layer.mergeAll(
   layerManagement,
   layerProjects,
   PersonAccess.layer.pipe(Layer.provideMerge(humanPersonRegistryLayer)),
+  ThreadMoves.layer,
 ).pipe(Layer.provideMerge(ProjectStore.layer), Layer.provideMerge(layerPersistence));
 
 const project = Effect.fn("test.project")(function* (id: string) {
@@ -251,6 +256,19 @@ const write = Effect.fn("test.write")(function* (
   const sink = yield* EventSink.EventSinkV2;
   const stored = yield* sink.write({ events: [threadEvent(type, input)] });
   return stored.at(-1)!.sequence;
+});
+
+/** Moves a thread to another project as upstream's Turn into project commits it. */
+const move = Effect.fn("test.move")(function* (id: string, projectId: ProjectId) {
+  const sink = yield* EventSink.EventSinkV2;
+  yield* sink.commitCommand({
+    commandId: CommandId.make(`move:${id}:${projectId}`),
+    threadId: ThreadId.make(id),
+    commandType: "thread.project.adopt-folder" satisfies OrchestrationV2ServerCommand["type"],
+    acceptedAt: NOW,
+    events: [threadEvent("thread.metadata-updated", { id, projectId })],
+    effects: [],
+  });
 });
 
 /** A Viewer for `GUEST`'s session, at the scopes given. */
@@ -868,6 +886,61 @@ live(
 );
 
 live(
+  "a thread moved to a project the guest doesn't hold leaves their feed without a reconnect",
+  Effect.gen(function* () {
+    const shared = yield* project("project:shared");
+    const other = yield* project("project:other");
+    const moved = ThreadId.make("thread:moved");
+    const there = ThreadId.make("thread:there");
+    yield* write("thread.created", { id: moved, projectId: shared });
+    yield* write("thread.created", { id: there, projectId: other });
+    // The thread grant puts the other project in the sidebar already, so the move names a
+    // project the client holds and would pass on its own.
+    yield* guest({ kind: "project", projectId: shared }, { kind: "thread", threadId: there });
+    const isSnapshot = (item: OrchestrationV2ShellStreamItem) => item.kind === "snapshot";
+    const threads = (items: ReadonlyArray<OrchestrationV2ShellStreamItem>) =>
+      snapshotOf(items)
+        .threads.map((thread) => thread.id as string)
+        .toSorted();
+
+    const feed = yield* open(GUEST);
+    assert.deepStrictEqual(threads(yield* until(feed, synchronized)), [moved, there]);
+
+    yield* move(moved, other);
+    assert.deepStrictEqual(threads(yield* until(feed, isSnapshot)), [there]);
+  }).pipe(Effect.scoped),
+);
+
+live(
+  "a thread moved into a project the person holds raises their level on it at once",
+  Effect.gen(function* () {
+    const shared = yield* project("project:shared");
+    const other = yield* project("project:other");
+    const moved = ThreadId.make("thread:moved");
+    yield* write("thread.created", { id: moved, projectId: other });
+    yield* guest({ kind: "project", projectId: shared });
+    const handlers = yield* makeAccessRpcHandlers({
+      people: yield* PersonAccess.PersonAccess,
+      access: yield* Access.pipe(Effect.provide(Layer.mock(Access)({}))),
+      session: GUEST,
+    });
+    const levels = yield* Queue.unbounded<string | null>();
+    yield* handlers[J5_ACCESS_WS_METHODS.subscribeThreadLevel]({ threadId: moved }).pipe(
+      Stream.runForEach((item) => Queue.offer(levels, item.level)),
+      Effect.forkScoped({ startImmediately: true }),
+    );
+    assert.strictEqual(yield* Queue.take(levels), null);
+
+    // No level is written: only the move's announcement makes the stream read again.
+    yield* move(moved, shared);
+    assert.strictEqual(yield* Queue.take(levels), "viewer");
+
+    yield* move(moved, other);
+    assert.strictEqual(yield* Queue.take(levels), null);
+  }).pipe(Effect.scoped),
+);
+
+live(
   "a project grant lists the project's threads, and the project even when it has none",
   Effect.gen(function* () {
     const shared = yield* project("project:shared");
@@ -1425,6 +1498,41 @@ live(
       ),
       ["thread:written-a", "thread:written-b"],
     );
+  }).pipe(Effect.scoped),
+);
+
+live(
+  "stops a thread's browser tabs on an open feed when the thread moves out of the project, and resumes when it moves back",
+  Effect.gen(function* () {
+    const access = yield* PersonAccess.PersonAccess;
+    const written = yield* project("project:written");
+    const other = yield* project("project:other");
+    yield* write("thread.created", { id: "thread:moved", projectId: written });
+    yield* write("thread.created", { id: "thread:stays", projectId: written });
+    const personId = yield* guest();
+    yield* access.setLevel({
+      personId,
+      scope: { kind: "project", projectId: written },
+      level: "collaborator",
+    });
+    const view = yield* GuestView.connectionView(GUEST);
+    const source = yield* Queue.unbounded<PreviewEvent>();
+    const told = yield* Queue.unbounded<string>();
+    yield* view.previewEvents(Stream.fromQueue(source)).pipe(
+      Stream.runForEach((event) => Queue.offer(told, event.threadId)),
+      Effect.forkScoped({ startImmediately: true }),
+    );
+    yield* Queue.offer(source, tabEvent("thread:moved"));
+    assert.strictEqual(yield* Queue.take(told), "thread:moved");
+
+    yield* move("thread:moved", other);
+    yield* Queue.offer(source, tabEvent("thread:moved"));
+    yield* Queue.offer(source, tabEvent("thread:stays"));
+    assert.strictEqual(yield* Queue.take(told), "thread:stays");
+
+    yield* move("thread:moved", written);
+    yield* Queue.offer(source, tabEvent("thread:moved"));
+    assert.strictEqual(yield* Queue.take(told), "thread:moved");
   }).pipe(Effect.scoped),
 );
 

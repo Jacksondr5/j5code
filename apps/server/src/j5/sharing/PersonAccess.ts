@@ -351,6 +351,11 @@ export interface PersonAccessShape {
   readonly subscribeChanges: Effect.Effect<PubSub.Subscription<ParticipantId>, never, Scope.Scope>;
   /** Tells subscribers and the People page that a person's reach or name changed. */
   readonly announce: (personId: ParticipantId) => Effect.Effect<void>;
+  /**
+   * Announces everyone who holds a level on a project or a thread: what they reach changed with
+   * no level written, as when a thread moves to another project.
+   */
+  readonly announcePartialReach: Effect.Effect<void, PersonAccessStorageError>;
 }
 
 export class PersonAccess extends Context.Service<PersonAccess, PersonAccessShape>()(
@@ -1118,6 +1123,17 @@ const make: Layer.Layer<PersonAccess, never, SqlClient.SqlClient | ReadChanges> 
 
       subscribeChanges: PubSub.subscribe(changes),
       announce,
+      announcePartialReach: sql<{ readonly person_id: string }>`
+        SELECT DISTINCT person_id FROM j5_a2a_person_level WHERE scope_kind <> 'server'
+      `.pipe(
+        Effect.flatMap((rows) =>
+          Effect.forEach(rows, (row) => announce(ParticipantId.make(row.person_id)), {
+            discard: true,
+          }),
+        ),
+        Effect.mapError(storage("announce the people who hold a project or a thread")),
+        Effect.withSpan("j5.sharing.personAccess.announcePartialReach"),
+      ),
     });
   }),
 );
