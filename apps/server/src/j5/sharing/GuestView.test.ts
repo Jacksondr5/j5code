@@ -11,6 +11,7 @@ import {
   type OrchestrationV2ThreadOpens,
   type OrchestrationV2ShellStreamItem,
   type OrchestrationV2ThreadStreamItem,
+  type PreviewEvent,
   ProjectId,
   type ScheduledTaskListResult,
   ProviderDriverKind,
@@ -1328,5 +1329,113 @@ live(
     const serverView = (yield* GuestView.connectionView(GUEST)).config(withSkills);
     assert.deepStrictEqual(names(serverView), ["project-skill", "host-skill"]);
     assert.notInclude(JSON.stringify(serverView), HOST_PATH);
+  }).pipe(Effect.scoped),
+);
+
+/** The Inbox browser's tabs ride the preview feed under this id, which names no thread. */
+const INBOX_BROWSER = "j5-inbox-browser";
+let previewRevision = 0;
+const tabEvent = (threadId: string): PreviewEvent =>
+  ({
+    type: "navigated",
+    threadId,
+    tabId: `tab:${threadId}`,
+    createdAt: AT,
+    serverEpoch: "epoch",
+    revision: ++previewRevision,
+    snapshot: { url: `https://host/${threadId}` },
+  }) as unknown as PreviewEvent;
+const tabsTold = (view: GuestView.ConnectionView, ...threadIds: ReadonlyArray<string>) =>
+  Stream.runCollect(view.previewEvents(Stream.fromIterable(threadIds.map(tabEvent)))).pipe(
+    Effect.map((events) => events.map((event) => event.threadId)),
+  );
+
+live(
+  "tells a thread's Collaborator of that thread's browser tabs only, and of one shared later",
+  Effect.gen(function* () {
+    const access = yield* PersonAccess.PersonAccess;
+    const projectId = yield* project("project:tabs");
+    yield* write("thread.created", { id: "thread:theirs", projectId });
+    yield* write("thread.created", { id: "thread:later", projectId });
+    yield* write("thread.created", { id: "thread:watched", projectId });
+    const personId = yield* guest({ kind: "thread", threadId: ThreadId.make("thread:watched") });
+    yield* access.setLevel({
+      personId,
+      scope: { kind: "thread", threadId: ThreadId.make("thread:theirs") },
+      level: "collaborator",
+    });
+    const view = yield* GuestView.connectionView(GUEST);
+    assert.deepStrictEqual(
+      yield* tabsTold(view, "thread:theirs", "thread:later", "thread:watched", INBOX_BROWSER),
+      ["thread:theirs"],
+    );
+
+    // A level given while the feed is open reaches it without a reconnect.
+    const source = yield* Queue.unbounded<PreviewEvent>();
+    const told = yield* Queue.unbounded<string>();
+    yield* view.previewEvents(Stream.fromQueue(source)).pipe(
+      Stream.runForEach((event) => Queue.offer(told, event.threadId)),
+      Effect.forkScoped({ startImmediately: true }),
+    );
+    yield* Queue.offer(source, tabEvent("thread:later"));
+    yield* Queue.offer(source, tabEvent("thread:theirs"));
+    assert.strictEqual(yield* Queue.take(told), "thread:theirs");
+    yield* access.setLevel({
+      personId,
+      scope: { kind: "thread", threadId: ThreadId.make("thread:later") },
+      level: "collaborator",
+    });
+    yield* Queue.offer(source, tabEvent("thread:later"));
+    assert.strictEqual(yield* Queue.take(told), "thread:later");
+
+    // A level taken away stops the next event, even on a feed that already told that thread.
+    yield* access.removeLevel({
+      personId,
+      scope: { kind: "thread", threadId: ThreadId.make("thread:later") },
+    });
+    yield* Queue.offer(source, tabEvent("thread:later"));
+    yield* Queue.offer(source, tabEvent("thread:theirs"));
+    assert.strictEqual(yield* Queue.take(told), "thread:theirs");
+  }).pipe(Effect.scoped),
+);
+
+live(
+  "tells a project's Collaborator of its threads' browser tabs, not another project's or the Inbox browser's",
+  Effect.gen(function* () {
+    const access = yield* PersonAccess.PersonAccess;
+    const written = yield* project("project:written");
+    const other = yield* project("project:other");
+    yield* write("thread.created", { id: "thread:written-a", projectId: written });
+    yield* write("thread.created", { id: "thread:written-b", projectId: written });
+    yield* write("thread.created", { id: "thread:other", projectId: other });
+    // A Viewer of the whole server reaches every thread, and the Inbox browser's id too.
+    const personId = yield* guest({ kind: "server" });
+    yield* access.setLevel({
+      personId,
+      scope: { kind: "project", projectId: written },
+      level: "collaborator",
+    });
+    assert.deepStrictEqual(
+      yield* tabsTold(
+        yield* GuestView.connectionView(GUEST),
+        "thread:written-a",
+        "thread:other",
+        INBOX_BROWSER,
+        "thread:written-b",
+      ),
+      ["thread:written-a", "thread:written-b"],
+    );
+  }).pipe(Effect.scoped),
+);
+
+live(
+  "gives someone server-wide upstream's browser-tab feed itself",
+  Effect.gen(function* () {
+    const access = yield* PersonAccess.PersonAccess;
+    const feed = Stream.make(tabEvent("thread:anything"), tabEvent(INBOX_BROWSER));
+    assert.strictEqual((yield* GuestView.connectionView(MEMBER)).previewEvents(feed), feed);
+    const personId = yield* guest();
+    yield* access.setLevel({ personId, scope: { kind: "server" }, level: "collaborator" });
+    assert.strictEqual((yield* GuestView.connectionView(GUEST)).previewEvents(feed), feed);
   }).pipe(Effect.scoped),
 );

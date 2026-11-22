@@ -12,6 +12,7 @@ import {
   type OrchestrationV2ThreadProjection,
   type OrchestrationV2ThreadShell,
   type OrchestrationV2ThreadStreamItem,
+  type PreviewEvent,
   type ProjectId,
   type ServerConfig,
   type ServerConfigStreamEvent,
@@ -20,7 +21,7 @@ import {
   type ServerProviderModel,
   type ServerProviderSkill,
   type ScheduledTaskListResult,
-  type ThreadId,
+  ThreadId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import { identity } from "effect/Function";
@@ -284,6 +285,10 @@ export interface ConnectionView {
   readonly threadStream: <E, R>(
     stream: Stream.Stream<OrchestrationV2ThreadStreamItem, E, R>,
   ) => Stream.Stream<OrchestrationV2ThreadStreamItem, E, R>;
+  /** Upstream's feed of every thread's browser tabs, their addresses included. */
+  readonly previewEvents: <E, R>(
+    stream: Stream.Stream<PreviewEvent, E, R>,
+  ) => Stream.Stream<PreviewEvent, E, R>;
   /** Upstream's one-shot thread load, the same detail without the feed. */
   readonly threadProjection: <E, R>(
     load: Effect.Effect<OrchestrationV2ThreadProjection, E, R>,
@@ -312,6 +317,7 @@ const MEMBER_VIEW: ConnectionView = {
   lifecycleStream: identity,
   shellStream: (input, subscribe) => subscribe(input),
   threadStream: identity,
+  previewEvents: identity,
   threadProjection: identity,
   searchThreads: (input, search) => search(input),
 };
@@ -526,6 +532,23 @@ const narrowedView = (
         }),
       ).pipe(Stream.mapError(shellFailure)),
     threadStream: (stream) => stream.pipe(Stream.map(narrowThreadItem)),
+    /**
+     * A tab is told only on a thread the person holds Collaborator on, as `AccessGate`'s preview
+     * rules ask; a tab of no thread, such as the Inbox browser's, never (only a server level covers
+     * it, and a narrowed one is below Collaborator). Reach is read on each event, so a share taken
+     * away, or a thread moved to a project the person doesn't reach, ends with the next one.
+     */
+    previewEvents: (stream) =>
+      personId === null
+        ? Stream.empty
+        : stream.pipe(
+            Stream.filterEffect((event) =>
+              access.threadLevel(personId, ThreadId.make(event.threadId)).pipe(
+                Effect.map((level) => levelReaches(level, "collaborator")),
+                Effect.orElseSucceed(() => false),
+              ),
+            ),
+          ),
     threadProjection: (load) => load.pipe(Effect.map(narrowProjection)),
     // Reach is read on each search, so a share taken away ends with the next one. A narrowed
     // sidebar has no older-settled cut, so the older-settled rows, read from every settled
