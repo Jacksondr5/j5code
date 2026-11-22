@@ -97,7 +97,7 @@ describe("fleet tree", () => {
 });
 
 describe("fleet involvement", () => {
-  it("names seats, their Captains, and spawners with placed children, once each, per environment", () => {
+  it("names seats, their Captains, spawners and their placed children, once each, per environment", () => {
     const environmentId = EnvironmentId.make("env:a");
     const refs = fleetInvolvedThreadRefs([
       {
@@ -109,7 +109,8 @@ describe("fleet involvement", () => {
           agent("captain"),
           agent("builder", { placementParentId: "captain", crew: seat("builder", "captain") }),
           agent("critic", { placementParentId: "captain", crew: seat("critic", "captain") }),
-          // A plain spawner with one placed child, and the child itself is not involved.
+          // A plain spawner with one placed child: the child's own row says whether it leaves the
+          // top level, which follows the spawner's archive, so it is re-read too.
           agent("spawner"),
           agent("helper", { placementParentId: "spawner" }),
           // Human-created rows with no Crew and no children are never re-read on a change.
@@ -123,6 +124,7 @@ describe("fleet involvement", () => {
       ["env:a", "thread:builder"],
       ["env:a", "thread:captain"],
       ["env:a", "thread:critic"],
+      ["env:a", "thread:helper"],
       ["env:a", "thread:spawner"],
     ]);
   });

@@ -1,7 +1,10 @@
 import { useAtomValue } from "@effect/atom-react";
 import type { PreparedConnection } from "@t3tools/client-runtime/connection";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { createScopedThreadReadStore } from "@t3tools/client-runtime/j5/scopedThreadReadStore";
+import {
+  createScopedThreadReadStore,
+  takeMovedRevisions,
+} from "@t3tools/client-runtime/j5/scopedThreadReadStore";
 import {
   replaceSpawnedChildren,
   spawnedChildrenRows,
@@ -21,7 +24,6 @@ import { environmentSession } from "../../state/session";
 import type { WorkspaceState } from "../../state/workspaceModel";
 import { answerExpectedAtom, connectionMemory } from "../connection/memory";
 import { crewListedThreads, crewListWaiting, type ListedThread } from "../connection/memory.logic";
-import { j5Sharing } from "../sharing/guestAccess";
 import { j5Environment } from "../state";
 
 const store = createScopedThreadReadStore<SpawnedChildrenRow, SpawnedChildrenRowEntry>({
@@ -48,25 +50,30 @@ const store = createScopedThreadReadStore<SpawnedChildrenRow, SpawnedChildrenRow
 });
 
 /**
- * Each catalogued environment's prepared connection, or null while it is not connected or the
- * person reaches less than the whole server, which refuses these reads (web's `useThreadRowReads`).
+ * Each catalogued environment's prepared connection, or null while it is not connected. A person
+ * who reaches less than the whole server is answered for what they reach.
  */
 export const threadReadConnectionsAtom = Atom.make((get) => {
   const connections = new Map<EnvironmentId, PreparedConnection | null>();
   for (const id of get(environmentCatalog.catalogValueAtom).entries.keys()) {
     const state = Option.getOrNull(AsyncResult.value(get(environmentCatalog.stateAtom(id))));
     const prepared = get(environmentSession.preparedConnectionValueAtom(id));
-    const readable = state?.phase === "connected" && !get(j5Sharing.isNarrow(id));
-    connections.set(id, readable ? Option.getOrNull(prepared) : null);
+    connections.set(id, state?.phase === "connected" ? Option.getOrNull(prepared) : null);
   }
   return connections;
 }).pipe(Atom.withLabel("mobile-j5:thread-read-connections"));
 
-/** Each environment's Crew and Fleet revisions; a moved pair means placements may have changed. */
+/**
+ * Each environment's Crew, Fleet and sharing revisions: placements, or what the person reaches of
+ * them (a level that goes can take a child's spawner out of reach), may have changed.
+ */
 const placementRevisionsAtom = Atom.make((get) => {
   const revisions: Array<readonly [EnvironmentId, string | null]> = [];
   for (const id of get(threadReadConnectionsAtom).keys())
-    revisions.push([id, get(j5Environment.rereadOn("crew", "fleet")({ environmentId: id }))]);
+    revisions.push([
+      id,
+      get(j5Environment.rereadOn("crew", "fleet", "sharing")({ environmentId: id })),
+    ]);
   return JSON.stringify(revisions);
 }).pipe(Atom.withLabel("mobile-j5:placement-revisions"));
 
@@ -79,14 +86,10 @@ const heardRevisions = new Map<EnvironmentId, string>();
  */
 const requestRows = (refs: ReadonlyArray<ScopedThreadRef>, revisions: string) => {
   store.request(refs);
-  const moved = new Set<EnvironmentId>();
-  for (const [environmentId, revision] of JSON.parse(revisions) as Array<
-    [EnvironmentId, string | null]
-  >) {
-    if (revision === null || heardRevisions.get(environmentId) === revision) continue;
-    heardRevisions.set(environmentId, revision);
-    moved.add(environmentId);
-  }
+  const moved = takeMovedRevisions(
+    heardRevisions,
+    JSON.parse(revisions) as Array<[EnvironmentId, string | null]>,
+  );
   if (moved.size > 0)
     store.request(
       refs.filter((ref) => moved.has(ref.environmentId)),
@@ -183,7 +186,7 @@ export function useThreadSpawnedChildren(ref: ScopedThreadRef | null): ReadonlyA
     read();
     const offConnections = appAtomRegistry.subscribe(threadReadConnectionsAtom, read);
     const offPlacements = appAtomRegistry.subscribe(
-      j5Environment.rereadOn("crew", "fleet")({ environmentId }),
+      j5Environment.rereadOn("crew", "fleet", "sharing")({ environmentId }),
       read,
     );
     return () => {
