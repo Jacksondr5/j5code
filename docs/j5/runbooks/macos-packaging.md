@@ -137,7 +137,9 @@ A preview is a GitHub pre-release and is never marked latest. The stable install
 A nightly is `j5/main` as it stands, published for daily use ahead of a stable release. Nothing is
 committed for one: the version is stamped into the four manifests during the build.
 
-To publish one, run `J5 Nightly` on `j5/main`. It takes no inputs. It names the build
+`J5 Nightly` runs every day at 11:17 UTC and builds only when `j5/main` has moved since the last
+nightly, published at least six hours earlier. To publish one now, run `J5 Nightly` on `j5/main`;
+a run started by hand always builds. It takes no inputs. It names the build
 `<x.y.z>-nightly.<yyyymmdd>.<run>`, where `x.y.z` is the next patch after the newer of the version
 `j5/main` commits and the latest stable release, then runs the signed macOS build and the release
 for that commit. The result is a GitHub pre-release, never marked latest, tagged `v<version>`.
