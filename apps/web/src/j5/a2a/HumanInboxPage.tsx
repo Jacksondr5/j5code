@@ -40,7 +40,7 @@ import { Textarea } from "../../components/ui/textarea";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip";
 import { isElectron } from "../../env";
 import { randomUUID } from "../../lib/utils";
-import { useProject, useThreadShell } from "../../state/entities";
+import { useProject } from "../../state/entities";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { RelativeTime } from "../../components/RelativeTime";
 import { RelativeAge } from "../RelativeAge";
@@ -94,7 +94,10 @@ import {
 import { useLogicalProjects } from "../logicalProjects";
 import { createVisibleRefreshHook } from "../useVisibleRefresh";
 import { notifyHumanInboxChanged } from "./humanInboxRefresh";
-import { useConnectionAccess } from "../sharing/access";
+import { j5Sharing, useConnectionAccess } from "../sharing/access";
+import { armInboxThreadPanel, reachesAskingThreadPanel } from "./inboxThreadPanel";
+import { InboxWithThreadPanel } from "./InboxThreadPanel";
+import { useSenderThread } from "./useSenderThread";
 
 type HumanInboxAnswers = Readonly<Record<string, string>>;
 type SenderLabels = ReadonlyMap<EnvironmentId, ReadonlyMap<string, string>>;
@@ -182,25 +185,39 @@ function OpenThreadButton({
 }
 
 /**
- * An agent's message, rendered as the sender's thread renders it. Relative file links resolve
- * against the sender's worktree, or the project's root once the sender has left the roster.
+ * An agent's message, rendered as the sender's thread renders it. Its links open where they would
+ * in that thread, in the thread's own right panel, which the Inbox then shows beside the asks.
+ * Relative file links resolve against the sender's worktree, or the project's root once the sender
+ * has left the roster; an ask with no thread here keeps links that need no panel.
  */
-export function InboxMessage({ item }: { readonly item: HumanInboxItem }) {
+export function InboxMessage({
+  item,
+  agentLabel,
+}: {
+  readonly item: HumanInboxItem;
+  readonly agentLabel: string;
+}) {
   const threadRef =
     item.senderThreadId === null
       ? null
       : scopeThreadRef(item.environmentId, ThreadId.make(item.senderThreadId));
-  const thread = useThreadShell(threadRef);
+  const sender = useSenderThread(threadRef);
+  const access = useConnectionAccess(item.environmentId);
+  const operable = useAtomValue(
+    j5Sharing.threadOperable(item.environmentId, threadRef?.threadId ?? null),
+  );
+  const panelRef =
+    threadRef !== null && sender.known && reachesAskingThreadPanel(access, operable)
+      ? threadRef
+      : undefined;
   const project = useProject(scopeProjectRef(item.environmentId, ProjectId.make(item.projectId)));
   const cwd = project
     ? projectScriptCwd({
         project: { cwd: project.workspaceRoot },
-        worktreePath: thread?.worktreePath ?? null,
+        worktreePath: sender.worktreePath,
       })
     : undefined;
   const navigate = useNavigate();
-  // The Inbox shows no thread panel, so artifact links open the Artifacts page and web links
-  // open as they do outside a thread.
   const openArtifact = (path: string) =>
     void navigate({
       to: "/artifacts",
@@ -217,13 +234,19 @@ export function InboxMessage({ item }: { readonly item: HumanInboxItem }) {
       environmentId={item.environmentId}
       lineBreaks={shouldPreserveAssistantLineBreaks(text)}
       text={text}
-      threadRef={threadRef ?? undefined}
-      onOpenArtifact={openArtifact}
-      noThreadPanel
+      threadRef={panelRef}
+      {...(panelRef === undefined ? { onOpenArtifact: openArtifact } : {})}
     />
   );
   return (
-    <div className="flex flex-col gap-4">
+    <div
+      className="flex flex-col gap-4"
+      onClickCapture={
+        panelRef === undefined
+          ? undefined
+          : () => armInboxThreadPanel({ ref: panelRef, agentLabel })
+      }
+    >
       {markdown(item.message)}
       {item.escalation === undefined ? null : <J5RecordPanel text={item.escalation.summary} />}
       {item.personaDraft === undefined ? null : <J5RecordPanel text={item.personaDraft.summary} />}
@@ -332,7 +355,15 @@ function OpenInboxItem({
           />
         </summary>
         <div className="border-t border-border/50 px-1 pb-5 pt-4 sm:ms-24 sm:px-0 sm:pe-1">
-          <InboxMessage item={item} />
+          <InboxMessage
+            item={item}
+            agentLabel={
+              presentParticipantIdentity({
+                participantId: item.senderId,
+                participantLabels: senderLabels.get(item.environmentId) ?? noLabels,
+              }).label
+            }
+          />
           {closedText === null && !item.connected ? (
             // Read-only until its server is back; words typed earlier are kept for then.
             <p className="mt-4 text-sm text-muted-foreground">
@@ -681,7 +712,7 @@ export function HumanInboxPage() {
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <InboxWithThreadPanel>
         <WorkspacePageHeader electron={isElectron}>
           <WorkspaceBreadcrumb ariaLabel="Inbox breadcrumb">
             <WorkspaceBreadcrumbItem current>Inbox</WorkspaceBreadcrumbItem>
@@ -798,7 +829,7 @@ export function HumanInboxPage() {
             />
           </main>
         </ScrollArea>
-      </div>
+      </InboxWithThreadPanel>
     </SidebarInset>
   );
 }
