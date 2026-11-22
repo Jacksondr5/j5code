@@ -251,7 +251,7 @@ export function InboxMessage({
     ?.find((candidate) => candidate.instanceId === sender.providerInstanceId);
   const skills = provider === undefined ? NO_SKILLS : resolveProviderSkillsForCwd(provider, cwd);
   const markdown = (text: string) => (
-    <div className="flex flex-col gap-1">
+    <div className="group/inbox-message flex flex-col gap-1">
       <ChatMarkdown
         className="max-w-[72ch] text-sm text-foreground/90"
         cwd={cwd}
@@ -262,7 +262,10 @@ export function InboxMessage({
         threadRef={panelRef}
         {...(panelRef === undefined ? { onOpenArtifact: openArtifact } : {})}
       />
-      <MessageCopyButton className="w-fit" text={text} variant="ghost" />
+      {/* Shown on hover, focus or a touch screen, as under a thread's agent reply. */}
+      <div className="w-fit opacity-0 transition-opacity duration-200 pointer-coarse:opacity-100 focus-within:opacity-100 group-hover/inbox-message:opacity-100">
+        <MessageCopyButton text={text} variant="ghost" />
+      </div>
     </div>
   );
   // While the sender's thread loads, its links wait rather than open as an ask with no thread;
