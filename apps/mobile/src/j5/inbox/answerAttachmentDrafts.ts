@@ -15,7 +15,6 @@ import {
   answerAttachmentsReadiness,
   type AnswerTarget,
 } from "./answerAttachments.logic";
-import { clearAnswerDraft } from "./answerDrafts";
 
 export { answerAttachmentDraftKey, type AnswerTarget } from "./answerAttachments.logic";
 
@@ -61,6 +60,3 @@ export function readyAnswerAttachments(
       appAtomRegistry.get(environmentServerConfigsAtom).get(target.environmentId) ?? null,
   });
 }
-
-/** The answer was delivered: the server copied its files into the agent's thread. */
-export const clearAnswerAttachments = clearAnswerDraft;

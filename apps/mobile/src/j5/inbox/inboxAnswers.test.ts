@@ -44,7 +44,10 @@ vi.mock("./inboxSources", async () => {
 });
 vi.mock("./answerAttachmentDrafts", () => ({
   readyAnswerAttachments: () => ({ attachments: [] }),
-  clearAnswerAttachments: server.cleared,
+}));
+vi.mock("./answerDrafts", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./answerDrafts")>()),
+  clearAnswerDraft: server.cleared,
 }));
 // The answers are saved in upstream's composer draft store; only its file is faked.
 vi.mock("expo-file-system", () => ({

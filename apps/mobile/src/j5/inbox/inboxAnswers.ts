@@ -16,8 +16,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { uuidv4 } from "../../lib/uuid";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { j5Environment } from "../state";
-import { clearAnswerAttachments, readyAnswerAttachments } from "./answerAttachmentDrafts";
+import { readyAnswerAttachments } from "./answerAttachmentDrafts";
 import {
+  clearAnswerDraft,
   pruneAnswerDrafts,
   setAnswerText,
   useAnswerDraftsLoaded,
@@ -195,7 +196,7 @@ export function useInboxAnswers(input: {
       // Called once the server took the answer. Its attachments, like its words, stay on the card
       // until the re-read takes the card away.
       refresh: (environmentId) =>
-        refreshAfterAnswer(environmentId).finally(() => clearAnswerAttachments(item)),
+        refreshAfterAnswer(environmentId).finally(() => clearAnswerDraft(item)),
       notifyChanged: notifyCountChanged,
       onAccepted: () => setAnswerText(item, ""),
       setPendingExchangeId: setPendingKey,
