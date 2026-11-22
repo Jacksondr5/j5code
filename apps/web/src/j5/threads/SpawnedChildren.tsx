@@ -200,10 +200,14 @@ function SpawnedChildGroupRows(
               setStopping(true);
               void stopCrew(props.environmentId, stoppable.crewInstanceId)
                 .catch((error: unknown) => {
+                  // The server names the Crew by its id, which agents need; the person knows it by name.
                   toastManager.add({
                     type: "error",
                     title: `Could not stop crew ${stoppable.crewName}`,
-                    description: error instanceof Error ? error.message : String(error),
+                    description: (error instanceof Error
+                      ? error.message
+                      : String(error)
+                    ).replaceAll(stoppable.crewInstanceId, stoppable.crewName),
                   });
                 })
                 .finally(() => setStopping(false));
