@@ -12,6 +12,7 @@ import {
   type OrchestrationV2ThreadProjection,
   type OrchestrationV2ThreadShell,
   type OrchestrationV2ThreadStreamItem,
+  type PreviewEvent,
   type ProjectId,
   type ServerConfig,
   type ServerConfigStreamEvent,
@@ -20,10 +21,11 @@ import {
   type ServerProviderModel,
   type ServerProviderSkill,
   type ScheduledTaskListResult,
-  type ThreadId,
+  ThreadId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import { identity } from "effect/Function";
+import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import type * as SqlClient from "effect/sql/SqlClient";
@@ -284,6 +286,10 @@ export interface ConnectionView {
   readonly threadStream: <E, R>(
     stream: Stream.Stream<OrchestrationV2ThreadStreamItem, E, R>,
   ) => Stream.Stream<OrchestrationV2ThreadStreamItem, E, R>;
+  /** Upstream's feed of every thread's browser tabs, their addresses included. */
+  readonly previewEvents: <E, R>(
+    stream: Stream.Stream<PreviewEvent, E, R>,
+  ) => Stream.Stream<PreviewEvent, E, R>;
   /** Upstream's one-shot thread load, the same detail without the feed. */
   readonly threadProjection: <E, R>(
     load: Effect.Effect<OrchestrationV2ThreadProjection, E, R>,
@@ -312,6 +318,7 @@ const MEMBER_VIEW: ConnectionView = {
   lifecycleStream: identity,
   shellStream: (input, subscribe) => subscribe(input),
   threadStream: identity,
+  previewEvents: identity,
   threadProjection: identity,
   searchThreads: (input, search) => search(input),
 };
@@ -526,6 +533,38 @@ const narrowedView = (
         }),
       ).pipe(Stream.mapError(shellFailure)),
     threadStream: (stream) => stream.pipe(Stream.map(narrowThreadItem)),
+    /**
+     * A tab is told only on a thread the person holds Collaborator on, as `AccessGate`'s preview
+     * rules ask; a tab of no thread, such as the Inbox browser's, never (only a server level covers
+     * it, and a narrowed one is below Collaborator). Each thread is read once and forgotten when
+     * anyone's reach changes; a lowered level also renews the person's session, ending this feed.
+     */
+    previewEvents: (stream) =>
+      personId === null
+        ? Stream.empty
+        : Stream.unwrap(
+            Effect.gen(function* () {
+              const changes = yield* access.subscribeChanges;
+              const drives = new Map<string, boolean>();
+              // Untraced: it runs on every tab event, and the feed's request is traced already.
+              const drivesTabsOn = Effect.fnUntraced(function* (threadId: string) {
+                const changed = yield* PubSub.takeUpTo(changes, Number.POSITIVE_INFINITY);
+                if (changed.length > 0) drives.clear();
+                const known = drives.get(threadId);
+                if (known !== undefined) return known;
+                const level = yield* access.threadLevel(personId, ThreadId.make(threadId));
+                const drivesTabs = levelReaches(level, "collaborator");
+                drives.set(threadId, drivesTabs);
+                return drivesTabs;
+              });
+              // A failed read is not kept, so the thread's next event reads it again.
+              return stream.pipe(
+                Stream.filterEffect((event) =>
+                  drivesTabsOn(event.threadId).pipe(Effect.orElseSucceed(() => false)),
+                ),
+              );
+            }),
+          ),
     threadProjection: (load) => load.pipe(Effect.map(narrowProjection)),
     // Reach is read on each search, so a share taken away ends with the next one. A narrowed
     // sidebar has no older-settled cut, so the older-settled rows, read from every settled
