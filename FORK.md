@@ -1168,7 +1168,7 @@ explicitly marked.
 | `apps/web/src/components/GitHubStarPrompt.tsx`                              | N       | B                                                  |
 | `apps/web/src/components/GitHubStarPrompt.test.ts`                          | N       | B                                                  |
 | `apps/web/src/components/ui/standalone-page.tsx`                            | N       | B                                                  |
-| `apps/web/src/components/chat/workspaceFileDrop.ts`                         | N       | 128                                                |
+| `apps/web/src/components/chat/workspaceFileDrop.ts`                         | N       | 127                                                |
 
 The 2026-09-08 import correction adds bounded file-content schemas and shared selection preparation in `packages/client-runtime/src/state/agentPersonas.ts`, plus import/removal commands in the existing orchestration atom module. Clients send selected JSON contents to the chosen environment, never local paths as server destinations. J5 library code validates and atomically persists imports under a process-wide mutation permit, overlays them on source definitions, and preserves launch snapshots on replacement/removal. The Settings registrations remain thin mounts. Focused tests cover nested file selections, single-file selection, atomic rejection, conflicts, persisted imports, concurrent sessions, restoration, snapshots, and RPC scopes. Native picker/browser interaction still requires an authorized client pass.
 
