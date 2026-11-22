@@ -12,7 +12,12 @@ import {
   FIND_BAR_MATCHES_CHANNEL,
   type FindBarCommand,
 } from "./findBarProtocol.ts";
-import { makeFindController, type FindArea, type FindController } from "./findController.ts";
+import {
+  isFindShortcut,
+  makeFindController,
+  type FindArea,
+  type FindController,
+} from "./findController.ts";
 
 const controllers = new WeakMap<Electron.WebContents, FindController>();
 
@@ -24,12 +29,13 @@ const FOCUSED_ARTIFACT_AREA_SCRIPT = `(() => {
   const rect = (surface.querySelector("[data-j5-artifact-find-area]") ?? surface).getBoundingClientRect();
   return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
 })()`;
-// An isolated world shares the page's DOM but not its globals, so the web app never sees these.
-const FOCUS_WORLD_ID = 1152;
-// The focused element when the bar opened: inside the artifact, or its iframe.
-const REMEMBER_FOCUS_SCRIPT = "window.returnFocus = document.activeElement; 0";
-const RESTORE_FOCUS_SCRIPT =
-  "window.returnFocus?.focus({ preventScroll: true }); window.returnFocus = null; 0";
+// findInPage can clear the page's focus before a script records it, so a close focuses what a
+// click on the preview does: the HTML artifact's iframe, or the scroll viewport around the text.
+const FOCUS_ARTIFACT_PREVIEW_SCRIPT = `(() => {
+  const area = document.querySelector("[data-j5-artifact-find-area]");
+  const target = area?.querySelector('iframe[name="${ARTIFACT_PREVIEW_FRAME_NAME}"]') ?? area?.querySelector("[tabindex]");
+  target?.focus({ preventScroll: true });
+})()`;
 
 const FindAreaSchema = Schema.Struct({
   x: Schema.Finite,
@@ -38,13 +44,6 @@ const FindAreaSchema = Schema.Struct({
   height: Schema.Finite,
 });
 const isFindArea = Schema.is(FindAreaSchema);
-
-function isFindShortcut(input: Electron.Input, platform: string): boolean {
-  if (input.type !== "keyDown" || input.alt || input.shift || input.key.toLowerCase() !== "f") {
-    return false;
-  }
-  return platform === "darwin" ? input.meta && !input.control : input.control && !input.meta;
-}
 
 /** The HTML artifact's iframe, or a frame inside it. Other frames, such as HTML renders, keep their keys. */
 function isInArtifactPreviewFrame(frame: Electron.WebFrameMain | null | undefined): boolean {
@@ -64,8 +63,6 @@ export function installFindBar(
 ): void {
   const preload = environment.path.join(environment.dirname, "j5-find-bar-preload.cjs");
   const contents = window.webContents;
-  const runInFocusWorld = (code: string) =>
-    void contents.executeJavaScriptInIsolatedWorld(FOCUS_WORLD_ID, [{ code }]).catch(() => {});
   let view: Electron.WebContentsView | null = null;
   let loaded: Promise<void> = Promise.resolve();
   const whenLoaded = (run: (bar: Electron.WebContents) => void) => {
@@ -101,10 +98,9 @@ export function installFindBar(
     {
       findInPage: (text, findOptions) => contents.findInPage(text, findOptions),
       stopFindInPage: () => contents.stopFindInPage("clearSelection"),
-      rememberFocus: () => runInFocusWorld(REMEMBER_FOCUS_SCRIPT),
       restoreFocus: () => {
         contents.focus();
-        runInFocusWorld(RESTORE_FOCUS_SCRIPT);
+        void contents.executeJavaScript(FOCUS_ARTIFACT_PREVIEW_SCRIPT).catch(() => undefined);
       },
       zoomFactor: () => contents.getZoomFactor(),
       contentSize: () => {
@@ -123,8 +119,9 @@ export function installFindBar(
       hide: () => {
         if (view !== null) window.contentView.removeChildView(view);
       },
-      focus: (query) =>
+      focus: (query, isCurrent) =>
         whenLoaded((bar) => {
+          if (!isCurrent()) return;
           bar.focus();
           bar.send(FIND_BAR_FOCUS_CHANNEL, query);
         }),

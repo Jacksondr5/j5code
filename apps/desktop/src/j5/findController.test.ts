@@ -6,6 +6,7 @@ import {
   FIND_BAR_WIDTH,
   findAnchor,
   findBarBounds,
+  isFindShortcut,
   makeFindController,
   type FindBounds,
 } from "./findController.ts";
@@ -16,6 +17,7 @@ function setup(options: { zoomFactor?: number } = {}) {
   const calls: string[] = [];
   const matches: (FindMatches | null)[] = [];
   const shown: FindBounds[] = [];
+  const focusIsCurrent: (() => boolean)[] = [];
   let nextRequestId = 0;
   const controller = makeFindController(
     {
@@ -25,7 +27,6 @@ function setup(options: { zoomFactor?: number } = {}) {
         return nextRequestId;
       },
       stopFindInPage: () => calls.push("stop"),
-      rememberFocus: () => calls.push("remember page focus"),
       restoreFocus: () => calls.push("restore page focus"),
       zoomFactor: () => zoom.factor,
       contentSize: () => content,
@@ -34,11 +35,14 @@ function setup(options: { zoomFactor?: number } = {}) {
       show: (bounds) => shown.push(bounds),
       place: (bounds) => calls.push(`place at ${bounds.x},${bounds.y}`),
       hide: () => calls.push("hide"),
-      focus: (query) => calls.push(query === "" ? "focus bar" : `focus bar with ${query}`),
+      focus: (query, isCurrent) => {
+        focusIsCurrent.push(isCurrent);
+        calls.push(query === "" ? "focus bar" : `focus bar with ${query}`);
+      },
       matches: (value) => matches.push(value),
     },
   );
-  return { controller, calls, matches, shown, content, zoom };
+  return { controller, calls, matches, shown, content, zoom, focusIsCurrent };
 }
 
 const panel = { x: 700, y: 48, width: 500, height: 700 };
@@ -55,7 +59,6 @@ describe("makeFindController", () => {
     controller.next();
 
     expect(calls).toEqual([
-      "remember page focus",
       "focus bar",
       "find al new",
       "find alpha new",
@@ -70,7 +73,6 @@ describe("makeFindController", () => {
     const { controller, calls } = setup();
     controller.open(panel);
     controller.query("alpha");
-    // Cmd/Ctrl+F again while open: the page's focus is still the one to go back to.
     controller.open(panel);
     controller.close();
     controller.close();
@@ -79,7 +81,6 @@ describe("makeFindController", () => {
     controller.open(panel);
 
     expect(calls).toEqual([
-      "remember page focus",
       "focus bar",
       "find alpha new",
       "focus bar with alpha",
@@ -87,11 +88,20 @@ describe("makeFindController", () => {
       "stop",
       "hide",
       "restore page focus",
-      "remember page focus",
       "focus bar with alpha",
       "find alpha new",
     ]);
     expect(controller.isOpen()).toBe(true);
+  });
+
+  it("drops a focus deferred past a close, even when the bar has opened again", () => {
+    const { controller, focusIsCurrent } = setup();
+    controller.open(panel);
+    controller.open(panel);
+    controller.close();
+    controller.open(panel);
+
+    expect(focusIsCurrent.map((isCurrent) => isCurrent())).toEqual([false, false, true]);
   });
 
   it("forgets the query when the page it searched goes away, so it never searches the next one", () => {
@@ -102,13 +112,11 @@ describe("makeFindController", () => {
     controller.open(panel);
 
     expect(calls).toEqual([
-      "remember page focus",
       "focus bar",
       "find alpha new",
       "stop",
       "hide",
       "restore page focus",
-      "remember page focus",
       "focus bar",
     ]);
   });
@@ -152,16 +160,60 @@ describe("makeFindController", () => {
 
     expect(shown).toHaveLength(2);
     expect(calls).toEqual([
-      "remember page focus",
       "focus bar",
       "find alpha new",
       "stop",
       "hide",
       "restore page focus",
-      "remember page focus",
       "focus bar with alpha",
       "find alpha new",
     ]);
+  });
+});
+
+describe("isFindShortcut", () => {
+  const ctrl = { type: "keyDown", alt: false, shift: false, meta: false, control: true };
+  it.each([
+    { name: "Ctrl+F", input: { ...ctrl, key: "f", code: "KeyF" }, platform: "linux", match: true },
+    {
+      name: "Cmd+F on macOS",
+      input: { ...ctrl, control: false, meta: true, key: "f", code: "KeyF" },
+      platform: "darwin",
+      match: true,
+    },
+    {
+      name: "Ctrl+F on macOS",
+      input: { ...ctrl, key: "f", code: "KeyF" },
+      platform: "darwin",
+      match: false,
+    },
+    {
+      name: "Ctrl+Shift+F",
+      input: { ...ctrl, shift: true, key: "F", code: "KeyF" },
+      platform: "linux",
+      match: false,
+    },
+    {
+      name: "the F key on a Russian layout",
+      input: { ...ctrl, key: "а", code: "KeyF" },
+      platform: "linux",
+      match: true,
+    },
+    // Dvorak puts "u" on the physical F key and "f" on Y.
+    {
+      name: "Ctrl+U on Dvorak",
+      input: { ...ctrl, key: "u", code: "KeyF" },
+      platform: "linux",
+      match: false,
+    },
+    {
+      name: "Ctrl+F on Dvorak",
+      input: { ...ctrl, key: "f", code: "KeyY" },
+      platform: "linux",
+      match: true,
+    },
+  ])("$name: $match", ({ input, platform, match }) => {
+    expect(isFindShortcut(input, platform)).toBe(match);
   });
 });
 

@@ -6,6 +6,7 @@ import { userEvent } from "vite-plus/test/browser";
 import { render, stubGlobal } from "../../../test/render";
 import type { ChatComposerHandle } from "../../components/chat/ChatComposer";
 import { useChatShortcuts } from "../../components/chat/useChatShortcuts";
+import { ScrollArea } from "../../components/ui/scroll-area";
 import { artifactFindAreaProps, artifactsSurfaceProps, isArtifactFindKey } from "./artifactFind";
 
 const findKeybindings: ResolvedKeybindingsConfig = [
@@ -72,9 +73,10 @@ function Page(props: { threadFinds: string[]; reachedPage: string[] }) {
       <textarea aria-label="Composer" />
       <main {...artifactsSurfaceProps}>
         <button type="button">Artifact file</button>
-        <div {...artifactFindAreaProps} aria-label="Artifact preview" tabIndex={-1}>
+        {/* ArtifactsPage's preview: Base UI's viewport is what a click on the text focuses. */}
+        <ScrollArea {...artifactFindAreaProps} aria-label="Artifact preview">
           <p>Artifact text</p>
-        </div>
+        </ScrollArea>
       </main>
     </>
   );
@@ -117,6 +119,17 @@ it.each([
   expect(finds).toEqual(threadFinds);
   // The browser opens its own find only for a key nobody prevented.
   expect(reachedPage.includes(key)).toBe(native);
+});
+
+it("matches the physical F key only on a non-Latin layout", async () => {
+  await using screen = await render(<Page threadFinds={[]} reachedPage={[]} />, options);
+  const preview = screen.getByText("Artifact text").element();
+  const key = (init: KeyboardEventInit) =>
+    isArtifactFindKey(new KeyboardEvent("keydown", { ctrlKey: true, ...init }), preview);
+
+  expect(key({ key: "а", code: "KeyF" })).toBe(true);
+  // Dvorak's "u" sits on the physical F key.
+  expect(key({ key: "u", code: "KeyF" })).toBe(false);
 });
 
 it("Ctrl+F in an artifact on desktop opens the find bar over the preview", async () => {

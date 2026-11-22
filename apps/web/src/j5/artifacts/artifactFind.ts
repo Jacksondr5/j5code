@@ -1,4 +1,4 @@
-import { isMacPlatform } from "@t3tools/shared/keybindings";
+import { isMacPlatform, resolveEventKeys } from "@t3tools/shared/keybindings";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 
 // apps/desktop/src/j5/FindBar.ts reads both markers and the frame name.
@@ -7,11 +7,14 @@ const FIND_AREA_ATTRIBUTE = "data-j5-artifact-find-area";
 /** The HTML artifact's iframe, whose Cmd/Ctrl+F the desktop app takes before it reaches the frame. */
 export const ARTIFACT_PREVIEW_FRAME_NAME = "j5-artifact-preview";
 
-/** Cmd+F on macOS, Ctrl+F elsewhere: the browser's find key, and the one the desktop bar opens on. */
+/**
+ * Cmd+F on macOS, Ctrl+F elsewhere, as the browser finds: by the layout's letter, or by the physical
+ * F key on a non-Latin layout. The desktop bar opens on the same key.
+ */
 function isFindKey(
-  event: Pick<KeyboardEvent, "key" | "altKey" | "shiftKey" | "metaKey" | "ctrlKey">,
+  event: Pick<KeyboardEvent, "key" | "code" | "altKey" | "shiftKey" | "metaKey" | "ctrlKey">,
 ) {
-  if (event.altKey || event.shiftKey || event.key.toLowerCase() !== "f") return false;
+  if (event.altKey || event.shiftKey || !resolveEventKeys(event).has("f")) return false;
   return isMacPlatform(navigator.platform)
     ? event.metaKey && !event.ctrlKey
     : event.ctrlKey && !event.metaKey;

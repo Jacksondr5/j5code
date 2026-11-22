@@ -1,3 +1,6 @@
+import { resolveEventKeys } from "@t3tools/shared/keybindings";
+import type * as Electron from "electron";
+
 import type { FindMatches } from "./findBarProtocol.ts";
 
 /** A rect in the page's CSS pixels. */
@@ -20,8 +23,7 @@ export interface FindTarget {
   /** Electron's `findNext: true` starts a new session; `false` steps to the next match. */
   readonly findInPage: (text: string, options: { findNext: boolean; forward: boolean }) => number;
   readonly stopFindInPage: () => void;
-  /** Find moves the page's focus to the active match, which can be outside the artifact. */
-  readonly rememberFocus: () => void;
+  /** Focuses the artifact preview again: find moves the page's focus to the active match, or clears it. */
   readonly restoreFocus: () => void;
   readonly zoomFactor: () => number;
   /** The window's content size in DIPs, the space child views are placed in. */
@@ -34,8 +36,11 @@ export interface FindBarView {
   /** Only moves it: re-adding the view can drop its focus on macOS. */
   readonly place: (bounds: FindBounds) => void;
   readonly hide: () => void;
-  /** Focuses the field with `query` in it, selected. */
-  readonly focus: (query: string) => void;
+  /**
+   * Focuses the field with `query` in it, selected. A focus deferred until the bar's page loads
+   * runs only while `isCurrent()`, so a bar closed meanwhile can't bring the window forward.
+   */
+  readonly focus: (query: string, isCurrent: () => boolean) => void;
   readonly matches: (matches: FindMatches | null) => void;
 }
 
@@ -77,6 +82,24 @@ export function findBarBounds(
   return { x: Math.round(x), y: Math.round(y), width: Math.round(width), height: FIND_BAR_HEIGHT };
 }
 
+/** Cmd+F on macOS, Ctrl+F elsewhere, by the layout's letter, or by the physical F key on a non-Latin layout. */
+export function isFindShortcut(
+  input: Pick<Electron.Input, "type" | "key" | "code" | "alt" | "shift" | "meta" | "control">,
+  platform: string,
+): boolean {
+  if (input.type !== "keyDown" || input.alt || input.shift) return false;
+  const keys = resolveEventKeys({
+    key: input.key,
+    code: input.code,
+    metaKey: input.meta,
+    ctrlKey: input.control,
+    shiftKey: input.shift,
+    altKey: input.alt,
+  });
+  if (!keys.has("f")) return false;
+  return platform === "darwin" ? input.meta && !input.control : input.control && !input.meta;
+}
+
 export type FindController = ReturnType<typeof makeFindController>;
 
 export function makeFindController(target: FindTarget, view: FindBarView) {
@@ -84,6 +107,8 @@ export function makeFindController(target: FindTarget, view: FindBarView) {
   let openZoomFactor = 1;
   let query = "";
   let requestId: number | null = null;
+  /** Counts closes: a deferred focus from before the latest close is stale. */
+  let closes = 0;
 
   const search = (findNext: boolean, forward: boolean) => {
     requestId = target.findInPage(query, { findNext, forward });
@@ -101,6 +126,7 @@ export function makeFindController(target: FindTarget, view: FindBarView) {
     if (options.forget === true) query = "";
     if (anchor === null) return;
     anchor = null;
+    closes += 1;
     stop();
     view.hide();
     target.restoreFocus();
@@ -110,12 +136,12 @@ export function makeFindController(target: FindTarget, view: FindBarView) {
     isOpen: () => anchor !== null,
     /** Opening again moves the bar and selects the field; a kept query searches again. */
     open: (area: FindArea) => {
-      if (anchor === null) target.rememberFocus();
       const content = target.contentSize();
       openZoomFactor = target.zoomFactor();
       anchor = findAnchor(area, openZoomFactor, content);
       view.show(findBarBounds(anchor, content));
-      view.focus(query);
+      const session = closes;
+      view.focus(query, () => closes === session);
       if (query !== "") search(true, true);
     },
     query: (text: string) => {
