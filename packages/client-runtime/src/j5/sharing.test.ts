@@ -157,6 +157,14 @@ const environments = Effect.fn(function* (
               otherReads.push(`${environmentId}:artifacts`);
               return Effect.succeed({ entries: [] });
             },
+            [J5_CLIENT_READ_WS_METHODS.listSpawnedChildren]: () => {
+              otherReads.push(`${environmentId}:spawned`);
+              return Effect.succeed({ entries: [], spawnedByAgent: [] });
+            },
+            [J5_CLIENT_READ_WS_METHODS.listCrewMemberships]: () => {
+              otherReads.push(`${environmentId}:memberships`);
+              return Effect.succeed({ entries: [] });
+            },
             [J5_ACCESS_WS_METHODS.getConnectionAccess]: () => {
               asked.push(`${environmentId}:connection`);
               return answer(access);
@@ -458,10 +466,20 @@ describe("a connection that holds two threads of a server", () => {
         false,
       );
       expect(yield* refused(atoms.fleet({ environmentId: SHARED_SERVER, input: {} }))).toBe(true);
+      // The rows it reaches: which of them an agent spawned, and their Crew chips.
+      const rows = { environmentId: SHARED_SERVER, input: { threadIds: [VIEWED] } };
+      const spawned = yield* Effect.promise(() => atoms.listSpawnedChildren.run(registry, rows));
+      expect(AsyncResult.isSuccess(spawned)).toBe(true);
+      const memberships = yield* Effect.promise(() =>
+        atoms.listCrewMemberships.run(registry, rows),
+      );
+      expect(AsyncResult.isSuccess(memberships)).toBe(true);
       expect(otherReads).toEqual([
         `${SHARED_SERVER}:artifacts`,
         `${SHARED_SERVER}:inbox`,
         `${SHARED_SERVER}:crew`,
+        `${SHARED_SERVER}:spawned`,
+        `${SHARED_SERVER}:memberships`,
       ]);
       expect(fleetReads).toEqual([]);
     }),

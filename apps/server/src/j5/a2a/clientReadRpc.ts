@@ -1,5 +1,6 @@
 import { AuthAccessReadScope, AuthOrchestrationReadScope, ThreadId } from "@t3tools/contracts";
 import {
+  J5ActionError,
   J5_CLIENT_READ_WS_METHODS,
   type CrewArchiveWorktreesRequest,
   type CrewWorktreeCleanupListRequest,
@@ -56,6 +57,7 @@ const inboxFailure = failAsJ5ActionError({
 });
 
 const failed = (message: string) => failAsJ5ActionError({ refusals: [], failed: message });
+const isJ5ActionError = Schema.is(J5ActionError);
 
 /** An id that is not one names nobody, so it stays unknown rather than failing the ids beside it. */
 const isParticipantId = Schema.is(ParticipantId);
@@ -170,7 +172,13 @@ export const makeClientReadRpcHandlers = Effect.fn("j5.makeClientReadRpcHandlers
       const reachesThread = yield* reaches;
       return yield* clientReads
         .spawnedChildren(input.threadIds, (threadId) => reachesThread(Effect.succeed(threadId)))
-        .pipe(Effect.catch(failed("Spawned children read failed.")));
+        .pipe(
+          // A failed reach check already carries its own code, as in the other narrowed reads.
+          Effect.catchIf(
+            (error) => !isJ5ActionError(error),
+            failed("Spawned children read failed."),
+          ),
+        );
     }),
     [METHODS.readPreArchiveFacts]: (input: PreArchiveFactsRequest) =>
       clientReads

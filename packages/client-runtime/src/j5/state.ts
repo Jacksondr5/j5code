@@ -82,6 +82,8 @@ const READS_A_NARROW_PERSON_SENDS: ReadonlySet<string> = new Set([
   J5_CLIENT_READ_WS_METHODS.readOpenInboxCount,
   J5_CLIENT_READ_WS_METHODS.listCrewProposals,
   J5_CLIENT_READ_WS_METHODS.listCrewRuntimeRequests,
+  J5_CLIENT_READ_WS_METHODS.listCrewMemberships,
+  J5_CLIENT_READ_WS_METHODS.listSpawnedChildren,
 ]);
 
 /**
