@@ -302,7 +302,7 @@ export function AnswerAttachmentList(props: {
         </ul>
       ) : null}
       {textUnsaved ? (
-        <p className="text-sm text-warning-foreground">
+        <p className="text-sm text-warning-foreground" role="status">
           This reply isn't saved on this device. Send it or copy it before reloading.
         </p>
       ) : null}
