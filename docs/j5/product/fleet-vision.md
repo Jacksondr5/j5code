@@ -69,7 +69,15 @@ The human sits at the top of a management hierarchy, not at the center of a hub-
 5. **Cost is a product surface.** One lead exists specifically to keep the fleet within budget. Cost rollups belong on the Fleet page, not in a settings page — per project, with the agents beneath it.
 6. **Beyond-coding is the bar.** Every design should pass the test: "does this work for the monitoring fleet, or only for coding fleets?" (E.g. PR panes are one instantiation of a more general "external artifact an agent team is responsible for" — incidents and dashboards are others.)
 
+## Where J5 is going
+
+- **v1** is J5 as it ships today, rolling out to more users.
+- **v2** is multiplayer: several people on one server and in one thread, Personas, Playbooks and skills shared across an organization, and a refined UX.
+- **v3** is a hosted server: v2's features plus what an enterprise needs at scale, such as cost management, security, and agents running in containers. Its backend is chosen after v2 shows what it has to carry. A big shared server running agents as they run today is valuable on its own and doesn't wait for v3 (Jackson, 2026-10-10).
+- **J5's enterprise angle is that it runs where T3 breaks:** behind firewalls that drop inbound connections, on ZPA-style networks, with no hosted relay. It is not about giving admins control, such as policy or governance; that is not on the roadmap, and upstream's managed policy is not part of it (Jackson, 2026-11-16).
+
 ## History
 
 - 2026-08-14 — captured from Jackson at the start of the project.
 - 2026-09-10 — implications 4 and 5 aligned with later definitions (the inbox is pure, so tree-wide attention is the Fleet page's job; cost rolls up per Squadron, nothing between); "teams" replaced by Crews; content otherwise unchanged.
+- 2026-11-22 — "Where J5 is going": the v1, v2 and v3 order ([record](../worklog/2026-10-10-hosted-server-session.md)) and the enterprise angle, running where T3 breaks (Jackson, 2026-11-16). Both had been kept only in agent memory.
