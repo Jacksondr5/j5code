@@ -4,10 +4,8 @@ import { Image } from "astro:assets";
 import Layout from "../../layouts/Layout.astro";
 import agentSetupCrews from "../../assets/whats-new-0-0-52/agent-setup-crews.png";
 import crewProposal from "../../assets/whats-new-0-0-52/crew-proposal.png";
-import inboxAllowOnce from "../../assets/whats-new-0-0-52/inbox-allow-once.png";
 import inboxAttachment from "../../assets/whats-new-0-0-52/inbox-attachment.png";
 import linksRow from "../../assets/whats-new-0-0-52/links-row.png";
-import personaForm from "../../assets/whats-new-0-0-52/persona-form.png";
 import { T3_SITE_URL, UPSTREAM_REPOSITORY_URL } from "../../lib/site";
 
 interface Item {
@@ -168,18 +166,6 @@ const groups: ReadonlyArray<Group> = [
       {
         title: "Switch a worker's model",
         body: "Move a worker to another model from the composer, for example when its provider hits a usage limit.",
-      },
-    ],
-    shots: [
-      {
-        src: personaForm,
-        alt: "The Create persona form with a read-only access level, two models in order and Independent reviewer turned on",
-        caption: "An ordered model list and the Independent reviewer switch.",
-      },
-      {
-        src: inboxAllowOnce,
-        alt: "An Inbox ask about a blocked persona launch, with J5's record of why and an Allow this once button",
-        caption: "A blocked persona asks you, with J5's record of why. An Owner can allow it once.",
       },
     ],
   },
@@ -465,9 +451,8 @@ const upstream: ReadonlyArray<Item> = [
     width: 100%;
     height: auto;
     border-radius: 12px;
-    border: 1px solid rgba(223, 233, 238, 0.14);
-    box-shadow: 0 18px 48px -24px rgba(6, 14, 24, 0.55);
-    background: #000;
+    border: 1px solid var(--border);
+    box-shadow: 0 14px 36px -20px rgba(18, 32, 47, 0.35);
   }
 
   figcaption {
