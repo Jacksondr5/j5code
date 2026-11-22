@@ -234,9 +234,14 @@ it.effect(
 
       const project = { kind: "project", projectId: PROJECT } as const;
       const onProject = yield* connection("Pat", [{ scope: project, level: "viewer" }]);
-      assert.deepStrictEqual(yield* reached(onProject), [CAPTAIN, SEAT]);
+      // One set of handlers, as one connection holds, so reach is read per request.
+      const { reads: projectReads } = yield* handlersFor(onProject);
+      const reachedOnProject = projectReads["j5.fleet.listSpawnedChildren"]({
+        threadIds: [CAPTAIN, SEAT, ELSEWHERE],
+      }).pipe(Effect.map((answer) => answer.spawnedByAgent));
+      assert.deepStrictEqual(yield* reachedOnProject, [CAPTAIN, SEAT]);
 
-      // Down to the seat alone: the next read follows.
+      // Down to the seat alone: the next read on the same connection follows.
       const access = yield* Access;
       const { personId } = onProject;
       yield* access.setLevel({
@@ -245,6 +250,6 @@ it.effect(
         level: "viewer",
       });
       yield* access.removeLevel({ personId, scope: project });
-      assert.deepStrictEqual(yield* reached(onProject), [SEAT]);
+      assert.deepStrictEqual(yield* reachedOnProject, [SEAT]);
     }).pipe(Effect.provide(conversationLayer)),
 );
