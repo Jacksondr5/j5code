@@ -5,7 +5,7 @@
  *
  * @module ThreadMoves
  */
-import type { CommandId } from "@t3tools/contracts";
+import type { CommandId, OrchestrationV2ServerCommand } from "@t3tools/contracts";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -17,7 +17,7 @@ import { readEventStoreHighWater } from "../a2a/eventStoreHighWater.ts";
 import { PersonAccess, layer as personAccessLayer } from "./PersonAccess.ts";
 
 /** The one command that changes a thread's project. Its event does not say which it left. */
-const MOVE_COMMAND = "thread.project.adopt-folder";
+const MOVE_COMMAND = "thread.project.adopt-folder" satisfies OrchestrationV2ServerCommand["type"];
 
 const make = Effect.gen(function* () {
   const events = yield* EventSinkV2;

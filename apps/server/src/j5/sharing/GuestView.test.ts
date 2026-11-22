@@ -8,16 +8,15 @@ import {
   EventId,
   GuestShareId,
   type OrchestrationV2DomainEvent,
+  type OrchestrationV2ServerCommand,
   type OrchestrationV2ThreadOpens,
   type OrchestrationV2ShellStreamItem,
   type OrchestrationV2ThreadStreamItem,
   type PreviewEvent,
-  ORCHESTRATION_V2_WS_METHODS,
   ProjectId,
   type ScheduledTaskListResult,
   ProviderDriverKind,
   ProviderInstanceId,
-  RpcScopeAuthorization,
   ServerConfig,
   type ServerConfigStreamEvent,
   type ServerLifecycleStreamEvent,
@@ -26,9 +25,7 @@ import {
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
-import * as Deferred from "effect/Deferred";
 import * as Exit from "effect/Exit";
-import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
@@ -36,7 +33,6 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
 import type * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
-import * as RpcAuthorization from "../../auth/RpcAuthorization.ts";
 import * as EventSink from "../../orchestration-v2/EventSink.ts";
 import * as EventStore from "../../orchestration-v2/EventStore.ts";
 import * as ProjectionStore from "../../orchestration-v2/ProjectionStore.ts";
@@ -47,10 +43,11 @@ import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import * as ProjectEnrichmentService from "../../project/ProjectEnrichmentService.ts";
 import * as ProjectService from "../../project/ProjectService.ts";
 import { subscribeOrchestrationV2Shell, subscribeOrchestrationV2Thread } from "../../ws.ts";
-import type { PersonScope } from "@t3tools/contracts/j5";
+import { J5_ACCESS_WS_METHODS, type PersonScope } from "@t3tools/contracts/j5";
 
 import { humanPersonRegistryLayer } from "../a2a/HumanPersonRegistry.ts";
-import * as AccessGate from "./AccessGate.ts";
+import { Access } from "./Access.ts";
+import { makeAccessRpcHandlers } from "./accessRpc.ts";
 import * as GuestView from "./GuestView.ts";
 import * as PersonAccess from "./PersonAccess.ts";
 import * as ThreadMoves from "./ThreadMoves.ts";
@@ -267,7 +264,7 @@ const move = Effect.fn("test.move")(function* (id: string, projectId: ProjectId)
   yield* sink.commitCommand({
     commandId: CommandId.make(`move:${id}:${projectId}`),
     threadId: ThreadId.make(id),
-    commandType: "thread.project.adopt-folder",
+    commandType: "thread.project.adopt-folder" satisfies OrchestrationV2ServerCommand["type"],
     acceptedAt: NOW,
     events: [threadEvent("thread.metadata-updated", { id, projectId })],
     effects: [],
@@ -889,7 +886,7 @@ live(
 );
 
 live(
-  "a thread moved to another project leaves or joins a guest's feed without a reconnect",
+  "a thread moved to a project the guest doesn't hold leaves their feed without a reconnect",
   Effect.gen(function* () {
     const shared = yield* project("project:shared");
     const other = yield* project("project:other");
@@ -911,38 +908,35 @@ live(
 
     yield* move(moved, other);
     assert.deepStrictEqual(threads(yield* until(feed, isSnapshot)), [there]);
-
-    yield* move(moved, shared);
-    assert.deepStrictEqual(threads(yield* until(feed, isSnapshot)), [moved, there]);
   }).pipe(Effect.scoped),
 );
 
 live(
-  "a guest's open thread feed ends refused when the thread moves out of their reach",
+  "a thread moved into a project the person holds raises their level on it at once",
   Effect.gen(function* () {
     const shared = yield* project("project:shared");
     const other = yield* project("project:other");
     const moved = ThreadId.make("thread:moved");
-    yield* write("thread.created", { id: moved, projectId: shared });
+    yield* write("thread.created", { id: moved, projectId: other });
     yield* guest({ kind: "project", projectId: shared });
-    const authorize = yield* RpcScopeAuthorization.pipe(
-      Effect.provide(AccessGate.layerRpcAuthorization(GUEST, RpcAuthorization.layer(GUEST.scopes))),
+    const handlers = yield* makeAccessRpcHandlers({
+      people: yield* PersonAccess.PersonAccess,
+      access: yield* Access.pipe(Effect.provide(Layer.mock(Access)({}))),
+      session: GUEST,
+    });
+    const levels = yield* Queue.unbounded<string | null>();
+    yield* handlers[J5_ACCESS_WS_METHODS.subscribeThreadLevel]({ threadId: moved }).pipe(
+      Stream.runForEach((item) => Queue.offer(levels, item.level)),
+      Effect.forkScoped({ startImmediately: true }),
     );
-    type Handler = Parameters<typeof authorize>[0];
-    const opened = yield* Deferred.make<void>();
-    const feed = yield* authorize(
-      Deferred.succeed(opened, undefined).pipe(Effect.andThen(Effect.never)) as unknown as Handler,
-      {
-        rpc: { _tag: ORCHESTRATION_V2_WS_METHODS.subscribeThread },
-        payload: { threadId: moved },
-      } as unknown as Parameters<typeof authorize>[1],
-    ).pipe(Effect.forkScoped);
-    yield* Deferred.await(opened);
+    assert.strictEqual(yield* Queue.take(levels), null);
+
+    // No level is written: only the move's announcement makes the stream read again.
+    yield* move(moved, shared);
+    assert.strictEqual(yield* Queue.take(levels), "viewer");
 
     yield* move(moved, other);
-    const exit = yield* Fiber.await(feed);
-    assert.isTrue(Exit.isFailure(exit));
-    assert.include(String(Exit.isFailure(exit) ? exit.cause : ""), "EnvironmentAuthorizationError");
+    assert.strictEqual(yield* Queue.take(levels), null);
   }).pipe(Effect.scoped),
 );
 
@@ -1504,6 +1498,41 @@ live(
       ),
       ["thread:written-a", "thread:written-b"],
     );
+  }).pipe(Effect.scoped),
+);
+
+live(
+  "stops a thread's browser tabs on an open feed when the thread moves out of the project, and resumes when it moves back",
+  Effect.gen(function* () {
+    const access = yield* PersonAccess.PersonAccess;
+    const written = yield* project("project:written");
+    const other = yield* project("project:other");
+    yield* write("thread.created", { id: "thread:moved", projectId: written });
+    yield* write("thread.created", { id: "thread:stays", projectId: written });
+    const personId = yield* guest();
+    yield* access.setLevel({
+      personId,
+      scope: { kind: "project", projectId: written },
+      level: "collaborator",
+    });
+    const view = yield* GuestView.connectionView(GUEST);
+    const source = yield* Queue.unbounded<PreviewEvent>();
+    const told = yield* Queue.unbounded<string>();
+    yield* view.previewEvents(Stream.fromQueue(source)).pipe(
+      Stream.runForEach((event) => Queue.offer(told, event.threadId)),
+      Effect.forkScoped({ startImmediately: true }),
+    );
+    yield* Queue.offer(source, tabEvent("thread:moved"));
+    assert.strictEqual(yield* Queue.take(told), "thread:moved");
+
+    yield* move("thread:moved", other);
+    yield* Queue.offer(source, tabEvent("thread:moved"));
+    yield* Queue.offer(source, tabEvent("thread:stays"));
+    assert.strictEqual(yield* Queue.take(told), "thread:stays");
+
+    yield* move("thread:moved", written);
+    yield* Queue.offer(source, tabEvent("thread:moved"));
+    assert.strictEqual(yield* Queue.take(told), "thread:moved");
   }).pipe(Effect.scoped),
 );
 
