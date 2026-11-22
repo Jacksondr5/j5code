@@ -9,7 +9,7 @@ import ChatMarkdown from "../../components/ChatMarkdown";
 import { ComposerBanner } from "../../components/chat/ComposerBanner";
 import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
-import { Textarea } from "../../components/ui/textarea";
+import type { ComposerPromptEditorHandle } from "../../components/ComposerPromptEditorTiptap";
 import { randomUUID } from "../../lib/utils";
 import { useEnvironmentQuery } from "../../state/query";
 import { formatElapsedDurationLabel } from "../../timestampFormat";
@@ -31,10 +31,11 @@ import {
   useRestoredAnswerUploads,
 } from "./AnswerAttachments";
 import { AnswerSendErrorAlert } from "./AnswerSendErrorAlert";
+import { InboxReplyEditor } from "./InboxReplyEditor";
 import { J5RecordPanel } from "./J5RecordPanel";
 import { answerToDeliver, useAnswerSends } from "./answerSends";
 import { ownFileDropTargetProps } from "./answerFileDrop";
-import { useClaimedStashShortcut } from "./claimedStashShortcut";
+import { useClaimedComposerShortcuts } from "./claimedComposerShortcuts";
 import { OwnerAskAction } from "./OwnerAskAction";
 import { answerHumanExchange, type HumanInboxItem } from "./humanInboxClient";
 import { setInboxAnswerText, useInboxAnswerTexts } from "./inboxAnswerDrafts";
@@ -85,7 +86,8 @@ export function AdjudicationDock(props: {
     new Map<string, { message: string; attachmentIds: string; clientRequestId: string }>(),
   );
   const support = useAnswerAttachmentSupport(environmentId);
-  const claimStashShortcut = useClaimedStashShortcut();
+  const claimStashShortcut = useClaimedComposerShortcuts();
+  const editorRef = useRef<ComposerPromptEditorHandle>(null);
 
   const asks = adjudicationAsks({
     items: query.data?.items ?? [],
@@ -124,7 +126,6 @@ export function AdjudicationDock(props: {
       ? null
       : (files: ReadonlyArray<File>) =>
           attachments.add(answerKey, environmentId, support.maxFileBytes, files);
-  const answerId = `adjudication-answer-${encodeURIComponent(shown.exchangeId)}`;
   const sendable = isOpen && message !== null && waitingOn === null;
   // The whole ask takes a dropped file while it can, so the thread never takes it too; when it
   // can't, a drop on it goes to the thread as anywhere else.
@@ -227,15 +228,19 @@ export function AdjudicationDock(props: {
               {expanded.has(shown.exchangeId) ? "Show less" : "Show full question"}
             </Button>
           ) : null}
-          <Textarea
-            aria-label={`Answer ${shown.intent}`}
-            className="min-h-9"
-            id={answerId}
-            onChange={(event) => setInboxAnswerText(answerKey, event.currentTarget.value)}
+          <InboxReplyEditor
+            ariaLabel={`Answer ${shown.intent}`}
+            draftKey={answerKey}
+            editorRef={editorRef}
+            environmentId={environmentId}
+            onChange={(value) => setInboxAnswerText(answerKey, value)}
+            onPaste={fileInput?.onPaste}
+            onSubmit={() => {
+              if (sendable && !pending) void answer();
+            }}
             placeholder="Type the answer exactly as it should be delivered"
             readOnly={!isOpen}
             value={words}
-            {...(fileInput === null ? {} : { onPaste: fileInput.onPaste })}
           />
           <AnswerAttachmentList
             answerKey={answerKey}
@@ -249,7 +254,7 @@ export function AdjudicationDock(props: {
           <div className="flex items-center justify-end gap-2">
             {addFiles === null ? null : (
               <AnswerAttachButton
-                focusAnswer={() => document.getElementById(answerId)?.focus()}
+                focusAnswer={() => editorRef.current?.focusAtEnd()}
                 onFiles={addFiles}
               />
             )}

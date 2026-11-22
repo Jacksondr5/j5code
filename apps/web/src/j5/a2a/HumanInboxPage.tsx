@@ -46,7 +46,7 @@ import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { ScrollArea } from "../../components/ui/scroll-area";
 import { SidebarInset } from "../../components/ui/sidebar";
-import { Textarea } from "../../components/ui/textarea";
+import type { ComposerPromptEditorHandle } from "../../components/ComposerPromptEditorTiptap";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip";
 import { isElectron } from "../../env";
 import { randomUUID } from "../../lib/utils";
@@ -71,6 +71,7 @@ import {
   useInboxAnswerTexts,
 } from "./inboxAnswerDrafts";
 import { AnswerSendErrorAlert } from "./AnswerSendErrorAlert";
+import { InboxReplyEditor } from "./InboxReplyEditor";
 import { J5RecordPanel } from "./J5RecordPanel";
 import { OwnerAskAction } from "./OwnerAskAction";
 import { useScopedParticipantLabels } from "./ParticipantIdentitiesClient";
@@ -350,7 +351,7 @@ function OpenInboxItem({
   const ownName = useOwnName(item.environmentId);
   const closedText = closed === undefined ? null : closedLine({ ...closed, ownName });
   const itemKey = scopedInboxItemKey(item);
-  const answerId = `inbox-answer-${encodeURIComponent(itemKey)}`;
+  const editorRef = useRef<ComposerPromptEditorHandle>(null);
   const support = useAnswerAttachmentSupport(item.environmentId);
   useRestoredAnswerUploads(itemKey, item.environmentId, canAnswer && closed === undefined);
   const addFiles =
@@ -362,6 +363,7 @@ function OpenInboxItem({
   const waitingOn = "blocked" in readiness ? readiness.blocked : null;
   const sendable =
     canAnswer && closedText === null && answerToDeliver(answerText) !== null && waitingOn === null;
+  const fileInput = addFiles === null ? null : answerAttachmentInputHandlers(addFiles);
   return (
     <li className="border-b border-border/70 last:border-b-0">
       <details
@@ -434,16 +436,29 @@ function OpenInboxItem({
             </p>
           ) : (
             <div className="mt-4 flex flex-col gap-3">
-              <Textarea
-                aria-label={`Answer ${item.intent}`}
-                className="min-h-24 resize-y"
-                id={answerId}
-                onChange={(event) => setInboxAnswerText(itemKey, event.currentTarget.value)}
-                placeholder="Type the answer exactly as it should be delivered"
-                readOnly={!canAnswer || closedText !== null}
-                value={answerText}
-                {...(addFiles === null ? {} : answerAttachmentInputHandlers(addFiles))}
-              />
+              <div
+                {...(fileInput === null
+                  ? {}
+                  : { onDragOver: fileInput.onDragOver, onDrop: fileInput.onDrop })}
+              >
+                {/* A collapsed ask mounts no editor: the Inbox can list many, and the words are stored. */}
+                {expanded ? (
+                  <InboxReplyEditor
+                    ariaLabel={`Answer ${item.intent}`}
+                    draftKey={itemKey}
+                    editorRef={editorRef}
+                    environmentId={item.environmentId}
+                    onChange={(value) => setInboxAnswerText(itemKey, value)}
+                    onPaste={fileInput?.onPaste}
+                    onSubmit={() => {
+                      if (sendable && !pending) answer(item);
+                    }}
+                    placeholder="Type the answer exactly as it should be delivered"
+                    readOnly={!canAnswer || closedText !== null}
+                    value={answerText}
+                  />
+                ) : null}
+              </div>
               <AnswerAttachmentList
                 answerKey={itemKey}
                 attachments={attachments.list(itemKey)}
@@ -462,7 +477,7 @@ function OpenInboxItem({
                   />
                   {addFiles === null || !canAnswer ? null : (
                     <AnswerAttachButton
-                      focusAnswer={() => document.getElementById(answerId)?.focus()}
+                      focusAnswer={() => editorRef.current?.focusAtEnd()}
                       onFiles={addFiles}
                     />
                   )}

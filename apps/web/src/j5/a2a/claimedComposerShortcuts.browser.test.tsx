@@ -2,13 +2,13 @@ import { expect, it, vi } from "vite-plus/test";
 
 import { registerCommands } from "../../shortcuts/dispatcher";
 import { render } from "../../../test/render";
-import { useClaimedStashShortcut } from "./claimedStashShortcut";
+import { useClaimedComposerShortcuts } from "./claimedComposerShortcuts";
 
 function PinnedAsk() {
   return (
     <div>
       <input aria-label="Captain's prompt" />
-      <div {...useClaimedStashShortcut()}>
+      <div {...useClaimedComposerShortcuts()}>
         <textarea aria-label="Answer" />
         <button type="button">Attach</button>
       </div>
@@ -49,4 +49,31 @@ it("keeps Mod+S typed in a pinned ask from stashing the Captain's prompt", async
   (prompt as HTMLElement).focus();
   pressModS(prompt);
   expect(stash).toHaveBeenCalledOnce();
+});
+
+it("keeps Alt+Up typed in a pinned ask from pulling a queued message into the composer", async () => {
+  // Nothing here links or navigates.
+  await using screen = await render(<PinnedAsk />, { router: false });
+  // The thread's handler, which treats the ask's editor as the composer.
+  const editQueued = vi.fn((event: KeyboardEvent) => event.preventDefault());
+  using _thread = {
+    [Symbol.dispose]: registerCommands(
+      { "thread.editQueuedMessage": editQueued },
+      { capture: true, context: () => ({ composerFocus: true }) },
+    ),
+  };
+  const answer = screen.getByRole("textbox", { name: "Answer" }).element() as HTMLElement;
+
+  answer.focus();
+  const event = new KeyboardEvent("keydown", {
+    key: "ArrowUp",
+    altKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  answer.dispatchEvent(event);
+
+  // The thread's own listener skips a key whose default is prevented.
+  expect(event.defaultPrevented).toBe(true);
+  expect(editQueued).not.toHaveBeenCalled();
 });
