@@ -21,7 +21,7 @@ import {
 } from "./PlacementService.ts";
 import { CommCommandId, LedgerProjectId, ParticipantId, type Participant } from "./contracts.ts";
 import { PlacementCommandId, type ParticipantProvenance } from "./placementContracts.ts";
-import { AgentCrewInstanceService } from "./AgentCrewInstanceService.ts";
+import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
 import { makeSpawnedChildrenRead } from "./spawnedChildrenRead.ts";
 
@@ -215,6 +215,89 @@ it.effect("keeps a moved child's placement: still under its spawner, still spawn
       [],
     );
   }).pipe(Effect.provide(TestLayer)),
+);
+
+it.effect(
+  "tells a person who reaches some threads only of the spawners and agents they reach",
+  () =>
+    Effect.gen(function* () {
+      const threadAgent = (name: string) => {
+        const threadId = ThreadId.make(`thread:${name}`);
+        return { kind: "agent" as const, id: participantIdForThread(threadId), threadId };
+      };
+      const captain = threadAgent("reach-captain");
+      const shown = threadAgent("reach-shown");
+      const hidden = threadAgent("reach-hidden");
+      const seat = threadAgent("reach-seat");
+      yield* prepare([captain, shown, hidden]);
+      yield* record({ index: 1, participant: shown, provenance: spawnedBy(captain) });
+      yield* record({ index: 2, participant: hidden, provenance: spawnedBy(captain) });
+      // A roster seat no parent holds yet, which the Captain's row carries.
+      const crew: AgentCrewInstance = {
+        id: "crew:reach",
+        projectId,
+        captainParticipantId: captain.id,
+        captainThreadId: captain.threadId,
+        brief: "Hidden Crew brief",
+        version: 1,
+        displayName: "Hidden Crew",
+        createdAt: timestamp,
+        archivedAt: null,
+        members: [
+          {
+            seatName: "hidden-seat",
+            agentId: null,
+            participantId: seat.id,
+            threadId: seat.threadId,
+            addedVersion: 1,
+            reason: null,
+          },
+        ],
+      };
+      const read = yield* makeSpawnedChildrenRead.pipe(
+        Effect.provide(
+          Layer.mock(AgentCrewInstanceService)({ listInvolving: () => Effect.succeed([crew]) }),
+        ),
+      );
+      const reaching =
+        (...threads: ReadonlyArray<{ readonly threadId: ThreadId }>) =>
+        (threadId: ThreadId | null) =>
+          Effect.succeed(threads.some((thread) => thread.threadId === threadId));
+      const requested = [captain.threadId, shown.threadId, hidden.threadId];
+
+      // Someone who reaches everything hears all of it, as before.
+      const everything = yield* read(requested);
+      assert.deepStrictEqual(
+        everything.entries.map((entry) => [
+          entry.threadId,
+          entry.children.map((child) => child.threadId),
+        ]),
+        [[captain.threadId, [shown.threadId, hidden.threadId, seat.threadId]]],
+      );
+      assert.deepStrictEqual(everything.spawnedByAgent, [shown.threadId, hidden.threadId]);
+
+      // Reaching the Captain and one child: that child, under its Captain, and nothing else.
+      const narrowed = yield* read(requested, reaching(captain, shown));
+      assert.deepStrictEqual(narrowed, {
+        entries: [
+          {
+            threadId: captain.threadId,
+            children: [{ threadId: shown.threadId, participantId: shown.id, seat: null }],
+          },
+        ],
+        spawnedByAgent: [shown.threadId],
+      });
+
+      // Reaching only the child: its row stays at the top level, and its spawner goes unsaid.
+      const childOnly = yield* read(requested, reaching(shown));
+      assert.deepStrictEqual(childOnly, { entries: [], spawnedByAgent: [] });
+
+      for (const answer of [narrowed, childOnly]) {
+        const told = JSON.stringify(answer);
+        for (const unseen of ["reach-hidden", "reach-seat", "Hidden Crew", "hidden-seat"])
+          assert.notInclude(told, unseen);
+      }
+    }).pipe(Effect.provide(TestLayer)),
 );
 
 it.effect("places wrapper-created children under their current caller", () =>

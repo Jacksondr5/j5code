@@ -4,7 +4,7 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 
 import { useWorkspaceEnvironments } from "../../state/workspace";
-import { connectionMemory, namesExpectedAtom } from "../connection/memory";
+import { connectionMemory, answerExpectedAtom } from "../connection/memory";
 import { pendingParticipants } from "../connection/memory.logic";
 
 export const NO_IDENTITIES: ParticipantIdentities = { labels: new Map(), threads: new Map() };
@@ -38,7 +38,7 @@ export function useParticipantIdentities(
   const idsKey = Array.from(new Set(participantIds)).sort().join("\0");
   const connected = useConnectedEnvironmentIds().has(environmentId);
   // Through a re-pair's first connection too, so the line never swaps a stand-in for the name.
-  const expected = useAtomValue(namesExpectedAtom).has(environmentId);
+  const expected = useAtomValue(answerExpectedAtom).has(environmentId);
   const { names: known, settled } = useSyncExternalStore(
     connectionMemory.subscribe,
     connectionMemory.getSnapshot,

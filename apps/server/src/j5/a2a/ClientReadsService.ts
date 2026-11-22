@@ -41,7 +41,7 @@ import { writesEveryThread } from "./HumanPersonRegistry.ts";
 import { outsideAgentNameRows } from "./outsideAgentNames.ts";
 import { threadIdForParticipant } from "./HomeRegistrar.ts";
 import { makePreArchiveFactsRead } from "./preArchiveFactsRead.ts";
-import { makeSpawnedChildrenRead } from "./spawnedChildrenRead.ts";
+import { makeSpawnedChildrenRead, type SpawnedChildrenReach } from "./spawnedChildrenRead.ts";
 
 export const DisplayIdentity = Schema.Union([
   Schema.Struct({
@@ -249,9 +249,13 @@ export interface ClientReadsShape {
     typeof CrewMembershipsResponse.Type,
     Read<typeof makeCrewMembershipsRead>["error"]
   >;
-  /** The agents placed under each thread the Sidebar shows, and which of those an agent spawned. */
+  /**
+   * The agents placed under each thread the Sidebar shows, and which of those an agent spawned,
+   * told only of threads `reaches` passes.
+   */
   readonly spawnedChildren: (
     threadIds: ReadonlyArray<ThreadId>,
+    reaches: SpawnedChildrenReach,
   ) => Effect.Effect<
     typeof SpawnedChildrenResponse.Type,
     Read<typeof makeSpawnedChildrenRead>["error"]

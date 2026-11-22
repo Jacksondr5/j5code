@@ -2,7 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 
-import { connectionMemory, namesExpectedAtom } from "../connection/memory";
+import { connectionMemory, answerExpectedAtom } from "../connection/memory";
 import { pendingParticipants } from "../connection/memory.logic";
 
 export interface ScopedParticipantRef {
@@ -58,7 +58,7 @@ export function useScopedParticipantLabels(
     [names],
   );
   // Every sender on screen, through a re-pair's first connection too: a name on its way shows none.
-  const expected = useAtomValue(namesExpectedAtom);
+  const expected = useAtomValue(answerExpectedAtom);
   const pendingKey = refs
     .flatMap((ref) =>
       pendingParticipants(

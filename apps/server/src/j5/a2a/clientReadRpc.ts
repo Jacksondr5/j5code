@@ -163,10 +163,15 @@ export const makeClientReadRpcHandlers = Effect.fn("j5.makeClientReadRpcHandlers
       clientReads
         .fleet(input.includeRetired === true)
         .pipe(Effect.catch(failed("Fleet read failed."))),
-    [METHODS.listSpawnedChildren]: (input: ThreadHomesRequest) =>
-      clientReads
-        .spawnedChildren(input.threadIds)
-        .pipe(Effect.catch(failed("Spawned children read failed."))),
+    [METHODS.listSpawnedChildren]: Effect.fn("j5.a2a.clientReadRpc.listSpawnedChildren")(function* (
+      input: ThreadHomesRequest,
+    ) {
+      // A narrowed person hears only of the threads they reach, spawners and children included.
+      const reachesThread = yield* reaches;
+      return yield* clientReads
+        .spawnedChildren(input.threadIds, (threadId) => reachesThread(Effect.succeed(threadId)))
+        .pipe(Effect.catch(failed("Spawned children read failed.")));
+    }),
     [METHODS.readPreArchiveFacts]: (input: PreArchiveFactsRequest) =>
       clientReads
         .preArchiveFacts(input.threadId)

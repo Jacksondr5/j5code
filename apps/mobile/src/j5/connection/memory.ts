@@ -215,23 +215,16 @@ export const accessConfirmedAtom = Atom.family((environmentId: EnvironmentId) =>
 );
 
 /**
- * Servers whose spawned-children answer is on its way: connected, or on a first attempt, to a
- * person who reads the whole server. Elsewhere none is coming.
+ * Servers whose answers (names, spawned children) are on their way: connected, or on a first
+ * attempt. Each server answers for what the person reaches. Elsewhere none is coming.
  */
 export const answerExpectedAtom = Atom.make((get) => {
-  const expected = new Set<EnvironmentId>();
-  for (const id of get(namesExpectedAtom)) if (!get(j5Sharing.isNarrow(id))) expected.add(id);
-  return expected;
-}).pipe(Atom.withLabel("mobile-j5:answer-expected"));
-
-/** Servers whose answers are on its way to anyone, a narrower person's name reads included. */
-export const namesExpectedAtom = Atom.make((get) => {
   const expected = new Set<EnvironmentId>();
   for (const id of get(environmentCatalog.catalogValueAtom).entries.keys())
     if (answerOnItsWay(Option.getOrNull(AsyncResult.value(get(environmentCatalog.stateAtom(id))))))
       expected.add(id);
   return expected;
-}).pipe(Atom.withLabel("mobile-j5:names-expected"));
+}).pipe(Atom.withLabel("mobile-j5:answer-expected"));
 
 export const connectionMemory = {
   subscribe: (listener: () => void) => {

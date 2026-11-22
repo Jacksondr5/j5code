@@ -197,7 +197,7 @@ export interface ListedThread {
 /**
  * The list's threads without the ones an agent spawned (register D22). A thread its server has
  * not answered for yet waits while the answer is on its way, so it never shows and then leaves.
- * Where no answer is coming (offline, a narrower person, a failed read) it shows.
+ * Where no answer is coming (offline, a failed read) it shows.
  */
 export function crewListedThreads<T extends ListedThread>(
   threads: ReadonlyArray<T>,

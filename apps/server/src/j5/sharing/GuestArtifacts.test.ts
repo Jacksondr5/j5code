@@ -341,14 +341,16 @@ it.layer(testLayer)("a project guest and the artifact requests on the socket", (
         J5_CLIENT_READ_WS_METHODS.readParticipantIdentities,
         J5_CLIENT_READ_WS_METHODS.subscribeReadChanges,
       ]);
-      // Each answers for the person on the connection alone: their inbox, and a Crew's requests
-      // where they write to its Captain. A device no one has claimed is refused them.
+      // Each answers for the person on the connection alone: their inbox, a Crew's requests
+      // where they write to its Captain, and the Crews and agents of the threads they reach. A
+      // device no one has claimed is refused them.
       const ownOnly = new Set<string>([
         J5_CLIENT_READ_WS_METHODS.listHumanInbox,
         J5_CLIENT_READ_WS_METHODS.readOpenInboxCount,
         J5_CLIENT_READ_WS_METHODS.listCrewProposals,
         J5_CLIENT_READ_WS_METHODS.listCrewRuntimeRequests,
         J5_CLIENT_READ_WS_METHODS.listCrewMemberships,
+        J5_CLIENT_READ_WS_METHODS.listSpawnedChildren,
       ]);
       for (const method of ownOnly) {
         assert.match(yield* authorized("stray", method, {}), /^refused: /, `stray ${method}`);
