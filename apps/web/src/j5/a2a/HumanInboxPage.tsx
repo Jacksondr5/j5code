@@ -66,6 +66,7 @@ import {
 import {
   type AnswerSendError,
   answerSendCallbacks,
+  answerToDeliver,
   retryAnswer,
   useAnswerSends,
 } from "./answerSends";
@@ -367,7 +368,7 @@ function OpenInboxItem({
   const readiness = attachments.ready(itemKey, item.environmentId);
   const waitingOn = "blocked" in readiness ? readiness.blocked : null;
   const sendable =
-    canAnswer && closedText === null && answerText.trim().length > 0 && waitingOn === null;
+    canAnswer && closedText === null && answerToDeliver(answerText) !== null && waitingOn === null;
   return (
     <li className="border-b border-border/70 last:border-b-0">
       <details
@@ -755,11 +756,10 @@ export function HumanInboxPage() {
 
   const answer = async (item: HumanInboxItem) => {
     const itemKey = scopedInboxItemKey(item);
-    // Sent trimmed, as the composer sends; words are still required.
-    const message = (answers[itemKey] ?? "").trim();
+    const message = answerToDeliver(answers[itemKey] ?? "");
     const readiness = answerAttachments.ready(itemKey, item.environmentId);
     // A kept ask has closed (AC17); its words stay to read, not to send.
-    if (message.length === 0 || !item.sourceReady || kept.has(itemKey) || "blocked" in readiness)
+    if (message === null || !item.sourceReady || kept.has(itemKey) || "blocked" in readiness)
       return;
     await submitHumanInboxAnswer({
       item,

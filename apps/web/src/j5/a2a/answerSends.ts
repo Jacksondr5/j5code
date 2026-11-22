@@ -40,6 +40,13 @@ export function useAnswerSends() {
 export type AnswerSends = ReturnType<typeof useAnswerSends>;
 
 /**
+ * What an answer delivers: exactly what was typed, edge spaces and newlines included (Inbox AC8),
+ * or `null` when it is only whitespace and so has no words to send.
+ */
+export const answerToDeliver = (typed: string): string | null =>
+  typed.trim() === "" ? null : typed;
+
+/**
  * The callbacks `submitHumanInboxAnswer` reports one send of the ask `key` through. An error after
  * the server took the answer is marked `delivered`, so trying again never sends it twice.
  */

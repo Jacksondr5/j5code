@@ -31,7 +31,7 @@ import {
   useRestoredAnswerUploads,
 } from "./AnswerAttachments";
 import { J5RecordPanel } from "./J5RecordPanel";
-import { useAnswerSends } from "./answerSends";
+import { answerToDeliver, useAnswerSends } from "./answerSends";
 import { ownFileDropTargetProps } from "./answerFileDrop";
 import { useClaimedStashShortcut } from "./claimedStashShortcut";
 import { OwnerAskAction } from "./OwnerAskAction";
@@ -109,8 +109,7 @@ export function AdjudicationDock(props: {
   const isOpen = (query.data?.items ?? []).some((item) => item.exchangeId === shown.exchangeId);
   const answerKey = keyOf(shown);
   const words = wordsOf(shown);
-  // Sent trimmed, as the composer sends; words are still required.
-  const message = words.trim();
+  const message = answerToDeliver(words);
   const pending = sends.isPending(answerKey);
   const error = sends.errorOf(answerKey)?.message ?? null;
   const urgency = urgencyBadge[shown.urgency];
@@ -125,7 +124,7 @@ export function AdjudicationDock(props: {
       : (files: ReadonlyArray<File>) =>
           attachments.add(answerKey, environmentId, support.maxFileBytes, files);
   const answerId = `adjudication-answer-${encodeURIComponent(shown.exchangeId)}`;
-  const sendable = isOpen && message !== "" && waitingOn === null;
+  const sendable = isOpen && message !== null && waitingOn === null;
   // The whole ask takes a dropped file while it can, so the thread never takes it too; when it
   // can't, a drop on it goes to the thread as anywhere else.
   const fileInput = addFiles === null ? null : answerAttachmentInputHandlers(addFiles);
@@ -135,7 +134,7 @@ export function AdjudicationDock(props: {
       : { ...ownFileDropTargetProps, onDragOver: fileInput.onDragOver, onDrop: fileInput.onDrop };
 
   const answer = async () => {
-    if (!sendable || "blocked" in readiness) return;
+    if (!sendable || message === null || "blocked" in readiness) return;
     const attachmentIds = readiness.attachments.map((attachment) => attachment.id).join("\n");
     // A retry of the same words and files reuses its request id, so a lost reply cannot answer twice.
     const previous = attempts.current.get(shown.exchangeId);

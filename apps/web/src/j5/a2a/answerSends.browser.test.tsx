@@ -4,7 +4,13 @@ import type { ScopedHumanInboxItem } from "@t3tools/contracts/j5";
 import { expect, it, vi } from "vite-plus/test";
 
 import { act, render } from "../../../test/render";
-import { type AnswerSends, answerSendCallbacks, retryAnswer, useAnswerSends } from "./answerSends";
+import {
+  type AnswerSends,
+  answerSendCallbacks,
+  answerToDeliver,
+  retryAnswer,
+  useAnswerSends,
+} from "./answerSends";
 
 function Harness(props: { readonly onRender: (sends: AnswerSends) => void }) {
   props.onRender(useAnswerSends());
@@ -73,4 +79,11 @@ it("only reads the Inbox again when trying again after the server took the answe
   expect(reread).toHaveBeenCalledOnce();
   expect(send).toHaveBeenCalledOnce();
   expect(current().errorOf("ask-a")).toBeNull();
+});
+
+it("delivers an answer exactly as typed, edge whitespace included, and a blank one not at all", () => {
+  expect(answerToDeliver("  indented\nkeep the trailing space ")).toBe(
+    "  indented\nkeep the trailing space ",
+  );
+  expect(answerToDeliver(" \n\t ")).toBeNull();
 });
