@@ -12,10 +12,12 @@ import {
   type OrchestrationV2ShellStreamItem,
   type OrchestrationV2ThreadStreamItem,
   type PreviewEvent,
+  ORCHESTRATION_V2_WS_METHODS,
   ProjectId,
   type ScheduledTaskListResult,
   ProviderDriverKind,
   ProviderInstanceId,
+  RpcScopeAuthorization,
   ServerConfig,
   type ServerConfigStreamEvent,
   type ServerLifecycleStreamEvent,
@@ -24,7 +26,9 @@ import {
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Deferred from "effect/Deferred";
 import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
@@ -32,6 +36,7 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
 import type * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
+import * as RpcAuthorization from "../../auth/RpcAuthorization.ts";
 import * as EventSink from "../../orchestration-v2/EventSink.ts";
 import * as EventStore from "../../orchestration-v2/EventStore.ts";
 import * as ProjectionStore from "../../orchestration-v2/ProjectionStore.ts";
@@ -45,8 +50,10 @@ import { subscribeOrchestrationV2Shell, subscribeOrchestrationV2Thread } from ".
 import type { PersonScope } from "@t3tools/contracts/j5";
 
 import { humanPersonRegistryLayer } from "../a2a/HumanPersonRegistry.ts";
+import * as AccessGate from "./AccessGate.ts";
 import * as GuestView from "./GuestView.ts";
 import * as PersonAccess from "./PersonAccess.ts";
+import * as ThreadMoves from "./ThreadMoves.ts";
 
 const AT = "2026-10-12T00:00:00.000Z";
 const NOW = DateTime.makeUnsafe(AT);
@@ -122,6 +129,7 @@ const layerTest = Layer.mergeAll(
   layerManagement,
   layerProjects,
   PersonAccess.layer.pipe(Layer.provideMerge(humanPersonRegistryLayer)),
+  ThreadMoves.layer,
 ).pipe(Layer.provideMerge(ProjectStore.layer), Layer.provideMerge(layerPersistence));
 
 const project = Effect.fn("test.project")(function* (id: string) {
@@ -251,6 +259,19 @@ const write = Effect.fn("test.write")(function* (
   const sink = yield* EventSink.EventSinkV2;
   const stored = yield* sink.write({ events: [threadEvent(type, input)] });
   return stored.at(-1)!.sequence;
+});
+
+/** Moves a thread to another project as upstream's Turn into project commits it. */
+const move = Effect.fn("test.move")(function* (id: string, projectId: ProjectId) {
+  const sink = yield* EventSink.EventSinkV2;
+  yield* sink.commitCommand({
+    commandId: CommandId.make(`move:${id}:${projectId}`),
+    threadId: ThreadId.make(id),
+    commandType: "thread.project.adopt-folder",
+    acceptedAt: NOW,
+    events: [threadEvent("thread.metadata-updated", { id, projectId })],
+    effects: [],
+  });
 });
 
 /** A Viewer for `GUEST`'s session, at the scopes given. */
@@ -864,6 +885,64 @@ live(
     assert.deepStrictEqual(outline(yield* until(feed, reached(again))), [
       `thread.updated@${again}`,
     ]);
+  }).pipe(Effect.scoped),
+);
+
+live(
+  "a thread moved to another project leaves or joins a guest's feed without a reconnect",
+  Effect.gen(function* () {
+    const shared = yield* project("project:shared");
+    const other = yield* project("project:other");
+    const moved = ThreadId.make("thread:moved");
+    const there = ThreadId.make("thread:there");
+    yield* write("thread.created", { id: moved, projectId: shared });
+    yield* write("thread.created", { id: there, projectId: other });
+    // The thread grant puts the other project in the sidebar already, so the move names a
+    // project the client holds and would pass on its own.
+    yield* guest({ kind: "project", projectId: shared }, { kind: "thread", threadId: there });
+    const isSnapshot = (item: OrchestrationV2ShellStreamItem) => item.kind === "snapshot";
+    const threads = (items: ReadonlyArray<OrchestrationV2ShellStreamItem>) =>
+      snapshotOf(items)
+        .threads.map((thread) => thread.id as string)
+        .toSorted();
+
+    const feed = yield* open(GUEST);
+    assert.deepStrictEqual(threads(yield* until(feed, synchronized)), [moved, there]);
+
+    yield* move(moved, other);
+    assert.deepStrictEqual(threads(yield* until(feed, isSnapshot)), [there]);
+
+    yield* move(moved, shared);
+    assert.deepStrictEqual(threads(yield* until(feed, isSnapshot)), [moved, there]);
+  }).pipe(Effect.scoped),
+);
+
+live(
+  "a guest's open thread feed ends refused when the thread moves out of their reach",
+  Effect.gen(function* () {
+    const shared = yield* project("project:shared");
+    const other = yield* project("project:other");
+    const moved = ThreadId.make("thread:moved");
+    yield* write("thread.created", { id: moved, projectId: shared });
+    yield* guest({ kind: "project", projectId: shared });
+    const authorize = yield* RpcScopeAuthorization.pipe(
+      Effect.provide(AccessGate.layerRpcAuthorization(GUEST, RpcAuthorization.layer(GUEST.scopes))),
+    );
+    type Handler = Parameters<typeof authorize>[0];
+    const opened = yield* Deferred.make<void>();
+    const feed = yield* authorize(
+      Deferred.succeed(opened, undefined).pipe(Effect.andThen(Effect.never)) as unknown as Handler,
+      {
+        rpc: { _tag: ORCHESTRATION_V2_WS_METHODS.subscribeThread },
+        payload: { threadId: moved },
+      } as unknown as Parameters<typeof authorize>[1],
+    ).pipe(Effect.forkScoped);
+    yield* Deferred.await(opened);
+
+    yield* move(moved, other);
+    const exit = yield* Fiber.await(feed);
+    assert.isTrue(Exit.isFailure(exit));
+    assert.include(String(Exit.isFailure(exit) ? exit.cause : ""), "EnvironmentAuthorizationError");
   }).pipe(Effect.scoped),
 );
 
