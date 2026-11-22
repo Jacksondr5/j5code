@@ -23,6 +23,8 @@ export const CONTACT_EMAIL = "hello@j5.codes";
  * at build time), which in turn fetches the release archive from GitHub.
  */
 export const INSTALL_COMMAND = `curl -fsSL ${SITE_URL}/install.sh | sh`;
+/** The Windows x64 server, installed from PowerShell with the script each release publishes. */
+export const WINDOWS_INSTALL_COMMAND = `irm ${GITHUB_RELEASES_URL}/latest/download/install.ps1 | iex`;
 export const INSTALL_DOCS_URL = `${GITHUB_REPOSITORY_URL}/blob/j5/main/docs/j5/user/install.md`;
 
 /** Status words used on every card. Copy must not claim more than the word allows. */
