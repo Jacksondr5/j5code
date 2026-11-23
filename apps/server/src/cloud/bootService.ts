@@ -1173,7 +1173,9 @@ export const make = Effect.fn("cloud.boot_service.make")(function* (input: {
               )
             : runStep(entry.step, entry.command, entry.args, {
                 ...(entry.timeout === undefined ? {} : { timeout: entry.timeout }),
-                ...(entry.acceptFailure === undefined ? {} : { acceptFailure: entry.acceptFailure }),
+                ...(entry.acceptFailure === undefined
+                  ? {}
+                  : { acceptFailure: entry.acceptFailure }),
               });
         return entry.optional === true ? run.pipe(Effect.ignore) : run.pipe(Effect.asVoid);
       },

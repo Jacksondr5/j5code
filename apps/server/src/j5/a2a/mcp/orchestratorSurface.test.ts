@@ -42,6 +42,7 @@ import * as J5OrchestratorSurfaceHandlers from "./orchestratorSurfaceHandlers.ts
 
 const threadId = ThreadId.make("thread:j5:orchestrator-surface");
 const providerInstanceId = ProviderInstanceId.make("codex-j5-orchestrator-surface");
+const isCapabilitiesResult = Schema.is(OrchestratorMcpCapabilitiesResult);
 const invocation: McpInvocationScope = {
   environmentId: EnvironmentId.make("environment:j5:orchestrator-surface"),
   capabilities: new Set(["orchestration"] as const),
@@ -173,7 +174,7 @@ it.effect("answers upstream's capabilities shape, without the bulk create J5 lea
       ...rawCapabilities,
       features: { ...rawCapabilities.features, batchThreadCreation: false, maxBatchThreads: 0 },
     });
-    expect(Schema.is(OrchestratorMcpCapabilitiesResult)(result.structuredContent)).toBe(true);
+    expect(isCapabilitiesResult(result.structuredContent)).toBe(true);
   }).pipe(Effect.provide(TestLayer)),
 );
 

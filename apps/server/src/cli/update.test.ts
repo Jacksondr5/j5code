@@ -673,7 +673,11 @@ it.layer(NodeServices.layer)("t3 update checks the database before switching", (
       targetVersion: "0.1.8",
       launcherProtocol: SERVICE_LAUNCHER_PROTOCOL,
       preflight: preflightOutput(
-        JSON.stringify({ status: "ready", version: "0.1.8", launcherProtocol: SERVICE_LAUNCHER_PROTOCOL }),
+        JSON.stringify({
+          status: "ready",
+          version: "0.1.8",
+          launcherProtocol: SERVICE_LAUNCHER_PROTOCOL,
+        }),
       ),
       failure: undefined,
     },

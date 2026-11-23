@@ -1699,6 +1699,7 @@
   "98f445984c075971": "Side chats start after the first message.",
   "e9cf5c708ad52a85": "Available once the thread's worktree is set up.",
   "6b1c0d7732da6648": "Failed to compact context.",
+  "799711a62d2d97df": "Starting a side chat needs Collaborator on this project.",
   "bbbce20ad5d6790d": "{count, plural, one {{count} queued} other {{count} queued}}",
   "2d3ad1215c5d8a52": "This connection cannot change threads.",
   "86860f420c3af36a": "Preparing machine",
@@ -1784,6 +1785,8 @@
   "0c659f9a193255dd": "Failed to add project",
   "4b3fc098d5a08a66": "Windows-style paths are only supported on Windows.",
   "2c2637dc1e236fb4": "Relative paths require an active project.",
+  "20bf8316140087e1": "Choose a folder in the selected environment",
+  "11c1bc320432e44d": "Select the matching environment in Skills, then choose the folder again.",
   "87f84b811a6aa0d1": "Failed to unarchive project",
   "e823121dffeff02d": "Failed to open project",
   "d235610ec49f6c81": "Cannot add project",
@@ -3098,10 +3101,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "on the computer that opened this page"
-      ]
+      "c": [" ", "on the computer that opened this page"]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3113,10 +3113,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "· whoever runs it gets this access"
-      ]
+      "c": [" ", "· whoever runs it gets this access"]
     }
   ],
   "c54cc9c75db9dc58": "Only approve a sign-in you just started.",
@@ -4676,6 +4673,7 @@
   "49c80af1dd4826f1": "Downloading it from the source failed.",
   "5ba22a660758e453": "The attachment limit has been reached.",
   "181933312b23cb0c": "The draft rejected this attachment (duplicate or attachment limit reached).",
+  "13a7d612e0f375e9": "Start a playbook in this thread",
   "df02c1d51d158d32": "Switch response model for this thread",
   "929781439a221aae": "Ask a side question in a new side chat",
   "378c3404c430fc05": "Same as /side",

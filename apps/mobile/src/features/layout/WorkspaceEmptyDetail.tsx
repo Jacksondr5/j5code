@@ -8,6 +8,7 @@ import { FloatingActionButton } from "../../components/ui/FloatingActionButton";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { ScreenContent } from "../../components/ui/ScreenContent";
 import type { WorkspaceTab } from "./workspace/workspace-tabs-state";
+import { useStartsSomewhere } from "../../j5/sharing/startAccess";
 
 export function WorkspaceEmptyDetail(props: {
   readonly tab?: WorkspaceTab | "settings";
@@ -15,6 +16,8 @@ export function WorkspaceEmptyDetail(props: {
   readonly onAddConnection?: () => void;
 }) {
   const gt = useGT();
+  // J5: New thread only for someone who may start one (FORK.md case 90).
+  const startsSomewhere = useStartsSomewhere();
   const pullRequests = props.tab === "pullRequests";
   const issues = props.tab === "issues";
   const settings = props.tab === "settings";
@@ -73,7 +76,7 @@ export function WorkspaceEmptyDetail(props: {
                       ? gt("Choose a thread from the sidebar or start a new thread.")
                       : gt("Choose a thread from the sidebar or start a new task.")}
             </Text>
-            {props.onStartNewTask && !pullRequests && !issues && !settings ? (
+            {props.onStartNewTask && startsSomewhere && !pullRequests && !issues && !settings ? (
               Platform.OS === "android" ? (
                 <NewThreadButton extended className="mt-2" onPress={props.onStartNewTask} />
               ) : (

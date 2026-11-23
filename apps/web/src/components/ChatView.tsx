@@ -3082,7 +3082,10 @@ export default function ChatView(props: ChatViewProps) {
     anchorNewTurn,
     acknowledgeActiveThreadWoke,
     onSideChat: sideChat.available ? sendSideChatStable : undefined,
-    sideChatDisabledReason,
+    // J5: no side chat door without a fork; `/side` typed anyway is refused (FORK.md case 90).
+    sideChatDisabledReason:
+      sideChatDisabledReason ??
+      (canForkThread ? null : gt("Starting a side chat needs Collaborator on this project.")),
     handleNewThreadInActiveProject,
     persistThreadSettingsForNextTurn,
     linkCheckoutPullRequest,

@@ -259,7 +259,10 @@ describe("J5 action commands", () => {
       });
       // Any other defect stays a defect: it is a bug to report, not a server to update.
       const defect = yield* Effect.promise(() =>
-        runAtomCommand(registry, atoms.stopCrew, { environmentId: work, input: { crewInstanceId: "crew:1" } }),
+        runAtomCommand(registry, atoms.stopCrew, {
+          environmentId: work,
+          input: { crewInstanceId: "crew:1" },
+        }),
       );
       expect(AsyncResult.isFailure(defect) && Cause.hasDies(defect.cause)).toBe(true);
     }).pipe(Effect.scoped),

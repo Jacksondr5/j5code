@@ -3,10 +3,10 @@ import type { ServerSelfUpdateOutcome } from "@t3tools/contracts";
 // Protocol 4 launchers coordinate selection writes and reconcile the unit. A remote update
 // replaces only the child, so an installed protocol-3 launcher stays until a local update or
 // service install restarts the service.
-// J5: 4 is also the executable's rename from `t3` to `j5` (FORK.md case 50). J5 launchers
-// have reported 4 since 0.0.48; a protocol-3 launcher predates the rename, so the staged
-// preflight refuses it and asks for `j5 update` on its machine (servicePreflight.ts). Its
-// state file is still read: a pre-rename `j5 update` writes protocol 3, then starts this launcher.
+
+// J5: 4 is also the `t3` → `j5` rename (FORK.md case 50). The staged preflight refuses a
+// protocol-3 launcher and asks for `j5 update` on its machine (servicePreflight.ts). Its state
+// file is still read: a pre-rename `j5 update` writes protocol 3, then starts this launcher.
 export const SERVICE_LAUNCHER_PROTOCOL = 4 as const;
 /** Launchers this runtime runs under. Protocol 3 has the same IPC and durable format, and
     refusing it stops every remote update until someone opens a shell on the host. */

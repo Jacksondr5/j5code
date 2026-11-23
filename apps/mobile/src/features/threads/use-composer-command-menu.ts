@@ -752,7 +752,7 @@ export function useComposerCommandMenu({
         : trigger?.kind === "slash-playbook"
           ? environmentId && projectId
             ? playbookQuery.error
-            : "Choose a project to see its playbooks."
+            : gt("Choose a project to see its playbooks.")
           : null,
     onSelect,
   };

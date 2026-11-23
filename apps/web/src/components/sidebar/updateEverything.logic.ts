@@ -23,6 +23,7 @@ import type { J5DatabaseMigrations } from "@t3tools/shared/j5/databaseMigrations
 import {
   isJ5ChannelSwitchBlock,
   j5ChannelSwitchBlock,
+  j5ChannelSwitchBlockMessage,
   j5ChannelSwitchBlockReason,
   type J5ChannelSwitchBlock,
 } from "~/j5/updates/channelSwitch";
@@ -213,7 +214,8 @@ function channelSwitchBlockReason(
   const to = channelSwitchLabel(release.channel, resolve);
   const version = release.version;
   // J5: FORK.md case 120.
-  if (isJ5ChannelSwitchBlock(block)) return j5ChannelSwitchBlockReason(block, { version, from, to });
+  if (isJ5ChannelSwitchBlock(block))
+    return j5ChannelSwitchBlockReason(block, { version, from, to });
   switch (block) {
     case "server-predates-checks":
       return resolve(
@@ -244,7 +246,7 @@ function localChannelSwitchBlockReason(
   const version = release.version;
   // J5: FORK.md case 120.
   if (isJ5ChannelSwitchBlock(block)) {
-    return `This app cannot switch: ${j5ChannelSwitchBlockReason(block, { version, from, to })}.`;
+    return j5ChannelSwitchBlockMessage(block, { version, from, to });
   }
   switch (block) {
     case "server-predates-checks":

@@ -1699,6 +1699,7 @@
   "98f445984c075971": "Los chats laterales empiezan después del primer mensaje.",
   "e9cf5c708ad52a85": "Disponible cuando el worktree del hilo esté configurado.",
   "6b1c0d7732da6648": "No se pudo compactar el contexto.",
+  "799711a62d2d97df": "Starting a side chat needs Collaborator on this project.",
   "bbbce20ad5d6790d": "{count, plural, one {{count} en cola} other {{count} en cola}}",
   "2d3ad1215c5d8a52": "Esta conexión no puede cambiar hilos.",
   "86860f420c3af36a": "Preparando la máquina",
@@ -1784,6 +1785,8 @@
   "0c659f9a193255dd": "No se pudo añadir el proyecto",
   "4b3fc098d5a08a66": "Las rutas de estilo Windows solo son compatibles en Windows.",
   "2c2637dc1e236fb4": "Las rutas relativas requieren un proyecto activo.",
+  "20bf8316140087e1": "Choose a folder in the selected environment",
+  "11c1bc320432e44d": "Select the matching environment in Skills, then choose the folder again.",
   "87f84b811a6aa0d1": "No se pudo desarchivar el proyecto",
   "e823121dffeff02d": "No se pudo abrir el proyecto",
   "d235610ec49f6c81": "No se puede añadir el proyecto",
@@ -3098,10 +3101,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "en el ordenador que abrió esta página"
-      ]
+      "c": [" ", "en el ordenador que abrió esta página"]
     }
   ],
   "b2d53b4d1d48fbef": [
@@ -3113,10 +3113,7 @@
     {
       "t": "span",
       "i": 2,
-      "c": [
-        " ",
-        "· quien lo ejecute obtiene este acceso"
-      ]
+      "c": [" ", "· quien lo ejecute obtiene este acceso"]
     }
   ],
   "c54cc9c75db9dc58": "Aprueba solo un inicio de sesión que acabes de iniciar.",
@@ -4674,6 +4671,7 @@
   "49c80af1dd4826f1": "Falló la descarga desde el origen.",
   "5ba22a660758e453": "Se alcanzó el límite de adjuntos.",
   "181933312b23cb0c": "El borrador rechazó este adjunto (duplicado o límite de adjuntos alcanzado).",
+  "13a7d612e0f375e9": "Start a playbook in this thread",
   "df02c1d51d158d32": "Cambiar el modelo de respuesta de este hilo",
   "929781439a221aae": "Hacer una pregunta aparte en un chat lateral nuevo",
   "378c3404c430fc05": "Igual que /side",

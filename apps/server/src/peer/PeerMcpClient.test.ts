@@ -495,7 +495,7 @@ it.effect("bounds the session handshake, not a tool call that waits longer", () 
       const stalled = yield* probe.pipe(Effect.flip, Effect.forkScoped);
       yield* Queue.takeN(arrived, requestsBeforeStall);
       yield* TestClock.adjust(Duration.seconds(10));
-      // J5: a stalled handshake is an absent machine (register D46, #1126).
+      // J5: a stalled handshake is an absent machine (register D46).
       expect(yield* Fiber.join(stalled)).toMatchObject({
         code: "peer_unreachable",
         message: "The linked environment stopped answering.",

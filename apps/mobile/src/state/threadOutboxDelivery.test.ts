@@ -962,34 +962,37 @@ describe("thread outbox recovery rollback", () => {
   });
 
   // L-ios-2: "Edit task" on the failed card must open the original task, not an empty draft.
-  it.effect("opens a rejected saved-agent task from Edit task with its text, project and agent", () => {
-    const message: QueuedThreadMessage = {
-      ...queuedMessage({ messageId: "message-edit-task", text: "review the release" }),
-      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-6-luna" },
-      creation: {
-        projectId: ProjectId.make("project-1"),
-        workspaceMode: "local",
-        branch: null,
-        worktreePath: null,
-        agentPersonaId: "luna-helper",
-      },
-    };
-    // The key the failed card's Edit task opens (ThreadRouteScreen).
-    const editTaskKey = restoredNewTaskDraftKey(message.messageId);
-    return Effect.gen(function* () {
-      yield* Effect.promise(() => harness.manager.enqueue(message));
-      expect(
-        yield* restoreRejectedQueuedMessage(message, "Model turned off for this project"),
-      ).toBe("restored");
-      yield* Effect.promise(() => recoverFailedThreadDraft(message));
+  it.effect(
+    "opens a rejected saved-agent task from Edit task with its text, project and agent",
+    () => {
+      const message: QueuedThreadMessage = {
+        ...queuedMessage({ messageId: "message-edit-task", text: "review the release" }),
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-6-luna" },
+        creation: {
+          projectId: ProjectId.make("project-1"),
+          workspaceMode: "local",
+          branch: null,
+          worktreePath: null,
+          agentPersonaId: "luna-helper",
+        },
+      };
+      // The key the failed card's Edit task opens (ThreadRouteScreen).
+      const editTaskKey = restoredNewTaskDraftKey(message.messageId);
+      return Effect.gen(function* () {
+        yield* Effect.promise(() => harness.manager.enqueue(message));
+        expect(
+          yield* restoreRejectedQueuedMessage(message, "Model turned off for this project"),
+        ).toBe("restored");
+        yield* Effect.promise(() => recoverFailedThreadDraft(message));
 
-      expect(composerDrafts.getComposerDraftSnapshot(editTaskKey)).toMatchObject({
-        text: "review the release",
-        project: { environmentId: message.environmentId, projectId: message.creation!.projectId },
-      });
-      expect(readDraftAgentPersonaId(editTaskKey)).toBe("luna-helper");
-    }).pipe(Effect.ensuring(Effect.sync(() => clearDraftAgent(editTaskKey))));
-  });
+        expect(composerDrafts.getComposerDraftSnapshot(editTaskKey)).toMatchObject({
+          text: "review the release",
+          project: { environmentId: message.environmentId, projectId: message.creation!.projectId },
+        });
+        expect(readDraftAgentPersonaId(editTaskKey)).toBe("luna-helper");
+      }).pipe(Effect.ensuring(Effect.sync(() => clearDraftAgent(editTaskKey))));
+    },
+  );
 
   it.effect("keeps the draft unchanged when a standalone goal command is rejected", () =>
     Effect.gen(function* () {

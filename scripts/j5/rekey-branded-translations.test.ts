@@ -16,9 +16,9 @@ describe("rekey-branded-translations", () => {
         '"Sign in to T3 Connect to use J5 Code."',
       ),
     ).toBe('"Melde dich bei T3 Connect an, um J5 Code zu nutzen."');
-    expect(
-      rebrandTranslation('"T3-Thread lesen"', '"Read T3 thread"', '"Read J5 thread"'),
-    ).toBe('"J5-Thread lesen"');
+    expect(rebrandTranslation('"T3-Thread lesen"', '"Read T3 thread"', '"Read J5 thread"')).toBe(
+      '"J5-Thread lesen"',
+    );
     expect(
       rebrandTranslation('"Führe `npx t3 pair` aus"', '"Run `npx t3 pair`"', '"Run `j5 pair`"'),
     ).toBe('"Führe `j5 pair` aus"');
@@ -37,11 +37,17 @@ describe("rekey-branded-translations", () => {
         a: "T3 requests zero data retention",
       }),
     ).toBe("a");
-    expect(upstreamKeyOf(JSON.stringify("Reconnected on j5 {version}."), {
-      a: "Reconnected on t3@{version}.",
-    })).toBe("a");
     expect(
-      rebrandTranslation('"Mit t3@{version} neu verbunden."', '"Reconnected on t3@{version}."', '"Reconnected on j5 {version}."'),
+      upstreamKeyOf(JSON.stringify("Reconnected on j5 {version}."), {
+        a: "Reconnected on t3@{version}.",
+      }),
+    ).toBe("a");
+    expect(
+      rebrandTranslation(
+        '"Mit t3@{version} neu verbunden."',
+        '"Reconnected on t3@{version}."',
+        '"Reconnected on j5 {version}."',
+      ),
     ).toBe('"Mit j5 {version} neu verbunden."');
     expect(
       rebrandTranslation(
@@ -67,7 +73,11 @@ describe("rekey-branded-translations", () => {
   });
 
   it("finds upstream's key only for a string that differs in its brand alone", () => {
-    const upstream = { a: "Update T3 Code", b: "Update the app", c: ["Open ", { v: 1 }, " in T3 Code"] };
+    const upstream = {
+      a: "Update T3 Code",
+      b: "Update the app",
+      c: ["Open ", { v: 1 }, " in T3 Code"],
+    };
     expect(upstreamKeyOf(JSON.stringify("Update J5 Code"), upstream)).toBe("a");
     expect(upstreamKeyOf(JSON.stringify(["Open ", { v: 1 }, " in J5 Code"]), upstream)).toBe("c");
     expect(upstreamKeyOf(JSON.stringify("Update J5 Code now"), upstream)).toBeUndefined();

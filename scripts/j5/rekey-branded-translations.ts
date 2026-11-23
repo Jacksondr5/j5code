@@ -36,12 +36,16 @@ export const PHRASES: ReadonlyArray<{
 }> = phrases;
 
 const withJ5Phrases = (english: string) =>
-  PHRASES.reduce((text, { english: phrase }) => text.replaceAll(phrase.upstream, phrase.j5), english);
+  PHRASES.reduce(
+    (text, { english: phrase }) => text.replaceAll(phrase.upstream, phrase.j5),
+    english,
+  );
 
 // "J5 Code" and "J5" both stand for a bare "T3", and `j5 <version>` for `t3@<version>`.
 const brandFree = (text: string) =>
-  text.replace(/npx t3(?:@latest)?|\bt3@|\b[tj][35]code\b|(?:\bT3|\bJ5)(?: Code)?|\bt3\b|\bj5\b/g, (match) =>
-    match === "t3@" ? "\u0000 " : "\u0000",
+  text.replace(
+    /npx t3(?:@latest)?|\bt3@|\b[tj][35]code\b|(?:\bT3|\bJ5)(?: Code)?|\bt3\b|\bj5\b/g,
+    (match) => (match === "t3@" ? "\u0000 " : "\u0000"),
   );
 
 /** Upstream's key for a J5 English string that differs from upstream's in its brand and `PHRASES`. */
@@ -167,7 +171,8 @@ const pinnedUpstreamTag = (root: string) => {
     "utf8",
   );
   const version = /J5_UPSTREAM_T3_CODE_VERSION = "([^"]+)"/.exec(source)?.[1];
-  if (version === undefined) throw new Error("No J5_UPSTREAM_T3_CODE_VERSION in upstreamVersion.ts");
+  if (version === undefined)
+    throw new Error("No J5_UPSTREAM_T3_CODE_VERSION in upstreamVersion.ts");
   return `v${version}`;
 };
 
@@ -179,7 +184,9 @@ function main() {
   const untranslated: string[] = [];
   const leftInEnglish = new Set<string>();
   for (const app of APPS) {
-    const config = JSON.parse(NodeFS.readFileSync(NodePath.join(root, app, "gt.config.json"), "utf8"));
+    const config = JSON.parse(
+      NodeFS.readFileSync(NodePath.join(root, app, "gt.config.json"), "utf8"),
+    );
     const catalogDir = NodePath.join(app, NodePath.dirname(config.files.gt.output));
     const catalogPath = (locale: string) => NodePath.join(catalogDir, `${locale}.json`);
     const english = readJson(NodePath.join(root, catalogPath(config.defaultLocale)));

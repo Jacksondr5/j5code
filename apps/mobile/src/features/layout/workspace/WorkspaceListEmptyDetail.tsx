@@ -6,6 +6,7 @@ import { Toolbar } from "../../../components/ui/Toolbar";
 import { NativeStackScreenOptions } from "../../../native/StackHeader";
 import { useWorkspacePaneState } from "../adaptive-workspace-context";
 import { WorkspaceEmptyDetail } from "../WorkspaceEmptyDetail";
+import { useStartsSomewhere } from "../../../j5/sharing/startAccess";
 
 /**
  * The thread list's route in split view, where the list is the sidebar beside it: an empty
@@ -18,6 +19,7 @@ export function WorkspaceListEmptyDetail(props: {
 }) {
   const gt = useGT();
   const { panes } = useWorkspacePaneState();
+  const startsSomewhere = useStartsSomewhere();
   return (
     <>
       <NativeStackScreenOptions
@@ -30,13 +32,16 @@ export function WorkspaceListEmptyDetail(props: {
           unstable_headerToolbarItems: () => [],
         }}
       />
-      <Toolbar placement="left">
-        <Toolbar.Button
-          accessibilityLabel={gt("New task")}
-          icon="square.and.pencil"
-          onPress={props.onStartNewTask}
-        />
-      </Toolbar>
+      {/* J5: New task only for someone who may start a thread (FORK.md case 90). */}
+      {startsSomewhere ? (
+        <Toolbar placement="left">
+          <Toolbar.Button
+            accessibilityLabel={gt("New task")}
+            icon="square.and.pencil"
+            onPress={props.onStartNewTask}
+          />
+        </Toolbar>
+      ) : null}
       <AppBar embedded title={gt("Threads", { $context: "screen title, list of chat threads" })} />
       <WorkspaceEmptyDetail
         onAddConnection={

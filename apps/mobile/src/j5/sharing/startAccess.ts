@@ -125,9 +125,8 @@ export function useCanForkThread(
   threadId: ThreadId | null,
 ): boolean {
   const projectId =
-    useThreadShell(
-      environmentId && threadId ? scopeThreadRef(environmentId, threadId) : null,
-    )?.projectId ?? null;
+    useThreadShell(environmentId && threadId ? scopeThreadRef(environmentId, threadId) : null)
+      ?.projectId ?? null;
   const starts = useAtomValue(startsAtom);
   return environmentId !== null && starts(environmentId, projectId);
 }

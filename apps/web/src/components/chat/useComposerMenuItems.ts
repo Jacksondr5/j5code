@@ -290,7 +290,7 @@ export function useComposerMenuItems({
           type: "slash-command",
           command: "playbook",
           label: "/playbook",
-          description: "Start a playbook in this thread",
+          description: gt("Start a playbook in this thread"),
         },
         {
           id: "slash:model",

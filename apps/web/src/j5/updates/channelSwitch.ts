@@ -27,7 +27,7 @@ export function j5ChannelSwitchBlock(
 }
 
 /** Upstream's predates-checks reasons would be wrong here: the server or release has upstream's
- * checks but not J5's. English until J5's screens are translated (#1180). */
+ * checks but not J5's. English until J5's screens are translated. */
 export function j5ChannelSwitchBlockReason(
   block: J5ChannelSwitchBlock,
   input: { readonly version: string; readonly from: string; readonly to: string },
@@ -35,4 +35,11 @@ export function j5ChannelSwitchBlockReason(
   return block === "j5-server-predates-checks"
     ? `its server predates J5's database checks; update it on ${input.from} first`
     : `${input.version} predates J5's database checks; wait for a newer ${input.to} release`;
+}
+
+export function j5ChannelSwitchBlockMessage(
+  block: J5ChannelSwitchBlock,
+  input: { readonly version: string; readonly from: string; readonly to: string },
+): string {
+  return `This app cannot switch: ${j5ChannelSwitchBlockReason(block, input)}.`;
 }

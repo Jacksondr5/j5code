@@ -414,6 +414,21 @@ const SEAMS: ReadonlyArray<Seam> = [
     ],
   },
   {
+    file: "features/layout/WorkspaceEmptyDetail.tsx",
+    record: "case 90: the empty pane's New thread follows the person's level",
+    from: "../../j5/sharing/startAccess",
+    reaches: [
+      "const startsSomewhere = useStartsSomewhere();",
+      "props.onStartNewTask && startsSomewhere &&",
+    ],
+  },
+  {
+    file: "features/layout/workspace/WorkspaceListEmptyDetail.tsx",
+    record: "case 90: the split-view list's New task follows the person's level",
+    from: "../../../j5/sharing/startAccess",
+    reaches: ["const startsSomewhere = useStartsSomewhere();", "{startsSomewhere ? ("],
+  },
+  {
     file: "features/layout/workspace/useWorkspaceCompose.ts",
     record: "case 90: starting follows the person's level",
     from: "../../../j5/sharing/startAccess",

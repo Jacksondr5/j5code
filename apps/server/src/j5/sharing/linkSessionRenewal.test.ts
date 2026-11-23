@@ -60,7 +60,11 @@ it.layer(layer)("a J5 link's device session", (it) => {
 
       // Past the hour its token lasts: without a renewal window this would be refused.
       yield* TestClock.adjust("2 hours");
-      const renewed = yield* auth.renewAccessToken(paired.access_token, key.thumbprint, Effect.void);
+      const renewed = yield* auth.renewAccessToken(
+        paired.access_token,
+        key.thumbprint,
+        Effect.void,
+      );
       assert.strictEqual((yield* sessions.verify(renewed.access_token)).sessionId, sessionId);
     }),
   );

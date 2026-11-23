@@ -213,6 +213,7 @@ const ROUTE_TITLES: Readonly<Record<string, string>> = {
   AddProject: msg("Add project"),
   ThreadFiles: msg("Files"),
   SettingsLegal: msg("Legal"),
+  SettingsAgents: msg("Agent Setup"),
   ConnectOnboarding: msg("Set up {product}", { product: "T3 Connect" }),
   Connections: msg("Environments"),
   ConnectionsNew: msg("Add Environment"),
@@ -333,10 +334,7 @@ const SETTINGS_SCREENS = {
   SettingsAgents: createNativeStackScreen({
     screen: SettingsAgentsRouteScreen,
     linking: "settings/personas",
-    options: {
-      ...settingsPage(),
-      title: "Agent Setup",
-    },
+    options: settingsPage(),
   }),
   ...j5SettingsFormRoutes(settingsPage()),
   SettingsProjectGrouping: createNativeStackScreen({

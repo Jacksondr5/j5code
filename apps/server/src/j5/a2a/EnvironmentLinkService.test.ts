@@ -264,9 +264,15 @@ it.effect("claims a link linkUnlessLinked makes, and leaves one it finds alone",
       const seen: Array<Seen> = [];
       const result = yield* PeerLinks.PeerLinks.pipe(
         Effect.flatMap((links) =>
-          links.linkUnlessLinked({ url: workUrl, pairingCode: "code", access: "approval-required" }),
+          links.linkUnlessLinked({
+            url: workUrl,
+            pairingCode: "code",
+            access: "approval-required",
+          }),
         ),
-        Effect.provide(makeLayer({ resolve: "linked", answer: 204, seen, unlinked: [], alreadyLinked })),
+        Effect.provide(
+          makeLayer({ resolve: "linked", answer: 204, seen, unlinked: [], alreadyLinked }),
+        ),
       );
       assert.equal(result.alreadyLinked, alreadyLinked);
       assert.deepStrictEqual(
@@ -297,7 +303,11 @@ const linksAnsweringAs = (answeringAs: string) =>
                   label: "Other",
                   platform: { os: "linux", arch: "x64" },
                   serverVersion: "0.0.0-test",
-                  capabilities: { repositoryIdentity: true, mcpModeLimitHeader: true, linkFence: true },
+                  capabilities: {
+                    repositoryIdentity: true,
+                    mcpModeLimitHeader: true,
+                    linkFence: true,
+                  },
                 }),
               ),
             ),

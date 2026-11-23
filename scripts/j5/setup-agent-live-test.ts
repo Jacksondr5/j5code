@@ -529,7 +529,7 @@ export function descendantGroupsFromTable(
   leader: number,
 ): ReadonlyArray<number> {
   const descendants = new Set([leader]);
-  for (let grew = true; grew; ) {
+  for (let grew = true; grew;) {
     grew = false;
     for (const [pid, parent] of table) {
       if (descendants.has(parent) && !descendants.has(pid)) {
@@ -549,7 +549,9 @@ export function descendantGroupsFromTable(
 }
 
 /** [pid, parent pid, group] for every process; macOS from `ps -A -o pid=,ppid=,pgid=`. */
-export function processTableFromPs(output: string): ReadonlyArray<readonly [number, number, number]> {
+export function processTableFromPs(
+  output: string,
+): ReadonlyArray<readonly [number, number, number]> {
   return output
     .split("\n")
     .map((line) => line.trim().split(/\s+/).map(Number))
@@ -617,7 +619,10 @@ interface ServerRecord {
    * Groups led by a process under the dev runner (`vp` starts the server in its own), recorded
    * once seen so `stop` still reaches them after the runner is gone.
    */
-  readonly childGroups?: ReadonlyArray<{ readonly group: number; readonly leaderStartTime: string }>;
+  readonly childGroups?: ReadonlyArray<{
+    readonly group: number;
+    readonly leaderStartTime: string;
+  }>;
 }
 
 export type ServerState =

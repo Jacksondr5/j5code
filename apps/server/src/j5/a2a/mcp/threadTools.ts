@@ -246,14 +246,12 @@ const editQueuedMessage = Effect.fn("j5.mcp.editQueuedMessage")(function* (input
       Effect.mapError(unavailable),
     );
   }
-  const result = yield* threads
-    .dispatch(command)
-    .pipe(
-      Effect.tapError(() =>
-        editorId === undefined ? Effect.void : Effect.ignore(releaseQueuedEditClaim(commandId)),
-      ),
-      Effect.mapError(dispatchFailure),
-    );
+  const result = yield* threads.dispatch(command).pipe(
+    Effect.tapError(() =>
+      editorId === undefined ? Effect.void : Effect.ignore(releaseQueuedEditClaim(commandId)),
+    ),
+    Effect.mapError(dispatchFailure),
+  );
   return { sequence: result.sequence };
 });
 

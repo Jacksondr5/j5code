@@ -171,10 +171,7 @@ describe("DesktopPreReadyPlatform", () => {
         assert.include(identity.desktopEntry ?? "", "Exec=/Applications/current.AppImage %U");
         assert.include(identity.desktopEntry ?? "", "Name=J5 Code");
         assert.include(identity.desktopEntry ?? "", "MimeType=x-scheme-handler/j5code;");
-        assert.include(
-          identity.desktopEntry ?? "",
-          "Icon=/xdg/icons/j5code.desktop.png",
-        );
+        assert.include(identity.desktopEntry ?? "", "Icon=/xdg/icons/j5code.desktop.png");
         assert.equal(
           copyFileSyncMock.mock.calls.length,
           0,

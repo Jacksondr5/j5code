@@ -179,16 +179,19 @@ const storedCredentialKey = createRuntimeCommand(connectionAtomRuntime, {
     return Option.match(stored, {
       onNone: () => null,
       onSome: (credential) =>
-        credentialKey({
-          httpAuthorization:
-            credential._tag === "BearerConnectionCredential"
-              ? { _tag: "Bearer", token: credential.token }
-              : {
-                  _tag: "Dpop",
-                  directConnection: { connectionId: credentialConnectionId(target.connectionId) },
-                },
-          target,
-        }, credentialReplacements(environmentId)),
+        credentialKey(
+          {
+            httpAuthorization:
+              credential._tag === "BearerConnectionCredential"
+                ? { _tag: "Bearer", token: credential.token }
+                : {
+                    _tag: "Dpop",
+                    directConnection: { connectionId: credentialConnectionId(target.connectionId) },
+                  },
+            target,
+          },
+          credentialReplacements(environmentId),
+        ),
     });
   }),
 });

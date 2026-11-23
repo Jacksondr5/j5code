@@ -469,7 +469,9 @@ describe("a connection that holds two threads of a server", () => {
       expect(yield* refused(atoms.fleet({ environmentId: SHARED_SERVER, input: {} }))).toBe(true);
       // The rows it reaches: which of them an agent spawned, and their Crew chips.
       const rows = { environmentId: SHARED_SERVER, input: { threadIds: [VIEWED] } };
-      const spawned = yield* Effect.promise(() => runAtomCommand(registry, atoms.listSpawnedChildren, rows));
+      const spawned = yield* Effect.promise(() =>
+        runAtomCommand(registry, atoms.listSpawnedChildren, rows),
+      );
       expect(AsyncResult.isSuccess(spawned)).toBe(true);
       const memberships = yield* Effect.promise(() =>
         runAtomCommand(registry, atoms.listCrewMemberships, rows),

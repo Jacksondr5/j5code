@@ -46,11 +46,9 @@ export function retainFailedWorkspaceSnapshot(
   };
 }
 
-// Upstream's `refreshWorkspaceSnapshot` (TTL, `fresh`, `scanCwd`, an instance's own `rescan`
-// report, latest claim writes, detached scan that callers wait on) plus J5's failure retention,
-// link-target resolution and `force`: a rescan of one cwd that supersedes a pending one without
-// `fresh`'s machine refresh or dropping other instances' snapshots, for callers that already
-// refresh every affected instance.
+// Upstream's `refreshWorkspaceSnapshot` plus J5's failure retention, link-target resolution
+// and `force`: a rescan of one cwd that supersedes a pending one without `fresh`'s machine
+// refresh or dropping other instances' snapshots, for callers that refresh every instance.
 export const makeSkillWorkspaceRefresh = Effect.fn("j5.skills.makeWorkspaceRefresh")(function* ({
   instanceRegistry,
   providersRef,

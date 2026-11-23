@@ -1791,33 +1791,34 @@ function OpenCommandPaletteDialog(props: {
   }
 
   // J5 (A4): the MCP wizard needs T3 Connect, which J5 does not ship.
-  if (T3_CONNECT_OFFERED) actionItems.push({
-    kind: "action",
-    value: "action:use-in-another-app",
-    searchTerms: [
-      "mcp",
-      "connector",
-      "another app",
-      "poke",
-      "claude",
-      "chatgpt",
-      "grok",
-      "muse",
-      "instinct",
-      "openclaw",
-      "hermes",
-    ],
-    title: gt("Use J5 Code in another app (MCP)"),
-    icon: <PlugIcon className={ITEM_ICON_CLASS} />,
-    run: async () => {
-      openUseInAnotherApp(
-        currentProjectEnvironmentId ??
-          (paletteRouteTarget?.kind === "server"
-            ? paletteRouteTarget.threadRef.environmentId
-            : null),
-      );
-    },
-  });
+  if (T3_CONNECT_OFFERED)
+    actionItems.push({
+      kind: "action",
+      value: "action:use-in-another-app",
+      searchTerms: [
+        "mcp",
+        "connector",
+        "another app",
+        "poke",
+        "claude",
+        "chatgpt",
+        "grok",
+        "muse",
+        "instinct",
+        "openclaw",
+        "hermes",
+      ],
+      title: gt("Use J5 Code in another app (MCP)"),
+      icon: <PlugIcon className={ITEM_ICON_CLASS} />,
+      run: async () => {
+        openUseInAnotherApp(
+          currentProjectEnvironmentId ??
+            (paletteRouteTarget?.kind === "server"
+              ? paletteRouteTarget.threadRef.environmentId
+              : null),
+        );
+      },
+    });
 
   actionItems.push({
     kind: "action",
@@ -2089,8 +2090,10 @@ function OpenCommandPaletteDialog(props: {
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Choose a folder in the selected environment",
-            description: "Select the matching environment in Skills, then choose the folder again.",
+            title: gt("Choose a folder in the selected environment"),
+            description: gt(
+              "Select the matching environment in Skills, then choose the folder again.",
+            ),
           }),
         );
         return;

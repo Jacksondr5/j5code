@@ -38,16 +38,19 @@ const fingerprint = (text: string) => {
  * instead, with how many re-pairs have replaced it this launch (`credentialReplacements`), since
  * the slot survives a re-pair to the same address. A connection with neither is known by its route.
  */
-export const credentialKey = (prepared: {
-  readonly httpAuthorization:
-    | Extract<NonNullable<PreparedConnection["httpAuthorization"]>, { readonly _tag: "Bearer" }>
-    | {
-        readonly _tag: "Dpop";
-        readonly directConnection?: { readonly connectionId: string } | undefined;
-      }
-    | null;
-  readonly target: unknown;
-}, replacements = 0) =>
+export const credentialKey = (
+  prepared: {
+    readonly httpAuthorization:
+      | Extract<NonNullable<PreparedConnection["httpAuthorization"]>, { readonly _tag: "Bearer" }>
+      | {
+          readonly _tag: "Dpop";
+          readonly directConnection?: { readonly connectionId: string } | undefined;
+        }
+      | null;
+    readonly target: unknown;
+  },
+  replacements = 0,
+) =>
   prepared.httpAuthorization?._tag === "Bearer"
     ? `bearer:${fingerprint(prepared.httpAuthorization.token)}`
     : prepared.httpAuthorization?._tag === "Dpop" && prepared.httpAuthorization.directConnection
