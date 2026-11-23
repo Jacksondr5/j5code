@@ -25,6 +25,14 @@ export interface Highlight {
 /** Newest first. Add an entry at the top. */
 export const HIGHLIGHTS: ReadonlyArray<Highlight> = [
   {
+    id: "2026-11-inbox-mirrors-thread",
+    title: "Read and answer in the Inbox the way you do in a thread",
+    description:
+      "Links in an agent's question open in its own panel beside the Inbox, and the reply box works like the composer.",
+    learnMoreUrl: "https://j5.codes/whats-new/0-0-53#inbox",
+    clients: ["web", "desktop"],
+  },
+  {
     id: "2026-11-release-0-0-52-links",
     title: "Your agents can work across machines",
     description:
