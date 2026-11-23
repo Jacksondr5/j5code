@@ -64,7 +64,7 @@ import {
   followInboxThreadPanelOpens,
   type InboxPanelThread,
   useInboxThreadPanelStore,
-} from "./inboxThreadPanel";
+} from "./inboxThreadPanelState";
 import { useSenderThread } from "./useSenderThread";
 
 const PreviewPanel = lazy(() =>

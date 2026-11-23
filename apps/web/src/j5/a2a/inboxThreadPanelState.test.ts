@@ -8,7 +8,7 @@ import {
   followInboxThreadPanelOpens,
   reachesAskingThreadPanel,
   useInboxThreadPanelStore,
-} from "./inboxThreadPanel";
+} from "./inboxThreadPanelState";
 
 const refA = scopeThreadRef("env-1" as EnvironmentId, ThreadId.make("thread-A"));
 const refB = scopeThreadRef("env-1" as EnvironmentId, ThreadId.make("thread-B"));

@@ -110,7 +110,7 @@ import { useLogicalProjects } from "../logicalProjects";
 import { createVisibleRefreshHook } from "../useVisibleRefresh";
 import { notifyHumanInboxChanged } from "./humanInboxRefresh";
 import { j5Sharing, useConnectionAccess } from "../sharing/access";
-import { armInboxThreadPanel, reachesAskingThreadPanel } from "./inboxThreadPanel";
+import { armInboxThreadPanel, reachesAskingThreadPanel } from "./inboxThreadPanelState";
 import { InboxWithThreadPanel } from "./InboxThreadPanel";
 import { useSenderThread } from "./useSenderThread";
 
