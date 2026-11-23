@@ -104,7 +104,7 @@ A persona that can't launch stays blocked; it is never recreated as a custom wor
 
 ## Deliverables
 
-A persona says how to work, not what to produce. The assignment, a brief or a Playbook step, names the deliverable; a file it asks for is written with `j5_write_artifact` and shows up on the Artifacts page like any other requested work. A run owes no file: the server appends no artifact instructions, checks nothing at the end of a run, and sends no reminder. A Crew member's finish notice carries how the run ended and the member's reply.
+A persona says how to work, not what to produce. The assignment, a brief or a Playbook step, names the deliverable; a file it asks for is written with `j5_write_artifact` and shows up on the Artifacts page like any other requested work. A run owes no file: the server appends no artifact instructions, checks nothing at the end of a run, and sends no reminder. A Crew member reports its own result to its Captain; only a failed run adds a platform notice, with the run's error and the member's reply.
 
 Tasks that ran before this keep the handoff status they recorded, read-only, on the persona control and chip. Nothing recomputes it.
 
@@ -182,3 +182,4 @@ Follow-up work: in-app git commit/push/pull (status nudges and open-in-editor sh
 - 2026-11-06 — an agent that wants another model replaces the worker, and a Captain can replace a Crew member (Bryant; [#784](https://github.com/Jacksondr5/j5code/issues/784)).
 - 2026-11-06 — a blocked persona refuses with one of six codes and escalates, and an Owner can allow one launch past one limit (Bryant; [#785](https://github.com/Jacksondr5/j5code/issues/785)).
 - 2026-11-06 — agents draft persona creates and edits, and an Owner saves them from the ask; a folder persona's edit saves as an environment override (Bryant; [#786](https://github.com/Jacksondr5/j5code/issues/786)).
+- 2026-11-22 — a Crew member reports its own result; only a failed run adds a platform notice (Jackson; [#1191](https://github.com/Jacksondr5/j5code/issues/1191)).

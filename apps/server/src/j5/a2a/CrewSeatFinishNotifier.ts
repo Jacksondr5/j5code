@@ -14,7 +14,6 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
-import * as SqlClient from "effect/sql/SqlClient";
 
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
 import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
@@ -26,10 +25,9 @@ import { formatRunFailureField, runFailureDetail } from "./runFailures.ts";
 import { lifecycleCommandId, lifecycleId } from "./spawnIds.ts";
 
 /**
- * A seat tells its Captain when its run ends owing no reply: a notice with the measured outcome and
- * the seat's reply (cut when long). The seat is never settled; upstream settles by hand, PR or
- * idle days. A notice repeats only when its facts changed, and one arriving mid-turn folds into the
- * seat notice already queued, so a Captain absorbs its Crew's news in one turn.
+ * A seat's failed run tells its Captain, with the run's error and the seat's reply; a completed run
+ * tells nothing, as the seat reports its own result. The seat is never settled. A notice repeats
+ * only when its facts changed, and one arriving mid-turn folds into the seat notice already queued.
  */
 export interface CrewSeatFinishNotifierShape {
   /** Returns the seat thread whose Captain was told, or null when the event needed no action. */
@@ -37,9 +35,9 @@ export interface CrewSeatFinishNotifierShape {
     event: OrchestrationV2StoredEvent,
   ) => Effect.Effect<ThreadId | null, never>;
   /**
-   * The boot sweep: tell every Captain about a live seat whose last run finished while nothing
+   * The boot sweep: tell every Captain about a live seat whose last run failed while nothing
    * reported it. Covers a notice that failed (the seat was left unreported on purpose) and a
-   * finish that landed while the server was down. Returns the seat threads reported.
+   * failure that landed while the server was down. Returns the seat threads reported.
    */
   readonly reconcile: Effect.Effect<ReadonlyArray<ThreadId>>;
 }
@@ -54,14 +52,13 @@ const FINISH_SESSION = "j5-crew-seat-finish";
 const REPLY_MAX_CHARS = 4_000;
 
 /**
- * A seat has finished only when its run completed or failed. Interrupted, cancelled and rolled back
- * runs are not finishes: `j5_stop_crew` and Stop crew interrupt seats to brief them again, and
- * nothing is reported then (Crews AC21), so a Captain is not woken by its own stop.
+ * Only a failed run is reported. A completed run was 90% noise to its Captain, who hears the result
+ * from the seat itself. Interrupted, cancelled and rolled back runs are not failures:
+ * `j5_stop_crew` and Stop crew interrupt seats to brief them again (Crews AC21).
  */
-const finishedRun = (stored: OrchestrationV2StoredEvent): OrchestrationV2Run | undefined => {
+const failedRun = (stored: OrchestrationV2StoredEvent): OrchestrationV2Run | undefined => {
   const event = stored.event;
-  return event.type === "run.updated" &&
-    (event.payload.status === "completed" || event.payload.status === "failed")
+  return event.type === "run.updated" && event.payload.status === "failed"
     ? event.payload
     : undefined;
 };
@@ -187,17 +184,6 @@ const makeLayer = (daemon: boolean) =>
       const crews = yield* AgentCrewInstanceService;
       const reporter = yield* CrewLaunchReporter;
       const cascade = yield* CrewCaptainArchiveCascade;
-      const sql = yield* SqlClient.SqlClient;
-
-      const owedReplies = Effect.fn("j5.a2a.crewSeatFinish.owedReplies")(function* (
-        participantId: string,
-      ) {
-        const rows = yield* sql<{ readonly count: number }>`
-          SELECT COUNT(*) AS count FROM j5_a2a_exchange
-          WHERE status = 'open' AND receiver_id = ${participantId}
-        `;
-        return Number(rows[0]?.count ?? 0);
-      });
 
       /**
        * Tells the Captain what changed. Ids derive from the run, so a redelivered event cannot
@@ -224,7 +210,7 @@ const makeLayer = (daemon: boolean) =>
           participantId: participantIdForThread(threadId),
           threadId,
           runStatus: run.status,
-          failure: run.status === "failed" ? runFailureDetail(projection, run.id) : null,
+          failure: runFailureDetail(projection, run.id),
           reply,
         });
         if (latestSeatNotice(captain, participantIdForThread(threadId)) === text.trim())
@@ -259,12 +245,11 @@ const makeLayer = (daemon: boolean) =>
         return "posted" as const;
       });
 
-      const notifyIfFinished = Effect.fn("j5.a2a.crewSeatFinish.notifyIfFinished")(function* (
+      const notifyIfFailed = Effect.fn("j5.a2a.crewSeatFinish.notifyIfFailed")(function* (
         threadId: ThreadId,
         run: OrchestrationV2Run,
       ) {
-        const participantId = participantIdForThread(threadId);
-        const membership = yield* crews.findMembership(participantId);
+        const membership = yield* crews.findMembership(participantIdForThread(threadId));
         if (membership === null) return null;
         const instance = yield* crews.read(membership.crewInstanceId);
         if (instance === null || instance.archivedAt !== null) return null;
@@ -280,31 +265,27 @@ const makeLayer = (daemon: boolean) =>
         );
         if (projection.thread.archivedAt !== null) return null;
         if (ThreadManagement.latestActiveRun(projection) !== undefined) return null;
-        if (run.status === "failed")
-          yield* alertHumanOfCrewFailure({
-            instance,
-            seatName: membership.seatName,
-            runId: run.id,
-            failure: runFailureDetail(projection, run.id),
-          });
+        yield* alertHumanOfCrewFailure({
+          instance,
+          seatName: membership.seatName,
+          runId: run.id,
+          failure: runFailureDetail(projection, run.id),
+        });
         // A failed first turn belongs to an owed launch report, or to the exact run ids in
         // its durable message. This remains true after the report posts and after restart.
-        if (run.status === "failed" && (yield* reporter.coversFailure(threadId, run))) return null;
-        // A completed run whose seat still owes a reply is left to that reply and the silence
-        // detector. A failed run is reported whatever the seat owes: the silence detector stays
-        // quiet about a seat's failure to its Captain, so this is where the Captain hears it.
-        if (run.status === "completed" && (yield* owedReplies(participantId)) > 0) return null;
-        // A failed dispatch is logged. Retry is passive: a later finish or the boot sweep; there
-        // is no guarantee of prompt delivery while the seat stays idle.
+        if (yield* reporter.coversFailure(threadId, run)) return null;
+        // Reported whatever the seat owes: the silence detector stays quiet about a seat's
+        // failure to its Captain, so this is where the Captain hears it. A failed dispatch is
+        // logged; retry is passive (a later failure or the boot sweep).
         yield* notifyCaptain(instance, membership.seatName, projection, run, runReply(projection));
         return threadId;
       });
 
-      /** Only report the latest run, never an older finish hidden behind a later interruption. */
-      const outstandingFinish = (projection: Pick<OrchestrationV2ThreadProjection, "runs">) => {
+      /** Only report the latest run, never an older failure hidden behind a later run. */
+      const outstandingFailure = (projection: Pick<OrchestrationV2ThreadProjection, "runs">) => {
         if (ThreadManagement.latestActiveRun(projection) !== undefined) return undefined;
         const newest = projection.runs.toSorted((a, b) => b.ordinal - a.ordinal)[0];
-        return newest?.status === "completed" || newest?.status === "failed" ? newest : undefined;
+        return newest?.status === "failed" ? newest : undefined;
       };
 
       const reconcile: CrewSeatFinishNotifierShape["reconcile"] = Effect.gen(function* () {
@@ -317,9 +298,9 @@ const makeLayer = (daemon: boolean) =>
               .pipe(Effect.catchCause(() => Effect.succeed(null)));
             if (projection === null) continue;
             if (projection.thread.archivedAt !== null) continue;
-            const run = outstandingFinish(projection);
+            const run = outstandingFailure(projection);
             if (run === undefined) continue;
-            const outcome = yield* notifyIfFinished(member.threadId, run).pipe(
+            const outcome = yield* notifyIfFailed(member.threadId, run).pipe(
               Effect.catchCause((cause) =>
                 Effect.logWarning("J5 crew seat finish sweep skipped a seat", {
                   threadId: member.threadId,
@@ -331,7 +312,7 @@ const makeLayer = (daemon: boolean) =>
           }
         }
         if (reportedNow.length > 0)
-          yield* Effect.logInfo("J5 crew seat finish sweep reported finished seats", {
+          yield* Effect.logInfo("J5 crew seat finish sweep reported failed seats", {
             reportedNow,
           });
         return reportedNow;
@@ -345,9 +326,9 @@ const makeLayer = (daemon: boolean) =>
         "j5.a2a.crewSeatFinish.handleStoredEvent",
       )(
         function* (stored) {
-          const run = finishedRun(stored);
+          const run = failedRun(stored);
           if (run === undefined) return null;
-          return yield* notifyIfFinished(run.threadId, run);
+          return yield* notifyIfFailed(run.threadId, run);
         },
         Effect.catchCause((cause) =>
           Effect.logWarning("J5 crew seat finish notice skipped", { cause }).pipe(Effect.as(null)),
@@ -357,7 +338,7 @@ const makeLayer = (daemon: boolean) =>
       if (daemon) {
         // The stream starts from the event store's current high-water mark, so everything that
         // landed while the server was down, and every reaction that failed before it, is caught
-        // up by one sweep first: orphaned Crews retire, finished seats tell their Captains.
+        // up by one sweep first: orphaned Crews retire, failed seats tell their Captains.
         const runDaemon = Effect.gen(function* () {
           let afterSequence = yield* readEventStoreHighWater("J5 crew seat finish notifier");
           // Launches the server lost mid-report are reported first, so a first turn that failed
