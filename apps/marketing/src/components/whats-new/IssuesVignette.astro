@@ -339,6 +339,8 @@ const id = (key: string) => `wn-issue-${key.replace(/[^a-z0-9]/gi, "").toLowerCa
     margin-bottom: 16px;
   }
 
+  .issues__tabs[inert] { opacity: 0.55; }
+
   .issues__tab {
     display: inline-flex;
     align-items: center;

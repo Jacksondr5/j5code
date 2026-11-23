@@ -127,11 +127,14 @@ function wireThreadPicker(issues: HTMLElement) {
   const search = dialog?.querySelector<HTMLInputElement>("[data-picker-search]");
   if (!dialog || !search) return;
   const threads = select<HTMLButtonElement>(dialog, "[data-thread]");
+  // The tracker buttons sit outside the window the dialog covers, so they are held while it is open.
+  const trackers = issues.querySelector<HTMLElement>(".issues__tabs");
   let opener: HTMLElement | null = null;
 
   const linkedOf = (panel: HTMLElement) => (panel.dataset.linked ?? "").split(",").filter(Boolean);
   const close = () => {
     dialog.hidden = true;
+    if (trackers) trackers.inert = false;
     opener?.focus();
     opener = null;
   };
@@ -166,6 +169,7 @@ function wireThreadPicker(issues: HTMLElement) {
       search.value = "";
       filter();
       dialog.hidden = false;
+      if (trackers) trackers.inert = true;
       search.focus();
     });
   }
