@@ -26,10 +26,9 @@ export interface Highlight {
 export const HIGHLIGHTS: ReadonlyArray<Highlight> = [
   {
     id: "2026-11-inbox-mirrors-thread",
-    title: "Read and answer in the Inbox the way you do in a thread",
+    title: "The Inbox works like a thread",
     description:
       "Links in an agent's question open in its own panel beside the Inbox, and the reply box works like the composer.",
-    learnMoreUrl: "https://j5.codes/whats-new/0-0-53#inbox",
     clients: ["web", "desktop"],
   },
   {
