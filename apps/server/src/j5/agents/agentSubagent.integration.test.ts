@@ -18,7 +18,6 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import { RemoteDelegation } from "../../peer/RemoteDelegation.ts";
 import { layerMemory as SqlitePersistenceMemory } from "../../persistence/Sqlite.ts";
 import { layerWithRegistry as makeOrchestratorV2ReplayLayerWithRegistry } from "../../orchestration-v2/testkit/ProviderReplayHarness.ts";
@@ -115,9 +114,7 @@ const mcp = Mcp.layer.pipe(
   Layer.provide(registry),
   Layer.provide(adapters),
   Layer.provide(Layer.mock(ScheduledTaskService)({})),
-  Layer.provide(
-    Layer.mock(ProjectService.ProjectService)({ getById: () => Effect.succeed(Option.none()) }),
-  ),
+  Layer.provide(Layer.mock(ProjectService.ProjectService)({ getById: () => Effect.succeedNone })),
   Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
   Layer.provide(Layer.mock(GitVcsDriver)({})),
   Layer.provide(Layer.mock(ThreadLaunchService)({})),
