@@ -209,6 +209,8 @@ const total = providers.reduce((sum, provider) => sum + provider.models.length, 
   .crewset__env { cursor: default; }
 
   .crewset__title { display: flex; align-items: center; gap: 6px; min-height: 20px; }
+  /* SettingsRow balances its description's lines. */
+  .crewset :global(.settings-a__desc) { max-width: 42rem; text-wrap: balance; }
 
   .crewset__mark,
   .crewset__reset {

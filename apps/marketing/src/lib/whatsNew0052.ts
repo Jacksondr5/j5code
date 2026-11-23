@@ -10,6 +10,10 @@ type Wire = (piece: HTMLElement, signal: AbortSignal) => void;
 const one = <T extends HTMLElement = HTMLElement>(root: ParentNode, selector: string) =>
   root.querySelector<T>(selector);
 
+/** Whether focus goes with an element that is about to leave, and so needs somewhere to land. */
+const focusLeavesWith = (leaving: HTMLElement) =>
+  leaving.contains(document.activeElement) || document.activeElement === document.body;
+
 function later(signal: AbortSignal, ms: number, run: () => void) {
   const timer = window.setTimeout(run, ms);
   signal.addEventListener("abort", () => window.clearTimeout(timer), { once: true });
@@ -61,10 +65,15 @@ function wirePicks(piece: HTMLElement, signal: AbortSignal) {
     popup.addEventListener("click", (event) => {
       const option = (event.target as Element).closest<HTMLElement>('[role="option"]');
       if (!option) return;
+      // Choosing what is already chosen changes nothing, so it is not reported as a choice.
+      const changed = option.dataset.value !== pickValue(pick);
       setPick(pick, option.dataset.value ?? "");
       show(pick, false);
       trigger.focus();
-      pick.dispatchEvent(new CustomEvent("pick", { bubbles: true, detail: option.dataset.value }));
+      if (changed)
+        pick.dispatchEvent(
+          new CustomEvent("pick", { bubbles: true, detail: option.dataset.value }),
+        );
     });
     popup.addEventListener("keydown", (event) => {
       if (event.key === "Escape" || event.key === "Tab") {
@@ -350,6 +359,8 @@ const wireAnswer: Wire = (piece, signal) => {
     for (const remove of select<HTMLButtonElement>(piece, "[data-answer-remove]"))
       remove.disabled = true;
     later(signal, 700, () => {
+      // Focus follows the question to the shelf, unless the reader has already moved on.
+      const stranded = focusLeavesWith(ask);
       ask.hidden = true;
       const count = one(piece, "[data-answer-count]");
       if (count) count.textContent = "0 questions open";
@@ -358,7 +369,7 @@ const wireAnswer: Wire = (piece, signal) => {
       const shelf = one(piece, "[data-answer-shelf]");
       if (!shelf) return;
       shelf.hidden = false;
-      one(shelf, "summary")?.focus({ preventScroll: true });
+      if (stranded) one(shelf, "summary")?.focus({ preventScroll: true });
     });
   });
   follow();
@@ -642,6 +653,7 @@ const wireProposal: Wire = (piece, signal) => {
     if (decision === "approve") approve.textContent = "Working…";
     paint();
     later(signal, ms, () => {
+      const stranded = focusLeavesWith(card);
       card.hidden = true;
       const notice = one(piece, `[data-crew-notice="${decision}"]`);
       if (!notice) return;
@@ -649,8 +661,8 @@ const wireProposal: Wire = (piece, signal) => {
       const text = one(notice, "[data-crew-notice-text]");
       if (text) text.textContent = `Crew approved · ${count} ${count === 1 ? "member" : "members"}`;
       notice.hidden = false;
-      // The card took focus away with it; the line that replaces it is where to read on.
-      notice.focus({ preventScroll: true });
+      // If the card took focus away with it, the line that replaces it is where to read on.
+      if (stranded) notice.focus({ preventScroll: true });
     });
   };
   approve.addEventListener("click", () => decide("approve", 800));
@@ -675,6 +687,13 @@ function mount(root: HTMLElement, piece: HTMLElement) {
   piece.addEventListener("click", (event) => {
     (event.target as Element).closest("[data-hot]")?.removeAttribute("data-hot");
   });
+  // A ring's pulse is over once it has finished or been cut short; see pieces.css.
+  for (const type of ["animationend", "animationcancel"] as const) {
+    piece.addEventListener(type, (event) => {
+      if (event.animationName === "piece-ping")
+        (event.target as Element).setAttribute("data-pinged", "");
+    });
+  }
   one(root, `[data-piece-reset="${name}"]`)?.addEventListener(
     "click",
     () => {

@@ -54,7 +54,9 @@
     0 0 0 5px var(--hot);
 }
 
-.wn-motion .piece[data-play] [data-hot] {
+/* The ring pulses twice when its piece is first seen, and never again: lib/whatsNew0052.ts marks
+   it once it has, so nothing that interrupts the pulse can start it over. */
+.wn-motion .piece[data-play] [data-hot]:not([data-pinged]) {
   animation: piece-ping 1.1s ease-out 1.2s 2;
 }
 
