@@ -58,6 +58,9 @@ jobs:
       - name: Check formatting
         run: pnpm exec vp fmt --check
 
+      - name: Check paths that differ only in case
+        run: node scripts/j5/check-case-paths.ts
+
       - name: Lint
         run: pnpm exec vp lint --report-unused-disable-directives
 
