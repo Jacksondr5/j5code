@@ -203,7 +203,7 @@ export const crewLaunchReportText = (input: {
     );
   if (pending.length > 0)
     prose.push(
-      `${pending.length} ${pending.length === 1 ? "seat has" : "seats have"} no confirmed provider activity after ${windowSeconds}s; its first turn may still be queued, and you will hear from it when it finishes.`,
+      `${pending.length} ${pending.length === 1 ? "seat has" : "seats have"} no confirmed provider activity after ${windowSeconds}s; its first turn may still be queued, and the platform tells you if it fails.`,
     );
   if (waiting > 0)
     prose.push(
