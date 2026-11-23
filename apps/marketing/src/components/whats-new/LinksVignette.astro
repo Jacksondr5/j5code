@@ -1,0 +1,169 @@
+---
+import Icon from "./Icon.astro";
+import Pick from "./Pick.astro";
+
+/**
+ * Settings → Environments → Linked environments, with one linked pair whose tool access is due
+ * for renewal (LinkedEnvironmentsSection.tsx, LinkPairRow.tsx and ToolsLevelPicker.tsx at v0.0.52).
+ * The two level pickers and Renew work; Link and the row's menu are drawn only.
+ */
+const levels = (holder: string, other: string) => [
+  { value: "off", label: "Off", desc: `Messages only. ${holder}'s agents can't use tools on ${other}.` },
+  { value: "read-only", label: "Read only", desc: "Read projects and threads. Cannot start, message or change anything." },
+  { value: "supervised", label: "Supervised", desc: "Ask before commands and file changes." },
+  { value: "auto-accept-edits", label: "Auto-accept edits", desc: "Auto-approve edits, ask before other actions." },
+  { value: "auto", label: "Auto", desc: "Supported providers approve routine actions; others still ask." },
+  {
+    value: "full-access",
+    label: "Full access",
+    desc: `Allow commands and edits without prompts. Also needed to act on ${other}'s own threads.`,
+  },
+];
+
+const directions = [
+  { holder: "lighthouse", other: "harbor", level: "read-only" },
+  { holder: "harbor", other: "lighthouse", level: "supervised" },
+];
+---
+
+<div class="app app--window piece links" data-vignette data-piece="links">
+  <div class="links__head">
+    <p class="links__title">Linked environments</p>
+    <span class="btn-a btn-a--primary btn-a--xs" aria-hidden="true"><Icon name="plus" class="ico-3" />Link</span>
+  </div>
+  <p class="links__about">
+    Link two of your servers so their agents can message each other and use tools on the other server.
+  </p>
+
+  <div class="settings-a links__card">
+    <div class="links__top">
+      <span
+        class="links__dot"
+        role="img"
+        tabindex="0"
+        aria-label="Tool access runs out in 4 days"
+        data-tip="Tool access runs out in 4 days"
+        data-tip-align="start"
+        data-links-dot
+        data-state="due"></span>
+      <p class="links__pair">lighthouse ↔ harbor</p>
+      <button type="button" class="btn-a btn-a--outline btn-a--xs" data-links-renew data-hot>Renew</button>
+      <span class="btn-a btn-a--ghost-muted btn-a--icon-xs" aria-hidden="true"><Icon name="ellipsis" /></span>
+    </div>
+
+    <dl class="links__facts">
+      <dt>Messages</dt>
+      <dd>Sent directly both ways</dd>
+      <dt class="links__tools">Tools</dt>
+      <dd class="links__directions">
+        {
+          directions.map((direction) => (
+            <div class="links__line">
+              <span>
+                <b>{direction.holder}</b>'s agents on <b>{direction.other}</b>
+              </span>
+              <Pick
+                name={direction.holder}
+                label={`${direction.holder}'s agents on ${direction.other}`}
+                value={direction.level}
+                options={levels(direction.holder, direction.other)}
+                size="xs"
+                class="links__pick"
+              />
+            </div>
+          ))
+        }
+        <p class="links__expiry" data-links-expiry data-state="due">Tool access runs out in 4 days</p>
+        <p class="links__expiry" data-links-hint hidden>
+          Choose a level to let one server's agents use tools on the other.
+        </p>
+      </dd>
+    </dl>
+  </div>
+</div>
+
+<style>
+  .links { padding: 18px 16px 16px; }
+
+  .links__head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    min-height: 28px;
+    padding: 0 16px;
+  }
+
+  .links__title { font-size: 16px; font-weight: 600; line-height: 28px; }
+  .links__about {
+    max-width: 42rem;
+    margin: 10px 0;
+    padding: 0 16px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--a-muted-fg);
+    text-wrap: balance;
+  }
+
+  .links__card { padding: 12px 16px; }
+  .links__top { display: flex; align-items: center; gap: 6px; min-height: 24px; }
+  .links__pair { flex: 1; min-width: 0; font-size: 14px; font-weight: 500; }
+
+  .links__dot {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 12px;
+    height: 12px;
+    border-radius: 999px;
+    cursor: help;
+  }
+
+  .links__dot::before {
+    content: "";
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: oklch(69.6% 0.17 162.48);
+    transition: background-color 0.2s ease;
+  }
+
+  .links__dot[data-state="due"]::before { background: oklch(76.9% 0.188 70.08); }
+
+  .links__facts {
+    display: grid;
+    grid-template-columns: 72px minmax(0, 1fr);
+    gap: 8px 12px;
+    margin-top: 8px;
+    font-size: 12px;
+  }
+
+  .links__facts dt { padding-top: 2px; color: var(--a-muted-fg); }
+  .links__facts dt.links__tools { padding-top: 6px; }
+  .links__facts dd { min-width: 0; font-size: 14px; }
+  .links__directions { display: flex; flex-direction: column; gap: 8px; }
+
+  .links__line {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-height: 28px;
+  }
+
+  .links__line b { font-weight: 500; }
+  .links__line :global(.links__pick) { width: 160px; }
+  .links__expiry { font-size: 12px; color: var(--a-muted-fg); }
+  .links__expiry[data-state="due"] { color: var(--a-warning-fg); }
+
+  @media (max-width: 560px) {
+    .links { padding: 14px 10px 12px; }
+    .links__head,
+    .links__about { padding: 0 6px; }
+    .links__card { padding: 12px; }
+    .links__facts { grid-template-columns: 1fr; gap: 4px; }
+    .links__facts dt.links__tools { padding-top: 8px; }
+    .links__line { flex-direction: column; align-items: stretch; gap: 6px; }
+    .links__line :global(.links__pick) { width: 100%; }
+  }
+</style>

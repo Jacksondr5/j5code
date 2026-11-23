@@ -1,0 +1,342 @@
+---
+import Icon from "./Icon.astro";
+import Mark from "./Mark.astro";
+import Pick from "./Pick.astro";
+
+/**
+ * Settings → Agent Setup → Crews with one project in scope (CrewApprovalSettings.tsx,
+ * CrewMemberModelsSettings.tsx, SettingsScopeSentence.tsx, SettingInheritance.tsx at v0.0.52), and
+ * the models 0.0.52 lists. The environment picker is drawn only, and the layers mark has its
+ * tooltip but not the app's popover.
+ */
+const providers = [
+  {
+    id: "codex",
+    name: "Codex",
+    mark: "openai",
+    models: [
+      "GPT-6.2-Sol",
+      "GPT-6.2-Astra",
+      "GPT-6.1 Terra",
+      "GPT-6.1-Sol",
+      "GPT-6-Astra",
+      "GPT-6-Sol",
+      "GPT-6-Luna",
+      "GPT-5.6-Sol",
+      "GPT-5.6-Terra",
+      "GPT-5.6-Luna",
+    ],
+    levels: ["Low", "Medium", "High", "Extra High", "Max", "Ultra"],
+  },
+  {
+    id: "claude",
+    name: "Claude",
+    mark: "claude",
+    models: [
+      "Opus 5.5",
+      "Sonnet 5.5",
+      "Fable 5.1",
+      "Fable 5",
+      "Opus 5",
+      "Opus 4.8",
+      "Opus 4.7",
+      "Opus 4.6",
+      "Opus 4.5",
+      "Sonnet 5",
+      "Sonnet 4.6",
+      "Haiku 5.5",
+      "Haiku 4.5",
+    ],
+    levels: ["Low", "Medium", "High", "Extra High", "Max", "Ultracode", "Ultrathink"],
+  },
+] as const;
+
+// The list this server has saved: everything but two Codex models.
+const unchecked = new Set(["GPT-6.2-Astra", "GPT-6-Astra"]);
+const total = providers.reduce((sum, provider) => sum + provider.models.length, 0);
+---
+
+<div class="app app--window piece crewset" data-vignette data-piece="crew-settings" data-scope="project">
+  <p class="crewset__crumbs"><span class="t-muted">Settings</span><i>/</i>Agent Setup</p>
+
+  <div class="crewset__page">
+    <div class="crewset__scope">
+      <span>Applying settings for</span>
+      <Pick
+        name="scope"
+        label="Project"
+        value="project"
+        align="start"
+        options={[
+          { value: "all", label: "All projects" },
+          { value: "project", label: "harbor-map" },
+        ]}
+        class="crewset__scope-pick"
+      />
+      <span>across</span>
+      <span class="select-a crewset__env" aria-hidden="true"><span>All environments</span><Icon name="chevron-down" /></span>
+    </div>
+
+    <p class="settings-a__heading">Crews</p>
+    <div class="settings-a">
+      <div class="settings-a__row">
+        <div>
+          <p class="crewset__title">
+            <span class="settings-a__title" id="wn-crew-auto">Auto-approve new Crews</span>
+            <span class="crewset__mark" tabindex="0" role="img" aria-label="Overridden for this project" data-tip="Overridden for this project" data-tip-align="start" data-mark="auto" data-state="overridden">
+              <Icon name="layers" class="ico-3" />
+            </span>
+            <button type="button" class="crewset__reset" aria-label="Reset Auto-approve new Crews to default" data-tip="Reset to inherited value" data-tip-align="start" data-reset="auto">
+              <Icon name="undo-2" class="ico-3" />
+            </button>
+          </p>
+          <p class="settings-a__desc">
+            Launch the Captain's proposed roster without asking you first. Captains can always add members to their
+            running Crews. Each member's access still controls tool approvals.
+          </p>
+        </div>
+        <button type="button" class="switch-a" role="switch" aria-checked="true" aria-labelledby="wn-crew-auto" data-auto data-hot></button>
+      </div>
+
+      <div class="crewset__models">
+        <div class="settings-a__row">
+          <div>
+            <p class="crewset__title">
+              <span class="settings-a__title">Models for custom members</span>
+              <span class="crewset__mark" tabindex="0" role="img" aria-label="Inherited from lighthouse" data-tip="Inherited from lighthouse" data-tip-align="start" data-mark="models" data-state="quiet">
+                <Icon name="layers" class="ico-3" />
+              </span>
+              <button type="button" class="crewset__reset" aria-label="Reset Models for custom members to default" data-tip="Reset to inherited value" data-tip-align="start" data-reset="models" hidden>
+                <Icon name="undo-2" class="ico-3" />
+              </button>
+            </p>
+            <p class="settings-a__desc">
+              Models and reasoning levels custom members and persona-less agents may use. All are allowed until you
+              save a list.
+            </p>
+            <p class="crewset__warning" data-warning hidden><Icon name="triangle-alert" class="ico-35" /><span></span></p>
+          </div>
+          <button type="button" class="btn-a btn-a--outline btn-a--sm crewset__count" aria-expanded="true" aria-controls="wn-crew-models" data-models-toggle>
+            <span class="tnum" data-models-count>{total - unchecked.size} of {total}</span>
+            <Icon name="chevron-down" class="crewset__open" /><Icon name="chevron-right" class="crewset__shut" />
+          </button>
+        </div>
+
+        <div class="crewset__panel" id="wn-crew-models" data-models-panel>
+          {
+            providers.map((provider, index) => (
+              <div class="crewset__provider" data-provider={provider.id}>
+                <div class="crewset__provider-head">
+                  <button type="button" class="crewset__provider-name" aria-expanded={index === 0 ? "true" : "false"} data-provider-toggle>
+                    <Icon name="chevron-down" class="ico-35 crewset__open" />
+                    <Icon name="chevron-right" class="ico-35 crewset__shut" />
+                    <Mark name={provider.mark} class="ico-35" />
+                    <b>{provider.name}</b>
+                  </button>
+                  <span class="t-muted tnum" data-provider-count />
+                  <button type="button" class="crewset__all" data-provider-all>Check all</button>
+                </div>
+                <div class="crewset__chips" hidden={index !== 0} data-provider-body>
+                  <p class="crewset__label">Models</p>
+                  <ul>
+                    {provider.models.map((model) => (
+                      <li>
+                        <button type="button" class="crewset__chip" aria-pressed={unchecked.has(model) ? "false" : "true"} data-chip="model">
+                          {model}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                  <p class="crewset__label">Reasoning</p>
+                  <ul>
+                    {provider.levels.map((level) => (
+                      <li>
+                        <button type="button" class="crewset__chip" aria-pressed="true" data-chip="level">
+                          {level}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            ))
+          }
+          <p class="crewset__note">Personas you pick can run on their own models. Native subagents aren't covered.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .crewset__crumbs {
+    display: flex;
+    align-items: center;
+    height: 48px;
+    padding: 0 20px;
+    border-bottom: 1px solid var(--a-border);
+    font-size: 14px;
+    font-weight: 500;
+  }
+
+  .crewset__crumbs i { margin: 0 12px; font-style: normal; color: var(--a-muted-fg); }
+  .crewset__page { padding: 18px 16px 16px; }
+
+  .crewset__scope {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 6px;
+    padding: 0 16px;
+    margin-bottom: 20px;
+    font-size: 14px;
+    color: var(--a-muted-fg);
+  }
+
+  .crewset__scope :global(.pick) { flex: 0 1 auto; min-width: 0; }
+  .crewset__scope :global(.select-a) { width: auto; min-width: 0; font-weight: 500; }
+  .crewset__env { cursor: default; }
+
+  .crewset__title { display: flex; align-items: center; gap: 6px; min-height: 20px; }
+
+  .crewset__mark,
+  .crewset__reset {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    background: none;
+    color: var(--a-muted-fg);
+  }
+
+  .crewset__reset { cursor: pointer; }
+  .crewset__reset:hover { background: var(--a-accent); color: var(--a-fg); }
+  .crewset__mark[data-state="overridden"] { color: var(--a-primary); }
+  /* A value that only inherits keeps its mark out of sight until the row is pointed at, as in the app. */
+  .crewset__mark[data-state="quiet"] { opacity: 0; transition: opacity 0.15s ease; }
+  :global(.settings-a__row):hover .crewset__mark[data-state="quiet"],
+  .crewset__mark[data-state="quiet"]:focus-visible { opacity: 1; }
+
+  .crewset__warning {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding-top: 2px;
+    font-size: 12px;
+    color: var(--a-warning-fg);
+  }
+
+  .crewset__models { border-top: 1px solid color-mix(in srgb, var(--a-border) 50%, transparent); }
+  .crewset__models > :global(.settings-a__row) { padding-bottom: 4px; }
+  .crewset__count { font-weight: 500; }
+
+  [aria-expanded="true"] > :global(.crewset__shut),
+  [aria-expanded="false"] > :global(.crewset__open) { display: none; }
+
+  .crewset__panel { display: grid; gap: 8px; padding: 4px 16px 12px; }
+
+  .crewset__provider {
+    border: 1px solid var(--a-border);
+    border-radius: 8px;
+    background: var(--a-card);
+  }
+
+  .crewset__provider-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 12px;
+    font-size: 12px;
+  }
+
+  .crewset__provider-name {
+    display: flex;
+    flex: 1 0 auto;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    color: var(--a-fg);
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .crewset__provider-name :global(.ico:not(.ico--mark)) { color: var(--a-muted-fg); }
+  .crewset__provider-name b { font-weight: 500; }
+
+  .crewset__all {
+    height: 20px;
+    padding: 0 5px;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    background: none;
+    font: 500 11px/1 var(--a-font);
+    color: var(--a-muted-fg);
+    white-space: nowrap;
+    cursor: pointer;
+  }
+
+  .crewset__all:hover { background: var(--a-accent); color: var(--a-fg); }
+  .crewset__chips { padding: 0 12px 12px; }
+  .crewset__chips ul {
+    list-style: none;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(136px, 1fr));
+    gap: 6px;
+  }
+
+  .crewset__label {
+    margin-bottom: 6px;
+    font-size: 10px;
+    font-weight: 500;
+    line-height: 14px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--a-muted-fg);
+  }
+
+  .crewset__chips ul + .crewset__label { margin-top: 12px; }
+
+  .crewset__chip {
+    width: 100%;
+    height: 28px;
+    padding: 0 8px;
+    overflow: hidden;
+    border: 1px solid var(--a-input);
+    border-radius: 6px;
+    background: var(--a-bg);
+    font: 400 12px/1 var(--a-font);
+    color: var(--a-muted-fg);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+      background-color 0.15s ease,
+      color 0.15s ease,
+      border-color 0.15s ease;
+  }
+
+  .crewset__chip:hover { background: var(--a-accent); color: var(--a-fg); }
+  .crewset__chip[aria-pressed="true"] {
+    border-color: var(--a-primary);
+    background: var(--a-primary);
+    color: #fff;
+  }
+
+  .crewset__note { font-size: 12px; line-height: 1.5; color: var(--a-muted-fg); }
+
+  @media (max-width: 560px) {
+    .crewset__page { padding: 14px 10px 12px; }
+    .crewset__scope { padding: 0 6px; }
+    .crewset__panel { padding: 4px 10px 10px; }
+    .crewset__provider-head { flex-wrap: wrap; }
+  }
+</style>

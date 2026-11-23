@@ -1,0 +1,62 @@
+---
+import Icon from "./Icon.astro";
+
+/**
+ * The app's Select: a trigger and the list it opens (ui/select.tsx). lib/whatsNew0052.ts opens it
+ * and reports a choice as a "pick" event on this element.
+ */
+interface Option {
+  value: string;
+  label: string;
+  desc?: string;
+}
+
+interface Props {
+  name: string;
+  label: string;
+  value: string;
+  options: ReadonlyArray<Option>;
+  size?: "xs" | "sm";
+  align?: "start" | "end";
+  class?: string;
+}
+
+const { name, label, value, options, size = "sm", align = "end", class: className } = Astro.props;
+---
+
+<div class:list={["pick", className]} data-pick={name}>
+  <button
+    type="button"
+    class:list={["select-a", { "select-a--xs": size === "xs" }]}
+    aria-haspopup="listbox"
+    aria-expanded="false"
+    aria-label={label}
+    data-pick-trigger
+  >
+    <span data-pick-value>{options.find((option) => option.value === value)?.label}</span>
+    <Icon name="chevron-down" />
+  </button>
+  <div class:list={["popup-a pick__popup", { "pick__popup--start": align === "start" }]} role="listbox" aria-label={label} hidden>
+    {
+      options.map((option) => (
+        <button
+          type="button"
+          class:list={["option-a", { "option-a--described": option.desc }]}
+          role="option"
+          aria-selected={option.value === value ? "true" : "false"}
+          data-value={option.value}
+          data-label={option.label}
+        >
+          {option.desc ? (
+            <>
+              <b>{option.label}</b>
+              <span>{option.desc}</span>
+            </>
+          ) : (
+            option.label
+          )}
+        </button>
+      ))
+    }
+  </div>
+</div>

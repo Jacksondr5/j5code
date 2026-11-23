@@ -1,0 +1,556 @@
+---
+import Icon from "./Icon.astro";
+import Mark from "./Mark.astro";
+import Pick from "./Pick.astro";
+
+/**
+ * A Captain's thread with a Crew proposal above its composer (CrewRosterGate.tsx,
+ * CrewProposalCard.tsx, CrewProposalMemberRow.tsx, CrewProposalMemberDialog.tsx at v0.0.52).
+ * Drawn only: the composer, and the member dialog's base-branch and worktree fields.
+ */
+const members = [
+  {
+    seat: "builder",
+    reason: "Builds the new tide chart in the Captain's checkout.",
+    instructions: "Build the new tide chart in the Captain's checkout. Keep the CSV export as it is.",
+  },
+  {
+    seat: "reviewer",
+    reason: "Checks keyboard access, empty days and narrow layouts of the new chart.",
+    instructions: "Review the new tide chart for keyboard access, empty days and narrow screens. Report what you find.",
+  },
+];
+
+const access = [
+  { value: "approval-required", label: "Supervised", desc: "Ask before commands and file changes." },
+  { value: "auto-accept-edits", label: "Auto-accept edits", desc: "Auto-approve edits, ask before other actions." },
+  { value: "auto", label: "Auto", desc: "Supported providers approve routine actions; others still ask." },
+  { value: "full-access", label: "Full access", desc: "Allow commands and edits without prompts." },
+];
+
+const plain = (labels: ReadonlyArray<string>) => labels.map((label) => ({ value: label, label }));
+const runtimes = [
+  {
+    provider: "claude",
+    models: plain(["Haiku 5.5", "Sonnet 5.5", "Opus 5.5"]),
+    levels: plain(["Provider default", "Low", "Medium", "High", "Extra High", "Max", "Ultracode", "Ultrathink"]),
+  },
+  {
+    provider: "codex",
+    models: plain(["GPT-6-Luna", "GPT-6.1-Sol", "GPT-6.2-Sol"]),
+    levels: plain(["Provider default", "Low", "Medium", "High", "Extra High", "Max", "Ultra"]),
+  },
+];
+
+const cap = (seat: string) => seat[0]?.toUpperCase() + seat.slice(1);
+---
+
+<div class="app app--window piece crewp" data-vignette data-piece="proposal">
+  <p class="topbar-a crewp__bar">Tide chart redesign<span class="t-muted">harbor-map</span></p>
+
+  <div class="crewp__thread" data-crew-thread>
+    <p class="bubble-a">Put a Crew on the tide chart redesign. I want a second pair of eyes on the result.</p>
+    <p class="reply-a">
+      I've proposed a Crew of two: one member to build the chart and one to review it. Approve the roster and I'll
+      hand them their first assignments.
+    </p>
+    <p class="crewp__notice" data-crew-notice="approve" hidden>
+      <Icon name="users" class="ico-35" /><span data-crew-notice-text>Crew approved · 2 members</span>
+    </p>
+    <p class="crewp__notice" data-crew-notice="decline" hidden>
+      <Icon name="users" class="ico-35" /><span>Crew Tide chart · roster declined</span>
+    </p>
+  </div>
+
+  <div class="crewp__dock" data-crew-dock>
+    <div class="crewp__card seq" style="--at: 0.2s" data-crew-card>
+      <button type="button" class="crewp__header" aria-expanded="true" aria-controls="wn-crew-roster" aria-label="Collapse Crew proposal" data-crew-fold>
+        <Icon name="users" class="ico-3 t-muted" />
+        <span>Crew proposal</span>
+        <span class="crewp__count tnum" data-crew-count>2 members</span>
+        <Icon name="chevron-down" class="ico-35 t-muted crewp__chevron" />
+      </button>
+
+      <div class="crewp__content" id="wn-crew-roster" role="region" aria-label="Crew proposal roster" data-crew-content>
+        <div class="crewp__brief">
+          <p class="crewp__brief-text" data-crew-brief>
+            Redraw the tide chart so tomorrow's high and low water read at a glance. Build the new chart, then review
+            it for keyboard access, empty days and narrow screens. Leave the CSV export alone: the harbour office
+            still reads it every morning.
+          </p>
+          <button type="button" class="crewp__more" aria-expanded="false" data-crew-more>View more</button>
+        </div>
+
+        <ul class="crewp__members" data-crew-members>
+          {
+            members.map((member) => (
+              <li
+                data-crew-member
+                data-seat={member.seat}
+                data-provider="claude"
+                data-model="Haiku 5.5"
+                data-level="Medium"
+                data-access="full-access"
+                data-workspace="captain"
+                data-instructions={member.instructions}
+              >
+                <span class="crewp__mark" data-crew-mark><Mark name="claude" /></span>
+                <div class="crewp__who">
+                  <p class="crewp__line">
+                    <b data-crew-name>{cap(member.seat)}</b>
+                    <span class="t-muted" data-crew-runtime>Haiku 5.5 · Medium · Full access</span>
+                    <span class="t-muted" data-crew-tag hidden />
+                  </p>
+                  <p class="crewp__reason" data-crew-reason>{member.reason}</p>
+                  <p class="crewp__extra" data-crew-workspace hidden />
+                  <p class="crewp__extra crewp__extra--warn" data-crew-asks hidden>Asks for approvals</p>
+                  <p class="crewp__extra crewp__extra--error" role="alert" data-crew-error hidden />
+                </div>
+                <div class="crewp__tools">
+                  <button type="button" class="btn-a btn-a--ghost btn-a--icon-xs" aria-label={`Edit seat ${member.seat}`} data-crew-edit data-hot={member.seat === "builder" ? "" : undefined}>
+                    <Icon name="pencil" />
+                  </button>
+                  <button type="button" class="btn-a btn-a--ghost btn-a--icon-xs" aria-label={`Remove seat ${member.seat}`} data-crew-remove>
+                    <Icon name="trash-2" />
+                  </button>
+                </div>
+              </li>
+            ))
+          }
+        </ul>
+
+        <div class="crewp__footer">
+          <button type="button" class="btn-a btn-a--ghost btn-a--sm" aria-label="Add crew member" data-crew-add>
+            <Icon name="plus" />Add member
+          </button>
+          <span class="crewp__decide">
+            <button type="button" class="btn-a btn-a--outline btn-a--sm" data-crew-decline>Decline</button>
+            <button type="button" class="crewp__approve" data-crew-approve data-hot>Approve Crew</button>
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div class="crewp__composer" aria-hidden="true">
+      <p class="crewp__placeholder">Ask anything. @ files, $ skills, / commands</p>
+      <p class="crewp__controls">
+        <span class="btn-a btn-a--ghost btn-a--sm crewp__attach"><Icon name="paperclip" /></span>
+        <span class="crewp__model"><Mark name="claude" />Haiku 5.5<span class="t-muted">Low</span></span>
+        <span class="crewp__send"><Icon name="arrow-up" class="ico-35" /></span>
+      </p>
+    </div>
+  </div>
+
+  <div class="crewp__veil" data-crew-dialog hidden>
+    <div class="crewp__dialog" role="dialog" aria-modal="true" aria-labelledby="wn-crew-dialog-title">
+      <div class="crewp__dialog-head">
+        <div>
+          <p class="crewp__dialog-title" id="wn-crew-dialog-title" data-crew-dialog-title>Edit member</p>
+          <p class="crewp__dialog-about" data-crew-dialog-about>Update this member in the proposed Crew.</p>
+        </div>
+        <button type="button" class="btn-a btn-a--ghost btn-a--icon-xs" aria-label="Close" data-crew-cancel><Icon name="x" /></button>
+      </div>
+
+      <div class="crewp__fields">
+        <label class="crewp__field">
+          Name
+          <input class="crewp__input" type="text" placeholder="reviewer" autocomplete="off" spellcheck="false" data-crew-field="seat" />
+        </label>
+        <div class="crewp__field">
+          Persona
+          <Pick name="persona" label="Persona" value="custom" options={[{ value: "custom", label: "Custom member" }]} align="start" />
+        </div>
+        <label class="crewp__field crewp__field--wide">
+          Instructions
+          <textarea class="crewp__input crewp__input--area" rows="4" placeholder="What should this member do?" data-crew-field="instructions"></textarea>
+        </label>
+        <div class="crewp__field">
+          Provider
+          <Pick name="provider" label="Provider" value="claude" options={[{ value: "claude", label: "Claude" }, { value: "codex", label: "Codex" }]} align="start" />
+        </div>
+        {
+          runtimes.map((runtime) => (
+            <div class="crewp__field" data-crew-for={runtime.provider} hidden={runtime.provider !== "claude"}>
+              Model
+              <Pick name={`model-${runtime.provider}`} label="Model" value={runtime.models[0]?.value ?? ""} options={runtime.models} align="start" />
+            </div>
+          ))
+        }
+        {
+          runtimes.map((runtime) => (
+            <div class="crewp__field" data-crew-for={runtime.provider} hidden={runtime.provider !== "claude"}>
+              Reasoning
+              <Pick name={`level-${runtime.provider}`} label="Reasoning" value="Medium" options={runtime.levels} align="start" class="pick--up" />
+            </div>
+          ))
+        }
+        <div class="crewp__field">
+          Access
+          <Pick name="access" label="Access" value="full-access" options={access} align="start" class="pick--up" />
+        </div>
+        <div class="crewp__field">
+          Workspace
+          <Pick
+            name="workspace"
+            label="Workspace"
+            value="captain"
+            options={[
+              { value: "captain", label: "Captain's checkout" },
+              { value: "new", label: "New worktree" },
+              { value: "existing", label: "Existing worktree" },
+            ]}
+            align="start"
+            class="pick--up"
+          />
+          <span class="crewp__hint">Where this member will work.</span>
+        </div>
+        <div class="crewp__field" data-crew-place="new" hidden>
+          Base branch
+          <span class="select-a" aria-hidden="true"><span>main</span><Icon name="chevron-down" /></span>
+        </div>
+        <div class="crewp__field" data-crew-place="existing" hidden>
+          Worktree
+          <span class="select-a" aria-hidden="true"><span>tide-chart</span><Icon name="chevron-down" /></span>
+        </div>
+      </div>
+
+      <div class="crewp__dialog-foot">
+        <p>Changes apply to the proposal. Nobody starts yet.</p>
+        <button type="button" class="btn-a btn-a--outline" data-crew-cancel>Cancel</button>
+        <button type="button" class="crewp__approve" data-crew-save>Save changes</button>
+      </div>
+    </div>
+  </div>
+
+  <template data-crew-row>
+    <li data-crew-member data-added>
+      <span class="crewp__mark" data-crew-mark><Mark name="claude" /></span>
+      <div class="crewp__who">
+        <p class="crewp__line">
+          <b data-crew-name></b>
+          <span class="t-muted" data-crew-runtime></span>
+          <span class="t-muted" data-crew-tag>Added</span>
+        </p>
+        <p class="crewp__reason" data-crew-reason>Added by the user</p>
+        <p class="crewp__extra" data-crew-workspace hidden></p>
+        <p class="crewp__extra crewp__extra--warn" data-crew-asks hidden>Asks for approvals</p>
+        <p class="crewp__extra crewp__extra--error" role="alert" data-crew-error hidden></p>
+      </div>
+      <div class="crewp__tools">
+        <button type="button" class="btn-a btn-a--ghost btn-a--icon-xs" data-crew-edit><Icon name="pencil" /></button>
+        <button type="button" class="btn-a btn-a--ghost btn-a--icon-xs" data-crew-remove><Icon name="trash-2" /></button>
+      </div>
+    </li>
+  </template>
+  <template data-crew-marks><span data-for="claude"><Mark name="claude" /></span><span data-for="codex"><Mark name="openai" /></span></template>
+</div>
+
+<style>
+  .crewp {
+    display: flex;
+    flex-direction: column;
+    /* Tall enough that the member dialog opens whole over the thread. */
+    min-height: 680px;
+  }
+
+  .crewp__bar { border-bottom: 1px solid var(--a-border); }
+  .crewp__bar span { font-weight: 400; font-size: 12px; }
+
+  .crewp__thread {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    justify-content: flex-end;
+    gap: 14px;
+    padding: 20px 22px 18px;
+  }
+
+  /* J5NoticeLine: one muted line in the timeline. */
+  .crewp__notice {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 4px;
+    font-size: 12px;
+    color: var(--a-muted-fg);
+  }
+
+  :global(.wn-motion) .crewp__notice:not([hidden]) { animation: wn-in 0.4s cubic-bezier(0.2, 0.7, 0.2, 1); }
+
+  .crewp__dock { padding: 0 14px 14px; }
+
+  /* ComposerBanner's attached surface: the card's last 17px sit under the composer. */
+  .crewp__card {
+    position: relative;
+    margin: 0 22px -17px;
+    padding: 5px 4px 22px;
+    border: 1px solid rgb(0 0 0 / 8%);
+    border-radius: 16px 16px 0 0;
+    background: color-mix(in srgb, var(--a-card) 80%, transparent);
+    box-shadow: var(--a-shadow);
+    font-size: 12px;
+    line-height: 16px;
+  }
+
+  .crewp__header {
+    display: grid;
+    grid-template-columns: 24px minmax(0, 1fr) auto 24px;
+    align-items: center;
+    gap: 4px;
+    width: 100%;
+    min-height: 24px;
+    padding: 0;
+    border: 0;
+    border-radius: 12px;
+    background: none;
+    font: inherit;
+    color: var(--a-fg);
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .crewp__header:hover { background: color-mix(in srgb, var(--a-fg) 5%, transparent); }
+  .crewp__header > :global(.ico) { justify-self: center; }
+  .crewp__count { font-weight: 500; color: var(--a-muted-fg); }
+  .crewp__header :global(.crewp__chevron) { transition: rotate 0.15s ease; }
+  .crewp__header[aria-expanded="false"] :global(.crewp__chevron) { rotate: 180deg; }
+
+  .crewp__content { padding: 4px 12px 12px; }
+  .crewp__brief { margin-bottom: 12px; font-size: 14px; line-height: 20px; color: var(--a-muted-fg); }
+
+  .crewp__brief-text:not([data-full]) {
+    display: -webkit-box;
+    overflow: hidden;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+  }
+
+  .crewp__more {
+    height: 24px;
+    padding: 0 7px;
+    border: 0;
+    background: none;
+    font: 500 12px/1 var(--a-font);
+    color: inherit;
+    cursor: pointer;
+  }
+
+  .crewp__more:hover { text-decoration: underline; text-underline-offset: 4px; }
+
+  .crewp__members {
+    list-style: none;
+    border-block: 1px solid color-mix(in srgb, var(--a-border) 70%, transparent);
+  }
+
+  .crewp__members li { display: flex; align-items: flex-start; gap: 8px; padding: 12px 0; }
+  .crewp__members li + li { border-top: 1px solid var(--a-border); }
+  .crewp__mark { padding-top: 2px; }
+  .crewp__mark :global(.ico) { width: 24px; height: 24px; }
+  .crewp__who { flex: 1; min-width: 0; }
+  .crewp__line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; }
+  .crewp__line b { font-size: 14px; font-weight: 500; line-height: 20px; overflow-wrap: anywhere; }
+
+  .crewp__reason {
+    display: -webkit-box;
+    margin-top: 2px;
+    overflow: hidden;
+    color: var(--a-muted-fg);
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+  }
+
+  .crewp__extra { margin-top: 4px; color: var(--a-muted-fg); }
+  .crewp__extra--warn { color: var(--a-warning-fg); }
+  .crewp__extra--error { color: var(--a-destructive-text); }
+  .crewp__tools { display: flex; flex-shrink: 0; gap: 4px; }
+
+  .crewp__footer {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 12px;
+  }
+
+  .crewp__decide { display: flex; align-items: center; gap: 8px; }
+
+  /* The proposal's own primary button: the foreground colour, not the app's blue. */
+  .crewp__approve {
+    display: inline-flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    height: 36px;
+    padding: 0 12px;
+    border: 1px solid var(--a-fg);
+    border-radius: 6px;
+    background: var(--a-fg);
+    font: 500 12px/1 var(--a-font);
+    color: var(--a-bg);
+    cursor: pointer;
+  }
+
+  .crewp__approve:hover { background: color-mix(in srgb, var(--a-fg) 90%, transparent); }
+  .crewp__approve:disabled { opacity: 0.5; cursor: default; }
+  .crewp :global(.btn-a):disabled { opacity: 0.64; cursor: default; }
+
+  /* ComposerSurface.Main and ChatComposer's footer, at rest with an empty prompt. */
+  .crewp__composer {
+    position: relative;
+    z-index: 1;
+    border: 1px solid rgb(0 0 0 / 8%);
+    border-radius: 16px;
+    background: var(--a-card);
+    box-shadow: var(--a-shadow);
+  }
+
+  .crewp__placeholder {
+    min-height: 54px;
+    padding: 16px 16px 8px;
+    font-size: 14px;
+    line-height: 1.625;
+    color: var(--a-muted-fg);
+  }
+
+  .crewp__controls { display: flex; align-items: center; gap: 8px; padding: 0 8px 8px; }
+  .crewp .crewp__attach { width: 28px; padding: 0; cursor: default; }
+  .crewp .crewp__attach :global(.ico) { margin: 0; translate: 0 1px; }
+
+  .crewp__model {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    height: 28px;
+    margin-left: auto;
+    padding: 0 8px;
+    font-size: 14px;
+    font-weight: 500;
+    color: color-mix(in srgb, var(--a-fg) 80%, transparent);
+  }
+
+  .crewp__model span { margin-left: -2px; }
+
+  .crewp__send {
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--a-fg) 12%, transparent);
+    color: var(--a-muted-fg);
+  }
+
+  /* ui/dialog.tsx over the thread, with CrewSeatEditor's fields. */
+  .crewp__veil {
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    display: grid;
+    place-items: start center;
+    padding: 16px;
+    overflow-y: auto;
+    border-radius: 11px;
+    background: rgb(0 0 0 / 32%);
+  }
+
+  .crewp__dialog {
+    width: min(100%, 576px);
+    border: 1px solid var(--a-border);
+    border-radius: 16px;
+    background: var(--a-card);
+    box-shadow: 0 24px 60px -24px rgb(0 0 0 / 55%);
+  }
+
+  :global(.wn-motion) .crewp__veil:not([hidden]) .crewp__dialog { animation: wn-in 0.2s ease-out; }
+
+  .crewp__dialog-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--a-border);
+  }
+
+  .crewp__dialog-title { font-size: 16px; font-weight: 500; line-height: 24px; }
+  .crewp__dialog-about { margin-top: 4px; font-size: 12px; color: var(--a-muted-fg); }
+
+  .crewp__fields {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px 12px;
+    padding: 20px 24px;
+  }
+
+  .crewp__field {
+    display: grid;
+    align-content: start;
+    gap: 6px;
+    min-width: 0;
+    font-size: 12px;
+    color: var(--a-muted-fg);
+  }
+
+  .crewp__field--wide { grid-column: 1 / -1; }
+  .crewp__field :global(.pick) { display: flex; }
+  .crewp__field :global(.select-a) { width: 100%; min-width: 0; }
+  .crewp__field > .select-a { cursor: default; }
+  .crewp__hint { font-size: 12px; }
+
+  .crewp__input {
+    width: 100%;
+    height: 36px;
+    padding: 0 11px;
+    border: 1px solid var(--a-input);
+    border-radius: 8px;
+    background: var(--a-bg);
+    box-shadow: var(--a-shadow);
+    font: 400 14px/20px var(--a-font);
+    color: var(--a-fg);
+  }
+
+  .crewp__input--area { height: auto; min-height: 104px; padding: 6px 11px; resize: none; }
+  .crewp__input::placeholder { color: var(--a-muted-fg); }
+
+  .crewp__input:focus-visible {
+    outline: none;
+    border-color: var(--a-primary);
+    box-shadow: inset 0 0 0 3px color-mix(in srgb, var(--a-primary) 24%, transparent);
+  }
+
+  .crewp__dialog-foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+    padding: 16px 24px;
+    border-top: 1px solid var(--a-border);
+    border-radius: 0 0 15px 15px;
+    background: color-mix(in srgb, var(--a-muted) 72%, transparent);
+  }
+
+  .crewp__dialog-foot p { flex: 1 1 0; min-width: 12ch; font-size: 12px; color: var(--a-muted-fg); }
+
+  /* A list near the foot of the dialog opens upward, where there is room for it. */
+  .crewp :global(.pick--up .pick__popup) { top: auto; bottom: calc(100% + 4px); transform-origin: 0 100%; }
+
+  @media (prefers-color-scheme: dark) {
+    .crewp__card,
+    .crewp__composer { border-color: rgb(255 255 255 / 8%); }
+  }
+
+  @media (max-width: 560px) {
+    .crewp__thread { padding: 16px 14px 14px; }
+    .crewp__dock { padding: 0 8px 8px; }
+    .crewp__card { margin-inline: 12px; }
+    .crewp__content { padding: 4px 8px 10px; }
+    .crewp__veil { padding: 8px; }
+    .crewp__fields { grid-template-columns: 1fr; padding: 16px; }
+    .crewp__dialog-head,
+    .crewp__dialog-foot { padding: 14px 16px; }
+  }
+</style>
