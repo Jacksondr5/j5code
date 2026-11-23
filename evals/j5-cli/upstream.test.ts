@@ -12,7 +12,7 @@ const text = (history: ReturnType<typeof splitConversation>["history"]) =>
 
 it("splits earlier turns from the live prompt and drops the template's own context", () => {
   const testCase = one("review-round-uses-thread-send");
-  const { history, prompt } = splitConversation(sampleFor(testCase, "claude-sonnet-5-5"));
+  const { history, prompt } = splitConversation(sampleFor(testCase, "claude-sonnet-5-5", "j5"));
   assert.strictEqual(prompt, testCase.prompt);
   assert.include(text(history), "Sol round 1 is back");
   assert.notInclude(text(history), testCase.prompt);
@@ -24,7 +24,7 @@ it("keeps a case's own notes in the earlier turns", () => {
     ({ setup }) => setup.context !== undefined && (setup.priorTurns ?? []).length === 0,
   );
   if (testCase?.setup.context === undefined) throw new Error("No case with context.");
-  const { history } = splitConversation(sampleFor(testCase, "claude-sonnet-5-5"));
+  const { history } = splitConversation(sampleFor(testCase, "claude-sonnet-5-5", "j5"));
   assert.include(text(history), JSON.stringify(testCase.setup.context).slice(1, 40));
 });
 

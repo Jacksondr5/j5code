@@ -11,7 +11,7 @@ import type { Sample } from "./upstream.ts";
 
 const EVAL_ENVIRONMENT_ID = EnvironmentId.make("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee");
 const SELF = "participant-self";
-const PROJECT = { project_id: "11111111-1111-4111-8111-aaaaaaaaaaaa", project_title: "app" };
+export const PROJECT = { project_id: "11111111-1111-4111-8111-aaaaaaaaaaaa", project_title: "app" };
 const uuid = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
 const linkTo = (threadId: string) =>
   formatThreadLink({ environmentId: EVAL_ENVIRONMENT_ID, threadId: ThreadId.make(threadId) });

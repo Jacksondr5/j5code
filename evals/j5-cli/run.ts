@@ -29,7 +29,14 @@ import { runClaude } from "./claude.ts";
 import { runCodex } from "./codex.ts";
 import { emptyUsage, shellUsage, type Usage } from "./usage.ts";
 import { type McpSample, startMcpServer } from "./mcp.ts";
-import { DATE_DEPENDENT, isCatalog, loadCases, sampleFor, UNSUPPORTED_DATE } from "./upstream.ts";
+import {
+  DATE_DEPENDENT,
+  isCatalog,
+  loadCases,
+  sampleFor,
+  splitConversation,
+  UNSUPPORTED_DATE,
+} from "./upstream.ts";
 
 const { values } = NodeUtil.parseArgs({
   options: {
@@ -45,15 +52,16 @@ const { values } = NodeUtil.parseArgs({
     catalog: { type: "string", default: "j5" },
     shard: { type: "string" },
     merge: { type: "boolean", default: false },
+    "dry-run": { type: "boolean", default: false },
     out: { type: "string" },
   },
 });
 const harness = values.harness === "codex" ? "codex" : "claude";
 const model = values.model ?? (harness === "codex" ? "gpt-6.1-sol" : "claude-sonnet-5-5");
-if (values.out === undefined) throw new Error("Pass --out <dir>.");
+if (values.out === undefined && !values["dry-run"]) throw new Error("Pass --out <dir>.");
 const catalog = values.catalog;
 if (!isCatalog(catalog)) throw new Error("--catalog is j5 or upstream.");
-const out = NodePath.resolve(values.out);
+const out = NodePath.resolve(values.out ?? ".");
 const CWD = "/home/user/app";
 const MAIN_COMMITS = [
   "chore: update dependencies",
@@ -93,6 +101,14 @@ const cases = loadCases(values.case ?? [], catalog)
   .filter((testCase) => (testCase.setup.harness ?? harness) === harness)
   .filter((_, index) => index % shardCount === shardIndex);
 if (cases.length === 0 && !values.merge) throw new Error("No case matches --case.");
+// Prints the conversation each case hands the harness, without starting a CLI or a container.
+if (values["dry-run"]) {
+  for (const testCase of cases) {
+    const { history, prompt } = splitConversation(sampleFor(testCase, model, catalog));
+    console.log(JSON.stringify({ id: testCase.id, history, prompt }, null, 2));
+  }
+  process.exit(0);
+}
 if (values["stop-on-regression"] && values.baseline === undefined) {
   throw new Error("--stop-on-regression needs --baseline.");
 }
@@ -151,7 +167,7 @@ const collect = async (): Promise<{ rows: Array<Row>; regressions: Array<string>
   let nextSample = 0;
   const runOne = async (testCase: McpToolUseCase): Promise<Row> => {
     const key = `s${nextSample++}`;
-    const sample = sampleFor(testCase, model);
+    const sample = sampleFor(testCase, model, catalog);
     makeCheckout(testCase);
     const answered: Array<{ tool: string; input: unknown }> = [];
     const entry: McpSample = {
