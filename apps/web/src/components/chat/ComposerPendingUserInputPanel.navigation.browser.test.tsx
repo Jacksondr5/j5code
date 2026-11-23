@@ -10,6 +10,7 @@ import { makeThreadRequestsResolvedAnnouncer } from "@t3tools/client-runtime/sta
 import { useLayoutEffect, useRef, type ComponentProps } from "react";
 import { expect, it, vi } from "vite-plus/test";
 import { userEvent } from "vite-plus/test/browser";
+import "~/index.css";
 
 vi.mock(import("../ChatMarkdown"), async (importOriginal) => ({
   ...(await importOriginal()),
@@ -20,6 +21,7 @@ import { act, fakeTimers, render } from "../../../test/render";
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { makeThreadProjectionFixture } from "../../test-fixtures";
 import { toastManager } from "../ui/toast";
+import { ComposerPendingUserInputPanel } from "./ComposerPendingUserInputPanel";
 import { usePendingThreadRequests } from "./usePendingThreadRequests";
 
 const threadRef = { environmentId: EnvironmentId.make("env"), threadId: ThreadId.make("thread") };
@@ -37,6 +39,47 @@ const prompt = {
     multiSelect: false,
   })),
 };
+
+it("bounds long questions and resets their scroll position when the question changes", async () => {
+  const options = Array.from({ length: 35 }, (_, index) => ({
+    label: `Option ${index + 1}`,
+    description: "Option detail",
+  }));
+  const pendingUserInputs = [
+    {
+      ...prompt,
+      questions: prompt.questions.map((question) => ({ ...question, options })),
+    },
+  ];
+  const panel = (questionIndex: number) => (
+    <ComposerPendingUserInputPanel
+      pendingUserInputs={pendingUserInputs}
+      cwd={undefined}
+      threadRef={threadRef}
+      respondingRequestIds={[]}
+      answers={{}}
+      questionIndex={questionIndex}
+      onToggleOption={() => {}}
+      onAdvance={() => {}}
+      onDismiss={() => {}}
+    />
+  );
+  await using screen = await render(panel(0));
+  const viewport = () => {
+    const element = screen.container.querySelector<HTMLElement>(
+      '[data-slot="scroll-area-viewport"]',
+    );
+    if (!element) throw new Error("Expected a question scroll viewport");
+    return element;
+  };
+  await vi.waitFor(() => expect(viewport().scrollHeight).toBeGreaterThan(viewport().clientHeight));
+  viewport().scrollTop = 150;
+  expect(viewport().scrollTop).toBeGreaterThan(0);
+
+  await screen.rerender(panel(1));
+  await expect.element(screen.getByText("Choose for question 2")).toBeVisible();
+  expect(viewport().scrollTop).toBe(0);
+});
 
 function questionProjection(threadId: ThreadId, requestIds = ["first", "second"]) {
   const projection = makeThreadProjectionFixture();
