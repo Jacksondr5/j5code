@@ -57,13 +57,14 @@ const errorHead = (error: string) => {
     .join(" ");
 };
 
-// `adb devices` lists one `<serial>\t<state>` line per device, among its header and
-// daemon messages.
+// Parsed as the hub parses `adb devices`: every line but the header, blanks and `* daemon`
+// messages names a device by its first word, whatever separates it from the state.
 const adbSerials = (stdout: string) =>
   stdout
     .split(/\r?\n/)
-    .filter((line) => line.includes("\t"))
-    .map((line) => line.split("\t")[0]!.trim());
+    .map((line) => line.trim())
+    .filter((line) => line && line !== "List of devices attached" && !line.startsWith("*"))
+    .map((line) => line.split(/\s+/)[0]!);
 
 const vendorPrefix = (platform: DevicePlatform) =>
   platform === "ios" ? "/vendor/serve-sim" : "/vendor/serve-emu";

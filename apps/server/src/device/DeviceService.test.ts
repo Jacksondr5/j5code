@@ -1267,7 +1267,7 @@ describe("Android close with shutdown", () => {
 
   const adbListing = (...lines: string[]) => ({
     code: 0,
-    stdout: ["List of devices attached", ...lines, ""].join("\n"),
+    stdout: ["* daemon started successfully", "List of devices attached", ...lines, ""].join("\n"),
     stderr: "",
   });
   // What the hub answers once `adb emu kill` finds no such serial.
@@ -1324,6 +1324,10 @@ describe("Android close with shutdown", () => {
   it.effect.each([
     { case: "adb still lists the serial", adb: () => adbListing(`${serial}\tdevice`) },
     { case: "adb lists the serial offline", adb: () => adbListing(`${serial}\toffline`) },
+    {
+      case: "adb separates the serial with spaces after a daemon message",
+      adb: () => adbListing(`${serial}          device product:sdk_gphone64 transport_id:3`),
+    },
     { case: "adb fails", adb: () => ({ code: 1, stdout: "", stderr: "adb: no server" }) },
   ])("a rejected shutdown keeps the session open when $case", ({ adb }) =>
     Effect.gen(function* () {
