@@ -4,7 +4,7 @@ import {
 } from "./AgentCrewInstanceService.ts";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import { PlacementCommandId } from "./placementContracts.ts";
-import { dispatchCommand as dispatchIntakeCommand } from "../../orchestration-v2/ThreadMessageIntake.ts";
+import { dispatchCommand } from "../../orchestration-v2/ThreadMessageIntake.ts";
 import { J5AdaptedThreadToolkit, J5AdaptedThreadHandlersLive } from "./mcp/threadTools.ts";
 import { claimPersonQueuedEdit } from "./queuedEdits.ts";
 import {
@@ -39,6 +39,7 @@ import {
   type OrchestrationV2ProviderFailure,
   type OrchestrationV2ProviderSession,
   type OrchestrationV2ProviderThread,
+  type OrchestrationV2ProviderTurn,
   type OrchestrationV2ThreadProjection,
   type OrchestrationV2TurnItem,
   ProjectId,
@@ -102,6 +103,7 @@ import {
 } from "../test-support/threadLifecycle.ts";
 import { layerMemory as SqlitePersistenceMemory } from "../../persistence/Sqlite.ts";
 import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
+import * as ModelManifest from "../../provider/ModelManifest.ts";
 import { ProviderInstanceRegistry } from "../../provider/ProviderInstanceRegistry.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import * as VcsDriverRegistry from "../../vcs/VcsDriverRegistry.ts";
@@ -175,6 +177,8 @@ import {
 } from "./contracts.ts";
 import { noDocumentTextLayer } from "../test-support/documentText.ts";
 
+const dispatchIntakeCommand = (command: Parameters<typeof dispatchCommand>[0]) =>
+  dispatchCommand(command, { managesProviders: true });
 const decodeSentFact = Schema.decodeUnknownEffect(Schema.fromJsonString(MessageSentPayload));
 const decodeToolFailure = Schema.decodeUnknownEffect(
   Schema.Struct({ code: Schema.String, message: Schema.String }),
@@ -238,6 +242,7 @@ interface FakeActiveTurn {
   readonly attemptId: ProviderAdapterV2TurnInput["attemptId"];
   readonly providerThreadId: ProviderThreadId;
   readonly providerTurnId: ProviderTurnId;
+  readonly providerTurn: OrchestrationV2ProviderTurn;
 }
 
 interface DeliveryHarness {
@@ -319,6 +324,21 @@ const makeOrchestrationAdapter = (harness: DeliveryHarness): ProviderAdapterV2["
               providerSession: { ...providerSession, status: "running", updatedAt: startedAt },
             });
             const providerTurnId = ProviderTurnId.make(`provider-turn:${input.attemptId}`);
+            const providerTurn: OrchestrationV2ProviderTurn = {
+              id: providerTurnId,
+              providerThreadId: input.providerThread.id,
+              nodeId: input.rootNodeId,
+              runAttemptId: input.attemptId,
+              nativeTurnRef: {
+                driver,
+                nativeId: `native-turn:${input.attemptId}`,
+                strength: "strong",
+              },
+              ordinal: input.providerTurnOrdinal,
+              status: "running",
+              startedAt,
+              completedAt: null,
+            };
             yield* Ref.update(harness.activeTurns, (existing) =>
               new Map(existing).set(input.threadId, {
                 events,
@@ -329,27 +349,10 @@ const makeOrchestrationAdapter = (harness: DeliveryHarness): ProviderAdapterV2["
                 attemptId: input.attemptId,
                 providerThreadId: input.providerThread.id,
                 providerTurnId,
+                providerTurn,
               }),
             );
-            yield* PubSub.publish(events, {
-              type: "provider_turn.updated",
-              driver,
-              providerTurn: {
-                id: providerTurnId,
-                providerThreadId: input.providerThread.id,
-                nodeId: input.rootNodeId,
-                runAttemptId: input.attemptId,
-                nativeTurnRef: {
-                  driver,
-                  nativeId: `native-turn:${input.attemptId}`,
-                  strength: "strong",
-                },
-                ordinal: input.providerTurnOrdinal,
-                status: "running",
-                startedAt,
-                completedAt: null,
-              },
-            });
+            yield* PubSub.publish(events, { type: "provider_turn.updated", driver, providerTurn });
           }),
         steerTurn: (input) =>
           Effect.gen(function* () {
@@ -364,7 +367,34 @@ const makeOrchestrationAdapter = (harness: DeliveryHarness): ProviderAdapterV2["
             yield* Ref.update(harness.steerInputs, (existing) => [...existing, input]);
           }),
         interruptTurn: (input) =>
-          Ref.update(harness.interruptInputs, (existing) => [...existing, input]),
+          Effect.gen(function* () {
+            yield* Ref.update(harness.interruptInputs, (existing) => [...existing, input]);
+            if (input.requestRuntimeRestart !== true) return;
+            // Stop's interrupt ends the running turn, as the Codex adapter reports it.
+            const active = [...(yield* Ref.get(harness.activeTurns)).values()].find(
+              (turn) => turn.providerTurnId === input.providerTurnId,
+            );
+            if (active === undefined) return;
+            yield* PubSub.publish(events, {
+              type: "provider_turn.updated",
+              driver,
+              providerTurn: {
+                ...active.providerTurn,
+                status: "interrupted",
+                completedAt: yield* DateTime.now,
+              },
+            });
+            yield* PubSub.publish(events, {
+              type: "turn.terminal",
+              driver,
+              providerThreadId: active.providerThreadId,
+              providerTurnId: active.providerTurnId,
+              runOrdinal: active.runOrdinal,
+              status: "interrupted",
+              failure: null,
+              threadDisposition: "reusable",
+            });
+          }),
         respondToRuntimeRequest: () =>
           Effect.die("respondToRuntimeRequest is unused by the A2 delivery seam test"),
         readThreadSnapshot: () =>
@@ -390,18 +420,24 @@ const makeTestLayer = (
     displayName: "Codex A2 delivery test",
     enabled: true,
     // No supportedRuntimeModes: every runtime mode runs as stored.
-    snapshot: { getSnapshot: Effect.succeed({}) } as unknown as ProviderInstance["snapshot"],
+    // Signed in with no custom endpoint: a usage limit without a reset time reads this.
+    snapshot: {
+      getSnapshot: Effect.succeed({ auth: { status: "authenticated" } }),
+    } as unknown as ProviderInstance["snapshot"],
     orchestrationAdapter,
     textGeneration: {} as ProviderInstance["textGeneration"],
   } satisfies ProviderInstance;
-  const providerInstanceRegistryTestLayer = Layer.succeed(ProviderInstanceRegistry, {
-    getInstance: (instanceId) =>
-      Effect.succeed(instanceId === providerInstance.instanceId ? providerInstance : undefined),
-    listInstances: Effect.succeed([providerInstance]),
-    listUnavailable: Effect.succeed([]),
-    streamChanges: Stream.empty,
-    subscribeChanges: Effect.never,
-  });
+  const providerInstanceRegistryTestLayer = Layer.merge(
+    ModelManifest.layerTest,
+    Layer.succeed(ProviderInstanceRegistry, {
+      getInstance: (instanceId) =>
+        Effect.succeed(instanceId === providerInstance.instanceId ? providerInstance : undefined),
+      listInstances: Effect.succeed([providerInstance]),
+      listUnavailable: Effect.succeed([]),
+      streamChanges: Stream.empty,
+      subscribeChanges: Effect.never,
+    }),
+  );
   const orchestrationTestLayer = Layer.merge(
     OrchestrationV2LayerLive,
     OrchestrationV2EventSinkLayerLive,
@@ -629,7 +665,7 @@ it.effect.each(["gpt-5.4", "gpt-6-astra"])(
           Stream.runHead,
           Effect.forkChild({ startImmediately: true }),
         );
-        yield* worker.runOnce;
+        yield* worker.runOnce();
         yield* Fiber.join(running);
         // A queue receipt stays valid after its Astra run becomes steerable.
         yield* transport.deliverAgent(target.delivery);
@@ -728,7 +764,7 @@ it.effect.each([
         Stream.runHead,
         Effect.forkChild({ startImmediately: true }),
       );
-      yield* worker.runOnce;
+      yield* worker.runOnce();
       yield* Fiber.join(running);
       const projection = yield* threads.getThreadProjection(target.threadId);
       assert.equal(peerSteeringRun(projection, "peer")?.id, active.run.id);
@@ -905,7 +941,7 @@ it.effect.each([
           envelopeChannel: channel,
         });
       }
-      assert.isFalse(yield* worker.runOnce);
+      assert.isFalse(yield* worker.runOnce());
       assert.lengthOf(yield* Ref.get(harness.steerInputs), 2);
       const withNotices = yield* threads.getThreadProjection(target.threadId);
       assert.equal(withNotices.runs.filter((run) => run.status === "queued").length, 2);
@@ -1346,7 +1382,7 @@ it.effect(
           Stream.runHead,
           Effect.forkChild({ startImmediately: true }),
         );
-        assert.isTrue(yield* worker.runOnce);
+        assert.isTrue(yield* worker.runOnce());
         yield* Fiber.join(runningEvent);
         const busyProjection = yield* threads.getThreadProjection(target.threadId);
         assert.equal(latestSteerableRun(busyProjection)?.id, active.run.id);
@@ -1367,7 +1403,7 @@ it.effect(
         yield* transport.deliverAgent(target.delivery);
         yield* transport.deliverAgent(target.delivery);
         // Queueing schedules no provider effect: nothing steers or interrupts.
-        assert.isFalse(yield* worker.runOnce);
+        assert.isFalse(yield* worker.runOnce());
 
         const upstreamMessageId = deliveryMessageId(target.messageId);
         const queuedProjection = yield* threads.getThreadProjection(target.threadId);
@@ -1792,7 +1828,7 @@ it.effect.each(
           createdBy: "user",
           creationSource: "web",
         });
-        yield* worker.runOnce;
+        yield* worker.runOnce();
         yield* Fiber.join(running);
         const projection = yield* threads.getThreadProjection(target.threadId);
         const turn = (yield* Ref.get(harness.activeTurns)).get(target.threadId)!;
@@ -1907,7 +1943,7 @@ it.effect(
           createdBy: "user",
           creationSource: "web",
         });
-        yield* worker.runOnce;
+        yield* worker.runOnce();
         yield* Fiber.join(running);
         const committed = yield* sink.stream({ threadId: target.threadId }).pipe(
           Stream.filter(
@@ -4445,7 +4481,7 @@ const makeNoProjectLayer = (harness: DeliveryHarness) => {
     // Upstream offers No project only when its home is outside a Git checkout.
     Layer.provide(
       Layer.mock(GitWorkflow.GitWorkflowService)({
-        isRepository: () => Effect.succeed(false),
+        repositoryRoot: () => Effect.succeed(null),
       }),
     ),
     Layer.provide(Layer.mock(GitVcsDriver)({})),

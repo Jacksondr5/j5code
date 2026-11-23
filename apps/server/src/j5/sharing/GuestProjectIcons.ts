@@ -158,9 +158,11 @@ const projectOfToken = Effect.fn("j5.sharing.guestProjectIcons.projectOfToken")(
   if (!(yield* (yield* signer).verify(payload, signature))) {
     return undefined;
   }
-  const claims = yield* Effect.try(() => decodeClaims(base64UrlDecodeUtf8(payload))).pipe(
-    Effect.orElseSucceed(() => Option.none()),
-  );
+  // A token that does not decode is no token: the icon route answers not found.
+  const claims = yield* Effect.try({
+    try: () => decodeClaims(base64UrlDecodeUtf8(payload)),
+    catch: () => undefined,
+  }).pipe(Effect.orElseSucceed(() => Option.none()));
   if (Option.isNone(claims) || claims.value.expiresAt <= (yield* Clock.currentTimeMillis)) {
     return undefined;
   }

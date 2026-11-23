@@ -5,7 +5,7 @@ import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 
-import { resolveLauncherPath } from "../../cli/update.ts";
+import { resolveLauncherPath } from "../../cloud/pinnedRuntime.ts";
 import { exposeOwnCliToAgents, withoutAgentCliOnPath } from "./agentPath.ts";
 
 // A home with two installed versions; returns each version's executable.
@@ -18,7 +18,8 @@ const makeHome = Effect.gen(function* () {
   );
   for (const executable of executables) {
     yield* fs.makeDirectory(path.dirname(executable), { recursive: true });
-    yield* fs.writeFileString(executable, "");
+    // Executable, as an installed runtime is: launcher lookup passes over files that are not.
+    yield* fs.writeFileString(executable, "", { mode: 0o755 });
   }
   return { baseDir, previous: executables[0]!, running: executables[1]! };
 });

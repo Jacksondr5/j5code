@@ -32,6 +32,11 @@ import { TerminalManager } from "../../terminal/Manager.ts";
 import { ManagedProjectFolders } from "../../project/ManagedProjectFolders.ts";
 import { PreviewManager } from "../../preview/Manager.ts";
 import { PullRequestReviewGuideService } from "../../pullRequest/PullRequestReviewGuideService.ts";
+import { PullRequestService } from "../../pullRequest/PullRequestService.ts";
+import { AssetSigner } from "../../assets/AssetSigner.ts";
+import { IssueService } from "../../issue/IssueService.ts";
+import { ThreadIssueService } from "../../orchestration-v2/ThreadIssueService.ts";
+import { EnvironmentThemeService } from "../../environmentTheme.ts";
 import { SourceControlRepositoryService } from "../../sourceControl/SourceControlRepositoryService.ts";
 import { ThreadSearch } from "../../orchestration-v2/ThreadSearch.ts";
 import * as SecretRequests from "../../secrets/SecretRequests.ts";
@@ -299,6 +304,11 @@ it.effect("shares one runtime and outbox across the production HTTP and MCP regi
                 Layer.mock(ManagedProjectFolders)({ namedProjectsRoot: "/unused" }),
                 Layer.mock(PreviewManager)({}),
                 Layer.mock(PullRequestReviewGuideService)({}),
+                Layer.mock(PullRequestService)({}),
+                Layer.mock(AssetSigner)({}),
+                Layer.mock(IssueService)({}),
+                Layer.mock(ThreadIssueService)({}),
+                Layer.mock(EnvironmentThemeService)({}),
                 Layer.mock(SourceControlRepositoryService)({}),
                 Layer.mock(ThreadSearch)({}),
                 ServerSettingsService.layerTest(),

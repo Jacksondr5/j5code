@@ -1,12 +1,12 @@
-import type {
-  AgentPersonaReviewIndependence,
-  OrchestrationV2AgentPersonaAssignment,
-  OrchestrationV2AppThread,
-  OrchestrationV2Run,
-  ProjectId,
+import {
+  type AgentPersonaReviewIndependence,
+  type OrchestrationV2AgentPersonaAssignment,
+  type OrchestrationV2AppThread,
+  type OrchestrationV2Run,
+  type ProjectId,
   ThreadId,
 } from "@t3tools/contracts";
-import * as Data from "effect/Data";
+import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
@@ -39,10 +39,10 @@ export interface ReviewAuthorsRequest {
   readonly projectId?: ProjectId | undefined;
 }
 
-class ReviewAuthorThreadRefusedError extends Data.TaggedError("ReviewAuthorThreadRefusedError")<{
-  readonly threadId: ThreadId;
-  readonly reason: "missing" | "other-project";
-}> {
+class ReviewAuthorThreadRefusedError extends Schema.TaggedError<ReviewAuthorThreadRefusedError>()(
+  "ReviewAuthorThreadRefusedError",
+  { threadId: ThreadId, reason: Schema.Literals(["missing", "other-project"]) },
+) {
   override get message() {
     return this.reason === "missing"
       ? `Author thread ${this.threadId} does not exist.`

@@ -76,7 +76,13 @@ export function rekeyLocale(input: {
   const missing: string[] = [];
   let carried = 0;
   for (const [key, english] of Object.entries(input.english)) {
-    if (Object.hasOwn(input.locale, key)) {
+    const newEnglish = JSON.stringify(english);
+    // `gt generate` fills a key it has not seen with the English text; that is not a translation.
+    const kept =
+      Object.hasOwn(input.locale, key) &&
+      (Object.hasOwn(input.upstreamLocale, key) ||
+        JSON.stringify(input.locale[key]) !== newEnglish);
+    if (kept) {
       catalog[key] = input.locale[key];
       continue;
     }
@@ -84,10 +90,10 @@ export function rekeyLocale(input: {
       catalog[key] = input.upstreamLocale[key];
       continue;
     }
-    const newEnglish = JSON.stringify(english);
     const oldKey = upstreamKeyOf(newEnglish, input.upstreamEnglish);
     if (oldKey === undefined || !Object.hasOwn(input.upstreamLocale, oldKey)) {
-      missing.push(key);
+      if (Object.hasOwn(input.locale, key)) catalog[key] = input.locale[key];
+      else missing.push(key);
       continue;
     }
     const translated = rebrandTranslation(

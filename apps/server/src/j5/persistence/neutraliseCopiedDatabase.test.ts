@@ -10,6 +10,7 @@ import { runMigrateDevDb } from "../../../scripts/migrate-dev-db.ts";
 import { runMigrations } from "../../persistence/Migrations.ts";
 import { runJ5A2AMigrations } from "../a2a/Migrations.ts";
 import { neutraliseCopiedDatabase, neutraliseJ5State } from "./neutraliseCopiedDatabase.ts";
+import { setProcessHome } from "../test-support/processEnv.ts";
 
 const at = "2026-08-01T00:00:00.000Z";
 
@@ -284,47 +285,37 @@ it.layer(NodeServices.layer)("neutraliseCopiedDatabase", (it) => {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const home = yield* fs.makeTempDirectoryScoped({ prefix: "j5-neutralise-homes-" });
-      const originalHome = process.env.HOME;
-      const originalUserProfile = process.env.USERPROFILE;
-      try {
-        process.env.HOME = home;
-        process.env.USERPROFILE = home;
-        for (const name of [".t3", ".j5code"]) {
-          const stateDir = path.join(home, name, "userdata");
-          yield* fs.makeDirectory(stateDir, { recursive: true });
-          const installed = path.join(stateDir, "statev2.sqlite");
-          yield* withDatabase(installed, seed());
+      yield* setProcessHome(home);
+      for (const name of [".t3", ".j5code"]) {
+        const stateDir = path.join(home, name, "userdata");
+        yield* fs.makeDirectory(stateDir, { recursive: true });
+        const installed = path.join(stateDir, "statev2.sqlite");
+        yield* withDatabase(installed, seed());
 
-          const error = yield* neutraliseCopiedDatabase({
-            copyPath: installed,
-            sourcePath: path.join(home, "elsewhere.sqlite"),
-          }).pipe(Effect.flip);
-          assert.equal(
-            error._tag === "NeutraliseCopiedDatabaseRefusedError" && error.reason,
-            "in-a-shared-home",
-          );
-          assert.equal((yield* withDatabase(installed, actingRows())).peers, 2);
+        const error = yield* neutraliseCopiedDatabase({
+          copyPath: installed,
+          sourcePath: path.join(home, "elsewhere.sqlite"),
+        }).pipe(Effect.flip);
+        assert.equal(
+          error._tag === "NeutraliseCopiedDatabaseRefusedError" && error.reason,
+          "in-a-shared-home",
+        );
+        assert.equal((yield* withDatabase(installed, actingRows())).peers, 2);
 
-          // A folder below the installed home is refused too.
-          const nestedDir = path.join(stateDir, "copies");
-          yield* fs.makeDirectory(nestedDir, { recursive: true });
-          const nested = path.join(nestedDir, "statev2.sqlite");
-          yield* withDatabase(nested, seed());
-          const nestedError = yield* neutraliseCopiedDatabase({
-            copyPath: nested,
-            sourcePath: path.join(home, "elsewhere.sqlite"),
-          }).pipe(Effect.flip);
-          assert.equal(
-            nestedError._tag === "NeutraliseCopiedDatabaseRefusedError" && nestedError.reason,
-            "in-a-shared-home",
-          );
-          assert.equal((yield* withDatabase(nested, actingRows())).peers, 2);
-        }
-      } finally {
-        if (originalHome === undefined) delete process.env.HOME;
-        else process.env.HOME = originalHome;
-        if (originalUserProfile === undefined) delete process.env.USERPROFILE;
-        else process.env.USERPROFILE = originalUserProfile;
+        // A folder below the installed home is refused too.
+        const nestedDir = path.join(stateDir, "copies");
+        yield* fs.makeDirectory(nestedDir, { recursive: true });
+        const nested = path.join(nestedDir, "statev2.sqlite");
+        yield* withDatabase(nested, seed());
+        const nestedError = yield* neutraliseCopiedDatabase({
+          copyPath: nested,
+          sourcePath: path.join(home, "elsewhere.sqlite"),
+        }).pipe(Effect.flip);
+        assert.equal(
+          nestedError._tag === "NeutraliseCopiedDatabaseRefusedError" && nestedError.reason,
+          "in-a-shared-home",
+        );
+        assert.equal((yield* withDatabase(nested, actingRows())).peers, 2);
       }
     }),
   );

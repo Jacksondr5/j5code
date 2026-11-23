@@ -161,7 +161,7 @@ describe("presentConnectionDiagnosis", () => {
       ),
     );
     expect(diagnosis?.headline).toBe("Mac mini is waiting for someone to approve this device");
-    expect(diagnosis?.steps.join(" ")).toContain("t3 auth connect-device approve K7QM-2XFD");
+    expect(diagnosis?.steps.join(" ")).toContain("j5 auth connect-device approve K7QM-2XFD");
   });
 
   it("tells a host that refused this device's login to sign in again, not to start T3 Code", () => {

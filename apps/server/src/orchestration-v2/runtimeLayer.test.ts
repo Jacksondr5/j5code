@@ -11811,7 +11811,7 @@ it.layer(layerSharedApplicationDataPlaneTest)("pending provider interruption", (
           interrupted.turnItems.filter((item) => item.type === "run_interrupt_request"),
           1,
         );
-        assert.isFalse(yield* effectWorker.runOnce);
+        assert.isFalse(yield* effectWorker.runOnce());
       }).pipe(Effect.provide(stopLayer));
     }),
   );

@@ -155,7 +155,7 @@ export function classifyReachability(
     return fail(
       "dns_failed",
       "The T3 Connect address no longer points to this machine's tunnel (Cloudflare error 1016). T3 Connect may have removed this environment.",
-      "Link this environment again. Turn T3 Connect off and on in Settings > Sharing & access, or run `t3 connect link` and then restart T3 Code.",
+      "Link this environment again. Turn T3 Connect off and on in Settings > Sharing & access, or run `j5 connect link` and then restart J5 Code.",
     );
   }
   if (status !== null) {

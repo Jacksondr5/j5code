@@ -492,7 +492,11 @@ function claudeGatewayDiscoveryGraceMs(environment: Readonly<Record<string, unkn
 
 class ClaudeCapabilitiesProbeSdkError extends Schema.TaggedError<ClaudeCapabilitiesProbeSdkError>()(
   "ClaudeCapabilitiesProbeSdkError",
-  { operation: Schema.Literals(["initialize", "usage", "settings"]), cause: Schema.Defect() },
+  {
+    // J5: "skills" for the bundled-skill reload (FORK.md case 43).
+    operation: Schema.Literals(["initialize", "usage", "settings", "skills"]),
+    cause: Schema.Defect(),
+  },
 ) {
   override get message(): string {
     return `Claude capability probe ${this.operation} failed.`;
@@ -562,7 +566,6 @@ const probeClaudeCapabilities = (
         // Only the rate limits are read, so skip the local transcript scan that fills
         // `behaviors`: with a few GB of transcripts it outlasts the deadline.
         // The effort caps are read in parallel under the same deadline; workspace probes skip both.
-        // J5: so does the bundled-skill reload; workspace probes reuse the machine snapshot's (case 43).
         const usageCheckedAt = DateTime.formatIso(yield* DateTime.now);
         const { getSettings } = q as ClaudeSettingsQuery;
         const [usageResult, settingsResult, skillsResult] = yield* Effect.all(
@@ -584,8 +587,14 @@ const probeClaudeCapabilities = (
                     new ClaudeCapabilitiesProbeSdkError({ operation: "settings", cause }),
                 }).pipe(Effect.timeout(DEFAULT_TIMEOUT_MS), Effect.result)
               : Effect.undefined,
+            // J5: the bundled-skill reload, under the same deadline; workspace probes reuse the
+            // machine snapshot's (FORK.md case 43).
             includeStatus
-              ? Effect.tryPromise(() => q.reloadSkills()).pipe(
+              ? Effect.tryPromise({
+                  try: () => q.reloadSkills(),
+                  catch: (cause) =>
+                    new ClaudeCapabilitiesProbeSdkError({ operation: "skills", cause }),
+                }).pipe(
                   Effect.flatMap(({ skills }) => decodeReloadedClaudeSkills(skills)),
                   Effect.timeout(DEFAULT_TIMEOUT_MS),
                   Effect.result,

@@ -3,6 +3,7 @@ import * as DateTime from "effect/DateTime";
 import { searchToolLabelParts } from "@t3tools/shared/toolActivity";
 import { msg } from "gt-react";
 
+import { APP_BASE_NAME } from "../../branding";
 import { m } from "../../i18n/messages";
 import type { TimelineEntry, WorkLogEntry } from "../../session-logic";
 import {
@@ -186,7 +187,7 @@ export interface TurnDetailMemory {
 }
 
 /** The heading every agent message has in the timeline. */
-const MESSAGE_AUTHOR = "T3 Code";
+const MESSAGE_AUTHOR = APP_BASE_NAME;
 
 /**
  * Decides which of the turn's messages and steps a screen reader hears next.

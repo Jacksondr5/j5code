@@ -2,7 +2,6 @@ import { assert, it } from "@effect/vitest";
 import {
   MessageId,
   type ModelSelection,
-  MessageId,
   NodeId,
   type OrchestrationV2ProviderThread,
   type OrchestrationV2Run,
@@ -530,7 +529,9 @@ it.effect("steering a busy Crew seat carries the roster change made while it wor
     assert.lengthOf(steered, 2);
     assert.include(steered[0]!, "joined: reviewer: participant_id=");
     assert.isTrue(steered[0]!.endsWith("Also cover the retry path."));
-    assert.equal(steered[1], "Also cover the retry path.");
+    // The second steer carries no roster change; upstream's MCP sender note still leads it.
+    assert.notInclude(steered[1]!, "joined:");
+    assert.isTrue(steered[1]!.endsWith("Also cover the retry path."));
   }).pipe(Effect.provide(crewServices)),
 );
 

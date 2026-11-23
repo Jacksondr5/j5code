@@ -351,8 +351,8 @@ export function McpConsent({
             />
             <p className="text-xs text-muted-foreground">
               <T>
-                Get one from Use T3 Code in another app (MCP), Settings → Sharing & access, or{" "}
-                <code>t3 auth pairing create</code> on this machine.
+                Get one from Use J5 Code in another app (MCP), Settings → Sharing & access, or{" "}
+                <code>j5 auth pairing create</code> on this machine.
               </T>
             </p>
           </div>

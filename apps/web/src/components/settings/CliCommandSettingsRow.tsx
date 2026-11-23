@@ -112,8 +112,8 @@ export function CliCommandSettingsRow() {
             onClick={() => run(installed ? "uninstall" : "install")}
           >
             {installed
-              ? resolve(msg("Remove", { $context: "verb, uninstalls the t3 command" }))
-              : resolve(msg("Install", { $context: "verb, installs the t3 command" }))}
+              ? resolve(msg("Remove", { $context: "verb, uninstalls the j5 command" }))
+              : resolve(msg("Install", { $context: "verb, installs the j5 command" }))}
           </Button>
         </div>
       }

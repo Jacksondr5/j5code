@@ -1,21 +1,21 @@
 import {
   type CommandId,
   type ProviderApprovalDecision,
-  type RuntimeRequestId,
-  type ThreadId,
+  RuntimeRequestId,
+  ThreadId,
 } from "@t3tools/contracts";
 import type { CrewRuntimeRequestItem, NativeQuestionInboxItem } from "@t3tools/contracts/j5";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
+import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import type { SqlError } from "effect/sql/SqlError";
 
 import { inboxAnswerableApprovals } from "@t3tools/shared/j5/crewRuntimeRequests";
-import type { OrchestratorV2Error } from "../../orchestration-v2/Orchestrator.ts";
+import { OrchestratorV2Error } from "../../orchestration-v2/Orchestrator.ts";
 import {
   ThreadManagementService,
-  type ThreadManagementProviderInstanceDisabledError,
+  ThreadManagementProviderInstanceDisabledError,
 } from "../../orchestration-v2/ThreadManagementService.ts";
 import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
 import { getThreadRecordsIfPresent } from "./threadProjectionReads.ts";
@@ -30,28 +30,30 @@ interface CrewSeatThread {
 
 export { inboxAnswerableApprovals } from "@t3tools/shared/j5/crewRuntimeRequests";
 
-class CrewRuntimeRequestNotFoundError extends Data.TaggedError("CrewRuntimeRequestNotFoundError")<{
-  readonly threadId: ThreadId;
-  readonly requestId: RuntimeRequestId;
-}> {
+class CrewRuntimeRequestNotFoundError extends Schema.TaggedError<CrewRuntimeRequestNotFoundError>()(
+  "CrewRuntimeRequestNotFoundError",
+  { threadId: ThreadId, requestId: RuntimeRequestId },
+) {
   override get message() {
     return `No pending approval ${this.requestId} on a live Crew seat's thread ${this.threadId}.`;
   }
 }
 
 /** The request exists but can no longer take this answer: answered, expired, or not resumable. */
-export class CrewRuntimeRequestConflictError extends Data.TaggedError(
+export class CrewRuntimeRequestConflictError extends Schema.TaggedError<CrewRuntimeRequestConflictError>()(
   "CrewRuntimeRequestConflictError",
-)<{ readonly detail: string }> {
+  { detail: Schema.String },
+) {
   override get message() {
     return this.detail;
   }
 }
 
 /** The answer could not be sent for a reason other than the request's state; the route logs it. */
-class CrewRuntimeRequestDispatchError extends Data.TaggedError("CrewRuntimeRequestDispatchError")<{
-  readonly cause: OrchestratorV2Error | ThreadManagementProviderInstanceDisabledError;
-}> {
+class CrewRuntimeRequestDispatchError extends Schema.TaggedError<CrewRuntimeRequestDispatchError>()(
+  "CrewRuntimeRequestDispatchError",
+  { cause: Schema.Union([OrchestratorV2Error, ThreadManagementProviderInstanceDisabledError]) },
+) {
   override get message() {
     return "The answer could not be sent.";
   }

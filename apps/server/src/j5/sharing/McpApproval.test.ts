@@ -114,7 +114,7 @@ const signIn = Effect.gen(function* () {
       method: "browser-session-cookie",
       scopes: LEVEL_PERMISSIONS.owner,
     };
-    const session = yield* oauth.approvingBrowserSession(request, authorization);
+    const session = yield* oauth.approvingSession(request, authorization);
     assert.isDefined(session);
     return codeOf(
       yield* oauth.approve({

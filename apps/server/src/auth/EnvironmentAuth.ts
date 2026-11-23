@@ -49,7 +49,11 @@ import { REUSABLE_DEV_SESSION_EXPIRES_AT, resolveReusableDevAuth } from "./Reusa
 import { verifyRequestDpopProof } from "./dpop.ts";
 import { DESKTOP_RENDERER_ORIGINS } from "../httpCors.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
-import { makeMcpApprovalCheck, makePairingSessionIssuer } from "../j5/sharing/PairingIntents.ts";
+import {
+  makeMcpApprovalCheck,
+  makePairingSessionIssuer,
+  renewsLikeAPairingLink,
+} from "../j5/sharing/PairingIntents.ts";
 import * as ManagedLimits from "../policy/managedLimits.ts";
 import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
 import {
@@ -1150,7 +1154,8 @@ export const make = Effect.gen(function* () {
             const renewable =
               input?.proofKeyThumbprint !== undefined &&
               grant.method === "one-time-token" &&
-              grant.subject === PAIRING_LINK_SUBJECT;
+              // J5: a J5 link's session renews like a pairing link's (FORK.md case 70).
+              (grant.subject === PAIRING_LINK_SUBJECT || renewsLikeAPairingLink(grant.subject));
             return yield* sessions
               .issue({
                 method: input?.proofKeyThumbprint ? "dpop-access-token" : "bearer-access-token",

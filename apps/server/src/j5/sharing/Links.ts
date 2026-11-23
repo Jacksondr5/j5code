@@ -82,10 +82,10 @@ export class LinkForManyIsViewerError extends Schema.TaggedError<LinkForManyIsVi
 
 export class PersonAlreadyHereError extends Schema.TaggedError<PersonAlreadyHereError>()(
   "PersonAlreadyHereError",
-  { name: Schema.String },
+  { personName: Schema.String },
 ) {
   override get message(): string {
-    return `${this.name} is already on this server. Give them more access from the People page rather than a link.`;
+    return `${this.personName} is already on this server. Give them more access from the People page rather than a link.`;
   }
 }
 
@@ -547,7 +547,8 @@ const make = Effect.gen(function* () {
             SELECT 1 AS found FROM j5_a2a_human_person
             WHERE name_key = ${personNameKey(request.name)} AND removed_at IS NULL
           `.pipe(Effect.mapError(storage("read who is on the server")));
-          if (taken.length > 0) return yield* new PersonAlreadyHereError({ name: request.name });
+          if (taken.length > 0)
+            return yield* new PersonAlreadyHereError({ personName: request.name });
         }
         const scope = scopeColumns(request.scope);
         yield* sql`

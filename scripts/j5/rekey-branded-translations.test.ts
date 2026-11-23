@@ -45,4 +45,15 @@ describe("rekey-branded-translations", () => {
     expect(result.carried).toBe(1);
     expect(result.missing).toEqual(["j5"]);
   });
+
+  it("replaces the English fallback `gt generate` writes for a key it has not seen", () => {
+    const result = rekeyLocale({
+      english: { fresh: "Update J5 Code", j5: "Open the Inbox" },
+      locale: { fresh: "Update J5 Code", j5: "Open the Inbox" },
+      upstreamEnglish: { old: "Update T3 Code" },
+      upstreamLocale: { old: "T3 Code aktualisieren" },
+    });
+    expect(result.catalog).toEqual({ fresh: "J5 Code aktualisieren", j5: "Open the Inbox" });
+    expect(result.missing).toEqual([]);
+  });
 });

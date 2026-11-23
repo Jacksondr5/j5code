@@ -1564,7 +1564,7 @@ effectIt.effect(
           failure: {
             class: "unknown",
             message:
-              "T3 Code could not start this turn. Send the message again; if it keeps failing, check the server logs.",
+              "J5 Code could not start this turn. Send the message again; if it keeps failing, check the server logs.",
           },
         },
       ]);
@@ -3540,16 +3540,22 @@ function makeNativeResumeHarness(input: {
             }),
         }),
         IdAllocator.layer,
-        Layer.mock(TurnItemPositionStore.TurnItemPositionStoreV2)({}),
+        // A fresh run start slot, as the store gives the first item placed at a run's start.
+        Layer.mock(TurnItemPositionStore.TurnItemPositionStoreV2)({
+          allocate: ({ runOrdinal }) => Effect.succeed((runOrdinal ?? 0) * 1_000_000),
+        }),
         layerWorktreeLocation(),
         FileSystem.layerNoop({}),
         Layer.mock(GitWorkflow.GitWorkflowService)({}),
-        Layer.mock(ProjectService.ProjectService)({}),
+        // No project folder to reserve: the turn starts with no workspace lock (FileSystem is a no-op).
+        Layer.mock(ProjectService.ProjectService)({ getById: () => Effect.succeedNone }),
         Layer.mock(ProjectionStore.ProjectionStoreV2)({
           getThreadRecords: projectionRead,
           getTurnStartContext: projectionRead,
           getRuntimeRecoveryProjection: projectionRead,
           getTurnStartHistory: () => Effect.succeed([]),
+          getRun: (_threadId, id) =>
+            Effect.sync(() => projection.runs.find((candidate) => candidate.id === id)),
         }),
         Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({
           open: () =>
@@ -3575,7 +3581,10 @@ function makeNativeResumeHarness(input: {
         Layer.mock(ProviderAuthService.ProviderAuthService)({
           tryHandlePromptCommand: () => Effect.succeed(false),
         }),
-        Layer.mock(RunExecutionService.RunExecutionServiceV2)({ startRootRun }),
+        Layer.mock(RunExecutionService.RunExecutionServiceV2)({
+          startRootRun,
+          forkBaseline: () => Effect.succeed(Effect.void),
+        }),
         Layer.mock(RuntimePolicy.RuntimePolicyV2)({
           resolve: input.persona?.resolve ?? (() => Effect.succeed({} as never)),
         }),

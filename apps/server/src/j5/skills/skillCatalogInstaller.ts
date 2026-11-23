@@ -372,6 +372,7 @@ function reconcileLinks({
   return [...kept].map(([path, target]) => ({ path, target }));
 }
 
+// @effect-diagnostics-next-line extendsNativeError:off -- thrown by this plain async installer; the tool boundary maps it.
 export class IncompleteApplyError extends Error {
   readonly result: SkillCatalogApplyResult;
 

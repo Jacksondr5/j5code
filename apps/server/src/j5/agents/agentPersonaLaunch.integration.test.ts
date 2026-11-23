@@ -512,25 +512,23 @@ it.effect("lets a person switch a reviewer onto its author's model, and queues a
           dispatchMode: { type: "queue_after_active" },
         }),
       );
-    // No provider runs here, so the first run stays active and the switch queues behind it.
-    yield* send("first");
+    // Onto the author's model directly, while idle (upstream refuses a model change during a
+    // turn): allowed, and the creation-time check stays as recorded.
     const opus = selection("claudeAgent", "claude-opus-5", "high");
-    yield* send("switch", opus);
-    const queued = yield* threads.getThreadProjection(reviewer);
-    assert.deepEqual(
-      queued.thread.agentPersonaAssignment?.resolvedModelSelection,
-      launchedAssignment.resolvedModelSelection,
-    );
-    assert.deepEqual(queued.runs.at(-1)?.status, "queued");
-    assert.deepEqual(queued.runs.at(-1)?.modelSelection, opus);
-
-    // Onto the author's model directly: allowed, and the creation-time check stays as recorded.
     yield* asPerson(threads.dispatch(setModel(reviewer, opus)));
     assert.deepInclude((yield* threads.getThreadShell(reviewer))?.agentPersonaAssignment, {
       resolvedModelSelection: opus,
       reviewIndependence,
       modelSwitchedBy: "person",
     });
+
+    // No provider runs here, so the first run stays active and a switch queues behind it.
+    yield* send("first");
+    yield* send("switch", launchedAssignment.resolvedModelSelection);
+    const queued = yield* threads.getThreadProjection(reviewer);
+    assert.deepEqual(queued.thread.agentPersonaAssignment?.resolvedModelSelection, opus);
+    assert.deepEqual(queued.runs.at(-1)?.status, "queued");
+    assert.deepEqual(queued.runs.at(-1)?.modelSelection, launchedAssignment.resolvedModelSelection);
   }).pipe(Effect.provide(switchLayer(harness)), Effect.scoped);
 });
 

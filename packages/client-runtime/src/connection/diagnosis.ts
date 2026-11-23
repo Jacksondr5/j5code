@@ -197,7 +197,7 @@ function steps(
               ),
             ),
         resolve(
-          msg("Or run `t3 auth connect-device approve {code}` on {host}.", {
+          msg("Or run `j5 auth connect-device approve {code}` on {host}.", {
             code: code ?? "<code>",
             host,
           }),

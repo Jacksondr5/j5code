@@ -417,9 +417,9 @@ const SUMMARY: Record<PullRequestWatchChange["kind"], string> = {
 };
 
 const WATCHING_CLOSING =
-  "Look into each item and act on it as your task requires. This PR stays linked and watched, so do not link, watch, or list it again. End your turn when you are done, and T3 Code wakes you on the next change. When you hand the work back to the user, call unwatch_pull_request first so the thread returns to their inbox.";
+  "Look into each item and act on it as your task requires. This PR stays linked and watched, so do not link, watch, or list it again. End your turn when you are done, and J5 Code wakes you on the next change. When you hand the work back to the user, call unwatch_pull_request first so the thread returns to their inbox.";
 const WATCHING_CLOSING_PLURAL =
-  "Look into each item and act on it as your task requires. Each PR T3 Code still watches stays linked and watched, so do not link, watch, or list them again. End your turn when you are done, and T3 Code wakes you on the next change. When you hand the work back to the user, call unwatch_pull_request for each first so the thread returns to their inbox.";
+  "Look into each item and act on it as your task requires. Each PR J5 Code still watches stays linked and watched, so do not link, watch, or list them again. End your turn when you are done, and J5 Code wakes you on the next change. When you hand the work back to the user, call unwatch_pull_request for each first so the thread returns to their inbox.";
 
 export interface PullRequestWatchWake {
   readonly text: string;
@@ -469,7 +469,7 @@ export function pullRequestWatchEndMessage(input: {
     : "was closed without merging";
   return {
     text: [
-      `Pull request #${input.number} (${input.url}) ${how}, so T3 Code stopped watching it.`,
+      `Pull request #${input.number} (${input.url}) ${how}, so J5 Code stopped watching it.`,
       ...(merged ? [] : ["If it is reopened, call watch_pull_request to watch it again."]),
     ].join(" "),
     notification: {

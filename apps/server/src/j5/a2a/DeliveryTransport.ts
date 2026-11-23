@@ -12,7 +12,11 @@ import {
   type PeerDeliveryRequest,
 } from "@t3tools/contracts/j5";
 import { codexModelFamily, normalizeModelSlug } from "@t3tools/shared/model";
-import { usageLimitBlockedRun } from "@t3tools/shared/orchestrationV2ThreadError";
+import {
+  latestExecutedRun,
+  orchestrationV2WorktreePending,
+  usageLimitBlockedRun,
+} from "@t3tools/shared/orchestrationV2ThreadError";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
@@ -313,8 +317,8 @@ export const requestedSteeringRun = (
 /**
  * Why a delivery to an idle agent waits unsent. Upstream refuses to resume a thread stopped by a
  * usage limit and would start the delivery into the same limit, and it holds a message queued
- * after a failed worktree setup (`worktreeSetupPending` in Orchestrator.ts), as resuming would run it
- * in the project checkout.
+ * after a failed worktree setup (`orchestrationV2WorktreePending`), as resuming would run it in the
+ * project checkout.
  */
 export const idleQueueHold = (
   target: Pick<
@@ -331,18 +335,11 @@ export const idleQueueHold = (
       )[0]?.lastError ?? null;
   const limitedRun = usageLimitBlockedRun(target.runs, target.turnItems, sessionError);
   if (limitedRun !== null) return { type: "usage_limit" as const, run: limitedRun };
-  // Upstream's `worktreeSetupPending`: any failed worktree setup, while the thread has none.
-  const failedSetup =
-    target.thread.worktreePath === null
-      ? target.runs.findLast(
-          (run) =>
-            (run.status === "failed" || run.status === "interrupted") &&
-            run.workspacePreparation?.type === "worktree",
-        )
-      : undefined;
-  return failedSetup === undefined
-    ? undefined
-    : { type: "worktree_setup_failed" as const, run: failedSetup };
+  const latestRun = latestExecutedRun(target.runs);
+  return latestRun !== null &&
+    orchestrationV2WorktreePending(target.thread.worktreePath, target.runs)
+    ? { type: "worktree_setup_failed" as const, run: latestRun }
+    : undefined;
 };
 
 export const formatAgentDeliveryEnvelope = (

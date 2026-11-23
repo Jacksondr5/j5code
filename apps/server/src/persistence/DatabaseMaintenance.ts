@@ -353,7 +353,7 @@ export const runRequestedReclaim = Effect.fn("DatabaseMaintenance.runRequestedRe
             .writeFileString(
               files.failure,
               error._tag === "DatabaseInUseError"
-                ? "Another program kept the database open. Close other T3 Code apps and t3 commands on this machine, then try again."
+                ? "Another program kept the database open. Close other J5 Code apps and j5 commands on this machine, then try again."
                 : error.message,
             )
             .pipe(

@@ -39,6 +39,9 @@ import {
  */
 export const J5_LINK_PAIRING_SUBJECT = "j5:link";
 
+/** A J5 link pairs a phone or browser like upstream's pairing link, so its session renews too. */
+export const renewsLikeAPairingLink = (subject: string) => subject === J5_LINK_PAIRING_SUBJECT;
+
 /** The subject of a guest's share link before levels; retired, and pairs nothing now. */
 const RETIRED_GUEST_SUBJECT = "j5:guest";
 

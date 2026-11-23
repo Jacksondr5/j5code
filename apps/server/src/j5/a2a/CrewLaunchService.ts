@@ -7,7 +7,7 @@ import {
 import { crewModelSelectionProblem } from "../agents/agentModelSelection.ts";
 import { describeCrewSeatRuntime, materializeCrewModelSelection } from "./crewRuntimePreview.ts";
 import type { CrewProposalSeatRuntime, CrewWorkspaceOptions } from "@t3tools/contracts/j5";
-import { type AgentPersonaBlockCode, isProviderAvailable } from "@t3tools/contracts";
+import { AgentPersonaBlockCode, isProviderAvailable } from "@t3tools/contracts";
 import type {
   ModelSelection,
   OrchestrationV2AgentPersonaCommandAssignment,
@@ -16,7 +16,6 @@ import type {
 } from "@t3tools/contracts";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
@@ -232,60 +231,67 @@ export interface CrewLaunchResult {
   readonly seats: ReadonlyArray<CrewSeatLaunchOutcome>;
 }
 
-export class CrewLaunchSeatUnavailableError extends Data.TaggedError(
+export class CrewLaunchSeatUnavailableError extends Schema.TaggedError<CrewLaunchSeatUnavailableError>()(
   "CrewLaunchSeatUnavailableError",
-)<{
-  readonly seatName: string;
-  readonly agentId: string;
-  readonly detail: string;
-  /** Why a persona seat was refused, the same code its other launch paths give. */
-  readonly blockCode?: AgentPersonaBlockCode | undefined;
-}> {
+  {
+    seatName: Schema.String,
+    agentId: Schema.String,
+    detail: Schema.String,
+    /** Why a persona seat was refused, the same code its other launch paths give. */
+    blockCode: Schema.optional(AgentPersonaBlockCode),
+  },
+) {
   override get message(): string {
     return `Seat ${this.seatName} (agent ${this.agentId}) is unavailable: ${this.detail} Nothing was spawned.`;
   }
 }
 
 /** A custom seat's model or reasoning level is not on the project's "Models for custom members" lists. */
-class CrewLaunchModelNotEligibleError extends Data.TaggedError("CrewLaunchModelNotEligibleError")<{
-  readonly seatName: string;
-  readonly detail: string;
-  /** For a persona seat, the code its other launch paths give the same block. */
-  readonly blockCode?: AgentPersonaBlockCode | undefined;
-}> {
+class CrewLaunchModelNotEligibleError extends Schema.TaggedError<CrewLaunchModelNotEligibleError>()(
+  "CrewLaunchModelNotEligibleError",
+  {
+    seatName: Schema.String,
+    detail: Schema.String,
+    /** For a persona seat, the code its other launch paths give the same block. */
+    blockCode: Schema.optional(AgentPersonaBlockCode),
+  },
+) {
   override get message(): string {
     return `Seat ${this.seatName}: ${this.detail} Nothing was spawned.`;
   }
 }
 
 /** The Crew is full; the seats it holds already reach the cap once the request is counted. */
-class CrewLaunchCapError extends Data.TaggedError("CrewLaunchCapError")<{
-  readonly crewInstanceId: string;
-  readonly held: number;
-  readonly adding: number;
-  readonly cap: number;
-}> {
+class CrewLaunchCapError extends Schema.TaggedError<CrewLaunchCapError>()("CrewLaunchCapError", {
+  crewInstanceId: Schema.String,
+  held: Schema.Number,
+  adding: Schema.Number,
+  cap: Schema.Number,
+}) {
   override get message(): string {
     return `Crew ${this.crewInstanceId} holds ${this.held} seats; adding ${this.adding} would exceed the cap of ${this.cap}. Nothing was spawned.`;
   }
 }
 
 /** A seat name the reservation could not take: another participant already holds it. */
-class CrewLaunchSeatConflictError extends Data.TaggedError("CrewLaunchSeatConflictError")<{
-  readonly crewInstanceId: string;
-  readonly seatNames: ReadonlyArray<string>;
-}> {
+class CrewLaunchSeatConflictError extends Schema.TaggedError<CrewLaunchSeatConflictError>()(
+  "CrewLaunchSeatConflictError",
+  { crewInstanceId: Schema.String, seatNames: Schema.Array(Schema.String) },
+) {
   override get message(): string {
     return `Crew ${this.crewInstanceId} already holds ${this.seatNames.length === 1 ? "a seat" : "seats"} named ${this.seatNames.join(", ")} filled by a different agent. Nothing was spawned.`;
   }
 }
 
-export class CrewLaunchOperationError extends Data.TaggedError("CrewLaunchOperationError")<{
-  readonly phase: string;
-  readonly seatName: string | null;
-  readonly createdSeats: ReadonlyArray<string>;
-  readonly cause: unknown;
-}> {
+export class CrewLaunchOperationError extends Schema.TaggedError<CrewLaunchOperationError>()(
+  "CrewLaunchOperationError",
+  {
+    phase: Schema.String,
+    seatName: Schema.NullOr(Schema.String),
+    createdSeats: Schema.Array(Schema.String),
+    cause: Schema.Defect(),
+  },
+) {
   override get message(): string {
     const cause = this.cause instanceof Error ? this.cause.message : String(this.cause);
     const seat = this.seatName === null ? "" : ` seat ${this.seatName}`;
@@ -303,10 +309,12 @@ export type CrewLaunchError =
   | CrewStepAlreadyOwnedError;
 
 /** Wraps a store failure for the launch, except a step-ownership refusal, which stays typed. */
+const isCrewStepAlreadyOwnedError = Schema.is(CrewStepAlreadyOwnedError);
+
 const unlessStepOwned =
   (wrap: (cause: unknown) => CrewLaunchOperationError) =>
   <E>(cause: E): CrewLaunchOperationError | CrewStepAlreadyOwnedError =>
-    cause instanceof CrewStepAlreadyOwnedError ? cause : wrap(cause);
+    isCrewStepAlreadyOwnedError(cause) ? cause : wrap(cause);
 
 /**
  * Who chose the roster: the person, on a card they approved (edited or not), or an agent, on an

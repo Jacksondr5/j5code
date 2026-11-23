@@ -25,7 +25,6 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
-import type { Tool } from "effect/ai";
 import { stringify } from "yaml";
 
 import { ServerConfig } from "../../config.ts";
@@ -191,7 +190,7 @@ const makeFixture = (
     );
     const call = <Name extends PlaybookToolName>(
       name: Name,
-      input: Tool.Parameters<(typeof J5Toolkit.tools)[Name]>,
+      input: Schema.Json,
       scope = scopeFor(),
     ) =>
       toolkit

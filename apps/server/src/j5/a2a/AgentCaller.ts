@@ -2,14 +2,14 @@ import * as ThreadRegistration from "./ThreadRegistration.ts";
 import * as A2ALedger from "./LedgerService.ts";
 import * as A2ASendService from "./SendService.ts";
 import type { McpThreadInvocationScope } from "../../mcp/McpInvocationContext.ts";
-import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 
 import type { ParticipantDirectoryRow } from "./contracts.ts";
-class J5AgentToolStateError extends Data.TaggedError("J5AgentToolStateError")<{
-  readonly state: string;
-  readonly nextCommand: string;
-}> {
+class J5AgentToolStateError extends Schema.TaggedError<J5AgentToolStateError>()(
+  "J5AgentToolStateError",
+  { state: Schema.String, nextCommand: Schema.String },
+) {
   override get message(): string {
     return `${this.state} ${this.nextCommand}`;
   }
@@ -19,11 +19,10 @@ export const stateError = (state: string, nextCommand: string) =>
   new J5AgentToolStateError({ state, nextCommand });
 
 /** A refused persona launch, whose code (`persona_disabled` and so on) is the tool failure's. */
-export class J5PersonaBlockedError extends Data.TaggedError("J5PersonaBlockedError")<{
-  readonly code: string;
-  readonly state: string;
-  readonly nextCommand: string;
-}> {
+export class J5PersonaBlockedError extends Schema.TaggedError<J5PersonaBlockedError>()(
+  "J5PersonaBlockedError",
+  { code: Schema.String, state: Schema.String, nextCommand: Schema.String },
+) {
   override get message(): string {
     return `${this.state} ${this.nextCommand}`;
   }

@@ -7,6 +7,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { runSqliteState } from "./t3-sqlite-state.ts";
+import { setProcessHome } from "../src/j5/test-support/processEnv.ts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
 
@@ -96,32 +97,16 @@ it.layer(NodeServices.layer)("t3-sqlite-state", (it) => {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const home = yield* fs.makeTempDirectoryScoped({ prefix: "t3-sqlite-state-homes-" });
-      const originalHome = process.env.HOME;
-      const originalUserProfile = process.env.USERPROFILE;
-      try {
-        process.env.HOME = home;
-        process.env.USERPROFILE = home;
-        for (const name of [".t3", ".j5code"]) {
-          const baseDir = path.join(home, name);
-          yield* createFixtureDatabase(baseDir);
-          const error = yield* runSqliteState({
-            operation: "exec",
-            baseDir,
-            sql: "DELETE FROM fixtures",
-          }).pipe(Effect.flip);
-          assert.equal(error._tag, "SqliteStateSharedHomeMutationError");
-        }
-      } finally {
-        if (originalHome === undefined) {
-          delete process.env.HOME;
-        } else {
-          process.env.HOME = originalHome;
-        }
-        if (originalUserProfile === undefined) {
-          delete process.env.USERPROFILE;
-        } else {
-          process.env.USERPROFILE = originalUserProfile;
-        }
+      yield* setProcessHome(home);
+      for (const name of [".t3", ".j5code"]) {
+        const baseDir = path.join(home, name);
+        yield* createFixtureDatabase(baseDir);
+        const error = yield* runSqliteState({
+          operation: "exec",
+          baseDir,
+          sql: "DELETE FROM fixtures",
+        }).pipe(Effect.flip);
+        assert.equal(error._tag, "SqliteStateSharedHomeMutationError");
       }
     }),
   );

@@ -1,5 +1,5 @@
 import type { OrchestrationV2Command, ThreadId } from "@t3tools/contracts";
-import * as Data from "effect/Data";
+import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 
 import { AgentCrewInstanceService } from "./AgentCrewInstanceService.ts";
@@ -11,13 +11,16 @@ import { participantIdForThread } from "./HomeRegistrar.ts";
  * so this check on that handler covers every door, and the organize MCP tool applies it too. The
  * unit paths archive seats through the lifecycle service, not this handler.
  */
-class CrewSeatArchivedAloneError extends Data.TaggedError("CrewSeatArchivedAloneError")<{
-  readonly threadId: string;
-  readonly action: "archive" | "delete";
-  readonly seatName: string;
-  readonly crewName: string;
-  readonly crewInstanceId: string;
-}> {
+class CrewSeatArchivedAloneError extends Schema.TaggedError<CrewSeatArchivedAloneError>()(
+  "CrewSeatArchivedAloneError",
+  {
+    threadId: Schema.String,
+    action: Schema.Literals(["archive", "delete"]),
+    seatName: Schema.String,
+    crewName: Schema.String,
+    crewInstanceId: Schema.String,
+  },
+) {
   override get message(): string {
     return `This thread is seat ${this.seatName} of Crew ${this.crewName}. Crew members are never ${this.action === "archive" ? "archived" : "deleted"} one by one; retire the whole Crew with Archive crew on the Fleet page in J5 on web or desktop, or message the member instead.`;
   }

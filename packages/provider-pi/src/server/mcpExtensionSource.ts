@@ -303,7 +303,7 @@ export default async function t3McpExtension(pi: ExtensionAPI) {
   // Only a tier the active model advertises is sent; Standard sends none.
   let serviceTier: string | undefined;
   pi.registerCommand(SERVICE_TIER_COMMAND, {
-    description: "Set the service tier T3 Code sends with provider requests",
+    description: "Set the service tier J5 Code sends with provider requests",
     handler: async (args) => {
       serviceTier = args.trim() || undefined;
     },

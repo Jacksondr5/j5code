@@ -54,6 +54,7 @@ export interface LineMuxOptions {
   readonly maxUnreadBytes: number;
 }
 
+// @effect-diagnostics-next-line extendsNativeError:off -- a Node stream's destroy error, handed to Node callbacks.
 export class LineClosedError extends Error {
   override readonly name = "LineClosedError";
 }

@@ -176,8 +176,11 @@ import * as SqlitePersistence from "./persistence/Sqlite.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import * as ProjectEnrichment from "./project/ProjectEnrichmentService.ts";
 import * as ProjectService from "./project/ProjectService.ts";
-import { PersonAccess } from "./j5/sharing/PersonAccess.ts";
-import { SharedConversation } from "./j5/sharing/SharedConversation.ts";
+import {
+  layerJ5ConnectionServices,
+  layerJ5WsRouteServices,
+} from "./j5/test-support/wsRpcServices.ts";
+import { J5_WS_RPC_METHODS } from "./j5/wsRpc.ts";
 import {
   layerWsRpc,
   resolveOpenDiscoveryForConfig,
@@ -969,6 +972,8 @@ it.live.each([
         }),
         ProviderInstallationGate.layer,
         FetchHttpClient.layer,
+        // J5: the services its route reads; this test calls none of its RPCs.
+        layerJ5WsRouteServices,
       );
       const context = yield* Layer.build(
         HttpRouter.serve(Ws.layer, { disableListenLog: true }).pipe(
@@ -1093,8 +1098,7 @@ it.effect.each([
           namedProjectsRoot: process.cwd(),
         }),
         // J5: a service session gets upstream's own answers (FORK.md case 69).
-        Layer.mock(PersonAccess)({ sessionReach: () => Effect.succeed({ kind: "service" }) }),
-        Layer.mock(SharedConversation)({}),
+        layerJ5ConnectionServices,
         Layer.mock(ScratchThreadPromotion.ScratchThreadPromotion)({}),
         Layer.mock(ServerEnvironment.ServerEnvironment)({
           getDescriptor: Effect.succeed({
@@ -1282,7 +1286,8 @@ it.effect("access changes made while the snapshot loads reach the client after i
       );
     const revokedElsewhere = AuthSessionId.make("revoked-elsewhere");
     const responses = yield* Queue.unbounded<AuthAccessStreamEvent>();
-    const server = yield* RpcServer.makeNoSerialization(WsRpcGroup, {
+    // J5: J5's RPCs are served by their own handler layer (j5/wsRpc.ts).
+    const server = yield* RpcServer.makeNoSerialization(WsRpcGroup.omit(...J5_WS_RPC_METHODS), {
       ...WS_RPC_SERVER_OPTIONS,
       onFromServer: (response) =>
         response._tag === "Chunk"
@@ -1307,11 +1312,14 @@ it.effect("access changes made while the snapshot loads reach the client after i
           yield* ServerBrowser.ServerBrowser,
           () => Effect.void,
           { secretReferences: true },
+          () => Effect.void,
         ).pipe(
           Layer.merge(RpcAuthorization.layer([AuthAccessReadScope])),
           Layer.provide(
             Layer.mergeAll(
               layerUnusedConfigRpcServices,
+              // J5: a service session gets upstream's own answers (FORK.md case 69).
+              layerJ5ConnectionServices,
               Layer.mock(ExternalLauncher.ExternalLauncher)({}),
               Layer.mock(ProviderRegistry.ProviderRegistry)({}),
               Layer.mock(UsageLimitSources.UsageLimitSources)({}),
@@ -1443,6 +1451,9 @@ it.effect("on-demand clients get provider config without workspace snapshots", (
         ),
         refresh: () => Effect.sync(() => registryProviders),
         refreshWorkspaceSnapshot: () => Effect.sync(() => registryProviders),
+        // J5: a machine refresh also rescans each instance's workspaces (refreshSkillProviders).
+        refreshInstance: () => Effect.sync(() => registryProviders),
+        getPendingWorkspaceCwds: () => Effect.succeed([]),
       }),
       Layer.mock(ProjectService.ProjectService)({
         workspaceScanDirectory: (cwd) => Effect.succeed(cwd),
@@ -1478,8 +1489,7 @@ it.effect("on-demand clients get provider config without workspace snapshots", (
         namedProjectsRoot: process.cwd(),
       }),
       // J5: a service session gets upstream's own answers (FORK.md case 69).
-      Layer.mock(PersonAccess)({ sessionReach: () => Effect.succeed({ kind: "service" }) }),
-      Layer.mock(SharedConversation)({}),
+      layerJ5ConnectionServices,
       Layer.mock(ScratchThreadPromotion.ScratchThreadPromotion)({}),
       Layer.mock(ServerEnvironment.ServerEnvironment)({
         getDescriptor: Effect.succeed({
@@ -1811,6 +1821,8 @@ it.effect("a missing thread worktree gets its project's skills in the cwd snapsh
     const responses = yield* Queue.unbounded<unknown>();
     const services = Layer.mergeAll(
       layerUnusedConfigRpcServices,
+      // J5: a service session gets upstream's own answers (FORK.md case 69).
+      layerJ5ConnectionServices,
       Layer.mock(ProviderRegistry.ProviderRegistry)({
         getProviders: Effect.succeed([provider]),
         refreshWorkspaceSnapshot: (input) =>
@@ -1888,6 +1900,7 @@ it.effect("a missing thread worktree gets its project's skills in the cwd snapsh
           yield* ServerBrowser.ServerBrowser,
           () => Effect.void,
           { secretReferences: true },
+          () => Effect.void,
         ).pipe(Layer.provide(services)),
       ),
     );
@@ -1933,6 +1946,8 @@ it.effect("a git action that fails partway still refreshes the repository status
     const exits = yield* Queue.unbounded<Exit.Exit<unknown, unknown>>();
     const services = Layer.mergeAll(
       layerUnusedConfigRpcServices,
+      // J5: a service session gets upstream's own answers (FORK.md case 69).
+      layerJ5ConnectionServices,
       Layer.mock(GitWorkflowService.GitWorkflowService)({
         runStackedAction: () => Effect.fail(failure),
       }),
@@ -1950,7 +1965,8 @@ it.effect("a git action that fails partway still refreshes the repository status
       Layer.mock(ServerEnvironment.ServerEnvironment)({}),
       Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
     );
-    const server = yield* RpcServer.makeNoSerialization(WsRpcGroup, {
+    // J5: J5's RPCs are served by their own handler layer (j5/wsRpc.ts).
+    const server = yield* RpcServer.makeNoSerialization(WsRpcGroup.omit(...J5_WS_RPC_METHODS), {
       ...WS_RPC_SERVER_OPTIONS,
       onFromServer: (response) =>
         response._tag === "Exit" ? Queue.offer(exits, response.exit) : Effect.void,
@@ -1967,6 +1983,7 @@ it.effect("a git action that fails partway still refreshes the repository status
           yield* ServerBrowser.ServerBrowser,
           () => Effect.void,
           { secretReferences: true },
+          () => Effect.void,
         ).pipe(
           Layer.provide(services),
           Layer.merge(RpcAuthorization.layer([AuthSourceControlWriteScope])),
@@ -2000,6 +2017,8 @@ it.effect("a publish whose push fails still refreshes the new remote", () =>
     const exits = yield* Queue.unbounded<string>();
     const services = Layer.mergeAll(
       layerUnusedConfigRpcServices,
+      // J5: a service session gets upstream's own answers (FORK.md case 69).
+      layerJ5ConnectionServices,
       Layer.mock(SourceControlRepositoryService.SourceControlRepositoryService)({
         publishRepository: (input) =>
           Effect.fail(
@@ -2030,7 +2049,8 @@ it.effect("a publish whose push fails still refreshes the new remote", () =>
       Layer.mock(ServerEnvironment.ServerEnvironment)({}),
       Layer.mock(EnvironmentAuth.EnvironmentAuth)({}),
     );
-    const server = yield* RpcServer.makeNoSerialization(WsRpcGroup, {
+    // J5: J5's RPCs are served by their own handler layer (j5/wsRpc.ts).
+    const server = yield* RpcServer.makeNoSerialization(WsRpcGroup.omit(...J5_WS_RPC_METHODS), {
       ...WS_RPC_SERVER_OPTIONS,
       onFromServer: (response) =>
         response._tag === "Exit" ? Queue.offer(exits, response.exit._tag) : Effect.void,
@@ -2047,6 +2067,7 @@ it.effect("a publish whose push fails still refreshes the new remote", () =>
           yield* ServerBrowser.ServerBrowser,
           () => Effect.void,
           { secretReferences: true },
+          () => Effect.void,
         ).pipe(
           Layer.provide(services),
           Layer.merge(RpcAuthorization.layer([AuthSourceControlWriteScope])),
@@ -2519,6 +2540,8 @@ it.effect("ACP session RPCs list a thread missing its history and repair it on i
     } as unknown as ProviderInstance;
     const dependencies = Layer.mergeAll(
       layerUnusedConfigRpcServices,
+      // J5: a service session gets upstream's own answers (FORK.md case 69).
+      layerJ5ConnectionServices,
       Layer.fresh(layerConfigSources),
       Layer.mock(ExternalLauncher.ExternalLauncher)({}),
       Layer.mock(ProviderRegistry.ProviderRegistry)({}),
@@ -2580,6 +2603,7 @@ it.effect("ACP session RPCs list a thread missing its history and repair it on i
           yield* ServerBrowser.ServerBrowser,
           () => Effect.void,
           { secretReferences: true },
+          () => Effect.void,
         ).pipe(
           Layer.provide(services),
           Layer.merge(

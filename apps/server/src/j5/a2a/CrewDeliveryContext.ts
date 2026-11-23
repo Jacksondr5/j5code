@@ -86,8 +86,10 @@ export const layer = Layer.effect(
               commandType: command.type,
             });
           }
+          // Upstream's "auto" intent would start an idle thread at once, before its worktree.
+          const { deliveryIntent: _auto, ...undirected } = command;
           return yield* inner.dispatch({
-            ...command,
+            ...undirected,
             dispatchMode: {
               type: "defer_start",
               // The saved commit is the base, and it is never fetched forward: a seat saved

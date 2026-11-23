@@ -40,10 +40,10 @@ export interface RegisterMachineParticipantInput {
 
 export class MachineParticipantInvalidNameError extends Schema.TaggedError<MachineParticipantInvalidNameError>()(
   "MachineParticipantInvalidNameError",
-  { name: Schema.String },
+  { participantName: Schema.String },
 ) {
   override get message(): string {
-    return `Machine participant name "${this.name}" is invalid. Use 1-64 lowercase letters, digits, or hyphens, starting with a letter or digit.`;
+    return `Machine participant name "${this.participantName}" is invalid. Use 1-64 lowercase letters, digits, or hyphens, starting with a letter or digit.`;
   }
 }
 
@@ -149,7 +149,7 @@ export const layer: Layer.Layer<MachineParticipantService, never, A2ALedger | Sq
         "j5.a2a.machine.register",
       )(function* (input) {
         if (!MACHINE_PARTICIPANT_NAME_PATTERN.test(input.name)) {
-          return yield* new MachineParticipantInvalidNameError({ name: input.name });
+          return yield* new MachineParticipantInvalidNameError({ participantName: input.name });
         }
         const participantId = machineParticipantIdForName(input.name);
         const projects = yield* sql<{ readonly project_id: string }>`

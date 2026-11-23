@@ -18,6 +18,7 @@ import {
   DEV_PROXIED_PATH_PREFIXES,
 } from "@t3tools/shared/devProxy";
 
+import { J5_BRANDING } from "../../scripts/lib/j5-branding";
 import { loadRepoEnv } from "../../scripts/lib/public-config";
 import { resolveTaggedSourceVersion } from "../../scripts/lib/tagged-source-version";
 import { thirdPartyLicensesPlugin } from "../../scripts/lib/third-party-licenses";
@@ -284,7 +285,7 @@ function bootstrapTitlePlugin(): Plugin {
         hostedAppChannel: configuredHostedAppChannel,
         development,
       });
-      const title = formatAppDisplayName({ baseName: "T3 Code", stageLabel });
+      const title = formatAppDisplayName({ baseName: J5_BRANDING.desktop.baseName, stageLabel });
       return html.replace(/<title>[^<]*<\/title>/, `<title>${title}</title>`);
     },
   };

@@ -506,7 +506,7 @@ const spawnHarness = (input: {
       ),
       Layer.provideMerge(dependencies),
     );
-    const call = (args: J5SpawnAgentInput) =>
+    const call = (args: Schema.Json) =>
       Effect.gen(function* () {
         const toolkit = yield* J5Toolkit;
         return yield* toolkit

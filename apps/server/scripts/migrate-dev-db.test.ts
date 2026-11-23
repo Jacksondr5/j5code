@@ -13,6 +13,7 @@ import {
 } from "../src/j5/a2a/Migrations.ts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { runMigrateDevDb } from "./migrate-dev-db.ts";
+import { setProcessHome } from "../src/j5/test-support/processEnv.ts";
 
 const withDatabase = <A, E, R>(
   databasePath: string,
@@ -550,10 +551,10 @@ it.layer(NodeServices.layer)("migrate-dev-db", (it) => {
         { baseDir: destDir, source, projects: 5, threadsPerProject: 10 },
         { sharedHome: sourceDir },
       ).pipe(Effect.flip);
-      assert.equal(error._tag, "MigrateDevDbPhaseError");
-      if (error._tag === "MigrateDevDbPhaseError") {
-        assert.equal(error.phase, "snapshot");
-        assert.include(String(error.cause), "thread_notes -> orchestration_v2_projection_threads");
+      // Upstream wraps only the copy's SQL failures in the snapshot phase error.
+      assert.equal(error._tag, "MigrateDevDbOrphanedRowsError");
+      if (error._tag === "MigrateDevDbOrphanedRowsError") {
+        assert.include(error.references, "thread_notes -> orchestration_v2_projection_threads");
       }
     }),
   );
@@ -714,33 +715,17 @@ it.layer(NodeServices.layer)("migrate-dev-db", (it) => {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const home = yield* fs.makeTempDirectoryScoped({ prefix: "migrate-dev-db-homes-" });
-      const originalHome = process.env.HOME;
-      const originalUserProfile = process.env.USERPROFILE;
-      try {
-        process.env.HOME = home;
-        process.env.USERPROFILE = home;
-        for (const name of [".t3", ".j5code"]) {
-          const baseDir = path.join(home, name);
-          const source = yield* createFixtureSource(baseDir);
-          const error = yield* runMigrateDevDb({
-            baseDir,
-            source,
-            projects: 5,
-            threadsPerProject: 10,
-          }).pipe(Effect.flip);
-          assert.equal(error._tag, "MigrateDevDbSharedHomeError");
-        }
-      } finally {
-        if (originalHome === undefined) {
-          delete process.env.HOME;
-        } else {
-          process.env.HOME = originalHome;
-        }
-        if (originalUserProfile === undefined) {
-          delete process.env.USERPROFILE;
-        } else {
-          process.env.USERPROFILE = originalUserProfile;
-        }
+      yield* setProcessHome(home);
+      for (const name of [".t3", ".j5code"]) {
+        const baseDir = path.join(home, name);
+        const source = yield* createFixtureSource(baseDir);
+        const error = yield* runMigrateDevDb({
+          baseDir,
+          source,
+          projects: 5,
+          threadsPerProject: 10,
+        }).pipe(Effect.flip);
+        assert.equal(error._tag, "MigrateDevDbSharedHomeError");
       }
     }),
   );

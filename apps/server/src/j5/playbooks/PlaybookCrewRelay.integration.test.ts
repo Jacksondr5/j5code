@@ -32,6 +32,7 @@ import * as RuntimeLayer from "../../orchestration-v2/runtimeLayer.ts";
 import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import { ProjectEnrichmentService } from "../../project/ProjectEnrichmentService.ts";
 import { ProjectService } from "../../project/ProjectService.ts";
+import * as ModelManifest from "../../provider/ModelManifest.ts";
 import { ProviderInstanceRegistry } from "../../provider/ProviderInstanceRegistry.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { SourceControlProviderRegistry } from "../../sourceControl/SourceControlProviderRegistry.ts";
@@ -111,6 +112,7 @@ const TestLayer = Layer.mergeAll(
         }),
       readRepositoryIdentity: () => Effect.succeed(null),
       invalidate: () => Effect.void,
+      refreshRepositoryIdentity: () => Effect.void,
       subscribeChanges: Effect.never,
     }),
   ),
@@ -130,14 +132,17 @@ const TestLayer = Layer.mergeAll(
   Layer.provide(ServerConfigLayer),
   Layer.provide(ServerSettingsService.layerTest()),
   Layer.provide(
-    Layer.succeed(ProviderInstanceRegistry, {
-      getInstance: (instanceId) =>
-        Effect.succeed(instanceId === providerInstance.instanceId ? providerInstance : undefined),
-      listInstances: Effect.succeed([providerInstance]),
-      listUnavailable: Effect.succeed([]),
-      streamChanges: Stream.empty,
-      subscribeChanges: Effect.never,
-    }),
+    Layer.merge(
+      ModelManifest.layerTest,
+      Layer.succeed(ProviderInstanceRegistry, {
+        getInstance: (instanceId) =>
+          Effect.succeed(instanceId === providerInstance.instanceId ? providerInstance : undefined),
+        listInstances: Effect.succeed([providerInstance]),
+        listUnavailable: Effect.succeed([]),
+        streamChanges: Stream.empty,
+        subscribeChanges: Effect.never,
+      }),
+    ),
   ),
   Layer.provideMerge(Layer.mergeAll(ledgerLayer, crewInstanceLayer)),
   Layer.provideMerge(SqlitePersistence.layerMemory),

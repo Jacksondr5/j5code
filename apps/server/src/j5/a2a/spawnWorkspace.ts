@@ -11,7 +11,6 @@ import {
   type ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -158,11 +157,14 @@ const NO_WORKSPACE_OPTIONS: CrewWorkspaceOptions = {
   worktrees: [],
 };
 
-export class SpawnWorkspaceError extends Data.TaggedError("SpawnWorkspaceError")<{
-  readonly detail: string;
-  readonly nextStep: string;
-  readonly cause?: unknown;
-}> {
+export class SpawnWorkspaceError extends Schema.TaggedError<SpawnWorkspaceError>()(
+  "SpawnWorkspaceError",
+  {
+    detail: Schema.String,
+    nextStep: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+) {
   override get message(): string {
     return this.detail;
   }

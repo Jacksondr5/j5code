@@ -11,6 +11,7 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 
@@ -47,6 +48,11 @@ import {
   LedgerProjectId,
   type StoredCommEvent,
 } from "./contracts.ts";
+
+const isArchiveAgentConfirmationRequiredError = Schema.is(ArchiveAgentConfirmationRequiredError);
+const isArchiveAgentConfirmationStaleError = Schema.is(ArchiveAgentConfirmationStaleError);
+const isArchiveAgentConfirmationTokenError = Schema.is(ArchiveAgentConfirmationTokenError);
+const isArchiveAgentPartialFailureError = Schema.is(ArchiveAgentPartialFailureError);
 
 const ledgerProjectId = LedgerProjectId.make("ledger:archive-agent");
 const exchangeProjectId = LedgerProjectId.make("project:archive-agent:counterparty");
@@ -326,7 +332,7 @@ it.effect("closes cross-project consequences before returning archived", () => {
     const service = yield* ArchiveAgentService;
     const refusal = yield* Effect.flip(service.archive(archiveInput()));
     assert.instanceOf(refusal, ArchiveAgentConfirmationRequiredError);
-    if (!(refusal instanceof ArchiveAgentConfirmationRequiredError)) return;
+    if (!isArchiveAgentConfirmationRequiredError(refusal)) return;
     assert.deepStrictEqual(
       refusal.facts.openExchanges.map((fact) => fact.exchangeId),
       [exchangeId],
@@ -366,7 +372,7 @@ it.effect("stops the delegates of a seat its first stop left idle before archivi
     const service = yield* ArchiveAgentService;
     const refusal = yield* Effect.flip(service.archive(archiveInput()));
     assert.instanceOf(refusal, ArchiveAgentConfirmationRequiredError);
-    if (!(refusal instanceof ArchiveAgentConfirmationRequiredError)) return;
+    if (!isArchiveAgentConfirmationRequiredError(refusal)) return;
     // The Stop commits and ends the turn, then stopping the seat's delegates fails.
     yield* Effect.flip(service.archive(archiveInput(refusal.confirmationToken)));
     harness.settleRun();
@@ -394,7 +400,7 @@ it.effect("rejects malformed and unknown-version tokens before reading target fa
       return yield* Effect.flip((yield* ArchiveAgentService).archive(archiveInput("not-a-token")));
     }).pipe(Effect.provide(malformedHarness.layer));
     assert.instanceOf(malformed, ArchiveAgentConfirmationTokenError);
-    if (malformed instanceof ArchiveAgentConfirmationTokenError) {
+    if (isArchiveAgentConfirmationTokenError(malformed)) {
       assert.equal(malformed.reason, "malformed");
     }
     assert.equal(malformedHarness.snapshot().factReads, 0);
@@ -405,7 +411,7 @@ it.effect("rejects malformed and unknown-version tokens before reading target fa
       );
     }).pipe(Effect.provide(unknownHarness.layer));
     assert.instanceOf(unknown, ArchiveAgentConfirmationTokenError);
-    if (unknown instanceof ArchiveAgentConfirmationTokenError) {
+    if (isArchiveAgentConfirmationTokenError(unknown)) {
       assert.equal(unknown.reason, "unsupported-version");
     }
     assert.equal(unknownHarness.snapshot().factReads, 0);
@@ -432,12 +438,12 @@ it.effect("rejects a stale token after consequential target facts change", () =>
     const service = yield* ArchiveAgentService;
     const refusal = yield* Effect.flip(service.archive(archiveInput()));
     assert.instanceOf(refusal, ArchiveAgentConfirmationRequiredError);
-    if (!(refusal instanceof ArchiveAgentConfirmationRequiredError)) return;
+    if (!isArchiveAgentConfirmationRequiredError(refusal)) return;
 
     harness.settleRun();
     const stale = yield* Effect.flip(service.archive(archiveInput(refusal.confirmationToken)));
     assert.instanceOf(stale, ArchiveAgentConfirmationStaleError);
-    if (stale instanceof ArchiveAgentConfirmationStaleError) {
+    if (isArchiveAgentConfirmationStaleError(stale)) {
       assert.isNotNull(stale.confirmationToken);
       assert.isNull(stale.facts.runningTurn);
       assert.deepStrictEqual(
@@ -462,11 +468,11 @@ it.effect("recovers forward after a committed thread archive and incomplete noti
     const service = yield* ArchiveAgentService;
     const refusal = yield* Effect.flip(service.archive(archiveInput()));
     assert.instanceOf(refusal, ArchiveAgentConfirmationRequiredError);
-    if (!(refusal instanceof ArchiveAgentConfirmationRequiredError)) return;
+    if (!isArchiveAgentConfirmationRequiredError(refusal)) return;
 
     const partial = yield* Effect.flip(service.archive(archiveInput(refusal.confirmationToken)));
     assert.instanceOf(partial, ArchiveAgentPartialFailureError);
-    if (partial instanceof ArchiveAgentPartialFailureError) {
+    if (isArchiveAgentPartialFailureError(partial)) {
       assert.isTrue(partial.interruptRequested);
       assert.isTrue(partial.threadArchived);
       assert.isFalse(partial.participantRetired);

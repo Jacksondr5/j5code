@@ -220,19 +220,22 @@ describe("J5 orchestration instructions", () => {
 
   it("carries upstream's thread, secret, schedule, and visuals guidance", () => {
     assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "`t3_thread_read` it before you answer about it");
+    assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "Asked to settle a thread, this one too");
     assert.include(
       J5_ORCHESTRATION_INSTRUCTIONS,
-      "In your reply, mention a thread by its `link`, verbatim.",
+      "In your reply, mention a thread by its `link`, verbatim,",
     );
     // J5's tools return a link too, so no fallback for writing one by hand.
     assert.notInclude(J5_ORCHESTRATION_INSTRUCTIONS, "t3-thread://v1/");
-    assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "call `request_secret` yourself");
+    assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "call `request_secret`, not a chat ask");
     assert.include(J5_ORCHESTRATION_INSTRUCTIONS, '`delivery: "file"`');
-    assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "Never ask in chat or invent one");
+    assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "sudo -S -p ''");
     assert.include(
       J5_ORCHESTRATION_INSTRUCTIONS,
-      "When asked only to schedule, `schedule_task` without running its prompt",
+      "Asked only to schedule: `schedule_task` without running its prompt",
     );
+    // Upstream's `send_to_user` shows content; what the person must act on stays an Inbox ask.
+    assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "Inbox ask with `j5_send_message`");
     assert.include(J5_ORCHESTRATION_INSTRUCTIONS, "### Visuals and preview");
     assert.include(
       J5_ORCHESTRATION_INSTRUCTIONS,

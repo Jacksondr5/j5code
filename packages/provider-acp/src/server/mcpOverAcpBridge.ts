@@ -214,7 +214,7 @@ export const makeAcpMcpOverAcpBridge = Effect.fn("AcpMcpOverAcpBridge.make")(fun
           orElse: () =>
             Effect.fail(
               new AcpMcpOverAcpError({
-                message: "T3 Code MCP endpoint did not answer disconnect.",
+                message: "J5 Code MCP endpoint did not answer disconnect.",
               }),
             ),
         }),

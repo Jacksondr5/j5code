@@ -145,10 +145,10 @@ const REPLAY_SPACING_MS = 20 * 60 * 1000;
 
 class LiveTestHomeReplayError extends Schema.TaggedError<LiveTestHomeReplayError>()(
   "LiveTestHomeReplayError",
-  { name: Schema.String, cause: Schema.Defect() },
+  { replay: Schema.String, cause: Schema.Defect() },
 ) {
   override get message(): string {
-    return `Replaying ${this.name} into the live-test home failed.`;
+    return `Replaying ${this.replay} into the live-test home failed.`;
   }
 }
 
@@ -229,6 +229,37 @@ function registerProject(input: {
   } finally {
     database.close();
   }
+}
+
+const isThreadNameSet = Schema.is(
+  Schema.Struct({
+    method: Schema.Literal("thread/name/set"),
+    params: Schema.Struct({ name: Schema.String }),
+  }),
+);
+
+/**
+ * Codex is told the app thread's title, and this home retitles each thread, so the recorded
+ * request names the thread the way the home does.
+ */
+function withRetitledNativeThread(
+  recorded: ProviderReplayTranscript,
+  title: (recordedTitle: string) => string,
+): ProviderReplayTranscript {
+  return {
+    ...recorded,
+    entries: recorded.entries.map((entry) =>
+      entry.type === "expect_outbound" && isThreadNameSet(entry.frame)
+        ? {
+            ...entry,
+            frame: {
+              ...entry.frame,
+              params: { ...entry.frame.params, name: title(entry.frame.params.name) },
+            },
+          }
+        : entry,
+    ),
+  };
 }
 
 const isAgentMessage = Schema.is(Schema.Struct({ type: Schema.Literal("agentMessage") }));
@@ -334,7 +365,16 @@ const replayFixture = Effect.fn("liveTestHome.replayFixture")(function* <
   const read = yield* readProviderReplayTranscript(input.variant.transcriptFile).pipe(
     Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
   );
-  const recorded = input.state === "question" ? asAsyncQuestion(read) : read;
+  // The fixture allocates a project id that nothing creates; its commands go to
+  // ours instead. Both drivers of a fixture share a title, so name the driver.
+  const title = (recordedTitle: string) =>
+    input.state === undefined
+      ? `${recordedTitle} (${input.variant.driver === "codex" ? "Codex" : "Claude"})`
+      : LIVE_TEST_STATE_TITLES[input.state];
+  const recorded = withRetitledNativeThread(
+    input.state === "question" ? asAsyncQuestion(read) : read,
+    title,
+  );
   const lastLabel = input.variant.transcriptEntriesThroughLabel;
   const lastIndex = recorded.entries.findIndex(
     (entry) => entry.type === "emit_inbound" && entry.label === lastLabel,
@@ -359,12 +399,6 @@ const replayFixture = Effect.fn("liveTestHome.replayFixture")(function* <
     driver: input.variant.driver,
     modelSelection: input.variant.modelSelection,
   }).pipe(Effect.provide(IdAllocator.layer));
-  // The fixture allocates a project id that nothing creates; its commands go to
-  // ours instead. Both drivers of a fixture share a title, so name the driver.
-  const title = (recordedTitle: string) =>
-    input.state === undefined
-      ? `${recordedTitle} (${input.variant.driver === "codex" ? "Codex" : "Claude"})`
-      : LIVE_TEST_STATE_TITLES[input.state];
   const retarget = (command: OrchestrationV2Command): OrchestrationV2Command =>
     command.type === "thread.create"
       ? {
@@ -509,7 +543,7 @@ export const buildLiveTestHome = Effect.fn("buildLiveTestHome")(function* (input
   const finishReplay = <Error>(name: string, replay: Effect.Effect<string, Error, Scope.Scope>) =>
     replay.pipe(
       Effect.scoped,
-      Effect.mapError((cause) => new LiveTestHomeReplayError({ name, cause })),
+      Effect.mapError((cause) => new LiveTestHomeReplayError({ replay: name, cause })),
     );
   for (const [index, [fixtureName, driver, state]] of replays.entries()) {
     const fixture = ORCHESTRATOR_REPLAY_FIXTURES.find((entry) => entry.name === fixtureName);

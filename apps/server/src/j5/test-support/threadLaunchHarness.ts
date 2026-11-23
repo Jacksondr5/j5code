@@ -3,6 +3,7 @@ import * as CrewDeliveryContext from "../a2a/CrewDeliveryContext.ts";
 import * as ProjectCloneTracker from "../../project/ProjectCloneTracker.ts";
 import * as WorktreeSetupTracker from "../../project/WorktreeSetupTracker.ts";
 import * as TerminalManager from "../../terminal/Manager.ts";
+import * as CheckpointStore from "../../checkpointing/CheckpointStore.ts";
 import { vi } from "@effect/vitest";
 import {
   ProjectId,
@@ -134,6 +135,9 @@ export function makeHarness(options: HarnessOptions = {}) {
     WorktreeSetupTracker.layer,
     Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({ get: () => Effect.succeed(null) }),
     Layer.mock(TerminalManager.TerminalManager)({ close: () => Effect.void }),
+    Layer.mock(CheckpointStore.CheckpointStore)({
+      isGitRepository: () => Effect.succeed(true),
+    }),
     Layer.succeed(ProjectService.ProjectService, {
       create: Effect.fn("ProjectService.ProjectService.create")(function () {
         return Effect.die("unused");
@@ -155,6 +159,11 @@ export function makeHarness(options: HarnessOptions = {}) {
           return Effect.succeedSome(project);
         },
       ),
+      workspaceScanDirectory: Effect.fn("ProjectService.ProjectService.workspaceScanDirectory")(
+        function () {
+          return Effect.die("unused");
+        },
+      ),
       snapshot: Effect.die("unused"),
       getShell: Effect.fn("ProjectService.ProjectService.getShell")(function () {
         return Effect.die("unused");
@@ -167,13 +176,23 @@ export function makeHarness(options: HarnessOptions = {}) {
       }),
     }),
     Layer.mock(GitWorkflow.GitWorkflowService)({
+      repositoryRoot: () => Effect.succeed(project.workspaceRoot),
       createWorktree,
       renameBranch,
       fetchRemote: options.fetchRemote ?? (() => Effect.void),
-      hasCommit: () => Effect.succeed(false),
+      fetchWorktreeBaseCommit: () =>
+        Effect.succeed({ commitSha: "remote-main-sha", remoteRefName: "origin/main" }),
+      // The faked repository has the base ref a launch asks for, so upstream keeps it as given.
+      hasCommit: () => Effect.succeed(true),
+      currentBranch: () => Effect.succeed(null),
+      resolveWorktreeBaseRemote: () => Effect.succeed({ remoteName: "origin", branchName: "main" }),
+      resolvePrimaryRemoteName: () => Effect.succeed("origin"),
+      resolveDefaultBranchName: () => Effect.succeed("main"),
       remoteExists: () => Effect.succeed(true),
       remoteBranchExists: () => Effect.succeed(true),
+      listLocalBranchNames: () => Effect.succeed([]),
       removeWorktree: () => Effect.void,
+      deleteLocalBranch: () => Effect.void,
       resolveRemoteTrackingCommit: () =>
         Effect.succeed({ commitSha: "remote-main-sha", remoteRefName: "origin/main" }),
     }),
@@ -194,7 +213,9 @@ export function makeHarness(options: HarnessOptions = {}) {
     }),
   );
   const launch = ThreadLaunch.layer.pipe(
-    Layer.provide(Layer.mergeAll(externalServices, threadManagement, receipts, IdAllocator.layer)),
+    Layer.provide(
+      Layer.mergeAll(externalServices, threadManagement, receipts, orchestrator, IdAllocator.layer),
+    ),
   );
   const projectedProjects = Layer.mock(ProjectStore.ProjectStoreV2)({
     get: (requestedProjectId) =>
@@ -206,6 +227,7 @@ export function makeHarness(options: HarnessOptions = {}) {
               workspaceRoot: project.workspaceRoot,
               defaultModelSelection: project.defaultModelSelection,
               defaultThreadEnvMode: null,
+              hasCustomTitle: false,
               autoPull: false,
               faviconPath: null,
               projectIcon: null,

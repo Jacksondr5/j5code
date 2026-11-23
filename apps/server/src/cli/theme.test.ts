@@ -5,7 +5,6 @@ import * as NodePath from "node:path";
 
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import * as ConfigProvider from "effect/ConfigProvider";
 import * as NetService from "@t3tools/shared/Net";
 import { assert, describe, it } from "@effect/vitest";
 import * as ConfigProvider from "effect/ConfigProvider";
@@ -88,7 +87,8 @@ describe("t3 theme", () => {
   it.effect("sets the theme of a dev server running in the default home", () =>
     Effect.gen(function* () {
       const home = makeBaseDir();
-      const devStateDir = NodePath.join(home, ".t3", "dev");
+      // J5: the default home is ~/.j5code (FORK.md case 15).
+      const devStateDir = NodePath.join(home, ".j5code", "dev");
       NodeFS.mkdirSync(devStateDir, { recursive: true });
       NodeFS.writeFileSync(
         NodePath.join(devStateDir, "server-runtime.json"),
@@ -109,7 +109,7 @@ describe("t3 theme", () => {
       );
 
       assert.equal(
-        NodeFS.existsSync(NodePath.join(home, ".t3", "userdata", "settings.json")),
+        NodeFS.existsSync(NodePath.join(home, ".j5code", "userdata", "settings.json")),
         false,
       );
       if (result._tag === "Success") {
