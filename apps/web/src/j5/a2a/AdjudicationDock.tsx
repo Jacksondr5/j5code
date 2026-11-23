@@ -24,13 +24,15 @@ import {
 } from "@t3tools/client-runtime/j5/adjudication-dock";
 import {
   AnswerAttachButton,
-  AnswerAttachmentList,
+  AnswerAttachmentStrip,
+  AnswerDropOverlay,
   answerAttachmentInputHandlers,
+  useAnswerAttachmentIntake,
   useAnswerAttachmentSupport,
   useAnswerAttachments,
-  useRestoredAnswerUploads,
+  useAnswerUploads,
 } from "./AnswerAttachments";
-import { AnswerSendErrorAlert } from "./AnswerSendErrorAlert";
+import { AnswerErrorAlert } from "./AnswerErrorAlert";
 import { InboxReplyEditor } from "./InboxReplyEditor";
 import { J5RecordPanel } from "./J5RecordPanel";
 import { answerToDeliver, useAnswerSends } from "./answerSends";
@@ -102,11 +104,14 @@ export function AdjudicationDock(props: {
   });
   const view = pickShownAsk(asks, picked);
   const attachments = useAnswerAttachments();
-  useRestoredAnswerUploads(
-    view === null ? "" : keyOf(view.shown),
-    environmentId,
-    captain && mayAnswer && view !== null,
-  );
+  const shownKey = view === null ? "" : keyOf(view.shown);
+  useAnswerUploads(shownKey, environmentId, captain && mayAnswer && view !== null);
+  const intake = useAnswerAttachmentIntake({
+    answerKey: shownKey,
+    support,
+    onError: (message) => attachments.setError(shownKey, message),
+  });
+  const [dragActive, setDragActive] = useState(false);
   if (!captain || !mayAnswer || environmentId === undefined || view === null) return null;
   const { shown, others, next: nextAsk } = view;
   const isOpen = (query.data?.items ?? []).some((item) => item.exchangeId === shown.exchangeId);
@@ -119,21 +124,24 @@ export function AdjudicationDock(props: {
   const openFor = formatElapsedDurationLabel(shown.openedAt);
   const threadRef = threadId == null ? undefined : scopeThreadRef(environmentId, threadId);
 
-  const readiness = attachments.ready(answerKey, environmentId);
+  const readiness = attachments.ready(answerKey, environmentId, intake.preparing);
   const waitingOn = "blocked" in readiness ? readiness.blocked : null;
-  const addFiles =
-    support === null || !isOpen || pending
-      ? null
-      : (files: ReadonlyArray<File>) =>
-          attachments.add(answerKey, environmentId, support.maxFileBytes, files);
+  const addFiles = support === null || !isOpen || pending ? null : intake.addFiles;
   const sendable = isOpen && message !== null && waitingOn === null;
   // The whole ask takes a dropped file while it can, so the thread never takes it too; when it
   // can't, a drop on it goes to the thread as anywhere else.
-  const fileInput = addFiles === null ? null : answerAttachmentInputHandlers(addFiles);
+  const fileInput =
+    addFiles === null ? null : answerAttachmentInputHandlers(addFiles, setDragActive);
   const dropTarget =
     fileInput === null
       ? {}
-      : { ...ownFileDropTargetProps, onDragOver: fileInput.onDragOver, onDrop: fileInput.onDrop };
+      : {
+          ...ownFileDropTargetProps,
+          onDragEnter: fileInput.onDragEnter,
+          onDragOver: fileInput.onDragOver,
+          onDragLeave: fileInput.onDragLeave,
+          onDrop: fileInput.onDrop,
+        };
 
   const answer = async () => {
     if (!sendable || message === null || "blocked" in readiness) return;
@@ -186,7 +194,12 @@ export function AdjudicationDock(props: {
   return (
     <ComposerBanner.Attachment>
       <ComposerBanner.Root density="comfortable" data-testid="adjudication-dock">
-        <div className="flex flex-col gap-2 px-2 py-1" {...dropTarget} {...claimComposerShortcuts}>
+        <div
+          className="relative flex flex-col gap-2 px-2 py-1"
+          {...dropTarget}
+          {...claimComposerShortcuts}
+        >
+          {dragActive && fileInput !== null ? <AnswerDropOverlay /> : null}
           <div className="flex flex-wrap items-center gap-2 text-muted-foreground">
             <span>Question for you</span>
             {openFor ? <span>· open {openFor}</span> : null}
@@ -242,15 +255,16 @@ export function AdjudicationDock(props: {
             readOnly={!isOpen}
             value={words}
           />
-          <AnswerAttachmentList
+          <AnswerAttachmentStrip
             answerKey={answerKey}
-            attachments={attachments.list(answerKey)}
+            delivering={pending}
             environmentId={environmentId}
             error={attachments.error(answerKey)}
-            onRemove={pending ? null : (id) => attachments.remove(answerKey, id)}
+            intake={intake}
+            support={support}
           />
           {/* As upstream's composer: the error shows, the words stay, and sending again retries. */}
-          {error === null ? null : <AnswerSendErrorAlert message={error} />}
+          {error === null ? null : <AnswerErrorAlert message={error} />}
           <div className="flex items-center justify-end gap-2">
             {addFiles === null ? null : (
               <AnswerAttachButton
