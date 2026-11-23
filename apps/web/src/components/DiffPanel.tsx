@@ -202,6 +202,8 @@ interface DiffPanelProps {
   composerDraftTarget: ScopedThreadRef | DraftId;
   workspaceMutationId: string | null;
   visible: boolean;
+  /** J5 (case 127): the thread whose diff to show where the route names none, such as the Inbox. */
+  threadRef?: ScopedThreadRef | undefined;
 }
 
 export default function DiffPanel({
@@ -209,6 +211,7 @@ export default function DiffPanel({
   composerDraftTarget,
   workspaceMutationId,
   visible,
+  threadRef,
 }: DiffPanelProps) {
   const resolvedTheme = useRenderedAppearance();
   const settings = useClientSettings((settings) => ({
@@ -232,7 +235,8 @@ export default function DiffPanel({
   const [openCommitMenu, setOpenCommitMenu] = useState<ReviewBranchCommitsResult | null>(null);
   const [codeViewRevision, setCodeViewRevision] = useState(0);
 
-  const routeThreadRef = useThreadRouteRef();
+  const routeThreadRefFromRoute = useThreadRouteRef();
+  const routeThreadRef = threadRef ?? routeThreadRefFromRoute;
   const activeThreadId = routeThreadRef?.threadId ?? null;
   const activeThread = useQuietThreadShell(routeThreadRef);
   const fileAccess = useFilesystemReadAccess(activeThread?.environmentId ?? null);
