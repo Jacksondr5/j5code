@@ -161,19 +161,11 @@ describe("toolsExpiryOf", () => {
     ])[0]!;
   const at = (iso: string) => ({ expiresAt: DateTime.makeUnsafe(iso) });
 
-  it("is the earlier direction's, warns in the last five days, and is expired when either is", () => {
+  it("is the earlier direction's, and is expired when either is", () => {
     expect(toolsExpiryOf(pairWith(null, null), NOW)).toEqual({ kind: "none" });
     expect(
       toolsExpiryOf(pairWith(at("2026-12-10T00:00:00.000Z"), at("2026-12-01T00:00:00.000Z")), NOW),
-    ).toMatchObject({ kind: "running", soon: false, at: at("2026-12-01T00:00:00.000Z").expiresAt });
-    expect(
-      toolsExpiryOf(pairWith(at("2026-11-24T12:00:00.000Z"), null), NOW),
-      "five days is inside upstream's warning",
-    ).toMatchObject({ kind: "running", soon: true });
-    expect(toolsExpiryOf(pairWith(at("2026-11-24T12:00:01.000Z"), null), NOW)).toMatchObject({
-      kind: "running",
-      soon: false,
-    });
+    ).toEqual({ kind: "running", at: at("2026-12-01T00:00:00.000Z").expiresAt });
     expect(
       toolsExpiryOf(pairWith(at("2026-12-10T00:00:00.000Z"), at("2026-11-17T00:00:00.000Z")), NOW),
     ).toMatchObject({ kind: "expired" });

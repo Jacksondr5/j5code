@@ -14,9 +14,21 @@ import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientError from "effect/http/HttpClientError";
 import * as HttpClientResponse from "effect/http/HttpClientResponse";
 
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+
+import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
+import * as ServerConfig from "../../config.ts";
 import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
 import * as PeerLinks from "../../peer/PeerLinks.ts";
-import { EnvironmentLinkService, layerOver, LINE_WAIT } from "./EnvironmentLinkService.ts";
+import * as Sqlite from "../../persistence/Sqlite.ts";
+import * as ServerSettings from "../../serverSettings.ts";
+import {
+  EnvironmentLinkService,
+  layerOver,
+  LINE_WAIT,
+  noOwnLoopback,
+} from "./EnvironmentLinkService.ts";
 import { LineClosedError } from "./line/LineMux.ts";
 import { LineRegistry, type LineUp } from "./line/LineRegistry.ts";
 
@@ -51,6 +63,8 @@ const makeLayer = (input: {
   readonly unlinked: Array<string>;
   /** The addresses upstream's link was asked to link at, in order. */
   readonly linkedAt?: Array<string>;
+  /** What upstream's linkUnlessLinked finds. */
+  readonly alreadyLinked?: boolean;
   /** The lines up here, each as it comes up, and when a link started to wait for one. */
   readonly lines?: {
     readonly up: Set<string>;
@@ -80,6 +94,8 @@ const makeLayer = (input: {
             input.linkedAt?.push(link.url);
             return workLink;
           }),
+        linkUnlessLinked: () =>
+          Effect.succeed({ link: workLink, alreadyLinked: input.alreadyLinked === true }),
         resolve: () =>
           input.resolve === "linked"
             ? Effect.succeed({ link: workLink, url: workUrl, token: "work-token" })
@@ -203,8 +219,16 @@ it.effect("forgets a link after asking the other server to end its session", () 
         revoked: false,
       },
       {
-        name: "expired, so its session is too",
+        // Work renews the session while it is used, so a link out of date here proves nothing.
+        name: "expired here, its session unknown there",
         resolve: new PeerLinkError({ reason: "expired", message: "The link to Work expired." }),
+        answer: 204,
+        asked: false,
+        revoked: false,
+      },
+      {
+        name: "unknown here, so it holds no session",
+        resolve: new PeerLinkError({ reason: "unknown_link", message: "No link to Work." }),
         answer: 204,
         asked: false,
         revoked: true,
@@ -232,4 +256,87 @@ it.effect("forgets a link after asking the other server to end its session", () 
       assert.equal(outcome.detail === null, row.revoked, `${row.name}: a session left says why`);
     }
   }),
+);
+
+it.effect("claims a link linkUnlessLinked makes, and leaves one it finds alone", () =>
+  Effect.gen(function* () {
+    for (const alreadyLinked of [false, true]) {
+      const seen: Array<Seen> = [];
+      const result = yield* PeerLinks.PeerLinks.pipe(
+        Effect.flatMap((links) =>
+          links.linkUnlessLinked({ url: workUrl, pairingCode: "code", access: "approval-required" }),
+        ),
+        Effect.provide(makeLayer({ resolve: "linked", answer: 204, seen, unlinked: [], alreadyLinked })),
+      );
+      assert.equal(result.alreadyLinked, alreadyLinked);
+      assert.deepStrictEqual(
+        seen.map((request) => request.method),
+        alreadyLinked ? [] : ["PUT"],
+        alreadyLinked ? "a link already there was claimed when made" : "a new link is claimed",
+      );
+    }
+  }),
+);
+
+/** Upstream's links with J5's loopback rule, where every address answers as `answeringAs`. */
+const linksAnsweringAs = (answeringAs: string) =>
+  Layer.build(
+    PeerLinks.layer.pipe(
+      Layer.provideMerge(ServerSettings.layerTest({ linkedEnvironmentsEnabled: true })),
+      Layer.provideMerge(Sqlite.layerMemory),
+      Layer.provide(ServerSecretStore.layer),
+      Layer.provide(
+        Layer.succeed(
+          HttpClient.HttpClient,
+          HttpClient.make((request) =>
+            Effect.succeed(
+              HttpClientResponse.fromWeb(
+                request,
+                Response.json({
+                  environmentId: answeringAs,
+                  label: "Other",
+                  platform: { os: "linux", arch: "x64" },
+                  serverVersion: "0.0.0-test",
+                  capabilities: { repositoryIdentity: true, mcpModeLimitHeader: true, linkFence: true },
+                }),
+              ),
+            ),
+          ),
+        ),
+      ),
+      Layer.provide(Layer.succeed(PeerLinks.LoopbackHost, noOwnLoopback)),
+      Layer.provide(
+        Layer.mock(ServerEnvironment.ServerEnvironment)({ getEnvironmentId: Effect.succeed(home) }),
+      ),
+      Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "j5-link-loopback-" })),
+      Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+    ),
+  ).pipe(Effect.map((context) => Context.get(context, PeerLinks.PeerLinks)));
+
+it.effect("probes a same-machine server and a line instead of calling them this machine", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const links = yield* linksAnsweringAs("environment-other");
+      for (const [url, shown] of [
+        ["http://127.0.0.1:3773", "http://127.0.0.1:3773"],
+        ["http://[::1]:3773", "http://[::1]:3773"],
+        ["http://127.77.0.1:1", "Its line"],
+      ] as const) {
+        const failed = yield* links
+          .link({
+            url,
+            pairingCode: "unused",
+            access: "auto",
+            expectedEnvironmentId: work,
+            expectedLabel: "Work",
+          })
+          .pipe(Effect.flip);
+        assert.equal(
+          failed.message,
+          `This environment could not reach Work: ${shown} answered as another environment, Other.`,
+          url,
+        );
+      }
+    }),
+  ),
 );

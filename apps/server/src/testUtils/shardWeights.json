@@ -57,7 +57,6 @@
   "src/j5/a2a/SendService.test.ts": 3.5,
   "src/j5/a2a/SilenceDetector.test.ts": 7.5,
   "src/j5/a2a/SpawnCompositionService.test.ts": 0.5,
-  "src/j5/a2a/claudeAgentSteers.integration.test.ts": 2.2,
   "src/j5/a2a/clientReadRpc.test.ts": 1,
   "src/j5/a2a/crewAccessRpc.test.ts": 1.1,
   "src/j5/a2a/crewFailureAlert.test.ts": 1,

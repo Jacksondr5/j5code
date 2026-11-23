@@ -1,7 +1,7 @@
 import { useState, useSyncExternalStore, type CSSProperties } from "react";
 
 import { SettingResetButton, SettingsRow } from "../../components/settings/settingsLayout";
-import { searchableSetting } from "../../components/settings/settingsSearch";
+import { useSearchableSetting } from "../../components/settings/settingsSearch";
 import {
   getNotificationVolume,
   setNotificationVolume,
@@ -9,6 +9,7 @@ import {
 } from "./notificationVolume";
 
 export function NotificationVolumeSettings() {
+  const searchableSetting = useSearchableSetting();
   const volume = useSyncExternalStore(subscribeNotificationVolume, getNotificationVolume, () => 1);
   const [error, setError] = useState<string | null>(null);
   const percent = Math.round(volume * 100);

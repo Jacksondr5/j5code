@@ -11,7 +11,11 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 
 import { agentCliDirectory } from "./agentPath.ts";
-import { launcherOwnsVersionsDir, pinnedRuntimeVersionsDir } from "../../cloud/pinnedRuntime.ts";
+import {
+  launcherOwnsVersionsDir,
+  pinnedRuntimeVersionsDir,
+  readPosixLauncherTarget,
+} from "../../cloud/pinnedRuntime.ts";
 
 // Profiles needn't be UTF-8. Reading each byte as one latin1 character keeps
 // every byte through the edit; the marker itself is ASCII.
@@ -58,7 +62,10 @@ export const planShellCleanup = Effect.fn("j5.cli.plan_shell_cleanup")(function*
 
   const command = path.join(home, ".local/bin/j5");
   const target = yield* fs.readLink(command).pipe(Effect.option);
-  const resolved = Option.map(target, (link) => path.resolve(path.dirname(command), link));
+  // Installers now write a script that execs the runtime; older ones wrote a link.
+  const resolved = Option.isSome(target)
+    ? Option.some(path.resolve(path.dirname(command), target.value))
+    : Option.fromUndefinedOr(yield* readPosixLauncherTarget(command));
   // The installer links into this home's runtime; the desktop app's install
   // command links to its script in this home's `bin`.
   const owned =

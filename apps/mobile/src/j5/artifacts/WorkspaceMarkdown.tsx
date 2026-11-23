@@ -3,7 +3,7 @@ import { type EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { useNavigation } from "@react-navigation/native";
 import { useState } from "react";
 
-import { FilePreviewModal, type FilePreviewSource } from "../../components/FilePreviewModal";
+import { FilePreviewModal, type FilePreviewSource } from "../../components/ui/FilePreviewModal";
 import { useMarkdownPreviewStyles } from "../../features/files/FileMarkdownPreview";
 import {
   fileRoutePathSegments,
@@ -25,7 +25,7 @@ import {
   SelectableMarkdownText,
 } from "../../native/SelectableMarkdownText";
 import { useMarkdownImageSource } from "../../native/useMarkdownImageSource";
-import { useThreadCwd } from "../../state/use-selected-thread-worktree";
+import { useThreadCwd } from "./useThreadCwd";
 import {
   artifactLinkContextMenu,
   onArtifactLinkMenuAction,

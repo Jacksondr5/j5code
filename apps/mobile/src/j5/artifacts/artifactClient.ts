@@ -6,13 +6,14 @@ import * as Option from "effect/Option";
 import { runtime } from "../../lib/runtime";
 import { appAtomRegistry } from "../../state/atom-registry";
 import { environmentSession } from "../../state/session";
+import { runJ5Command } from "../runCommand";
 import { j5Environment } from "../state";
 
 export async function listArtifacts(input: {
   readonly environmentId: EnvironmentId;
   readonly projectId: ProjectId;
 }): Promise<ReadonlyArray<ArtifactEntry>> {
-  const result = await j5Environment.listArtifacts.run(appAtomRegistry, {
+  const result = await runJ5Command(j5Environment.listArtifacts, {
     environmentId: input.environmentId,
     input: { projectId: input.projectId },
   });

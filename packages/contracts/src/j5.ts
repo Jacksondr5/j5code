@@ -3,6 +3,7 @@ import * as Schema from "effect/Schema";
 import * as Struct from "effect/Struct";
 import { Rpc, RpcGroup } from "effect/rpc";
 export * from "./j5/actionError.ts";
+export * from "./j5/deliveryEnvelope.ts";
 export * from "./j5/fleet.ts";
 export * from "./j5/peerPoll.ts";
 export * from "./j5/playbook.ts";

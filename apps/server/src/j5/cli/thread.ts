@@ -124,7 +124,12 @@ export const startAgent = Effect.fn("j5.cli.thread.startAgent")(function* (
       });
     }
     if (!input.json) yield* Console.error(`Thread ${spawned.thread_id}`);
-    return yield* finishRun(tools, { threadId: spawned.thread_id, runId, json: input.json });
+    return yield* finishRun(tools, {
+      threadId: spawned.thread_id,
+      runId,
+      json: input.json,
+      followWakes: true,
+    });
   }
   yield* input.json ? printJson(spawned) : Console.log(spawned.thread_id);
 });

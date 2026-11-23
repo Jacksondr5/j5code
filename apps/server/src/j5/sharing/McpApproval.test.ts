@@ -40,13 +40,14 @@ const signIn = Effect.gen(function* () {
     browser: undefined as EnvironmentAuth.AuthenticatedSession | undefined,
   };
   const upstreamAuth = Layer.mock(EnvironmentAuth.EnvironmentAuth)({
-    consumeMcpApprovalCode: (code) =>
+    consumeMcpApprovalCode: (code, access) =>
       Effect.gen(function* () {
         const grant = yield* grants.consume(code).pipe(Effect.orDie);
         assert.isTrue(yield* intents.approvesMcpClient(grant, code).pipe(Effect.orDie));
         yield* hooks.beforeCodeSpent;
+        return access;
       }),
-    authenticateBrowserSession: () =>
+    authenticateHttpRequest: () =>
       hooks.browser === undefined
         ? Effect.fail(new EnvironmentAuth.ServerAuthMissingCredentialError({}))
         : Effect.succeed(hooks.browser),

@@ -26,6 +26,7 @@ import type { ConnectionCatalogEntry } from "../connection/catalog.ts";
 import { EnvironmentRegistry } from "../connection/registry.ts";
 import { EnvironmentSupervisor } from "../connection/supervisor.ts";
 import type { RpcSession } from "../rpc/session.ts";
+import { runAtomCommand } from "../state/runtime.ts";
 import {
   createSharingEnvironmentAtoms,
   ownerOnlySettingsNotice,
@@ -447,7 +448,7 @@ describe("a connection that holds two threads of a server", () => {
       expect(yield* settlesAt(registry, sharing.isNarrow(SHARED_SERVER), true)).toBe(true);
 
       const listed = yield* Effect.promise(() =>
-        atoms.listArtifacts.run(registry, {
+        runAtomCommand(registry, atoms.listArtifacts, {
           environmentId: SHARED_SERVER,
           input: { projectId: ProjectId.make("project-shared") },
         }),
@@ -468,10 +469,10 @@ describe("a connection that holds two threads of a server", () => {
       expect(yield* refused(atoms.fleet({ environmentId: SHARED_SERVER, input: {} }))).toBe(true);
       // The rows it reaches: which of them an agent spawned, and their Crew chips.
       const rows = { environmentId: SHARED_SERVER, input: { threadIds: [VIEWED] } };
-      const spawned = yield* Effect.promise(() => atoms.listSpawnedChildren.run(registry, rows));
+      const spawned = yield* Effect.promise(() => runAtomCommand(registry, atoms.listSpawnedChildren, rows));
       expect(AsyncResult.isSuccess(spawned)).toBe(true);
       const memberships = yield* Effect.promise(() =>
-        atoms.listCrewMemberships.run(registry, rows),
+        runAtomCommand(registry, atoms.listCrewMemberships, rows),
       );
       expect(AsyncResult.isSuccess(memberships)).toBe(true);
       expect(otherReads).toEqual([

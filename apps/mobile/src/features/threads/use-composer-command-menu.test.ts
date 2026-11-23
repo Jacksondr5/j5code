@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vite-plus/test";
-import { ProviderDriverKind } from "@t3tools/contracts";
+import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
 
 vi.mock("react-native", () => ({ Alert: { alert: vi.fn() } }));
 
@@ -28,7 +28,9 @@ vi.mock("../../state/server", () => ({
   },
 }));
 
+import type { ModelOption } from "../../lib/modelOptions";
 import {
+  buildComposerModelItems,
   buildComposerSlashCommandItems,
   resolveComposerCommandSelection,
   resolveComposerMenuSelection,
@@ -75,10 +77,9 @@ describe("mobile slash commands", () => {
       query: "",
       atMessageStart: false,
       hasThread: true,
-      allowInteractionMode: true,
       selectedProviderStatus: null,
     });
-    expect(items.map((item) => item.label)).toEqual(["/model", "/plan", "/default"]);
+    expect(items.map((item) => item.label)).toEqual(["/model"]);
   });
 
   it("inserts the registered playbook name", () => {
@@ -93,9 +94,8 @@ describe("mobile slash commands", () => {
           label: "Debug",
           description: "",
         },
-        allowInteractionMode: false,
       }),
-    ).toEqual({ text: "/playbook debugging ", cursor: 20, interactionMode: null });
+    ).toEqual({ text: "/playbook debugging ", cursor: 20 });
   });
   it("inserts a mentioned playbook name mid-message", () => {
     const draftMessage = "Please run @playbook:deb";
@@ -110,16 +110,14 @@ describe("mobile slash commands", () => {
           label: "debugging",
           description: "",
         },
-        allowInteractionMode: false,
       }),
-    ).toEqual({ text: "Please run @playbook:debugging ", cursor: 31, interactionMode: null });
+    ).toEqual({ text: "Please run @playbook:debugging ", cursor: 31 });
   });
   it("keeps the playbook command active to search names", () => {
     const item = buildComposerSlashCommandItems({
       query: "playbook",
       atMessageStart: true,
       hasThread: true,
-      allowInteractionMode: false,
       selectedProviderStatus: null,
     })[0];
     if (!item) throw new Error("Expected playbook command");
@@ -128,74 +126,117 @@ describe("mobile slash commands", () => {
         draftMessage: "/playbook",
         trigger: { rangeStart: 0, rangeEnd: 9 },
         item,
-        allowInteractionMode: false,
       }),
-    ).toEqual({
-      text: "/playbook ",
-      cursor: 10,
-      interactionMode: null,
-    });
+    ).toEqual({ text: "/playbook ", cursor: 10 });
   });
-  const antigravity = {
-    driver: ProviderDriverKind.make("antigravity"),
-    showInteractionModeToggle: false,
-    slashCommands: [{ name: "plan", description: "Plan with Antigravity" }],
-  };
 
-  it.each([false, true])(
-    "keeps native /plan with legacy mode enabled=%s",
-    (allowInteractionMode) => {
-      const items = buildComposerSlashCommandItems({
-        query: "pl",
-        atMessageStart: true,
-        hasThread: true,
-        allowInteractionMode,
-        selectedProviderStatus: antigravity,
-      });
-
-      expect(items.map((item) => item.type)).toEqual(["slash-command", "provider-slash-command"]);
-      const item = items.find((item) => item.type === "provider-slash-command");
-      if (!item) throw new Error("Expected the native plan command");
-      expect(
-        resolveComposerCommandSelection({
-          draftMessage: "/pl",
-          trigger: { rangeStart: 0, rangeEnd: 3 },
-          item,
-          allowInteractionMode,
-        }),
-      ).toEqual({ text: "/plan ", cursor: 6, interactionMode: null });
-    },
-  );
-
-  it("still applies the T3 plan command for supported providers", () => {
+  it("keeps a provider's native /plan", () => {
     const items = buildComposerSlashCommandItems({
-      query: "plan",
+      query: "pl",
       atMessageStart: true,
       hasThread: true,
-      allowInteractionMode: true,
       selectedProviderStatus: {
-        driver: ProviderDriverKind.make("codex"),
-        slashCommands: [],
+        driver: ProviderDriverKind.make("antigravity"),
+        slashCommands: [{ name: "plan", description: "Plan with Antigravity" }],
       },
     });
-    const item = items[0];
-    if (!item) throw new Error("Expected the T3 plan command");
-    expect(
-      resolveComposerCommandSelection({
-        draftMessage: "/plan",
-        trigger: { rangeStart: 0, rangeEnd: 5 },
-        item,
-        allowInteractionMode: true,
-      }),
-    ).toEqual({ text: "", cursor: 0, interactionMode: "plan" });
 
+    // J5's /playbook also matches "pl".
+    expect(items.map((item) => item.type)).toEqual(["slash-command", "provider-slash-command"]);
+    const item = items.find((item) => item.type === "provider-slash-command");
+    if (!item) throw new Error("Expected the native plan command");
     expect(
       resolveComposerCommandSelection({
-        draftMessage: "/plan",
-        trigger: { rangeStart: 0, rangeEnd: 5 },
+        draftMessage: "/pl",
+        trigger: { rangeStart: 0, rangeEnd: 3 },
         item,
-        allowInteractionMode: false,
       }),
-    ).toEqual({ text: "/plan ", cursor: 6, interactionMode: null });
+    ).toEqual({ text: "/plan ", cursor: 6 });
+  });
+
+  it("offers T3's /clear in place of the provider's, only at the message start", () => {
+    const claude = {
+      driver: ProviderDriverKind.make("claudeAgent"),
+      slashCommands: [{ name: "clear", description: "Clear conversation history" }],
+    };
+    const build = (offersFreshSession: boolean, atMessageStart = true) =>
+      buildComposerSlashCommandItems({
+        query: "cle",
+        atMessageStart,
+        hasThread: true,
+        offersFreshSession,
+        selectedProviderStatus: claude,
+      }).map((item) => item.id);
+    expect(build(true)).toEqual(["cmd:clear"]);
+    expect(build(false)).toEqual(["pcmd:clear"]);
+    expect(build(true, false)).toEqual([]);
+  });
+});
+
+describe("mobile model mentions", () => {
+  const provider = (
+    instanceId: string,
+    overrides: Partial<ServerProvider> = {},
+  ): ServerProvider => ({
+    instanceId: ProviderInstanceId.make(instanceId),
+    driver: ProviderDriverKind.make("codex"),
+    enabled: true,
+    installed: true,
+    version: null,
+    status: "ready",
+    auth: { status: "authenticated" },
+    checkedAt: "2026-01-01T00:00:00.000Z",
+    models: [],
+    slashCommands: [],
+    skills: [],
+    ...overrides,
+  });
+  const option = (key: string, overrides: Partial<ModelOption> = {}): ModelOption => {
+    const [instanceId = "", model = ""] = key.split(":");
+    return {
+      key,
+      label: "GPT-6.1",
+      subtitle: "",
+      providerKey: instanceId,
+      providerLabel: "Traex",
+      providerDriver: "codex",
+      isDefault: false,
+      isLegacy: false,
+      capabilities: null,
+      selection: { instanceId: ProviderInstanceId.make(instanceId), model },
+      ...overrides,
+    };
+  };
+
+  it("offers current, visible models labelled with their provider", () => {
+    const items = buildComposerModelItems(
+      [
+        option("traex:gpt-6.1"),
+        option("opencode:traex/gpt-6.1", {
+          subtitle: "Traex",
+          providerLabel: "OpenCode",
+          providerDriver: "opencode",
+        }),
+        option("hidden:gpt-6.1", { isHidden: true }),
+        option("gone:gpt-6.1", { isUnavailable: true }),
+        option("old:gpt-5", { label: "GPT-5", isLegacy: true }),
+      ],
+      "gpt",
+      ["traex", "opencode", "hidden", "gone", "old"].map((id) => provider(id)),
+    );
+    expect(items.map((item) => [item.id, item.description]).toSorted()).toEqual([
+      ["model:opencode:traex/gpt-6.1", "OpenCode · Traex"],
+      ["model:traex:gpt-6.1", "Traex"],
+    ]);
+  });
+
+  it.each([
+    ["missing", []],
+    ["not installed", [provider("traex", { installed: false })]],
+    ["signed out", [provider("traex", { auth: { status: "unauthenticated" } })]],
+    ["not ready", [provider("traex", { status: "error" })]],
+    ["unavailable", [provider("traex", { availability: "unavailable" })]],
+  ] as const)("does not suggest a preserved selection whose provider is %s", (_, providers) => {
+    expect(buildComposerModelItems([option("traex:gpt-6.1")], "gpt", providers)).toEqual([]);
   });
 });

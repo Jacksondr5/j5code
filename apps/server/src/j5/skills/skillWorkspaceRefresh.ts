@@ -1,5 +1,6 @@
 import {
   isProviderWorkspaceSnapshotCurrent,
+  isProviderWorkspaceSnapshotPending,
   type ProviderInstanceId,
   type ServerProvider,
 } from "@t3tools/contracts";
@@ -45,10 +46,11 @@ export function retainFailedWorkspaceSnapshot(
   };
 }
 
-// Upstream's `refreshWorkspaceSnapshot` (TTL, `fresh`, latest claim writes, detached scan that
-// callers wait on) plus J5's failure retention, link-target resolution and `force`: a rescan of
-// one cwd that supersedes a pending one without `fresh`'s machine refresh or dropping other
-// instances' snapshots, for callers that already refresh every affected instance.
+// Upstream's `refreshWorkspaceSnapshot` (TTL, `fresh`, `scanCwd`, an instance's own `rescan`
+// report, latest claim writes, detached scan that callers wait on) plus J5's failure retention,
+// link-target resolution and `force`: a rescan of one cwd that supersedes a pending one without
+// `fresh`'s machine refresh or dropping other instances' snapshots, for callers that already
+// refresh every affected instance.
 export const makeSkillWorkspaceRefresh = Effect.fn("j5.skills.makeWorkspaceRefresh")(function* ({
   instanceRegistry,
   providersRef,
@@ -80,10 +82,29 @@ export const makeSkillWorkspaceRefresh = Effect.fn("j5.skills.makeWorkspaceRefre
   const refreshWorkspaceSnapshot = Effect.fn("refreshWorkspaceSnapshot")(function* (input: {
     readonly instanceId: ProviderInstanceId;
     readonly cwd: string;
+    readonly scanCwd?: string;
     readonly fresh?: boolean;
     readonly force?: boolean;
+    // Set by an instance's own report that its workspace skills changed.
+    readonly rescan?: ProviderInstance;
   }) {
     const replace = input.fresh === true || input.force === true;
+    const workspaceSnapshotOf = (candidate: ServerProvider | undefined) =>
+      candidate?.workspaceSnapshots?.find((s) => s.cwd === input.cwd);
+    // What clients saw before the awaited scan, which may already have published the change.
+    const heldBeforeWait = input.rescan
+      ? workspaceSnapshotOf(
+          (yield* Ref.get(providersRef)).find(
+            (candidate) => candidate.instanceId === input.instanceId,
+          ),
+        )
+      : undefined;
+    // A rescan waits for a running scan, which may have read files before the hook linked them.
+    // Claims are read before snapshots: a scan publishes before it releases its claim.
+    const runningScan = input.rescan
+      ? (yield* Ref.get(workspaceRefreshesRef)).get(input.rescan)?.get(input.cwd)
+      : undefined;
+    if (runningScan) yield* Deferred.await(runningScan);
     if (input.fresh) {
       yield* updateProviders((providers) =>
         providers.map((candidate) =>
@@ -95,34 +116,44 @@ export const makeSkillWorkspaceRefresh = Effect.fn("j5.skills.makeWorkspaceRefre
     }
     const providers = yield* Ref.get(providersRef);
     const provider = providers.find((candidate) => candidate.instanceId === input.instanceId);
-    const workspaceSnapshotOf = (candidate: ServerProvider | undefined) =>
-      candidate?.workspaceSnapshots?.find((s) => s.cwd === input.cwd);
     const scannedFrom = workspaceSnapshotOf(provider);
     const now = yield* DateTime.now;
     if (
       !provider ||
       !provider.enabled ||
       (!replace &&
+        !input.rescan &&
         scannedFrom &&
         !scannedFrom.refreshError &&
-        !scannedFrom.slashCommandsPending &&
+        !isProviderWorkspaceSnapshotPending(scannedFrom) &&
         isProviderWorkspaceSnapshotCurrent(scannedFrom, DateTime.toEpochMillis(now)))
     ) {
       return providers;
     }
     const scannedAt = DateTime.formatIso(now);
     const instance = yield* instanceRegistry.getInstance(input.instanceId);
-    if (!instance?.snapshotForCwd) return providers;
-    const snapshotForCwd = instance.snapshotForCwd;
+    const snapshotForCwd = instance?.snapshotForCwd;
+    if (!instance || !snapshotForCwd) return providers;
+    // A report never enrolls a cwd nobody requested, nor outlives the instance that made it.
+    if (input.rescan && (input.rescan !== instance || (!runningScan && !scannedFrom))) {
+      return providers;
+    }
     const request = yield* Deferred.make<void>();
+    // A machine refresh can change this cwd's snapshot, so the scan publishes against the result.
     const refreshMachineSnapshot = input.fresh
       ? (instance.invalidateCaches ?? Effect.void).pipe(
           Effect.andThen(refreshInstance(input.instanceId)),
+          Effect.andThen(Ref.get(providersRef)),
+          Effect.map((current) =>
+            workspaceSnapshotOf(
+              current.find((candidate) => candidate.instanceId === input.instanceId),
+            ),
+          ),
         )
-      : Effect.void;
+      : Effect.succeed(scannedFrom);
     const runScan = refreshMachineSnapshot.pipe(
-      Effect.andThen(
-        snapshotForCwd(input.cwd).pipe(
+      Effect.flatMap((scanBase) =>
+        snapshotForCwd(input.scanCwd ?? input.cwd).pipe(
           Effect.flatMap((snapshot) =>
             resolveProviderSkillPaths(snapshot.skills).pipe(
               Effect.provideService(FileSystem.FileSystem, fs),
@@ -135,17 +166,18 @@ export const makeSkillWorkspaceRefresh = Effect.fn("j5.skills.makeWorkspaceRefre
           Effect.catchCause((cause) =>
             Cause.hasInterruptsOnly(cause) ? Effect.interrupt : Effect.void,
           ),
+          Effect.map((scopedSnapshot) => ({ scanBase, scopedSnapshot })),
         ),
       ),
       // A returned snapshot is a real inventory even while the provider's health check reports
       // an error.
-      Effect.flatMap((scopedSnapshot) =>
+      Effect.flatMap(({ scanBase, scopedSnapshot }) =>
         instanceRegistry.getInstance(input.instanceId).pipe(
           Effect.flatMap((currentInstance) => {
             if (currentInstance !== instance) return Ref.get(providersRef);
             // A first scan that failed left no commands for a pending scan to keep.
             const withoutFailedPlaceholder = (candidate: ServerProvider) =>
-              scannedFrom?.refreshError && scannedFrom.slashCommands.length === 0
+              scanBase?.refreshError && scanBase.slashCommands.length === 0
                 ? dropProviderWorkspaceSnapshot(candidate, input.cwd)
                 : candidate;
             return updateProviders((currentProviders) => {
@@ -153,30 +185,43 @@ export const makeSkillWorkspaceRefresh = Effect.fn("j5.skills.makeWorkspaceRefre
               if (Ref.getUnsafe(workspaceRefreshesRef).get(instance)?.get(input.cwd) !== request) {
                 return currentProviders;
               }
-              return currentProviders.map((candidate) =>
-                candidate.instanceId !== input.instanceId ||
-                !Equal.equals(workspaceSnapshotOf(candidate), scannedFrom)
-                  ? candidate
-                  : scopedSnapshot === undefined
-                    ? retainFailedWorkspaceSnapshot(candidate, input.cwd, {
-                        checkedAt: scannedAt,
-                        message: "Workspace discovery failed.",
-                      })
-                    : upsertProviderWorkspaceSnapshot(
-                        withoutFailedPlaceholder(candidate),
-                        input.cwd,
-                        {
-                          ...scopedSnapshot,
-                          checkedAt: scannedAt,
-                          // Unless the driver reports its own command discovery,
-                          // commands come from the health check. A failed check
-                          // leaves them unknown, so keep the last ones and retry.
-                          slashCommandsPending:
-                            scopedSnapshot.slashCommandsPending ??
-                            scopedSnapshot.status === "error",
-                        },
-                      ),
-              );
+              return currentProviders.map((candidate) => {
+                if (
+                  candidate.instanceId !== input.instanceId ||
+                  !Equal.equals(workspaceSnapshotOf(candidate), scanBase)
+                ) {
+                  return candidate;
+                }
+                if (scopedSnapshot === undefined) {
+                  return retainFailedWorkspaceSnapshot(candidate, input.cwd, {
+                    checkedAt: scannedAt,
+                    message: "Workspace discovery failed.",
+                  });
+                }
+                const scanned = upsertProviderWorkspaceSnapshot(
+                  withoutFailedPlaceholder(candidate),
+                  input.cwd,
+                  {
+                    ...scopedSnapshot,
+                    checkedAt: scannedAt,
+                    // Unless the driver reports its own command discovery,
+                    // commands come from the health check. A failed check
+                    // leaves them unknown, so keep the last ones and retry.
+                    slashCommandsPending:
+                      scopedSnapshot.slashCommandsPending ?? scopedSnapshot.status === "error",
+                  },
+                );
+                // Clients keep fetched snapshots, so a changed rescan must tell them to fetch again.
+                const rescanned = workspaceSnapshotOf(scanned);
+                const held = heldBeforeWait ?? scanBase;
+                return input.rescan &&
+                  !(
+                    Equal.equals(rescanned?.skills, held?.skills) &&
+                    Equal.equals(rescanned?.slashCommands, held?.slashCommands)
+                  )
+                  ? { ...scanned, workspaceRescannedAt: scannedAt }
+                  : scanned;
+              });
             });
           }),
         ),

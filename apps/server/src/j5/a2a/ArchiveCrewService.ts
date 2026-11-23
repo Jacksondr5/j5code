@@ -6,13 +6,11 @@ import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 
+import * as Mac from "effect/crypto/Mac";
+
+import * as PayloadSigner from "../../auth/PayloadSigner.ts";
 import { ServerSecretStore } from "../../auth/ServerSecretStore.ts";
-import {
-  base64UrlDecodeUtf8,
-  base64UrlEncode,
-  signPayload,
-  timingSafeEqualBase64Url,
-} from "../../auth/utils.ts";
+import { base64UrlDecodeUtf8, base64UrlEncode } from "../../auth/utils.ts";
 import type { CrewArchiveWorktree } from "@t3tools/contracts/j5";
 import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
 import {
@@ -297,12 +295,17 @@ export const layer = Layer.effect(
     const secret = secrets
       .getOrCreateRandom(TOKEN_SECRET_NAME, TOKEN_SECRET_BYTES)
       .pipe(Effect.orDie);
+    const mac = yield* Mac.Mac;
+    const signer = secret.pipe(
+      Effect.flatMap(PayloadSigner.fromSecret),
+      Effect.provideService(Mac.Mac, mac),
+    );
 
     const issueToken = Effect.fn("j5.a2a.archiveCrew.issueToken")(function* (
       payload: TokenPayload,
     ) {
       const encoded = base64UrlEncode(encodeTokenPayloadJson(payload));
-      return `${encoded}.${signPayload(encoded, yield* secret)}`;
+      return `${encoded}.${yield* (yield* signer).sign(encoded)}`;
     });
 
     const parseToken = Effect.fn("j5.a2a.archiveCrew.parseToken")(function* (token: string) {
@@ -310,7 +313,7 @@ export const layer = Layer.effect(
       if (parts.length !== 2 || parts[0] === "" || parts[1] === "")
         return yield* new ArchiveCrewConfirmationTokenError({ reason: "malformed" });
       const [encoded, signature] = parts as [string, string];
-      if (!timingSafeEqualBase64Url(signature, signPayload(encoded, yield* secret)))
+      if (!(yield* (yield* signer).verify(encoded, signature)))
         return yield* new ArchiveCrewConfirmationTokenError({ reason: "malformed" });
       const text = yield* Effect.result(
         Effect.try({

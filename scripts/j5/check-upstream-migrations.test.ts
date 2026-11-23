@@ -7,6 +7,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import reviewedNightly3238 from "../../apps/server/src/j5/persistence/reviewed-v0.1.1-nightly.20261017.3238.v1.json" with { type: "json" };
 import reviewedV013 from "../../apps/server/src/j5/persistence/reviewed-v0.1.3.v1.json" with { type: "json" };
+import reviewedV0111 from "../../apps/server/src/j5/persistence/reviewed-v0.1.11.v1.json" with { type: "json" };
 import reviewedV017 from "../../apps/server/src/j5/persistence/reviewed-v0.1.7.v1.json" with { type: "json" };
 import reviewed from "../../apps/server/src/j5/persistence/reviewed-v2-reconcile.v1.json" with { type: "json" };
 import {
@@ -133,6 +134,31 @@ describe("reviewed v0.1.3 → upstream v0.1.7", () => {
     expect(targetMigrations.slice(-10).map(({ id }) => id)).toEqual([
       70, 71, 72, 73, 74, 75, 76, 77, 78, 79,
     ]);
+  });
+});
+
+describe("reviewed v0.1.7 → upstream v0.1.11", () => {
+  it("chains from the v0.1.7 review, appends 080 to 102, and changes only 026, 064, 071 and 072", () => {
+    const { sourceMigrations, targetMigrations, targetRef } = reviewedV0111;
+    expect(sourceMigrations).toEqual(reviewedV017.targetMigrations);
+    expect(matchesReviewedBridge(sourceMigrations, targetMigrations, targetRef)).toBe(true);
+    expect(matchesReviewedBridge(sourceMigrations, targetMigrations, reviewedV017.targetRef)).toBe(
+      false,
+    );
+    expect(
+      inspectMigrationChanges(sourceMigrations, targetMigrations).map(({ kind, name }) => [
+        kind,
+        name,
+      ]),
+    ).toEqual([
+      ["implementation_changed", "CanonicalizeModelSelectionOptions"],
+      ["implementation_changed", "CanonicalizeThreadPullRequestLinks"],
+      ["implementation_changed", "PeerLinkFence"],
+      ["implementation_changed", "WaitingLinkRequestIndex"],
+    ]);
+    expect(targetMigrations.slice(-23).map(({ id }) => id)).toEqual(
+      Array.from({ length: 23 }, (_, index) => 80 + index),
+    );
   });
 });
 

@@ -1,5 +1,6 @@
 import * as Effect from "effect/Effect";
 import * as Migrator from "effect/sql/Migrator";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import Migration0001 from "./migrations/001_EpicCommunicationLedger.ts";
 import Migration0002 from "./migrations/002_SendDeliverReply.ts";
@@ -146,6 +147,19 @@ const run = Migrator.make({});
 export interface RunJ5A2AMigrationsOptions {
   readonly toMigrationInclusive?: number;
 }
+
+/** Whether this lane has a migration to run: the migrator runs every id above the newest recorded. */
+export const hasPendingJ5A2AMigrations = Effect.fn("hasPendingJ5A2AMigrations")(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const tables = yield* sql`
+    SELECT name FROM sqlite_master WHERE type = 'table' AND name = ${J5_A2A_MIGRATIONS_TABLE}
+  `;
+  if (tables.length === 0) return true;
+  const rows = yield* sql<{ readonly latestId: number | null }>`
+    SELECT MAX(migration_id) AS latestId FROM ${sql(J5_A2A_MIGRATIONS_TABLE)}
+  `;
+  return (rows[0]?.latestId ?? 0) < Math.max(...migrationEntries.map(([id]) => id));
+});
 
 /**
  * J5 migrations deliberately use a separate tracking table and id space so an

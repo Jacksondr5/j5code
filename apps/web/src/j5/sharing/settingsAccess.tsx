@@ -3,30 +3,43 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import { useLocation } from "@tanstack/react-router";
 import { type ReactNode } from "react";
 
-import type { SettingsPath } from "../../components/settings/settingsSearch";
+import {
+  SETTINGS_SECTION_LABELS,
+  type SettingsPath,
+} from "../../components/settings/settingsSearch";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../../components/ui/empty";
 import { WorkspacePageContainer } from "../../components/WorkspacePageContainer";
 import { useEnvironment, usePrimaryEnvironmentId } from "../../state/environments";
 import { useOwnedEnvironmentIds, useOwnerSomewhere, useWritesSomewhere } from "./access";
 import {
   LICENSES_PATH,
-  PAGES_FOR_EVERYONE,
   settingsNavGroups,
   settingsPageShown,
   type SettingsNavGroup,
 } from "./settingsAccess.logic";
 
+// Upstream's nav keys and labels each group by its heading, so the licenses group has a hidden one.
+const LICENSES_GROUP: SettingsNavGroup<SettingsPath> = {
+  heading: SETTINGS_SECTION_LABELS[LICENSES_PATH],
+  headingHidden: true,
+  paths: [LICENSES_PATH],
+};
+
 /** Settings' sidebar groups as this person sees them; see `settingsNavGroups`. */
 export function useSettingsNavGroups(groups: ReadonlyArray<SettingsNavGroup<SettingsPath>>) {
-  return settingsNavGroups(groups, useOwnerSomewhere() === true, LICENSES_PATH);
+  return settingsNavGroups(groups, useSettingsAccess(), LICENSES_GROUP);
+}
+
+function useSettingsAccess() {
+  return { ownerSomewhere: useOwnerSomewhere() === true, writesSomewhere: useWritesSomewhere() };
 }
 
 /** Settings search finds only the pages a person is shown (AC28). */
 export function useShownSettingsSearchItems<Item extends { readonly to: string }>(
   items: ReadonlyArray<Item>,
 ): ReadonlyArray<Item> {
-  const ownerSomewhere = useOwnerSomewhere() === true;
-  return ownerSomewhere ? items : items.filter((item) => PAGES_FOR_EVERYONE.has(item.to));
+  const access = useSettingsAccess();
+  return access.ownerSomewhere ? items : items.filter((item) => settingsPageShown(item.to, access));
 }
 
 /**
@@ -42,9 +55,13 @@ export function SettingsPageGate({
   readonly children: ReactNode;
 }) {
   const ownerSomewhere = useOwnerSomewhere();
+  const writesSomewhere = useWritesSomewhere();
   // Only an answer replaces a page: an Owner reloading one of their pages keeps it, and a
   // server still being asked holds no page back. The server refuses what is not theirs to read.
-  if (ownerSomewhere !== false || settingsPageShown({ path: pathname, ownerSomewhere })) {
+  if (
+    ownerSomewhere !== false ||
+    settingsPageShown(pathname, { ownerSomewhere: false, writesSomewhere })
+  ) {
     return children;
   }
   return <OwnerOnlySettingsNotice />;

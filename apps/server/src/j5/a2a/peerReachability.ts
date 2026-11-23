@@ -1,6 +1,8 @@
 import type * as NodeOS from "node:os";
 
-import { formatHostForUrl, isLoopbackHost, isWildcardHost } from "../../startupAccess.ts";
+import { formatHostForUrl, isWildcardHost } from "@t3tools/shared/hostClassification";
+
+import { isLoopbackHost } from "../../startupAccess.ts";
 
 /**
  * The origins others might reach this server at, for the client's pre-peering check: its bound

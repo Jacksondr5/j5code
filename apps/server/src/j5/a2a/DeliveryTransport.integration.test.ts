@@ -4951,6 +4951,26 @@ it.effect(
           (yield* decodeToolFailure(refusedPerson.result)).message,
           "A person wrote this queued message",
         );
+        // Upstream's rule holds for an agent's own plain message too: no edit into a sign-out.
+        yield* threads.sendToThread({
+          commandId: CommandId.make("command:edit:own-plain"),
+          projectId: receiver.projectId,
+          threadId: receiver.threadId,
+          messageId: MessageId.make("message:edit:own-plain"),
+          senderThreadId: editor.threadId,
+          text: "An agent's plain queued words",
+          attachments: [],
+          mode: "queue",
+          createdBy: "agent",
+          creationSource: "mcp",
+        });
+        const ownPlainQueued = yield* queued(MessageId.make("message:edit:own-plain"));
+        const refusedSignOut = yield* edit(ownPlainQueued.run.id, "/logout");
+        assert.isTrue(refusedSignOut.isFailure);
+        assert.equal(
+          (yield* decodeToolFailure(refusedSignOut.result)).message,
+          "A queued message cannot be edited into a provider sign-out.",
+        );
         assert.equal(
           (yield* queued(deliveryMessageId(others.messageId))).message.text,
           othersQueued.message.text,

@@ -211,6 +211,21 @@ describe("credentialKey", () => {
     expect(first).not.toContain("secret");
   });
 
+  it("keeps a key-bound pairing through its token renewals", () => {
+    const dpop = (accessToken: string) => ({
+      httpAuthorization: {
+        _tag: "Dpop" as const,
+        accessToken,
+        expiresAtEpochMs: 0,
+        directConnection: { connectionId: "slot-1", httpBaseUrl: "https://server-1" },
+      },
+      target: { environmentId: server, address: "https://server-1" },
+    });
+
+    expect(credentialKey(dpop("first-access"))).toBe(credentialKey(dpop("renewed-access")));
+    expect(credentialKey(dpop("first-access"))).not.toContain("access");
+  });
+
   it("keeps a server's names through a learned route, and drops them on a re-pair", () => {
     const named = rememberIdentities(
       observeCredential(new Map(), server, credentialKey(prepared("owner-token"))),

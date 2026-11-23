@@ -6,6 +6,7 @@ import * as NodeUtil from "node:util";
 
 import reviewedNightly3238 from "../../apps/server/src/j5/persistence/reviewed-v0.1.1-nightly.20261017.3238.v1.json" with { type: "json" };
 import reviewedV013 from "../../apps/server/src/j5/persistence/reviewed-v0.1.3.v1.json" with { type: "json" };
+import reviewedV0111 from "../../apps/server/src/j5/persistence/reviewed-v0.1.11.v1.json" with { type: "json" };
 import reviewedV017 from "../../apps/server/src/j5/persistence/reviewed-v0.1.7.v1.json" with { type: "json" };
 import reviewedV2Reconcile from "../../apps/server/src/j5/persistence/reviewed-v2-reconcile.v1.json" with { type: "json" };
 
@@ -95,7 +96,13 @@ const sameManifest = (
   });
 
 /** Reviewed transitions, oldest first. Each is a record of one advance, never regenerated. */
-const reviewedBridges = [reviewedV2Reconcile, reviewedNightly3238, reviewedV013, reviewedV017];
+const reviewedBridges = [
+  reviewedV2Reconcile,
+  reviewedNightly3238,
+  reviewedV013,
+  reviewedV017,
+  reviewedV0111,
+];
 
 /** Reviewed upstream targets. A candidate must contain one of these exact commits. */
 export const reviewedTargetRefs = reviewedBridges.map((bridge) => bridge.targetRef);

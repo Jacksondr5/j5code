@@ -90,6 +90,8 @@ const NARROWED_COMMAND_SCOPES: {
   "thread.pull-request-link.sync": onThread,
   "thread.pull-request.watch": onThread,
   "thread.pull-request.sync": onThread,
+  "thread.issue.link": onThread,
+  "thread.issue.unlink": onThread,
   "thread.title.regeneration.complete": onThread,
   "thread.runtime-mode.set": onThread,
   "thread.interaction-mode.set": onThread,

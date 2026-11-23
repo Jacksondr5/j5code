@@ -32,6 +32,7 @@ import { EnvironmentRegistry } from "../connection/registry.ts";
 import { EnvironmentSupervisor } from "../connection/supervisor.ts";
 import type { RpcSession } from "../rpc/session.ts";
 import { createCommandPermissions } from "../state/commandPermissions.ts";
+import { runAtomCommand } from "../state/runtime.ts";
 import { createJ5EnvironmentAtoms } from "./state.ts";
 
 vi.mock("../state/session.ts", () => ({
@@ -105,7 +106,7 @@ describe("J5 action commands", () => {
       registry.set(sessions(home), AsyncResult.success(granting([AuthOrchestrationOperateScope])));
       const input = { crewInstanceId: "crew:1" };
       const stopped = yield* Effect.promise(() =>
-        atoms.stopCrew.run(registry, { environmentId: home, input }),
+        runAtomCommand(registry, atoms.stopCrew, { environmentId: home, input }),
       );
       expect(AsyncResult.isSuccess(stopped)).toBe(true);
       expect(calls).toEqual([[home, ACTIONS.stopCrew, input]]);
@@ -121,7 +122,7 @@ describe("J5 action commands", () => {
       expect(registry.get(atoms.deletePlaybook.permissionAtom(work))).toBe(true);
       expect(registry.get(atoms.deletePlaybook.permissionAtom(home))).toBe(false);
       const refused = yield* Effect.promise(() =>
-        atoms.deletePlaybook.run(registry, { environmentId: home, input }),
+        runAtomCommand(registry, atoms.deletePlaybook, { environmentId: home, input }),
       );
       expect(failureOf(refused)).toMatchObject({
         _tag: "EnvironmentAuthorizationError",
@@ -134,7 +135,7 @@ describe("J5 action commands", () => {
       registry.set(sessions(work), AsyncResult.success(granting([AuthOrchestrationReadScope])));
       expect(registry.get(atoms.deletePlaybook.permissionAtom(work))).toBe(false);
       const narrowed = yield* Effect.promise(() =>
-        atoms.deletePlaybook.run(registry, { environmentId: work, input }),
+        runAtomCommand(registry, atoms.deletePlaybook, { environmentId: work, input }),
       );
       expect(failureOf(narrowed)).toMatchObject({ _tag: "EnvironmentAuthorizationError" });
       expect(calls).toEqual([]);
@@ -153,13 +154,13 @@ describe("J5 action commands", () => {
         );
         const input = { projectId: ProjectId.make("project:artifacts") };
         const deleted = yield* Effect.promise(() =>
-          atoms.deleteAllArtifacts.run(registry, { environmentId: home, input }),
+          runAtomCommand(registry, atoms.deleteAllArtifacts, { environmentId: home, input }),
         );
         expect(AsyncResult.isSuccess(deleted)).toBe(true);
         expect(calls).toEqual([[home, J5_ARTIFACT_WS_METHODS.deleteAllArtifacts, input]]);
         registry.set(sessions(home), AsyncResult.success(granting([AuthOrchestrationReadScope])));
         const refused = yield* Effect.promise(() =>
-          atoms.deleteAllArtifacts.run(registry, { environmentId: home, input }),
+          runAtomCommand(registry, atoms.deleteAllArtifacts, { environmentId: home, input }),
         );
         expect(failureOf(refused)).toMatchObject({ _tag: "EnvironmentAuthorizationError" });
         expect(calls).toHaveLength(1);
@@ -221,7 +222,7 @@ describe("J5 action commands", () => {
       );
       registry.set(sessions(work), AsyncResult.success(granting([AuthOrchestrationOperateScope])));
       const result = yield* Effect.promise(() =>
-        atoms.resolveCrewProposal.run(registry, {
+        runAtomCommand(registry, atoms.resolveCrewProposal, {
           environmentId: work,
           input: { proposalId: "proposal:1", decision: "decline" },
         }),
@@ -245,7 +246,7 @@ describe("J5 action commands", () => {
         AsyncResult.success(granting([AuthOrchestrationOperateScope, AuthSettingsWriteScope])),
       );
       const outdated = yield* Effect.promise(() =>
-        atoms.archiveCrew.run(registry, {
+        runAtomCommand(registry, atoms.archiveCrew, {
           environmentId: work,
           input: { crewInstanceId: "crew:1" },
         }),
@@ -258,7 +259,7 @@ describe("J5 action commands", () => {
       });
       // Any other defect stays a defect: it is a bug to report, not a server to update.
       const defect = yield* Effect.promise(() =>
-        atoms.stopCrew.run(registry, { environmentId: work, input: { crewInstanceId: "crew:1" } }),
+        runAtomCommand(registry, atoms.stopCrew, { environmentId: work, input: { crewInstanceId: "crew:1" } }),
       );
       expect(AsyncResult.isFailure(defect) && Cause.hasDies(defect.cause)).toBe(true);
     }).pipe(Effect.scoped),

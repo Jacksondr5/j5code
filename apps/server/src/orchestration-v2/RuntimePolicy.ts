@@ -100,7 +100,7 @@ export const layer: Layer.Layer<RuntimePolicyV2> = Layer.effect(
   }),
 );
 
-function providerRuntimeMode(
+export function providerRuntimeMode(
   runtimeMode: RuntimeMode,
   supportedRuntimeModes: ReadonlyArray<RuntimeMode> | undefined,
 ): RuntimeMode {

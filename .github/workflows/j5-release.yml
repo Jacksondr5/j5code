@@ -332,12 +332,12 @@ jobs:
       # VP_NODE_VERSION in upstream's release-desktop.yml.
       - uses: actions/setup-node@v6
         with:
-          node-version: 26.12.1
+          node-version: 26.13.1
 
       # The executable bundles the server again, so it needs the same channel.
       - name: Build CLI single-executable
         env:
-          VP_NODE_VERSION: 26.12.1
+          VP_NODE_VERSION: 26.13.1
           T3CODE_TELEMETRY_CHANNEL: ${{ needs.resolve.outputs.channel }}
         run: pnpm exec node apps/server/scripts/cli.ts build-exe --verbose
 
@@ -352,7 +352,7 @@ jobs:
       - name: Run the database startup tests on the Node the executable embeds
         working-directory: apps/server
         run: |
-          test "$(node --version)" = "v26.12.1"
+          test "$(node --version)" = "v26.13.1"
           pnpm exec vp test run src/j5/persistence src/persistence src/serverRuntimeState.test.ts
 
       - uses: actions/setup-node@v6

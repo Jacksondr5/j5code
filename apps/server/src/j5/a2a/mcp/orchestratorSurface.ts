@@ -1,19 +1,10 @@
 import { J5DelegateTaskTool } from "../../agents/agentDelegation.ts";
 import {
-  NonNegativeInt,
   OrchestratorMcpCapabilitiesInput,
+  OrchestratorMcpCapabilitiesResult,
   OrchestratorMcpFailure,
-  OrchestratorMcpModelOption,
-  ProviderDriverKind,
-  ProviderInstanceId,
-  ProviderInteractionMode,
-  ProviderOptionSelection,
-  RuntimeMode,
-  ThreadId,
-  type OrchestratorMcpCapabilitiesResult,
 } from "@t3tools/contracts";
 import * as SecureRandom from "effect/crypto/SecureRandom";
-import * as Schema from "effect/Schema";
 import { Tool, Toolkit } from "effect/ai";
 
 import * as McpInvocationContext from "../../../mcp/McpInvocationContext.ts";
@@ -24,61 +15,15 @@ import { AgentCrewInstanceService } from "../AgentCrewInstanceService.ts";
 
 const dependencies = [McpInvocationContext.McpInvocationContext, OrchestratorMcpService];
 
-export const J5OrchestratorProviderCapability = Schema.Struct({
-  providerInstanceId: ProviderInstanceId,
-  driverKind: ProviderDriverKind,
-  displayName: Schema.NullOr(Schema.String),
-  models: Schema.Array(
-    Schema.Struct({
-      id: Schema.String,
-      label: Schema.optional(Schema.String),
-      options: Schema.optional(Schema.Array(OrchestratorMcpModelOption)),
-    }),
-  ),
-  omittedModels: Schema.optional(NonNegativeInt),
-  runtimeModes: Schema.optional(Schema.Array(RuntimeMode)),
-  constraints: Schema.Array(Schema.String),
-});
-
-export const J5OrchestratorCapabilitiesResult = Schema.Struct({
-  /** The calling thread, or null when the caller is not a J5 thread. */
-  parentThreadId: Schema.NullOr(ThreadId),
-  inheritedProviderInstanceId: Schema.NullOr(ProviderInstanceId),
-  inheritedModel: Schema.NullOr(Schema.String),
-  inheritedOptions: Schema.optional(Schema.Array(ProviderOptionSelection)),
-  runtimeMode: RuntimeMode,
-  interactionMode: ProviderInteractionMode,
-  providers: Schema.Array(J5OrchestratorProviderCapability),
-  features: Schema.Struct({
-    incrementalThreadRead: Schema.Boolean,
-    scheduledTasks: Schema.Boolean,
-  }),
-});
-
+/**
+ * Upstream's answer in upstream's shape, which a linked environment's `delegate_task` decodes
+ * (T3 Code's `RemoteDelegation`). J5 leaves out bulk create (register D2), so it says so.
+ */
 export const mapJ5OrchestratorCapabilities = (
   capabilities: OrchestratorMcpCapabilitiesResult,
-): typeof J5OrchestratorCapabilitiesResult.Type => ({
-  parentThreadId: capabilities.parentThreadId,
-  inheritedProviderInstanceId: capabilities.inheritedProviderInstanceId,
-  inheritedModel: capabilities.inheritedModel,
-  ...(capabilities.inheritedOptions === undefined
-    ? {}
-    : { inheritedOptions: capabilities.inheritedOptions }),
-  runtimeMode: capabilities.runtimeMode,
-  interactionMode: capabilities.interactionMode,
-  providers: capabilities.providers.map((provider) => ({
-    providerInstanceId: provider.providerInstanceId,
-    driverKind: provider.driverKind,
-    displayName: provider.displayName,
-    models: provider.models,
-    ...(provider.omittedModels === undefined ? {} : { omittedModels: provider.omittedModels }),
-    ...(provider.runtimeModes === undefined ? {} : { runtimeModes: provider.runtimeModes }),
-    constraints: provider.constraints,
-  })),
-  features: {
-    incrementalThreadRead: capabilities.features.incrementalThreadRead,
-    scheduledTasks: capabilities.features.scheduledTasks,
-  },
+): OrchestratorMcpCapabilitiesResult => ({
+  ...capabilities,
+  features: { ...capabilities.features, batchThreadCreation: false, maxBatchThreads: 0 },
 });
 
 export const J5_ORCHESTRATOR_CAPABILITIES_DESCRIPTION =
@@ -87,7 +32,7 @@ export const J5_ORCHESTRATOR_CAPABILITIES_DESCRIPTION =
 const J5OrchestratorCapabilitiesTool = Tool.make("orchestrator_capabilities", {
   description: J5_ORCHESTRATOR_CAPABILITIES_DESCRIPTION,
   parameters: OrchestratorMcpCapabilitiesInput,
-  success: J5OrchestratorCapabilitiesResult,
+  success: OrchestratorMcpCapabilitiesResult,
   failure: OrchestratorMcpFailure,
   failureMode: "return",
   dependencies,
@@ -119,7 +64,7 @@ const J5ThreadInterruptTool = Tool.make("t3_thread_interrupt", {
 
 /**
  * The orchestrator tools J5 declares itself: `delegate_task` takes a persona,
- * `orchestrator_capabilities` leaves out upstream's claims about tools J5 does not expose, and
+ * `orchestrator_capabilities` says J5 leaves out bulk create, and
  * `t3_thread_interrupt` lets a Captain stop its own seats. The upstream tools J5 registers
  * unchanged are in upstreamCatalog.ts.
  */

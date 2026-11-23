@@ -23,6 +23,10 @@ export const atReadableAddresses = (urls: ReadonlyArray<string>): string => {
   return shown.length === 0 ? "" : ` at ${shown.join(", ")}`;
 };
 
+/** An origin for a message a person or an agent reads: a line's address is "Its line". */
+export const readableOrigin = (origin: string): string =>
+  isLineHost(URL.parse(origin)?.hostname ?? "") ? "Its line" : origin;
+
 /** Whether a URL's hostname is a line host; such a request may only travel through a line. */
 export const isLineHost = (hostname: string): boolean => {
   if (!hostname.startsWith(LINE_HOST_PREFIX)) return false;

@@ -2,7 +2,7 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import type { CrewProposalPreviewRequest, CrewProposalResolveRequest } from "@t3tools/contracts/j5";
 import * as Cause from "effect/Cause";
 
-import { appAtomRegistry } from "../../state/atom-registry";
+import { runJ5Command } from "../runCommand";
 import { j5Environment } from "../state";
 
 /** Resolve runtime settings on the environment that will launch these exact seats. */
@@ -10,7 +10,7 @@ export async function previewCrewProposal(
   environmentId: EnvironmentId,
   input: CrewProposalPreviewRequest,
 ) {
-  const result = await j5Environment.previewCrewProposal.run(appAtomRegistry, {
+  const result = await runJ5Command(j5Environment.previewCrewProposal, {
     environmentId,
     input,
   });
@@ -23,7 +23,7 @@ export async function resolveCrewProposal(
   environmentId: EnvironmentId,
   input: CrewProposalResolveRequest,
 ) {
-  const result = await j5Environment.resolveCrewProposal.run(appAtomRegistry, {
+  const result = await runJ5Command(j5Environment.resolveCrewProposal, {
     environmentId,
     input,
   });

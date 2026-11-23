@@ -2,6 +2,8 @@ import { findSearchTokenRanges, splitSearchText } from "@t3tools/shared/paletteS
 import type { EnvironmentThreadSearchMatch } from "@t3tools/client-runtime/state/thread-search";
 import { threadSearchMatchLabel } from "@t3tools/client-runtime/j5/shared-conversation";
 
+import { useGT } from "gt-react-native";
+
 import { AppText as Text } from "../../components/ui/AppText";
 import { cn } from "../../lib/cn";
 
@@ -12,6 +14,7 @@ export function ThreadSearchMatchExcerpt(props: {
   readonly compact?: boolean;
   readonly sidebar?: boolean;
 }) {
+  const gt = useGT();
   const isUser = props.match.source === "user";
   const parts = splitSearchText(
     props.match.snippet,
@@ -42,7 +45,11 @@ export function ThreadSearchMatchExcerpt(props: {
         )}
       >
         {/* J5 (case 99): another person's message names them. */}
-        {threadSearchMatchLabel(props.match)}:{" "}
+        {isUser && props.match.author?._tag === "person"
+          ? `${threadSearchMatchLabel(props.match)}:`
+          : isUser
+            ? gt("You:", { $context: "label before a search snippet the user wrote" })
+            : gt("Agent:", { $context: "label before a search snippet the agent wrote" })}{" "}
       </Text>
       {parts.map((part) => (
         <Text

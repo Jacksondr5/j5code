@@ -8,9 +8,9 @@ import {
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import { Tool } from "effect/ai";
+import { McpSchema, Tool } from "effect/ai";
 
-import { McpInvocationContext } from "../../mcp/McpInvocationContext.ts";
+import { hiddenFromOutsideClients, McpInvocationContext } from "../../mcp/McpInvocationContext.ts";
 import { OrchestratorMcpService } from "../../mcp/OrchestratorMcpService.ts";
 import { UnreachableCalls } from "../a2a/line/UnreachableCallsService.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
@@ -79,7 +79,9 @@ export const J5DelegateTaskTool = Tool.make("delegate_task", {
 })
   .annotate(Tool.Title, "Delegate a child task")
   .annotate(Tool.Destructive, true)
-  .annotate(Tool.OpenWorld, true);
+  .annotate(Tool.OpenWorld, true)
+  // As upstream's delegate_task, which this replaces: a child needs a calling thread to report to.
+  .annotate(McpSchema.EnabledWhen, hiddenFromOutsideClients);
 
 export const delegateTask = Effect.fn("j5.delegateTask")(function* (input: J5DelegateTaskInput) {
   const { persona: personaId, authorThreads, allow_once: allowOnce, ...delegate } = input;

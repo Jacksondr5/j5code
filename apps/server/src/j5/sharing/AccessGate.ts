@@ -270,6 +270,8 @@ const ACCESS_RPC_RULES: Partial<Record<WsRpcMethod, AccessRpcRule>> = {
   [WS_METHODS.subscribeVcsStatus]: collaborator,
   [WS_METHODS.vcsPull]: collaborator,
   [WS_METHODS.vcsRefreshStatus]: collaborator,
+  [WS_METHODS.subscribeVcsBranch]: collaborator,
+  [WS_METHODS.vcsRefreshBranch]: collaborator,
   [WS_METHODS.vcsListRefs]: collaborator,
   [WS_METHODS.vcsCreateWorktree]: collaborator,
   [WS_METHODS.vcsRemoveWorktree]: collaborator,
@@ -592,6 +594,11 @@ export const layerGatedEnvironmentAuth = Layer.effect(
           return unbound(access.unbindSession(sessionId), inner.revokeSession(sessionId));
         },
       ),
+      // `auth session revoke` from the CLI; a device-key session takes its key's other
+      // sessions with it, which a key renewing in place does not have (FORK.md case 79).
+      revokeClient: Effect.fn("EnvironmentAuth.EnvironmentAuth.revokeClient")(function (sessionId) {
+        return unbound(access.unbindSession(sessionId), inner.revokeClient(sessionId));
+      }),
       revokeClientSession: Effect.fn("EnvironmentAuth.EnvironmentAuth.revokeClientSession")(
         function (currentSessionId, targetSessionId) {
           return currentSessionId === targetSessionId

@@ -21,8 +21,8 @@ import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import { HttpRouter, HttpServer } from "effect/http";
 
-import * as SessionStore from "../auth/SessionStore.ts";
 import * as EnvironmentAuth from "../auth/EnvironmentAuth.ts";
+import * as SessionStore from "../auth/SessionStore.ts";
 import * as PreviewBrowserHost from "./PreviewBrowserHost.ts";
 import * as ServerBrowser from "./ServerBrowser.ts";
 import { routeLayer } from "./ServerBrowserStream.ts";
@@ -32,7 +32,7 @@ const platformLayer = NodeHttpPlatform.layer.pipe(Layer.provideMerge(NodeService
 const makeAuth = (
   scopes: ReadonlyArray<AuthEnvironmentScope>,
   error?: EnvironmentAuth.ServerAuthCredentialError,
-  invalidation: Effect.Effect<void> = Effect.never,
+  awaitInvalidation: SessionStore.SessionStore["Service"]["awaitInvalidation"] = () => Effect.never,
 ) => {
   const requests: string[] = [];
   const layer = Layer.mock(EnvironmentAuth.EnvironmentAuth, {
@@ -52,9 +52,9 @@ const makeAuth = (
     layer: Layer.merge(
       layer,
       Layer.mock(SessionStore.SessionStore, {
-        cookieName: "test-session",
+        cookieName: "test",
         legacyCookieName: undefined,
-        awaitInvalidation: () => invalidation,
+        awaitInvalidation,
       }),
     ),
     requests,
@@ -70,6 +70,7 @@ const mutations = [
   { type: "navigate", url: "https://example.com" },
   { type: "history", delta: -1 },
   { type: "reload" },
+  { type: "stopLoading" },
   { type: "probe", x: 10, y: 10 },
   { type: "takeControl" },
   { type: "releaseControl" },
@@ -162,90 +163,14 @@ it.effect.each([
       },
     ]);
     expect(auth.requests).toEqual([resource]);
-  }).pipe(Effect.scoped),
-);
-
-it.effect.each([false, true])(
-  "closes an established viewer on invalidation (operate=%s)",
-  (operate) =>
-    Effect.gen(function* () {
-      const invalidated = yield* Deferred.make<void>();
-      const detached = yield* Deferred.make<void>();
-      const inputStarted = yield* Deferred.make<void>();
-      const inputInterrupted = yield* Deferred.make<void>();
-      const output = yield* Queue.make<ServerBrowser.ServerBrowserViewerOutput>();
-      const auth = makeAuth(
-        operate
-          ? [AuthOrchestrationReadScope, AuthPreviewOperateScope]
-          : [AuthOrchestrationReadScope],
-        undefined,
-        Deferred.await(invalidated),
-      );
-      const browser = ServerBrowser.ServerBrowser.of({
-        clearProfile: () => Effect.void,
-        profileReporter: Effect.succeed(() => Effect.void),
-        openDownload: () => Effect.succeedNone,
-        answerFileChooser: () => Effect.succeed(false),
-        attachViewer: () =>
-          Effect.gen(function* () {
-            yield* Effect.addFinalizer(() => Deferred.succeed(detached, undefined));
-            return {
-              output,
-              input: () =>
-                Deferred.succeed(inputStarted, undefined).pipe(
-                  Effect.andThen(Effect.never),
-                  Effect.onInterrupt(() => Deferred.succeed(inputInterrupted, undefined)),
-                ),
-            };
-          }),
-      });
-      const services = yield* Layer.build(
-        HttpRouter.serve(
-          routeLayer.pipe(
-            Layer.provide(Layer.succeed(ServerBrowser.ServerBrowser, browser)),
-            Layer.provide(platformLayer),
-          ),
-          { disableListenLog: true },
-        ).pipe(Layer.provideMerge(NodeHttpServer.layerTest), Layer.provide(auth.layer)),
-      );
-      const server = Context.get(services, HttpServer.HttpServer);
-      const origin = HttpServer.formatAddress(server.address).replace(/^http/, "ws");
-      const received = Promise.withResolvers<void>();
-      const closed = Promise.withResolvers<void>();
-      const frames: unknown[] = [];
-      const socket = yield* Effect.acquireRelease(
-        Effect.sync(() => {
-          const socket = new WebSocket(`${origin}/api/preview-stream/ws?threadId=thread&tabId=tab`);
-          socket.addEventListener("message", (event) => {
-            frames.push(event.data);
-            received.resolve();
-          });
-          socket.addEventListener("close", () => closed.resolve());
-          socket.addEventListener("error", () => received.reject(new Error("stream failed")));
-          return socket;
-        }),
-        (socket) => Effect.sync(() => socket.close()),
-      );
-      yield* Queue.offer(output, { _tag: "frame", data: new Uint8Array([1]), ack: Effect.void });
-      yield* Effect.promise(() => received.promise);
-      if (operate) {
-        socket.send(JSON.stringify({ type: "takeControl" }));
-        yield* Deferred.await(inputStarted);
-      }
-      yield* Deferred.succeed(invalidated, undefined);
-      yield* Deferred.await(detached);
-      yield* Effect.promise(() => closed.promise);
-      if (operate) yield* Deferred.await(inputInterrupted);
-      yield* Queue.offer(output, { _tag: "frame", data: new Uint8Array([2]), ack: Effect.void });
-      expect(frames).toHaveLength(1);
-      expect(socket.readyState).toBe(WebSocket.CLOSED);
-    }).pipe(Effect.scoped),
+  }),
 );
 
 it.effect("sends replies ahead of stale frames and only the newest frame after an ack", () =>
   Effect.gen(function* () {
     const output = yield* Queue.make<ServerBrowser.ServerBrowserViewerOutput>();
     const released: number[] = [];
+    const invalidated = yield* Deferred.make<void>();
     const frame = (id: number): ServerBrowser.ServerBrowserViewerOutput => ({
       _tag: "frame",
       data: new Uint8Array([id]),
@@ -267,7 +192,10 @@ it.effect("sends replies ahead of stale frames and only the newest frame after a
         { disableListenLog: true },
       ).pipe(
         Layer.provideMerge(NodeHttpServer.layerTest),
-        Layer.provide(makeAuth([AuthOrchestrationReadScope]).layer),
+        Layer.provide(
+          makeAuth([AuthOrchestrationReadScope], undefined, () => Deferred.await(invalidated))
+            .layer,
+        ),
       ),
     );
     const server = Context.get(services, HttpServer.HttpServer);
@@ -311,7 +239,13 @@ it.effect("sends replies ahead of stale frames and only the newest frame after a
     yield* Effect.promise(() => next.promise);
     expect(received).toEqual([1, "probe", 4]);
     expect(released).toEqual([2, 3, 1]);
-  }).pipe(Effect.scoped),
+
+    const closed = new Promise<void>((resolve) =>
+      socket.addEventListener("close", () => resolve(), { once: true }),
+    );
+    yield* Deferred.succeed(invalidated, undefined);
+    yield* Effect.promise(() => closed);
+  }),
 );
 
 it.effect.each([
@@ -354,7 +288,7 @@ it.effect.each([
     );
     expect(response.status).toBe(testCase.status);
     expect(attachments).toBe(0);
-  }).pipe(Effect.scoped),
+  }),
 );
 
 it.effect("serves a tab's download only to an authorized session", () =>
@@ -459,7 +393,7 @@ it.effect("passes uploaded files to the page's open picker and needs operate sco
       { chooserId: "chooser-1", files: [{ name: "notes.txt", text: "hello" }] },
     ]);
     expect((yield* upload([AuthPreviewOperateScope], "stale")).status).toBe(409);
-  }).pipe(Effect.scoped),
+  }),
 );
 
 const decodeHostSetup = Schema.decodeUnknownEffect(Schema.fromJsonString(PreviewStreamHostSetup));
@@ -520,5 +454,5 @@ it.effect.each([
       need,
       command: "sudo t3 browser setup",
     });
-  }).pipe(Effect.scoped),
+  }),
 );

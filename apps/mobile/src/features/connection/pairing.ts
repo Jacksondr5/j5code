@@ -1,5 +1,8 @@
 import { readHostedPairingRequest } from "@t3tools/shared/remote";
 import * as Schema from "effect/Schema";
+import { msg } from "gt-react-native";
+
+import { m } from "../../i18n/messages";
 
 import { J5_BRANDING } from "../../../../../scripts/lib/j5-branding.ts";
 
@@ -25,7 +28,7 @@ export class PairingQrPayloadEmptyError extends Schema.TaggedError<PairingQrPayl
   {},
 ) {
   override get message(): string {
-    return "Scanned QR code did not contain a pairing URL.";
+    return m(msg("Scanned QR code did not contain a pairing URL."));
   }
 }
 

@@ -19,8 +19,9 @@ const server = vi.hoisted(() => {
   return { deferred, send: deferred(), reread: deferred(), cleared: vi.fn() };
 });
 vi.mock("../state", () => ({
-  j5Environment: { answerHumanExchange: { run: () => server.send.promise } },
+  j5Environment: { answerHumanExchange: {} },
 }));
+vi.mock("../runCommand", () => ({ runJ5Command: () => server.send.promise }));
 vi.mock("@t3tools/client-runtime/state/runtime", () => ({
   executeAtomQuery: () => server.reread.promise,
 }));

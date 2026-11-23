@@ -84,10 +84,14 @@ const makeServices = Effect.gen(function* () {
     let sessionRevoked = false;
     let detail: string | null = null;
     if (Result.isFailure(resolved)) {
-      // An expired link's session expired with it, and an unknown link holds none.
-      sessionRevoked =
-        resolved.failure.reason === "expired" || resolved.failure.reason === "unknown_link";
-      detail = sessionRevoked ? null : resolved.failure.message;
+      // An unknown link holds none. An expired one may not have: the other server renews a
+      // session each time it is used, and a renewal whose answer never came back is not seen here.
+      sessionRevoked = resolved.failure.reason === "unknown_link";
+      detail = sessionRevoked
+        ? null
+        : resolved.failure.reason === "expired"
+          ? "The link ran out here, so this server cannot ask the other to end its session."
+          : resolved.failure.message;
     } else {
       const label = resolved.success.link.label;
       const released = yield* Effect.result(sessionRequest("DELETE", resolved.success));
@@ -138,12 +142,28 @@ const makeServices = Effect.gen(function* () {
       return linked;
     },
   );
-  const claimingLinks = PeerLinks.PeerLinks.of({ ...links, link });
+  /** A link it leaves alone was claimed when it was made. */
+  const linkUnlessLinked: PeerLinks.PeerLinks["Service"]["linkUnlessLinked"] = Effect.fn(
+    "j5.a2a.environmentLinks.linkUnlessLinked",
+  )(function* (input) {
+    const host = URL.parse(input.url)?.hostname ?? "";
+    if (isLineHost(host)) yield* awaitLine(host);
+    const result = yield* links.linkUnlessLinked(input);
+    if (!result.alreadyLinked) yield* claim(result.link.environmentId);
+    return result;
+  });
+  const claimingLinks = PeerLinks.PeerLinks.of({ ...links, link, linkUnlessLinked });
 
   return Context.make(PeerLinks.PeerLinks, claimingLinks).pipe(
     Context.add(EnvironmentLinkService, EnvironmentLinkService.of({ forget })),
   );
 });
+
+/**
+ * No address counts as this machine: J5 links same-machine servers at 127.0.0.1/[::1], and a line
+ * at 127.77.x.y. The answer must still name the environment the link expects.
+ */
+export const noOwnLoopback = (_host: string): boolean => false;
 
 /** Over whichever `PeerLinks` it is given: upstream's in the server, a stand-in under test. */
 export const layerOver = Layer.effectContext(makeServices);
@@ -154,6 +174,7 @@ export const layerOver = Layer.effectContext(makeServices);
  */
 export const layer = layerOver.pipe(
   Layer.provide(PeerLinks.layer),
+  Layer.provide(Layer.succeed(PeerLinks.LoopbackHost, noOwnLoopback)),
   // The one registry: Effect builds this layer once however many layers name it.
   Layer.provide(lineRegistryLayer),
 );

@@ -12,8 +12,11 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+
+import * as PayloadSigner from "../../auth/PayloadSigner.ts";
 import { ServerSecretStore } from "../../auth/ServerSecretStore.ts";
-import { base64UrlEncode, signPayload } from "../../auth/utils.ts";
+import { base64UrlEncode } from "../../auth/utils.ts";
 import {
   OrchestratorDispatchError,
   OrchestratorProjectionError,
@@ -180,6 +183,7 @@ const makeHarness = (options: HarnessOptions = {}) => {
   };
 
   const dependencies = Layer.mergeAll(
+    NodeCrypto.layerMac,
     Layer.succeed(
       A2AArchiveFacts,
       A2AArchiveFacts.of({
@@ -383,8 +387,9 @@ it.effect("rejects malformed and unknown-version tokens before reading target fa
   const malformedHarness = makeHarness({ openExchange: true });
   const unknownHarness = makeHarness({ openExchange: true });
   const encoded = base64UrlEncode('{"version":"j5-archive-confirmation/v2"}');
-  const unknownVersionToken = `${encoded}.${signPayload(encoded, signingSecret)}`;
   return Effect.gen(function* () {
+    const signer = yield* PayloadSigner.fromSecret(signingSecret);
+    const unknownVersionToken = `${encoded}.${yield* signer.sign(encoded)}`;
     const malformed = yield* Effect.gen(function* () {
       return yield* Effect.flip((yield* ArchiveAgentService).archive(archiveInput("not-a-token")));
     }).pipe(Effect.provide(malformedHarness.layer));
@@ -404,7 +409,7 @@ it.effect("rejects malformed and unknown-version tokens before reading target fa
       assert.equal(unknown.reason, "unsupported-version");
     }
     assert.equal(unknownHarness.snapshot().factReads, 0);
-  });
+  }).pipe(Effect.provide(NodeCrypto.layerMac));
 });
 
 it.effect("refuses an X-for-Y target mismatch before interrupt, archive, or closure", () => {
@@ -491,6 +496,7 @@ const readFactsFor = (home: "none" | "registered", thread: "missing" | "unreadab
       archiveAgentLayer.pipe(
         Layer.provide(
           Layer.mergeAll(
+            NodeCrypto.layerMac,
             Layer.mock(A2AArchiveFacts)({
               readForThread: () =>
                 Effect.succeed(

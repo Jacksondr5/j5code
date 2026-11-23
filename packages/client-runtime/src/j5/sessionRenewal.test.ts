@@ -35,6 +35,9 @@ const ENTRY: ConnectionCatalogEntry = {
   enabled: true,
 };
 
+const tokenOf = (credential: ConnectionCredential | undefined) =>
+  credential?._tag === "BearerConnectionCredential" ? credential.token : undefined;
+
 /** A saved token, and a server that answers the renewal route as given. */
 const harness = (answer: { readonly status: number; readonly body: unknown }) => {
   const stored = new Map<string, ConnectionCredential>([
@@ -76,7 +79,7 @@ it.effect("stores the token a saved server renews its session with", () =>
     assert.deepStrictEqual(asked, [
       { url: `https://team.example${J5_SESSION_RENEW_PATH}`, authorization: "Bearer old-token" },
     ]);
-    assert.strictEqual(stored.get("connection:team")?.token, "new-token");
+    assert.strictEqual(tokenOf(stored.get("connection:team")), "new-token");
   }),
 );
 
@@ -88,7 +91,7 @@ it.effect("leaves the token as it is when the server will not renew it", () =>
     ]) {
       const { stored, layer } = harness(answer);
       assert.isFalse(yield* renewSavedSession(ENTRY).pipe(Effect.provide(layer)));
-      assert.strictEqual(stored.get("connection:team")?.token, "old-token");
+      assert.strictEqual(tokenOf(stored.get("connection:team")), "old-token");
     }
   }),
 );

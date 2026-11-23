@@ -17,12 +17,15 @@ export function useShownSettingsSections<
   Section extends { readonly rows: ReadonlyArray<{ readonly target?: string }> },
 >(sections: ReadonlyArray<Section>): ReadonlyArray<Section> {
   const ownerSomewhere = useOwnerSomewhere();
+  const writesSomewhere = useWritesSomewhere();
   if (ownerSomewhere !== false) return sections;
   return sections
     .map((section) => ({
       ...section,
       rows: section.rows.filter(
-        (row) => row.target === undefined || settingsPageShown(row.target, ownerSomewhere),
+        (row) =>
+          row.target === undefined ||
+          settingsPageShown(row.target, ownerSomewhere, writesSomewhere),
       ),
     }))
     .filter((section) => section.rows.length > 0);
@@ -34,7 +37,8 @@ export function useShownSettingsSections<
  */
 export function useOwnerOnlySettingsPage(routeName: string, children: ReactNode): ReactNode {
   const ownerSomewhere = useOwnerSomewhere();
-  if (settingsPageShown(routeName, ownerSomewhere)) return children;
+  const writesSomewhere = useWritesSomewhere();
+  if (settingsPageShown(routeName, ownerSomewhere, writesSomewhere)) return children;
   return <OwnerOnlySettingsNotice />;
 }
 

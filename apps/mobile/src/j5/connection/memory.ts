@@ -22,6 +22,7 @@ import { appAtomRegistry } from "../../state/atom-registry";
 import { environmentSession } from "../../state/session";
 import { j5Sharing } from "../sharing/guestAccess";
 import { j5Environment } from "../state";
+import { runJ5Command } from "../runCommand";
 import {
   answeredSince,
   answerOnItsWay,
@@ -177,7 +178,15 @@ const storedCredentialKey = createRuntimeCommand(connectionAtomRuntime, {
       onNone: () => null,
       onSome: (credential) =>
         credentialKey({
-          httpAuthorization: { _tag: "Bearer", token: credential.token },
+          httpAuthorization:
+            credential._tag === "BearerConnectionCredential"
+              ? { _tag: "Bearer", token: credential.token }
+              : {
+                  _tag: "Dpop",
+                  directConnection: {
+                    connectionId: credentialConnectionId(entry.target.connectionId),
+                  },
+                },
           target: entry.target,
         }),
     });
@@ -194,7 +203,7 @@ appAtomRegistry.subscribe(
       const previous = entries.get(environmentId);
       entries.set(environmentId, entry);
       if (previous === undefined || previous === entry) continue;
-      void storedCredentialKey.run(appAtomRegistry, environmentId).then((result) => {
+      void runJ5Command(storedCredentialKey, environmentId).then((result) => {
         if (result._tag === "Success" && result.value !== null)
           applyCredential(environmentId, result.value);
       });
@@ -271,7 +280,7 @@ export const connectionMemory = {
     namesInFlight.set(environmentId, inFlight);
     for (const id of ids) inFlight.add(id);
     try {
-      const result = await j5Environment.readParticipantIdentities.run(appAtomRegistry, {
+      const result = await runJ5Command(j5Environment.readParticipantIdentities, {
         environmentId,
         input: { participantIds: ids },
       });

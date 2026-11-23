@@ -120,10 +120,16 @@ export function useCanAddProject(environmentId: EnvironmentId | null): boolean {
  * Whether this connection may fork a thread. A fork is a new thread in the thread's project, so
  * the project's level decides, not the thread's.
  */
-export function useCanForkThread(environmentId: EnvironmentId, threadId: ThreadId): boolean {
-  const projectId = useThreadShell(scopeThreadRef(environmentId, threadId))?.projectId ?? null;
+export function useCanForkThread(
+  environmentId: EnvironmentId | null,
+  threadId: ThreadId | null,
+): boolean {
+  const projectId =
+    useThreadShell(
+      environmentId && threadId ? scopeThreadRef(environmentId, threadId) : null,
+    )?.projectId ?? null;
   const starts = useAtomValue(startsAtom);
-  return starts(environmentId, projectId);
+  return environmentId !== null && starts(environmentId, projectId);
 }
 
 /**

@@ -4,6 +4,8 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+
 import { ServerSecretStore } from "../../auth/ServerSecretStore.ts";
 import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
 import {
@@ -108,6 +110,7 @@ const fixture = Effect.gen(function* () {
   const layer = archiveCrewLayer.pipe(
     Layer.provide(
       Layer.mergeAll(
+        NodeCrypto.layerMac,
         Layer.mock(CrewWorktrees)({
           liveSessions: (seats) =>
             Effect.forEach(seats, (seat) => step(`read:${seat.threadId}`)).pipe(

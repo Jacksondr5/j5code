@@ -5,7 +5,7 @@ import {
 } from "@t3tools/contracts";
 import * as SpawnAgentService from "../SpawnAgentService.ts";
 import * as RequestReplayService from "../RequestReplayService.ts";
-import { Tool, Toolkit } from "effect/ai";
+import { McpSchema, Tool, Toolkit } from "effect/ai";
 import { playbookTools } from "../../playbooks/mcp.ts";
 import * as Schema from "effect/Schema";
 import { PLAYBOOK_MAX_STEPS } from "@t3tools/contracts/j5";
@@ -885,7 +885,8 @@ export const J5ProposeCrewTool = Tool.make("j5_propose_crew", {
   .annotate(Tool.Readonly, false)
   .annotate(Tool.Destructive, true)
   .annotate(Tool.Idempotent, false)
-  .annotate(Tool.OpenWorld, true);
+  .annotate(Tool.OpenWorld, true)
+  .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
 
 export const J5RequestCrewMemberTool = Tool.make("j5_request_crew_member", {
   description: J5_REQUEST_CREW_MEMBER_DESCRIPTION,
@@ -899,7 +900,8 @@ export const J5RequestCrewMemberTool = Tool.make("j5_request_crew_member", {
   .annotate(Tool.Readonly, false)
   .annotate(Tool.Destructive, true)
   .annotate(Tool.Idempotent, false)
-  .annotate(Tool.OpenWorld, true);
+  .annotate(Tool.OpenWorld, true)
+  .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
 
 const J5ListAgentsTool = Tool.make("j5_list_personas", {
   description: J5_LIST_AGENTS_DESCRIPTION,
@@ -940,7 +942,8 @@ const J5ProposePersonaTool = Tool.make("j5_propose_persona", {
   .annotate(Tool.Readonly, false)
   .annotate(Tool.Destructive, false)
   .annotate(Tool.Idempotent, false)
-  .annotate(Tool.OpenWorld, false);
+  .annotate(Tool.OpenWorld, false)
+  .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
 
 const J5StopCrewTool = Tool.make("j5_stop_crew", {
   description: J5_STOP_CREW_DESCRIPTION,
@@ -954,7 +957,8 @@ const J5StopCrewTool = Tool.make("j5_stop_crew", {
   .annotate(Tool.Readonly, false)
   .annotate(Tool.Destructive, true)
   .annotate(Tool.Idempotent, false)
-  .annotate(Tool.OpenWorld, false);
+  .annotate(Tool.OpenWorld, false)
+  .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
 
 export const J5ArchiveCrewTool = Tool.make("j5_archive_crew", {
   description: J5_ARCHIVE_CREW_DESCRIPTION,
@@ -968,7 +972,8 @@ export const J5ArchiveCrewTool = Tool.make("j5_archive_crew", {
   .annotate(Tool.Readonly, false)
   .annotate(Tool.Destructive, true)
   .annotate(Tool.Idempotent, false)
-  .annotate(Tool.OpenWorld, false);
+  .annotate(Tool.OpenWorld, false)
+  .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
 
 const J5ClearOwnAskTool = Tool.make("j5_clear_own_ask", {
   description: A2A_CLEAR_OWN_ASK_TOOL_DESCRIPTION,
@@ -987,7 +992,8 @@ const J5ClearOwnAskTool = Tool.make("j5_clear_own_ask", {
   .annotate(Tool.Readonly, false)
   .annotate(Tool.Destructive, true)
   .annotate(Tool.Idempotent, true)
-  .annotate(Tool.OpenWorld, false);
+  .annotate(Tool.OpenWorld, false)
+  .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
 
 /** Shared J5 toolkit bootstrap. Later J5 milestones append their tools here. */
 export const J5Toolkit = Toolkit.make(

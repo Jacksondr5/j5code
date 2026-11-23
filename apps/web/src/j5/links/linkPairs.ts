@@ -79,14 +79,11 @@ export const pairHasMessaging = (pair: LinkPair): boolean =>
 export const toolsAddressOf = (record: PeerRecord | null): string | null =>
   record === null ? null : record.linkMode === "store" ? record.lineAddress : record.origin;
 
-/** The days before expiry in which upstream's own link row starts to warn. */
-const RENEW_SOON_DAYS = 5;
-
 export type ToolsExpiry =
   | { readonly kind: "none" }
   | { readonly kind: "expired"; readonly at: DateTime.Utc }
-  /** `soon` is upstream's own warning window, when Renew is offered on the row itself. */
-  | { readonly kind: "running"; readonly at: DateTime.Utc; readonly soon: boolean };
+  /** Using a link renews it on the server it reaches, so `at` is its end if left unused. */
+  | { readonly kind: "running"; readonly at: DateTime.Utc };
 
 /** When a pair's tools run out: the earlier of its two directions, and expired if either is. */
 export function toolsExpiryOf(pair: LinkPair, now: DateTime.Utc): ToolsExpiry {
@@ -100,5 +97,5 @@ export function toolsExpiryOf(pair: LinkPair, now: DateTime.Utc): ToolsExpiry {
   const expired = links.find((link) => link.status === "expired");
   if (expired !== undefined) return { kind: "expired", at: expired.expiresAt };
   if (left <= 0) return { kind: "expired", at: first.expiresAt };
-  return { kind: "running", at: first.expiresAt, soon: left <= RENEW_SOON_DAYS * 86_400_000 };
+  return { kind: "running", at: first.expiresAt };
 }

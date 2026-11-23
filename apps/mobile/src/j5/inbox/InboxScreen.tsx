@@ -18,13 +18,14 @@ import {
 import { spansMultipleEnvironments } from "@t3tools/client-runtime/j5/readSources";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { scopedInboxItemKey } from "@t3tools/contracts/j5";
-import { useFocusEffect } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { type ComponentProps, forwardRef, useCallback, useState } from "react";
 import { Platform, Pressable, RefreshControl, View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import Animated from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { AppBar } from "../../components/ui/AppBar";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import { AppText as Text } from "../../components/ui/AppText";
 import { EmptyState } from "../../components/ui/EmptyState";
@@ -102,6 +103,7 @@ function refreshAll() {
  * worktree cleanups, and the asks already answered.
  */
 export function InboxScreen() {
+  const navigation = useNavigation();
   const openSources = useAtomValue(openInboxSourcesAtom);
   const answeredSources = useAtomValue(answeredInboxSourcesAtom);
   const items = mergeHumanInboxSources(openSources);
@@ -220,7 +222,7 @@ export function InboxScreen() {
   // keyboard-controller keeps the focused answer box, and the Answer row below it, clear of the
   // keyboard on both platforms. The offset is measured from the caret, so it spans the rest of an
   // empty box and the row.
-  return (
+  const list = (
     <KeyboardAwareScrollView
       bottomOffset={140}
       contentInsetAdjustmentBehavior="automatic"
@@ -237,6 +239,15 @@ export function InboxScreen() {
     >
       {content}
     </KeyboardAwareScrollView>
+  );
+  // Android draws every page's bar in the screen; upstream's route presets hide the native one.
+  return Platform.OS === "android" ? (
+    <View className="flex-1 bg-sheet">
+      <AppBar title="Inbox" onBack={() => navigation.goBack()} />
+      {list}
+    </View>
+  ) : (
+    list
   );
 }
 

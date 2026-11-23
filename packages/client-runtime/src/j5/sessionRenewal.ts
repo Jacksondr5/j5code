@@ -43,12 +43,13 @@ export const renewSavedSession = Effect.fn("j5.sessionRenewal.renewSavedSession"
   const bearer = bearerOf(entry);
   if (bearer === null || bearer.httpBaseUrl === null) return false;
   const credentials = yield* ConnectionCredentialStore;
-  const stored = yield* credentials.get(bearer.connectionId);
-  if (Option.isNone(stored)) return false;
+  const stored = Option.getOrNull(yield* credentials.get(bearer.connectionId));
+  // A DPoP credential renews with the host itself and J5's renewal route refuses it.
+  if (stored?._tag !== "BearerConnectionCredential") return false;
   const client = yield* HttpClient.HttpClient;
   const response = yield* client.execute(
     HttpClientRequest.post(new URL(J5_SESSION_RENEW_PATH, bearer.httpBaseUrl).toString()).pipe(
-      HttpClientRequest.bearerToken(stored.value.token),
+      HttpClientRequest.bearerToken(stored.token),
     ),
   );
   if (response.status !== 200) return false;

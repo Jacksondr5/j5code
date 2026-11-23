@@ -12,10 +12,7 @@ import {
   type PeerDeliveryRequest,
 } from "@t3tools/contracts/j5";
 import { codexModelFamily, normalizeModelSlug } from "@t3tools/shared/model";
-import {
-  latestExecutedRun,
-  usageLimitBlockedRun,
-} from "@t3tools/shared/orchestrationV2ThreadError";
+import { usageLimitBlockedRun } from "@t3tools/shared/orchestrationV2ThreadError";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
@@ -274,9 +271,8 @@ export const peerSteeringRun = (
   );
   if (providerThread === undefined || session?.driver !== providerThread.driver) return undefined;
   const turns = session.capabilities.turns;
-  // Claude's adapter sends an agent's steer with priority "next", which waits for the running
-  // tool calls instead of cancelling them (case 89). Its capability still reports that steering
-  // interrupts tools, because a person's steer does.
+  // Claude's adapter sends a steer with priority "next", which waits for the running tool calls
+  // instead of cancelling them.
   const claudeTakesPeerUpdates =
     providerThread.driver === "claudeAgent" && turns.supportsActiveSteering === true;
   const gpt6TakesPeerUpdates =
@@ -317,7 +313,7 @@ export const requestedSteeringRun = (
 /**
  * Why a delivery to an idle agent waits unsent. Upstream refuses to resume a thread stopped by a
  * usage limit and would start the delivery into the same limit, and it holds a message queued
- * after a failed worktree setup (`worktreeMissingRun` in Orchestrator.ts), as resuming would run it
+ * after a failed worktree setup (`worktreeSetupPending` in Orchestrator.ts), as resuming would run it
  * in the project checkout.
  */
 export const idleQueueHold = (
@@ -335,12 +331,18 @@ export const idleQueueHold = (
       )[0]?.lastError ?? null;
   const limitedRun = usageLimitBlockedRun(target.runs, target.turnItems, sessionError);
   if (limitedRun !== null) return { type: "usage_limit" as const, run: limitedRun };
-  const latestRun = latestExecutedRun(target.runs);
-  return (latestRun?.status === "failed" || latestRun?.status === "interrupted") &&
-    latestRun.workspacePreparation?.type === "worktree" &&
+  // Upstream's `worktreeSetupPending`: any failed worktree setup, while the thread has none.
+  const failedSetup =
     target.thread.worktreePath === null
-    ? { type: "worktree_setup_failed" as const, run: latestRun }
-    : undefined;
+      ? target.runs.findLast(
+          (run) =>
+            (run.status === "failed" || run.status === "interrupted") &&
+            run.workspacePreparation?.type === "worktree",
+        )
+      : undefined;
+  return failedSetup === undefined
+    ? undefined
+    : { type: "worktree_setup_failed" as const, run: failedSetup };
 };
 
 export const formatAgentDeliveryEnvelope = (

@@ -29,6 +29,9 @@ function relayAuthorization(tokens: ReadonlyArray<string>, httpBaseUrl = "https:
   const service: RemoteEnvironmentAuthorization["Service"] = {
     authorizeBearer: () => Effect.die("bearer authorization is not used by relay reads"),
     authorizeDpop: () => Effect.die("socket authorization is not used by HTTP reads"),
+    authorizeDirectDpop: () => Effect.die("direct socket authorization is not used by relay reads"),
+    authorizeDirectDpopHttp: () => Effect.die("direct HTTP authorization is not used by relay reads"),
+    rememberCheckedDescriptor: () => Effect.void,
     renewDpopBeforeExpiry: () => Effect.die("HTTP reads do not renew a socket's token"),
     authorizeDpopHttp: (input) => {
       issued.push(

@@ -235,7 +235,7 @@ const SEAMS: ReadonlyArray<Seam> = [
     file: "features/settings/SettingsRouteScreen.tsx",
     record: "PR #75–#86 role library: Personas settings",
     from: "",
-    reaches: ['page("SettingsAgents", "person.2", "Agent Setup")'],
+    reaches: ['page("SettingsAgents", "person.2", gt("Agent Setup"))'],
   },
   {
     file: "features/home/useThreadListActions.ts",
@@ -247,7 +247,7 @@ const SEAMS: ReadonlyArray<Seam> = [
     file: "Stack.tsx",
     record: "case 103: the persona forms' routes",
     from: "./j5/agents/routes",
-    reaches: ["...j5SettingsFormRoutes(SETTINGS_PAGE_OPTIONS)"],
+    reaches: ["...j5SettingsFormRoutes(settingsPage())"],
   },
   {
     file: "../metro.config.js",
@@ -259,18 +259,24 @@ const SEAMS: ReadonlyArray<Seam> = [
     file: "Stack.tsx",
     record: "case 101: the Inbox route",
     from: "./j5/inbox/routes",
-    reaches: ["...j5InboxRoutes(GLASS_HEADER_OPTIONS)"],
+    reaches: ["...j5InboxRoutes(pageRoute())"],
   },
   {
-    file: "features/home/ThreadListToolbar.tsx",
+    file: "features/layout/workspace/WorkspaceListHeader.android.tsx",
     record: "case 102: the Inbox bell",
-    from: "../../j5/inbox/InboxBell",
-    reaches: ["<InboxBell />"],
+    from: "../../../j5/inbox/InboxBell",
+    reaches: ["trailing={connectionState.hasConnections ? <InboxBell /> : null}"],
   },
   {
-    file: "features/workspace/WorkspaceToolbar.ios.tsx",
+    file: "features/layout/workspace/WorkspaceListHeader.tsx",
     record: "case 102: the Inbox bell",
-    from: "../../j5/inbox/InboxBell",
+    from: "../../../j5/inbox/InboxBell",
+    reaches: ['{ type: "custom" as const, element: <InboxBell /> }'],
+  },
+  {
+    file: "features/layout/workspace/WorkspaceToolbar.tsx",
+    record: "case 102: the Inbox bell",
+    from: "../../../j5/inbox/InboxBell",
     reaches: ["<InboxBell />"],
   },
   {
@@ -283,7 +289,7 @@ const SEAMS: ReadonlyArray<Seam> = [
     file: "Stack.tsx",
     record: "cases 98 and 114: J5 thread routes (artifacts, Crew proposal review)",
     from: "./j5/threadRoutes",
-    reaches: ["...j5ThreadRoutes(THREAD_LINKING_PREFIX, GLASS_HEADER_OPTIONS)"],
+    reaches: ["...j5ThreadRoutes(THREAD_LINKING_PREFIX, pageRoute())"],
   },
   {
     file: "features/threads/ThreadDetailScreen.tsx",
@@ -308,12 +314,6 @@ const SEAMS: ReadonlyArray<Seam> = [
       "j5Slot.onOverlayLayout(event);",
       "{j5Slot.hidesComposer ? <View style={{ height: composerBottomInset }} /> : null}",
     ],
-  },
-  {
-    file: "features/threads/ComposerCommandPopover.tsx",
-    record: "case 124: the @ popover heads its leading personas",
-    from: "../../j5/composer/PopoverPersonaGroup",
-    reaches: ["leadingPersonaCount(props.triggerKind, props.items)", "<PopoverGroupHeading"],
   },
   {
     file: "features/threads/ThreadFeed.tsx",
@@ -384,16 +384,16 @@ const SEAMS: ReadonlyArray<Seam> = [
     reaches: ["const startsSomewhere = useStartsSomewhere();", "startsSomewhere &&"],
   },
   {
-    file: "features/workspace/WorkspaceToolbar.ios.tsx",
-    record: "case 90: starting follows the person's level",
-    from: "../../j5/sharing/startAccess",
-    reaches: ["const startsSomewhere = useStartsSomewhere();", "!startsSomewhere ||"],
+    file: "features/threads/useCanShareWithGuest.ts",
+    record: "case 92: guest links are hidden (both mobile doors)",
+    from: "../../j5/sharing/guestLinks",
+    reaches: ["return GUEST_LINKS_OFFERED && offered;"],
   },
   {
-    file: "features/workspace/WorkspaceNativeTabs.ios.tsx",
+    file: "features/layout/workspace/useWorkspaceCompose.ts",
     record: "case 90: starting follows the person's level",
-    from: "../../j5/sharing/startAccess",
-    reaches: ["const startsSomewhere = useStartsSomewhere();", "startsSomewhere &&"],
+    from: "../../../j5/sharing/startAccess",
+    reaches: ["const startsSomewhere = useStartsSomewhere();", "!startsSomewhere ||"],
   },
   {
     file: "features/threads/NewTaskDraftScreen.tsx",
@@ -430,7 +430,10 @@ const SEAMS: ReadonlyArray<Seam> = [
     file: "features/threads/ThreadRouteScreen.tsx",
     record: "case 90: starting follows the person's level",
     from: "../../j5/sharing/startAccess",
-    reaches: ["const projects = useStartableProjects(useProjects());"],
+    reaches: [
+      "const projects = useStartableProjects(useProjects());",
+      "offersSideChat={composer.sideChatUnavailableReason === null && canForkThread}",
+    ],
   },
   {
     file: "App.tsx",

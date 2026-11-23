@@ -9,8 +9,12 @@ import {
 import { isAgentPersonaAuthorityPolicy, OrchestratorMcpFailure } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
-import { Tool } from "effect/ai";
-import { McpInvocationContext, requireThreadScope } from "../../mcp/McpInvocationContext.ts";
+import { McpSchema, Tool } from "effect/ai";
+import {
+  hiddenFromOutsideClients,
+  McpInvocationContext,
+  requireThreadScope,
+} from "../../mcp/McpInvocationContext.ts";
 import { actsAsThreadCaller, readsAsThreadCaller, spawnAndBrief } from "../a2a/mcp/outsideAgent.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { ProjectService } from "../../project/ProjectService.ts";
@@ -59,7 +63,7 @@ export const playbookTools = [
     failure: Failure,
     failureMode: "return",
     dependencies,
-  }),
+  }).annotate(McpSchema.EnabledWhen, hiddenFromOutsideClients),
   Tool.make("j5_playbook_list", {
     description:
       "Discover live YAML playbooks from this environment's libraries and your thread workspace's .j5/playbooks directory, with each step's persona. Invalid files include actionable errors; non-blocking warnings name steps whose persona is missing or turned off.",
@@ -70,7 +74,8 @@ export const playbookTools = [
   })
     .annotate(Tool.Readonly, true)
     .annotate(Tool.Destructive, false)
-    .annotate(Tool.OpenWorld, false),
+    .annotate(Tool.OpenWorld, false)
+    .annotate(McpSchema.EnabledWhen, hiddenFromOutsideClients),
   Tool.make("j5_playbook_read", {
     description:
       "Read a playbook's live definition, with every step's prompt and persona, its source, and the digest an edit through j5_playbook_save needs, without starting a run. Pass the same name as j5_playbook_start. warnings name steps whose persona is missing or turned off; they never block starting.",
@@ -82,7 +87,8 @@ export const playbookTools = [
   })
     .annotate(Tool.Readonly, true)
     .annotate(Tool.Destructive, false)
-    .annotate(Tool.OpenWorld, false),
+    .annotate(Tool.OpenWorld, false)
+    .annotate(McpSchema.EnabledWhen, hiddenFromOutsideClients),
   Tool.make("j5_playbook_start", {
     ...common,
     dependencies: workspaceDependencies,
@@ -90,7 +96,7 @@ export const playbookTools = [
     description:
       "Start a named playbook in your own thread and retrieve its first live prompt. Only one run may be active. You perform the work and control advancement; the playbook never spawns or stops agents. As a Captain, pass crew_instance_id to run the playbook your Crew follows: each step then goes to the seat that owns it, and delivery says who holds it." +
       mutationDescription,
-  }),
+  }).annotate(McpSchema.EnabledWhen, hiddenFromOutsideClients),
   Tool.make("j5_playbook_current", {
     ...common,
     parameters: Current,
@@ -99,42 +105,43 @@ export const playbookTools = [
   })
     .annotate(Tool.Readonly, true)
     .annotate(Tool.Destructive, false)
-    .annotate(Tool.OpenWorld, false),
+    .annotate(Tool.OpenWorld, false)
+    .annotate(McpSchema.EnabledWhen, hiddenFromOutsideClients),
   Tool.make("j5_playbook_next", {
     ...common,
     parameters: Movement,
     description:
       "Advance one step in the latest YAML order and retrieve its prompt. expectedStepId must equal your current step. At the last step, use j5_playbook_complete." +
       mutationDescription,
-  }),
+  }).annotate(McpSchema.EnabledWhen, hiddenFromOutsideClients),
   Tool.make("j5_playbook_back", {
     ...common,
     parameters: Movement,
     description:
       "Move back one step in the latest YAML order and retrieve its live prompt. This changes progress only; it does not undo work or file edits. expectedStepId guards against stale calls." +
       mutationDescription,
-  }),
+  }).annotate(McpSchema.EnabledWhen, hiddenFromOutsideClients),
   Tool.make("j5_playbook_reselect", {
     ...common,
     parameters: Reselection,
     description:
       "Explicitly select an available stepId, including recovery when the stored current step was removed. expectedStepId must equal the stored currentStepId, even if that ID is absent from YAML." +
       mutationDescription,
-  }),
+  }).annotate(McpSchema.EnabledWhen, hiddenFromOutsideClients),
   Tool.make("j5_playbook_complete", {
     ...common,
     parameters: Movement,
     description:
       "Mark the playbook completed. expectedStepId guards against stale completion. Your agent and thread remain usable; you may start another playbook." +
       mutationDescription,
-  }),
+  }).annotate(McpSchema.EnabledWhen, hiddenFromOutsideClients),
   Tool.make("j5_playbook_cancel", {
     ...common,
     parameters: Mutation,
     description:
       "Cancel your playbook even when its YAML is missing or invalid. This does not interrupt or archive your agent." +
       mutationDescription,
-  }),
+  }).annotate(McpSchema.EnabledWhen, hiddenFromOutsideClients),
 ] as const;
 
 const ownerScope = Effect.gen(function* () {
