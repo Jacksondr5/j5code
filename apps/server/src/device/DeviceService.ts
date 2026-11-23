@@ -126,13 +126,31 @@ const adbSerials = (stdout: string) =>
     .filter((line) => line && line !== "List of devices attached" && !line.startsWith("*"))
     .map((line) => line.split(/\s+/)[0]!);
 
-// Exits 0 when the emulator console on the given port accepts a connection, and
-// EMULATOR_CONSOLE_REFUSED only when it is refused; anything else is not an answer.
-const EMULATOR_CONSOLE_REFUSED = 3;
-const EMULATOR_CONSOLE_PROBE = `const socket = require("node:net").connect(Number(process.argv[1]), "127.0.0.1");
-socket.setTimeout(5000, () => process.exit(2));
-socket.on("connect", () => process.exit(0));
-socket.on("error", (error) => process.exit(error.code === "ECONNREFUSED" ? ${EMULATOR_CONSOLE_REFUSED} : 2));`;
+// Exits 0 when the emulator console on the given port accepts a connection on 127.0.0.1 or ::1,
+// which the emulator opens separately, and EMULATOR_CONSOLE_REFUSED only when neither can be
+// listening; anything else is not an answer. A host without IPv6 cannot listen on ::1.
+export const EMULATOR_CONSOLE_REFUSED = 3;
+export const EMULATOR_CONSOLE_PROBE = `const net = require("node:net");
+const port = Number(process.argv[1]);
+const noIpv6 = ["EADDRNOTAVAIL", "EAFNOSUPPORT", "ENETUNREACH"];
+const probe = (host) =>
+  new Promise((resolve) => {
+    const socket = net.connect(port, host);
+    socket.setTimeout(5000, () => (socket.destroy(), resolve("unknown")));
+    socket.on("connect", () => (socket.destroy(), resolve("open")));
+    socket.on("error", (error) =>
+      resolve(
+        error.code === "ECONNREFUSED" || (host === "::1" && noIpv6.includes(error.code))
+          ? "closed"
+          : "unknown",
+      ),
+    );
+  });
+Promise.all([probe("127.0.0.1"), probe("::1")]).then((results) =>
+  process.exit(
+    results.includes("open") ? 0 : results.every((result) => result === "closed") ? ${EMULATOR_CONSOLE_REFUSED} : 2,
+  ),
+);`;
 
 const DeviceHostName = Schema.Struct({ id: DeviceHostId, label: Schema.optional(Schema.String) });
 const hostName = (host: typeof DeviceHostName.Type) => host.label ?? `host ${host.id}`;

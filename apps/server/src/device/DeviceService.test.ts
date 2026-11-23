@@ -10,6 +10,10 @@ import {
   type ServerSettings as Settings,
   type SshDeviceHostConfig,
 } from "@t3tools/contracts";
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- Runs the real console probe as the device host does.
+import * as NodeChildProcess from "node:child_process";
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- Real sockets stand in for an emulator console.
+import * as NodeNet from "node:net";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NetService from "@t3tools/shared/Net";
@@ -1364,6 +1368,29 @@ describe("Android close with shutdown", () => {
       expect(commands).toContain("adb devices");
       expect((yield* service.state).sessions).toHaveLength(1);
     }).pipe(Effect.provide(ServerSettings.layerTest({ enableDeviceSupport: true })), Effect.scoped),
+  );
+
+  // The emulator listens on 127.0.0.1 and ::1 separately, and either can fail to bind.
+  it.each(["127.0.0.1", "::1", null] as const)(
+    "the console probe sees a console listening on %s",
+    async (host) => {
+      const server = NodeNet.createServer();
+      await new Promise<void>((resolve) => server.listen(0, host ?? "127.0.0.1", resolve));
+      const port = (server.address() as NodeNet.AddressInfo).port;
+      if (host === null) await new Promise<void>((resolve) => server.close(() => resolve()));
+      try {
+        const probe = await new Promise<number | null>((resolve) =>
+          NodeChildProcess.execFile(
+            process.execPath,
+            ["-e", DeviceService.EMULATOR_CONSOLE_PROBE, String(port)],
+            (error) => resolve(error ? (typeof error.code === "number" ? error.code : null) : 0),
+          ),
+        );
+        expect(probe).toBe(host === null ? DeviceService.EMULATOR_CONSOLE_REFUSED : 0);
+      } finally {
+        if (host !== null) server.close();
+      }
+    },
   );
 
   it.effect("a rejected shutdown of an AVD by name is not read as an exited emulator", () =>
