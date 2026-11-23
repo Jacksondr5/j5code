@@ -3,7 +3,7 @@ import { ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
@@ -15,15 +15,18 @@ import {
   PlacementParentIneligibleError,
   PlacementParentNotFoundError,
   PlacementParticipantNotFoundError,
-  PlacementSquadronNotFoundError,
+  PlacementProjectNotFoundError,
   ParticipantPlacementService,
   layer as placementLayer,
 } from "./PlacementService.ts";
-import { CommCommandId, SquadronId, ParticipantId, type Participant } from "./contracts.ts";
+import { CommCommandId, LedgerProjectId, ParticipantId, type Participant } from "./contracts.ts";
 import { PlacementCommandId, type ParticipantProvenance } from "./placementContracts.ts";
+import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
+import { participantIdForThread } from "./HomeRegistrar.ts";
+import { makeSpawnedChildrenRead } from "./spawnedChildrenRead.ts";
 
 const timestamp = "2026-08-16T16:00:00.000Z";
-const squadronId = SquadronId.make("squadron:placement");
+const projectId = LedgerProjectId.make("project:placement");
 const legacyGlobalHumanId = ParticipantId.make("human:global");
 const isCycle = Schema.is(PlacementCycleError);
 const isGraphCorrupt = Schema.is(PlacementGraphCorruptError);
@@ -31,9 +34,9 @@ const isHumanTarget = Schema.is(PlacementHumanTargetError);
 const isParentIneligible = Schema.is(PlacementParentIneligibleError);
 const isParentNotFound = Schema.is(PlacementParentNotFoundError);
 const isParticipantNotFound = Schema.is(PlacementParticipantNotFoundError);
-const isSquadronNotFound = Schema.is(PlacementSquadronNotFoundError);
+const isProjectLedgerNotFound = Schema.is(PlacementProjectNotFoundError);
 const TestLayer = Layer.merge(ledgerLayer, placementLayer).pipe(
-  Layer.provideMerge(NodeSqliteClient.layerMemory()),
+  Layer.provideMerge(NodeSqliteClient.layer({ filename: ":memory:" })),
 );
 
 const agent = (name: string): Extract<Participant, { kind: "agent" }> => ({
@@ -54,7 +57,7 @@ const joinParticipant = (index: number, participant: Participant) =>
     const ledger = yield* A2ALedger;
     yield* ledger.append({
       commandId: CommCommandId.make(`membership:${index}`),
-      squadronId,
+      projectId,
       acceptedAt: timestamp,
       event: {
         kind: "participant.joined",
@@ -72,9 +75,7 @@ const prepare = (participants: ReadonlyArray<Participant>) =>
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
     const ledger = yield* A2ALedger;
-    yield* ledger.createSquadron({
-      squadron: { id: squadronId, name: "Placement tests", createdAt: timestamp },
-    });
+    yield* ledger.ensureProject({ projectId: projectId, createdAt: timestamp });
     for (const [index, participant] of participants.entries()) {
       yield* joinParticipant(index + 1, participant);
     }
@@ -89,13 +90,285 @@ const record = (input: {
     const placements = yield* ParticipantPlacementService;
     return yield* placements.recordCreation({
       commandId: PlacementCommandId.make(`placement:${input.index}`),
-      squadronId,
+      projectId,
       participantId: input.participant.id,
       actor: "platform",
       provenance: input.provenance,
       createdAt: timestamp,
     });
   });
+
+it.effect("records a spawner from another project and makes its child a root there", () =>
+  Effect.gen(function* () {
+    const spawner = agent("cross-project-spawner");
+    const child = agent("cross-project-child");
+    const elsewhere = LedgerProjectId.make("project:placement-elsewhere");
+    yield* prepare([spawner]);
+    const ledger = yield* A2ALedger;
+    yield* ledger.ensureProject({ projectId: elsewhere, createdAt: timestamp });
+    yield* ledger.append({
+      commandId: CommCommandId.make("membership:cross-project-child"),
+      projectId: elsewhere,
+      acceptedAt: timestamp,
+      event: {
+        kind: "participant.joined",
+        sender: null,
+        receiver: null,
+        exchangeId: null,
+        correlationId: null,
+        payload: { participant: child },
+        createdAt: timestamp,
+      },
+    });
+    const placements = yield* ParticipantPlacementService;
+    const recorded = yield* placements.recordCreation({
+      commandId: PlacementCommandId.make("placement:cross-project-child"),
+      projectId: elsewhere,
+      participantId: child.id,
+      actor: "agent",
+      provenance: spawnedBy(spawner),
+      createdAt: timestamp,
+    });
+    assert.deepStrictEqual(recorded.placement.provenance, spawnedBy(spawner));
+    assert.isNull(recorded.placement.placementParentId);
+    assert.deepStrictEqual(
+      (yield* placements.listParticipants(elsewhere)).map((row) => [
+        row.participantId,
+        row.placementParentId,
+      ]),
+      [[child.id, null]],
+    );
+  }).pipe(Effect.provide(TestLayer)),
+);
+
+it.effect("keeps a moved child's placement: still under its spawner, still spawned by it", () =>
+  Effect.gen(function* () {
+    // Thread-derived ids, as the spawned-children read maps them back to threads.
+    const threadAgent = (name: string) => {
+      const threadId = ThreadId.make(`thread:${name}`);
+      return { kind: "agent" as const, id: participantIdForThread(threadId), threadId };
+    };
+    const spawner = threadAgent("move-spawner");
+    const child = threadAgent("move-child");
+    yield* prepare([spawner, child]);
+    yield* record({ index: 1, participant: child, provenance: spawnedBy(spawner) });
+    // Turn into project moves the child's membership; its placement stays where it was made.
+    const ledger = yield* A2ALedger;
+    const promoted = LedgerProjectId.make("project:placement-promoted");
+    yield* ledger.ensureProject({ projectId: promoted, createdAt: timestamp });
+    for (const ledgerProjectId of [projectId, promoted]) {
+      yield* ledger.append({
+        commandId: CommCommandId.make(`move:child:${ledgerProjectId}`),
+        projectId: ledgerProjectId,
+        acceptedAt: timestamp,
+        event: {
+          kind: "participant.moved",
+          sender: null,
+          receiver: child.id,
+          exchangeId: null,
+          correlationId: null,
+          payload: {
+            participant: child,
+            fromProjectId: projectId,
+            toProjectId: promoted,
+            archivedAt: null,
+          },
+          createdAt: timestamp,
+        },
+      });
+    }
+
+    const placements = yield* ParticipantPlacementService;
+    assert.deepStrictEqual(
+      (yield* placements.listParticipants(promoted)).map((row) => row.provenance),
+      [spawnedBy(spawner)],
+    );
+    const spawnedChildren = yield* makeSpawnedChildrenRead.pipe(
+      Effect.provide(
+        Layer.mock(AgentCrewInstanceService)({ listInvolving: () => Effect.succeed([]) }),
+      ),
+    );
+    const read = yield* spawnedChildren([spawner.threadId]);
+    assert.deepStrictEqual(
+      read.entries.map((entry) => entry.children.map((row) => row.threadId)),
+      [[child.threadId]],
+    );
+
+    // Deleting it, in its new project, removes the placement it left behind.
+    yield* ledger.append({
+      commandId: CommCommandId.make("delete:child"),
+      projectId: promoted,
+      acceptedAt: timestamp,
+      event: {
+        kind: "participant.deleted",
+        sender: null,
+        receiver: child.id,
+        exchangeId: null,
+        correlationId: null,
+        payload: { participant: child },
+        createdAt: timestamp,
+      },
+    });
+    const sql = yield* SqlClient.SqlClient;
+    assert.deepStrictEqual(
+      yield* sql`SELECT project_id FROM j5_a2a_participant_placement WHERE participant_id = ${child.id}`,
+      [],
+    );
+  }).pipe(Effect.provide(TestLayer)),
+);
+
+it.effect("leaves a child at the top level while its spawner is archived or deleted", () =>
+  Effect.gen(function* () {
+    const threadAgent = (name: string) => {
+      const threadId = ThreadId.make(`thread:${name}`);
+      return { kind: "agent" as const, id: participantIdForThread(threadId), threadId };
+    };
+    const spawner = threadAgent("gone-spawner");
+    const child = threadAgent("gone-child");
+    yield* prepare([spawner, child]);
+    yield* record({ index: 1, participant: child, provenance: spawnedBy(spawner) });
+    const read = yield* makeSpawnedChildrenRead.pipe(
+      Effect.provide(
+        Layer.mock(AgentCrewInstanceService)({ listInvolving: () => Effect.succeed([]) }),
+      ),
+    );
+    const ledger = yield* A2ALedger;
+    const spawnerEvent = (
+      kind: "participant.archived" | "participant.unarchived" | "participant.deleted",
+    ) =>
+      ledger.append({
+        commandId: CommCommandId.make(`${kind}:gone-spawner`),
+        projectId,
+        acceptedAt: timestamp,
+        event: {
+          kind,
+          sender: null,
+          receiver: spawner.id,
+          exchangeId: null,
+          correlationId: null,
+          payload: { participant: spawner },
+          createdAt: timestamp,
+        },
+      });
+    const spawned = read([child.threadId]).pipe(Effect.map((answer) => answer.spawnedByAgent));
+
+    assert.deepStrictEqual(yield* spawned, [child.threadId]);
+    // No live row would hold it, so hiding it from the top level would lose it.
+    yield* spawnerEvent("participant.archived");
+    assert.deepStrictEqual(yield* spawned, []);
+    yield* spawnerEvent("participant.unarchived");
+    assert.deepStrictEqual(yield* spawned, [child.threadId]);
+    yield* spawnerEvent("participant.deleted");
+    assert.deepStrictEqual(yield* spawned, []);
+  }).pipe(Effect.provide(TestLayer)),
+);
+
+it.effect(
+  "tells a person who reaches some threads only of the spawners and agents they reach",
+  () =>
+    Effect.gen(function* () {
+      const threadAgent = (name: string) => {
+        const threadId = ThreadId.make(`thread:${name}`);
+        return { kind: "agent" as const, id: participantIdForThread(threadId), threadId };
+      };
+      const captain = threadAgent("reach-captain");
+      const shown = threadAgent("reach-shown");
+      const hidden = threadAgent("reach-hidden");
+      const seat = threadAgent("reach-seat");
+      yield* prepare([captain, shown, hidden]);
+      yield* record({ index: 1, participant: shown, provenance: spawnedBy(captain) });
+      yield* record({ index: 2, participant: hidden, provenance: spawnedBy(captain) });
+      // A roster seat no parent holds yet, which the Captain's row carries.
+      const crew: AgentCrewInstance = {
+        id: "crew:reach",
+        projectId,
+        captainParticipantId: captain.id,
+        captainThreadId: captain.threadId,
+        brief: "Hidden Crew brief",
+        version: 1,
+        displayName: "Hidden Crew",
+        createdAt: timestamp,
+        archivedAt: null,
+        members: [
+          {
+            seatName: "hidden-seat",
+            agentId: null,
+            participantId: seat.id,
+            threadId: seat.threadId,
+            addedVersion: 1,
+            reason: null,
+          },
+        ],
+        // The shown child once held a seat; the agent that took it over is hidden.
+        replaced: [
+          {
+            seatName: "old-seat",
+            agentId: null,
+            participantId: shown.id,
+            threadId: shown.threadId,
+            playbookStepIds: [],
+            replacedBySeat: "hidden-replacement",
+            replacedByParticipantId: hidden.id,
+            replacedAt: timestamp,
+          },
+        ],
+      };
+      const read = yield* makeSpawnedChildrenRead.pipe(
+        Effect.provide(
+          Layer.mock(AgentCrewInstanceService)({ listInvolving: () => Effect.succeed([crew]) }),
+        ),
+      );
+      const reaching =
+        (...threads: ReadonlyArray<{ readonly threadId: ThreadId }>) =>
+        (threadId: ThreadId | null) =>
+          Effect.succeed(threads.some((thread) => thread.threadId === threadId));
+      const requested = [captain.threadId, shown.threadId, hidden.threadId];
+
+      // Someone who reaches everything hears all of it, as before.
+      const everything = yield* read(requested);
+      assert.deepStrictEqual(
+        everything.entries.map((entry) => [
+          entry.threadId,
+          entry.children.map((child) => child.threadId),
+        ]),
+        [[captain.threadId, [shown.threadId, hidden.threadId, seat.threadId]]],
+      );
+      assert.deepStrictEqual(everything.spawnedByAgent, [shown.threadId, hidden.threadId]);
+      assert.strictEqual(
+        everything.entries[0]?.children[0]?.replaced?.replacedBy,
+        "hidden-replacement",
+      );
+
+      // Reaching the Captain and one child: that child, under its Captain, and nothing else,
+      // not even the seat it held, since what replaced it is out of reach.
+      const narrowed = yield* read(requested, reaching(captain, shown));
+      assert.deepStrictEqual(narrowed, {
+        entries: [
+          {
+            threadId: captain.threadId,
+            children: [{ threadId: shown.threadId, participantId: shown.id, seat: null }],
+          },
+        ],
+        spawnedByAgent: [shown.threadId],
+      });
+
+      // Reaching only the child: its row stays at the top level, and its spawner goes unsaid.
+      const childOnly = yield* read(requested, reaching(shown));
+      assert.deepStrictEqual(childOnly, { entries: [], spawnedByAgent: [] });
+
+      for (const answer of [narrowed, childOnly]) {
+        const told = JSON.stringify(answer);
+        for (const unseen of [
+          "reach-hidden",
+          "reach-seat",
+          "Hidden Crew",
+          "hidden-seat",
+          "hidden-replacement",
+        ])
+          assert.notInclude(told, unseen);
+      }
+    }).pipe(Effect.provide(TestLayer)),
+);
 
 it.effect("places wrapper-created children under their current caller", () =>
   Effect.gen(function* () {
@@ -140,7 +413,7 @@ it.effect("places through retained departed ancestors using the placement-row sa
     for (const participant of [root, first, second]) {
       yield* ledger.append({
         commandId: CommCommandId.make(`membership:${participant.id}:left`),
-        squadronId,
+        projectId,
         acceptedAt: timestamp,
         event: {
           kind: "participant.left",
@@ -206,7 +479,7 @@ it.effect(
       yield* sql`
         UPDATE j5_a2a_participant_placement
         SET placement_parent_id = ${group.id}
-        WHERE squadron_id = ${squadronId} AND participant_id = ${source.id}
+        WHERE project_id = ${projectId} AND participant_id = ${source.id}
       `;
       const nestedForkResult = yield* record({
         index: 4,
@@ -222,10 +495,10 @@ it.effect(
       yield* sql`
         UPDATE j5_a2a_participant_placement
         SET placement_parent_id = NULL
-        WHERE squadron_id = ${squadronId} AND participant_id = ${source.id}
+        WHERE project_id = ${projectId} AND participant_id = ${source.id}
       `;
       assert.equal(
-        (yield* placements.readPlacement({ squadronId, participantId: nestedFork.id }))
+        (yield* placements.readPlacement({ projectId, participantId: nestedFork.id }))
           ?.placementParentId,
         group.id,
       );
@@ -246,7 +519,7 @@ it.effect(
       });
       const placements = yield* ParticipantPlacementService;
 
-      const rows = yield* placements.listParticipants(squadronId);
+      const rows = yield* placements.listParticipants(projectId);
       const nativeRow = rows.find((row) => row.participantId === native.id);
       const unrecordedRow = rows.find((row) => row.participantId === unrecorded.id);
       assert.deepStrictEqual(nativeRow?.provenance, {
@@ -274,7 +547,7 @@ it.effect("roots departed lineage backfill while refusing a participant id that 
     });
     yield* (yield* A2ALedger).append({
       commandId: CommCommandId.make("membership:departed-parent:left"),
-      squadronId,
+      projectId,
       acceptedAt: timestamp,
       event: {
         kind: "participant.left",
@@ -318,7 +591,7 @@ it.effect("roots departed lineage backfill while refusing a participant id that 
     assert.include(wrapperError.message, departedParent.id);
     assert.equal(
       yield* (yield* ParticipantPlacementService).readPlacement({
-        squadronId,
+        projectId,
         participantId: wrapperChild.id,
       }),
       null,
@@ -339,7 +612,7 @@ it.effect("roots departed lineage backfill while refusing a participant id that 
     assert.include(fabricatedError.message, fabricatedSource.id);
     assert.equal(
       yield* (yield* ParticipantPlacementService).readPlacement({
-        squadronId,
+        projectId,
         participantId: fabricatedTarget.id,
       }),
       null,
@@ -360,7 +633,7 @@ it.effect("replays placement creation without changing immutable provenance", ()
     const placements = yield* ParticipantPlacementService;
     const input = {
       commandId: PlacementCommandId.make("placement:replay"),
-      squadronId,
+      projectId,
       participantId: child.id,
       actor: "agent" as const,
       provenance: spawnedBy(parent),
@@ -397,7 +670,7 @@ it.effect("refuses self-provenance as a placement cycle without writing placemen
     assert.isTrue(isCycle(error));
     assert.include(error.message, participant.id);
     assert.equal(
-      yield* placements.readPlacement({ squadronId, participantId: participant.id }),
+      yield* placements.readPlacement({ projectId, participantId: participant.id }),
       null,
     );
   }).pipe(Effect.provide(TestLayer)),
@@ -416,7 +689,7 @@ it.effect("refuses both human participant id shapes as immutable placement targe
       const creationError = yield* Effect.flip(
         placements.recordCreation({
           commandId: PlacementCommandId.make(`placement:human-target-refused:${index}`),
-          squadronId,
+          projectId,
           participantId: personId,
           actor: "platform",
           provenance: { kind: "unknown", source: "native_or_unobserved" },
@@ -445,7 +718,7 @@ it.effect("refuses both retained human id shapes as j5_spawn provenance parents"
       yield* sql`
         INSERT INTO j5_a2a_comm_event (
           seq,
-          squadron_id,
+          project_id,
           kind,
           sender,
           receiver,
@@ -455,7 +728,7 @@ it.effect("refuses both retained human id shapes as j5_spawn provenance parents"
           created_at
         ) VALUES (
           ${100 + index},
-          ${squadronId},
+          ${projectId},
           'participant.joined',
           NULL,
           NULL,
@@ -480,7 +753,7 @@ it.effect("refuses both retained human id shapes as j5_spawn provenance parents"
       assert.isTrue(isParentIneligible(error));
       assert.include(error.message, "ineligible-non-agent");
       assert.include(error.message, personId);
-      assert.equal(yield* placements.readPlacement({ squadronId, participantId: child.id }), null);
+      assert.equal(yield* placements.readPlacement({ projectId, participantId: child.id }), null);
     }
   }).pipe(Effect.provide(TestLayer)),
 );
@@ -508,7 +781,7 @@ it.effect("detects corrupt stored cycles in creation and subtree traversal", () 
         WHEN ${first.id} THEN ${second.id}
         WHEN ${second.id} THEN ${first.id}
       END
-      WHERE squadron_id = ${squadronId} AND participant_id IN (${first.id}, ${second.id})
+      WHERE project_id = ${projectId} AND participant_id IN (${first.id}, ${second.id})
     `;
     const placements = yield* ParticipantPlacementService;
 
@@ -518,37 +791,37 @@ it.effect("detects corrupt stored cycles in creation and subtree traversal", () 
     assert.isTrue(isGraphCorrupt(mutationError));
     assert.include(mutationError.message, "Placement graph state");
     assert.include(mutationError.message, "placement bound");
-    assert.equal(yield* placements.readPlacement({ squadronId, participantId: child.id }), null);
+    assert.equal(yield* placements.readPlacement({ projectId, participantId: child.id }), null);
 
     const traversalError = yield* Effect.flip(
-      placements.listSubtree({ squadronId, participantId: first.id }),
+      placements.listSubtree({ projectId, participantId: first.id }),
     );
     assert.isTrue(isGraphCorrupt(traversalError));
     assert.include(traversalError.message, "Placement graph state");
   }).pipe(Effect.provide(TestLayer)),
 );
 
-it.effect("distinguishes missing Squadron state from a missing subtree participant", () =>
+it.effect("distinguishes missing project state from a missing subtree participant", () =>
   Effect.gen(function* () {
-    const missingSquadronId = SquadronId.make("squadron:placement-missing");
+    const missingProjectId = LedgerProjectId.make("project:placement-missing");
     const missingParticipantId = ParticipantId.make("agent:placement-missing");
     yield* prepare([]);
     const placements = yield* ParticipantPlacementService;
 
-    const squadronError = yield* Effect.flip(
+    const projectError = yield* Effect.flip(
       placements.listSubtree({
-        squadronId: missingSquadronId,
+        projectId: missingProjectId,
         participantId: missingParticipantId,
       }),
     );
-    assert.isTrue(isSquadronNotFound(squadronError));
-    assert.include(squadronError.message, missingSquadronId);
+    assert.isTrue(isProjectLedgerNotFound(projectError));
+    assert.include(projectError.message, missingProjectId);
 
     const participantError = yield* Effect.flip(
-      placements.listSubtree({ squadronId, participantId: missingParticipantId }),
+      placements.listSubtree({ projectId, participantId: missingParticipantId }),
     );
     assert.isTrue(isParticipantNotFound(participantError));
-    assert.include(participantError.message, squadronId);
+    assert.include(participantError.message, projectId);
     assert.include(participantError.message, missingParticipantId);
   }).pipe(Effect.provide(TestLayer)),
 );
@@ -591,16 +864,16 @@ it.effect("walks the mutable placement subtree leaves-first rather than followin
         WHEN ${movedToFirst.id} THEN ${firstRoot.id}
         ELSE placement_parent_id
       END
-      WHERE squadron_id = ${squadronId}
+      WHERE project_id = ${projectId}
         AND participant_id IN (${movedToSecond.id}, ${movedToFirst.id})
     `;
 
     const firstSubtree = yield* placements.listSubtree({
-      squadronId,
+      projectId,
       participantId: firstRoot.id,
     });
     const secondSubtree = yield* placements.listSubtree({
-      squadronId,
+      projectId,
       participantId: secondRoot.id,
     });
 

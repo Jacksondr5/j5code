@@ -18,21 +18,12 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import { SqlitePersistenceMemory } from "../persistence/Layers/Sqlite.ts";
-import {
-  ProjectionStoreV2,
-  ProjectionStoreThreadNotFoundError,
-  layer,
-  layerMemory,
-} from "./ProjectionStore.ts";
-import { ProviderSessionManagerV2 } from "./ProviderSessionManager.ts";
-import {
-  layer as controlLayer,
-  ProviderTurnControlServiceV2,
-} from "./ProviderTurnControlService.ts";
-import { layer as replyLayer, RuntimeRequestServiceV2 } from "./RuntimeRequestService.ts";
+import * as SqlClient from "effect/sql/SqlClient";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
+import * as ProjectionStore from "./ProjectionStore.ts";
+import * as ProviderSessionManager from "./ProviderSessionManager.ts";
+import * as ProviderTurnControlService from "./ProviderTurnControlService.ts";
+import * as RuntimeRequestService from "./RuntimeRequestService.ts";
 
 const threadId = ThreadId.make("thread:control-reads");
 const providerThreadId = ProviderThreadId.make("provider-thread:control-reads");
@@ -194,12 +185,40 @@ function fixtureEvents(now: DateTime.Utc): ReadonlyArray<OrchestrationV2DomainEv
   ];
 }
 
-for (const storage of ["sqlite", "memory"] as const) {
-  const storeLayer =
-    storage === "sqlite" ? layer.pipe(Layer.provideMerge(SqlitePersistenceMemory)) : layerMemory;
-  it.effect(`${storage}: controls and replies read only their exact durable targets`, () =>
+const storageCases = [
+  {
+    storage: "sqlite" as const,
+    storeLayer: ProjectionStore.layer.pipe(Layer.provideMerge(SqlitePersistence.layerMemory)),
+  },
+];
+
+it.effect.each(storageCases)(
+  "$storage: finds the active root turn without an attempt reverse link",
+  ({ storeLayer }) =>
     Effect.gen(function* () {
-      const store = yield* ProjectionStoreV2;
+      const store = yield* ProjectionStore.ProjectionStoreV2;
+      const now = yield* DateTime.now;
+      const events = fixtureEvents(now).map((event) =>
+        event.type === "run-attempt.created"
+          ? { ...event, payload: { ...event.payload, providerTurnId: null } }
+          : event,
+      );
+      yield* Effect.forEach(events, (event) => store.apply(event), { discard: true });
+      const running = yield* store.getRunningTurnContext(threadId);
+      assert.equal(running.providerTurn?.id, providerTurnId);
+      const turnEvent = events.find((event) => event.type === "provider-turn.updated")!;
+      yield* store.apply({
+        ...turnEvent,
+        payload: { ...turnEvent.payload, status: "completed", completedAt: now },
+      });
+      assert.isUndefined((yield* store.getRunningTurnContext(threadId)).providerTurn);
+    }).pipe(Effect.provide(storeLayer)),
+);
+it.effect.each(storageCases)(
+  "$storage: controls and replies read only their exact durable targets",
+  ({ storage, storeLayer }) =>
+    Effect.gen(function* () {
+      const store = yield* ProjectionStore.ProjectionStoreV2;
       const now = yield* DateTime.now;
       const events = fixtureEvents(now);
       yield* Effect.forEach(events, (event) => store.apply(event), { discard: true });
@@ -210,7 +229,26 @@ for (const storage of ["sqlite", "memory"] as const) {
         VALUES ('message:unrelated-obsolete', ${threadId}, ${runId}, ${nodeId}, 'assistant', 0,
           ${DateTime.formatIso(now)}, ${DateTime.formatIso(now)}, '{"obsolete":"transcript"}')`;
         assert.equal((yield* Effect.exit(store.getThreadProjection(threadId)))._tag, "Failure");
+        const queryPlan = yield* sql<{ detail: string }>`EXPLAIN QUERY PLAN
+          SELECT payload_json FROM orchestration_v2_projection_turn_items
+          WHERE thread_id = ${threadId} AND node_id = ${nodeId}
+            AND type IN ('approval_request', 'user_input_request')
+            AND json_extract(payload_json, '$.requestId') = ${requestId}
+          ORDER BY ordinal ASC LIMIT 1`;
+        assert.isTrue(queryPlan.some((row) => row.detail.includes("turn_items_node_ordinal_idx")));
       }
+      const running = yield* store.getRunningTurnContext(threadId);
+      assert.equal(running.run?.id, runId);
+      assert.equal(running.providerThread?.id, providerThreadId);
+      assert.equal(running.providerTurn?.id, providerTurnId);
+      const providerContext = yield* store.getThreadProviderContext(threadId, providerInstanceId);
+      assert.equal(providerContext.thread.id, threadId);
+      assert.deepEqual(
+        providerContext.providerThreads.map((thread) => thread.id),
+        [providerThreadId],
+      );
+      const responseContext = yield* store.getRuntimeResponseContext(threadId, requestId);
+      assert.equal(responseContext.request?.id, requestId);
       const target = { providerThreadId, providerTurnId, attemptId, messageId };
       const context = yield* store.getProviderControlContext(threadId, target);
       assert.equal(context.providerThread?.id, providerThreadId);
@@ -231,32 +269,35 @@ for (const storage of ["sqlite", "memory"] as const) {
       const missingThread = yield* store
         .getRuntimeRequest(ThreadId.make("thread:missing"), requestId)
         .pipe(Effect.flip);
-      assert.instanceOf(missingThread, ProjectionStoreThreadNotFoundError);
+      assert.instanceOf(missingThread, ProjectionStore.ProjectionStoreThreadNotFoundError);
 
       const calls: string[] = [];
-      const sessions = Layer.mock(ProviderSessionManagerV2)({
+      const layerSessions = Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({
         get: () =>
-          Effect.succeed(
-            Option.some({
-              interruptTurn: () =>
-                Effect.sync(() => {
-                  calls.push("interrupt");
-                }),
-              steerTurn: (input: { message: { text: string }; runId: RunId }) =>
-                Effect.sync(() => {
-                  assert.equal(input.runId, runId);
-                  calls.push(input.message.text);
-                }),
-              respondToRuntimeRequest: () =>
-                Effect.sync(() => {
-                  calls.push("reply");
-                }),
-            } as never),
-          ),
+          Effect.succeedSome({
+            interruptTurn: () =>
+              Effect.sync(() => {
+                calls.push("interrupt");
+              }),
+            steerTurn: (input: {
+              message: {
+                text: string;
+              };
+              runId: RunId;
+            }) =>
+              Effect.sync(() => {
+                assert.equal(input.runId, runId);
+                calls.push(input.message.text);
+              }),
+            respondToRuntimeRequest: () =>
+              Effect.sync(() => {
+                calls.push("reply");
+              }),
+          } as never),
       });
       yield* Effect.gen(function* () {
-        const control = yield* ProviderTurnControlServiceV2;
-        const reply = yield* RuntimeRequestServiceV2;
+        const control = yield* ProviderTurnControlService.ProviderTurnControlServiceV2;
+        const reply = yield* RuntimeRequestService.RuntimeRequestServiceV2;
         yield* control.interrupt({ threadId, providerThreadId, providerTurnId, providerSessionId });
         yield* control.steer({
           threadId,
@@ -291,7 +332,22 @@ for (const storage of ["sqlite", "memory"] as const) {
           "Failure",
         );
         assert.lengthOf(calls, 3);
-      }).pipe(Effect.provide(Layer.merge(controlLayer, replyLayer).pipe(Layer.provide(sessions))));
-    }).pipe(Effect.provide(Layer.merge(storeLayer, SqlitePersistenceMemory))),
-  );
-}
+        const turn = context.providerTurn!;
+        yield* store.apply({
+          id: EventId.make("control:turn-completed"),
+          type: "provider-turn.updated",
+          threadId,
+          occurredAt: now,
+          payload: { ...turn, status: "completed", completedAt: now },
+        });
+        yield* control.interrupt({ threadId, providerThreadId, providerTurnId, providerSessionId });
+        assert.deepEqual(calls, ["interrupt", "Use the smaller fix.", "reply", "interrupt"]);
+      }).pipe(
+        Effect.provide(
+          Layer.merge(ProviderTurnControlService.layer, RuntimeRequestService.layer).pipe(
+            Layer.provide(layerSessions),
+          ),
+        ),
+      );
+    }).pipe(Effect.provide(Layer.merge(storeLayer, SqlitePersistence.layerMemory))),
+);

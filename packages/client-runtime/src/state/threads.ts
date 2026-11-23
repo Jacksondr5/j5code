@@ -1,11 +1,15 @@
 import {
+  isOrchestrationV2WorkActive,
   ORCHESTRATION_V2_WS_METHODS,
   type EnvironmentId as EnvironmentIdType,
   type OrchestrationV2ThreadDetailSnapshot,
   type OrchestrationV2ThreadProjection,
   type OrchestrationV2ThreadStreamItem,
+  type OrchestrationV2TurnItem,
   type ThreadId as ThreadIdType,
 } from "@t3tools/contracts";
+import { boundedSnapshotProjection } from "@t3tools/shared/orchestrationV2BoundedSnapshot";
+import { pendingBackgroundTurnItems } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -17,25 +21,27 @@ import * as Result from "effect/Result";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
-import { HttpClient } from "effect/unstable/http";
-import { Atom } from "effect/unstable/reactivity";
+import { HttpClient } from "effect/http";
+import { Atom } from "effect/reactivity";
 
-import { RemoteEnvironmentAuthorization } from "../authorization/service.ts";
-import { EnvironmentRegistry } from "../connection/registry.ts";
+import * as RemoteEnvironmentAuthorization from "../authorization/service.ts";
+import * as EnvironmentRegistry from "../connection/registry.ts";
 import { connectionProjectionPhase } from "../connection/model.ts";
-import { EnvironmentSupervisor } from "../connection/supervisor.ts";
+import * as EnvironmentSupervisor from "../connection/supervisor.ts";
 import * as ConnectionWakeups from "../connection/wakeups.ts";
-import { EnvironmentCacheStore } from "../platform/persistence.ts";
-import { ManagedRelayDpopSigner } from "../relay/managedRelay.ts";
-import { subscribeDynamic } from "../rpc/client.ts";
+import * as Persistence from "../platform/persistence.ts";
+import {
+  dropReplacedRetainedState,
+  savesUnderCurrentCredential,
+} from "../j5/replacedCredential.ts";
+import { runCachePersistence } from "./cachePersistence.ts";
+import * as ManagedRelay from "../relay/managedRelay.ts";
+import { request, subscribeDynamic } from "../rpc/client.ts";
 import { parseThreadKey, threadKey } from "./entities.ts";
 import { applyOrchestrationV2ProjectionEvent } from "./orchestrationV2Projection.ts";
 import { THREAD_SNAPSHOT_IDLE_TTL_MS } from "./threadRetention.ts";
 import { followStreamInEnvironment } from "./runtime.ts";
-import {
-  ThreadHistoryController,
-  type ThreadHistoryLoadEarlierResult,
-} from "./threadHistoryController.ts";
+import * as ThreadHistoryController from "./threadHistoryController.ts";
 import { fetchEnvironmentThreadHistoryPage } from "./threadHistoryHttp.ts";
 import {
   applyHistoryPageMeta,
@@ -45,7 +51,8 @@ import {
   mergeOlderHistoryIntoProjection,
   type ThreadHistoryMeta,
 } from "./threadHistoryMerge.ts";
-import { ThreadSnapshotLoader, type ThreadSnapshotLoadResult } from "./threadSnapshotHttp.ts";
+import * as ThreadSnapshotLoader from "./threadSnapshotHttp.ts";
+import { makeThreadRequestsResolvedAnnouncer, pendingRuntimeRequestIds } from "./threadRequests.ts";
 import {
   EMPTY_ENVIRONMENT_THREAD_STATE,
   type EnvironmentThreadState,
@@ -82,7 +89,6 @@ function historyMetaFromCachedSnapshot(
     hasMoreHistory,
     loading: false,
     error: null,
-    // Cache never stores expanded progressive history (load-earlier growth).
     expanded: false,
     latestLocalTurnOrdinal: snapshot.latestLocalTurnOrdinal ?? null,
   };
@@ -92,10 +98,11 @@ function snapshotToPersist(
   snapshotSequence: number,
   projection: OrchestrationV2ThreadProjection,
   history: ThreadHistoryMeta,
+  acceptsBoundedSnapshots: boolean,
 ): OrchestrationV2ThreadDetailSnapshot {
-  // Persist progressive meta with the bounded window so warm resume restores the
-  // history cursor instead of looking like a complete full-projection cache hit.
-  if (history.hasMoreHistory || history.historyCursor !== null) {
+  // A complete bounded snapshot still proves paging support. Retain that evidence
+  // so a thread that grows while closed can resume with a bounded fallback.
+  if (acceptsBoundedSnapshots || history.hasMoreHistory || history.historyCursor !== null) {
     return {
       snapshotSequence,
       projection,
@@ -121,10 +128,34 @@ function shouldPersistThread(
   );
 }
 
+// Only still-active local copies take the server's item: events applied meanwhile win,
+// and inherited rows belong to another thread.
+function settleTurnItems(
+  threadId: ThreadIdType,
+  projection: OrchestrationV2ThreadProjection,
+  settled: ReadonlyMap<string, OrchestrationV2TurnItem>,
+): OrchestrationV2ThreadProjection {
+  let changed = false;
+  const settle = (item: OrchestrationV2TurnItem, id: string) => {
+    const server = settled.get(id);
+    if (server === undefined || !isOrchestrationV2WorkActive(item.status)) return item;
+    changed = true;
+    return server;
+  };
+  const turnItems = projection.turnItems.map((item) => settle(item, item.id));
+  const visibleTurnItems = projection.visibleTurnItems.map((row) => {
+    if (row.sourceThreadId !== threadId) return row;
+    const item = settle(row.item, row.sourceItemId);
+    return item === row.item ? row : { ...row, item };
+  });
+  return changed ? { ...projection, turnItems, visibleTurnItems } : projection;
+}
+
 interface ThreadResumeSnapshot {
   readonly state: EnvironmentThreadState;
   readonly sequence: number;
   readonly persisted: boolean;
+  readonly acceptsBoundedSnapshots?: boolean;
 }
 
 interface ThreadResumeCache {
@@ -152,7 +183,10 @@ function matchesThreadSnapshot(
 function cachedThreadState(value: EnvironmentThreadState): EnvironmentThreadState {
   return {
     ...value,
-    status: value.status === "deleted" ? "deleted" : statusWithoutLiveData(value.data),
+    status:
+      value.status === "deleted" || (value.status === "live" && Option.isSome(value.data))
+        ? value.status
+        : statusWithoutLiveData(value.data),
     error: Option.none(),
     history: { ...value.history, loading: false, error: null },
   };
@@ -162,15 +196,22 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
   threadId: ThreadIdType,
   resumeCache?: ThreadResumeCache,
 ) {
-  const supervisor = yield* EnvironmentSupervisor;
-  const cache = yield* EnvironmentCacheStore;
-  const snapshotLoader = yield* ThreadSnapshotLoader;
-  const historyController = yield* Effect.serviceOption(ThreadHistoryController);
+  const supervisor = yield* EnvironmentSupervisor.EnvironmentSupervisor;
+  const cache = yield* Persistence.EnvironmentCacheStore;
+  const snapshotLoader = yield* ThreadSnapshotLoader.ThreadSnapshotLoader;
+  const historyController = yield* Effect.serviceOption(
+    ThreadHistoryController.ThreadHistoryController,
+  );
   const httpClient = yield* Effect.serviceOption(HttpClient.HttpClient);
-  const dpopSigner = yield* Effect.serviceOption(ManagedRelayDpopSigner);
-  const remoteAuthorization = yield* Effect.serviceOption(RemoteEnvironmentAuthorization);
+  const dpopSigner = yield* Effect.serviceOption(ManagedRelay.ManagedRelayDpopSigner);
+  const remoteAuthorization = yield* Effect.serviceOption(
+    RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization,
+  );
   const wakeups = yield* Effect.serviceOption(ConnectionWakeups.ConnectionWakeups);
   const environmentId = supervisor.target.environmentId;
+  // J5 (case 125): a thread state made under a replaced credential stops saving.
+  const underCredential = savesUnderCurrentCredential(environmentId);
+  if (resumeCache) dropReplacedRetainedState(environmentId, resumeCache);
   const retained = resumeCache?.snapshot;
   const owner = {};
   if (resumeCache) resumeCache.owner = owner;
@@ -190,6 +231,11 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
         )
       : Option.none<OrchestrationV2ThreadDetailSnapshot>();
   const cachedThread = Option.map(cached, (snapshot) => snapshot.projection);
+  // Seed the resume cursor from the cached snapshot so a warm cache can catch up
+  // via `afterSequence` instead of re-downloading the full thread body.
+  const initialSequence =
+    retained?.sequence ??
+    Option.match(cached, { onNone: () => 0, onSome: (snapshot) => snapshot.snapshotSequence });
   const initialState: EnvironmentThreadState = retained
     ? cachedThreadState(retained.state)
     : {
@@ -200,30 +246,38 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
           onNone: () => EMPTY_THREAD_HISTORY_META,
           onSome: historyMetaFromCachedSnapshot,
         }),
+        sequence: initialSequence,
       };
   const state = yield* SubscriptionRef.make(initialState);
-  // Seed the resume cursor from the cached snapshot so a warm cache can catch up
-  // via `afterSequence` instead of re-downloading the full thread body.
-  const initialSequence =
-    retained?.sequence ??
-    Option.match(cached, { onNone: () => 0, onSome: (snapshot) => snapshot.snapshotSequence });
+  const canLoadHistory = Option.isSome(httpClient) && Option.isSome(historyController);
+  const acceptsBoundedSocketSnapshots = yield* Ref.make(canLoadHistory);
   const lastSequence = yield* SubscriptionRef.make(initialSequence);
   let committed: ThreadResumeSnapshot = {
     state: initialState,
     sequence: initialSequence,
     persisted: retained?.persisted ?? Option.isSome(cached),
+    acceptsBoundedSnapshots: canLoadHistory,
   };
   if (resumeCache?.owner === owner) resumeCache.snapshot = committed;
   const awaitingCompletion = yield* Ref.make(false);
   const applyLock = yield* Semaphore.make(1);
   // Save only completed data/cursor updates. A canceled scope must not cache
   // a cursor whose event has not reached the data yet.
+  const announceRequests = makeThreadRequestsResolvedAnnouncer(environmentId, threadId);
   const remember = Effect.gen(function* () {
     const current = yield* SubscriptionRef.get(state);
     const sequence = yield* SubscriptionRef.get(lastSequence);
+    // Only a synchronized projection from the scope that owns the thread is
+    // authoritative: a cached one can predate a request the user already has
+    // drafts for, and a superseded scope can lag its successor.
+    const owns = resumeCache === undefined || resumeCache.owner === owner;
+    if (owns && current.status === "deleted") announceRequests([]);
+    else if (owns && current.status === "live" && Option.isSome(current.data))
+      announceRequests(pendingRuntimeRequestIds(current.data.value));
     committed = {
       state: current,
       sequence,
+      acceptsBoundedSnapshots: yield* Ref.get(acceptsBoundedSocketSnapshots),
       persisted:
         committed.persisted &&
         matchesThreadSnapshot(committed, Option.getOrNull(current.data), sequence, current.history),
@@ -231,11 +285,19 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     if (resumeCache?.owner === owner) resumeCache.snapshot = committed;
   });
   const persistence = yield* Queue.sliding<OrchestrationV2ThreadDetailSnapshot>(1);
+  let queuedSnapshot = Option.getOrUndefined(cached);
+  let savedSnapshot = queuedSnapshot;
+  const queuePersist = (snapshot: OrchestrationV2ThreadDetailSnapshot) =>
+    Effect.suspend(() => {
+      queuedSnapshot = snapshot;
+      return Queue.offer(persistence, snapshot);
+    });
 
   const persist = Effect.fn("EnvironmentThreadState.persist")(function* (
     snapshot: OrchestrationV2ThreadDetailSnapshot,
   ) {
     if (resumeCache !== undefined && resumeCache.owner !== owner) return;
+    if (committed.state.status === "deleted") return;
     if (
       committed.persisted &&
       matchesThreadSnapshot(
@@ -246,9 +308,10 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
       )
     )
       return;
-    yield* cache.saveThread(environmentId, snapshot).pipe(
+    yield* underCredential(cache.saveThread(environmentId, snapshot)).pipe(
       Effect.tap(() =>
         Effect.sync(() => {
+          savedSnapshot = snapshot;
           if (
             !matchesThreadSnapshot(
               committed,
@@ -274,14 +337,34 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     );
   });
 
-  yield* Stream.fromQueue(persistence).pipe(
-    Stream.debounce("500 millis"),
-    Stream.runForEach(persist),
-    Effect.forkScoped,
+  yield* Effect.addFinalizer(() =>
+    Effect.suspend(() => {
+      const { state: current, sequence: snapshotSequence } = committed;
+      return Option.match(current.data, {
+        onNone: () => Effect.void,
+        onSome: (projection) =>
+          shouldPersistThread(projection, current.history)
+            ? persist(
+                snapshotToPersist(
+                  snapshotSequence,
+                  projection,
+                  current.history,
+                  committed.acceptsBoundedSnapshots === true,
+                ),
+              )
+            : // The consumer may still be waiting out its delay; an expanded thread queues
+              // only cache repairs, which must survive leaving the thread.
+              queuedSnapshot !== undefined && queuedSnapshot !== savedSnapshot
+              ? persist(queuedSnapshot)
+              : Effect.void,
+      });
+    }),
   );
 
-  const setSynchronizing = SubscriptionRef.update(state, (current) =>
-    current.status === "deleted"
+  yield* runCachePersistence(persistence, persist).pipe(Effect.forkScoped);
+
+  const setConnecting = SubscriptionRef.update(state, (current) =>
+    current.status === "deleted" || Option.isSome(current.error)
       ? current
       : {
           ...current,
@@ -290,7 +373,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
         },
   );
   const setReady = SubscriptionRef.update(state, (current) =>
-    current.status === "live" || current.status === "deleted"
+    current.status === "live" || current.status === "deleted" || Option.isSome(current.error)
       ? current
       : {
           ...current,
@@ -305,14 +388,14 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
       status: current.status === "deleted" ? current.status : statusWithoutLiveData(current.data),
     }));
   });
-  const setStreamError = (cause: Cause.Cause<unknown>) =>
+  const setStreamError = (message: string) =>
     Ref.set(awaitingCompletion, false).pipe(
       Effect.andThen(
         SubscriptionRef.update(state, (current) => ({
           ...current,
           status:
             current.status === "deleted" ? current.status : statusWithoutLiveData(current.data),
-          error: Option.some(formatThreadError(cause)),
+          error: Option.some(message),
         })),
       ),
     );
@@ -320,16 +403,12 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
   const setThread = Effect.fn("EnvironmentThreadState.setThread")(function* (
     thread: OrchestrationV2ThreadProjection,
     options?: {
-      /** Socket/full snapshots: drop progressive meta with the new timeline. */
       readonly resetHistory?: boolean;
-      /**
-       * Explicit progressive meta installed atomically with the projection
-       * (bounded HTTP). Wins over resetHistory when both are supplied.
-       */
       readonly history?: ThreadHistoryMeta;
     },
   ) {
     const waiting = yield* Ref.get(awaitingCompletion);
+    const sequence = yield* SubscriptionRef.get(lastSequence);
     // Atomic with concurrent history meta updates: never get-then-set the whole
     // state when only the projection changes. Bounded installs pass history so
     // projection + cursor persist together in one enqueue.
@@ -343,9 +422,14 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
       return {
         ...previous,
         data: Option.some(thread),
-        status: waiting ? ("synchronizing" as const) : ("live" as const),
-        error: Option.none(),
+        status: Option.isSome(previous.error)
+          ? ("cached" as const)
+          : waiting
+            ? ("synchronizing" as const)
+            : ("live" as const),
+        error: previous.error,
         history,
+        sequence,
       };
     });
     // Active projections can update many times per second and retain large tool
@@ -353,7 +437,14 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     // streaming path. Progressive meta rides along when the window is incomplete.
     if (shouldPersistThread(thread, next.history)) {
       const snapshotSequence = yield* SubscriptionRef.get(lastSequence);
-      yield* Queue.offer(persistence, snapshotToPersist(snapshotSequence, thread, next.history));
+      yield* queuePersist(
+        snapshotToPersist(
+          snapshotSequence,
+          thread,
+          next.history,
+          yield* Ref.get(acceptsBoundedSocketSnapshots),
+        ),
+      );
     }
   });
 
@@ -370,6 +461,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
       status: "deleted",
       error: Option.none(),
       history: EMPTY_THREAD_HISTORY_META,
+      sequence: yield* SubscriptionRef.get(lastSequence),
     });
     yield* remember;
     if (resumeCache !== undefined && resumeCache.owner !== owner) return;
@@ -386,33 +478,36 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     );
   });
 
-  const applyItemLocked = Effect.fn("EnvironmentThreadState.applyItemLocked")(function* (
-    item: OrchestrationV2ThreadStreamItem,
+  type EventItem = Extract<OrchestrationV2ThreadStreamItem, { kind: "event" }>;
+  type SequencedItem = Extract<
+    OrchestrationV2ThreadStreamItem,
+    { kind: "event" | "unknown-event" }
+  >;
+  const applyEventsLocked = Effect.fn("EnvironmentThreadState.applyEventsLocked")(function* (
+    items: ReadonlyArray<SequencedItem>,
   ) {
-    if (item.kind === "synchronized") {
-      yield* Ref.set(awaitingCompletion, false);
-      yield* SubscriptionRef.update(state, (current) =>
-        Option.isSome(current.data) && current.status !== "deleted"
-          ? { ...current, status: "live" as const, error: Option.none() }
-          : current,
+    const appliedSequence = yield* SubscriptionRef.get(lastSequence);
+    let sequence = appliedSequence;
+    const fresh: EventItem[] = [];
+    for (const item of items) {
+      if (item.sequence <= sequence) continue;
+      sequence = item.sequence;
+      if (item.kind === "event") {
+        fresh.push(item);
+        continue;
+      }
+      yield* Effect.logDebug("Skipped a thread event type this client does not know.").pipe(
+        Effect.annotateLogs({
+          environmentId,
+          threadId,
+          eventType: item.eventType.slice(0, 64),
+          sequence: item.sequence,
+        }),
       );
-      return;
     }
-
-    if (item.kind === "snapshot") {
-      yield* SubscriptionRef.set(lastSequence, item.snapshotSequence);
-      // True socket/full snapshots replace the full timeline; progressive cursor
-      // state from a prior bounded window must not stick around. Bounded HTTP
-      // installs call setThread with explicit history and never route here.
-      yield* setThread(item.projection, { resetHistory: true });
-      return;
-    }
-
-    const sequence = yield* SubscriptionRef.get(lastSequence);
-    if (item.sequence <= sequence) {
-      return;
-    }
-    yield* SubscriptionRef.set(lastSequence, item.sequence);
+    if (sequence === appliedSequence) return;
+    yield* SubscriptionRef.set(lastSequence, sequence);
+    if (fresh.length === 0) return;
 
     const waiting = yield* Ref.get(awaitingCompletion);
     // Apply against the latest projection/history in one update so a concurrent
@@ -427,57 +522,68 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
           readonly history: ThreadHistoryMeta;
         };
 
+    const applyEvent = (
+      current: EnvironmentThreadState,
+      item: EventItem,
+    ): readonly [EventApplyResult, EnvironmentThreadState] => {
+      if (current.status === "deleted") {
+        return [{ _tag: "noop" }, current];
+      }
+      if (Option.isNone(current.data)) {
+        return [
+          item.event.type === "thread.deleted" ? { _tag: "delete" } : { _tag: "noop" },
+          current,
+        ];
+      }
+      if (item.event.type === "thread.deleted") {
+        return [{ _tag: "delete" }, current];
+      }
+
+      // Incomplete progressive windows only (hasMore or open cursor). Do not
+      // use expanded: it remains true after the last page as a cache marker.
+      const partial =
+        current.history.hasMoreHistory || current.history.historyCursor !== null
+          ? {
+              partialTimeline: true as const,
+              latestLocalTurnOrdinal: current.history.latestLocalTurnOrdinal,
+            }
+          : undefined;
+      const next = applyOrchestrationV2ProjectionEvent(current.data.value, item.event, partial);
+      if (next === null || next === current.data.value) {
+        return [{ _tag: "noop" }, current];
+      }
+
+      let history = current.history;
+      if (partial !== undefined && item.event.type === "turn-item.updated") {
+        const ordinal = item.event.payload.ordinal;
+        const watermark = history.latestLocalTurnOrdinal;
+        if (watermark === null || ordinal > watermark) {
+          history = { ...history, latestLocalTurnOrdinal: ordinal };
+        }
+      }
+
+      const updated: EnvironmentThreadState = {
+        ...current,
+        data: Option.some(next),
+        status: waiting ? "synchronizing" : "live",
+        error: Option.none(),
+        history,
+      };
+      return [{ _tag: "applied", projection: next, history: updated.history }, updated];
+    };
+
     const result = yield* SubscriptionRef.modify(
       state,
       (current): readonly [EventApplyResult, EnvironmentThreadState] => {
-        if (current.status === "deleted") {
-          return [{ _tag: "noop" }, current];
+        let result: EventApplyResult = { _tag: "noop" };
+        for (const item of fresh) {
+          const [applied, next] = applyEvent(current, item);
+          current = next;
+          if (applied._tag !== "noop") result = applied;
+          if (applied._tag === "delete") break;
         }
-        if (Option.isNone(current.data)) {
-          return [
-            item.event.type === "thread.deleted" ? { _tag: "delete" } : { _tag: "noop" },
-            current,
-          ];
-        }
-        if (item.event.type === "thread.deleted") {
-          return [{ _tag: "delete" }, current];
-        }
-
-        // Incomplete progressive windows only (hasMore or open cursor). Do not
-        // use expanded: it remains true after the last page as a cache marker.
-        // Full/web and fully-loaded timelines keep default append-on-miss.
-        const partial =
-          current.history.hasMoreHistory || current.history.historyCursor !== null
-            ? {
-                partialTimeline: true as const,
-                latestLocalTurnOrdinal: current.history.latestLocalTurnOrdinal,
-              }
-            : undefined;
-        const next = applyOrchestrationV2ProjectionEvent(current.data.value, item.event, partial);
-        // True no-op when the reducer deliberately returns the current projection
-        // reference (e.g. dropped old partial-timeline turn-item). Do not clear
-        // stream error/status or enqueue persistence.
-        if (next === null || next === current.data.value) {
-          return [{ _tag: "noop" }, current];
-        }
-
-        let history = current.history;
-        if (partial !== undefined && item.event.type === "turn-item.updated") {
-          const ordinal = item.event.payload.ordinal;
-          const watermark = history.latestLocalTurnOrdinal;
-          if (watermark === null || ordinal > watermark) {
-            history = { ...history, latestLocalTurnOrdinal: ordinal };
-          }
-        }
-
-        const updated: EnvironmentThreadState = {
-          ...current,
-          data: Option.some(next),
-          status: waiting ? "synchronizing" : "live",
-          error: Option.none(),
-          history,
-        };
-        return [{ _tag: "applied", projection: next, history: updated.history }, updated];
+        // A batch that changed nothing keeps its state object, so readers do not re-render.
+        return [result, result._tag === "noop" ? current : { ...current, sequence }];
       },
     );
 
@@ -487,149 +593,228 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     }
     if (result._tag === "applied" && shouldPersistThread(result.projection, result.history)) {
       const snapshotSequence = yield* SubscriptionRef.get(lastSequence);
-      yield* Queue.offer(
-        persistence,
-        snapshotToPersist(snapshotSequence, result.projection, result.history),
+      yield* queuePersist(
+        snapshotToPersist(
+          snapshotSequence,
+          result.projection,
+          result.history,
+          yield* Ref.get(acceptsBoundedSocketSnapshots),
+        ),
       );
     }
   });
 
-  const applyItem = Effect.fn("EnvironmentThreadState.applyItem")(function* (
+  const applyItemLocked = Effect.fn("EnvironmentThreadState.applyItemLocked")(function* (
     item: OrchestrationV2ThreadStreamItem,
   ) {
-    yield* applyLock.withPermits(1)(applyItemLocked(item).pipe(Effect.andThen(remember)));
+    if (item.kind === "synchronized") {
+      yield* Ref.set(awaitingCompletion, false);
+      yield* SubscriptionRef.update(state, (current) =>
+        Option.isSome(current.data) && current.status !== "deleted" && Option.isNone(current.error)
+          ? { ...current, status: "live" as const, error: Option.none() }
+          : current,
+      );
+      return;
+    }
+
+    if (item.kind === "snapshot") {
+      yield* SubscriptionRef.set(lastSequence, item.snapshotSequence);
+      const hasProgressiveHistory =
+        item.historyCursor !== undefined ||
+        item.hasMoreHistory !== undefined ||
+        item.latestLocalTurnOrdinal !== undefined;
+      yield* setThread(
+        boundedSnapshotProjection(item),
+        hasProgressiveHistory
+          ? {
+              history: {
+                historyCursor: item.historyCursor ?? null,
+                hasMoreHistory: item.hasMoreHistory ?? false,
+                loading: false,
+                error: null,
+                expanded: false,
+                latestLocalTurnOrdinal: item.latestLocalTurnOrdinal ?? null,
+              },
+            }
+          : { resetHistory: true },
+      );
+      return;
+    }
+
+    yield* applyEventsLocked([item]);
   });
 
-  const loadEarlier = Effect.fn("EnvironmentThreadState.loadEarlier")(function* () {
+  const applyItems = Effect.fn("EnvironmentThreadState.applyItems")(function* (
+    items: ReadonlyArray<OrchestrationV2ThreadStreamItem>,
+  ) {
+    yield* applyLock.withPermits(1)(
+      Effect.gen(function* () {
+        let events: SequencedItem[] = [];
+        for (const item of items) {
+          if (
+            item.kind === "unknown-event" ||
+            (item.kind === "event" && item.event.type !== "thread.deleted")
+          ) {
+            events.push(item);
+            continue;
+          }
+          yield* applyEventsLocked(events);
+          events = [];
+          yield* applyItemLocked(item);
+        }
+        yield* applyEventsLocked(events);
+        yield* remember;
+      }),
+    );
+  });
+
+  const loadEarlier = Effect.fn("EnvironmentThreadState.loadEarlier")(function* (
+    throughEntryId?: string,
+    workAnchorId?: string,
+  ): Effect.fn.Return<ThreadHistoryController.ThreadHistoryLoadEarlierResult> {
+    const workCursor = (latest: EnvironmentThreadState) =>
+      Option.getOrNull(latest.data)?.visibleTurnItems.find(
+        (row) => row.sourceItemId === workAnchorId,
+      )?.item.deferredWork?.cursor ?? null;
     const current = yield* SubscriptionRef.get(state);
+    const initialCursor =
+      workAnchorId === undefined ? current.history.historyCursor : workCursor(current);
     if (
       current.status === "deleted" ||
       Option.isNone(current.data) ||
-      !current.history.hasMoreHistory ||
-      current.history.historyCursor === null
-    ) {
-      return { _tag: "noop" } satisfies ThreadHistoryLoadEarlierResult;
-    }
-    if (current.history.loading) {
-      return { _tag: "busy" } satisfies ThreadHistoryLoadEarlierResult;
-    }
-
-    // Capture the cursor that initiated this request. Completions/failures must
-    // no-op if a socket or new bounded snapshot replaced progressive meta mid-flight.
-    const requestCursor = current.history.historyCursor;
-    yield* patchHistoryMeta((history) =>
-      isActiveHistoryRequestCursor(requestCursor, history)
-        ? { ...history, loading: true, error: null }
-        : history,
-    );
-
-    const runLoad = Effect.gen(function* () {
-      const preparedOption = yield* SubscriptionRef.get(supervisor.prepared);
-      if (Option.isNone(preparedOption) || Option.isNone(httpClient)) {
-        const message = "Environment is not connected.";
-        const stillCurrent = yield* SubscriptionRef.modify(
-          state,
-          (latest): readonly [boolean, EnvironmentThreadState] => {
-            if (!isActiveHistoryRequestCursor(requestCursor, latest.history)) {
-              return [false, latest];
-            }
-            return [
-              true,
-              {
-                ...latest,
-                history: { ...latest.history, loading: false, error: message },
-              },
-            ];
-          },
-        );
-        if (!stillCurrent) {
-          return { _tag: "noop" } satisfies ThreadHistoryLoadEarlierResult;
-        }
-        return {
-          _tag: "error",
-          message,
-        } satisfies ThreadHistoryLoadEarlierResult;
-      }
-
-      const pageResult = yield* fetchEnvironmentThreadHistoryPage({
-        prepared: preparedOption.value,
-        threadId,
-        cursor: requestCursor,
-        signer: dpopSigner,
-        remoteAuthorization,
-      }).pipe(Effect.provideService(HttpClient.HttpClient, httpClient.value), Effect.result);
-
-      if (Result.isFailure(pageResult)) {
-        const message = formatHistoryError(pageResult.failure);
-        // Only mark error when this request's cursor is still active. Leave
-        // stream/status/error alone so concurrent live updates stay intact.
-        const stillCurrent = yield* SubscriptionRef.modify(
-          state,
-          (latest): readonly [boolean, EnvironmentThreadState] => {
-            if (!isActiveHistoryRequestCursor(requestCursor, latest.history)) {
-              return [false, latest];
-            }
-            return [
-              true,
-              {
-                ...latest,
-                history: { ...latest.history, loading: false, error: message },
-              },
-            ];
-          },
-        );
-        if (!stillCurrent) {
-          return { _tag: "noop" } satisfies ThreadHistoryLoadEarlierResult;
-        }
-        return { _tag: "error", message } satisfies ThreadHistoryLoadEarlierResult;
-      }
-
-      const page = pageResult.success;
-      const waiting = yield* Ref.get(awaitingCompletion);
-      // Single atomic merge against whatever is current after the await so a
-      // concurrent applyItem cannot be clobbered by a stale get/set pair.
-      return yield* applyLock.withPermits(1)(
-        SubscriptionRef.modify(
-          state,
-          (latest): readonly [ThreadHistoryLoadEarlierResult, EnvironmentThreadState] => {
-            // Stale page: socket/full snapshot or newer bounded install changed the
-            // progressive cursor while this request was in flight. Never mutate the
-            // replacement meta (including deleted/empty installs).
-            if (!isActiveHistoryRequestCursor(requestCursor, latest.history)) {
-              return [{ _tag: "noop" }, latest];
-            }
-            if (Option.isNone(latest.data) || latest.status === "deleted") {
-              return [
-                { _tag: "noop" },
+      initialCursor === null ||
+      (workAnchorId === undefined && !current.history.hasMoreHistory)
+    )
+      return { _tag: "noop" };
+    if (workAnchorId === undefined && current.history.loading) return { _tag: "busy" };
+    let requestCursor = initialCursor;
+    const isCurrent = (latest: EnvironmentThreadState) =>
+      workAnchorId === undefined
+        ? isActiveHistoryRequestCursor(requestCursor, latest.history)
+        : workCursor(latest) === requestCursor;
+    const staleResult = (
+      latest: EnvironmentThreadState,
+    ): ThreadHistoryController.ThreadHistoryLoadEarlierResult =>
+      workAnchorId !== undefined && workCursor(latest) !== null
+        ? { _tag: "error", message: "Work history changed. Retry loading it." }
+        : { _tag: "noop" };
+    if (workAnchorId === undefined)
+      yield* patchHistoryMeta((history) =>
+        isActiveHistoryRequestCursor(requestCursor, history)
+          ? { ...history, loading: true, error: null }
+          : history,
+      );
+    const failLoad = (message: string) =>
+      SubscriptionRef.modify(
+        state,
+        (
+          latest,
+        ): readonly [
+          ThreadHistoryController.ThreadHistoryLoadEarlierResult,
+          EnvironmentThreadState,
+        ] =>
+          isCurrent(latest)
+            ? [
+                { _tag: "error", message },
                 {
                   ...latest,
-                  history: EMPTY_THREAD_HISTORY_META,
+                  history:
+                    workAnchorId === undefined
+                      ? { ...latest.history, loading: false, error: message }
+                      : latest.history,
                 },
-              ];
-            }
-
-            const merged = mergeOlderHistoryIntoProjection(latest.data.value, page.items);
-            const history = applyHistoryPageMeta(latest.history, page);
-            return [
-              { _tag: "loaded" },
-              {
-                ...latest,
-                data: Option.some(merged),
-                status: waiting
-                  ? ("synchronizing" as const)
-                  : latest.status === "live"
-                    ? ("live" as const)
-                    : latest.status,
-                history,
-              },
-            ];
-          },
-        ).pipe(Effect.tap(() => remember)),
+              ]
+            : [staleResult(latest), latest],
       );
-    });
 
-    // On Effect interruption only: clear loading when this request cursor is
-    // still active. Never mutate stream status/error from the interrupt path.
+    const runLoad = Effect.gen(function* () {
+      while (true) {
+        const preparedOption = yield* SubscriptionRef.get(supervisor.prepared);
+        if (Option.isNone(preparedOption) || Option.isNone(httpClient))
+          return yield* failLoad("Environment is not connected.");
+        const views =
+          workAnchorId !== undefined
+            ? ["work" as const]
+            : throughEntryId === undefined
+              ? [undefined]
+              : ["conversation" as const, undefined];
+        let nextCursor: string | null = null;
+        for (const view of views) {
+          const pageResult = yield* fetchEnvironmentThreadHistoryPage({
+            prepared: preparedOption.value,
+            threadId,
+            cursor: requestCursor,
+            throughEntryId: workAnchorId ?? throughEntryId,
+            view,
+            signer: dpopSigner,
+            remoteAuthorization,
+          }).pipe(Effect.provideService(HttpClient.HttpClient, httpClient.value), Effect.result);
+          if (Result.isFailure(pageResult))
+            return yield* failLoad(formatHistoryError(pageResult.failure));
+          const page = pageResult.success;
+          const complete = view !== "conversation";
+          const keepPaging =
+            complete &&
+            (workAnchorId !== undefined
+              ? page.nextCursor !== null
+              : throughEntryId === undefined &&
+                page.hasMoreHistory &&
+                !page.items.some(
+                  ({ item }) => item.type === "user_message" && item.createdBy === "user",
+                ));
+          if (keepPaging && (page.nextCursor === null || page.nextCursor === requestCursor))
+            return yield* failLoad(
+              workAnchorId === undefined
+                ? "History did not advance."
+                : "Work history did not advance.",
+            );
+          const waiting = yield* Ref.get(awaitingCompletion);
+          const result = yield* applyLock.withPermits(1)(
+            SubscriptionRef.modify(
+              state,
+              (
+                latest,
+              ): readonly [
+                ThreadHistoryController.ThreadHistoryLoadEarlierResult,
+                EnvironmentThreadState,
+              ] => {
+                if (!isCurrent(latest)) return [staleResult(latest), latest];
+                if (Option.isNone(latest.data) || latest.status === "deleted")
+                  return [{ _tag: "noop" }, { ...latest, history: EMPTY_THREAD_HISTORY_META }];
+                return [
+                  { _tag: "loaded" },
+                  {
+                    ...latest,
+                    data: Option.some(
+                      mergeOlderHistoryIntoProjection(
+                        latest.data.value,
+                        page.items,
+                        workAnchorId === undefined
+                          ? undefined
+                          : { anchorId: workAnchorId, nextCursor: page.nextCursor },
+                      ),
+                    ),
+                    status:
+                      workAnchorId === undefined && complete && waiting
+                        ? "synchronizing"
+                        : latest.status,
+                    history:
+                      workAnchorId === undefined && complete
+                        ? { ...applyHistoryPageMeta(latest.history, page), loading: keepPaging }
+                        : { ...latest.history, expanded: true },
+                  },
+                ];
+              },
+            ),
+          );
+          if (result._tag !== "loaded") return result;
+          if (complete) yield* applyLock.withPermits(1)(remember);
+          nextCursor = keepPaging ? page.nextCursor : null;
+        }
+        if (nextCursor === null) return { _tag: "loaded" } as const;
+        requestCursor = nextCursor;
+      }
+    });
     return yield* runLoad.pipe(
       Effect.onInterrupt(() =>
         SubscriptionRef.update(state, (latest) => ({
@@ -640,10 +825,83 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     );
   });
 
+  // A cached item can stay running after the server finished it, and no event will ever
+  // name it again: it can sit outside every bounded window, and a repeated Stop records
+  // nothing new. Stop asks the server about each pending item instead of
+  // inferring status from what a snapshot omits, and settles only those items.
+  const reconcilePendingWork = Effect.fn("EnvironmentThreadState.reconcilePendingWork")(
+    function* () {
+      const current = yield* SubscriptionRef.get(state);
+      if (current.status === "deleted" || Option.isNone(current.data)) return;
+      const pending = pendingBackgroundTurnItems(current.data.value);
+      if (pending.length === 0) return;
+      const queried = new Set<string>(pending.map((item) => item.id));
+      const fetched = yield* Effect.forEach(
+        pending,
+        (item) =>
+          request(ORCHESTRATION_V2_WS_METHODS.getTurnItem, { threadId, itemId: item.id }).pipe(
+            Effect.timeout("10 seconds"),
+            Effect.map((result) => result.item),
+            Effect.orElseSucceed(() => null),
+          ),
+        { concurrency: 4 },
+      );
+      const settled = new Map(
+        fetched.flatMap((item) =>
+          item === null || isOrchestrationV2WorkActive(item.status) ? [] : [[item.id, item]],
+        ),
+      );
+      yield* applyLock.withPermits(1)(
+        Effect.gen(function* () {
+          const latest = yield* SubscriptionRef.get(state);
+          if (latest.status === "deleted" || Option.isNone(latest.data)) return;
+          const thread = settleTurnItems(threadId, latest.data.value, settled);
+          if (thread !== latest.data.value) {
+            yield* setThread(thread);
+            yield* remember;
+          }
+          // An expanded timeline is never saved, so reload would bring the stale row back.
+          // Repair the snapshot last handed to the cache instead, keeping its window and cursor.
+          // A resumed state skipped the cache load, so read the saved snapshot then.
+          if (shouldPersistThread(thread, latest.history)) return;
+          // A terminal event that landed during the lookup is newer than any reply, and the
+          // expanded live state never saves it, whatever the lookup returned.
+          const latestItems = new Map(settled);
+          for (const item of thread.turnItems) {
+            if (queried.has(item.id) && !isOrchestrationV2WorkActive(item.status)) {
+              latestItems.set(item.id, item);
+            }
+          }
+          if (latestItems.size === 0) return;
+          const saved =
+            queuedSnapshot ??
+            Option.getOrUndefined(
+              yield* cache
+                .loadThread(environmentId, threadId)
+                .pipe(Effect.orElseSucceed(() => Option.none())),
+            );
+          if (saved === undefined) return;
+          const projection = settleTurnItems(threadId, saved.projection, latestItems);
+          if (projection !== saved.projection) yield* queuePersist({ ...saved, projection });
+        }),
+      );
+    },
+  );
+
   if (Option.isSome(historyController)) {
     const scope = yield* Scope.Scope;
     const registration = yield* historyController.value.register(environmentId, threadId, {
-      loadEarlier: () => loadEarlier().pipe(Effect.forkIn(scope), Effect.flatMap(Fiber.join)),
+      loadEarlier: (throughEntryId, workAnchorId) =>
+        loadEarlier(throughEntryId, workAnchorId).pipe(
+          Effect.forkIn(scope),
+          Effect.flatMap(Fiber.join),
+        ),
+      reconcilePendingWork: () =>
+        reconcilePendingWork().pipe(
+          Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+          Effect.forkIn(scope),
+          Effect.flatMap(Fiber.join),
+        ),
     });
     yield* Effect.addFinalizer(() => historyController.value.unregister(registration));
   }
@@ -652,7 +910,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
     Stream.runForEach((connectionState) => {
       switch (connectionProjectionPhase(connectionState)) {
         case "synchronizing":
-          return setSynchronizing;
+          return setConnecting;
         case "disconnected":
           return setDisconnected;
         case "ready":
@@ -668,7 +926,20 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
       service.changes.pipe(Stream.filter(ConnectionWakeups.shouldResubscribeAfterWakeup)),
   });
 
-  yield* setSynchronizing;
+  // Only the first subscription after a warm live resume keeps the retained
+  // status. A replacement session or foreground resubscribe on the same scope
+  // may have missed events, so those show sync progress until confirmed.
+  const resumingLive = yield* Ref.make(initialState.status === "live");
+  const markSynchronizing = Effect.gen(function* () {
+    if (yield* Ref.get(resumingLive)) return;
+    yield* SubscriptionRef.update(state, (current) =>
+      current.status === "deleted"
+        ? current
+        : { ...current, status: "synchronizing" as const, error: Option.none() },
+    );
+  });
+
+  yield* markSynchronizing;
   yield* Effect.forkScoped(
     subscribeDynamic(
       ORCHESTRATION_V2_WS_METHODS.subscribeThread,
@@ -681,12 +952,10 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
           return yield* Effect.never;
         }
 
-        const supportsCompletionMarker = yield* session.initialConfig.pipe(
-          Effect.map((config) => config.threadResumeCompletionMarker === true),
-          Effect.orElseSucceed(() => false),
-        );
-        yield* Ref.set(awaitingCompletion, supportsCompletionMarker);
-        yield* setSynchronizing;
+        yield* Effect.ignore(session.initialConfig);
+        yield* Ref.set(awaitingCompletion, true);
+        yield* markSynchronizing;
+        yield* Ref.set(resumingLive, false);
 
         if (Option.isNone(current.data)) {
           const prepared = yield* SubscriptionRef.get(supervisor.prepared).pipe(
@@ -703,12 +972,13 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
               }),
             ),
           );
-          const httpResult: ThreadSnapshotLoadResult = yield* snapshotLoader.load(
-            prepared,
-            threadId,
-          );
+          const httpResult: ThreadSnapshotLoader.ThreadSnapshotLoadResult =
+            yield* snapshotLoader.load(prepared, threadId);
           switch (httpResult._tag) {
             case "present": {
+              if (canLoadHistory && httpResult.history !== undefined) {
+                yield* Ref.set(acceptsBoundedSocketSnapshots, true);
+              }
               // Atomic projection + progressive meta so a settled bounded window
               // never persists as a complete full-timeline cache entry. Socket
               // snapshots still go through applyItem (resetHistory).
@@ -734,13 +1004,12 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
               break;
             }
             case "missing": {
-              // Definitive HTTP 404: clear any stale cache and do not open or
-              // retry a socket subscription for this attempt.
               yield* setDeleted();
+              // A 404 also means "not created yet". Only a delete event may outlive this mount.
+              if (resumeCache?.owner === owner) resumeCache.snapshot = undefined;
               return yield* Effect.never;
             }
             case "unavailable": {
-              // Transient HTTP failure: fall through to the socket path.
               break;
             }
           }
@@ -748,45 +1017,36 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
 
         const sequence = yield* SubscriptionRef.get(lastSequence);
         const canResume = Option.isSome(current.data);
-        if (!supportsCompletionMarker && canResume) {
-          yield* SubscriptionRef.update(state, (value) => ({
-            ...value,
-            status: value.status === "deleted" ? value.status : ("live" as const),
-            error: Option.none(),
-          }));
-        }
+        const acceptBoundedSnapshot = yield* Ref.get(acceptsBoundedSocketSnapshots);
 
         return {
           threadId,
           ...(canResume ? { afterSequence: sequence } : {}),
-          ...(supportsCompletionMarker ? { requestCompletionMarker: true as const } : {}),
+          requestCompletionMarker: true as const,
+          ...(acceptBoundedSnapshot
+            ? {
+                acceptBoundedSnapshot: true as const,
+                acceptDeferredWork: true as const,
+                acceptCompactTurnItems: true as const,
+                acceptCompactIds: true as const,
+              }
+            : {}),
+          acceptDedupedBodies: true as const,
         };
       }),
       {
-        onExpectedFailure: setStreamError,
+        onDefect: () => setStreamError("Could not synchronize the thread."),
+        onExpectedFailure: (cause) => setStreamError(formatThreadError(cause)),
         retryExpectedFailureAfter: "250 millis",
         resubscribe: foregroundResubscriptions,
       },
-    ).pipe(Stream.runForEach(applyItem)),
-  );
-
-  yield* Effect.addFinalizer(() =>
-    Effect.suspend(() => {
-      const { state: current, sequence: snapshotSequence } = committed;
-      return Option.match(current.data, {
-        onNone: () => Effect.void,
-        onSome: (projection) =>
-          shouldPersistThread(projection, current.history)
-            ? persist(snapshotToPersist(snapshotSequence, projection, current.history))
-            : Effect.void,
-      });
-    }),
+    ).pipe(Stream.runForEachArray(applyItems)),
   );
 
   return state;
 });
 
-export function threadStateChanges(
+function threadStateChanges(
   environmentId: EnvironmentIdType,
   threadId: ThreadIdType,
   resumeCache?: ThreadResumeCache,
@@ -801,7 +1061,10 @@ export function threadStateChanges(
 
 export function createEnvironmentThreadStateAtoms<R, E>(
   runtime: Atom.AtomRuntime<
-    EnvironmentRegistry | EnvironmentCacheStore | ThreadSnapshotLoader | R,
+    | EnvironmentRegistry.EnvironmentRegistry
+    | Persistence.EnvironmentCacheStore
+    | ThreadSnapshotLoader.ThreadSnapshotLoader
+    | R,
     E
   >,
 ) {
@@ -824,6 +1087,8 @@ export function createEnvironmentThreadStateAtoms<R, E>(
         (get) => {
           get.mount(resumeAtom);
           const resume = get.once(resumeAtom);
+          // J5 (case 125): a re-pair with another credential drops the last person's state.
+          dropReplacedRetainedState(environmentId, resume);
           const live = threadStateChanges(environmentId, threadId, resume);
           return resume.snapshot === undefined
             ? live
@@ -844,13 +1109,17 @@ export function createEnvironmentThreadStateAtoms<R, E>(
 
 export * from "./archivedThreads.ts";
 export * from "./checkpointDiff.ts";
-export * from "./boundedThreadSnapshotHttp.ts";
-export * from "./threadHistoryController.ts";
+export * as BoundedThreadSnapshotLoader from "./boundedThreadSnapshotHttp.ts";
+export * as ThreadHistoryController from "./threadHistoryController.ts";
+export type { ThreadHistoryLoadEarlierResult } from "./threadHistoryController.ts";
 export * from "./threadHistoryMerge.ts";
 export * from "./threadSnapshotHttp.ts";
 export * from "./composerPathSearch.ts";
 export * from "./threadCommands.ts";
 export * from "./threadFeedback.ts";
 export * from "./threadDetail.ts";
+export * from "./threadFamilies.ts";
+export * from "./olderSettledThreads.ts";
 export * from "./threadShell.ts";
 export * from "./threadState.ts";
+export * from "./threadTagFilter.ts";

@@ -2,8 +2,8 @@ import type { ThreadId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 
 import {
   A2AHomeRegistrationTransaction,
@@ -12,15 +12,26 @@ import {
 } from "./HomeRegistrar.ts";
 import { A2ALedgerTransactionWriter } from "./LedgerService.ts";
 import { ParticipantPlacementTransactionWriter, type PlacementError } from "./PlacementService.ts";
-import type { CommCommandId, ParticipantId, SquadronId } from "./contracts.ts";
-import type { ParticipantPlacement, PlacementCommandId } from "./placementContracts.ts";
+import type { CommCommandId, LedgerProjectId } from "./contracts.ts";
+import { recordOutsideAgentName } from "./outsideAgentNames.ts";
+import { ReadChanges } from "./ReadChanges.ts";
+import type {
+  ParticipantPlacement,
+  ParticipantProvenance,
+  PlacementCommandId,
+} from "./placementContracts.ts";
 
 export interface RecordSpawnFactsInput {
   readonly homeCommandId: CommCommandId;
   readonly placementCommandId: PlacementCommandId;
-  readonly squadronId: SquadronId;
+  readonly projectId: LedgerProjectId;
   readonly threadId: ThreadId;
-  readonly spawnedByParticipantId: ParticipantId;
+  readonly provenance: ParticipantProvenance;
+  /**
+   * Set when the spawner is an outside agent: the label its client signed in with, recorded with
+   * the placement so the spawner named in provenance is one this server knows.
+   */
+  readonly outsideSpawnerName?: string;
   readonly createdAt: string;
 }
 
@@ -48,6 +59,7 @@ export const layer: Layer.Layer<
   | A2AHomeRegistrationTransaction
   | A2ALedgerTransactionWriter
   | ParticipantPlacementTransactionWriter
+  | ReadChanges
   | SqlClient.SqlClient
 > = Layer.effect(
   SpawnCompositionService,
@@ -56,14 +68,12 @@ export const layer: Layer.Layer<
     const ledgerWriter = yield* A2ALedgerTransactionWriter;
     const placements = yield* ParticipantPlacementTransactionWriter;
     const sql = yield* SqlClient.SqlClient;
+    const changes = yield* ReadChanges;
 
-    // Lifecycle writers share one total lock order:
-    // drainPermit ≺ appendPermit ≺ mutationPermit ≺ DB. Spawn never drains: this
-    // coordinator never acquires drainPermit, which is private to DeliveryWorker
-    // and cannot be held across this call. A delivery drain may be in flight while
-    // this runs; it simply contends for appendPermit. If a future lifecycle path
-    // exposes and holds a drain permit while composing, it must acquire that
-    // permit before appendPermit.
+    // Lifecycle writers share one lock order: drainPermit ≺ appendPermit ≺ mutationPermit ≺ DB.
+    // Spawn never takes drainPermit (private to DeliveryWorker), so an in-flight drain only
+    // contends for appendPermit. A future path holding a drain permit while composing must take it
+    // before appendPermit.
     const recordFacts: SpawnCompositionServiceShape["recordFacts"] = (input) =>
       ledgerWriter.withPermit(
         placements.withPermit(
@@ -72,20 +82,26 @@ export const layer: Layer.Layer<
               Effect.gen(function* () {
                 const registered = yield* homes.registerAtCreationInTransaction({
                   commandId: input.homeCommandId,
-                  squadronId: input.squadronId,
+                  projectId: input.projectId,
                   threadId: input.threadId,
                   createdAt: input.createdAt,
                 });
+                if (
+                  input.outsideSpawnerName !== undefined &&
+                  input.provenance.kind === "spawned-by"
+                ) {
+                  yield* recordOutsideAgentName(sql, {
+                    participantId: input.provenance.spawnedByParticipantId,
+                    name: input.outsideSpawnerName,
+                    at: input.createdAt,
+                  });
+                }
                 const placement = yield* placements.recordCreationInTransaction({
                   commandId: input.placementCommandId,
-                  squadronId: input.squadronId,
+                  projectId: input.projectId,
                   participantId: registered.home.participantId,
                   actor: "agent",
-                  provenance: {
-                    kind: "spawned-by",
-                    spawnedByParticipantId: input.spawnedByParticipantId,
-                    source: "j5_spawn",
-                  },
+                  provenance: input.provenance,
                   createdAt: input.createdAt,
                 });
                 return {
@@ -97,6 +113,9 @@ export const layer: Layer.Layer<
             )
             .pipe(
               Effect.tap((result) => ledgerWriter.publishCommitted(result.committedEvents)),
+              // A placement on a thread that was already registered commits no ledger event,
+              // so the Fleet would not hear of it from the ledger.
+              Effect.tap(() => changes.notify("fleet")),
               Effect.map(({ home, placement }) => ({ home, placement })),
             ),
         ),

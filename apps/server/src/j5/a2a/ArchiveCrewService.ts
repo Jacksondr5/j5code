@@ -13,14 +13,21 @@ import {
   signPayload,
   timingSafeEqualBase64Url,
 } from "../../auth/utils.ts";
-import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
+import type { CrewArchiveWorktree } from "@t3tools/contracts/j5";
+import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
+import {
+  AgentCrewInstanceService,
+  crewArchiveThreads,
+  type AgentCrewInstance,
+} from "./AgentCrewInstanceService.ts";
 import {
   ArchiveAgentService,
   type ArchiveAgentConsequenceFacts,
   type ArchiveAgentError,
   type ArchiveAgentResult,
 } from "./ArchiveAgentService.ts";
-import { ParticipantId, SquadronId } from "./contracts.ts";
+import { ParticipantId, LedgerProjectId } from "./contracts.ts";
+import { CrewWorktrees, type CrewSeatSession } from "./CrewWorktrees.ts";
 
 const TOKEN_VERSION = "j5-crew-archive-confirmation/v1" as const;
 const TOKEN_SECRET_NAME = "j5-a2a-archive-confirmation-v1";
@@ -32,6 +39,11 @@ export interface ArchiveCrewMemberFacts {
   readonly participantId: ParticipantId;
   readonly threadId: ThreadId;
   readonly alreadyArchived: boolean;
+  /**
+   * The seat's row was recorded but its thread never came to exist (a launch or addition that
+   * failed before reaching it). Nothing runs there, so the unit retires past it.
+   */
+  readonly neverCreated: boolean;
   readonly facts: ArchiveAgentConsequenceFacts;
 }
 
@@ -43,8 +55,8 @@ export interface ArchiveCrewInput {
   readonly providerSessionId: string;
   /** The Captain calling over MCP, or null when a person archives the Crew from the app. */
   readonly callerParticipantId: ParticipantId | null;
-  /** The Squadron the caller named; null when the person's route only knows the Crew. */
-  readonly squadronId: SquadronId | null;
+  /** The project the caller named; null when the person's route only knows the Crew. */
+  readonly projectId: LedgerProjectId | null;
   readonly crewInstanceId: string;
   readonly clientRequestKey: string;
   readonly confirmationToken?: string;
@@ -54,6 +66,8 @@ export interface ArchiveCrewInput {
    */
   readonly confirmationSatisfied?: boolean;
   readonly archivedAt: string;
+  /** Set by the Captain cascade: the Crew comes back when its Captain is unarchived. */
+  readonly withCaptain?: boolean;
   /** Per-seat command ids derive from the caller's request key so retries replay each member. */
   readonly commandIds: (seatName: string) => {
     readonly interruptCommandId: CommandId;
@@ -64,19 +78,25 @@ export interface ArchiveCrewInput {
 export interface ArchiveCrewMemberResult {
   readonly seatName: string;
   readonly participantId: ParticipantId;
-  readonly result: ArchiveAgentResult;
+  readonly result: ArchiveAgentResult | "never_created";
 }
 
 export interface ArchiveCrewOutcome {
   readonly status: ArchiveAgentResult;
   readonly members: ReadonlyArray<ArchiveCrewMemberResult>;
+  /**
+   * What the archive did with each worktree J5 created for the Crew's seats. Cleanup runs after
+   * the archive commits and never fails it, so this reports removals, worktrees kept with the
+   * reason, and removals that failed.
+   */
+  readonly worktrees: ReadonlyArray<CrewArchiveWorktree>;
 }
 
 export class ArchiveCrewNotFoundError extends Data.TaggedError("ArchiveCrewNotFoundError")<{
   readonly crewInstanceId: string;
 }> {
   override get message(): string {
-    return `Crew ${this.crewInstanceId} is not recorded in this environment. Call list_participants to inspect the roster; only Crews launched from an approved roster can be archived as a unit.`;
+    return `Crew ${this.crewInstanceId} is not recorded in this environment. Call j5_list_participants to inspect the roster; only Crews launched from an approved roster can be archived as a unit.`;
   }
 }
 
@@ -90,15 +110,13 @@ export class ArchiveCrewNotCaptainError extends Data.TaggedError("ArchiveCrewNot
   }
 }
 
-export class ArchiveCrewSquadronMismatchError extends Data.TaggedError(
-  "ArchiveCrewSquadronMismatchError",
-)<{
+class ArchiveCrewProjectMismatchError extends Data.TaggedError("ArchiveCrewProjectMismatchError")<{
   readonly crewInstanceId: string;
-  readonly squadronId: SquadronId;
-  readonly expected: SquadronId;
+  readonly projectId: LedgerProjectId;
+  readonly expected: LedgerProjectId;
 }> {
   override get message(): string {
-    return `Crew ${this.crewInstanceId} lives in Squadron ${this.expected}, but archive_crew named ${this.squadronId}. Retry with squadron_id=${this.expected}.`;
+    return `Crew ${this.crewInstanceId} lives in project ${this.expected}, and the caller is in project ${this.projectId}. A Captain archives a Crew from the Crew's own project.`;
   }
 }
 
@@ -111,7 +129,7 @@ export class ArchiveCrewConfirmationRequiredError extends Data.TaggedError(
       0,
     );
     const running = this.facts.members.filter((member) => member.facts.runningTurn !== null).length;
-    return `Archiving this Crew would end active work: ${waiting} open exchange(s) and ${running} running turn(s) across its seats. Review every listed member fact, check with the user before retiring a Crew that others are waiting on, then retry archive_crew with the confirmation_token.`;
+    return `Archiving this Crew would end active work: ${waiting} open exchange(s) and ${running} running turn(s) across its seats. Review every listed member fact, check with the user before retiring a Crew that others are waiting on, then retry j5_archive_crew with the confirmation_token.`;
   }
 }
 
@@ -120,18 +138,18 @@ export class ArchiveCrewConfirmationStaleError extends Data.TaggedError(
 )<{ readonly facts: ArchiveCrewConsequenceFacts; readonly confirmationToken: string | null }> {
   override get message(): string {
     return this.confirmationToken === null
-      ? "The confirmation_token is stale because the Crew no longer has consequential work. Retry archive_crew without a token."
-      : "The confirmation_token is stale because the Crew's facts changed. Review the current member facts and retry archive_crew with the new confirmation_token.";
+      ? "The confirmation_token is stale because the Crew no longer has consequential work. Retry j5_archive_crew without a token."
+      : "The confirmation_token is stale because the Crew's facts changed. Review the current member facts and retry j5_archive_crew with the new confirmation_token.";
   }
 }
 
-export class ArchiveCrewConfirmationTokenError extends Data.TaggedError(
+class ArchiveCrewConfirmationTokenError extends Data.TaggedError(
   "ArchiveCrewConfirmationTokenError",
 )<{ readonly reason: "malformed" | "unsupported-version" }> {
   override get message(): string {
     return this.reason === "unsupported-version"
-      ? "The confirmation_token uses an unsupported version. Call archive_crew without a token to receive a current refusal."
-      : "The confirmation_token is malformed or has an invalid signature. Call archive_crew without a token to receive a current refusal.";
+      ? "The confirmation_token uses an unsupported version. Call j5_archive_crew without a token to receive a current refusal."
+      : "The confirmation_token is malformed or has an invalid signature. Call j5_archive_crew without a token to receive a current refusal.";
   }
 }
 
@@ -145,14 +163,14 @@ export class ArchiveCrewPartialFailureError extends Data.TaggedError(
 }> {
   override get message(): string {
     const cause = this.cause instanceof Error ? this.cause.message : String(this.cause);
-    return `archive_crew retired seat(s) ${this.archivedSeats.join(", ") || "none"} of Crew ${this.crewInstanceId} but stopped at seat ${this.failedSeat}: ${cause} Retry archive_crew with the same client_request_id and confirmation_token; retired seats replay as already archived and the rest continue.`;
+    return `j5_archive_crew retired seat(s) ${this.archivedSeats.join(", ") || "none"} of Crew ${this.crewInstanceId} but stopped at seat ${this.failedSeat}: ${cause} Retry j5_archive_crew with the same client_request_id and confirmation_token; retired seats replay as already archived and the rest continue.`;
   }
 }
 
 export type ArchiveCrewError =
   | ArchiveCrewNotFoundError
   | ArchiveCrewNotCaptainError
-  | ArchiveCrewSquadronMismatchError
+  | ArchiveCrewProjectMismatchError
   | ArchiveCrewConfirmationRequiredError
   | ArchiveCrewConfirmationStaleError
   | ArchiveCrewConfirmationTokenError
@@ -168,7 +186,7 @@ const TokenPayload = Schema.Struct({
   version: Schema.Literal(TOKEN_VERSION),
   provider_session_id: Schema.String,
   caller_participant_id: Schema.NullOr(ParticipantId),
-  squadron_id: Schema.NullOr(SquadronId),
+  project_id: Schema.NullOr(LedgerProjectId),
   crew_instance_id: Schema.String,
   members: Schema.Array(TokenMember),
 });
@@ -182,7 +200,7 @@ const payloadFor = (input: ArchiveCrewInput, facts: ArchiveCrewConsequenceFacts)
   version: TOKEN_VERSION,
   provider_session_id: input.providerSessionId,
   caller_participant_id: input.callerParticipantId,
-  squadron_id: input.squadronId,
+  project_id: input.projectId,
   crew_instance_id: input.crewInstanceId,
   members: facts.members.map((member) => ({
     seat: member.seatName,
@@ -195,6 +213,21 @@ const payloadFor = (input: ArchiveCrewInput, facts: ArchiveCrewConsequenceFacts)
   })),
 });
 
+/** The seats whose threads exist; a seat that never came to exist has no worktree to look at. */
+const createdSeats = (facts: ArchiveCrewConsequenceFacts) =>
+  facts.members
+    .filter((member) => !member.neverCreated)
+    .map((member) => ({ seatName: member.seatName, threadId: member.threadId }));
+
+/** Who the worktree approval is filed for. */
+const approvalCrew = (instance: AgentCrewInstance, archivedAt: string) => ({
+  crewInstanceId: instance.id,
+  archivedAt: instance.archivedAt ?? archivedAt,
+  crewName: instance.displayName,
+  projectId: instance.projectId,
+  captainThreadId: instance.captainThreadId,
+});
+
 const hasConsequences = (facts: ArchiveCrewConsequenceFacts) =>
   facts.members.some(
     (member) => member.facts.openExchanges.length > 0 || member.facts.runningTurn !== null,
@@ -205,7 +238,7 @@ const isForwardOnlyRecovery = (confirmed: TokenPayload, current: TokenPayload): 
   if (
     confirmed.provider_session_id !== current.provider_session_id ||
     confirmed.caller_participant_id !== current.caller_participant_id ||
-    confirmed.squadron_id !== current.squadron_id ||
+    confirmed.project_id !== current.project_id ||
     confirmed.crew_instance_id !== current.crew_instance_id
   ) {
     return false;
@@ -237,7 +270,7 @@ export interface ArchiveCrewServiceShape {
    * archive dialog shows these before the Crews retire ahead of their Captain.
    */
   readonly readCaptainFacts: (input: {
-    readonly squadronId: SquadronId;
+    readonly projectId: LedgerProjectId;
     readonly captainParticipantId: ParticipantId;
   }) => Effect.Effect<ReadonlyArray<ArchiveCrewCaptainFacts>, ArchiveCrewPartialFailureError>;
 }
@@ -258,6 +291,8 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const archiveAgent = yield* ArchiveAgentService;
     const crews = yield* AgentCrewInstanceService;
+    const playbooks = yield* PlaybookStore;
+    const worktrees = yield* CrewWorktrees;
     const secrets = yield* ServerSecretStore;
     const secret = secrets
       .getOrCreateRandom(TOKEN_SECRET_NAME, TOKEN_SECRET_BYTES)
@@ -306,10 +341,11 @@ export const layer = Layer.effect(
       instance: AgentCrewInstance,
     ) {
       const members: Array<ArchiveCrewMemberFacts> = [];
-      for (const member of instance.members) {
+      // A member the Captain replaced retires with the Crew its worktree was made for.
+      for (const member of crewArchiveThreads(instance)) {
         const state = yield* archiveAgent
           .readFacts({
-            squadronId: instance.squadronId,
+            projectId: instance.projectId,
             participantId: member.participantId,
             threadId: member.threadId,
           })
@@ -328,15 +364,19 @@ export const layer = Layer.effect(
           seatName: member.seatName,
           participantId: member.participantId,
           threadId: member.threadId,
-          alreadyArchived: state.threadArchived && state.retired,
-          facts: state.facts,
+          alreadyArchived: state !== null && state.threadArchived && state.retired,
+          neverCreated: state === null,
+          facts: state?.facts ?? { openExchanges: [], runningTurn: null },
         });
       }
       return { members } satisfies ArchiveCrewConsequenceFacts;
     });
 
-    const archive: ArchiveCrewServiceShape["archive"] = (input) =>
-      Effect.gen(function* () {
+    // The roster is read, confirmed, and retired as one unit step, so an approved launch or
+    // addition either lands before the read and retires with the rest, or waits and meets the
+    // retired stamp before it reserves a seat.
+    const archiveUnit = Effect.fn("j5.a2a.archiveCrew.archiveUnit")(
+      function* (input: ArchiveCrewInput) {
         const decodedToken =
           input.confirmationToken === undefined
             ? undefined
@@ -344,11 +384,11 @@ export const layer = Layer.effect(
         const instance = yield* crews.read(input.crewInstanceId).pipe(Effect.orDie);
         if (instance === null)
           return yield* new ArchiveCrewNotFoundError({ crewInstanceId: input.crewInstanceId });
-        if (input.squadronId !== null && instance.squadronId !== input.squadronId)
-          return yield* new ArchiveCrewSquadronMismatchError({
+        if (input.projectId !== null && instance.projectId !== input.projectId)
+          return yield* new ArchiveCrewProjectMismatchError({
             crewInstanceId: instance.id,
-            squadronId: input.squadronId,
-            expected: instance.squadronId,
+            projectId: input.projectId,
+            expected: instance.projectId,
           });
         // A person is not a participant and holds the authority the gate gave them; only an
         // agent caller has to be the Captain (R19).
@@ -362,18 +402,27 @@ export const layer = Layer.effect(
             callerParticipantId: input.callerParticipantId,
           });
 
+        // Archiving a Crew ends its playbook run. Idempotent, and also on the already-archived
+        // retry, so a crash between the cancel and the retired stamp is repaired.
+        const cancelPlaybookRun = playbooks.cancelForCrew(instance.id).pipe(Effect.orDie);
         const facts = yield* readFacts(instance);
         if (
           instance.archivedAt !== null &&
-          facts.members.every((member) => member.alreadyArchived)
+          facts.members.every((member) => member.alreadyArchived || member.neverCreated)
         ) {
+          yield* cancelPlaybookRun;
           return {
             status: "already_archived" as const,
             members: facts.members.map((member) => ({
               seatName: member.seatName,
               participantId: member.participantId,
-              result: "already_archived" as const,
+              result: member.neverCreated
+                ? ("never_created" as const)
+                : ("already_archived" as const),
             })),
+            seats: createdSeats(facts),
+            crew: approvalCrew(instance, input.archivedAt),
+            sessions: [] as ReadonlyArray<CrewSeatSession>,
           };
         }
 
@@ -401,8 +450,23 @@ export const layer = Layer.effect(
         }
 
         const results: Array<ArchiveCrewMemberResult> = [];
+        const sessions: Array<CrewSeatSession> = [];
         for (const member of facts.members) {
+          if (member.neverCreated) {
+            results.push({
+              seatName: member.seatName,
+              participantId: member.participantId,
+              result: "never_created",
+            });
+            continue;
+          }
           const ids = input.commandIds(member.seatName);
+          // Before the archive: committing it removes the binding that names the session.
+          sessions.push(
+            ...(yield* worktrees.liveSessions([
+              { seatName: member.seatName, threadId: member.threadId },
+            ])),
+          );
           const result = yield* archiveAgent
             .archive({
               providerSessionId: input.providerSessionId,
@@ -411,7 +475,7 @@ export const layer = Layer.effect(
               // Captain's identity because the unit retires as the Captain's Crew.
               callerParticipantId: input.callerParticipantId ?? instance.captainParticipantId,
               target: {
-                squadronId: instance.squadronId,
+                projectId: instance.projectId,
                 participantId: member.participantId,
                 threadId: member.threadId,
               },
@@ -426,7 +490,9 @@ export const layer = Layer.effect(
                 (cause) =>
                   new ArchiveCrewPartialFailureError({
                     crewInstanceId: instance.id,
-                    archivedSeats: results.map(({ seatName }) => seatName),
+                    archivedSeats: results
+                      .filter(({ result }) => result !== "never_created")
+                      .map(({ seatName }) => seatName),
                     failedSeat: member.seatName,
                     cause,
                   }),
@@ -434,20 +500,45 @@ export const layer = Layer.effect(
             );
           results.push({ seatName: member.seatName, participantId: member.participantId, result });
         }
-        yield* crews.markArchived(instance.id, input.archivedAt).pipe(Effect.orDie);
-        return { status: "archived" as const, members: results };
-      });
+        yield* cancelPlaybookRun;
+        yield* crews
+          .markArchived(instance.id, input.archivedAt, { withCaptain: input.withCaptain === true })
+          .pipe(Effect.orDie);
+        return {
+          status: "archived" as const,
+          members: results,
+          seats: createdSeats(facts),
+          crew: approvalCrew(instance, input.archivedAt),
+          sessions,
+        };
+      },
+      (unit, input) => crews.serialize(input.crewInstanceId, unit),
+    );
 
-    const readCaptainFacts: ArchiveCrewServiceShape["readCaptainFacts"] = (input) =>
-      Effect.gen(function* () {
-        const commanded = yield* crews.listForCaptain(input).pipe(Effect.orDie);
-        const live = commanded.filter((instance) => instance.archivedAt === null);
-        return yield* Effect.forEach(
-          live,
-          (instance) => readFacts(instance).pipe(Effect.map((facts) => ({ instance, facts }))),
-          { concurrency: 1 },
-        );
-      });
+    // After the unit's step commits and its lock is released, so a slow check or removal holds
+    // nothing. Also on the already-archived replay: a worktree kept because a session was still
+    // open, or because a check failed, gets another look when the archive is asked for again.
+    const archive: ArchiveCrewServiceShape["archive"] = Effect.fn("j5.a2a.archiveCrew.archive")(
+      function* (input) {
+        const { seats, sessions, crew, ...outcome } = yield* archiveUnit(input);
+        // Each seat's session is closed before the cleanup looks for one open in its worktree.
+        yield* worktrees.closeSessions(sessions);
+        const removed = yield* worktrees.cleanup({ seats, crew });
+        return { ...outcome, worktrees: removed };
+      },
+    );
+
+    const readCaptainFacts: ArchiveCrewServiceShape["readCaptainFacts"] = Effect.fn(
+      "j5.a2a.archiveCrew.readCaptainFacts",
+    )(function* (input) {
+      const commanded = yield* crews.listForCaptain(input).pipe(Effect.orDie);
+      const live = commanded.filter((instance) => instance.archivedAt === null);
+      return yield* Effect.forEach(
+        live,
+        (instance) => readFacts(instance).pipe(Effect.map((facts) => ({ instance, facts }))),
+        { concurrency: 1 },
+      );
+    });
 
     return ArchiveCrewService.of({ archive, readCaptainFacts });
   }),

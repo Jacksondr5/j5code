@@ -1,6 +1,7 @@
 import { assert, it } from "@effect/vitest";
 import {
   type ModelSelection,
+  MessageId,
   NodeId,
   type OrchestrationV2ProviderThread,
   type OrchestrationV2ThreadProjection,
@@ -20,16 +21,24 @@ import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
+import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
+
+import * as Crews from "../j5/a2a/AgentCrewInstanceService.ts";
+import * as CrewTurnContext from "../j5/a2a/CrewTurnContext.ts";
+import { participantIdForThread } from "../j5/a2a/HomeRegistrar.ts";
+import { A2ALedger, layer as ledgerLayer } from "../j5/a2a/LedgerService.ts";
+import { runJ5A2AMigrations } from "../j5/a2a/Migrations.ts";
+import { LedgerProjectId } from "../j5/a2a/contracts.ts";
+import { spawnFirstTurnText } from "../j5/a2a/spawnIds.ts";
 
 import { CodexProviderCapabilitiesV2 } from "./Adapters/CodexAdapterV2.ts";
-import { ProjectionStoreV2 } from "./ProjectionStore.ts";
-import type { ProviderAdapterV2SessionRuntime } from "./ProviderAdapter.ts";
-import { ProviderSessionManagerV2 } from "./ProviderSessionManager.ts";
-import {
-  layer as providerTurnControlLayer,
-  ProviderTurnControlServiceV2,
-} from "./ProviderTurnControlService.ts";
+import * as Orchestrator from "./Orchestrator.ts";
+import * as ProjectionStore from "./ProjectionStore.ts";
+import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+import * as ProviderSessionManager from "./ProviderSessionManager.ts";
+import * as ProviderTurnControlService from "./ProviderTurnControlService.ts";
 
 const driver = ProviderDriverKind.make("codex");
 const providerInstanceId = ProviderInstanceId.make("codex");
@@ -145,8 +154,6 @@ it.effect(
         id: providerThreadId,
         driver,
         providerInstanceId,
-        // The restart command has already projected this replacement binding
-        // before the process-bound restart effect executes.
         providerSessionId: replacementSessionId,
         appThreadId: threadId,
         ownerNodeId: null,
@@ -180,7 +187,7 @@ it.effect(
         updatedAt: now,
         lastError: null,
       };
-      const runtime: ProviderAdapterV2SessionRuntime = {
+      const runtime: ProviderAdapter.ProviderAdapterV2SessionRuntime = {
         instanceId: providerInstanceId,
         driver,
         providerSessionId: oldSessionId,
@@ -210,16 +217,46 @@ it.effect(
         rollbackThread: () => Effect.die("unused rollbackThread"),
         forkThread: () => Effect.die("unused forkThread"),
       };
-      const projectionLayer = Layer.succeed(
-        ProjectionStoreV2,
-        ProjectionStoreV2.of({
+      const layerProjection = Layer.succeed(
+        ProjectionStore.ProjectionStoreV2,
+        ProjectionStore.ProjectionStoreV2.of({
           apply: () => Effect.void,
+          getLimitRecoveryCandidates: () => Effect.die("unused getLimitRecoveryCandidates"),
+          getLimitRecoveryWakeAt: () => Effect.die("unused getLimitRecoveryWakeAt"),
+          getOpenRemoteDelegatedTasks: Effect.die("unused getOpenRemoteDelegatedTasks"),
           getShellSnapshot: () => Effect.die("unused getShellSnapshot"),
+          listActiveSubagentThreadIds: () => Effect.die("unused listActiveSubagentThreadIds"),
+          countThreads: () => Effect.die("unused countThreads"),
+          listActiveShellIndex: () => Effect.die("unused listActiveShellIndex"),
+          listOlderSettledThreads: () => Effect.die("unused listOlderSettledThreads"),
+          readShellSnapshot: () => Effect.die("unused readShellSnapshot"),
           getThreadShell: () => Effect.die("unused getThreadShell"),
+          findGuestShareThreadId: () => Effect.die("unused findGuestShareThreadId"),
           getThread: () => Ref.get(projection).pipe(Effect.map((state) => state.thread)),
           getSettlementCandidates: () => Effect.die("unused getSettlementCandidates"),
+          getThreadsWithPullRequests: () => Effect.die("unused getThreadsWithPullRequests"),
+          getThreadWorktreePaths: () => Effect.die("unused getThreadWorktreePaths"),
           getThreadProjection: () => Effect.die("control effects must not load transcript"),
+          getTurnStartContext: () => Effect.die("unused"),
+          getTurnStartHistory: () => Effect.die("unused"),
+          getRuntimeRecoveryProjection: () => Effect.die("unused getRuntimeRecoveryProjection"),
+          getPlan: () => Effect.die("unused"),
+          hasUnpairedRunInterruptRequest: () => Effect.die("unused interrupt read"),
+          getThreadAttachmentIds: () => Effect.die("Unused attachment lookup"),
+          searchThread: () => Effect.die("unused"),
+          searchThreadStream: () => Stream.empty,
+          getThreadHistoryPage: () => Effect.die("unused"),
+          getTimelinePage: () => Effect.die("Unused timeline read"),
+          getMessageCount: () => Effect.die("unused message count"),
+          getSubagentCount: () => Effect.die("unused subagent count"),
+          listAppOwnedChildThreadIds: () => Effect.die("unused listAppOwnedChildThreadIds"),
+          getNextTurnItemOrdinal: () => Effect.die("unused ordinal read"),
+          getTurnItem: () => Effect.die("unused turn item read"),
+          getThreadRecords: () => Effect.die("unused record read"),
           getRuntimeRequest: () => Effect.die("unused getRuntimeRequest"),
+          getRunningTurnContext: () => Effect.die("unused getRunningTurnContext"),
+          getThreadProviderContext: () => Effect.die("unused getThreadProviderContext"),
+          getRuntimeResponseContext: () => Effect.die("unused getRuntimeResponseContext"),
           getPendingNativeUserInputs: () => Effect.die("unused getPendingNativeUserInputs"),
           getProviderControlContext: (_threadId, target) =>
             Ref.get(projection).pipe(
@@ -236,32 +273,43 @@ it.effect(
               })),
             ),
           getCheckpointContext: () => Effect.die("not used"),
+          getCheckpointRollbackContext: () => Effect.die("unused rollback context"),
+          getCheckpointCaptureContext: () => Effect.die("not used"),
+          getRunMessage: () => Effect.die("not used"),
+          isNodeStored: () => Effect.die("not used"),
+          canStartQueuedRun: () => Effect.die("not used"),
+          getHeldQueuedRuns: () => Effect.die("not used"),
           getRecoveryThreadIds: () => Effect.die("unused getRecoveryThreadIds"),
           getUnreadableThreadIds: () => Effect.die("unused getUnreadableThreadIds"),
           getThreadSnapshot: () => Effect.die("unused getThreadSnapshot"),
           getThreadSnapshotWindow: () => Effect.die("unused getThreadSnapshotWindow"),
+          getPullRequestSnapshot: () => Effect.die("unused getPullRequestSnapshot"),
         }),
       );
-      const sessionManagerLayer = Layer.succeed(
-        ProviderSessionManagerV2,
-        ProviderSessionManagerV2.of({
+      const layerSessionManager = Layer.succeed(
+        ProviderSessionManager.ProviderSessionManagerV2,
+        ProviderSessionManager.ProviderSessionManagerV2.of({
           shutdown: Effect.void,
           open: () => Effect.die("unused open"),
           get: (providerSessionId) =>
             Effect.succeed(
               providerSessionId === oldSessionId ? Option.some(runtime) : Option.none(),
             ),
+          isLive: (providerSessionId) => Effect.succeed(providerSessionId === oldSessionId),
           close: () => Effect.void,
+          closeInstance: () => Effect.void,
           release: () => Effect.void,
           detach: () => Effect.void,
+          otherWorkingThreads: () => Effect.succeed([]),
+          releaseUnlessBusy: () => Effect.succeed(true),
         }),
       );
-      const controlLayer = providerTurnControlLayer.pipe(
-        Layer.provide(Layer.merge(projectionLayer, sessionManagerLayer)),
+      const layerControl = ProviderTurnControlService.layer.pipe(
+        Layer.provide(Layer.merge(layerProjection, layerSessionManager)),
       );
 
       const [ordinaryInterrupt, unrelatedRestart] = yield* Effect.gen(function* () {
-        const control = yield* ProviderTurnControlServiceV2;
+        const control = yield* ProviderTurnControlService.ProviderTurnControlServiceV2;
         const ordinary = yield* Effect.exit(
           control.interrupt({
             threadId,
@@ -281,14 +329,14 @@ it.effect(
           }),
         );
         return [ordinary, unrelated] as const;
-      }).pipe(Effect.provide(controlLayer));
+      }).pipe(Effect.provide(layerControl));
 
       assert.isTrue(Exit.isFailure(ordinaryInterrupt));
       assert.isTrue(Exit.isFailure(unrelatedRestart));
       assert.isNull(yield* Ref.get(interruptedThread));
 
       yield* Effect.gen(function* () {
-        const control = yield* ProviderTurnControlServiceV2;
+        const control = yield* ProviderTurnControlService.ProviderTurnControlServiceV2;
         yield* control.interruptAndAwaitTerminal({
           threadId,
           providerSessionId: oldSessionId,
@@ -297,7 +345,7 @@ it.effect(
           providerTurnId,
           interruptedAttemptId: attemptId,
         });
-      }).pipe(Effect.provide(controlLayer));
+      }).pipe(Effect.provide(layerControl));
 
       const interrupted = yield* Ref.get(interruptedThread);
       assert.isNotNull(interrupted);
@@ -305,4 +353,144 @@ it.effect(
       assert.equal(interrupted?.id, providerThreadId);
       assert.equal(interrupted?.nativeThreadRef?.nativeId, "native-thread:restart-session");
     }),
+);
+
+const crewDatabase = NodeSqliteClient.layer({ filename: ":memory:" });
+const crewServices = Layer.mergeAll(
+  crewDatabase,
+  Crews.layer.pipe(Layer.provide(crewDatabase)),
+  ledgerLayer.pipe(Layer.provide(crewDatabase)),
+  // The seat records what it was told through a dispatch these tests do not inspect.
+  Layer.mock(Orchestrator.OrchestratorV2)({
+    dispatch: () => Effect.succeed({ sequence: 1, storedEvents: [] }),
+  }),
+);
+
+it.effect("steering a busy Crew seat carries the roster change made while it worked", () =>
+  Effect.gen(function* () {
+    yield* runJ5A2AMigrations();
+    const sql = yield* SqlClient.SqlClient;
+    const crews = yield* Crews.AgentCrewInstanceService;
+    const now = yield* DateTime.now;
+    const threadId = ThreadId.make("thread:crew-builder");
+    const captainThreadId = ThreadId.make("thread:crew-captain");
+    const sessionId = ProviderSessionId.make("provider-session:crew-builder");
+    const providerThreadId = ProviderThreadId.make("provider-thread:crew-builder");
+    const providerTurnId = ProviderTurnId.make("provider-turn:crew-builder");
+    const attemptId = RunAttemptId.make("run-attempt:crew-builder");
+    const providerThread: OrchestrationV2ProviderThread = {
+      id: providerThreadId,
+      driver,
+      providerInstanceId,
+      providerSessionId: sessionId,
+      appThreadId: threadId,
+      ownerNodeId: null,
+      nativeThreadRef: { driver, nativeId: "native-thread:crew-builder", strength: "strong" },
+      nativeConversationHeadRef: null,
+      status: "active",
+      firstRunOrdinal: 1,
+      lastRunOrdinal: 1,
+      handoffIds: [],
+      forkedFrom: null,
+      createdAt: now,
+      updatedAt: now,
+    };
+    const base = makeProjection({ now, threadId, providerThread, providerTurnId, attemptId });
+    const message = {
+      id: MessageId.make("message:steer-builder"),
+      text: "Also cover the retry path.",
+      attachments: [],
+      createdBy: "agent",
+      creationSource: "mcp",
+    };
+    const steered: Array<string> = [];
+    const runtime = {
+      steerTurn: (input: ProviderAdapter.ProviderAdapterV2SteerInput) =>
+        Effect.sync(() => void steered.push(input.message.text)),
+    } as unknown as ProviderAdapter.ProviderAdapterV2SessionRuntime;
+
+    const projectId = LedgerProjectId.make("project:crew-steer");
+    yield* (yield* A2ALedger).ensureProject({ projectId, createdAt: "2026-10-27T12:00:00.000Z" });
+    const seat = (seatName: string, id: ThreadId) => ({
+      seatName,
+      agentId: null,
+      threadId: id,
+      participantId: participantIdForThread(id),
+      reason: `Responsibility of ${seatName}`,
+    });
+    yield* crews.record({
+      id: "crew:steer",
+      projectId,
+      captainThreadId,
+      captainParticipantId: participantIdForThread(captainThreadId),
+      displayName: "Steer crew",
+      brief: "Shared goal",
+      createdAt: "2026-10-27T12:00:00.000Z",
+      members: [seat("builder", threadId)],
+    });
+    const text = spawnFirstTurnText({
+      brief: "Shared goal",
+      participantId: participantIdForThread(threadId),
+      projectId,
+      projectTitle: "Project",
+      spawnedByParticipantId: participantIdForThread(captainThreadId),
+      crew: {
+        displayName: "Steer crew",
+        instanceId: "crew:steer",
+        seatName: "builder",
+        captainParticipantId: participantIdForThread(captainThreadId),
+        roster: [],
+      },
+    });
+    yield* sql`INSERT INTO j5_crew_seat_context (thread_id, first_turn_text, workspace)
+      VALUES (${threadId}, ${text}, '{"type":"shared"}')`;
+    // The builder's assignment started the turn that is still running.
+    yield* Effect.gen(function* () {
+      yield* (yield* CrewTurnContext.CrewTurnContext).deliver(
+        { threadId, runId: RunId.make("run:crew-builder"), providerThread, text: "Build the fix." },
+        () => Effect.succeed(true),
+      );
+    }).pipe(Effect.provide(CrewTurnContext.layer));
+    yield* crews.addMembers("crew:steer", [
+      seat("reviewer", ThreadId.make("thread:crew-reviewer")),
+    ]);
+
+    const target = {
+      threadId,
+      providerSessionId: sessionId,
+      providerThreadId,
+      providerTurnId,
+      messageId: message.id,
+    };
+    const layerControl = ProviderTurnControlService.layer.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          Layer.mock(ProjectionStore.ProjectionStoreV2)({
+            getProviderControlContext: () =>
+              Effect.succeed({
+                providerThread,
+                providerTurn: base.providerTurns[0],
+                attempt: base.attempts[0],
+                message,
+                run: { id: RunId.make("run:crew-builder") },
+              } as never),
+          }),
+          Layer.mock(ProviderSessionManager.ProviderSessionManagerV2)({
+            get: () => Effect.succeedSome(runtime),
+          }),
+        ),
+      ),
+      Layer.provide(CrewTurnContext.layer),
+    );
+    yield* Effect.gen(function* () {
+      const control = yield* ProviderTurnControlService.ProviderTurnControlServiceV2;
+      yield* control.steer(target);
+      yield* control.steer(target);
+    }).pipe(Effect.provide(layerControl));
+
+    assert.lengthOf(steered, 2);
+    assert.include(steered[0]!, "joined: reviewer: participant_id=");
+    assert.isTrue(steered[0]!.endsWith("Also cover the retry path."));
+    assert.equal(steered[1], "Also cover the retry path.");
+  }).pipe(Effect.provide(crewServices)),
 );

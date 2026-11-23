@@ -17,10 +17,10 @@
           "id": "019fcfd6-17bb-72f0-ae12-a1f2dee6e3e5",
           "extra": null,
           "sessionId": "019fcfd6-17bb-72f0-ae12-a1f2dee6e3e5",
-          "projectId": null,
           "forkedFromId": null,
           "parentThreadId": null,
           "preview": "",
+          "projectId": null,
           "ephemeral": false,
           "historyMode": "legacy",
           "modelProvider": "openai",
@@ -82,7 +82,6 @@
     {
       "method": "item/completed",
       "params": {
-        "completedAtMs": 1756771200000,
         "item": {
           "type": "subAgentActivity",
           "id": "call_S2JPiq0sMnJYS7kswVdvzEjB",
@@ -159,7 +158,6 @@
     {
       "method": "item/completed",
       "params": {
-        "completedAtMs": 1756771200000,
         "item": {
           "type": "subAgentActivity",
           "id": "call_A2U7sfjmdGlUn5bn6gUNI0rl",
@@ -227,7 +225,6 @@
     {
       "method": "item/completed",
       "params": {
-        "completedAtMs": 1756771200000,
         "item": {
           "type": "subAgentActivity",
           "id": "call_2W1NboHClVo0VqAf1y3ZFinO",
@@ -269,7 +266,6 @@
     {
       "method": "item/started",
       "params": {
-        "startedAtMs": 1756771200000,
         "item": {
           "type": "collabAgentToolCall",
           "id": "call_XGMDYMm4O8ne7vg3Y6p4eSqz",
@@ -290,7 +286,6 @@
     {
       "method": "item/completed",
       "params": {
-        "completedAtMs": 1756771200000,
         "item": {
           "type": "collabAgentToolCall",
           "id": "call_XGMDYMm4O8ne7vg3Y6p4eSqz",
@@ -392,10 +387,10 @@
         "id": "019fcfd6-17bb-72f0-ae12-a1f2dee6e3e5",
         "extra": null,
         "sessionId": "019fcfd6-17bb-72f0-ae12-a1f2dee6e3e5",
-        "projectId": null,
         "forkedFromId": null,
         "parentThreadId": null,
         "preview": "",
+        "projectId": null,
         "ephemeral": false,
         "historyMode": "legacy",
         "modelProvider": "openai",

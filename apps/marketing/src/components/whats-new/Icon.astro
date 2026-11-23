@@ -1,0 +1,26 @@
+---
+import { LUCIDE, type LucideName } from "./icons";
+
+/** A lucide icon drawn as the app draws it: 1.75 stroke, sized by the caller's CSS (16px default). */
+interface Props {
+  name: LucideName;
+  class?: string;
+  style?: string;
+}
+
+const { name, class: className, style } = Astro.props;
+---
+
+<svg
+  class:list={["ico", className]}
+  viewBox="0 0 24 24"
+  fill="none"
+  stroke="currentColor"
+  stroke-width="1.75"
+  stroke-linecap="round"
+  stroke-linejoin="round"
+  style={style}
+  aria-hidden="true"
+  focusable="false"
+  set:html={LUCIDE[name]}
+/>

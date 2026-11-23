@@ -1,148 +1,31 @@
+import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
+import { isAttachmentOnlyBootstrapPrompt } from "@t3tools/shared/composerContextReferences";
 import {
-  type ChatAttachment,
   CommandId,
+  type ChatAttachment,
   type MessageId,
+  type OrchestrationV2AppThread,
+  type OrchestrationV2ConversationMessage,
+  type RunId,
   type ServerSettingsError,
   type ThreadId,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Schedule from "effect/Schedule";
 
-import type { ProjectionRepositoryError } from "../persistence/Errors.ts";
-import { ProjectionProjectRepository } from "../persistence/Services/ProjectionProjects.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as TextGeneration from "../textGeneration/TextGeneration.ts";
 import type { OrchestratorV2Error } from "./Orchestrator.ts";
-import { ThreadManagementService } from "./ThreadManagementService.ts";
+import * as ProjectStore from "./ProjectStore.ts";
+import * as ThreadManagementService from "./ThreadManagementService.ts";
 
-const MAX_REGENERATION_ATTACHMENTS = 4;
-const MAX_THREAD_TITLE_CONTEXT_CHARS = 8_000;
-const MAX_FIRST_USER_TITLE_CONTEXT_CHARS = 2_000;
-const THREAD_TITLE_CONTEXT_TRUNCATION_MARKER = "[Earlier content truncated]\n\n";
-const FIRST_USER_CONTEXT_TRUNCATION_MARKER = "\n[First user message truncated]";
-
-type ThreadTitleMessage = {
-  readonly role: "user" | "assistant" | "system";
-  readonly text: string;
-  readonly attachments?: ReadonlyArray<ChatAttachment> | undefined;
-};
-
-function formatThreadTitleSection(message: ThreadTitleMessage): string | undefined {
-  if (message.role === "system") {
-    return undefined;
-  }
-  const text = message.text.trim();
-  const attachmentSummary = (message.attachments ?? [])
-    .map((attachment) => attachment.name)
-    .join(", ");
-  const contents = [
-    ...(text.length > 0 ? [text] : []),
-    ...(attachmentSummary.length > 0 ? [`[Attachments: ${attachmentSummary}]`] : []),
-  ].join("\n");
-  return contents.length > 0 ? `${message.role.toUpperCase()}:\n${contents}` : undefined;
-}
-
-function limitFirstUserSection(section: string): string {
-  if (section.length <= MAX_FIRST_USER_TITLE_CONTEXT_CHARS) {
-    return section;
-  }
-  return `${section.slice(
-    0,
-    MAX_FIRST_USER_TITLE_CONTEXT_CHARS - FIRST_USER_CONTEXT_TRUNCATION_MARKER.length,
-  )}${FIRST_USER_CONTEXT_TRUNCATION_MARKER}`;
-}
-
-function collectRecentThreadTitleContext(
-  messages: ReadonlyArray<ThreadTitleMessage>,
-  maxChars: number,
-): {
-  readonly context: string;
-  readonly attachments: ReadonlyArray<ChatAttachment>;
-  readonly truncated: boolean;
-} {
-  let context = "";
-  let truncated = false;
-  const retainedAttachments: Array<ChatAttachment> = [];
-
-  for (const message of messages.toReversed()) {
-    const section = formatThreadTitleSection(message);
-    if (section === undefined) {
-      continue;
-    }
-
-    const separator = context.length > 0 ? "\n\n" : "";
-    const available = maxChars - context.length - separator.length;
-    if (section.length > available) {
-      if (available > 0) {
-        context = `${section.slice(-available)}${separator}${context}`;
-        retainedAttachments.unshift(...(message.attachments ?? []));
-      }
-      truncated = true;
-      break;
-    }
-    context = `${section}${separator}${context}`;
-    retainedAttachments.unshift(...(message.attachments ?? []));
-  }
-
-  return { context, attachments: retainedAttachments, truncated };
-}
-
-/**
- * Conversation digest for the title prompt. Recent messages fill the budget
- * newest-first; when the conversation no longer fits, the first user message
- * is pinned ahead of the recent tail so regenerated titles stay anchored to
- * what the thread is actually about. Mirrors the v1 reactor's flow (#5365).
- */
-export function formatThreadTitleContext(messages: ReadonlyArray<ThreadTitleMessage>): {
-  readonly message: string;
-  readonly attachments: ReadonlyArray<ChatAttachment>;
-} {
-  const recent = collectRecentThreadTitleContext(messages, MAX_THREAD_TITLE_CONTEXT_CHARS);
-  if (!recent.truncated) {
-    return {
-      message: recent.context,
-      attachments: recent.attachments.slice(-MAX_REGENERATION_ATTACHMENTS),
-    };
-  }
-
-  const firstUserMessage = messages.find(
-    (message) => message.role === "user" && formatThreadTitleSection(message),
-  );
-  const firstUserSection = firstUserMessage
-    ? formatThreadTitleSection(firstUserMessage)
-    : undefined;
-  if (!firstUserMessage || !firstUserSection) {
-    return {
-      message: `${THREAD_TITLE_CONTEXT_TRUNCATION_MARKER}${recent.context}`,
-      attachments: recent.attachments.slice(-MAX_REGENERATION_ATTACHMENTS),
-    };
-  }
-
-  const pinnedSection = limitFirstUserSection(firstUserSection);
-  const recentContextBudget =
-    MAX_THREAD_TITLE_CONTEXT_CHARS -
-    pinnedSection.length -
-    "\n\n".length -
-    THREAD_TITLE_CONTEXT_TRUNCATION_MARKER.length;
-  const retainedRecent = collectRecentThreadTitleContext(messages, recentContextBudget);
-  const pinnedAttachment = firstUserMessage.attachments?.[0];
-  const recentAttachments = retainedRecent.attachments.filter(
-    (attachment) => attachment.id !== pinnedAttachment?.id,
-  );
-
-  return {
-    message: `${pinnedSection}\n\n${THREAD_TITLE_CONTEXT_TRUNCATION_MARKER}${retainedRecent.context}`,
-    attachments: [
-      ...(pinnedAttachment ? [pinnedAttachment] : []),
-      ...recentAttachments.slice(
-        -(MAX_REGENERATION_ATTACHMENTS - (pinnedAttachment === undefined ? 0 : 1)),
-      ),
-    ],
-  };
-}
+import { formatThreadTitleContext } from "@t3tools/provider-core/server/threadTitleContext";
+export { formatThreadTitleContext } from "@t3tools/provider-core/server/threadTitleContext";
 
 export class ThreadTitleRegenerationService extends Context.Service<
   ThreadTitleRegenerationService,
@@ -155,16 +38,20 @@ export class ThreadTitleRegenerationService extends Context.Service<
         | { readonly type: "regenerate" };
     }) => Effect.Effect<
       void,
-      OrchestratorV2Error | ProjectionRepositoryError | ServerSettingsError
+      | OrchestratorV2Error
+      | ProjectStore.ProjectStoreV2Error
+      | ServerSettingsError
+      | ThreadManagementService.ThreadManagementProviderInstanceDisabledError
     >;
   }
 >()("t3/orchestration-v2/ThreadTitleRegenerationService") {}
 
-export const make = Effect.gen(function* () {
-  const threads = yield* ThreadManagementService;
-  const projects = yield* ProjectionProjectRepository;
+const make = Effect.gen(function* () {
+  const threads = yield* ThreadManagementService.ThreadManagementService;
+  const projects = yield* ProjectStore.ProjectStoreV2;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const textGeneration = yield* TextGeneration.TextGeneration;
+  const fileSystem = yield* FileSystem.FileSystem;
 
   const complete = (input: {
     readonly threadId: ThreadId;
@@ -181,18 +68,63 @@ export const make = Effect.gen(function* () {
       })
       .pipe(Effect.asVoid);
 
+  const messagesThroughRun = Effect.fn("ThreadTitleRegenerationService.messagesThroughRun")(
+    function* (threadId: ThreadId, runId: RunId) {
+      const source = yield* threads.getThreadRecords(threadId, ["messages", "runs"], {
+        messageRoles: ["user", "assistant"],
+      });
+      const ordinals = new Map(
+        source.runs
+          .filter((run) => run.status !== "rolled_back")
+          .map((run) => [run.id, run.ordinal]),
+      );
+      const forkOrdinal = ordinals.get(runId) ?? -1;
+      const messages = source.messages.filter((message) => {
+        if (message.streaming) return false;
+        if (message.runId === null) return source.thread.historyOrigin === "v1_import";
+        return (ordinals.get(message.runId) ?? Infinity) <= forkOrdinal;
+      });
+      return { thread: source.thread, messages };
+    },
+  );
+
+  // A fork starts with no messages of its own, so its subject lives in the history it inherited.
+  const forkSource = Effect.fn("ThreadTitleRegenerationService.forkSource")(function* (
+    thread: OrchestrationV2AppThread,
+  ) {
+    let title: string | undefined;
+    const history: Array<ReadonlyArray<OrchestrationV2ConversationMessage>> = [];
+    let forkedFrom = thread.forkedFrom;
+    while (forkedFrom?.type === "run") {
+      const source = yield* messagesThroughRun(forkedFrom.threadId, forkedFrom.runId);
+      history.push(source.messages);
+      title ??= source.thread.title;
+      forkedFrom = source.thread.forkedFrom;
+    }
+    const context = formatThreadTitleContext(history.reverse().flat());
+    return title === undefined || context.message.length === 0
+      ? undefined
+      : { title, history: context.message };
+  });
+
   const execute: ThreadTitleRegenerationService["Service"]["execute"] = Effect.fn(
     "ThreadTitleRegenerationService.execute",
   )(function* (input) {
     const outcome:
       | { readonly type: "stale" }
       | { readonly type: "complete"; readonly title?: string } = yield* Effect.gen(function* () {
-      const projection = yield* threads.getThreadProjection(input.threadId);
+      const projection = yield* threads.getThreadRecords(
+        input.threadId,
+        ["messages"],
+        input.kind.type === "initial"
+          ? { messageIds: [input.kind.messageId] }
+          : { messageRoles: ["user", "assistant"] },
+      );
       if (projection.thread.titleRegeneration?.requestId !== input.requestId) {
         return { type: "stale" as const };
       }
 
-      const project = yield* projects.getById({ projectId: projection.thread.projectId });
+      const project = yield* projects.get(projection.thread.projectId);
       if (Option.isNone(project)) {
         return { type: "complete" as const };
       }
@@ -209,7 +141,10 @@ export const make = Effect.gen(function* () {
         context =
           message === undefined
             ? { message: "", attachments: [] }
-            : { message: message.text, attachments: message.attachments };
+            : {
+                message: isAttachmentOnlyBootstrapPrompt(message.text) ? "" : message.text,
+                attachments: message.attachments,
+              };
       } else {
         context = formatThreadTitleContext(
           projection.messages.filter((message) => !message.streaming),
@@ -219,12 +154,26 @@ export const make = Effect.gen(function* () {
         return { type: "complete" as const };
       }
 
-      const settings = yield* serverSettings.getSettings;
+      // A deleted source should not cost the fork its title.
+      const inherited = yield* forkSource(projection.thread).pipe(
+        Effect.orElseSucceed(() => undefined),
+      );
+      const settings = resolveProjectSettings(
+        yield* serverSettings.getSettings,
+        projection.thread.projectId,
+      ).settings;
+      // Storage cleanup removes worktrees but keeps the path; CLIs cannot spawn in a missing cwd.
+      const worktreePath = projection.thread.worktreePath;
+      const worktreeExists =
+        worktreePath !== null &&
+        (yield* fileSystem.exists(worktreePath).pipe(Effect.orElseSucceed(() => false)));
       const result = yield* textGeneration.generateThreadTitle({
-        cwd: projection.thread.worktreePath ?? project.value.workspaceRoot,
+        cwd: worktreeExists ? worktreePath : project.value.workspaceRoot,
         message: context.message,
         attachments: context.attachments,
         ...(input.kind.type === "regenerate" ? { previousTitle: projection.thread.title } : {}),
+        ...(inherited === undefined ? {} : { forkSource: inherited }),
+        instructions: settings.threadTitleInstructions,
         modelSelection: settings.textGenerationModelSelection,
       });
       const generatedTitle = result.title.trim();
@@ -233,6 +182,10 @@ export const make = Effect.gen(function* () {
         ? { type: "complete" as const }
         : { type: "complete" as const, title: result.title };
     }).pipe(
+      Effect.retry({
+        times: input.kind.type === "initial" ? 2 : 0,
+        schedule: Schedule.exponential("2 seconds"),
+      }),
       Effect.catchCause((cause) =>
         Cause.hasInterruptsOnly(cause)
           ? Effect.interrupt

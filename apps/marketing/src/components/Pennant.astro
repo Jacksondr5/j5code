@@ -1,0 +1,62 @@
+---
+import { STATUS_HELP, STATUS_LABEL, type ShipStatus } from "../lib/site";
+
+interface Props {
+  status: ShipStatus;
+}
+
+const { status } = Astro.props;
+---
+
+<span class:list={["pennant", `pennant-${status}`]} title={STATUS_HELP[status]}>
+  <svg viewBox="0 0 14 10" aria-hidden="true"><path d="M0 0h14L9.5 5 14 10H0z" /></svg>
+  <span>{STATUS_LABEL[status]}</span>
+</span>
+
+<style>
+  /* A signal pennant: filled for shipped work, outlined for charted, dashed for horizon. */
+  .pennant {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: 10.5px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
+  }
+
+  .pennant svg {
+    width: 14px;
+    height: 10px;
+    flex-shrink: 0;
+  }
+
+  .pennant-underway {
+    color: var(--pennant-underway, #2f7d5b);
+  }
+  .pennant-underway svg {
+    fill: currentColor;
+  }
+
+  .pennant-charted {
+    color: var(--pennant-charted, var(--brass-deep));
+  }
+  .pennant-charted svg {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.2;
+  }
+
+  .pennant-horizon {
+    color: var(--pennant-horizon, var(--fg-dim));
+  }
+  .pennant-horizon svg {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 1.2;
+    stroke-dasharray: 2 1.5;
+  }
+</style>

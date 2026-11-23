@@ -1,0 +1,260 @@
+import { ThreadId } from "@t3tools/contracts";
+import * as Effect from "effect/Effect";
+import * as J5Contracts from "@t3tools/contracts/j5";
+import * as SqlClient from "effect/sql/SqlClient";
+
+import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
+import { participantIdForThread } from "./HomeRegistrar.ts";
+import { ParticipantId } from "./contracts.ts";
+
+const AGENT_PARTICIPANT_PREFIX = "agent:j5:a2a:";
+
+/** The inverse of `participantIdForThread`; non-thread participants (humans) yield null. */
+export const threadIdForParticipant = (participantId: string): ThreadId | null =>
+  participantId.startsWith(AGENT_PARTICIPANT_PREFIX)
+    ? ThreadId.make(participantId.slice(AGENT_PARTICIPANT_PREFIX.length))
+    : null;
+
+export const SpawnedChild = J5Contracts.SpawnedChild;
+export const SpawnedChildrenResponse = J5Contracts.SpawnedChildrenResponse;
+export type SpawnedChildrenResponse = typeof SpawnedChildrenResponse.Type;
+
+interface PlacementRow {
+  readonly participant_id: string;
+  readonly placement_parent_id: string;
+}
+
+/** A roster seat's ledger row, when it has one: its membership and where it is placed. */
+export interface RecordedSeat {
+  readonly archived: boolean;
+  readonly placementParentId: string | null;
+}
+
+/**
+ * Pure projection: placement rows keyed by parent, annotated with live Crew seats. A Captain's row
+ * also carries roster seats no parent holds yet (reserved, or registered and unplaced), so a Crew
+ * never under-counts while its seats are unknown. Archived or otherwise-placed seats are not added;
+ * parents without children get no entry.
+ */
+export const projectSpawnedChildren = (
+  threadIds: ReadonlyArray<ThreadId>,
+  rows: ReadonlyArray<PlacementRow>,
+  crews: ReadonlyArray<AgentCrewInstance>,
+  recordedSeats: ReadonlyMap<string, RecordedSeat> = new Map(),
+  spawnedParticipantIds: ReadonlySet<string> = new Set(),
+): SpawnedChildrenResponse => {
+  const seats = new Map<string, NonNullable<typeof SpawnedChild.Type.seat>>();
+  const live = crews.filter((crew) => crew.archivedAt === null);
+  const replaced = new Map<string, J5Contracts.ReplacedCrewSeat>();
+  for (const crew of live) {
+    for (const member of crew.replaced ?? [])
+      replaced.set(member.participantId, {
+        crewInstanceId: crew.id,
+        crewName: crew.displayName,
+        seat: member.seatName,
+        replacedBy: member.replacedBySeat,
+      });
+    for (const member of crew.members)
+      seats.set(member.participantId, {
+        crewInstanceId: crew.id,
+        crewName: crew.displayName,
+        seat: member.seatName,
+        ...(member.notStarted === undefined ? {} : { notStarted: member.notStarted }),
+      });
+  }
+  const entries: Array<SpawnedChildrenResponse["entries"][number]> = [];
+  for (const threadId of new Set(threadIds)) {
+    const parentId = participantIdForThread(threadId);
+    const children = rows.flatMap((row) => {
+      if (row.placement_parent_id !== parentId) return [];
+      const childThreadId = threadIdForParticipant(row.participant_id);
+      if (childThreadId === null) return [];
+      const replacedSeat = replaced.get(row.participant_id);
+      return [
+        {
+          threadId: childThreadId,
+          participantId: ParticipantId.make(row.participant_id),
+          seat: seats.get(row.participant_id) ?? null,
+          ...(replacedSeat === undefined ? {} : { replaced: replacedSeat }),
+        },
+      ];
+    });
+    const placed = new Set(children.map((child) => child.participantId as string));
+    for (const crew of live) {
+      if (crew.captainParticipantId !== parentId) continue;
+      for (const member of crew.members) {
+        if (placed.has(member.participantId)) continue;
+        const recorded = recordedSeats.get(member.participantId);
+        if (recorded !== undefined && (recorded.archived || recorded.placementParentId !== null))
+          continue;
+        children.push({
+          threadId: member.threadId,
+          participantId: member.participantId,
+          seat: seats.get(member.participantId) ?? null,
+        });
+      }
+    }
+    if (children.length > 0) entries.push({ threadId, children });
+  }
+  return {
+    entries,
+    spawnedByAgent: [...new Set(threadIds)].filter((threadId) =>
+      spawnedParticipantIds.has(participantIdForThread(threadId)),
+    ),
+  };
+};
+
+/** Whether the person reaches a thread; `null` names none, which nobody narrowed reaches. */
+export type SpawnedChildrenReach = (
+  threadId: ThreadId | null,
+) => Effect.Effect<boolean, J5Contracts.J5ActionError>;
+
+/**
+ * The answer as a person who reaches only some threads may hear it: no child, seat or replacement
+ * they don't reach is named, and a thread they see whose spawner they don't reach stays at their
+ * top level. Requested threads are already reached; reaching everything changes nothing.
+ */
+const narrowSpawnedChildren = (
+  response: SpawnedChildrenResponse,
+  spawnerOf: ReadonlyMap<ThreadId, ThreadId | null>,
+  replacementOf: ReadonlyMap<string, ThreadId | null>,
+  reached: (threadId: ThreadId | null) => boolean,
+): SpawnedChildrenResponse => ({
+  entries: response.entries.flatMap((entry) => {
+    const children = entry.children.flatMap((child) => {
+      if (!reached(child.threadId)) return [];
+      if (child.replaced === undefined || reached(replacementOf.get(child.participantId) ?? null))
+        return [child];
+      const { replaced: _unreached, ...unannotated } = child;
+      return [unannotated];
+    });
+    return children.length === 0 ? [] : [{ threadId: entry.threadId, children }];
+  }),
+  spawnedByAgent: response.spawnedByAgent.filter((threadId) =>
+    reached(spawnerOf.get(threadId) ?? null),
+  ),
+});
+
+/**
+ * Sidebar discovery read: the agents placed directly under each visible thread, so a Captain's
+ * (or any spawner's) row can expand into the work it started. Placement is the J5 org tree;
+ * upstream lineage children (subagents, forks) are not included here. It also says which of the
+ * visible threads an agent spawned, which is what moves a row under its spawner.
+ */
+export const makeSpawnedChildrenRead = Effect.gen(function* () {
+  const sql = yield* SqlClient.SqlClient;
+  const crews = yield* AgentCrewInstanceService;
+  return (
+    requested: ReadonlyArray<ThreadId>,
+    reaches: SpawnedChildrenReach = () => Effect.succeed(true),
+  ) =>
+    Effect.gen(function* () {
+      const threadIds = yield* Effect.filter([...new Set(requested)], reaches);
+      if (threadIds.length === 0)
+        return { entries: [], spawnedByAgent: [] } satisfies SpawnedChildrenResponse;
+      const parentIds = [...new Set(threadIds.map(participantIdForThread))];
+      // Retired children leave the expander as they leave the Fleet page: a membership
+      // stamped archived_at (reversible archive) is not a live child. A child that Turn into
+      // project moved keeps its placement where it was, so the two meet on the participant.
+      const rows = yield* sql<PlacementRow>`
+        SELECT p.participant_id, p.placement_parent_id
+        FROM j5_a2a_participant_placement p
+        JOIN j5_a2a_membership m ON m.participant_id = p.participant_id
+        WHERE p.placement_parent_id IN ${sql.in(parentIds)} AND m.archived_at IS NULL
+      `;
+      const childThreadIds = rows.flatMap((row) => {
+        const id = threadIdForParticipant(row.participant_id);
+        return id === null ? [] : [id];
+      });
+      // Crews the requested rows sit in or command: a Captain's roster may name seats
+      // that have no placement row yet.
+      const involved = yield* crews.listInvolving({
+        threadIds: childThreadIds,
+        participantIds: parentIds,
+      });
+      const rosterIds = [
+        ...new Set(
+          involved
+            .filter(
+              (crew) => crew.archivedAt === null && parentIds.includes(crew.captainParticipantId),
+            )
+            .flatMap((crew) => crew.members.map((member) => member.participantId)),
+        ),
+      ];
+      const recorded =
+        rosterIds.length === 0
+          ? []
+          : yield* sql<{
+              readonly participant_id: string;
+              readonly archived_at: string | null;
+              readonly placement_parent_id: string | null;
+            }>`
+              SELECT m.participant_id, m.archived_at, p.placement_parent_id
+              FROM j5_a2a_membership m
+              LEFT JOIN j5_a2a_participant_placement p ON p.participant_id = m.participant_id
+              WHERE m.participant_id IN ${sql.in(rosterIds)}
+            `;
+      // The sidebar's membership rule: a row an agent spawned leaves the top level, to
+      // sit under its spawner. One spawned into another project has no parent in its own
+      // project's tree, so it stays at the top level, where it can be found. So does one whose
+      // spawner was archived or deleted: no live row would hold it.
+      const spawned = yield* sql<PlacementRow>`
+        SELECT p.participant_id, p.placement_parent_id
+        FROM j5_a2a_participant_placement p
+        JOIN j5_a2a_membership spawner ON spawner.participant_id = p.placement_parent_id
+        WHERE p.participant_id IN ${sql.in(parentIds)}
+          AND p.provenance_kind = 'spawned-by'
+          AND spawner.archived_at IS NULL
+      `;
+      const projected = projectSpawnedChildren(
+        threadIds,
+        rows,
+        involved,
+        new Map(
+          recorded.map((row) => [
+            row.participant_id,
+            {
+              archived: row.archived_at !== null,
+              placementParentId: row.placement_parent_id,
+            },
+          ]),
+        ),
+        new Set(spawned.map((row) => row.participant_id)),
+      );
+      const spawnerOf = new Map(
+        spawned.flatMap((row) => {
+          const threadId = threadIdForParticipant(row.participant_id);
+          return threadId === null
+            ? []
+            : [[threadId, threadIdForParticipant(row.placement_parent_id)] as const];
+        }),
+      );
+      const replacementOf = new Map(
+        involved.flatMap((crew) =>
+          crew.archivedAt === null
+            ? (crew.replaced ?? []).map(
+                (member) =>
+                  [
+                    member.participantId as string,
+                    threadIdForParticipant(member.replacedByParticipantId),
+                  ] as const,
+              )
+            : [],
+        ),
+      );
+      const named = new Set<ThreadId | null>([
+        ...projected.entries.flatMap((entry) =>
+          entry.children.flatMap((child) =>
+            child.replaced === undefined
+              ? [child.threadId]
+              : [child.threadId, replacementOf.get(child.participantId) ?? null],
+          ),
+        ),
+        ...projected.spawnedByAgent.map((threadId) => spawnerOf.get(threadId) ?? null),
+      ]);
+      const reachable = new Set(yield* Effect.filter([...named], reaches));
+      return narrowSpawnedChildren(projected, spawnerOf, replacementOf, (threadId) =>
+        reachable.has(threadId),
+      );
+    });
+});

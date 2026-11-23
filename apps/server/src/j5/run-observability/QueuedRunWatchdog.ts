@@ -3,6 +3,7 @@ import {
   type OrchestrationV2Run,
   type OrchestrationV2ThreadProjection,
 } from "@t3tools/contracts";
+import { FLEET_DISPATCH_THRESHOLD_MS } from "@t3tools/contracts/j5";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -11,21 +12,21 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 
 import { EventSinkV2 } from "../../orchestration-v2/EventSink.ts";
-import { IdAllocatorV2 } from "../../orchestration-v2/IdAllocator.ts";
+import { IdAllocatorV2 } from "@t3tools/provider-core/server/IdAllocator";
 import { ProjectionStoreV2 } from "../../orchestration-v2/ProjectionStore.ts";
 import {
   type CandidateCursor,
   QueuedRunCandidates,
   layer as candidateLayer,
 } from "./QueuedRunCandidates.ts";
-import { makeProviderFailure } from "../../orchestration-v2/ProviderFailure.ts";
+import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
 import { forkParked } from "../../serverActivation.ts";
 
-export const QUEUED_RUN_WATCHDOG_DELAY_MS = 5 * 60 * 1000;
+export const QUEUED_RUN_WATCHDOG_DELAY_MS = FLEET_DISPATCH_THRESHOLD_MS;
 export const QUEUED_RUN_WATCHDOG_POLL_MS = 60 * 1000;
 export const QUEUED_RUN_WATCHDOG_MAX_CANDIDATES = 100;
 
-export class QueuedRunWatchdogError extends Schema.TaggedErrorClass<QueuedRunWatchdogError>()(
+export class QueuedRunWatchdogError extends Schema.TaggedError<QueuedRunWatchdogError>()(
   "QueuedRunWatchdogError",
   { cause: Schema.optional(Schema.Defect()) },
 ) {}
@@ -50,7 +51,7 @@ function waitingMinutes(run: OrchestrationV2Run, now: DateTime.Utc): number {
 }
 
 function hasFact(
-  projection: OrchestrationV2ThreadProjection,
+  projection: Pick<OrchestrationV2ThreadProjection, "turnItems">,
   run: OrchestrationV2Run,
   signal: string,
 ) {
@@ -79,8 +80,18 @@ export const layer = Layer.effect(
     const candidatesStore = yield* QueuedRunCandidates;
     const startingRunCursor = yield* Ref.make<CandidateCursor | undefined>(undefined);
 
+    // The run, and its error items: the signal facts this writes are error items of that run.
+    const readRunFacts = (
+      threadId: OrchestrationV2Run["threadId"],
+      runId: OrchestrationV2Run["id"],
+    ) =>
+      projections.getThreadRecords(threadId, ["runs", "turnItems"], {
+        runIds: [runId],
+        turnItemRunId: runId,
+        turnItemTypes: ["error"],
+      });
     const writeFact = Effect.fn("QueuedRunWatchdog.writeFact")(function* (input: {
-      readonly projection: OrchestrationV2ThreadProjection;
+      readonly projection: Pick<OrchestrationV2ThreadProjection, "turnItems">;
       readonly run: OrchestrationV2Run;
       readonly signal: string;
       readonly title: string;
@@ -156,9 +167,8 @@ export const layer = Layer.effect(
         candidates,
         (candidate) =>
           Effect.gen(function* () {
-            // A full projection is only needed for a bounded candidate, where
-            // it provides deduplication and rechecks current run state.
-            const projection = yield* projections.getThreadProjection(candidate.threadId);
+            // Read per bounded candidate, for deduplication and to recheck current run state.
+            const projection = yield* readRunFacts(candidate.threadId, candidate.id);
             const run = projection.runs.find((current) => current.id === candidate.id);
             if (
               run === undefined ||
@@ -194,10 +204,15 @@ export const layer = Layer.effect(
       }) {
         const vcsError = findVcsError(input.cause);
         if (vcsError === undefined) return;
-        const projection = yield* projections.getThreadProjection(input.threadId);
+        const projection = yield* readRunFacts(input.threadId, input.runId);
         const run = projection.runs.find((candidate) => candidate.id === input.runId);
         if (run === undefined) return;
-        const failure = makeProviderFailure({ cause: vcsError, class: "unknown" });
+        // Upstream no longer copies arbitrary cause text; VCS errors format their own redacted message.
+        const failure = makeProviderFailure({
+          cause: vcsError,
+          message: vcsError.message,
+          class: "unknown",
+        });
         yield* writeFact({
           projection,
           run,
@@ -216,7 +231,7 @@ export const layer = Layer.effect(
       readonly runId: OrchestrationV2Run["id"];
       readonly phase: "start" | "finalization";
       readonly cause: unknown;
-    }) => recordVcsFailureEffect(input).pipe(Effect.catchCause(() => Effect.void));
+    }) => recordVcsFailureEffect(input).pipe(Effect.ignoreCause);
 
     return { scan, recordVcsFailure };
   }),

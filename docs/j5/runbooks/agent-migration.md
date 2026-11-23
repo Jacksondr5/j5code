@@ -6,7 +6,7 @@ kind: runbook
 # Agent migration runbook
 
 Hand-surgery to move a long-running agent — its conversation memory intact, continuing mid-thought —
-from one environment into a J5 Code environment as a real Squadron citizen. Scope ruling (Jackson):
+from one environment into a J5 Code environment as a real participant. Scope ruling (Jackson):
 this is **not a product feature**. It is MacGyver-grade surgery — copying files and driving the app
 directly is sanctioned. There is no import UI, no adopt-session code path.
 
@@ -57,7 +57,7 @@ Do **not** hand-write J5's event chain for a thread. J5 verifies projections aga
 at startup and, on any mismatch, **rebuilds every projection from events** — hand-written projection
 rows are wiped. Instead:
 
-1. Let the J5 server **grow a carrier thread naturally** — create it in the destination Squadron and
+1. Let the J5 server **grow a carrier thread naturally** — create it in the destination project and
    run one trivial turn. J5 writes a perfect, valid event chain and mints its own session uuid.
 2. **Swap the memory in**: overwrite that uuid's session file with the migrated agent's transcript
    (retarget its internal `sessionId` and `cwd` to the carrier's; leave the message/`parentUuid`
@@ -66,7 +66,7 @@ rows are wiped. Instead:
 
 This needs **zero database surgery**: the DB is untouched, so startup verify passes and no rebuild
 fires. It is far less fragile than authoring provider-thread events by hand, and J5 citizenship
-(Squadron home/membership via the Registrar) comes free from having created the carrier in the Squadron; placement and provenance are A6's store — unmerged at Stage-1 time — and its backfill absorbs migrated members when it lands (rows read `unrecorded` until then).
+(the carrier is a participant in its project's ledger) comes free from having created the carrier in the project; placement and provenance are A6's store — unmerged at Stage-1 time — and its backfill absorbs migrated members when it lands (rows read `unrecorded` until then).
 
 ## Stage 1 — Traycer → local J5 on the Mac
 
@@ -74,18 +74,16 @@ fires. It is far less fragile than authoring provider-thread events by hand, and
 
 1. Stand up the local J5 environment (`dogfood-local.sh --fresh`, or equivalent), state at
    `~/.j5code` (never `~/.t3`, never `~/.j5code` reused with `--fresh` after you start).
-2. Create the destination Squadron through the first-run gate: any name (no constraints), one folder
-   = your repo clone. **Then stop.** Do not create threads or agents in it — the migration
+2. Create the destination project: add your repo clone as a project. **Then stop.** Do not create threads or agents in it — the migration
    hand-creates the carrier threads so their ids, provider refs, and placement are controlled.
-3. Read back and record: the base dir, the Squadron id and project id
-   (`SELECT id, name FROM j5_a2a_squadron;` `SELECT project_id FROM projection_projects;`).
-4. **The carrier's cwd — RULED (Jackson): the Squadron folder itself, the repo clone on `j5/main`,
+3. Read back and record: the base dir and the project id
+   (`SELECT project_id FROM projection_projects;`).
+4. **The carrier's cwd — RULED (Jackson): the project folder itself, the repo clone on `j5/main`,
    for all five core agents. Not per-agent worktrees.** These are long-standing non-coding agents
    (they read/write docs repo-direct on `j5/main`, commission work, never build features in
    branches); worktrees would fragment their commits for no benefit, and they already share the
-   clone under Traycer today. Create each carrier as a **local thread on the Squadron folder** — the
-   `chat.newLocal` door (`mod+shift+n`, converted in #35), which resolves the Squadron destination
-   and starts a thread on its folder. **Confirmed live:** this "current checkout" path records the
+   clone under Traycer today. Create each carrier as a **local thread on the project folder** — the
+   `chat.newLocal` door (`mod+shift+n`), which starts a thread on the project's folder. **Confirmed live:** this "current checkout" path records the
    thread's cwd as the folder itself, no worktree (the Stage-1 proof used exactly it).
 
    **Consequence — one munged key for all five, and it is the key memory already lives under.** With
@@ -102,11 +100,11 @@ fires. It is far less fragile than authoring provider-thread events by hand, and
 
    (Why not the agents' old Traycer worktree paths: they exist on the Mac but are
    housekeeping-prunable and, for the Director, a worktree of upstream `t3code`; and Stage 2 forces a
-   rename regardless. Moot under this ruling — the Squadron folder is the same clone they already
+   rename regardless. Moot under this ruling — the project folder is the same clone they already
    use.)
 
-**Must not, before import:** re-run any `--fresh` after the Squadron exists (wipes state); archive,
-delete, or recreate the Squadron (its id changes and breaks the citizenship rows); log out of Claude
+**Must not, before import:** re-run any `--fresh` after the project exists (wipes state); delete
+or recreate the project (its id changes and breaks the citizenship rows); log out of Claude
 in `~/.claude` (kills the keychain auth resume relies on). Pin the runtime checkout sha and confirm
 the installed Claude CLI supports the model each thread will run.
 
@@ -115,11 +113,11 @@ the installed Claude CLI supports the model each thread will run.
 1. **Copy the session file at swap time** (read-only on the source; a live agent's file is mid-append, so validate the copy parses and trim a truncated trailing line if present): from the Traycer harness account,
    `harness-accounts/claude-code/<acct>/projects/<munged-traycer-worktree>/<uuid>.jsonl`. Keep the
    original untouched.
-2. **Grow the carrier**: in the destination Squadron, create a thread on the agent's chosen cwd and
+2. **Grow the carrier**: in the destination project, create a thread on the agent's chosen cwd and
    send one trivial message (e.g. "reply READY"). Let it complete.
 3. **Read the carrier's session uuid** from the DB:
    `SELECT json_extract(payload_json,'$.nativeThreadRef.nativeId') FROM
-orchestration_v2_projection_provider_threads WHERE …` — and confirm `nativeConversationHeadRef`
+   orchestration_v2_projection_provider_threads WHERE …` — and confirm `nativeConversationHeadRef`
    is null (a non-null head ref would force `--resume-session-at` at a message uuid the transplant
    lacks).
 4. **Stop the server** — or, on a live server you must not restart (the real dogfood env), use the **model-switch variant**: run the carrier's turn 1 on a cheaper model (Sonnet 5), swap, then dispatch the orientation turn on the target model (Fable 5). The adapter keeps a Claude query alive between turns and only re-spawns the CLI with `--resume` when the model selection changes — so the switch closes the old query and resumes against the swapped file. Proven on all five Stage-1 agents with no restart and nothing killed.
@@ -143,8 +141,8 @@ prefix, and **outbound A2A** appears as `tool_use` blocks for `mcp__traycer_a2a_
 
 - **None of that pre-transplant history renders in the J5 timeline** — it is model context only, per
   the honest line. The agent _remembers_ its A2A exchanges; J5 does not _display_ them.
-- **The history references tools that do not exist in J5's toolset.** J5 exposes `send_message`,
-  `list_participants`, `spawn_agent`, `stop_agent`, `archive_agent`, `clear_own_ask` — not the
+- **The history references tools that do not exist in J5's toolset.** J5 exposes `j5_send_message`,
+  `j5_list_participants`, `j5_spawn_agent`, `t3_thread_interrupt`, `j5_clear_own_ask` — not the
   `mcp__traycer_a2a__*` or `traycer_*` tools the transcript is full of. **Resuming a session whose
   history contains those dead tool_use blocks works with no API error** — proven in the Stage-1
   live run (the resumed session was dense with `mcp__traycer_a2a__traycer_send_message` blocks and
@@ -157,14 +155,15 @@ before any real work, so the agent re-maps its tools before it acts. Template:
 > You have been migrated into J5 Code, and your memory has carried over — everything you remember is
 > still valid. Three things have changed and take effect now:
 >
-> 1. You are a Peer Agent in the J5 Squadron **"<squadron-name>"**. Your prior Traycer epic/agents
+> 1. You are a Peer Agent in the J5 project **"<project-title>"**. Your prior Traycer epic/agents
 >    are not here; your peers are the participants J5 lists.
 > 2. **Your tools changed.** The Traycer tools you used before (`traycer_send_message`,
 >    `traycer_create_agent`, `traycer_get_transcript`, every `mcp__traycer_a2a__*`) **no longer
->    exist**. Your A2A surface is now: `list_participants` (your address book — call it first),
->    `send_message` (plain send / ask with `expect_reply` / reply with `exchange_id`), `spawn_agent`,
->    `stop_agent`, `archive_agent`, `clear_own_ask`. Do not call any `traycer_*` tool.
-> 3. **The human is reached through the inbox** — `send_message` to the human participant (with
+>    exist**. Your A2A surface is now: `j5_list_participants` (your address book — call it first),
+>    `j5_send_message` (plain send / ask with `expect_reply` / reply with `exchange_id`), `j5_spawn_agent`,
+>    `t3_thread_interrupt` (with `stop: true` to stop an agent), `j5_clear_own_ask`. Do not call any
+>    `traycer_*` tool.
+> 3. **The human is reached through the inbox** — `j5_send_message` to the human participant (with
 >    `urgency` when it is an ask), not a Traycer channel. **Until issue #44 lands, a message a person
 >    must SEE is an ask (`expect_reply` + `urgency`); a plain message to a person is ledger-only and
 >    invisible. No celebratory check-ins.**
@@ -176,7 +175,7 @@ before any real work, so the agent re-maps its tools before it acts. Template:
 
 Adjust the tool list to the J5 toolset actually installed at migration time.
 
-**Finding (issue #44, measured 2026-09-02):** a plain `send_message` to a person is **ledger-only and invisible** — no inbox row, no exchange; only an ask (`expect_reply` + `urgency`) surfaces. Three migrated agents sent celebratory check-ins that Jackson never saw. The template's item 3 now says so; do not let a migrated agent "check in" with a plain send.
+**Finding (issue #44, measured 2026-09-02):** a plain `j5_send_message` to a person is **ledger-only and invisible** — no inbox row, no exchange; only an ask (`expect_reply` + `urgency`) surfaces. Three migrated agents sent celebratory check-ins that Jackson never saw. The template's item 3 now says so; do not let a migrated agent "check in" with a plain send.
 
 **The per-agent Operating Principles slot (item 4) is required, not optional.** The conduct
 knowledge that lives only in sessions — how Jackson wants each agent to work — is Role-definition
@@ -277,8 +276,8 @@ refusal string is unmeasured; the row mismatch is the evidence.
 
 **The silent-fallback hazard, and the mandatory discriminators.** After the recall turn: (1) the
 provider thread's `nativeThreadRef.nativeId` had **changed** to a new uuid; (2) a context-transfer row
-with id `context-transfer:type:provider_resume_fallback:…` and a `full_thread_summary` handoff
-existed (summary text = the carrier's READY exchange only); (3) the swapped rollout **did not grow**
+with id `context-transfer:type:provider_resume_fallback:…` and a `full_thread_summary` context
+handoff existed (summary text = the carrier's READY exchange only); (3) the swapped rollout **did not grow**
 while a **new rollout** appeared; (4) the deep probe answered `NO-MEMORY` — and the run status was
 `completed`. A shallow probe would have called this a pass. **Never declare a Codex transplant
 resumed without all four**: native uuid unchanged, no `provider_resume_fallback` transfer, the
@@ -301,7 +300,7 @@ Procedure per Codex agent:
 2. Confirm the agent's codex thread id exists in `~/.codex/state_5.sqlite` `threads` on the **same
    machine** the J5 server runs on (same-store requirement; cross-machine needs the codex store moved
    too — unmeasured).
-3. Create a carrier thread in the destination Squadron on a Codex model; run one trivial turn.
+3. Create a carrier thread in the destination project on a Codex model; run one trivial turn.
 4. Stop the J5 server; insert the one event above for the carrier's stream.
 5. Restart; verify the carrier's provider-thread `nativeThreadRef.nativeId` now equals the agent's
    thread id (the rebuild did it).

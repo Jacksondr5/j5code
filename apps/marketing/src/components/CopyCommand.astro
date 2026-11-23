@@ -1,0 +1,148 @@
+---
+interface Props {
+  command: string;
+  label?: string;
+}
+
+const { command, label = "Copy command" } = Astro.props;
+---
+
+<button class="copy-cmd" type="button" data-command={command} aria-label={`${label}: ${command}`}>
+  <span class="copy-cmd-prompt" aria-hidden="true">$</span>
+  <code>{command}</code>
+  <svg class="copy-cmd-icon copy-cmd-icon--copy" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <rect x="9" y="9" width="12" height="12" rx="2" />
+    <path d="M5 15V5a2 2 0 0 1 2-2h10" />
+  </svg>
+  <svg class="copy-cmd-icon copy-cmd-icon--done" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M4 12l5 5L20 6" />
+  </svg>
+  <svg class="copy-cmd-icon copy-cmd-icon--failed" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+    <path d="M12 8v5M12 16.5v.5" />
+    <circle cx="12" cy="12" r="9" />
+  </svg>
+</button>
+
+<script>
+  // One polite live region for every copy button announces the outcome.
+  const status = document.createElement("span");
+  status.className = "copy-cmd-status";
+  status.setAttribute("role", "status");
+  document.body.append(status);
+
+  for (const button of document.querySelectorAll<HTMLButtonElement>(".copy-cmd")) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    button.addEventListener("click", async () => {
+      const command = button.dataset.command;
+      if (!command) return;
+      clearTimeout(timer);
+      button.classList.remove("is-copied", "is-failed");
+      try {
+        await navigator.clipboard.writeText(command);
+        button.classList.add("is-copied");
+        status.textContent = "Command copied to clipboard.";
+      } catch {
+        // No clipboard access: select the command so a keyboard copy works.
+        const code = button.querySelector("code");
+        if (code) window.getSelection()?.selectAllChildren(code);
+        button.classList.add("is-failed");
+        status.textContent = "Couldn't copy automatically. The command is selected; copy it with your keyboard.";
+      }
+      timer = setTimeout(() => button.classList.remove("is-copied", "is-failed"), 4000);
+    });
+  }
+</script>
+
+<style>
+  .copy-cmd {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    max-width: 100%;
+    padding: 12px 16px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: rgba(0, 0, 0, 0.18);
+    color: var(--fg-muted);
+    font-family: var(--font-mono);
+    font-size: 13.5px;
+    letter-spacing: -0.01em;
+    text-align: left;
+    transition:
+      border-color 0.18s ease,
+      color 0.18s ease;
+  }
+
+  .copy-cmd:hover {
+    color: var(--fg);
+    border-color: var(--border-strong);
+  }
+
+  .copy-cmd-prompt {
+    color: var(--brass);
+    font-weight: 600;
+  }
+
+  /* One line always; a long command scrolls sideways rather than wrapping. */
+  .copy-cmd code {
+    font: inherit;
+    color: inherit;
+    white-space: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .copy-cmd-icon {
+    flex-shrink: 0;
+    opacity: 0.6;
+  }
+
+  .copy-cmd-icon--done {
+    display: none;
+    color: #4fb98a;
+    opacity: 1;
+  }
+
+  .copy-cmd-icon--failed {
+    display: none;
+    color: #e8836f;
+    opacity: 1;
+  }
+
+  .copy-cmd.is-copied .copy-cmd-icon--copy,
+  .copy-cmd.is-failed .copy-cmd-icon--copy {
+    display: none;
+  }
+
+  .copy-cmd.is-copied .copy-cmd-icon--done,
+  .copy-cmd.is-failed .copy-cmd-icon--failed {
+    display: block;
+  }
+
+  .copy-cmd.is-failed {
+    border-color: #e8836f;
+  }
+
+  /* The live region is appended to <body> by the script, so it is global. */
+  :global(.copy-cmd-status) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  @media (max-width: 1100px) {
+    .copy-cmd {
+      font-size: 12px;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .copy-cmd {
+      font-size: 11px;
+      padding: 11px 13px;
+    }
+  }
+</style>

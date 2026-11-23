@@ -1,0 +1,121 @@
+/*
+ * What a What's new page is laid out with: chart paper by day and open water by night, following
+ * the visitor's scheme (the app windows on it follow too), and the sections that sit on it.
+ * Everything is under .wn, the page's wrapper.
+ */
+.wn {
+  --wn-bg: var(--canvas);
+  --wn-fg: var(--ink);
+  --wn-muted: var(--ink-muted);
+  --wn-line: rgba(18, 32, 47, 0.14);
+  --wn-grid: rgba(18, 32, 47, 0.05);
+  --wn-window-edge: rgba(18, 32, 47, 0.18);
+  --wn-window-shadow: 0 1px 0 rgba(18, 32, 47, 0.04), 0 26px 50px -30px rgba(18, 32, 47, 0.5);
+  color-scheme: light;
+  background-color: var(--wn-bg);
+  background-image:
+    linear-gradient(to right, var(--wn-grid) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--wn-grid) 1px, transparent 1px);
+  background-size: 56px 56px;
+  color: var(--wn-fg);
+}
+
+@media (prefers-color-scheme: dark) {
+  .wn {
+    --wn-bg: var(--navy-950);
+    --wn-fg: var(--foam);
+    --wn-muted: var(--foam-muted);
+    --wn-line: var(--line);
+    --wn-grid: rgba(223, 233, 238, 0.035);
+    --wn-window-edge: rgba(223, 233, 238, 0.16);
+    --wn-window-shadow: 0 30px 60px -30px rgba(0, 0, 0, 0.85);
+    color-scheme: dark;
+  }
+}
+
+.wn .container {
+  max-width: 1200px;
+}
+
+.wn :focus-visible {
+  outline-color: var(--wn-fg);
+}
+
+/* With reduced motion nothing on the page moves, hover and press feedback included. */
+@media (prefers-reduced-motion: reduce) {
+  .wn *,
+  .wn *::before,
+  .wn *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
+  }
+}
+
+/* Hints that ask the reader to try something show only once the script that makes it work runs. */
+.wn:not([data-live]) .live-only {
+  display: none;
+}
+
+.wn .feature {
+  padding: 88px 0 0;
+  scroll-margin-top: 48px;
+}
+
+.wn .items {
+  list-style: none;
+  display: grid;
+  gap: 28px 40px;
+  margin-top: 40px;
+}
+
+.wn .items--5 {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 28px 32px;
+  margin-top: 56px;
+}
+
+/* An item's title and text share their rows with its neighbours', so a title that wraps moves
+   every text in that row down with it and none sits lower than the rest. */
+.wn .items li {
+  display: grid;
+  grid-template-rows: subgrid;
+  grid-row: span 2;
+  row-gap: 6px;
+  padding-top: 16px;
+  border-top: 1px solid var(--wn-line);
+}
+
+.wn .items h3 {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+}
+
+.wn .items p {
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--wn-muted);
+}
+
+@media (max-width: 1000px) {
+  .wn .items--5 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .wn .container {
+    padding: 0 16px;
+  }
+
+  .wn .feature {
+    padding-top: 64px;
+  }
+
+  .wn .items--5 {
+    grid-template-columns: 1fr;
+  }
+}

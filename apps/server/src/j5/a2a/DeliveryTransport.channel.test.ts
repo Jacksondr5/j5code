@@ -2,11 +2,11 @@ import { assert, it } from "@effect/vitest";
 
 import { type AgentDeliveryInput, formatAgentDeliveryEnvelope } from "./DeliveryTransport.ts";
 import { formatSilenceNoticeEnvelope } from "./EnvelopeFormatter.ts";
-import { SquadronId, ExchangeId, LedgerMessageId, ParticipantId } from "./contracts.ts";
+import { LedgerProjectId, ExchangeId, LedgerMessageId, ParticipantId } from "./contracts.ts";
 
 const delivery = {
-  originSquadronId: SquadronId.make("squadron:channel"),
-  receiverSquadronId: SquadronId.make("squadron:channel"),
+  originProjectId: LedgerProjectId.make("project:channel"),
+  receiverProjectId: LedgerProjectId.make("project:channel"),
   messageId: LedgerMessageId.make("message:channel"),
   senderId: ParticipantId.make("agent:channel:sender"),
   receiverId: ParticipantId.make("agent:channel:receiver"),
@@ -52,11 +52,11 @@ it("selects the closed-envelope variant only for persisted reply deliveries", ()
 
   for (const rendered of [peerReply, humanReply]) {
     assert.include(rendered, "platform closed this exchange");
-    assert.notInclude(rendered, "send_message(");
+    assert.notInclude(rendered, "j5_send_message(");
   }
   assert.include(peerReply, "Exact peer reply");
   assert.include(humanReply, "Exact human reply");
-  assert.include(followup, "send_message(");
+  assert.include(followup, "j5_send_message(");
   assert.notInclude(followup, "platform closed this exchange");
 });
 

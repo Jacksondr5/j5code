@@ -1,0 +1,645 @@
+import { describe, expect, it } from "@effect/vitest";
+import { EnvironmentId, J5_ARTIFACT_WS_METHODS, ProjectId, ThreadId } from "@t3tools/contracts";
+import {
+  type ConnectionAccess,
+  type HeldPersonLevel,
+  J5_ACCESS_WS_METHODS,
+  J5_CLIENT_READ_WS_METHODS,
+  type PersonLevel,
+} from "@t3tools/contracts/j5";
+import * as Cause from "effect/Cause";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Stream from "effect/Stream";
+import * as SubscriptionRef from "effect/SubscriptionRef";
+import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
+
+import {
+  AVAILABLE_CONNECTION_STATE,
+  BearerConnectionTarget,
+  type NetworkStatus,
+  type PreparedConnection,
+  type SupervisorConnectionState,
+} from "../connection/model.ts";
+import type { ConnectionCatalogEntry } from "../connection/catalog.ts";
+import { EnvironmentRegistry } from "../connection/registry.ts";
+import { EnvironmentSupervisor } from "../connection/supervisor.ts";
+import type { RpcSession } from "../rpc/session.ts";
+import {
+  createSharingEnvironmentAtoms,
+  ownerOnlySettingsNotice,
+  ownerSomewhereState,
+  projectLevelFor,
+  permissionNoticeApplies,
+  reachesServer,
+  serverToAskNameFor,
+  sharingAllowsOperate,
+  sharingAllowsStart,
+  sharingAllowsStartAnywhere,
+  someServerAllowsStart,
+  threadLevelFor,
+  threadLevelInProject,
+  type KnownConnectionAccess,
+} from "./sharing.ts";
+import { createJ5EnvironmentAtoms } from "./state.ts";
+
+const person = (
+  levels: ReadonlyArray<HeldPersonLevel>,
+  options: { readonly wide?: boolean; readonly owner?: boolean } = {},
+): ConnectionAccess => ({
+  kind: "person",
+  personId: "human:person",
+  name: "Priya",
+  firstOwner: false,
+  levels,
+  wide: options.wide ?? false,
+  owner: options.owner ?? false,
+  retiredLinks: null,
+});
+
+const OWNER = person([{ scope: { kind: "server" }, level: "owner" }], { wide: true, owner: true });
+const SERVER_VIEWER = person([{ scope: { kind: "server" }, level: "viewer" }]);
+
+describe("what a connection may do with a thread", () => {
+  it("withholds nothing while the server has not answered", () => {
+    // A composer must not flicker to read-only while the answer is on its way.
+    expect(sharingAllowsOperate({ access: null, level: null })).toBe(true);
+  });
+
+  it("gives someone who writes to the whole server their server level on every thread", () => {
+    expect(threadLevelFor(OWNER, null)).toBe("owner");
+  });
+
+  it("takes the server's word for anyone else, a server-scope Viewer included", () => {
+    // A Viewer at server scope may be a Collaborator on one thread; only the server knows which.
+    expect(threadLevelFor(SERVER_VIEWER, "collaborator")).toBe("collaborator");
+    expect(sharingAllowsOperate({ access: SERVER_VIEWER, level: "viewer" })).toBe(false);
+    expect(sharingAllowsOperate({ access: SERVER_VIEWER, level: "collaborator" })).toBe(true);
+  });
+
+  it("keeps a device the server cannot place from writing anywhere", () => {
+    expect(threadLevelFor({ kind: "unknown" }, null)).toBe(null);
+    expect(sharingAllowsOperate({ access: { kind: "unknown" }, level: null })).toBe(false);
+  });
+
+  it("counts only a level at server scope as reaching the server", () => {
+    expect(reachesServer(SERVER_VIEWER)).toBe(true);
+    expect(
+      reachesServer(
+        person([
+          { scope: { kind: "project", projectId: ProjectId.make("p") }, level: "collaborator" },
+        ]),
+      ),
+    ).toBe(false);
+    expect(reachesServer({ kind: "service" })).toBe(true);
+  });
+});
+
+const MEMBER_SERVER = EnvironmentId.make("own-server");
+const SHARED_SERVER = EnvironmentId.make("shared-server");
+const VIEWED = ThreadId.make("thread:viewed");
+const JOINED = ThreadId.make("thread:joined");
+
+const NARROW = person([
+  { scope: { kind: "thread", threadId: VIEWED }, level: "viewer" },
+  { scope: { kind: "thread", threadId: JOINED }, level: "collaborator" },
+]);
+
+/** Two connected environments: one this person owns, one where they hold two threads. */
+const environments = Effect.fn(function* (
+  // How a server answers "what is this connection?"; by default with what it is there.
+  answer: (access: ConnectionAccess) => Effect.Effect<ConnectionAccess> = Effect.succeed,
+) {
+  const viewedLevel = yield* SubscriptionRef.make<PersonLevel | null>("viewer");
+  const asked: Array<string> = [];
+  const fleetReads: Array<EnvironmentId> = [];
+  const otherReads: Array<string> = [];
+  const supervisor = Effect.fn(function* (environmentId: EnvironmentId, access: ConnectionAccess) {
+    const target = new BearerConnectionTarget({
+      environmentId,
+      label: environmentId,
+      connectionId: environmentId,
+    });
+    const prepared: PreparedConnection = {
+      environmentId,
+      label: environmentId,
+      httpBaseUrl: `https://${environmentId}.test`,
+      socketUrl: `wss://${environmentId}.test/ws`,
+      target,
+      httpAuthorization: { _tag: "Bearer", token: environmentId },
+    };
+    return EnvironmentSupervisor.of({
+      target,
+      state: yield* SubscriptionRef.make<SupervisorConnectionState>({
+        ...AVAILABLE_CONNECTION_STATE,
+        desired: true,
+        phase: "connected",
+        generation: 1,
+      }),
+      prepared: yield* SubscriptionRef.make(Option.some(prepared)),
+      session: yield* SubscriptionRef.make<Option.Option<RpcSession>>(
+        Option.some({
+          client: {
+            [J5_CLIENT_READ_WS_METHODS.readFleet]: () => {
+              fleetReads.push(environmentId);
+              return Effect.succeed({ projects: [] });
+            },
+            [J5_CLIENT_READ_WS_METHODS.readOpenInboxCount]: () => {
+              otherReads.push(`${environmentId}:inbox`);
+              return Effect.succeed({ personId: "human:local-operator", count: 0 });
+            },
+            [J5_CLIENT_READ_WS_METHODS.listCrewProposals]: () => {
+              otherReads.push(`${environmentId}:crew`);
+              return Effect.succeed({ proposals: [] });
+            },
+            [J5_ARTIFACT_WS_METHODS.listArtifacts]: () => {
+              otherReads.push(`${environmentId}:artifacts`);
+              return Effect.succeed({ entries: [] });
+            },
+            [J5_CLIENT_READ_WS_METHODS.listSpawnedChildren]: () => {
+              otherReads.push(`${environmentId}:spawned`);
+              return Effect.succeed({ entries: [], spawnedByAgent: [] });
+            },
+            [J5_CLIENT_READ_WS_METHODS.listCrewMemberships]: () => {
+              otherReads.push(`${environmentId}:memberships`);
+              return Effect.succeed({ entries: [] });
+            },
+            [J5_ACCESS_WS_METHODS.getConnectionAccess]: () => {
+              asked.push(`${environmentId}:connection`);
+              return answer(access);
+            },
+            [J5_ACCESS_WS_METHODS.subscribeThreadLevel]: (input: { threadId: ThreadId }) => {
+              asked.push(`${environmentId}:${input.threadId}`);
+              return input.threadId === VIEWED
+                ? SubscriptionRef.changes(viewedLevel).pipe(Stream.map((level) => ({ level })))
+                : Stream.make({ level: "collaborator" as const }).pipe(Stream.concat(Stream.never));
+            },
+          },
+        } as unknown as RpcSession),
+      ),
+      connect: Effect.void,
+      disconnect: Effect.void,
+      retryNow: Effect.void,
+    });
+  });
+  const supervisors = new Map([
+    [MEMBER_SERVER, yield* supervisor(MEMBER_SERVER, OWNER)],
+    [SHARED_SERVER, yield* supervisor(SHARED_SERVER, NARROW)],
+  ]);
+  const layer = Layer.mock(EnvironmentRegistry)({
+    entries: yield* SubscriptionRef.make<ReadonlyMap<EnvironmentId, ConnectionCatalogEntry>>(
+      new Map(),
+    ),
+    networkStatus: yield* SubscriptionRef.make<NetworkStatus>("online"),
+    run: (id, effect) =>
+      effect.pipe(Effect.provideService(EnvironmentSupervisor, supervisors.get(id)!)),
+    followStream: (id, stream) =>
+      stream.pipe(Stream.provideService(EnvironmentSupervisor, supervisors.get(id)!)),
+  });
+  const registry = yield* Effect.acquireRelease(
+    Effect.sync(() => AtomRegistry.make()),
+    (registry) => Effect.sync(() => registry.dispose()),
+  );
+  return { layer, registry, viewedLevel, asked, fleetReads, otherReads };
+});
+
+/** Waits for the atom to hold a value that passes; one that never arrives fails the test by timeout. */
+const settlesWhere = <A>(
+  registry: AtomRegistry.AtomRegistry,
+  atom: Atom.Atom<A>,
+  passes: (value: A) => boolean,
+) =>
+  AtomRegistry.toStream(registry, atom).pipe(
+    Stream.filter(passes),
+    Stream.runHead,
+    Effect.map(Option.isSome),
+  );
+
+/** Waits for the atom to hold `expected`; a value that never arrives fails the test by timeout. */
+const settlesAt = <A>(registry: AtomRegistry.AtomRegistry, atom: Atom.Atom<A>, expected: A) =>
+  AtomRegistry.toStream(registry, atom).pipe(
+    Stream.filter((value) => value === expected),
+    Stream.runHead,
+    Effect.map(Option.isSome),
+  );
+
+describe("what a connection may do with a thread it is starting", () => {
+  const PROJECT = ProjectId.make("project:shared");
+
+  it("lets a project's Collaborator write to a new thread in it", () => {
+    const access = person([
+      { scope: { kind: "project", projectId: PROJECT }, level: "collaborator" },
+    ]);
+    expect(sharingAllowsOperate({ access, level: projectLevelFor(access, PROJECT) })).toBe(true);
+  });
+
+  it("does not let them write to one in another project", () => {
+    const access = person([
+      { scope: { kind: "project", projectId: PROJECT }, level: "collaborator" },
+    ]);
+    expect(sharingAllowsOperate({ access, level: projectLevelFor(access, "project:other") })).toBe(
+      false,
+    );
+  });
+
+  it("does not let a thread's Collaborator start another thread in its project", () => {
+    const access = person([
+      { scope: { kind: "thread", threadId: ThreadId.make("thread:one") }, level: "collaborator" },
+    ]);
+    expect(projectLevelFor(access, PROJECT)).toBeNull();
+  });
+
+  it("is not held back by an answer the server gave before the thread existed", () => {
+    const access = person([
+      { scope: { kind: "project", projectId: PROJECT }, level: "collaborator" },
+    ]);
+    const level = threadLevelInProject({ access, threadLevel: null, projectId: PROJECT });
+    expect(sharingAllowsOperate({ access, level })).toBe(true);
+    expect(threadLevelInProject({ access, threadLevel: "owner", projectId: PROJECT })).toBe(
+      "owner",
+    );
+  });
+
+  it("gives a server's Viewer their server level, and the highest of the two", () => {
+    const access = person([
+      { scope: { kind: "server" }, level: "viewer" },
+      { scope: { kind: "project", projectId: PROJECT }, level: "collaborator" },
+    ]);
+    expect(projectLevelFor(SERVER_VIEWER, PROJECT)).toBe("viewer");
+    expect(projectLevelFor(access, PROJECT)).toBe("collaborator");
+  });
+});
+
+describe("what a connection may start", () => {
+  const PROJECT = ProjectId.make("project:shared");
+  const THREAD = ThreadId.make("thread:one");
+
+  it("lets a thread's Collaborator start no thread, fork or project", () => {
+    const access = person([{ scope: { kind: "thread", threadId: THREAD }, level: "collaborator" }]);
+    expect(sharingAllowsStart(access, PROJECT)).toBe(false);
+    expect(sharingAllowsStart(access, null)).toBe(false);
+    expect(sharingAllowsStartAnywhere(access)).toBe(false);
+  });
+
+  it("lets a project's Collaborator start threads there and add no project", () => {
+    const access = person([
+      { scope: { kind: "server" }, level: "viewer" },
+      { scope: { kind: "project", projectId: PROJECT }, level: "collaborator" },
+    ]);
+    expect(sharingAllowsStart(access, PROJECT)).toBe(true);
+    expect(sharingAllowsStart(access, "project:other")).toBe(false);
+    expect(sharingAllowsStart(access, null)).toBe(false);
+    expect(sharingAllowsStartAnywhere(access)).toBe(true);
+  });
+
+  it("lets a Viewer here who writes to another thread start nothing here", () => {
+    const access = person([
+      { scope: { kind: "project", projectId: PROJECT }, level: "viewer" },
+      { scope: { kind: "thread", threadId: THREAD }, level: "collaborator" },
+    ]);
+    expect(sharingAllowsStart(access, PROJECT)).toBe(false);
+    expect(sharingAllowsStartAnywhere(access)).toBe(false);
+  });
+
+  it("lets a server's Viewer start nothing anywhere", () => {
+    expect(sharingAllowsStart(SERVER_VIEWER, PROJECT)).toBe(false);
+    expect(sharingAllowsStart(SERVER_VIEWER, null)).toBe(false);
+    expect(sharingAllowsStartAnywhere(SERVER_VIEWER)).toBe(false);
+  });
+
+  it("lets a server's Collaborator or Owner, or a service, start anything", () => {
+    const collaborator = person([{ scope: { kind: "server" }, level: "collaborator" }], {
+      wide: true,
+    });
+    for (const access of [collaborator, OWNER, { kind: "service" } as const]) {
+      expect(sharingAllowsStart(access, PROJECT)).toBe(true);
+      expect(sharingAllowsStart(access, null)).toBe(true);
+      expect(sharingAllowsStartAnywhere(access)).toBe(true);
+    }
+  });
+
+  it("withholds nothing before the server answers, and everything from an unplaced device", () => {
+    expect(sharingAllowsStart(null, null)).toBe(true);
+    expect(sharingAllowsStart({ kind: "unknown" }, PROJECT)).toBe(false);
+    expect(sharingAllowsStartAnywhere(null)).toBe(true);
+    expect(sharingAllowsStartAnywhere({ kind: "unknown" })).toBe(false);
+  });
+
+  it("offers a door only where one server's levels and its session's Operate tasks both allow", () => {
+    const addsProject = (access: KnownConnectionAccess) => sharingAllowsStart(access, null);
+    for (const allows of [addsProject, sharingAllowsStartAnywhere]) {
+      expect(someServerAllowsStart([], allows)).toBe(true);
+      // An Owner on a device paired read-only.
+      expect(someServerAllowsStart([{ access: OWNER, operates: false }], allows)).toBe(false);
+      // Ownership on one server and Operate tasks on another open neither.
+      expect(
+        someServerAllowsStart(
+          [
+            { access: OWNER, operates: false },
+            { access: SERVER_VIEWER, operates: true },
+          ],
+          allows,
+        ),
+      ).toBe(false);
+      expect(
+        someServerAllowsStart(
+          [
+            { access: SERVER_VIEWER, operates: true },
+            { access: OWNER, operates: true },
+          ],
+          allows,
+        ),
+      ).toBe(true);
+    }
+  });
+});
+
+describe("a connection that holds two threads of a server", () => {
+  it.effect("reads one thread and writes to another on the same server", () =>
+    Effect.gen(function* () {
+      const { layer, registry, viewedLevel, asked } = yield* environments();
+      const sharing = createSharingEnvironmentAtoms(Atom.runtime(layer));
+      const viewed = sharing.threadOperable(SHARED_SERVER, VIEWED);
+      const joined = sharing.threadOperable(SHARED_SERVER, JOINED);
+      const draft = sharing.threadOperable(SHARED_SERVER, null);
+      const own = sharing.threadOperable(MEMBER_SERVER, VIEWED);
+      for (const atom of [viewed, joined, draft, own]) yield* AtomRegistry.mount(registry, atom);
+
+      expect(yield* settlesAt(registry, sharing.isNarrow(SHARED_SERVER), true)).toBe(true);
+      expect(yield* settlesAt(registry, joined, true)).toBe(true);
+      expect(registry.get(viewed)).toBe(false);
+      expect(registry.get(draft)).toBe(false);
+
+      // An Owner raises the first thread to Collaborator while the person has it open.
+      yield* SubscriptionRef.set(viewedLevel, "collaborator");
+      expect(yield* settlesAt(registry, viewed, true)).toBe(true);
+      yield* SubscriptionRef.set(viewedLevel, null);
+      expect(yield* settlesAt(registry, viewed, false)).toBe(true);
+
+      // On the server the person owns nothing is withheld, and no thread is asked about.
+      expect(
+        yield* settlesWhere(registry, sharing.connectionAccess(MEMBER_SERVER), (a) => a !== null),
+      ).toBe(true);
+      expect(registry.get(own)).toBe(true);
+      expect(registry.get(own)).toBe(true);
+      expect(asked.filter((entry) => entry.startsWith(MEMBER_SERVER))).toEqual([
+        `${MEMBER_SERVER}:connection`,
+      ]);
+    }),
+  );
+
+  it.effect("is offered a thread's actions only where it holds Collaborator", () =>
+    Effect.gen(function* () {
+      const { layer, registry } = yield* environments();
+      const sharing = createSharingEnvironmentAtoms(Atom.runtime(layer));
+      // The open thread's view holds these; the read asks nothing of its own.
+      const viewed = sharing.threadOperable(SHARED_SERVER, VIEWED);
+      const joined = sharing.threadOperable(SHARED_SERVER, JOINED);
+      const own = sharing.threadOperable(MEMBER_SERVER, VIEWED);
+      for (const atom of [viewed, joined, own]) yield* AtomRegistry.mount(registry, atom);
+      expect(yield* settlesAt(registry, joined, true)).toBe(true);
+      expect(
+        yield* settlesWhere(registry, sharing.connectionAccess(MEMBER_SERVER), (a) => a !== null),
+      ).toBe(true);
+      const read = (environmentId: EnvironmentId, threadId: ThreadId, permitted: boolean) =>
+        sharing.readCanOperateThread(registry, { environmentId, threadId, permitted });
+
+      // An Owner gets upstream's answer, whichever it is.
+      expect(read(MEMBER_SERVER, VIEWED, true)).toBe(true);
+      expect(read(MEMBER_SERVER, VIEWED, false)).toBe(false);
+      // A Viewer of the thread gets no; a Collaborator on that thread, yes.
+      expect(read(SHARED_SERVER, VIEWED, true)).toBe(false);
+      expect(read(SHARED_SERVER, JOINED, true)).toBe(true);
+      // Nobody gets more than upstream's permission allows.
+      expect(read(SHARED_SERVER, JOINED, false)).toBe(false);
+    }),
+  );
+
+  it.effect("sends none of the server's own reads once the server has said what it holds", () =>
+    Effect.gen(function* () {
+      const { layer, registry, fleetReads } = yield* environments();
+      const runtime = Atom.runtime(layer);
+      const sharing = createSharingEnvironmentAtoms(runtime);
+      const atoms = createJ5EnvironmentAtoms(runtime);
+      yield* AtomRegistry.mount(registry, sharing.isNarrow(SHARED_SERVER));
+      expect(yield* settlesAt(registry, sharing.isNarrow(SHARED_SERVER), true)).toBe(true);
+
+      const own = atoms.fleet({ environmentId: MEMBER_SERVER, input: {} });
+      const shared = atoms.fleet({ environmentId: SHARED_SERVER, input: {} });
+      yield* AtomRegistry.mount(registry, own);
+      yield* AtomRegistry.mount(registry, shared);
+      yield* AtomRegistry.getResult(registry, own);
+      const refused = yield* AtomRegistry.getResult(registry, shared).pipe(Effect.flip);
+      expect(refused).toMatchObject({ message: "This is not shared with you on this server." });
+      expect(AsyncResult.isFailure(registry.get(shared))).toBe(true);
+      expect(fleetReads).toEqual([MEMBER_SERVER]);
+    }),
+  );
+
+  it.effect("still asks for what its scope gives it: artifacts, its inbox and Crew requests", () =>
+    Effect.gen(function* () {
+      const { layer, registry, fleetReads, otherReads } = yield* environments();
+      const runtime = Atom.runtime(layer);
+      const sharing = createSharingEnvironmentAtoms(runtime);
+      const atoms = createJ5EnvironmentAtoms(runtime);
+      yield* AtomRegistry.mount(registry, sharing.isNarrow(SHARED_SERVER));
+      expect(yield* settlesAt(registry, sharing.isNarrow(SHARED_SERVER), true)).toBe(true);
+
+      const listed = yield* Effect.promise(() =>
+        atoms.listArtifacts.run(registry, {
+          environmentId: SHARED_SERVER,
+          input: { projectId: ProjectId.make("project-shared") },
+        }),
+      );
+      expect(AsyncResult.isSuccess(listed)).toBe(true);
+
+      const refused = <A, E>(atom: Atom.Atom<AsyncResult.AsyncResult<A, E>>) =>
+        AtomRegistry.mount(registry, atom).pipe(
+          Effect.andThen(Effect.exit(AtomRegistry.getResult(registry, atom))),
+          Effect.map((exit) => exit._tag === "Failure"),
+        );
+      expect(yield* refused(atoms.openCount({ environmentId: SHARED_SERVER, input: {} }))).toBe(
+        false,
+      );
+      expect(yield* refused(atoms.crewProposals({ environmentId: SHARED_SERVER, input: {} }))).toBe(
+        false,
+      );
+      expect(yield* refused(atoms.fleet({ environmentId: SHARED_SERVER, input: {} }))).toBe(true);
+      // The rows it reaches: which of them an agent spawned, and their Crew chips.
+      const rows = { environmentId: SHARED_SERVER, input: { threadIds: [VIEWED] } };
+      const spawned = yield* Effect.promise(() => atoms.listSpawnedChildren.run(registry, rows));
+      expect(AsyncResult.isSuccess(spawned)).toBe(true);
+      const memberships = yield* Effect.promise(() =>
+        atoms.listCrewMemberships.run(registry, rows),
+      );
+      expect(AsyncResult.isSuccess(memberships)).toBe(true);
+      expect(otherReads).toEqual([
+        `${SHARED_SERVER}:artifacts`,
+        `${SHARED_SERVER}:inbox`,
+        `${SHARED_SERVER}:crew`,
+        `${SHARED_SERVER}:spawned`,
+        `${SHARED_SERVER}:memberships`,
+      ]);
+      expect(fleetReads).toEqual([]);
+    }),
+  );
+});
+
+describe("an Owner's connection", () => {
+  it.effect("reads at once while the server has not answered what it is", () =>
+    Effect.gen(function* () {
+      // The server never answers the question: nothing may wait on it.
+      const { layer, registry, fleetReads, asked } = yield* environments(() => Effect.never);
+      const atoms = createJ5EnvironmentAtoms(Atom.runtime(layer));
+      const own = atoms.fleet({ environmentId: MEMBER_SERVER, input: {} });
+      yield* AtomRegistry.mount(registry, own);
+      expect((yield* AtomRegistry.getResult(registry, own)).projects).toEqual([]);
+      expect(fleetReads).toEqual([MEMBER_SERVER]);
+      // Asked once, in the background, however many reads follow.
+      registry.refresh(own);
+      yield* AtomRegistry.getResult(registry, own);
+      expect(asked).toEqual([`${MEMBER_SERVER}:connection`]);
+    }),
+  );
+
+  it.effect("reads, and may write to its threads, when the server cannot answer", () =>
+    Effect.gen(function* () {
+      // A server from before people has no such request; upstream's permissions decide there.
+      const { layer, registry, fleetReads } = yield* environments(() =>
+        Effect.die(new Error("Unknown request tag: j5.access.getConnectionAccess")),
+      );
+      const runtime = Atom.runtime(layer);
+      const sharing = createSharingEnvironmentAtoms(runtime);
+      const own = createJ5EnvironmentAtoms(runtime).fleet({
+        environmentId: MEMBER_SERVER,
+        input: {},
+      });
+      const operable = sharing.threadOperable(MEMBER_SERVER, VIEWED);
+      yield* AtomRegistry.mount(registry, own);
+      yield* AtomRegistry.mount(registry, operable);
+      yield* AtomRegistry.getResult(registry, own);
+      expect(fleetReads).toEqual([MEMBER_SERVER]);
+      yield* Effect.exit(
+        AtomRegistry.getResult(
+          registry,
+          sharing.connectionAccessQuery({ environmentId: MEMBER_SERVER, input: {} }),
+        ),
+      );
+      expect(registry.get(sharing.isNarrow(MEMBER_SERVER))).toBe(false);
+      expect(registry.get(operable)).toBe(true);
+    }),
+  );
+});
+
+const firstOwner = (name: string | null): ConnectionAccess => ({
+  kind: "person",
+  personId: "human:owner",
+  name,
+  firstOwner: true,
+  levels: [{ scope: { kind: "server" }, level: "owner" }],
+  wide: true,
+  owner: true,
+  retiredLinks: null,
+});
+
+describe("which server asks a person their name", () => {
+  it("asks a device the server cannot place to say whose it is", () => {
+    expect(serverToAskNameFor([{ id: "a", access: { kind: "unknown" } }])).toEqual({
+      id: "a",
+      kind: "claim",
+    });
+  });
+
+  it("asks the first owner for a name until they have one", () => {
+    expect(serverToAskNameFor([{ id: "a", access: firstOwner(null) }])).toEqual({
+      id: "a",
+      kind: "first-owner",
+    });
+    expect(serverToAskNameFor([{ id: "a", access: firstOwner("Jackson") }])).toBeNull();
+  });
+
+  it("waits for a server that has not answered, and asks the next one that needs it", () => {
+    expect(
+      serverToAskNameFor([
+        { id: "a", access: null },
+        { id: "b", access: firstOwner("Jackson") },
+        { id: "c", access: { kind: "unknown" } },
+      ]),
+    ).toEqual({ id: "c", kind: "claim" });
+  });
+});
+
+const noticePerson = {
+  kind: "person" as const,
+  personId: "human:priya",
+  name: "Priya",
+  firstOwner: false,
+  levels: [{ scope: { kind: "server" as const }, level: "viewer" as const }],
+  wide: false,
+  owner: false,
+  retiredLinks: null,
+};
+
+describe("upstream's notice to pair again", () => {
+  it("is not shown to a person, whose permissions follow their level", () => {
+    expect(permissionNoticeApplies(AsyncResult.success(noticePerson))).toBe(false);
+  });
+
+  it("is not shown to a device the server will ask about", () => {
+    expect(permissionNoticeApplies(AsyncResult.success({ kind: "unknown" as const }))).toBe(false);
+  });
+
+  it("waits for the server's answer, and a read that failed on the way is no answer", () => {
+    expect(permissionNoticeApplies(AsyncResult.initial())).toBe(false);
+    expect(
+      permissionNoticeApplies(AsyncResult.failure(Cause.fail(new Error("socket closed")))),
+    ).toBe(false);
+  });
+
+  it("stays upstream's for a server from before people and for a session that is no person's", () => {
+    expect(
+      permissionNoticeApplies(AsyncResult.failure(Cause.die("Unknown request tag: j5.access"))),
+    ).toBe(true);
+    expect(permissionNoticeApplies(AsyncResult.success(null))).toBe(true);
+    expect(permissionNoticeApplies(AsyncResult.success({ kind: "service" as const }))).toBe(true);
+  });
+});
+
+describe("whether the person owns a connected server", () => {
+  it("is not known until the catalog is read and a server has answered", () => {
+    expect(ownerSomewhereState({ catalogReady: false, answers: [] })).toBe("loading");
+    expect(ownerSomewhereState({ catalogReady: true, answers: [null] })).toBe("loading");
+    expect(ownerSomewhereState({ catalogReady: true, answers: ["other", null] })).toBe("loading");
+  });
+
+  it("is settled by one server that says so, whatever the others have answered", () => {
+    expect(ownerSomewhereState({ catalogReady: true, answers: [null, "owner"] })).toBe(true);
+    expect(ownerSomewhereState({ catalogReady: true, answers: ["other", "other"] })).toBe(false);
+  });
+
+  it("waits while the catalog lists no server yet, as it does before the client's own is added", () => {
+    expect(ownerSomewhereState({ catalogReady: true, answers: [] })).toBe("loading");
+  });
+});
+
+describe("an Owner's Settings page, reached by someone who owns no server", () => {
+  it("names the server and says who to ask", () => {
+    expect(ownerOnlySettingsNotice({ serverName: "openclaw", writesSomewhere: true })).toEqual({
+      title: "Only an Owner can change this",
+      body: "Ask an Owner of openclaw, or an agent on a thread you can write to.",
+    });
+  });
+
+  it("does not send someone who writes nowhere to an agent", () => {
+    expect(ownerOnlySettingsNotice({ serverName: "openclaw", writesSomewhere: false }).body).toBe(
+      "Ask an Owner of openclaw.",
+    );
+  });
+
+  it("says this server when the server has no name to show", () => {
+    expect(ownerOnlySettingsNotice({ serverName: null, writesSomewhere: false }).body).toBe(
+      "Ask an Owner of this server.",
+    );
+  });
+});

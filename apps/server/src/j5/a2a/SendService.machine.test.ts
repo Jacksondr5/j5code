@@ -2,22 +2,25 @@ import { assert, it } from "@effect/vitest";
 import { ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
+import { noneLayer as peerDirectoryNoneLayer } from "./PeerDirectory.ts";
+import { runMigrations } from "../../persistence/Migrations.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
+import { ensureLocalOperatorHumanPerson } from "./HumanPersonRegistry.ts";
 import { A2ASendService, layer as sendLayer } from "./SendService.ts";
 import {
   type AgentParticipant,
   CommCommandId,
   type MachineParticipant,
   ParticipantId,
-  SquadronId,
+  LedgerProjectId,
 } from "./contracts.ts";
 
 const timestamp = "2026-09-15T12:00:00.000Z";
-const squadronId = SquadronId.make("squadron:monitoring");
+const projectId = LedgerProjectId.make("project:monitoring");
 
 const agent: AgentParticipant = {
   kind: "agent",
@@ -31,22 +34,25 @@ const watchdog: MachineParticipant = {
 };
 
 const makeTestLayer = () => {
-  const database = NodeSqliteClient.layerMemory();
+  const database = NodeSqliteClient.layer({ filename: ":memory:" });
   const ledger = ledgerLayer.pipe(Layer.provide(database));
-  const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
+  const send = sendLayer.pipe(
+    Layer.provide(peerDirectoryNoneLayer),
+    Layer.provide(ledger),
+    Layer.provide(database),
+  );
   return Layer.mergeAll(database, ledger, send);
 };
 
 const setup = Effect.fn("test.j5.a2a.machineSend.setup")(function* () {
+  yield* runMigrations();
   yield* runJ5A2AMigrations();
   const ledger = yield* A2ALedger;
-  yield* ledger.createSquadron({
-    squadron: { id: squadronId, name: "Monitoring", createdAt: timestamp },
-  });
+  yield* ledger.ensureProject({ projectId: projectId, createdAt: timestamp });
   for (const [index, participant] of [agent, watchdog].entries()) {
     yield* ledger.append({
       commandId: CommCommandId.make(`command:join:${String(index)}`),
-      squadronId,
+      projectId,
       acceptedAt: timestamp,
       event: {
         kind: "participant.joined",
@@ -149,6 +155,44 @@ it.effect("refuses an unregistered machine sender and any send addressed to a ma
   }).pipe(Effect.provide(makeTestLayer())),
 );
 
+it.effect("lists the server's owner by the name they set, once they have set one", () =>
+  Effect.gen(function* () {
+    yield* setup();
+    const service = yield* A2ASendService;
+    const sql = yield* SqlClient.SqlClient;
+    const owner = yield* ensureLocalOperatorHumanPerson(sql);
+    const ownerRow = Effect.map(service.listParticipants(agent.threadId), (rows) =>
+      rows.find((row) => row.participantId === owner),
+    );
+    // Before a name is set the row is as it always was: it carries no name at all.
+    const before = {
+      projectId,
+      participantId: owner,
+      participant: { kind: "human" as const, id: owner },
+      archived: false,
+      canReceiveMessage: false,
+      canOpenExchange: true,
+      acceptsUrgency: true,
+    };
+    assert.deepStrictEqual(yield* ownerRow, before);
+    yield* sql`
+      UPDATE j5_a2a_human_person SET display_name = 'Jackson Miller' WHERE person_id = ${owner}
+    `;
+    // After, the same row with the name added, and nothing else changed.
+    assert.deepStrictEqual(yield* ownerRow, { ...before, displayName: "Jackson Miller" });
+    // A guest is a person with a name too, and is not in the address book at all.
+    yield* sql`
+      INSERT INTO j5_a2a_human_person (person_id, is_local_operator, created_at, display_name)
+      VALUES ('human:a-guest', 0, '2026-10-13T00:00:00.000Z', 'Marco')
+    `;
+    assert.isUndefined(
+      (yield* service.listParticipants(agent.threadId)).find(
+        (row) => row.participantId === "human:a-guest",
+      ),
+    );
+  }).pipe(Effect.provide(makeTestLayer())),
+);
+
 it.effect("lists a machine in the address book as a named sender that receives nothing", () =>
   Effect.gen(function* () {
     yield* setup();
@@ -156,7 +200,7 @@ it.effect("lists a machine in the address book as a named sender that receives n
     const rows = yield* service.listParticipants(agent.threadId);
     const machineRow = rows.find((row) => row.participantId === watchdog.id);
     assert.deepStrictEqual(machineRow, {
-      squadronId,
+      projectId,
       participantId: watchdog.id,
       participant: watchdog,
       archived: false,

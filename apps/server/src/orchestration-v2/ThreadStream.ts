@@ -1,17 +1,91 @@
-/** Maximum number of reducer applications allowed during a thread resume. */
+import type {
+  OrchestrationV2ThreadProjection,
+  OrchestrationV2ThreadStreamItem,
+} from "@t3tools/contracts";
+
+import { omitLocalVisibleTurnItems } from "@t3tools/shared/orchestrationV2BoundedSnapshot";
+import { dedupeSnapshotBodies } from "@t3tools/shared/orchestrationV2DedupedBodies";
+
+import {
+  buildBoundedThreadProjection,
+  type BoundedProjectionResult,
+} from "./threadHistoryPaging.ts";
+import {
+  capProjectionCheckpointFilesForWire,
+  projectThreadProjectionForWire,
+} from "./WireProjection.ts";
+
 export const THREAD_RESUME_MAX_REPLAY_EVENTS = 128;
 
-/** Maximum encoded event JSON allowed during a thread resume. */
 export const THREAD_RESUME_MAX_REPLAY_ENCODED_BYTES = 1_048_576;
 
-/** Encoded payload cost after events have been projected for the wire. */
-export function threadReplayEncodedBytes(items: ReadonlyArray<unknown>): number {
+/** Decoded objects and temporary strings exceed stored JSON size, even before wire slimming. */
+export const THREAD_RESUME_MAX_RAW_PAYLOAD_BYTES = 1_048_576;
+
+export function isThreadReplayRawPayloadSafe(rawPayloadBytes: number): boolean {
+  return rawPayloadBytes <= THREAD_RESUME_MAX_RAW_PAYLOAD_BYTES;
+}
+
+export function threadReplayEncodedBytes(
+  items: ReadonlyArray<unknown>,
+  limit: number = THREAD_RESUME_MAX_REPLAY_ENCODED_BYTES,
+): number {
   let total = 0;
   for (const item of items) {
     const encoded = JSON.stringify(item);
     total += Buffer.byteLength(encoded ?? "", "utf8");
+    if (total > limit) break;
   }
   return total;
+}
+
+type ThreadSnapshotStreamItem = Extract<
+  OrchestrationV2ThreadStreamItem,
+  { readonly kind: "snapshot" }
+>;
+
+export function boundedSnapshotResponseFields(input: {
+  readonly bounded: BoundedProjectionResult;
+  readonly compactTurnItems: boolean;
+  readonly dedupeBodies: boolean;
+  readonly compactIds: boolean;
+}) {
+  const { bounded } = input;
+  const capped = capProjectionCheckpointFilesForWire(bounded.projection);
+  // Dedupe keeps shared items one object, which the compaction's identity check needs.
+  const projection = input.dedupeBodies ? dedupeSnapshotBodies(capped) : capped;
+  const compactProjection = input.compactTurnItems ? omitLocalVisibleTurnItems(projection) : null;
+  return {
+    projection: compactProjection ?? projection,
+    historyCursor: bounded.historyCursor,
+    hasMoreHistory: bounded.hasMoreHistory,
+    latestLocalTurnOrdinal: bounded.latestLocalTurnOrdinal,
+    ...(compactProjection === null ? {} : { turnItemsOmitLocalVisible: true as const }),
+    ...(input.compactIds ? { idTable: true as const } : {}),
+  };
+}
+
+export function buildBoundedThreadStreamSnapshot(input: {
+  readonly snapshotSequence: number;
+  readonly projection: OrchestrationV2ThreadProjection;
+  readonly compactTurnItems?: boolean;
+  readonly dedupeBodies?: boolean;
+  readonly compactIds?: boolean;
+}): ThreadSnapshotStreamItem {
+  const bounded = buildBoundedThreadProjection({
+    snapshotSequence: input.snapshotSequence,
+    projection: projectThreadProjectionForWire(input.projection),
+  });
+  return {
+    kind: "snapshot",
+    snapshotSequence: input.snapshotSequence,
+    ...boundedSnapshotResponseFields({
+      bounded,
+      compactTurnItems: input.compactTurnItems === true,
+      dedupeBodies: input.dedupeBodies === true,
+      compactIds: input.compactIds === true,
+    }),
+  };
 }
 
 export type ThreadResumePlan =
@@ -22,14 +96,7 @@ export type ThreadResumePlan =
     }
   | { readonly mode: "snapshot" };
 
-/**
- * Decide whether a thread subscription should replay the event gap after the
- * client's cursor or send a fresh snapshot instead.
- *
- * A client cursor above the high water mark is stale or invalid. Event count
- * limits reducer churn while encoded bytes limit a small number of large
- * updates. Either excess is cheaper to replace with one current snapshot.
- */
+/** Bound event count and encoded bytes; replace excessive replay with one current snapshot. */
 export function decideThreadResume(input: {
   readonly afterSequence: number;
   readonly highWater: number;

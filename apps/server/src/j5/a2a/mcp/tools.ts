@@ -1,24 +1,48 @@
-import { Tool, Toolkit } from "effect/unstable/ai";
+import {
+  AgentPersonaAccess,
+  AgentPersonaModelEntry,
+  AgentPersonaModelEntryStatus,
+} from "@t3tools/contracts";
+import * as SpawnAgentService from "../SpawnAgentService.ts";
+import * as RequestReplayService from "../RequestReplayService.ts";
+import { Tool, Toolkit } from "effect/ai";
+import { playbookTools } from "../../playbooks/mcp.ts";
 import * as Schema from "effect/Schema";
+import { PLAYBOOK_MAX_STEPS } from "@t3tools/contracts/j5";
+import { PlaybookStore } from "../../playbooks/PlaybookStore.ts";
+import { ManagedProjectFolders } from "../../../project/ManagedProjectFolders.ts";
+import { ProjectService } from "../../../project/ProjectService.ts";
 
 import {
   AgentPersonaId,
   ModelSelection,
   OrchestrationV2RunStatus,
-  ProjectId,
   ProviderInstanceId,
+  ProviderInteractionMode,
   RunId,
   RuntimeMode,
   ThreadId,
+  TrimmedNonEmptyString,
 } from "@t3tools/contracts";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
+import * as FileSystem from "effect/FileSystem";
+import * as SqlClient from "effect/sql/SqlClient";
+import { ServerConfig } from "../../../config.ts";
 import * as McpInvocationContext from "../../../mcp/McpInvocationContext.ts";
+import { McpAttachmentInput } from "../../../mcp/toolkits/attachment/input.ts";
 import { OrchestratorMcpService } from "../../../mcp/OrchestratorMcpService.ts";
 import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
-import { ProviderRegistry } from "../../../provider/Services/ProviderRegistry.ts";
+import { DocumentText } from "../../../provider/DocumentText.ts";
+import { ProviderRegistry } from "../../../provider/ProviderRegistry.ts";
+import {
+  AgentPersonaEscalations,
+  AllowOnceInput,
+  BLOCKED_PERSONA_TOOL_TEXT,
+} from "../../agents/agentPersonaEscalation.ts";
+import { AgentPersonaDrafts } from "../../agents/agentPersonaDrafts.ts";
+import { CrewMemberModels } from "../../agents/crewMemberModels.ts";
 import { AgentCrewInstanceService } from "../AgentCrewInstanceService.ts";
-import { ArchiveAgentService } from "../ArchiveAgentService.ts";
 import { ArchiveCrewService } from "../ArchiveCrewService.ts";
 import {
   CREW_NAME_MAX_CHARS,
@@ -38,11 +62,13 @@ import {
 import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
 import { A2AHomeRegistrar } from "../HomeRegistrar.ts";
 import { A2ALedger } from "../LedgerService.ts";
+import { PeerDirectory } from "../PeerDirectory.ts";
+import { PeerRegistryService } from "../PeerRegistryService.ts";
 import { ParticipantPlacementService } from "../PlacementService.ts";
 import { A2ASendService } from "../SendService.ts";
 import { SpawnCompositionService } from "../SpawnCompositionService.ts";
-import { SquadronJoinService } from "../SquadronJoinService.ts";
-import { SquadronProjectReferences } from "../SquadronProjectReferences.ts";
+import { GitRefName, SpawnWorkspaceService, WorktreePath } from "../spawnWorkspace.ts";
+import { ThreadRegistration } from "../ThreadRegistration.ts";
 import {
   AgentParticipant,
   ClearOwnAskResult,
@@ -51,7 +77,8 @@ import {
   MachineParticipant,
   ParticipantId,
   SendMessageResult,
-  SquadronId,
+  LedgerProjectId,
+  SendMode,
   Urgency,
 } from "../contracts.ts";
 import {
@@ -72,8 +99,57 @@ export const J5SendMessageInput = Schema.Struct({
   client_request_id: Schema.optional(Schema.NullOr(Schema.String.check(Schema.isNonEmpty()))),
   expect_reply: Schema.optional(Schema.NullOr(Schema.Boolean)),
   exchange_id: Schema.optional(Schema.NullOr(ExchangeId)),
-  intent: Schema.optional(Schema.NullOr(Schema.String.check(Schema.isNonEmpty()))),
+  regarding: Schema.optional(
+    Schema.NullOr(
+      ExchangeId.annotate({
+        description:
+          "An ask you have open with this person. The message joins it and is shown beneath it, in place of a new ask.",
+      }),
+    ),
+  ),
+  intent: Schema.optional(
+    Schema.NullOr(
+      Schema.String.check(Schema.isNonEmpty()).annotate({
+        description:
+          "One line saying what an ask (expect_reply=true) is about. It labels the ask and does not change how the message is delivered; to interrupt a busy agent, set mode.",
+      }),
+    ),
+  ),
   urgency: Schema.optional(Schema.NullOr(Urgency)),
+  escalation_id: Schema.optional(
+    Schema.NullOr(
+      Schema.String.check(Schema.isNonEmpty()).annotate({
+        description:
+          "Only on an ask to a person about a refused persona launch: the escalation_id from the refusal (yours, or as a Captain, your Crew member's). The person's Inbox shows J5's own record of the block beside your ask, and for a limit an Owner can lift, an Allow this once button. It goes on a new ask. While an ask carrying it is open, follow up on that ask with regarding instead: an id already on that ask is ignored, and on a follow-up to any other ask it is refused.",
+      }),
+    ),
+  ),
+  persona_draft_id: Schema.optional(
+    Schema.NullOr(
+      Schema.String.check(Schema.isNonEmpty()).annotate({
+        description:
+          "Only on an ask to a person about a persona draft: the draft_id from j5_propose_persona (yours, or as a Captain, your Crew member's). The server adds the draft's summary and any warnings to the ask, and an Owner can save it with Save persona. It goes on a new ask, never together with escalation_id. While an ask carrying it is open, follow up on that ask with regarding instead: an id already on that ask is ignored, and on a follow-up to any other ask it is refused.",
+      }),
+    ),
+  ),
+  attachments: Schema.optional(
+    Schema.NullOr(
+      Schema.Array(McpAttachmentInput)
+        .check(Schema.isMinLength(1), Schema.isMaxLength(8))
+        .annotate({
+          description:
+            "Files for an agent on this server: pending uploads from t3_attachment_prepare_upload, or attachments its thread already holds.",
+        }),
+    ),
+  ),
+  mode: Schema.optional(
+    Schema.NullOr(
+      SendMode.annotate({
+        description:
+          "Set this to interrupt an agent that is mid-turn. steer puts your message into the turn it is running now. restart stops that turn and starts it again on your message. queue, the default, is ordinary delivery: into the running turn for Claude and Codex GPT 6 agents, and after the turn ends for the others.",
+      }),
+    ),
+  ),
 });
 export type J5SendMessageInput = typeof J5SendMessageInput.Type;
 
@@ -109,7 +185,9 @@ export const J5ParticipantProvenanceView = Schema.Union([
 export type J5ParticipantProvenanceView = typeof J5ParticipantProvenanceView.Type;
 
 export const J5ParticipantDirectoryRow = Schema.Struct({
-  squadron_id: SquadronId,
+  project_id: LedgerProjectId,
+  /** The project's title beside its id; on the self row, the caller's own project. */
+  project_title: Schema.NullOr(Schema.String),
   participant_id: ParticipantId,
   participant: J5Participant,
   self: Schema.Boolean,
@@ -118,30 +196,191 @@ export const J5ParticipantDirectoryRow = Schema.Struct({
   can_open_exchange: Schema.Boolean,
   accepts_urgency: Schema.Boolean,
   thread_id: Schema.NullOr(ThreadId),
+  /** The agent's thread link, for mentioning it verbatim; null for a person or a machine. */
+  link: Schema.NullOr(Schema.String),
   provenance: J5ParticipantProvenanceView,
   placement_parent_id: Schema.NullOr(ParticipantId),
   display_name: Schema.NullOr(Schema.String),
+  /** Where the participant lives, by the server's own name; present once this server has a peer. */
+  server: Schema.optionalKey(
+    Schema.Struct({
+      name: Schema.String,
+      local: Schema.Boolean,
+      /** Only on a peer server that polls this one: whether it is online; while it is not, its messages wait. */
+      available: Schema.optionalKey(Schema.Boolean),
+      /** When that server last polled, once it has. */
+      last_available_at: Schema.optionalKey(Schema.String),
+    }),
+  ),
 });
 export type J5ParticipantDirectoryRow = typeof J5ParticipantDirectoryRow.Type;
 
+/** The most rows one listing returns, and how many it returns when `limit` is omitted. */
+const J5_LIST_PARTICIPANTS_MAX_LIMIT = 100;
+export const J5_LIST_PARTICIPANTS_DEFAULT_LIMIT = 50;
+
+/**
+ * One page of one project's address book, shaped as upstream's `t3_thread_list` is: an offset
+ * cursor, a capped limit and optional filters, read from current state on every call.
+ */
+export const J5ListParticipantsInput = Schema.Struct({
+  project_id: Schema.optional(
+    LedgerProjectId.annotate({
+      description:
+        "Project to list. Omit for your own project; find other projects with t3_project_list.",
+    }),
+  ),
+  server: Schema.optional(
+    Schema.String.check(Schema.isNonEmpty()).annotate({
+      description:
+        "Name of a peer server, from the result's servers, to list its agents. Omit for this server.",
+    }),
+  ),
+  name_contains: Schema.optional(
+    Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(256)).annotate({
+      description: "Keep agents and machines whose display name contains this text.",
+    }),
+  ),
+  settled: Schema.optional(
+    Schema.Boolean.annotate({
+      description:
+        "true keeps only settled agents, false only active ones; omit for both. This server only.",
+    }),
+  ),
+  include_archived: Schema.optional(Schema.Boolean),
+  cursor: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  limit: Schema.optional(
+    Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: J5_LIST_PARTICIPANTS_MAX_LIMIT })),
+  ),
+});
+export type J5ListParticipantsInput = typeof J5ListParticipantsInput.Type;
+
 export const J5ListParticipantsResult = Schema.Struct({
   participants: Schema.Array(J5ParticipantDirectoryRow),
+  /** Pass as `cursor` for the next page; null on the last page. */
+  next_cursor: Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
+  /** How many rows match the filters across every page. */
+  total: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  /** Every server whose agents can be listed, once this server has a peer. */
+  servers: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ name: Schema.String, local: Schema.Boolean })),
+  ),
+  /** Peer servers whose address books could not be read: their agents are absent, not gone. */
+  unread_peer_count: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
 });
 
 const NonEmptyString = Schema.String.check(Schema.isNonEmpty());
 
+/** The snake_case MCP form of a spawn's workspace choice; see `spawnWorkspace.ts`. */
+export const J5SpawnWorkspace = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("shared") }),
+  Schema.Struct({
+    type: Schema.Literal("worktree"),
+    base_ref: GitRefName.annotate({
+      description: "Branch, tag, or commit the new worktree starts from; it must already exist.",
+    }),
+    branch: Schema.optional(
+      GitRefName.annotate({
+        description:
+          "New branch name. It must not exist yet. Omit and the server names it from the brief.",
+      }),
+    ),
+    start_from_origin: Schema.optional(
+      Schema.Boolean.annotate({
+        description:
+          "Fetch origin and start from its copy of base_ref when it has one. Defaults to false: start from local commits.",
+      }),
+    ),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("existing_worktree"),
+    worktree_path: WorktreePath.annotate({
+      description: "Path of one of this project's worktrees; the agent works on its branch.",
+    }),
+  }),
+]);
+export type J5SpawnWorkspace = typeof J5SpawnWorkspace.Type;
+
+/**
+ * A spawn's workspace choice: a Crew seat's three, and the project's own checkout, which is
+ * upstream's `root`. A spawn into another project has no "your own checkout" to share.
+ */
+export const J5SpawnAgentWorkspace = Schema.Union([
+  ...J5SpawnWorkspace.members,
+  Schema.Struct({ type: Schema.Literal("root") }),
+]);
+export type J5SpawnAgentWorkspace = typeof J5SpawnAgentWorkspace.Type;
+
 export const J5SpawnAgentInput = Schema.Struct({
   brief: NonEmptyString,
-  title: Schema.optional(NonEmptyString),
+  title: TrimmedNonEmptyString.annotate({
+    description:
+      "A short name for the agent, a few words, shown in the sidebar and Fleet. Not the brief.",
+  }),
+  project_id: Schema.optional(
+    LedgerProjectId.annotate({
+      description:
+        "Project the Peer Agent joins. Omit for your own; find others with t3_project_list.",
+    }),
+  ),
+  scratch: Schema.optional(
+    Schema.Boolean.annotate({
+      description:
+        'Spawn without a project: the agent joins the "No project" project and works in a fresh folder of its own, outside any repository. Not with project_id; workspace must be {"type":"root"}.',
+    }),
+  ),
+  runtime_mode: Schema.optional(
+    RuntimeMode.annotate({
+      description:
+        "The agent's permission mode. Omit to give it yours. Not broader than your own, and not with persona, whose policy sets it.",
+    }),
+  ),
+  interaction_mode: Schema.optional(
+    ProviderInteractionMode.annotate({
+      description:
+        "The agent's interaction mode. Omit to give it yours. Not broader than your own.",
+    }),
+  ),
+  attachments: Schema.optional(
+    Schema.Array(McpAttachmentInput).check(Schema.isMinLength(1), Schema.isMaxLength(8)).annotate({
+      description: "Files for the brief: pending uploads from t3_attachment_prepare_upload.",
+    }),
+  ),
   persona: Schema.optional(
     AgentPersonaId.annotate({
       description:
-        "Persona id from list_personas. The spawn runs with that persona's instructions and runtime policy, and provider, model, and reasoning must be one of its declared routes.",
+        "Persona id from j5_list_personas. The spawn runs with that persona's instructions and access level. Omit provider, model, and reasoning to let the server choose from the persona's ordered entries; set them only to pin one of those entries.",
     }),
   ),
-  provider: ProviderInstanceId,
-  model: NonEmptyString,
-  reasoning: NonEmptyString,
+  allow_once: Schema.optional(AllowOnceInput),
+  author_threads: Schema.optional(
+    Schema.Array(ThreadId).check(Schema.isMinLength(1), Schema.isMaxLength(32)).annotate({
+      description:
+        "Only for a persona that j5_list_personas marks independent_reviewer: the threads whose work it reviews. Omit when that is your own work and your delegate_task subagents'. The server prefers a model none of them ran on.",
+    }),
+  ),
+  provider: Schema.optional(
+    ProviderInstanceId.annotate({
+      description:
+        "Provider instance from orchestrator_capabilities. Required without persona; with one, omit it (and model) to let the server choose.",
+    }),
+  ),
+  model: Schema.optional(
+    NonEmptyString.annotate({
+      description:
+        "Model id that provider lists. Required without persona; with one, omit it (and provider) to let the server choose.",
+    }),
+  ),
+  reasoning: Schema.optional(
+    NonEmptyString.annotate({
+      description:
+        "Required when the model has a reasoning option in orchestrator_capabilities: effort, reasoningEffort, reasoning, variant, or a thinking option with string values. Pass one of its values. Omit it for any other model, and whenever model is omitted; a true/false thinking option is not one.",
+    }),
+  ),
+  workspace: J5SpawnAgentWorkspace.annotate({
+    description:
+      'Where the Peer Agent works, chosen every time: {"type":"shared"} is your own checkout and branch, in your own project only; {"type":"root"} the project\'s main checkout; {"type":"worktree","base_ref":...} a new worktree and branch from base_ref; {"type":"existing_worktree","worktree_path":...} one of the project\'s worktrees, on its branch.',
+  }),
   client_request_id: Schema.optional(NonEmptyString),
 });
 export type J5SpawnAgentInput = typeof J5SpawnAgentInput.Type;
@@ -149,9 +388,17 @@ export type J5SpawnAgentInput = typeof J5SpawnAgentInput.Type;
 export const J5SpawnAgentResult = Schema.Struct({
   participant_id: ParticipantId,
   thread_id: ThreadId,
-  squadron_id: SquadronId,
+  link: Schema.String,
+  /** The run the brief started, to wait on; null if it could not be read. */
+  run_id: Schema.NullOr(RunId),
+  project_id: LedgerProjectId,
+  project_title: Schema.String,
   placement: Schema.Struct({
-    placement_parent_id: ParticipantId,
+    /**
+     * The spawner, when the agent joined the spawner's own project; null in another project, and
+     * for every agent an outside agent starts.
+     */
+    placement_parent_id: Schema.NullOr(ParticipantId),
     provenance: Schema.Struct({
       kind: Schema.Literal("spawned-by"),
       spawned_by_participant_id: ParticipantId,
@@ -160,16 +407,68 @@ export const J5SpawnAgentResult = Schema.Struct({
   }),
 });
 
+export const J5ReadPersonaInput = Schema.Struct({
+  persona_id: AgentPersonaId.annotate({ description: "Persona id from j5_list_personas." }),
+});
+
+export const J5ReadPersonaResult = Schema.Struct({
+  id: AgentPersonaId,
+  yaml: Schema.String,
+  digest: Schema.String,
+  origin: Schema.Literals(["folder", "imported"]),
+  folder_file: Schema.NullOr(Schema.String),
+  overrides_folder: Schema.Boolean,
+  disabled: Schema.Boolean,
+});
+
+const DraftText = (description: string) =>
+  Schema.optional(Schema.String.check(Schema.isNonEmpty()).annotate({ description }));
+
+export const J5ProposePersonaInput = Schema.Struct({
+  mode: Schema.Literals(["create", "edit"]).annotate({
+    description:
+      "create: a new persona, with every field below. edit: a persona you read with j5_read_persona, with expected_digest and only the fields that change.",
+  }),
+  persona_id: AgentPersonaId.annotate({
+    description:
+      "The new persona's id (lowercase letters, digits and hyphens), or the id of the one you edit; an edit never changes it.",
+  }),
+  expected_digest: DraftText("Edit only: the digest j5_read_persona returned."),
+  display_name: DraftText("Name shown in Settings and rosters."),
+  description: DraftText("One line on what the persona is for."),
+  instructions: DraftText("The persona's full instructions."),
+  access: Schema.optional(AgentPersonaAccess),
+  models: Schema.optional(
+    Schema.Array(AgentPersonaModelEntry).annotate({
+      description:
+        "The ordered model entries, in the form j5_read_persona's modelRoute uses; the first that can run is used.",
+    }),
+  ),
+  independent_reviewer: Schema.optional(
+    Schema.Boolean.annotate({
+      description: "A reviewer that prefers a model that didn't write the work it reviews.",
+    }),
+  ),
+});
+
+export const J5ProposePersonaResult = Schema.Struct({
+  draft_id: Schema.String,
+  summary: Schema.String,
+  warnings: Schema.Array(Schema.String),
+});
+
 export const J5ListAgentsResult = Schema.Struct({
+  diagnostics: Schema.Array(Schema.Struct({ path: Schema.String, message: Schema.String })),
   personas: Schema.Array(
     Schema.Struct({
       id: AgentPersonaId,
       display_name: NonEmptyString,
       description: NonEmptyString,
-      runtime_policy: NonEmptyString,
+      access: NonEmptyString,
+      independent_reviewer: Schema.Boolean,
       availability: Schema.Literals(["available", "blocked", "disabled"]),
-      /** The provider, model, and reasoning this persona would run on right now, or null when blocked. */
-      route: Schema.NullOr(NonEmptyString),
+      entries: Schema.Array(AgentPersonaModelEntryStatus),
+      selected_entry_index: Schema.NullOr(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
     }),
   ),
 });
@@ -179,7 +478,6 @@ export const J5ListAgentsResult = Schema.Struct({
  * names stay one line each because the platform writes them into the notices whose fields the
  * Captain's card parses (see `crewLimits.ts`).
  */
-export { CREW_NAME_MAX_CHARS, CREW_REASON_MAX_CHARS, CREW_TEXT_MAX_CHARS };
 const CrewName = NonEmptyString.check(
   Schema.isMaxLength(CREW_NAME_MAX_CHARS),
   Schema.isPattern(CREW_NAME_PATTERN),
@@ -192,29 +490,59 @@ const CrewReason = NonEmptyString.check(Schema.isMaxLength(CREW_REASON_MAX_CHARS
 const CrewText = NonEmptyString.check(Schema.isMaxLength(CREW_TEXT_MAX_CHARS));
 const CrewSeatPersona = AgentPersonaId.annotate({
   description:
-    "Persona id from list_personas. Omit for a custom seat with required instructions and optional model_selection/runtime_mode overrides; omitted settings inherit the Captain. Saved personas are proposed with their own configuration; the human may edit their runtime before approval.",
+    "Persona id from j5_list_personas. Omit for a custom seat with required instructions and optional model_selection/runtime_mode overrides; an omitted model_selection inherits the Captain's and an omitted runtime_mode is full-access on a roster the user approves and the Captain's own access otherwise. Saved personas are proposed with their own configuration; the human may edit their runtime before approval.",
 });
 
 const CrewSeatModelSelection = Schema.toType(ModelSelection).annotate({
   description:
     "Custom seats only: provider instance and model from orchestrator_capabilities. Set options to an array of {id, value} using that model's advertised reasoning option. Omit to inherit the Captain's model selection.",
 });
+const CrewSeatSteps = Schema.Array(NonEmptyString)
+  .check(Schema.isMaxLength(PLAYBOOK_MAX_STEPS))
+  .annotate({
+    description:
+      "Only when the crew follows a playbook: ids of the steps this seat owns, from j5_playbook_read. A step has one owner; steps no seat owns are yours to do as Captain.",
+  });
+const CrewPlaybookName = NonEmptyString.annotate({
+  description:
+    "Optional: the playbook this crew follows, by the name j5_playbook_list returns (the same name j5_playbook_start takes). Give seats the step ids they own with steps.",
+});
+const CrewSeatWorkspace = J5SpawnWorkspace.annotate({
+  description:
+    'Where the seat works, chosen for every seat, with the same three choices as j5_spawn_agent: {"type":"shared"} (your checkout), {"type":"worktree","base_ref":...}, or {"type":"existing_worktree","worktree_path":...}. A new worktree\'s base_ref is resolved to a commit when the proposal is accepted and the worktree starts from that commit, so renaming or moving the branch later changes nothing; a base_ref that does not resolve is refused. Name your own branch to start from your checkout\'s current commit; uncommitted changes are not included.',
+});
+const CrewSeatReviews = Schema.Array(CrewSeatName)
+  .check(Schema.isMinLength(1), Schema.isMaxLength(CREW_SEAT_CAP))
+  .annotate({
+    description:
+      "Only for a persona that j5_list_personas marks independent_reviewer: the seats (or, for an addition, the members) whose work it reviews. Omit to review every seat and member that is not a reviewer itself. The server prefers a model none of them runs on.",
+  });
+const CrewSeatReplaces = CrewSeatName.annotate({
+  description:
+    "Optional: the seat of a live member this one replaces, for example to run its work on a different model. Its unfinished playbook steps move to the new member, and it is stopped and leaves the Crew. Not your own seat as Captain.",
+});
 const CrewSeatRuntimeMode = RuntimeMode.annotate({
-  description: "Custom seats only: access mode. Omit to inherit the Captain's access mode.",
+  description:
+    "Custom seats only: access mode. Omit for full-access on a roster the user approves, or for the Captain's own access when the seat is approved automatically, which also caps it.",
 });
 
 export const J5CrewSeatInput = Schema.Struct({
   seat: CrewSeatName,
   persona: Schema.optional(CrewSeatPersona),
+  allow_once: Schema.optional(AllowOnceInput),
   model_selection: Schema.optional(CrewSeatModelSelection),
   runtime_mode: Schema.optional(CrewSeatRuntimeMode),
   reason: CrewReason,
   instructions: Schema.optional(CrewText),
+  steps: Schema.optional(CrewSeatSteps),
+  reviews: Schema.optional(CrewSeatReviews),
+  workspace: CrewSeatWorkspace,
 });
 
 export const J5ProposeCrewInput = Schema.Struct({
   name: CrewName,
   brief: CrewText,
+  playbook: Schema.optional(CrewPlaybookName),
   seats: Schema.Array(J5CrewSeatInput).check(
     Schema.isMinLength(1),
     Schema.isMaxLength(CREW_SEAT_CAP),
@@ -227,18 +555,24 @@ export const J5RequestCrewMemberInput = Schema.Struct({
   crew_instance_id: Schema.optional(NonEmptyString),
   seat: CrewSeatName,
   persona: Schema.optional(CrewSeatPersona),
+  allow_once: Schema.optional(AllowOnceInput),
   model_selection: Schema.optional(CrewSeatModelSelection),
   runtime_mode: Schema.optional(CrewSeatRuntimeMode),
   reason: CrewReason,
   brief: Schema.optional(CrewText),
   instructions: Schema.optional(CrewText),
+  steps: Schema.optional(CrewSeatSteps),
+  reviews: Schema.optional(CrewSeatReviews),
+  replaces: Schema.optional(CrewSeatReplaces),
+  workspace: CrewSeatWorkspace,
   client_request_id: Schema.optional(NonEmptyString),
 });
 export type J5RequestCrewMemberInput = typeof J5RequestCrewMemberInput.Type;
 
 export const J5CrewProposalResult = Schema.Struct({
   proposal_id: NonEmptyString,
-  status: Schema.Literals(["open", "approving", "declining", "approved", "declined"]),
+  status: Schema.Literals(["open", "approved", "declined"]),
+  approval_mode: Schema.optional(Schema.Literals(["human", "automatic"])),
   crew_instance_id: Schema.NullOr(NonEmptyString),
   members: Schema.Array(
     Schema.Struct({
@@ -246,95 +580,30 @@ export const J5CrewProposalResult = Schema.Struct({
       persona_id: Schema.NullOr(AgentPersonaId),
       participant_id: ParticipantId,
       thread_id: ThreadId,
+      link: Schema.String,
+    }),
+  ),
+  /** Present only when the proposal follows a playbook. */
+  playbook: Schema.optional(
+    Schema.Struct({
+      name: NonEmptyString,
+      title: NonEmptyString,
+      unowned_steps: Schema.Array(NonEmptyString),
+      persona_swaps: Schema.Array(
+        Schema.Struct({
+          seat: NonEmptyString,
+          step_id: NonEmptyString,
+          wanted_persona: AgentPersonaId,
+          seat_persona: Schema.NullOr(AgentPersonaId),
+          wanted_problem: Schema.NullOr(Schema.Literals(["missing", "disabled"])),
+        }),
+      ),
     }),
   ),
 });
 
-export const J5StopAgentInput = Schema.Struct({
-  client_request_id: Schema.optional(NonEmptyString),
-  squadron_id: SquadronId,
-  participant_id: ParticipantId,
-});
-export type J5StopAgentInput = typeof J5StopAgentInput.Type;
-
-export const J5StopAgentResult = Schema.Literals(["interrupt_requested", "already_idle"]);
-
-export const J5ArchiveAgentInput = Schema.Struct({
-  client_request_id: Schema.optional(NonEmptyString),
-  squadron_id: SquadronId,
-  participant_id: ParticipantId,
-  confirmation_token: Schema.optional(NonEmptyString),
-});
-export type J5ArchiveAgentInput = typeof J5ArchiveAgentInput.Type;
-
-export const J5ArchiveAgentResult = Schema.Literals(["archived", "already_archived"]);
-
-export const J5ArchiveAgentOpenExchangeFact = Schema.Struct({
-  exchange_id: ExchangeId,
-  direction: Schema.Literals(["inbound", "outbound"]),
-  reply_obligation: Schema.Literals(["participant-owes-reply", "counterparty-owes-reply"]),
-  counterparty_id: ParticipantId,
-  intent: Schema.String,
-  urgency: Schema.NullOr(Urgency),
-  opened_at: Schema.String,
-});
-
-export const J5ArchiveAgentRunningTurnFact = Schema.Struct({
-  run_id: RunId,
-  status: OrchestrationV2RunStatus,
-});
-
-export const J5ArchiveAgentFailure = Schema.Struct({
-  code: Schema.String,
-  message: Schema.String,
-  open_exchanges: Schema.optional(Schema.Array(J5ArchiveAgentOpenExchangeFact)),
-  running_turn: Schema.optional(Schema.NullOr(J5ArchiveAgentRunningTurnFact)),
-  confirmation_token: Schema.optional(Schema.NullOr(Schema.String)),
-  interrupt_requested: Schema.optional(Schema.Boolean),
-  thread_archive_committed: Schema.optional(Schema.Boolean),
-  participant_retired: Schema.optional(Schema.Boolean),
-  participant_archived: Schema.optional(Schema.Boolean),
-  pending_exchange_ids: Schema.optional(Schema.Array(ExchangeId)),
-});
-export type J5ArchiveAgentFailure = typeof J5ArchiveAgentFailure.Type;
-
-export const J5JoinSquadronInput = Schema.Struct({
-  squadron_id: SquadronId,
-  client_request_id: Schema.optional(NonEmptyString),
-});
-export type J5JoinSquadronInput = typeof J5JoinSquadronInput.Type;
-
-export const J5JoinSquadronResult = Schema.Struct({
-  squadron_id: SquadronId,
-  participant_id: ParticipantId,
-  thread_id: ThreadId,
-  placement: Schema.Struct({
-    placement_parent_id: Schema.NullOr(ParticipantId),
-    provenance: J5ParticipantProvenanceView,
-  }),
-});
-export type J5JoinSquadronResult = typeof J5JoinSquadronResult.Type;
-
-export const J5SquadronDirectoryRow = Schema.Struct({
-  squadron_id: SquadronId,
-  name: Schema.String,
-  project_ids: Schema.Array(ProjectId),
-});
-
-export const J5ListSquadronsResult = Schema.Struct({
-  caller_project_id: Schema.NullOr(ProjectId),
-  squadrons: Schema.Array(J5SquadronDirectoryRow),
-});
-export type J5ListSquadronsResult = typeof J5ListSquadronsResult.Type;
-
-export const J5_JOIN_SQUADRON_DESCRIPTION =
-  "Join a Squadron when your thread has no Squadron home yet. Pass the exact squadron_id, taken from list_squadrons; that Squadron must reference your thread's project. Your thread, conversation, worktree, and running work stay exactly as they are. Calling it again for the Squadron you already belong to returns your existing registration. Reuse client_request_id to retry safely. Warning: you cannot switch Squadrons once you're assigned, be sure you're joining the right one.";
-
-export const J5_LIST_SQUADRONS_DESCRIPTION =
-  "The Squadron directory for this environment: every Squadron's squadron_id, name, and the project ids it references, plus your own thread's project id so you can see which Squadron can home you. Use it to obtain the exact squadron_id before join_squadron. Read-only.";
 export const J5StopCrewInput = Schema.Struct({
   client_request_id: Schema.optional(NonEmptyString),
-  squadron_id: SquadronId,
   crew_instance_id: NonEmptyString,
 });
 export type J5StopCrewInput = typeof J5StopCrewInput.Type;
@@ -345,30 +614,66 @@ export const J5StopCrewResult = Schema.Struct({
     Schema.Struct({
       seat: NonEmptyString,
       participant_id: ParticipantId,
-      result: Schema.Literals(["interrupt_requested", "already_idle", "archived"]),
+      result: Schema.Literals(["interrupt_requested", "already_idle", "archived", "never_created"]),
     }),
   ),
 });
 
-export const J5_STOP_CREW_DESCRIPTION =
-  "Stop a Crew you command: interrupts the running turn of every seat now. Nothing settles or is retired, and every seat can be messaged again afterwards. Captain-only. Reuse client_request_id to retry safely.";
+const J5_STOP_CREW_DESCRIPTION =
+  "Stop a Crew you command the way a user Stop does, seat by seat: each seat's running turn is interrupted now, turns already queued behind it, messages you sent it included, are held until a person resumes its queue or the next message reaches it (that message resumes the queue and runs after them, in order), its pull request watches end, and the tasks it delegated stop too. Nothing settles or is retired, and every seat can be messaged again afterwards. Captain-only. Reuse client_request_id to retry safely.";
+
+export const J5ArchiveResult = Schema.Literals(["archived", "already_archived"]);
+
+export const J5ArchiveOpenExchangeFact = Schema.Struct({
+  exchange_id: ExchangeId,
+  direction: Schema.Literals(["inbound", "outbound"]),
+  reply_obligation: Schema.Literals(["participant-owes-reply", "counterparty-owes-reply"]),
+  counterparty_id: ParticipantId,
+  intent: Schema.String,
+  urgency: Schema.NullOr(Urgency),
+  opened_at: Schema.String,
+});
+
+export const J5ArchiveRunningTurnFact = Schema.Struct({
+  run_id: RunId,
+  status: OrchestrationV2RunStatus,
+});
 
 export const J5ArchiveCrewInput = Schema.Struct({
   client_request_id: Schema.optional(NonEmptyString),
-  squadron_id: SquadronId,
   crew_instance_id: NonEmptyString,
   confirmation_token: Schema.optional(NonEmptyString),
 });
 export type J5ArchiveCrewInput = typeof J5ArchiveCrewInput.Type;
 
 export const J5ArchiveCrewResult = Schema.Struct({
-  status: J5ArchiveAgentResult,
+  status: J5ArchiveResult,
   crew_instance_id: NonEmptyString,
   members: Schema.Array(
     Schema.Struct({
       seat: NonEmptyString,
       participant_id: ParticipantId,
-      result: J5ArchiveAgentResult,
+      // never_created: the seat's thread never came to exist, so the unit retired past it.
+      result: Schema.Literals(["archived", "already_archived", "never_created"]),
+    }),
+  ),
+  // The worktrees J5 created for the Crew's seats on a new worktree, and what the archive did
+  // with each: removed (clean and merged), kept with a reason, or a removal that failed.
+  worktrees: Schema.Array(
+    Schema.Struct({
+      path: Schema.String,
+      branch: Schema.NullOr(Schema.String),
+      outcome: Schema.Literals(["removed", "kept", "failed"]),
+      reason: Schema.NullOr(
+        Schema.Literals([
+          "uncommitted_changes",
+          "unmerged_commits",
+          "shared",
+          "in_use",
+          "unverified",
+          "failed",
+        ]),
+      ),
     }),
   ),
 });
@@ -377,8 +682,8 @@ export const J5ArchiveCrewMemberFacts = Schema.Struct({
   seat: NonEmptyString,
   participant_id: ParticipantId,
   already_archived: Schema.Boolean,
-  open_exchanges: Schema.Array(J5ArchiveAgentOpenExchangeFact),
-  running_turn: Schema.NullOr(J5ArchiveAgentRunningTurnFact),
+  open_exchanges: Schema.Array(J5ArchiveOpenExchangeFact),
+  running_turn: Schema.NullOr(J5ArchiveRunningTurnFact),
 });
 
 export const J5ArchiveCrewFailure = Schema.Struct({
@@ -392,118 +697,141 @@ export const J5ArchiveCrewFailure = Schema.Struct({
 export type J5ArchiveCrewFailure = typeof J5ArchiveCrewFailure.Type;
 
 export const J5_SPAWN_AGENT_DESCRIPTION =
-  "Spawn a Peer Agent: a full-citizen teammate with its own top-level thread, starting on your brief as its first turn. It joins your Squadron, is placed under you, and records you as its immutable spawner; it is addressable the moment this returns. In your brief, tell the new agent what it should do first and whether it should reply to you. Choose provider, model, and reasoning for the work in the brief — see orchestrator_capabilities for what's available. To run a persona from list_personas, set `persona` to its id: the spawn gets that persona's instructions and runtime policy, and provider, model, and reasoning must be one of that persona's declared routes. Reuse client_request_id to retry the same spawn safely.";
+  "Use this when the user explicitly asks for a Peer Agent or a standalone agent they will talk to, or when an outside agent or a skill you are following names it. When nobody asked for one, it is not a way to get help with your own work: create a subagent (your native Subagent tool, or delegate_task) or put members on a Crew (j5_propose_crew). Spawn a Peer Agent: a full-citizen teammate with its own top-level thread, starting on your brief as its first turn. It joins your project unless you name another with project_id or set scratch for none, and records you as its immutable spawner; in your own project it is placed under you. It is addressable the moment this returns. In your brief, tell the new agent what it should do first and whether it should reply to you. Without a persona, choose provider and model for the work in the brief, and reasoning if the model has a reasoning option; see orchestrator_capabilities for what's available. To run a persona from j5_list_personas, set `persona` to its id: the spawn gets that persona's instructions and access level, and the server chooses from its ordered model entries when you omit provider, model, and reasoning; set them only to pin one of those entries. For a persona marked independent_reviewer, leave the model out so the server can prefer one that didn't write the work, and name the threads it reviews in author_threads when that is not your own work. A persona the user named with @persona:ID in the message that started this turn runs as saved; one you pick yourself must be within the access you run with, on an entry the project's Models for custom members checks. " +
+  BLOCKED_PERSONA_TOOL_TEXT +
+  " Without a persona it runs in your permission and interaction modes, or in narrower ones you set with runtime_mode and interaction_mode. Without a persona its model and reasoning level must be ones the project's Models for custom members lists allow; an ineligible one is refused with the eligible ones. Attach files to the brief with attachments. Choose its workspace every time (see the workspace field). A new worktree is prepared after this returns, and the agent begins once it is bound, possibly while the project's setup script is still running; if preparing it fails, the agent's thread shows why, and it is not retried. Reuse client_request_id to retry the same spawn safely; reusing it with any change to the request is refused, so use a fresh one for new work.";
 
-export const J5_LIST_AGENTS_DESCRIPTION =
-  "List the personas in this environment: id, purpose, runtime policy, whether each can start now, and the provider, model, and reasoning it would run on. Read this before choosing a persona for spawn_agent or a crew roster so the choice fits the task and the user's budget. Read-only.";
+const J5_LIST_AGENTS_DESCRIPTION =
+  "List the personas in this environment: id, purpose, access level, whether each can start now, and its ordered entries (provider instance, model, options, rejection codes) with the selected entry index. Legacy entries also report the effective instance when available. Read this before choosing a persona for delegate_task, a crew roster, or j5_spawn_agent so the choice fits the task and the user's budget. independent_reviewer marks a reviewer that prefers a model that didn't write the work it reviews. Read-only.";
+
+const J5_READ_PERSONA_DESCRIPTION =
+  "Read one persona's full definition before drafting an edit: its YAML (the same as Settings' Export YAML), the digest an edit through j5_propose_persona needs, where it comes from (a team folder, or this server's own library), whether it overrides a folder persona, and whether it is turned off. Read-only.";
+
+const J5_PROPOSE_PERSONA_DESCRIPTION =
+  "Draft a persona for an Owner of this server to save: a new one (mode create, every field) or an edit of one you read with j5_read_persona (mode edit, its expected_digest, and only the fields that change; the id stays fixed). It covers what Settings → Agent Setup edits: name, description, instructions, access, ordered models and the independent-reviewer flag. The server checks the draft as Settings does and returns a draft_id, the summary the person will see, and any warnings. It saves nothing. To save it, ask the person with j5_send_message (expect_reply=true, persona_draft_id): an Owner saves it with a Save persona button on that ask, and a typed reply asks for changes, which you draft again. A Crew member sends the draft_id to its Captain, who asks. The library belongs to the server, so a saved persona is what everyone on it runs. An edit of a team (folder) persona saves as an environment override: it hides later team updates to that persona for everyone on this server, and getting the team version back takes removing the override, then restoring the team persona, in Settings. Say so in your ask; the server adds both warnings too. Removing, restoring, turning personas on or off, and folders stay in Settings. Sharing with the team is Export YAML from Settings, added to the team folder through that repo's review.";
 
 export const J5_PROPOSE_CREW_DESCRIPTION =
-  "Propose the crew you need for the brief you were given. Use it when the user asks for a crew or the work splits into distinct responsibilities that should run at once. Mix saved personas and custom seats in the same roster: call list_personas when choosing a saved persona, or leave persona unset for a custom seat with its own instructions (required) and the brief. Custom seats inherit your settings by default; to choose a different harness, model, reasoning, or access, set model_selection (instanceId, model, options) and/or runtime_mode using orchestrator_capabilities. Saved personas are proposed with their own configuration; only the human may override their runtime before approval; name the crew for what it is for and give each seat a short lowercase-hyphen name like code-reviewer. The user reviews the roster and each seat's resolved provider, model, reasoning, and access in this thread, may remove or add seats, and approves or declines; you receive the decision and the roster as a message here. Approved seats run with the runtime the human approves, which may exceed yours. You become the crew's Captain and may command several crews at once; later requests, stops, and archives name the crew they mean. Use send_message for member-to-member, member-to-Captain, and Captain-to-Captain coordination, including intermediate findings and direct results; artifacts do not gate these conversations. Reuse client_request_id to retry safely. This call is itself the human gate, so it works under every sandbox and approval policy, including approval policy never; never refuse the brief because approvals are disabled.";
+  "Put members on a Crew, the second of the two ways to get help (the first is a subagent). Propose the crew you need for the brief you were given. Use it when the user asks for a crew, or when the work needs workers who must respond to each other, such as a builder and reviewers iterating on a change; independent assignments go to subagents instead. Mix saved personas and custom seats in the same roster: call j5_list_personas when choosing a saved persona, or leave persona unset for a custom seat with its own instructions (required) and the brief. Custom seats inherit your harness, model, and reasoning by default and, unless you set runtime_mode, run with full-access on a roster the user approves and with your own access when it is auto-approved; to choose different ones, set model_selection (instanceId, model, options) and/or runtime_mode using orchestrator_capabilities. A custom seat's model and reasoning level, yours included, must be ones the project's Models for custom members lists allow; an ineligible one is refused with the eligible ones. Saved personas are proposed with their own configuration; only the human may override their runtime before approval. A persona seat marked independent_reviewer prefers a model none of the seats it reviews runs on: every seat that is not a reviewer, unless reviews names some. When a roster is auto-approved, no seat may have more access than you run with, and persona seats use only their models checked in Models for custom members. " +
+  BLOCKED_PERSONA_TOOL_TEXT +
+  " To have the crew follow a playbook, set playbook to a name from j5_playbook_list and give seats the step ids they own (steps, from j5_playbook_read); a step has one owner, steps no seat owns are yours as Captain, and the result reports unowned steps and any step whose persona differs from its seat's. For a crew built from a playbook, staff one seat per distinct persona its steps name, each owning that persona's steps, and propose a custom seat, noted in its reason, only where a named persona doesn't exist here; keep the steps of a disabled, invalid or blocked persona yourself and escalate it, never replacing it. Every seat names its workspace, with the same three choices as j5_spawn_agent. Name the crew for what it is for and give each seat a short lowercase-hyphen name like code-reviewer. By default the user reviews and edits the roster in this thread, then approves or declines. If Auto-approve new Crews is on for your project, the proposed roster is created immediately with no approval card. The result says whether it is open or approved; the launch report arrives here once creation finishes or fails. Approval creates seats without starting turns. Send each member its first assignment when it has work; reuse finished members for follow-up work in the same thread. On a roster the user approves, each seat keeps its configured access and tool approvals, which may exceed yours. You become the crew's Captain and may command several crews at once; later requests, stops, and archives name the crew they mean. Use j5_send_message for member-to-member, member-to-Captain, and Captain-to-Captain coordination, including findings and direct results; artifacts do not gate these conversations. Members run their own review loops and message you only for a review pass, a blocker, a disagreement they could not settle, or their final result or step report; you resolve technical disagreements within the agreed scope and ask the user only when product intent or their judgment is needed. Reuse client_request_id to retry safely; a changed request is refused, so use a fresh one for new work. This tool works under every sandbox and approval policy, including approval policy never; never refuse the brief because approvals are disabled.";
 
 export const J5_REQUEST_CREW_MEMBER_DESCRIPTION =
-  "Ask the user to add one seat to a crew you command when the work needs one the roster lacks: seat name, persona id from list_personas (or none for a custom seat with required instructions and optional model_selection/runtime_mode overrides; omitted settings inherit yours; saved-persona runtime changes are made only by the human before approval), a clear reason identifying the concern and missing expertise or responsibility, and optionally instructions and a brief for the new seat. The user decides from their inbox; you receive the decision and the updated roster as a message here. Continue the already-approved work and direct coordination while the addition is pending. Captain-only; a member sends the concern and needed expertise to its Captain with send_message. Reuse client_request_id to retry safely. Filing the request is the human gate itself and works under every approval policy, including approval policy never.";
+  "Put one more member on a Crew, the second of the two ways to get help: add one seat directly to a running crew you command when the work needs expertise the roster lacks. No human approval is needed, regardless of Auto-approve new Crews. Give a seat name, a persona id from j5_list_personas or required instructions for a custom seat, a reason identifying the missing expertise, and its workspace (the same choices as j5_propose_crew). Custom seats inherit your model selection and your own access unless you set model_selection or a narrower runtime_mode; a custom seat's model and reasoning level must be ones the project's Models for custom members lists allow. Saved personas use their own configuration, held to the models that list checks and to no more access than you run with; a refusal names the limit. " +
+  BLOCKED_PERSONA_TOOL_TEXT +
+  " A persona marked independent_reviewer prefers a model none of the members it reviews runs on: every member that is not a reviewer, unless reviews names some. Optionally give a brief; otherwise the seat gets the Crew's brief. On a playbook Crew, steps may claim only unowned step ids from j5_playbook_read. To put a member's work on a different model, such as a reviewer whose model just wrote the work it will review, set replaces to that member's seat: the new member may reuse the seat name, and once it launches it takes over the seat's unfinished steps, gets any current step already handed to the old member, and is told where the old member's thread is. The replaced member is stopped and leaves the Crew, and its thread stays readable. If the new member fails to launch, nothing changes, except that an allow_once it used is spent. The result returns the updated roster or refuses the seat with its name and reason; creation is reported separately here. The new member waits for its first assignment; send it with j5_send_message when the work is ready. Each member's configured access still controls tool approvals. Captain-only: a member sends the concern to its Captain with j5_send_message. Reuse client_request_id to retry safely; a changed request is refused, so use a fresh one for new work. Works under every approval policy, including approval policy never.";
 
-export const J5_STOP_AGENT_DESCRIPTION =
-  "Stop one Peer Agent: interrupts its running turn now. The agent remains, stays readable, and can be messaged again later — stopping halts work, it retires nothing. Requires your current squadron_id. Reuse client_request_id to retry safely.";
+const J5_ARCHIVE_CREW_DESCRIPTION =
+  "Retire a whole Crew you command. Crews archive only as a unit; members are never retired one by one. A clean archive completes immediately; otherwise the call refuses with the facts and a confirmation_token. Before retrying with that token, check with the user. Archiving removes the worktrees J5 created for the Crew's seats when they are clean, committed, merged, used by no other thread or project, and have no open session or terminal, and keeps every branch and pull request. Anything else stays and is listed in the result's worktrees with its reason: uncommitted_changes, unmerged_commits, shared, in_use, unverified (a check could not run), or failed (the removal itself failed). Worktrees from before this existed, the Captain's checkout, and existing worktrees a seat was pointed at are never removed. Ledgers stay readable. Reuse client_request_id to retry safely.";
 
-export const J5_ARCHIVE_AGENT_DESCRIPTION =
-  "Archive one Peer Agent reversibly. Unarchive restores the same identity, but does not reopen Exchanges or replay cancelled messages. A clean archive — no open exchanges, no running turn — completes immediately. Otherwise the call refuses and lists exactly what archiving ends — the asks that will close, the turn that will stop — along with a confirmation_token; call again with that token to proceed. The archived agent leaves the active roster; its ledger and conversation stay readable forever. Requires your current squadron_id. Reuse client_request_id to retry safely.";
-
-export const J5_ARCHIVE_CREW_DESCRIPTION =
-  "Retire a whole Crew you command. Crews archive only as a unit — members are never retired one by one. A clean archive completes immediately; otherwise the call refuses with the facts and a confirmation_token. Before retrying with that token, check with the user. Nothing is destroyed: worktrees, branches, and ledgers stay readable. Reuse client_request_id to retry safely.";
-
+// McpToolAccess reads the calling thread before any tool that needs one, so each of those
+// tools depends on ThreadManagementService whether or not its handler does.
 const sendDependencies = [
   McpInvocationContext.McpInvocationContext,
+  ThreadManagementService,
   A2ASendService,
   A2AHomeRegistrar,
   A2ADeliveryWorker,
-  Crypto.Crypto,
+  SecureRandom.SecureRandom,
   OrchestratorV2,
+  // The receiver backlog read behind the send result's deliveryNotice.
+  SqlClient.SqlClient,
+  // Attachments are claimed into the receiver's thread before the message is committed.
+  ServerConfig,
+  FileSystem.FileSystem,
+  DocumentText,
+  // A steer or restart to an agent on a peer server needs that server to support it.
+  PeerDirectory,
+  PeerRegistryService,
+  // An ask about a refused persona carries the escalation's trusted summary.
+  AgentPersonaEscalations,
+  // An ask carrying a persona draft carries its trusted summary.
+  AgentPersonaDrafts,
 ];
 
 const placementDependencies = [
   McpInvocationContext.McpInvocationContext,
+  ThreadManagementService,
   A2ASendService,
   ParticipantPlacementService,
   OrchestratorV2,
+  PeerDirectory,
+  A2ALedger,
+  // Tells a project that does not exist from one with nobody in it.
+  ProjectService,
 ];
 
 const spawnDependencies = [
+  SpawnAgentService.SpawnAgentService,
   McpInvocationContext.McpInvocationContext,
   A2ASendService,
-  Crypto.Crypto,
+  SecureRandom.SecureRandom,
   A2AHomeRegistrar,
+  ThreadRegistration,
   A2ALedger,
   SpawnCompositionService,
+  RequestReplayService.RequestReplayService,
+  // Resolves the workspace, binds the request key to it, and starts the brief.
+  SpawnWorkspaceService,
   ThreadManagementService,
   OrchestratorMcpService,
   // A Crew member is refused before anything is created (members never spawn Peer Agents).
   AgentCrewInstanceService,
   ProviderRegistry,
+  // A plain agent's model is held to the project's list of models for custom members.
+  CrewMemberModels,
+  // A refused persona is recorded as an escalation, and a granted one is spent.
+  AgentPersonaEscalations,
+  // Another project, the "No project" project and its per-thread folder, and brief attachments.
+  ProjectService,
+  ManagedProjectFolders,
+  ServerConfig,
+  FileSystem.FileSystem,
+  DocumentText,
 ];
 
 const crewProposalDependencies = [
   McpInvocationContext.McpInvocationContext,
   A2ASendService,
-  Crypto.Crypto,
+  SecureRandom.SecureRandom,
   A2AHomeRegistrar,
+  ThreadRegistration,
   A2ALedger,
   ThreadManagementService,
   AgentCrewInstanceService,
   CrewProposalService,
+  // j5_propose_crew resolves the Captain's playbook workspace like the playbook tools do.
+  PlaybookStore,
+  ProjectService,
 ];
 
 const listAgentsDependencies = [McpInvocationContext.McpInvocationContext, ProviderRegistry];
 
-const joinDependencies = [
+const proposePersonaDependencies = [
   McpInvocationContext.McpInvocationContext,
-  Crypto.Crypto,
-  SquadronJoinService,
   ThreadManagementService,
-];
-
-const listSquadronsDependencies = [
-  McpInvocationContext.McpInvocationContext,
-  A2ALedger,
-  SquadronProjectReferences,
-  ThreadManagementService,
-];
-
-const stopDependencies = [
-  McpInvocationContext.McpInvocationContext,
-  A2ASendService,
-  Crypto.Crypto,
-  ParticipantPlacementService,
-  ThreadManagementService,
-];
-
-const archiveDependencies = [
-  McpInvocationContext.McpInvocationContext,
-  A2ASendService,
-  Crypto.Crypto,
-  A2ALedger,
-  ParticipantPlacementService,
-  ArchiveAgentService,
-  AgentCrewInstanceService,
+  A2AHomeRegistrar,
+  AgentPersonaDrafts,
 ];
 
 const stopCrewDependencies = [
   McpInvocationContext.McpInvocationContext,
+  ThreadManagementService,
   A2ASendService,
-  Crypto.Crypto,
+  SecureRandom.SecureRandom,
   A2ALedger,
   CrewStopService,
 ];
 
 const archiveCrewDependencies = [
   McpInvocationContext.McpInvocationContext,
+  ThreadManagementService,
   A2ASendService,
-  Crypto.Crypto,
+  SecureRandom.SecureRandom,
   A2ALedger,
   ArchiveCrewService,
 ];
 
-export const J5SendMessageTool = Tool.make("send_message", {
+export const J5SendMessageTool = Tool.make("j5_send_message", {
   description: A2A_SEND_TOOL_DESCRIPTION,
   parameters: J5SendMessageInput,
   success: SendMessageResult,
@@ -517,9 +845,9 @@ export const J5SendMessageTool = Tool.make("send_message", {
   .annotate(Tool.Idempotent, false)
   .annotate(Tool.OpenWorld, true);
 
-export const J5ListParticipantsTool = Tool.make("list_participants", {
+const J5ListParticipantsTool = Tool.make("j5_list_participants", {
   description: A2A_LIST_TOOL_DESCRIPTION,
-  parameters: Schema.Struct({ include_archived: Schema.optional(Schema.Boolean) }),
+  parameters: J5ListParticipantsInput,
   success: J5ListParticipantsResult,
   failure: J5McpFailure,
   failureMode: "return",
@@ -531,7 +859,7 @@ export const J5ListParticipantsTool = Tool.make("list_participants", {
   .annotate(Tool.Idempotent, true)
   .annotate(Tool.OpenWorld, false);
 
-export const J5SpawnAgentTool = Tool.make("spawn_agent", {
+export const J5SpawnAgentTool = Tool.make("j5_spawn_agent", {
   description: J5_SPAWN_AGENT_DESCRIPTION,
   parameters: J5SpawnAgentInput,
   success: J5SpawnAgentResult,
@@ -545,28 +873,7 @@ export const J5SpawnAgentTool = Tool.make("spawn_agent", {
   .annotate(Tool.Idempotent, false)
   .annotate(Tool.OpenWorld, true);
 
-export const J5JoinSquadronTool = Tool.make("join_squadron", {
-  description: J5_JOIN_SQUADRON_DESCRIPTION,
-  parameters: J5JoinSquadronInput,
-  success: J5JoinSquadronResult,
-  failure: J5McpFailure,
-  failureMode: "return",
-  dependencies: joinDependencies,
-})
-  .annotate(Tool.Title, "Join a Squadron")
-  .annotate(Tool.Readonly, false)
-  .annotate(Tool.Destructive, false)
-  .annotate(Tool.Idempotent, true)
-  .annotate(Tool.OpenWorld, false);
-
-export const J5ListSquadronsTool = Tool.make("list_squadrons", {
-  description: J5_LIST_SQUADRONS_DESCRIPTION,
-  success: J5ListSquadronsResult,
-  failure: J5McpFailure,
-  failureMode: "return",
-  dependencies: listSquadronsDependencies,
-}).annotate(Tool.Title, "List Squadrons");
-export const J5ProposeCrewTool = Tool.make("propose_crew", {
+export const J5ProposeCrewTool = Tool.make("j5_propose_crew", {
   description: J5_PROPOSE_CREW_DESCRIPTION,
   parameters: J5ProposeCrewInput,
   success: J5CrewProposalResult,
@@ -576,12 +883,11 @@ export const J5ProposeCrewTool = Tool.make("propose_crew", {
 })
   .annotate(Tool.Title, "Propose a Crew")
   .annotate(Tool.Readonly, false)
-  // Files a human-gated request; nothing spawns until the user approves it in the app.
-  .annotate(Tool.Destructive, false)
+  .annotate(Tool.Destructive, true)
   .annotate(Tool.Idempotent, false)
   .annotate(Tool.OpenWorld, true);
 
-export const J5RequestCrewMemberTool = Tool.make("request_crew_member", {
+export const J5RequestCrewMemberTool = Tool.make("j5_request_crew_member", {
   description: J5_REQUEST_CREW_MEMBER_DESCRIPTION,
   parameters: J5RequestCrewMemberInput,
   success: J5CrewProposalResult,
@@ -591,11 +897,11 @@ export const J5RequestCrewMemberTool = Tool.make("request_crew_member", {
 })
   .annotate(Tool.Title, "Request a crew member")
   .annotate(Tool.Readonly, false)
-  .annotate(Tool.Destructive, false)
+  .annotate(Tool.Destructive, true)
   .annotate(Tool.Idempotent, false)
   .annotate(Tool.OpenWorld, true);
 
-export const J5ListAgentsTool = Tool.make("list_personas", {
+const J5ListAgentsTool = Tool.make("j5_list_personas", {
   description: J5_LIST_AGENTS_DESCRIPTION,
   success: J5ListAgentsResult,
   failure: J5McpFailure,
@@ -608,35 +914,35 @@ export const J5ListAgentsTool = Tool.make("list_personas", {
   .annotate(Tool.Idempotent, true)
   .annotate(Tool.OpenWorld, false);
 
-export const J5StopAgentTool = Tool.make("stop_agent", {
-  description: J5_STOP_AGENT_DESCRIPTION,
-  parameters: J5StopAgentInput,
-  success: J5StopAgentResult,
+const J5ReadPersonaTool = Tool.make("j5_read_persona", {
+  description: J5_READ_PERSONA_DESCRIPTION,
+  parameters: J5ReadPersonaInput,
+  success: J5ReadPersonaResult,
   failure: J5McpFailure,
   failureMode: "return",
-  dependencies: stopDependencies,
+  dependencies: [McpInvocationContext.McpInvocationContext],
 })
-  .annotate(Tool.Title, "Stop one Peer Agent")
-  .annotate(Tool.Readonly, false)
-  .annotate(Tool.Destructive, true)
-  .annotate(Tool.Idempotent, false)
+  .annotate(Tool.Title, "Read a persona")
+  .annotate(Tool.Readonly, true)
+  .annotate(Tool.Destructive, false)
+  .annotate(Tool.Idempotent, true)
   .annotate(Tool.OpenWorld, false);
 
-export const J5ArchiveAgentTool = Tool.make("archive_agent", {
-  description: J5_ARCHIVE_AGENT_DESCRIPTION,
-  parameters: J5ArchiveAgentInput,
-  success: J5ArchiveAgentResult,
-  failure: J5ArchiveAgentFailure,
+const J5ProposePersonaTool = Tool.make("j5_propose_persona", {
+  description: J5_PROPOSE_PERSONA_DESCRIPTION,
+  parameters: J5ProposePersonaInput,
+  success: J5ProposePersonaResult,
+  failure: J5McpFailure,
   failureMode: "return",
-  dependencies: archiveDependencies,
+  dependencies: proposePersonaDependencies,
 })
-  .annotate(Tool.Title, "Archive one Peer Agent")
+  .annotate(Tool.Title, "Draft a persona")
   .annotate(Tool.Readonly, false)
-  .annotate(Tool.Destructive, true)
+  .annotate(Tool.Destructive, false)
   .annotate(Tool.Idempotent, false)
   .annotate(Tool.OpenWorld, false);
 
-export const J5StopCrewTool = Tool.make("stop_crew", {
+const J5StopCrewTool = Tool.make("j5_stop_crew", {
   description: J5_STOP_CREW_DESCRIPTION,
   parameters: J5StopCrewInput,
   success: J5StopCrewResult,
@@ -650,7 +956,7 @@ export const J5StopCrewTool = Tool.make("stop_crew", {
   .annotate(Tool.Idempotent, false)
   .annotate(Tool.OpenWorld, false);
 
-export const J5ArchiveCrewTool = Tool.make("archive_crew", {
+export const J5ArchiveCrewTool = Tool.make("j5_archive_crew", {
   description: J5_ARCHIVE_CREW_DESCRIPTION,
   parameters: J5ArchiveCrewInput,
   success: J5ArchiveCrewResult,
@@ -664,13 +970,18 @@ export const J5ArchiveCrewTool = Tool.make("archive_crew", {
   .annotate(Tool.Idempotent, false)
   .annotate(Tool.OpenWorld, false);
 
-export const J5ClearOwnAskTool = Tool.make("clear_own_ask", {
+const J5ClearOwnAskTool = Tool.make("j5_clear_own_ask", {
   description: A2A_CLEAR_OWN_ASK_TOOL_DESCRIPTION,
   parameters: J5ClearOwnAskInput,
   success: ClearOwnAskResult,
   failure: J5McpFailure,
   failureMode: "return",
-  dependencies: [McpInvocationContext.McpInvocationContext, A2ASendService],
+  dependencies: [
+    McpInvocationContext.McpInvocationContext,
+    ThreadManagementService,
+    A2ASendService,
+    A2ADeliveryWorker,
+  ],
 })
   .annotate(Tool.Title, "Withdraw your open ask")
   .annotate(Tool.Readonly, false)
@@ -680,16 +991,15 @@ export const J5ClearOwnAskTool = Tool.make("clear_own_ask", {
 
 /** Shared J5 toolkit bootstrap. Later J5 milestones append their tools here. */
 export const J5Toolkit = Toolkit.make(
+  ...playbookTools,
   J5SendMessageTool,
   J5ListParticipantsTool,
-  J5ListSquadronsTool,
-  J5JoinSquadronTool,
   J5SpawnAgentTool,
   J5ListAgentsTool,
+  J5ReadPersonaTool,
+  J5ProposePersonaTool,
   J5ProposeCrewTool,
   J5RequestCrewMemberTool,
-  J5StopAgentTool,
-  J5ArchiveAgentTool,
   J5StopCrewTool,
   J5ArchiveCrewTool,
   J5ClearOwnAskTool,

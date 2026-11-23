@@ -1,0 +1,618 @@
+// @effect-diagnostics nodeBuiltinImport:off - a build-time generator; plain file writes and one child process.
+/**
+ * Builds the home an agent live-tests against, with no model:
+ *   node apps/server/src/j5/test-support/liveTestHome.ts --root <absolute dir> --owner-name <name>
+ * Writes `test-repo`, a `home` with replayed (view-only) threads, and `<root>/manifest.json` for
+ * `scripts/j5/setup-agent-live-test.ts`. Nothing in the home points outside `<root>`.
+ */
+import { seedLiveTestSkills } from "./liveTestSkills.ts";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import * as NodeServices from "@effect/platform-node/NodeServices";
+import {
+  ChatAttachmentId,
+  ProjectId,
+  type ChatAttachment,
+  type ModelSelection,
+  type OrchestrationV2Command,
+  type ProviderReplayTranscript,
+} from "@t3tools/contracts";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import {
+  materializeReplayTranscriptWorkspace,
+  readProviderReplayTranscript,
+} from "@t3tools/provider-testing/replayTranscript";
+import * as Clock from "effect/Clock";
+import * as Config from "effect/Config";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as SqlClient from "effect/sql/SqlClient";
+import * as Logger from "effect/Logger";
+import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
+import type * as Scope from "effect/Scope";
+import { TestClock } from "effect/testing";
+import * as NodeChildProcess from "node:child_process";
+import * as NodeFS from "node:fs";
+import * as NodePath from "node:path";
+import * as NodeSqlite from "node:sqlite";
+
+import { attachmentRelativePath, createDeterministicAttachmentId } from "../../attachmentStore.ts";
+import { ClaudeOrchestratorReplayHarness } from "../../orchestration-v2/Adapters/ClaudeAdapterV2.testkit.ts";
+import { CodexOrchestratorReplayHarness } from "../../orchestration-v2/Adapters/CodexAdapterV2.testkit.ts";
+import { provideDeterministicTestRuntime } from "../../orchestration-v2/testkit/DeterministicRuntime.ts";
+import { ORCHESTRATOR_REPLAY_FIXTURES } from "../../orchestration-v2/testkit/fixtures/index.ts";
+import {
+  materializeFixtureInput,
+  type OrchestratorReplayFixture,
+  type ProviderOrchestratorReplayVariant,
+} from "../../orchestration-v2/testkit/fixtures/shared.ts";
+import {
+  runOrchestratorV2ProviderReplayScenario,
+  type OrchestratorV2ProviderReplayHarness,
+} from "../../orchestration-v2/testkit/ProviderReplayHarness.ts";
+import { materializeReplayTranscriptRuntimeInstructions } from "../../orchestration-v2/testkit/ReplayRuntimeInstructions.ts";
+import * as SqlitePersistence from "../../persistence/Sqlite.ts";
+import {
+  runDevDeliverySeed,
+  validateIsolatedBaseDir,
+} from "../a2a/test-support/devDeliverySeed.ts";
+import { checkedPersonName } from "../sharing/personNames.ts";
+import * as PersonAccess from "../sharing/PersonAccess.ts";
+import { ensureLocalOperatorHumanPerson } from "../a2a/HumanPersonRegistry.ts";
+import {
+  createLiveTestRepo,
+  LIVE_TEST_HOLD_RELEASE_FILE,
+  LIVE_TEST_HOLD_SCRIPT,
+  LIVE_TEST_PLAYBOOKS,
+} from "./liveTestRepo.ts";
+
+type ReplayDriver = "claudeAgent" | "codex";
+
+/**
+ * A state no recording has. `image`: the user's message shows an image the provider never saw.
+ * `question`: a Codex question that does not hold its turn, the one pending request startup
+ * recovery keeps; answering starts a real turn. No approvals: recovery expires them.
+ */
+type ReplayState = "image" | "question";
+/** The title each state's thread gets, which is how a tester finds it. */
+const LIVE_TEST_STATE_TITLES = {
+  image: "Message with an image",
+  question: "Question waiting for an answer",
+} as const satisfies Record<ReplayState, string>;
+const LIVE_TEST_QUESTION = {
+  title: "Which colour should the banner be?",
+  options: ["Blue", "Green"],
+};
+const LIVE_TEST_IMAGE = NodePath.join(import.meta.dirname, "liveTestImage.png");
+
+type LiveTestReplay = readonly [fixture: string, driver: ReplayDriver, state?: ReplayState];
+
+/**
+ * [fixture, driver], oldest first. Chosen for variety in what the timeline has
+ * to render. Each pair appears once: a recording's native item ids become its
+ * turn item ids, so a second replay of it would take the first one's rows.
+ */
+const LIVE_TEST_REPLAYS: ReadonlyArray<LiveTestReplay> = [
+  ["multi_turn", "claudeAgent"],
+  ["multi_turn", "codex"],
+  ["turn_interrupt", "claudeAgent"],
+  ["turn_interrupt", "codex"],
+  ["claude_result_is_error", "claudeAgent"],
+  ["subagent", "claudeAgent"],
+  ["subagent", "codex"],
+  ["claude_background_task_wake", "claudeAgent"],
+  ["tool_call_read_only", "claudeAgent"],
+  ["claude_compact_after_peer_turn", "claudeAgent"],
+  ["queued_turn", "codex"],
+  ["todo_list", "codex"],
+  ["proposed_plan", "codex"],
+  ["web_search", "codex"],
+  ["claude_mcp_tool_presentation", "claudeAgent"],
+  ["simple", "claudeAgent", "image"],
+  ["simple", "codex", "question"],
+];
+
+const LIVE_TEST_PROJECT_TITLE = "Live test repo";
+/**
+ * New threads in the home start on this model. Haiku 5.5 and not 4.5: 4.5
+ * exposes no reasoning options, so `j5_spawn_agent` cannot start it, and it has
+ * no Auto mode.
+ */
+const LIVE_TEST_DEFAULT_MODEL = {
+  instanceId: "claudeAgent",
+  model: "claude-haiku-5-5",
+  options: [{ id: "effort", value: "low" }],
+} as const;
+const HAIKU_ROUTE = { driver: "claudeAgent", model: "claude-haiku-5-5" } as const;
+const LUNA_ROUTE = { driver: "codex", model: "gpt-6-luna" } as const;
+/** A persona names exactly two routes; the second is used only when the first is unavailable. */
+const LIVE_TEST_PERSONAS = [
+  { id: "haiku-helper", displayName: "Haiku helper", routes: [HAIKU_ROUTE, LUNA_ROUTE] },
+  { id: "luna-helper", displayName: "Luna helper", routes: [LUNA_ROUTE, HAIKU_ROUTE] },
+] as const;
+/**
+ * The time to build as, in epoch milliseconds, when `J5_LIVE_TEST_NOW` is set.
+ * `setup-agent-live-test --base` sets it for both builds, so a base and a head
+ * home date their replayed threads identically.
+ */
+const fixedNow = Config.Int("J5_LIVE_TEST_NOW").pipe(
+  Config.option,
+  Config.map(Option.getOrUndefined),
+  Effect.orElseSucceed(() => undefined),
+);
+/** The replayed threads are spaced this far apart, ending just before the build. */
+const REPLAY_SPACING_MS = 20 * 60 * 1000;
+
+class LiveTestHomeReplayError extends Schema.TaggedError<LiveTestHomeReplayError>()(
+  "LiveTestHomeReplayError",
+  { name: Schema.String, cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return `Replaying ${this.name} into the live-test home failed.`;
+  }
+}
+
+export interface LiveTestHomeManifest {
+  readonly version: 1;
+  readonly home: string;
+  readonly testRepo: string;
+  readonly testRepoOrigin: string;
+  readonly project: { readonly id: string; readonly title: string };
+  /** The name the home's owner was given, as stored. */
+  readonly ownerName: string;
+  readonly defaultModel: string;
+  /** `fallbackModel` is the second route, used when the first is unavailable or the launcher prefers its own provider. */
+  readonly personas: ReadonlyArray<{
+    readonly id: string;
+    readonly model: string;
+    readonly fallbackModel: string;
+  }>;
+  readonly playbooks: ReadonlyArray<string>;
+  readonly holdScript: string;
+  readonly holdReleaseFile: string;
+  readonly replayedThreads: number;
+  readonly seedThreads: number;
+  /** Titles of the threads left in a pre-made state, such as a question waiting. */
+  readonly stateThreads: ReadonlyArray<string>;
+}
+
+const liveTestHomePaths = (root: string) => ({
+  home: NodePath.join(root, "home"),
+  testRepo: NodePath.join(root, "test-repo"),
+  testRepoOrigin: NodePath.join(root, "test-repo-origin.git"),
+  manifest: NodePath.join(root, "manifest.json"),
+});
+
+/** Variables an agent's shell inherits from the live server; nothing started here may see them. */
+const withoutLiveServerVariables = (environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
+  const {
+    T3CODE_PORT: _port,
+    T3CODE_HOST: _host,
+    J5CODE_HOME: _home,
+    J5CODE_SERVER_NAME: _name,
+    ...rest
+  } = environment;
+  return rest;
+};
+
+/** Registers the test repo through the offline `project add` CLI, which also runs the migrations. */
+function registerProject(input: {
+  readonly home: string;
+  readonly testRepo: string;
+  readonly databasePath: string;
+}): ProjectId {
+  NodeChildProcess.execFileSync(
+    process.execPath,
+    [
+      NodePath.resolve(import.meta.dirname, "../../bin.ts"),
+      "project",
+      "add",
+      input.testRepo,
+      "--title",
+      LIVE_TEST_PROJECT_TITLE,
+      "--base-dir",
+      input.home,
+    ],
+    { cwd: input.testRepo, stdio: "pipe", env: withoutLiveServerVariables(process.env) },
+  );
+  const database = new NodeSqlite.DatabaseSync(input.databasePath, { readOnly: true });
+  try {
+    const projects = database
+      .prepare("SELECT project_id, workspace_root FROM projection_projects")
+      .all();
+    if (projects.length !== 1 || projects[0]?.workspace_root !== input.testRepo) {
+      throw new Error(
+        `Expected one project at ${input.testRepo}, found ${JSON.stringify(projects)}.`,
+      );
+    }
+    return ProjectId.make(String(projects[0].project_id));
+  } finally {
+    database.close();
+  }
+}
+
+const isAgentMessage = Schema.is(Schema.Struct({ type: Schema.Literal("agentMessage") }));
+const isAgentMessageStart = Schema.is(
+  Schema.Struct({
+    label: Schema.Literal("item/started"),
+    frame: Schema.Struct({
+      params: Schema.Struct({ item: Schema.Struct({ type: Schema.Literal("agentMessage") }) }),
+    }),
+  }),
+);
+
+/**
+ * A Codex recording with each agent message turned into `LIVE_TEST_QUESTION`,
+ * asked the way Codex asks without holding its turn open. The message's start
+ * and streamed text go: they would be stored under the question's turn item id
+ * and replace it.
+ */
+function asAsyncQuestion(recorded: ProviderReplayTranscript): ProviderReplayTranscript {
+  const entries = recorded.entries.filter(
+    (entry) =>
+      !("label" in entry && entry.label === "item/agentMessage/delta") &&
+      !isAgentMessageStart(entry),
+  );
+  if (entries.length === recorded.entries.length) {
+    throw new Error(`${recorded.scenario} records no agent message to turn into a question.`);
+  }
+  return {
+    ...recorded,
+    entries: JSON.parse(JSON.stringify(entries), (_key, value: unknown) =>
+      isAgentMessage(value)
+        ? { ...value, delivery: "async", questions: [LIVE_TEST_QUESTION] }
+        : value,
+    ),
+  };
+}
+
+/**
+ * Puts the image on the thread's user message as stored. Replaying a message with an attachment
+ * fails its turn (the recorded prompt has none), so the file goes into the home and the reference
+ * onto the two projection rows the client reads.
+ */
+function attachLiveTestImage(input: {
+  readonly home: string;
+  readonly databasePath: string;
+  readonly threadId: string;
+}): void {
+  const id = createDeterministicAttachmentId(input.threadId, "live-test-image");
+  if (id === null) throw new Error(`No attachment id for thread ${input.threadId}.`);
+  const bytes = NodeFS.readFileSync(LIVE_TEST_IMAGE);
+  const attachment: ChatAttachment = {
+    type: "image",
+    id: ChatAttachmentId.make(id),
+    name: NodePath.basename(LIVE_TEST_IMAGE),
+    mimeType: "image/png",
+    sizeBytes: bytes.byteLength,
+  };
+  const relativePath = attachmentRelativePath(attachment);
+  if (relativePath === null) throw new Error(`No attachment path for ${id}.`);
+  const attachmentsDir = NodePath.join(input.home, "userdata", "attachments");
+  NodeFS.mkdirSync(attachmentsDir, { recursive: true });
+  NodeFS.writeFileSync(NodePath.join(attachmentsDir, relativePath), bytes);
+  const database = new NodeSqlite.DatabaseSync(input.databasePath);
+  try {
+    for (const [table, where] of [
+      ["orchestration_v2_projection_messages", "role = 'user'"],
+      ["orchestration_v2_projection_turn_items", "type = 'user_message'"],
+    ] as const) {
+      const { changes } = database
+        .prepare(
+          `UPDATE ${table} SET payload_json = json_set(payload_json, '$.attachments', json(?))
+           WHERE thread_id = ? AND ${where}`,
+        )
+        .run(JSON.stringify([attachment]), input.threadId);
+      if (changes !== 1) {
+        throw new Error(`Expected one user message in ${table}, changed ${changes}.`);
+      }
+    }
+  } finally {
+    database.close();
+  }
+}
+
+/**
+ * Replays one recorded provider transcript into the home's database as a thread of `projectId`.
+ * Adapted from the private `runFixtureProvider` in upstream's
+ * `OrchestratorReplayFixtures.integration.test.ts`: a file database, our project and repository,
+ * a clock from `startAtMs`, and no assertions (each fixture's expect a database of one thread).
+ */
+const replayFixture = Effect.fn("liveTestHome.replayFixture")(function* <
+  Transcript extends ProviderReplayTranscript,
+  Error,
+>(input: {
+  readonly fixture: OrchestratorReplayFixture;
+  readonly variant: ProviderOrchestratorReplayVariant;
+  readonly harness: OrchestratorV2ProviderReplayHarness<Transcript, Error>;
+  readonly projectId: ProjectId;
+  readonly testRepo: string;
+  readonly databasePath: string;
+  readonly startAtMs: number;
+  readonly state: ReplayState | undefined;
+}) {
+  const read = yield* readProviderReplayTranscript(input.variant.transcriptFile).pipe(
+    Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+  );
+  const recorded = input.state === "question" ? asAsyncQuestion(read) : read;
+  const lastLabel = input.variant.transcriptEntriesThroughLabel;
+  const lastIndex = recorded.entries.findIndex(
+    (entry) => entry.type === "emit_inbound" && entry.label === lastLabel,
+  );
+  if (lastLabel !== undefined && lastIndex === -1) {
+    return yield* Effect.die(`${recorded.scenario} has no inbound entry labelled ${lastLabel}.`);
+  }
+  const withInstructions = materializeReplayTranscriptRuntimeInstructions(
+    lastLabel === undefined
+      ? recorded
+      : { ...recorded, entries: recorded.entries.slice(0, lastIndex + 1) },
+    { driver: input.variant.driver, model: input.variant.modelSelection.model },
+  );
+  const transcript = yield* input.harness.decodeTranscript(
+    input.variant.driver === "codex"
+      ? materializeReplayTranscriptWorkspace(withInstructions, input.testRepo)
+      : withInstructions,
+  );
+  const materialized = yield* materializeFixtureInput({
+    scenario: input.fixture.name,
+    fixtureInput: input.fixture.buildInput(),
+    driver: input.variant.driver,
+    modelSelection: input.variant.modelSelection,
+  }).pipe(Effect.provide(IdAllocator.layer));
+  // The fixture allocates a project id that nothing creates; its commands go to
+  // ours instead. Both drivers of a fixture share a title, so name the driver.
+  const title = (recordedTitle: string) =>
+    input.state === undefined
+      ? `${recordedTitle} (${input.variant.driver === "codex" ? "Codex" : "Claude"})`
+      : LIVE_TEST_STATE_TITLES[input.state];
+  const retarget = (command: OrchestrationV2Command): OrchestrationV2Command =>
+    command.type === "thread.create"
+      ? {
+          ...command,
+          projectId: input.projectId,
+          title: title(command.title),
+        }
+      : "projectId" in command
+        ? { ...command, projectId: input.projectId }
+        : command;
+  const result = yield* Effect.gen(function* () {
+    yield* TestClock.setTime(input.startAtMs);
+    return yield* runOrchestratorV2ProviderReplayScenario(
+      {
+        name: `${input.fixture.name}/${input.variant.driver}`,
+        transcript,
+        commands: materialized.commands.map(retarget),
+        steps: materialized.steps.map((step) =>
+          step.type === "dispatch" ? { ...step, command: retarget(step.command) } : step,
+        ),
+        projectionThreadIds: materialized.projectionThreadIds,
+        runtimePolicyOverride: { ...input.variant.runtimePolicyOverride, cwd: input.testRepo },
+      },
+      input.harness,
+      {
+        databaseLayer: SqlitePersistence.layerFromPath(input.databasePath).pipe(
+          Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+        ),
+        ...(input.variant.runContinuationWorker === true ? { runContinuationWorker: true } : {}),
+      },
+    );
+  }).pipe(provideDeterministicTestRuntime);
+  const threadId = materialized.projectionThreadIds[0];
+  if (threadId === undefined || !result.projections.has(threadId)) {
+    return yield* Effect.die(`${input.fixture.name}/${input.variant.driver} replayed no thread.`);
+  }
+  return threadId;
+});
+
+function writeSettingsAndPersonas(
+  home: string,
+  skills: Partial<Effect.Success<ReturnType<typeof seedLiveTestSkills>>>,
+): void {
+  const stateDir = NodePath.join(home, "userdata");
+  NodeFS.writeFileSync(
+    NodePath.join(stateDir, "settings.json"),
+    `${JSON.stringify(
+      {
+        defaultModelSelection: LIVE_TEST_DEFAULT_MODEL satisfies Pick<ModelSelection, "model">,
+        // A provider found behind its latest release raises a toast that covers the top-right
+        // controls of every page until dismissed, and tests click those controls.
+        enableProviderUpdateChecks: false,
+        ...skills,
+      },
+      null,
+      2,
+    )}\n`,
+  );
+  // With no agent-personas.json the library reads this folder, in place of the bundled examples.
+  NodeFS.mkdirSync(NodePath.join(stateDir, "personas"), { recursive: true });
+  for (const persona of LIVE_TEST_PERSONAS) {
+    NodeFS.writeFileSync(
+      NodePath.join(stateDir, "personas", `${persona.id}.yaml`),
+      [
+        `id: ${persona.id}`,
+        "version: 1",
+        `displayName: ${persona.displayName}`,
+        `description: A light persona for live tests, pinned to ${persona.routes[0].model}.`,
+        "authority:",
+        "  defaultPolicy: full-access",
+        "  allowedPolicies: [full-access]",
+        "modelRoute:",
+        ...persona.routes.map(
+          (route) => `  - { driver: ${route.driver}, model: ${route.model}, reasoningEffort: low }`,
+        ),
+        "instructions: Keep every reply to one short sentence unless the task needs more.",
+        "",
+      ].join("\n"),
+    );
+  }
+}
+
+/**
+ * Names the home's owner the way the running server does, on the database alone: no server is
+ * up yet, and a hand-written row would skip what `setName` keeps true.
+ */
+const nameOwner = (databasePath: string, ownerName: string) =>
+  PersonAccess.PersonAccess.use((access) =>
+    // The server records its first owner when it starts; this home has not started yet.
+    SqlClient.SqlClient.use(ensureLocalOperatorHumanPerson).pipe(
+      Effect.andThen(access.firstOwner),
+      Effect.flatMap((owner) =>
+        access.setName({ personId: owner.personId, displayName: ownerName }),
+      ),
+    ),
+  ).pipe(
+    Effect.provide(
+      PersonAccess.layer.pipe(
+        Layer.provideMerge(SqlitePersistence.layerFromPath(databasePath)),
+        Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+      ),
+    ),
+  );
+
+/** Written last, so its presence means the build finished. */
+function writeManifest(manifestPath: string, manifest: LiveTestHomeManifest): void {
+  NodeFS.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+/**
+ * Builds the test repository and home under `root` and returns the manifest
+ * it wrote. `root` must not hold a build already. `ownerName` is held to the
+ * rule every person's name is. `replays` narrows the replayed threads, for
+ * tests.
+ */
+export const buildLiveTestHome = Effect.fn("buildLiveTestHome")(function* (input: {
+  readonly root: string;
+  readonly ownerName: string;
+  readonly replays?: ReadonlyArray<LiveTestReplay>;
+  readonly skillsOnly?: boolean;
+}) {
+  const ownerName = yield* checkedPersonName(input.ownerName);
+  const paths = liveTestHomePaths(input.root);
+  for (const existing of Object.values(paths)) {
+    if (NodeFS.existsSync(existing)) {
+      return yield* Effect.die(`${existing} already exists. Delete ${input.root} to rebuild.`);
+    }
+  }
+  // The same rule as the delivery seed: never the shared home or its state.
+  const home = yield* validateIsolatedBaseDir(paths.home).pipe(
+    Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+  );
+  const root = NodePath.dirname(home);
+  const { testRepo, testRepoOrigin, manifest: manifestPath } = liveTestHomePaths(root);
+  const databasePath = NodePath.join(home, "userdata", "statev2.sqlite");
+
+  createLiveTestRepo({ repoDir: testRepo, originDir: testRepoOrigin });
+  const projectId = registerProject({ home, testRepo, databasePath });
+
+  const replays = input.replays ?? LIVE_TEST_REPLAYS;
+  const now = (yield* fixedNow) ?? (yield* Clock.currentTimeMillis);
+  const finishReplay = <Error>(name: string, replay: Effect.Effect<string, Error, Scope.Scope>) =>
+    replay.pipe(
+      Effect.scoped,
+      Effect.mapError((cause) => new LiveTestHomeReplayError({ name, cause })),
+    );
+  for (const [index, [fixtureName, driver, state]] of replays.entries()) {
+    const fixture = ORCHESTRATOR_REPLAY_FIXTURES.find((entry) => entry.name === fixtureName);
+    const variant = fixture?.providers.find((provider) => provider.driver === driver);
+    if (fixture === undefined || variant === undefined) {
+      return yield* Effect.die(`No replay fixture ${fixtureName} for ${driver}.`);
+    }
+    const scenario = {
+      fixture,
+      variant,
+      projectId,
+      testRepo,
+      databasePath,
+      startAtMs: now - (replays.length - index) * REPLAY_SPACING_MS,
+      state,
+    };
+    const name = `${fixtureName}/${driver}`;
+    const threadId = yield* driver === "codex"
+      ? finishReplay(name, replayFixture({ ...scenario, harness: CodexOrchestratorReplayHarness }))
+      : finishReplay(
+          name,
+          replayFixture({ ...scenario, harness: ClaudeOrchestratorReplayHarness }),
+        );
+    if (state === "image") attachLiveTestImage({ home, databasePath, threadId });
+  }
+
+  const seed = yield* runDevDeliverySeed(home, {
+    project: { id: projectId, workspaceRoot: testRepo },
+  });
+  yield* nameOwner(databasePath, ownerName);
+  writeSettingsAndPersonas(
+    home,
+    input.skillsOnly
+      ? yield* seedLiveTestSkills(home).pipe(
+          Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+        )
+      : { skillCatalogSource: "" },
+  );
+
+  const manifest: LiveTestHomeManifest = {
+    version: 1,
+    home,
+    testRepo,
+    testRepoOrigin,
+    project: { id: projectId, title: LIVE_TEST_PROJECT_TITLE },
+    ownerName,
+    defaultModel: LIVE_TEST_DEFAULT_MODEL.model,
+    personas: LIVE_TEST_PERSONAS.map(({ id, routes }) => ({
+      id,
+      model: routes[0].model,
+      fallbackModel: routes[1].model,
+    })),
+    playbooks: LIVE_TEST_PLAYBOOKS,
+    holdScript: LIVE_TEST_HOLD_SCRIPT,
+    holdReleaseFile: NodePath.join(testRepo, LIVE_TEST_HOLD_RELEASE_FILE),
+    replayedThreads: replays.length,
+    seedThreads: Object.keys(seed.threads).length,
+    stateThreads: replays.flatMap(([, , state]) =>
+      state === undefined ? [] : [LIVE_TEST_STATE_TITLES[state]],
+    ),
+  };
+  writeManifest(manifestPath, manifest);
+  return manifest;
+});
+
+if (import.meta.main) {
+  const args = process.argv.slice(2);
+  const root = args[1];
+  const ownerName = args[3];
+  if (
+    (args.length !== 4 && !(args.length === 5 && args[4] === "--skills")) ||
+    args[0] !== "--root" ||
+    args[2] !== "--owner-name" ||
+    root === undefined ||
+    ownerName === undefined ||
+    !NodePath.isAbsolute(root)
+  ) {
+    process.stderr.write(
+      "Usage: liveTestHome.ts --root <absolute directory> --owner-name <name> [--skills]\n",
+    );
+    process.exit(64);
+  }
+  Effect.runPromise(
+    buildLiveTestHome({ root, ownerName, skillsOnly: args[4] === "--skills" }).pipe(
+      Effect.provide(Logger.layer([], { mergeWithExisting: false })),
+    ),
+  ).then(
+    (manifest) => {
+      process.stdout.write(`Built ${manifest.home}\n`);
+      // The replay runtimes leave daemon fibers behind; everything is committed.
+      process.exit(0);
+    },
+    (cause: unknown) => {
+      process.stderr.write(
+        `${cause instanceof Error ? (cause.stack ?? cause.message) : String(cause)}\n`,
+      );
+      if (cause instanceof Error && cause.cause !== undefined) {
+        process.stderr.write(`Caused by: ${String(cause.cause)}\n`);
+      }
+      process.stderr.write(
+        `The build is incomplete. ${root} must be deleted before it runs again.\n`,
+      );
+      process.exit(1);
+    },
+  );
+}

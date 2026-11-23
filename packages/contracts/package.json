@@ -1,6 +1,6 @@
 {
   "name": "@t3tools/contracts",
-  "version": "0.0.39",
+  "version": "0.0.52",
   "private": true,
   "files": [
     "dist"
@@ -19,18 +19,14 @@
       "types": "./src/relay.ts",
       "import": "./src/relay.ts"
     },
-    "./legacy-orchestration": {
-      "types": "./src/orchestration.ts",
-      "import": "./src/orchestration.ts"
-    },
     "./j5": {
       "types": "./src/j5.ts",
       "import": "./src/j5.ts"
     }
   },
   "scripts": {
-    "typecheck": "tsgo --noEmit",
-    "test": "vp test run"
+    "typecheck": "tsc --noEmit",
+    "test": "vp test run --config ../../vite.config.ts --dir ."
   },
   "dependencies": {
     "effect": "catalog:"

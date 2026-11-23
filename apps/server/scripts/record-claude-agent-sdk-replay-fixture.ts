@@ -2,6 +2,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Console from "effect/Console";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
 import {
@@ -9,12 +10,9 @@ import {
   CLAUDE_AGENT_SDK_REPLAY_PROTOCOL,
 } from "../src/orchestration-v2/Adapters/ClaudeAdapterV2.testkit.ts";
 import { claudeRuntimeQueryPolicyForRuntimePolicy } from "../src/orchestration-v2/Adapters/ClaudeAdapterV2.ts";
-import {
-  ProviderAdapterV2RuntimePolicy,
-  type ProviderAdapterV2RuntimePolicy as ProviderAdapterV2RuntimePolicyType,
-} from "../src/orchestration-v2/ProviderAdapter.ts";
+import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import type { RuntimePolicyV2Override } from "../src/orchestration-v2/RuntimePolicy.ts";
-import { makeCheckpointWorkspace } from "../src/orchestration-v2/testkit/ReplayFixtureWorkspace.ts";
+import { makeCheckpointWorkspace } from "@t3tools/provider-testing/replayWorkspace";
 import { CLAUDE_MODEL_SELECTION } from "../src/orchestration-v2/testkit/fixtures/shared.ts";
 import {
   MESSAGE_STEERING_INITIAL_PROMPT,
@@ -29,24 +27,14 @@ import {
   THREAD_FORK_NATIVE_PRIOR_TURN_ALPHA_PROMPT,
   THREAD_FORK_NATIVE_PRIOR_TURN_BETA_PROMPT,
   THREAD_FORK_NATIVE_PRIOR_TURN_REPEAT_PROMPT,
-  THREAD_FORK_NATIVE_CONTINUE_FIRST_PROMPT,
-  THREAD_FORK_NATIVE_CONTINUE_SECOND_PROMPT,
-  THREAD_FORK_NATIVE_CONTINUE_SOURCE_PROMPT,
-  THREAD_FORK_NATIVE_SIBLINGS_FIRST_PROMPT,
-  THREAD_FORK_NATIVE_SIBLINGS_SECOND_PROMPT,
-  THREAD_FORK_NATIVE_SIBLINGS_SOURCE_PROMPT,
   THREAD_FORK_NATIVE_SOURCE_PROMPT,
   THREAD_FORK_NATIVE_TARGET_PROMPT,
-  THREAD_MERGE_BACK_FORK_PROMPT,
-  THREAD_MERGE_BACK_HANDOFF_PROMPT,
-  THREAD_MERGE_BACK_RECALL_PROMPT,
   THREAD_MERGE_BACK_SIBLINGS_FIRST_FORK_PROMPT,
   THREAD_MERGE_BACK_SIBLINGS_FIRST_HANDOFF_PROMPT,
   THREAD_MERGE_BACK_SIBLINGS_RECALL_PROMPT,
   THREAD_MERGE_BACK_SIBLINGS_SECOND_FORK_PROMPT,
   THREAD_MERGE_BACK_SIBLINGS_SECOND_HANDOFF_PROMPT,
   THREAD_MERGE_BACK_SIBLINGS_SOURCE_PROMPT,
-  THREAD_MERGE_BACK_SOURCE_PROMPT,
   THREAD_ROLLBACK_AFTER_PROMPT,
   THREAD_ROLLBACK_FIRST_PROMPT,
   THREAD_ROLLBACK_SECOND_PROMPT,
@@ -54,11 +42,34 @@ import {
   TOOL_CALL_READ_ONLY_WORKSPACE_ROOT,
   TOOL_CALL_WRITE_PROMPT,
   TURN_INTERRUPT_MID_TOOL_PROMPT,
+  COMMAND_OUTPUT_STREAMING_PROMPT,
   TURN_INTERRUPT_PROMPT,
   TURN_INTERRUPT_RECOVERY_PROMPT,
   WORKSPACE_NEVER_POLICY,
   WEB_SEARCH_PROMPT,
 } from "../src/orchestration-v2/testkit/fixtures/shared.ts";
+import { CLAUDE_BACKGROUND_SUBAGENT_AFTER_ROOT_PROMPT } from "../src/orchestration-v2/testkit/fixtures/claude_background_subagent_after_root/input.ts";
+import {
+  CLAUDE_BACKGROUND_SUBAGENT_LIFECYCLE_FINAL_PROMPT,
+  CLAUDE_BACKGROUND_SUBAGENT_LIFECYCLE_LAUNCH_PROMPT,
+  CLAUDE_BACKGROUND_SUBAGENT_LIFECYCLE_RESUME_PROMPT,
+  CLAUDE_BACKGROUND_SUBAGENT_LIFECYCLE_STOP_PROMPT,
+} from "../src/orchestration-v2/testkit/fixtures/claude_background_subagent_lifecycle/input.ts";
+import { CLAUDE_BACKGROUND_MONITOR_WAKE_PROMPT } from "../src/orchestration-v2/testkit/fixtures/claude_background_monitor_wake/input.ts";
+import { CLAUDE_NESTED_BACKGROUND_SUBAGENT_WAKE_PROMPT } from "../src/orchestration-v2/testkit/fixtures/claude_nested_background_subagent_wake/input.ts";
+import { CLAUDE_NESTED_SUBAGENT_MODEL_PROMPT } from "../src/orchestration-v2/testkit/fixtures/claude_nested_subagent_model/input.ts";
+import { CLAUDE_MCP_TOOL_PRESENTATION_PROMPT } from "../src/orchestration-v2/testkit/fixtures/claude_mcp_tool_presentation/input.ts";
+import { CLAUDE_BACKGROUND_TASK_INTERRUPT_PROMPT } from "../src/orchestration-v2/testkit/fixtures/claude_background_task_interrupt/input.ts";
+import { CLAUDE_BACKGROUND_WAKE_BEFORE_QUEUED_PROMPT_LAUNCH_PROMPT } from "../src/orchestration-v2/testkit/fixtures/claude_background_wake_before_queued_prompt/input.ts";
+import {
+  CLAUDE_BACKGROUND_TASK_WAKE_FOLLOW_UP_PROMPT,
+  CLAUDE_BACKGROUND_TASK_WAKE_PROMPT,
+} from "../src/orchestration-v2/testkit/fixtures/claude_background_task_wake/input.ts";
+import {
+  DENIED_WRITE_POLICY,
+  TOOL_CALL_DENIED_WRITE_PROMPT,
+  TOOL_CALL_DENIED_WRITE_TARGET,
+} from "../src/orchestration-v2/testkit/fixtures/tool_call_denied_write/input.ts";
 import {
   validateClaudeReplayRecordingSelection,
   type ClaudeRecordingQueryMode,
@@ -93,6 +104,12 @@ const CLAUDE_RECORDINGS = {
     prompts: [MESSAGE_STEERING_INITIAL_PROMPT, MESSAGE_STEERING_STEER_PROMPT],
     defaultTranscriptFile: "fixtures/message_steering/claude_transcript.ndjson",
     queryMode: "active_steering",
+    enableTools: true,
+  },
+  command_output_streaming: {
+    prompts: [COMMAND_OUTPUT_STREAMING_PROMPT],
+    defaultTranscriptFile: "fixtures/command_output_streaming/claude_transcript.ndjson",
+    queryMode: "streaming",
     enableTools: true,
   },
   turn_interrupt_mid_tool: {
@@ -136,6 +153,15 @@ const CLAUDE_RECORDINGS = {
     enableTools: true,
     runtimePolicyOverride: WORKSPACE_NEVER_POLICY,
   },
+  tool_call_denied_write: {
+    prompts: [TOOL_CALL_DENIED_WRITE_PROMPT],
+    defaultTranscriptFile: "fixtures/tool_call_denied_write/claude_transcript.ndjson",
+    queryMode: "streaming",
+    enableTools: true,
+    runtimePolicyOverride: DENIED_WRITE_POLICY,
+    permissionDecision: "decline",
+    expectedAbsentWorkspacePaths: [TOOL_CALL_DENIED_WRITE_TARGET],
+  },
   tool_call_restricted_granular: {
     prompts: [TOOL_CALL_WRITE_PROMPT],
     defaultTranscriptFile: "fixtures/tool_call_restricted_granular/claude_transcript.ndjson",
@@ -146,6 +172,83 @@ const CLAUDE_RECORDINGS = {
   web_search: {
     prompts: [WEB_SEARCH_PROMPT],
     defaultTranscriptFile: "fixtures/web_search/claude_transcript.ndjson",
+    queryMode: "streaming",
+    enableTools: true,
+  },
+  claude_background_subagent_after_root: {
+    prompts: [CLAUDE_BACKGROUND_SUBAGENT_AFTER_ROOT_PROMPT],
+    defaultTranscriptFile:
+      "fixtures/claude_background_subagent_after_root/claude_transcript.ndjson",
+    queryMode: "streaming",
+    enableTools: true,
+    backgroundWakeCounts: [1],
+  },
+  claude_background_task_wake: {
+    prompts: [CLAUDE_BACKGROUND_TASK_WAKE_PROMPT, CLAUDE_BACKGROUND_TASK_WAKE_FOLLOW_UP_PROMPT],
+    defaultTranscriptFile: "fixtures/claude_background_task_wake/claude_transcript.ndjson",
+    queryMode: "streaming",
+    enableTools: true,
+    backgroundWakeCounts: [1, 0],
+  },
+  claude_background_monitor_wake: {
+    prompts: [CLAUDE_BACKGROUND_MONITOR_WAKE_PROMPT],
+    defaultTranscriptFile: "fixtures/claude_background_monitor_wake/claude_transcript.ndjson",
+    queryMode: "streaming",
+    enableTools: true,
+    backgroundWakeCounts: [1],
+  },
+  claude_background_subagent_lifecycle: {
+    prompts: [
+      CLAUDE_BACKGROUND_SUBAGENT_LIFECYCLE_LAUNCH_PROMPT,
+      CLAUDE_BACKGROUND_SUBAGENT_LIFECYCLE_STOP_PROMPT,
+      CLAUDE_BACKGROUND_SUBAGENT_LIFECYCLE_RESUME_PROMPT,
+      CLAUDE_BACKGROUND_SUBAGENT_LIFECYCLE_FINAL_PROMPT,
+    ],
+    defaultTranscriptFile: "fixtures/claude_background_subagent_lifecycle/claude_transcript.ndjson",
+    queryMode: "streaming",
+    enableTools: true,
+    backgroundWakeCounts: [1, 0, 1, 0],
+  },
+  claude_background_wake_before_queued_prompt: {
+    prompts: [
+      CLAUDE_BACKGROUND_WAKE_BEFORE_QUEUED_PROMPT_LAUNCH_PROMPT,
+      CLAUDE_BACKGROUND_SUBAGENT_LIFECYCLE_STOP_PROMPT,
+      CLAUDE_BACKGROUND_SUBAGENT_LIFECYCLE_RESUME_PROMPT,
+      CLAUDE_BACKGROUND_SUBAGENT_LIFECYCLE_FINAL_PROMPT,
+    ],
+    defaultTranscriptFile:
+      "fixtures/claude_background_wake_before_queued_prompt/claude_transcript.ndjson",
+    queryMode: "streaming",
+    enableTools: true,
+    backgroundWakeCounts: [1, 0, 1, 0],
+    offerNextPromptImmediately: true,
+  },
+  claude_background_task_interrupt: {
+    prompts: [CLAUDE_BACKGROUND_TASK_INTERRUPT_PROMPT],
+    defaultTranscriptFile: "fixtures/claude_background_task_interrupt/claude_transcript.ndjson",
+    queryMode: "interrupt",
+    enableTools: true,
+    interruptAfter: "tool_use",
+    interruptAfterToolUses: 2,
+  },
+  claude_nested_background_subagent_wake: {
+    prompts: [CLAUDE_NESTED_BACKGROUND_SUBAGENT_WAKE_PROMPT],
+    defaultTranscriptFile:
+      "fixtures/claude_nested_background_subagent_wake/claude_transcript.ndjson",
+    queryMode: "streaming",
+    enableTools: true,
+    backgroundWakeCounts: [1],
+  },
+  claude_nested_subagent_model: {
+    prompts: [CLAUDE_NESTED_SUBAGENT_MODEL_PROMPT],
+    defaultTranscriptFile: "fixtures/claude_nested_subagent_model/claude_transcript.ndjson",
+    queryMode: "streaming",
+    enableTools: true,
+  },
+  // Requires the recording account's claude.ai Firecrawl connector; MCP metadata uses undeclared `tool_use_meta`.
+  claude_mcp_tool_presentation: {
+    prompts: [CLAUDE_MCP_TOOL_PRESENTATION_PROMPT],
+    defaultTranscriptFile: "fixtures/claude_mcp_tool_presentation/claude_transcript.ndjson",
     queryMode: "streaming",
     enableTools: true,
   },
@@ -181,37 +284,6 @@ const CLAUDE_RECORDINGS = {
     queryMode: "fork_session_prior_turn",
     enableTools: true,
   },
-  thread_fork_native_continue: {
-    prompts: [
-      THREAD_FORK_NATIVE_CONTINUE_SOURCE_PROMPT,
-      THREAD_FORK_NATIVE_CONTINUE_FIRST_PROMPT,
-      THREAD_FORK_NATIVE_CONTINUE_SECOND_PROMPT,
-    ],
-    defaultTranscriptFile: "fixtures/thread_fork_native_continue/claude_transcript.ndjson",
-    queryMode: "fork_session_continue",
-    enableTools: true,
-  },
-  thread_fork_native_siblings: {
-    prompts: [
-      THREAD_FORK_NATIVE_SIBLINGS_SOURCE_PROMPT,
-      THREAD_FORK_NATIVE_SIBLINGS_FIRST_PROMPT,
-      THREAD_FORK_NATIVE_SIBLINGS_SECOND_PROMPT,
-    ],
-    defaultTranscriptFile: "fixtures/thread_fork_native_siblings/claude_transcript.ndjson",
-    queryMode: "fork_session_siblings",
-    enableTools: true,
-  },
-  thread_merge_back_continue: {
-    prompts: [
-      THREAD_MERGE_BACK_SOURCE_PROMPT,
-      THREAD_MERGE_BACK_FORK_PROMPT,
-      THREAD_MERGE_BACK_HANDOFF_PROMPT,
-      THREAD_MERGE_BACK_RECALL_PROMPT,
-    ],
-    defaultTranscriptFile: "fixtures/thread_merge_back_continue/claude_transcript.ndjson",
-    queryMode: "fork_session_merge_back",
-    enableTools: true,
-  },
   thread_merge_back_siblings: {
     prompts: [
       THREAD_MERGE_BACK_SIBLINGS_SOURCE_PROMPT,
@@ -244,9 +316,6 @@ function selectedQueryMode(defaultMode: ClaudeRecordingQueryMode): ClaudeRecordi
     raw === "resume_at_cursor" ||
     raw === "fork_session" ||
     raw === "fork_session_prior_turn" ||
-    raw === "fork_session_continue" ||
-    raw === "fork_session_siblings" ||
-    raw === "fork_session_merge_back" ||
     raw === "fork_session_merge_back_siblings" ||
     raw === "active_steering" ||
     raw === "interrupt" ||
@@ -255,7 +324,7 @@ function selectedQueryMode(defaultMode: ClaudeRecordingQueryMode): ClaudeRecordi
     return raw;
   }
   throw new Error(
-    `Unsupported Claude replay query mode '${raw}'. Use 'streaming', 'restart', 'resume_at_cursor', 'fork_session', 'fork_session_prior_turn', 'fork_session_continue', 'fork_session_siblings', 'fork_session_merge_back', 'fork_session_merge_back_siblings', 'active_steering', 'interrupt', or 'interrupt_restart'.`,
+    `Unsupported Claude replay query mode '${raw}'. Use 'streaming', 'restart', 'resume_at_cursor', 'fork_session', 'fork_session_prior_turn', 'fork_session_merge_back_siblings', 'active_steering', 'interrupt', or 'interrupt_restart'.`,
   );
 }
 
@@ -264,18 +333,24 @@ const recording = CLAUDE_RECORDINGS[scenario as keyof typeof CLAUDE_RECORDINGS];
 const encodeUnknownJsonString = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 
 if (recording === undefined) {
-  throw new Error(
-    `Claude replay fixture '${scenario}' is not configured. ` +
-      "TODO: approval fixtures need permission callback recording before they can be generated.",
-  );
+  throw new Error(`Claude replay fixture '${scenario}' is not configured.`);
 }
 
 const positionalOutputPath = process.argv[2]?.startsWith("--") ? undefined : process.argv[2];
+const path = await Effect.runPromise(
+  Effect.service(Path.Path).pipe(Effect.provide(NodeServices.layer)),
+);
 const outputPath =
   readArgValue("--out") ??
   positionalOutputPath ??
-  new URL(`../src/orchestration-v2/testkit/${recording.defaultTranscriptFile}`, import.meta.url)
-    .pathname;
+  (await Effect.runPromise(
+    path.fromFileUrl(
+      new URL(
+        `../src/orchestration-v2/testkit/${recording.defaultTranscriptFile}`,
+        import.meta.url,
+      ),
+    ),
+  ));
 
 function encodeTranscriptNdjson(
   transcript: Awaited<ReturnType<typeof recordClaudeAgentSdkReplayTranscript>>,
@@ -286,15 +361,6 @@ function encodeTranscriptNdjson(
     ...entries.map((entry) => JSON.stringify(entry)),
     "",
   ].join("\n");
-}
-
-function dirname(filePath: string): string {
-  const normalized = filePath.replace(/\/+$/u, "");
-  const lastSlash = normalized.lastIndexOf("/");
-  if (lastSlash < 0) {
-    return ".";
-  }
-  return lastSlash === 0 ? "/" : normalized.slice(0, lastSlash);
 }
 
 function joinPath(directory: string, fileName: string): string {
@@ -330,8 +396,8 @@ validateClaudeReplayRecordingSelection({
 function runtimePolicyForRecording(input: {
   readonly cwd: string;
   readonly override?: RuntimePolicyV2Override;
-}): ProviderAdapterV2RuntimePolicyType {
-  return ProviderAdapterV2RuntimePolicy.make({
+}): ProviderAdapter.ProviderAdapterV2RuntimePolicy {
+  return ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
     runtimeMode: "full-access",
     interactionMode: "default",
     cwd: input.override?.cwd ?? input.cwd,
@@ -364,6 +430,33 @@ const cwd =
     ? await makeToolCallReadOnlyRecordingWorkspace()
     : await makeCheckpointWorkspace(`claude-agent-sdk-record-${scenario}`));
 const shouldRemoveCwd = process.env.T3_CLAUDE_REPLAY_CWD === undefined;
+
+const expectedAbsentWorkspacePaths =
+  "expectedAbsentWorkspacePaths" in recording ? recording.expectedAbsentWorkspacePaths : [];
+
+async function assertWorkspacePathsAbsent(phase: "before" | "after"): Promise<void> {
+  const presentPaths = await runFileSystem(
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const present: Array<string> = [];
+      for (const relativePath of expectedAbsentWorkspacePaths) {
+        if (yield* fs.exists(joinPath(cwd, relativePath))) {
+          present.push(relativePath);
+        }
+      }
+      return present;
+    }),
+  );
+  if (presentPaths.length > 0) {
+    throw new Error(
+      `Claude replay fixture '${scenario}' expected ${presentPaths
+        .map((relativePath) => `'${relativePath}'`)
+        .join(
+          ", ",
+        )} to be absent ${phase} the recorded turn, but found in the recording workspace.`,
+    );
+  }
+}
 
 if (shouldRemoveCwd && (scenario === "tool_call_read_only" || scenario === "subagent")) {
   await runFileSystem(
@@ -398,6 +491,7 @@ try {
   });
   const queryPolicy = claudeRuntimeQueryPolicyForRuntimePolicy(runtimePolicy);
 
+  await assertWorkspacePathsAbsent("before");
   const transcript = await recordClaudeAgentSdkReplayTranscript({
     scenario,
     prompts,
@@ -418,13 +512,36 @@ try {
       ? {}
       : { allowDangerouslySkipPermissions: queryPolicy.allowDangerouslySkipPermissions }),
     ...(queryPolicy.installPermissionCallback ? { enablePermissionCallback: true } : {}),
+    ...("permissionDecision" in recording
+      ? { permissionDecision: recording.permissionDecision }
+      : {}),
     ...("interruptAfter" in recording ? { interruptAfter: recording.interruptAfter } : {}),
+    ...("interruptAfterToolUses" in recording
+      ? { interruptAfterToolUses: recording.interruptAfterToolUses }
+      : {}),
+    ...("backgroundWakeCounts" in recording
+      ? { backgroundWakeCounts: recording.backgroundWakeCounts }
+      : {}),
+    ...("offerNextPromptImmediately" in recording
+      ? { offerNextPromptImmediately: recording.offerNextPromptImmediately }
+      : {}),
   });
+  await assertWorkspacePathsAbsent("after");
+  const transcriptWithEvidence =
+    expectedAbsentWorkspacePaths.length === 0
+      ? transcript
+      : {
+          ...transcript,
+          metadata: {
+            ...transcript.metadata,
+            verifiedAbsentWorkspacePaths: [...expectedAbsentWorkspacePaths],
+          },
+        };
   await runFileSystem(
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
-      yield* fs.makeDirectory(dirname(outputPath), { recursive: true });
-      yield* fs.writeFileString(outputPath, encodeTranscriptNdjson(transcript));
+      yield* fs.makeDirectory(path.dirname(outputPath), { recursive: true });
+      yield* fs.writeFileString(outputPath, encodeTranscriptNdjson(transcriptWithEvidence));
     }),
   );
   await Effect.runPromise(

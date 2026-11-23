@@ -1,108 +1,104 @@
-import { FolderGit2Icon, FolderGitIcon, FolderIcon, HistoryIcon } from "lucide-react";
-import { memo, useMemo } from "react";
-import { cn } from "../lib/utils";
-import {
-  THREAD_DETAILS_PANEL_ICON_CLASS,
-  THREAD_DETAILS_PANEL_LOCKED_ROW_CLASS,
-  THREAD_DETAILS_PANEL_ROW_POPUP_CLASS,
-  THREAD_DETAILS_PANEL_SELECT_ROW_CLASS,
-} from "./chat/threadDetailsPanelStyles";
+import { ComposerSelectControl } from "./chat/ComposerControl";
+import { ComposerContextLabel } from "./ComposerContextLabel";
+import { FolderGit2Icon, FolderGitIcon, FolderIcon } from "lucide-react";
+import { memo, type MouseEvent as ReactMouseEvent } from "react";
 
 import {
   resolveCurrentWorkspaceLabel,
   resolveEnvModeLabel,
   resolveLockedWorkspaceLabel,
-  resolveWorkspaceDisplayName,
   type EnvMode,
 } from "./BranchToolbar.logic";
-import { composerFloatingLayerProps } from "./chat/composerEventScope";
+import { useComposerMenuProps } from "./chat/composerEventScope";
+import { PreviousWorktreeItemContent } from "./PreviousWorktreeItemContent";
 import {
   Select,
   SelectGroup,
   SelectGroupLabel,
   SelectItem,
   SelectPopup,
-  SelectTrigger,
   SelectValue,
 } from "./ui/select";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
+import { useAtomValue } from "@effect/atom-react";
+import { shortcutLabelForCommand } from "../keybindings";
+import { primaryServerKeybindingsAtom } from "../state/server";
 
-export const PREVIOUS_WORKTREE_SELECT_VALUE = "previous-worktree";
+const PREVIOUS_WORKTREE_SELECT_VALUE = "previous-worktree";
 
 interface BranchToolbarEnvModeSelectorProps {
+  forceNewWorktree?: boolean;
   envLocked: boolean;
   effectiveEnvMode: EnvMode;
   activeWorktreePath: string | null;
-  workspaceRoot?: string | null;
   onEnvModeChange: (mode: EnvMode) => void;
-  displayMode?: "toolbar" | "panel";
   previousWorktreeLabel?: string | null;
+  previousWorktreeBranch?: string | null;
   onUsePreviousWorktree?: () => void;
 }
 
 export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSelector({
+  forceNewWorktree = false,
   envLocked,
   effectiveEnvMode,
   activeWorktreePath,
-  workspaceRoot = null,
   onEnvModeChange,
-  displayMode = "toolbar",
   previousWorktreeLabel,
+  previousWorktreeBranch = null,
   onUsePreviousWorktree,
 }: BranchToolbarEnvModeSelectorProps) {
-  const workspacePath = displayMode === "panel" ? (activeWorktreePath ?? workspaceRoot) : null;
-  const workspaceDisplayName = resolveWorkspaceDisplayName(workspacePath);
-  const workspaceKind = activeWorktreePath ? "Worktree" : "Project folder";
-  const showPreviousWorktree = Boolean(previousWorktreeLabel && onUsePreviousWorktree);
-  const envModeItems = useMemo(
-    () => [
-      {
-        value: "local",
-        label: workspaceDisplayName ?? resolveCurrentWorkspaceLabel(activeWorktreePath),
-      },
-      { value: "worktree", label: resolveEnvModeLabel("worktree") },
-      ...(showPreviousWorktree && previousWorktreeLabel
-        ? [{ value: PREVIOUS_WORKTREE_SELECT_VALUE, label: previousWorktreeLabel }]
-        : []),
-    ],
-    [activeWorktreePath, previousWorktreeLabel, showPreviousWorktree, workspaceDisplayName],
+  const composerFloatingLayerProps = useComposerMenuProps();
+  const shortcutLabel = shortcutLabelForCommand(
+    useAtomValue(primaryServerKeybindingsAtom),
+    "composer.workspace",
   );
+  const showPreviousWorktree = Boolean(previousWorktreeLabel && onUsePreviousWorktree);
+  const envModeItems = [
+    {
+      value: "local",
+      label: resolveCurrentWorkspaceLabel(activeWorktreePath),
+    },
+    { value: "worktree", label: resolveEnvModeLabel("worktree") },
+    ...(showPreviousWorktree && previousWorktreeLabel
+      ? [{ value: PREVIOUS_WORKTREE_SELECT_VALUE, label: previousWorktreeLabel }]
+      : []),
+  ];
 
-  if (envLocked) {
+  const stopContextMenuMouseDown = (event: ReactMouseEvent) => {
+    if (event.button !== 0 || event.ctrlKey) {
+      event.stopPropagation();
+    }
+  };
+
+  if (envLocked || forceNewWorktree) {
     const lockedRow = (
       <span
-        className={cn(
-          "inline-flex h-7 min-w-0 items-center gap-1 border border-transparent px-[calc(--spacing(2)-1px)] font-normal text-muted-foreground/70 text-xs sm:h-6",
-          displayMode === "panel" && THREAD_DETAILS_PANEL_LOCKED_ROW_CLASS,
-        )}
+        className="inline-flex h-7 min-w-0 items-center gap-1.5 border border-transparent px-1.75 font-normal text-muted-foreground/70 text-sm sm:h-6 sm:text-xs"
         data-composer-context-control
       >
         {activeWorktreePath ? (
-          <FolderGitIcon
-            className={displayMode === "panel" ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3"}
-          />
+          <FolderGitIcon className="size-3" />
+        ) : effectiveEnvMode === "worktree" ? (
+          <FolderGit2Icon className="size-3" />
         ) : (
-          <FolderIcon
-            className={displayMode === "panel" ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3"}
-          />
+          <FolderIcon className="size-3" />
         )}
-        <span className="min-w-0 flex-1 truncate">
-          {workspaceDisplayName ?? resolveLockedWorkspaceLabel(activeWorktreePath)}
-        </span>
-        {displayMode === "panel" ? (
-          <span className="shrink-0 text-[10px] font-normal text-muted-foreground/70">
-            {workspaceKind}
-          </span>
-        ) : null}
+        <ComposerContextLabel>
+          {forceNewWorktree
+            ? resolveEnvModeLabel("worktree")
+            : resolveLockedWorkspaceLabel(activeWorktreePath, effectiveEnvMode)}
+        </ComposerContextLabel>
       </span>
     );
-
-    if (!workspacePath) return lockedRow;
 
     return (
       <Tooltip>
         <TooltipTrigger render={lockedRow} />
-        <TooltipPopup side="left">{workspacePath}</TooltipPopup>
+        <TooltipPopup>
+          {forceNewWorktree
+            ? "Each model starts in its own worktree."
+            : resolveLockedWorkspaceLabel(activeWorktreePath, effectiveEnvMode)}
+        </TooltipPopup>
       </Tooltip>
     );
   }
@@ -123,59 +119,38 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
       <Tooltip>
         <TooltipTrigger
           render={
-            <SelectTrigger
-              variant="ghost"
-              size={displayMode === "panel" ? "default" : "xs"}
-              className={cn(
-                "min-w-0 shrink font-normal text-xs!",
-                displayMode === "panel" && THREAD_DETAILS_PANEL_SELECT_ROW_CLASS,
-              )}
+            <ComposerSelectControl
+              size="xs"
+              className="min-w-0 shrink"
               aria-label="Workspace"
+              data-composer-shortcut="composer.workspace"
               data-composer-context-control
+              onMouseDownCapture={stopContextMenuMouseDown}
             />
           }
         >
           {effectiveEnvMode === "worktree" ? (
-            <FolderGit2Icon
-              className={displayMode === "panel" ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3"}
-            />
+            <FolderGit2Icon className="size-3" />
           ) : activeWorktreePath ? (
-            <FolderGitIcon
-              className={displayMode === "panel" ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3"}
-            />
+            <FolderGitIcon className="size-3" />
           ) : (
-            <FolderIcon
-              className={displayMode === "panel" ? THREAD_DETAILS_PANEL_ICON_CLASS : "size-3"}
-            />
+            <FolderIcon className="size-3" />
           )}
-          <span
-            data-composer-label
-            className={
-              displayMode === "panel"
-                ? // flex-1 pushes the kind label and chevron cell to the right edge, so the
-                  // chevron lines up with every other row's trigger.
-                  "min-w-0 flex-1 truncate text-left"
-                : "min-w-0 max-w-[240px] truncate group-data-[compact]/composer-context:max-w-0"
-            }
-          >
+          <ComposerContextLabel>
             <SelectValue />
-          </span>
-          {displayMode === "panel" ? (
-            <span className="shrink-0 text-[10px] font-normal text-muted-foreground/70">
-              {effectiveEnvMode === "worktree" && !activeWorktreePath ? "Create" : workspaceKind}
-            </span>
-          ) : null}
+          </ComposerContextLabel>
         </TooltipTrigger>
-        {workspacePath ? <TooltipPopup side="left">{workspacePath}</TooltipPopup> : null}
+        <TooltipPopup>
+          {effectiveEnvMode === "worktree"
+            ? resolveEnvModeLabel("worktree")
+            : resolveCurrentWorkspaceLabel(activeWorktreePath)}
+          {shortcutLabel ? ` · ${shortcutLabel}` : null}
+        </TooltipPopup>
       </Tooltip>
       <SelectPopup
         alignItemWithTrigger={false}
-        {...(displayMode === "toolbar" ? composerFloatingLayerProps : {})}
-        {...(displayMode === "panel"
-          ? {
-              popupClassName: THREAD_DETAILS_PANEL_ROW_POPUP_CLASS,
-            }
-          : {})}
+        {...composerFloatingLayerProps}
+        className={showPreviousWorktree ? "w-[min(21rem,calc(100vw-2rem))]" : undefined}
       >
         <SelectGroup>
           <SelectGroupLabel>Workspace</SelectGroupLabel>
@@ -197,10 +172,7 @@ export const BranchToolbarEnvModeSelector = memo(function BranchToolbarEnvModeSe
           </SelectItem>
           {showPreviousWorktree && previousWorktreeLabel ? (
             <SelectItem value={PREVIOUS_WORKTREE_SELECT_VALUE}>
-              <span className="inline-flex items-center gap-1.5">
-                <HistoryIcon className="size-3" />
-                {previousWorktreeLabel}
-              </span>
+              <PreviousWorktreeItemContent branch={previousWorktreeBranch} />
             </SelectItem>
           ) : null}
         </SelectGroup>

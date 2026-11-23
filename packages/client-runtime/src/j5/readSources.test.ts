@@ -1,46 +1,36 @@
 import { expect, it } from "@effect/vitest";
-import {
-  AuthOrchestrationReadScope,
-  EnvironmentId,
-  type AuthSessionState,
-} from "@t3tools/contracts";
+import { j5SourceNotice } from "./inbox.ts";
+import { EnvironmentId } from "@t3tools/contracts";
+import { J5ActionError, J5_LEDGER_CAPABILITIES } from "@t3tools/contracts/j5";
 import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
 
-import { J5HttpError } from "./http.ts";
-import { resolveJ5ReadSource, spansMultipleEnvironments } from "./readSources.ts";
+import {
+  createJ5ReadSourcesAtom,
+  resolveJ5ReadSource,
+  spansMultipleEnvironments,
+} from "./readSources.ts";
 
-const session: AuthSessionState = {
-  authenticated: true,
-  scopes: [AuthOrchestrationReadScope],
-  auth: {
-    policy: "remote-reachable",
-    bootstrapMethods: ["one-time-token"],
-    sessionMethods: ["bearer-access-token"],
-    sessionCookieName: "session",
-  },
-};
 const source = {
   environmentId: EnvironmentId.make("remote"),
   environmentLabel: "Remote",
   phase: "connected" as const,
-  session,
 };
 
-it("preserves an independently loaded read-only source without permitting mutations", () => {
+it("reports an independently loaded source as ready with its data", () => {
   const result = resolveJ5ReadSource({ ...source, result: AsyncResult.success(["remote-row"]) });
-  expect(result).toMatchObject({ data: ["remote-row"], status: "ready", canOperate: false });
+  expect(result).toMatchObject({ data: ["remote-row"], status: "ready", connected: true });
 });
 
 it("retains data but reports an outage or refresh failure instead of an empty successful source", () => {
   const success = AsyncResult.success(["cached-row"]);
   const offline = resolveJ5ReadSource({ ...source, phase: "offline", result: success });
-  expect(offline).toMatchObject({ status: "offline", data: ["cached-row"], canOperate: false });
+  expect(offline).toMatchObject({ status: "offline", data: ["cached-row"], connected: false });
   const failed = resolveJ5ReadSource({
     ...source,
     result: AsyncResult.failure(
-      Cause.fail(new J5HttpError({ status: 503, detail: "Unavailable" })),
+      Cause.fail(new J5ActionError({ code: "SqlError", message: "Unavailable" })),
       { previousSuccess: Option.some(success) },
     ),
   });
@@ -55,15 +45,7 @@ it("keeps unsupported, authentication failure, and not-yet-connected states dist
     resolveJ5ReadSource({
       ...source,
       result: AsyncResult.failure(
-        Cause.fail(new J5HttpError({ status: 404, detail: "Not found" })),
-      ),
-    }).status,
-  ).toBe("unsupported");
-  expect(
-    resolveJ5ReadSource({
-      ...source,
-      result: AsyncResult.failure(
-        Cause.fail(new J5HttpError({ status: 401, detail: "Pair again" })),
+        Cause.fail(new J5ActionError({ code: "A2ALocalOperatorNotFoundError", message: "Gone" })),
       ),
     }).status,
   ).toBe("error");
@@ -71,6 +53,103 @@ it("keeps unsupported, authentication failure, and not-yet-connected states dist
     resolveJ5ReadSource({ ...source, phase: "connecting", result: AsyncResult.initial(false) })
       .status,
   ).toBe("loading");
+  // A retry after a failure, or the wait before one, is reconnecting, as upstream presents it: not
+  // a first load, and its line uses upstream's word. A client with no network reads offline.
+  const retrying = resolveJ5ReadSource({
+    ...source,
+    phase: "connecting",
+    reconnecting: true,
+    result: AsyncResult.success(["cached-row"]),
+  });
+  expect(retrying).toMatchObject({ status: "offline", data: ["cached-row"] });
+  expect(j5SourceNotice(retrying)).toBe("Remote: reconnecting… (showing saved results).");
+  expect(
+    j5SourceNotice(
+      resolveJ5ReadSource({
+        ...source,
+        phase: "connecting",
+        reconnecting: true,
+        result: AsyncResult.initial(false),
+      }),
+    ),
+  ).toBe("Remote: reconnecting…");
+  expect(
+    j5SourceNotice(
+      resolveJ5ReadSource({
+        ...source,
+        phase: "backoff",
+        reconnecting: true,
+        result: AsyncResult.initial(false),
+      }),
+    ),
+  ).toBe("Remote: reconnecting…");
+  expect(
+    j5SourceNotice(
+      resolveJ5ReadSource({ ...source, phase: "offline", result: AsyncResult.initial(false) }),
+    ),
+  ).toBe("Remote: offline.");
+  // "available" is a server nothing is connecting to, so it is not loading.
+  expect(
+    resolveJ5ReadSource({ ...source, phase: "available", result: AsyncResult.initial(false) })
+      .status,
+  ).toBe("offline");
+});
+
+it("leaves out a server the person turned off, and reads only a first connection as loading", () => {
+  type Input = Parameters<typeof createJ5ReadSourcesAtom<ReadonlyArray<string>>>[0];
+  const on = EnvironmentId.make("on");
+  const off = EnvironmentId.make("off");
+  const starting = EnvironmentId.make("starting");
+  const retrying = EnvironmentId.make("retrying");
+  const waiting = EnvironmentId.make("waiting");
+  const reads: Array<EnvironmentId> = [];
+  const sources = createJ5ReadSourcesAtom<ReadonlyArray<string>>({
+    label: "test:j5-read-sources-disabled",
+    capability: "j5ProjectLedger",
+    catalogValueAtom: Atom.make({
+      isReady: true,
+      entries: new Map([
+        [on, { target: { label: "On" }, enabled: true }],
+        [off, { target: { label: "Off" }, enabled: false }],
+        [starting, { target: { label: "Starting" }, enabled: true }],
+        [retrying, { target: { label: "Retrying" }, enabled: true }],
+        [waiting, { target: { label: "Waiting" }, enabled: true }],
+      ]),
+    }) as unknown as Input["catalogValueAtom"],
+    stateAtom: (id) =>
+      Atom.make(
+        id === on
+          ? AsyncResult.success({ phase: "connected" })
+          : id === off
+            ? AsyncResult.success({ phase: "available", desired: false })
+            : id === retrying
+              ? AsyncResult.success({ phase: "connecting", attempt: 4, lastFailure: {} })
+              : id === waiting
+                ? AsyncResult.success({ phase: "backoff", attempt: 4, lastFailure: {} })
+                : AsyncResult.initial(true),
+      ) as unknown as ReturnType<Input["stateAtom"]>,
+    configValueAtom: (id) =>
+      Atom.make(
+        id === starting ? null : { environment: { capabilities: { j5ProjectLedger: true } } },
+      ) as unknown as ReturnType<Input["configValueAtom"]>,
+    queryAtom: (id) =>
+      Atom.make(() => {
+        reads.push(id);
+        return id === on
+          ? AsyncResult.success<ReadonlyArray<string>, unknown>(["row"])
+          : AsyncResult.initial<ReadonlyArray<string>, unknown>(true);
+      }),
+  });
+  const result = AtomRegistry.make().get(sources).sources;
+  expect(
+    result.map((entry) => [entry.environmentLabel, entry.status, j5SourceNotice(entry)]),
+  ).toEqual([
+    ["On", "ready", null],
+    ["Starting", "loading", "Starting: loading…"],
+    ["Retrying", "offline", "Retrying: reconnecting…"],
+    ["Waiting", "offline", "Waiting: reconnecting…"],
+  ]);
+  expect(reads).not.toContain(off);
 });
 
 it("shows environment labels only once items span more than one environment", () => {
@@ -79,4 +158,108 @@ it("shows environment labels only once items span more than one environment", ()
   expect(spansMultipleEnvironments([])).toBe(false);
   expect(spansMultipleEnvironments([alpha, alpha])).toBe(false);
   expect(spansMultipleEnvironments([alpha, bravo])).toBe(true);
+});
+
+/** Reads one environment's source for a capability key, counting the reads it makes. */
+const readSourceFor = (
+  capabilities: Partial<Record<keyof typeof J5_LEDGER_CAPABILITIES, boolean>>,
+  capability: keyof typeof J5_LEDGER_CAPABILITIES,
+) => {
+  const environmentId = source.environmentId;
+  let routeCalls = 0;
+  type Input = Parameters<typeof createJ5ReadSourcesAtom<ReadonlyArray<string>>>[0];
+  const sources = createJ5ReadSourcesAtom<ReadonlyArray<string>>({
+    label: "test:j5-read-sources",
+    // The two older keys are the ones the client from before the re-key passed here.
+    capability: capability as Input["capability"],
+    catalogValueAtom: Atom.make({
+      isReady: true,
+      entries: new Map([[environmentId, { target: { label: "Remote" }, enabled: true }]]),
+    }) as unknown as Input["catalogValueAtom"],
+    stateAtom: () =>
+      Atom.make(AsyncResult.success({ phase: "connected" })) as unknown as ReturnType<
+        Input["stateAtom"]
+      >,
+    configValueAtom: () =>
+      Atom.make({ environment: { capabilities } }) as unknown as ReturnType<
+        Input["configValueAtom"]
+      >,
+    queryAtom: () =>
+      Atom.make(() => {
+        routeCalls += 1;
+        return AsyncResult.success<ReadonlyArray<string>, unknown>(["row"]);
+      }),
+  });
+  const [result] = AtomRegistry.make().get(sources).sources;
+  return { status: result?.status, data: result?.data, routeCalls };
+};
+
+it("shows an older client's J5 views as unsupported against a project-keyed server, calling no route", () => {
+  // Fleet read `j5Squadrons`; the Inbox, its count, Crew proposals and Crew runtime requests read
+  // `j5HumanInbox`. Their routes changed shape, so that client must not reach them.
+  for (const olderKey of ["j5Squadrons", "j5HumanInbox"] as const) {
+    expect(readSourceFor(J5_LEDGER_CAPABILITIES, olderKey)).toEqual({
+      status: "unsupported",
+      data: null,
+      routeCalls: 0,
+    });
+  }
+  expect(readSourceFor(J5_LEDGER_CAPABILITIES, "j5ProjectLedger")).toEqual({
+    status: "ready",
+    data: ["row"],
+    routeCalls: 1,
+  });
+});
+
+it("shows a server with no J5 ledger as unsupported without reading it", () => {
+  expect(readSourceFor({}, "j5ProjectLedger")).toEqual({
+    status: "unsupported",
+    data: null,
+    routeCalls: 0,
+  });
+});
+
+it("shows nothing from a server once its connection is known to be a guest's", () => {
+  type Input = Parameters<typeof createJ5ReadSourcesAtom<ReadonlyArray<string>>>[0];
+  const guest = Atom.make(false);
+  let routeCalls = 0;
+  const sources = createJ5ReadSourcesAtom<ReadonlyArray<string>>({
+    label: "test:j5-read-sources-guest",
+    capability: "j5ProjectLedger",
+    catalogValueAtom: Atom.make({
+      isReady: true,
+      entries: new Map([[source.environmentId, { target: { label: "Remote" }, enabled: true }]]),
+    }) as unknown as Input["catalogValueAtom"],
+    stateAtom: () =>
+      Atom.make(AsyncResult.success({ phase: "connected" })) as unknown as ReturnType<
+        Input["stateAtom"]
+      >,
+    configValueAtom: () =>
+      Atom.make({
+        environment: { capabilities: { j5ProjectLedger: true } },
+      }) as unknown as ReturnType<Input["configValueAtom"]>,
+    // The read a guest's client sent before it knew: the server refused it.
+    queryAtom: () =>
+      Atom.make(() => {
+        routeCalls += 1;
+        return AsyncResult.failure<ReadonlyArray<string>, unknown>(
+          Cause.fail(new J5ActionError({ code: "forbidden", message: "Not shared" })),
+        );
+      }),
+    guestAtom: () => guest,
+  });
+  const registry = AtomRegistry.make();
+  // Until the server says which kind the connection is, the read goes out as a member's would.
+  expect(registry.get(sources).sources[0]).toMatchObject({ status: "error", error: "Not shared" });
+  expect(routeCalls).toBe(1);
+  registry.set(guest, true);
+  // The refusal leaves no error behind, and a source that is unsupported is never asked again.
+  expect(registry.get(sources).sources[0]).toMatchObject({
+    status: "unsupported",
+    data: null,
+    error: null,
+  });
+  expect(routeCalls).toBe(1);
+  // The page says why, and not that the server is too old.
+  expect(j5SourceNotice(registry.get(sources).sources[0]!)).toBe("Remote: not shared with you.");
 });

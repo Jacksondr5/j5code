@@ -1,10 +1,11 @@
+// @effect-diagnostics nodeBuiltinImport:off - synchronous hashing for deterministic ids and digests.
 import * as NodeCrypto from "node:crypto";
 
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import { ParticipantId } from "./contracts.ts";
 
@@ -12,7 +13,7 @@ interface HumanPersonRow {
   readonly person_id: string;
 }
 
-export class A2ALocalOperatorNotFoundError extends Schema.TaggedErrorClass<A2ALocalOperatorNotFoundError>()(
+export class A2ALocalOperatorNotFoundError extends Schema.TaggedError<A2ALocalOperatorNotFoundError>()(
   "A2ALocalOperatorNotFoundError",
   {},
 ) {
@@ -21,26 +22,58 @@ export class A2ALocalOperatorNotFoundError extends Schema.TaggedErrorClass<A2ALo
   }
 }
 
+// Who writes to every thread: the first owner, and the people who hold Collaborator or Owner at
+// server scope.
+const WIDE_WRITER = `
+  j5_a2a_human_person.is_local_operator = 1 OR EXISTS (
+    SELECT 1 FROM j5_a2a_person_level AS held
+    WHERE held.person_id = j5_a2a_human_person.person_id
+      AND held.scope_kind = 'server'
+      AND held.level IN ('collaborator', 'owner')
+  )
+`;
+
+/**
+ * The people who write to every thread: the first owner, and those who hold Collaborator or Owner
+ * at server scope. The roster that resolves a machine's addressee by name lists them.
+ */
 export const listRegisteredHumanPersonIds = Effect.fn(
   "j5.a2a.humanPersonRegistry.listRegisteredHumanPersonIds",
 )(function* (sql: SqlClient.SqlClient) {
   const rows = yield* sql<HumanPersonRow>`
     SELECT person_id
     FROM j5_a2a_human_person
+    WHERE (${sql.literal(WIDE_WRITER)})
     ORDER BY person_id
   `;
   return rows.map((row) => ParticipantId.make(row.person_id));
 });
 
-export const isRegisteredHumanPerson = Effect.fn(
-  "j5.a2a.humanPersonRegistry.isRegisteredHumanPerson",
-)(function* (sql: SqlClient.SqlClient, personId: ParticipantId) {
-  const rows = yield* sql<{ readonly count: number }>`
-    SELECT COUNT(*) AS count
-    FROM j5_a2a_human_person
-    WHERE person_id = ${personId}
+/**
+ * Whether a person writes to every thread, so needs no check thread by thread: what they are
+ * asked and may answer covers every agent on the server.
+ */
+export const writesEveryThread = Effect.fn("j5.a2a.humanPersonRegistry.writesEveryThread")(
+  function* (sql: SqlClient.SqlClient, personId: ParticipantId) {
+    const rows = yield* sql<{ readonly count: number }>`
+      SELECT COUNT(*) AS count
+      FROM j5_a2a_human_person
+      WHERE person_id = ${personId} AND (${sql.literal(WIDE_WRITER)})
+    `;
+    return (rows[0]?.count ?? 0) === 1;
+  },
+);
+
+/** Whether the id is a person on this server, at any level or none; false once removed. */
+export const isHumanPerson = Effect.fn("j5.a2a.humanPersonRegistry.isHumanPerson")(function* (
+  sql: SqlClient.SqlClient,
+  personId: ParticipantId,
+) {
+  const rows = yield* sql<{ readonly found: number }>`
+    SELECT 1 AS found FROM j5_a2a_human_person
+    WHERE person_id = ${personId} AND removed_at IS NULL
   `;
-  return (rows[0]?.count ?? 0) === 1;
+  return rows.length > 0;
 });
 
 export const getLocalOperatorHumanPersonId = Effect.fn(
@@ -77,12 +110,20 @@ export const ensureLocalOperatorHumanPerson = Effect.fn(
         VALUES (${personId}, 1, ${createdAt})
         ON CONFLICT DO NOTHING
       `;
-      return yield* getLocalOperatorHumanPersonId(sql);
+      const firstOwner = yield* getLocalOperatorHumanPersonId(sql);
+      // The first owner is the server's Owner from the start (People and access AC2, AC51).
+      yield* sql`
+        INSERT INTO j5_a2a_person_level
+          (person_id, scope_kind, scope_id, level, created_at, updated_at)
+        VALUES (${firstOwner}, 'server', '', 'owner', ${createdAt}, ${createdAt})
+        ON CONFLICT DO NOTHING
+      `;
+      return firstOwner;
     }),
   );
 });
 
-/** Runtime startup mints one durable host-local operator without Squadron state. */
+/** Runtime startup mints one durable host-local operator without project state. */
 export const humanPersonRegistryLayer = Layer.effectDiscard(
   Effect.gen(function* () {
     const sql = yield* SqlClient.SqlClient;

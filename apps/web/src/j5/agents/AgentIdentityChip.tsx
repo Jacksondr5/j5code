@@ -24,7 +24,7 @@ export function AgentIdentityChip(props: {
           <span
             className={
               props.className ??
-              "inline-flex max-w-36 shrink-0 items-center gap-1 truncate rounded-sm border border-border/60 px-1 text-[.65rem] text-muted-foreground"
+              "inline-flex max-w-36 shrink-0 items-center gap-1 truncate rounded-sm border border-border/60 px-1 text-3xs text-muted-foreground"
             }
           />
         }
@@ -35,32 +35,35 @@ export function AgentIdentityChip(props: {
       <TooltipPopup side="top">
         Persona {presentation.personaLabel} · {presentation.routeLabel} ·{" "}
         {props.assignment.authorityPolicy}
+        {presentation.switchNote === null ? null : `. ${presentation.switchNote}`}
       </TooltipPopup>
     </Tooltip>
   );
 }
 
-/** Runtime rows know only the child thread; look up its shell for the pinned assignment. */
+/**
+ * Persona chip plus handoff link for upstream's lineage rows and subagent cards. Both are
+ * interactive, so callers mount this beside the row's navigation button, never inside it. Runtime
+ * rows know only the child thread; look up its shell for the pinned assignment.
+ */
 export function AgentRowIdentity(props: {
-  readonly environmentId: EnvironmentId | null;
+  readonly environmentId: EnvironmentId;
   readonly childThreadId: string | null;
 }) {
   const shell = useThreadShell(
-    props.environmentId !== null && props.childThreadId !== null
+    props.childThreadId !== null
       ? { environmentId: props.environmentId, threadId: props.childThreadId as ThreadId }
       : null,
   );
+  const assignment = shell?.agentPersonaAssignment;
+  if (assignment === undefined || props.childThreadId === null) return null;
   return (
     <>
-      <AgentIdentityChip assignment={shell?.agentPersonaAssignment} />
-      {shell?.agentPersonaAssignment !== undefined &&
-      props.environmentId !== null &&
-      props.childThreadId !== null ? (
-        <AgentHandoffChip
-          environmentId={props.environmentId}
-          threadId={props.childThreadId as ThreadId}
-        />
-      ) : null}
+      <AgentIdentityChip assignment={assignment} />
+      <AgentHandoffChip
+        environmentId={props.environmentId}
+        threadId={props.childThreadId as ThreadId}
+      />
     </>
   );
 }

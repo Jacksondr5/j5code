@@ -2,65 +2,30 @@ import { delegateTask } from "../../agents/agentDelegation.ts";
 import * as Effect from "effect/Effect";
 
 import { McpInvocationContext } from "../../../mcp/McpInvocationContext.ts";
+import * as McpToolAccess from "../../../mcp/McpToolAccess.ts";
 import { OrchestratorMcpService } from "../../../mcp/OrchestratorMcpService.ts";
+import { actsAsThreadCaller, spawnAndBrief } from "./outsideAgent.ts";
 import { J5OrchestratorSurface, mapJ5OrchestratorCapabilities } from "./orchestratorSurface.ts";
+import { threadInterrupt } from "./threadInterrupt.ts";
 
 const handlers = {
-  delegate_task: delegateTask,
-  task_status: ({ taskId }) =>
+  // A delegated task reports back to the thread that asked for it, and an outside agent has none.
+  delegate_task: actsAsThreadCaller(
+    "delegate_task",
+    spawnAndBrief("delegate the task"),
+    delegateTask,
+  ),
+  // Declared as upstream declares the tool this stands in for.
+  orchestrator_capabilities: McpToolAccess.reads((input) =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext;
       const service = yield* OrchestratorMcpService;
-      return yield* service.taskStatus(scope, taskId);
+      return yield* service
+        .capabilities(scope, input)
+        .pipe(Effect.map(mapJ5OrchestratorCapabilities));
     }),
-  task_cancel: (input) =>
-    Effect.gen(function* () {
-      const scope = yield* McpInvocationContext;
-      const service = yield* OrchestratorMcpService;
-      return yield* service.cancelTask(scope, input);
-    }),
-  orchestrator_capabilities: () =>
-    Effect.gen(function* () {
-      const scope = yield* McpInvocationContext;
-      const service = yield* OrchestratorMcpService;
-      return yield* service.capabilities(scope).pipe(Effect.map(mapJ5OrchestratorCapabilities));
-    }),
-  schedule_task: (input) =>
-    Effect.gen(function* () {
-      const scope = yield* McpInvocationContext;
-      const service = yield* OrchestratorMcpService;
-      return yield* service.scheduleTask(scope, input);
-    }),
-  list_scheduled_tasks: () =>
-    Effect.gen(function* () {
-      const scope = yield* McpInvocationContext;
-      const service = yield* OrchestratorMcpService;
-      return yield* service.listScheduledTasks(scope);
-    }),
-  update_scheduled_task: (input) =>
-    Effect.gen(function* () {
-      const scope = yield* McpInvocationContext;
-      const service = yield* OrchestratorMcpService;
-      return yield* service.updateScheduledTask(scope, input);
-    }),
-  delete_scheduled_task: (input) =>
-    Effect.gen(function* () {
-      const scope = yield* McpInvocationContext;
-      const service = yield* OrchestratorMcpService;
-      return yield* service.deleteScheduledTask(scope, input);
-    }),
-  t3_thread_list: (input) =>
-    Effect.gen(function* () {
-      const scope = yield* McpInvocationContext;
-      const service = yield* OrchestratorMcpService;
-      return yield* service.listThreads(scope, input);
-    }),
-  t3_thread_read: (input) =>
-    Effect.gen(function* () {
-      const scope = yield* McpInvocationContext;
-      const service = yield* OrchestratorMcpService;
-      return yield* service.readThread(scope, input);
-    }),
-} satisfies Parameters<typeof J5OrchestratorSurface.toLayer>[0];
+  ),
+  t3_thread_interrupt: threadInterrupt,
+} satisfies McpToolAccess.Handlers<typeof J5OrchestratorSurface.tools>;
 
-export const J5OrchestratorSurfaceHandlersLive = J5OrchestratorSurface.toLayer(handlers);
+export const layer = McpToolAccess.toLayer(J5OrchestratorSurface, handlers);

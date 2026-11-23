@@ -1,10 +1,10 @@
-import { createFileRoute, redirect, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, redirect, useRouter } from "@tanstack/react-router";
 
 import {
   HostedPairingRouteSurface,
   PairingPendingSurface,
-  PairingRouteSurface,
 } from "../components/auth/PairingRouteSurface";
+import { JoinLinkPairingSurface } from "../j5/sharing/JoinLinkPairingSurface";
 
 export const Route = createFileRoute("/pair")({
   beforeLoad: async ({ context }) => {
@@ -15,7 +15,11 @@ export const Route = createFileRoute("/pair")({
       };
     }
 
-    if (authGateState.status === "authenticated" || authGateState.status === "hosted-static") {
+    if (
+      authGateState.status === "authenticated" ||
+      authGateState.status === "hosted-static" ||
+      authGateState.status === "guest"
+    ) {
       throw redirect({ to: "/", replace: true });
     }
     return {
@@ -27,8 +31,8 @@ export const Route = createFileRoute("/pair")({
 });
 
 function PairRouteView() {
+  const router = useRouter();
   const { authGateState } = Route.useRouteContext();
-  const navigate = useNavigate();
 
   if (!authGateState) {
     return null;
@@ -39,10 +43,13 @@ function PairRouteView() {
   }
 
   return (
-    <PairingRouteSurface
+    <JoinLinkPairingSurface
       auth={authGateState.auth}
       onAuthenticated={() => {
-        void navigate({ to: "/", replace: true });
+        // Recreate the connection so WebSocket and cached scopes use the new pairing cookie.
+        router.history.replace("/");
+        router.history.flush();
+        window.location.reload();
       }}
       {...(authGateState.errorMessage ? { initialErrorMessage: authGateState.errorMessage } : {})}
     />

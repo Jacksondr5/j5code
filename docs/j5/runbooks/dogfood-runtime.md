@@ -5,7 +5,7 @@ kind: runbook
 
 # Dogfood runtime: self-hosted J5 Code server and clients
 
-How Jackson's solo dogfood (phase 3 of [dogfood v0](../plans/dogfood-v0.md)) actually runs: one
+How Jackson's solo dogfood (phase 3 of dogfood v0) actually runs: one
 source-built J5 Code server on a Linux box, reached over Tailscale, with the browser as the client.
 This document is self-contained on purpose — dogfood agents have no access to the design sessions
 that produced it. Decisions and their load-bearing reasons are recorded inline.
@@ -18,7 +18,7 @@ exact source and verification limits.
 
 ## Shape and rationale
 
-- **One server, one Squadron.** A Squadron lives entirely on one server by design, so the dogfood
+- **One server.** A project and its ledger live entirely on one server by design, so the dogfood
   fleet is single-server. The Linux box is that server.
 - **The browser is the dogfood client.** The server serves its own web bundle, built from the same
   commit as the server itself (`apps/server/src/config.ts` resolves `dist/client`, the HTTP
@@ -36,15 +36,16 @@ exact source and verification limits.
 - **Every update snapshots the database first.** Both migration lanes (upstream's and J5's) are
   forward-only with no downgrade guard — an older server binary starts silently against a
   newer-migrated database and fails later at query time. The only reliable rollback is
-  previous-commit + restored snapshot, so the snapshot is not optional.
-- **Restarts interrupt active turns.** Automatic continuation is off by default. With
-  **Continue threads after restarts** enabled for the environment, upstream recovery may dispatch
-  “Continue where you left off.” for eligible interrupted work after an update, crash or machine
-  restart. J5's temporary adaptation prevents a committed Stop from being revived, including a
-  Stop arriving after continuation was prepared. This does not guarantee every interrupted task
-  will resume or complete. A2A deliveries remain in their durable queue and resume delivery on
-  boot with idempotent retries. Prefer updating when the fleet is quiet. At the next upstream
-  merge, favor upstream's revised continuation/Stop handling as recorded in FORK.md.
+  previous-commit + restored snapshot, so the snapshot is not optional. A second server on the
+  same home is refused (it exits with code 78), so an old and a new binary can't run on one home
+  at once.
+- **Restarts interrupt active turns.** The environment's **Continue threads after restarts**
+  setting is on by default, so upstream recovery may dispatch “Continue where you left off.” for
+  eligible interrupted work after an update, crash or machine restart, Crew seats and Peer Agents
+  included. It stops after three automatic continuations of a thread in a row, and skips a thread
+  that waits on the person. Upstream does not continue a run the person stopped. This does not guarantee every
+  interrupted task will resume or complete. A2A deliveries remain in their durable queue and
+  resume delivery on boot with idempotent retries. Prefer updating when the fleet is quiet.
 - **Native provider history is never silently replaced.** If a provider thread with a native
   reference cannot resume, its turn fails with the recorded cause; only a future explicit
   fall-back act may request a digest re-prime.
@@ -79,14 +80,12 @@ agreement.
 As `j5dev` (Ansible reconciles all of this):
 
 1. **Toolchain.** `git`, `gh`, `sqlite3`, `build-essential`, `python3`, `fnm`, and via fnm the Node
-   version in the checkout's `.nvmrc` (currently 24.14.0). Install the pnpm version from the repo's
+   version in the checkout's `.nvmrc` (currently 24.22.0). Install the pnpm version from the repo's
    `packageManager` field under that
    Node; the server's Node distribution has no Corepack executable. Rust is **not** required —
-   it is only used for desktop packaging. Codex CLI **≥ 0.151.0** is the configured minimum;
-   real 0.151.0 wire compatibility is not established by the fixtures normalized to the generated
-   0.152.1 protocol. The earlier dogfood guidance used tested **0.153.3** for GPT-6 Astra; that
-   evidence does not prove the lower bound. The server refuses an app-server below the configured
-   minimum with a named turn failure before thread requests. The C/C++ toolchain and Python
+   it is only used for desktop packaging. J5 sets no Codex CLI minimum of its own: Settings →
+   Providers warns when the installed version is outside the range upstream's compatibility
+   table supports, and does not block it. The C/C++ toolchain and Python
    support native dependency builds; `gh` supports repository and pull-request work.
 2. **Checkout and first build.**
 
@@ -114,7 +113,7 @@ As `j5dev` (Ansible reconciles all of this):
    git -C ~/src/j5code remote add upstream https://github.com/pingdotgg/t3code.git
    ```
 
-   Select `~/src/j5code` when creating the J5 development Squadron. Other initiatives get their
+   Add `~/src/j5code` as the J5 development project. Other initiatives get their
    own clones under `~/src`. Development servers use their worktrees' isolated homes.
 
 3. **Unit.** `~/.config/systemd/user/j5code.service`:
@@ -207,9 +206,9 @@ As `j5dev` (Ansible reconciles all of this):
    server itself do not prove that tailnet policy admits the client.
 
 6. **Pairing.** Headless serve prints pairing details after startup — read them with
-   `journalctl --user -u j5code -e`. The startup token carries admin scopes, and its link uses the
-   loopback origin. For a fresh standard-scope client token with the private HTTPS origin already
-   included, run:
+   `journalctl --user -u j5code -e`. The startup token carries every permission, and its link uses the
+   loopback origin. For a fresh client token, which carries the same permissions, with the private
+   HTTPS origin already included, run:
 
    ```sh
    cd ~/j5code
@@ -294,9 +293,9 @@ connection timeout and two-second total request timeout, separated by one-second
 check fails after about 90 seconds at most, rather than hanging on a stalled response.
 
 What happens after restart depends on the environment's **Continue threads after restarts**
-setting. With its default off, interrupted tasks need an explicit continuation prompt. With it
-on, eligible work can receive the automatic continuation described above; check whether recovery
-already started a turn before sending another prompt. Queued A2A deliveries drain on boot.
+setting. It is on by default, so eligible work can receive the automatic continuation described
+above; check whether recovery already started a turn before sending another prompt. With it off,
+interrupted tasks need an explicit continuation prompt. Queued A2A deliveries drain on boot.
 
 ## Rollback
 
@@ -312,20 +311,126 @@ package_manager="$(fnm exec --using "$(cat .nvmrc)" node -p 'require("./package.
 fnm exec --using "$(cat .nvmrc)" npm install --global "$package_manager"
 fnm exec --using "$(cat .nvmrc)" pnpm install --frozen-lockfile
 fnm exec --using "$(cat .nvmrc)" pnpm exec vp run --filter t3 build
-rm -f ~/.j5code/userdata/state.sqlite ~/.j5code/userdata/state.sqlite-wal ~/.j5code/userdata/state.sqlite-shm
-cp ~/.j5code/db-snapshots/<pre-update-snapshot>/state.sqlite ~/.j5code/userdata/state.sqlite
+db=statev2.sqlite   # the file name inside the snapshot directory: statev2.sqlite or state.sqlite
+rm -f ~/.j5code/userdata/$db ~/.j5code/userdata/$db-wal ~/.j5code/userdata/$db-shm
+cp ~/.j5code/db-snapshots/<pre-update-snapshot>/$db ~/.j5code/userdata/$db
 systemctl --user start j5code.service
 ```
 
 Restoring the snapshot is required whenever the bad version ran migrations, and safe otherwise —
-when in doubt, restore. Ledger writes made between the snapshot and the rollback are lost; that is
+when in doubt, restore.
+
+The server keeps its database in `userdata/statev2.sqlite`. The first start of a V2 build copies
+`state.sqlite` to `statev2.sqlite` and never touches `state.sqlite` again, so the snapshot names
+whichever file was live. Rolling back to a build from before that copy is one-way: the old build
+reads `state.sqlite` and cannot see anything written to `statev2.sqlite`. Stop the service first,
+restore `state.sqlite` if the pre-update snapshot is named that, and move `statev2.sqlite` (with its
+`-wal`/`-shm`) aside rather than deleting it; an existing `statev2.sqlite` always wins, so leaving it
+in place would hide the old build's writes from the next V2 start. Never run an old and a new
+server against the two files at once. Ledger writes made between the snapshot and the rollback are lost; that is
 the accepted cost, which is why updates happen at quiet moments. If the bad version never actually
 started (build failure), skip the restore and just rebuild at the previous commit.
+
+Since the release based on T3 Code 0.1.7 the server prunes its event log, keeping about a day of it.
+Pruned events are gone from the live database; only a snapshot taken before the prune still holds
+them. Builds before that release read who answered a prompt in a shared conversation from the log,
+so rolling back to one without restoring a snapshot shows answers whose events were pruned without
+who gave them.
+
+### Restoring the automatic pre-migration snapshot
+
+Before a new version runs any migration, upstream's or J5's, the server copies the database to
+`userdata/statev2.pre-migration-u<upstream>-j<j5>.sqlite`, where the two three-digit numbers are
+the newest upstream and J5 ledger migrations the database had recorded, and logs the path, the size
+and how long it took (a few seconds for a 2 GB database). It does this on its own at startup,
+whether or not the update script ran, and only when a migration is pending. If the copy fails (a
+full disk, for instance) the server refuses to start and nothing migrates; free space and start it
+again.
+
+To go back to the state before those migrations. A person runs this, from a terminal outside J5
+Code; an agent running inside the server being rolled back must not, because the first step stops
+that server and ends the agent partway through. There can be up to three snapshots: `ls -l` shows
+when each was written, and the one to restore is the one written when the version you are leaving
+first started.
+
+```sh
+systemctl --user stop j5code.service              # 1. stop the server
+cd ~/.j5code/userdata
+ls -l statev2.pre-migration-*.sqlite
+snapshot=statev2.pre-migration-u<upstream>-j<j5>.sqlite
+aside=../db-aside-$(date +%Y%m%d-%H%M%S)
+# 2. move the newer database aside and copy the snapshot into its place
+test -f "$snapshot" && mkdir "$aside" &&
+  mv statev2.sqlite "$aside"/ &&
+  { [ ! -e statev2.sqlite-wal ] || mv statev2.sqlite-wal "$aside"/; } &&
+  { [ ! -e statev2.sqlite-shm ] || mv statev2.sqlite-shm "$aside"/; } &&
+  cp "$snapshot" statev2.sqlite &&
+  echo "Restored $snapshot. The newer database is in $aside."
+cd ~/j5code && git checkout <previous-commit>     # 3. run the previous version
+# rebuild as in the rollback steps above, then:
+systemctl --user start j5code.service
+```
+
+Step 2 stops at the first command that fails, and has worked only if it prints its last line; do
+not go on to step 3 otherwise. The snapshot is copied, not moved, so it is still there to restore
+again. Run the previous version, not the new one: the new one would take a fresh snapshot and
+migrate again. Everything written after the snapshot is lost, as with any restore.
+
+Each snapshot is a full copy of the database. The server keeps the three most recent and deletes
+older ones when it writes a new one. Snapshots named `statev2.pre-j5-*.sqlite` or
+`statev2.pre-upstream-renumber.sqlite` come from earlier versions and are never deleted: remove
+them by hand. A file ending in `.partial` or `.partial-journal` is a copy that was killed partway;
+the server deletes those, once an hour old, the next time it writes a snapshot.
+
+### A project shared by several Squadrons
+
+The migration that retires Squadrons moves each Squadron's ledger to the project that Squadron
+referenced. It cannot do
+that when two Squadrons referenced the same project, so the server refuses to start and logs the
+project and the Squadrons by name:
+
+```text
+Cannot retire Squadrons: project "<title>" (<project id>) is shared by Squadrons "<name>" (<squadron id>) and "<name>" (<squadron id>). Nothing was changed.
+```
+
+Nothing was changed: the database is as it was before the start. The app has had no way to create
+this state since Create Squadron was removed, so it is rare. To repair it, one of the Squadrons has
+to go, and only the previous version can remove one:
+
+1. **Run the previous version.** Check out and build the commit before this update, as in
+   [Rollback](#rollback), and start the service. No restore is needed. The snapshot the failed start
+   wrote (`statev2.pre-migration-*.sqlite`) can stay; the next start replaces it.
+2. **Choose the Squadron to remove.** Its agents keep their threads and conversations, but its
+   agent-to-agent history (messages, Exchanges, Inbox items) is deleted with it.
+3. **Archive that Squadron's agents and Crews** in the app. The delete below refuses while any is
+   still live, and says which.
+4. **Delete the Squadron** on the server host:
+
+   ```sh
+   TOKEN=$(j5 auth session issue --ttl 10m --token-only)
+   curl -sS -X POST -H "Authorization: Bearer $TOKEN" \
+     "http://127.0.0.1:5773/api/j5/squadrons/$(jq -rn --arg id '<squadron id>' '$id|@uri')/delete"
+   ```
+
+   The id has a colon in it, which is why it is encoded. A `{"deleted":true,...}` reply means it is
+   gone.
+
+5. **Update again.** The migration now runs.
+
+To check for this before updating, read-only:
+
+```sql
+SELECT project_id, COUNT(*) AS squadrons
+FROM j5_a2a_squadron_project_reference GROUP BY project_id HAVING COUNT(*) > 1;
+```
+
+No rows means the migration will not refuse for this reason.
 
 ## Backups
 
 Interim story until the client-pulled backup design lands: the nightly snapshot timer plus the
 pre-update snapshots, both under `~/.j5code/db-snapshots/` with a retention cap enforced by the
-snapshot script. Snapshots cover `state.sqlite` only — `secrets/` and `settings.json` change
+snapshot script. Snapshots cover the live database only (`statev2.sqlite`, or `state.sqlite`
+before the first V2 start) — `secrets/` and `settings.json` change
 rarely; copy them by hand after changing them. Off-box copies follow whatever backup regime the
 box already has; the snapshot directory is the thing to include in it.

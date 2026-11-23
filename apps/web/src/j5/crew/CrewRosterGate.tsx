@@ -1,11 +1,13 @@
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
-import { useCallback, useState } from "react";
+import { useId, useState } from "react";
 
+import { ComposerBanner } from "../../components/chat/ComposerBanner";
 import { useEnvironmentQuery } from "../../state/query";
 import { notifyHumanInboxChanged } from "../a2a/humanInboxRefresh";
 import { crewProposalsQueryAtom } from "../state";
 import { CrewProposalCard } from "./CrewProposalCard";
-import { rosterGatesForThread } from "./crewProposals.logic";
+import { clearCrewProposalDraft } from "./crewProposalDraftStore";
+import { rosterGatesForThread } from "@t3tools/client-runtime/j5/crew-proposals";
 import {
   refreshCrewProposals,
   resolveCrewProposal,
@@ -14,11 +16,8 @@ import {
   type CrewProposalSeat,
 } from "./crewProposalsClient";
 
-/**
- * The Captain's roster proposal, answered where it was asked: above the composer of the thread
- * that launched the crew, like a planning question. Reads the thread's own environment and shares
- * the crew-gate poll with the bell, so ordinary threads pay nothing extra.
- */
+const proposalViews = new Map<string, ReadonlySet<string>>();
+
 export function CrewRosterGate(props: {
   readonly environmentId: EnvironmentId | undefined;
   readonly threadId: ThreadId | null | undefined;
@@ -28,64 +27,76 @@ export function CrewRosterGate(props: {
     environmentId !== undefined && threadId != null ? crewProposalsQueryAtom(environmentId) : null,
   );
   useCrewProposalsRefresh();
+  const viewKey = JSON.stringify([environmentId, threadId]);
+  const [expanded, setExpanded] = useState(() => proposalViews.get(viewKey) ?? new Set<string>());
+  const contentId = useId();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const resolve = useCallback(
-    async (
-      proposal: CrewProposal,
-      decision: "approve" | "decline",
-      seats: ReadonlyArray<CrewProposalSeat>,
-      approvalToken?: string,
-    ) => {
-      if (environmentId === undefined) return;
-      setBusyId(proposal.id);
-      setError(null);
-      try {
-        if (decision === "approve" && approvalToken === undefined)
-          throw new Error("Refresh the runtime preview before approving.");
-        await resolveCrewProposal(
-          environmentId,
-          decision === "approve"
-            ? { proposalId: proposal.id, decision, seats, approvalToken: approvalToken! }
-            : { proposalId: proposal.id, decision },
-        );
-        notifyHumanInboxChanged(environmentId);
-        await refreshCrewProposals(environmentId).catch(() => undefined);
-      } catch (cause) {
-        setError(cause instanceof Error ? cause.message : "Could not resolve the crew request.");
-      } finally {
-        setBusyId(null);
-      }
-    },
-    [environmentId],
-  );
+  const resolve = async (
+    proposal: CrewProposal,
+    decision: "approve" | "decline",
+    seats: ReadonlyArray<CrewProposalSeat>,
+    approvalToken?: string,
+  ) => {
+    if (environmentId === undefined) return;
+    if (decision === "approve" && approvalToken === undefined) {
+      setBusyId(null);
+      setError("Refresh the runtime preview before approving.");
+      return;
+    }
+    setBusyId(proposal.id);
+    setError(null);
+    try {
+      await resolveCrewProposal(
+        environmentId,
+        decision === "approve"
+          ? { proposalId: proposal.id, decision, seats, approvalToken: approvalToken! }
+          : { proposalId: proposal.id, decision },
+      );
+      clearCrewProposalDraft(environmentId, proposal.id);
+      notifyHumanInboxChanged(environmentId);
+      await refreshCrewProposals(environmentId).catch(() => undefined);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not resolve the crew request.");
+    }
+    setBusyId(null);
+  };
 
   const gates = rosterGatesForThread(query.data ?? [], threadId);
   if (gates.length === 0 || environmentId === undefined) return null;
   return (
-    <div
-      className="mb-3 max-h-[60dvh] min-h-0 shrink overflow-y-auto overscroll-contain"
-      data-testid="crew-roster-gate"
-    >
-      {error ? (
-        <p className="mb-2 text-sm text-destructive" role="alert">
-          {error}
-        </p>
-      ) : null}
-      <ul className="space-y-3">
-        {gates.map((proposal) => (
-          <CrewProposalCard
-            key={proposal.id}
-            proposal={proposal}
-            environmentId={environmentId}
-            busy={busyId === proposal.id}
-            onResolve={(decision, seats, approvalToken) =>
-              void resolve(proposal, decision, seats, approvalToken)
-            }
-          />
-        ))}
-      </ul>
-    </div>
+    <ComposerBanner.Attachment>
+      <ComposerBanner.Root density="comfortable" data-testid="crew-roster-gate">
+        {error ? (
+          <p className="mb-2 text-sm text-destructive" role="alert">
+            {error}
+          </p>
+        ) : null}
+        <ul className="divide-y divide-border">
+          {gates.map((proposal) => (
+            <CrewProposalCard
+              key={proposal.id}
+              proposal={proposal}
+              environmentId={environmentId}
+              busy={busyId === proposal.id}
+              disclosure={{
+                expanded: expanded.has(proposal.id),
+                contentId: `${contentId}-${proposal.id}`,
+                onToggle: () => {
+                  const next = new Set(expanded);
+                  if (!next.delete(proposal.id)) next.add(proposal.id);
+                  proposalViews.set(viewKey, next);
+                  setExpanded(next);
+                },
+              }}
+              onResolve={(decision, seats, approvalToken) =>
+                void resolve(proposal, decision, seats, approvalToken)
+              }
+            />
+          ))}
+        </ul>
+      </ComposerBanner.Root>
+    </ComposerBanner.Attachment>
   );
 }

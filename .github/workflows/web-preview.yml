@@ -34,6 +34,7 @@ jobs:
     # workflow should skip rather than fail for them. On `labeled` events, only
     # the preview label itself triggers a deploy.
     if: >-
+      github.repository == 'pingdotgg/t3code' &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       contains(github.event.pull_request.labels.*.name, 'preview:web') &&
       (github.event.action != 'labeled' || github.event.label.name == 'preview:web')
@@ -77,13 +78,21 @@ jobs:
 
           vercel_scope="${VERCEL_TEAM_SLUG:-$VERCEL_ORG_ID}"
 
-          deployment_url="$(
+          deployment_output="$(
             vp dlx vercel@53.1.1 deploy \
               --archive=tgz \
               --yes \
               --token "$VERCEL_TOKEN" \
-              --scope "$vercel_scope"
+              --scope "$vercel_scope" \
+              --build-env "VITE_RELEASE_CHANNEL=preview"
           )"
+          printf '%s\n' "$deployment_output"
+          # Vercel can print lockfile warnings to stdout before the deployment URL.
+          deployment_url="$(printf '%s\n' "$deployment_output" | grep -E '^https://[[:alnum:].-]+\.vercel\.app$')"
+          if [[ "$deployment_url" == *$'\n'* ]]; then
+            echo "Vercel returned multiple deployment URLs." >&2
+            exit 1
+          fi
 
           echo "Deployed $deployment_url"
           echo "deployment_url=$deployment_url" >> "$GITHUB_OUTPUT"

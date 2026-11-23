@@ -1,0 +1,39 @@
+import { useAtomValue } from "@effect/atom-react";
+import {
+  participantIdsForJ5UserMessage,
+  type J5UserMessageInput,
+} from "@t3tools/client-runtime/j5/user-message";
+import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+
+import { environmentShell } from "../../state/shell";
+import { accessConfirmedAtom } from "../connection/memory";
+import { j5Sharing } from "../sharing/guestAccess";
+import { useThreadAuthorIndex } from "../sharing/sharedConversation";
+import { useParticipantIdentities } from "./participantIdentities";
+import type { J5Timeline } from "./timelinePresentation";
+
+/** The reader and the identity read's names for one thread's timeline, read once for its rows. */
+export function useJ5Timeline(
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+  messages: ReadonlyArray<J5UserMessageInput>,
+): J5Timeline {
+  const access = useAtomValue(j5Sharing.connectionAccess(environmentId));
+  const accessConfirmed = useAtomValue(accessConfirmedAtom(environmentId));
+  const narrow = useAtomValue(j5Sharing.isNarrow(environmentId));
+  const threadListLive = useAtomValue(environmentShell.statusAtom(environmentId)) === "live";
+  const { authors } = useThreadAuthorIndex(environmentId, threadId);
+  const identities = useParticipantIdentities(
+    environmentId,
+    messages.flatMap((message) => participantIdsForJ5UserMessage(message)),
+  );
+  return {
+    ...identities,
+    accessConfirmed,
+    narrow,
+    threadListLive,
+    environmentId,
+    viewerParticipantId: access?.kind === "person" ? access.personId : null,
+    sharedAuthors: authors,
+  };
+}

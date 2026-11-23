@@ -1,4 +1,6 @@
 import {
+  type ApplicationProjectEvent,
+  type ApplicationStoredEvent,
   CommandId,
   OrchestrationV2DomainEvent,
   OrchestrationV2StoredEvent,
@@ -9,12 +11,10 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import type * as SqlClient from "effect/unstable/sql/SqlClient";
+import type * as SqlClient from "effect/sql/SqlClient";
+import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore.ts";
 
-import { OrchestrationEventStoreLive } from "../persistence/Layers/OrchestrationEventStore.ts";
-import { OrchestrationEventStore } from "../persistence/Services/OrchestrationEventStore.ts";
-
-export class EventStoreAppendEventsError extends Schema.TaggedErrorClass<EventStoreAppendEventsError>()(
+export class EventStoreAppendEventsError extends Schema.TaggedError<EventStoreAppendEventsError>()(
   "EventStoreAppendEventsError",
   {
     eventCount: Schema.Number,
@@ -26,7 +26,7 @@ export class EventStoreAppendEventsError extends Schema.TaggedErrorClass<EventSt
   }
 }
 
-export class EventStoreReadEventsError extends Schema.TaggedErrorClass<EventStoreReadEventsError>()(
+export class EventStoreReadEventsError extends Schema.TaggedError<EventStoreReadEventsError>()(
   "EventStoreReadEventsError",
   {
     afterSequence: Schema.optional(Schema.Number),
@@ -52,10 +52,14 @@ export interface EventStoreV2Shape {
     readonly commandId?: CommandId;
     readonly events: ReadonlyArray<OrchestrationV2DomainEvent>;
   }) => Effect.Effect<ReadonlyArray<OrchestrationV2StoredEvent>, EventStoreV2Error>;
+  readonly appendProjectEvent: (
+    event: OrchestrationEventStore.UnsequencedProjectEvent,
+  ) => Effect.Effect<ApplicationProjectEvent, EventStoreV2Error>;
   readonly read: (input?: {
     readonly afterSequence?: number;
     readonly throughSequence?: number;
     readonly threadId?: ThreadId;
+    readonly eventType?: OrchestrationV2DomainEvent["type"];
     readonly limit?: number;
   }) => Stream.Stream<OrchestrationV2StoredEvent, EventStoreV2Error>;
   readonly readByCommandId: (input: {
@@ -64,76 +68,89 @@ export interface EventStoreV2Shape {
   readonly latestSequence: (input?: {
     readonly threadId?: ThreadId;
   }) => Effect.Effect<number, EventStoreV2Error>;
-  readonly publishCommitted: (
-    events: ReadonlyArray<OrchestrationV2StoredEvent>,
-  ) => Effect.Effect<void>;
+  readonly latestApplicationSequence: Effect.Effect<number, EventStoreV2Error>;
+  readonly publishCommitted: (events: ReadonlyArray<ApplicationStoredEvent>) => Effect.Effect<void>;
 }
 
 export class EventStoreV2 extends Context.Service<EventStoreV2, EventStoreV2Shape>()(
   "t3/orchestration-v2/EventStore/EventStoreV2",
 ) {}
 
-const baseLayer: Layer.Layer<EventStoreV2, never, OrchestrationEventStore> = Layer.effect(
-  EventStoreV2,
-  Effect.gen(function* () {
-    const applicationEvents = yield* OrchestrationEventStore;
+const layerBase: Layer.Layer<EventStoreV2, never, OrchestrationEventStore.OrchestrationEventStore> =
+  Layer.effect(
+    EventStoreV2,
+    Effect.gen(function* () {
+      const applicationEvents = yield* OrchestrationEventStore.OrchestrationEventStore;
 
-    const read: EventStoreV2Shape["read"] = (input) =>
-      applicationEvents
-        .readAgentEvents({
-          ...(input?.afterSequence === undefined ? {} : { afterSequence: input.afterSequence }),
-          ...(input?.throughSequence === undefined
-            ? {}
-            : { throughSequence: input.throughSequence }),
-          ...(input?.threadId === undefined ? {} : { threadId: input.threadId }),
-          ...(input?.limit === undefined ? {} : { limit: input.limit }),
-        })
-        .pipe(
-          Stream.mapError(
-            (cause) =>
-              new EventStoreReadEventsError({
-                ...(input?.afterSequence === undefined
-                  ? {}
-                  : { afterSequence: input.afterSequence }),
-                ...(input?.threadId === undefined ? {} : { threadId: input.threadId }),
-                cause,
-              }),
-          ),
-        );
-
-    return EventStoreV2.of({
-      append: (input) =>
-        applicationEvents.appendAgentEvents(input).pipe(
-          Effect.mapError(
-            (cause) =>
-              new EventStoreAppendEventsError({
-                eventCount: input.events.length,
-                cause,
-              }),
-          ),
-        ),
-      read,
-      readByCommandId: ({ commandId }) =>
+      const read: EventStoreV2Shape["read"] = (input) =>
         applicationEvents
-          .readAgentEvents({ commandId })
-          .pipe(Stream.mapError((cause) => new EventStoreReadEventsError({ cause }))),
-      latestSequence: (input) =>
-        applicationEvents.latestAgentSequence(input?.threadId).pipe(
-          Effect.mapError(
-            (cause) =>
-              new EventStoreReadEventsError({
-                ...(input?.threadId === undefined ? {} : { threadId: input.threadId }),
-                cause,
-              }),
-          ),
+          .readAgentEvents({
+            ...(input?.afterSequence === undefined ? {} : { afterSequence: input.afterSequence }),
+            ...(input?.throughSequence === undefined
+              ? {}
+              : { throughSequence: input.throughSequence }),
+            ...(input?.threadId === undefined ? {} : { threadId: input.threadId }),
+            ...(input?.eventType === undefined ? {} : { eventType: input.eventType }),
+            ...(input?.limit === undefined ? {} : { limit: input.limit }),
+          })
+          .pipe(
+            Stream.mapError(
+              (cause) =>
+                new EventStoreReadEventsError({
+                  ...(input?.afterSequence === undefined
+                    ? {}
+                    : { afterSequence: input.afterSequence }),
+                  ...(input?.threadId === undefined ? {} : { threadId: input.threadId }),
+                  cause,
+                }),
+            ),
+          );
+
+      return EventStoreV2.of({
+        append: Effect.fn("EventStoreV2.append")(function (input) {
+          return applicationEvents.appendAgentEvents(input).pipe(
+            Effect.mapError(
+              (cause) =>
+                new EventStoreAppendEventsError({
+                  eventCount: input.events.length,
+                  cause,
+                }),
+            ),
+          );
+        }),
+        appendProjectEvent: Effect.fn("EventStoreV2.appendProjectEvent")(function (event) {
+          return applicationEvents
+            .appendProjectEvent(event)
+            .pipe(
+              Effect.mapError((cause) => new EventStoreAppendEventsError({ eventCount: 1, cause })),
+            );
+        }),
+        read,
+        readByCommandId: ({ commandId }) =>
+          applicationEvents
+            .readAgentEvents({ commandId })
+            .pipe(Stream.mapError((cause) => new EventStoreReadEventsError({ cause }))),
+        latestSequence: Effect.fn("EventStoreV2.latestSequence")(function (input) {
+          return applicationEvents.latestAgentSequence(input?.threadId).pipe(
+            Effect.mapError(
+              (cause) =>
+                new EventStoreReadEventsError({
+                  ...(input?.threadId === undefined ? {} : { threadId: input.threadId }),
+                  cause,
+                }),
+            ),
+          );
+        }),
+        latestApplicationSequence: applicationEvents.latestApplicationSequence.pipe(
+          Effect.mapError((cause) => new EventStoreReadEventsError({ cause })),
         ),
-      publishCommitted: applicationEvents.publishCommitted,
-    });
-  }),
+        publishCommitted: applicationEvents.publishCommitted,
+      });
+    }),
+  );
+
+export const layer: Layer.Layer<EventStoreV2, never, SqlClient.SqlClient> = layerBase.pipe(
+  Layer.provide(OrchestrationEventStore.layer),
 );
 
-export const layer: Layer.Layer<EventStoreV2, never, SqlClient.SqlClient> = baseLayer.pipe(
-  Layer.provide(OrchestrationEventStoreLive),
-);
-
-export const layerFromOrchestrationEventStore = baseLayer;
+export const layerFromOrchestrationEventStore = layerBase;

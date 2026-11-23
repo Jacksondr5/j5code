@@ -1,33 +1,45 @@
-<!--
-⚠️ READ BEFORE OPENING ⚠️
+## Problem
 
-We are not actively accepting contributions right now.
+<!-- One or two sentences: what was wrong or missing, and for whom. Link the tracking issue on this repository: "Closes #123". -->
 
-You can still open a PR, but please do so knowing there is a high chance
-we may close it without merging it, or never review it.
+## What changed
 
-- Small, focused PRs are strongly preferred. Bug fixes are most likely to be merged.
-- New features will most likely just annoy us.
-- 1,000+ line PRs with a bunch of new features will probably get you banned from the repo.
--->
+<!-- How you fixed it, and why this shape. Keep scope tight: one concern per PR. -->
 
-## What Changed
-
-<!-- Describe the change clearly and keep scope tight. -->
-
-## Why
-
-<!-- Explain the problem being solved and why this approach is the right one. -->
-
-## UI Changes
+## UI changes
 
 <!-- If this PR changes UI, include clear before/after screenshots.
+     Upload them as GitHub attachments (see the j5-live-test skill), never to a branch.
+     Each image's alt text names its state and side:
+     alt="Viewer search with no matches, after", not alt="After".
      If the change involves motion or interaction, include a short video.
      Delete this section if not applicable. -->
 
+## Live testing
+
+<!-- What was tested on a real server, from the tester's report (see the j5-live-test skill):
+     the verdict; the commit tested, the head, and what changed between them and why it
+     was or was not re-tested; what was not exercised live, and why;
+     anything a person needs to test by hand, with exact steps.
+     Delete this section if nothing in the PR can be live-tested. -->
+
+## Upstream impact
+
+<!-- Delete if the PR only touches J5-owned paths (apps/*/src/j5, packages/*/src/j5, docs/j5,
+     and the J5-owned files listed in FORK.md, such as AGENTS.md).
+     Otherwise list each upstream-owned file you edited and its FORK.md case.
+     If the PR changes what upstream's product does, link the human decision
+     and the register entry in docs/j5/product/upstream.md. -->
+
 ## Checklist
 
-- [ ] This PR is small and focused
-- [ ] I explained what changed and why
-- [ ] I included before/after screenshots for any UI changes
-- [ ] I included a video for animation/interaction changes
+- [ ] One concern: the description has no "also"
+- [ ] Tests cover the changed behavior (backend changes ship with focused tests)
+- [ ] UI changes: before/after screenshots above, and a video for motion or interaction
+- [ ] Live testing: the section above says what ran live and what did not
+- [ ] Upstream-owned files: each one is recorded in `FORK.md` (case text and file-table row) in this PR
+- [ ] Upstream product: any change to what upstream's product does has a human decision linked above and a register entry in `docs/j5/product/upstream.md`
+- [ ] Surfaces: entry points, clients, providers, contracts, reverse states, connection modes (see `AGENTS.md`)
+- [ ] Docs: definitions under `docs/j5/product/` and user docs rewritten where this changes them
+
+<!-- End with the model and harness that did the work. -->

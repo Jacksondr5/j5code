@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect";
-import * as Migrator from "effect/unstable/sql/Migrator";
+import * as Migrator from "effect/sql/Migrator";
 
 import Migration0001 from "./migrations/001_EpicCommunicationLedger.ts";
 import Migration0002 from "./migrations/002_SendDeliverReply.ts";
@@ -18,11 +18,53 @@ import Migration0014 from "./migrations/014_AgentCrews.ts";
 import Migration0015 from "./migrations/015_CustomCrewSeats.ts";
 import Migration0016 from "./migrations/016_CrewProposalClaims.ts";
 import Migration0017 from "./migrations/017_EnsureCustomCrewSeats.ts";
+import Migration0018 from "./migrations/018_AgentLedPlaybooks.ts";
+import Migration0019 from "./migrations/019_PlaybookRunMaintenance.ts";
+import Migration0020 from "./migrations/020_CrewAlertExchanges.ts";
+import Migration0021 from "./migrations/021_CrewProposalsResolveOnce.ts";
+import Migration0022 from "./migrations/022_CrewRetiredWithCaptain.ts";
+import Migration0023 from "./migrations/023_Peers.ts";
+import Migration0024 from "./migrations/024_PeerDeliveryOrigin.ts";
+import Migration0025 from "./migrations/025_PeerDeliveryReceiver.ts";
+import Migration0026 from "./migrations/026_PeerRouteIndexes.ts";
+import Migration0027 from "./migrations/027_PeerSenderLabelRecency.ts";
+import Migration0028 from "./migrations/028_CrewPlaybooks.ts";
+import Migration0029 from "./migrations/029_CrewPlaybookRuns.ts";
+import Migration0030 from "./migrations/030_PeerPollMode.ts";
+import Migration0031 from "./migrations/031_LedgerRekeysToProjects.ts";
+import Migration0032 from "./migrations/032_PeerRosterSaysProject.ts";
+import Migration0033 from "./migrations/033_OutsideAgents.ts";
+import Migration0034 from "./migrations/034_PeopleAndGrants.ts";
+import Migration0035 from "./migrations/035_GuestLinks.ts";
+import Migration0036 from "./migrations/036_OpenLinks.ts";
+import Migration0037 from "./migrations/037_PersonNames.ts";
+import Migration0038 from "./migrations/038_OpenLinkJoins.ts";
+import Migration0039 from "./migrations/039_PeopleAndLevels.ts";
+import Migration0040 from "./migrations/040_Links.ts";
+import Migration0041 from "./migrations/041_SharedConversation.ts";
+import Migration0042 from "./migrations/042_EveryoneHereAsks.ts";
+import Migration0043 from "./migrations/043_TaskSchedulers.ts";
+import Migration0044 from "./migrations/044_QueuedMessageEdits.ts";
+import Migration0045 from "./migrations/045_McpClientApprovers.ts";
+import Migration0046 from "./migrations/046_LocalDeliveryOrder.ts";
+import Migration0047 from "./migrations/047_RequestReplay.ts";
+import Migration0048 from "./migrations/048_CrewApprovalMode.ts";
+import Migration0049 from "./migrations/049_CrewSeatActivation.ts";
+import Migration0050 from "./migrations/050_CrewWorktrees.ts";
+import Migration0051 from "./migrations/051_CrewWorktreeCleanup.ts";
+import Migration0052 from "./migrations/052_PersonAsksStayDistinct.ts";
+import Migration0053 from "./migrations/053_CrewSeatReplacement.ts";
+import Migration0054 from "./migrations/054_PersonaEscalations.ts";
+import Migration0055 from "./migrations/055_PersonaDrafts.ts";
+import Migration0056 from "./migrations/056_PromptAnswerSettled.ts";
+import Migration0057 from "./migrations/057_ParticipantMoved.ts";
+import Migration0058 from "./migrations/058_PeerLines.ts";
+import Migration0059 from "./migrations/059_LinkSessions.ts";
 
 export const J5_A2A_MIGRATIONS_TABLE = "j5_a2a_migrations";
 
-// Entries 1 through 13 are persisted migration history. Keep their file and manifest names unchanged;
-// applied migrations are skipped by id and never rerun.
+// Every entry already in this list is persisted migration history: keep its id, file, and
+// manifest name unchanged. Applied migrations are skipped by id and never rerun.
 export const migrationEntries = [
   [1, "EpicCommunicationLedger", Migration0001],
   [2, "SendDeliverReply", Migration0002],
@@ -45,6 +87,49 @@ export const migrationEntries = [
   [16, "CrewProposalClaims", Migration0016],
   // Covers databases that ran the lower stack through 16 before 15 became available.
   [17, "EnsureCustomCrewSeats", Migration0017],
+  [18, "AgentLedPlaybooks", Migration0018],
+  [19, "PlaybookRunMaintenance", Migration0019],
+  [20, "CrewAlertExchanges", Migration0020],
+  [21, "CrewProposalsResolveOnce", Migration0021],
+  [22, "CrewRetiredWithCaptain", Migration0022],
+  [23, "Peers", Migration0023],
+  [24, "PeerDeliveryOrigin", Migration0024],
+  [25, "PeerDeliveryReceiver", Migration0025],
+  [26, "PeerRouteIndexes", Migration0026],
+  [27, "PeerSenderLabelRecency", Migration0027],
+  [28, "CrewPlaybooks", Migration0028],
+  [29, "CrewPlaybookRuns", Migration0029],
+  [30, "PeerPollMode", Migration0030],
+  [31, "LedgerRekeysToProjects", Migration0031],
+  [32, "PeerRosterSaysProject", Migration0032],
+  [33, "OutsideAgents", Migration0033],
+  [34, "PeopleAndGrants", Migration0034],
+  [35, "GuestLinks", Migration0035],
+  [36, "OpenLinks", Migration0036],
+  // 37 sits in the layer below 36 in the stack that introduced both; ids are never renumbered.
+  [37, "PersonNames", Migration0037],
+  [38, "OpenLinkJoins", Migration0038],
+  [39, "PeopleAndLevels", Migration0039],
+  [40, "Links", Migration0040],
+  [41, "SharedConversation", Migration0041],
+  [42, "EveryoneHereAsks", Migration0042],
+  [43, "TaskSchedulers", Migration0043],
+  [44, "QueuedMessageEdits", Migration0044],
+  [45, "McpClientApprovers", Migration0045],
+  [46, "LocalDeliveryOrder", Migration0046],
+  [47, "RequestReplay", Migration0047],
+  [48, "CrewApprovalMode", Migration0048],
+  [49, "CrewSeatActivation", Migration0049],
+  [50, "CrewWorktrees", Migration0050],
+  [51, "CrewWorktreeCleanup", Migration0051],
+  [52, "PersonAsksStayDistinct", Migration0052],
+  [53, "CrewSeatReplacement", Migration0053],
+  [54, "PersonaEscalations", Migration0054],
+  [55, "PersonaDrafts", Migration0055],
+  [56, "PromptAnswerSettled", Migration0056],
+  [57, "ParticipantMoved", Migration0057],
+  [58, "PeerLines", Migration0058],
+  [59, "LinkSessions", Migration0059],
 ] as const;
 
 const makeMigrationLoader = (throughId?: number) =>

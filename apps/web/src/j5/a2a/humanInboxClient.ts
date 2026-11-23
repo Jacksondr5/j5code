@@ -1,6 +1,9 @@
 import type { EnvironmentId } from "@t3tools/contracts";
-import type { AnswerHumanExchangeRequest } from "@t3tools/contracts/j5";
-import { executeAtomQuery } from "@t3tools/client-runtime/state/runtime";
+import type {
+  AllowPersonaOnceRequest,
+  AnswerHumanExchangeRequest,
+  SavePersonaDraftRequest,
+} from "@t3tools/contracts/j5";
 import * as Cause from "effect/Cause";
 
 import { appAtomRegistry } from "../../rpc/atomRegistry";
@@ -11,32 +14,38 @@ export type {
   HumanInboxResponse,
   ScopedHumanInboxItem,
 } from "@t3tools/contracts/j5";
-export {
-  J5HttpError as HumanInboxHttpError,
-  listHumanInbox as listHumanInboxEffect,
-} from "@t3tools/client-runtime/j5/http";
-
-export async function listHumanInbox(
-  environmentId: EnvironmentId,
-  personId?: string,
-  status: "open" | "answered" = "open",
-) {
-  const result = await executeAtomQuery(
-    appAtomRegistry,
-    j5Environment.inbox({
-      environmentId,
-      input: { status, ...(personId === undefined ? {} : { personId }) },
-    }),
-  );
-  if (result._tag === "Failure") throw Cause.squash(result.cause);
-  return result.value;
-}
 
 export async function answerHumanExchange(
   environmentId: EnvironmentId,
   input: AnswerHumanExchangeRequest,
 ) {
   const result = await j5Environment.answerHumanExchange.run(appAtomRegistry, {
+    environmentId,
+    input,
+  });
+  if (result._tag === "Failure") throw Cause.squash(result.cause);
+  return result.value;
+}
+
+/** The Owner's "Allow this once" on an ask escalating a blocked persona. */
+export async function allowPersonaOnce(
+  environmentId: EnvironmentId,
+  input: AllowPersonaOnceRequest,
+) {
+  const result = await j5Environment.allowPersonaOnce.run(appAtomRegistry, {
+    environmentId,
+    input,
+  });
+  if (result._tag === "Failure") throw Cause.squash(result.cause);
+  return result.value;
+}
+
+/** The Owner's "Save persona" on an ask carrying an agent's persona draft. */
+export async function savePersonaDraft(
+  environmentId: EnvironmentId,
+  input: SavePersonaDraftRequest,
+) {
+  const result = await j5Environment.savePersonaDraft.run(appAtomRegistry, {
     environmentId,
     input,
   });

@@ -13,7 +13,7 @@ import {
  */
 export const CREW_PROPOSAL_SESSION = "j5-crew-proposal";
 
-export const crewSeatSpawnInput = (proposalId: string, seatName: string): SpawnStableInput => ({
+const crewSeatSpawnInput = (proposalId: string, seatName: string): SpawnStableInput => ({
   providerSessionId: CREW_PROPOSAL_SESSION,
   requestKey: crewSeatRequestKey(proposalId, seatName),
 });

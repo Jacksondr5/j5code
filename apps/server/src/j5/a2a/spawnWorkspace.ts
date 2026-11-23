@@ -1,0 +1,720 @@
+import type { J5SpawnWorkspace } from "./mcp/tools.ts";
+import {
+  type ChatAttachment,
+  CommandId,
+  type GitCommandError,
+  type MessageId,
+  type ModelSelection,
+  type ProjectId,
+  type ProviderInteractionMode,
+  type RuntimeMode,
+  type ThreadId,
+} from "@t3tools/contracts";
+import * as Context from "effect/Context";
+import * as Data from "effect/Data";
+import * as Effect from "effect/Effect";
+import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
+import * as Result from "effect/Result";
+import * as Schema from "effect/Schema";
+
+import type { CrewWorkspaceOptions } from "@t3tools/contracts/j5";
+import { GitWorkflowService } from "../../git/GitWorkflowService.ts";
+import * as GitVcsDriver from "../../vcs/GitVcsDriver.ts";
+import {
+  CommandReceiptStoreV2,
+  type CommandReceiptStoreV2Error,
+  layerFromApplicationReceipts as commandReceiptStoreLayer,
+} from "../../orchestration-v2/CommandReceiptStore.ts";
+import {
+  type ThreadLaunchError,
+  ThreadLaunchService,
+} from "../../orchestration-v2/ThreadLaunchService.ts";
+import type { OrchestratorV2Error } from "../../orchestration-v2/Orchestrator.ts";
+import {
+  ThreadManagementService,
+  type ThreadManagementProviderInstanceDisabledError,
+} from "../../orchestration-v2/ThreadManagementService.ts";
+import { ProjectService } from "../../project/ProjectService.ts";
+import { lifecycleCommandId, type SpawnStableInput } from "./spawnIds.ts";
+
+/**
+ * A branch or ref a caller names for a worktree. Git takes it as a positional argument, so a
+ * leading dash would be read as an option; whitespace and control characters are never valid.
+ */
+const GIT_REF_PATTERN = /^[^-\s\p{Cc}][^\s\p{Cc}]*$/u;
+const GIT_REF_MESSAGE =
+  "A git ref must not start with '-' or contain whitespace or control characters";
+
+export const GitRefName = Schema.String.check(
+  Schema.isMinLength(1),
+  Schema.isMaxLength(255),
+  Schema.isPattern(GIT_REF_PATTERN, { message: GIT_REF_MESSAGE }),
+);
+
+/** A full commit id as it is printed. */
+const COMMIT_SHA_PATTERN = /^[0-9a-f]{40,64}$/;
+
+/** A worktree path with its trailing separators dropped, so `/repo/wt/` matches git's `/repo/wt`. */
+export const worktreePathKey = (path: string) => path.replace(/[\\/]+$/, "");
+
+/** An absolute path a caller names for an existing worktree. */
+export const WorktreePath = Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(4096));
+
+/**
+ * Where a spawned thread works, as the caller chose it; there is no default. `shared` is the
+ * caller's own checkout, `worktree` a new worktree that upstream's ThreadLaunch prepares from
+ * `baseRef` before the brief starts, and `existing_worktree` one of the project's worktrees that
+ * already exists. Stored on Crew seats in this camelCase form.
+ */
+export const SpawnWorkspaceChoice = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("shared") }),
+  Schema.Struct({
+    type: Schema.Literal("worktree"),
+    baseRef: GitRefName,
+    baseCommit: Schema.optionalKey(Schema.String.check(Schema.isPattern(COMMIT_SHA_PATTERN))),
+    branch: Schema.optionalKey(GitRefName),
+    startFromOrigin: Schema.optionalKey(Schema.Boolean),
+  }),
+  Schema.Struct({ type: Schema.Literal("existing_worktree"), worktreePath: WorktreePath }),
+]);
+export type SpawnWorkspaceChoice = typeof SpawnWorkspaceChoice.Type;
+
+export type ResolvedSpawnWorkspace =
+  | { readonly type: "shared" }
+  | {
+      readonly type: "worktree";
+      readonly baseRef: string;
+      /** The commit the worktree starts from; always set when a Crew seat resolves. */
+      readonly baseCommit?: string;
+      readonly branch?: string;
+      readonly startFromOrigin: boolean;
+    }
+  | { readonly type: "existing_worktree"; readonly worktreePath: string; readonly branch: string };
+
+/**
+ * A base ref as a caller named it; from origin, its fetched remote-tracking copy also counts.
+ * `commit` is the pin an earlier acceptance saved, which is checked instead of the ref.
+ */
+export interface SpawnBaseRef {
+  readonly ref: string;
+  readonly startFromOrigin: boolean;
+  readonly commit?: string | undefined;
+}
+
+/** The existing worktrees a set of choices name, for `inspect` to read live. */
+export const namedWorktreePaths = (
+  choices: ReadonlyArray<SpawnWorkspaceChoice>,
+): ReadonlyArray<string> =>
+  choices.flatMap((choice) => (choice.type === "existing_worktree" ? [choice.worktreePath] : []));
+
+/** The base refs a set of choices name, for `inspect` to verify. */
+export const namedBaseRefs = (
+  choices: ReadonlyArray<SpawnWorkspaceChoice>,
+): ReadonlyArray<SpawnBaseRef> =>
+  choices.flatMap((choice) =>
+    choice.type === "worktree"
+      ? [
+          {
+            ref: choice.baseRef,
+            startFromOrigin: choice.startFromOrigin ?? false,
+            commit: choice.baseCommit,
+          },
+        ]
+      : [],
+  );
+
+/**
+ * A worktree of the project other than its main checkout, with the branch git has there; null
+ * when a live read found none (detached, or the directory is gone).
+ */
+export interface ProjectWorktree {
+  readonly path: string;
+  readonly branch: string | null;
+}
+
+/**
+ * The project's repository as git reports it, read once per spawn or Crew roster, or why it
+ * couldn't be read. A choice that needs git is refused when it can't be read.
+ */
+export type SpawnCheckout =
+  | {
+      readonly readable: true;
+      readonly worktrees: ReadonlyArray<ProjectWorktree>;
+      /** Every local branch, read only when a choice names a new branch to check against. */
+      readonly localBranchNames: ReadonlyArray<string>;
+      /** Base refs a caller named that git can't resolve to a commit, as they were asked for. */
+      readonly missingBaseRefs: ReadonlyArray<SpawnBaseRef>;
+      /** The commit each base ref that resolved means now, or the saved pin that still exists. */
+      readonly baseCommits: ReadonlyArray<SpawnBaseRef & { readonly sha: string }>;
+      /** Base refs chosen from origin whose fetch failed, with why; only their seats are refused. */
+      readonly unreachableBaseRefs: ReadonlyArray<SpawnBaseRef & { readonly problem: string }>;
+    }
+  | { readonly readable: false; readonly problem: string };
+
+const NO_WORKSPACE_OPTIONS: CrewWorkspaceOptions = {
+  currentBranch: null,
+  cwd: null,
+  worktrees: [],
+};
+
+export class SpawnWorkspaceError extends Data.TaggedError("SpawnWorkspaceError")<{
+  readonly detail: string;
+  readonly nextStep: string;
+  readonly cause?: unknown;
+}> {
+  override get message(): string {
+    return this.detail;
+  }
+}
+
+/** The checks for one explicit choice. Only `shared` needs nothing from git. */
+export const resolveSpawnWorkspace = (
+  checkout: SpawnCheckout,
+  choice: SpawnWorkspaceChoice,
+): Result.Result<ResolvedSpawnWorkspace, SpawnWorkspaceError> => {
+  if (choice.type === "shared") return Result.succeed({ type: "shared" });
+  // Checked here as well as in the schemas: the person's card edits arrive through the client
+  // contract, which doesn't constrain refs, and every door resolves through this function.
+  const badRef =
+    choice.type === "worktree"
+      ? [choice.baseRef, choice.branch].find(
+          (ref) => ref !== undefined && (ref.length > 255 || !GIT_REF_PATTERN.test(ref)),
+        )
+      : undefined;
+  if (
+    choice.type === "worktree" &&
+    choice.baseCommit !== undefined &&
+    !COMMIT_SHA_PATTERN.test(choice.baseCommit)
+  )
+    return Result.fail(
+      new SpawnWorkspaceError({
+        detail: `The saved base commit ${JSON.stringify(choice.baseCommit)} is not a full commit id.`,
+        nextStep: "Edit the member's base to a branch, tag, or commit that exists.",
+      }),
+    );
+  if (badRef !== undefined)
+    return Result.fail(
+      new SpawnWorkspaceError({
+        detail: `${GIT_REF_MESSAGE}: ${JSON.stringify(badRef)}.`,
+        nextStep:
+          "Name an existing branch or ref for base_ref, and a plain branch name for branch.",
+      }),
+    );
+  if (!checkout.readable)
+    return Result.fail(
+      new SpawnWorkspaceError({
+        detail: `The project's git repository can't be read (${checkout.problem}), so no worktree can be used.`,
+        nextStep: 'Retry once git can read the project, or use workspace {"type":"shared"}.',
+      }),
+    );
+  if (choice.type === "existing_worktree") {
+    const wanted = worktreePathKey(choice.worktreePath);
+    const found = checkout.worktrees.find((worktree) => worktree.path === wanted);
+    if (found === undefined)
+      return Result.fail(
+        new SpawnWorkspaceError({
+          detail: `'${choice.worktreePath}' isn't one of this project's worktrees on a branch.${checkout.worktrees.length === 0 ? " The project has none." : ` Its worktrees: ${checkout.worktrees.map((worktree) => worktree.path).join(", ")}.`}`,
+          nextStep:
+            "Name one of those paths for workspace.worktree_path. A worktree created in the last few seconds may not be listed yet; retry in a moment.",
+        }),
+      );
+    if (found.branch === null)
+      return Result.fail(
+        new SpawnWorkspaceError({
+          detail: `'${found.path}' has no branch checked out now, or can't be read.`,
+          nextStep: "Check out a branch there, or name another worktree.",
+        }),
+      );
+    return Result.succeed({
+      type: "existing_worktree",
+      worktreePath: found.path,
+      branch: found.branch,
+    });
+  }
+  const startFromOrigin = choice.startFromOrigin ?? false;
+  const sameBase = (base: SpawnBaseRef) =>
+    base.ref === choice.baseRef &&
+    base.startFromOrigin === startFromOrigin &&
+    base.commit === choice.baseCommit;
+  const unreachable = checkout.unreachableBaseRefs.find(sameBase);
+  if (unreachable !== undefined)
+    return Result.fail(
+      new SpawnWorkspaceError({
+        detail: `Base '${choice.baseRef}' was chosen from origin, but origin could not be fetched (${unreachable.problem}).`,
+        nextStep:
+          "Check the connection to origin, or start the member from the local branch instead.",
+      }),
+    );
+  if (checkout.missingBaseRefs.some(sameBase))
+    return Result.fail(
+      choice.baseCommit === undefined
+        ? new SpawnWorkspaceError({
+            detail: `Base ref '${choice.baseRef}' doesn't resolve to a commit in this repository${startFromOrigin ? ", locally or as a fetched origin branch" : ""}.`,
+            nextStep: "Name an existing branch, tag, or commit for workspace.base_ref.",
+          })
+        : new SpawnWorkspaceError({
+            detail: `Base commit ${choice.baseCommit.slice(0, 8)} (from '${choice.baseRef}') is no longer in this repository.`,
+            nextStep: "Edit the member's base to a commit that exists, or decline.",
+          }),
+    );
+  if (choice.branch !== undefined && checkout.localBranchNames.includes(choice.branch))
+    return Result.fail(
+      new SpawnWorkspaceError({
+        detail: `Branch '${choice.branch}' already exists.`,
+        nextStep:
+          "Choose a different workspace.branch, or omit it and let the server name the branch.",
+      }),
+    );
+  const baseCommit = checkout.baseCommits.find(sameBase)?.sha;
+  return Result.succeed({
+    type: "worktree",
+    baseRef: choice.baseRef,
+    ...(baseCommit === undefined ? {} : { baseCommit }),
+    ...(choice.branch === undefined ? {} : { branch: choice.branch }),
+    startFromOrigin,
+  });
+};
+
+/**
+ * The create command id encodes the workspace type. Shared keeps the original id, so spawns
+ * already in flight still replay.
+ */
+export const spawnCreateCommandId = (
+  stableInput: SpawnStableInput,
+  workspace: ResolvedSpawnWorkspace["type"],
+): CommandId =>
+  workspace === "shared"
+    ? lifecycleCommandId({ ...stableInput, operation: "spawn-create" })
+    : workspace === "existing_worktree"
+      ? lifecycleCommandId({ ...stableInput, operation: "spawn-create-existing" })
+      : lifecycleCommandId({ ...stableInput, operation: "spawn-create-worktree" });
+
+const spawnLaunchCommandId = (stableInput: SpawnStableInput) =>
+  lifecycleCommandId({ ...stableInput, operation: "spawn-launch" });
+
+/** The brief's message command: dispatched directly, or by ThreadLaunch as its initial message. */
+const spawnBriefCommandId = (
+  stableInput: SpawnStableInput,
+  workspace: ResolvedSpawnWorkspace["type"],
+): CommandId =>
+  workspace === "worktree"
+    ? // ThreadLaunchService derives its initial message's command id this way.
+      CommandId.make(`${spawnLaunchCommandId(stableInput)}:initial-message`)
+    : lifecycleCommandId({ ...stableInput, operation: "spawn-brief" });
+
+/**
+ * The new thread's binding at creation: the caller's checkout, the existing worktree and its
+ * branch, or none until ThreadLaunch binds a new worktree.
+ */
+export const spawnThreadCheckout = (
+  workspace: ResolvedSpawnWorkspace,
+  caller: { readonly branch: string | null; readonly worktreePath: string | null },
+) =>
+  workspace.type === "shared"
+    ? { branch: caller.branch, worktreePath: caller.worktreePath }
+    : workspace.type === "existing_worktree"
+      ? { branch: workspace.branch, worktreePath: workspace.worktreePath }
+      : { branch: null, worktreePath: null };
+
+export interface StartSpawnBriefInput {
+  readonly workspace: ResolvedSpawnWorkspace;
+  readonly stableInput: SpawnStableInput;
+  readonly ledgerProjectId: string;
+  readonly projectId: ProjectId;
+  readonly threadId: ThreadId;
+  readonly title: string;
+  readonly messageId: MessageId;
+  readonly text: string;
+  readonly modelSelection: ModelSelection;
+  readonly runtimeMode: RuntimeMode;
+  readonly interactionMode: ProviderInteractionMode;
+  /** Files for the brief, already claimed into the thread; a Crew seat's brief has none. */
+  readonly attachments?: ReadonlyArray<ChatAttachment>;
+}
+
+export interface SpawnWorkspaceServiceShape {
+  /**
+   * Reads the project's repository from where the caller works: its worktrees, the live branch
+   * of each existing worktree a choice names, its local branches when asked, and whether the
+   * named base refs exist. Everything that binds a workspace uses this. Shared choices don't.
+   */
+  readonly inspect: (caller: {
+    readonly projectId: ProjectId;
+    readonly worktreePath: string | null;
+    /** Existing worktrees the choices name, whose branch is read live (see `namedWorktreePaths`). */
+    readonly existingWorktreePaths: ReadonlyArray<string>;
+    /** Read every local branch, to refuse a new branch name that exists. */
+    readonly checkBranches: boolean;
+    /** Base refs to check before anything is created (see `namedBaseRefs`). */
+    readonly baseRefs: ReadonlyArray<SpawnBaseRef>;
+    /**
+     * Pin each base to a commit, fetching origin for one chosen from there. Off for a direct
+     * spawn, which doesn't use a pin: it only checks the ref exists, with no fetch.
+     */
+    readonly pinBases: boolean;
+  }) => Effect.Effect<SpawnCheckout>;
+  /**
+   * What the roster card offers: the caller's branch, the directory its branch picker searches,
+   * and the project's worktrees. Read through upstream's ref cache, since nothing is bound from it; an
+   * unreadable repository offers none.
+   */
+  readonly workspaceOptions: (caller: {
+    readonly projectId: ProjectId;
+    readonly worktreePath: string | null;
+  }) => Effect.Effect<CrewWorkspaceOptions>;
+  /** Check the accepted create receipt before first binding a pre-upgrade thread's retry. */
+  readonly assertExistingWorkspace: (input: {
+    readonly stableInput: SpawnStableInput;
+    readonly workspace: ResolvedSpawnWorkspace["type"];
+  }) => Effect.Effect<void, SpawnWorkspaceError>;
+  /**
+   * Runs one spawn's start (create, facts, brief), refusing it while another start for the thread
+   * is in flight. Every door dispatching `thread.create` for a spawn thread must use this: the
+   * projection upserts, so a second create would overwrite the first. A key keeps its workspace
+   * type through its request binding, and a Crew seat's approval records it before any seat starts.
+   */
+  readonly withSpawnStart: <A, E, R>(
+    input: {
+      readonly stableInput: SpawnStableInput;
+      readonly threadId: ThreadId;
+    },
+    effect: Effect.Effect<A, E, R>,
+  ) => Effect.Effect<A, E | SpawnWorkspaceError, R>;
+  /**
+   * Starts the brief on a created, registered thread: at once for shared or an existing worktree,
+   * while a new worktree hands it to ThreadLaunch, which holds it as a preparing run until the
+   * worktree is bound. Setup is awaited only when it asks to finish first, so the agent may begin
+   * while it runs.
+   */
+  readonly startBrief: (
+    input: StartSpawnBriefInput,
+  ) => Effect.Effect<
+    void,
+    OrchestratorV2Error | ThreadLaunchError | ThreadManagementProviderInstanceDisabledError
+  >;
+  /**
+   * Whether the brief's message has an accepted receipt, so its files already belong to the
+   * thread. A thread alone proves nothing: a partial failure can leave one without its brief.
+   */
+  readonly briefAccepted: (input: {
+    readonly stableInput: SpawnStableInput;
+    readonly workspace: ResolvedSpawnWorkspace["type"];
+  }) => Effect.Effect<boolean, CommandReceiptStoreV2Error>;
+}
+
+export class SpawnWorkspaceService extends Context.Service<
+  SpawnWorkspaceService,
+  SpawnWorkspaceServiceShape
+>()("t3/j5/a2a/spawnWorkspace/SpawnWorkspaceService") {}
+
+const detailOf = (cause: unknown) => (cause instanceof Error ? cause.message : String(cause));
+
+/** Refs read per page when listing the repository's worktrees. */
+const BRANCH_PAGE = 100;
+
+const make = Effect.gen(function* () {
+  const projects = yield* ProjectService;
+  const git = yield* GitWorkflowService;
+  const driver = yield* GitVcsDriver.GitVcsDriver;
+  const receipts = yield* CommandReceiptStoreV2;
+  const launcher = yield* ThreadLaunchService;
+  const threads = yield* ThreadManagementService;
+  // Spawn threads with a start running in this process. A second start for one of them is
+  // refused rather than queued: it would only replay the first, and retrying is safe.
+  const startsInFlight = new Set<ThreadId>();
+
+  const projectRoot = (projectId: ProjectId) =>
+    projects
+      .getById(projectId)
+      .pipe(
+        Effect.flatMap((project) =>
+          Option.isSome(project)
+            ? Effect.succeed(project.value.workspaceRoot)
+            : Effect.fail("the project is not readable"),
+        ),
+      );
+
+  /** Every worktree listRefs knows, other than the main checkout, with the branch it reports. */
+  const listWorktrees = Effect.fn("j5.spawnWorkspace.listWorktrees")(function* (
+    cwd: string,
+    workspaceRoot: string,
+  ) {
+    // Refreshed, so changes from an agent's shell show up once upstream's few-second refresh
+    // coalescing has passed rather than after its longer snapshot TTL; the later pages come from
+    // that refreshed snapshot.
+    const first = yield* git.listRefs({
+      cwd,
+      refKind: "local",
+      limit: BRANCH_PAGE,
+      refresh: true,
+    });
+    if (!first.isRepo) return null;
+    // Pages come from one cached snapshot per repository, so reading every worktree is cheap.
+    const refs = [...first.refs];
+    for (let cursor = first.nextCursor; cursor !== null;) {
+      const page = yield* git.listRefs({ cwd, refKind: "local", cursor, limit: 200 });
+      refs.push(...page.refs);
+      cursor = page.nextCursor;
+    }
+    const root = worktreePathKey(workspaceRoot);
+    return {
+      first,
+      worktrees: refs.flatMap((ref) =>
+        ref.worktreePath === null || worktreePathKey(ref.worktreePath) === root
+          ? []
+          : [{ path: worktreePathKey(ref.worktreePath), branch: ref.name }],
+      ),
+    };
+  });
+
+  type BaseResolution =
+    | { readonly kind: "commit"; readonly sha: string }
+    | { readonly kind: "found" }
+    | { readonly kind: "missing" }
+    | { readonly kind: "unreachable"; readonly problem: string };
+
+  /**
+   * The commit a base means, from where the caller works: its saved pin while that commit exists,
+   * else the ref now (from origin, origin's, fetched now). Missing when nothing resolves, and
+   * unreachable when the fetch fails, rather than pinning a stale ref the person didn't choose.
+   */
+  const resolveBase = Effect.fn("j5.spawnWorkspace.resolveBase")(function* (
+    cwd: string,
+    base: SpawnBaseRef,
+  ): Effect.fn.Return<BaseResolution, GitCommandError> {
+    if (base.commit !== undefined)
+      return (yield* git.hasCommit({ cwd, refName: base.commit }))
+        ? { kind: "commit", sha: base.commit }
+        : { kind: "missing" };
+    if (base.startFromOrigin && (yield* git.remoteExists({ cwd, remoteName: "origin" }))) {
+      const fetched = yield* git
+        .fetchRemote({ cwd, remoteName: "origin", refName: base.ref })
+        .pipe(Effect.result);
+      if (Result.isFailure(fetched))
+        return { kind: "unreachable", problem: detailOf(fetched.failure) };
+      if (yield* git.remoteBranchExists({ cwd, remoteName: "origin", refName: base.ref }))
+        return {
+          kind: "commit",
+          sha: (yield* git.resolveRemoteTrackingCommit({
+            cwd,
+            refName: base.ref,
+            fallbackRemoteName: "origin",
+          })).commitSha,
+        };
+    }
+    return yield* driver.resolveCommit({ cwd, revision: base.ref }).pipe(
+      Effect.map(({ commitSha }): BaseResolution => ({ kind: "commit", sha: commitSha })),
+      Effect.orElseSucceed((): BaseResolution => ({ kind: "missing" })),
+    );
+  });
+
+  /** Whether a base exists as asked, with no fetch; a base from origin may be its fetched copy. */
+  const baseExists = Effect.fn("j5.spawnWorkspace.baseExists")(function* (
+    cwd: string,
+    base: SpawnBaseRef,
+  ) {
+    const found = yield* git.hasCommit({ cwd, refName: base.ref });
+    return found || !base.startFromOrigin
+      ? found
+      : yield* git.hasCommit({ cwd, refName: `refs/remotes/origin/${base.ref}` });
+  });
+
+  const inspect: SpawnWorkspaceServiceShape["inspect"] = Effect.fn("j5.spawnWorkspace.inspect")(
+    function* (caller) {
+      const workspaceRoot = yield* projectRoot(caller.projectId);
+      const cwd = caller.worktreePath ?? workspaceRoot;
+      // Membership comes from upstream's ref snapshot, which coalesces refreshes for 5 seconds,
+      // so a worktree an agent's shell created under 5s ago may be refused once; retrying shortly
+      // after finds it. What a seat or spawn binds, its branch, is read live below.
+      const listed = yield* listWorktrees(cwd, workspaceRoot);
+      if (listed === null) return yield* Effect.fail("the project is not a git repository");
+      const wanted = new Set(caller.existingWorktreePaths.map(worktreePathKey));
+      const worktrees = yield* Effect.forEach(listed.worktrees, (worktree) =>
+        wanted.has(worktree.path)
+          ? // The checkout itself says which branch it is on now; its status cache is dropped
+            // first so a branch switched from a shell a moment ago is what gets bound.
+            git.invalidateLocalStatus(worktree.path).pipe(
+              Effect.andThen(git.localStatus({ cwd: worktree.path })),
+              Effect.map((status) => ({ path: worktree.path, branch: status.refName })),
+              Effect.orElseSucceed(() => ({ path: worktree.path, branch: null })),
+            )
+          : Effect.succeed(worktree),
+      );
+      const bases = yield* Effect.forEach(caller.baseRefs, (base) =>
+        (caller.pinBases
+          ? resolveBase(cwd, base)
+          : baseExists(cwd, base).pipe(
+              Effect.map((found): BaseResolution => ({ kind: found ? "found" : "missing" })),
+            )
+        ).pipe(Effect.map((resolution) => ({ base, resolution }))),
+      );
+      const missingBaseRefs = bases.flatMap(({ base, resolution }) =>
+        resolution.kind === "missing" ? [base] : [],
+      );
+      const baseCommits = bases.flatMap(({ base, resolution }) =>
+        resolution.kind === "commit" ? [{ ...base, sha: resolution.sha }] : [],
+      );
+      const unreachableBaseRefs = bases.flatMap(({ base, resolution }) =>
+        resolution.kind === "unreachable" ? [{ ...base, problem: resolution.problem }] : [],
+      );
+      return {
+        readable: true,
+        worktrees,
+        localBranchNames: caller.checkBranches ? yield* git.listLocalBranchNames(cwd) : [],
+        missingBaseRefs,
+        baseCommits,
+        unreachableBaseRefs,
+      } satisfies SpawnCheckout;
+    },
+    Effect.catch((cause) =>
+      Effect.succeed({ readable: false, problem: detailOf(cause) } satisfies SpawnCheckout),
+    ),
+  );
+
+  const workspaceOptions: SpawnWorkspaceServiceShape["workspaceOptions"] = Effect.fn(
+    "j5.spawnWorkspace.workspaceOptions",
+  )(
+    function* (caller) {
+      const workspaceRoot = yield* projectRoot(caller.projectId);
+      const cwd = caller.worktreePath ?? workspaceRoot;
+      const listed = yield* listWorktrees(cwd, workspaceRoot);
+      if (listed === null) return NO_WORKSPACE_OPTIONS;
+      return {
+        currentBranch: listed.first.refs.find((ref) => ref.current)?.name ?? null,
+        cwd,
+        worktrees: listed.worktrees,
+      };
+    },
+    Effect.orElseSucceed(() => NO_WORKSPACE_OPTIONS),
+  );
+
+  const assertExistingWorkspace: SpawnWorkspaceServiceShape["assertExistingWorkspace"] = Effect.fn(
+    "j5.spawnWorkspace.assertExistingWorkspace",
+  )(function* (input) {
+    for (const other of ["shared", "worktree", "existing_worktree"] as const) {
+      if (other === input.workspace) continue;
+      const receipt = yield* receipts
+        .getByCommandId(spawnCreateCommandId(input.stableInput, other))
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new SpawnWorkspaceError({
+                detail: "The spawn's earlier workspace choice could not be read.",
+                nextStep: "Retry with the same client_request_id.",
+                cause,
+              }),
+          ),
+        );
+      if (Option.isSome(receipt) && receipt.value.status === "accepted") {
+        return yield* new SpawnWorkspaceError({
+          detail: `client_request_id ${input.stableInput.requestKey} is already bound to workspace {"type":"${other}"}.`,
+          nextStep: "Retry with that workspace, or use a fresh client_request_id.",
+        });
+      }
+    }
+  });
+
+  const withSpawnStart: SpawnWorkspaceServiceShape["withSpawnStart"] = <A, E, R>(
+    input: Parameters<SpawnWorkspaceServiceShape["withSpawnStart"]>[0],
+    effect: Effect.Effect<A, E, R>,
+  ) =>
+    // The check, the add, and the releasing finalizer run with no interruptible gap, so an
+    // interrupt can't leak an entry and block every later start of this thread.
+    Effect.uninterruptibleMask((restore) =>
+      Effect.suspend((): Effect.Effect<A, E | SpawnWorkspaceError, R> => {
+        if (startsInFlight.has(input.threadId))
+          return Effect.fail(
+            new SpawnWorkspaceError({
+              detail: `A start for client_request_id ${input.stableInput.requestKey} is already in progress.`,
+              nextStep: "Retry with the same client_request_id once it returns.",
+            }),
+          );
+        startsInFlight.add(input.threadId);
+        return restore(effect).pipe(
+          Effect.ensuring(Effect.sync(() => startsInFlight.delete(input.threadId))),
+        );
+      }),
+    );
+
+  const startBrief: SpawnWorkspaceServiceShape["startBrief"] = (input) =>
+    input.workspace.type !== "worktree"
+      ? threads
+          .dispatch({
+            type: "message.dispatch",
+            createdBy: "agent",
+            creationSource: "mcp",
+            commandId: spawnBriefCommandId(input.stableInput, input.workspace.type),
+            threadId: input.threadId,
+            messageId: input.messageId,
+            text: input.text,
+            attachments: input.attachments ?? [],
+            modelSelection: input.modelSelection,
+            dispatchMode: { type: "start_immediately" },
+          })
+          .pipe(Effect.asVoid)
+      : launcher
+          .launch({
+            commandId: spawnLaunchCommandId(input.stableInput),
+            threadId: input.threadId,
+            reuseExistingThread: true,
+            projectId: input.projectId,
+            title: input.title,
+            modelSelection: input.modelSelection,
+            runtimeMode: input.runtimeMode,
+            interactionMode: input.interactionMode,
+            workspaceStrategy: {
+              type: "worktree",
+              baseRef: input.workspace.baseRef,
+              ...(input.workspace.branch === undefined ? {} : { branch: input.workspace.branch }),
+              startFromOrigin: input.workspace.startFromOrigin,
+            },
+            initialMessage: {
+              messageId: input.messageId,
+              text: input.text,
+              attachments: input.attachments ?? [],
+            },
+            createdBy: "agent",
+            creationSource: "mcp",
+          })
+          .pipe(Effect.asVoid);
+
+  const briefAccepted: SpawnWorkspaceServiceShape["briefAccepted"] = Effect.fn(
+    "j5.spawnWorkspace.briefAccepted",
+  )(function* (input) {
+    const receipt = yield* receipts.getByCommandId(
+      spawnBriefCommandId(input.stableInput, input.workspace),
+    );
+    return Option.isSome(receipt) && receipt.value.status === "accepted";
+  });
+
+  return SpawnWorkspaceService.of({
+    inspect,
+    workspaceOptions,
+    withSpawnStart,
+    assertExistingWorkspace,
+    startBrief,
+    briefAccepted,
+  });
+});
+
+/** Takes the receipt store from its caller; tests provide their own. */
+export const layerFromReceiptStore = Layer.effect(SpawnWorkspaceService, make);
+
+/** The receipt store is a stateless reader over the shared receipt table, built here for J5. */
+export const layer = layerFromReceiptStore.pipe(Layer.provide(commandReceiptStoreLayer));
+
+/** The stored camelCase form of an MCP workspace choice; unset fields stay unset. */
+export const spawnWorkspaceFromInput = (workspace: J5SpawnWorkspace) =>
+  workspace.type === "shared"
+    ? { type: "shared" as const }
+    : workspace.type === "existing_worktree"
+      ? { type: "existing_worktree" as const, worktreePath: workspace.worktree_path }
+      : {
+          type: "worktree" as const,
+          baseRef: workspace.base_ref,
+          ...(workspace.branch === undefined ? {} : { branch: workspace.branch }),
+          ...(workspace.start_from_origin === undefined
+            ? {}
+            : { startFromOrigin: workspace.start_from_origin }),
+        };

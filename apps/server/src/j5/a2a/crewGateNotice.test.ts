@@ -4,9 +4,10 @@ import { ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import type { AgentCrewInstance } from "./AgentCrewInstanceService.ts";
 import type { CrewProposal } from "./AgentCrewProposalService.ts";
 import { crewLaunchReportText, crewRosterChanges } from "./crewGateNotice.ts";
-import { ParticipantId, SquadronId } from "./contracts.ts";
+import { ParticipantId, LedgerProjectId } from "./contracts.ts";
 
 const seat = (name: string, agentId: string, reason = `${name} does its part`) => ({
+  workspace: { type: "shared" as const },
   seat: name,
   agentId,
   reason,
@@ -84,7 +85,7 @@ describe("crew roster changes", () => {
 describe("crew launch report", () => {
   const proposal: CrewProposal = {
     id: "proposal:1",
-    squadronId: SquadronId.make("squadron:1"),
+    projectId: LedgerProjectId.make("project:1"),
     captainParticipantId: ParticipantId.make("agent:captain"),
     captainThreadId: ThreadId.make("thread:captain"),
     crewInstanceId: "crew:1",
@@ -103,6 +104,7 @@ describe("crew launch report", () => {
     reportedAt: null,
   };
   const member = (name: string, agentId: string) => ({
+    workspace: { type: "shared" as const },
     seatName: name,
     agentId,
     participantId: ParticipantId.make(`agent:${name}`),
@@ -112,7 +114,7 @@ describe("crew launch report", () => {
   });
   const instance = {
     id: "crew:1",
-    squadronId: SquadronId.make("squadron:1"),
+    projectId: LedgerProjectId.make("project:1"),
     captainParticipantId: ParticipantId.make("agent:captain"),
     captainThreadId: ThreadId.make("thread:captain"),
     displayName: "Comedy",
@@ -126,6 +128,28 @@ describe("crew launch report", () => {
       member("prosecutor", "prosecutor"),
     ],
   } as unknown as AgentCrewInstance;
+
+  it("names the playbook before the roster and tells the Captain how to start it", () => {
+    const text = crewLaunchReportText({
+      proposal,
+      instance,
+      verdicts: new Map(),
+      windowMs: 60_000,
+      playbook: { name: "review", title: "Review <a> change" },
+    });
+    assert.include(text, "playbook: review | Review &#60;a&#62; change\nroster:\n");
+    assert.include(
+      text,
+      `Start it with j5_playbook_start(name: "review", client_request_id, crew_instance_id: "${instance.id}").`,
+    );
+    const plain = crewLaunchReportText({
+      proposal,
+      instance,
+      verdicts: new Map(),
+      windowMs: 60_000,
+    });
+    assert.notInclude(plain, "playbook");
+  });
 
   it("distinguishes a custom seat from a saved agent named custom", () => {
     const text = crewLaunchReportText({
@@ -170,10 +194,13 @@ describe("crew launch report", () => {
     });
     assert.include(text, "decision: approved");
     assert.include(text, "changes: added prosecutor");
-    assert.include(text, "launch: 1 started, 1 failed, 1 start unconfirmed after 60s");
     assert.include(
       text,
-      "seat_failed: punchline | failed | provider_error — API Error: Can't reach the API server",
+      "launch: 1 started, 1 failed, 0 not created, 1 start unconfirmed after 60s",
+    );
+    assert.include(
+      text,
+      "seat_failed: punchline | failed | provider_error: API Error: Can't reach the API server",
     );
     assert.include(text, "seat_pending: prosecutor");
     assert.include(
@@ -187,8 +214,32 @@ describe("crew launch report", () => {
     assert.notInclude(text, "Your crew is running");
   });
 
+  it("names seats that never got a thread or never got their brief", () => {
+    const text = crewLaunchReportText({
+      proposal,
+      instance: { ...instance, members: instance.members.slice(0, 2) } as AgentCrewInstance,
+      verdicts: new Map([
+        ["setup", { kind: "started" }],
+        ["punchline", { kind: "not_started", detail: "brief failed\nretry later" }],
+        ["prosecutor", { kind: "not_created", detail: "its thread was never created" }],
+      ]),
+      windowMs: 60_000,
+    });
+    assert.include(
+      text,
+      "launch: 1 started, 1 failed, 1 not created, 0 start unconfirmed after 60s",
+    );
+    assert.include(text, "seat_failed: punchline | not_started | brief failed&#10;retry later");
+    assert.include(text, "thread_id=thread:punchline start=failed");
+    assert.include(text, "seat_not_created: prosecutor | its thread was never created");
+    assert.notInclude(text, "thread_id=thread:prosecutor");
+    assert.include(text, "j5_request_crew_member");
+    assert.notInclude(text, "Your crew is running");
+  });
+
   it("tells the Captain when the human pins a custom seat to a different runtime", () => {
     const requested = {
+      workspace: { type: "shared" as const },
       seat: "reviewer",
       agentId: null,
       reason: "Reviews",
@@ -226,8 +277,30 @@ describe("crew launch report", () => {
       windowMs: 60_000,
     });
     assert.include(text, "changes: none");
-    assert.include(text, "launch: 2 started, 0 failed, 0 start unconfirmed after 60s");
+    assert.include(
+      text,
+      "launch: 2 started, 0 failed, 0 not created, 0 start unconfirmed after 60s",
+    );
     assert.include(text, "Your crew is running.");
+    assert.include(
+      text,
+      "resolve technical disagreements within the agreed scope yourself, and ask the user only when product intent or their judgment is needed",
+    );
+    assert.include(
+      text,
+      "ask with j5_send_message to the user with expect_reply=true, not a native question tool, so the request reaches their Inbox, state the disagreement, the options as a list and your recommendation, and keep working on what does not depend on the answer",
+    );
     assert.notInclude(text, "seat_failed");
+  });
+  it("identifies automatic approval without attributing it to a person", () => {
+    const text = crewLaunchReportText({
+      proposal: { ...proposal, approvalMode: "automatic" },
+      instance,
+      verdicts: new Map(),
+      windowMs: 60_000,
+    });
+    assert.include(text, "approval_mode: automatic");
+    assert.include(text, "decision: approved");
+    assert.notInclude(text, "decided_by:");
   });
 });

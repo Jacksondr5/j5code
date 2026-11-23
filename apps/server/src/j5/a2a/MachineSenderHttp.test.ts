@@ -1,4 +1,5 @@
 import {
+  AuthA2APeerScope,
   AuthA2ASendScope,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
@@ -9,7 +10,7 @@ import { J5_MACHINE_API_PATHS } from "@t3tools/contracts/j5";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { HttpRouter, HttpServer } from "effect/unstable/http";
+import { HttpRouter, HttpServer } from "effect/http";
 
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
@@ -25,13 +26,13 @@ import {
   LedgerMessageId,
   ParticipantId,
   type SendAsMachineInput,
-  SquadronId,
+  LedgerProjectId,
 } from "./contracts.ts";
 
 const watchdog: MachineParticipantRecord = {
   participantId: ParticipantId.make("machine:watchdog"),
-  squadronId: SquadronId.make("squadron:monitoring"),
-  squadronName: "Monitoring",
+  projectId: LedgerProjectId.make("project:monitoring"),
+  projectTitle: "Monitoring",
   name: "watchdog",
   createdAt: "2026-09-15T00:00:00.000Z",
 };
@@ -106,8 +107,8 @@ const makeHandler = (input: {
                         {
                           participantId: "agent:j5:a2a:thread:twin-one",
                           kind: "agent" as const,
-                          squadronId: "squadron:monitoring",
-                          squadronName: "Monitoring",
+                          projectId: "project:monitoring",
+                          projectTitle: "Monitoring",
                           displayName: "twin",
                           threadId: null,
                           archived: false,
@@ -118,8 +119,8 @@ const makeHandler = (input: {
                         {
                           participantId: "agent:j5:a2a:thread:twin-two",
                           kind: "agent" as const,
-                          squadronId: "squadron:monitoring",
-                          squadronName: "Monitoring",
+                          projectId: "project:monitoring",
+                          projectTitle: "Monitoring",
                           displayName: "twin",
                           threadId: null,
                           archived: false,
@@ -265,22 +266,29 @@ it("answers whoami and the roster for a machine token, and the roster for a read
   const machine = makeHandler({ subject: watchdog.participantId, scopes: [AuthA2ASendScope] });
   const reader = makeHandler({ subject: "browser", scopes: [AuthOrchestrationReadScope] });
   const stranger = makeHandler({ subject: "browser", scopes: [] });
+  const peer = makeHandler({ subject: "peer:environment-home", scopes: [AuthA2APeerScope] });
   try {
     const whoami = await machine.handler(get(J5_MACHINE_API_PATHS.whoami));
     assert.equal(whoami.status, 200);
     const identity = (await whoami.json()) as {
-      participant: { participantId: string; squadronName: string };
+      participant: { participantId: string; projectTitle: string };
       server: { version: string };
     };
     assert.equal(identity.participant.participantId, watchdog.participantId);
-    assert.equal(identity.participant.squadronName, "Monitoring");
+    assert.equal(identity.participant.projectTitle, "Monitoring");
     assert.isString(identity.server.version);
 
     assert.equal((await machine.handler(get(J5_MACHINE_API_PATHS.roster))).status, 200);
     assert.equal((await reader.handler(get(J5_MACHINE_API_PATHS.roster))).status, 200);
     assert.equal((await stranger.handler(get(J5_MACHINE_API_PATHS.roster))).status, 403);
+    assert.equal(
+      (await peer.handler(get(J5_MACHINE_API_PATHS.roster))).status,
+      403,
+      "a peer credential reads the peer roster route, never the shared roster",
+    );
     assert.equal((await reader.handler(get(J5_MACHINE_API_PATHS.whoami))).status, 403);
   } finally {
+    await peer.dispose();
     await machine.dispose();
     await reader.dispose();
     await stranger.dispose();
@@ -293,7 +301,7 @@ it("registers a machine only for an operate-scoped client", async () => {
   try {
     const created = await operator.handler(
       post(J5_MACHINE_API_PATHS.machineParticipants, {
-        squadronId: "squadron:monitoring",
+        projectId: "project:monitoring",
         name: "watchd",
       }),
     );
@@ -304,7 +312,7 @@ it("registers a machine only for an operate-scoped client", async () => {
 
     const badName = await operator.handler(
       post(J5_MACHINE_API_PATHS.machineParticipants, {
-        squadronId: "squadron:monitoring",
+        projectId: "project:monitoring",
         name: "Not Valid",
       }),
     );
@@ -312,7 +320,7 @@ it("registers a machine only for an operate-scoped client", async () => {
 
     const refused = await machine.handler(
       post(J5_MACHINE_API_PATHS.machineParticipants, {
-        squadronId: "squadron:monitoring",
+        projectId: "project:monitoring",
         name: "another",
       }),
     );

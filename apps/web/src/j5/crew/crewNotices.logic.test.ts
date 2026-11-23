@@ -1,14 +1,13 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  artifactPanelPath,
-  crewGateFooter,
-  crewGateTitle,
-  crewSeatsTitle,
-  participantIdsForCrewNotice,
+  crewApprovalSummary,
+  crewDeclinedDetail,
+  crewDeclinedSummary,
+  crewNoticeLines,
+  isHiddenCrewNotice,
   presentCrewNotice,
-  seatRunStatusLabel,
-} from "./crewNotices.logic";
+} from "@t3tools/client-runtime/j5/crew-notices";
 
 const approvedGate = [
   "<j5_crew_gate>",
@@ -27,7 +26,7 @@ const approvedGate = [
 ].join("\n");
 
 describe("crew notices in the Captain's thread", () => {
-  it("presents an approved roster with its seats and names the seats for the identity read", () => {
+  it("presents an approved roster with its compact approval summary", () => {
     const message = { role: "user", createdBy: "system", text: approvedGate };
     const notice = presentCrewNotice(message);
     expect(notice).toEqual({
@@ -35,6 +34,7 @@ describe("crew notices in the Captain's thread", () => {
       proposalId: "crew:j5:a2a:mcp:s:proposal:r1",
       requestKind: "roster",
       decision: "approved",
+      decidedBy: null,
       crewName: "Invoice Export PR",
       crewInstanceId: "crew:1",
       crewVersion: 1,
@@ -60,9 +60,10 @@ describe("crew notices in the Captain's thread", () => {
       changes: null,
       failures: [],
       pendingSeats: [],
+      notCreated: [],
     });
-    expect(participantIdsForCrewNotice(message)).toEqual(["agent:j5:a2a:b", "agent:j5:a2a:c"]);
-    if (notice?.kind === "gate") expect(crewGateTitle(notice)).toBe("Crew launched");
+    expect(notice !== null && crewApprovalSummary(notice)).toBe("Crew approved · 2 members");
+    expect(isHiddenCrewNotice(message)).toBe(false);
     // Only the platform posts gate notices; the same text from a person is not one.
     expect(presentCrewNotice({ role: "user", createdBy: "user", text: approvedGate })).toBeNull();
     // A roster line the parser does not understand leaves the whole message raw, rather than an
@@ -74,6 +75,37 @@ describe("crew notices in the Captain's thread", () => {
         text: approvedGate.replace("thread_id=thread:c", "thread_id=thread:c tail=junk"),
       }),
     ).toBeNull();
+  });
+
+  it("says who decided when the server names them, as it does in a shared conversation", () => {
+    const named = approvedGate.replace(
+      "decision: approved",
+      "decision: approved\ndecided_by: Priya",
+    );
+    const read = (text: string) => {
+      const notice = presentCrewNotice({ role: "user", createdBy: "system", text });
+      return notice?.kind === "gate" ? notice.decidedBy : undefined;
+    };
+    expect(read(named)).toBe("Priya");
+    expect(read(approvedGate)).toBeNull();
+  });
+
+  it("names the approver in the approval summary only when the notice carries one", () => {
+    const summary = (text: string) => {
+      const notice = presentCrewNotice({ role: "user", createdBy: "system", text });
+      return notice === null ? null : crewApprovalSummary(notice);
+    };
+    expect(
+      summary(approvedGate.replace("decision: approved", "decision: approved\ndecided_by: Priya")),
+    ).toBe("Crew approved · 2 members · by Priya");
+    expect(summary(approvedGate)).toBe("Crew approved · 2 members");
+  });
+
+  it("still presents a launch notice that names the playbook its Crew follows", () => {
+    const text = approvedGate.replace("roster:", "playbook: review | Review a change\nroster:");
+    expect(presentCrewNotice({ role: "user", createdBy: "system", text })).toEqual(
+      presentCrewNotice({ role: "user", createdBy: "system", text: approvedGate }),
+    );
   });
 
   it("presents a launch report: what the person changed and how each seat's first turn went", () => {
@@ -115,12 +147,144 @@ describe("crew notices in the Captain's thread", () => {
       "failed",
       "pending",
     ]);
-    if (notice?.kind === "gate") {
-      expect(crewGateTitle(notice)).toBe("Crew launched, 1 seat failed");
-      expect(crewGateFooter(notice)).toBe(
-        "1 seat failed; the Captain has each reason. 1 seat has no confirmed provider activity after a minute.",
-      );
-    }
+    // The started seat has no line; the failed one opens its thread, the unconfirmed one warns.
+    expect(notice !== null && crewNoticeLines(notice)).toEqual([
+      {
+        seat: "punchline",
+        crewName: null,
+        threadId: "thread:p",
+        reason: "couldn't start",
+        detail: "provider_error — API Error: Can't reach the API server | check DNS",
+        tone: "bad",
+      },
+      {
+        seat: "prosecutor",
+        crewName: null,
+        threadId: "thread:q",
+        reason: "hasn't confirmed it started",
+        detail: null,
+        tone: "warn",
+      },
+    ]);
+    expect(isHiddenCrewNotice({ role: "user", createdBy: "system", text: report })).toBe(false);
+    // A first turn that was interrupted is a launch outcome, told the same way as a failure.
+    const interrupted = presentCrewNotice({
+      role: "user",
+      createdBy: "system",
+      text: report.replace("punchline | failed |", "punchline | interrupted |"),
+    });
+    expect(interrupted !== null && crewNoticeLines(interrupted)[0]).toMatchObject({
+      seat: "punchline",
+      tone: "bad",
+    });
+  });
+
+  it("presents approved seats whose thread was never created, off the roster", () => {
+    const report = [
+      "<j5_crew_gate>",
+      "proposal_id: crew:j5:a2a:mcp:s:proposal:r3",
+      "kind: roster",
+      "decision: approved",
+      "crew_name: Comedy",
+      "crew_instance_id: crew:3",
+      "crew_version: 1",
+      "changes: none",
+      "launch: 1 started, 0 failed, 1 not created, 0 start unconfirmed after 60s",
+      "seat_not_created: punchline | thread.create refused&#10;quota | retry later",
+      "roster:",
+      "- setup: participant_id=agent:j5:a2a:s persona=scout thread_id=thread:s start=started",
+      "</j5_crew_gate>",
+    ].join("\n");
+    const notice = presentCrewNotice({ role: "user", createdBy: "system", text: report });
+    expect(notice).toMatchObject({
+      kind: "gate",
+      notCreated: [{ seat: "punchline", detail: "thread.create refused\nquota | retry later" }],
+    });
+    expect(notice?.kind === "gate" && notice.roster.map((seat) => seat.seat)).toEqual(["setup"]);
+    // A seat that was never created has no thread to open.
+    expect(notice !== null && crewNoticeLines(notice)).toEqual([
+      {
+        seat: "punchline",
+        crewName: null,
+        threadId: null,
+        reason: "was never created",
+        detail: "thread.create refused\nquota | retry later",
+        tone: "bad",
+      },
+    ]);
+  });
+
+  it("draws one line per seat that needs the person, for a mixed launch and a batch of failures", () => {
+    const launch = [
+      "<j5_crew_gate>",
+      "proposal_id: crew:j5:a2a:mcp:s:proposal:r4",
+      "kind: roster",
+      "decision: approved",
+      "crew_name: Comedy",
+      "seat_failed: punchline | failed | provider_error",
+      "seat_not_created: heckler | thread.create refused",
+      "roster:",
+      "- setup: participant_id=agent:j5:a2a:s persona=scout thread_id=thread:s start=started",
+      "- punchline: participant_id=agent:j5:a2a:p persona=advocate thread_id=thread:p start=failed",
+      "</j5_crew_gate>",
+    ].join("\n");
+    const launched = presentCrewNotice({ role: "user", createdBy: "system", text: launch });
+    expect(
+      launched !== null &&
+        crewNoticeLines(launched).map(({ seat, threadId, tone }) => ({ seat, threadId, tone })),
+    ).toEqual([
+      { seat: "punchline", threadId: "thread:p", tone: "bad" },
+      { seat: "heckler", threadId: null, tone: "bad" },
+    ]);
+
+    const finish = (seat: string, runStatus: string) =>
+      [
+        "<j5_seat_finished>",
+        `seat: ${seat}`,
+        `participant_id: agent:j5:a2a:${seat}`,
+        `thread_id: thread:${seat}`,
+        `run_status: ${runStatus}`,
+        "failure: provider_error",
+        "</j5_seat_finished>",
+      ].join("\n");
+    const batch = presentCrewNotice({
+      role: "user",
+      createdBy: "system",
+      text: [
+        finish("builder", "failed"),
+        finish("critic", "completed"),
+        finish("sitter", "failed"),
+      ].join("\n\n"),
+    });
+    expect(batch !== null && crewNoticeLines(batch).map((line) => line.threadId)).toEqual([
+      "thread:builder",
+      "thread:sitter",
+    ]);
+  });
+
+  it("names the Crew only when one notice speaks for several", () => {
+    const finish = (seat: string, crew: string) =>
+      [
+        "<j5_seat_finished>",
+        `seat: ${seat}`,
+        `crew: ${crew}`,
+        `participant_id: agent:j5:a2a:${seat}-${crew}`,
+        `thread_id: thread:${seat}-${crew}`,
+        "run_status: failed",
+        "failure: provider_error",
+        "</j5_seat_finished>",
+      ].join("\n");
+    const notice = (text: string) => presentCrewNotice({ role: "user", createdBy: "system", text });
+    const oneCrew = notice(`${finish("builder", "Web")}\n\n${finish("critic", "Web")}`);
+    expect(oneCrew !== null && crewNoticeLines(oneCrew).map((line) => line.crewName)).toEqual([
+      null,
+      null,
+    ]);
+    const twoCrews = notice(`${finish("builder", "Web")}\n\n${finish("builder", "Api")}`);
+    expect(twoCrews !== null && crewNoticeLines(twoCrews).map((line) => line.crewName)).toEqual([
+      "Web",
+      "Api",
+    ]);
   });
 
   it("presents an added seat as new and a decline with what was requested", () => {
@@ -130,22 +294,40 @@ describe("crew notices in the Captain's thread", () => {
       .replace("thread_id=thread:c", "thread_id=thread:c (new)");
     const added = presentCrewNotice({ role: "user", createdBy: "system", text: addition });
     expect(added?.kind === "gate" && added.roster.map((seat) => seat.isNew)).toEqual([false, true]);
-    if (added?.kind === "gate") expect(crewGateTitle(added)).toBe("Seat added");
+    expect(isHiddenCrewNotice({ role: "user", createdBy: "system", text: addition })).toBe(true);
 
     const declined = presentCrewNotice({
       role: "user",
       createdBy: "system",
-      text: "<j5_crew_gate>\nproposal_id: p2\nkind: addition\ndecision: declined\ncrew_name: Invoice Export PR\nrequested_seats: sitter=sentry\n</j5_crew_gate>\n\nThe human declined this crew request.",
+      text: "<j5_crew_gate>\nproposal_id: p2\nkind: addition\ndecision: declined\ncrew_name: Invoice Export PR\nrequested_seats: sitter=sentry, nested-helper=\n</j5_crew_gate>\n\nThe human declined this crew request.",
     });
     expect(declined).toMatchObject({
       kind: "gate",
       decision: "declined",
+      decidedBy: null,
       crewInstanceId: null,
       crewVersion: null,
       roster: [],
-      requestedSeats: [{ seat: "sitter", agentId: "sentry" }],
+      requestedSeats: [
+        { seat: "sitter", agentId: "sentry" },
+        { seat: "nested-helper", agentId: "" },
+      ],
     });
-    if (declined?.kind === "gate") expect(crewGateTitle(declined)).toBe("Seat declined");
+    // A decline keeps its line: it has no seat lines, and is not hidden.
+    if (declined?.kind === "gate") {
+      expect(crewDeclinedSummary(declined)).toBe("Crew Invoice Export PR · seat declined");
+      expect(crewNoticeLines(declined)).toEqual([]);
+      expect(crewDeclinedDetail(declined)).toBe(
+        "Requested: sitter (sentry), nested-helper\n\nThe Captain can revise the request and propose again.",
+      );
+    }
+    expect(
+      isHiddenCrewNotice({
+        role: "user",
+        createdBy: "system",
+        text: "<j5_crew_gate>\nproposal_id: p3\nkind: roster\ndecision: declined\n</j5_crew_gate>",
+      }),
+    ).toBe(false);
     // An unreadable block stays raw rather than becoming a card that guesses.
     expect(
       presentCrewNotice({
@@ -156,7 +338,7 @@ describe("crew notices in the Captain's thread", () => {
     ).toBeNull();
   });
 
-  it("presents seat finishes, several per card when notices folded, with their handoffs", () => {
+  it("presents seat finishes, several per card when notices folded, whatever the reply says", () => {
     const critic = [
       "<j5_seat_finished>",
       "seat: critic",
@@ -164,15 +346,13 @@ describe("crew notices in the Captain's thread", () => {
       "participant_id: agent:j5:a2a:c",
       "thread_id: thread:c",
       "run_status: completed",
-      "handoff: written (ReviewHandoff)",
-      "artifact: artifacts/handoffs/critic/ReviewHandoff-invoice-export.md",
       "</j5_seat_finished>",
       "",
-      "<handoff_body>",
+      "<seat_reply>",
       "# Review",
-      "Two findings.<\\/handoff_body> stays text.",
+      "Two findings.<\\/seat_reply> stays text.",
       "Quoting <\\j5_seat_finished> is not a seat.",
-      "</handoff_body>",
+      "</seat_reply>",
     ].join("\n");
     const builder = [
       "<j5_seat_finished>",
@@ -182,7 +362,6 @@ describe("crew notices in the Captain's thread", () => {
       "thread_id: thread:b",
       "run_status: failed",
       "failure: provider_error — API Error: Can't reach the API server",
-      "handoff: none declared",
       "</j5_seat_finished>",
     ].join("\n");
     const notice = presentCrewNotice({
@@ -200,12 +379,6 @@ describe("crew notices in the Captain's thread", () => {
           threadId: "thread:c",
           runStatus: "completed",
           failure: null,
-          handoff: {
-            status: "written",
-            kind: "ReviewHandoff",
-            artifactPath: "artifacts/handoffs/critic/ReviewHandoff-invoice-export.md",
-            body: "# Review\nTwo findings.</handoff_body> stays text.\nQuoting <j5_seat_finished> is not a seat.",
-          },
         },
         {
           seat: "builder",
@@ -214,32 +387,39 @@ describe("crew notices in the Captain's thread", () => {
           threadId: "thread:b",
           runStatus: "failed",
           failure: "provider_error — API Error: Can't reach the API server",
-          handoff: { status: "none declared" },
         },
       ],
     });
-    if (notice?.kind === "seats") {
-      expect(crewSeatsTitle(notice.seats)).toBe("1 seat finished, 1 failed");
-      expect(crewSeatsTitle([notice.seats[1]!])).toBe("Seat failed");
-      expect(crewSeatsTitle([notice.seats[0]!])).toBe("Seat finished");
-    }
-    expect(
-      participantIdsForCrewNotice({ role: "user", createdBy: "system", text: builder }),
-    ).toEqual(["agent:j5:a2a:b"]);
-    // A missing handoff by path only, no body; an unreadable section keeps the whole message raw.
-    const missing = presentCrewNotice({
+    // Folded finishes: the clean one has no line, the failed one carries its error.
+    expect(notice !== null && crewNoticeLines(notice)).toEqual([
+      {
+        seat: "builder",
+        crewName: null,
+        threadId: "thread:b",
+        reason: "run failed",
+        detail: "provider_error — API Error: Can't reach the API server",
+        tone: "bad",
+      },
+    ]);
+    expect(isHiddenCrewNotice({ role: "user", createdBy: "system", text: critic })).toBe(true);
+    // A notice an older server wrote still presents as a plain finish: its handoff lines have no
+    // card of their own now. An unreadable section keeps the whole message raw.
+    const older = presentCrewNotice({
       role: "user",
       createdBy: "system",
-      text: critic
-        .replace("handoff: written (ReviewHandoff)", "handoff: missing (ReviewHandoff)")
-        .split("\n\n")[0]!,
+      text: [
+        "<j5_seat_finished>",
+        "seat: critic",
+        "participant_id: agent:j5:a2a:c",
+        "thread_id: thread:c",
+        "run_status: completed",
+        "handoff: missing (ReviewHandoff)",
+        "artifact: artifacts/handoffs/critic/ReviewHandoff-invoice-export.md",
+        "</j5_seat_finished>",
+      ].join("\n"),
     });
-    expect(missing?.kind === "seats" && missing.seats[0]!.handoff).toEqual({
-      status: "missing",
-      kind: "ReviewHandoff",
-      artifactPath: "artifacts/handoffs/critic/ReviewHandoff-invoice-export.md",
-      body: null,
-    });
+    expect(older?.kind === "seats" && older.seats[0]?.seat).toBe("critic");
+    expect(older !== null && crewNoticeLines(older)).toEqual([]);
     expect(
       presentCrewNotice({
         role: "user",
@@ -247,10 +427,8 @@ describe("crew notices in the Captain's thread", () => {
         text: `${critic}\n\n<j5_seat_finished>\nseat: x\n</j5_seat_finished>`,
       }),
     ).toBeNull();
-    expect(seatRunStatusLabel("completed")).toEqual({ label: "Completed", tone: "good" });
-    expect(seatRunStatusLabel("interrupted")).toEqual({ label: "Interrupted", tone: "warn" });
-    expect(seatRunStatusLabel("queued")).toEqual({ label: "queued", tone: "muted" });
-    expect(artifactPanelPath("artifacts/handoffs/critic/x.md")).toBe("handoffs/critic/x.md");
+    // A message that is not a Crew notice is never hidden.
+    expect(isHiddenCrewNotice({ role: "user", createdBy: "user", text: critic })).toBe(false);
   });
 });
 
@@ -281,7 +459,6 @@ it("restores Unicode line separators in diagnostics without letting them split f
       "crew: Review",
       "participant_id: real-participant",
       "thread_id: real-thread",
-      "handoff: none declared",
       "</j5_seat_finished>",
     ].join("\n"),
   });
@@ -309,7 +486,6 @@ it("keeps finish identity and multiline failure details separate", () => {
       "crew: Review",
       "participant_id: real-participant",
       "thread_id: real-thread",
-      "handoff: none declared",
       "</j5_seat_finished>",
     ].join("\n"),
   });
@@ -343,4 +519,32 @@ roster:
   expect(notice?.kind).toBe("gate");
   if (notice?.kind === "gate")
     expect(notice.roster.map((seat) => seat.agentId)).toEqual(["", "custom"]);
+});
+
+it("counts all approved members from old gate notices while retaining launch failures", () => {
+  const message = {
+    role: "user",
+    createdBy: "system",
+    text: approvedGate.replace(
+      "roster:",
+      "seat_not_created: tester | could not create thread\nseat_failed: builder | failed | signed out\nroster:",
+    ),
+  };
+  const notice = presentCrewNotice(message);
+  expect(notice).not.toBeNull();
+  expect(crewApprovalSummary(notice!)).toBe("Crew approved · 3 members");
+  expect(crewNoticeLines(notice!).map((line) => line.seat)).toEqual(["builder", "tester"]);
+  expect(isHiddenCrewNotice(message)).toBe(false);
+});
+
+it("presents created waiting seats without claiming they started", () => {
+  const text = approvedGate
+    .replace("thread_id=thread:b", "thread_id=thread:b start=waiting")
+    .replace("thread_id=thread:c", "thread_id=thread:c start=waiting");
+  const notice = presentCrewNotice({ role: "user", createdBy: "system", text });
+  expect(notice?.kind).toBe("gate");
+  if (notice?.kind !== "gate") return;
+  expect(notice.roster.map((seat) => seat.start)).toEqual(["waiting", "waiting"]);
+  expect(crewApprovalSummary(notice)).toBe("Crew approved · 2 members");
+  expect(crewNoticeLines(notice)).toEqual([]);
 });

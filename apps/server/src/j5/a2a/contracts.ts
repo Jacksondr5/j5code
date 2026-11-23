@@ -1,15 +1,23 @@
-import { ThreadId } from "@t3tools/contracts";
+import {
+  AgentPersonaDraftView,
+  AgentPersonaEscalationView,
+  ChatAttachment,
+  ProviderInteractionMode,
+  RuntimeMode,
+  ThreadId,
+} from "@t3tools/contracts";
+import { PeerSenderLabel } from "@t3tools/contracts/j5";
 import * as Schema from "effect/Schema";
 
 const Identifier = Schema.String.check(Schema.isNonEmpty());
-const SquadronName = Schema.String.check(
-  Schema.makeFilter((name) => name.trim().length > 0 || "Squadron name must not be blank."),
+const ProjectTitle = Schema.String.check(
+  Schema.makeFilter((name) => name.trim().length > 0 || "A project title must not be blank."),
 );
 const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
-export const SquadronId = Identifier.pipe(Schema.brand("J5A2ASquadronId"));
-export type SquadronId = typeof SquadronId.Type;
+export const LedgerProjectId = Identifier.pipe(Schema.brand("J5A2ALedgerProjectId"));
+export type LedgerProjectId = typeof LedgerProjectId.Type;
 
 export const ExchangeId = Identifier.pipe(Schema.brand("J5A2AExchangeId"));
 export type ExchangeId = typeof ExchangeId.Type;
@@ -29,6 +37,25 @@ export type LedgerMessageId = typeof LedgerMessageId.Type;
 export const Urgency = Schema.Literals(["blocking", "soon", "fyi"]);
 export type Urgency = typeof Urgency.Type;
 
+/**
+ * How a sender asks for its message to land on an agent, in upstream's words: `queue` is J5's
+ * ordinary delivery (after the receiver's turn ends, or into it for the models D4 excepts),
+ * `steer` joins the running turn, and `restart` interrupts the turn and restarts it with the
+ * message. Upstream's `auto` is left out: it steers whenever it can.
+ */
+export const SendMode = Schema.Literals(["queue", "steer", "restart"]);
+export type SendMode = typeof SendMode.Type;
+
+/**
+ * The broadest modes a sender could touch when it asked for a steer or a restart. Delivery is
+ * later than the send, and the receiver's modes can be raised in between, so the limit is kept
+ * with the message and upstream checks it again when the message is dispatched.
+ */
+export const SendModeLimit = Schema.Struct({
+  runtimeMode: RuntimeMode,
+  interactionMode: ProviderInteractionMode,
+});
+
 export const DeliveryEnvelopeChannel = Schema.Literals([
   "peer",
   "silence_notice",
@@ -45,11 +72,30 @@ export const isHumanParticipantId = (id: ParticipantId): boolean =>
 export const isDurableHumanParticipantId = (id: ParticipantId): boolean =>
   isHumanParticipantId(id) && id !== "human:global";
 
-export const MACHINE_PARTICIPANT_ID_PREFIX = "machine:";
+/**
+ * The receiver of an agent's ask to everyone here (Inbox AC15): everyone who can write to the
+ * asking agent's thread when the ask is read. No person has this id.
+ */
+export const EVERYONE_HERE_PERSON_ID = ParticipantId.make("human:everyone-here");
+
+const MACHINE_PARTICIPANT_ID_PREFIX = "machine:";
 export const isMachineParticipantId = (id: ParticipantId): boolean =>
   id.startsWith(MACHINE_PARTICIPANT_ID_PREFIX) && id.length > MACHINE_PARTICIPANT_ID_PREFIX.length;
+export const isPlatformParticipantId = (id: string): boolean => id.startsWith("platform:");
 export const machineParticipantIdForName = (name: string) =>
   ParticipantId.make(`${MACHINE_PARTICIPANT_ID_PREFIX}${name}`);
+
+/**
+ * An outside agent: an MCP client signed in through OAuth, one participant per sign-in. It has no
+ * thread and no project, sends plain messages only, and can never receive. It joins no ledger, so
+ * it is not in the `Participant` union; its name is kept in `j5_a2a_outside_agent`.
+ */
+const OUTSIDE_AGENT_PARTICIPANT_ID_PREFIX = "outside:";
+export const isOutsideAgentParticipantId = (id: ParticipantId): boolean =>
+  id.startsWith(OUTSIDE_AGENT_PARTICIPANT_ID_PREFIX) &&
+  id.length > OUTSIDE_AGENT_PARTICIPANT_ID_PREFIX.length;
+export const outsideAgentParticipantId = (sessionId: string) =>
+  ParticipantId.make(`${OUTSIDE_AGENT_PARTICIPANT_ID_PREFIX}${sessionId}`);
 
 export const AgentParticipant = Schema.Struct({
   kind: Schema.Literal("agent"),
@@ -92,12 +138,12 @@ export type Participant = typeof Participant.Type;
 
 export const participantId = (participant: Participant): ParticipantId => participant.id;
 
-export const Squadron = Schema.Struct({
-  id: SquadronId,
-  name: SquadronName,
+export const ProjectLedger = Schema.Struct({
+  id: LedgerProjectId,
+  name: ProjectTitle,
   createdAt: Schema.String,
 });
-export type Squadron = typeof Squadron.Type;
+export type ProjectLedger = typeof ProjectLedger.Type;
 
 export const CommEventKind = Schema.Literals([
   "exchange.opened",
@@ -106,6 +152,7 @@ export const CommEventKind = Schema.Literals([
   "message.delivered",
   "message.delivery_failed",
   "message.cancelled",
+  "message.edited",
   "exchange.closed",
   "exchange.dropped",
   "silence.notice",
@@ -114,6 +161,7 @@ export const CommEventKind = Schema.Literals([
   "participant.archived",
   "participant.unarchived",
   "participant.deleted",
+  "participant.moved",
 ]);
 export type CommEventKind = typeof CommEventKind.Type;
 
@@ -123,6 +171,7 @@ const NonMembershipEventKind = Schema.Literals([
   "message.delivered",
   "message.delivery_failed",
   "message.cancelled",
+  "message.edited",
   "exchange.closed",
   "exchange.dropped",
   "silence.notice",
@@ -142,14 +191,33 @@ const NonMembershipCommEvent = Schema.Struct({
   payload: Schema.Json,
 });
 
+/**
+ * The receiver project's own row for a message another project sent. When the
+ * origin is a peer server, `originEnvironmentId` names it and the row is also
+ * the fact this server delivers from, since no `message.sent` exists here.
+ */
+export const MessageReceivedPayload = Schema.Struct({
+  originProjectId: LedgerProjectId,
+  originEnvironmentId: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
+  /** The id and clock the origin used; this ledger keys and stamps the message itself. */
+  originMessageId: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
+  originCreatedAt: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
+  /** "none": the row records a fact (a withdrawal) and injects nothing into the receiver's thread. */
+  injection: Schema.optional(Schema.Literal("none")),
+  /** From a peer delivery: the sender's display name its server sent, read by the client identity lookup and nothing else. */
+  senderLabel: Schema.optional(PeerSenderLabel),
+  /** From a peer delivery whose sender asked for a steer or a restart, with the sender's limit. */
+  mode: Schema.optional(SendMode),
+  modeLimit: Schema.optional(SendModeLimit),
+  message: Schema.Json,
+});
+export type MessageReceivedPayload = typeof MessageReceivedPayload.Type;
+
 const MessageReceivedCommEvent = Schema.Struct({
   ...eventAddressFields,
   kind: Schema.Literal("message.received"),
   correlationId: CorrelationId,
-  payload: Schema.Struct({
-    originSquadronId: SquadronId,
-    message: Schema.Json,
-  }),
+  payload: MessageReceivedPayload,
 });
 
 const ParticipantJoinedCommEvent = Schema.Struct({
@@ -169,17 +237,35 @@ const ParticipantMembershipCommEvent = Schema.Struct({
   payload: Schema.Struct({ participant: Participant }),
 });
 
+/**
+ * An agent's membership moving with its thread to another project. Both ledgers record it: the
+ * one it left and the one it joined. It keeps its id and whether it is archived.
+ */
+export const ParticipantMovedPayload = Schema.Struct({
+  participant: Participant,
+  fromProjectId: LedgerProjectId,
+  toProjectId: LedgerProjectId,
+  archivedAt: Schema.NullOr(Schema.String),
+});
+
+const ParticipantMovedCommEvent = Schema.Struct({
+  ...eventAddressFields,
+  kind: Schema.Literal("participant.moved"),
+  payload: ParticipantMovedPayload,
+});
+
 export const CommEvent = Schema.Union([
   NonMembershipCommEvent,
   MessageReceivedCommEvent,
   ParticipantJoinedCommEvent,
   ParticipantMembershipCommEvent,
+  ParticipantMovedCommEvent,
 ]);
 export type CommEvent = typeof CommEvent.Type;
 
 const storedFields = {
   seq: PositiveInt,
-  squadronId: SquadronId,
+  projectId: LedgerProjectId,
 } as const;
 
 export const StoredCommEvent = Schema.Union([
@@ -187,17 +273,19 @@ export const StoredCommEvent = Schema.Union([
   Schema.Struct({ ...storedFields, ...MessageReceivedCommEvent.fields }),
   Schema.Struct({ ...storedFields, ...ParticipantJoinedCommEvent.fields }),
   Schema.Struct({ ...storedFields, ...ParticipantMembershipCommEvent.fields }),
+  Schema.Struct({ ...storedFields, ...ParticipantMovedCommEvent.fields }),
 ]);
 export type StoredCommEvent = typeof StoredCommEvent.Type;
 
-export const CreateSquadronCommand = Schema.Struct({
-  squadron: Squadron,
+export const EnsureProjectCommand = Schema.Struct({
+  projectId: LedgerProjectId,
+  createdAt: Schema.String,
 });
-export type CreateSquadronCommand = typeof CreateSquadronCommand.Type;
+export type EnsureProjectCommand = typeof EnsureProjectCommand.Type;
 
 export const AppendCommEventCommand = Schema.Struct({
   commandId: CommCommandId,
-  squadronId: SquadronId,
+  projectId: LedgerProjectId,
   acceptedAt: Schema.String,
   event: CommEvent,
 });
@@ -205,7 +293,7 @@ export type AppendCommEventCommand = typeof AppendCommEventCommand.Type;
 
 export const CommCommandReceipt = Schema.Struct({
   commandId: CommCommandId,
-  squadronId: SquadronId,
+  projectId: LedgerProjectId,
   commandType: Schema.Literal("comm.append"),
   acceptedAt: Schema.String,
   resultSeq: PositiveInt,
@@ -214,7 +302,7 @@ export type CommCommandReceipt = typeof CommCommandReceipt.Type;
 
 export const AppendCommEventsCommand = Schema.Struct({
   commandId: CommCommandId,
-  squadronId: SquadronId,
+  projectId: LedgerProjectId,
   acceptedAt: Schema.String,
   events: Schema.Array(CommEvent).pipe(Schema.check(Schema.isMinLength(1))),
 });
@@ -226,15 +314,53 @@ export const ExchangeOpenedPayload = Schema.Struct({
 });
 export type ExchangeOpenedPayload = typeof ExchangeOpenedPayload.Type;
 
+/**
+ * Why an Exchange ended, as a terminal notice carries it to the other party. A fact that came
+ * from a peer server names that server's project.
+ */
+export const TerminalFact = Schema.Union([
+  Schema.Struct({
+    kind: Schema.Literal("dropped"),
+    cause: Schema.Struct({
+      kind: Schema.Literals(["participant-archived", "participant-deleted"]),
+      participantId: Schema.String,
+      projectId: Schema.String,
+    }),
+  }),
+  Schema.Struct({ kind: Schema.Literal("sender-cleared") }),
+]);
+export type TerminalFact = typeof TerminalFact.Type;
+
 export const MessageSentPayload = Schema.Struct({
+  attachments: Schema.optional(Schema.Array(ChatAttachment)),
+  /** How the sender asked for the message to land; absent means `queue`. */
+  mode: Schema.optional(SendMode),
+  modeLimit: Schema.optional(SendModeLimit),
+  /** Present on a terminal notice headed to a peer server: the fact it carries, fixed when the notice is written. */
+  terminal: Schema.optional(TerminalFact),
   messageId: LedgerMessageId,
   text: Schema.String.check(Schema.isNonEmpty()),
-  originSquadronId: SquadronId,
-  receiverSquadronId: SquadronId,
+  originProjectId: LedgerProjectId,
+  receiverProjectId: LedgerProjectId,
+  /** Present when the receiver's project lives on a peer server. */
+  receiverEnvironmentId: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
   exchangeRole: Schema.Literals(["none", "ask", "followup", "reply", "terminal_notice"]),
   envelopeChannel: DeliveryEnvelopeChannel,
 });
 export type MessageSentPayload = typeof MessageSentPayload.Type;
+
+/**
+ * A queued message's new text, recorded when anyone edits it in the receiver's queue. The event's
+ * sender is who edited it, or null when J5 could not tell. `text` is the body inside the envelope
+ * the message was delivered with, as `message.sent` records it, or the whole queued text once the
+ * envelope no longer matches. `sourceSequence` is the orchestration event that carried the edit.
+ */
+export const MessageEditedPayload = Schema.Struct({
+  messageId: LedgerMessageId,
+  text: Schema.String.check(Schema.isNonEmpty()),
+  sourceSequence: NonNegativeInt,
+});
+export type MessageEditedPayload = typeof MessageEditedPayload.Type;
 
 export const MessageDeliveredPayload = Schema.Struct({
   messageId: LedgerMessageId,
@@ -249,6 +375,8 @@ export const MessageDeliveryFailedPayload = Schema.Struct({
   error: Schema.String.check(Schema.isNonEmpty()),
   nextAttemptAt: Schema.NullOr(Schema.String),
   alarmed: Schema.Boolean,
+  /** The receiver held it unsent: a recheck, which never counts toward the alarm. */
+  held: Schema.optional(Schema.Boolean),
 });
 export type MessageDeliveryFailedPayload = typeof MessageDeliveryFailedPayload.Type;
 
@@ -263,10 +391,21 @@ export type ExchangeDropDisposition = typeof ExchangeDropDisposition.Type;
 
 export const ExchangeDroppedPayload = Schema.Struct({
   disposition: ExchangeDropDisposition,
+  /**
+   * What ended it, and the party it was about. A peer server's refusal of the
+   * ask, or the removal of the peer, names the party on that server.
+   */
   cause: Schema.Struct({
-    kind: Schema.Literals(["participant-archived", "participant-deleted"]),
+    kind: Schema.Literals([
+      "participant-archived",
+      "participant-deleted",
+      "delivery-refused",
+      "peer-removed",
+      // A person asked can no longer write to the asking agent's thread, so cannot answer it.
+      "access-ended",
+    ]),
     participantId: ParticipantId,
-    squadronId: SquadronId,
+    projectId: LedgerProjectId,
   }),
   facts: Schema.Struct({
     replyRequired: Schema.Literal(false),
@@ -293,12 +432,17 @@ export const ClearOwnAskResult = Schema.Struct({
 export type ClearOwnAskResult = typeof ClearOwnAskResult.Type;
 
 export const SendMessageInput = Schema.Struct({
+  attachments: Schema.optional(Schema.Array(ChatAttachment)),
+  mode: Schema.optional(SendMode),
+  modeLimit: Schema.optional(SendModeLimit),
   commandId: CommCommandId,
   senderThreadId: ThreadId,
   to: ParticipantId,
   message: Schema.String.check(Schema.isNonEmpty()),
   expectReply: Schema.optional(Schema.Boolean),
   exchangeId: Schema.optional(ExchangeId),
+  /** An open ask to a person that this message follows up on. */
+  regarding: Schema.optional(ExchangeId),
   intent: Schema.optional(Schema.String.check(Schema.isNonEmpty())),
   urgency: Schema.optional(Urgency),
   acceptedAt: Schema.String,
@@ -315,28 +459,59 @@ export const SendAsMachineInput = Schema.Struct({
 });
 export type SendAsMachineInput = typeof SendAsMachineInput.Type;
 
+/** An outside agent commits a plain message only, to an agent on this server. */
+export const SendAsOutsideAgentInput = Schema.Struct({
+  attachments: Schema.optional(Schema.Array(ChatAttachment)),
+  mode: Schema.optional(SendMode),
+  modeLimit: Schema.optional(SendModeLimit),
+  commandId: CommCommandId,
+  senderParticipantId: ParticipantId,
+  /** The label the client signed in with; kept so the envelope can name the sender. */
+  senderName: Schema.String,
+  to: ParticipantId,
+  /** The receiver's project, from `outsideAgentReceiver`: where the message is recorded. */
+  receiverProjectId: LedgerProjectId,
+  message: Schema.String.check(Schema.isNonEmpty()),
+  acceptedAt: Schema.String,
+});
+export type SendAsOutsideAgentInput = typeof SendAsOutsideAgentInput.Type;
+
 export const SendMessageResult = Schema.Struct({
   messageId: LedgerMessageId,
   exchangeId: Schema.NullOr(ExchangeId),
   exchangeState: Schema.Literals(["none", "open", "closing", "closed"]),
   joinedExistingExchange: Schema.Boolean,
   durableAtSeq: PositiveInt,
+  /** Present when the message will wait: behind the receiver's running turn, or on its held queue or usage limit. */
+  deliveryNotice: Schema.optional(Schema.String),
+  /** The name of the peer server the receiver lives on; absent for a receiver on this server. */
+  receiverServer: Schema.optionalKey(Schema.String),
+  /** Present when the receiver's server polls this one and is offline: the message waits for it. */
+  delivery: Schema.optionalKey(Schema.Literal("waiting_for_recipient")),
+  /** When that server was last available: its last poll. */
+  recipientLastAvailableAt: Schema.optionalKey(Schema.String),
+  /** The same facts in one sentence an agent reads at a glance. */
+  note: Schema.optionalKey(Schema.String),
+  /** On a new ask to a person: withdraw it with j5_clear_own_ask if the thread settles it instead. */
+  ifAnsweredInThread: Schema.optionalKey(Schema.String),
 });
 export type SendMessageResult = typeof SendMessageResult.Type;
 
 export const ParticipantDirectoryRow = Schema.Struct({
-  squadronId: SquadronId,
+  projectId: LedgerProjectId,
   participantId: ParticipantId,
   participant: Participant,
   archived: Schema.Boolean,
   canReceiveMessage: Schema.Boolean,
   canOpenExchange: Schema.Boolean,
   acceptsUrgency: Schema.Boolean,
+  /** A person's name, once the server has recorded one for them. */
+  displayName: Schema.optionalKey(Schema.String),
 });
 export type ParticipantDirectoryRow = typeof ParticipantDirectoryRow.Type;
 
 export const DeliveryAlarm = Schema.Struct({
-  squadronId: SquadronId,
+  projectId: LedgerProjectId,
   messageId: LedgerMessageId,
   attempts: PositiveInt,
   lastError: Schema.String,
@@ -344,7 +519,7 @@ export const DeliveryAlarm = Schema.Struct({
 export type DeliveryAlarm = typeof DeliveryAlarm.Type;
 
 export const DeliveryMilestone = Schema.Struct({
-  squadronId: SquadronId,
+  projectId: LedgerProjectId,
   messageId: LedgerMessageId,
   state: Schema.Literals(["delivered", "retry_scheduled", "alarmed", "cancelled"]),
   attempt: PositiveInt,
@@ -372,7 +547,7 @@ export const CommEventPage = Schema.Struct({
 export type CommEventPage = typeof CommEventPage.Type;
 
 export const Membership = Schema.Struct({
-  squadronId: SquadronId,
+  projectId: LedgerProjectId,
   participant: Participant,
   joinedSeq: PositiveInt,
   updatedSeq: PositiveInt,
@@ -381,17 +556,29 @@ export type Membership = typeof Membership.Type;
 
 export const HumanInboxItem = Schema.Struct({
   personId: ParticipantId,
-  squadronId: SquadronId,
-  squadronName: SquadronName,
+  projectId: LedgerProjectId,
+  projectTitle: Schema.String,
   exchangeId: ExchangeId,
   senderId: ParticipantId,
   senderThreadId: Schema.NullOr(ThreadId),
   intent: Schema.String,
   urgency: Urgency,
   message: Schema.String,
+  /** What the agent added to this ask, oldest first; absent when it added nothing. */
+  followUps: Schema.optionalKey(
+    Schema.Array(Schema.Struct({ messageId: Schema.String, message: Schema.String })),
+  ),
   openedAt: Schema.String,
   status: Schema.Literals(["open", "answered"]),
   terminalAt: Schema.NullOr(Schema.String),
+  /** Asked of everyone who can write to the asking agent's thread (Inbox AC15). */
+  forEveryone: Schema.optionalKey(Schema.Boolean),
+  /** Who answered an ask to everyone that is closed, by the name they had then (Inbox AC16). */
+  answeredBy: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  /** A refused persona launch this ask escalates, as the server recorded it. */
+  escalation: Schema.optionalKey(AgentPersonaEscalationView),
+  /** A persona draft this ask carries for the Owner's "Save persona"; never with `escalation`. */
+  personaDraft: Schema.optionalKey(AgentPersonaDraftView),
 });
 export type HumanInboxItem = typeof HumanInboxItem.Type;
 
@@ -403,6 +590,7 @@ export const AnswerHumanExchangeInput = Schema.Struct({
   personId: ParticipantId,
   exchangeId: ExchangeId,
   message: Schema.String.check(Schema.isNonEmpty()),
+  attachments: Schema.optional(Schema.Array(ChatAttachment)),
   acceptedAt: Schema.String,
 });
 export type AnswerHumanExchangeInput = typeof AnswerHumanExchangeInput.Type;

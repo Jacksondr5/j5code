@@ -11,17 +11,21 @@ import type {
   ProviderUserInputAnswers,
   CommandId,
   ThreadId,
+  TurnItemId,
 } from "@t3tools/contracts";
+import * as Clock from "effect/Clock";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
+import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { TestClock } from "effect/testing";
 
-import { OrchestratorV2, type OrchestratorV2Error } from "../Orchestrator.ts";
-import type { ProviderReplayGate } from "./ProviderReplayGate.testkit.ts";
+import * as Orchestrator from "../Orchestrator.ts";
+import type { RecordedCommandOutput } from "./CommandOutputRecorder.ts";
+import type { ProviderReplayGate } from "@t3tools/provider-testing/replayGate";
 
 export type OrchestratorV2ScenarioStep =
   | {
@@ -46,6 +50,10 @@ export type OrchestratorV2ScenarioStep =
       readonly threadId: ThreadId;
     }
   | {
+      readonly type: "await_no_background_work";
+      readonly threadId: ThreadId;
+    }
+  | {
       readonly type: "await_run_steerable";
       readonly threadId: ThreadId;
       readonly runId: OrchestrationV2Run["id"];
@@ -57,10 +65,20 @@ export type OrchestratorV2ScenarioStep =
       readonly status: OrchestrationV2Run["status"];
     }
   | {
+      readonly type: "finish_held_run";
+      readonly threadId: ThreadId;
+      readonly runId: OrchestrationV2Run["id"];
+      readonly status: OrchestrationV2Run["status"];
+    }
+  | {
       readonly type: "await_run_turn_item";
       readonly threadId: ThreadId;
       readonly runId: OrchestrationV2Run["id"];
       readonly itemType: OrchestrationV2TurnItem["type"];
+      /** Wait until the item also has this status. */
+      readonly itemStatus?: OrchestrationV2TurnItem["status"];
+      /** Look in the threads of the run's provider subagents instead of the run itself. */
+      readonly inSubagentThreads?: boolean;
     }
   | {
       readonly type: "release_replay_gate_after_waiting";
@@ -82,6 +100,7 @@ export type OrchestratorV2ScenarioStep =
       readonly commandId: CommandId;
       readonly decision?: ProviderApprovalDecision;
       readonly answers?: ProviderUserInputAnswers;
+      readonly shellSnapshotKeyWhilePending?: string;
     };
 
 export interface OrchestratorV2Scenario {
@@ -97,9 +116,11 @@ export interface OrchestratorV2ScenarioResult {
   readonly projections: ReadonlyMap<ThreadId, OrchestrationV2ThreadProjection>;
   readonly shellSnapshot: OrchestrationV2ThreadShellSnapshot;
   readonly capturedShellSnapshots: ReadonlyMap<string, OrchestrationV2ThreadShellSnapshot>;
+  /** Live output each command streamed (never persisted). Provider replays fill it in. */
+  readonly commandOutput?: ReadonlyMap<TurnItemId, RecordedCommandOutput>;
 }
 
-export class OrchestratorV2ScenarioStepError extends Schema.TaggedErrorClass<OrchestratorV2ScenarioStepError>()(
+export class OrchestratorV2ScenarioStepError extends Schema.TaggedError<OrchestratorV2ScenarioStepError>()(
   "OrchestratorV2ScenarioStepError",
   {
     scenario: Schema.String,
@@ -114,35 +135,52 @@ export class OrchestratorV2ScenarioStepError extends Schema.TaggedErrorClass<Orc
 function commandThreadIds(command: OrchestrationV2Command): ReadonlyArray<ThreadId> {
   switch (command.type) {
     case "thread.create":
+    case "thread.stop":
     case "thread.archive":
     case "thread.unarchive":
     case "thread.delete":
+    case "thread.guest-share.close":
+    case "thread.guest-message.dismiss":
     case "thread.settle":
     case "thread.auto-settle":
     case "thread.unsettle":
     case "thread.snooze":
     case "thread.unsnooze":
+    case "thread.auto-settle.set":
     case "thread.pin":
     case "thread.unpin":
     case "thread.pin.reorder":
+    case "thread.active.reorder":
+    case "thread.tag.set":
     case "thread.visit":
     case "thread.mark-unread":
     case "thread.metadata.update":
+    case "thread.pull-request.link":
+    case "thread.pull-request.unlink":
+    case "thread.pull-request-link.sync":
+    case "thread.pull-request.watch":
+    case "thread.pull-request.sync":
     case "thread.title.regeneration.complete":
     case "thread.runtime-mode.set":
     case "thread.interaction-mode.set":
     case "thread.model-selection.set":
     case "provider-session.detach":
     case "message.dispatch":
+    case "notification.delivery.accept":
     case "prepared-run.release":
     case "prepared-run.progress":
     case "prepared-run.fail":
+    case "prepared-run.retry":
+    case "subagent.stop":
     case "run.interrupt":
     case "queued-message.promote-to-steer":
+    case "queued-run.start":
+    case "queue.resume":
     case "queued-run.reorder":
     case "queued-run.cancel":
     case "queued-run.edit":
     case "runtime-request.respond":
+    case "thread.user-input.dismiss":
     case "checkpoint.rollback":
     case "provider.switch":
       return [command.threadId];
@@ -186,10 +224,7 @@ const hasActiveRun = (projection: OrchestrationV2ThreadProjection) =>
   );
 
 const SCENARIO_WAIT_ATTEMPTS = 10_000;
-// Iterations count event-loop turns, not time: while async work (git
-// subprocesses, fixture IO) is in flight the loop is idle and the counter
-// burns at full speed on slow runners. A wait is exhausted only once BOTH
-// the iteration budget and this wall-clock deadline are spent.
+// Iteration budgets burn through idle event-loop turns during async I/O; exhaust both iterations and wall-clock deadline.
 const SCENARIO_WAIT_DEADLINE_MS = 60_000;
 const scenarioWaitDeadline = () => performance.now() + SCENARIO_WAIT_DEADLINE_MS;
 const scenarioWaitExhausted = (attemptsRemaining: number, deadlineAt: number) =>
@@ -224,15 +259,16 @@ export function runOrchestratorV2Scenario(
   scenario: OrchestratorV2Scenario,
   options: {
     readonly replayGate?: ProviderReplayGate;
+    readonly afterSteps?: Effect.Effect<void>;
   } = {},
 ): Effect.Effect<
   OrchestratorV2ScenarioResult,
-  OrchestratorV2Error | OrchestratorV2ScenarioStepError,
-  OrchestratorV2
+  Orchestrator.OrchestratorV2Error | OrchestratorV2ScenarioStepError,
+  Orchestrator.OrchestratorV2
 > {
   return Effect.scoped(
     Effect.gen(function* () {
-      const orchestrator = yield* OrchestratorV2;
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
       const storedEventGroups: Array<ReadonlyArray<OrchestrationV2StoredEvent>> = [];
       const observedStoredEvents = yield* Ref.make<Array<OrchestrationV2StoredEvent>>([]);
       yield* orchestrator.streamStoredEvents.pipe(
@@ -243,24 +279,23 @@ export function runOrchestratorV2Scenario(
       );
       const backgroundDispatches = new Map<
         string,
-        Fiber.Fiber<ReadonlyArray<OrchestrationV2StoredEvent>, OrchestratorV2Error>
+        Fiber.Fiber<ReadonlyArray<OrchestrationV2StoredEvent>, Orchestrator.OrchestratorV2Error>
       >();
       const capturedShellSnapshots = new Map<string, OrchestrationV2ThreadShellSnapshot>();
       let anonymousBackgroundDispatchIndex = 0;
 
-      const awaitDispatch = (key: string) =>
-        Effect.gen(function* () {
-          const fiber = backgroundDispatches.get(key);
-          if (!fiber) {
-            return yield* new OrchestratorV2ScenarioStepError({
-              scenario: scenario.name,
-              step: `await:${key}`,
-            });
-          }
-          const events = yield* Fiber.join(fiber);
-          backgroundDispatches.delete(key);
-          storedEventGroups.push(events);
-        });
+      const awaitDispatch = Effect.fn("awaitDispatch")(function* (key: string) {
+        const fiber = backgroundDispatches.get(key);
+        if (!fiber) {
+          return yield* new OrchestratorV2ScenarioStepError({
+            scenario: scenario.name,
+            step: `await:${key}`,
+          });
+        }
+        const events = yield* Fiber.join(fiber);
+        backgroundDispatches.delete(key);
+        storedEventGroups.push(events);
+      });
 
       const waitForPendingRuntimeRequest = (
         threadId: ThreadId,
@@ -268,7 +303,7 @@ export function runOrchestratorV2Scenario(
         deadlineAt = scenarioWaitDeadline(),
       ): Effect.Effect<
         OrchestrationV2RuntimeRequest,
-        OrchestratorV2Error | OrchestratorV2ScenarioStepError,
+        Orchestrator.OrchestratorV2Error | OrchestratorV2ScenarioStepError,
         never
       > =>
         Effect.gen(function* () {
@@ -292,7 +327,11 @@ export function runOrchestratorV2Scenario(
         threadId: ThreadId,
         attemptsRemaining = SCENARIO_WAIT_ATTEMPTS,
         deadlineAt = scenarioWaitDeadline(),
-      ): Effect.Effect<void, OrchestratorV2Error | OrchestratorV2ScenarioStepError, never> =>
+      ): Effect.Effect<
+        void,
+        Orchestrator.OrchestratorV2Error | OrchestratorV2ScenarioStepError,
+        never
+      > =>
         Effect.gen(function* () {
           const projection = yield* orchestrator.getThreadProjection(threadId);
           if (!hasActiveRun(projection)) {
@@ -318,12 +357,40 @@ export function runOrchestratorV2Scenario(
           return yield* waitForThreadIdle(threadId, attemptsRemaining - 1, deadlineAt);
         });
 
+      const waitForNoBackgroundWork = (
+        threadId: ThreadId,
+        attemptsRemaining = SCENARIO_WAIT_ATTEMPTS,
+        deadlineAt = scenarioWaitDeadline(),
+      ): Effect.Effect<
+        void,
+        Orchestrator.OrchestratorV2Error | OrchestratorV2ScenarioStepError,
+        never
+      > =>
+        Effect.gen(function* () {
+          const pending = (yield* orchestrator.getThreadShell(threadId))?.pendingBackgroundTasks;
+          if ((pending?.length ?? 0) === 0) {
+            return;
+          }
+          if (scenarioWaitExhausted(attemptsRemaining, deadlineAt)) {
+            return yield* new OrchestratorV2ScenarioStepError({
+              scenario: scenario.name,
+              step: `await_no_background_work:${threadId}:pending=${pending?.map((task) => task.taskId).join(",")}`,
+            });
+          }
+          yield* yieldToRuntime;
+          return yield* waitForNoBackgroundWork(threadId, attemptsRemaining - 1, deadlineAt);
+        });
+
       const waitForRunSteerable = (
         threadId: ThreadId,
         runId: OrchestrationV2Run["id"],
         attemptsRemaining = SCENARIO_WAIT_ATTEMPTS,
         deadlineAt = scenarioWaitDeadline(),
-      ): Effect.Effect<void, OrchestratorV2Error | OrchestratorV2ScenarioStepError, never> =>
+      ): Effect.Effect<
+        void,
+        Orchestrator.OrchestratorV2Error | OrchestratorV2ScenarioStepError,
+        never
+      > =>
         Effect.gen(function* () {
           const projection = yield* orchestrator.getThreadProjection(threadId);
           const run = projection.runs.find((candidate) => candidate.id === runId);
@@ -352,7 +419,11 @@ export function runOrchestratorV2Scenario(
         status: OrchestrationV2Run["status"],
         attemptsRemaining = SCENARIO_WAIT_ATTEMPTS,
         deadlineAt = scenarioWaitDeadline(),
-      ): Effect.Effect<void, OrchestratorV2Error | OrchestratorV2ScenarioStepError, never> =>
+      ): Effect.Effect<
+        void,
+        Orchestrator.OrchestratorV2Error | OrchestratorV2ScenarioStepError,
+        never
+      > =>
         Effect.gen(function* () {
           const projection = yield* orchestrator.getThreadProjection(threadId);
           const run = projection.runs.find((candidate) => candidate.id === runId);
@@ -379,21 +450,32 @@ export function runOrchestratorV2Scenario(
         threadId: ThreadId,
         runId: OrchestrationV2Run["id"],
         itemType: OrchestrationV2TurnItem["type"],
+        itemStatus: OrchestrationV2TurnItem["status"] | undefined,
+        inSubagentThreads: boolean,
         attemptsRemaining = SCENARIO_WAIT_ATTEMPTS,
         deadlineAt = scenarioWaitDeadline(),
-      ): Effect.Effect<void, OrchestratorV2Error | OrchestratorV2ScenarioStepError, never> =>
+      ): Effect.Effect<
+        void,
+        Orchestrator.OrchestratorV2Error | OrchestratorV2ScenarioStepError,
+        never
+      > =>
         Effect.gen(function* () {
           const projection = yield* orchestrator.getThreadProjection(threadId);
-          const hasTurnItem = projection.turnItems.some(
-            (item) => item.runId === runId && item.type === itemType,
-          );
-          if (hasTurnItem) {
-            return;
+          const matches = (item: OrchestrationV2TurnItem) =>
+            item.type === itemType && (itemStatus === undefined || item.status === itemStatus);
+          if (!inSubagentThreads) {
+            if (projection.turnItems.some((item) => item.runId === runId && matches(item))) return;
+          } else {
+            for (const subagent of projection.subagents) {
+              if (subagent.runId !== runId || subagent.childThreadId === null) continue;
+              const child = yield* orchestrator.getThreadProjection(subagent.childThreadId);
+              if (child.turnItems.some(matches)) return;
+            }
           }
           if (scenarioWaitExhausted(attemptsRemaining, deadlineAt)) {
             return yield* new OrchestratorV2ScenarioStepError({
               scenario: scenario.name,
-              step: `await_run_turn_item:${runId}:${itemType}`,
+              step: `await_run_turn_item:${runId}:${itemType}${itemStatus === undefined ? "" : `:${itemStatus}`}`,
             });
           }
           yield* yieldToRuntime;
@@ -401,6 +483,8 @@ export function runOrchestratorV2Scenario(
             threadId,
             runId,
             itemType,
+            itemStatus,
+            inSubagentThreads,
             attemptsRemaining - 1,
             deadlineAt,
           );
@@ -411,7 +495,11 @@ export function runOrchestratorV2Scenario(
         threadId: ThreadId,
         runId: OrchestrationV2Run["id"],
         attemptsRemaining = SCENARIO_WAIT_ATTEMPTS,
-      ): Effect.Effect<void, OrchestratorV2Error | OrchestratorV2ScenarioStepError, never> =>
+      ): Effect.Effect<
+        void,
+        Orchestrator.OrchestratorV2Error | OrchestratorV2ScenarioStepError,
+        never
+      > =>
         Effect.gen(function* () {
           const projection = yield* orchestrator.getThreadProjection(threadId);
           const run = projection.runs.find((candidate) => candidate.id === runId);
@@ -450,7 +538,11 @@ export function runOrchestratorV2Scenario(
         threadId: ThreadId,
         providerThreadId: NonNullable<OrchestrationV2Run["providerThreadId"]>,
         attemptsRemaining = SCENARIO_WAIT_ATTEMPTS,
-      ): Effect.Effect<void, OrchestratorV2Error | OrchestratorV2ScenarioStepError, never> =>
+      ): Effect.Effect<
+        void,
+        Orchestrator.OrchestratorV2Error | OrchestratorV2ScenarioStepError,
+        never
+      > =>
         Effect.gen(function* () {
           const projection = yield* orchestrator.getThreadProjection(threadId);
           const providerThread = projection.providerThreads.find(
@@ -480,17 +572,59 @@ export function runOrchestratorV2Scenario(
           );
         });
 
-      const releaseReplayGate = Effect.fn("releaseReplayGate")(function* (label: string) {
-        const reached = yield* Effect.promise(
-          () => options.replayGate?.waitUntilReached(label) ?? Promise.resolve(false),
-        );
+      let consumedFinishReceipts = 0;
+      const finishHeldRun = Effect.fn("scenario.finishHeldRun")(function* (
+        step: Extract<OrchestratorV2ScenarioStep, { readonly type: "finish_held_run" }>,
+      ) {
+        const gate = options.replayGate;
+        if (gate === undefined) {
+          return yield* new OrchestratorV2ScenarioStepError({
+            scenario: scenario.name,
+            step: `finish_held_run:${step.runId}:no_replay_gate`,
+          });
+        }
+        while (true) {
+          // Only the latest debounce receipt settles the run; late frames rearm it.
+          const armed = yield* Effect.promise(() =>
+            gate.waitForFinishArmed(consumedFinishReceipts),
+          ).pipe(
+            Effect.timeoutOption(Duration.millis(SCENARIO_WAIT_DEADLINE_MS)),
+            Effect.provideService(Clock.Clock, Clock.Clock.defaultValue()),
+          );
+          if (Option.isNone(armed)) {
+            const projection = yield* orchestrator.getThreadProjection(step.threadId);
+            const run = projection.runs.find((candidate) => candidate.id === step.runId);
+            return yield* new OrchestratorV2ScenarioStepError({
+              scenario: scenario.name,
+              step: `finish_held_run:${step.runId}:${step.status}:actual=${run?.status ?? "missing"}:no_finish_armed`,
+            });
+          }
+          consumedFinishReceipts = gate.finishArmedCount();
+          yield* TestClock.adjust(armed.value);
+          const settled = yield* Effect.raceFirst(
+            waitForRunStatus(step.threadId, step.runId, step.status).pipe(Effect.as(true)),
+            Effect.promise(() => gate.waitForFinishArmed(consumedFinishReceipts)).pipe(
+              Effect.as(false),
+            ),
+          );
+          if (settled) {
+            consumedFinishReceipts = gate.finishArmedCount();
+            return;
+          }
+        }
+      });
+
+      const releaseReplayGate = Effect.fn("scenario.releaseReplayGate")(function* (label: string) {
+        const gate = options.replayGate;
+        const reached =
+          gate === undefined ? false : yield* Effect.promise(() => gate.waitForReached(label));
         if (!reached) {
           return yield* new OrchestratorV2ScenarioStepError({
             scenario: scenario.name,
-            step: `release_replay_gate:${label}:reached=false`,
+            step: `release_replay_gate:${label}:not_configured`,
           });
         }
-        options.replayGate?.release(label);
+        gate?.release(label);
       });
 
       for (const step of scenarioSteps(scenario)) {
@@ -527,14 +661,26 @@ export function runOrchestratorV2Scenario(
           case "await_thread_idle":
             yield* waitForThreadIdle(step.threadId);
             break;
+          case "await_no_background_work":
+            yield* waitForNoBackgroundWork(step.threadId);
+            break;
           case "await_run_steerable":
             yield* waitForRunSteerable(step.threadId, step.runId);
             break;
           case "await_run_status":
             yield* waitForRunStatus(step.threadId, step.runId, step.status);
             break;
+          case "finish_held_run":
+            yield* finishHeldRun(step);
+            break;
           case "await_run_turn_item":
-            yield* waitForRunTurnItem(step.threadId, step.runId, step.itemType);
+            yield* waitForRunTurnItem(
+              step.threadId,
+              step.runId,
+              step.itemType,
+              step.itemStatus,
+              step.inSubagentThreads === true,
+            );
             break;
           case "release_replay_gate_after_waiting":
             yield* releaseReplayGateAfterWaiting(step.label, step.threadId, step.runId);
@@ -547,6 +693,12 @@ export function runOrchestratorV2Scenario(
             break;
           case "respond_to_next_runtime_request": {
             const request = yield* waitForPendingRuntimeRequest(step.threadId);
+            if (step.shellSnapshotKeyWhilePending !== undefined) {
+              capturedShellSnapshots.set(
+                step.shellSnapshotKeyWhilePending,
+                yield* orchestrator.getShellSnapshot(),
+              );
+            }
             const result = yield* orchestrator.dispatch({
               type: "runtime-request.respond",
               commandId: step.commandId,
@@ -563,6 +715,9 @@ export function runOrchestratorV2Scenario(
 
       for (const key of Array.from(backgroundDispatches.keys())) {
         yield* awaitDispatch(key);
+      }
+      if (options.afterSteps !== undefined) {
+        yield* options.afterSteps;
       }
 
       const shellSnapshot = yield* orchestrator.getShellSnapshot();
@@ -589,5 +744,8 @@ export function runOrchestratorV2Scenario(
         capturedShellSnapshots,
       };
     }),
+  ).pipe(
+    // Release held provider frames before shutdown so teardown cannot block on gates.
+    Effect.ensuring(Effect.sync(() => options.replayGate?.releaseAll())),
   );
 }

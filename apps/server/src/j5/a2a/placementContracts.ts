@@ -1,7 +1,7 @@
 import { AuthSessionId, ThreadId } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
-import { SquadronId, Participant, ParticipantId } from "./contracts.ts";
+import { LedgerProjectId, Participant, ParticipantId } from "./contracts.ts";
 
 const Identifier = Schema.String.check(Schema.isNonEmpty());
 const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
@@ -50,7 +50,7 @@ export const ParticipantProvenanceView = Schema.Union([
 export type ParticipantProvenanceView = typeof ParticipantProvenanceView.Type;
 
 export const ParticipantPlacement = Schema.Struct({
-  squadronId: SquadronId,
+  projectId: LedgerProjectId,
   participantId: ParticipantId,
   provenance: ParticipantProvenance,
   placementParentId: Schema.NullOr(ParticipantId),
@@ -62,7 +62,7 @@ export type ParticipantPlacement = typeof ParticipantPlacement.Type;
 export const PlacementCreatedEvent = Schema.Struct({
   seq: PositiveInt,
   commandId: PlacementCommandId,
-  squadronId: SquadronId,
+  projectId: LedgerProjectId,
   participantId: ParticipantId,
   kind: Schema.Literal("participant.placement_created"),
   actor: PlacementActor,
@@ -81,7 +81,7 @@ export type PlacementCreatedEvent = typeof PlacementCreatedEvent.Type;
 export const PlacementReparentedEvent = Schema.Struct({
   seq: PositiveInt,
   commandId: PlacementCommandId,
-  squadronId: SquadronId,
+  projectId: LedgerProjectId,
   participantId: ParticipantId,
   kind: Schema.Literal("participant.reparented"),
   actor: Schema.Literal("human"),
@@ -100,7 +100,7 @@ export type PlacementEvent = typeof PlacementEvent.Type;
 
 export const RecordParticipantPlacementInput = Schema.Struct({
   commandId: PlacementCommandId,
-  squadronId: SquadronId,
+  projectId: LedgerProjectId,
   participantId: ParticipantId,
   actor: PlacementActor,
   provenance: ParticipantProvenance,
@@ -109,7 +109,7 @@ export const RecordParticipantPlacementInput = Schema.Struct({
 export type RecordParticipantPlacementInput = typeof RecordParticipantPlacementInput.Type;
 
 export const ParticipantPlacementView = Schema.Struct({
-  squadronId: SquadronId,
+  projectId: LedgerProjectId,
   participant: Participant,
   participantId: ParticipantId,
   threadId: Schema.NullOr(ThreadId),

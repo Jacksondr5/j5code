@@ -6,11 +6,15 @@ import {
 import type { CrewProposalSeatRuntime } from "@t3tools/contracts/j5";
 import { describe, expect, it } from "vite-plus/test";
 
-import { CUSTOM_AGENT, addSeat } from "./crewProposalDraft";
+import { CUSTOM_AGENT, addSeat, saveSeat } from "./crewProposalDraft";
 import {
   applyCrewSeatDraft,
   chooseCrewSeatPersona,
+  chooseCrewSeatWorkspace,
   chooseCrewHarness,
+  setCrewSeatBaseRef,
+  setCrewSeatStartFromOrigin,
+  setCrewSeatWorktree,
   crewModelSelection,
   crewReasoningDescriptor,
   crewSeatDraft,
@@ -19,6 +23,7 @@ import {
 } from "./crewSeatRuntime";
 
 const runtime: CrewProposalSeatRuntime = {
+  workspace: { type: "shared" },
   seat: "reviewer",
   provider: "OpenAI",
   harness: "Codex",
@@ -115,7 +120,7 @@ describe("crew member edits", () => {
   });
 
   it.each(["auto", "auto-accept-edits"] as const)(
-    "switches unsupported ACP %s access to explicit Approval required",
+    "switches unsupported ACP %s access to explicit Supervised",
     (runtimeMode) => {
       const draft = { ...crewSeatDraft(seat), runtimeMode };
       const acp = {
@@ -185,9 +190,87 @@ describe("crew member edits", () => {
       reason: "Added by the user",
       modelSelection: runtime.modelSelection,
       runtimeMode: "full-access",
+      workspace: { type: "shared" },
     });
     const saved = addSeat([seat], { ...draft, agentId: "sentry" });
     expect(saved.seats[1]?.modelSelection).toEqual(runtime.modelSelection);
     expect(saved.seats[1]?.runtimeMode).toBe("full-access");
+  });
+});
+
+describe("crew seat workspace", () => {
+  const options = {
+    currentBranch: "j5/main",
+    cwd: "/repo",
+    worktrees: [{ path: "/repo-worktrees/builder", branch: "fix/login" }],
+  };
+
+  it("keeps a seat's workspace through a persona change and the save", () => {
+    const proposed = {
+      ...seat,
+      workspace: { type: "worktree" as const, baseRef: "release", branch: "fix/login" },
+    };
+    const draft = chooseCrewSeatPersona(crewSeatDraft(proposed), "critic");
+    expect(draft.workspace).toEqual(proposed.workspace);
+    const saved = saveSeat([proposed], proposed.seat, draft);
+    expect(saved.error).toBeNull();
+    expect(saved.seats[0]?.workspace).toEqual(proposed.workspace);
+    expect(applyCrewSeatDraft(proposed, draft).workspace).toEqual(proposed.workspace);
+  });
+
+  it("starts each choice from the Captain's repository and edits its details", () => {
+    const draft = crewSeatDraft({ ...seat, workspace: { type: "shared" } });
+    const worktree = chooseCrewSeatWorkspace(draft, "worktree", options);
+    // A new worktree starts from the Captain's current branch, and its base can change.
+    expect(worktree.workspace).toEqual({ type: "worktree", baseRef: "j5/main" });
+    expect(setCrewSeatBaseRef(worktree, "release").workspace).toEqual({
+      type: "worktree",
+      baseRef: "release",
+    });
+    // Starting from origin is a separate choice that keeps the base.
+    expect(setCrewSeatStartFromOrigin(worktree, true).workspace).toEqual({
+      type: "worktree",
+      baseRef: "j5/main",
+      startFromOrigin: true,
+    });
+    expect(setCrewSeatStartFromOrigin(draft, true)).toBe(draft);
+    const existing = chooseCrewSeatWorkspace(draft, "existing_worktree", options);
+    expect(existing.workspace).toEqual({
+      type: "existing_worktree",
+      worktreePath: "/repo-worktrees/builder",
+    });
+    expect(setCrewSeatWorktree(existing, "/repo-worktrees/other").workspace).toEqual({
+      type: "existing_worktree",
+      worktreePath: "/repo-worktrees/other",
+    });
+    expect(chooseCrewSeatWorkspace(existing, "shared", options).workspace).toEqual({
+      type: "shared",
+    });
+    const saved = saveSeat([seat], seat.seat, worktree);
+    expect(saved.seats[0]?.workspace).toEqual({ type: "worktree", baseRef: "j5/main" });
+  });
+
+  it("starts a seat the person adds in the Captain's checkout", () => {
+    const added = addSeat([], { seat: "reviewer", agentId: CUSTOM_AGENT, instructions: "Review" });
+    expect(added.seats[0]?.workspace).toEqual({ type: "shared" });
+  });
+
+  it("drops a saved commit when the base or its origin choice is edited", () => {
+    const baseCommit = "3f9c2ab1".repeat(5);
+    const pinned = {
+      seat: "builder",
+      agentId: CUSTOM_AGENT,
+      instructions: "Build",
+      workspace: { type: "worktree" as const, baseRef: "main", baseCommit },
+    };
+    expect(setCrewSeatBaseRef(pinned, "release").workspace).toEqual({
+      type: "worktree",
+      baseRef: "release",
+    });
+    expect(setCrewSeatStartFromOrigin(pinned, true).workspace).toEqual({
+      type: "worktree",
+      baseRef: "main",
+      startFromOrigin: true,
+    });
   });
 });

@@ -2,37 +2,43 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
-import { ThreadId } from "@t3tools/contracts";
+import * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
+import { type ChatAttachment, ThreadId } from "@t3tools/contracts";
 
 import {
   type AnswerHumanExchangeInput,
   CommCommandId,
   type CommEvent,
   CorrelationId,
-  SquadronId,
+  EVERYONE_HERE_PERSON_ID,
+  LedgerProjectId,
   ExchangeId,
   type HumanInboxItem,
   type HumanInboxListStatus,
   isDurableHumanParticipantId,
   LedgerMessageId,
+  MessageSentPayload,
   ParticipantId,
   type SendMessageResult,
 } from "./contracts.ts";
+import { AttachmentClaimError } from "../../orchestration-v2/AttachmentClaims.ts";
 import { A2ALedger, type A2ALedgerError } from "./LedgerService.ts";
 import {
   type A2ALocalOperatorNotFoundError,
   getLocalOperatorHumanPersonId,
-  isRegisteredHumanPerson,
+  isHumanPerson,
+  writesEveryThread,
 } from "./HumanPersonRegistry.ts";
+import type { PersonAccessStorageError } from "../sharing/PersonAccess.ts";
+import { SharedThreads, layer as sharedThreadsLayer } from "../sharing/SharedThreads.ts";
 import {
   A2AExchangeAlreadyAnsweredError,
   A2AExchangeNotOpenError,
   A2AParticipantNotFoundError,
 } from "./SendService.ts";
 
-export class A2AHumanPersonIdError extends Schema.TaggedErrorClass<A2AHumanPersonIdError>()(
+export class A2AHumanPersonIdError extends Schema.TaggedError<A2AHumanPersonIdError>()(
   "A2AHumanPersonIdError",
   { personId: Schema.String },
 ) {
@@ -41,32 +47,67 @@ export class A2AHumanPersonIdError extends Schema.TaggedErrorClass<A2AHumanPerso
   }
 }
 
+/** A later reply to an ask to everyone here, which the first reply closed (Inbox AC16). */
+export class A2AAskAnsweredError extends Schema.TaggedError<A2AAskAnsweredError>()(
+  "A2AAskAnsweredError",
+  { answeredBy: Schema.NullOr(Schema.String) },
+) {
+  override get message(): string {
+    return this.answeredBy === null
+      ? "Someone already answered this."
+      : `${this.answeredBy} already answered this.`;
+  }
+}
+
+/** An answer from someone who can no longer write to the asking agent's thread (Inbox AC14). */
+export class A2AAskNotYoursError extends Schema.TaggedError<A2AAskNotYoursError>()(
+  "A2AAskNotYoursError",
+  {},
+) {
+  override get message(): string {
+    return "You can no longer write to the agent that asked this, so it is not yours to answer.";
+  }
+}
+
 export type A2AHumanInboxError =
   | A2ALedgerError
   | SqlError
+  | PersonAccessStorageError
   | A2ALocalOperatorNotFoundError
   | A2AHumanPersonIdError
   | A2AParticipantNotFoundError
   | A2AExchangeNotOpenError
-  | A2AExchangeAlreadyAnsweredError;
+  | A2AExchangeAlreadyAnsweredError
+  | A2AAskAnsweredError
+  | A2AAskNotYoursError;
+
+const decodeFollowUps = Schema.decodeSync(
+  Schema.fromJsonString(
+    Schema.Array(Schema.Struct({ messageId: Schema.String, message: Schema.String })),
+  ),
+);
 
 interface InboxRow {
   readonly person_id: string;
-  readonly squadron_id: string;
-  readonly squadron_name: string;
+  readonly project_id: string;
+  readonly project_title: string;
   readonly exchange_id: string;
   readonly sender_id: string;
   readonly sender_thread_id: string | null;
+  readonly sender_project_id: string | null;
   readonly intent: string;
   readonly urgency: "blocking" | "soon" | "fyi";
   readonly message: string;
+  /** A JSON array of the follow-ups, oldest first. */
+  readonly follow_ups: string;
   readonly opened_at: string;
   readonly status: "open" | "answered";
   readonly terminal_at: string | null;
+  readonly answered_by: string | null;
 }
 
 interface ExchangeRow {
-  readonly squadron_id: string;
+  readonly project_id: string;
   readonly exchange_id: string;
   readonly sender_id: string;
   readonly receiver_id: string;
@@ -74,9 +115,11 @@ interface ExchangeRow {
 }
 
 interface ExistingReplyRow {
-  readonly squadron_id: string;
+  readonly project_id: string;
   readonly sent_seq: number;
 }
+
+const encodeSentPayload = Schema.encodeEffect(Schema.toCodecJson(MessageSentPayload));
 
 const messageIdFor = (commandId: CommCommandId) =>
   LedgerMessageId.make(`message:j5:a2a:${encodeURIComponent(commandId)}`);
@@ -99,62 +142,128 @@ export interface A2AHumanInboxShape {
   ) => Effect.Effect<ReadonlyArray<HumanInboxItem>, A2AHumanInboxError>;
   readonly answer: (
     input: AnswerHumanExchangeInput,
-  ) => Effect.Effect<SendMessageResult, A2AHumanInboxError>;
+    /**
+     * Runs once the reply is known to be one this person may give, before it is recorded, with
+     * the asking agent's thread and the reply's message id: a shared conversation records who
+     * is replying, and any note due, as they stand now.
+     */
+    beforeReply?: (reply: {
+      readonly threadId: ThreadId;
+      readonly messageId: LedgerMessageId;
+    }) => Effect.Effect<void, PersonAccessStorageError>,
+    /**
+     * Claims `input.attachments` into the asking agent's thread, once the reply is known to be one
+     * this person may give and no one else answered first. Nothing undoes the claim: the only later
+     * failure is recording the reply, after which nobody knows whether it was recorded.
+     */
+    claimAttachments?: (
+      threadId: ThreadId,
+      attachments: ReadonlyArray<ChatAttachment>,
+    ) => Effect.Effect<ReadonlyArray<ChatAttachment>, AttachmentClaimError>,
+  ) => Effect.Effect<SendMessageResult, A2AHumanInboxError | AttachmentClaimError>;
 }
 
 export class A2AHumanInbox extends Context.Service<A2AHumanInbox, A2AHumanInboxShape>()(
   "t3/j5/a2a/HumanInboxService/A2AHumanInbox",
 ) {}
 
+/**
+ * A person's inbox holds the asks addressed to them and the asks to everyone here, and of those
+ * only the ones whose asking agent's thread they can write to when it is read (Inbox AC14,
+ * AC15). Someone who writes to every thread sees them all; a Viewer sees none.
+ */
 export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlClient> =
   Layer.effect(
     A2AHumanInbox,
     Effect.gen(function* () {
       const ledger = yield* A2ALedger;
       const sql = yield* SqlClient.SqlClient;
+      const shared = yield* SharedThreads;
 
-      const resolvePersonId: A2AHumanInboxShape["resolvePersonId"] = (personId) =>
-        Effect.gen(function* () {
-          if (personId === undefined) return yield* getLocalOperatorHumanPersonId(sql);
-          yield* assertPersonId(personId);
-          if (!(yield* isRegisteredHumanPerson(sql, personId))) {
-            return yield* new A2AParticipantNotFoundError({ participantId: personId });
-          }
-          return personId;
-        });
+      const resolvePersonId: A2AHumanInboxShape["resolvePersonId"] = Effect.fn(
+        "j5.a2a.humanInbox.resolvePersonId",
+      )(function* (personId) {
+        if (personId === undefined) return yield* getLocalOperatorHumanPersonId(sql);
+        yield* assertPersonId(personId);
+        if (!(yield* isHumanPerson(sql, personId))) {
+          return yield* new A2AParticipantNotFoundError({ participantId: personId });
+        }
+        return personId;
+      });
 
-      const list: A2AHumanInboxShape["list"] = (personId, status = "open") =>
-        Effect.gen(function* () {
-          yield* resolvePersonId(personId);
-          const rows = yield* sql<InboxRow>`
+      /**
+       * Whether a person may answer what an agent asks: they can write to its thread. Built once
+       * per person, so a list reads whether they write to every thread once, not row by row.
+       */
+      const writerOfAskers = (personId: ParticipantId) =>
+        writesEveryThread(sql, personId).pipe(
+          Effect.map(
+            (everywhere) =>
+              (asker: { readonly threadId: string | null; readonly projectId: string }) =>
+                everywhere
+                  ? Effect.succeed(true)
+                  : shared.writesTo(personId, {
+                      threadId: asker.threadId === null ? null : ThreadId.make(asker.threadId),
+                      projectId: asker.projectId,
+                    }),
+          ),
+        );
+
+      const list: A2AHumanInboxShape["list"] = Effect.fn("j5.a2a.humanInbox.list")(function* (
+        personId,
+        status = "open",
+      ) {
+        yield* resolvePersonId(personId);
+        const rows = yield* sql<InboxRow>`
             SELECT
               exchange.receiver_id AS person_id,
-              exchange.squadron_id,
-              squadron.name AS squadron_name,
+              exchange.project_id,
+              COALESCE(project.title, ledger.project_id) AS project_title,
               exchange.exchange_id,
               exchange.sender_id,
               membership.thread_id AS sender_thread_id,
+              membership.project_id AS sender_project_id,
               exchange.intent,
               exchange.urgency,
               inbox.latest_message AS message,
+              (
+                SELECT json_group_array(json_object('messageId', message_id, 'message', payload)) FROM (
+                  -- CROSS JOIN keeps the small person-message table first, so a lookup
+                  -- reads that project's messages to people, not all its deliveries.
+                  SELECT data.message_id, data.payload
+                  FROM j5_a2a_human_inbox_data AS data
+                  CROSS JOIN j5_a2a_delivery AS delivery
+                    ON delivery.project_id = data.origin_project_id
+                   AND delivery.message_id = data.message_id
+                  WHERE data.origin_project_id = inbox.project_id
+                    AND data.exchange_id = inbox.exchange_id
+                    AND delivery.exchange_role = 'followup'
+                  ORDER BY delivery.sent_seq
+                )
+              ) AS follow_ups,
               inbox.opened_at,
               inbox.status,
-              inbox.terminal_at
+              inbox.terminal_at,
+              everyone.display_name AS answered_by
             FROM j5_a2a_human_inbox AS inbox
-            JOIN j5_a2a_squadron AS squadron ON squadron.id = inbox.squadron_id
+            JOIN j5_a2a_project_ledger AS ledger ON ledger.project_id = inbox.project_id
+            LEFT JOIN projection_projects AS project ON project.project_id = inbox.project_id
             JOIN j5_a2a_exchange AS exchange
-              ON exchange.squadron_id = inbox.squadron_id
+              ON exchange.project_id = inbox.project_id
              AND exchange.exchange_id = inbox.exchange_id
-            LEFT JOIN j5_a2a_squadron_membership AS membership
-              ON membership.squadron_id = inbox.squadron_id
-             AND membership.participant_id = inbox.sender_id
+            -- The asker has one membership, which Turn into project may have moved since it asked.
+            LEFT JOIN j5_a2a_membership AS membership
+              ON membership.participant_id = inbox.sender_id
+            LEFT JOIN j5_a2a_everyone_answer AS everyone
+              ON everyone.project_id = inbox.project_id
+             AND everyone.exchange_id = inbox.exchange_id
             WHERE (
                 (${status} = 'open' AND inbox.status = 'open' AND exchange.status = 'open')
                 OR
                 (${status} = 'answered' AND inbox.status = 'answered'
                   AND inbox.terminal_disposition = 'answered')
               )
-              AND inbox.person_id = ${personId}
+              AND inbox.person_id IN (${personId}, ${EVERYONE_HERE_PERSON_ID})
             ORDER BY
               CASE WHEN ${status} = 'open' THEN
                 CASE inbox.urgency
@@ -165,38 +274,49 @@ export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlC
               END,
               CASE WHEN ${status} = 'open' THEN inbox.opened_at END,
               CASE WHEN ${status} = 'answered' THEN inbox.terminal_at END DESC,
-              inbox.squadron_id,
+              inbox.project_id,
               inbox.exchange_id
           `;
-          return rows.map(
-            (row) =>
-              ({
-                personId: ParticipantId.make(row.person_id),
-                squadronId: SquadronId.make(row.squadron_id),
-                squadronName: row.squadron_name,
-                exchangeId: ExchangeId.make(row.exchange_id),
-                senderId: ParticipantId.make(row.sender_id),
-                senderThreadId:
-                  row.sender_thread_id === null ? null : ThreadId.make(row.sender_thread_id),
-                intent: row.intent,
-                urgency: row.urgency,
-                message: row.message,
-                openedAt: row.opened_at,
-                status: row.status,
-                terminalAt: row.terminal_at,
-              }) satisfies HumanInboxItem,
-          );
+        const writesToAsker = yield* writerOfAskers(personId);
+        const visible = yield* Effect.filter(rows, (row) =>
+          writesToAsker({
+            threadId: row.sender_thread_id,
+            projectId: row.sender_project_id ?? row.project_id,
+          }),
+        );
+        return visible.map((row) => {
+          const followUps = decodeFollowUps(row.follow_ups);
+          return {
+            personId,
+            projectId: LedgerProjectId.make(row.project_id),
+            projectTitle: row.project_title,
+            exchangeId: ExchangeId.make(row.exchange_id),
+            senderId: ParticipantId.make(row.sender_id),
+            senderThreadId:
+              row.sender_thread_id === null ? null : ThreadId.make(row.sender_thread_id),
+            intent: row.intent,
+            urgency: row.urgency,
+            message: row.message,
+            ...(followUps.length === 0 ? {} : { followUps }),
+            openedAt: row.opened_at,
+            status: row.status,
+            terminalAt: row.terminal_at,
+            ...(row.person_id === EVERYONE_HERE_PERSON_ID
+              ? { forEveryone: true, answeredBy: row.answered_by }
+              : {}),
+          } satisfies HumanInboxItem;
         });
+      });
 
-      const answer: A2AHumanInboxShape["answer"] = (input) =>
-        Effect.gen(function* () {
+      const answer: A2AHumanInboxShape["answer"] = Effect.fn("j5.a2a.humanInbox.answer")(
+        function* (input, beforeReply, claimAttachments) {
           yield* assertPersonId(input.personId);
-          if (!(yield* isRegisteredHumanPerson(sql, input.personId))) {
+          if (!(yield* isHumanPerson(sql, input.personId))) {
             return yield* new A2AParticipantNotFoundError({ participantId: input.personId });
           }
           const messageId = messageIdFor(input.commandId);
           const replay = yield* sql<ExistingReplyRow>`
-            SELECT squadron_id, sent_seq
+            SELECT project_id, sent_seq
             FROM j5_a2a_delivery
             WHERE message_id = ${messageId}
               AND sender_id = ${input.personId}
@@ -214,18 +334,46 @@ export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlC
             } satisfies SendMessageResult;
           }
 
-          const exchanges = yield* sql<ExchangeRow>`
-            SELECT squadron_id, exchange_id, sender_id, receiver_id, status
-            FROM j5_a2a_exchange
-            WHERE exchange_id = ${input.exchangeId}
-              AND receiver_id = ${input.personId}
+          const exchanges = yield* sql<
+            ExchangeRow & {
+              readonly sender_thread_id: string | null;
+              readonly sender_project_id: string | null;
+            }
+          >`
+            SELECT exchange.project_id, exchange.exchange_id, exchange.sender_id,
+              exchange.receiver_id, exchange.status, membership.thread_id AS sender_thread_id,
+              membership.project_id AS sender_project_id
+            FROM j5_a2a_exchange AS exchange
+            LEFT JOIN j5_a2a_membership AS membership
+              ON membership.participant_id = exchange.sender_id
+            WHERE exchange.exchange_id = ${input.exchangeId}
+              AND exchange.receiver_id IN (${input.personId}, ${EVERYONE_HERE_PERSON_ID})
             LIMIT 2
           `;
           const exchange = exchanges.length === 1 ? exchanges[0] : undefined;
           if (exchange === undefined) {
             return yield* new A2AParticipantNotFoundError({ participantId: input.personId });
           }
+          if (
+            !(yield* (yield* writerOfAskers(input.personId))({
+              threadId: exchange.sender_thread_id,
+              projectId: exchange.sender_project_id ?? exchange.project_id,
+            }))
+          ) {
+            return yield* new A2AAskNotYoursError({});
+          }
+          const forEveryone = exchange.receiver_id === EVERYONE_HERE_PERSON_ID;
+          const firstAnswer = sql<{ readonly display_name: string | null }>`
+            SELECT display_name FROM j5_a2a_everyone_answer
+            WHERE project_id = ${exchange.project_id} AND exchange_id = ${exchange.exchange_id}
+          `.pipe(Effect.map((rows) => rows[0]));
+          const alreadyAnswered = firstAnswer.pipe(
+            Effect.flatMap((row) =>
+              Effect.fail(new A2AAskAnsweredError({ answeredBy: row?.display_name ?? null })),
+            ),
+          );
           if (exchange.status !== "open") {
+            if (forEveryone && (yield* firstAnswer) !== undefined) return yield* alreadyAnswered;
             return yield* new A2AExchangeNotOpenError({ exchangeId: input.exchangeId });
           }
           const acceptedReplies = yield* sql<{ readonly count: number }>`
@@ -234,10 +382,50 @@ export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlC
             WHERE exchange_id = ${input.exchangeId} AND exchange_role = 'reply'
           `;
           if ((acceptedReplies[0]?.count ?? 0) > 0) {
+            if (forEveryone) return yield* alreadyAnswered;
             return yield* new A2AExchangeAlreadyAnsweredError({ exchangeId: input.exchangeId });
           }
+          if (beforeReply !== undefined && exchange.sender_thread_id !== null) {
+            yield* beforeReply({
+              threadId: ThreadId.make(exchange.sender_thread_id),
+              messageId,
+            });
+          }
+          if (forEveryone) {
+            // The first reply to an ask to everyone closes it for all of them: two people
+            // answering at once both get here, and the key lets only one claim it.
+            const claimed = yield* sql<{ readonly person_id: string }>`
+              INSERT INTO j5_a2a_everyone_answer (
+                project_id, exchange_id, person_id, display_name, answered_at
+              )
+              SELECT ${exchange.project_id}, ${exchange.exchange_id}, person_id, display_name,
+                ${input.acceptedAt}
+              FROM j5_a2a_human_person WHERE person_id = ${input.personId}
+              ON CONFLICT (project_id, exchange_id) DO NOTHING
+              RETURNING person_id
+            `;
+            if (claimed.length === 0) return yield* alreadyAnswered;
+          }
+          const releaseClaim = sql`
+            DELETE FROM j5_a2a_everyone_answer
+            WHERE project_id = ${exchange.project_id} AND exchange_id = ${exchange.exchange_id}
+              AND person_id = ${input.personId}
+          `.pipe(Effect.ignore);
+          const requested = input.attachments ?? [];
+          const attachments =
+            requested.length === 0
+              ? []
+              : yield* (
+                  exchange.sender_thread_id === null || claimAttachments === undefined
+                    ? Effect.fail(
+                        new AttachmentClaimError({
+                          message: "This ask's agent has no thread to receive files.",
+                        }),
+                      )
+                    : claimAttachments(ThreadId.make(exchange.sender_thread_id), requested)
+                ).pipe(Effect.onError(() => (forEveryone ? releaseClaim : Effect.void)));
 
-          const squadronId = SquadronId.make(exchange.squadron_id);
+          const projectId = LedgerProjectId.make(exchange.project_id);
           const senderId = ParticipantId.make(exchange.sender_id);
           const correlationId = correlationIdFor(input.commandId);
           const events: ReadonlyArray<CommEvent> = [
@@ -247,14 +435,16 @@ export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlC
               receiver: senderId,
               exchangeId: input.exchangeId,
               correlationId,
-              payload: {
+              // Every field is already decoded, so encoding cannot fail.
+              payload: yield* encodeSentPayload({
                 messageId,
                 text: input.message,
-                originSquadronId: squadronId,
-                receiverSquadronId: squadronId,
+                ...(attachments.length === 0 ? {} : { attachments }),
+                originProjectId: projectId,
+                receiverProjectId: projectId,
                 exchangeRole: "reply",
                 envelopeChannel: "peer",
-              },
+              }).pipe(Effect.orDie),
               createdAt: input.acceptedAt,
             },
             {
@@ -267,12 +457,15 @@ export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlC
               createdAt: input.acceptedAt,
             },
           ];
-          const result = yield* ledger.appendEvents({
-            commandId: input.commandId,
-            squadronId,
-            acceptedAt: input.acceptedAt,
-            events,
-          });
+          // A reply that is not recorded leaves the ask open for someone else to answer.
+          const result = yield* ledger
+            .appendEvents({
+              commandId: input.commandId,
+              projectId,
+              acceptedAt: input.acceptedAt,
+              events,
+            })
+            .pipe(Effect.onError(() => (forEveryone ? releaseClaim : Effect.void)));
           const sent = result.events.find((event) => event.kind === "message.sent");
           if (sent === undefined) {
             return yield* new A2AParticipantNotFoundError({ participantId: input.personId });
@@ -284,8 +477,9 @@ export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlC
             joinedExistingExchange: false,
             durableAtSeq: sent.seq,
           } satisfies SendMessageResult;
-        });
+        },
+      );
 
       return A2AHumanInbox.of({ resolvePersonId, list, answer });
     }),
-  );
+  ).pipe(Layer.provide(sharedThreadsLayer));

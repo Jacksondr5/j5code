@@ -60,6 +60,9 @@ export function assertThreadRollbackOutput(
     THREAD_ROLLBACK_AFTER_PROMPT,
   ]);
   assertVisibleUserMessagesExclude(projection, [THREAD_ROLLBACK_SECOND_PROMPT]);
+  const recall = projection.turnItems.findLast((item) => item.type === "assistant_message");
+  assert.include(recall?.type === "assistant_message" ? recall.text : "", "first turn complete");
+  assert.notInclude(recall?.type === "assistant_message" ? recall.text : "", "second turn");
   assert.isAtLeast(projection.checkpoints.length, 2);
   assert.isTrue(
     projection.runs.some((run) => run.status === "rolled_back"),

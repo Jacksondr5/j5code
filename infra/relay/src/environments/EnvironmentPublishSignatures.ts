@@ -11,17 +11,17 @@ import {
 } from "@t3tools/shared/relayJwt";
 import { stableStringify } from "@t3tools/shared/relaySigning";
 import * as Context from "effect/Context";
-import * as Crypto from "effect/Crypto";
+import * as Digest from "effect/crypto/Digest";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
-import * as Encoding from "effect/Encoding";
+import * as Base64Url from "effect/encoding/Base64Url";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
 import * as DpopProofs from "../auth/DpopProofs.ts";
 import * as RelayConfiguration from "../Config.ts";
 
-export class EnvironmentPublishSignatureExpired extends Schema.TaggedErrorClass<EnvironmentPublishSignatureExpired>()(
+export class EnvironmentPublishSignatureExpired extends Schema.TaggedError<EnvironmentPublishSignatureExpired>()(
   "EnvironmentPublishSignatureExpired",
   {
     environmentId: Schema.String,
@@ -34,7 +34,7 @@ export class EnvironmentPublishSignatureExpired extends Schema.TaggedErrorClass<
   }
 }
 
-export class EnvironmentPublishSignatureInvalid extends Schema.TaggedErrorClass<EnvironmentPublishSignatureInvalid>()(
+export class EnvironmentPublishSignatureInvalid extends Schema.TaggedError<EnvironmentPublishSignatureInvalid>()(
   "EnvironmentPublishSignatureInvalid",
   {
     environmentId: Schema.String,
@@ -56,21 +56,9 @@ export class EnvironmentPublishSignatureInvalid extends Schema.TaggedErrorClass<
   }
 }
 
-export class EnvironmentPublishPublicKeyMissing extends Schema.TaggedErrorClass<EnvironmentPublishPublicKeyMissing>()(
-  "EnvironmentPublishPublicKeyMissing",
-  {
-    environmentId: Schema.String,
-  },
-) {
-  override get message(): string {
-    return `Environment '${this.environmentId}' has no publish public key`;
-  }
-}
-
 export type EnvironmentPublishSignatureError =
   | EnvironmentPublishSignatureExpired
   | EnvironmentPublishSignatureInvalid
-  | EnvironmentPublishPublicKeyMissing
   | DpopProofs.DpopProofReplayPersistenceError;
 
 export class EnvironmentPublishSignatures extends Context.Service<
@@ -100,12 +88,12 @@ function environmentPublishReplayThumbprintData(input: {
 }
 
 const formatEnvironmentPublishReplayThumbprint = (digest: Uint8Array) =>
-  `env-publish:${Encoding.encodeBase64Url(digest)}`;
+  `env-publish:${Base64Url.encode(digest)}`;
 
 const make = Effect.gen(function* () {
   const proofReplay = yield* DpopProofs.DpopProofReplay;
   const config = yield* RelayConfiguration.RelayConfiguration;
-  const crypto = yield* Crypto.Crypto;
+  const crypto = yield* Digest.Digest;
 
   return EnvironmentPublishSignatures.of({
     verify: Effect.fn("relay.environment_publish_signatures.verify")(function* (input) {
@@ -182,7 +170,7 @@ const make = Effect.gen(function* () {
       }
       const thumbprint = yield* crypto
         .digest(
-          "SHA-256",
+          Digest.sha256,
           environmentPublishReplayThumbprintData({
             environmentId: input.environmentId,
             environmentPublicKey: input.environmentPublicKey,

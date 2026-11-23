@@ -1,25 +1,41 @@
 name: J5 CI
 
+# Pull request branches are covered by `pull_request`, so `push` lists only the
+# branches that are tested without a PR: `j5/main`, and the release and preview
+# branches the packaging runbook publishes from before any PR exists.
+# `pull_request` has no base filter, so every layer of a chain of PRs is tested
+# whatever its base branch is named, and whether or not GitHub knows the chain
+# as a stack.
 on:
   push:
     branches:
-      - "j5/**"
+      - "j5/main"
+      - "j5/release-[0-9]*"
+      - "j5/preview-[0-9]*"
   pull_request:
-    branches:
-      - "j5/**"
 
 permissions:
   contents: read
 
+# A new push to a PR cancels that PR's older run. Pushing a stack sends each
+# stacked PR two identical `pull_request` events (its head moved and its base
+# moved), so the first of the pair is cancelled and the second is the one that
+# counts. Re-running that cancelled run must not cancel the run that replaced
+# it, so only a first attempt cancels. Push runs are grouped per commit and
+# never cancelled, so every commit on `j5/main` gets a result.
 concurrency:
-  group: j5-ci-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: j5-ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' && github.run_attempt == 1 }}
 
+# One serial job used to run format, lint, typecheck, and every package's tests
+# and had crept up to its 20 minute timeout with all tests green. The work is
+# now split across parallel jobs, mirroring upstream ci.yml. The `quality`
+# gate at the bottom keeps the check name the default-branch ruleset requires.
 jobs:
-  quality:
-    name: Format, lint, typecheck, and unit tests
+  checks:
+    name: Format, lint, and typecheck
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -27,7 +43,7 @@ jobs:
       - name: Install pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 11.10.0
+          version: 12.14.0
           run_install: false
 
       - name: Install Node from .nvmrc
@@ -39,13 +55,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Install browser secret helper build libraries
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends libsecret-1-dev pkg-config
-
       - name: Check formatting
         run: pnpm exec vp fmt --check
+
+      - name: Check paths that differ only in case
+        run: node scripts/j5/check-case-paths.ts
 
       - name: Lint
         run: pnpm exec vp lint --report-unused-disable-directives
@@ -53,14 +67,182 @@ jobs:
       - name: Typecheck
         run: pnpm exec vp run -r --concurrency-limit 2 --log grouped typecheck
 
-      - name: Unit tests
-        run: pnpm exec vp run -r --log grouped test
+      - name: Check unused code
+        run: pnpm exec vp run knip:check
 
-      # actions/checkout runs its credential cleanup after all workflow steps.
-      # That cleanup recursively visits this vendored gitlink, but its manifest
-      # belongs to the vendored tree rather than this repository. Remove the
-      # link from the disposable CI index once all work is complete so the
-      # post-job cleanup cannot misclassify it as a root submodule.
-      - name: Exclude vendored gitlink from checkout cleanup
+      # These gitlinks belong to vendored manifests, not this repository.
+      # Remove them only from the disposable index before checkout's cleanup.
+      - name: Exclude vendored gitlinks from checkout cleanup
         if: always()
-        run: git update-index --force-remove -- .repos/alchemy-effect/.vendor/alchemy
+        run: |
+          python3 - <<'PYTHON'
+          import subprocess
+          entries = subprocess.check_output(["git", "ls-files", "--stage", "-z", ".repos"])
+          paths = [entry.split(b"\t", 1)[1] for entry in entries.split(b"\0") if entry.startswith(b"160000 ")]
+          if paths:
+              subprocess.run(["git", "update-index", "--force-remove", "-z", "--stdin"], input=b"\0".join(paths) + b"\0", check=True)
+          PYTHON
+
+  # Every package except `t3` (apps/server), which gets its own sharded job, and
+  # `@t3tools/web`, which gets its own runner.
+  test:
+    name: Test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 12.14.0
+          run_install: false
+
+      - name: Install Node from .nvmrc
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # apps/desktop's Linux secret storage tests build the native helper.
+      - name: Install browser secret helper build libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libsecret-1-dev pkg-config
+
+      - name: Test
+        run: pnpm exec vp run --log grouped --filter '!t3' --filter '!@t3tools/web' --filter '!@t3tools/monorepo' test
+
+      # These gitlinks belong to vendored manifests, not this repository.
+      # Remove them only from the disposable index before checkout's cleanup.
+      - name: Exclude vendored gitlinks from checkout cleanup
+        if: always()
+        run: |
+          python3 - <<'PYTHON'
+          import subprocess
+          entries = subprocess.check_output(["git", "ls-files", "--stage", "-z", ".repos"])
+          paths = [entry.split(b"\t", 1)[1] for entry in entries.split(b"\0") if entry.startswith(b"160000 ")]
+          if paths:
+              subprocess.run(["git", "update-index", "--force-remove", "-z", "--stdin"], input=b"\0".join(paths) + b"\0", check=True)
+          PYTHON
+
+  # The web suite imports the whole app into jsdom. Sharing a runner with the
+  # other packages starved it until a setup hook timed out, so it runs alone,
+  # as upstream's `test_web` does.
+  test_web:
+    name: Test Web
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 12.14.0
+          run_install: false
+
+      - name: Install Node from .nvmrc
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Upstream runs web component tests in a real headless Chromium (no jsdom since v0.1.3).
+      - name: Install Chromium for web browser tests
+        run: node apps/web/node_modules/playwright/cli.js install --with-deps --only-shell chromium
+
+      - name: Test
+        run: pnpm exec vp run --log grouped --filter '@t3tools/web' test
+
+      # These gitlinks belong to vendored manifests, not this repository.
+      # Remove them only from the disposable index before checkout's cleanup.
+      - name: Exclude vendored gitlinks from checkout cleanup
+        if: always()
+        run: |
+          python3 - <<'PYTHON'
+          import subprocess
+          entries = subprocess.check_output(["git", "ls-files", "--stage", "-z", ".repos"])
+          paths = [entry.split(b"\t", 1)[1] for entry in entries.split(b"\0") if entry.startswith(b"160000 ")]
+          if paths:
+              subprocess.run(["git", "update-index", "--force-remove", "-z", "--stdin"], input=b"\0".join(paths) + b"\0", check=True)
+          PYTHON
+
+  # apps/server sets `fileParallelism: false`, so its files run strictly one at
+  # a time and the package alone took over eleven minutes. Sharding spreads the
+  # files over separate runners, so no two server test files share a machine
+  # and the isolation that flag buys is preserved exactly.
+  test_server:
+    name: Test Server ${{ matrix.shard }}
+    runs-on: ubuntu-24.04
+    # The Chromium install below can take over eleven minutes on its own.
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 12.14.0
+          run_install: false
+
+      - name: Install Node from .nvmrc
+        uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # src/preview's browser integration tests drive a real headless Chromium.
+      - name: Install Chromium for server browser integration tests
+        run: node apps/server/node_modules/playwright-core/cli.js install --with-deps --only-shell chromium
+
+      - name: Test
+        run: pnpm exec vp run --filter t3 test --shard ${{ matrix.shard }}/${{ strategy.job-total }}
+
+      # These gitlinks belong to vendored manifests, not this repository.
+      # Remove them only from the disposable index before checkout's cleanup.
+      - name: Exclude vendored gitlinks from checkout cleanup
+        if: always()
+        run: |
+          python3 - <<'PYTHON'
+          import subprocess
+          entries = subprocess.check_output(["git", "ls-files", "--stage", "-z", ".repos"])
+          paths = [entry.split(b"\t", 1)[1] for entry in entries.split(b"\0") if entry.startswith(b"160000 ")]
+          if paths:
+              subprocess.run(["git", "update-index", "--force-remove", "-z", "--stdin"], input=b"\0".join(paths) + b"\0", check=True)
+          PYTHON
+
+  # The default-branch ruleset requires a check with this exact name. It passes
+  # only when every job above passed, so renaming or adding jobs never silently
+  # weakens the merge gate.
+  quality:
+    name: Format, lint, typecheck, and unit tests
+    if: always()
+    needs: [checks, test, test_web, test_server]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Require every job to pass
+        env:
+          RESULTS: ${{ toJSON(needs.*.result) }}
+        run: |
+          echo "$RESULTS"
+          case "$RESULTS" in
+            *failure*|*cancelled*|*skipped*) exit 1 ;;
+          esac

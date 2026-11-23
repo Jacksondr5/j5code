@@ -1,0 +1,59 @@
+---
+title: "Merging upstream"
+kind: process
+---
+
+# Merging upstream
+
+How J5 advances to a new upstream T3 Code. FORK.md holds the rules this depends on: the integration-case inventory, temporary patches, the pin log and the advance steps. This page is the checklist that stops an advance from missing something. The agents doing it are capable; use judgment, not ceremony.
+
+## Shape
+
+- **One PR.** The advance and every fork adaptation it forces land together, however large.
+- **Advance onto a release tag,** not a branch tip. Upstream's `main` holds V2 now, and `j5/main` descends from it, so an ordinary `git merge` of the tag is expected. When J5 needs an upstream commit no release has yet, advance onto a nightly tag that upstream CI passed instead, and record why in the FORK.md pin log.
+- **Freeze.** Record the fork head, the previous pin and the upstream SHA, and don't move the target mid-merge.
+- **Start from earlier advances' leftovers.** Before any merge work, read the open issues in earlier advances' milestones and in "Missed upstream merge items". Take in the ones this advance makes due or possible, such as an issue that waits for "the next advance", and comment on the ones it fixes.
+- **Follow-ups go in the advance's milestone.** Create a milestone named for the upstream version, such as "Upstream advance: T3 Code v0.1.3". Everything agreed but not done in the advance PR becomes an issue in it, filed when it is agreed, so the advance can be tracked and closed from one place.
+- **If the previous pin is not an ancestor of the candidate,** git's own merge base is wrong. Use the merge-tree fallback in FORK.md ("Advancing").
+
+## Review before building
+
+- **Real content delta:** diff the pin against the candidate and read the diff, not only the commit log. Summarize what upstream added, especially anything touching J5 areas.
+- **Check the watch lists against the delta.** Test each "Watch for" line in the [upstream convergence watchlist](../product/upstream-convergence.md) and each retirement condition in the [register of divergences](../product/upstream.md) against what upstream shipped. A hit, or a partial one, becomes a decision for the maintainer.
+- **Literal conflicts**, then the **breaks that merge cleanly**, which cause most defects:
+  - **J5-owned code** that imports or calls upstream APIs that changed (typecheck an approximate merge).
+  - **New upstream lint rules.** Upstream's rules apply to J5 code too: lint `apps/*/src/j5` and `packages/*/src/j5` against the candidate's rules.
+  - **New upstream files** that carry branding or `~/.t3` / `T3CODE_HOME` paths. BRANDING.md only lists files we already know.
+  - **New or changed user-visible copy** that says "T3 Code" or a bare "T3" (divergence D25). Run `git grep -nE "T3 Code|\bT3\b" -- apps packages native` on the candidate, rebrand what a person or an agent reads, and leave what BRANDING.md lists as unchanged. Docs keep upstream's wording.
+  - **New upstream MCP tools.** Review each one and decide whether agents get it, and check J5's access declarations against upstream's changes to `McpToolAccess` (FORK.md cases 2 and 4).
+  - **New ways to archive a thread**, which must run the archive preflight.
+  - **Upstream behavior** that crosses a J5 policy, such as resume, Stop, settle, queues or delivery.
+  - **Migrations:** run `node scripts/j5/check-upstream-migrations.ts --base <pin> --candidate <candidate>`. For a renumbering or insertion, first check whether upstream ships its own reconcile and use it. It also needs a reviewed manifest, the checker's `--allow-reviewed-bridge`, and a rehearsal on a `VACUUM INTO` copy of real data.
+  - **Codex fixtures and generated protocol:** take upstream's files whole.
+  - **Muse and Kiro fixtures:** take upstream's `muse_transcript.ndjson` and `kiro_transcript.ndjson` files, then change "running in T3 Code" to "running in J5 Code" and "T3 Code's files viewer" to "J5 Code's files viewer" in each, to match J5's runtime instructions (FORK.md, "Advancing"). Their replays compare that text; other providers' fixtures don't, and stay as upstream wrote them.
+  - **New upstream workflows and jobs** that need the `pingdotgg/t3code` repository guard.
+  - **Upstream code J5 doesn't use.** When J5 drops, replaces or rebrands away the only caller of upstream code, leave that code as upstream wrote it and list it in the J5 ignores in `knip.jsonc` (FORK.md case 95). Deleting it, or adding `export` to it, makes another conflict in every advance.
+- **Adopt new upstream features as shipped.** Recommend a divergence only when the feature breaks a J5 feature or a standing ruling, never as a precaution. When an upstream feature contradicts a J5 rule, relax the rule instead of adding a fork case.
+- **Walk every FORK.md integration case and temporary patch.** For each patch, decide keep, retire (upstream fixed it) or narrow.
+- **Walk the [register of divergences](../product/upstream.md).** For each entry, check whether upstream's change makes it unnecessary, harder to carry, or wrong. Bring any change to the maintainer; retiring a divergence is the default when upstream now does the job.
+- **Port upstream's edits to the files J5 owns outright** (`AGENTS.md`, the PR template; see FORK.md) and to J5's standing agent instructions, `packages/provider-core/src/j5/orchestrationInstructions.ts` (FORK.md case 8). Keep J5's version and apply what fits. Upstream's changes to its own instruction text show up as a merge conflict in `packages/provider-core/src/server/orchestrationInstructions.ts`, where J5 deleted that text.
+- **Rewrite** the [upstream convergence watchlist](../product/upstream-convergence.md) and check the give-back backlog (#276).
+- **Brief the maintainer, then bring the decisions.** First, what J5 picks up: the upstream features and behavior changes a person or an agent would notice, in a few lines each, including those that need no decision. Then the decisions, one at a time with a recommendation: watch-list hits, divergences, and upstream behavior that crosses a J5 policy. Default to adopting upstream and adjusting later if it proves bad.
+- **Propose highlights.** From the briefing, pick what deserves a [highlight](../product/features/highlights.md): a J5 feature the advance visibly changes, and upstream features worth introducing. Smaller upstream changes can share one roundup entry. Bring the candidates with the briefing; the agreed entries are committed in the advance PR.
+
+## Build and verify
+
+- Set `J5_UPSTREAM_T3_CODE_VERSION` to the release the pinned code will ship as (FORK.md case 59). For a pin on upstream `main` that is the version its nightlies carry, one patch above upstream's `package.json`, not the `package.json` version.
+- Typecheck every package, including the root `scripts` project, to zero errors. Run the full suites for server, web, client-runtime, shared, contracts, mobile and desktop.
+- Run `vp run knip:check` to zero findings; J5 CI fails on any. Then remove the J5 `ignoreFiles` and `ignoreIssues` blocks from `knip.jsonc` and run it again. What it reports is the set of entries still needed. Put those back and drop the rest, because knip runs with `--no-config-hints` and never flags a stale ignore.
+- Rehearse migrations through the production startup path (`layerConfig`), including the `statev2.sqlite` copy. Check a second boot and J5 table integrity.
+- The release executable embeds the Node that the root `package.json`'s `engines.node` names: `apps/server/vite.config.ts` reads it and refuses to build an executable on any other. J5's `.nvmrc`, which tests run on, names the same version, so the two no longer differ in `node:sqlite`. When upstream moves `engines.node`, move `.nvmrc` and the pinned versions in `.github/workflows/j5-release.yml` (its `setup-node` and `VP_NODE_VERSION` for the executable, and the version its database startup step checks) with it, and run the database startup tests on the new version (`vp test run src/j5/persistence src/persistence src/serverRuntimeState.test.ts` from `apps/server`).
+- Rerecord the server shard weights (FORK.md case 65): `node apps/server/scripts/update-test-shard-weights.ts` runs the server suite once, serially, and rewrites `shardWeights.json`. Start it with the live server's variables unset, as for a dev server.
+- **Live-test the advance** with the [j5-live-test](../../../.agents/skills/j5-live-test/SKILL.md) skill. The brief covers the upstream change the advance was taken for, and each upstream behavior change that crosses a J5 policy (see "Review before building"), or says why one is left out.
+- **Never touch the live install.** Run service tests with `HOME` and `XDG_CONFIG_HOME` pointed at a temp directory, and check that the live units' hashes are unchanged afterwards. `~/.j5code/userdata` is read-only.
+- Update FORK.md (cases, patches, pin log), BRANDING.md, the register, the watchlist, and the user migration guide if install or data changes.
+
+## After merge
+
+- Cut the release and migrate machines per the user guide.
+- Check that every follow-up the review agreed on is an issue in the advance's milestone.

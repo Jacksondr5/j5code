@@ -1,0 +1,177 @@
+import { useAtomValue } from "@effect/atom-react";
+import {
+  authorIndex,
+  isSettledPrompt,
+  mayBeSharedConversation,
+  NO_SHARED_MESSAGES_SEEN,
+  observeSharedMessages,
+  sharedQueuedRuns,
+  type ThreadAuthorIndex,
+} from "@t3tools/client-runtime/j5/shared-conversation";
+import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import type { ThreadAuthors } from "@t3tools/contracts/j5";
+import * as Option from "effect/Option";
+import { AsyncResult, Atom } from "effect/reactivity";
+import { useEffect, useState } from "react";
+import { View } from "react-native";
+
+import { AppText as Text } from "../../components/ui/AppText";
+import type { ThreadFeedEntry } from "../../lib/threadActivity";
+import { appAtomRegistry } from "../../state/atom-registry";
+import { j5Sharing } from "./guestAccess";
+import { presentSharedConversationFeed } from "./sharedConversationFeed";
+
+const NO_RECORD = Atom.make(AsyncResult.initial(false)) as ReturnType<
+  typeof j5Sharing.threadAuthors
+>;
+const NO_CHANGES = Atom.make(AsyncResult.initial(false)) as ReturnType<
+  typeof j5Sharing.threadAuthorsChanges
+>;
+const NO_PEOPLE = Atom.make(AsyncResult.initial(false)) as ReturnType<typeof j5Sharing.scopePeople>;
+const NO_PEOPLE_CHANGES = Atom.make(AsyncResult.initial(false)) as ReturnType<
+  typeof j5Sharing.scopePeopleChanges
+>;
+
+/**
+ * Who reaches a thread, read again whenever the server says it changed, so a thread shared while
+ * it is open is known to be shared before anyone else's first message arrives.
+ */
+function useThreadPeople(environmentId: EnvironmentId | null, threadId: ThreadId | null) {
+  const target =
+    environmentId === null || threadId === null
+      ? null
+      : { environmentId, input: { scope: { kind: "thread" as const, threadId } } };
+  const query = target === null ? NO_PEOPLE : j5Sharing.scopePeople(target);
+  const people = useAtomValue(query);
+  const changes = useAtomValue(
+    target === null ? NO_PEOPLE_CHANGES : j5Sharing.scopePeopleChanges(target),
+  );
+  const revision = Option.getOrNull(AsyncResult.value(changes))?.revision;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- rereads who reaches the thread when the server's change counter moves.
+  useEffect(() => {
+    if (revision !== undefined && revision > 0) appAtomRegistry.refresh(query);
+  }, [query, revision]);
+  return Option.getOrNull(AsyncResult.value(people))?.people ?? null;
+}
+
+function useThreadAuthorsResult(environmentId: EnvironmentId | null, threadId: ThreadId | null) {
+  const result = useAtomValue(
+    environmentId === null || threadId === null
+      ? NO_RECORD
+      : j5Sharing.threadAuthors({ environmentId, input: { threadId } }),
+  );
+  const record: ThreadAuthors | null = Option.getOrNull(AsyncResult.value(result));
+  return {
+    record,
+    failed: AsyncResult.isFailure(result),
+    readAt: result._tag === "Success" ? result.timestamp : null,
+  };
+}
+
+/**
+ * The thread's record as its timeline last read it, by message and by prompt. Rows, the queue and
+ * the work log read it and ask nothing; the timeline's own read keeps it current.
+ */
+export function useThreadAuthorIndex(
+  environmentId: EnvironmentId | null,
+  threadId: ThreadId | null,
+): ThreadAuthorIndex {
+  return authorIndex(useThreadAuthorsResult(environmentId, threadId).record);
+}
+
+/** The queue's rows with the words their authors typed (Shared conversations AC14). */
+export function useSharedQueuedRuns<
+  Queued extends { readonly run: { readonly userMessageId: string }; readonly text: string },
+>(environmentId: EnvironmentId, threadId: ThreadId, queued: ReadonlyArray<Queued>) {
+  return sharedQueuedRuns(useThreadAuthorsResult(environmentId, threadId), queued);
+}
+
+/**
+ * Shared conversations AC16 for the native timeline (`presentSharedConversationFeed`), from the
+ * record of who sent each message and who reaches the thread, each read again whenever the server
+ * says it changed.
+ */
+export function useSharedConversationFeed(
+  environmentId: EnvironmentId | null,
+  threadId: ThreadId | null,
+  feed: ReadonlyArray<ThreadFeedEntry>,
+): ReadonlyArray<ThreadFeedEntry> {
+  const target =
+    environmentId === null || threadId === null ? null : { environmentId, input: { threadId } };
+  const query = target === null ? NO_RECORD : j5Sharing.threadAuthors(target);
+  const { record, failed, readAt } = useThreadAuthorsResult(environmentId, threadId);
+  const people = useThreadPeople(environmentId, threadId);
+  const changes = useAtomValue(
+    target === null ? NO_CHANGES : j5Sharing.threadAuthorsChanges(target),
+  );
+  const revision = Option.getOrNull(AsyncResult.value(changes))?.revision;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- rereads message authors when the server's change counter moves.
+  useEffect(() => {
+    if (revision !== undefined && revision > 0) appAtomRegistry.refresh(query);
+  }, [query, revision]);
+
+  const [stored, setStored] = useState(NO_SHARED_MESSAGES_SEEN);
+  const seen = observeSharedMessages(
+    stored,
+    feed.flatMap((entry) => (entry.type === "message" ? [entry.message] : [])),
+    mayBeSharedConversation({ record, failed, people }),
+    Date.now,
+  );
+  if (seen !== stored) setStored(seen);
+
+  const { feed: shown, pendingKey } = presentSharedConversationFeed({
+    feed,
+    record,
+    failed,
+    readAt,
+    seen,
+    people,
+  });
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- asks once more about a message waiting on its author, in case the change feed is slow.
+  useEffect(() => {
+    if (pendingKey !== "") appAtomRegistry.refresh(query);
+  }, [pendingKey, query]);
+
+  return shown;
+}
+
+/**
+ * Who answered one of the agent's prompts, after the prompt's row label: "· answered by Priya"
+ * (AC10). Nothing for a prompt nobody is recorded as answering, or one still open.
+ */
+export function PromptAnsweredBy(props: {
+  readonly environmentId: EnvironmentId;
+  readonly item: { readonly threadId: ThreadId };
+  /** Nothing precedes it in the row, so it drops the separator. */
+  readonly alone?: boolean;
+  /**
+   * The row is an answered question, so it says so even where no one is recorded (an unshared
+   * thread): "· answered" folded, "answered" opened.
+   */
+  readonly answered?: boolean;
+}) {
+  const { answers } = useThreadAuthorIndex(props.environmentId, props.item.threadId);
+  const by = isSettledPrompt(props.item) ? answers.get(props.item.requestId) : undefined;
+  if (by === undefined && !props.alone && !props.answered)
+    // The label fits its text on a prompt's row, so the row's end stays where it was.
+    return answeredByFollowsLabel(props.item, false) ? <View className="flex-1" /> : null;
+  // Lowercase in every state, as web's "· answered by Priya" is.
+  const said = props.alone ? "answered" : "· answered";
+  return (
+    <>
+      <Text
+        numberOfLines={1}
+        // After a question, the question truncates first and a long name stops at half the row.
+        // Alone, it takes the row and cancels the gap-1.5 around the empty label before it.
+        className={`pr-1.5 text-sm text-foreground-muted ${props.alone ? "-ml-1.5 min-w-0 flex-1" : "max-w-[50%] shrink-0 pl-1"}`}
+      >
+        {by === undefined ? said : `${said} by ${by.you ? "you" : (by.name ?? "someone")}`}
+      </Text>
+      {props.alone ? null : <View className="flex-1" />}
+    </>
+  );
+}
+
+/** A prompt's row whose label `PromptAnsweredBy` follows, right after the text (IN-29). */
+export const answeredByFollowsLabel = (item: unknown, answered: boolean) =>
+  answered || isSettledPrompt(item);

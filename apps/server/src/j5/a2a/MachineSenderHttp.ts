@@ -2,7 +2,6 @@ import {
   AuthA2ASendScope,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
-  type AuthEnvironmentScope,
 } from "@t3tools/contracts";
 import {
   J5_MACHINE_API_PATHS,
@@ -19,22 +18,21 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
-import {
-  HttpRouter,
-  HttpServerRequest,
-  HttpServerRespondable,
-  HttpServerResponse,
-} from "effect/unstable/http";
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 
 import packageJson from "../../../package.json" with { type: "json" };
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
-import {
-  annotateEnvironmentRequest,
-  failEnvironmentAuthInvalid,
-  failEnvironmentInternal,
-  failEnvironmentScopeRequired,
-} from "../../auth/http.ts";
+import { annotateEnvironmentRequest } from "../../auth/http.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
+import {
+  authenticate,
+  jsonError,
+  messageOf,
+  requestFailure,
+  requireAnyScope,
+  respondableTags,
+  tagOf,
+} from "./httpSupport.ts";
 import {
   MachineParticipantService,
   type MachineParticipantRecord,
@@ -47,7 +45,7 @@ import { CommCommandId, isMachineParticipantId, ParticipantId } from "./contract
  * The machine-sender HTTP surface behind `j5 a2a`. A machine token carries the
  * `a2a:send` scope and its participant id as the session subject; identity is
  * never a request field. Sends drive the same send service and command-id
- * idempotency the MCP `send_message` tool uses.
+ * idempotency the MCP `j5_send_message` tool uses.
  */
 
 const decodeRegisterRequest = Schema.decodeUnknownEffect(RegisterMachineParticipantRequest);
@@ -64,53 +62,15 @@ export const machineSendCommandId = (input: {
     `command:j5:a2a:machine:${stablePart(input.senderParticipantId)}:send:${stablePart(input.clientRequestId)}`,
   );
 
-export const machineRegisterCommandId = (input: {
-  readonly squadronId: string;
-  readonly name: string;
-}) =>
+const machineRegisterCommandId = (input: { readonly projectId: string; readonly name: string }) =>
   CommCommandId.make(
-    `command:j5:a2a:machine:register:${stablePart(input.squadronId)}:${stablePart(input.name)}`,
+    `command:j5:a2a:machine:register:${stablePart(input.projectId)}:${stablePart(input.name)}`,
   );
-
-const authenticate = Effect.gen(function* () {
-  const request = yield* HttpServerRequest.HttpServerRequest;
-  const serverAuth = yield* EnvironmentAuth.EnvironmentAuth;
-  return yield* serverAuth.authenticateHttpRequest(request).pipe(
-    Effect.catchIf(EnvironmentAuth.isServerAuthCredentialError, (error) =>
-      failEnvironmentAuthInvalid(EnvironmentAuth.serverAuthCredentialReason(error)),
-    ),
-    Effect.catchIf(EnvironmentAuth.isServerAuthInternalError, (error) =>
-      failEnvironmentInternal("internal_error", error),
-    ),
-  );
-});
-
-const requireAnyScope = (
-  session: EnvironmentAuth.AuthenticatedSession,
-  scopes: ReadonlyArray<AuthEnvironmentScope>,
-) =>
-  scopes.some((scope) => session.scopes.includes(scope))
-    ? Effect.void
-    : failEnvironmentScopeRequired(scopes[0]!);
-
-const jsonError = (
-  status: number,
-  error: string,
-  message: string,
-  extra: Record<string, unknown> = {},
-) => HttpServerResponse.jsonUnsafe({ error, message, ...extra }, { status });
-
-const requestFailure = (message: string) => jsonError(400, "invalid_request", message);
-
-const tagOf = (error: unknown) =>
-  typeof error === "object" && error !== null && "_tag" in error ? String(error._tag) : "Error";
-const messageOf = (error: unknown, fallback: string) =>
-  error instanceof Error ? error.message : fallback;
 
 const wireRecord = (record: MachineParticipantRecord): MachineParticipantWire => ({
   participantId: record.participantId,
-  squadronId: record.squadronId,
-  squadronName: record.squadronName,
+  projectId: record.projectId,
+  projectTitle: record.projectTitle,
   name: record.name,
   createdAt: record.createdAt,
 });
@@ -149,8 +109,8 @@ const sendFailure = (error: unknown): Effect.Effect<HttpServerResponse.HttpServe
 const registerFailure = (error: unknown): Effect.Effect<HttpServerResponse.HttpServerResponse> => {
   const tag = tagOf(error);
   const message = messageOf(error, "Registration failed.");
-  if (tag === "SquadronNotFoundError") {
-    return Effect.succeed(jsonError(404, "squadron_not_found", message));
+  if (tag === "MachineParticipantProjectNotFoundError") {
+    return Effect.succeed(jsonError(404, "project_not_found", message));
   }
   if (tag === "MachineParticipantNameTakenError") {
     return Effect.succeed(jsonError(409, "name_taken", message));
@@ -161,12 +121,6 @@ const registerFailure = (error: unknown): Effect.Effect<HttpServerResponse.HttpS
   );
 };
 
-const respondableTags = {
-  EnvironmentAuthInvalidError: HttpServerRespondable.toResponse,
-  EnvironmentInternalError: HttpServerRespondable.toResponse,
-  EnvironmentScopeRequiredError: HttpServerRespondable.toResponse,
-} as const;
-
 export const machineSenderHttpRouteLayer = Layer.unwrap(
   Effect.gen(function* () {
     const machines = yield* MachineParticipantService;
@@ -175,31 +129,32 @@ export const machineSenderHttpRouteLayer = Layer.unwrap(
     const roster = yield* RosterService;
 
     /** The token's subject must name a registered machine; anything else is refused with the next command. */
-    const machineForSession = (session: EnvironmentAuth.AuthenticatedSession) =>
-      Effect.gen(function* () {
-        const subject = ParticipantId.make(session.subject);
-        if (!isMachineParticipantId(subject)) {
-          return Result.fail(
-            jsonError(
-              403,
-              "machine_subject_required",
-              `This token is not bound to a machine participant (subject "${session.subject}"). Issue one with \`j5 a2a token issue --participant <name>\`.`,
-            ),
+    const machineForSession = Effect.fn("j5.a2a.machineSenderHttp.machineForSession")(function* (
+      session: EnvironmentAuth.AuthenticatedSession,
+    ) {
+      const subject = ParticipantId.make(session.subject);
+      if (!isMachineParticipantId(subject)) {
+        return Result.fail(
+          jsonError(
+            403,
+            "machine_subject_required",
+            `This token is not bound to a machine participant (subject "${session.subject}"). Issue one with \`j5 a2a token issue --participant <name>\`.`,
+          ),
+        );
+      }
+      const resolved = yield* Effect.result(machines.resolve(subject));
+      return Result.isSuccess(resolved)
+        ? Result.succeed(resolved.success)
+        : Result.fail(
+            tagOf(resolved.failure) === "MachineParticipantNotFoundError"
+              ? jsonError(
+                  403,
+                  "machine_sender_not_registered",
+                  messageOf(resolved.failure, "Machine participant is not registered."),
+                )
+              : jsonError(500, tagOf(resolved.failure), "Machine lookup failed."),
           );
-        }
-        const resolved = yield* Effect.result(machines.resolve(subject));
-        return Result.isSuccess(resolved)
-          ? Result.succeed(resolved.success)
-          : Result.fail(
-              tagOf(resolved.failure) === "MachineParticipantNotFoundError"
-                ? jsonError(
-                    403,
-                    "machine_sender_not_registered",
-                    messageOf(resolved.failure, "Machine participant is not registered."),
-                  )
-                : jsonError(500, tagOf(resolved.failure), "Machine lookup failed."),
-            );
-      });
+    });
 
     const registerRoute = HttpRouter.add(
       "POST",
@@ -214,14 +169,17 @@ export const machineSenderHttpRouteLayer = Layer.unwrap(
         const decoded = yield* Effect.result(decodeRegisterRequest(body.success));
         if (Result.isFailure(decoded)) {
           return requestFailure(
-            "squadronId and a name of 1-64 lowercase letters, digits, or hyphens are required.",
+            "projectId and a name of 1-64 lowercase letters, digits, or hyphens are required.",
           );
         }
         const acceptedAt = yield* DateTime.now.pipe(Effect.map(DateTime.formatIso));
         const result = yield* Effect.result(
           machines.register({
-            commandId: machineRegisterCommandId(decoded.success),
-            squadronId: decoded.success.squadronId as MachineParticipantRecord["squadronId"],
+            commandId: machineRegisterCommandId({
+              projectId: decoded.success.projectId,
+              name: decoded.success.name,
+            }),
+            projectId: decoded.success.projectId as MachineParticipantRecord["projectId"],
             name: decoded.success.name,
             acceptedAt,
           }),
@@ -271,7 +229,7 @@ export const machineSenderHttpRouteLayer = Layer.unwrap(
                 participantId: candidate.participantId,
                 threadId: candidate.threadId,
                 displayName: candidate.displayName,
-                squadronName: candidate.squadronName,
+                projectTitle: candidate.projectTitle,
               })),
             },
           );

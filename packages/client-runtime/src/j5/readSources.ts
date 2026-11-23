@@ -1,31 +1,35 @@
-import {
-  AuthOrchestrationOperateScope,
-  type AuthSessionState,
-  type EnvironmentId,
-  type ServerConfig,
-} from "@t3tools/contracts";
+import type { EnvironmentId, ServerConfig } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
-import { AsyncResult, Atom } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 
 import type { SupervisorConnectionState } from "../connection/model.ts";
-import type { EnvironmentCatalogState } from "../state/connections.ts";
-import { isJ5UnsupportedError } from "./http.ts";
+import { type EnvironmentCatalogState, enabledEnvironmentIds } from "../state/connections.ts";
 
 /** Environment labels are noise until a read model actually spans more than one environment. */
 export const spansMultipleEnvironments = (
   items: ReadonlyArray<{ readonly environmentId: EnvironmentId }>,
 ): boolean => new Set(items.map((item) => item.environmentId)).size > 1;
 
+/**
+ * Whether a server has a J5 ledger to read: false for one that does not report it (plain T3 Code,
+ * for one), and unknown until its config arrives. The only thing that makes a J5 view unsupported.
+ */
+export const j5LedgerSupported = (config: Pick<ServerConfig, "environment"> | null | undefined) =>
+  config == null ? undefined : config.environment.capabilities.j5ProjectLedger === true;
+
 export interface J5ReadSource<A> {
   readonly environmentId: EnvironmentId;
   readonly environmentLabel: string;
   readonly connected: boolean;
-  readonly canOperate: boolean;
   readonly status: "loading" | "ready" | "offline" | "unsupported" | "error";
   readonly data: A | null;
   readonly error: string | null;
   readonly refreshing: boolean;
+  /** Set when the source is unsupported because the connection is a guest's, not for the server's age. */
+  readonly guest?: true;
+  /** Set when an offline source is retrying after a failure, which upstream calls reconnecting. */
+  readonly reconnecting?: true;
 }
 
 export interface J5ReadSources<A> {
@@ -37,18 +41,20 @@ export function resolveJ5ReadSource<A>(input: {
   readonly environmentId: EnvironmentId;
   readonly environmentLabel: string;
   readonly phase: SupervisorConnectionState["phase"];
+  /** A retry after a failure, or the wait before one, which upstream presents as reconnecting. */
+  readonly reconnecting?: boolean;
   readonly supported?: boolean;
-  readonly session: AuthSessionState | null;
+  readonly guest?: boolean;
   readonly result: AsyncResult.AsyncResult<A, unknown>;
 }): J5ReadSource<A> {
   const connected = input.phase === "connected";
   const data = Option.getOrNull(AsyncResult.value(input.result));
   const failure = input.result._tag === "Failure" ? Cause.squash(input.result.cause) : null;
-  const unsupported = input.supported === false || isJ5UnsupportedError(failure);
+  const unsupported = input.supported === false;
   const status = unsupported
     ? "unsupported"
     : !connected
-      ? input.phase === "connecting" || input.phase === "available"
+      ? input.phase === "connecting" && input.reconnecting !== true
         ? "loading"
         : "offline"
       : failure !== null
@@ -60,10 +66,6 @@ export function resolveJ5ReadSource<A>(input: {
     environmentId: input.environmentId,
     environmentLabel: input.environmentLabel,
     connected,
-    canOperate:
-      connected &&
-      input.session?.authenticated === true &&
-      (input.session.scopes?.includes(AuthOrchestrationOperateScope) ?? true),
     status,
     data: unsupported ? null : data,
     error:
@@ -73,36 +75,59 @@ export function resolveJ5ReadSource<A>(input: {
           ? failure.message
           : "The environment request failed.",
     refreshing: connected && input.result.waiting,
+    ...(input.guest === true ? { guest: true as const } : {}),
+    ...(status === "offline" && input.reconnecting === true ? { reconnecting: true as const } : {}),
   };
 }
 
-/** Merge read models through the existing catalog; each source keeps its own data and failure state. */
+/**
+ * Merge read models through the existing catalog; each source keeps its own data and failure state.
+ * A server the person turned off is left out, as upstream's thread and project lists leave it out.
+ * A server whose config does not report the capability has no J5 ledger: its source is unsupported
+ * and this read is never made.
+ */
 export function createJ5ReadSourcesAtom<A>(input: {
   readonly label: string;
-  readonly capability: "j5Squadrons" | "j5HumanInbox";
+  readonly capability: "j5ProjectLedger";
   readonly catalogValueAtom: Atom.Atom<EnvironmentCatalogState>;
   readonly stateAtom: (
     id: EnvironmentId,
   ) => Atom.Atom<AsyncResult.AsyncResult<SupervisorConnectionState, unknown>>;
   readonly configValueAtom: (id: EnvironmentId) => Atom.Atom<ServerConfig | null>;
-  readonly sessionStateValueAtom: (id: EnvironmentId) => Atom.Atom<AuthSessionState | null>;
   readonly queryAtom: (id: EnvironmentId) => Atom.Atom<AsyncResult.AsyncResult<A, unknown>>;
+  /**
+   * Whether the environment's connection is a guest's. A guest is shown nothing of a server's J5
+   * read models (Shared server AC24), so its source reads as unsupported as soon as this is true,
+   * whatever an earlier read answered, and is not asked again.
+   */
+  readonly guestAtom?: (id: EnvironmentId) => Atom.Atom<boolean>;
 }): Atom.Atom<J5ReadSources<A>> {
   return Atom.make((get) => {
     const catalog = get(input.catalogValueAtom);
     const sources: Array<J5ReadSource<A>> = [];
-    for (const [environmentId, entry] of catalog.entries) {
+    for (const environmentId of enabledEnvironmentIds(catalog)) {
+      const entry = catalog.entries.get(environmentId)!;
       const state = Option.getOrNull(AsyncResult.value(get(input.stateAtom(environmentId))));
-      const supported = get(input.configValueAtom(environmentId))?.environment.capabilities[
-        input.capability
-      ];
+      const config = get(input.configValueAtom(environmentId));
+      const guest = input.guestAtom !== undefined && get(input.guestAtom(environmentId));
+      const supported = guest
+        ? false
+        : config === null
+          ? undefined
+          : config.environment.capabilities[input.capability] === true;
       sources.push(
         resolveJ5ReadSource({
           environmentId,
           environmentLabel: entry.target.label,
-          phase: state?.phase ?? "available",
+          // Before its supervisor publishes, an enabled server is starting to connect.
+          phase: state?.phase ?? "connecting",
+          // Upstream's `presentConnectionState` rule for "Reconnecting".
+          reconnecting:
+            state !== null &&
+            (state.phase === "backoff" ||
+              (state.phase === "connecting" && (state.attempt > 1 || state.lastFailure !== null))),
           ...(supported === undefined ? {} : { supported }),
-          session: get(input.sessionStateValueAtom(environmentId)),
+          guest,
           result:
             supported === false
               ? AsyncResult.initial<A, unknown>(false)

@@ -2,15 +2,19 @@ import { assert, it } from "@effect/vitest";
 import { ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
-import { AgentCrewInstanceService, layer as crewLayer } from "./AgentCrewInstanceService.ts";
+import {
+  AgentCrewInstanceService,
+  CrewStepAlreadyOwnedError,
+  layer as crewLayer,
+} from "./AgentCrewInstanceService.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
-import { ParticipantId, SquadronId } from "./contracts.ts";
+import { ParticipantId, LedgerProjectId } from "./contracts.ts";
 
-const database = NodeSqliteClient.layerMemory();
+const database = NodeSqliteClient.layer({ filename: ":memory:" });
 const testLayer = Layer.mergeAll(
   database,
   ledgerLayer.pipe(Layer.provide(database)),
@@ -21,15 +25,13 @@ const createdAt = "2026-09-09T16:00:00.000Z";
 it.effect("records a crew once, exposes membership, and lists by captain", () =>
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
-    const squadronId = SquadronId.make("squadron:crew-instances");
-    yield* (yield* A2ALedger).createSquadron({
-      squadron: { id: squadronId, name: "Crew Squadron", createdAt },
-    });
+    const projectId = LedgerProjectId.make("project:crew-instances");
+    yield* (yield* A2ALedger).ensureProject({ projectId: projectId, createdAt });
     const service = yield* AgentCrewInstanceService;
     const captain = ParticipantId.make("agent:j5:a2a:captain");
     const input = {
       id: "crew:j5:a2a:mcp:session:spawn-crew:req",
-      squadronId,
+      projectId,
       captainParticipantId: captain,
       captainThreadId: ThreadId.make("thread:captain"),
       displayName: "Review Pair",
@@ -69,12 +71,12 @@ it.effect("records a crew once, exposes membership, and lists by captain", () =>
     assert.deepStrictEqual(yield* service.read(input.id), first);
     assert.isNull(yield* service.read("missing"));
     assert.deepStrictEqual(
-      yield* service.listForCaptain({ squadronId, captainParticipantId: captain }),
+      yield* service.listForCaptain({ projectId, captainParticipantId: captain }),
       [first],
     );
     assert.deepStrictEqual(
       yield* service.listForCaptain({
-        squadronId,
+        projectId,
         captainParticipantId: ParticipantId.make("agent:j5:a2a:other"),
       }),
       [],
@@ -110,10 +112,8 @@ it.effect("records a crew once, exposes membership, and lists by captain", () =>
 it.effect("decides concurrent additions inside one transaction so the cap holds", () =>
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
-    const squadronId = SquadronId.make("squadron:crew-cap");
-    yield* (yield* A2ALedger).createSquadron({
-      squadron: { id: squadronId, name: "Cap Squadron", createdAt },
-    });
+    const projectId = LedgerProjectId.make("project:crew-cap");
+    yield* (yield* A2ALedger).ensureProject({ projectId: projectId, createdAt });
     const service = yield* AgentCrewInstanceService;
     const seat = (name: string) => ({
       seatName: name,
@@ -124,7 +124,7 @@ it.effect("decides concurrent additions inside one transaction so the cap holds"
     });
     const instance = yield* service.record({
       id: "crew:cap",
-      squadronId,
+      projectId,
       captainParticipantId: ParticipantId.make("agent:j5:a2a:captain-cap"),
       captainThreadId: ThreadId.make("thread:captain-cap"),
       displayName: "Nearly Full",
@@ -166,10 +166,8 @@ it.effect("decides concurrent additions inside one transaction so the cap holds"
 it.effect("refuses a same-name seat under a different identity, and any seat once retired", () =>
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
-    const squadronId = SquadronId.make("squadron:crew-conflict");
-    yield* (yield* A2ALedger).createSquadron({
-      squadron: { id: squadronId, name: "Conflict Squadron", createdAt },
-    });
+    const projectId = LedgerProjectId.make("project:crew-conflict");
+    yield* (yield* A2ALedger).ensureProject({ projectId: projectId, createdAt });
     const service = yield* AgentCrewInstanceService;
     const seat = (name: string, identity: string) => ({
       seatName: name,
@@ -180,7 +178,7 @@ it.effect("refuses a same-name seat under a different identity, and any seat onc
     });
     yield* service.record({
       id: "crew:conflict",
-      squadronId,
+      projectId,
       captainParticipantId: ParticipantId.make("agent:j5:a2a:captain-conflict"),
       captainThreadId: ThreadId.make("thread:captain-conflict"),
       displayName: "Contested",
@@ -201,5 +199,315 @@ it.effect("refuses a same-name seat under a different identity, and any seat onc
     const late = yield* service.addMembers("crew:conflict", [seat("late", "late")]);
     assert.equal(late.status, "archived");
     assert.lengthOf((yield* service.read("crew:conflict"))!.members, 1);
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("brings back only a Crew that retired with its Captain", () =>
+  Effect.gen(function* () {
+    yield* runJ5A2AMigrations();
+    const projectId = LedgerProjectId.make("project:crew-restore");
+    yield* (yield* A2ALedger).ensureProject({ projectId: projectId, createdAt });
+    const service = yield* AgentCrewInstanceService;
+    const captainThreadId = ThreadId.make("thread:restore-captain");
+    const record = (id: string) =>
+      service.record({
+        id,
+        projectId,
+        captainParticipantId: ParticipantId.make("agent:j5:a2a:restore-captain"),
+        captainThreadId,
+        displayName: id,
+        brief: "Keep going.",
+        createdAt,
+        members: [],
+      });
+    yield* record("crew:with-captain");
+    yield* record("crew:on-its-own");
+    yield* service.markArchived("crew:with-captain", "2026-09-09T17:00:00.000Z", {
+      withCaptain: true,
+    });
+    yield* service.markArchived("crew:on-its-own", "2026-09-09T17:00:00.000Z");
+    assert.deepStrictEqual(
+      (yield* service.listRetiredWithCaptain(captainThreadId)).map(({ id }) => id),
+      ["crew:with-captain"],
+    );
+    assert.deepStrictEqual(
+      (yield* service.listRetiredWithCaptain(ThreadId.make("thread:other"))).map(({ id }) => id),
+      [],
+    );
+    assert.isFalse(yield* service.restoreWithCaptain("crew:on-its-own"));
+    assert.isTrue(yield* service.restoreWithCaptain("crew:with-captain"));
+    assert.isNull((yield* service.read("crew:with-captain"))?.archivedAt);
+    assert.isNotNull((yield* service.read("crew:on-its-own"))?.archivedAt);
+    // Restoring twice is a no-op, and a later archive on its own does not come back.
+    assert.isFalse(yield* service.restoreWithCaptain("crew:with-captain"));
+    yield* service.markArchived("crew:with-captain", "2026-09-09T18:00:00.000Z");
+    assert.deepStrictEqual(yield* service.listRetiredWithCaptain(captainThreadId), []);
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect(
+  "keeps each playbook step to one seat and writes nothing when a seat claims an owned one",
+  () =>
+    Effect.gen(function* () {
+      yield* runJ5A2AMigrations();
+      const projectId = LedgerProjectId.make("project:crew-steps");
+      yield* (yield* A2ALedger).ensureProject({ projectId: projectId, createdAt });
+      const service = yield* AgentCrewInstanceService;
+      const member = (seatName: string, playbookStepIds?: ReadonlyArray<string>) => ({
+        seatName,
+        agentId: null,
+        participantId: ParticipantId.make(`agent:j5:a2a:thread:${seatName}`),
+        threadId: ThreadId.make(`thread:${seatName}`),
+        reason: null,
+        ...(playbookStepIds === undefined ? {} : { playbookStepIds }),
+      });
+      const input = {
+        id: "crew:steps",
+        projectId,
+        captainParticipantId: ParticipantId.make("agent:j5:a2a:captain"),
+        captainThreadId: ThreadId.make("thread:captain"),
+        displayName: "Release Crew",
+        brief: "Ship it.",
+        createdAt,
+        playbook: { name: "release", definitionPath: "/repo/.j5/playbooks/release.yaml" },
+        members: [member("planner", ["plan"]), member("helper")],
+      };
+      const doubled = yield* Effect.flip(
+        service.record({
+          ...input,
+          id: "crew:doubled",
+          members: [member("planner", ["plan"]), member("builder", ["plan"])],
+        }),
+      );
+      assert.equal(doubled._tag, "CrewStepAlreadyOwnedError");
+      assert.isNull(yield* service.read("crew:doubled"));
+
+      const recorded = yield* service.record(input);
+      assert.deepStrictEqual(recorded.playbook, input.playbook);
+      assert.deepStrictEqual(
+        recorded.members.map(({ seatName, playbookStepIds }) => [seatName, playbookStepIds]),
+        [
+          ["planner", ["plan"]],
+          ["helper", []],
+        ],
+      );
+      // A replay of the same seats is not a second owner.
+      assert.deepStrictEqual(yield* service.record(input), recorded);
+
+      const refused = yield* Effect.flip(service.addMembers(input.id, [member("rival", ["plan"])]));
+      assert.instanceOf(refused, CrewStepAlreadyOwnedError);
+      const { _tag, crewInstanceId, stepId, ownerSeat, seat } =
+        refused as CrewStepAlreadyOwnedError;
+      assert.deepStrictEqual(
+        { _tag, crewInstanceId, stepId, ownerSeat, seat },
+        {
+          _tag: "CrewStepAlreadyOwnedError",
+          crewInstanceId: input.id,
+          stepId: "plan",
+          ownerSeat: "planner",
+          seat: "rival",
+        },
+      );
+      const unchanged = (yield* service.read(input.id))!;
+      assert.equal(unchanged.version, recorded.version);
+      assert.deepStrictEqual(
+        unchanged.members.map(({ seatName }) => seatName),
+        ["planner", "helper"],
+      );
+
+      const added = yield* service.addMembers(input.id, [member("reviewer", ["review"])]);
+      assert.equal(added.status, "added");
+      assert.deepStrictEqual(added.instance?.members.at(-1)?.playbookStepIds, ["review"]);
+    }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("stores the step owners the person approved last when a record is replayed", () =>
+  Effect.gen(function* () {
+    yield* runJ5A2AMigrations();
+    const projectId = LedgerProjectId.make("project:crew-replay");
+    yield* (yield* A2ALedger).ensureProject({ projectId: projectId, createdAt });
+    const service = yield* AgentCrewInstanceService;
+    // Participant ids are unique across Crews, so each seat's id carries its Crew.
+    let crew = "";
+    const member = (seatName: string, playbookStepIds?: ReadonlyArray<string>) => ({
+      seatName,
+      agentId: null,
+      participantId: ParticipantId.make(`agent:j5:a2a:thread:${crew}-${seatName}`),
+      threadId: ThreadId.make(`thread:${crew}-${seatName}`),
+      reason: null,
+      ...(playbookStepIds === undefined ? {} : { playbookStepIds }),
+    });
+    const record = (id: string, members: ReadonlyArray<ReturnType<typeof member>>) =>
+      service.record({
+        id,
+        projectId,
+        captainParticipantId: ParticipantId.make("agent:j5:a2a:captain"),
+        captainThreadId: ThreadId.make("thread:captain"),
+        displayName: "Replay Crew",
+        brief: "Ship it.",
+        createdAt,
+        playbook: { name: "release", definitionPath: "/repo/.j5/playbooks/release.yaml" },
+        members,
+      });
+    const owners = (
+      instance: {
+        readonly members: ReadonlyArray<{
+          seatName: string;
+          playbookStepIds?: ReadonlyArray<string> | undefined;
+        }>;
+      } | null,
+    ) => instance?.members.map(({ seatName, playbookStepIds }) => [seatName, playbookStepIds]);
+
+    // Re-approved with the same seat name and no steps: the step is unowned, as the card showed.
+    crew = "reapproved";
+    const first = yield* record("crew:reapproved", [member("a", ["s"])]);
+    assert.deepStrictEqual(owners(yield* record("crew:reapproved", [member("a")])), [["a", []]]);
+    // An unchanged replay writes nothing new.
+    yield* record("crew:reapproved", [member("a")]);
+    assert.equal((yield* service.read("crew:reapproved"))?.version, first.version);
+
+    // The step moved to a new seat in the approval: the new seat owns it and the old one nothing.
+    crew = "moved";
+    yield* record("crew:moved", [member("a", ["s"])]);
+    assert.deepStrictEqual(owners(yield* record("crew:moved", [member("a"), member("b", ["s"])])), [
+      ["a", []],
+      ["b", ["s"]],
+    ]);
+
+    // A kept row no incoming seat replaces still owns its step, so a new claimant is refused.
+    crew = "kept";
+    const kept = yield* record("crew:kept", [member("a", ["s"])]);
+    const refused = yield* Effect.flip(record("crew:kept", [member("b", ["s"])]));
+    assert.equal(refused._tag, "CrewStepAlreadyOwnedError");
+    assert.deepStrictEqual(yield* service.read("crew:kept"), kept);
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("swaps a replacement in for a seat, moving only its unfinished steps", () =>
+  Effect.gen(function* () {
+    yield* runJ5A2AMigrations();
+    const projectId = LedgerProjectId.make("project:crew-replace");
+    yield* (yield* A2ALedger).ensureProject({ projectId, createdAt });
+    const service = yield* AgentCrewInstanceService;
+    const seat = (name: string, steps: ReadonlyArray<string>) => ({
+      seatName: name,
+      agentId: "scout",
+      participantId: ParticipantId.make(`agent:j5:a2a:thread:${name}`),
+      threadId: ThreadId.make(`thread:${name}`),
+      reason: null,
+      playbookStepIds: steps,
+    });
+    const id = "crew:replace";
+    yield* service.record({
+      id,
+      projectId,
+      captainParticipantId: ParticipantId.make("agent:j5:a2a:captain"),
+      captainThreadId: ThreadId.make("thread:captain"),
+      displayName: "Release",
+      brief: "Ship it.",
+      createdAt,
+      members: [seat("builder", ["plan", "build", "fix"]), seat("reviewer", ["review"])],
+    });
+    yield* service.markArchived(id, "2026-09-09T17:00:00.000Z", { withCaptain: true });
+    yield* service.restoreWithCaptain(id);
+    // The new member reuses the seat name; `plan` is finished and stays on the old member.
+    const replacement = {
+      ...seat("builder", []),
+      participantId: ParticipantId.make("agent:j5:a2a:thread:builder-2"),
+      threadId: ThreadId.make("thread:builder-2"),
+    };
+    const input = {
+      seatName: "builder",
+      participantId: ParticipantId.make("agent:j5:a2a:thread:builder"),
+      member: replacement,
+      movedStepIds: ["build", "fix"],
+      replacedAt: "2026-09-09T18:00:00.000Z",
+    };
+    const swapped = yield* service.replaceMember(id, input);
+    assert.equal(swapped.status, "replaced");
+    const crew = (yield* service.read(id))!;
+    assert.deepStrictEqual(
+      crew.members.map((member) => [member.seatName, member.participantId, member.playbookStepIds]),
+      [
+        ["builder", replacement.participantId, ["build", "fix"]],
+        ["reviewer", ParticipantId.make("agent:j5:a2a:thread:reviewer"), ["review"]],
+      ],
+    );
+    assert.deepStrictEqual(crew.replaced, [
+      {
+        seatName: "builder",
+        agentId: "scout",
+        participantId: input.participantId,
+        threadId: ThreadId.make("thread:builder"),
+        playbookStepIds: ["plan"],
+        replacedBySeat: "builder",
+        replacedByParticipantId: replacement.participantId,
+        replacedAt: input.replacedAt,
+      },
+    ]);
+    assert.equal(crew.version, 2);
+    // A plain agent now: no membership, no seat toward the cap, and it stays out on a restore.
+    assert.isNull(yield* service.findMembership(input.participantId));
+    assert.deepStrictEqual(yield* service.findMembership(replacement.participantId), {
+      crewInstanceId: id,
+      seatName: "builder",
+    });
+    const added = yield* service.addMembers(id, [seat("scribe", [])], { maxSeats: 3 });
+    assert.equal(added.status, "added");
+    // A replay of the same swap writes nothing; a second replacement of the old member is refused.
+    assert.equal((yield* service.replaceMember(id, input)).status, "replaced");
+    const again = yield* service.replaceMember(id, {
+      ...input,
+      member: {
+        ...replacement,
+        participantId: ParticipantId.make("agent:j5:a2a:thread:builder-3"),
+      },
+    });
+    assert.equal(again.status, "refused");
+    assert.equal((yield* service.read(id))!.version, 3);
+    yield* service.markArchived(id, "2026-09-09T19:00:00.000Z", { withCaptain: true });
+    yield* service.restoreWithCaptain(id);
+    const restored = (yield* service.read(id))!;
+    assert.isFalse(restored.members.some((member) => member.participantId === input.participantId));
+    assert.isNull(yield* service.findMembership(input.participantId));
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("refuses a replacement that would give a step two owners, writing nothing", () =>
+  Effect.gen(function* () {
+    yield* runJ5A2AMigrations();
+    const projectId = LedgerProjectId.make("project:crew-replace-owned");
+    yield* (yield* A2ALedger).ensureProject({ projectId, createdAt });
+    const service = yield* AgentCrewInstanceService;
+    const seat = (name: string, steps: ReadonlyArray<string>) => ({
+      seatName: name,
+      agentId: "scout",
+      participantId: ParticipantId.make(`agent:j5:a2a:thread:${name}`),
+      threadId: ThreadId.make(`thread:${name}`),
+      reason: null,
+      playbookStepIds: steps,
+    });
+    const id = "crew:replace-owned";
+    const recorded = yield* service.record({
+      id,
+      projectId,
+      captainParticipantId: ParticipantId.make("agent:j5:a2a:captain"),
+      captainThreadId: ThreadId.make("thread:captain"),
+      displayName: "Release",
+      brief: "Ship it.",
+      createdAt,
+      members: [seat("builder", ["build"]), seat("reviewer", ["review"])],
+    });
+    const failure = yield* service
+      .replaceMember(id, {
+        seatName: "builder",
+        participantId: ParticipantId.make("agent:j5:a2a:thread:builder"),
+        member: seat("builder-2", ["review"]),
+        movedStepIds: ["build"],
+        replacedAt: "2026-09-09T18:00:00.000Z",
+      })
+      .pipe(Effect.flip);
+    assert.instanceOf(failure, CrewStepAlreadyOwnedError);
+    assert.deepStrictEqual(yield* service.read(id), recorded);
   }).pipe(Effect.provide(testLayer)),
 );

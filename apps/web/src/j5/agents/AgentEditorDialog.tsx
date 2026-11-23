@@ -35,6 +35,7 @@ export function AgentEditorDialog(props: {
   const read = useAtomCommand(agentPersonaEnvironment.readAgentPersona, {
     reportFailure: false,
   });
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- loads the persona's instructions from the server when the dialog opens.
   useEffect(() => {
     let cancelled = false;
     void read({ environmentId: props.environmentId, input: { personaId: props.initial.personaId } })
@@ -54,23 +55,22 @@ export function AgentEditorDialog(props: {
     if (saving || instructions === null) return;
     setSaving(true);
     setError(null);
-    try {
-      const result = await save({
-        environmentId: props.environmentId,
-        input: {
-          ...draft,
-          displayName: draft.displayName.trim(),
-          description: draft.description.trim(),
-          instructions,
-        },
-      });
-      if (result._tag === "Failure") throw squashAtomCommandFailure(result);
-      props.onSaved();
-    } catch (cause) {
+    const result = await save({
+      environmentId: props.environmentId,
+      input: {
+        ...draft,
+        displayName: draft.displayName.trim(),
+        description: draft.description.trim(),
+        instructions,
+      },
+    });
+    if (result._tag === "Failure") {
+      const cause = squashAtomCommandFailure(result);
       setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setSaving(false);
+    } else {
+      props.onSaved();
     }
+    setSaving(false);
   }
   return (
     <Dialog
@@ -94,7 +94,7 @@ export function AgentEditorDialog(props: {
               existing tasks stay unchanged.
             </DialogDescription>
           </DialogHeader>
-          <DialogPanel className="grid gap-4">
+          <DialogPanel>
             <label className="grid gap-1.5 text-sm">
               Name
               <Input
@@ -115,16 +115,18 @@ export function AgentEditorDialog(props: {
             </label>
             <label className="grid gap-1.5 text-sm">
               Instructions
-              <Textarea
-                value={instructions ?? ""}
-                required
-                disabled={saving || instructions === null}
-                placeholder={instructions === null ? "Loading…" : undefined}
-                className="min-h-40 font-mono text-xs"
-                onChange={(event) => setInstructions(event.target.value)}
-              />
+              <div className="font-mono">
+                <Textarea
+                  value={instructions ?? ""}
+                  required
+                  disabled={saving || instructions === null}
+                  placeholder={instructions === null ? "Loading…" : undefined}
+                  className="min-h-40"
+                  onChange={(event) => setInstructions(event.target.value)}
+                />
+              </div>
               <span className="text-xs text-muted-foreground">
-                Markdown. Instructions describe behavior; the runtime policy below is what is
+                Markdown. Instructions describe behavior; the access level below is what is
                 enforced.
               </span>
             </label>

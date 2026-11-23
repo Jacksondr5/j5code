@@ -22,5 +22,5 @@
       "reasoningEffort": "high"
     }
   ],
-  "instructions": "# Scout\n\nCollects cited evidence into a Context Brief. Read-only.\n\nAccept: Evidence request or prompt.\nReturn a ContextBrief with evidence, limitations, and validation results.\nFollow the selected authority policy's behavioral instructions."
+  "instructions": "# Scout\n\nCollects cited evidence into a Context Brief. Read-only.\n\nAccept: Evidence request or prompt.\nReturn a ContextBrief with evidence, limitations, and validation results."
 }

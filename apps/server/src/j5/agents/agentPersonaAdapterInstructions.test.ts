@@ -7,7 +7,7 @@ import {
   makeClaudeQueryOptions,
 } from "../../orchestration-v2/Adapters/ClaudeAdapterV2.ts";
 import { buildCodexTurnStartParams } from "../../orchestration-v2/Adapters/CodexAdapterV2.ts";
-import { T3_CODE_ORCHESTRATION_INSTRUCTIONS } from "../../provider/T3OrchestrationInstructions.ts";
+import { T3_CODE_ORCHESTRATION_INSTRUCTIONS } from "@t3tools/provider-core/server/orchestrationInstructions";
 
 const CLAUDE_TEST_MODEL_SELECTION = {
   instanceId: ProviderInstanceId.make(CLAUDE_PROVIDER),
@@ -50,11 +50,9 @@ describe("agent persona adapter instructions", () => {
         hasT3Mcp: false,
       });
 
-      assert.equal(params.collaborationMode?.mode, "default");
-      assert.equal(
-        params.collaborationMode?.settings.developer_instructions,
-        "Builder instructions",
-      );
+      assert.deepEqual(params.additionalContext, {
+        j5_agent_persona: { kind: "application", value: "Builder instructions" },
+      });
     }),
   );
 });

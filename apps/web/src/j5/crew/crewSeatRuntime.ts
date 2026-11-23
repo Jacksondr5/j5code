@@ -5,7 +5,13 @@ import type {
   ServerProvider,
   ServerProviderModel,
 } from "@t3tools/contracts";
-import type { CrewProposalSeat, CrewProposalSeatRuntime } from "@t3tools/contracts/j5";
+import { isAgentPersonaReasoningOptionId } from "@t3tools/contracts";
+import type {
+  CrewProposalSeat,
+  CrewProposalSeatRuntime,
+  CrewSeatWorkspace,
+  CrewWorkspaceOptions,
+} from "@t3tools/contracts/j5";
 import { buildProviderOptionSelectionsFromDescriptors } from "@t3tools/shared/model";
 
 import { CUSTOM_AGENT } from "./crewProposalDraft";
@@ -14,20 +20,23 @@ export interface CrewSeatDraft {
   readonly seat: string;
   readonly agentId: string;
   readonly instructions: string;
+  /** The persona's whole text as edited on the card, run instead of the persona's own. */
+  readonly personaInstructions?: string;
   readonly modelSelection?: ModelSelection;
   readonly runtimeMode?: RuntimeMode;
+  readonly workspace?: CrewSeatWorkspace;
 }
 
 export const CREW_ACCESS_OPTIONS = [
   {
     value: "approval-required",
-    label: "Approval required",
+    label: "Supervised",
     description: "Ask before commands and file changes.",
   },
   {
     value: "auto-accept-edits",
-    label: "Accept edits",
-    description: "Approve edits; ask before other actions.",
+    label: "Auto-accept edits",
+    description: "Auto-approve edits, ask before other actions.",
   },
   {
     value: "auto",
@@ -45,8 +54,12 @@ export const crewSeatDraft = (seat: CrewProposalSeat): CrewSeatDraft => ({
   seat: seat.seat,
   agentId: seat.agentId ?? CUSTOM_AGENT,
   instructions: seat.instructions ?? "",
+  ...(seat.personaInstructions === undefined
+    ? {}
+    : { personaInstructions: seat.personaInstructions }),
   ...(seat.modelSelection === undefined ? {} : { modelSelection: seat.modelSelection }),
   ...(seat.runtimeMode === undefined ? {} : { runtimeMode: seat.runtimeMode }),
+  ...(seat.workspace === undefined ? {} : { workspace: seat.workspace }),
 });
 
 /** Freeze the resolved runtime before changing one field, so unrelated settings stay put. */
@@ -64,11 +77,63 @@ export const resolvedCrewSeatDraft = (
   };
 };
 
-/** A newly selected persona starts from its own defaults; overrides belong to the previous member. */
+/**
+ * A newly selected persona starts from its own runtime defaults; those overrides belong to the
+ * previous member. Where the seat works is about the seat, so it stays.
+ */
 export const chooseCrewSeatPersona = (draft: CrewSeatDraft, agentId: string): CrewSeatDraft => ({
   seat: draft.seat,
   instructions: draft.instructions,
   agentId,
+  ...(draft.workspace === undefined ? {} : { workspace: draft.workspace }),
+});
+
+export const CREW_WORKSPACE_OPTIONS = [
+  { value: "shared", label: "Captain's checkout" },
+  { value: "worktree", label: "New worktree" },
+  { value: "existing_worktree", label: "Existing worktree" },
+] as const;
+
+/**
+ * A new type starts from what the Captain's repository offers: a new worktree from the Captain's
+ * current branch, an existing worktree at the first one listed. The server checks both again.
+ */
+export const chooseCrewSeatWorkspace = (
+  draft: CrewSeatDraft,
+  type: CrewSeatWorkspace["type"],
+  options: CrewWorkspaceOptions | undefined,
+): CrewSeatDraft => ({
+  ...draft,
+  workspace:
+    type === "shared"
+      ? { type }
+      : type === "worktree"
+        ? { type, baseRef: options?.currentBranch ?? "" }
+        : { type, worktreePath: options?.worktrees[0]?.path ?? "" },
+});
+
+/**
+ * A new worktree's base branch; other fields of the choice stay as they were. The saved commit is
+ * dropped: an edited base is resolved again, and the new commit shown, before it can be approved.
+ */
+export const setCrewSeatBaseRef = (draft: CrewSeatDraft, baseRef: string): CrewSeatDraft => {
+  const { baseCommit: _pin, ...kept } = draft.workspace?.type === "worktree" ? draft.workspace : {};
+  return { ...draft, workspace: { ...kept, type: "worktree", baseRef } };
+};
+
+/** Whether a new worktree starts from the fetched origin copy of its base branch. */
+export const setCrewSeatStartFromOrigin = (
+  draft: CrewSeatDraft,
+  startFromOrigin: boolean,
+): CrewSeatDraft => {
+  if (draft.workspace?.type !== "worktree") return draft;
+  const { baseCommit: _pin, ...kept } = draft.workspace;
+  return { ...draft, workspace: { ...kept, startFromOrigin } };
+};
+
+export const setCrewSeatWorktree = (draft: CrewSeatDraft, worktreePath: string): CrewSeatDraft => ({
+  ...draft,
+  workspace: { type: "existing_worktree", worktreePath },
 });
 
 /** A different model starts with its own advertised defaults, never options from another model. */
@@ -82,7 +147,7 @@ export const crewModelSelection = (
   return { instanceId: provider.instanceId, model: model.slug, ...(options ? { options } : {}) };
 };
 
-/** ACP cannot enforce Auto or Accept edits; a harness switch visibly chooses its supervised mode. */
+/** ACP cannot enforce Auto or Auto-accept edits; a harness switch visibly chooses its supervised mode. */
 export const chooseCrewHarness = (
   draft: CrewSeatDraft,
   provider: Pick<ServerProvider, "instanceId" | "driver">,
@@ -99,9 +164,7 @@ export const chooseCrewHarness = (
 export const crewReasoningDescriptor = (
   model: ServerProviderModel | undefined,
 ): ProviderOptionDescriptor | undefined =>
-  model?.capabilities?.optionDescriptors?.find(({ id }) =>
-    ["reasoningEffort", "effort", "variant", "thinking"].includes(id),
-  );
+  model?.capabilities?.optionDescriptors?.find(({ id }) => isAgentPersonaReasoningOptionId(id));
 
 export const setCrewReasoning = (
   selection: ModelSelection,
@@ -123,6 +186,10 @@ export const applyCrewSeatDraft = (
   reason: seat.reason,
   agentId: draft.agentId === CUSTOM_AGENT ? null : draft.agentId,
   ...(draft.instructions ? { instructions: draft.instructions } : {}),
+  ...(draft.personaInstructions ? { personaInstructions: draft.personaInstructions } : {}),
   ...(draft.modelSelection ? { modelSelection: draft.modelSelection } : {}),
   ...(draft.runtimeMode ? { runtimeMode: draft.runtimeMode } : {}),
+  ...(draft.workspace ? { workspace: draft.workspace } : {}),
+  ...(seat.steps === undefined ? {} : { steps: seat.steps }),
+  ...(seat.reviews === undefined ? {} : { reviews: seat.reviews }),
 });

@@ -1,5 +1,7 @@
+import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
-import type { ArtifactContent, ArtifactEntry } from "@t3tools/contracts";
+import { type ArtifactContent, type ArtifactEntry } from "@t3tools/contracts";
+import { J5ActionError } from "@t3tools/contracts/j5";
 import {
   FileIcon,
   FileImageIcon,
@@ -9,7 +11,8 @@ import {
   Trash2Icon,
 } from "lucide-react";
 import * as Option from "effect/Option";
-import { type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import * as Schema from "effect/Schema";
+import { type CSSProperties, useEffect, useRef, useState } from "react";
 
 import ChatMarkdown from "../../components/ChatMarkdown";
 import { DiffFilePathCopyButton } from "../../components/DiffFilePathCopyButton";
@@ -18,6 +21,7 @@ import { ScrollArea } from "../../components/ui/scroll-area";
 import { SidebarInset } from "../../components/ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip";
 import { WorkspaceBreadcrumb, WorkspaceBreadcrumbItem } from "../../components/WorkspaceBreadcrumb";
+import { WorkspacePageHeader } from "../../components/WorkspacePageHeader";
 import { requestConfirmDialog } from "../../confirmDialog";
 import { isElectron } from "../../env";
 import { type ResizableWidthHandlers, useResizableWidth } from "../../hooks/useResizableWidth";
@@ -26,23 +30,26 @@ import { useEnvironments } from "../../state/environments";
 import { useProjects } from "../../state/entities";
 import { useEnvironmentQuery } from "../../state/query";
 import { usePreparedConnection } from "../../state/session";
-import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "../../workspaceTitlebar";
 import { artifactEnvironment } from "./artifactChanges";
-import { listArtifacts, readArtifact, deleteArtifact } from "./artifactClient";
-import { artifactPreviewRevision } from "./artifactPreview.logic";
+import { j5Environment } from "../state";
+import { listArtifacts, readArtifact, deleteArtifact, deleteAllArtifacts } from "./artifactClient";
+import {
+  ARTIFACT_IMAGE_MEDIA_TYPES,
+  ARTIFACT_MARKDOWN_EXTENSIONS,
+  artifactDataUrl,
+  artifactExtension,
+  artifactPreviewKind,
+  artifactPreviewRevision,
+} from "@t3tools/client-runtime/j5/artifacts";
+import {
+  ARTIFACT_PREVIEW_FRAME_NAME,
+  artifactFindAreaProps,
+  artifactsSurfaceProps,
+  closeDesktopFind,
+} from "./artifactFind";
 import { nextArtifactRefreshGeneration } from "./artifactRefresh";
 
-const MARKDOWN_EXTENSIONS = new Set(["md", "markdown", "mdx"]);
-const IMAGE_MEDIA_TYPES: Readonly<Record<string, string>> = {
-  png: "image/png",
-  jpg: "image/jpeg",
-  jpeg: "image/jpeg",
-  gif: "image/gif",
-  webp: "image/webp",
-  svg: "image/svg+xml",
-};
-
-const extensionOf = (path: string) => path.split(".").at(-1)?.toLowerCase() ?? "";
+const isJ5ActionError = Schema.is(J5ActionError);
 const projectKey = (project: Pick<EnvironmentProject, "environmentId" | "id">) =>
   `${project.environmentId}:${project.id}`;
 
@@ -79,16 +86,10 @@ function ArtifactFilePaneResizeHandle(props: {
 }
 
 function artifactIcon(path: string) {
-  const extension = extensionOf(path);
-  if (MARKDOWN_EXTENSIONS.has(extension)) return FileTextIcon;
-  if (IMAGE_MEDIA_TYPES[extension] !== undefined) return FileImageIcon;
+  const extension = artifactExtension(path);
+  if (ARTIFACT_MARKDOWN_EXTENSIONS.has(extension)) return FileTextIcon;
+  if (ARTIFACT_IMAGE_MEDIA_TYPES[extension] !== undefined) return FileImageIcon;
   return FileIcon;
-}
-
-function binaryDataUrl(content: ArtifactContent) {
-  const mediaType = IMAGE_MEDIA_TYPES[extensionOf(content.path)] ?? "application/octet-stream";
-  if (content.encoding === "base64") return `data:${mediaType};base64,${content.content}`;
-  return `data:${mediaType};charset=utf-8,${encodeURIComponent(content.content)}`;
 }
 
 export interface ArtifactsPageProps {
@@ -106,10 +107,8 @@ export function ArtifactsPage({
 }: ArtifactsPageProps) {
   const projects = useProjects();
   const { environments } = useEnvironments();
-  const environmentLabels = useMemo(
-    () =>
-      new Map(environments.map((environment) => [environment.environmentId, environment.label])),
-    [environments],
+  const environmentLabels = new Map(
+    environments.map((environment) => [environment.environmentId, environment.label]),
   );
   const initialKey =
     initialEnvironmentId && initialProjectId ? `${initialEnvironmentId}:${initialProjectId}` : null;
@@ -126,6 +125,7 @@ export function ArtifactsPage({
   const [listGeneration, setListGeneration] = useState(0);
   const [manualRefreshes, setManualRefreshes] = useState(0);
   const [listedProjectKey, setListedProjectKey] = useState<string | null>(null);
+  const [oversizedProjectKey, setOversizedProjectKey] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const filePane = useResizableWidth({
     storageKey: embedded ? "j5:artifacts:embedded-file-pane-width" : "j5:artifacts:file-pane-width",
@@ -138,21 +138,30 @@ export function ArtifactsPage({
     ? ARTIFACT_EMBEDDED_FILE_PANE_MAX_WIDTH
     : ARTIFACT_FILE_PANE_MAX_WIDTH;
 
-  const selectedProject = useMemo(
-    () =>
-      projects.find((project) => projectKey(project) === selectedProjectKey) ??
-      (embedded ? null : (projects.at(0) ?? null)),
-    [embedded, projects, selectedProjectKey],
-  );
+  const selectedProject =
+    projects.find((project) => projectKey(project) === selectedProjectKey) ??
+    (embedded ? null : (projects.at(0) ?? null));
+  if (!embedded && selectedProject !== null && selectedProjectKey !== projectKey(selectedProject)) {
+    setSelectedProjectKey(projectKey(selectedProject));
+  }
   const selectedEnvironmentId = selectedProject?.environmentId ?? null;
+  const canDelete = useAtomValue(
+    j5Environment.deleteArtifact.permissionAtom(selectedEnvironmentId),
+  );
+  const canDeleteAll = useAtomValue(
+    j5Environment.deleteAllArtifacts.permissionAtom(selectedEnvironmentId),
+  );
   const selectedProjectId = selectedProject?.id ?? null;
   const selectedWorkspaceRoot = selectedProject?.workspaceRoot;
   const selectedKey = selectedProject === null ? null : projectKey(selectedProject);
-  // The artifact client reads the environment's prepared connection from an atom that only holds
-  // a value while something subscribes to it. Inside a thread the chat surface keeps it mounted;
-  // on the standalone route this page is the only subscriber, so it must hold the subscription
-  // itself and wait for the connection before fetching, or every read fails as "not connected".
-  const connected = Option.isSome(usePreparedConnection(selectedEnvironmentId));
+  // The prepared-connection atom only holds a value while subscribed, and on the standalone route
+  // this page is the only subscriber. The socket comes up after the prepared connection, so the
+  // page waits for both before fetching, or the read fails as "not connected".
+  const prepared = Option.isSome(usePreparedConnection(selectedEnvironmentId));
+  const connected =
+    prepared &&
+    environments.find((environment) => environment.environmentId === selectedEnvironmentId)
+      ?.connection.phase === "connected";
   const selectedEntry = entries.find((entry) => entry.path === selectedPath);
   const selectedRevision = artifactPreviewRevision(selectedEntry, manualRefreshes);
   const artifactChange = useEnvironmentQuery(
@@ -164,29 +173,35 @@ export function ArtifactsPage({
       : null,
   );
 
-  useEffect(() => {
-    if (embedded) return;
-    if (selectedProject !== null && selectedProjectKey !== projectKey(selectedProject)) {
-      setSelectedProjectKey(projectKey(selectedProject));
-    }
-  }, [embedded, selectedProject, selectedProjectKey]);
-
-  useEffect(() => {
+  // Each new read resets the list's status in the render that asks for it; the effect below
+  // only runs the read.
+  const listInputs = JSON.stringify([
+    selectedEnvironmentId,
+    selectedProjectId,
+    connected,
+    listGeneration,
+    manualRefreshes,
+  ]);
+  const [resetListInputs, setResetListInputs] = useState<string | null>(null);
+  if (resetListInputs !== listInputs) {
+    setResetListInputs(listInputs);
+    setOversizedProjectKey(null);
     if (selectedEnvironmentId === null || selectedProjectId === null) {
       setEntries([]);
       setSelectedPath(null);
       setListedProjectKey(null);
       setListState("ready");
-      return;
-    }
-    if (!connected) {
+    } else {
       setListState("loading");
       setError(null);
-      return;
     }
+  }
+  // Names the read, so a refresh that changes nothing else still reads again.
+  const listRead = connected ? listInputs : null;
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- lists the selected project's artifacts from the server, and drops a stale answer when the selection changes.
+  useEffect(() => {
+    if (listRead === null || selectedEnvironmentId === null || selectedProjectId === null) return;
     let current = true;
-    setListState("loading");
-    setError(null);
     void listArtifacts({
       environmentId: selectedEnvironmentId,
       projectId: selectedProjectId,
@@ -207,33 +222,62 @@ export function ArtifactsPage({
         setEntries([]);
         setSelectedPath(null);
         setError(cause instanceof Error ? cause.message : "Artifacts could not be loaded.");
+        if (isJ5ActionError(cause) && cause.code === "ArtifactListTooLargeError") {
+          setOversizedProjectKey(`${selectedEnvironmentId}:${selectedProjectId}`);
+        }
         setListState("error");
       },
     );
     return () => {
       current = false;
     };
-  }, [connected, listGeneration, manualRefreshes, selectedEnvironmentId, selectedProjectId]);
+  }, [listRead, selectedEnvironmentId, selectedProjectId]);
 
-  useEffect(() => {
+  const [seenChange, setSeenChange] = useState<typeof artifactChange.data>(null);
+  if (seenChange !== artifactChange.data) {
+    setSeenChange(artifactChange.data);
     setListGeneration((generation) =>
       nextArtifactRefreshGeneration(generation, artifactChange.data),
     );
-  }, [artifactChange.data]);
+  }
 
+  // The server refuses the change feed for a project this connection can no longer read, such as
+  // one a guest's grant on has ended. Reading the list again is then refused too, which clears
+  // the file that was open instead of leaving it on screen.
+  const [seenChangeError, setSeenChangeError] = useState<typeof artifactChange.error>(null);
+  if (seenChangeError !== artifactChange.error) {
+    setSeenChangeError(artifactChange.error);
+    if (artifactChange.error !== null) setListGeneration((generation) => generation + 1);
+  }
+
+  const contentRead =
+    !connected ||
+    selectedEnvironmentId === null ||
+    selectedProjectId === null ||
+    selectedPath === null
+      ? null
+      : JSON.stringify([selectedEnvironmentId, selectedProjectId, selectedPath, selectedRevision]);
+  const [resetContentRead, setResetContentRead] = useState<string | null | undefined>(undefined);
+  if (resetContentRead !== contentRead) {
+    setResetContentRead(contentRead);
+    if (contentRead === null) {
+      setContent(null);
+      setContentState("idle");
+    } else {
+      setContentState("loading");
+    }
+  }
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reads the selected artifact from the server, and drops a stale answer when the selection changes.
   useEffect(() => {
     if (
-      !connected ||
+      contentRead === null ||
       selectedEnvironmentId === null ||
       selectedProjectId === null ||
       selectedPath === null
     ) {
-      setContent(null);
-      setContentState("idle");
       return;
     }
     let current = true;
-    setContentState("loading");
     void readArtifact({
       environmentId: selectedEnvironmentId,
       projectId: selectedProjectId,
@@ -254,14 +298,19 @@ export function ArtifactsPage({
     return () => {
       current = false;
     };
-  }, [connected, selectedEnvironmentId, selectedPath, selectedProjectId, selectedRevision]);
+  }, [contentRead, selectedEnvironmentId, selectedPath, selectedProjectId]);
 
   const selectionKey = JSON.stringify([selectedEnvironmentId, selectedProjectId, selectedPath]);
   const currentSelection = useRef(selectionKey);
-  currentSelection.current = selectionKey;
+  const currentProjectKey = useRef(selectedKey);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- async handlers compare against the latest selection, and render may not write refs.
+  useEffect(() => {
+    currentSelection.current = selectionKey;
+    currentProjectKey.current = selectedKey;
+  }, [currentProjectKey, currentSelection, selectedKey, selectionKey]);
 
-  const refresh = useCallback(() => setManualRefreshes((count) => count + 1), []);
-  const deleteSelectedArtifact = useCallback(async () => {
+  const refresh = () => setManualRefreshes((count) => count + 1);
+  const deleteSelectedArtifact = async () => {
     if (
       selectedEnvironmentId === null ||
       selectedProjectId === null ||
@@ -282,52 +331,83 @@ export function ArtifactsPage({
 
     setDeleting(true);
     setDeleteError(null);
-    try {
-      await deleteArtifact({
-        environmentId: selectedEnvironmentId,
-        projectId: selectedProjectId,
-        path,
-      });
+    const failure = await deleteArtifact({
+      environmentId: selectedEnvironmentId,
+      projectId: selectedProjectId,
+      path,
+    }).then(
+      () => null,
+      (cause: unknown) =>
+        cause instanceof Error ? cause.message : "The artifact could not be deleted.",
+    );
+    if (failure === null) {
       // Re-read whichever project is current when the request completes. The list effect cancels
       // superseded reads, so an in-flight deletion from another project cannot write stale rows.
       setListGeneration((generation) => generation + 1);
-    } catch (cause) {
-      if (currentSelection.current !== requestSelection) return;
-      setDeleteError(cause instanceof Error ? cause.message : "The artifact could not be deleted.");
-    } finally {
-      setDeleting(false);
+    } else if (currentSelection.current === requestSelection) {
+      setDeleteError(failure);
     }
-  }, [selectedEnvironmentId, selectedPath, selectedProjectId, deleting, selectionKey]);
-  const selectedExtension = selectedPath === null ? "" : extensionOf(selectedPath);
+    setDeleting(false);
+  };
+  const canDeleteProjectArtifacts =
+    selectedProject !== null &&
+    connected &&
+    canDeleteAll &&
+    !deleting &&
+    ((listState === "ready" && listedProjectKey === selectedKey && entries.length > 0) ||
+      (listState === "error" && oversizedProjectKey === selectedKey));
+  const deleteProjectArtifacts = async () => {
+    if (selectedProject === null || !canDeleteProjectArtifacts) {
+      return;
+    }
+    const requestProjectKey = selectedKey;
+    const confirmation = requestConfirmDialog(
+      `Permanently delete all artifacts in “${selectedProject.title}” from the environment host? This includes all handoff versions and cannot be undone.`,
+      { variant: "destructive" },
+      { confirmLabel: "Delete all permanently" },
+    );
+    if (confirmation === undefined || !(await confirmation)) return;
+    if (currentProjectKey.current !== requestProjectKey) return;
+
+    setDeleting(true);
+    setDeleteError(null);
+    const failure = await deleteAllArtifacts({
+      environmentId: selectedProject.environmentId,
+      projectId: selectedProject.id,
+    }).then(
+      () => null,
+      (cause: unknown) =>
+        cause instanceof Error ? cause.message : "Artifacts could not be deleted.",
+    );
+    if (failure !== null && currentProjectKey.current === requestProjectKey) {
+      setDeleteError(`${failure} Some artifacts may already have been deleted.`);
+    }
+    // A failed bulk delete may have removed some files, so refresh on failure too.
+    setListGeneration((generation) => generation + 1);
+    setDeleting(false);
+  };
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- the desktop find bar lives in the main process; leaving the surface closes it.
+  useEffect(() => closeDesktopFind, []);
   const selectedName = selectedPath?.split("/").at(-1) ?? null;
-  const image = IMAGE_MEDIA_TYPES[selectedExtension] !== undefined;
-  const markdown = MARKDOWN_EXTENSIONS.has(selectedExtension);
-  const html = selectedExtension === "html" || selectedExtension === "htm";
+  const previewKind = content === null ? null : artifactPreviewKind(content);
 
   return (
     <SidebarInset
+      {...artifactsSurfaceProps}
       className={cn(
-        "min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground isolate",
+        "min-h-0 overflow-hidden overscroll-y-none isolate",
         embedded ? "h-full" : "h-dvh",
       )}
     >
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {!embedded ? (
-          <header
-            className={cn(
-              "flex shrink-0 items-center gap-3 px-3 sm:px-5",
-              isElectron
-                ? "drag-region h-[52px] wco:h-[env(titlebar-area-height)] wco:pr-[calc(100vw-env(titlebar-area-width)-env(titlebar-area-x)+1em)]"
-                : "h-[var(--workspace-topbar-height)] min-h-[var(--workspace-topbar-height)]",
-              COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
-            )}
-          >
+          <WorkspacePageHeader electron={isElectron}>
             <WorkspaceBreadcrumb ariaLabel="Artifacts breadcrumb">
               <WorkspaceBreadcrumbItem current>Artifacts</WorkspaceBreadcrumbItem>
             </WorkspaceBreadcrumb>
             <Button
               aria-label="Refresh artifacts"
-              className="no-drag ms-auto"
+              className="ms-auto"
               disabled={listState === "loading" || selectedProject === null}
               onClick={refresh}
               size="icon-xs"
@@ -337,7 +417,7 @@ export function ArtifactsPage({
                 className={cn("size-3.5", listState === "loading" && "animate-spin")}
               />
             </Button>
-          </header>
+          </WorkspacePageHeader>
         ) : null}
 
         <div
@@ -350,42 +430,47 @@ export function ArtifactsPage({
           style={{ "--artifact-file-pane-width": `${filePane.width}px` } as CSSProperties}
         >
           {!embedded ? (
-            <ScrollArea className="min-h-0 border-b border-border md:border-e md:border-b-0">
-              <div className="p-2">
-                <p className="px-2 py-1.5 text-xs font-medium text-muted-foreground">Workspaces</p>
-                {projects.map((project) => {
-                  const selected =
-                    selectedProject !== null && projectKey(project) === projectKey(selectedProject);
-                  return (
-                    <button
-                      key={projectKey(project)}
-                      aria-pressed={selected}
-                      className={cn(
-                        "flex w-full cursor-pointer items-start gap-2 rounded-md px-2 py-2 text-left text-sm outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
-                        selected && "bg-muted",
-                      )}
-                      onClick={() => {
-                        setSelectedProjectKey(projectKey(project));
-                        setSelectedPath(null);
-                        setDeleteError(null);
-                      }}
-                      type="button"
-                    >
-                      <FolderArchiveIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-                      <span className="min-w-0">
-                        <span className="block truncate">{project.title}</span>
-                        <span className="block truncate text-xs text-muted-foreground">
-                          {environmentLabels.get(project.environmentId) ?? "Environment"}
+            <div className="min-h-0 border-b border-border md:border-e md:border-b-0">
+              <ScrollArea>
+                <div className="p-2">
+                  <p className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
+                    Workspaces
+                  </p>
+                  {projects.map((project) => {
+                    const selected =
+                      selectedProject !== null &&
+                      projectKey(project) === projectKey(selectedProject);
+                    return (
+                      <button
+                        key={projectKey(project)}
+                        aria-pressed={selected}
+                        className={cn(
+                          "flex w-full cursor-pointer items-start gap-2 rounded-md px-2 py-2 text-left text-sm outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                          selected && "bg-muted",
+                        )}
+                        onClick={() => {
+                          setSelectedProjectKey(projectKey(project));
+                          setSelectedPath(null);
+                          setDeleteError(null);
+                        }}
+                        type="button"
+                      >
+                        <FolderArchiveIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                        <span className="min-w-0">
+                          <span className="block truncate">{project.title}</span>
+                          <span className="block truncate text-xs text-muted-foreground">
+                            {environmentLabels.get(project.environmentId) ?? "Environment"}
+                          </span>
                         </span>
-                      </span>
-                    </button>
-                  );
-                })}
-                {projects.length === 0 ? (
-                  <p className="px-2 py-6 text-sm text-muted-foreground">No workspaces yet.</p>
-                ) : null}
-              </div>
-            </ScrollArea>
+                      </button>
+                    );
+                  })}
+                  {projects.length === 0 ? (
+                    <p className="px-2 py-6 text-sm text-muted-foreground">No workspaces yet.</p>
+                  ) : null}
+                </div>
+              </ScrollArea>
+            </div>
           ) : null}
 
           <div
@@ -396,22 +481,32 @@ export function ArtifactsPage({
           >
             <ScrollArea className="min-h-0">
               <div className="p-2">
-                <div className="flex items-center px-2 py-1.5">
+                <div className="flex flex-wrap items-center gap-x-1 px-2 py-1.5">
                   <p className="text-xs font-medium text-muted-foreground">Files</p>
-                  {embedded ? (
+                  <div className="ms-auto flex items-center gap-1">
+                    {embedded ? (
+                      <Button
+                        aria-label="Refresh artifacts"
+                        disabled={listState === "loading" || selectedProject === null}
+                        onClick={refresh}
+                        size="icon-xs"
+                        variant="ghost"
+                      >
+                        <RefreshCwIcon
+                          className={cn("size-3.5", listState === "loading" && "animate-spin")}
+                        />
+                      </Button>
+                    ) : null}
                     <Button
-                      aria-label="Refresh artifacts"
-                      className="ms-auto"
-                      disabled={listState === "loading" || selectedProject === null}
-                      onClick={refresh}
-                      size="icon-xs"
-                      variant="ghost"
+                      aria-label="Delete all artifacts permanently"
+                      disabled={!canDeleteProjectArtifacts}
+                      onClick={() => void deleteProjectArtifacts()}
+                      size="xs"
+                      variant="ghost-destructive"
                     >
-                      <RefreshCwIcon
-                        className={cn("size-3.5", listState === "loading" && "animate-spin")}
-                      />
+                      Delete all
                     </Button>
-                  ) : null}
+                  </div>
                 </div>
                 {entries.map((entry) => {
                   const Icon = artifactIcon(entry.path);
@@ -420,7 +515,7 @@ export function ArtifactsPage({
                       key={entry.path}
                       aria-pressed={selectedPath === entry.path}
                       className={cn(
-                        "flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring",
+                        "flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                         selectedPath === entry.path && "bg-muted",
                       )}
                       onClick={() => {
@@ -475,7 +570,7 @@ export function ArtifactsPage({
                   render={
                     <Button
                       aria-label="Delete artifact permanently"
-                      disabled={selectedPath === null || deleting}
+                      disabled={selectedPath === null || deleting || !canDelete}
                       onClick={() => void deleteSelectedArtifact()}
                       size="icon-micro"
                       variant="ghost"
@@ -492,7 +587,7 @@ export function ArtifactsPage({
                 {deleteError}
               </p>
             ) : null}
-            <ScrollArea className="min-h-0 flex-1">
+            <ScrollArea {...artifactFindAreaProps} className="min-h-0 flex-1">
               <div className={cn("min-h-full", embedded ? "p-4" : "p-5 md:p-8")}>
                 {contentState === "loading" ? (
                   <p className="text-sm text-muted-foreground">Opening artifact…</p>
@@ -503,27 +598,28 @@ export function ArtifactsPage({
                     <FolderArchiveIcon className="mb-3 size-8" />
                     <p className="text-sm">Select an artifact to preview it.</p>
                   </div>
-                ) : image ? (
+                ) : previewKind === "image" ? (
                   <img
                     alt={content.path}
                     className="mx-auto max-h-[calc(100dvh-8rem)] max-w-full rounded-md border border-border object-contain"
-                    src={binaryDataUrl(content)}
+                    src={artifactDataUrl(content)}
                   />
-                ) : html && content.encoding === "utf8" ? (
+                ) : previewKind === "html" ? (
                   <iframe
                     className="h-[calc(100dvh-8rem)] min-h-96 w-full border-0 bg-transparent"
+                    name={ARTIFACT_PREVIEW_FRAME_NAME}
                     referrerPolicy="no-referrer"
                     sandbox=""
                     srcDoc={content.content}
                     title={`Artifact preview: ${content.path}`}
                   />
-                ) : markdown && content.encoding === "utf8" ? (
+                ) : previewKind === "markdown" ? (
                   <ChatMarkdown
                     className="mx-auto max-w-4xl"
                     cwd={selectedWorkspaceRoot}
                     text={content.content}
                   />
-                ) : content.encoding === "utf8" ? (
+                ) : previewKind === "text" ? (
                   <pre className="overflow-x-auto whitespace-pre-wrap break-words font-mono text-sm">
                     {content.content}
                   </pre>

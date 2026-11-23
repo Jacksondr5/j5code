@@ -1,0 +1,113 @@
+import * as Context from "effect/Context";
+import * as Fiber from "effect/Fiber";
+import { McpSchema, Tool, Toolkit } from "effect/ai";
+
+import { McpInvocationContext } from "../../../mcp/McpInvocationContext.ts";
+
+import type { HandlersLayer } from "../../../mcp/McpToolAccess.ts";
+import { ArtifactToolkit } from "../../../mcp/toolkits/artifacts/tools.ts";
+import { EnvironmentToolkit } from "../../../mcp/toolkits/environment/tools.ts";
+import { OrchestratorToolkit } from "../../../mcp/toolkits/orchestrator/tools.ts";
+import { ProjectToolkit } from "../../../mcp/toolkits/project/tools.ts";
+import { ThreadToolkit } from "../../../mcp/toolkits/thread/tools.ts";
+
+// Original tool objects reuse upstream's handlers, and with them upstream's access
+// declarations, without registering their excluded siblings. Keep this catalog explicit when
+// upstream adds tools.
+
+/**
+ * Upstream's handlers for a whole toolkit, as the handlers of the part of it J5 registers.
+ * Handlers are looked up by tool, so a layer for every tool also serves a selection of them.
+ * TypeScript compares the two tool records property by property and cannot see that, hence the
+ * cast; `Tools extends Part` keeps the selection inside the toolkit the handlers were built for.
+ */
+export const handlersFor = <Part extends Record<string, Tool.Any>, Tools extends Part, EX, RX>(
+  _part: Toolkit.Toolkit<Part>,
+  handlers: HandlersLayer<Tools, EX, RX>,
+) => handlers as unknown as HandlersLayer<Part, EX, RX>;
+
+export const J5EnvironmentToolkit = Toolkit.make(
+  EnvironmentToolkit.tools.t3_environment_read
+    .annotate(Tool.Destructive, false)
+    .annotate(Tool.OpenWorld, false),
+  EnvironmentToolkit.tools.t3_environment_preferences_update,
+);
+
+/**
+ * `McpSchema.EnabledWhen` for a tool only another environment's link may see and call: a task it
+ * delegates here starts through `t3_thread_launch` (register D42). An agent here uses
+ * `j5_spawn_agent`.
+ */
+const linkSessionsOnly = (): boolean => {
+  const fiber = Fiber.getCurrent();
+  const scope = fiber && Context.getOrUndefined(fiber.context, McpInvocationContext);
+  return scope?.client?.linked === true;
+};
+
+/**
+ * `t3_project_delete` stays out until J5 settles what deleting a project does to the state it
+ * keeps for each project. `t3_thread_launch` serves links only; `j5_spawn_agent` is an agent's door.
+ */
+export const J5ProjectToolkit = Toolkit.make(
+  ProjectToolkit.tools.t3_project_list
+    .annotate(Tool.Destructive, false)
+    .annotate(Tool.OpenWorld, false),
+  ProjectToolkit.tools.t3_project_read
+    .annotate(Tool.Destructive, false)
+    .annotate(Tool.OpenWorld, false),
+  ProjectToolkit.tools.t3_project_create,
+  ProjectToolkit.tools.t3_project_update,
+  ProjectToolkit.tools.t3_project_clone,
+  ProjectToolkit.tools.t3_thread_launch.annotate(McpSchema.EnabledWhen, linkSessionsOnly),
+);
+
+// Raw send and bulk-create stay out: `j5_send_message` and `j5_spawn_agent` are their doors
+// (register D2). Waiting, interrupting and links are upstream's (D42).
+// `orchestrator_capabilities`, `delegate_task` and `t3_thread_interrupt` are J5's
+// (orchestratorSurface.ts).
+export const J5OrchestratorToolkit = Toolkit.make(
+  OrchestratorToolkit.tools.task_status,
+  OrchestratorToolkit.tools.task_cancel,
+  OrchestratorToolkit.tools.schedule_task,
+  OrchestratorToolkit.tools.list_scheduled_tasks
+    .annotate(Tool.Destructive, false)
+    .annotate(Tool.OpenWorld, false),
+  OrchestratorToolkit.tools.delete_scheduled_task,
+  OrchestratorToolkit.tools.request_secret,
+  OrchestratorToolkit.tools.t3_thread_list
+    .annotate(Tool.Destructive, false)
+    .annotate(Tool.OpenWorld, false),
+  OrchestratorToolkit.tools.t3_thread_read,
+  OrchestratorToolkit.tools.t3_thread_update,
+  OrchestratorToolkit.tools.t3_workflow_stop,
+  OrchestratorToolkit.tools.t3_background_wait,
+  OrchestratorToolkit.tools.t3_thread_wait
+    .annotate(Tool.Destructive, false)
+    .annotate(Tool.OpenWorld, false),
+  OrchestratorToolkit.tools.t3_environment_links
+    .annotate(Tool.Destructive, false)
+    .annotate(Tool.OpenWorld, false),
+  OrchestratorToolkit.tools.t3_environment_link,
+  OrchestratorToolkit.tools.t3_environment_unlink,
+);
+
+// `t3_thread_transfer`, `t3_thread_organize` and `t3_queue` are J5's own (see threadTools.ts).
+export const J5ThreadToolkit = Toolkit.make(
+  ThreadToolkit.tools.t3_pending_request,
+  ThreadToolkit.tools.t3_thread_configure,
+  ThreadToolkit.tools.t3_thread_search
+    .annotate(Tool.Destructive, false)
+    .annotate(Tool.OpenWorld, false),
+  ThreadToolkit.tools.run_scheduled_task_now,
+);
+
+// Artifact verbs are J5-owned even though their original toolkit lives in the MCP tree.
+export const J5ArtifactToolkit = Toolkit.make(
+  ArtifactToolkit.tools.j5_list_artifacts
+    .annotate(Tool.Destructive, false)
+    .annotate(Tool.OpenWorld, false),
+  ArtifactToolkit.tools.j5_read_artifact
+    .annotate(Tool.Destructive, false)
+    .annotate(Tool.OpenWorld, false),
+  ArtifactToolkit.tools.j5_write_artifact,
+);

@@ -2,15 +2,12 @@ import { useAtomValue } from "@effect/atom-react";
 import {
   agentPersonaIdError,
   agentPersonaIdFromName,
+  agentPersonaPolicyDrivers,
   defaultAgentPersonaModelRoute,
   type AgentPersonaCreateDraft,
 } from "@t3tools/client-runtime/j5/agent-personas";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
-import type {
-  AgentPersonaAuthorityPolicy,
-  AgentPersonaModelTarget,
-  EnvironmentId,
-} from "@t3tools/contracts";
+import type { AgentPersonaAccess, AgentPersonaModelEntry, EnvironmentId } from "@t3tools/contracts";
 import { useState } from "react";
 
 import { Button } from "../../components/ui/button";
@@ -25,6 +22,7 @@ import {
 } from "../../components/ui/dialog";
 import { Input } from "../../components/ui/input";
 import { Textarea } from "../../components/ui/textarea";
+import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { AgentRoutePolicyFields } from "./AgentDefinitionFields";
@@ -43,15 +41,23 @@ export function AgentCreateDialog(props: {
   onCreated: (displayName: string) => void;
 }) {
   const providers = useAtomValue(serverEnvironment.providersValueAtom(props.environmentId));
-  const defaultRoute = defaultAgentPersonaModelRoute(providers ?? []);
+  const catalog = useEnvironmentQuery(
+    agentPersonaEnvironment.catalog({ environmentId: props.environmentId, input: {} }),
+  );
+  // New personas start on read-only, so prefer a provider that sandboxes it.
+  const defaultRoute = defaultAgentPersonaModelRoute(
+    providers ?? [],
+    agentPersonaPolicyDrivers(catalog.data, "read-only"),
+  );
   const [draft, setDraft] = useState<{
     displayName: string;
     id: string;
     idEdited: boolean;
     description: string;
     instructions: string;
-    authorityPolicy: AgentPersonaAuthorityPolicy;
-    modelRoute: readonly [AgentPersonaModelTarget, AgentPersonaModelTarget] | null;
+    access: AgentPersonaAccess;
+    modelRoute: ReadonlyArray<AgentPersonaModelEntry> | null;
+    independentReviewer: boolean;
   }>(
     props.initial
       ? { ...props.initial, idEdited: true }
@@ -61,8 +67,9 @@ export function AgentCreateDialog(props: {
           idEdited: false,
           description: "",
           instructions: "",
-          authorityPolicy: "read-only",
+          access: "read-only",
           modelRoute: null,
+          independentReviewer: false,
         },
   );
   const [saving, setSaving] = useState(false);
@@ -83,25 +90,25 @@ export function AgentCreateDialog(props: {
     if (!ready || modelRoute === null) return;
     setSaving(true);
     setError(null);
-    try {
-      const result = await create({
-        environmentId: props.environmentId,
-        input: {
-          id: draft.id,
-          displayName: draft.displayName.trim(),
-          description: draft.description.trim(),
-          instructions: draft.instructions,
-          authorityPolicy: draft.authorityPolicy,
-          modelRoute: [modelRoute[0], modelRoute[1]],
-        },
-      });
-      if (result._tag === "Failure") throw squashAtomCommandFailure(result);
-      props.onCreated(draft.displayName.trim());
-    } catch (cause) {
+    const result = await create({
+      environmentId: props.environmentId,
+      input: {
+        id: draft.id,
+        displayName: draft.displayName.trim(),
+        description: draft.description.trim(),
+        instructions: draft.instructions,
+        access: draft.access,
+        modelRoute,
+        independentReviewer: draft.independentReviewer,
+      },
+    });
+    if (result._tag === "Failure") {
+      const cause = squashAtomCommandFailure(result);
       setError(cause instanceof Error ? cause.message : String(cause));
-    } finally {
-      setSaving(false);
+    } else {
+      props.onCreated(draft.displayName.trim());
     }
+    setSaving(false);
   }
   return (
     <Dialog
@@ -125,7 +132,7 @@ export function AgentCreateDialog(props: {
               can edit, switch off, or remove it later.
             </DialogDescription>
           </DialogHeader>
-          <DialogPanel className="grid gap-4">
+          <DialogPanel>
             <label className="grid gap-1.5 text-sm">
               Name
               <Input
@@ -170,16 +177,18 @@ export function AgentCreateDialog(props: {
             </label>
             <label className="grid gap-1.5 text-sm">
               Instructions
-              <Textarea
-                value={draft.instructions}
-                required
-                disabled={saving}
-                className="min-h-40 font-mono text-xs"
-                placeholder={INSTRUCTIONS_PLACEHOLDER}
-                onChange={(event) => setDraft({ ...draft, instructions: event.target.value })}
-              />
+              <div className="font-mono">
+                <Textarea
+                  value={draft.instructions}
+                  required
+                  disabled={saving}
+                  className="min-h-40"
+                  placeholder={INSTRUCTIONS_PLACEHOLDER}
+                  onChange={(event) => setDraft({ ...draft, instructions: event.target.value })}
+                />
+              </div>
               <span className="text-xs text-muted-foreground">
-                Markdown. Instructions describe behavior; the runtime policy below is what is
+                Markdown. Instructions describe behavior; the access level below is what is
                 enforced.
               </span>
             </label>
@@ -190,9 +199,19 @@ export function AgentCreateDialog(props: {
             ) : (
               <AgentRoutePolicyFields
                 environmentId={props.environmentId}
-                value={{ authorityPolicy: draft.authorityPolicy, modelRoute }}
+                value={{
+                  access: draft.access,
+                  modelRoute,
+                  independentReviewer: draft.independentReviewer,
+                }}
                 disabled={saving}
-                onChange={(next) => setDraft({ ...draft, ...next })}
+                onChange={(next) =>
+                  setDraft({
+                    ...draft,
+                    ...next,
+                    independentReviewer: next.independentReviewer === true,
+                  })
+                }
               />
             )}
             {error ? (

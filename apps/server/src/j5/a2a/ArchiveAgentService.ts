@@ -1,10 +1,4 @@
-import {
-  CommandId,
-  OrchestrationV2RunStatus,
-  RunId,
-  ThreadId,
-  type OrchestrationV2ThreadProjection,
-} from "@t3tools/contracts";
+import { CommandId, OrchestrationV2RunStatus, RunId, ThreadId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
@@ -20,21 +14,27 @@ import {
   signPayload,
   timingSafeEqualBase64Url,
 } from "../../auth/utils.ts";
-import { ThreadLifecycleService } from "../../orchestration-v2/ThreadLifecycleService.ts";
+import type { ProjectionRecords } from "../../orchestration-v2/ProjectionStore.ts";
 import {
   ThreadManagementService,
   latestActiveRun,
 } from "../../orchestration-v2/ThreadManagementService.ts";
-import { A2AArchiveFacts, type OpenExchangeArchiveFact } from "./ArchiveFactsService.ts";
+import {
+  A2AArchiveFacts,
+  type OpenExchangeArchiveFact,
+  type ThreadPreArchiveFacts,
+} from "./ArchiveFactsService.ts";
 import { A2ALedger } from "./LedgerService.ts";
 import { A2ALifecycleService } from "./LifecycleService.ts";
+import { stopThread } from "./stopThread.ts";
+import { getThreadRecordsIfPresent } from "./threadProjectionReads.ts";
 import {
   ExchangeDroppedPayload,
   ExchangeId,
   type LedgerCursor,
   MessageSentPayload,
   ParticipantId,
-  SquadronId,
+  LedgerProjectId,
   type StoredCommEvent,
   Urgency,
 } from "./contracts.ts";
@@ -64,7 +64,7 @@ export interface ArchiveAgentConsequenceFacts {
 }
 
 export interface ArchiveAgentTarget {
-  readonly squadronId: SquadronId;
+  readonly projectId: LedgerProjectId;
   readonly participantId: ParticipantId;
   readonly threadId: ThreadId;
 }
@@ -77,7 +77,7 @@ export interface ArchiveAgentInput {
   readonly confirmationToken?: string;
   /**
    * The Crew archive path has already shown the unit's facts and holds a valid crew token, so
-   * per-member confirmation is satisfied; never set from the single-agent tool.
+   * per-member confirmation is satisfied; set only by the internal crew archive flow.
    */
   readonly confirmationSatisfied?: boolean;
   readonly archivedAt: string;
@@ -94,7 +94,7 @@ export class ArchiveAgentConfirmationRequiredError extends Data.TaggedError(
   readonly confirmationToken: string;
 }> {
   override get message(): string {
-    return "Archiving would end active work. Review the exact facts and retry archive_agent with the confirmation_token.";
+    return "Archiving would end active work. Review the exact facts and retry the archive operation with the confirmation_token.";
   }
 }
 
@@ -106,8 +106,8 @@ export class ArchiveAgentConfirmationStaleError extends Data.TaggedError(
 }> {
   override get message(): string {
     return this.confirmationToken === null
-      ? "The confirmation_token is stale because the target no longer has consequential work. Retry archive_agent without a token."
-      : "The confirmation_token is stale because the target facts changed. Review the current facts and retry archive_agent with the new confirmation_token.";
+      ? "The confirmation_token is stale because the target no longer has consequential work. Retry the archive operation without a token."
+      : "The confirmation_token is stale because the target facts changed. Review the current facts and retry the archive operation with the new confirmation_token.";
   }
 }
 
@@ -118,8 +118,8 @@ export class ArchiveAgentConfirmationTokenError extends Data.TaggedError(
 }> {
   override get message(): string {
     return this.reason === "unsupported-version"
-      ? "The confirmation_token uses an unsupported version. Call archive_agent without a token to receive a current refusal."
-      : "The confirmation_token is malformed or has an invalid signature. Call archive_agent without a token to receive a current refusal.";
+      ? "The confirmation_token uses an unsupported version. Retry the archive operation without a token to receive a current refusal."
+      : "The confirmation_token is malformed or has an invalid signature. Retry the archive operation without a token to receive a current refusal.";
   }
 }
 
@@ -130,7 +130,7 @@ export class ArchiveAgentTargetMismatchError extends Data.TaggedError(
   readonly observed: string;
 }> {
   override get message(): string {
-    return `archive_agent selected ${this.expected.squadronId}/${this.expected.participantId}/${this.expected.threadId}, but the durable target reads resolve ${this.observed}. No archive side effect was attempted.`;
+    return `The archive operation selected ${this.expected.projectId}/${this.expected.participantId}/${this.expected.threadId}, but the durable target reads resolve ${this.observed}. No archive side effect was attempted.`;
   }
 }
 
@@ -139,7 +139,7 @@ export class ArchiveAgentOperationError extends Data.TaggedError("ArchiveAgentOp
   readonly cause: unknown;
 }> {
   override get message(): string {
-    return `archive_agent failed while ${this.phase}: ${this.cause instanceof Error ? this.cause.message : String(this.cause)}.`;
+    return `The archive operation failed while ${this.phase}: ${this.cause instanceof Error ? this.cause.message : String(this.cause)}.`;
   }
 }
 
@@ -160,12 +160,12 @@ export class ArchiveAgentPartialFailureError extends Data.TaggedError(
         ? "No active run is currently observed."
         : `Run ${this.runningTurn.runId} is still observed as ${this.runningTurn.status}; an interrupt may have been requested, but terminal state is not yet observed.`;
     return [
-      `archive_agent committed thread archive=${this.threadArchived}, participant archived=${this.participantArchived}, legacy retirement=${this.participantRetired}.`,
+      `The archive operation committed thread archive=${this.threadArchived}, participant archived=${this.participantArchived}, legacy retirement=${this.participantRetired}.`,
       this.pendingExchangeIds.length === 0
         ? "All observed lifecycle obligation events are committed."
         : `Lifecycle obligation events remain in flight for exchanges ${this.pendingExchangeIds.join(", ")}.`,
       runClaim,
-      "Retry archive_agent with the same client_request_id; recovery is forward-only and idempotent.",
+      "Retry the archive operation with the same client_request_id; recovery is forward-only and idempotent.",
       `Cause: ${this.cause instanceof Error ? this.cause.message : String(this.cause)}.`,
     ].join(" ");
   }
@@ -193,7 +193,7 @@ const TokenPayload = Schema.Struct({
   version: Schema.Literal(TOKEN_VERSION),
   provider_session_id: Schema.String,
   caller_participant_id: ParticipantId,
-  squadron_id: SquadronId,
+  project_id: LedgerProjectId,
   target_participant_id: ParticipantId,
   thread_id: ThreadId,
   thread_archived: Schema.Boolean,
@@ -211,7 +211,7 @@ const decodeExchangeDroppedOption = Schema.decodeUnknownOption(ExchangeDroppedPa
 const decodeMessageSentOption = Schema.decodeUnknownOption(MessageSentPayload);
 
 interface ReadState {
-  readonly projection: OrchestrationV2ThreadProjection;
+  readonly projection: ProjectionRecords<"runs">;
   readonly retired: boolean;
   readonly archived: boolean;
   readonly facts: ArchiveAgentConsequenceFacts;
@@ -254,7 +254,7 @@ const tokenPayload = (input: {
   version: TOKEN_VERSION,
   provider_session_id: input.providerSessionId,
   caller_participant_id: input.callerParticipantId,
-  squadron_id: input.target.squadronId,
+  project_id: input.target.projectId,
   target_participant_id: input.target.participantId,
   thread_id: input.target.threadId,
   thread_archived: input.state.projection.thread.archivedAt !== null,
@@ -289,7 +289,7 @@ const isForwardOnlyRecovery = (confirmed: TokenPayload, current: TokenPayload): 
   if (
     confirmed.provider_session_id !== current.provider_session_id ||
     confirmed.caller_participant_id !== current.caller_participant_id ||
-    confirmed.squadron_id !== current.squadron_id ||
+    confirmed.project_id !== current.project_id ||
     confirmed.target_participant_id !== current.target_participant_id ||
     confirmed.thread_id !== current.thread_id
   ) {
@@ -321,10 +321,15 @@ export interface ArchiveAgentServiceShape {
   readonly archive: (
     input: ArchiveAgentInput,
   ) => Effect.Effect<ArchiveAgentResult, ArchiveAgentError>;
-  /** Consequence facts without side effects, so a unit archive can warn about every member at once. */
+  /**
+   * Consequence facts without side effects, so a unit archive can warn about every member at once.
+   * Null only when the target provably never existed (no home registered, projection not-found), as
+   * rows a partly failed Crew launch leaves. Every other failure propagates: absence is never
+   * inferred from a store that could not answer, and a home without a thread is a mismatch.
+   */
   readonly readFacts: (
     target: ArchiveAgentTarget,
-  ) => Effect.Effect<ArchiveAgentTargetFacts, ArchiveAgentError>;
+  ) => Effect.Effect<ArchiveAgentTargetFacts | null, ArchiveAgentError>;
 }
 
 export class ArchiveAgentService extends Context.Service<
@@ -339,31 +344,33 @@ export const layer = Layer.effect(
     const ledger = yield* A2ALedger;
     const lifecycle = yield* A2ALifecycleService;
     const threadManagement = yield* ThreadManagementService;
-    const threadLifecycle = yield* ThreadLifecycleService;
     const secrets = yield* ServerSecretStore;
 
     const secret = secrets
       .getOrCreateRandom(TOKEN_SECRET_NAME, TOKEN_SECRET_BYTES)
       .pipe(Effect.mapError(operationError("loading the confirmation-token signing secret")));
 
-    const readState = Effect.fn("j5.a2a.archiveAgent.readState")(function* (
-      target: ArchiveAgentTarget,
-    ) {
-      const facts = yield* archiveFacts
+    const readArchiveFacts = (target: ArchiveAgentTarget) =>
+      archiveFacts
         .readForThread(target.threadId)
         .pipe(Effect.mapError(operationError("reading A2A archive facts")));
+
+    const readStateWith = Effect.fn("j5.a2a.archiveAgent.readState")(function* (
+      target: ArchiveAgentTarget,
+      facts: ThreadPreArchiveFacts,
+    ) {
       const projection = yield* threadManagement
-        .getThreadProjection(target.threadId)
+        .getThreadRecords(target.threadId, ["runs"])
         .pipe(Effect.mapError(operationError("reading the target thread projection")));
       if (
         facts.state !== "registered" ||
-        facts.squadronId !== target.squadronId ||
+        facts.projectId !== target.projectId ||
         facts.participantId !== target.participantId ||
         projection.thread.id !== target.threadId
       ) {
         const observed =
           facts.state === "registered"
-            ? `${facts.squadronId}/${facts.participantId}/${projection.thread.id}`
+            ? `${facts.projectId}/${facts.participantId}/${projection.thread.id}`
             : `${facts.state}/${projection.thread.id}`;
         return yield* new ArchiveAgentTargetMismatchError({ expected: target, observed });
       }
@@ -379,6 +386,9 @@ export const layer = Layer.effect(
         },
       } satisfies ReadState;
     });
+
+    const readState = (target: ArchiveAgentTarget) =>
+      readArchiveFacts(target).pipe(Effect.flatMap((facts) => readStateWith(target, facts)));
 
     const issueToken = Effect.fn("j5.a2a.archiveAgent.issueToken")(function* (
       payload: TokenPayload,
@@ -432,13 +442,13 @@ export const layer = Layer.effect(
     });
 
     const readLedgerEvents = Effect.fn("j5.a2a.archiveAgent.readLedgerEvents")(function* (
-      squadronId: SquadronId,
+      projectId: LedgerProjectId,
     ) {
       const events: Array<StoredCommEvent> = [];
       let cursor: LedgerCursor = { afterSeq: 0 };
       while (true) {
         const page = yield* ledger
-          .readEvents({ squadronId, cursor, limit: 500 })
+          .readEvents({ projectId, cursor, limit: 500 })
           .pipe(Effect.mapError(operationError("reading durable lifecycle evidence")));
         events.push(...page.events);
         if (page.complete) return events;
@@ -447,12 +457,12 @@ export const layer = Layer.effect(
     });
 
     const readLifecycleEvents = Effect.fn("j5.a2a.archiveAgent.readLifecycleEvents")(function* () {
-      const squadrons = yield* ledger
-        .listSquadrons()
-        .pipe(Effect.mapError(operationError("listing lifecycle evidence Squadrons")));
+      const projects = yield* ledger
+        .listProjectLedgers()
+        .pipe(Effect.mapError(operationError("listing lifecycle evidence projects")));
       const events: Array<StoredCommEvent> = [];
-      for (const squadron of squadrons) {
-        events.push(...(yield* readLedgerEvents(squadron.id)));
+      for (const project of projects) {
+        events.push(...(yield* readLedgerEvents(project.id)));
       }
       return events;
     });
@@ -463,8 +473,8 @@ export const layer = Layer.effect(
     ) {
       const post = yield* readState(target);
       // A9 writes each dropped Exchange and its terminal notice to that
-      // Exchange's owning Squadron, which can differ from the retired agent's
-      // immutable home. Completion therefore scans every durable Squadron and
+      // Exchange's owning project, which can differ from the retired agent's
+      // immutable home. Completion therefore scans every durable project and
       // filters to this exact participant below.
       const events = yield* readLifecycleEvents();
       const participantLeftAt =
@@ -539,8 +549,8 @@ export const layer = Layer.effect(
       });
     });
 
-    const archive: ArchiveAgentServiceShape["archive"] = (input) =>
-      Effect.gen(function* () {
+    const archive: ArchiveAgentServiceShape["archive"] = Effect.fn("j5.a2a.archiveAgent.archive")(
+      function* (input) {
         const decodedToken =
           input.confirmationToken === undefined
             ? undefined
@@ -580,23 +590,21 @@ export const layer = Layer.effect(
         }
 
         const expectedExchangeIds = before.facts.openExchanges.map((fact) => fact.exchangeId);
-        let interruptRequested = false;
-        if (before.facts.runningTurn !== null) {
-          yield* threadManagement
-            .interruptThread({
-              projectId: before.projection.thread.projectId,
-              commandId: input.interruptCommandId,
-              threadId: input.target.threadId,
-              runId: before.facts.runningTurn.runId,
-              reason: "Peer Agent archived by archive_agent",
-            })
-            .pipe(Effect.mapError(operationError("requesting interruption of the active run")));
-          interruptRequested = true;
+        const interruptRequested = before.facts.runningTurn !== null;
+        // Idle seats too: a retry after a failed delegate stop finds the seat idle, and its
+        // delegates on a linked machine still need stopping before it is archived.
+        if (before.projection.thread.archivedAt === null) {
+          yield* stopThread(threadManagement, {
+            commandId: input.interruptCommandId,
+            threadId: input.target.threadId,
+            reason: "Peer Agent archived as part of Crew retirement",
+          }).pipe(Effect.mapError(operationError("requesting interruption of the active run")));
         }
 
         if (before.projection.thread.archivedAt === null) {
           const archiveAttempt = yield* Effect.result(
-            threadLifecycle.archive({
+            threadManagement.dispatch({
+              type: "thread.archive",
               commandId: input.archiveCommandId,
               threadId: input.target.threadId,
             }),
@@ -630,16 +638,28 @@ export const layer = Layer.effect(
           return yield* error;
         }
         return "archived" as const;
-      });
+      },
+    );
 
-    const readFacts: ArchiveAgentServiceShape["readFacts"] = (target) =>
-      readState(target).pipe(
-        Effect.map((state) => ({
-          facts: state.facts,
-          threadArchived: state.projection.thread.archivedAt !== null,
-          retired: state.retired,
-        })),
-      );
+    const readFacts: ArchiveAgentServiceShape["readFacts"] = Effect.fn(
+      "j5.a2a.archiveAgent.readFacts",
+    )(function* (target) {
+      const facts = yield* readArchiveFacts(target);
+      if (facts.state === "not-an-a2a-participant") {
+        const projection = yield* getThreadRecordsIfPresent(
+          threadManagement,
+          target.threadId,
+          [],
+        ).pipe(Effect.mapError(operationError("reading the target thread projection")));
+        if (projection === null) return null;
+      }
+      const state = yield* readStateWith(target, facts);
+      return {
+        facts: state.facts,
+        threadArchived: state.projection.thread.archivedAt !== null,
+        retired: state.retired,
+      };
+    });
 
     return ArchiveAgentService.of({ archive, readFacts });
   }),

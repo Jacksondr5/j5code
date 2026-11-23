@@ -1,6 +1,6 @@
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import {
@@ -10,7 +10,7 @@ import {
 } from "./HumanPersonRegistry.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 
-it.effect("mints one opaque local operator once without Squadron state", () =>
+it.effect("mints one opaque local operator once without project ledger state", () =>
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
     const sql = yield* SqlClient.SqlClient;
@@ -27,13 +27,13 @@ it.effect("mints one opaque local operator once without Squadron state", () =>
     const domainCounts = yield* sql<{
       readonly events: number;
       readonly memberships: number;
-      readonly squadrons: number;
+      readonly projects: number;
     }>`
       SELECT
-        (SELECT COUNT(*) FROM j5_a2a_squadron) AS squadrons,
-        (SELECT COUNT(*) FROM j5_a2a_squadron_membership) AS memberships,
+        (SELECT COUNT(*) FROM j5_a2a_project_ledger) AS projects,
+        (SELECT COUNT(*) FROM j5_a2a_membership) AS memberships,
         (SELECT COUNT(*) FROM j5_a2a_comm_event) AS events
     `;
-    assert.deepStrictEqual(domainCounts, [{ squadrons: 0, memberships: 0, events: 0 }]);
-  }).pipe(Effect.provide(NodeSqliteClient.layerMemory())),
+    assert.deepStrictEqual(domainCounts, [{ projects: 0, memberships: 0, events: 0 }]);
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );

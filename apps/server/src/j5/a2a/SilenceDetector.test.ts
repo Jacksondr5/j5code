@@ -1,3 +1,5 @@
+import type { SDKMessage, SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { assert, it } from "@effect/vitest";
 import {
   MessageId,
@@ -5,13 +7,12 @@ import {
   type OrchestrationV2ProviderFailure,
   type OrchestrationV2Run,
   type OrchestrationV2StoredEvent,
-  type OrchestrationV2ThreadProjection,
   ProviderInstanceId,
   RunId,
   ThreadId,
 } from "@t3tools/contracts";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as DateTime from "effect/DateTime";
-import * as Context from "effect/Context";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -22,22 +23,43 @@ import * as Queue from "effect/Queue";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
-import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
+import { layerMemory as SqlitePersistenceMemory } from "../../persistence/Sqlite.ts";
+import {
+  EventSinkStreamError,
+  EventSinkV2,
+  type EventSinkV2Shape,
+} from "../../orchestration-v2/EventSink.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import {
   AgentCrewInstanceService,
   layer as crewInstanceLayer,
 } from "./AgentCrewInstanceService.ts";
+import type { ClaudeAgentSdkQuerySession } from "../../orchestration-v2/Adapters/ClaudeAdapterV2.ts";
+import {
+  j5ClaimMissedClaudeSteer,
+  j5ClaudeSteerFields,
+  j5NoteMissedClaudeSteers,
+  j5ObserveClaudeSteer,
+  j5OfferClaudeSteer,
+} from "./claudeAgentSteers.ts";
 import { A2ADeliveryWorker, manualLayer as deliveryWorkerLayer } from "./DeliveryWorker.ts";
-import { A2ADeliveryTransport, type A2ADeliveryTransportShape } from "./DeliveryTransport.ts";
+import {
+  A2ADeliveryTransport,
+  type A2ADeliveryTransportShape,
+  deliveryMessageId,
+} from "./DeliveryTransport.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
+import { noneLayer as peerDirectoryNoneLayer } from "./PeerDirectory.ts";
+import { runMigrations } from "../../persistence/Migrations.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { A2ASendService, layer as sendLayer } from "./SendService.ts";
 import {
   A2ASilenceDetector,
+  REMOVED_NOTICE_TYPE,
+  removedNoticeMessage,
   SilenceNoticePayload,
   STOPPED_NOTICE_INSTRUCTION,
   layer as liveSilenceDetectorLayer,
@@ -48,14 +70,15 @@ import {
   CorrelationId,
   ExchangeId,
   LedgerMessageId,
-  SquadronId,
+  MessageSentPayload,
+  LedgerProjectId,
   ParticipantId,
   SILENCE_DETECTOR_PARTICIPANT_ID,
   type AgentParticipant,
   type HumanParticipant,
 } from "./contracts.ts";
 
-const squadronId = SquadronId.make("squadron:silence-test");
+const projectId = LedgerProjectId.make("project:silence-test");
 const waiter: AgentParticipant = {
   kind: "agent",
   id: ParticipantId.make("agent:silence:waiter"),
@@ -89,30 +112,63 @@ const failureDetail = {
 
 const iso = (second: number) => `2026-08-19T12:00:${String(second).padStart(2, "0")}.000Z`;
 const decodeSilenceNotice = Schema.decodeUnknownEffect(SilenceNoticePayload);
+const decodeMessageSentPayload = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(MessageSentPayload),
+);
+
+const defaultRunId = RunId.make("run:silence:test");
+
+/**
+ * The receiver's thread as the detector reads it. Each test layer starts it over with the
+ * default run; `seedInbound` records which run a delivered ask belongs to.
+ */
+const thread: {
+  thread: { archivedAt: string | null; deletedAt: string | null };
+  runs: Array<OrchestrationV2Run>;
+  messages: Array<{ readonly id: MessageId; readonly runId: RunId }>;
+} = { thread: { archivedAt: null, deletedAt: null }, runs: [], messages: [] };
+
+const threadMock = (overrides: Partial<ThreadManagementService["Service"]> = {}) => {
+  thread.thread = { archivedAt: null, deletedAt: null };
+  thread.runs = [runOf(terminalEvent("completed"))];
+  thread.messages = [];
+  return Layer.mock(ThreadManagementService)({
+    getThreadRecords: (() => Effect.succeed(thread)) as never,
+    ...overrides,
+  });
+};
 
 const makeTestLayer = () => {
-  const database = NodeSqliteClient.layerMemory();
+  const database = NodeSqliteClient.layer({ filename: ":memory:" });
   const ledger = ledgerLayer.pipe(Layer.provide(database));
-  const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
-  const threads = Layer.mock(ThreadManagementService)({
-    getThreadProjection: () =>
-      Effect.succeed({
-        runs: [],
-        turnItems: [
-          {
-            runId: RunId.make("run:silence:test"),
-            type: "error",
-            status: "failed",
-            failure: failureDetail,
-          },
-        ],
-      } as unknown as OrchestrationV2ThreadProjection),
+  const send = sendLayer.pipe(
+    Layer.provide(peerDirectoryNoneLayer),
+    Layer.provide(ledger),
+    Layer.provide(database),
+  );
+  const threads = threadMock({
+    getThreadRecords: ((_threadId: ThreadId, fields: ReadonlyArray<string>) =>
+      Effect.succeed(
+        fields.includes("turnItems")
+          ? {
+              turnItems: [
+                {
+                  runId: RunId.make("run:silence:test"),
+                  type: "error",
+                  status: "failed",
+                  failure: failureDetail,
+                },
+              ],
+            }
+          : thread,
+      )) as never,
   });
   const transport = Layer.succeed(
     A2ADeliveryTransport,
     A2ADeliveryTransport.of({
       deliverAgent: () => Effect.void,
       cancelAgent: () => Effect.succeed("cancelled" as const),
+      deliverPeer: () => Effect.die("peer delivery is not under test"),
       deliverHuman: () => Effect.void,
     } satisfies A2ADeliveryTransportShape),
   );
@@ -125,6 +181,7 @@ const makeTestLayer = () => {
     Layer.provide(ledger),
     Layer.provide(database),
     Layer.provide(threads),
+    Layer.provide(Layer.mock(EventSinkV2)({})),
     Layer.provideMerge(crewInstanceLayer.pipe(Layer.provide(database))),
     Layer.provideMerge(worker),
   );
@@ -135,53 +192,22 @@ const makeDaemonTestLayer = (
   storedEvents: (input?: {
     readonly afterSequence?: number;
   }) => Stream.Stream<OrchestrationV2StoredEvent>,
-  runs: ReadonlyArray<OrchestrationV2Run>,
-  initialHighWater: number,
+  latestSequence: EventSinkV2Shape["latestSequence"],
 ) => {
-  const database = SqlitePersistenceMemory.pipe(
-    Layer.tap((context) => {
-      const sql = Context.get(context, SqlClient.SqlClient);
-      return sql`
-        INSERT OR IGNORE INTO orchestration_v2_events (
-            sequence,
-            event_id,
-            command_id,
-            thread_id,
-            run_id,
-            node_id,
-            provider,
-            raw_event_id,
-            event_type,
-            occurred_at,
-            payload_json
-          ) VALUES (
-            ${initialHighWater},
-            'event:silence:cursor-high-water',
-            NULL,
-            'thread:silence:cursor-high-water',
-            NULL,
-            NULL,
-            NULL,
-            NULL,
-            'thread.created',
-            ${iso(0)},
-            '{}'
-          )
-        `;
-    }),
-  );
+  const database = SqlitePersistenceMemory;
   const ledger = ledgerLayer.pipe(Layer.provide(database));
-  const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
-  const threads = Layer.mock(ThreadManagementService)({
-    getThreadProjection: () =>
-      Effect.succeed({ runs, turnItems: [] } as unknown as OrchestrationV2ThreadProjection),
-    streamStoredEventsFrom: storedEvents,
-  });
+  const send = sendLayer.pipe(
+    Layer.provide(peerDirectoryNoneLayer),
+    Layer.provide(ledger),
+    Layer.provide(database),
+  );
+  const threads = threadMock({ streamStoredEventsFrom: storedEvents });
   const transport = Layer.succeed(
     A2ADeliveryTransport,
     A2ADeliveryTransport.of({
       deliverAgent: () => Effect.void,
       cancelAgent: () => Effect.succeed("cancelled" as const),
+      deliverPeer: () => Effect.die("peer delivery is not under test"),
       deliverHuman: () => Effect.void,
     } satisfies A2ADeliveryTransportShape),
   );
@@ -194,6 +220,7 @@ const makeDaemonTestLayer = (
     Layer.provide(ledger),
     Layer.provide(database),
     Layer.provide(threads),
+    Layer.provide(Layer.mock(EventSinkV2)({ latestSequence })),
     Layer.provideMerge(crewInstanceLayer.pipe(Layer.provide(database))),
     Layer.provideMerge(worker),
   );
@@ -207,7 +234,7 @@ const join = Effect.fn("test.j5.a2a.silence.join")(function* (
   const participantId = participant.id;
   yield* (yield* A2ALedger).append({
     commandId: CommCommandId.make(`command:silence:join:${suffix}`),
-    squadronId,
+    projectId,
     acceptedAt: iso(0),
     event: {
       kind: "participant.joined",
@@ -222,6 +249,7 @@ const join = Effect.fn("test.j5.a2a.silence.join")(function* (
 });
 
 const seed = Effect.fn("test.j5.a2a.silence.seed")(function* () {
+  yield* runMigrations();
   yield* runJ5A2AMigrations();
   const ledger = yield* A2ALedger;
   const sql = yield* SqlClient.SqlClient;
@@ -229,9 +257,12 @@ const seed = Effect.fn("test.j5.a2a.silence.seed")(function* () {
     INSERT INTO j5_a2a_human_person (person_id, is_local_operator, created_at)
     VALUES (${person.id}, 1, ${iso(0)})
   `;
-  yield* ledger.createSquadron({
-    squadron: { id: squadronId, name: "Silence detector", createdAt: iso(0) },
-  });
+  // The first owner writes to every thread, as the server records them at startup.
+  yield* sql`
+    INSERT INTO j5_a2a_person_level (person_id, scope_kind, scope_id, level, created_at, updated_at)
+    VALUES (${person.id}, 'server', '', 'owner', ${iso(0)}, ${iso(0)})
+  `;
+  yield* ledger.ensureProject({ projectId: projectId, createdAt: iso(0) });
   yield* join(waiter, "waiter");
   yield* join(subject, "subject");
   yield* join(peer, "peer");
@@ -266,7 +297,7 @@ const markDelivered = Effect.fn("test.j5.a2a.silence.markDelivered")(function* (
 ) {
   const result = yield* (yield* A2ALedger).append({
     commandId: CommCommandId.make(`command:silence:delivered:${messageId}`),
-    squadronId,
+    projectId,
     acceptedAt: iso(second),
     event: {
       kind: "message.delivered",
@@ -289,7 +320,7 @@ const markAlarmed = Effect.fn("test.j5.a2a.silence.markAlarmed")(function* (
 ) {
   yield* (yield* A2ALedger).append({
     commandId: CommCommandId.make(`command:silence:alarmed:${messageId}`),
-    squadronId,
+    projectId,
     acceptedAt: iso(1),
     event: {
       kind: "message.delivery_failed",
@@ -318,7 +349,7 @@ const silenceAppendCommand = (
   const correlationId = CorrelationId.make(`correlation:silence:serialization:${suffix}`);
   return {
     commandId: CommCommandId.make(`command:silence:serialization:${suffix}`),
-    squadronId,
+    projectId,
     acceptedAt: observedAt,
     events: [
       {
@@ -346,8 +377,8 @@ const silenceAppendCommand = (
         payload: {
           messageId: LedgerMessageId.make(`message:silence:serialization:${suffix}`),
           text: "Serialization seam silence notice",
-          originSquadronId: squadronId,
-          receiverSquadronId: squadronId,
+          originProjectId: projectId,
+          receiverProjectId: projectId,
           exchangeRole: "none" as const,
           envelopeChannel: "silence_notice" as const,
         },
@@ -363,7 +394,7 @@ const dropExchange = Effect.fn("test.j5.a2a.silence.dropExchange")(function* (
 ) {
   yield* (yield* A2ALedger).append({
     commandId: CommCommandId.make(`command:silence:serialization:drop:${suffix}`),
-    squadronId,
+    projectId,
     acceptedAt: iso(5),
     event: {
       kind: "exchange.dropped",
@@ -376,7 +407,7 @@ const dropExchange = Effect.fn("test.j5.a2a.silence.dropExchange")(function* (
         cause: {
           kind: "participant-archived",
           participantId: subject.id,
-          squadronId,
+          projectId: projectId,
         },
         facts: {
           replyRequired: false,
@@ -393,9 +424,19 @@ const dropExchange = Effect.fn("test.j5.a2a.silence.dropExchange")(function* (
 const terminalEvent = (
   status: "completed" | "failed" | "interrupted" | "cancelled" | "rolled_back",
   sequence = 100,
+  carries: {
+    readonly id: RunId;
+    readonly userMessageId: MessageId;
+    readonly completedAtSecond: number;
+  } = {
+    id: defaultRunId,
+    userMessageId: MessageId.make("message:silence:upstream"),
+    completedAtSecond: 3,
+  },
+  started = true,
 ): OrchestrationV2StoredEvent => {
-  const completedAt = DateTime.makeUnsafe(iso(3));
-  const runId = RunId.make("run:silence:test");
+  const completedAt = DateTime.makeUnsafe(iso(carries.completedAtSecond));
+  const runId = carries.id;
   return {
     sequence,
     commandId: null,
@@ -413,12 +454,12 @@ const terminalEvent = (
         providerInstanceId: ProviderInstanceId.make("codex"),
         modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "test-model" },
         providerThreadId: null,
-        userMessageId: MessageId.make("message:silence:upstream"),
+        userMessageId: carries.userMessageId,
         rootNodeId: null,
         activeAttemptId: null,
         status,
         requestedAt: DateTime.makeUnsafe(iso(0)),
-        startedAt: DateTime.makeUnsafe(iso(1)),
+        startedAt: started ? DateTime.makeUnsafe(iso(1)) : null,
         completedAt,
         checkpointId: null,
         contextHandoffId: null,
@@ -429,7 +470,7 @@ const terminalEvent = (
 
 const readNotices = Effect.fn("test.j5.a2a.silence.readNotices")(function* () {
   const page = yield* (yield* A2ALedger).readEvents({
-    squadronId,
+    projectId,
     cursor: { afterSeq: 0 },
     limit: 100,
   });
@@ -439,9 +480,16 @@ const readNotices = Effect.fn("test.j5.a2a.silence.readNotices")(function* () {
   );
 });
 
-const seedInbound = Effect.fn("test.j5.a2a.silence.seedInbound")(function* (deliveredAt: number) {
+const seedInbound = Effect.fn("test.j5.a2a.silence.seedInbound")(function* (
+  deliveredAt: number,
+  // The run the delivered ask belongs to; null when the thread never took the message.
+  owner: RunId | null = defaultRunId,
+) {
   const exchange = yield* openExchange(waiter, subject.id, `inbound-${deliveredAt}`);
   assert.isNotNull(exchange.exchangeId);
+  if (owner !== null) {
+    thread.messages.push({ id: deliveryMessageId(exchange.messageId), runId: owner });
+  }
   const deliveryEvent = yield* markDelivered(
     exchange.messageId,
     exchange.exchangeId!,
@@ -483,7 +531,7 @@ it.effect("uses one receipt identity across delivery and lifecycle producers", (
 
     assert.deepStrictEqual(fromDelivery.identity, fromLifecycle.identity);
     const noticeIdentity = [
-      squadronId,
+      projectId,
       fromDelivery.exchange.exchangeId!,
       fromDelivery.exchange.messageId,
     ]
@@ -543,7 +591,7 @@ it.effect("emits processed mid-turn silence and dedupes a later lifecycle sequen
     assert.notInclude(noticeDelivery.message_text, "[Cross-agent message from");
     assert.equal(noticeDelivery.sender_id, SILENCE_DETECTOR_PARTICIPANT_ID);
     assert.equal(noticeDelivery.status, "pending");
-    const noticeIdentity = [squadronId, exchange.exchangeId!, exchange.messageId]
+    const noticeIdentity = [projectId, exchange.exchangeId!, exchange.messageId]
       .map(encodeURIComponent)
       .join(":");
     assert.equal(noticeDelivery.command_id, `command:j5:a2a:silence:${noticeIdentity}`);
@@ -560,6 +608,269 @@ it.effect("emits processed mid-turn silence and dedupes a later lifecycle sequen
     `;
     assert.deepStrictEqual(delivered, [{ status: "delivered" }]);
   }).pipe(Effect.provide(makeTestLayer())),
+);
+
+const runOf = (stored: OrchestrationV2StoredEvent): OrchestrationV2Run => {
+  if (stored.event.type !== "run.updated") throw new Error("expected a run event");
+  return stored.event.payload;
+};
+
+const carrierRunId = RunId.make("run:silence:carrier");
+
+const otherRun = (name: string, completedAtSecond: number, sequence = 100) =>
+  terminalEvent("completed", sequence, {
+    id: RunId.make(`run:silence:${name}`),
+    userMessageId: MessageId.make(`message:silence:${name}`),
+    completedAtSecond,
+  });
+
+const carrierRun = (
+  messageId: LedgerMessageId,
+  completedAtSecond: number,
+  sequence = 101,
+  status: "completed" | "cancelled" = "completed",
+) =>
+  terminalEvent(status, sequence, {
+    id: carrierRunId,
+    userMessageId: deliveryMessageId(messageId),
+    completedAtSecond,
+  });
+
+it.effect("waits for the run that carries a queued ask before reporting silence (#433)", () =>
+  Effect.gen(function* () {
+    yield* seed();
+    const ask = yield* seedInbound(2, carrierRunId);
+    const busy = otherRun("busy", 3);
+    const carrier = carrierRun(ask.messageId, 5);
+    thread.runs = [runOf(busy), runOf(carrier)];
+    const detector = yield* A2ASilenceDetector;
+
+    yield* detector.handleStoredEvent(busy);
+    assert.lengthOf(yield* readNotices(), 0, "the run that was already busy never saw the ask");
+
+    yield* detector.handleStoredEvent(carrier);
+    const notices = yield* readNotices();
+    assert.lengthOf(notices, 1);
+    assert.equal(notices[0]?.state, "turn-ended-no-reply");
+    assert.equal(notices[0]?.runId, carrierRunId);
+  }).pipe(Effect.provide(makeTestLayer())),
+);
+
+it.effect("reconciling stays quiet while the run that carries the ask is still queued", () =>
+  Effect.gen(function* () {
+    yield* seed();
+    const ask = yield* seedInbound(2, carrierRunId);
+    thread.runs = [
+      { ...runOf(carrierRun(ask.messageId, 0)), status: "queued", completedAt: null },
+      { ...runOf(otherRun("later", 4)), status: "cancelled" },
+    ];
+    yield* (yield* A2ASilenceDetector).reconcileOpenExchanges;
+    assert.lengthOf(yield* readNotices(), 0, "a later run ending is not the ask's run ending");
+  }).pipe(Effect.provide(makeTestLayer())),
+);
+
+it.effect("reports the carrying run when its delivery is recorded after it ended", () =>
+  Effect.gen(function* () {
+    yield* seed();
+    const ask = yield* seedInbound(4, carrierRunId);
+    const carrier = carrierRun(ask.messageId, 3, 100);
+    const later = otherRun("later", 5, 101);
+    thread.runs = [runOf(carrier), { ...runOf(later), status: "queued", completedAt: null }];
+    const detector = yield* A2ASilenceDetector;
+
+    yield* detector.handleStoredEvent(carrier);
+    yield* detector.handleDeliveryEvent(ask.deliveryEvent);
+    thread.runs = [runOf(carrier), runOf(later)];
+    yield* detector.handleStoredEvent(later);
+
+    const notices = yield* readNotices();
+    assert.lengthOf(notices, 1);
+    assert.equal(notices[0]?.runId, carrierRunId);
+  }).pipe(Effect.provide(makeTestLayer())),
+);
+
+it.effect("follows a queued ask promoted into the running turn (#435)", () =>
+  Effect.gen(function* () {
+    yield* seed();
+    const running = otherRun("running", 5, 101);
+    // Promotion cancels the queued run and moves its message into the running turn.
+    const ask = yield* seedInbound(2, runOf(running).id);
+    const promoted = carrierRun(ask.messageId, 3, 100, "cancelled");
+    thread.runs = [{ ...runOf(running), status: "running", completedAt: null }, runOf(promoted)];
+    const detector = yield* A2ASilenceDetector;
+
+    yield* detector.handleStoredEvent(promoted);
+    yield* detector.reconcileOpenExchanges;
+    assert.lengthOf(yield* readNotices(), 0, "the turn that took the ask can still answer it");
+
+    thread.runs = [runOf(running), runOf(promoted)];
+    yield* detector.handleStoredEvent(running);
+    const notices = yield* readNotices();
+    assert.lengthOf(notices, 1);
+    assert.equal(notices[0]?.state, "turn-ended-no-reply");
+    assert.equal(notices[0]?.runId, runOf(running).id);
+  }).pipe(Effect.provide(makeTestLayer())),
+);
+
+/** A message the waiter sent the subject without asking for a reply, queued as `carrierRunId`. */
+const seedQueuedMessage = Effect.fn("test.j5.a2a.silence.seedQueuedMessage")(function* () {
+  const sent = yield* (yield* A2ASendService).send({
+    commandId: CommCommandId.make("command:silence:send:queued"),
+    senderThreadId: waiter.threadId,
+    to: subject.id,
+    message: "Queued update that never ran",
+    acceptedAt: iso(1),
+  });
+  yield* (yield* A2ALedger).append({
+    commandId: CommCommandId.make("command:silence:delivered:queued"),
+    projectId,
+    acceptedAt: iso(2),
+    event: {
+      kind: "message.delivered",
+      sender: waiter.id,
+      receiver: subject.id,
+      exchangeId: null,
+      correlationId: CorrelationId.make("correlation:silence:delivered:queued"),
+      payload: { messageId: sent.messageId, attempt: 1, channel: "agent" },
+      createdAt: iso(2),
+    },
+  });
+  thread.messages.push({ id: deliveryMessageId(sent.messageId), runId: carrierRunId });
+  // Removed from the queue: the run ended without ever starting.
+  const removed = terminalEvent(
+    "cancelled",
+    100,
+    { id: carrierRunId, userMessageId: deliveryMessageId(sent.messageId), completedAtSecond: 3 },
+    false,
+  );
+  thread.runs = [runOf(removed)];
+  return { removed, messageId: sent.messageId };
+});
+
+const claudeLifecycle = (commandUuid: string, state: string) =>
+  ({ type: "command_lifecycle", command_uuid: commandUuid, state }) as unknown as SDKMessage;
+
+const readRemovedNotices = Effect.fn("test.j5.a2a.silence.readRemovedNotices")(function* () {
+  return yield* (yield* SqlClient.SqlClient)<{
+    readonly receiver_id: string;
+    readonly message_text: string;
+  }>`
+    SELECT receiver_id, message_text
+    FROM j5_a2a_delivery
+    WHERE envelope_channel = 'silence_notice'
+  `;
+});
+
+it.effect("tells the sender once when its queued message is removed before it runs", () =>
+  Effect.gen(function* () {
+    yield* seed();
+    const { removed, messageId } = yield* seedQueuedMessage();
+    const detector = yield* A2ASilenceDetector;
+
+    yield* detector.handleStoredEvent(removed);
+    yield* detector.handleStoredEvent(removed);
+
+    const notices = yield* readRemovedNotices();
+    assert.lengthOf(notices, 1);
+    assert.equal(notices[0]?.receiver_id, waiter.id);
+    assert.include(
+      notices[0]?.message_text,
+      `[Cross-agent messaging system notice: ${REMOVED_NOTICE_TYPE}]`,
+    );
+    assert.include(
+      notices[0]?.message_text,
+      removedNoticeMessage(subject.id, messageId, "Queued update that never ran"),
+    );
+    assert.include(
+      notices[0]?.message_text,
+      `Your message ${messageId} to ${subject.id} was removed`,
+      "it names the message by the id its send returned",
+    );
+  }).pipe(Effect.provide(makeTestLayer())),
+);
+
+// FORK.md case 89: cleanup survives removal of the unread-after-Stop notice.
+it.effect.each([
+  { status: "interrupted", registered: true },
+  { status: "failed", registered: true },
+  { status: "cancelled", registered: true },
+  { status: "rolled_back", registered: true },
+  { status: "interrupted", registered: false },
+] as const)(
+  "releases a $status Claude turn's waiting steer without a notice (registered=$registered)",
+  ({ status, registered }) =>
+    Effect.gen(function* () {
+      yield* seed();
+      const sent = yield* (yield* A2ASendService).send({
+        commandId: CommCommandId.make(`command:silence:send:steered:${status}`),
+        senderThreadId: waiter.threadId,
+        to: subject.id,
+        message: "Steered update",
+        acceptedAt: iso(1),
+      });
+      const threadMessageId = deliveryMessageId(sent.messageId);
+      thread.messages.push({ id: threadMessageId, runId: carrierRunId });
+      const query = {} as ClaudeAgentSdkQuerySession;
+      const providerTurnId = `provider-turn:silence:${status}`;
+      const steer = yield* j5ClaudeSteerFields(
+        { createdBy: "agent" },
+        yield* SecureRandom.SecureRandom,
+      );
+      yield* j5OfferClaudeSteer({
+        query,
+        providerTurnId,
+        messageId: threadMessageId,
+        steer,
+        offer: Effect.void,
+      });
+      j5ObserveClaudeSteer(query, claudeLifecycle(steer.uuid!, "queued"));
+      const result = {
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        terminal_reason: "completed",
+      } as SDKResultMessage;
+      const ended = terminalEvent(status, 100, {
+        id: carrierRunId,
+        userMessageId: MessageId.make("message:silence:upstream"),
+        completedAtSecond: 3,
+      });
+      thread.runs = [runOf(ended)];
+      if (!registered) {
+        yield* (yield* SqlClient.SqlClient)`
+          DELETE FROM j5_a2a_membership WHERE thread_id = ${subject.threadId}
+        `;
+      }
+
+      yield* (yield* A2ASilenceDetector).handleStoredEvent(ended);
+
+      assert.lengthOf(yield* readRemovedNotices(), 0);
+      // A late result for the released turn finds no steer left to run.
+      const nativeThreadId = `native-thread:silence:${status}:${registered}`;
+      j5NoteMissedClaudeSteers({ query, nativeThreadId, providerTurnId, result });
+      assert.isUndefined(j5ClaimMissedClaudeSteer(nativeThreadId, query));
+    }).pipe(Effect.provide(Layer.merge(makeTestLayer(), NodeCrypto.layer))),
+);
+
+it.effect.each(["promoted into the running turn", "archived with its receiver"] as const)(
+  "says nothing about a queued message %s",
+  (reason) =>
+    Effect.gen(function* () {
+      yield* seed();
+      const { removed } = yield* seedQueuedMessage();
+      if (reason === "archived with its receiver") {
+        thread.thread = { archivedAt: iso(3), deletedAt: null };
+      } else {
+        thread.messages = thread.messages.map((message) => ({
+          ...message,
+          runId: defaultRunId,
+        }));
+      }
+
+      yield* (yield* A2ASilenceDetector).handleStoredEvent(removed);
+
+      assert.lengthOf(yield* readRemovedNotices(), 0);
+    }).pipe(Effect.provide(makeTestLayer())),
 );
 
 it.effect("no-ops when A9 drops after the A3 read but before its serialized append", () =>
@@ -627,7 +938,7 @@ it.effect("keeps both historical facts when A3 appends before A9 drops", () =>
 it.effect("emits never-processed when no turn started after the latest delivery", () =>
   Effect.gen(function* () {
     yield* seed();
-    const inbound = yield* seedInbound(4);
+    const inbound = yield* seedInbound(4, null);
     yield* (yield* A2ASilenceDetector).handleDeliveryEvent(inbound.deliveryEvent);
     const notices = yield* readNotices();
     assert.equal(notices[0]?.state, "turn-ended-no-reply");
@@ -640,9 +951,6 @@ it.effect("emits never-processed when no turn started after the latest delivery"
 
 it.effect("daemon retries its stored-event stream and advances the durable cursor", () => {
   const stored = terminalEvent("completed", 130);
-  assert.equal(stored.event.type, "run.updated");
-  if (stored.event.type !== "run.updated") return Effect.die("expected run.updated fixture");
-  const run = stored.event.payload;
   let streamCalls = 0;
   const observedCursors: Array<number> = [];
   const gateEffect = Effect.gen(function* () {
@@ -661,8 +969,7 @@ it.effect("daemon retries its stored-event stream and advances the durable curso
         if ((input?.afterSequence ?? 0) >= stored.sequence) return Stream.never;
         return Stream.fromEffect(Deferred.await(gate).pipe(Effect.as(stored)));
       },
-      [run],
-      75,
+      () => Effect.succeed(75),
     );
 
     return yield* Effect.scoped(
@@ -697,6 +1004,52 @@ it.effect("daemon retries its stored-event stream and advances the durable curso
   return gateEffect;
 });
 
+it.effect(
+  "a new cursor starts at the event store's latest sequence, retrying a failed read rather than 0",
+  () =>
+    Effect.gen(function* () {
+      const firstReadFailed = yield* Deferred.make<void>();
+      const streamStarted = yield* Deferred.make<number>();
+      let reads = 0;
+      let streamCalls = 0;
+      const daemonLayer = makeDaemonTestLayer(
+        (input) => {
+          streamCalls += 1;
+          return Stream.fromEffect(Deferred.succeed(streamStarted, input?.afterSequence ?? 0)).pipe(
+            Stream.drain,
+            Stream.concat(Stream.never),
+          );
+        },
+        () =>
+          Effect.suspend(() => {
+            reads += 1;
+            return reads === 1
+              ? Deferred.succeed(firstReadFailed, undefined).pipe(
+                  Effect.andThen(Effect.fail(new EventSinkStreamError({}))),
+                )
+              : Effect.succeed(4200);
+          }),
+      );
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* Deferred.await(firstReadFailed);
+          assert.equal(streamCalls, 0);
+          yield* TestClock.adjust(Duration.millis(250));
+          assert.equal(yield* Deferred.await(streamStarted), 4200);
+          const cursor = yield* (yield* SqlClient.SqlClient)<{
+            readonly after_sequence: number | null;
+          }>`
+            SELECT after_sequence
+            FROM j5_a2a_silence_detector_cursor
+            WHERE singleton = 1
+          `;
+          assert.deepStrictEqual(cursor, [{ after_sequence: 4200 }]);
+        }).pipe(Effect.provide(daemonLayer)),
+      );
+    }),
+);
+
 it.effect("backs off exponentially across consecutive lifecycle stream failures", () =>
   Effect.gen(function* () {
     const failures = yield* Queue.unbounded<number>();
@@ -716,8 +1069,7 @@ it.effect("backs off exponentially across consecutive lifecycle stream failures"
           Stream.never,
         );
       },
-      [],
-      75,
+      () => Effect.succeed(75),
     );
 
     yield* Effect.scoped(
@@ -761,7 +1113,7 @@ it.effect("stays quiet about a seat's failed run when the asker is its Captain",
     // notice tells it about the failure, with the run's error, so no errored notice is posted here.
     yield* (yield* AgentCrewInstanceService).record({
       id: "crew:silence",
-      squadronId,
+      projectId,
       captainParticipantId: waiter.id,
       captainThreadId: waiter.threadId,
       displayName: "Silence Crew",
@@ -811,9 +1163,9 @@ it.effect("emits awaiting-human with human-knows when the inbox row exists", () 
     const sql = yield* SqlClient.SqlClient;
     yield* sql`
       INSERT INTO j5_a2a_human_inbox_data (
-        origin_squadron_id, message_id, exchange_id, sender_id, receiver_id, payload, created_at
+        origin_project_id, message_id, exchange_id, sender_id, receiver_id, payload, created_at
       ) VALUES (
-        ${squadronId}, ${outbound.messageId}, ${outbound.exchangeId}, ${subject.id},
+        ${projectId}, ${outbound.messageId}, ${outbound.exchangeId}, ${subject.id},
         ${person.id}, 'Human request', ${iso(1)}
       )
     `;
@@ -882,6 +1234,53 @@ it.effect("emits nothing for an idle agent that owes no reply", () =>
   }).pipe(Effect.provide(makeTestLayer())),
 );
 
+it.effect(
+  "emits nothing for a reply to another project that is accepted but not yet delivered",
+  () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      yield* runJ5A2AMigrations();
+      const ledger = yield* A2ALedger;
+      const subjectProjectId = LedgerProjectId.make("project:silence-test:subject");
+      yield* ledger.ensureProject({ projectId: projectId, createdAt: iso(0) });
+      yield* ledger.ensureProject({ projectId: subjectProjectId, createdAt: iso(0) });
+      yield* join(waiter, "waiter");
+      yield* ledger.append({
+        commandId: CommCommandId.make("command:silence:join:cross-subject"),
+        projectId: subjectProjectId,
+        acceptedAt: iso(0),
+        event: {
+          kind: "participant.joined",
+          sender: null,
+          receiver: subject.id,
+          exchangeId: null,
+          correlationId: null,
+          payload: { participant: subject },
+          createdAt: iso(0),
+        },
+      });
+      const exchange = yield* seedInbound(2);
+      yield* (yield* A2ASendService).send({
+        commandId: CommCommandId.make("command:silence:send:cross-reply"),
+        senderThreadId: subject.threadId,
+        to: waiter.id,
+        message: "Answered before the turn ended.",
+        exchangeId: exchange.exchangeId!,
+        acceptedAt: iso(3),
+      });
+      const pending = yield* (yield* SqlClient.SqlClient)<{ readonly status: string }>`
+      SELECT status FROM j5_a2a_delivery WHERE exchange_role = 'reply'
+    `;
+      assert.deepStrictEqual(pending, [{ status: "pending" }], "the worker has not run");
+
+      const appended = yield* (yield* A2ASilenceDetector).handleStoredEvent(
+        terminalEvent("completed"),
+      );
+      assert.deepStrictEqual(appended, []);
+      assert.deepStrictEqual(yield* readNotices(), []);
+    }).pipe(Effect.provide(makeTestLayer())),
+);
+
 it.effect("emits nothing when the human is the quiet recipient", () =>
   Effect.gen(function* () {
     yield* seed();
@@ -898,5 +1297,77 @@ it.effect("emits nothing when the human is the quiet recipient", () =>
     const appended = yield* (yield* A2ASilenceDetector).handleDeliveryEvent(delivered);
     assert.deepStrictEqual(appended, []);
     assert.deepStrictEqual(yield* readNotices(), []);
+  }).pipe(Effect.provide(makeTestLayer())),
+);
+
+it.effect("addresses a silence notice to a waiter on a peer server through the peer path", () =>
+  Effect.gen(function* () {
+    yield* seed();
+    const ledger = yield* A2ALedger;
+    const sql = yield* SqlClient.SqlClient;
+    const remoteAsker = ParticipantId.make("agent:j5:a2a:thread:remote-asker");
+    const exchangeId = ExchangeId.make("exchange:j5:a2a:remote-ask");
+    const correlationId = CorrelationId.make("correlation:j5:a2a:remote-ask");
+    const messageId = LedgerMessageId.make("message:j5:a2a:remote-ask");
+    // The ask came in from a peer: the inbound service's two facts, as it records them.
+    yield* ledger.appendEvents({
+      commandId: CommCommandId.make("command:silence:remote-ask"),
+      projectId,
+      acceptedAt: iso(0),
+      events: [
+        {
+          kind: "exchange.opened",
+          sender: remoteAsker,
+          receiver: subject.id,
+          exchangeId,
+          correlationId,
+          payload: { intent: "incident status", urgency: null },
+          createdAt: iso(0),
+        },
+        {
+          kind: "message.received",
+          sender: remoteAsker,
+          receiver: subject.id,
+          exchangeId,
+          correlationId,
+          payload: {
+            originProjectId: LedgerProjectId.make("project:home-support"),
+            originEnvironmentId: "environment-home",
+            message: {
+              messageId,
+              text: "What is the incident status?",
+              originProjectId: "project:home-support",
+              receiverProjectId: projectId,
+              exchangeRole: "ask",
+              envelopeChannel: "peer",
+            },
+          },
+          createdAt: iso(0),
+        },
+      ],
+    });
+    assert.equal((yield* (yield* A2ADeliveryWorker).runOnce)?.state, "delivered");
+    thread.messages.push({ id: deliveryMessageId(messageId), runId: defaultRunId });
+
+    const appended = yield* (yield* A2ASilenceDetector).handleStoredEvent(
+      terminalEvent("completed"),
+    );
+    assert.equal(appended.length, 1);
+    const notices = yield* readNotices();
+    assert.equal(notices[0]?.state, "turn-ended-no-reply");
+
+    const sent = yield* sql<{ readonly receiver: string; readonly payload: string }>`
+      SELECT receiver, payload FROM j5_a2a_comm_event
+      WHERE kind = 'message.sent' AND json_extract(payload, '$.envelopeChannel') = 'silence_notice'
+    `;
+    assert.equal(sent.length, 1);
+    assert.equal(sent[0]!.receiver, remoteAsker);
+    const payload = yield* decodeMessageSentPayload(sent[0]!.payload);
+    assert.equal(payload.receiverEnvironmentId, "environment-home");
+    assert.equal(payload.receiverProjectId, "project:home-support");
+    const row = yield* sql<{ readonly receiver_environment_id: string | null }>`
+      SELECT receiver_environment_id FROM j5_a2a_delivery WHERE message_id = ${payload.messageId}
+    `;
+    assert.deepStrictEqual(row, [{ receiver_environment_id: "environment-home" }]);
   }).pipe(Effect.provide(makeTestLayer())),
 );

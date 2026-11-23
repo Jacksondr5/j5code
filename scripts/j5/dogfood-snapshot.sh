@@ -7,7 +7,11 @@
 set -euo pipefail
 
 base_dir="${J5_DOGFOOD_BASE_DIR:-$HOME/.j5code}"
-db_path="$base_dir/userdata/state.sqlite"
+# The V2 server copies state.sqlite to statev2.sqlite on its first start and uses
+# only the copy afterwards; snapshot whichever file the server is using.
+db_name="statev2.sqlite"
+if [[ ! -f "$base_dir/userdata/$db_name" ]]; then db_name="state.sqlite"; fi
+db_path="$base_dir/userdata/$db_name"
 snapshot_root="${J5_DOGFOOD_SNAPSHOT_DIR:-$base_dir/db-snapshots}"
 keep="${J5_DOGFOOD_SNAPSHOT_KEEP:-14}"
 label="${1:-manual}"
@@ -19,8 +23,8 @@ fi
 
 snapshot_dir="$snapshot_root/$(date +%Y%m%d-%H%M%S)-$label"
 mkdir -p "$snapshot_dir"
-sqlite3 "$db_path" "VACUUM INTO '$snapshot_dir/state.sqlite'"
-echo "Snapshot written: $snapshot_dir/state.sqlite"
+sqlite3 -readonly "$db_path" "VACUUM INTO '$snapshot_dir/$db_name'"
+echo "Snapshot written: $snapshot_dir/$db_name"
 
 # Prune the oldest snapshots beyond the retention cap. Portable across GNU and
 # BSD userlands (macOS `head` has no negative -n; BSD `xargs` has no -r).

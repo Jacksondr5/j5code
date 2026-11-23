@@ -1,6 +1,11 @@
+import * as NodeOS from "node:os";
+
+import { CODEX_THREAD_CONFIG } from "../src/orchestration-v2/Adapters/CodexAdapterV2.ts";
+import { revertCodexThread } from "../src/provider/CodexThreadRevert.ts";
+import { buildCodexInitializeParams } from "../src/provider/CodexProvider.ts";
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import * as Console from "effect/Console";
 import * as Deferred from "effect/Deferred";
@@ -9,7 +14,7 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Effect from "effect/Effect";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 import * as CodexClient from "effect-codex-app-server/client";
 import type * as CodexSchema from "effect-codex-app-server/schema";
@@ -27,29 +32,25 @@ import {
   SUBAGENT_CONTINUE_PARENT_PROMPT,
   SUBAGENT_CONTINUE_PROMPT,
   SUBAGENT_PROMPT,
+  SUBAGENT_V2_APPROVAL_PROMPT,
+  SUBAGENT_V2_PROMPT,
+  SUBAGENT_V2_NESTED_APPROVAL_PROMPT,
+  SUBAGENT_V2_NESTED_PROMPT,
   THREAD_ROLLBACK_AFTER_PROMPT,
   THREAD_ROLLBACK_FIRST_PROMPT,
   THREAD_ROLLBACK_SECOND_PROMPT,
-  THREAD_FORK_NATIVE_CONTINUE_FIRST_PROMPT,
-  THREAD_FORK_NATIVE_CONTINUE_SECOND_PROMPT,
-  THREAD_FORK_NATIVE_CONTINUE_SOURCE_PROMPT,
-  THREAD_FORK_NATIVE_SIBLINGS_FIRST_PROMPT,
-  THREAD_FORK_NATIVE_SIBLINGS_SECOND_PROMPT,
-  THREAD_FORK_NATIVE_SIBLINGS_SOURCE_PROMPT,
-  THREAD_MERGE_BACK_FORK_PROMPT,
-  THREAD_MERGE_BACK_HANDOFF_PROMPT,
-  THREAD_MERGE_BACK_RECALL_PROMPT,
   THREAD_MERGE_BACK_SIBLINGS_FIRST_FORK_PROMPT,
   THREAD_MERGE_BACK_SIBLINGS_FIRST_HANDOFF_PROMPT,
   THREAD_MERGE_BACK_SIBLINGS_RECALL_PROMPT,
   THREAD_MERGE_BACK_SIBLINGS_SECOND_FORK_PROMPT,
   THREAD_MERGE_BACK_SIBLINGS_SECOND_HANDOFF_PROMPT,
   THREAD_MERGE_BACK_SIBLINGS_SOURCE_PROMPT,
-  THREAD_MERGE_BACK_SOURCE_PROMPT,
   TODO_LIST_PROMPT,
   TOOL_CALL_WRITE_PROMPT,
   TURN_INTERRUPT_MID_TOOL_PROMPT,
+  COMMAND_OUTPUT_STREAMING_PROMPT,
   TURN_INTERRUPT_PROMPT,
+  WEB_SEARCH_PROMPT,
 } from "../src/orchestration-v2/testkit/fixtures/shared.ts";
 import { codexReplayRecordingOutputRecords } from "./codexReplayRecordingRecords.ts";
 import { makeReplayRecorderDeferredRegistry } from "./replayRecorderDeferredRegistry.ts";
@@ -57,14 +58,14 @@ import { makeReplayRecorderDeferredRegistry } from "./replayRecorderDeferredRegi
 const CODEX_REPLAY_PLAN_MODE_DEVELOPER_INSTRUCTIONS =
   process.env.T3_CODEX_REPLAY_PLAN_DEVELOPER_INSTRUCTIONS ??
   "You are in Plan mode. Prefer request_user_input for clarifying questions. When presenting a complete plan, wrap it in <proposed_plan> and </proposed_plan>.";
-const CODEX_CLIENT_INFO = {
-  name: "t3code_desktop",
-  title: "T3 Code Desktop",
-  version: "0.1.0",
-} as const;
+// Match V2 adapter frames so recordings replay unchanged.
 const CODEX_CLIENT_CAPABILITIES = {
   experimentalApi: true,
+  optOutNotificationMethods: ["turn/diff/updated"],
+  extensions: { "io.modelcontextprotocol/ui": { mimeTypes: ["text/html;profile=mcp-app"] } },
 } as const;
+const CODEX_REPLAY_DEFAULT_MODEL = "gpt-6-luna";
+const CODEX_REPLAY_MODEL_OVERRIDE = readArgValue("--model") ?? process.env.T3_CODEX_REPLAY_MODEL;
 
 const SCENARIO_NAMES = [
   "simple",
@@ -73,18 +74,24 @@ const SCENARIO_NAMES = [
   "tool_call_restricted_granular",
   "subagent",
   "subagent_continue",
+  "subagent_v2",
+  "subagent_v2_approval",
+  "subagent_v2_nested",
+  "subagent_v2_nested_approval",
   "multi_turn",
+  "queued_turn",
   "provider_thread_resume",
   "todo_list",
+  "web_search",
   "plan_questions",
   "proposed_plan",
   "message_steering",
   "turn_interrupt",
   "turn_interrupt_mid_tool",
+  "command_output_streaming",
   "thread_rollback",
-  "thread_fork_native_continue",
-  "thread_fork_native_siblings",
-  "thread_merge_back_continue",
+  "thread_rollback_after_restart",
+  "thread_rollback_to_stopped_turn",
   "thread_merge_back_siblings",
 ] as const;
 
@@ -103,6 +110,9 @@ interface ReplayRun {
   readonly description: string;
   readonly steps: ReadonlyArray<ReplayStep>;
   readonly turnDefaults?: Omit<TurnStartParams, "input" | "threadId">;
+  readonly interactionMode?: "plan";
+  /** Recorder overrides; replay ignores keys listed in the header's `recorderThreadConfigKeys`. */
+  readonly threadConfig?: Readonly<Record<string, boolean | number | string>>;
 }
 
 type ReplayStep =
@@ -148,6 +158,7 @@ interface ReplayScenario {
   readonly name: ScenarioName;
   readonly fileName: `${ScenarioName}.ndjson`;
   readonly description: string;
+  readonly model?: string;
   readonly runs: ReadonlyArray<ReplayRun>;
 }
 
@@ -312,14 +323,16 @@ function granularApprovalPolicy(): ApprovalPolicy {
   };
 }
 
-function collaborationMode(
-  mode: Extract<CodexSchema.V2TurnStartParams__ModeKind, "plan">,
-): CodexSchema.V2TurnStartParams__CollaborationMode {
+function scenarioModel(scenario: ReplayScenario): string {
+  return CODEX_REPLAY_MODEL_OVERRIDE ?? scenario.model ?? CODEX_REPLAY_DEFAULT_MODEL;
+}
+
+function planCollaborationMode(model: string): CodexSchema.V2TurnStartParams__CollaborationMode {
   return {
-    mode,
+    mode: "plan",
     settings: {
       developer_instructions: CODEX_REPLAY_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
-      model: "gpt-5.4",
+      model,
       reasoning_effort: "medium",
     },
   };
@@ -345,6 +358,8 @@ function scenarios(): ReadonlyArray<ReplayScenario> {
       fileName: "tool_call_read_only_on_request.ndjson",
       description:
         "Write a small fixture file with read-only full filesystem visibility and on-request approvals.",
+      // gpt-6-luna declines to attempt the write under a read-only sandbox; gpt-6-sol tries it.
+      model: "gpt-6-sol",
       runs: [
         {
           name: "read-only-on-request",
@@ -383,6 +398,8 @@ function scenarios(): ReadonlyArray<ReplayScenario> {
       fileName: "tool_call_restricted_granular.ndjson",
       description:
         "Write a small fixture file with restricted read access and granular approval flags enabled.",
+      // gpt-5.6-terra uses apply_patch, which raises this approval; gpt-6 uses the shell.
+      model: "gpt-5.6-terra",
       runs: [
         {
           name: "restricted-granular",
@@ -407,11 +424,15 @@ function scenarios(): ReadonlyArray<ReplayScenario> {
       name: "subagent",
       fileName: "subagent.ndjson",
       description: "One root turn that asks Codex to spawn two collab agents.",
+      // gpt-5.6-luna still runs multi-agent v1, the only live source of collabAgentToolCall.
+      model: "gpt-5.6-luna",
       runs: [
         {
           name: "two-subagents",
           description: "Root turn asks for two subagents reading different files.",
           prompt: SUBAGENT_PROMPT,
+          // Without this, children read the recording user's own skills into the fixture.
+          threadConfig: { "skills.include_instructions": false },
           turnDefaults: {
             approvalPolicy: "on-request",
             sandboxPolicy: readOnlyFullAccessSandbox(),
@@ -421,10 +442,95 @@ function scenarios(): ReadonlyArray<ReplayScenario> {
       ],
     },
     {
+      name: "subagent_v2",
+      fileName: "subagent_v2.ndjson",
+      description:
+        "One root turn on a multi-agent v2 model that spawns one native subagent and waits for it.",
+      runs: [
+        {
+          name: "spawn-v2-subagent",
+          description:
+            "The default model runs multi-agent v2, so Codex emits subAgentActivity items.",
+          steps: [{ type: "turn", label: "spawn-v2-subagent", prompt: SUBAGENT_V2_PROMPT }],
+        },
+      ],
+    },
+    {
+      name: "subagent_v2_approval",
+      fileName: "subagent_v2_approval.ndjson",
+      description:
+        "One root turn in approval-required mode whose multi-agent v2 subagent runs a command that needs approval.",
+      runs: [
+        {
+          name: "spawn-v2-subagent-needing-approval",
+          description:
+            "The child inherits the root's approval policy, so its write asks the client for approval on the child's native thread and turn.",
+          turnDefaults: {
+            approvalPolicy: "untrusted",
+            sandboxPolicy: { type: "readOnly" },
+          },
+          steps: [
+            {
+              type: "turn",
+              label: "spawn-v2-subagent-needing-approval",
+              prompt: SUBAGENT_V2_APPROVAL_PROMPT,
+            },
+          ],
+        },
+      ],
+    },
+    {
+      name: "subagent_v2_nested",
+      fileName: "subagent_v2_nested.ndjson",
+      description:
+        "One root turn on a multi-agent v2 model whose subagent spawns a subagent that spawns a leaf.",
+      runs: [
+        {
+          name: "spawn-nested-v2-subagents",
+          description: "Multi-agent v2; depth 3 lets each child spawn again.",
+          threadConfig: { "agents.max_depth": 3 },
+          steps: [
+            {
+              type: "turn",
+              label: "spawn-nested-v2-subagents",
+              prompt: SUBAGENT_V2_NESTED_PROMPT,
+            },
+          ],
+        },
+      ],
+    },
+    {
+      name: "subagent_v2_nested_approval",
+      fileName: "subagent_v2_nested_approval.ndjson",
+      description:
+        "One root turn in approval-required mode whose multi-agent v2 subagent spawns a subagent that runs a command that needs approval.",
+      runs: [
+        {
+          name: "spawn-nested-v2-subagent-needing-approval",
+          description:
+            "Depth 2 lets the first child spawn once. The grandchild inherits the root's approval policy, so its write asks the client for approval on the grandchild's native thread and turn.",
+          threadConfig: { "agents.max_depth": 2 },
+          turnDefaults: {
+            approvalPolicy: "untrusted",
+            sandboxPolicy: { type: "readOnly" },
+          },
+          steps: [
+            {
+              type: "turn",
+              label: "spawn-nested-v2-subagent-needing-approval",
+              prompt: SUBAGENT_V2_NESTED_APPROVAL_PROMPT,
+            },
+          ],
+        },
+      ],
+    },
+    {
       name: "subagent_continue",
       fileName: "subagent_continue.ndjson",
       description:
         "A root turn spawns one native Codex subagent, then a later root turn resumes and messages the same child thread.",
+      // gpt-5.6-luna still runs multi-agent v1, the only live source of collabAgentToolCall.
+      model: "gpt-5.6-luna",
       runs: [
         {
           name: "continued-subagent",
@@ -464,6 +570,22 @@ function scenarios(): ReadonlyArray<ReplayScenario> {
               label: "second",
               prompt: MULTI_TURN_SECOND_PROMPT,
             },
+          ],
+        },
+      ],
+    },
+    {
+      name: "queued_turn",
+      fileName: "queued_turn.ndjson",
+      description: "A second user turn queued behind an active turn starts after it completes.",
+      runs: [
+        {
+          name: "queued-second-turn",
+          description:
+            "The orchestrator holds the queued message until the first turn completes, so the provider sees two sequential turns.",
+          steps: [
+            { type: "turn", label: "first", prompt: MULTI_TURN_FIRST_PROMPT },
+            { type: "turn", label: "queued", prompt: MULTI_TURN_SECOND_PROMPT },
           ],
         },
       ],
@@ -511,6 +633,19 @@ function scenarios(): ReadonlyArray<ReplayScenario> {
       ],
     },
     {
+      name: "web_search",
+      fileName: "web_search.ndjson",
+      description:
+        "One turn with a native Codex webSearch item that should become normalized progress.",
+      runs: [
+        {
+          name: "web-search",
+          description: "Default-mode turn that should surface a webSearch item.",
+          steps: [{ type: "turn", label: "web-search", prompt: WEB_SEARCH_PROMPT }],
+        },
+      ],
+    },
+    {
       name: "plan_questions",
       fileName: "plan_questions.ndjson",
       description: "One plan-mode turn that asks a structured clarifying question.",
@@ -519,9 +654,9 @@ function scenarios(): ReadonlyArray<ReplayScenario> {
           name: "plan-questions",
           description: "Plan-mode turn intended to surface item/tool/requestUserInput.",
           prompt: PLAN_QUESTIONS_PROMPT,
+          interactionMode: "plan",
           turnDefaults: {
             approvalPolicy: "never",
-            collaborationMode: collaborationMode("plan"),
             sandboxPolicy: readOnlyFullAccessSandbox(),
           },
           steps: [{ type: "turn", label: "plan-questions", prompt: PLAN_QUESTIONS_PROMPT }],
@@ -538,9 +673,9 @@ function scenarios(): ReadonlyArray<ReplayScenario> {
           description:
             "Plan-mode turn intended to surface item/plan/delta and completed plan item.",
           prompt: PROPOSED_PLAN_PROMPT,
+          interactionMode: "plan",
           turnDefaults: {
             approvalPolicy: "never",
-            collaborationMode: collaborationMode("plan"),
             sandboxPolicy: readOnlyFullAccessSandbox(),
           },
           steps: [{ type: "turn", label: "proposed-plan", prompt: PROPOSED_PLAN_PROMPT }],
@@ -616,6 +751,29 @@ function scenarios(): ReadonlyArray<ReplayScenario> {
       ],
     },
     {
+      name: "command_output_streaming",
+      fileName: "command_output_streaming.ndjson",
+      description: "One command prints over several seconds, so Codex streams its output deltas.",
+      runs: [
+        {
+          name: "command-output-streaming",
+          description: "Run a foreground command that prints a line a second.",
+          prompt: COMMAND_OUTPUT_STREAMING_PROMPT,
+          turnDefaults: {
+            approvalPolicy: "never",
+            sandboxPolicy: workspaceWriteSandbox(),
+          },
+          steps: [
+            {
+              type: "turn",
+              label: "command-output-streaming",
+              prompt: COMMAND_OUTPUT_STREAMING_PROMPT,
+            },
+          ],
+        },
+      ],
+    },
+    {
       name: "thread_rollback",
       fileName: "thread_rollback.ndjson",
       description:
@@ -624,7 +782,7 @@ function scenarios(): ReadonlyArray<ReplayScenario> {
         {
           name: "rollback-one-turn",
           description:
-            "Two completed turns, thread/rollback numTurns=1, then a post-rollback turn.",
+            "Two completed turns, thread/revert before the second turn, then a post-rollback turn.",
           steps: [
             {
               type: "turn",
@@ -651,124 +809,80 @@ function scenarios(): ReadonlyArray<ReplayScenario> {
       ],
     },
     {
-      name: "thread_fork_native_continue",
-      fileName: "thread_fork_native_continue.ndjson",
+      name: "thread_rollback_after_restart",
+      fileName: "thread_rollback_after_restart.ndjson",
       description:
-        "One source marker turn, a native thread fork, a fork-local marker turn, and a recall turn that requires both contexts.",
+        "One thread completes two turns, the app-server restarts, then the thread rolls back its latest turn and starts another turn.",
       runs: [
         {
-          name: "continue-native-fork",
+          name: "rollback-after-restart",
           description:
-            "Proves the native fork inherits source context and retains its own first turn into a second fork-local turn.",
+            "Two completed turns, a fresh app-server that has not loaded the thread, thread/revert before the second turn, then a post-rollback turn.",
           steps: [
             {
               type: "turn",
-              label: "source",
-              prompt: THREAD_FORK_NATIVE_CONTINUE_SOURCE_PROMPT,
-            },
-            {
-              type: "fork",
-              label: "fork-source",
+              label: "first-before-rollback",
+              prompt: THREAD_ROLLBACK_FIRST_PROMPT,
             },
             {
               type: "turn",
-              label: "fork-first-delta",
-              prompt: THREAD_FORK_NATIVE_CONTINUE_FIRST_PROMPT,
+              label: "second-before-rollback",
+              prompt: THREAD_ROLLBACK_SECOND_PROMPT,
+            },
+            {
+              type: "rollback",
+              label: "rollback-latest-turn",
+              numTurns: 1,
             },
             {
               type: "turn",
-              label: "fork-second-delta",
-              prompt: THREAD_FORK_NATIVE_CONTINUE_SECOND_PROMPT,
+              label: "post-rollback",
+              prompt: THREAD_ROLLBACK_AFTER_PROMPT,
             },
           ],
         },
       ],
     },
     {
-      name: "thread_fork_native_siblings",
-      fileName: "thread_fork_native_siblings.ndjson",
+      name: "thread_rollback_to_stopped_turn",
+      fileName: "thread_rollback_to_stopped_turn.ndjson",
       description:
-        "One source marker turn and two independent native forks that each recall the source plus only their own fork marker.",
+        "One completed turn, one turn stopped mid-tool, one completed turn, thread/revert back to the stopped turn, then a post-rollback turn.",
       runs: [
         {
-          name: "native-sibling-forks",
+          name: "rollback-to-stopped-turn",
           description:
-            "Creates two native forks from the same source provider thread and proves their contexts remain isolated.",
+            "Edit the message after a stopped turn: revert the turn after it and keep the stopped turn.",
+          turnDefaults: {
+            approvalPolicy: "never",
+            sandboxPolicy: workspaceWriteSandbox(),
+          },
           steps: [
             {
               type: "turn",
-              label: "source",
-              prompt: THREAD_FORK_NATIVE_SIBLINGS_SOURCE_PROMPT,
-              thread: "source",
+              label: "first-before-rollback",
+              prompt: THREAD_ROLLBACK_FIRST_PROMPT,
             },
             {
-              type: "fork",
-              label: "fork-first",
-              from: "source",
-              as: "first",
-            },
-            {
-              type: "turn",
-              label: "first-recall",
-              prompt: THREAD_FORK_NATIVE_SIBLINGS_FIRST_PROMPT,
-              thread: "first",
-            },
-            {
-              type: "fork",
-              label: "fork-second",
-              from: "source",
-              as: "second",
+              type: "interruptedTurn",
+              label: "stopped-mid-tool",
+              prompt: TURN_INTERRUPT_MID_TOOL_PROMPT,
+              interruptAfterCommandExecutionStarted: true,
             },
             {
               type: "turn",
-              label: "second-recall",
-              prompt: THREAD_FORK_NATIVE_SIBLINGS_SECOND_PROMPT,
-              thread: "second",
-            },
-          ],
-        },
-      ],
-    },
-    {
-      name: "thread_merge_back_continue",
-      fileName: "thread_merge_back_continue.ndjson",
-      description:
-        "A source thread consumes one fork-delta handoff and later recalls source and transferred context.",
-      runs: [
-        {
-          name: "merge-native-fork",
-          description:
-            "Proves a merge-back handoff becomes durable context on the original provider thread.",
-          steps: [
-            {
-              type: "turn",
-              label: "source",
-              prompt: THREAD_MERGE_BACK_SOURCE_PROMPT,
-              thread: "source",
+              label: "second-before-rollback",
+              prompt: THREAD_ROLLBACK_SECOND_PROMPT,
             },
             {
-              type: "fork",
-              label: "fork",
-              from: "source",
-              as: "fork",
+              type: "rollback",
+              label: "rollback-to-stopped-turn",
+              numTurns: 1,
             },
             {
               type: "turn",
-              label: "fork-delta",
-              prompt: THREAD_MERGE_BACK_FORK_PROMPT,
-              thread: "fork",
-            },
-            {
-              type: "turn",
-              label: "merge-back",
-              prompt: THREAD_MERGE_BACK_HANDOFF_PROMPT,
-              thread: "source",
-            },
-            {
-              type: "turn",
-              label: "source-recall",
-              prompt: THREAD_MERGE_BACK_RECALL_PROMPT,
-              thread: "source",
+              label: "post-rollback",
+              prompt: THREAD_ROLLBACK_AFTER_PROMPT,
             },
           ],
         },
@@ -779,6 +893,8 @@ function scenarios(): ReadonlyArray<ReplayScenario> {
       fileName: "thread_merge_back_siblings.ndjson",
       description:
         "Two sibling fork deltas are merged sequentially into one source provider thread and recalled together.",
+      // gpt-6-luna often recalls acknowledgements; gpt-6-sol recalls the markers.
+      model: "gpt-6-sol",
       runs: [
         {
           name: "merge-native-sibling-forks",
@@ -840,60 +956,74 @@ function scenarios(): ReadonlyArray<ReplayScenario> {
   ];
 }
 
-function makeRecorder({
+function recorderThreadConfigMetadata(scenario: ReplayScenario) {
+  const keys = [...new Set(scenario.runs.flatMap((run) => Object.keys(run.threadConfig ?? {})))];
+  return keys.length === 0 ? {} : { recorderThreadConfigKeys: keys };
+}
+
+const makeRecorder = Effect.fn("record-codex-app-server-replay-fixture.makeRecorder")(function* ({
   outPath,
   scenario,
+  checkout,
 }: {
   readonly outPath: string;
   readonly scenario: ReplayScenario;
-}): Effect.Effect<Recorder, PlatformError.PlatformError, FileSystem.FileSystem> {
-  return Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    let version = "unknown";
-    const records: Array<Record<string, unknown>> = [];
-    const setVersion = (nextVersion: string) =>
-      Effect.sync(() => {
-        version = nextVersion;
-      });
-    const writeRecord = (record: Record<string, unknown>) =>
-      Effect.sync(() => {
-        records.push(record);
-      });
-    const flush = () => {
-      const outputRecords = codexReplayRecordingOutputRecords(records);
-      return fs.writeFileString(
-        outPath,
-        `${[
-          {
-            type: "transcript_start",
-            provider: "codex",
-            protocol: "codex.app-server",
-            version,
-            scenario: scenario.name,
-            metadata: {
-              source: "record-codex-app-server-replay-fixture",
-              fileName: scenario.fileName,
-              description: scenario.description,
-            },
+  readonly checkout: string;
+}): Effect.fn.Return<Recorder, PlatformError.PlatformError, FileSystem.FileSystem> {
+  const fs = yield* FileSystem.FileSystem;
+  let version = "unknown";
+  const records: Array<Record<string, unknown>> = [];
+  const setVersion = (nextVersion: string) =>
+    Effect.sync(() => {
+      version = nextVersion;
+    });
+  const writeRecord = (record: Record<string, unknown>) =>
+    Effect.sync(() => {
+      records.push(record);
+    });
+  const flush = () => {
+    const outputRecords = codexReplayRecordingOutputRecords(records, {
+      workspace: process.cwd(),
+      machine: {
+        home: NodeOS.homedir(),
+        hostname: NodeOS.hostname(),
+        checkout,
+      },
+    });
+    return fs.writeFileString(
+      outPath,
+      `${[
+        {
+          type: "transcript_start",
+          provider: "codex",
+          protocol: "codex.app-server",
+          version,
+          scenario: scenario.name,
+          metadata: {
+            source: "record-codex-app-server-replay-fixture",
+            fileName: scenario.fileName,
+            description: scenario.description,
+            model: scenarioModel(scenario),
+            ...recorderThreadConfigMetadata(scenario),
           },
-          ...outputRecords,
-        ]
-          .map((record) => JSON.stringify(record))
-          .join("\n")}\n`,
-      );
-    };
+        },
+        ...outputRecords,
+      ]
+        .map((record) => JSON.stringify(record))
+        .join("\n")}\n`,
+    );
+  };
 
-    return { path: outPath, setVersion, writeRecord, flush };
-  });
-}
+  return { path: outPath, setVersion, writeRecord, flush };
+});
 
-function makeCodexLayer({ recorder }: { readonly recorder: Recorder }) {
+function layerCodex({ recorder }: { readonly recorder: Recorder }) {
   const clientRequestMethodById = new Map<string, string>();
   const serverRequestMethodById = new Map<string, string>();
   const clientOptions: CodexClient.CodexAppServerClientOptions = {
     logIncoming: true,
     logOutgoing: true,
-    logger: (event) => {
+    logger: Effect.fn("logger")(function (event) {
       if (event.stage === "raw") {
         return Effect.void;
       }
@@ -944,13 +1074,15 @@ function makeCodexLayer({ recorder }: { readonly recorder: Recorder }) {
         yield* updateVersion;
         yield* recorder.writeRecord(record);
       }).pipe(Effect.ignore);
-    },
+    }),
   };
 
   return Layer.effect(
     CodexClient.CodexAppServerClient,
     Effect.gen(function* () {
-      const environment = yield* HostProcessEnvironment;
+      // Inheriting the vp shim's VP_TOOL_RECURSION makes Codex's shell `node` calls fail.
+      const { VP_TOOL_RECURSION: _vpToolRecursion, ...environment } =
+        yield* HostProcess.Environment;
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const commandName = environment.T3_CODEX_BIN ?? environment.CODEX_BIN ?? "codex";
       const spawnCommand = yield* resolveSpawnCommand(commandName, ["app-server"], {
@@ -975,12 +1107,14 @@ function installReplayHandlers({
   completeTurn,
   startCommandExecution,
   beforeApprovalResponse,
+  runningCommandProcessIds,
 }: {
   readonly client: CodexClient.CodexAppServerClient["Service"];
   readonly startTurn: (turnId: string) => Effect.Effect<void>;
   readonly completeTurn: (turnId: string) => Effect.Effect<void>;
   readonly startCommandExecution: (turnId: string) => Effect.Effect<void>;
   readonly beforeApprovalResponse: () => Effect.Effect<void>;
+  readonly runningCommandProcessIds: Map<string, Map<string, string>>;
 }) {
   return Effect.all(
     [
@@ -1042,31 +1176,36 @@ function installReplayHandlers({
       client.handleServerNotification("turn/completed", (payload) =>
         completeTurn(payload.turn.id).pipe(Effect.ignore),
       ),
-      client.handleServerNotification("item/completed", (payload) =>
-        isRecord(payload.item) && payload.item.type === "commandExecution"
-          ? startCommandExecution(payload.turnId).pipe(Effect.ignore)
-          : Effect.void,
-      ),
-      client.handleServerNotification("item/started", (payload) =>
-        isRecord(payload.item) && payload.item.type === "commandExecution"
-          ? startCommandExecution(payload.turnId).pipe(Effect.ignore)
-          : Effect.void,
-      ),
+      client.handleServerNotification("item/completed", (payload) => {
+        if (payload.item.type !== "commandExecution") return Effect.void;
+        runningCommandProcessIds.get(payload.turnId)?.delete(payload.item.id);
+        return startCommandExecution(payload.turnId).pipe(Effect.ignore);
+      }),
+      client.handleServerNotification("item/started", (payload) => {
+        if (payload.item.type !== "commandExecution") return Effect.void;
+        const processId = payload.item.processId;
+        if (payload.item.status === "inProgress" && typeof processId === "string") {
+          const running = runningCommandProcessIds.get(payload.turnId) ?? new Map();
+          running.set(payload.item.id, processId);
+          runningCommandProcessIds.set(payload.turnId, running);
+        }
+        return startCommandExecution(payload.turnId).pipe(Effect.ignore);
+      }),
     ],
     { discard: true },
   );
 }
 
-function runReplaySession({
-  scenario,
-  run,
-  recorder,
-}: {
-  readonly scenario: ReplayScenario;
-  readonly run: ReplayRun;
-  readonly recorder: Recorder;
-}) {
-  return Effect.gen(function* () {
+const runReplaySession = Effect.fn("record-codex-app-server-replay-fixture.runReplaySession")(
+  function* ({
+    scenario,
+    run,
+    recorder,
+  }: {
+    readonly scenario: ReplayScenario;
+    readonly run: ReplayRun;
+    readonly recorder: Recorder;
+  }) {
     const startedTurns = yield* makeReplayRecorderDeferredRegistry();
     const completedTurns = yield* makeReplayRecorderDeferredRegistry();
     const startedCommandExecutions = yield* makeReplayRecorderDeferredRegistry();
@@ -1079,6 +1218,10 @@ function runReplaySession({
     const startCommandExecution = startedCommandExecutions.succeed;
     const beforeApprovalResponse = () =>
       approvalGate ? Deferred.await(approvalGate) : Effect.void;
+    const model = scenarioModel(scenario);
+    const threadRuntimeParams = { cwd: process.cwd(), model, config: CODEX_THREAD_CONFIG };
+    const lastTurnIdByThread = new Map<string, string>();
+    const runningCommandProcessIds = new Map<string, Map<string, string>>();
 
     const initializeClient = Effect.gen(function* () {
       const client = yield* CodexClient.CodexAppServerClient;
@@ -1089,10 +1232,11 @@ function runReplaySession({
         completeTurn,
         startCommandExecution,
         beforeApprovalResponse,
+        runningCommandProcessIds,
       });
 
       yield* client.request("initialize", {
-        clientInfo: CODEX_CLIENT_INFO,
+        clientInfo: buildCodexInitializeParams().clientInfo,
         capabilities: CODEX_CLIENT_CAPABILITIES,
       });
 
@@ -1101,57 +1245,72 @@ function runReplaySession({
       return client;
     });
 
-    const runTurnStep = (
+    const runTurnStep = Effect.fn("record-codex-app-server-replay-fixture.runTurnStep")(function* (
       client: CodexClient.CodexAppServerClient["Service"],
       threadId: string,
       step: TurnReplayStep,
-    ) =>
-      Effect.gen(function* () {
-        const turnParams: TurnStartParams = {
-          ...run.turnDefaults,
-          ...step.turnOverrides,
-          input: turnInput(step.prompt),
+    ) {
+      const turnParams: TurnStartParams = {
+        approvalPolicy: "never",
+        sandboxPolicy: { type: "dangerFullAccess" },
+        cwd: process.cwd(),
+        model,
+        summary: "detailed",
+        approvalsReviewer: "user",
+        ...(run.interactionMode === "plan"
+          ? { collaborationMode: planCollaborationMode(model) }
+          : {}),
+        ...run.turnDefaults,
+        ...step.turnOverrides,
+        input: turnInput(step.prompt),
+        threadId,
+      };
+
+      if (step.type === "steeredTurn") {
+        approvalGate = yield* Deferred.make<void>();
+      }
+
+      const turn = yield* client.request("turn/start", turnParams);
+      const turnId = getTurnId(turn);
+      const started = yield* getStarted(turnId);
+      yield* getCompletion(turnId);
+
+      if (step.type === "steeredTurn") {
+        yield* Deferred.await(started);
+        yield* client.request("turn/steer", {
+          expectedTurnId: turnId,
+          input: turnInput(step.steer),
           threadId,
-        };
-
-        if (step.type === "steeredTurn") {
-          approvalGate = yield* Deferred.make<void>();
+        });
+        if (approvalGate) {
+          yield* Deferred.succeed(approvalGate, void 0);
+          approvalGate = undefined;
         }
+      }
 
-        const turn = yield* client.request("turn/start", turnParams);
-        const turnId = getTurnId(turn);
-        const started = yield* getStarted(turnId);
-        yield* getCompletion(turnId);
-
-        if (step.type === "steeredTurn") {
-          yield* Deferred.await(started);
-          yield* client.request("turn/steer", {
-            expectedTurnId: turnId,
-            input: turnInput(step.steer),
-            threadId,
-          });
-          if (approvalGate) {
-            yield* Deferred.succeed(approvalGate, void 0);
-            approvalGate = undefined;
-          }
+      if (step.type === "interruptedTurn") {
+        if (step.interruptAfterCommandExecutionStarted === true) {
+          const commandExecutionStarted = yield* getCommandExecutionStarted(turnId);
+          yield* Deferred.await(commandExecutionStarted);
+        } else {
+          yield* Effect.sleep(`${step.interruptAfterMs ?? 1_500} millis`);
         }
-
-        if (step.type === "interruptedTurn") {
-          if (step.interruptAfterCommandExecutionStarted === true) {
-            const commandExecutionStarted = yield* getCommandExecutionStarted(turnId);
-            yield* Deferred.await(commandExecutionStarted);
-          } else {
-            yield* Effect.sleep(`${step.interruptAfterMs ?? 1_500} millis`);
-          }
-          yield* client.request("turn/interrupt", {
+        yield* client.request("turn/interrupt", {
+          threadId,
+          turnId,
+        });
+        for (const processId of runningCommandProcessIds.get(turnId)?.values() ?? []) {
+          yield* client.raw.request("thread/backgroundTerminals/terminate", {
             threadId,
-            turnId,
+            processId,
           });
         }
+      }
 
-        const completed = yield* getCompletion(turnId);
-        yield* Deferred.await(completed);
-      });
+      const completed = yield* getCompletion(turnId);
+      yield* Deferred.await(completed);
+      lastTurnIdByThread.set(threadId, turnId);
+    });
 
     if (scenario.name === "provider_thread_resume") {
       const firstStep = run.steps[0];
@@ -1169,12 +1328,12 @@ function runReplaySession({
 
       const firstThread = yield* Effect.gen(function* () {
         const client = yield* initializeClient;
-        const thread = yield* client.request("thread/start", {});
+        const thread = yield* client.request("thread/start", threadRuntimeParams);
         yield* runTurnStep(client, thread.thread.id, firstStep);
         return thread;
       }).pipe(
         Effect.provide(
-          makeCodexLayer({
+          layerCodex({
             recorder,
           }),
         ),
@@ -1189,11 +1348,13 @@ function runReplaySession({
         const client = yield* initializeClient;
         const thread = yield* client.request("thread/resume", {
           threadId: firstThread.thread.id,
+          excludeTurns: true,
+          ...threadRuntimeParams,
         });
         yield* runTurnStep(client, thread.thread.id, secondStep);
       }).pipe(
         Effect.provide(
-          makeCodexLayer({
+          layerCodex({
             recorder,
           }),
         ),
@@ -1201,18 +1362,64 @@ function runReplaySession({
       return;
     }
 
+    if (scenario.name === "thread_rollback_after_restart") {
+      const [first, second, rollback, after] = run.steps;
+      if (
+        first === undefined ||
+        second === undefined ||
+        rollback?.type !== "rollback" ||
+        after === undefined ||
+        first.type === "rollback" ||
+        first.type === "fork" ||
+        second.type === "rollback" ||
+        second.type === "fork" ||
+        after.type === "rollback" ||
+        after.type === "fork"
+      ) {
+        throw new Error(
+          "thread_rollback_after_restart replay recording requires turn, turn, rollback, turn.",
+        );
+      }
+
+      const threadId = yield* Effect.gen(function* () {
+        const client = yield* initializeClient;
+        const thread = yield* client.request("thread/start", threadRuntimeParams);
+        yield* runTurnStep(client, thread.thread.id, first);
+        yield* runTurnStep(client, thread.thread.id, second);
+        return thread.thread.id;
+      }).pipe(Effect.provide(layerCodex({ recorder })));
+
+      yield* recorder.writeRecord({
+        type: "runtime_exit",
+        status: "success",
+      });
+
+      yield* Effect.gen(function* () {
+        const client = yield* initializeClient;
+        const resumeParams = { threadId, excludeTurns: true, ...threadRuntimeParams };
+        // Fresh app-servers report notLoaded; resume before thread/revert and again on the next turn.
+        yield* client.request("thread/read", { threadId, includeTurns: false });
+        yield* client.request("thread/resume", resumeParams);
+        yield* revertCodexThread(client, threadId, rollback.numTurns);
+        yield* client.request("thread/resume", resumeParams);
+        yield* runTurnStep(client, threadId, after);
+      }).pipe(Effect.provide(layerCodex({ recorder })));
+      return;
+    }
+
     yield* Effect.gen(function* () {
       const client = yield* initializeClient;
-      const thread = yield* client.request("thread/start", {});
+      const thread = yield* client.request("thread/start", {
+        ...threadRuntimeParams,
+        config: { ...threadRuntimeParams.config, ...run.threadConfig },
+      });
       let activeThreadId = thread.thread.id;
       const threadIds = new Map<string, string>([["source", thread.thread.id]]);
 
       for (const [stepIndex, step] of run.steps.entries()) {
         if (step.type === "rollback") {
-          yield* client.request("thread/rollback", {
-            threadId: activeThreadId,
-            numTurns: step.numTurns,
-          });
+          yield* client.request("thread/read", { threadId: activeThreadId, includeTurns: false });
+          yield* revertCodexThread(client, activeThreadId, step.numTurns);
           continue;
         }
         if (step.type === "fork") {
@@ -1221,8 +1428,11 @@ function runReplaySession({
           if (sourceThreadId === undefined) {
             throw new Error(`Unknown replay thread alias '${step.from}'.`);
           }
+          const lastTurnId = lastTurnIdByThread.get(sourceThreadId);
           const forked = yield* client.request("thread/fork", {
             threadId: sourceThreadId,
+            ...(lastTurnId === undefined ? {} : { lastTurnId }),
+            ...threadRuntimeParams,
           });
           activeThreadId = forked.thread.id;
           if (step.as !== undefined) {
@@ -1242,40 +1452,39 @@ function runReplaySession({
       }
     }).pipe(
       Effect.provide(
-        makeCodexLayer({
+        layerCodex({
           recorder,
         }),
       ),
     );
-  });
-}
+  },
+);
 
-function runScenario({
+const runScenario = Effect.fn("record-codex-app-server-replay-fixture.runScenario")(function* ({
   scenario,
   outPath,
 }: {
   readonly scenario: ReplayScenario;
   readonly outPath: string;
 }) {
-  return Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const recorder = yield* makeRecorder({ outPath, scenario });
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const checkout = path.resolve(yield* path.fromFileUrl(new URL("../../..", import.meta.url)));
+  const recorder = yield* makeRecorder({ outPath, scenario, checkout });
 
-    yield* fs.makeDirectory(path.dirname(outPath), { recursive: true });
-    yield* Console.log(`Writing ${scenario.name} Codex replay events to ${recorder.path}`);
+  yield* fs.makeDirectory(path.dirname(outPath), { recursive: true });
+  yield* Console.log(`Writing ${scenario.name} Codex replay events to ${recorder.path}`);
 
-    yield* Effect.forEach(scenario.runs, (run) => runReplaySession({ scenario, run, recorder }), {
-      concurrency: 1,
-    });
-
-    yield* recorder.writeRecord({
-      type: "runtime_exit",
-      status: "success",
-    });
-    yield* recorder.flush();
+  yield* Effect.forEach(scenario.runs, (run) => runReplaySession({ scenario, run, recorder }), {
+    concurrency: 1,
   });
-}
+
+  yield* recorder.writeRecord({
+    type: "runtime_exit",
+    status: "success",
+  });
+  yield* recorder.flush();
+});
 
 const program = Effect.gen(function* () {
   const path = yield* Path.Path;

@@ -1,0 +1,1063 @@
+---
+import Icon from "./Icon.astro";
+import InboxExplorer from "./InboxExplorer.astro";
+import Mark from "./Mark.astro";
+import type { LucideName } from "./icons";
+
+interface Tab {
+  kind: string;
+  surface: string;
+  label: string;
+  icon: LucideName;
+  tone?: string;
+  selected?: boolean;
+  later?: boolean;
+}
+
+interface Surface {
+  kind: string;
+  label: string;
+  icon: LucideName;
+  key: string;
+  off?: string;
+  offIn?: string;
+}
+
+/**
+ * The Inbox with the asking agent's panel beside it (apps/web/src/j5/a2a/HumanInboxPage.tsx,
+ * InboxThreadPanel.tsx); a sheet over it in a narrow window, as in the app. lib/whatsNew.ts makes
+ * the links, tabs, + menu, panel controls and Answer work. The reply box is drawn plain.
+ */
+const threads: { id: string; agent: string; title: string; tabs: Tab[] }[] = [
+  {
+    id: "pr",
+    agent: "Release checker",
+    title: "Sort-order fix",
+    tabs: [
+      { kind: "pr", surface: "pr", label: "#42", icon: "git-pull-request-arrow", tone: "t-open" },
+      { kind: "diff", surface: "diff-pr", label: "Diff", icon: "file-diff", selected: true },
+      { kind: "files", surface: "files", label: "Files", icon: "files" },
+      { kind: "artifacts", surface: "artifacts", label: "Artifacts", icon: "folder-archive", later: true },
+    ],
+  },
+  {
+    id: "file",
+    agent: "Docs writer",
+    title: "README cleanup",
+    tabs: [
+      { kind: "file", surface: "file", label: "README.md", icon: "file-text", selected: true },
+      { kind: "files", surface: "files", label: "Files", icon: "files", later: true },
+      { kind: "artifacts", surface: "artifacts", label: "Artifacts", icon: "folder-archive", later: true },
+      { kind: "diff", surface: "diff-file", label: "Diff", icon: "file-diff", later: true },
+    ],
+  },
+];
+
+/** RightPanelTabs' add menu, with the reasons the Inbox gives for what it can't open. */
+const surfaces: Surface[] = [
+  { kind: "browser", label: "Browser", icon: "earth", key: "B", off: "Browser previews are only available in the J5 Code desktop app." },
+  { kind: "terminal", label: "Terminal", icon: "square-terminal", key: "T", off: "Terminal surfaces are only available from a project thread." },
+  { kind: "files", label: "Files", icon: "files", key: "F" },
+  { kind: "artifacts", label: "Artifacts", icon: "folder-archive", key: "R" },
+  { kind: "diff", label: "Diff", icon: "file-diff", key: "D" },
+  { kind: "pr", label: "Pull request", icon: "git-pull-request-arrow", key: "P", offIn: "file", off: "This thread's branch has no pull request yet." },
+  { kind: "prs", label: "Linked pull requests", icon: "link-2", key: "L", off: "No linked pull requests are available for this thread." },
+  { kind: "device", label: "Device", icon: "smartphone", key: "M", off: "Devices are only available from a thread." },
+];
+
+const diffs = [
+  {
+    id: "diff-pr",
+    branch: "fix/sort-completed",
+    add: 16,
+    del: 3,
+    files: [
+      {
+        path: "src/todo.js",
+        add: 6,
+        del: 2,
+        open: true,
+        skipped: "5 unmodified lines",
+        lines: [
+          { k: "del", n: 6, t: "/** Lists todos in the order they were added. */" },
+          { k: "add", n: 6, t: "/** Lists open todos first; order within each group is unchanged. */" },
+          { k: "ctx", n: 7, t: "export const format = (todos) =>" },
+          { k: "del", n: 8, t: '  todos.map((todo) => line(todo)).join("\\n");' },
+          { k: "add", n: 8, t: "  sortCompletedLast(todos)" },
+          { k: "add", n: 9, t: "    .map((todo) => line(todo))" },
+          { k: "add", n: 10, t: '    .join("\\n");' },
+          { k: "ctx", n: 11, t: "" },
+          { k: "add", n: 12, t: "const sortCompletedLast = (todos) =>" },
+          { k: "add", n: 13, t: "  [...todos].sort((a, b) => a.completed - b.completed);" },
+        ],
+      },
+      {
+        path: "test/todo.test.js",
+        add: 9,
+        del: 0,
+        added: true,
+        skipped: "28 unmodified lines",
+        lines: [
+          { k: "ctx", n: 29, t: "" },
+          { k: "add", n: 30, t: 'test("format lists completed todos last", () => {' },
+          { k: "add", n: 31, t: "  const todos = [" },
+          { k: "add", n: 32, t: '    { id: 1, title: "Ship", completed: true },' },
+          { k: "add", n: 33, t: '    { id: 2, title: "Write tests", completed: false },' },
+          { k: "add", n: 34, t: "  ];" },
+          { k: "add", n: 35, t: '  const lines = format(todos).split("\\n");' },
+          { k: "add", n: 36, t: '  expect(lines[0]).toContain("Write tests");' },
+          { k: "add", n: 37, t: '  expect(lines[1]).toContain("Ship");' },
+          { k: "add", n: 38, t: "});" },
+        ],
+      },
+      {
+        path: "README.md",
+        add: 1,
+        del: 1,
+        skipped: "16 unmodified lines",
+        lines: [
+          { k: "ctx", n: 17, t: "## Listing todos" },
+          { k: "ctx", n: 18, t: "" },
+          { k: "del", n: 19, t: "`todo list` prints todos in the order you added them." },
+          { k: "add", n: 19, t: "`todo list` prints open todos first, then completed ones." },
+        ],
+      },
+    ],
+  },
+  {
+    id: "diff-file",
+    branch: "docs/readme-cleanup",
+    add: 2,
+    del: 2,
+    files: [
+      {
+        path: "README.md",
+        add: 2,
+        del: 2,
+        open: true,
+        skipped: "2 unmodified lines",
+        lines: [
+          { k: "ctx", n: 3, t: "" },
+          { k: "del", n: 4, t: "A tiny todo app for the comand line." },
+          { k: "add", n: 4, t: "A tiny todo app for the command line." },
+          { k: "ctx", n: 5, t: "" },
+          { k: "del", n: 6, t: "## Instal" },
+          { k: "add", n: 6, t: "## Install" },
+        ],
+      },
+    ],
+  },
+];
+
+const sign = { add: "+", del: "-", ctx: "" };
+---
+
+<div class="app app--window inbox" data-vignette data-inbox data-panel="open">
+  <div class="inbox__page">
+    <div class="topbar-a"><span>Inbox</span></div>
+    <div class="inbox__main">
+      <div class="inbox__head">
+        <div>
+          <h4 class="inbox__title">Inbox</h4>
+          <p class="inbox__count" data-inbox-count>2 questions open</p>
+        </div>
+        <span class="btn-a btn-a--ghost btn-a--sm" aria-hidden="true"><Icon name="refresh-cw" />Refresh</span>
+      </div>
+
+      <ol class="inbox__list">
+        <li data-inbox-ask="pr">
+          <details open>
+            <summary class="inbox__summary">
+              <span class="badge-a badge-a--md badge-a--warning inbox__badge">Soon</span>
+              <span class="inbox__lines">
+                <span class="inbox__from"><b>Release checker</b><i>·</i>todo-app<i>·</i>open 12m</span>
+                <span class="inbox__ask">Merge the sort-order fix now?</span>
+              </span>
+              <Icon name="chevron-right" class="inbox__chevron" />
+            </summary>
+            <div class="inbox__body">
+              <p class="inbox__message">
+                PR #42 moves completed todos to the bottom of the list. The change is small, but the CLI's
+                <code>list</code> output order changes with it. Merge now, or hold it for the 0.4 release?
+              </p>
+              <p class="inbox__message">
+                <button type="button" class="inbox__link" data-inbox-open="pr" data-hot aria-pressed="false">
+                  <Mark name="github" />Sort completed todos last #42
+                </button>
+              </p>
+              <textarea class="inbox__reply" rows="3" aria-label="Answer Merge the sort-order fix now?" placeholder="Type the answer exactly as it should be delivered" data-inbox-reply>Merge it now, and add a line to the changelog about the new order.</textarea>
+              <div class="inbox__actions">
+                <span class="btn-a btn-a--ghost btn-a--sm" aria-hidden="true">Open thread<Icon name="arrow-up-right" class="ico-35" /></span>
+                <span class="btn-a btn-a--ghost btn-a--sm inbox__attach" aria-hidden="true"><Icon name="paperclip" /></span>
+                <button type="button" class="btn-a btn-a--primary inbox__answer" data-inbox-answer data-hot>Answer</button>
+              </div>
+            </div>
+          </details>
+        </li>
+        <li data-inbox-ask="file">
+          <details open>
+            <summary class="inbox__summary">
+              <span class="badge-a badge-a--md badge-a--secondary inbox__badge">FYI</span>
+              <span class="inbox__lines">
+                <span class="inbox__from"><b>Docs writer</b><i>·</i>todo-app<i>·</i>open 40m</span>
+                <span class="inbox__ask">Rename the <code>done</code> flag in the README?</span>
+              </span>
+              <Icon name="chevron-right" class="inbox__chevron" />
+            </summary>
+            <div class="inbox__body">
+              <p class="inbox__message">
+                The README still calls it <code>done</code>, but the code says <code>completed</code> everywhere. OK to
+                rename it in the docs?
+                <button type="button" class="inbox__link inbox__link--file" data-inbox-open="file" data-hot aria-pressed="false">
+                  <Icon name="file-text" />README.md · L24
+                </button>
+              </p>
+              <textarea class="inbox__reply" rows="3" aria-label="Answer Rename the done flag in the README?" placeholder="Type the answer exactly as it should be delivered" data-inbox-reply></textarea>
+              <div class="inbox__actions">
+                <span class="btn-a btn-a--ghost btn-a--sm" aria-hidden="true">Open thread<Icon name="arrow-up-right" class="ico-35" /></span>
+                <span class="btn-a btn-a--ghost btn-a--sm inbox__attach" aria-hidden="true"><Icon name="paperclip" /></span>
+                <button type="button" class="btn-a btn-a--primary inbox__answer" data-inbox-answer disabled>Answer</button>
+              </div>
+            </div>
+          </details>
+        </li>
+      </ol>
+
+      <div class="inbox__empty" data-inbox-empty hidden>
+        <span class="inbox__empty-mark"><Icon name="inbox" class="ico-5" /></span>
+        <p class="inbox__empty-title">Nothing is waiting on you</p>
+        <p class="inbox__empty-text">New questions from agents will arrive here in urgency order.</p>
+      </div>
+
+      <details class="inbox__shelf" data-inbox-shelf hidden>
+        <summary class="inbox__shelf-summary" data-hot>
+          <Icon name="chevron-right" class="inbox__chevron" />Answered
+          <span class="inbox__shelf-count tnum" data-inbox-answered-count>0</span>
+        </summary>
+        <ol class="inbox__answered">
+          <li data-inbox-answered="pr" hidden>
+            <Icon name="circle-check" class="t-open inbox__answered-mark" />
+            <span class="inbox__lines">
+              <span class="inbox__answered-ask">Merge the sort-order fix now?</span>
+              <span class="inbox__answered-from truncate">Release checker · todo-app · answered just now · You answered</span>
+            </span>
+            <span class="btn-a btn-a--ghost btn-a--sm" aria-hidden="true">Open thread<Icon name="arrow-up-right" class="ico-35" /></span>
+          </li>
+          <li data-inbox-answered="file" hidden>
+            <Icon name="circle-check" class="t-open inbox__answered-mark" />
+            <span class="inbox__lines">
+              <span class="inbox__answered-ask">Rename the <code>done</code> flag in the README?</span>
+              <span class="inbox__answered-from truncate">Docs writer · todo-app · answered just now · You answered</span>
+            </span>
+            <span class="btn-a btn-a--ghost btn-a--sm" aria-hidden="true">Open thread<Icon name="arrow-up-right" class="ico-35" /></span>
+          </li>
+        </ol>
+      </details>
+    </div>
+  </div>
+
+  <div class="inbox__panel seq" style="--at: 0.5s">
+    {
+      threads.map((thread) => (
+        <div data-inbox-thread={thread.id} hidden={thread.id !== "pr"}>
+          <div class="tabs-a inbox__strip">
+            <div class="inbox__tablist" role="tablist" aria-label={`${thread.agent}'s panel`}>
+              {thread.tabs.map((tab) => (
+                <button
+                  type="button"
+                  role="tab"
+                  class="tab-a"
+                  data-inbox-tab={tab.surface}
+                  aria-controls={`inbox-surface-${tab.surface}`}
+                  data-kind={tab.kind}
+                  aria-selected={tab.selected ? "true" : "false"}
+                  hidden={tab.later}
+                >
+                  <Icon name={tab.icon} class={tab.tone} />
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+            <button
+              type="button"
+              class="btn-a btn-a--ghost-muted btn-a--icon-xs"
+              data-inbox-plus
+              aria-label="Add panel surface"
+              aria-haspopup="menu"
+              aria-expanded="false"
+            >
+              <Icon name="plus" />
+            </button>
+            <div class="inbox__menu" role="menu" aria-label="Add panel surface" hidden>
+              {surfaces.map((surface) => {
+                const off = surface.off !== undefined && (surface.offIn === undefined || surface.offIn === thread.id);
+                return (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    data-inbox-add={surface.kind}
+                    data-key={surface.key}
+                    aria-disabled={off ? "true" : undefined}
+                    title={off ? surface.off : undefined}
+                  >
+                    <Icon name={surface.icon} />
+                    <span>{surface.label}</span>
+                    <kbd>{surface.key}</kbd>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          <p class="inbox__thread">
+            <b>{thread.agent}</b>
+            <i>·</i>
+            <span class="truncate">{thread.title}</span>
+          </p>
+        </div>
+      ))
+    }
+
+    <div class="inbox__pr" id="inbox-surface-pr" role="tabpanel" aria-label="Pull request #42" data-inbox-surface="pr" hidden>
+      <p class="inbox__pr-top">
+        <span class="t-muted">harbor/todo-app</span>
+        <span class="t-open-text inbox__pr-key">#42<Icon name="external-link" /></span>
+        <span class="inbox__pr-actions" aria-hidden="true">
+          <span class="btn-a btn-a--primary btn-a--xs"><Icon name="git-merge" /><span class="inbox__pr-merge">Squash and merge</span></span>
+          <span class="btn-a btn-a--outline btn-a--xs"><Icon name="git-branch" /><Icon name="chevron-down" /></span>
+          <span class="btn-a btn-a--ghost-muted btn-a--icon-xs"><Icon name="ellipsis" /></span>
+        </span>
+      </p>
+      <h4 class="inbox__pr-title">Sort completed todos last</h4>
+      <p class="inbox__pr-meta">
+        <span class="avatar-a avatar-a--sm" style="--av: #3b8fae">r</span><b>release-checker</b><i>·</i>updated 12m ago
+        <span class="mono inbox__pr-checkout">gh pr checkout 42</span>
+      </p>
+      <p class="inbox__pr-branch">
+        <span class="mono">main</span><Icon name="arrow-left" class="ico-3" /><span class="mono">fix/sort-completed</span>
+        <span class="inbox__pr-files"><Icon name="file-diff" class="ico-35" />3 files <b class="t-open-text">+16</b> <b class="inbox__del">-3</b></span>
+      </p>
+      <p class="inbox__pr-tabs">
+        <span class="inbox__segments"><b>Summary</b><span>Timeline</span><span>Code</span></span>
+        <span class="inbox__checks"><Icon name="circle-check" class="ico-35 t-open" />All checks passed</span>
+      </p>
+      <p class="inbox__pr-heading">Description</p>
+      <p class="inbox__pr-body">
+        Completed todos now sort after open ones, in the list view and in <code>todo list</code>. Order within each
+        group is unchanged.
+      </p>
+    </div>
+
+    {
+      diffs.map((diff) => (
+        <div
+          class="diff"
+          id={`inbox-surface-${diff.id}`}
+          role="tabpanel"
+          aria-label="Diff"
+          data-inbox-surface={diff.id}
+          hidden={diff.id !== "diff-pr"}
+        >
+          <p class="diff__bar" aria-hidden="true">
+            <span class="btn-a btn-a--secondary btn-a--xs">Changes<Icon name="chevron-down" /></span>
+            <span class="diff__range truncate">{diff.branch} → Automatic</span>
+            <span class="diff__total mono tnum">
+              <b class="diff__add">+{diff.add}</b> <b class="diff__del">-{diff.del}</b>
+            </span>
+            <span class="diff__tools">
+              <Icon name="refresh-cw" class="ico-35" />
+              <Icon name="chevrons-down-up" class="ico-35" />
+              <span class="diff__view"><b><Icon name="rows-3" class="ico-35" /></b><span><Icon name="columns-2" class="ico-35" /></span></span>
+              <Icon name="text-wrap" class="ico-35 diff__on" />
+              <Icon name="pilcrow" class="ico-35" />
+              <Icon name="folder-tree" class="ico-35" />
+            </span>
+          </p>
+          {diff.files.map((file) => (
+            <details class="diff__file" open={file.open}>
+              <summary>
+                <Icon name="chevron-right" class="diff__chevron" />
+                <Icon name={file.added ? "square-plus" : "square-dot"} class:list={["ico-35", file.added ? "diff__add" : "t-pending"]} />
+                <span class="truncate">{file.path}</span>
+                <span class="diff__stat mono tnum">
+                  <b class="diff__add">+{file.add}</b> <b class="diff__del">-{file.del}</b>
+                </span>
+              </summary>
+              <p class="diff__skip">{file.skipped}</p>
+              <ol class="diff__lines mono">
+                {file.lines.map((line) => (
+                  <li class={`diff__line diff__line--${line.k}`}>
+                    <span class="diff__num tnum">{line.n}</span>
+                    <span class="diff__text">{sign[line.k as keyof typeof sign]}</span>
+                    <span class="diff__text">{line.t}</span>
+                  </li>
+                ))}
+              </ol>
+            </details>
+          ))}
+        </div>
+      ))
+    }
+
+    <div id="inbox-surface-files" role="tabpanel" aria-label="Files" data-inbox-surface="files" hidden>
+      <InboxExplorer />
+    </div>
+
+    <div class="arts" id="inbox-surface-artifacts" role="tabpanel" aria-label="Artifacts" data-inbox-surface="artifacts" hidden>
+      <div class="arts__list">
+        <p class="arts__bar" aria-hidden="true">
+          <span>Files</span><Icon name="refresh-cw" class="ico-35" /><span class="arts__delete">Delete all</span>
+        </p>
+        <p class="arts__none">Planning documents created in <code>artifacts/</code> will appear here.</p>
+      </div>
+      <div class="arts__view">
+        <p class="arts__name"><span>No artifact selected</span><Icon name="trash-2" class="ico-3" /></p>
+        <p class="arts__pick"><Icon name="folder-archive" class="ico-8" />Select an artifact to preview it.</p>
+      </div>
+    </div>
+
+    <div class="inbox__filetab" id="inbox-surface-file" role="tabpanel" aria-label="README.md" data-inbox-surface="file" hidden>
+      <p class="inbox__crumbs">todo-app<Icon name="chevron-right" class="ico-3" /><span>README.md</span></p>
+      <div class="inbox__file">
+        <ol class="inbox__code mono">
+          <li>## Marking a todo finished</li>
+          <li>&nbsp;</li>
+          <li>Each todo is one line in `todos.json`.</li>
+          <li class="inbox__line">Set `done: true` and it moves to the end.</li>
+          <li>&nbsp;</li>
+          <li>```sh</li>
+          <li>todo complete 3</li>
+          <li>```</li>
+        </ol>
+        <div class="inbox__side"><InboxExplorer current="README.md" /></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ChatView's panel controls: over the panel's tabs when it is open, over the top bar when shut. -->
+  <div class="inbox__controls">
+    <button type="button" class="inbox__toggle inbox__max" data-inbox-max aria-label="Maximize panel" aria-pressed="false">
+      <Icon name="maximize-2" class="inbox__max-off" /><Icon name="minimize-2" class="inbox__max-on" />
+    </button>
+    <button type="button" class="inbox__toggle" data-inbox-toggle aria-label="Toggle right panel" aria-pressed="true">
+      <Icon name="panel-right" />
+    </button>
+  </div>
+</div>
+
+<style>
+  .inbox {
+    --inbox-file: oklch(45% 0.085 224.283);
+    --inbox-hot: var(--brass-deep, #a67f2a);
+    --inbox-emerald: oklch(69.6% 0.17 162.48);
+    --inbox-tint: 88%;
+    --inbox-line: 50%;
+    --inbox-gutter: 35%;
+
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    min-height: 540px;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    .inbox {
+      --inbox-file: oklch(78.9% 0.154 211.53);
+      --inbox-hot: var(--brass, #c9a24d);
+      --inbox-tint: 80%;
+      --inbox-line: 70%;
+      --inbox-gutter: 60%;
+    }
+  }
+
+  .inbox [hidden] { display: none !important; }
+  .inbox:is([data-panel="closed"], [data-max]) { grid-template-columns: minmax(0, 1fr); }
+  .inbox[data-panel="closed"] .inbox__panel { display: none; }
+  .inbox[data-max] .inbox__page { display: none; }
+
+  .inbox i { font-style: normal; opacity: 0.6; margin: 0 6px; }
+  .inbox code {
+    padding: 1px 4px;
+    border-radius: 4px;
+    background: var(--a-accent);
+    font: 0.92em var(--a-mono);
+  }
+
+  /* What the page asks the reader to try wears a ring until it has been used. It is the page's, not the app's. */
+  :global(.wn[data-live]) .inbox [data-hot] {
+    border-radius: 6px;
+    box-shadow:
+      0 0 0 3px var(--a-bg),
+      0 0 0 5px var(--inbox-hot);
+  }
+
+  :global(.wn-motion) .inbox[data-play] [data-hot] { animation: inbox-ping 1.1s ease-out 1.2s 2; }
+
+  @keyframes inbox-ping {
+    from {
+      box-shadow:
+        0 0 0 3px var(--a-bg),
+        0 0 0 5px var(--inbox-hot),
+        0 0 0 5px color-mix(in srgb, var(--inbox-hot) 50%, transparent);
+    }
+    to {
+      box-shadow:
+        0 0 0 3px var(--a-bg),
+        0 0 0 5px var(--inbox-hot),
+        0 0 0 15px transparent;
+    }
+  }
+
+  .inbox__main { padding: 8px 28px 24px; }
+
+  .inbox__head {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 16px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--a-border);
+  }
+
+  .inbox__title { font-size: 24px; font-weight: 600; letter-spacing: -0.025em; line-height: 1.33; }
+  .inbox__count { margin-top: 4px; font-size: 14px; color: var(--a-muted-fg); }
+
+  .inbox__list { list-style: none; }
+  .inbox__list > li + li { border-top: 1px solid color-mix(in srgb, var(--a-border) 70%, transparent); }
+
+  .inbox summary { list-style: none; cursor: pointer; }
+  .inbox summary::-webkit-details-marker { display: none; }
+  .inbox summary:focus-visible { outline: 2px solid var(--a-primary); outline-offset: -2px; border-radius: 8px; }
+  .inbox :global(.inbox__chevron) { color: var(--a-muted-fg); transition: rotate 0.15s ease; }
+  .inbox details[open] > summary :global(.inbox__chevron) { rotate: 90deg; }
+
+  .inbox__summary {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    padding: 16px 4px;
+  }
+
+  .inbox__summary :global(.inbox__chevron) { margin-top: 4px; }
+  .inbox__badge { margin-top: 2px; text-transform: uppercase; letter-spacing: 0.025em; }
+  .inbox__lines { display: block; min-width: 0; flex: 1; }
+  .inbox__lines > span { display: block; }
+  .inbox__from { font-size: 12px; color: var(--a-muted-fg); }
+  .inbox__from b { font-weight: 500; color: color-mix(in srgb, var(--a-fg) 80%, transparent); }
+  .inbox__ask { margin-top: 4px; font-size: 16px; font-weight: 600; line-height: 1.375; text-wrap: pretty; }
+  .inbox__ask code { font-weight: 500; }
+
+  .inbox__body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px 4px 20px 0;
+    margin-left: 96px;
+    border-top: 1px solid color-mix(in srgb, var(--a-border) 50%, transparent);
+  }
+
+  .inbox__message { font-size: 14px; line-height: 1.625; color: color-mix(in srgb, var(--a-fg) 90%, transparent); }
+
+  /* ChatMarkdown's links: link-blue, with a dotted underline on the one whose tab is open. */
+  .inbox__link {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    border: 0;
+    background: none;
+    font: 500 14px/1.625 var(--a-font);
+    color: var(--a-primary);
+    text-align: left;
+    text-decoration: underline dotted transparent;
+    text-underline-offset: 3px;
+    cursor: pointer;
+    transition: text-decoration-color 0.15s ease;
+  }
+
+  .inbox__link :global(.ico) { width: 14px; height: 14px; color: var(--a-fg); }
+  .inbox__link:is(:hover, [aria-pressed="true"]) { text-decoration-color: currentColor; }
+
+  /* A file link is a chip: the file's icon, then its name and line in the file tint. */
+  .inbox__link--file {
+    margin-left: 4px;
+    color: var(--inbox-file);
+    font-weight: 600;
+    text-decoration: none;
+  }
+
+  .inbox__link--file :global(.ico) { color: var(--a-muted-fg); }
+
+  .inbox__reply {
+    width: 100%;
+    min-height: 96px;
+    margin-top: 6px;
+    padding: 8px 11px;
+    border: 1px solid var(--a-input);
+    border-radius: 8px;
+    background: var(--a-control);
+    box-shadow: var(--a-shadow);
+    font: 400 14px/1.5 var(--a-font);
+    color: var(--a-fg);
+    resize: none;
+  }
+
+  .inbox__reply:focus-visible { outline: 2px solid var(--a-primary); outline-offset: -1px; }
+  .inbox__reply::placeholder { color: var(--a-muted-fg); }
+  .inbox__actions { display: flex; align-items: center; gap: 4px; }
+  .inbox .inbox__attach { width: 28px; padding: 0; }
+  .inbox .inbox__attach :global(.ico) { width: 16px; height: 16px; margin: 0; }
+  .inbox .inbox__answer { margin-left: auto; }
+  .inbox .inbox__answer:disabled { opacity: 0.64; cursor: default; }
+
+  .inbox__empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 56px 16px;
+    text-align: center;
+  }
+
+  .inbox__empty-mark {
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--inbox-emerald) 10%, transparent);
+    color: var(--a-success-fg);
+  }
+
+  .inbox__empty-mark :global(.ico) { width: 20px; height: 20px; }
+  .inbox__empty-title { margin-top: 16px; font-size: 16px; font-weight: 500; }
+  .inbox__empty-text { max-width: 384px; margin-top: 4px; font-size: 14px; line-height: 1.625; color: var(--a-muted-fg); }
+
+  .inbox__shelf { padding-top: 16px; border-top: 1px solid var(--a-border); }
+
+  .inbox__shelf-summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: fit-content;
+    padding: 8px 8px 8px 0;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--a-muted-fg);
+    transition: color 0.15s ease;
+  }
+
+  .inbox__shelf-summary:hover { color: var(--a-fg); }
+  .inbox__shelf-count { color: color-mix(in srgb, var(--a-muted-fg) 80%, var(--a-fg)); }
+  .inbox__answered { margin-top: 4px; padding-left: 24px; list-style: none; }
+
+  .inbox__answered li {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px 0;
+  }
+
+  .inbox__answered li + li { border-top: 1px solid color-mix(in srgb, var(--a-border) 60%, transparent); }
+  .inbox__answered :global(.inbox__answered-mark) { margin-top: 2px; }
+  .inbox__answered-ask { font-size: 14px; font-weight: 500; color: color-mix(in srgb, var(--a-fg) 80%, transparent); }
+  .inbox__answered-from { margin-top: 2px; font-size: 12px; color: var(--a-muted-fg); }
+
+  .inbox__panel {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    border-left: 1px solid var(--a-border);
+    background: var(--a-bg);
+  }
+
+  .inbox[data-max] .inbox__panel { border-left: 0; }
+
+  /* Room on the right for the panel controls that sit over the strip. */
+  .inbox__strip { position: relative; padding-right: 92px; }
+
+  .inbox__tablist {
+    display: flex;
+    gap: 4px;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .inbox__menu {
+    position: absolute;
+    top: 44px;
+    left: clamp(8px, var(--x, 8px), calc(100% - 232px));
+    z-index: 4;
+    width: 224px;
+    padding: 4px;
+    border: 1px solid var(--a-border);
+    border-radius: 8px;
+    background: var(--a-card);
+    box-shadow: 0 8px 24px -8px rgb(0 0 0 / 28%);
+  }
+
+  .inbox__menu button {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 28px;
+    padding: 0 8px;
+    border: 0;
+    border-radius: 4px;
+    background: none;
+    font: 400 14px/1 var(--a-font);
+    color: var(--a-fg);
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .inbox__menu button :global(.ico) { color: var(--a-muted-fg); }
+  .inbox__menu button span { flex: 1; }
+  .inbox__menu kbd { font: 500 12px/1 var(--a-font); color: var(--a-muted-fg); }
+  .inbox__menu button:is(:hover, :focus-visible):not([aria-disabled]) { background: var(--a-accent); }
+  .inbox__menu button[aria-disabled] { opacity: 0.64; cursor: default; }
+
+  .inbox__controls {
+    position: absolute;
+    top: 0;
+    right: 12px;
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    height: 52px;
+  }
+
+  /* ui/toggle.tsx, ghost sm. */
+  .inbox__toggle {
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    border: 0;
+    border-radius: 8px;
+    background: none;
+    color: var(--a-fg);
+    cursor: pointer;
+    transition: background-color 0.15s ease;
+  }
+
+  .inbox__toggle:is(:hover, [aria-pressed="true"]) { background: var(--a-accent); }
+  .inbox[data-panel="closed"] .inbox__max,
+  .inbox__max[aria-pressed="false"] :global(.inbox__max-on),
+  .inbox__max[aria-pressed="true"] :global(.inbox__max-off) { display: none; }
+
+  /* InboxThreadPanelHeader: whose panel this is. */
+  .inbox__thread {
+    display: flex;
+    align-items: center;
+    height: 32px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--a-border);
+    font-size: 12px;
+    color: var(--a-muted-fg);
+  }
+
+  .inbox__thread b { font-weight: 500; color: color-mix(in srgb, var(--a-fg) 80%, transparent); white-space: nowrap; }
+
+  .inbox__pr { padding: 12px 16px 20px; container: inbox-pr / inline-size; }
+  .inbox__pr-top { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; }
+  .inbox__pr-key { display: inline-flex; align-items: center; gap: 2px; }
+  .inbox__pr-key :global(.ico) { width: 10px; height: 10px; }
+  .inbox__pr-actions { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; }
+  .inbox__pr-title { margin-top: 6px; font-size: 16px; font-weight: 600; line-height: 1.375; }
+
+  .inbox__pr-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--a-muted-fg);
+  }
+
+  .inbox__pr-meta i { margin: 0; }
+  .inbox__pr-meta b { font-weight: 500; color: var(--a-fg); }
+  .inbox__pr-checkout { margin-left: auto; font-size: 11px; }
+
+  .inbox__pr-branch {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-top: 14px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--a-border);
+    font-size: 12px;
+    color: var(--a-muted-fg);
+  }
+
+  .inbox__pr-files { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; }
+  .inbox__pr-files b { font-weight: 500; }
+  .inbox__del { color: var(--a-destructive-text); }
+
+  .inbox__pr-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    padding: 10px 0;
+    font-size: 12px;
+    color: var(--a-muted-fg);
+  }
+
+  .inbox__segments { display: inline-flex; gap: 2px; padding: 2px; border-radius: 8px; background: var(--a-accent); font-size: 13px; }
+  /* A shade deeper than the app's muted tone, which measures 4.4:1 on this strip by day. */
+  .inbox__segments > * {
+    padding: 3px 10px;
+    border-radius: 6px;
+    font-weight: 500;
+    color: color-mix(in srgb, var(--a-muted-fg) 75%, var(--a-fg));
+  }
+  .inbox__segments b { background: var(--a-card); color: var(--a-fg); box-shadow: var(--a-shadow); }
+  .inbox__checks { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; white-space: nowrap; }
+  .inbox__pr-heading { margin-top: 6px; font-size: 12px; font-weight: 500; color: var(--a-muted-fg); }
+  .inbox__pr-body { margin-top: 8px; font-size: 14px; line-height: 1.625; }
+
+  /* PullRequestDetailActions drops the merge button's label in a narrow header. */
+  @container inbox-pr (max-width: 30rem) {
+    .inbox__pr-merge { display: none; }
+  }
+
+  /* DiffPanel over @pierre/diffs: the toolbar, then one collapsible block per file. */
+  .diff { padding-top: 8px; }
+
+  .diff__bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 28px;
+    margin-bottom: 12px;
+    padding: 0 8px;
+    font-size: 12px;
+    color: var(--a-muted-fg);
+  }
+
+  .diff__bar :global(.btn-a--secondary) { background: var(--a-accent); }
+  .diff__range { flex: 1; }
+  .diff__total { font-size: 11px; white-space: nowrap; }
+  .diff__tools { display: inline-flex; align-items: center; gap: 12px; padding-right: 4px; }
+  .diff__tools :global(.diff__on) { color: var(--a-fg); }
+  .diff__view { display: inline-flex; gap: 2px; padding: 2px; border-radius: 8px; background: var(--a-accent); }
+  .diff__view > * { display: grid; place-items: center; width: 22px; height: 20px; border-radius: 6px; }
+  .diff__view b { background: var(--a-card); color: var(--a-fg); box-shadow: var(--a-shadow); }
+
+  .diff b { font-weight: 500; }
+  .diff :global(.diff__add),
+  .diff .diff__add { color: var(--a-open-text); }
+  .diff .diff__del { color: var(--a-destructive-text); }
+
+  .diff__file { border-top: 1px solid var(--a-border); }
+
+  .diff__file summary {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 12px 0 8px;
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  .diff__file summary :global(.diff__chevron) { color: var(--a-muted-fg); transition: rotate 0.15s ease; }
+  .diff__file[open] summary :global(.diff__chevron) { rotate: 90deg; }
+  .diff__stat { margin-left: auto; font-size: 11px; white-space: nowrap; }
+
+  .diff__skip {
+    display: flex;
+    align-items: center;
+    height: 24px;
+    padding: 0 12px 0 46px;
+    background: color-mix(in srgb, var(--a-bg) 95%, var(--a-fg));
+    font-size: 11px;
+    color: var(--a-muted-fg);
+  }
+
+  .diff__lines { list-style: none; font-size: 12px; line-height: 20px; }
+
+  .diff__line {
+    display: grid;
+    grid-template-columns: 34px 12px minmax(0, 1fr);
+    background: color-mix(in srgb, var(--a-bg) 97%, var(--a-fg));
+  }
+
+  .diff__num { padding-right: 8px; text-align: right; color: var(--a-muted-fg); }
+  .diff__text { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+  .diff__line--add {
+    --line: var(--inbox-emerald);
+    --number: var(--a-open-text);
+  }
+
+  .diff__line--del {
+    --line: var(--a-destructive);
+    --number: var(--a-destructive-text);
+  }
+
+  .diff__line:is(.diff__line--add, .diff__line--del) {
+    background: color-mix(in lab, var(--a-bg) var(--inbox-tint), color-mix(in srgb, var(--a-bg) var(--inbox-line), var(--line)));
+  }
+
+  .diff__line:is(.diff__line--add, .diff__line--del) .diff__num {
+    background: color-mix(in lab, var(--a-bg) var(--inbox-tint), color-mix(in srgb, var(--a-bg) var(--inbox-gutter), var(--line)));
+    color: var(--number);
+  }
+
+  .diff__line:is(.diff__line--add, .diff__line--del) .diff__num + .diff__text { color: var(--number); }
+
+  /* ArtifactsPage, embedded: the project's artifacts on the left, the chosen one on the right. */
+  .arts { display: grid; flex: 1; grid-template-columns: 200px minmax(0, 1fr); }
+  .arts__list { padding: 8px; border-right: 1px solid var(--a-border); }
+
+  .arts__bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--a-muted-fg);
+  }
+
+  .arts__bar span:first-child { flex: 1; }
+  .arts__delete { opacity: 0.64; }
+  .arts__none { padding: 24px 8px; font-size: 14px; color: var(--a-muted-fg); }
+
+  .arts__name {
+    display: flex;
+    align-items: center;
+    height: 32px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--a-border);
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  .arts__name span { flex: 1; }
+  .arts__name :global(.ico) { color: var(--a-muted-fg); opacity: 0.64; }
+
+  .arts__pick {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+    min-height: 288px;
+    padding: 16px;
+    font-size: 14px;
+    color: var(--a-muted-fg);
+    text-align: center;
+  }
+
+  .arts__pick :global(.ico) { width: 32px; height: 32px; }
+
+  .inbox__crumbs {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 14px;
+    font-size: 12px;
+    color: var(--a-muted-fg);
+  }
+
+  .inbox__crumbs span { color: var(--a-fg); }
+
+  /* The file tab: the file on the left, the workspace's tree on the right. */
+  .inbox__filetab { display: flex; flex: 1; flex-direction: column; }
+
+  .inbox__file {
+    display: grid;
+    flex: 1;
+    grid-template-columns: minmax(0, 1fr) 168px;
+    border-top: 1px solid var(--a-border);
+  }
+
+  .inbox__side { border-left: 1px solid var(--a-border); }
+
+  .inbox__code {
+    min-width: 0;
+    padding: 8px 0 20px;
+    font-size: 12.5px;
+    line-height: 20px;
+    list-style: none;
+    counter-reset: line 20;
+  }
+
+  .inbox__code li {
+    display: flex;
+    gap: 14px;
+    padding: 0 12px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    counter-increment: line;
+  }
+
+  .inbox__code li::before {
+    content: counter(line);
+    flex: 0 0 2ch;
+    text-align: right;
+    color: var(--a-muted-fg);
+  }
+
+  .inbox__code .inbox__line { background: color-mix(in srgb, var(--a-primary) 12%, transparent); }
+
+  @media (max-width: 860px) {
+    .inbox { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+    .inbox__main { padding: 4px 14px 16px; }
+    .inbox :global(.topbar-a) { padding-inline: 14px; height: 44px; }
+    .inbox__body { margin-left: 0; }
+    .inbox__summary { gap: 12px; }
+    .inbox :global(.tabs-a) { height: 44px; }
+    .inbox__controls { height: 44px; }
+    .inbox__strip { padding-right: 48px; }
+    .inbox__menu { top: 40px; }
+    .inbox .inbox__max { display: none; }
+    .inbox[data-max] .inbox__page { display: block; }
+    .inbox:not([data-sheet]) .inbox__toggle[aria-pressed="true"]:not(:hover) { background: none; }
+
+    /* Below the app's own breakpoint the panel is a sheet over the Inbox, opened by a link. */
+    /* The sheet slides in when a link opens it; it takes no part in the scroll-in sequence. */
+    .inbox .inbox__panel,
+    .inbox .inbox__panel.seq {
+      position: absolute;
+      inset: 0 0 0 10%;
+      z-index: 2;
+      overflow-y: auto;
+      box-shadow:
+        0 0 0 100vmax rgb(0 0 0 / 28%),
+        -16px 0 40px -20px rgb(0 0 0 / 50%);
+      opacity: 1;
+      animation: inbox-sheet 0.28s cubic-bezier(0.2, 0.7, 0.2, 1);
+    }
+
+    .inbox:not([data-sheet]) .inbox__panel { display: none; }
+    /* With the sheet shut, no link's tab is showing. */
+    .inbox:not([data-sheet]) .inbox__link[aria-pressed="true"]:not(:hover) { text-decoration-color: transparent; }
+    .inbox { scroll-margin-top: 64px; }
+    .inbox__file { grid-template-columns: minmax(0, 1fr); }
+    .inbox__side { display: none; }
+    .diff__range,
+    .diff__tools { display: none; }
+    .diff__total { margin-left: auto; }
+    .arts { grid-template-columns: minmax(0, 1fr); }
+    .arts__list { border-right: 0; border-bottom: 1px solid var(--a-border); }
+  }
+
+  @keyframes inbox-sheet {
+    from {
+      translate: 100% 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .inbox .inbox__panel,
+    .inbox .inbox__panel.seq,
+    .inbox [data-hot] { animation: none; }
+  }
+</style>

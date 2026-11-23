@@ -1,3 +1,4 @@
+// @effect-diagnostics nodeBuiltinImport:off - a project directory name is a synchronous hash.
 import type { ArtifactContent, ArtifactEntry, ProjectId } from "@t3tools/contracts";
 import * as NodeCrypto from "node:crypto";
 import * as Context from "effect/Context";
@@ -12,7 +13,7 @@ import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
-import { writeFileStringAtomically } from "../../atomicWrite.ts";
+import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
 import { ServerConfig } from "../../config.ts";
 
 export const ARTIFACT_DIRECTORY_NAME = "artifacts";
@@ -22,13 +23,20 @@ export const MAX_ARTIFACT_BYTES = 5 * 1024 * 1024;
 export const artifactProjectDirectoryName = (projectId: ProjectId): string =>
   NodeCrypto.createHash("sha256").update(projectId).digest("hex");
 
-export class ArtifactWorkspaceError extends Schema.TaggedErrorClass<ArtifactWorkspaceError>()(
+export class ArtifactWorkspaceError extends Schema.TaggedError<ArtifactWorkspaceError>()(
   "ArtifactWorkspaceError",
   {
     operation: Schema.String,
     detail: Schema.String,
-    /** Set when the failure is the caller's target, not the workspace: routes map it to 404. */
-    reason: Schema.optional(Schema.Literal("not_found")),
+    /**
+     * Set when the failure is the caller's target, not the workspace: routes map `not_found` to
+     * 404. The others are deterministic facts about the target a reader can report as such: a
+     * file over `MAX_ARTIFACT_BYTES`, a path that is not a regular file, or a link that leaves
+     * the artifacts directory.
+     */
+    reason: Schema.optional(
+      Schema.Literals(["not_found", "too_large", "not_a_file", "outside_root"]),
+    ),
     cause: Schema.optional(Schema.Defect()),
   },
 ) {
@@ -37,11 +45,24 @@ export class ArtifactWorkspaceError extends Schema.TaggedErrorClass<ArtifactWork
   }
 }
 
+export class ArtifactListTooLargeError extends Schema.TaggedError<ArtifactListTooLargeError>()(
+  "ArtifactListTooLargeError",
+  { maximumFiles: Schema.Number },
+) {
+  override get message(): string {
+    return `The artifacts directory is too large to browse (maximum ${this.maximumFiles} files).`;
+  }
+}
+
 export interface ArtifactWorkspaceShape {
   readonly prepare: (projectId: ProjectId) => Effect.Effect<void, ArtifactWorkspaceError>;
   readonly list: (
     projectId: ProjectId,
-  ) => Effect.Effect<ReadonlyArray<ArtifactEntry>, ArtifactWorkspaceError>;
+    options?: { readonly all: boolean },
+  ) => Effect.Effect<
+    ReadonlyArray<ArtifactEntry>,
+    ArtifactWorkspaceError | ArtifactListTooLargeError
+  >;
   readonly read: (input: {
     readonly projectId: ProjectId;
     readonly relativePath: string;
@@ -103,13 +124,10 @@ const looksBinary = (bytes: Uint8Array) => {
   return inspected.some((byte) => byte === 0);
 };
 
-// ---------------------------------------------------------------------------
-// Versioned files. The whole file is rendered from the versions it holds, so a retried write
-// converges and a hand-edited or pre-existing file is simply treated as version 1. The marker on
-// the first line lists every kept version as `<number>@<timestamp>`, and the parser only treats a
-// line as a boundary when it equals the heading rendered for one of those entries. Bodies are
-// never trimmed of separators, so a handoff may quote an earlier heading or end with `---`.
-// ---------------------------------------------------------------------------
+// A versioned file is rendered whole from its versions, so a retried write converges and a
+// hand-edited file counts as version 1. The first-line marker lists `<number>@<timestamp>`, and
+// only a line equal to one of those headings is a boundary, so a body may quote an earlier heading
+// or end with `---`.
 
 const VERSIONED_MARKER = /^<!-- j5-artifact-versions: .*?; (.*?) -->\s*$/;
 
@@ -119,7 +137,7 @@ export interface ArtifactVersion {
   readonly content: string;
 }
 
-export const artifactVersionedMarker = (
+const artifactVersionedMarker = (
   relativePath: string,
   versions: ReadonlyArray<Pick<ArtifactVersion, "number" | "timestamp">>,
 ) =>
@@ -200,7 +218,7 @@ const firstHeading = (content: string) =>
     .find((title): title is string => title !== undefined);
 
 /** Render the file from its versions, newest first. */
-export function renderArtifactVersions(input: {
+function renderArtifactVersions(input: {
   readonly relativePath: string;
   readonly versions: ReadonlyArray<ArtifactVersion>;
   readonly dropped: number;
@@ -366,7 +384,7 @@ export const layer = Layer.effect(
     );
 
     const list: ArtifactWorkspaceShape["list"] = Effect.fn("ArtifactWorkspace.list")(
-      function* (projectId) {
+      function* (projectId, options) {
         yield* prepare(projectId);
         const workspace = yield* resolveExistingArtifactRoot(projectId);
         if (workspace.realArtifactRoot === null) return [];
@@ -379,11 +397,8 @@ export const layer = Layer.effect(
           );
         // Fail fast on an absurd directory rather than stat and sort tens of thousands of entries
         // for a 500-row page; the cap below still sorts before it truncates.
-        if (names.length > MAX_ARTIFACT_COUNT * 4) {
-          return yield* new ArtifactWorkspaceError({
-            operation: "list-artifacts",
-            detail: `The artifacts directory is too large to browse (maximum ${MAX_ARTIFACT_COUNT} files).`,
-          });
+        if (!options?.all && names.length > MAX_ARTIFACT_COUNT * 4) {
+          return yield* new ArtifactListTooLargeError({ maximumFiles: MAX_ARTIFACT_COUNT });
         }
         const entries = yield* Effect.forEach(
           names,
@@ -393,7 +408,9 @@ export const layer = Layer.effect(
               const realPath = yield* Effect.result(fileSystem.realPath(absolutePath));
               if (
                 Result.isFailure(realPath) ||
-                !isPathWithin(path, workspace.realArtifactRoot!, realPath.success)
+                !isPathWithin(path, workspace.realArtifactRoot!, realPath.success) ||
+                // Bulk deletion must not encounter links that the single-file delete refuses.
+                (options?.all && realPath.success !== absolutePath)
               ) {
                 return null;
               }
@@ -415,7 +432,7 @@ export const layer = Layer.effect(
         return entries
           .filter((entry): entry is ArtifactEntry => entry !== null)
           .toSorted((left, right) => left.path.localeCompare(right.path))
-          .slice(0, MAX_ARTIFACT_COUNT);
+          .slice(0, options?.all ? undefined : MAX_ARTIFACT_COUNT);
       },
     );
 
@@ -458,6 +475,7 @@ export const layer = Layer.effect(
           return yield* new ArtifactWorkspaceError({
             operation: "read-artifact",
             detail: "Artifact links cannot leave the artifacts directory.",
+            reason: "outside_root",
           });
         }
         const info = yield* fileSystem
@@ -471,12 +489,14 @@ export const layer = Layer.effect(
           return yield* new ArtifactWorkspaceError({
             operation: "read-artifact",
             detail: "Only artifact files can be opened.",
+            reason: "not_a_file",
           });
         }
         if (Number(info.size) > MAX_ARTIFACT_BYTES) {
           return yield* new ArtifactWorkspaceError({
             operation: "read-artifact",
             detail: `This artifact is larger than the ${MAX_ARTIFACT_BYTES / 1024 / 1024} MB preview limit.`,
+            reason: "too_large",
           });
         }
         const bytes = yield* fileSystem

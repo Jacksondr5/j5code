@@ -5,21 +5,22 @@ import type { ParticipantProvenance } from "./placementContracts.ts";
 
 /**
  * Converts immutable upstream lineage into the typed J5 provenance fact.
- * `parentParticipantId` comes from squadron membership; timeline breadcrumbs such
+ * `parentParticipantId` comes from project membership; timeline breadcrumbs such
  * as `thread.created.record` are intentionally not consulted. The imminent A2
  * spawn/verb slice is the named production consumer.
  */
 export function provenanceFromThreadLineage(input: {
   readonly lineage: Pick<
     OrchestrationV2AppThread["lineage"],
-    "parentThreadId" | "relationshipToParent"
+    "parentThreadId" | "relationshipToParent" | "sideChat"
   >;
   readonly parentParticipantId: ParticipantId | null;
 }): ParticipantProvenance {
   if (input.lineage.parentThreadId === null || input.parentParticipantId === null) {
     return { kind: "unknown", source: "native_or_unobserved" };
   }
-  switch (input.lineage.relationshipToParent) {
+  // A side chat is a hidden fork that answers its parent, as a subagent does.
+  switch (input.lineage.sideChat === true ? "subagent" : input.lineage.relationshipToParent) {
     case "subagent":
       return {
         kind: "spawned-by",

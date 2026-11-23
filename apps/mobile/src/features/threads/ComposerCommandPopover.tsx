@@ -2,19 +2,36 @@ import {
   resolveProviderSkillSourceKind,
   type ProviderSkillSourceKind,
 } from "@t3tools/client-runtime/providerSkills";
-import type { ServerProviderSkill, ServerProviderSlashCommand } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  EnvironmentMachineKind,
+  PullRequestContextMetadata,
+  ScopedThreadRef,
+  ServerProviderSkill,
+  ServerProviderSlashCommand,
+} from "@t3tools/contracts";
 import type { ComposerTriggerKind } from "@t3tools/shared/composerTrigger";
-import { memo } from "react";
+import { Fragment, memo } from "react";
 import { Pressable, ScrollView, StyleSheet, View, type ViewStyle } from "react-native";
 
-import { SymbolView, type AppSymbolName } from "../../components/AppSymbol";
-import { AppText as Text } from "../../components/AppText";
-import { GlassSurface } from "../../components/GlassSurface";
+import { SymbolView, type AppSymbolName } from "../../components/ui/AppSymbol";
+import { AppText as Text } from "../../components/ui/AppText";
+import { ENVIRONMENT_MACHINE_SYMBOLS } from "../../components/EnvironmentMachineSymbol";
+import { GlassSurface } from "../../components/ui/GlassSurface";
 import { PierreEntryIcon } from "../../components/PierreEntryIcon";
+import { pullRequestStatus } from "../pull-requests/pullRequestStatus";
 import type { agentPersonaMentionItems } from "@t3tools/client-runtime/j5/agent-mentions";
+import { leadingPersonaCount, PopoverGroupHeading } from "../../j5/composer/PopoverPersonaGroup";
 
 export type ComposerCommandItem =
   | ReturnType<typeof agentPersonaMentionItems>[number]
+  | {
+      readonly id: string;
+      readonly type: "pull-request";
+      readonly pullRequest: PullRequestContextMetadata;
+      readonly label: string;
+      readonly description: string;
+    }
   | {
       readonly id: string;
       readonly type: "path";
@@ -25,8 +42,30 @@ export type ComposerCommandItem =
     }
   | {
       readonly id: string;
+      readonly type: "thread";
+      readonly thread: ScopedThreadRef;
+      readonly label: string;
+      readonly description: string;
+    }
+  | {
+      readonly id: string;
+      readonly type: "environment";
+      readonly environmentId: EnvironmentId;
+      readonly machine: EnvironmentMachineKind;
+      readonly label: string;
+      readonly description: string;
+    }
+  | {
+      readonly id: string;
       readonly type: "slash-command";
       readonly command: string;
+      readonly label: string;
+      readonly description: string;
+    }
+  | {
+      readonly id: string;
+      readonly type: "playbook";
+      readonly name: string;
       readonly label: string;
       readonly description: string;
     }
@@ -49,6 +88,7 @@ interface ComposerCommandPopoverProps {
   readonly items: ReadonlyArray<ComposerCommandItem>;
   readonly triggerKind: ComposerTriggerKind | null;
   readonly isLoading: boolean;
+  readonly error?: string | null;
   readonly onSelect: (item: ComposerCommandItem) => void;
 }
 
@@ -81,24 +121,35 @@ const SKILL_SOURCE_SYMBOL_BY_KIND: Record<ProviderSkillSourceKind, AppSymbolName
 
 function itemIcon(item: ComposerCommandItem): AppSymbolName | null {
   switch (item.type) {
+    case "pull-request":
+      return pullRequestStatus(item.pullRequest).icon;
     case "agent":
       return "person.crop.circle";
     case "slash-command":
+    case "playbook":
     case "provider-slash-command":
       return "terminal";
     case "skill":
       return SKILL_SOURCE_SYMBOL_BY_KIND[resolveProviderSkillSourceKind(item.skill)];
     case "path":
       return null;
+    case "thread":
+      return "text.bubble";
+    case "environment":
+      return ENVIRONMENT_MACHINE_SYMBOLS[item.machine];
   }
 }
 
 function groupLabel(triggerKind: ComposerTriggerKind | null): string | null {
   switch (triggerKind) {
+    case "pull-request":
+      return "Pull requests";
     case "agent":
       return "Personas";
     case "slash-command":
       return "Commands";
+    case "slash-playbook":
+      return "Playbooks";
     case "skill":
       return "Skills";
     case "path":
@@ -113,6 +164,8 @@ function emptyText(triggerKind: ComposerTriggerKind | null, isLoading: boolean):
     return triggerKind === "path" ? "Searching files…" : "Loading…";
   }
   switch (triggerKind) {
+    case "pull-request":
+      return "No matching pull requests.";
     case "agent":
       return "No available personas found.";
     case "path":
@@ -121,6 +174,8 @@ function emptyText(triggerKind: ComposerTriggerKind | null, isLoading: boolean):
       return "No skills found.";
     case "slash-command":
       return "No matching commands.";
+    case "slash-playbook":
+      return "No matching playbooks.";
     default:
       return "No results.";
   }
@@ -147,7 +202,11 @@ const CommandRow = memo(function CommandRow(props: {
         <SymbolView
           name={iconName}
           size={14}
-          tintColorClassName={"accent-icon-subtle"}
+          tintColorClassName={
+            props.item.type === "pull-request"
+              ? pullRequestStatus(props.item.pullRequest).tint
+              : "accent-icon-subtle"
+          }
           type="monochrome"
         />
       ) : null}
@@ -173,7 +232,9 @@ const CommandRow = memo(function CommandRow(props: {
 export const ComposerCommandPopover = memo(function ComposerCommandPopover(
   props: ComposerCommandPopoverProps,
 ) {
-  const label = groupLabel(props.triggerKind);
+  // J5 (AC-3): personas leading a bare `@` list get their own heading, and "Files" follows them.
+  const personas = leadingPersonaCount(props.triggerKind, props.items);
+  const label = personas > 0 ? "Personas" : groupLabel(props.triggerKind);
 
   return (
     <PopoverSurface>
@@ -191,19 +252,23 @@ export const ComposerCommandPopover = memo(function ComposerCommandPopover(
           showsVerticalScrollIndicator={false}
         >
           {props.items.map((item, index) => (
-            <CommandRow
-              key={item.id}
-              item={item}
-              onPress={() => props.onSelect(item)}
-              isLast={index === props.items.length - 1}
-              isSlashSkill={props.triggerKind === "slash-command" && item.type === "skill"}
-            />
+            <Fragment key={item.id}>
+              {personas > 0 && index === personas ? (
+                <PopoverGroupHeading label={groupLabel(props.triggerKind) ?? ""} />
+              ) : null}
+              <CommandRow
+                item={item}
+                onPress={() => props.onSelect(item)}
+                isLast={index === props.items.length - 1}
+                isSlashSkill={props.triggerKind === "slash-command" && item.type === "skill"}
+              />
+            </Fragment>
           ))}
         </ScrollView>
       ) : (
         <View className="px-3.5 py-2.5">
           <Text className="text-xs text-foreground-tertiary">
-            {emptyText(props.triggerKind, props.isLoading)}
+            {props.error ?? emptyText(props.triggerKind, props.isLoading)}
           </Text>
         </View>
       )}

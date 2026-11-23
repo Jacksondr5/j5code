@@ -14,7 +14,14 @@ import * as Layer from "effect/Layer";
 
 import { ServerSecretStore } from "../../auth/ServerSecretStore.ts";
 import { base64UrlEncode, signPayload } from "../../auth/utils.ts";
-import { ThreadLifecycleService } from "../../orchestration-v2/ThreadLifecycleService.ts";
+import {
+  OrchestratorDispatchError,
+  OrchestratorProjectionError,
+} from "../../orchestration-v2/Orchestrator.ts";
+import {
+  ProjectionStoreReadError,
+  ProjectionStoreThreadNotFoundError,
+} from "../../orchestration-v2/ProjectionStore.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import {
   ArchiveAgentConfirmationRequiredError,
@@ -34,12 +41,12 @@ import {
   ExchangeId,
   LedgerMessageId,
   ParticipantId,
-  SquadronId,
+  LedgerProjectId,
   type StoredCommEvent,
 } from "./contracts.ts";
 
-const squadronId = SquadronId.make("squadron:archive-agent");
-const exchangeSquadronId = SquadronId.make("squadron:archive-agent:counterparty");
+const ledgerProjectId = LedgerProjectId.make("ledger:archive-agent");
+const exchangeProjectId = LedgerProjectId.make("project:archive-agent:counterparty");
 const participantId = ParticipantId.make("agent:archive-agent:target");
 const counterpartyId = ParticipantId.make("agent:archive-agent:counterparty");
 const callerParticipantId = ParticipantId.make("agent:archive-agent:caller");
@@ -51,7 +58,7 @@ const now = "2026-08-31T18:00:00.000Z";
 const nowUtc = DateTime.makeUnsafe(now);
 const signingSecret = new Uint8Array(32).fill(19);
 
-const target = { squadronId, participantId, threadId } as const;
+const target = { projectId: ledgerProjectId, participantId, threadId } as const;
 
 const archiveInput = (confirmationToken?: string): ArchiveAgentInput => ({
   providerSessionId: "provider-session:archive-agent",
@@ -66,10 +73,11 @@ const archiveInput = (confirmationToken?: string): ArchiveAgentInput => ({
 
 interface HarnessOptions {
   readonly openExchange?: boolean;
-  readonly exchangeSquadronId?: SquadronId;
+  readonly exchangeProjectId?: LedgerProjectId;
   readonly runStatus?: OrchestrationV2RunStatus;
   readonly mismatchParticipantId?: ParticipantId;
   readonly failLifecycleOnce?: boolean;
+  readonly failDelegateStopOnce?: boolean;
 }
 
 const makeHarness = (options: HarnessOptions = {}) => {
@@ -80,11 +88,12 @@ const makeHarness = (options: HarnessOptions = {}) => {
   let lifecycleCalls = 0;
   let archiveCalls = 0;
   let factReads = 0;
-  const owningExchangeSquadronId = options.exchangeSquadronId ?? squadronId;
+  let delegateStops = 0;
+  const owningExchangeProjectId = options.exchangeProjectId ?? ledgerProjectId;
   const order: Array<string> = [];
   const events: Array<StoredCommEvent> = [];
-  const nextSeq = (eventSquadronId: SquadronId) =>
-    events.filter((event) => event.squadronId === eventSquadronId).length + 1;
+  const nextSeq = (eventProjectId: LedgerProjectId) =>
+    events.filter((event) => event.projectId === eventProjectId).length + 1;
 
   const projection = (): OrchestrationV2ThreadProjection =>
     ({
@@ -109,8 +118,8 @@ const makeHarness = (options: HarnessOptions = {}) => {
   const appendParticipantLeft = () => {
     if (events.some((event) => event.kind === "participant.archived")) return;
     events.push({
-      seq: nextSeq(squadronId),
-      squadronId,
+      seq: nextSeq(ledgerProjectId),
+      projectId: ledgerProjectId,
       kind: "participant.archived",
       sender: null,
       receiver: participantId,
@@ -126,11 +135,11 @@ const makeHarness = (options: HarnessOptions = {}) => {
     if (!open) return;
     const correlationId = CorrelationId.make("correlation:archive-agent:open");
     const noticeMessageId = LedgerMessageId.make("message:archive-agent:terminal");
-    const firstSeq = nextSeq(owningExchangeSquadronId);
+    const firstSeq = nextSeq(owningExchangeProjectId);
     events.push(
       {
         seq: firstSeq,
-        squadronId: owningExchangeSquadronId,
+        projectId: owningExchangeProjectId,
         kind: "exchange.dropped",
         sender: participantId,
         receiver: counterpartyId,
@@ -138,7 +147,7 @@ const makeHarness = (options: HarnessOptions = {}) => {
         correlationId,
         payload: {
           disposition: "sender-retired",
-          cause: { kind: "participant-archived", participantId, squadronId },
+          cause: { kind: "participant-archived", participantId, projectId: ledgerProjectId },
           facts: {
             replyRequired: false,
             retryAllowed: false,
@@ -150,7 +159,7 @@ const makeHarness = (options: HarnessOptions = {}) => {
       },
       {
         seq: firstSeq + 1,
-        squadronId: owningExchangeSquadronId,
+        projectId: owningExchangeProjectId,
         kind: "message.sent",
         sender: ParticipantId.make("agent:platform:lifecycle"),
         receiver: counterpartyId,
@@ -159,8 +168,8 @@ const makeHarness = (options: HarnessOptions = {}) => {
         payload: {
           messageId: noticeMessageId,
           text: "Lifecycle terminal notice",
-          originSquadronId: owningExchangeSquadronId,
-          receiverSquadronId: squadronId,
+          originProjectId: owningExchangeProjectId,
+          receiverProjectId: ledgerProjectId,
           exchangeRole: "terminal_notice",
           envelopeChannel: "lifecycle_notice",
         },
@@ -179,14 +188,14 @@ const makeHarness = (options: HarnessOptions = {}) => {
           return Effect.succeed({
             state: "registered",
             threadId,
-            squadronId,
+            projectId: ledgerProjectId,
             participantId: options.mismatchParticipantId ?? participantId,
             retired: false,
             archived: participantArchived,
             openExchanges: open
               ? [
                   {
-                    squadronId: owningExchangeSquadronId,
+                    projectId: owningExchangeProjectId,
                     exchangeId,
                     direction: "outbound",
                     replyObligation: "counterparty-owes-reply",
@@ -203,16 +212,16 @@ const makeHarness = (options: HarnessOptions = {}) => {
       }),
     ),
     Layer.mock(A2ALedger)({
-      listSquadrons: () =>
+      listProjectLedgers: () =>
         Effect.succeed(
-          [...new Set([squadronId, owningExchangeSquadronId])].map((id) => ({
+          [...new Set([ledgerProjectId, owningExchangeProjectId])].map((id) => ({
             id,
             name: id,
             createdAt: now,
           })),
         ),
-      readEvents: ({ squadronId: requestedSquadronId }) => {
-        const matching = events.filter((event) => event.squadronId === requestedSquadronId);
+      readEvents: ({ projectId: requestedProjectId }) => {
+        const matching = events.filter((event) => event.projectId === requestedProjectId);
         return Effect.succeed({
           events: matching,
           nextCursor: { afterSeq: matching.length, snapshotEnd: matching.length },
@@ -221,22 +230,28 @@ const makeHarness = (options: HarnessOptions = {}) => {
       },
     }),
     Layer.mock(ThreadManagementService)({
-      getThreadProjection: () => Effect.succeed(projection()),
-      interruptThread: () => {
-        order.push("interrupt_requested");
-        return Effect.succeed({
-          type: "interrupt_requested",
-          run: projection().runs[0]!,
-          dispatch: { sequence: 1, storedEvents: [] },
-        });
+      getThreadRecords: () => Effect.succeed(projection()),
+      dispatch: (command) => {
+        if (command.type === "thread.archive") {
+          archiveCalls += 1;
+          order.push("thread_archive_committed");
+          archived = true;
+        } else {
+          order.push(command.type === "thread.stop" ? "interrupt_requested" : command.type);
+        }
+        return Effect.succeed({ sequence: 1, storedEvents: [] });
       },
-    }),
-    Layer.mock(ThreadLifecycleService)({
-      archive: () => {
-        archiveCalls += 1;
-        order.push("thread_archive_committed");
-        archived = true;
-        return Effect.succeed(projection());
+      stopDelegatedTasks: (input) => {
+        delegateStops += 1;
+        if (options.failDelegateStopOnce === true && delegateStops === 1)
+          return Effect.fail(
+            new OrchestratorDispatchError({
+              commandId: input.commandId,
+              commandType: "delegated_task.remote.complete",
+            }),
+          );
+        order.push("delegates_stopped");
+        return Effect.void;
       },
     }),
     Layer.mock(A2ALifecycleService)({
@@ -297,10 +312,10 @@ it.effect("archives a clean exact target and proves terminal ledger facts on rep
   }).pipe(Effect.provide(harness.layer));
 });
 
-it.effect("closes cross-Squadron consequences before returning archived", () => {
+it.effect("closes cross-project consequences before returning archived", () => {
   const harness = makeHarness({
     openExchange: true,
-    exchangeSquadronId,
+    exchangeProjectId,
     runStatus: "running",
   });
   return Effect.gen(function* () {
@@ -322,6 +337,7 @@ it.effect("closes cross-Squadron consequences before returning archived", () => 
     const state = harness.snapshot();
     assert.deepStrictEqual(state.order, [
       "interrupt_requested",
+      "delegates_stopped",
       "thread_archive_committed",
       "lifecycle_obligations_committed",
     ]);
@@ -337,6 +353,29 @@ it.effect("closes cross-Squadron consequences before returning archived", () => 
           event.payload.exchangeRole === "terminal_notice",
       ),
     );
+  }).pipe(Effect.provide(harness.layer));
+});
+
+it.effect("stops the delegates of a seat its first stop left idle before archiving it", () => {
+  const harness = makeHarness({ runStatus: "running", failDelegateStopOnce: true });
+  return Effect.gen(function* () {
+    const service = yield* ArchiveAgentService;
+    const refusal = yield* Effect.flip(service.archive(archiveInput()));
+    assert.instanceOf(refusal, ArchiveAgentConfirmationRequiredError);
+    if (!(refusal instanceof ArchiveAgentConfirmationRequiredError)) return;
+    // The Stop commits and ends the turn, then stopping the seat's delegates fails.
+    yield* Effect.flip(service.archive(archiveInput(refusal.confirmationToken)));
+    harness.settleRun();
+    assert.isFalse(harness.snapshot().archived);
+    // The retry finds the seat idle, so it needs no token, and still stops its delegates first.
+    assert.equal(yield* service.archive(archiveInput()), "archived");
+    assert.deepStrictEqual(harness.snapshot().order, [
+      "interrupt_requested",
+      "interrupt_requested",
+      "delegates_stopped",
+      "thread_archive_committed",
+      "lifecycle_obligations_committed",
+    ]);
   }).pipe(Effect.provide(harness.layer));
 });
 
@@ -438,3 +477,81 @@ it.effect("recovers forward after a committed thread archive and incomplete noti
     assert.isFalse(state.open);
   }).pipe(Effect.provide(harness.layer));
 });
+
+/**
+ * `readFacts` for a Crew seat row: null only when both stores say the thread never existed. The
+ * home is read from the archive facts, the thread from the projection store.
+ */
+const readFactsFor = (home: "none" | "registered", thread: "missing" | "unreadable" | "present") =>
+  Effect.gen(function* () {
+    const service = yield* ArchiveAgentService;
+    return yield* service.readFacts(target);
+  }).pipe(
+    Effect.provide(
+      archiveAgentLayer.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            Layer.mock(A2AArchiveFacts)({
+              readForThread: () =>
+                Effect.succeed(
+                  home === "none"
+                    ? {
+                        state: "not-an-a2a-participant",
+                        threadId,
+                        openExchanges: [],
+                        placementSubtree: { state: "not-applicable" },
+                      }
+                    : {
+                        state: "registered",
+                        threadId,
+                        projectId: ledgerProjectId,
+                        participantId,
+                        retired: false,
+                        archived: false,
+                        openExchanges: [],
+                        placementSubtree: { state: "none" },
+                      },
+                ),
+            }),
+            Layer.mock(ThreadManagementService)({
+              getThreadRecords: () =>
+                thread === "present"
+                  ? Effect.succeed({
+                      thread: { id: threadId, projectId, archivedAt: null },
+                      runs: [],
+                    } as never)
+                  : Effect.fail(
+                      new OrchestratorProjectionError({
+                        threadId,
+                        cause:
+                          thread === "missing"
+                            ? new ProjectionStoreThreadNotFoundError({ threadId })
+                            : new ProjectionStoreReadError({ threadId }),
+                      }),
+                    ),
+            }),
+            Layer.mock(A2ALedger)({}),
+            Layer.mock(A2ALifecycleService)({}),
+            Layer.mock(ServerSecretStore)({
+              getOrCreateRandom: () => Effect.succeed(signingSecret),
+            }),
+          ),
+        ),
+      ),
+    ),
+  );
+
+it.effect("reads a target as never created only when neither its home nor its thread exists", () =>
+  Effect.gen(function* () {
+    assert.isNull(yield* readFactsFor("none", "missing"));
+    // A store that cannot answer is not an absence.
+    const outage = yield* readFactsFor("none", "unreadable").pipe(Effect.flip);
+    assert.equal(outage._tag, "ArchiveAgentOperationError");
+    // A home with no thread behind it is a broken target, not one that never existed.
+    const homed = yield* readFactsFor("registered", "missing").pipe(Effect.flip);
+    assert.equal(homed._tag, "ArchiveAgentOperationError");
+    // A thread with no home is the mismatch it always was.
+    const unhomed = yield* readFactsFor("none", "present").pipe(Effect.flip);
+    assert.instanceOf(unhomed, ArchiveAgentTargetMismatchError);
+  }),
+);

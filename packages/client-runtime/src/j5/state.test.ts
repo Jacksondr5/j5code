@@ -1,12 +1,19 @@
 import { expect, it } from "@effect/vitest";
-import { EnvironmentId } from "@t3tools/contracts";
+import { EnvironmentId, J5_ARTIFACT_WS_METHODS, ProjectId, ThreadId } from "@t3tools/contracts";
+import {
+  J5ActionError,
+  J5_CLIENT_READ_WS_METHODS,
+  J5_PLAYBOOK_WS_METHODS,
+  type J5ReadRevisions,
+} from "@t3tools/contracts/j5";
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
-import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity";
-import { HttpClient, HttpClientResponse } from "effect/unstable/http";
+import { AsyncResult, Atom, AtomRegistry } from "effect/reactivity";
 
 import {
   AVAILABLE_CONNECTION_STATE,
@@ -21,113 +28,364 @@ import type { RpcSession } from "../rpc/session.ts";
 import type { ConnectionCatalogEntry } from "../connection/catalog.ts";
 import { createJ5EnvironmentAtoms } from "./state.ts";
 
+const READS = J5_CLIENT_READ_WS_METHODS;
+const alphaId = EnvironmentId.make("alpha");
+const bravoId = EnvironmentId.make("bravo");
+
+/**
+ * Two connected environments. Each socket answers the fleet read with its own name and how often
+ * it was asked; `alpha` is a server from before the playbook reads existed.
+ */
+const fixture = Effect.gen(function* () {
+  const supervisors = new Map<EnvironmentId, EnvironmentSupervisor["Service"]>();
+  const revisions = new Map<EnvironmentId, SubscriptionRef.SubscriptionRef<number>>();
+  const readRevisions = new Map<EnvironmentId, SubscriptionRef.SubscriptionRef<J5ReadRevisions>>();
+  const calls: Array<readonly [EnvironmentId, string, unknown]> = [];
+  for (const environmentId of [alphaId, bravoId]) {
+    const revision = yield* SubscriptionRef.make(0);
+    revisions.set(environmentId, revision);
+    const readRevision = yield* SubscriptionRef.make<J5ReadRevisions>({
+      inbox: 0,
+      crew: 0,
+      fleet: 0,
+      runtimeRequests: 0,
+      peers: 0,
+      sharing: 0,
+    });
+    readRevisions.set(environmentId, readRevision);
+    // A socket answers after the read that asked has been built, never inside it. An answer
+    // inside the build would reach the query's stale-while-revalidate wrapper on mount, and a
+    // first answer that failed would then be read once more for no revision.
+    const answer =
+      <A, E = never>(method: string, respond: () => Effect.Effect<A, E>) =>
+      (input: unknown) =>
+        Effect.suspend(() => {
+          calls.push([environmentId, method, input]);
+          return Effect.promise(() => Promise.resolve()).pipe(Effect.andThen(respond));
+        });
+    const fleetReads = () =>
+      calls.filter(([id, method]) => id === environmentId && method === READS.readFleet);
+    supervisors.set(
+      environmentId,
+      EnvironmentSupervisor.of({
+        target: new BearerConnectionTarget({
+          environmentId,
+          label: environmentId,
+          connectionId: environmentId,
+        }),
+        state: yield* SubscriptionRef.make<SupervisorConnectionState>({
+          ...AVAILABLE_CONNECTION_STATE,
+          desired: true,
+          phase: "connected",
+          generation: 1,
+        }),
+        prepared: yield* SubscriptionRef.make(Option.none<PreparedConnection>()),
+        session: yield* SubscriptionRef.make<Option.Option<RpcSession>>(
+          Option.some({
+            client: {
+              [J5_PLAYBOOK_WS_METHODS.subscribeChanges]: () => SubscriptionRef.changes(revision),
+              [J5_PLAYBOOK_WS_METHODS.readLibrary]: answer(J5_PLAYBOOK_WS_METHODS.readLibrary, () =>
+                Effect.gen(function* () {
+                  const current = yield* SubscriptionRef.get(revision);
+                  return {
+                    workspaceRoot: "/workspace",
+                    playbooks:
+                      current === 0
+                        ? []
+                        : [
+                            {
+                              name: "shared",
+                              title: "Shared playbook",
+                              description: "Available to this environment",
+                              stepCount: 1,
+                              steps: [{ id: "first", title: "First" }],
+                              issue: null,
+                              source: { kind: "environment" },
+                            },
+                          ],
+                  };
+                }),
+              ),
+              [J5_PLAYBOOK_WS_METHODS.listThreadRuns]: answer(
+                J5_PLAYBOOK_WS_METHODS.listThreadRuns,
+                () =>
+                  environmentId === alphaId
+                    ? Effect.die(`Unknown request tag: ${J5_PLAYBOOK_WS_METHODS.listThreadRuns}`)
+                    : Effect.succeed({ runs: [] }),
+              ),
+              [J5_PLAYBOOK_WS_METHODS.listRuns]: answer(J5_PLAYBOOK_WS_METHODS.listRuns, () =>
+                Effect.die("Unknown request tag: something.else"),
+              ),
+              [J5_ARTIFACT_WS_METHODS.listArtifacts]: answer(
+                J5_ARTIFACT_WS_METHODS.listArtifacts,
+                () => Effect.die(`Unknown request tag: ${J5_ARTIFACT_WS_METHODS.listArtifacts}`),
+              ),
+              [READS.readFleet]: answer(READS.readFleet, () =>
+                Effect.succeed({
+                  projects: [
+                    {
+                      id: "project:shared",
+                      title: `${environmentId} read ${fleetReads().length}`,
+                      agents: [],
+                      crews: [],
+                    },
+                  ],
+                }),
+              ),
+              [READS.subscribeReadChanges]: () => SubscriptionRef.changes(readRevision),
+              [READS.readOpenInboxCount]: answer(READS.readOpenInboxCount, () =>
+                Effect.succeed({ personId: "human:local-operator", count: 0 }),
+              ),
+              [READS.listCrewProposals]: answer(READS.listCrewProposals, () =>
+                Effect.succeed({ proposals: [] }),
+              ),
+              [READS.listPeers]: answer(READS.listPeers, () =>
+                Effect.fail(
+                  new J5ActionError({ code: "SqlError", message: "Listing peers failed." }),
+                ),
+              ),
+            },
+          } as unknown as RpcSession),
+        ),
+        connect: Effect.void,
+        disconnect: Effect.void,
+        retryNow: Effect.void,
+      }),
+    );
+  }
+  const layer = Layer.mock(EnvironmentRegistry)({
+    entries: yield* SubscriptionRef.make<ReadonlyMap<EnvironmentId, ConnectionCatalogEntry>>(
+      new Map(),
+    ),
+    networkStatus: yield* SubscriptionRef.make<NetworkStatus>("online"),
+    run: (id, effect) =>
+      effect.pipe(Effect.provideService(EnvironmentSupervisor, supervisors.get(id)!)),
+    followStream: (id, stream) =>
+      stream.pipe(Stream.provideService(EnvironmentSupervisor, supervisors.get(id)!)),
+  });
+  const registry = yield* Effect.acquireRelease(
+    Effect.sync(() => AtomRegistry.make()),
+    (registry) => Effect.sync(() => registry.dispose()),
+  );
+  const atoms = createJ5EnvironmentAtoms(Atom.runtime(layer));
+  /** Mounts a query and waits for it to settle either way. */
+  const settle = <A, E>(atom: Atom.Atom<AsyncResult.AsyncResult<A, E>>) =>
+    AtomRegistry.mount(registry, atom).pipe(
+      Effect.andThen(Effect.exit(AtomRegistry.getResult(registry, atom))),
+    );
+  /**
+   * Holds an environment's change stream open and waits for where it stands, as an open app does;
+   * a query mounted before the stream's first value reads once more when that value arrives.
+   */
+  const followReadChanges = (environmentId: EnvironmentId) => {
+    const changes = atoms.readChanges({ environmentId, input: {} });
+    return AtomRegistry.mount(registry, changes).pipe(
+      Effect.andThen(AtomRegistry.getResult(registry, changes)),
+    );
+  };
+  return {
+    atoms,
+    calls,
+    followReadChanges,
+    readRevisions,
+    registry,
+    revisions,
+    settle,
+    supervisors,
+  };
+});
+
 it.effect(
-  "uses registry-owned connections, shares reads, and refreshes with new credentials on reconnect",
+  "reads each environment over its own socket, shares a read, and reads again on reconnect",
   () =>
     Effect.gen(function* () {
-      const supervisors = new Map<EnvironmentId, EnvironmentSupervisor["Service"]>();
-      for (const id of ["alpha", "bravo"]) {
-        const environmentId = EnvironmentId.make(id);
-        const target = new BearerConnectionTarget({ environmentId, label: id, connectionId: id });
-        const prepared: PreparedConnection = {
-          environmentId,
-          label: id,
-          httpBaseUrl: `https://${id}.test`,
-          socketUrl: `wss://${id}.test/ws`,
-          target,
-          httpAuthorization: { _tag: "Bearer", token: `${id}-1` },
-        };
-        supervisors.set(
-          environmentId,
-          EnvironmentSupervisor.of({
-            target,
-            state: yield* SubscriptionRef.make<SupervisorConnectionState>({
-              ...AVAILABLE_CONNECTION_STATE,
-              desired: true,
-              phase: "connected",
-              generation: 1,
-            }),
-            prepared: yield* SubscriptionRef.make(Option.some(prepared)),
-            session: yield* SubscriptionRef.make<Option.Option<RpcSession>>(
-              Option.some({} as RpcSession),
-            ),
-            connect: Effect.void,
-            disconnect: Effect.void,
-            retryNow: Effect.void,
-          }),
-        );
-      }
-      const calls: string[] = [];
-      const client = HttpClient.make((request) => {
-        calls.push(request.url);
-        return Effect.succeed(
-          HttpClientResponse.fromWeb(
-            request,
-            Response.json({
-              squadrons: [
-                {
-                  squadron: {
-                    id: "squadron:shared",
-                    name: request.headers.authorization,
-                    createdAt: "2026-09-08T00:00:00Z",
-                  },
-                  projectIds: [],
-                },
-              ],
-            }),
-          ),
-        );
-      });
-      const layer = Layer.merge(
-        Layer.succeed(HttpClient.HttpClient, client),
-        Layer.mock(EnvironmentRegistry)({
-          entries: yield* SubscriptionRef.make<ReadonlyMap<EnvironmentId, ConnectionCatalogEntry>>(
-            new Map(),
-          ),
-          networkStatus: yield* SubscriptionRef.make<NetworkStatus>("online"),
-          run: (id, effect) =>
-            effect.pipe(Effect.provideService(EnvironmentSupervisor, supervisors.get(id)!)),
-          followStream: (id, stream) =>
-            stream.pipe(Stream.provideService(EnvironmentSupervisor, supervisors.get(id)!)),
-        }),
-      );
-      const atoms = createJ5EnvironmentAtoms(Atom.runtime(layer));
-      const registry = yield* Effect.acquireRelease(
-        Effect.sync(() => AtomRegistry.make()),
-        (registry) => Effect.sync(() => registry.dispose()),
-      );
-      const alphaId = EnvironmentId.make("alpha");
-      const alpha = atoms.squadrons({ environmentId: alphaId, input: {} });
-      const bravo = atoms.squadrons({ environmentId: EnvironmentId.make("bravo"), input: {} });
+      const { atoms, calls, followReadChanges, registry, revisions, supervisors } = yield* fixture;
+      yield* followReadChanges(alphaId);
+      yield* followReadChanges(bravoId);
+      const alpha = atoms.fleet({ environmentId: alphaId, input: {} });
+      const bravo = atoms.fleet({ environmentId: bravoId, input: {} });
       yield* AtomRegistry.mount(registry, alpha);
       yield* AtomRegistry.mount(registry, bravo);
       const first = yield* AtomRegistry.getResult(registry, alpha);
       const second = yield* AtomRegistry.getResult(registry, bravo);
-      expect(first[0]?.squadron.name).toBe("Bearer alpha-1");
-      expect(second[0]?.squadron.name).toBe("Bearer bravo-1");
-      yield* AtomRegistry.getResult(
-        registry,
-        atoms.squadrons({ environmentId: alphaId, input: {} }),
-      );
-      expect(calls).toHaveLength(2);
+      expect(first.projects[0]?.title).toBe("alpha read 1");
+      expect(second.projects[0]?.title).toBe("bravo read 1");
+      yield* AtomRegistry.getResult(registry, atoms.fleet({ environmentId: alphaId, input: {} }));
+      expect(calls).toEqual([
+        [alphaId, READS.readFleet, {}],
+        [bravoId, READS.readFleet, {}],
+      ]);
 
-      const supervisor = supervisors.get(alphaId)!;
-      const previous = yield* SubscriptionRef.get(supervisor.prepared);
-      if (Option.isNone(previous)) return yield* Effect.die("Missing prepared connection");
-      yield* SubscriptionRef.set(
-        supervisor.prepared,
-        Option.some({ ...previous.value, httpAuthorization: { _tag: "Bearer", token: "alpha-2" } }),
+      const alphaChanges = atoms.playbookChanges({ environmentId: alphaId, input: {} });
+      const bravoChanges = atoms.playbookChanges({ environmentId: bravoId, input: {} });
+      expect(atoms.playbookChanges({ environmentId: alphaId, input: {} })).toBe(alphaChanges);
+      yield* AtomRegistry.mount(registry, alphaChanges);
+      yield* AtomRegistry.mount(registry, bravoChanges);
+      expect(yield* AtomRegistry.getResult(registry, alphaChanges)).toBe(0);
+      expect(yield* AtomRegistry.getResult(registry, bravoChanges)).toBe(0);
+      yield* SubscriptionRef.set(revisions.get(alphaId)!, 1);
+      const changed = yield* AtomRegistry.toStream(registry, alphaChanges).pipe(
+        Stream.filter((result) => AsyncResult.isSuccess(result) && result.value === 1),
+        Stream.runHead,
       );
-      yield* SubscriptionRef.update(supervisor.state, (state) => ({ ...state, generation: 2 }));
+      expect(Option.isSome(changed)).toBe(true);
+      expect(yield* AtomRegistry.getResult(registry, bravoChanges)).toBe(0);
+
+      yield* SubscriptionRef.update(supervisors.get(alphaId)!.state, (state) => ({
+        ...state,
+        generation: 2,
+      }));
       const refreshed = yield* AtomRegistry.toStream(registry, alpha).pipe(
         Stream.filter(
           (result) =>
-            AsyncResult.isSuccess(result) && result.value[0]?.squadron.name === "Bearer alpha-2",
+            AsyncResult.isSuccess(result) && result.value.projects[0]?.title === "alpha read 2",
         ),
         Stream.runHead,
       );
       expect(Option.isSome(refreshed)).toBe(true);
-      expect(calls.filter((url) => url.startsWith("https://alpha.test"))).toHaveLength(2);
-      expect(calls.filter((url) => url.startsWith("https://bravo.test"))).toHaveLength(1);
+      expect(calls.filter(([id]) => id === bravoId)).toHaveLength(1);
+    }).pipe(Effect.scoped),
+);
+
+it.effect("reads again when the server says a read's own revision moved, and only then", () =>
+  Effect.gen(function* () {
+    const { atoms, calls, followReadChanges, readRevisions, registry, settle } = yield* fixture;
+    yield* followReadChanges(bravoId);
+    const count = atoms.openCount({ environmentId: bravoId, input: {} });
+    const proposals = atoms.crewProposals({ environmentId: bravoId, input: {} });
+    const peers = atoms.peers({ environmentId: bravoId, input: {} });
+    const readsOf = (method: string) => calls.filter((call) => call[1] === method).length;
+    /** Waits for the read the registry starts when a revision moves to be made. */
+    const rereadTo = <A, E>(
+      atom: Atom.Atom<AsyncResult.AsyncResult<A, E>>,
+      method: string,
+      reads: number,
+    ) =>
+      AtomRegistry.toStream(registry, atom).pipe(
+        Stream.filter((result) => !result.waiting && readsOf(method) === reads),
+        Stream.runHead,
+      );
+    yield* AtomRegistry.mount(registry, count);
+    yield* AtomRegistry.mount(registry, proposals);
+    yield* AtomRegistry.getResult(registry, count);
+    yield* AtomRegistry.getResult(registry, proposals);
+    expect([readsOf(READS.readOpenInboxCount), readsOf(READS.listCrewProposals)]).toEqual([1, 1]);
+
+    const move = (name: keyof J5ReadRevisions) =>
+      SubscriptionRef.update(readRevisions.get(bravoId)!, (current) => ({
+        ...current,
+        [name]: current[name] + 1,
+      }));
+    yield* move("inbox");
+    yield* rereadTo(count, READS.readOpenInboxCount, 2);
+    // Nothing a proposal shows changed, so the proposals are not read again.
+    expect(readsOf(READS.listCrewProposals)).toBe(1);
+
+    yield* move("crew");
+    yield* rereadTo(proposals, READS.listCrewProposals, 2);
+    expect(readsOf(READS.readOpenInboxCount)).toBe(2);
+
+    // The peer list has no timer: a peer's heartbeat, error or backlog moves its own revision.
+    yield* settle(peers);
+    expect(readsOf(READS.listPeers)).toBe(1);
+    yield* move("peers");
+    yield* rereadTo(peers, READS.listPeers, 2);
+    expect([readsOf(READS.readOpenInboxCount), readsOf(READS.listCrewProposals)]).toEqual([2, 2]);
+    // Another environment's server moving a revision is not this one's.
+    expect(calls.every(([environmentId]) => environmentId === bravoId)).toBe(true);
+  }).pipe(Effect.scoped),
+);
+
+it.effect("hands a list read's rows to its view, and a refusal in the server's own words", () =>
+  Effect.gen(function* () {
+    const { atoms, settle } = yield* fixture;
+    expect(yield* settle(atoms.crewProposals({ environmentId: bravoId, input: {} }))).toEqual(
+      Exit.succeed([]),
+    );
+    const refused = yield* settle(atoms.peers({ environmentId: bravoId, input: {} }));
+    expect(Exit.isFailure(refused) && Cause.squash(refused.cause)).toMatchObject({
+      code: "SqlError",
+      message: "Listing peers failed.",
+    });
+  }).pipe(Effect.scoped),
+);
+
+it.effect("tells the person to update a server that does not have the read yet", () =>
+  Effect.gen(function* () {
+    const { atoms, registry, settle } = yield* fixture;
+    const input = { threadId: ThreadId.make("thread:playbooks") };
+    const outdated = yield* settle(atoms.playbooks({ environmentId: alphaId, input }));
+    expect(Exit.isFailure(outdated) && Cause.squash(outdated.cause)).toMatchObject({
+      _tag: "EnvironmentRpcUnavailableError",
+      environmentId: alphaId,
+      message:
+        "This view needs a newer server. Update the server hosting this environment, then try again.",
+    });
+    expect(yield* settle(atoms.playbooks({ environmentId: bravoId, input }))).toEqual(
+      Exit.succeed({ runs: [] }),
+    );
+    // Any other defect stays a defect: it is a bug to report, not a server to update.
+    const defect = yield* settle(atoms.playbookRuns({ environmentId: bravoId, input: {} }));
+    expect(Exit.isFailure(defect) && Cause.hasDies(defect.cause)).toBe(true);
+    // The reads a caller makes once go the same way.
+    const once = yield* Effect.promise(() =>
+      atoms.listArtifacts.run(registry, {
+        environmentId: bravoId,
+        input: { projectId: ProjectId.make("project:shared") },
+      }),
+    );
+    expect(AsyncResult.isFailure(once) && Cause.squash(once.cause)).toMatchObject({
+      _tag: "EnvironmentRpcUnavailableError",
+      environmentId: bravoId,
+    });
+  }).pipe(Effect.scoped),
+);
+
+it.effect(
+  "refreshes both projects after an environment library save without refreshing another environment",
+  () =>
+    Effect.gen(function* () {
+      const { atoms, calls, revisions, registry } = yield* fixture;
+      for (const environmentId of [alphaId, bravoId]) {
+        const changes = atoms.playbookChanges({ environmentId, input: {} });
+        yield* AtomRegistry.mount(registry, changes);
+        yield* AtomRegistry.getResult(registry, changes);
+      }
+      const first = atoms.playbookLibrary({
+        environmentId: alphaId,
+        input: { projectId: ProjectId.make("first") },
+      });
+      const second = atoms.playbookLibrary({
+        environmentId: alphaId,
+        input: { projectId: ProjectId.make("second") },
+      });
+      const other = atoms.playbookLibrary({
+        environmentId: bravoId,
+        input: { projectId: ProjectId.make("first") },
+      });
+      for (const query of [first, second, other]) {
+        yield* AtomRegistry.mount(registry, query);
+        expect((yield* AtomRegistry.getResult(registry, query)).playbooks).toEqual([]);
+      }
+      const otherReads = calls.filter(
+        ([id, method]) => id === bravoId && method === J5_PLAYBOOK_WS_METHODS.readLibrary,
+      ).length;
+      yield* SubscriptionRef.update(revisions.get(alphaId)!, (value) => value + 1);
+      for (const query of [first, second]) {
+        const refreshed = yield* AtomRegistry.toStream(registry, query).pipe(
+          Stream.filter(
+            (result) =>
+              AsyncResult.isSuccess(result) && result.value.playbooks[0]?.name === "shared",
+          ),
+          Stream.runHead,
+        );
+        expect(Option.isSome(refreshed)).toBe(true);
+      }
+      expect((yield* AtomRegistry.getResult(registry, other)).playbooks).toEqual([]);
+      expect(
+        calls.filter(
+          ([id, method]) => id === bravoId && method === J5_PLAYBOOK_WS_METHODS.readLibrary,
+        ),
+      ).toHaveLength(otherReads);
     }).pipe(Effect.scoped),
 );

@@ -2,7 +2,7 @@ import { assert, it } from "@effect/vitest";
 import { ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import {
@@ -20,12 +20,12 @@ import {
   CommCommandId,
   ExchangeId,
   ParticipantId,
-  SquadronId,
+  LedgerProjectId,
   type AgentParticipant,
 } from "./contracts.ts";
 
 const timestamp = "2026-08-29T12:00:00.000Z";
-const squadronId = SquadronId.make("squadron:archive-facts");
+const projectId = LedgerProjectId.make("project:archive-facts");
 const participant: AgentParticipant = {
   kind: "agent",
   id: ParticipantId.make("agent:archive-facts:subject"),
@@ -43,7 +43,7 @@ const inboundCounterparty: AgentParticipant = {
 };
 
 const makeTestLayer = (placementFacts = placementFactsLayer) => {
-  const database = NodeSqliteClient.layerMemory();
+  const database = NodeSqliteClient.layer({ filename: ":memory:" });
   const ledger = ledgerLayer.pipe(Layer.provide(database));
   const placements = placementLayer.pipe(Layer.provide(ledger), Layer.provide(database));
   const facts = archiveFactsLayer.pipe(
@@ -57,9 +57,7 @@ const makeTestLayer = (placementFacts = placementFactsLayer) => {
 const seed = Effect.gen(function* () {
   yield* runJ5A2AMigrations();
   const ledger = yield* A2ALedger;
-  yield* ledger.createSquadron({
-    squadron: { id: squadronId, name: "Archive facts", createdAt: timestamp },
-  });
+  yield* ledger.ensureProject({ projectId: projectId, createdAt: timestamp });
   for (const [index, candidate] of [
     participant,
     outboundCounterparty,
@@ -67,7 +65,7 @@ const seed = Effect.gen(function* () {
   ].entries()) {
     yield* ledger.append({
       commandId: CommCommandId.make(`command:archive-facts:join:${index}`),
-      squadronId,
+      projectId,
       acceptedAt: timestamp,
       event: {
         kind: "participant.joined",
@@ -82,7 +80,7 @@ const seed = Effect.gen(function* () {
   }
   yield* ledger.append({
     commandId: CommCommandId.make("command:archive-facts:outbound"),
-    squadronId,
+    projectId,
     acceptedAt: timestamp,
     event: {
       kind: "exchange.opened",
@@ -96,7 +94,7 @@ const seed = Effect.gen(function* () {
   });
   yield* ledger.append({
     commandId: CommCommandId.make("command:archive-facts:inbound"),
-    squadronId,
+    projectId,
     acceptedAt: timestamp,
     event: {
       kind: "exchange.opened",
@@ -110,7 +108,7 @@ const seed = Effect.gen(function* () {
   });
   yield* ledger.append({
     commandId: CommCommandId.make("command:archive-facts:unrelated"),
-    squadronId,
+    projectId,
     acceptedAt: timestamp,
     event: {
       kind: "exchange.opened",
@@ -171,7 +169,7 @@ it.effect("reports real placement descendants without including the archived roo
     const placements = yield* ParticipantPlacementService;
     yield* placements.recordCreation({
       commandId: PlacementCommandId.make("command:archive-facts:placement:subject"),
-      squadronId,
+      projectId,
       participantId: participant.id,
       actor: "platform",
       provenance: { kind: "unknown", source: "native_or_unobserved" },
@@ -179,7 +177,7 @@ it.effect("reports real placement descendants without including the archived roo
     });
     yield* placements.recordCreation({
       commandId: PlacementCommandId.make("command:archive-facts:placement:inbound"),
-      squadronId,
+      projectId,
       participantId: inboundCounterparty.id,
       actor: "platform",
       provenance: {
@@ -195,6 +193,61 @@ it.effect("reports real placement descendants without including the archived roo
     assert.deepStrictEqual(facts.placementSubtree, {
       state: "known",
       participantIds: [inboundCounterparty.id],
+    });
+  }).pipe(Effect.provide(makeTestLayer())),
+);
+
+it.effect("leaves already archived descendants out and keeps their live children", () =>
+  Effect.gen(function* () {
+    yield* seed;
+    const placements = yield* ParticipantPlacementService;
+    const ledger = yield* A2ALedger;
+    // subject -> inbound (archived) -> outbound (live)
+    yield* placements.recordCreation({
+      commandId: PlacementCommandId.make("command:archive-facts:placement:subject"),
+      projectId,
+      participantId: participant.id,
+      actor: "platform",
+      provenance: { kind: "unknown", source: "native_or_unobserved" },
+      createdAt: timestamp,
+    });
+    for (const [child, parent] of [
+      [inboundCounterparty, participant],
+      [outboundCounterparty, inboundCounterparty],
+    ] as const) {
+      yield* placements.recordCreation({
+        commandId: PlacementCommandId.make(`command:archive-facts:placement:${child.id}`),
+        projectId,
+        participantId: child.id,
+        actor: "platform",
+        provenance: {
+          kind: "spawned-by",
+          spawnedByParticipantId: parent.id,
+          source: "j5_spawn",
+        },
+        createdAt: timestamp,
+      });
+    }
+    yield* ledger.append({
+      commandId: CommCommandId.make("command:archive-facts:archive-inbound"),
+      projectId,
+      acceptedAt: timestamp,
+      event: {
+        kind: "participant.archived",
+        sender: null,
+        receiver: inboundCounterparty.id,
+        exchangeId: null,
+        correlationId: null,
+        payload: { participant: inboundCounterparty },
+        createdAt: "2026-08-29T12:00:04.000Z",
+      },
+    });
+    const facts = yield* (yield* A2AArchiveFacts).readForThread(participant.threadId);
+    assert.equal(facts.state, "registered");
+    if (facts.state !== "registered") return;
+    assert.deepStrictEqual(facts.placementSubtree, {
+      state: "known",
+      participantIds: [outboundCounterparty.id],
     });
   }).pipe(Effect.provide(makeTestLayer())),
 );

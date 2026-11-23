@@ -2,11 +2,11 @@ import { EnvironmentId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
-import { McpSessionRegistry } from "./McpSessionRegistry.ts";
+import * as McpSessionRegistry from "./McpSessionRegistry.ts";
 
 export const layer = Layer.succeed(
-  McpSessionRegistry,
-  McpSessionRegistry.of({
+  McpSessionRegistry.McpSessionRegistry,
+  McpSessionRegistry.McpSessionRegistry.of({
     issue: ({ threadId, providerInstanceId }) =>
       Effect.succeed({
         config: {
@@ -19,6 +19,7 @@ export const layer = Layer.succeed(
           browserToolsAvailable: true,
         },
       }),
+    // @effect-diagnostics-next-line effectSucceedWithVoid:off - This optional result requires undefined, not the wider void type.
     resolve: () => Effect.succeed(undefined),
     touch: () => Effect.void,
     revokeProviderSession: () => Effect.void,

@@ -1,32 +1,62 @@
-import { CommandId, MessageId, type OrchestrationV2ThreadProjection } from "@t3tools/contracts";
-import { normalizeModelSlug } from "@t3tools/shared/model";
+import {
+  type ChatAttachment,
+  CommandId,
+  MessageId,
+  type OrchestrationV2Run,
+  type OrchestrationV2ThreadProjection,
+  ThreadId,
+} from "@t3tools/contracts";
+import {
+  J5_PEER_API_PATHS,
+  peerCredentialRejectedReason,
+  type PeerDeliveryRequest,
+} from "@t3tools/contracts/j5";
+import { codexModelFamily, normalizeModelSlug } from "@t3tools/shared/model";
+import {
+  latestExecutedRun,
+  usageLimitBlockedRun,
+} from "@t3tools/shared/orchestrationV2ThreadError";
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { HttpClient, HttpClientRequest } from "effect/http";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
+import { DispatchModeLimit, type DispatchModes } from "../../orchestration-v2/DispatchModeLimit.ts";
 import { EffectOutboxV2 } from "../../orchestration-v2/EffectOutbox.ts";
 import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";
 import {
   formatClosedHumanEnvelope,
   formatClosedPeerEnvelope,
   formatMachineEnvelope,
+  formatOutsideAgentEnvelope,
   formatPeerEnvelope,
 } from "./EnvelopeFormatter.ts";
+import { outsideAgentNameRows } from "./outsideAgentNames.ts";
+import { authorLabel, personNameInLine } from "../sharing/authorLabel.ts";
+import type { WriterLevel } from "@t3tools/contracts/j5";
+import { PeerDeliveryRefusalCode } from "./PeerInboundService.ts";
+import { PeerRegistryService } from "./PeerRegistryService.ts";
+import { peerProtocolHeaders, responseProtocolMismatch } from "./peerProtocol.ts";
 import {
   type DeliveryEnvelopeChannel,
-  SquadronId,
+  type SendMode,
+  LedgerProjectId,
   ExchangeId,
   isHumanParticipantId,
   isMachineParticipantId,
+  isOutsideAgentParticipantId,
   Participant,
   ParticipantId,
-  type LedgerMessageId,
+  LedgerMessageId,
 } from "./contracts.ts";
 
-export class A2ADeliveryTargetError extends Schema.TaggedErrorClass<A2ADeliveryTargetError>()(
+export class A2ADeliveryTargetError extends Schema.TaggedError<A2ADeliveryTargetError>()(
   "A2ADeliveryTargetError",
   {
     participantId: Schema.String,
@@ -34,11 +64,11 @@ export class A2ADeliveryTargetError extends Schema.TaggedErrorClass<A2ADeliveryT
   },
 ) {
   override get message(): string {
-    return `Cannot deliver to ${this.participantId}: ${this.state}. Call list_participants before sending again.`;
+    return `Cannot deliver to ${this.participantId}: ${this.state}. Call j5_list_participants before sending again.`;
   }
 }
 
-export class A2ADeliveryTransportError extends Schema.TaggedErrorClass<A2ADeliveryTransportError>()(
+export class A2ADeliveryTransportError extends Schema.TaggedError<A2ADeliveryTransportError>()(
   "A2ADeliveryTransportError",
   {
     operation: Schema.String,
@@ -46,21 +76,75 @@ export class A2ADeliveryTransportError extends Schema.TaggedErrorClass<A2ADelive
   },
 ) {}
 
+/**
+ * The receiver durably accepted the message, but its run waits behind a held queue
+ * (upstream holds queued runs after a restart until someone resumes the thread).
+ * The message is not delivered yet; the worker retries without alarming.
+ */
+export class A2ADeliveryHeldError extends Schema.TaggedError<A2ADeliveryHeldError>()(
+  "A2ADeliveryHeldError",
+  {
+    participantId: Schema.String,
+    /** The held or limited run it waits on, or the earlier message it waits behind. */
+    waitingOn: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `${this.participantId} holds this message, not delivered: it waits on ${this.waitingOn}.`;
+  }
+}
+
+export const isHeldError = Schema.is(A2ADeliveryHeldError);
+
+/** The peer server refused the message for good: its receiver is gone or will not take it. */
+export class A2ADeliveryRefusedError extends Schema.TaggedError<A2ADeliveryRefusedError>()(
+  "A2ADeliveryRefusedError",
+  {
+    participantId: Schema.String,
+    /** The peer's refusal code, such as `policy_refused`. */
+    code: Schema.String,
+    /** The peer's own sentence for why, which the sender is told. */
+    refusal: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `The peer server refused the message to ${this.participantId}: ${this.code}: ${this.refusal}`;
+  }
+}
+
+export const isRefusedError = Schema.is(A2ADeliveryRefusedError);
+
 export interface AgentDeliveryInput {
-  readonly originSquadronId: SquadronId;
-  readonly receiverSquadronId: SquadronId;
+  readonly originProjectId: LedgerProjectId;
+  readonly receiverProjectId: LedgerProjectId;
   readonly messageId: LedgerMessageId;
   readonly senderId: ParticipantId;
   readonly receiverId: ParticipantId;
   readonly exchangeId: ExchangeId | null;
   readonly exchangeRole: "none" | "ask" | "followup" | "reply" | "terminal_notice";
   readonly message: string;
+  readonly attachments?: ReadonlyArray<ChatAttachment>;
+  /** How the sender asked for the message to land; absent means `queue`. */
+  readonly mode?: SendMode;
+  /** The broadest modes the sender could touch when it asked for a steer or a restart. */
+  readonly modeLimit?: DispatchModes;
   readonly envelopeChannel: DeliveryEnvelopeChannel;
+  /** The peer server a received message came from, named in its envelope; absent for a local sender. */
+  readonly senderServerName?: string;
 }
 
 export interface HumanDeliveryInput extends AgentDeliveryInput {
   readonly createdAt: string;
 }
+
+/** A receiver homed on a peer server: the peer writes its own received row and delivers from there. */
+export interface PeerDeliveryInput {
+  readonly receiverEnvironmentId: string;
+  /** The one body a message crosses in, built by `buildPeerDeliveryBody` for direct sends and polls alike. */
+  readonly body: PeerDeliveryRequest;
+}
+
+const PEER_DELIVERY_TIMEOUT = Duration.seconds(15);
 
 export interface A2ADeliveryTransportShape {
   /** Withdraw an accepted queue entry, or prove that delivery already reached its run/provider. */
@@ -70,10 +154,13 @@ export interface A2ADeliveryTransportShape {
   }) => Effect.Effect<"cancelled" | "delivered", A2ADeliveryTransportError>;
   readonly deliverAgent: (
     input: AgentDeliveryInput,
-  ) => Effect.Effect<void, A2ADeliveryTransportError>;
+  ) => Effect.Effect<void, A2ADeliveryTransportError | A2ADeliveryHeldError>;
   readonly deliverHuman: (
     input: HumanDeliveryInput,
   ) => Effect.Effect<void, A2ADeliveryTransportError>;
+  readonly deliverPeer: (
+    input: PeerDeliveryInput,
+  ) => Effect.Effect<void, A2ADeliveryTransportError | A2ADeliveryRefusedError>;
 }
 
 export class A2ADeliveryTransport extends Context.Service<
@@ -83,6 +170,13 @@ export class A2ADeliveryTransport extends Context.Service<
 
 const stablePart = (value: string) => encodeURIComponent(value);
 
+/** A run upstream queues new messages behind. */
+const isActiveRun = (run: OrchestrationV2Run) =>
+  run.status === "preparing" ||
+  run.status === "starting" ||
+  run.status === "running" ||
+  run.status === "waiting";
+
 /**
  * Every retry reuses this upstream command/message pair. A rejected upstream
  * receipt therefore exhausts into the visible alarm instead of rotating an id
@@ -91,8 +185,36 @@ const stablePart = (value: string) => encodeURIComponent(value);
 export const deliveryCommandId = (messageId: LedgerMessageId) =>
   CommandId.make(`command:j5:a2a:delivery:${stablePart(messageId)}`);
 
+/**
+ * The command an asked-for steer or restart, or a peer's steer into a running GPT 6 or Claude turn,
+ * is dispatched under. It is not the delivery's own: upstream records a rejected command for good,
+ * and rejects a restart aimed at a turn that has just ended and a steer to a run that Stop has
+ * reached, so the plain delivery that follows must keep a command id that nothing has refused.
+ */
+const askedDeliveryCommandId = (messageId: LedgerMessageId, mode: Exclude<SendMode, "queue">) =>
+  CommandId.make(`${deliveryCommandId(messageId)}:${mode}`);
+
+/** Every command one message's delivery may have been dispatched under. */
+const deliveryCommandIds = (messageId: LedgerMessageId) => [
+  deliveryCommandId(messageId),
+  askedDeliveryCommandId(messageId, "steer"),
+  askedDeliveryCommandId(messageId, "restart"),
+];
+
+const DELIVERY_MESSAGE_ID_PREFIX = "message:j5:a2a:delivery:";
+
 export const deliveryMessageId = (messageId: LedgerMessageId) =>
-  MessageId.make(`message:j5:a2a:delivery:${stablePart(messageId)}`);
+  MessageId.make(`${DELIVERY_MESSAGE_ID_PREFIX}${stablePart(messageId)}`);
+
+/** Whether a thread message is an A2A delivery (a peer message or a platform notice). */
+export const isDeliveryMessageId = (messageId: string) =>
+  messageId.startsWith(DELIVERY_MESSAGE_ID_PREFIX);
+
+/** The ledger message a thread's delivery message carries; undefined for any other message. */
+export const ledgerMessageIdOfDelivery = (messageId: string) =>
+  isDeliveryMessageId(messageId)
+    ? LedgerMessageId.make(decodeURIComponent(messageId.slice(DELIVERY_MESSAGE_ID_PREFIX.length)))
+    : undefined;
 
 interface MembershipRow {
   readonly payload: string;
@@ -109,7 +231,10 @@ interface HumanExchangeRow {
 }
 
 const decodeParticipant = Schema.decodeUnknownEffect(Schema.fromJsonString(Participant));
-
+const decodeRefusalOption = Schema.decodeUnknownOption(
+  Schema.fromJsonString(Schema.Struct({ error: PeerDeliveryRefusalCode, message: Schema.String })),
+);
+const decodeRefusal = (text: string) => decodeRefusalOption(text).pipe(Option.getOrNull);
 const assertNever = (channel: never): never => {
   throw new Error(`Unsupported A2A delivery envelope channel: ${String(channel)}`);
 };
@@ -123,9 +248,19 @@ const assertPersonReply = (input: AgentDeliveryInput): never => {
   );
 };
 
-/** Use the active run's selection, not the picker selection for future runs. */
-export const astraPeerSteeringRun = (
-  target: OrchestrationV2ThreadProjection,
+// Every GPT 6 model (Astra, Luna, Sol and their point releases) takes messages during work.
+const isGpt6Model = (model: string | null) =>
+  model !== null && /^gpt-6[-.]/.test(codexModelFamily(model));
+
+/**
+ * The running turn a peer's update steers into without being asked: a Codex GPT 6 turn or a
+ * Claude turn. Use the active run's selection, not the picker selection for future runs.
+ */
+export const peerSteeringRun = (
+  target: Pick<
+    OrchestrationV2ThreadProjection,
+    "thread" | "runs" | "providerTurns" | "providerThreads" | "providerSessions"
+  >,
   channel: DeliveryEnvelopeChannel,
 ) => {
   if (channel !== "peer" || target.thread.archivedAt !== null) return undefined;
@@ -137,42 +272,138 @@ export const astraPeerSteeringRun = (
   const session = target.providerSessions.find(
     (candidate) => candidate.id === providerThread?.providerSessionId,
   );
-  return providerThread?.driver === "codex" &&
-    session?.driver === "codex" &&
-    session.capabilities.turns.supportsActiveSteering === true &&
-    normalizeModelSlug(run.modelSelection.model, providerThread.driver) === "gpt-6-astra"
-    ? run
+  if (providerThread === undefined || session?.driver !== providerThread.driver) return undefined;
+  const turns = session.capabilities.turns;
+  // Claude's adapter sends an agent's steer with priority "next", which waits for the running
+  // tool calls instead of cancelling them (case 89). Its capability still reports that steering
+  // interrupts tools, because a person's steer does.
+  const claudeTakesPeerUpdates =
+    providerThread.driver === "claudeAgent" && turns.supportsActiveSteering === true;
+  const gpt6TakesPeerUpdates =
+    providerThread.driver === "codex" &&
+    turns.supportsActiveSteering === true &&
+    isGpt6Model(normalizeModelSlug(run.modelSelection.model, providerThread.driver));
+  return claudeTakesPeerUpdates || gpt6TakesPeerUpdates ? run : undefined;
+};
+
+/**
+ * The running turn a `steer` or `restart` lands on, by upstream's own steering policy: a steer
+ * needs a provider that steers a turn directly or by interrupting and restarting it, and a restart
+ * needs the second. Undefined when the receiver has no such turn, and the message is then
+ * delivered as any other: it starts a turn on an idle agent, or waits behind a busy one.
+ */
+export const requestedSteeringRun = (
+  target: Pick<
+    OrchestrationV2ThreadProjection,
+    "thread" | "runs" | "providerTurns" | "providerThreads" | "providerSessions"
+  >,
+  channel: DeliveryEnvelopeChannel,
+  mode: Exclude<SendMode, "queue">,
+) => {
+  if (channel !== "peer" || target.thread.archivedAt !== null) return undefined;
+  const run = ThreadManagement.latestSteerableRun(target);
+  if (run === undefined) return undefined;
+  const providerThread = target.providerThreads.find(
+    (thread) => thread.id === run.providerThreadId,
+  );
+  const turns = target.providerSessions.find(
+    (candidate) => candidate.id === providerThread?.providerSessionId,
+  )?.capabilities.turns;
+  if (turns === undefined) return undefined;
+  const restarts = turns.supportsInterrupt && turns.supportsSteeringByInterruptRestart;
+  return (mode === "steer" ? turns.supportsActiveSteering || restarts : restarts) ? run : undefined;
+};
+
+/**
+ * Why a delivery to an idle agent waits unsent. Upstream refuses to resume a thread stopped by a
+ * usage limit and would start the delivery into the same limit, and it holds a message queued
+ * after a failed worktree setup (`worktreeMissingRun` in Orchestrator.ts), as resuming would run it
+ * in the project checkout.
+ */
+export const idleQueueHold = (
+  target: Pick<
+    OrchestrationV2ThreadProjection,
+    "thread" | "runs" | "turnItems" | "providerSessions"
+  >,
+) => {
+  const sessionError =
+    target.providerSessions
+      .filter((session) => session.providerInstanceId === target.thread.providerInstanceId)
+      .toSorted(
+        (left, right) =>
+          DateTime.toEpochMillis(right.updatedAt) - DateTime.toEpochMillis(left.updatedAt),
+      )[0]?.lastError ?? null;
+  const limitedRun = usageLimitBlockedRun(target.runs, target.turnItems, sessionError);
+  if (limitedRun !== null) return { type: "usage_limit" as const, run: limitedRun };
+  const latestRun = latestExecutedRun(target.runs);
+  return (latestRun?.status === "failed" || latestRun?.status === "interrupted") &&
+    latestRun.workspacePreparation?.type === "worktree" &&
+    target.thread.worktreePath === null
+    ? { type: "worktree_setup_failed" as const, run: latestRun }
     : undefined;
 };
 
-export const formatAgentDeliveryEnvelope = (input: AgentDeliveryInput): string => {
+export const formatAgentDeliveryEnvelope = (
+  input: AgentDeliveryInput & {
+    readonly originProjectTitle?: string | undefined;
+    /** The label an outside agent signed in with. */
+    readonly outsideAgentName?: string | undefined;
+    /** How a person who replies from the inbox is named, when the server holds a name. */
+    readonly humanSenderLabel?: string | undefined;
+    /** A shared conversation's note the reply carries. */
+    readonly humanNote?: string | null | undefined;
+    /** The intent of the ask a person's reply answers. */
+    readonly answeredIntent?: string | undefined;
+  },
+): string => {
   switch (input.envelopeChannel) {
     case "peer":
       return input.exchangeRole === "reply"
         ? isHumanParticipantId(input.senderId)
           ? formatClosedHumanEnvelope({
               senderId: input.senderId,
+              senderLabel: input.humanSenderLabel,
+              note: input.humanNote,
               message: input.message,
+              answeredAsk:
+                input.exchangeId === null || input.answeredIntent === undefined
+                  ? undefined
+                  : { exchangeId: input.exchangeId, intent: input.answeredIntent },
             })
           : formatClosedPeerEnvelope({
               senderId: input.senderId,
-              originSquadronId: input.originSquadronId,
+              originProjectId: input.originProjectId,
+              originProjectTitle: input.originProjectTitle,
               message: input.message,
+              ...(input.senderServerName === undefined
+                ? {}
+                : { senderServerName: input.senderServerName }),
             })
         : isHumanParticipantId(input.senderId)
           ? assertPersonReply(input)
           : isMachineParticipantId(input.senderId)
             ? formatMachineEnvelope({
                 senderId: input.senderId,
-                originSquadronId: input.originSquadronId,
+                originProjectId: input.originProjectId,
+                originProjectTitle: input.originProjectTitle,
                 message: input.message,
               })
-            : formatPeerEnvelope({
-                senderId: input.senderId,
-                originSquadronId: input.originSquadronId,
-                exchangeId: input.exchangeId,
-                message: input.message,
-              });
+            : isOutsideAgentParticipantId(input.senderId)
+              ? formatOutsideAgentEnvelope({
+                  senderId: input.senderId,
+                  senderName: input.outsideAgentName,
+                  message: input.message,
+                })
+              : formatPeerEnvelope({
+                  senderId: input.senderId,
+                  originProjectId: input.originProjectId,
+                  originProjectTitle: input.originProjectTitle,
+                  exchangeId: input.exchangeId,
+                  message: input.message,
+                  ...(input.senderServerName === undefined
+                    ? {}
+                    : { senderServerName: input.senderServerName }),
+                });
     case "silence_notice":
     case "lifecycle_notice":
       return input.message;
@@ -184,17 +415,35 @@ export const formatAgentDeliveryEnvelope = (input: AgentDeliveryInput): string =
 export const live: Layer.Layer<
   A2ADeliveryTransport,
   never,
-  ThreadManagement.ThreadManagementService | OrchestratorV2 | EffectOutboxV2 | SqlClient.SqlClient
+  | ThreadManagement.ThreadManagementService
+  | OrchestratorV2
+  | EffectOutboxV2
+  | SqlClient.SqlClient
+  | PeerRegistryService
+  | HttpClient.HttpClient
 > = Layer.effect(
   A2ADeliveryTransport,
   Effect.gen(function* () {
     const threads = yield* ThreadManagement.ThreadManagementService;
     const orchestrator = yield* OrchestratorV2;
     const outbox = yield* EffectOutboxV2;
+    const peers = yield* PeerRegistryService;
+    const httpClient = yield* HttpClient.HttpClient;
+    const settledEffect = Effect.fn(function* (effectId: string) {
+      yield* outbox.awaitSettled(effectId).pipe(Effect.timeout("30 seconds"));
+      const row = yield* outbox.get(effectId);
+      if (Option.isNone(row)) {
+        return yield* new A2ADeliveryTransportError({
+          operation: "await peer steering",
+          cause: `Steering effect ${effectId} does not exist.`,
+        });
+      }
+      return row.value;
+    });
     const awaitSteeringOutcome = Effect.fn(function* (effectId: string) {
       // Only bound the observer. The provider effect may still acknowledge later;
       // retries must inspect that same durable effect, never inject a new one.
-      const outcome = yield* outbox.awaitSettled(effectId).pipe(Effect.timeout("30 seconds"));
+      const outcome = yield* settledEffect(effectId);
       if (outcome.status !== "succeeded") {
         return yield* new A2ADeliveryTransportError({
           operation: "await peer steering",
@@ -203,10 +452,20 @@ export const live: Layer.Layer<
       }
     });
     const sql = yield* SqlClient.SqlClient;
+    // An agent sender has one membership, in the project it lives in now, which is not the
+    // delivery's origin once Turn into project has moved it since sending.
+    const agentThreadId = Effect.fn("j5.a2a.delivery.agentThreadId")(function* (
+      participantId: ParticipantId,
+    ) {
+      const rows = yield* sql<{ readonly thread_id: string }>`SELECT thread_id
+        FROM j5_a2a_membership
+        WHERE participant_id = ${participantId}`;
+      return rows[0] === undefined ? undefined : ThreadId.make(rows[0].thread_id);
+    });
 
     return A2ADeliveryTransport.of({
-      cancelAgent: (input) =>
-        Effect.gen(function* () {
+      cancelAgent: Effect.fn("j5.a2a.delivery.cancelAgent")(
+        function* (input) {
           const rows =
             yield* sql<MembershipRow>`SELECT json_extract(payload, '$.participant') AS payload
           FROM j5_a2a_comm_event WHERE kind = 'participant.joined'
@@ -222,15 +481,23 @@ export const live: Layer.Layer<
               participantId: input.receiverId,
               state: "not an agent",
             });
-          const priorEffects = yield* outbox.listByCommandId(deliveryCommandId(input.messageId));
+          // A steer may sit under the delivery's own command (Astra) or the one its sender asked
+          // for; its outcome, not the message in the thread, says whether the provider took it.
+          const priorEffects = (yield* Effect.forEach(deliveryCommandIds(input.messageId), (id) =>
+            outbox.listByCommandId(id),
+          )).flat();
           const steer = priorEffects.find(
             (effect) => effect.request.type === "provider-turn.steer",
           );
           if (steer !== undefined) {
-            const outcome = yield* outbox.awaitSettled(steer.id).pipe(Effect.timeout("30 seconds"));
+            const outcome = yield* settledEffect(steer.id);
             return outcome.status === "succeeded" ? ("delivered" as const) : ("cancelled" as const);
           }
-          const projection = yield* threads.getThreadProjection(participant.threadId);
+          const projection = yield* threads.getThreadRecords(
+            participant.threadId,
+            ["messages", "runs"],
+            { messageIds: [deliveryMessageId(input.messageId)] },
+          );
           const message = projection.messages.find(
             (entry) => entry.id === deliveryMessageId(input.messageId),
           );
@@ -255,18 +522,17 @@ export const live: Layer.Layer<
             return "cancelled" as const;
           }
           return run.status === "cancelled" ? ("cancelled" as const) : ("delivered" as const);
-        }).pipe(
-          Effect.mapError(
-            (cause) => new A2ADeliveryTransportError({ operation: "cancel agent delivery", cause }),
-          ),
+        },
+        Effect.mapError(
+          (cause) => new A2ADeliveryTransportError({ operation: "cancel agent delivery", cause }),
         ),
-      deliverAgent: (input) =>
-        Effect.gen(function* () {
+      ),
+      deliverAgent: Effect.fn("j5.a2a.delivery.deliverAgent")(
+        function* (input) {
           const rows = yield* sql<MembershipRow>`
             SELECT payload
-            FROM j5_a2a_squadron_membership
-            WHERE squadron_id = ${input.receiverSquadronId}
-              AND participant_id = ${input.receiverId}
+            FROM j5_a2a_membership
+            WHERE participant_id = ${input.receiverId}
               AND archived_at IS NULL
             LIMIT 1
           `;
@@ -284,7 +550,19 @@ export const live: Layer.Layer<
               state: "participant is not an addressable agent thread",
             });
           }
-          const target = yield* threads.getThreadProjection(participant.threadId);
+          // Error items are all the usage-limit hold reads; the one message is the accepted check.
+          const target = yield* threads.getThreadRecords(
+            participant.threadId,
+            [
+              "runs",
+              "messages",
+              "turnItems",
+              "providerTurns",
+              "providerThreads",
+              "providerSessions",
+            ],
+            { messageIds: [deliveryMessageId(input.messageId)], turnItemTypes: ["error"] },
+          );
           if (target.thread.archivedAt !== null) {
             return yield* new A2ADeliveryTargetError({
               participantId: input.receiverId,
@@ -293,27 +571,120 @@ export const live: Layer.Layer<
           }
           // A retry must observe the original steer even if its run has ended.
           // Re-dispatching the stable command as a queue request cannot prove delivery.
+          // Upstream prunes succeeded and cancelled effects after seven days; past that the
+          // steer row is gone and the accepted message in the projection decides below.
           const priorEffects = yield* outbox.listByCommandId(deliveryCommandId(input.messageId));
           const priorSteer = priorEffects.find(
             (effect) => effect.request.type === "provider-turn.steer",
           );
           if (priorSteer !== undefined) return yield* awaitSteeringOutcome(priorSteer.id);
-          // Astra can receive peer updates during its long turns. Other models
-          // and platform notices retain QS1's queue policy (Claude issue #73).
+          // GPT 6 and Claude agents take peer updates during their long turns. Other models
+          // and platform notices retain QS1's queue policy.
           const alreadyAccepted = target.messages.some(
             (message) => message.id === deliveryMessageId(input.messageId),
           );
-          const steeringRun = alreadyAccepted
+          const heldQueueRun = target.runs.find(
+            (run) => run.status === "queued" && run.queueHeld === true,
+          );
+          // A held queue keeps landing order: the update joins its back rather than steering.
+          const steeringRun =
+            alreadyAccepted || heldQueueRun !== undefined
+              ? undefined
+              : peerSteeringRun(target, input.envelopeChannel);
+          // The header names the sender's project by id, with its title when the sender is on this
+          // server. A peer server's project is not one of ours, so it is named by id alone.
+          const originProject =
+            input.senderServerName !== undefined
+              ? []
+              : yield* sql<{ readonly title: string }>`
+                  SELECT title FROM projection_projects WHERE project_id = ${input.originProjectId}
+                `.pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new A2ADeliveryTransportError({ operation: "read origin project", cause }),
+                  ),
+                );
+          const outsideAgent = !isOutsideAgentParticipantId(input.senderId)
+            ? []
+            : yield* outsideAgentNameRows(sql, [input.senderId]).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new A2ADeliveryTransportError({ operation: "read outside agent", cause }),
+                ),
+              );
+          // A person's reply names them once the server holds a name. In a shared conversation
+          // it was recorded as it was accepted, with their name and level then and any note due,
+          // as a typed message is; elsewhere it is named as the person is named now.
+          const humanSender = !isHumanParticipantId(input.senderId)
             ? undefined
-            : astraPeerSteeringRun(target, input.envelopeChannel);
-          const envelope = formatAgentDeliveryEnvelope(input);
+            : yield* Effect.gen(function* () {
+                const recorded = yield* sql<{
+                  readonly display_name: string | null;
+                  readonly level: WriterLevel;
+                  readonly note: string | null;
+                }>`
+                  SELECT display_name, level, note FROM j5_a2a_message_author
+                  WHERE thread_id = ${target.thread.id}
+                    AND message_id = ${deliveryMessageId(input.messageId)}
+                `;
+                const row = recorded[0];
+                if (row !== undefined) {
+                  return {
+                    label: authorLabel({ displayName: row.display_name, level: row.level }),
+                    note: row.note,
+                  };
+                }
+                const people = yield* sql<{ readonly display_name: string | null }>`
+                  SELECT display_name FROM j5_a2a_human_person WHERE person_id = ${input.senderId}
+                `;
+                const displayName = people[0]?.display_name ?? null;
+                return displayName === null
+                  ? undefined
+                  : { label: personNameInLine(displayName), note: null };
+              }).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new A2ADeliveryTransportError({ operation: "read the person replying", cause }),
+                ),
+              );
+          const answeredAsk =
+            !isHumanParticipantId(input.senderId) || input.exchangeId === null
+              ? []
+              : yield* sql<{ readonly intent: string }>`
+                  SELECT intent FROM j5_a2a_exchange
+                  WHERE project_id = ${input.originProjectId}
+                    AND exchange_id = ${input.exchangeId}
+                `.pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new A2ADeliveryTransportError({ operation: "read the answered ask", cause }),
+                  ),
+                );
+          const envelope = formatAgentDeliveryEnvelope({
+            ...input,
+            originProjectTitle: originProject[0]?.title,
+            outsideAgentName: outsideAgent[0]?.display_name,
+            humanSenderLabel: humanSender?.label,
+            humanNote: humanSender?.note ?? null,
+            answeredIntent: answeredAsk[0]?.intent,
+          });
+          // Upstream links an agent-authored message to its sending thread. A machine and an
+          // outside agent have none.
+          const senderThreadId =
+            input.envelopeChannel === "peer" &&
+            !isHumanParticipantId(input.senderId) &&
+            !isMachineParticipantId(input.senderId) &&
+            !isOutsideAgentParticipantId(input.senderId)
+              ? yield* agentThreadId(input.senderId)
+              : undefined;
           const sendInput = {
             projectId: target.thread.projectId,
             commandId: deliveryCommandId(input.messageId),
             threadId: participant.threadId,
             messageId: deliveryMessageId(input.messageId),
+            ...(senderThreadId === undefined ? {} : { senderThreadId }),
             text: envelope,
-            attachments: [],
+            attachments: input.attachments ?? [],
             mode: "queue",
             createdBy:
               input.envelopeChannel === "silence_notice" ||
@@ -324,47 +695,244 @@ export const live: Layer.Layer<
                   : "agent",
             creationSource: "mcp",
           } satisfies ThreadManagement.ThreadManagementSendInput;
-          if (steeringRun === undefined) {
-            yield* threads.sendToThread(sendInput);
-          } else {
-            // Pin the checked run: sendToThread reselects the latest live run,
-            // which could now be a different model. Upstream rejects a stale
-            // target rather than steering/restarting an unchecked replacement.
-            yield* orchestrator.dispatch({
-              type: "message.dispatch",
-              commandId: sendInput.commandId,
-              threadId: sendInput.threadId,
-              messageId: sendInput.messageId,
-              text: sendInput.text,
-              attachments: sendInput.attachments,
-              createdBy: sendInput.createdBy,
-              creationSource: sendInput.creationSource,
-              modelSelection: steeringRun.modelSelection,
-              dispatchMode: { type: "steer_active", targetRunId: steeringRun.id },
-            });
+          const heldRun = (run: OrchestrationV2Run | undefined) =>
+            run?.status === "queued" && run.queueHeld === true
+              ? Effect.fail(
+                  new A2ADeliveryHeldError({
+                    participantId: input.receiverId,
+                    waitingOn: `run ${run.id}`,
+                  }),
+                )
+              : Effect.void;
+          // Register D4: a delivery to a held queue, idle or busy, resumes it and joins its back, so
+          // messages run in landing order (a person's held ones too); a retry never resumes again.
+          // Under a usage limit it waits unsent for the continue; after a failed worktree setup it
+          // waits behind held messages.
+          const idle = !alreadyAccepted && !target.runs.some(isActiveRun);
+          const hold = idle ? idleQueueHold(target) : undefined;
+          const queueBehindHeld =
+            alreadyAccepted || (heldQueueRun === undefined && hold?.type !== "usage_limit")
+              ? Effect.void
+              : hold !== undefined
+                ? Effect.fail(
+                    new A2ADeliveryHeldError({
+                      participantId: input.receiverId,
+                      waitingOn: `run ${heldQueueRun?.id ?? hold.run.id}`,
+                    }),
+                  )
+                : orchestrator.dispatch({
+                    type: "queue.resume",
+                    commandId: CommandId.make(`${deliveryCommandId(input.messageId)}:resume`),
+                    threadId: participant.threadId,
+                  });
+          // Whether the message is in the thread, steered under `commandId` or accepted otherwise.
+          const landed = Effect.fn("j5.a2a.delivery.landed")(function* (commandId: CommandId) {
+            const steer = (yield* outbox.listByCommandId(commandId)).find(
+              (effect) => effect.request.type === "provider-turn.steer",
+            );
+            if (steer !== undefined) {
+              yield* awaitSteeringOutcome(steer.id);
+              return true;
+            }
+            // A restart, and a steer the provider takes by interrupting and restarting, leave
+            // no steer effect: the message in the thread is the proof.
+            const accepted = yield* orchestrator.getThreadRecords(
+              participant.threadId,
+              ["messages", "runs"],
+              { messageIds: [sendInput.messageId] },
+            );
+            if (!accepted.messages.some((message) => message.id === sendInput.messageId)) {
+              return false;
+            }
+            yield* heldRun(accepted.runs.find((run) => run.userMessageId === sendInput.messageId));
+            return true;
+          });
+          const mode = input.mode ?? "queue";
+          if (mode !== "queue") {
+            // The sender asked for a steer or a restart (see `askedDeliveryCommandId`).
+            const askedCommandId = askedDeliveryCommandId(input.messageId, mode);
+            if (yield* landed(askedCommandId)) return;
+            const askedRun = requestedSteeringRun(target, input.envelopeChannel, mode);
+            if (askedRun !== undefined) {
+              // Through ThreadManagement, so a project's disabled provider is refused as upstream's
+              // own steer is.
+              yield* threads
+                .dispatch({
+                  type: "message.dispatch",
+                  commandId: askedCommandId,
+                  threadId: sendInput.threadId,
+                  messageId: sendInput.messageId,
+                  text: sendInput.text,
+                  attachments: sendInput.attachments,
+                  ...(sendInput.senderThreadId === undefined
+                    ? {}
+                    : { senderThreadId: sendInput.senderThreadId }),
+                  createdBy: sendInput.createdBy,
+                  creationSource: sendInput.creationSource,
+                  modelSelection: askedRun.modelSelection,
+                  dispatchMode: {
+                    type: mode === "restart" ? "restart_active" : "steer_active",
+                    targetRunId: askedRun.id,
+                  },
+                })
+                .pipe(
+                  // The sender's limit when it sent. The receiver's user can raise its modes
+                  // before delivery, and upstream checks again under the thread's lock.
+                  Effect.provideService(DispatchModeLimit, input.modeLimit),
+                  // Refused or too late: the message is delivered as any other, below.
+                  Effect.catch((cause) =>
+                    Effect.logInfo("J5 A2A delivery could not land as its sender asked", {
+                      messageId: input.messageId,
+                      mode,
+                      cause,
+                    }),
+                  ),
+                );
+              if (yield* landed(askedCommandId)) return;
+            }
+            yield* queueBehindHeld;
+            return yield* heldRun((yield* threads.sendToThread(sendInput)).run);
           }
-          // Re-read even after queue dispatch: a concurrent attempt may have
-          // committed this same command as a steer before our projection read.
-          const effects = yield* outbox.listByCommandId(sendInput.commandId);
-          const steer = effects.find((effect) => effect.request.type === "provider-turn.steer");
-          if (steer !== undefined) {
-            yield* awaitSteeringOutcome(steer.id);
-          } else if (steeringRun !== undefined) {
-            return yield* new A2ADeliveryTransportError({
-              operation: "await peer steering",
-              cause: "The committed command has no steering effect.",
-            });
+          // A peer's steer into a GPT 6 or Claude run has the asked-for steer's command id, not the
+          // delivery's own: upstream refuses a steer to a run that Stop has reached and keeps that
+          // refusal for the command id, and the message then queues under the delivery's id.
+          const runSteerCommandId = askedDeliveryCommandId(input.messageId, "steer");
+          // A retry after that steer was taken or refused finds the message without sending it again.
+          if (
+            alreadyAccepted &&
+            (yield* threads.hasReceipt(runSteerCommandId)) &&
+            (yield* landed(runSteerCommandId))
+          ) {
+            return;
           }
-        }).pipe(
-          Effect.mapError(
-            (cause) => new A2ADeliveryTransportError({ operation: "deliver agent", cause }),
-          ),
+          if (steeringRun !== undefined) {
+            // Pin the checked run and model. If it completed before admission,
+            // upstream can accept this same message as a queued follow-up.
+            yield* threads
+              .dispatch({
+                type: "message.dispatch",
+                commandId: runSteerCommandId,
+                threadId: sendInput.threadId,
+                messageId: sendInput.messageId,
+                text: sendInput.text,
+                attachments: sendInput.attachments,
+                ...(sendInput.senderThreadId === undefined
+                  ? {}
+                  : { senderThreadId: sendInput.senderThreadId }),
+                createdBy: sendInput.createdBy,
+                creationSource: sendInput.creationSource,
+                modelSelection: steeringRun.modelSelection,
+                dispatchMode: { type: "steer_active", targetRunId: steeringRun.id },
+              })
+              .pipe(
+                Effect.catch((cause) =>
+                  Effect.logInfo("J5 A2A delivery could not steer into the running turn", {
+                    messageId: input.messageId,
+                    cause,
+                  }),
+                ),
+              );
+            if (yield* landed(runSteerCommandId)) return;
+          }
+          yield* queueBehindHeld;
+          yield* heldRun((yield* threads.sendToThread(sendInput)).run);
+          // Re-read even after queue dispatch: a delivery from before the steer had its own id
+          // may have committed this same command as a steer before our projection read.
+          const steer = (yield* outbox.listByCommandId(sendInput.commandId)).find(
+            (effect) => effect.request.type === "provider-turn.steer",
+          );
+          if (steer !== undefined) yield* awaitSteeringOutcome(steer.id);
+        },
+        Effect.mapError((cause) =>
+          isHeldError(cause)
+            ? cause
+            : new A2ADeliveryTransportError({ operation: "deliver agent", cause }),
         ),
-      deliverHuman: (input) =>
-        input.envelopeChannel === "lifecycle_notice"
+      ),
+      deliverPeer: Effect.fn("j5.a2a.delivery.deliverPeer")(
+        function* (input) {
+          const receiverId = ParticipantId.make(input.body.receiverId);
+          const peer = yield* peers.connection(input.receiverEnvironmentId);
+          if (peer === null) {
+            return yield* new A2ADeliveryTargetError({
+              participantId: receiverId,
+              state: `peer ${input.receiverEnvironmentId} is no longer recorded on this server`,
+            });
+          }
+          // A peer that polls is never called; its messages wait here until it asks.
+          if (peer.origin === null || peer.credential === null) {
+            return yield* new A2ADeliveryTargetError({
+              participantId: receiverId,
+              state: `peer ${peer.label} polls this server for its messages, so none is sent to it`,
+            });
+          }
+          const body = input.body;
+          const request = yield* HttpClientRequest.bodyJson(
+            HttpClientRequest.post(`${peer.origin}${J5_PEER_API_PATHS.deliver}`).pipe(
+              HttpClientRequest.bearerToken(peer.credential),
+              HttpClientRequest.acceptJson,
+              HttpClientRequest.setHeaders(peerProtocolHeaders),
+            ),
+            body,
+          );
+          const response = yield* httpClient
+            .execute(request)
+            .pipe(Effect.timeout(PEER_DELIVERY_TIMEOUT));
+          // An older server answers 201 to a body it cannot read, so its version is checked first.
+          // The peer's row shows a mismatch until a later delivery succeeds.
+          const mismatch = responseProtocolMismatch({
+            response,
+            peer: peer.label,
+          });
+          if (mismatch !== null) {
+            yield* peers.recordLastError(peer.environmentId, mismatch);
+            return yield* new A2ADeliveryTargetError({
+              participantId: receiverId,
+              state: mismatch,
+            });
+          }
+          if (response.status === 200 || response.status === 201) {
+            yield* peers.recordLastError(peer.environmentId, null);
+            return;
+          }
+          // A peer rejects the credential it issued only once it removed this
+          // server: the row says it ended the peering. The send retries and alarms.
+          if (response.status === 401) {
+            yield* peers.recordLastError(
+              peer.environmentId,
+              peerCredentialRejectedReason(peer.label),
+            );
+          }
+          const text = yield* response.text;
+          // Only an error answer that is the peer's own refusal, with its code
+          // and reason, is final: it decided, so retrying cannot change it. A
+          // bare status, such as an older server's missing route or a proxy's
+          // page, or any other 2xx, is retried and alarms like any failure.
+          const refused =
+            response.status >= 200 && response.status < 300 ? null : decodeRefusal(text);
+          if (refused !== null) {
+            return yield* new A2ADeliveryRefusedError({
+              participantId: receiverId,
+              code: refused.error,
+              refusal: refused.message.slice(0, 4_000),
+            });
+          }
+          return yield* new A2ADeliveryTransportError({
+            operation: "deliver to peer",
+            cause: `Peer ${peer.label} answered HTTP ${String(response.status)}: ${text.slice(0, 500)}`,
+          });
+        },
+        Effect.mapError((cause) =>
+          isRefusedError(cause)
+            ? cause
+            : new A2ADeliveryTransportError({ operation: "deliver to peer", cause }),
+        ),
+      ),
+      deliverHuman: Effect.fn("A2ADeliveryTransport.deliverHuman")(function (input) {
+        return input.envelopeChannel === "lifecycle_notice"
           ? Effect.gen(function* () {
               const terminal = yield* sql`SELECT 1 FROM j5_a2a_human_inbox
-                WHERE person_id = ${input.receiverId} AND squadron_id = ${input.originSquadronId}
+                WHERE person_id = ${input.receiverId} AND project_id = ${input.originProjectId}
                   AND exchange_id = ${input.exchangeId} AND status = 'dropped'
                   AND terminal_notice_message_id = ${input.messageId}`;
               if (terminal.length !== 1)
@@ -384,7 +952,7 @@ export const live: Layer.Layer<
           : Effect.gen(function* () {
               yield* sql`
             INSERT INTO j5_a2a_human_inbox_data (
-              origin_squadron_id,
+              origin_project_id,
               message_id,
               exchange_id,
               sender_id,
@@ -392,7 +960,7 @@ export const live: Layer.Layer<
               payload,
               created_at
             ) VALUES (
-              ${input.originSquadronId},
+              ${input.originProjectId},
               ${input.messageId},
               ${input.exchangeId},
               ${input.senderId},
@@ -400,13 +968,14 @@ export const live: Layer.Layer<
               ${input.message},
               ${input.createdAt}
             )
-            ON CONFLICT(origin_squadron_id, message_id) DO NOTHING
+            ON CONFLICT(origin_project_id, message_id) DO NOTHING
           `;
-              if (input.exchangeId === null) return;
+              // The inbox row holds the ask. A follow-up is read beneath it from the rows above.
+              if (input.exchangeId === null || input.exchangeRole !== "ask") return;
               const exchanges = yield* sql<HumanExchangeRow>`
             SELECT sender_id, receiver_id, status, intent, urgency, opened_seq, created_at
             FROM j5_a2a_exchange
-            WHERE squadron_id = ${input.originSquadronId}
+            WHERE project_id = ${input.originProjectId}
               AND exchange_id = ${input.exchangeId}
               AND receiver_id = ${input.receiverId}
             LIMIT 1
@@ -418,15 +987,13 @@ export const live: Layer.Layer<
                   state: "person-addressed exchange disappeared before inbox projection",
                 });
               }
-              // A follow-up may still be pending when the person answers or
-              // lifecycle closure drops the exchange. The raw peer message is
-              // durable above, but a discharged obligation has no active inbox
-              // row to update and is a successful projection no-op.
+              // Lifecycle closure may drop the exchange while its ask is pending. The raw
+              // message is durable above, and a discharged obligation gets no inbox row.
               if (exchange.status !== "open") return;
               yield* sql`
             INSERT INTO j5_a2a_human_inbox (
               person_id,
-              squadron_id,
+              project_id,
               exchange_id,
               sender_id,
               intent,
@@ -444,7 +1011,7 @@ export const live: Layer.Layer<
               terminal_notice_message_id
             ) VALUES (
               ${input.receiverId},
-              ${input.originSquadronId},
+              ${input.originProjectId},
               ${input.exchangeId},
               ${exchange.sender_id},
               ${exchange.intent},
@@ -461,17 +1028,15 @@ export const live: Layer.Layer<
               NULL,
               NULL
             )
-            ON CONFLICT(person_id, squadron_id, exchange_id) DO UPDATE SET
-              latest_message_id = excluded.latest_message_id,
-              latest_message = excluded.latest_message
-            WHERE j5_a2a_human_inbox.status = 'open'
+            ON CONFLICT(person_id, project_id, exchange_id) DO NOTHING
           `;
             }).pipe(
               Effect.asVoid,
               Effect.mapError(
                 (cause) => new A2ADeliveryTransportError({ operation: "deliver human", cause }),
               ),
-            ),
+            );
+      }),
     });
   }),
 );

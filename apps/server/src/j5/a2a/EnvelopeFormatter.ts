@@ -1,6 +1,6 @@
 import config from "./envelopes.v1.json" with { type: "json" };
 
-import type { SquadronId, ExchangeId, ParticipantId } from "./contracts.ts";
+import type { LedgerProjectId, ExchangeId, ParticipantId } from "./contracts.ts";
 
 export const A2A_ENVELOPE_VERSION = config.version;
 export const A2A_SEND_TOOL_DESCRIPTION = config.sendToolDescription;
@@ -9,6 +9,18 @@ export const A2A_CLEAR_OWN_ASK_TOOL_DESCRIPTION = config.clearOwnAskToolDescript
 
 const render = (template: string, values: Readonly<Record<string, string>>): string =>
   template.replace(/\{\{([^{}]+)\}\}/g, (placeholder, name: string) => values[name] ?? placeholder);
+
+/**
+ * How a header names the sender's project: its id, with the title beside it when this server
+ * knows one. The title is kept on the header's one line and clear of its closing bracket.
+ */
+const originLabel = (input: {
+  readonly originProjectId: LedgerProjectId;
+  readonly originProjectTitle?: string | undefined;
+}) => {
+  const title = input.originProjectTitle?.replace(/[\]\s]+/g, " ").trim() ?? "";
+  return title.length === 0 ? input.originProjectId : `${input.originProjectId} (${title})`;
+};
 
 const deliveryInstruction = (input: {
   readonly senderId: ParticipantId;
@@ -21,15 +33,22 @@ const deliveryInstruction = (input: {
         exchangeId: input.exchangeId,
       });
 
+/** A sender on a peer server is named with the server it lives on; a local sender's line is unchanged. */
+const senderServer = (serverName: string | undefined) =>
+  serverName === undefined ? "" : render(config.senderServer, { serverName });
+
 export const formatPeerEnvelope = (input: {
   readonly senderId: ParticipantId;
-  readonly originSquadronId: SquadronId;
+  readonly originProjectId: LedgerProjectId;
+  readonly originProjectTitle?: string | undefined;
   readonly exchangeId: ExchangeId | null;
   readonly message: string;
+  readonly senderServerName?: string;
 }): string =>
   render(config.peerMessage, {
     senderId: input.senderId,
-    originSquadronId: input.originSquadronId,
+    origin: originLabel(input),
+    senderServer: senderServer(input.senderServerName),
     message: input.message,
     exchangeInstruction: deliveryInstruction(input),
   });
@@ -37,38 +56,88 @@ export const formatPeerEnvelope = (input: {
 /** A machine sender never opens an exchange, so its envelope carries no reply instruction. */
 export const formatMachineEnvelope = (input: {
   readonly senderId: ParticipantId;
-  readonly originSquadronId: SquadronId;
+  readonly originProjectId: LedgerProjectId;
+  readonly originProjectTitle?: string | undefined;
   readonly message: string;
 }): string =>
   render(config.machineMessage, {
     senderId: input.senderId,
-    originSquadronId: input.originSquadronId,
+    origin: originLabel(input),
     message: input.message,
     machineInstruction: config.machineInstruction,
   });
 
+/**
+ * An outside agent is named by the label its client signed in with, kept on the header's one
+ * line and clear of its closing bracket. It has no project, so the header names none.
+ */
+export const formatOutsideAgentEnvelope = (input: {
+  readonly senderId: ParticipantId;
+  readonly senderName?: string | undefined;
+  readonly message: string;
+}): string => {
+  const name = input.senderName?.replace(/[\]\s]+/g, " ").trim() ?? "";
+  return render(config.outsideAgentMessage, {
+    senderName: name.length === 0 ? "unnamed" : name,
+    senderId: input.senderId,
+    message: input.message,
+    outsideAgentInstruction: config.outsideAgentInstruction,
+  });
+};
+
 export const formatClosedPeerEnvelope = (input: {
   readonly senderId: ParticipantId;
-  readonly originSquadronId: SquadronId;
+  readonly originProjectId: LedgerProjectId;
+  readonly originProjectTitle?: string | undefined;
   readonly message: string;
+  readonly senderServerName?: string;
 }): string =>
   render(config.peerClosedMessage, {
     senderId: input.senderId,
-    originSquadronId: input.originSquadronId,
+    origin: originLabel(input),
+    senderServer: senderServer(input.senderServerName),
     message: input.message,
     closedExchangeInstruction: config.closedExchangeInstruction,
   });
 
-/** A person's only ledger message is the inbox answer that closes an exchange. */
+/**
+ * A person's reply from the inbox to an agent's ask. The header names them as the outside-agent
+ * header does, `[Message from Jackson (human:…)]`, adding their level in a shared conversation
+ * (`[Message from Jackson (owner) (human:…)]`); with no name on record it is the id alone.
+ */
 export const formatClosedHumanEnvelope = (input: {
   readonly senderId: ParticipantId;
+  /** `Jackson`, or `Jackson (owner)` in a shared conversation; already fit for one line. */
+  readonly senderLabel?: string | undefined;
+  /** A shared conversation's note the reply carries, at its very top, as a message carries one. */
+  readonly note?: string | null | undefined;
+  /** An agent can hold several asks with a person, so a reply says which one it answers. */
+  readonly answeredAsk?: { readonly exchangeId: ExchangeId; readonly intent: string } | undefined;
   readonly message: string;
-}): string =>
-  render(config.humanClosedMessage, {
-    senderId: input.senderId,
-    message: input.message,
-    closedExchangeInstruction: config.closedExchangeInstruction,
-  });
+}): string => {
+  const label = input.senderLabel?.replace(/[\]\s]+/g, " ").trim() ?? "";
+  const message =
+    input.answeredAsk === undefined
+      ? input.message
+      : `${input.message}\n\n${render(config.answeredAskLine, {
+          intent: input.answeredAsk.intent.replace(/\s+/g, " ").trim(),
+          exchangeId: input.answeredAsk.exchangeId,
+        })}`;
+  const envelope =
+    label.length === 0
+      ? render(config.humanClosedMessage, {
+          senderId: input.senderId,
+          message,
+          closedExchangeInstruction: config.closedExchangeInstruction,
+        })
+      : render(config.humanNamedClosedMessage, {
+          senderLabel: label,
+          senderId: input.senderId,
+          message,
+          closedExchangeInstruction: config.closedExchangeInstruction,
+        });
+  return input.note == null ? envelope : `${input.note}\n${envelope}`;
+};
 
 /** A3 supplies notice derivation; A2 owns this channel's stable rendering shape. */
 export const formatSilenceNoticeEnvelope = (input: {
@@ -79,3 +148,37 @@ export const formatSilenceNoticeEnvelope = (input: {
     noticeType: input.noticeType,
     message: input.message,
   });
+
+/** Told to a sender whose message will wait behind the receiver's running turn. */
+export const formatReceiverBacklogNotice = (input: {
+  readonly receiverId: ParticipantId;
+  readonly waiting: number;
+  readonly fromYou: number;
+}): string =>
+  render(config.receiverBacklogNotice, {
+    receiverId: input.receiverId,
+    waiting: String(input.waiting),
+    fromYou: String(input.fromYou),
+  });
+
+/**
+ * Told to a sender whose message waits on a receiver stopped by a usage limit. `resetAt` is when
+ * upstream continues it, or null when it waits for a person.
+ */
+export const formatReceiverLimitNotice = (input: {
+  readonly receiverId: ParticipantId;
+  readonly resetAt: string | null;
+}): string =>
+  input.resetAt === null
+    ? render(config.receiverLimitPausedNotice, { receiverId: input.receiverId })
+    : render(config.receiverLimitAutoResumeNotice, {
+        receiverId: input.receiverId,
+        resetAt: input.resetAt,
+      });
+
+/** Told to a sender whose message waits until a person resumes the receiver's held queue. */
+export const formatReceiverQueueHeldNotice = (input: { readonly receiverId: ParticipantId }) =>
+  render(config.receiverQueueHeldNotice, { receiverId: input.receiverId });
+
+export const formatAskWithdrawInstruction = (input: { readonly exchangeId: ExchangeId }) =>
+  render(config.askWithdrawInstruction, { exchangeId: input.exchangeId });

@@ -2,38 +2,45 @@ import { assert, describe, it } from "@effect/vitest";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import {
   EnvironmentId,
+  EventId,
+  MessageId,
+  NodeId,
+  type OrchestrationV2DomainEvent,
   type OrchestrationV2ThreadShell,
+  type OrchestrationV2TurnItem,
   ProjectId,
   ProviderInstanceId,
+  RunId,
   ThreadId,
+  TurnItemId,
 } from "@t3tools/contracts";
 import { RelayAgentActivityState } from "@t3tools/contracts/relay";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
+import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
 
-import { SecretStoreReadError, ServerSecretStore } from "../auth/ServerSecretStore.ts";
+import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import {
   PUBLISH_AGENT_ACTIVITY_SECRET,
   RELAY_ENVIRONMENT_CREDENTIAL_SECRET,
   RELAY_ISSUER_SECRET,
   RELAY_URL_SECRET,
 } from "../cloud/config.ts";
-import { ServerEnvironment } from "../environment/ServerEnvironment.ts";
-import { ThreadManagementService } from "../orchestration-v2/ThreadManagementService.ts";
-import { ProjectService } from "../project/ProjectService.ts";
-import {
-  make,
-  makeAgentAwarenessPublishWorker,
-  shouldPublishAgentAwarenessEvent,
-} from "./AgentAwarenessRelay.ts";
+import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
+import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
+import * as SqlitePersistence from "../persistence/Sqlite.ts";
+import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
+import * as ProjectService from "../project/ProjectService.ts";
+import * as AgentAwarenessRelay from "./AgentAwarenessRelay.ts";
 
 const THREAD_ID = ThreadId.make("relay-thread");
 const SECOND_THREAD_ID = ThreadId.make("relay-thread-2");
@@ -89,26 +96,77 @@ const PublishPayload = Schema.Struct({ state: Schema.NullOr(RelayAgentActivitySt
 const decodePublishPayload = Schema.decodeUnknownSync(Schema.fromJsonString(PublishPayload));
 const unused = () => Effect.die("Unexpected test dependency call");
 
+describe("startup agent activity", () => {
+  it("publishes active work and only terminal runs completed after startup", () => {
+    const startedAt = DateTime.toEpochMillis(DateTime.makeUnsafe(NOW));
+    const oldCompleted = ThreadId.make("old-completed");
+    const newCompleted = ThreadId.make("new-completed");
+    const oldFailed = ThreadId.make("old-failed");
+    const newFailed = ThreadId.make("new-failed");
+    const ids = AgentAwarenessRelay.resolveAgentAwarenessRelayActiveThreadIds({
+      environmentId: EnvironmentId.make("relay-env"),
+      startedAt,
+      projects: [{ id: PROJECT_ID, title: "Project" }],
+      threads: [
+        shell(),
+        shell({
+          id: oldCompleted,
+          status: "completed",
+          latestRunCompletedAt: DateTime.makeUnsafe("2026-09-04T11:59:00.000Z"),
+        }),
+        shell({
+          id: newCompleted,
+          status: "completed",
+          latestRunCompletedAt: DateTime.makeUnsafe("2026-09-04T12:00:01.000Z"),
+        }),
+        shell({
+          id: oldFailed,
+          status: "failed",
+          latestRunCompletedAt: DateTime.makeUnsafe("2026-09-04T11:59:00.000Z"),
+        }),
+        shell({
+          id: newFailed,
+          status: "failed",
+          latestRunCompletedAt: DateTime.makeUnsafe("2026-09-04T12:00:01.000Z"),
+        }),
+        shell({ id: ThreadId.make("idle"), status: "idle" }),
+        shell({ id: ThreadId.make("missing-project"), projectId: ProjectId.make("missing") }),
+      ],
+    });
+    assert.deepStrictEqual(ids, [THREAD_ID, newCompleted, newFailed]);
+  });
+});
+
 const makeTestRelay = Effect.fnUntraced(function* (
   options: {
     readonly respond?: (attempt: number) => Response;
     readonly failSecretRead?: (name: string) => boolean;
+    readonly linked?: boolean;
+    readonly readShell?: (threadId: ThreadId) => Effect.Effect<OrchestrationV2ThreadShell | null>;
+    readonly domainEvents?: Stream.Stream<OrchestrationV2DomainEvent>;
   } = {},
 ) {
-  const values = new Map<string, Uint8Array>([
-    [PUBLISH_AGENT_ACTIVITY_SECRET, new TextEncoder().encode("true")],
-    [RELAY_URL_SECRET, new TextEncoder().encode("https://relay.example.test")],
-    [RELAY_ISSUER_SECRET, new TextEncoder().encode("https://relay.example.test")],
-    [RELAY_ENVIRONMENT_CREDENTIAL_SECRET, new TextEncoder().encode("credential-1")],
-  ]);
+  const values = new Map<string, Uint8Array>(
+    options.linked === false
+      ? []
+      : [
+          [PUBLISH_AGENT_ACTIVITY_SECRET, new TextEncoder().encode("true")],
+          [RELAY_URL_SECRET, new TextEncoder().encode("https://relay.example.test")],
+          [RELAY_ISSUER_SECRET, new TextEncoder().encode("https://relay.example.test")],
+          [RELAY_ENVIRONMENT_CREDENTIAL_SECRET, new TextEncoder().encode("credential-1")],
+        ],
+  );
   const secretReads: string[] = [];
-  const secrets = ServerSecretStore.of({
+  const secrets = ServerSecretStore.ServerSecretStore.of({
     get: (name) =>
       Effect.suspend(() => {
         secretReads.push(name);
         if (options.failSecretRead?.(name)) {
           return Effect.fail(
-            new SecretStoreReadError({ resource: name, cause: "temporary read failure" }),
+            new ServerSecretStore.SecretStoreReadError({
+              resource: name,
+              cause: "temporary read failure",
+            }),
           );
         }
         return Effect.succeed(Option.fromUndefinedOr(values.get(name)));
@@ -120,25 +178,57 @@ const makeTestRelay = Effect.fnUntraced(function* (
   });
   const currentShell = yield* Ref.make<OrchestrationV2ThreadShell | null>(shell());
   const shellReads: ThreadId[] = [];
-  const threads = ThreadManagementService.of({
+  const catchUp = { shellSnapshotReads: 0 };
+  const threads = ThreadManagementService.ThreadManagementService.of({
     getThreadShell: (threadId) =>
-      Effect.sync(() => shellReads.push(threadId)).pipe(Effect.andThen(Ref.get(currentShell))),
-    getShellSnapshot: unused,
+      Effect.sync(() => shellReads.push(threadId)).pipe(
+        Effect.andThen(options.readShell?.(threadId) ?? Ref.get(currentShell)),
+      ),
+    getShellSnapshot: () =>
+      Effect.sync(() => {
+        catchUp.shellSnapshotReads += 1;
+        return { schemaVersion: 2, snapshotSequence: 1, threads: [], archivedThreads: [] };
+      }),
+    listActiveSubagentThreadIds: unused,
+    listAppOwnedChildThreadIds: unused,
+    countThreads: unused,
+    listActiveShellIndex: () => Effect.succeed([]),
+    listOlderSettledThreads: unused,
+    readShellSnapshot: unused,
     ensureLegacyTranscript: unused,
     dispatch: unused,
+    searchThread: () => Effect.die("unused"),
+    searchThreadStream: () => Stream.empty,
+    getThreadHistoryPage: () => Effect.die("unused"),
+    getTimelinePage: () => Effect.die("Unused timeline read"),
+    getMessageCount: () => Effect.die("unused message count"),
+    getTurnItem: () => Effect.die("unused turn item read"),
+    getThreadRecords: () => Effect.die("unused record read"),
     getThreadProjection: unused,
     getCheckpointContext: unused,
     getThreadSnapshot: unused,
+    getThreadTranscript: unused,
     getThreadSnapshotWindow: unused,
-    getProjectThread: unused,
+    getProjectThreadRecords: () => Effect.die("unused project record read"),
     listProjectThreads: unused,
     sendToThread: unused,
+    assertProviderInstanceEnabled: unused,
+    isProviderInstanceEnabledForProject: unused,
+    hasReceipt: unused,
     waitForThread: unused,
+    settleAfterRun: unused,
+    settleThread: unused,
     interruptThread: unused,
+    stopWorkflow: () => Effect.die("unused stopWorkflow"),
+    forceStopThread: () => Effect.die("unused forceStopThread"),
+    awaitBackgroundTasks: unused,
+    stopDelegatedTasks: unused,
     getThreadEventSequence: unused,
+    recoverDelegatedTask: unused,
+    delegatedTaskResultPending: unused,
     streamStoredEvents: Stream.empty,
     streamStoredEventsFrom: () => Stream.empty,
-    streamDomainEvents: Stream.empty,
+    streamDomainEvents: options.domainEvents ?? Stream.empty,
   });
   const publications: Array<{
     readonly url: string;
@@ -168,66 +258,42 @@ const makeTestRelay = Effect.fnUntraced(function* (
     },
     { preconnect: () => {} },
   );
-  const relay = yield* make.pipe(
-    Effect.provideService(ServerSecretStore, secrets),
-    Effect.provideService(ThreadManagementService, threads),
-    Effect.provideService(ServerEnvironment, {
+  const relay = yield* AgentAwarenessRelay.make.pipe(
+    Effect.provideService(ServerSecretStore.ServerSecretStore, secrets),
+    Effect.provideService(ThreadManagementService.ThreadManagementService, threads),
+    Effect.provideService(ServerEnvironment.ServerEnvironment, {
       getEnvironmentId: Effect.succeed(EnvironmentId.make("relay-environment")),
       getDescriptor: unused(),
     }),
-    Effect.provideService(ProjectService, {
+    Effect.provideService(ProjectService.ProjectService, {
       create: unused,
       bootstrap: unused,
       update: unused,
       delete: unused,
       getByWorkspaceRoot: unused,
-      snapshot: unused(),
+      snapshot: Effect.succeed({ projects: [] } as never),
+      listPage: unused,
+      getShell: unused,
+      listShells: unused,
       getById: () =>
-        Effect.succeed(
-          Option.some({
-            id: PROJECT_ID,
-            title: "Project",
-            workspaceRoot: "/workspace",
-            defaultModelSelection: null,
-            scripts: [],
-            createdAt: NOW,
-            updatedAt: NOW,
-            deletedAt: null,
-          }),
-        ),
+        Effect.succeedSome({
+          id: PROJECT_ID,
+          title: "Project",
+          workspaceRoot: "/workspace",
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: NOW,
+          updatedAt: NOW,
+          deletedAt: null,
+        }),
     }),
     Effect.provideService(FetchHttpClient.Fetch, fetch),
     Effect.provide(NodeCrypto.layer),
   );
-  return { relay, secrets, secretReads, currentShell, shellReads, publications };
+  return { relay, secrets, secretReads, currentShell, shellReads, publications, catchUp };
 });
 
 describe("AgentAwarenessRelay", () => {
-  it("ignores transcript and tool updates but retains activity and metadata changes", () => {
-    for (const type of [
-      "message.updated",
-      "turn-item.updated",
-      "provider-turn.updated",
-      "thread.visited",
-      "thread.pinned",
-    ] as const) {
-      assert.isFalse(shouldPublishAgentAwarenessEvent({ type }));
-    }
-    for (const type of [
-      "run.created",
-      "run.updated",
-      "runtime-request.updated",
-      "thread.metadata-updated",
-      "thread.model-selection-updated",
-      "thread.provider-switched",
-      "thread.archived",
-      "thread.unarchived",
-      "thread.deleted",
-    ] as const) {
-      assert.isTrue(shouldPublishAgentAwarenessEvent({ type }));
-    }
-  });
-
   it.effect("coalesces queued updates and reruns a thread dirtied during publishing", () =>
     Effect.gen(function* () {
       const started = yield* Deferred.make<void>();
@@ -236,7 +302,7 @@ describe("AgentAwarenessRelay", () => {
       const releaseRerun = yield* Deferred.make<void>();
       const processed: Array<{ threadId: ThreadId; revision: number }> = [];
       let revision = 1;
-      const worker = yield* makeAgentAwarenessPublishWorker((threadId) =>
+      const worker = yield* AgentAwarenessRelay.makeAgentAwarenessPublishWorker((threadId) =>
         Effect.gen(function* () {
           const currentRevision = revision;
           const index = processed.length;
@@ -292,22 +358,6 @@ describe("AgentAwarenessRelay", () => {
     }),
   );
 
-  it.effect("stops before shell reads when disabled and republishes after re-enabling", () =>
-    Effect.gen(function* () {
-      const { relay, secrets, secretReads, shellReads, publications } = yield* makeTestRelay();
-      yield* relay.publishThread(THREAD_ID);
-      yield* secrets.set(PUBLISH_AGENT_ACTIVITY_SECRET, new TextEncoder().encode("false"));
-      const previousReads = secretReads.length;
-      yield* relay.publishThread(THREAD_ID);
-      assert.deepEqual(secretReads.slice(previousReads), [PUBLISH_AGENT_ACTIVITY_SECRET]);
-      assert.equal(shellReads.length, 1);
-      assert.equal(publications.length, 1);
-      yield* secrets.set(PUBLISH_AGENT_ACTIVITY_SECRET, new TextEncoder().encode("true"));
-      yield* relay.publishThread(THREAD_ID);
-      assert.equal(publications.length, 2);
-    }),
-  );
-
   it.effect("republishes unchanged state with fresh credentials after relinking", () =>
     Effect.gen(function* () {
       const { relay, secrets, publications } = yield* makeTestRelay();
@@ -330,244 +380,483 @@ describe("AgentAwarenessRelay", () => {
     }),
   );
 
-  it.effect("retries a failed final state without another thread event", () =>
-    Effect.gen(function* () {
-      const { relay, currentShell, shellReads, publications } = yield* makeTestRelay({
-        respond: (attempt) =>
-          attempt === 2
-            ? new Response("relay unavailable", { status: 503 })
-            : Response.json({ ok: true, deliveries: [] }),
-      });
-      yield* relay.publishThread(THREAD_ID);
-      yield* Ref.set(currentShell, shell({ status: "completed" }));
-      yield* relay.publishThread(THREAD_ID);
-      assert.equal(publications.length, 2);
-      yield* TestClock.adjust("1 second");
-      yield* relay.drain;
-      assert.equal(publications.length, 3);
-      assert.equal(publications[2]?.state?.phase, "completed");
-      yield* TestClock.adjust("1 minute");
-      yield* relay.drain;
-      assert.equal(shellReads.length, 3);
-    }),
-  );
-
-  it.effect("retries the latest shell and credentials with first-completion confirmation", () =>
-    Effect.gen(function* () {
-      const { relay, secrets, currentShell, publications } = yield* makeTestRelay({
-        respond: (attempt) =>
-          attempt === 1
-            ? new Response("relay unavailable", { status: 503 })
-            : Response.json({ ok: true, deliveries: [] }),
-      });
-      yield* relay.publishThread(THREAD_ID);
-      yield* Ref.set(currentShell, shell({ status: "completed", title: "Final title" }));
-      yield* secrets.set(
-        RELAY_ENVIRONMENT_CREDENTIAL_SECRET,
-        new TextEncoder().encode("credential-2"),
-      );
-      yield* TestClock.adjust("1 second");
-      yield* relay.drain;
-      assert.equal(publications.length, 1);
-      yield* TestClock.adjust("5 seconds");
-      yield* relay.drain;
-      assert.equal(publications.length, 2);
-      assert.equal(publications[1]?.authorization, "Bearer credential-2");
-      assert.equal(publications[1]?.state?.phase, "completed");
-      assert.equal(publications[1]?.state?.threadTitle, "Final title");
-    }),
-  );
-
-  it.effect("cancels a stale retry when a newer update publishes successfully", () =>
-    Effect.gen(function* () {
-      const { relay, currentShell, shellReads, publications } = yield* makeTestRelay({
-        respond: (attempt) =>
-          attempt === 1
-            ? new Response("relay unavailable", { status: 503 })
-            : Response.json({ ok: true, deliveries: [] }),
-      });
-      yield* relay.publishThread(THREAD_ID);
-      yield* Ref.set(currentShell, shell({ title: "New title" }));
-      yield* relay.publishThread(THREAD_ID);
-      assert.equal(publications.length, 2);
-      assert.equal(publications[1]?.state?.threadTitle, "New title");
-      yield* TestClock.adjust("1 minute");
-      yield* relay.drain;
-      assert.equal(shellReads.length, 2);
-    }),
-  );
-
-  it.effect.each(["disable", "unlink"] as const)(
-    "stops retries before shell reads after %s",
-    (change) =>
+  it.effect.each(["completed", "failed"] as const)(
+    "publishes a tombstone when a %s thread is settled through a domain event",
+    (status) =>
       Effect.gen(function* () {
-        const { relay, secrets, shellReads, publications } = yield* makeTestRelay({
-          respond: () => new Response("relay unavailable", { status: 503 }),
+        const events = yield* Queue.unbounded<OrchestrationV2DomainEvent>();
+        const pulls = yield* Queue.unbounded<void>();
+        const { relay, currentShell, publications } = yield* makeTestRelay({
+          domainEvents: Stream.fromEffectRepeat(
+            Queue.offer(pulls, undefined).pipe(Effect.andThen(Queue.take(events))),
+          ),
         });
+        yield* relay.start();
+        yield* Queue.take(pulls);
         yield* relay.publishThread(THREAD_ID);
-        if (change === "disable") {
-          yield* secrets.set(PUBLISH_AGENT_ACTIVITY_SECRET, new TextEncoder().encode("false"));
-        } else {
-          yield* secrets.remove(RELAY_ENVIRONMENT_CREDENTIAL_SECRET);
-        }
-        yield* TestClock.adjust("1 second");
-        yield* relay.drain;
-        yield* TestClock.adjust("1 minute");
-        yield* relay.drain;
-        assert.equal(publications.length, 1);
-        assert.equal(shellReads.length, 1);
-      }),
-  );
-
-  it.effect("recovers from a transient configuration read failure", () =>
-    Effect.gen(function* () {
-      let failRead = false;
-      const { relay, shellReads, publications } = yield* makeTestRelay({
-        failSecretRead: (name) => failRead && name === PUBLISH_AGENT_ACTIVITY_SECRET,
-      });
-      failRead = true;
-      yield* relay.publishThread(THREAD_ID);
-      assert.equal(shellReads.length, 0);
-      failRead = false;
-      yield* TestClock.adjust("1 second");
-      yield* relay.drain;
-      assert.equal(publications.length, 1);
-      assert.equal(publications[0]?.state?.phase, "running");
-    }),
-  );
-
-  it.effect("bounds retry attempts and resets the budget for a newer update", () =>
-    Effect.gen(function* () {
-      const { relay, currentShell, shellReads, publications } = yield* makeTestRelay({
-        respond: () => new Response("relay unavailable", { status: 503 }),
-      });
-      yield* relay.publishThread(THREAD_ID);
-      let attempts = 1;
-      for (const delay of [1_000, 2_000, 4_000, 8_000, 16_000]) {
-        yield* TestClock.adjust(delay - 1);
-        yield* relay.drain;
-        assert.equal(publications.length, attempts);
-        yield* TestClock.adjust(1);
-        yield* relay.drain;
-        attempts += 1;
-        assert.equal(publications.length, attempts);
-      }
-      yield* TestClock.adjust("1 minute");
-      yield* relay.drain;
-      assert.equal(publications.length, 6);
-      assert.equal(shellReads.length, 6);
-      yield* Ref.set(currentShell, shell({ title: "New update" }));
-      yield* relay.publishThread(THREAD_ID);
-      yield* TestClock.adjust("1 second");
-      yield* relay.drain;
-      assert.equal(publications.length, 8);
-      assert.equal(publications[7]?.state?.threadTitle, "New update");
-    }),
-  );
-
-  it.effect("retries a confirmed completion without restarting its confirmation window", () =>
-    Effect.gen(function* () {
-      const { relay, currentShell, publications } = yield* makeTestRelay({
-        respond: (attempt) =>
-          attempt <= 2
-            ? new Response("relay unavailable", { status: 503 })
-            : Response.json({ ok: true, deliveries: [] }),
-      });
-      yield* Ref.set(currentShell, shell({ status: "completed" }));
-      yield* relay.publishThread(THREAD_ID);
-      yield* TestClock.adjust("5 seconds");
-      yield* relay.drain;
-      assert.equal(publications.length, 1);
-      yield* TestClock.adjust("1 second");
-      yield* relay.drain;
-      assert.equal(publications.length, 2);
-      yield* TestClock.adjust("2 seconds");
-      yield* relay.drain;
-      assert.equal(publications.length, 3);
-      assert.isTrue(publications.every((publication) => publication.state?.phase === "completed"));
-      yield* TestClock.adjust("1 minute");
-      yield* relay.drain;
-      assert.equal(publications.length, 3);
-    }),
-  );
-
-  it.effect("does not reset an exhausted retry budget for old confirmation timers", () =>
-    Effect.gen(function* () {
-      let unavailable = false;
-      const { relay, currentShell, shellReads, publications } = yield* makeTestRelay({
-        respond: () =>
-          unavailable
-            ? new Response("relay unavailable", { status: 503 })
-            : Response.json({ ok: true, deliveries: [] }),
-      });
-      yield* relay.publishThread(THREAD_ID);
-      // Leave six obsolete confirmations at 5,000 through 5,005 milliseconds.
-      for (let i = 0; i < 6; i++) {
-        yield* Ref.set(currentShell, null);
+        const terminal = shell({ status });
+        yield* Ref.set(currentShell, terminal);
         yield* relay.publishThread(THREAD_ID);
-        yield* Ref.set(currentShell, shell());
-        yield* relay.publishThread(THREAD_ID);
-        yield* TestClock.adjust(1);
-      }
-      unavailable = true;
-      yield* Ref.set(currentShell, shell({ status: "failed" }));
-      yield* relay.publishThread(THREAD_ID);
-      yield* TestClock.adjust(1_000);
-      yield* relay.drain;
-      yield* TestClock.adjust(2_000);
-      yield* relay.drain;
-      yield* TestClock.adjust(1_994);
-      yield* relay.drain;
-      for (let i = 0; i < 5; i++) {
-        yield* TestClock.adjust(1);
+        yield* TestClock.adjust("5 seconds");
         yield* relay.drain;
-      }
-      const attempts = publications.length;
-      const reads = shellReads.length;
-      yield* TestClock.adjust("1 minute");
-      yield* relay.drain;
-      assert.equal(publications.length, attempts);
-      assert.equal(shellReads.length, reads);
-    }),
+        assert.equal(publications[1]?.state?.phase, status);
+
+        const now = yield* DateTime.now;
+        const settled = {
+          ...terminal,
+          settledOverride: "settled" as const,
+          settledAt: now,
+          lastVisitedAt: null,
+        };
+        yield* Ref.set(currentShell, settled);
+        yield* Queue.offer(events, {
+          id: EventId.make("event:settled"),
+          type: "thread.settled",
+          threadId: THREAD_ID,
+          occurredAt: now,
+          payload: settled,
+        });
+        yield* Queue.take(pulls);
+        yield* relay.drain;
+        assert.equal(publications.length, 2);
+        yield* TestClock.adjust("5 seconds");
+        yield* relay.drain;
+        assert.equal(publications.length, 3);
+        assert.equal(publications[2]?.state, null);
+      }).pipe(Effect.scoped),
   );
 
-  it.effect("confirms tombstones and cancels stale confirmations when activity recovers", () =>
+  it.effect("holds a completion through a continuation gap, then publishes it once", () =>
     Effect.gen(function* () {
       const { relay, currentShell, publications } = yield* makeTestRelay();
       yield* relay.publishThread(THREAD_ID);
-      yield* Ref.set(currentShell, null);
+      yield* Ref.set(currentShell, shell({ status: "completed" }));
       yield* relay.publishThread(THREAD_ID);
-      assert.equal(publications.length, 1);
       yield* Ref.set(currentShell, shell());
       yield* relay.publishThread(THREAD_ID);
       yield* TestClock.adjust("5 seconds");
       yield* relay.drain;
-      assert.equal(publications.length, 1);
-      yield* Ref.set(currentShell, null);
+      assert.deepEqual(
+        publications.map((publication) => publication.state?.phase),
+        ["running"],
+      );
+
+      yield* Ref.set(currentShell, shell({ status: "completed" }));
       yield* relay.publishThread(THREAD_ID);
       assert.equal(publications.length, 1);
+      yield* TestClock.adjust("5 seconds");
+      yield* relay.drain;
+      assert.deepEqual(
+        publications.map((publication) => publication.state?.phase),
+        ["running", "completed"],
+      );
+    }),
+  );
+
+  it.effect("still publishes a completion when the thread settles during the hold", () =>
+    Effect.gen(function* () {
+      const { relay, currentShell, publications } = yield* makeTestRelay();
+      yield* relay.publishThread(THREAD_ID);
+      const completed = shell({ status: "completed" });
+      yield* Ref.set(currentShell, completed);
+      yield* relay.publishThread(THREAD_ID);
+      yield* Ref.set(currentShell, {
+        ...completed,
+        settledOverride: "settled",
+        settledAt: yield* DateTime.now,
+        lastVisitedAt: null,
+      });
+      yield* relay.publishThread(THREAD_ID);
+      yield* TestClock.adjust("5 seconds");
+      yield* relay.drain;
+      assert.deepEqual(
+        publications.map((publication) => publication.state?.phase ?? null),
+        ["running", "completed"],
+      );
+
+      yield* TestClock.adjust("5 seconds");
+      yield* relay.drain;
+      assert.deepEqual(
+        publications.map((publication) => publication.state?.phase ?? null),
+        ["running", "completed", null],
+      );
+    }),
+  );
+
+  it.effect("publishes a cleared thread's tombstone once while it stays cleared", () =>
+    Effect.gen(function* () {
+      const { relay, currentShell, publications } = yield* makeTestRelay();
+      yield* relay.publishThread(THREAD_ID);
+      const completed = shell({ status: "completed" });
+      yield* Ref.set(currentShell, completed);
+      yield* relay.publishThread(THREAD_ID);
+      yield* TestClock.adjust("5 seconds");
+      yield* relay.drain;
+      yield* Ref.set(currentShell, {
+        ...completed,
+        settledOverride: "settled",
+        settledAt: yield* DateTime.now,
+        lastVisitedAt: null,
+      });
+      yield* relay.publishThread(THREAD_ID);
+      yield* TestClock.adjust("5 seconds");
+      yield* relay.drain;
+      assert.deepEqual(
+        publications.map((publication) => publication.state?.phase ?? null),
+        ["running", "completed", null],
+      );
+
+      for (let i = 0; i < 3; i++) {
+        yield* relay.publishThread(THREAD_ID);
+        yield* TestClock.adjust("5 seconds");
+        yield* relay.drain;
+      }
+      assert.deepEqual(
+        publications.map((publication) => publication.state?.phase ?? null),
+        ["running", "completed", null],
+      );
+    }),
+  );
+
+  it.effect("does not alert an old completion after publishing its thread's tombstone", () =>
+    Effect.gen(function* () {
+      const oldCompleted = shell({
+        status: "completed",
+        latestRunCompletedAt: DateTime.makeUnsafe("2026-09-04T11:59:00.000Z"),
+      });
+      yield* TestClock.setTime(DateTime.toEpochMillis(DateTime.makeUnsafe(NOW)));
+      const { relay, currentShell, publications } = yield* makeTestRelay();
+      yield* Ref.set(currentShell, {
+        ...oldCompleted,
+        settledOverride: "settled",
+        settledAt: DateTime.makeUnsafe(NOW),
+        lastVisitedAt: null,
+      });
+      yield* relay.publishThread(THREAD_ID);
+      yield* TestClock.adjust("5 seconds");
+      yield* relay.drain;
+      assert.deepEqual(
+        publications.map((publication) => publication.state),
+        [null],
+      );
+
+      yield* Ref.set(currentShell, oldCompleted);
+      yield* relay.publishThread(THREAD_ID);
+      yield* TestClock.adjust("5 seconds");
+      yield* relay.drain;
+      assert.deepEqual(
+        publications.map((publication) => publication.state),
+        [null],
+      );
+    }),
+  );
+
+  it.effect("alerts a completion settled during its hold after an earlier tombstone", () =>
+    Effect.gen(function* () {
+      yield* TestClock.setTime(DateTime.toEpochMillis(DateTime.makeUnsafe(NOW)));
+      const { relay, currentShell, publications } = yield* makeTestRelay();
+      const settledAt = DateTime.makeUnsafe(NOW);
+      yield* Ref.set(currentShell, {
+        ...shell({ status: "completed" }),
+        settledOverride: "settled",
+        settledAt,
+        lastVisitedAt: null,
+      });
+      yield* relay.publishThread(THREAD_ID);
+      yield* TestClock.adjust("5 seconds");
+      yield* relay.drain;
+
+      const completed = shell({
+        status: "completed",
+        latestRunCompletedAt: DateTime.makeUnsafe("2026-09-04T12:00:06.000Z"),
+      });
+      yield* Ref.set(currentShell, completed);
+      yield* relay.publishThread(THREAD_ID);
+      yield* Ref.set(currentShell, {
+        ...completed,
+        settledOverride: "settled",
+        settledAt,
+        lastVisitedAt: null,
+      });
+      yield* relay.publishThread(THREAD_ID);
+      yield* TestClock.adjust("5 seconds");
+      yield* relay.drain;
+      yield* TestClock.adjust("5 seconds");
+      yield* relay.drain;
+      assert.deepEqual(
+        publications.map((publication) => publication.state?.phase ?? null),
+        [null, "completed", null],
+      );
+    }),
+  );
+
+  it.effect("drops a held completion when a queued continuation hides the thread", () =>
+    Effect.gen(function* () {
+      const { relay, currentShell, publications } = yield* makeTestRelay();
+      yield* relay.publishThread(THREAD_ID);
+      yield* Ref.set(currentShell, shell({ status: "completed" }));
+      yield* relay.publishThread(THREAD_ID);
+      yield* Ref.set(currentShell, shell({ status: "queued" }));
+      yield* relay.publishThread(THREAD_ID);
+      yield* TestClock.adjust("5 seconds");
+      yield* relay.drain;
+      assert.notInclude(
+        publications.map((publication) => publication.state?.phase ?? null),
+        "completed",
+      );
+    }),
+  );
+
+  it.effect("retries a failed completion even after the thread settles", () =>
+    Effect.gen(function* () {
+      const { relay, currentShell, publications } = yield* makeTestRelay({
+        respond: (attempt) =>
+          attempt === 2
+            ? new Response("unavailable", { status: 503 })
+            : Response.json({ ok: true, deliveries: [] }),
+      });
+      yield* relay.publishThread(THREAD_ID);
+      const completed = shell({ status: "completed" });
+      yield* Ref.set(currentShell, completed);
+      yield* relay.publishThread(THREAD_ID);
+      yield* TestClock.adjust("5 seconds");
+      yield* relay.drain;
+      yield* Ref.set(currentShell, {
+        ...completed,
+        settledOverride: "settled",
+        settledAt: yield* DateTime.now,
+        lastVisitedAt: null,
+      });
+      yield* TestClock.adjust("1 second");
+      yield* relay.drain;
+      assert.deepEqual(
+        publications.map((publication) => publication.state?.phase ?? null),
+        ["running", "completed", "completed"],
+      );
+
+      yield* TestClock.adjust("5 seconds");
+      yield* relay.drain;
+      assert.equal(publications.at(-1)?.state ?? null, null);
+    }),
+  );
+
+  it.effect("keeps settled live work until its awaited monitor finishes", () =>
+    Effect.gen(function* () {
+      const { relay, currentShell, publications } = yield* makeTestRelay();
+      yield* relay.publishThread(THREAD_ID);
+      const held = shell({
+        status: "completed",
+        settledOverride: "settled",
+        pendingBackgroundTasks: [{ taskId: "watch", kind: "monitor", awaited: true }],
+      });
+      yield* Ref.set(currentShell, held);
+      yield* relay.publishThread(THREAD_ID);
+      yield* TestClock.adjust("5 seconds");
+      yield* relay.drain;
+      assert.equal(publications.length, 1);
+      assert.equal(publications[0]?.state?.phase, "running");
+
+      yield* Ref.set(currentShell, { ...held, pendingBackgroundTasks: [] });
+      yield* relay.publishThread(THREAD_ID);
       yield* TestClock.adjust("5 seconds");
       yield* relay.drain;
       assert.equal(publications.length, 2);
       assert.equal(publications[1]?.state, null);
     }),
   );
-
-  it.effect("confirms a first completed state and respects disabling during confirmation", () =>
+  it.effect("publishes a held completion when its background item ends, not on tool output", () =>
     Effect.gen(function* () {
-      const { relay, secrets, currentShell, publications } = yield* makeTestRelay();
-      yield* Ref.set(currentShell, shell({ status: "completed" }));
-      yield* relay.publishThread(THREAD_ID);
-      assert.equal(publications.length, 0);
+      const store = yield* ProjectionStore.ProjectionStoreV2;
+      const events = yield* Queue.unbounded<OrchestrationV2DomainEvent>();
+      const pulls = yield* Queue.unbounded<void>();
+      const { relay, shellReads, publications } = yield* makeTestRelay({
+        readShell: (threadId) => store.getThreadShell(threadId).pipe(Effect.orDie),
+        domainEvents: Stream.fromEffectRepeat(
+          Queue.offer(pulls, undefined).pipe(Effect.andThen(Queue.take(events))),
+        ),
+      });
+      yield* relay.start();
+      yield* Queue.take(pulls);
+      const deliver = Effect.fnUntraced(function* (event: OrchestrationV2DomainEvent) {
+        yield* store.apply(event);
+        yield* Queue.offer(events, event);
+        yield* Queue.take(pulls);
+        yield* relay.drain;
+      });
+
+      const now = yield* DateTime.now;
+      const runId = RunId.make("run:held-item");
+      const run = {
+        id: runId,
+        threadId: THREAD_ID,
+        ordinal: 1,
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "test-model" },
+        providerThreadId: null,
+        userMessageId: MessageId.make("message:held-item"),
+        rootNodeId: null,
+        activeAttemptId: null,
+        status: "running" as const,
+        requestedAt: now,
+        startedAt: now,
+        completedAt: null,
+        checkpointId: null,
+        contextHandoffId: null,
+      };
+      const item = (
+        id: string,
+        fields: Pick<OrchestrationV2TurnItem, "status"> &
+          (
+            | { readonly type: "dynamic_tool"; readonly toolName: string; readonly input: unknown }
+            | {
+                readonly type: "assistant_message";
+                readonly messageId: MessageId;
+                readonly text: string;
+                readonly streaming: boolean;
+              }
+          ),
+      ): OrchestrationV2TurnItem => ({
+        id: TurnItemId.make(id),
+        threadId: THREAD_ID,
+        runId,
+        nodeId: NodeId.make("node:held-item"),
+        providerThreadId: null,
+        providerTurnId: null,
+        nativeItemRef: null,
+        parentItemId: null,
+        ordinal: 1,
+        title: null,
+        startedAt: now,
+        completedAt: null,
+        updatedAt: now,
+        ...fields,
+      });
+      const itemEvent = (id: string, payload: OrchestrationV2TurnItem) =>
+        ({
+          id: EventId.make(id),
+          type: "turn-item.updated",
+          threadId: THREAD_ID,
+          runId,
+          occurredAt: now,
+          payload,
+        }) satisfies OrchestrationV2DomainEvent;
+      const background = { type: "dynamic_tool" as const, toolName: "watch", input: {} };
+
+      yield* deliver({
+        id: EventId.make("event:held-item:thread"),
+        type: "thread.created",
+        threadId: THREAD_ID,
+        occurredAt: now,
+        payload: {
+          createdBy: "user",
+          creationSource: "web",
+          id: THREAD_ID,
+          projectId: PROJECT_ID,
+          title: "Thread",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "test-model" },
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          activeProviderThreadId: null,
+          lineage: { rootThreadId: THREAD_ID, parentThreadId: null, relationshipToParent: null },
+          forkedFrom: null,
+          createdAt: now,
+          updatedAt: now,
+          archivedAt: null,
+          settledOverride: null,
+          settledAt: null,
+          lastVisitedAt: null,
+          deletedAt: null,
+        },
+      });
+      yield* deliver({
+        id: EventId.make("event:held-item:run"),
+        type: "run.created",
+        threadId: THREAD_ID,
+        runId,
+        occurredAt: now,
+        payload: run,
+      });
+      yield* deliver(
+        itemEvent("event:held-item:tool", item("item:tool", { ...background, status: "running" })),
+      );
+      yield* deliver({
+        id: EventId.make("event:held-item:run-completed"),
+        type: "run.updated",
+        threadId: THREAD_ID,
+        runId,
+        occurredAt: now,
+        payload: { ...run, status: "completed", completedAt: now },
+      });
+      assert.deepEqual(
+        publications.map((publication) => publication.state?.phase),
+        ["running"],
+      );
+
+      const readsBeforeOutput = shellReads.length;
+      yield* deliver(
+        itemEvent(
+          "event:held-item:reply",
+          item("item:reply", {
+            type: "assistant_message",
+            messageId: MessageId.make("message:held-item:reply"),
+            text: "Still watching",
+            streaming: true,
+            status: "running",
+          }),
+        ),
+      );
+      yield* deliver(
+        itemEvent("event:held-item:tick", item("item:tool", { ...background, status: "running" })),
+      );
+      assert.equal(shellReads.length, readsBeforeOutput);
+
+      yield* deliver(
+        itemEvent("event:held-item:end", item("item:tool", { ...background, status: "completed" })),
+      );
       yield* TestClock.adjust("5 seconds");
       yield* relay.drain;
-      assert.equal(publications[0]?.state?.phase, "completed");
-      yield* Ref.set(currentShell, null);
-      yield* relay.publishThread(THREAD_ID);
-      yield* secrets.set(PUBLISH_AGENT_ACTIVITY_SECRET, new TextEncoder().encode("false"));
-      yield* TestClock.adjust("5 seconds");
-      yield* relay.drain;
-      assert.equal(publications.length, 1);
-    }),
+      assert.deepEqual(
+        publications.map((publication) => publication.state?.phase),
+        ["running", "completed"],
+      );
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(ProjectionStore.layer.pipe(Layer.provide(SqlitePersistence.layerMemory))),
+    ),
   );
 });
+
+it.effect("catches up after startup without polling after success", () =>
+  Effect.gen(function* () {
+    const { relay, secrets, secretReads, catchUp } = yield* makeTestRelay();
+    yield* relay.start();
+    yield* TestClock.adjust("1 second");
+    assert.equal(catchUp.shellSnapshotReads, 1);
+
+    yield* secrets.set(PUBLISH_AGENT_ACTIVITY_SECRET, new TextEncoder().encode("false"));
+    yield* relay.requestCatchUp();
+    yield* TestClock.adjust("1 second");
+    assert.equal(catchUp.shellSnapshotReads, 1);
+
+    yield* secrets.set(PUBLISH_AGENT_ACTIVITY_SECRET, new TextEncoder().encode("true"));
+    yield* relay.requestCatchUp();
+    yield* TestClock.adjust("1 second");
+    assert.equal(catchUp.shellSnapshotReads, 2);
+
+    const readsBeforeIdle = secretReads.length;
+    yield* TestClock.adjust("10 minutes");
+    assert.equal(catchUp.shellSnapshotReads, 2);
+    assert.equal(secretReads.length, readsBeforeIdle);
+
+    yield* secrets.set(
+      RELAY_ENVIRONMENT_CREDENTIAL_SECRET,
+      new TextEncoder().encode("credential-2"),
+    );
+    yield* relay.requestCatchUp();
+    yield* TestClock.adjust("1 second");
+    assert.equal(catchUp.shellSnapshotReads, 3);
+  }).pipe(Effect.scoped),
+);

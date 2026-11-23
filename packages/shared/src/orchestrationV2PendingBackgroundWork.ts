@@ -3,7 +3,13 @@ import type {
   OrchestrationV2ProviderThread,
   OrchestrationV2Run,
   OrchestrationV2TurnItem,
+  ThreadId,
+  ThreadPullRequestLink,
 } from "@t3tools/contracts";
+import { isOrchestrationV2WorkActive } from "@t3tools/contracts";
+import * as Predicate from "effect/Predicate";
+
+import { resolveT3McpToolId } from "./t3McpToolPresentation.ts";
 
 const BACKGROUND_TURN_ITEM_TYPES = new Set<OrchestrationV2TurnItem["type"]>([
   "command_execution",
@@ -11,18 +17,15 @@ const BACKGROUND_TURN_ITEM_TYPES = new Set<OrchestrationV2TurnItem["type"]>([
   "subagent",
 ]);
 
-const TERMINAL_TURN_ITEM_STATUSES = new Set<OrchestrationV2TurnItem["status"]>([
-  "completed",
-  "interrupted",
-  "failed",
-  "cancelled",
+// Plans and text streams can stay open across tool calls without executing work.
+const EXECUTION_TURN_ITEM_TYPES = new Set<OrchestrationV2TurnItem["type"]>([
+  ...BACKGROUND_TURN_ITEM_TYPES,
+  "file_change",
+  "file_search",
+  "web_search",
+  "compaction",
 ]);
 
-/**
- * True terminal run statuses (includes `rolled_back`). Retained as the
- * canonical terminal set for this module; do not widen or reuse it as the
- * background-wait gate — that gate intentionally excludes `rolled_back`.
- */
 const TERMINAL_RUN_STATUSES = new Set<OrchestrationV2Run["status"]>([
   "cancelled",
   "completed",
@@ -31,14 +34,7 @@ const TERMINAL_RUN_STATUSES = new Set<OrchestrationV2Run["status"]>([
   "rolled_back",
 ]);
 
-/**
- * Run statuses that allow a pending-background roster to surface.
- * Includes `waiting`: a successful turn persists as waiting until checkpoint
- * capture flips it to completed, and waiting is only set from completed.
- * Excludes `rolled_back`: the provider-thread roster is not run-tied, so a
- * rolled-back latest run must fail the gate entirely (not only item filter).
- * Built explicitly rather than spreading or deleting from TERMINAL_RUN_STATUSES.
- */
+// waiting is completed work awaiting checkpoints; exclude rolled_back entirely because provider threads are not run-tied.
 const SETTLED_FOR_BACKGROUND_WAIT_RUN_STATUSES = new Set<OrchestrationV2Run["status"]>([
   "cancelled",
   "completed",
@@ -47,36 +43,100 @@ const SETTLED_FOR_BACKGROUND_WAIT_RUN_STATUSES = new Set<OrchestrationV2Run["sta
   "waiting",
 ]);
 
-// Keep TERMINAL_RUN_STATUSES referenced so the true-terminal set stays defined
-// next to the background-wait subset (rolled_back is terminal, not wait-settled).
 void TERMINAL_RUN_STATUSES;
 
 export type PendingBackgroundWorkTask = OrchestrationV2PendingBackgroundTask;
 
+export function turnItemUpdateCanEndBackgroundWork(
+  item: Pick<OrchestrationV2TurnItem, "type" | "status">,
+): boolean {
+  return BACKGROUND_TURN_ITEM_TYPES.has(item.type) && !isOrchestrationV2WorkActive(item.status);
+}
+
+export function deriveBlockedOnThreadWait(input: {
+  readonly activeRun: Pick<OrchestrationV2Run, "id" | "status"> | null;
+  readonly turnItems: ReadonlyArray<OrchestrationV2TurnItem>;
+}): boolean {
+  if (input.activeRun?.status !== "running") return false;
+  let hasWait = false;
+  for (const item of input.turnItems) {
+    if (
+      item.runId !== input.activeRun.id ||
+      !EXECUTION_TURN_ITEM_TYPES.has(item.type) ||
+      (item.status !== "running" && item.status !== "waiting") ||
+      // App-owned rows track the child, including the child a blocking delegate is waiting for.
+      (item.type === "subagent" && item.origin === "app_owned")
+    ) {
+      continue;
+    }
+    if (item.type !== "dynamic_tool") return false;
+    const tool = resolveT3McpToolId(item.toolName);
+    if (
+      tool !== "t3_thread_wait" &&
+      !(
+        tool === "delegate_task" &&
+        Predicate.isObject(item.input) &&
+        Reflect.get(item.input, "mode") === "wait"
+      )
+    ) {
+      return false;
+    }
+    hasWait = true;
+  }
+  return hasWait;
+}
+
+export function backgroundWorkHoldsCompletion(
+  tasks: ReadonlyArray<Pick<PendingBackgroundWorkTask, "kind" | "awaited">>,
+): boolean {
+  return tasks.some(
+    (task) => task.awaited === true || backgroundWorkKindHoldsCompletion(task.kind),
+  );
+}
+
+// Commands and monitors are as often a dev server or its watchdog as a wait, so they hold
+// only when the agent marks them awaited.
+function backgroundWorkKindHoldsCompletion(kind: PendingBackgroundWorkTask["kind"]): boolean {
+  switch (kind) {
+    case "command":
+    case "monitor":
+      return false;
+    case "subagent":
+    case "background_task":
+      return true;
+  }
+}
+
 type PendingBackgroundWorkRun = Pick<OrchestrationV2Run, "id" | "ordinal" | "status">;
+
+type PendingBackgroundWorkPullRequest = Pick<
+  ThreadPullRequestLink,
+  "host" | "repository" | "number" | "url" | "source" | "watch"
+> & {
+  readonly snapshot: Pick<NonNullable<ThreadPullRequestLink["snapshot"]>, "state"> | null;
+};
 
 type PendingBackgroundWorkProviderThread = Pick<
   OrchestrationV2ProviderThread,
   "id" | "pendingBackgroundTasks"
->;
+> & { readonly providerInstanceId?: OrchestrationV2ProviderThread["providerInstanceId"] };
 
 type PendingBackgroundWorkTurnItem = {
   readonly id: OrchestrationV2TurnItem["id"] | string;
   readonly type: OrchestrationV2TurnItem["type"];
   readonly status: OrchestrationV2TurnItem["status"];
   readonly title: string | null;
-  /** When present and the run is rolled_back, the item is abandoned, not pending. */
+  /** Shell readers join the owner, even when its provider thread belongs to a child app thread. */
+  readonly owningProviderInstanceId?: OrchestrationV2ProviderThread["providerInstanceId"];
   readonly runId?: OrchestrationV2Run["id"] | string | null;
   readonly nativeItemRef?: {
     readonly nativeId: string | null;
   } | null;
   readonly input?: unknown;
+  readonly monitor?: boolean | undefined;
   readonly prompt?: string | undefined;
+  readonly childThreadId?: ThreadId | null;
 };
-
-function isTerminalTurnItemStatus(status: OrchestrationV2TurnItem["status"]): boolean {
-  return TERMINAL_TURN_ITEM_STATUSES.has(status);
-}
 
 function isLatestRunSettledForBackgroundWait(
   latestRun: PendingBackgroundWorkRun | null | undefined,
@@ -115,6 +175,29 @@ function descriptionFromTurnItem(item: PendingBackgroundWorkTurnItem): string | 
   return undefined;
 }
 
+function pendingTaskFromTurnItem(
+  taskId: string,
+  item: PendingBackgroundWorkTurnItem,
+): PendingBackgroundWorkTask {
+  const description = descriptionFromTurnItem(item);
+  const named = { taskId, ...(description === undefined ? {} : { description }) };
+  switch (item.type) {
+    case "subagent":
+      return {
+        ...named,
+        kind: "subagent",
+        ...(item.owningProviderInstanceId === undefined
+          ? {}
+          : { providerInstanceId: item.owningProviderInstanceId }),
+        ...(item.childThreadId == null ? {} : { childThreadId: item.childThreadId }),
+      };
+    case "command_execution":
+      return { ...named, kind: item.monitor === true ? "monitor" : "command" };
+    default:
+      return { ...named, kind: "background_task" };
+  }
+}
+
 function nativeTaskIdFromTurnItem(item: PendingBackgroundWorkTurnItem): string {
   const nativeId = item.nativeItemRef?.nativeId;
   if (typeof nativeId === "string" && nativeId.length > 0) {
@@ -123,32 +206,34 @@ function nativeTaskIdFromTurnItem(item: PendingBackgroundWorkTurnItem): string {
   return String(item.id);
 }
 
-/**
- * Derive one normalized pending-background-work list for post-settlement UI.
- *
- * Sources:
- * - Provider-thread roster (Claude SDK background tasks)
- * - Nonterminal command_execution / dynamic_tool / subagent turn items
- *
- * Gated on latest root run settlement. Dedupes by native task ID. Excludes
- * the roster while any interruptible foreground run remains active. Excludes
- * Grok persistent monitors (`dynamic_tool` input with `persistent: true`).
- * Excludes turn items whose run resolves to `rolled_back` (abandoned work);
- * items with a null or absent run id stay eligible (matches SQL shell path).
- * Does not consult subagent entities (those double-count turn items).
- */
+/** Items Stop ends, without the pending list's settled-run gate. */
+export function pendingBackgroundTurnItems<Item extends PendingBackgroundWorkTurnItem>(input: {
+  readonly turnItems: ReadonlyArray<Item>;
+  readonly runs?: ReadonlyArray<PendingBackgroundWorkRun>;
+}): ReadonlyArray<Item> {
+  const rolledBackRunIds = new Set(
+    (input.runs ?? []).filter((run) => run.status === "rolled_back").map((run) => String(run.id)),
+  );
+  return input.turnItems.filter(
+    (item) =>
+      BACKGROUND_TURN_ITEM_TYPES.has(item.type) &&
+      isOrchestrationV2WorkActive(item.status) &&
+      !(item.type === "dynamic_tool" && isPersistentDynamicToolInput(item.input)) &&
+      (item.runId === undefined ||
+        item.runId === null ||
+        !rolledBackRunIds.has(String(item.runId))),
+  );
+}
+
 export function derivePendingBackgroundWork(input: {
   readonly latestRun: PendingBackgroundWorkRun | null | undefined;
   readonly providerThreads: ReadonlyArray<PendingBackgroundWorkProviderThread>;
   readonly turnItems: ReadonlyArray<PendingBackgroundWorkTurnItem>;
   readonly activeProviderThreadId?: string | null;
   readonly hasActiveRun?: boolean;
-  /**
-   * Run rows used to exclude items owned by rolled_back runs. Optional for
-   * callers that already filtered (SQL shell path); in-memory callers should
-   * pass projection runs so policy cannot drift.
-   */
+  /** Excludes rolled-back runs; optional only when the caller already filtered them, as SQL shell reads do. */
   readonly runs?: ReadonlyArray<PendingBackgroundWorkRun>;
+  readonly pullRequests?: ReadonlyArray<PendingBackgroundWorkPullRequest> | undefined;
 }): ReadonlyArray<PendingBackgroundWorkTask> {
   const hasActiveRun =
     input.hasActiveRun ??
@@ -159,14 +244,14 @@ export function derivePendingBackgroundWork(input: {
   if (hasActiveRun) {
     return [];
   }
+  if (input.latestRun == null) {
+    return pullRequestWatchTasks(input.pullRequests);
+  }
   if (!isLatestRunSettledForBackgroundWait(input.latestRun)) {
     return [];
   }
 
   const byTaskId = new Map<string, PendingBackgroundWorkTask>();
-  const rolledBackRunIds = new Set(
-    (input.runs ?? []).filter((run) => run.status === "rolled_back").map((run) => String(run.id)),
-  );
 
   const providerThreads =
     input.activeProviderThreadId === undefined || input.activeProviderThreadId === null
@@ -178,61 +263,50 @@ export function derivePendingBackgroundWork(input: {
       if (task.taskId.length === 0 || byTaskId.has(task.taskId)) {
         continue;
       }
-      const description = task.description?.trim();
+      const { description: rawDescription, ...named } = task;
+      const description = rawDescription?.trim();
       byTaskId.set(task.taskId, {
-        taskId: task.taskId,
+        ...named,
+        ...(task.kind === "subagent"
+          ? { providerInstanceId: providerThread.providerInstanceId }
+          : {}),
         ...(description === undefined || description.length === 0 ? {} : { description }),
-        ...(task.taskType === undefined ? {} : { taskType: task.taskType }),
       });
     }
   }
 
-  for (const item of input.turnItems) {
-    if (!BACKGROUND_TURN_ITEM_TYPES.has(item.type)) {
-      continue;
-    }
-    if (isTerminalTurnItemStatus(item.status)) {
-      continue;
-    }
-    if (item.type === "dynamic_tool" && isPersistentDynamicToolInput(item.input)) {
-      continue;
-    }
-    // Null/absent run id stays eligible; only known rolled_back runs drop.
-    const itemRunId = item.runId;
-    if (itemRunId !== undefined && itemRunId !== null && rolledBackRunIds.has(String(itemRunId))) {
-      continue;
-    }
-
+  for (const item of pendingBackgroundTurnItems(input)) {
     const taskId = nativeTaskIdFromTurnItem(item);
     if (byTaskId.has(taskId)) {
       continue;
     }
 
-    const description = descriptionFromTurnItem(item);
-    byTaskId.set(taskId, {
-      taskId,
-      ...(description === undefined ? {} : { description }),
-      taskType: item.type,
-    });
+    byTaskId.set(taskId, pendingTaskFromTurnItem(taskId, item));
   }
+
+  for (const task of pullRequestWatchTasks(input.pullRequests)) byTaskId.set(task.taskId, task);
 
   return Array.from(byTaskId.values());
 }
 
-export function formatPendingBackgroundWorkLabel(
-  tasks: ReadonlyArray<PendingBackgroundWorkTask>,
-): string | null {
-  if (tasks.length === 0) {
-    return null;
-  }
-  const firstDescription = tasks[0]?.description?.trim();
-  if (tasks.length === 1) {
-    return firstDescription && firstDescription.length > 0
-      ? `Waiting on background task: ${firstDescription}`
-      : "Waiting on a background task";
-  }
-  if (firstDescription && firstDescription.length > 0) {
-    return `Waiting on ${tasks.length} background tasks: ${firstDescription}, …`;
-  }
-  return `Waiting on ${tasks.length} background tasks`;
+function pullRequestWatchTasks(
+  pullRequests: ReadonlyArray<PendingBackgroundWorkPullRequest> | undefined,
+): Array<PendingBackgroundWorkTask> {
+  return (pullRequests ?? []).flatMap((link) =>
+    // The watch reactor ends a merged PR's watch without waking the agent, so it holds nothing.
+    link.watch === undefined ||
+    link.source === "stack-dismissed" ||
+    link.snapshot?.state === "merged"
+      ? []
+      : [
+          {
+            // Links store their normalized identity, and this id only has to be unique within the
+            // thread, so it reads those fields instead of parsing the URL.
+            taskId: `pull-request-watch:${link.host.toLowerCase()}/${link.repository.toLowerCase()}#${link.number}`,
+            description: `Watching pull request #${link.number}`,
+            kind: "monitor" as const,
+            awaited: true as const,
+          },
+        ],
+  );
 }

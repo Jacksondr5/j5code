@@ -15,12 +15,12 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 
-import { CheckpointServiceV2 } from "./CheckpointService.ts";
-import { EventSinkV2 } from "./EventSink.ts";
-import { IdAllocatorV2, type IdAllocatorV2Shape } from "./IdAllocator.ts";
-import { ProjectionStoreV2 } from "./ProjectionStore.ts";
+import * as CheckpointService from "./CheckpointService.ts";
+import * as EventSink from "./EventSink.ts";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
+import * as ProjectionStore from "./ProjectionStore.ts";
 
-export class CheckpointCaptureExecutionError extends Schema.TaggedErrorClass<CheckpointCaptureExecutionError>()(
+export class CheckpointCaptureExecutionError extends Schema.TaggedError<CheckpointCaptureExecutionError>()(
   "CheckpointCaptureExecutionError",
   {
     threadId: ThreadId,
@@ -48,37 +48,44 @@ export class CheckpointCaptureServiceV2 extends Context.Service<
 export const layer: Layer.Layer<
   CheckpointCaptureServiceV2,
   never,
-  CheckpointServiceV2 | EventSinkV2 | IdAllocatorV2 | ProjectionStoreV2
+  | CheckpointService.CheckpointServiceV2
+  | EventSink.EventSinkV2
+  | IdAllocator.IdAllocatorV2
+  | ProjectionStore.ProjectionStoreV2
 > = Layer.effect(
   CheckpointCaptureServiceV2,
   Effect.gen(function* () {
-    const checkpoints = yield* CheckpointServiceV2;
-    const eventSink = yield* EventSinkV2;
-    const ids = yield* IdAllocatorV2;
-    const projections = yield* ProjectionStoreV2;
+    const checkpoints = yield* CheckpointService.CheckpointServiceV2;
+    const eventSink = yield* EventSink.EventSinkV2;
+    const ids = yield* IdAllocator.IdAllocatorV2;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
 
     const execute = Effect.fn("orchestrationV2.checkpointCapture.execute")(function* (input: {
       readonly threadId: ThreadId;
       readonly runId: RunId;
       readonly scopeId: CheckpointScopeId;
     }) {
-      const projection = yield* projections.getThreadProjection(input.threadId);
-      const run = projection.runs.find((candidate) => candidate.id === input.runId);
+      const { run, rootNode, scope, providerThread, readyCheckpointOrdinals, sideChat } =
+        yield* projections.getCheckpointCaptureContext(input.threadId, input);
+      // Stopped runs remain terminal; their checkpoint is the next message's rollback point.
+      const stopped = run?.status === "interrupted" || run?.status === "cancelled";
 
-      // The effect is at-least-once. A completed run with a checkpoint proves
-      // that an earlier execution committed its result.
-      if (run?.status === "completed" && run.checkpointId !== null) {
+      // A checkpoint on a settled run proves this at-least-once effect already committed.
+      if (
+        run !== undefined &&
+        run.checkpointId !== null &&
+        (run.status === "completed" || stopped)
+      ) {
+        return;
+      }
+      // Rollback uses the same lane and can precede a capture retry; preserve the restored workspace and discarded run.
+      if (run?.status === "rolled_back") {
         return;
       }
 
-      const rootNode = projection.nodes.find((candidate) => candidate.id === run?.rootNodeId);
-      const scope = projection.checkpointScopes.find((candidate) => candidate.id === input.scopeId);
-      const providerThread = projection.providerThreads.find(
-        (candidate) => candidate.id === run?.providerThreadId,
-      );
       if (
         run === undefined ||
-        run.status !== "waiting" ||
+        (run.status !== "waiting" && !stopped) ||
         rootNode === undefined ||
         scope === undefined ||
         rootNode.checkpointScopeId !== scope.id ||
@@ -95,24 +102,21 @@ export const layer: Layer.Layer<
       const capturedAt = yield* DateTime.now;
       const baselineOrdinalWithinScope = Math.max(0, run.ordinal - 1);
       const hasReadyCheckpoint = (ordinalWithinScope: number) =>
-        projection.checkpoints.some(
-          (candidate) =>
-            candidate.scopeId === scope.id &&
-            candidate.ordinalWithinScope === ordinalWithinScope &&
-            candidate.status === "ready",
-        );
+        readyCheckpointOrdinals.includes(ordinalWithinScope);
       const threadStartCheckpoint =
         baselineOrdinalWithinScope === 0 || hasReadyCheckpoint(0)
           ? null
           : yield* checkpoints.materializeBaselineCheckpoint({
               scope,
               ordinalWithinScope: 0,
+              forceMissing: sideChat,
             });
       const baselineCheckpoint = hasReadyCheckpoint(baselineOrdinalWithinScope)
         ? null
         : yield* checkpoints.materializeBaselineCheckpoint({
             scope,
             ordinalWithinScope: baselineOrdinalWithinScope,
+            forceMissing: sideChat,
           });
       const checkpoint = yield* checkpoints.capture({
         scope,
@@ -121,11 +125,9 @@ export const layer: Layer.Layer<
         ordinalWithinScope: run.ordinal,
         appRunOrdinal: run.ordinal,
         capturedAt,
+        forceMissing: sideChat,
       });
-      // Match RunExecutionService: capture loaded the waiting run before
-      // materializing baselines. Omit delegatedCompletion so a newer cohort
-      // write during capture is not overwritten by this stale snapshot
-      // (ProjectionStore preserves the field when absent from the payload).
+      // Omit delegatedCompletion to preserve cohort writes made after capture loaded the run.
       const { delegatedCompletion: _delegatedCompletion, ...runWithoutDelegatedCompletion } = run;
       const commandId = CommandId.make(`command:effect:checkpoint.capture:${run.id}`);
       yield* eventSink.commitCommand({
@@ -200,47 +202,54 @@ export const layer: Layer.Layer<
             nodeId: rootNode.id,
             providerInstanceId: run.providerInstanceId,
             occurredAt: capturedAt,
-            payload: {
-              ...runWithoutDelegatedCompletion,
-              status: "completed",
-              completedAt: capturedAt,
-              checkpointId: checkpoint.id,
-            },
+            payload: stopped
+              ? { ...runWithoutDelegatedCompletion, checkpointId: checkpoint.id }
+              : {
+                  ...runWithoutDelegatedCompletion,
+                  status: "completed",
+                  completedAt: capturedAt,
+                  checkpointId: checkpoint.id,
+                },
           },
-          {
-            id: yield* ids.allocate.event({ threadId: input.threadId, commandId }),
-            type: "node.updated",
-            threadId: input.threadId,
-            runId: run.id,
-            nodeId: rootNode.id,
-            providerInstanceId: run.providerInstanceId,
-            occurredAt: capturedAt,
-            payload: {
-              ...rootNode,
-              status: "completed",
-              completedAt: capturedAt,
-              checkpointScopeId: scope.id,
-            },
-          },
+          ...(stopped
+            ? []
+            : [
+                {
+                  id: yield* ids.allocate.event({ threadId: input.threadId, commandId }),
+                  type: "node.updated" as const,
+                  threadId: input.threadId,
+                  runId: run.id,
+                  nodeId: rootNode.id,
+                  providerInstanceId: run.providerInstanceId,
+                  occurredAt: capturedAt,
+                  payload: {
+                    ...rootNode,
+                    status: "completed" as const,
+                    completedAt: capturedAt,
+                    checkpointScopeId: scope.id,
+                  },
+                },
+              ]),
         ],
       });
     });
 
     return CheckpointCaptureServiceV2.of({
-      execute: (input) =>
-        execute(input).pipe(
+      execute: Effect.fn("CheckpointCaptureServiceV2.execute")(function (input) {
+        return execute(input).pipe(
           Effect.mapError((cause) =>
             isCheckpointCaptureExecutionError(cause)
               ? cause
               : new CheckpointCaptureExecutionError({ ...input, cause }),
           ),
-        ),
+        );
+      }),
     });
   }),
 );
 
 function makeCheckpointTurnItem(input: {
-  readonly idAllocator: IdAllocatorV2Shape;
+  readonly idAllocator: IdAllocator.IdAllocatorV2["Service"];
   readonly run: OrchestrationV2Run;
   readonly rootNode: OrchestrationV2ExecutionNode;
   readonly providerThread: OrchestrationV2ProviderThread;

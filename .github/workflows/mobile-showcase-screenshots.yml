@@ -43,8 +43,8 @@ env:
 
 jobs:
   ios:
-    name: iPhone 6.9, iPhone 6.5, and iPad 13
-    if: inputs.platform == 'all' || inputs.platform == 'ios'
+    name: iPhone, iPhone Duo, and iPad 13
+    if: github.repository == 'pingdotgg/t3code' && (inputs.platform == 'all' || inputs.platform == 'ios')
     runs-on: blacksmith-12vcpu-macos-26
     # Capturing every palette multiplies the device matrix by six, and only the
     # one native build is shared between them.
@@ -76,6 +76,20 @@ jobs:
           echo "$vp_pnpm_bin" >> "$GITHUB_PATH"
           "$vp_pnpm_bin/pnpm" --version
 
+      - name: Install AXe
+        # Locks the simulator and answers the notification prompt for the
+        # agent-activity scene.
+        # Homebrew refuses third-party tap formulae until they are trusted;
+        # older releases have no trust command and install them as is.
+        run: |
+          brew tap cameroncooke/axe
+          if brew commands | grep -qx trust; then brew trust --formula cameroncooke/axe/axe; fi
+          brew install cameroncooke/axe/axe
+          axe --version
+
+      - name: Install foldable simulator controls
+        run: npm install --global agent-device@0.21.25
+
       - name: Capture iOS showcase
         run: pnpm screenshots:mobile --platform ios --appearance "${{ inputs.appearance }}" --theme "${{ inputs.theme }}"
 
@@ -93,7 +107,7 @@ jobs:
 
   android:
     name: Android phone, 7-inch tablet, and 10-inch tablet
-    if: inputs.platform == 'all' || inputs.platform == 'android'
+    if: github.repository == 'pingdotgg/t3code' && (inputs.platform == 'all' || inputs.platform == 'android')
     runs-on: blacksmith-16vcpu-ubuntu-2404
     # Capturing every palette multiplies the device matrix by six, and only the
     # one native build is shared between them.

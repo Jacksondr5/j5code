@@ -1,0 +1,45 @@
+import { useAtomValue } from "@effect/atom-react";
+import { inboxBellCount } from "@t3tools/client-runtime/j5/crew-inbox-requests";
+import { inboxBellPresentation, mergeOpenInboxCounts } from "@t3tools/client-runtime/j5/inbox";
+import { useNavigation } from "@react-navigation/native";
+import { Pressable, View } from "react-native";
+
+import { AppText as Text } from "../../components/ui/AppText";
+import { BellGlyph } from "./BellGlyph";
+import { crewRequestSourcesAtom, inboxCountSourcesAtom } from "./inboxSources";
+
+/**
+ * The Inbox bell in the thread list's header, with the open count across every connected server:
+ * open asks and an Owner's worktree cleanups (the server's count), seat approvals and agents'
+ * questions, as web's bell counts them.
+ */
+export function InboxBell() {
+  const navigation = useNavigation();
+  const { badge, label } = inboxBellPresentation(
+    inboxBellCount(
+      mergeOpenInboxCounts(useAtomValue(inboxCountSourcesAtom)),
+      useAtomValue(crewRequestSourcesAtom),
+    ),
+  );
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={label}
+      hitSlop={4}
+      onPress={() => navigation.navigate("Inbox")}
+      className="size-12 items-center justify-center active:opacity-70"
+    >
+      <BellGlyph size={22} tintColorClassName="accent-header-foreground" />
+      {badge === null ? null : (
+        <View
+          pointerEvents="none"
+          className="absolute right-1 top-1 min-w-4 items-center justify-center rounded-full bg-primary px-1"
+        >
+          <Text className="text-[10px] font-t3-bold leading-4 text-primary-foreground">
+            {badge}
+          </Text>
+        </View>
+      )}
+    </Pressable>
+  );
+}

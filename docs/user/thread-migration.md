@@ -1,7 +1,18 @@
 # Threads from older T3 Code versions
 
-When a server first starts with the current orchestration system, it brings its existing threads
-forward automatically. You do not need to run an import command.
+On your first V2 launch, T3 Code copies the V1 database, `state.sqlite`, into `statev2.sqlite`
+in the same data directory and migrates the copy. Your threads appear automatically, with full
+transcripts imported as needed. You do not need to run an import command.
+
+V1 continues using its original database while V2 uses the copy. The database import can run while
+V1 is open. Opening V2 again resumes your V2 history. The copy happens only once: later conversations
+and changes in either version do not sync to the other. Settings, attachments, and workspace files
+remain shared.
+
+The V2 desktop app uses a separate browser profile, so browser cookies and caches do not carry
+over from V1. You may need to sign in again to websites opened inside the app. On its first launch,
+the V2 desktop app copies stashed prompts, unsent drafts, layout, and theme from V1. Anything you
+change in V2 afterwards stays in V2.
 
 The migrated thread keeps its title, project, provider and model selection, permission and
 interaction modes, branch or worktree, archive state, settlement state, snooze and pin state, and
@@ -15,9 +26,11 @@ present.
 
 ## Continuing a migrated thread
 
-The first new message starts a fresh provider session. T3 Code gives that session the newest part of
-the old user and assistant transcript, up to 32,000 characters. Earlier text remains visible in the
-thread, but the provider does not receive it automatically.
+The first new message starts a fresh provider session. T3 Code selects intact user and assistant
+messages using the same [handoff budget](./portable-handoffs.md) as a provider switch. Omitted text
+remains in the thread and can be retrieved by the agent. The migration retains its separate
+32,000-character recovery excerpt; neither that excerpt nor the handoff replaces the full imported
+transcript.
 
 Before continuing a long or important thread, read the recent transcript and include any older
 requirements the agent still needs in your next message. Starting a new thread and pasting a short
@@ -27,7 +40,7 @@ handoff is also a good choice when the old conversation contains conflicting ins
 
 T3 Code does not currently have a whole-thread export command. Before a major server update, stop
 the server and copy its `userdata` directory to a safe location. The default is
-`~/.t3/userdata`; a server started with `--home-dir <path>` uses `<path>/userdata`.
+`~/.t3/userdata`; a server started with `--base-dir <path>` uses `<path>/userdata`.
 
 If a migrated transcript is missing from the app, keep that copy unchanged. You can inspect the
 old transcript without starting a server against it:

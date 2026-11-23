@@ -16,7 +16,6 @@ const persona = (
   description: "Finds evidence",
   definitionVersion: 1,
   acceptedInput: "prompt",
-  outputArtifact: "Brief",
   defaultAuthorityPolicy: "read-only",
   allowedAuthorityPolicies: ["read-only"],
   availability: reason

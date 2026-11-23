@@ -1,79 +1,74 @@
-import type { ThreadId } from "@t3tools/contracts";
+import { ThreadId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 
 import {
-  type AppendCommEventCommand,
+  type AppendCommEventsCommand,
   type CommCommandId,
   ParticipantId,
-  SquadronId,
+  LedgerProjectId,
   type StoredCommEvent,
 } from "./contracts.ts";
 import {
   A2ALedger,
   type A2ALedgerError,
   A2ALedgerTransactionWriter,
-  type AppendResult,
+  type AppendEventsResult,
 } from "./LedgerService.ts";
 
 export interface RegisteredThreadHome {
-  readonly squadronId: SquadronId;
+  readonly projectId: LedgerProjectId;
   readonly participantId: ParticipantId;
 }
 
-export interface ThreadHomeLookup {
-  readonly threadId: ThreadId;
-  readonly home:
-    | {
-        readonly kind: "known";
-        readonly squadron: { readonly id: SquadronId; readonly name: string };
-      }
-    | { readonly kind: "unknown" };
-}
-
 export interface RegisterAtCreationInput {
-  readonly squadronId: SquadronId;
+  readonly projectId: LedgerProjectId;
   readonly threadId: ThreadId;
   readonly createdAt: string;
   readonly commandId: CommCommandId;
+  /**
+   * Set for a thread that was archived before it was ever registered. It joins as archived: the
+   * join and the archive are one command, so neither is recorded without the other.
+   */
+  readonly archivedAt?: string;
 }
 
-export class A2AHomeNotFoundError extends Schema.TaggedErrorClass<A2AHomeNotFoundError>()(
+export class A2AHomeNotFoundError extends Schema.TaggedError<A2AHomeNotFoundError>()(
   "A2AHomeNotFoundError",
   { threadId: Schema.String },
 ) {
   override get message(): string {
-    return `Thread ${this.threadId} has no registered home squadron and is not an A2A participant. Call list_squadrons, then join_squadron with the exact squadron_id that references this thread's project, before retrying.`;
+    return `Thread ${this.threadId} is not an agent-to-agent participant. Provider Subagents and deleted threads never are.`;
   }
 }
 
-export class A2AHomeConflictError extends Schema.TaggedErrorClass<A2AHomeConflictError>()(
+export class A2AHomeConflictError extends Schema.TaggedError<A2AHomeConflictError>()(
   "A2AHomeConflictError",
   {
     threadId: Schema.String,
-    existingSquadronId: Schema.String,
-    requestedSquadronId: Schema.String,
+    existingProjectId: Schema.String,
+    requestedProjectId: Schema.String,
   },
 ) {
   override get message(): string {
-    return `Thread ${this.threadId} already has immutable home squadron ${this.existingSquadronId}; registration requested ${this.requestedSquadronId}. Keep the existing home; this registrar cannot select, move, or replace it.`;
+    return `Thread ${this.threadId} is already registered in project ${this.existingProjectId}; registration requested ${this.requestedProjectId}. A thread's project never changes.`;
   }
 }
 
-export class A2AHomeCommandConflictError extends Schema.TaggedErrorClass<A2AHomeCommandConflictError>()(
+export class A2AHomeCommandConflictError extends Schema.TaggedError<A2AHomeCommandConflictError>()(
   "A2AHomeCommandConflictError",
   {
     commandId: Schema.String,
     requestedThreadId: Schema.String,
-    requestedSquadronId: Schema.String,
+    requestedProjectId: Schema.String,
   },
 ) {
   override get message(): string {
-    return `Creation command ${this.commandId} is already bound to a different ledger event than thread ${this.requestedThreadId} in squadron ${this.requestedSquadronId}. Reuse the original creation inputs or issue a new command id.`;
+    return `Creation command ${this.commandId} is already bound to a different ledger event than thread ${this.requestedThreadId} in project ${this.requestedProjectId}. Reuse the original creation inputs or issue a new command id.`;
   }
 }
 
@@ -92,13 +87,6 @@ export interface A2AHomeRegistrarShape {
   readonly getHomeForThread: (
     threadId: ThreadId,
   ) => Effect.Effect<RegisteredThreadHome, A2AHomeLookupError>;
-  /**
-   * Batch read for sidebar-visible thread sets. This reads immutable agent
-   * joins only; native and unregistered threads remain explicitly unknown.
-   */
-  readonly getHomesForThreads: (
-    threadIds: ReadonlyArray<ThreadId>,
-  ) => Effect.Effect<ReadonlyArray<ThreadHomeLookup>, SqlError>;
 }
 
 export class A2AHomeRegistrar extends Context.Service<A2AHomeRegistrar, A2AHomeRegistrarShape>()(
@@ -123,9 +111,9 @@ export class A2AHomeRegistrationTransaction extends Context.Service<
 >()("t3/j5/a2a/HomeRegistrar/A2AHomeRegistrationTransaction") {}
 
 interface HistoricalHomeRow {
-  readonly home_squadron_id: string;
+  readonly home_project_id: string;
   readonly home_participant_id: string;
-  readonly active_squadron_id: string | null;
+  readonly active_project_id: string | null;
   readonly active_participant_id: string | null;
   readonly is_retired: number;
 }
@@ -136,70 +124,121 @@ interface ThreadHomeResolution {
   readonly retired: boolean;
 }
 
-interface ThreadHomeLookupRow {
-  readonly thread_id: string;
-  readonly squadron_id: string;
-  readonly squadron_name: string;
-}
-
-/** Leaves headroom under SQLite's bind-parameter ceiling for sidebar reads. */
-export const THREAD_HOME_LOOKUP_BATCH_SIZE = 900;
-
-const uniqueInFirstOccurrenceOrder = <Value>(values: ReadonlyArray<Value>) =>
-  Array.from(new Set(values));
-
-const batchesOf = <Value>(values: ReadonlyArray<Value>) => {
-  const batches: Array<ReadonlyArray<Value>> = [];
-  for (let index = 0; index < values.length; index += THREAD_HOME_LOOKUP_BATCH_SIZE) {
-    batches.push(values.slice(index, index + THREAD_HOME_LOOKUP_BATCH_SIZE));
-  }
-  return batches;
-};
+const AGENT_PARTICIPANT_PREFIX = "agent:j5:a2a:";
 
 export const participantIdForThread = (threadId: ThreadId) =>
-  ParticipantId.make(`agent:j5:a2a:${threadId}`);
+  ParticipantId.make(`${AGENT_PARTICIPANT_PREFIX}${threadId}`);
+
+/**
+ * The inverse, for an agent on a peer server, whose thread this server has no record of. Every
+ * J5 server mints agent ids above; anything else (a person, an automation) has no thread.
+ */
+export const threadIdForParticipant = (participantId: string) =>
+  participantId.startsWith(AGENT_PARTICIPANT_PREFIX) &&
+  participantId.length > AGENT_PARTICIPANT_PREFIX.length
+    ? ThreadId.make(participantId.slice(AGENT_PARTICIPANT_PREFIX.length))
+    : null;
+
+type HomeFactFilter = { readonly threadId: ThreadId } | { readonly participantId: ParticipantId };
+
+// A thread names an agent, and the join index covers agents only, so the thread filter says so.
+const homeFactFilter = (sql: SqlClient.SqlClient, by: HomeFactFilter) =>
+  "threadId" in by
+    ? sql`json_extract(payload, '$.participant.kind') = 'agent'
+        AND json_extract(payload, '$.participant.threadId') = ${by.threadId}`
+    : sql`json_extract(payload, '$.participant.id') = ${by.participantId}`;
+
+/**
+ * The ledger rows that place an agent in a project now: its join, or the move that brought it
+ * there, with no later move out of that ledger. Upstream's Turn into project moves a thread to
+ * another project; its agent keeps its id and moves with it. Each branch names its kind so it
+ * reads through its partial index, never the whole log.
+ */
+export const currentHomeFacts = (sql: SqlClient.SqlClient, by: HomeFactFilter) => sql`
+  SELECT project_id, seq, payload FROM (
+    SELECT project_id, seq, payload FROM j5_a2a_comm_event
+    WHERE kind = 'participant.joined'
+      AND ${homeFactFilter(sql, by)}
+    UNION ALL
+    SELECT project_id, seq, payload FROM j5_a2a_comm_event
+    WHERE kind = 'participant.moved'
+      AND json_extract(payload, '$.toProjectId') = project_id
+      AND ${homeFactFilter(sql, by)}
+  ) AS candidate
+  WHERE NOT EXISTS (
+    SELECT 1
+    FROM j5_a2a_comm_event AS moved_out
+    WHERE moved_out.kind = 'participant.moved'
+      AND json_extract(moved_out.payload, '$.participant.threadId') =
+        json_extract(candidate.payload, '$.participant.threadId')
+      AND moved_out.project_id = candidate.project_id
+      AND moved_out.seq > candidate.seq
+      AND json_extract(moved_out.payload, '$.fromProjectId') = candidate.project_id
+  )
+`;
+
+const threadHomeStatement = (
+  sql: SqlClient.SqlClient,
+  threadId: ThreadId,
+) => sql<HistoricalHomeRow>`
+    SELECT
+      home.project_id AS home_project_id,
+      json_extract(home.payload, '$.participant.id') AS home_participant_id,
+      membership.project_id AS active_project_id,
+      membership.participant_id AS active_participant_id,
+      EXISTS (
+        SELECT 1
+        FROM j5_a2a_comm_event AS retirement
+        WHERE retirement.project_id = home.project_id
+          AND retirement.seq > home.seq
+          AND retirement.kind IN ('participant.left', 'participant.deleted')
+          AND json_extract(retirement.payload, '$.participant.kind') = 'agent'
+          AND json_extract(retirement.payload, '$.participant.id') =
+            json_extract(home.payload, '$.participant.id')
+          AND json_extract(retirement.payload, '$.participant.threadId') = ${threadId}
+      ) AS is_retired
+    FROM (${currentHomeFacts(sql, { threadId })}) AS home
+    LEFT JOIN j5_a2a_membership AS membership
+      ON membership.thread_id = ${threadId}
+    ORDER BY membership.project_id, membership.participant_id
+  `;
+
+/**
+ * Query plans for a test to hold indexed: a thread's home lookup, which every send runs, and the
+ * participant-id lookup a send to an id with no membership here runs.
+ */
+export const explainHomeStatements = (sql: SqlClient.SqlClient) => {
+  const explain = (statement: {
+    readonly compile: () => readonly [string, ReadonlyArray<unknown>];
+  }) => {
+    const [text, parameters] = statement.compile();
+    return sql.unsafe<{ readonly detail: string }>(`EXPLAIN QUERY PLAN ${text}`, parameters);
+  };
+  return {
+    byThread: explain(threadHomeStatement(sql, "thread:plan" as ThreadId)),
+    byParticipant: explain(
+      currentHomeFacts(sql, { participantId: ParticipantId.make("agent:plan") }),
+    ),
+  };
+};
 
 export const resolveThreadHome = Effect.fn("j5.a2a.resolveThreadHome")(function* (
   sql: SqlClient.SqlClient,
   threadId: ThreadId,
 ): Effect.fn.Return<ThreadHomeResolution, A2AHomeLookupError> {
-  const rows = yield* sql<HistoricalHomeRow>`
-    SELECT
-      event.squadron_id AS home_squadron_id,
-      json_extract(event.payload, '$.participant.id') AS home_participant_id,
-      membership.squadron_id AS active_squadron_id,
-      membership.participant_id AS active_participant_id,
-      EXISTS (
-        SELECT 1
-        FROM j5_a2a_comm_event AS retirement
-        WHERE retirement.squadron_id = event.squadron_id
-          AND retirement.seq > event.seq
-          AND retirement.kind IN ('participant.left', 'participant.deleted')
-          AND json_extract(retirement.payload, '$.participant.kind') = 'agent'
-          AND json_extract(retirement.payload, '$.participant.id') =
-            json_extract(event.payload, '$.participant.id')
-          AND json_extract(retirement.payload, '$.participant.threadId') = ${threadId}
-      ) AS is_retired
-    FROM j5_a2a_comm_event AS event
-    LEFT JOIN j5_a2a_squadron_membership AS membership
-      ON membership.thread_id = ${threadId}
-    WHERE event.kind = 'participant.joined'
-      AND json_extract(event.payload, '$.participant.kind') = 'agent'
-      AND json_extract(event.payload, '$.participant.threadId') = ${threadId}
-    ORDER BY membership.squadron_id, membership.participant_id
-  `;
+  const rows = yield* threadHomeStatement(sql, threadId);
   const first = rows[0];
   if (first === undefined) return yield* new A2AHomeNotFoundError({ threadId });
   const activeMemberships = Array.from(
     new Map(
       rows.flatMap((row) =>
-        row.active_squadron_id === null || row.active_participant_id === null
+        row.active_project_id === null || row.active_participant_id === null
           ? []
           : [
               [
-                `${row.active_squadron_id}\u0000${row.active_participant_id}`,
+                `${row.active_project_id}\u0000${row.active_participant_id}`,
                 {
-                  squadronId: row.active_squadron_id as SquadronId,
+                  projectId: row.active_project_id as LedgerProjectId,
                   participantId: ParticipantId.make(row.active_participant_id),
                 },
               ] as const,
@@ -209,7 +248,7 @@ export const resolveThreadHome = Effect.fn("j5.a2a.resolveThreadHome")(function*
   );
   return {
     home: {
-      squadronId: first.home_squadron_id as SquadronId,
+      projectId: first.home_project_id as LedgerProjectId,
       participantId: ParticipantId.make(first.home_participant_id),
     },
     activeMemberships,
@@ -217,90 +256,79 @@ export const resolveThreadHome = Effect.fn("j5.a2a.resolveThreadHome")(function*
   };
 });
 
-const threadHomeRows = (sql: SqlClient.SqlClient, threadIds: ReadonlyArray<ThreadId>) =>
-  sql<ThreadHomeLookupRow>`
-    WITH ranked_homes AS (
-      SELECT
-        json_extract(event.payload, '$.participant.threadId') AS thread_id,
-        squadron.id AS squadron_id,
-        squadron.name AS squadron_name,
-        ROW_NUMBER() OVER (
-          PARTITION BY json_extract(event.payload, '$.participant.threadId')
-          ORDER BY event.created_at ASC, event.squadron_id ASC, event.seq ASC
-        ) AS home_rank
-      FROM j5_a2a_comm_event AS event
-      JOIN j5_a2a_squadron AS squadron ON squadron.id = event.squadron_id
-      WHERE event.kind = 'participant.joined'
-        AND json_extract(event.payload, '$.participant.kind') = 'agent'
-        AND json_extract(event.payload, '$.participant.threadId') IN ${sql.in(threadIds)}
-    )
-    SELECT thread_id, squadron_id, squadron_name
-    FROM ranked_homes
-    WHERE home_rank = 1
-  `;
-
 const makeRegisterAtCreation = (input: {
   readonly getHomeForThread: A2AHomeRegistrarShape["getHomeForThread"];
-  readonly readSquadron: A2ALedger["Service"]["readSquadron"];
-  readonly append: (command: AppendCommEventCommand) => Effect.Effect<AppendResult, A2ALedgerError>;
+  readonly ensureProject: A2ALedger["Service"]["ensureProject"];
+  readonly appendEvents: (
+    command: AppendCommEventsCommand,
+  ) => Effect.Effect<AppendEventsResult, A2ALedgerError>;
 }) =>
   Effect.fn("j5.a2a.registerAtCreation")(function* (registration: RegisterAtCreationInput) {
     const existing = yield* input
       .getHomeForThread(registration.threadId)
-      .pipe(Effect.catchTag("A2AHomeNotFoundError", () => Effect.succeed(null)));
-    if (existing !== null && existing.squadronId !== registration.squadronId) {
+      .pipe(Effect.catchTags({ A2AHomeNotFoundError: () => Effect.succeed(null) }));
+    if (existing !== null && existing.projectId !== registration.projectId) {
       return yield* new A2AHomeConflictError({
         threadId: registration.threadId,
-        existingSquadronId: existing.squadronId,
-        requestedSquadronId: registration.squadronId,
+        existingProjectId: existing.projectId,
+        requestedProjectId: registration.projectId,
       });
     }
 
-    yield* input.readSquadron(registration.squadronId);
-    // A historical home is ledger identity, not a value to re-derive after the
-    // ID format changes. Only a thread without one mints the current format.
-    const participantId = existing?.participantId ?? participantIdForThread(registration.threadId);
+    // Registration reaches a thread from several paths (the creation daemon, a spawn's own
+    // transaction, the caller's first tool call); whichever arrives second changes nothing.
+    if (existing !== null) return { home: existing, committedEvents: [] };
+
+    // The first participant in a project makes it a ledger.
+    yield* input.ensureProject({
+      projectId: registration.projectId,
+      createdAt: registration.createdAt,
+    });
+    const participantId = participantIdForThread(registration.threadId);
+    const membershipFact = (kind: "participant.joined" | "participant.archived", at: string) => ({
+      kind,
+      sender: null,
+      receiver: participantId,
+      exchangeId: null,
+      correlationId: null,
+      payload: {
+        participant: { kind: "agent" as const, id: participantId, threadId: registration.threadId },
+      },
+      createdAt: at,
+    });
     const appendResult = yield* Effect.result(
-      input.append({
+      input.appendEvents({
         commandId: registration.commandId,
-        squadronId: registration.squadronId,
+        projectId: registration.projectId,
         acceptedAt: registration.createdAt,
-        event: {
-          kind: "participant.joined",
-          sender: null,
-          receiver: participantId,
-          exchangeId: null,
-          correlationId: null,
-          payload: {
-            participant: {
-              kind: "agent",
-              id: participantId,
-              threadId: registration.threadId,
-            },
-          },
-          createdAt: registration.createdAt,
-        },
+        events: [
+          membershipFact("participant.joined", registration.createdAt),
+          ...(registration.archivedAt === undefined
+            ? []
+            : [membershipFact("participant.archived", registration.archivedAt)]),
+        ],
       }),
     );
     if (appendResult._tag === "Failure") {
       const racedHome = yield* input
         .getHomeForThread(registration.threadId)
-        .pipe(Effect.catchTag("A2AHomeNotFoundError", () => Effect.succeed(null)));
+        .pipe(Effect.catchTags({ A2AHomeNotFoundError: () => Effect.succeed(null) }));
       if (racedHome === null) return yield* appendResult.failure;
-      if (racedHome.squadronId !== registration.squadronId) {
+      if (racedHome.projectId !== registration.projectId) {
         return yield* new A2AHomeConflictError({
           threadId: registration.threadId,
-          existingSquadronId: racedHome.squadronId,
-          requestedSquadronId: registration.squadronId,
+          existingProjectId: racedHome.projectId,
+          requestedProjectId: registration.projectId,
         });
       }
       return { home: racedHome, committedEvents: [] };
     }
 
-    const event = appendResult.success.event;
+    const event = appendResult.success.events[0];
     if (
+      event === undefined ||
       event.kind !== "participant.joined" ||
-      event.squadronId !== registration.squadronId ||
+      event.projectId !== registration.projectId ||
       event.createdAt !== registration.createdAt ||
       event.payload.participant.kind !== "agent" ||
       event.payload.participant.threadId !== registration.threadId ||
@@ -309,12 +337,12 @@ const makeRegisterAtCreation = (input: {
       return yield* new A2AHomeCommandConflictError({
         commandId: registration.commandId,
         requestedThreadId: registration.threadId,
-        requestedSquadronId: registration.squadronId,
+        requestedProjectId: registration.projectId,
       });
     }
     return {
-      home: { squadronId: registration.squadronId, participantId },
-      committedEvents: appendResult.success.committed ? [event] : [],
+      home: { projectId: registration.projectId, participantId },
+      committedEvents: appendResult.success.committed ? appendResult.success.events : [],
     };
   });
 
@@ -326,38 +354,16 @@ export const layer: Layer.Layer<A2AHomeRegistrar, never, A2ALedger | SqlClient.S
       const sql = yield* SqlClient.SqlClient;
       const getHomeForThread: A2AHomeRegistrarShape["getHomeForThread"] = (threadId) =>
         resolveThreadHome(sql, threadId).pipe(Effect.map((resolution) => resolution.home));
-      const getHomesForThreads: A2AHomeRegistrarShape["getHomesForThreads"] = (threadIds) =>
-        Effect.gen(function* () {
-          const uniqueThreadIds = uniqueInFirstOccurrenceOrder(threadIds);
-          if (uniqueThreadIds.length === 0) return [];
-          const rows: Array<ThreadHomeLookupRow> = [];
-          for (const threadIdBatch of batchesOf(uniqueThreadIds)) {
-            rows.push(...(yield* threadHomeRows(sql, threadIdBatch)));
-          }
-          const rowsByThread = new Map(rows.map((row) => [row.thread_id, row]));
-          return uniqueThreadIds.map((threadId) => {
-            const row = rowsByThread.get(threadId);
-            return row === undefined
-              ? ({ threadId, home: { kind: "unknown" } } satisfies ThreadHomeLookup)
-              : ({
-                  threadId,
-                  home: {
-                    kind: "known",
-                    squadron: { id: SquadronId.make(row.squadron_id), name: row.squadron_name },
-                  },
-                } satisfies ThreadHomeLookup);
-          });
-        });
-
       const register = makeRegisterAtCreation({
         getHomeForThread,
-        readSquadron: ledger.readSquadron,
-        append: ledger.append,
+        ensureProject: ledger.ensureProject,
+        appendEvents: ledger.appendEvents,
       });
       return A2AHomeRegistrar.of({
         getHomeForThread,
-        getHomesForThreads,
-        registerAtCreation: (input) => register(input).pipe(Effect.map((result) => result.home)),
+        registerAtCreation: Effect.fn("A2AHomeRegistrar.registerAtCreation")(function (input) {
+          return register(input).pipe(Effect.map((result) => result.home));
+        }),
       });
     }),
   );
@@ -377,8 +383,8 @@ export const transactionLayer: Layer.Layer<
     return A2AHomeRegistrationTransaction.of({
       registerAtCreationInTransaction: makeRegisterAtCreation({
         getHomeForThread,
-        readSquadron: ledger.readSquadron,
-        append: ledgerWriter.appendInTransaction,
+        ensureProject: ledger.ensureProject,
+        appendEvents: ledgerWriter.appendEventsInTransaction,
       }),
     });
   }),

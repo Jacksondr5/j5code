@@ -1,3 +1,7 @@
+import { Atom } from "effect/reactivity";
+import type { ServerProvider } from "@t3tools/contracts";
+import { serverEnvironment } from "../../state/server";
+import { useAtomValue } from "@effect/atom-react";
 import { toastManager } from "../../components/ui/toast";
 import { requestConfirmDialog } from "../../confirmDialog";
 import { AgentImportConflictSelection } from "./AgentImportConflictSelection";
@@ -10,18 +14,20 @@ import { AgentEditorDialog } from "./AgentEditorDialog";
 import { AgentFolderPickerDialog } from "./AgentFolderPickerDialog";
 import {
   ChevronDownIcon,
-  EllipsisVerticalIcon,
+  CopyIcon,
+  DownloadIcon,
   ExternalLinkIcon,
+  MoreHorizontalIcon,
   PencilIcon,
   PlusIcon,
   Trash2Icon,
   Undo2Icon,
 } from "lucide-react";
 import {
+  AGENT_PERSONA_OVERRIDE_NOTE,
   agentPersonaFolderNudges,
   agentPersonaFolderStatusLabel,
   agentPersonaUsageById,
-  prepareAgentPersonaImport,
   importAgentPersonasWithConfirmation,
   presentAgentPersonaCatalog,
   presentAgentPersonaUsage,
@@ -32,12 +38,19 @@ import type {
   AgentPersonaImportConflictError,
   EnvironmentId,
 } from "@t3tools/contracts";
-import { useMemo, useRef, useState } from "react";
+import { useState } from "react";
 
 import { useOpenInPreferredEditor } from "../../editorPreferences";
 import { useServerConfigs } from "../../state/entities";
 import { useEnvironments, usePrimaryEnvironmentId } from "../../state/environments";
+import { useSettingsScopeEnvironments } from "../settingsScopeEnvironment";
+import { LIBRARY_FOR_OWNERS } from "@t3tools/client-runtime/j5/sharing";
+import { useIsOwnerSomewhere, useOwnedEnvironmentIds } from "../sharing/access";
 import { agentPersonaEnvironment } from "./agentPersonaAtoms";
+import { SettingsScopeNotice } from "../../components/settings/SettingsScopeNotice";
+import { AgentSetupLinks } from "./AgentSetupLinks";
+import { CrewApprovalSettings } from "../crew/CrewApprovalSettings";
+import { PlaybookLibrarySettings } from "../playbooks/PlaybookLibrarySettings";
 import { useEnvironmentQuery } from "../../state/query";
 import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -45,6 +58,7 @@ import {
   Menu,
   MenuItem,
   MenuPopup,
+  MenuSeparator,
   MenuSub,
   MenuSubPopup,
   MenuSubTrigger,
@@ -55,40 +69,69 @@ import { Switch } from "../../components/ui/switch";
 import { Badge } from "../../components/ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip";
 import {
-  Select,
-  SelectItem,
-  SelectPopup,
-  SelectTrigger,
-  SelectValue,
-} from "../../components/ui/select";
-import {
   SettingsPageContainer,
   SettingsRow,
   SettingsSection,
+  SettingsUnavailableGroup,
 } from "../../components/settings/settingsLayout";
 
+const noProvidersAtom = Atom.make<ReadonlyArray<ServerProvider>>([]);
+
+/** Outside the component: the React Compiler cannot compile `try`/`finally` or `throw` inside `try`. */
+async function runPersonaAction(failureTitle: string, action: () => Promise<void>) {
+  try {
+    await action();
+  } catch (error) {
+    toastManager.add({
+      type: "error",
+      title: failureTitle,
+      description: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 export function AgentLibrarySettings() {
-  const { environments, isReady } = useEnvironments();
-  const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const orderedEnvironments = useMemo(
-    () =>
-      environments.toSorted((left, right) => {
-        const leftPrimary = left.environmentId === primaryEnvironmentId;
-        const rightPrimary = right.environmentId === primaryEnvironmentId;
-        return Number(rightPrimary) - Number(leftPrimary) || left.label.localeCompare(right.label);
-      }),
-    [environments, primaryEnvironmentId],
+  // Settings is an Owner's, for the servers they own (People and access AC27).
+  return !useIsOwnerSomewhere() ? (
+    <SettingsPageContainer>
+      <SettingsSection title="Personas">
+        <SettingsUnavailableGroup message={LIBRARY_FOR_OWNERS}>{null}</SettingsUnavailableGroup>
+      </SettingsSection>
+    </SettingsPageContainer>
+  ) : (
+    <MemberAgentLibrarySettings />
   );
-  const [selectedEnvironmentId, setSelectedEnvironmentId] = useState<EnvironmentId | null>(
+}
+
+function MemberAgentLibrarySettings() {
+  const { environments: connected, isReady } = useEnvironments();
+  const ownedEnvironmentIds = useOwnedEnvironmentIds();
+  const environments = connected.filter((environment) =>
+    ownedEnvironmentIds.has(environment.environmentId),
+  );
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const orderedEnvironments = environments.toSorted((left, right) => {
+    const leftPrimary = left.environmentId === primaryEnvironmentId;
+    const rightPrimary = right.environmentId === primaryEnvironmentId;
+    return Number(rightPrimary) - Number(leftPrimary) || left.label.localeCompare(right.label);
+  });
+  const { candidates: libraryEnvironments, initialEnvironmentId } = useSettingsScopeEnvironments(
+    orderedEnvironments,
     primaryEnvironmentId,
   );
-  const effectiveEnvironmentId = orderedEnvironments.some(
-    (environment) => environment.environmentId === selectedEnvironmentId,
-  )
-    ? selectedEnvironmentId
-    : (orderedEnvironments[0]?.environmentId ?? null);
+  const effectiveEnvironmentId =
+    libraryEnvironments.length > 1
+      ? null
+      : orderedEnvironments.some((entry) => entry.environmentId === initialEnvironmentId)
+        ? initialEnvironmentId
+        : null;
   const selectedEnvironment = orderedEnvironments.find(
     (environment) => environment.environmentId === effectiveEnvironmentId,
+  );
+  const providers = useAtomValue(
+    effectiveEnvironmentId === null
+      ? noProvidersAtom
+      : serverEnvironment.providersValueAtom(effectiveEnvironmentId),
   );
   const catalog = useEnvironmentQuery(
     effectiveEnvironmentId === null
@@ -103,7 +146,7 @@ export function AgentLibrarySettings() {
       ? null
       : agentPersonaEnvironment.usage({ environmentId: effectiveEnvironmentId, input: {} }),
   );
-  const usageById = useMemo(() => agentPersonaUsageById(usage.data), [usage.data]);
+  const usageById = agentPersonaUsageById(usage.data);
   const librarySources = useEnvironmentQuery(
     effectiveEnvironmentId === null
       ? null
@@ -118,19 +161,28 @@ export function AgentLibrarySettings() {
   const setLibraryFolders = useAtomCommand(agentPersonaEnvironment.setLibraryFolders, {
     reportFailure: false,
   });
-  const [pickingFolder, setPickingFolder] = useState(false);
+  /** Which question the environment path picker is answering, if it is open. */
+  const [picking, setPicking] = useState<"library-folder" | "import-file" | "import-folder" | null>(
+    null,
+  );
   const otherEnvironments = orderedEnvironments.filter(
     (environment) => environment.environmentId !== effectiveEnvironmentId,
   );
-  const folderInput = useRef<HTMLInputElement>(null);
-  const fileInput = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  // A session that may not change the library can still read and export it.
+  const canOperate = useAtomValue(
+    agentPersonaEnvironment.createAgentPersona.permissionAtom(effectiveEnvironmentId),
+  );
+  const locked = busy || !canOperate;
   const [creating, setCreating] = useState<{ initial?: AgentPersonaCreateDraft } | null>(null);
   const [editing, setEditing] = useState<{
     environmentId: EnvironmentId;
     initial: Omit<AgentPersonaEditInput, "instructions">;
   } | null>(null);
   const importAgents = useAtomCommand(agentPersonaEnvironment.importAgentPersonas, {
+    reportFailure: false,
+  });
+  const readImportFiles = useAtomCommand(agentPersonaEnvironment.readImportFiles, {
     reportFailure: false,
   });
   const removeAgent = useAtomCommand(agentPersonaEnvironment.removeAgentPersona, {
@@ -175,7 +227,7 @@ export function AgentLibrarySettings() {
   ) {
     if (busy) return;
     setBusy(true);
-    try {
+    await runPersonaAction("Persona action failed", async () => {
       const { definition, fileName, yaml } = await readDefinition(personaId);
       const result = await importAgentPersonasWithConfirmation(
         [{ name: fileName, content: yaml }],
@@ -195,34 +247,20 @@ export function AgentLibrarySettings() {
             : `Copied ${definition.displayName} to ${target.label}`,
       });
       if (target.environmentId === effectiveEnvironmentId) catalog.refresh();
-    } catch (error) {
-      toastManager.add({
-        type: "error",
-        title: "Persona action failed",
-        description: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      setBusy(false);
-    }
+    });
+    setBusy(false);
   }
   async function saveFolders(folders: ReadonlyArray<string>) {
     if (effectiveEnvironmentId === null || busy) return;
     const environmentId = effectiveEnvironmentId;
     setBusy(true);
-    try {
+    await runPersonaAction("Library folders not saved", async () => {
       const result = await setLibraryFolders({ environmentId, input: { folders } });
       if (result._tag === "Failure") throw squashAtomCommandFailure(result);
       librarySources.refresh();
       catalog.refresh();
-    } catch (error) {
-      toastManager.add({
-        type: "error",
-        title: "Library folders not saved",
-        description: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      setBusy(false);
-    }
+    });
+    setBusy(false);
   }
   async function openFolder(path: string) {
     const result = await openInEditor(path);
@@ -233,20 +271,16 @@ export function AgentLibrarySettings() {
         description: "Sign in to an editor on this environment, or open the path shown above.",
       });
   }
-  async function importSelection(files: File[]) {
+  /** Imports a YAML file, or every YAML file under a folder, from the environment's machine. */
+  async function importFromPath(path: string) {
     if (effectiveEnvironmentId === null || busy) return;
     const environmentId = effectiveEnvironmentId;
     setBusy(true);
-    try {
-      const definitions = await prepareAgentPersonaImport(
-        files.map((file) => ({
-          name: file.webkitRelativePath || file.name,
-          size: file.size,
-          text: () => file.text(),
-        })),
-      );
+    await runPersonaAction("Persona action failed", async () => {
+      const read = await readImportFiles({ environmentId, input: { path } });
+      if (read._tag === "Failure") throw squashAtomCommandFailure(read);
       const result = await importAgentPersonasWithConfirmation(
-        definitions,
+        read.value.files,
         async (input) => {
           const response = await importAgents({ environmentId, input });
           if (response._tag === "Failure") throw squashAtomCommandFailure(response);
@@ -260,42 +294,28 @@ export function AgentLibrarySettings() {
         title: `Imported ${result.importedIds.length} persona(s).`,
       });
       catalog.refresh();
-    } catch (error) {
-      toastManager.add({
-        type: "error",
-        title: "Persona action failed",
-        description: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      setBusy(false);
-    }
+    });
+    setBusy(false);
   }
   const setAgentEnabled = useAtomCommand(agentPersonaEnvironment.setAgentPersonaEnabled, {
     reportFailure: false,
   });
+  // Leaves `busy` alone, which would disable every other control while it saves; the server
+  // serializes the writes.
   async function toggleAgent(personaId: string, enabled: boolean) {
     if (effectiveEnvironmentId === null || busy) return;
     const environmentId = effectiveEnvironmentId;
-    setBusy(true);
-    try {
+    await runPersonaAction("Persona action failed", async () => {
       const result = await setAgentEnabled({ environmentId, input: { personaId, enabled } });
       if (result._tag === "Failure") throw squashAtomCommandFailure(result);
       catalog.refresh();
-    } catch (error) {
-      toastManager.add({
-        type: "error",
-        title: "Persona action failed",
-        description: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      setBusy(false);
-    }
+    });
   }
   async function removePersona(personaId: string) {
     if (effectiveEnvironmentId === null || busy) return;
     const environmentId = effectiveEnvironmentId;
     setBusy(true);
-    try {
+    await runPersonaAction("Persona action failed", async () => {
       const result = await removeAgent({
         environmentId,
         input: { personaId },
@@ -303,15 +323,8 @@ export function AgentLibrarySettings() {
       if (result._tag === "Failure") throw squashAtomCommandFailure(result);
       toastManager.add({ type: "success", title: "Persona removed" });
       catalog.refresh();
-    } catch (error) {
-      toastManager.add({
-        type: "error",
-        title: "Persona action failed",
-        description: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      setBusy(false);
-    }
+    });
+    setBusy(false);
   }
   async function readDefinition(personaId: string) {
     if (effectiveEnvironmentId === null) throw new Error("Select an environment first.");
@@ -325,23 +338,16 @@ export function AgentLibrarySettings() {
   async function duplicatePersona(personaId: string) {
     if (busy) return;
     setBusy(true);
-    try {
+    await runPersonaAction("Persona action failed", async () => {
       const { definition } = await readDefinition(personaId);
       setCreating({ initial: agentPersonaDuplicateDraft(definition) });
-    } catch (error) {
-      toastManager.add({
-        type: "error",
-        title: "Persona action failed",
-        description: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      setBusy(false);
-    }
+    });
+    setBusy(false);
   }
   async function exportPersona(personaId: string) {
     if (busy) return;
     setBusy(true);
-    try {
+    await runPersonaAction("Persona action failed", async () => {
       const { fileName, yaml } = await readDefinition(personaId);
       const url = URL.createObjectURL(new Blob([yaml], { type: "application/yaml" }));
       const anchor = document.createElement("a");
@@ -350,133 +356,87 @@ export function AgentLibrarySettings() {
       anchor.click();
       URL.revokeObjectURL(url);
       toastManager.add({ type: "success", title: `Exported ${fileName}` });
-    } catch (error) {
-      toastManager.add({
-        type: "error",
-        title: "Persona action failed",
-        description: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      setBusy(false);
-    }
+    });
+    setBusy(false);
   }
   async function restorePersona(personaId: string) {
     if (effectiveEnvironmentId === null || busy) return;
     const environmentId = effectiveEnvironmentId;
     setBusy(true);
-    try {
+    await runPersonaAction("Persona action failed", async () => {
       const result = await restoreAgent({ environmentId, input: { personaId } });
       if (result._tag === "Failure") throw squashAtomCommandFailure(result);
       toastManager.add({ type: "success", title: "Persona restored" });
       catalog.refresh();
-    } catch (error) {
-      toastManager.add({
-        type: "error",
-        title: "Persona action failed",
-        description: error instanceof Error ? error.message : String(error),
-      });
-    } finally {
-      setBusy(false);
-    }
+    });
+    setBusy(false);
   }
   const personas =
     catalog.data === null || catalog.data === undefined
       ? []
-      : presentAgentPersonaCatalog(catalog.data);
+      : presentAgentPersonaCatalog(catalog.data, providers ?? []);
+
+  if (libraryEnvironments.length > 1)
+    return (
+      <SettingsPageContainer>
+        <AgentSetupLinks />
+        <div id="personas" className="space-y-3">
+          <SettingsSection title="Personas">
+            <SettingsRow
+              title="Choose an environment"
+              description="Persona libraries and Playbooks are stored separately on each environment."
+            />
+          </SettingsSection>
+          <SettingsScopeNotice
+            target="environment"
+            eligibleEnvironmentIds={libraryEnvironments.map((entry) => entry.environmentId)}
+          >
+            Choose an environment to manage its Personas and Playbooks.
+          </SettingsScopeNotice>
+        </div>
+        <CrewApprovalSettings />
+        <SettingsSection title="Playbooks" id="playbooks">
+          <SettingsRow title="Choose an environment above" />
+        </SettingsSection>
+      </SettingsPageContainer>
+    );
 
   return (
     <SettingsPageContainer>
-      <SettingsSection title="Personas">
-        <SettingsRow
-          title="Persona library"
-          description="In a Codex or Claude conversation, type @persona:id, or @ and the start of a persona’s name, to run a persona as a subagent. Edit imported personas here."
-        />
-        {orderedEnvironments.length > 1 ? (
-          <SettingsRow
-            title="Environment"
-            description="Availability and model routing are resolved by the selected environment."
-            control={
-              <Select
-                disabled={busy}
-                value={effectiveEnvironmentId ?? undefined}
-                onValueChange={(value) => {
-                  const environment = orderedEnvironments.find(
-                    (candidate) => candidate.environmentId === value,
-                  );
-                  if (environment) setSelectedEnvironmentId(environment.environmentId);
-                }}
-              >
-                <SelectTrigger className="w-full sm:w-56" aria-label="Persona environment">
-                  <SelectValue>{selectedEnvironment?.label}</SelectValue>
-                </SelectTrigger>
-                <SelectPopup align="end" alignItemWithTrigger={false}>
-                  {orderedEnvironments.map((environment) => (
-                    <SelectItem key={environment.environmentId} value={environment.environmentId}>
-                      {environment.label}
-                    </SelectItem>
-                  ))}
-                </SelectPopup>
-              </Select>
-            }
-          />
-        ) : null}
-        <input
-          ref={folderInput}
-          type="file"
-          hidden
-          multiple
-          {...{ webkitdirectory: "" }}
-          aria-label="Choose persona folder"
-          onChange={(event) => {
-            const files = Array.from(event.currentTarget.files ?? []);
-            event.currentTarget.value = "";
-            void importSelection(files);
-          }}
-        />
-        <input
-          ref={fileInput}
-          type="file"
-          hidden
-          accept=".yaml,.yml,application/yaml,text/yaml"
-          aria-label="Choose persona YAML file"
-          onChange={(event) => {
-            const files = Array.from(event.currentTarget.files ?? []);
-            event.currentTarget.value = "";
-            void importSelection(files);
-          }}
-        />
-      </SettingsSection>
+      <AgentSetupLinks />
 
       <SettingsSection
-        title="Scoped personas"
+        id="personas"
+        title="Personas"
         headerAction={
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1">
             <Button
-              variant="outline"
-              disabled={busy || effectiveEnvironmentId === null}
+              size="xs"
+              variant="ghost-muted"
+              disabled={locked || effectiveEnvironmentId === null}
               onClick={() => setCreating({})}
             >
-              <PlusIcon aria-hidden="true" className="size-4" />
+              <PlusIcon aria-hidden="true" className="size-3" />
               Create persona
             </Button>
             <Menu>
               <MenuTrigger
-                render={<Button variant="outline" />}
-                disabled={busy || effectiveEnvironmentId === null}
+                render={<Button size="xs" variant="ghost-muted" />}
+                disabled={locked || effectiveEnvironmentId === null}
               >
                 Import
-                <ChevronDownIcon aria-hidden="true" className="size-4" />
+                <ChevronDownIcon aria-hidden="true" className="size-3" />
               </MenuTrigger>
               <MenuPopup align="end">
                 <MenuItem
-                  disabled={busy || effectiveEnvironmentId === null}
-                  onClick={() => fileInput.current?.click()}
+                  disabled={locked || effectiveEnvironmentId === null}
+                  onClick={() => setPicking("import-file")}
                 >
                   Persona file
                 </MenuItem>
                 <MenuItem
-                  disabled={busy || effectiveEnvironmentId === null}
-                  onClick={() => folderInput.current?.click()}
+                  disabled={locked || effectiveEnvironmentId === null}
+                  onClick={() => setPicking("import-folder")}
                 >
                   Folder
                 </MenuItem>
@@ -485,6 +445,13 @@ export function AgentLibrarySettings() {
           </div>
         }
       >
+        {catalog.data?.diagnostics?.map((diagnostic) => (
+          <SettingsRow
+            key={`${diagnostic.path}:${diagnostic.message}`}
+            title={`Invalid persona file: ${diagnostic.path}`}
+            description={diagnostic.message}
+          />
+        ))}
         {effectiveEnvironmentId === null ? (
           <SettingsRow
             title={isReady ? "No connected environments" : "Loading environments"}
@@ -497,179 +464,199 @@ export function AgentLibrarySettings() {
         ) : personas.length === 0 ? (
           <SettingsRow
             title="No personas"
-            description="This environment’s configured library is empty."
+            description="Create or import a persona, or add a library source folder to get started."
           />
         ) : (
-          personas.map((persona) => (
-            <SettingsRow
-              key={persona.personaId}
-              title={
-                <span className="inline-flex flex-wrap items-center gap-2">
-                  <span>{persona.displayName}</span>
-                  {persona.blockedReasons.length > 0 ? (
-                    <Tooltip>
-                      <TooltipTrigger
-                        render={<Badge variant="warning">{persona.availabilityLabel}</Badge>}
-                      />
-                      <TooltipPopup className="max-w-sm">
-                        {persona.blockedReasons.map((reason) => (
-                          <span key={reason} className="block">
-                            {reason}
-                          </span>
-                        ))}
-                      </TooltipPopup>
-                    </Tooltip>
-                  ) : (
-                    <Badge variant={persona.availability === "available" ? "success" : "outline"}>
-                      {persona.availabilityLabel}
-                    </Badge>
-                  )}
-                  {persona.originLabel ? (
-                    persona.origin?.kind === "folder" ? (
+          personas.map((persona) => {
+            const usageEntry = usageById.get(persona.personaId);
+            const usageSummary =
+              usageEntry === undefined ? null : presentAgentPersonaUsage(usageEntry);
+            return (
+              <SettingsRow
+                key={persona.personaId}
+                title={persona.displayName}
+                description={persona.description}
+                status={
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    {persona.blockedReasons.length > 0 ? (
                       <Tooltip>
                         <TooltipTrigger
-                          render={<Badge variant="outline">{persona.originLabel}</Badge>}
+                          render={<Badge variant="warning">{persona.availabilityLabel}</Badge>}
                         />
-                        <TooltipPopup className="font-mono">{persona.origin.path}</TooltipPopup>
-                      </Tooltip>
-                    ) : (
-                      <Badge variant="outline">{persona.originLabel}</Badge>
-                    )
-                  ) : null}
-                </span>
-              }
-              description={
-                <>
-                  {persona.description}
-                  {(() => {
-                    const entry = usageById.get(persona.personaId);
-                    if (entry === undefined) return null;
-                    const summary = presentAgentPersonaUsage(entry);
-                    const line = (
-                      <span className="mt-1 block text-xs text-muted-foreground">
-                        {summary.line}
-                      </span>
-                    );
-                    return summary.routes.length === 0 ? (
-                      line
-                    ) : (
-                      <Tooltip>
-                        <TooltipTrigger render={line} />
-                        <TooltipPopup>
-                          {summary.routes.map((route) => (
-                            <span key={route} className="block">
-                              {route}
+                        <TooltipPopup className="max-w-sm">
+                          {persona.blockedReasons.map((reason) => (
+                            <span key={reason} className="block">
+                              {reason}
                             </span>
                           ))}
                         </TooltipPopup>
                       </Tooltip>
-                    );
-                  })()}
-                </>
-              }
-              control={
-                <div className="flex flex-wrap items-center gap-2">
-                  {persona.removed ? (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={busy}
-                      aria-label={`Restore ${persona.displayName}`}
-                      onClick={() => void restorePersona(persona.personaId)}
-                    >
-                      <Undo2Icon className="size-4" />
-                      Restore
-                    </Button>
-                  ) : (
-                    <>
+                    ) : (
+                      <Badge variant={persona.availability === "available" ? "success" : "outline"}>
+                        {persona.availabilityLabel}
+                      </Badge>
+                    )}
+                    {persona.unsandboxed ? <Badge variant="warning">Full access</Badge> : null}
+                    {persona.originLabel ? (
+                      <>
+                        <span aria-hidden="true">·</span>
+                        {persona.overridesFolder !== null ? (
+                          <Tooltip>
+                            <TooltipTrigger render={<span>{persona.originLabel}</span>} />
+                            <TooltipPopup>
+                              {AGENT_PERSONA_OVERRIDE_NOTE} Team file: {persona.overridesFolder}
+                            </TooltipPopup>
+                          </Tooltip>
+                        ) : persona.origin?.kind === "folder" ? (
+                          <Tooltip>
+                            <TooltipTrigger render={<span>{persona.originLabel}</span>} />
+                            <TooltipPopup variant="code">{persona.origin.path}</TooltipPopup>
+                          </Tooltip>
+                        ) : (
+                          <span>{persona.originLabel}</span>
+                        )}
+                      </>
+                    ) : null}
+                    {usageSummary ? (
+                      usageSummary.routes.length === 0 ? (
+                        <span className="basis-full">{usageSummary.line}</span>
+                      ) : (
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={<span className="basis-full">{usageSummary.line}</span>}
+                          />
+                          <TooltipPopup>
+                            {usageSummary.routes.map((route) => (
+                              <span key={route} className="block">
+                                {route}
+                              </span>
+                            ))}
+                          </TooltipPopup>
+                        </Tooltip>
+                      )
+                    ) : null}
+                    {persona.availability === "unsupported" ? (
+                      <span className="basis-full">{persona.blockedReasons.join("; ")}</span>
+                    ) : persona.edit === null && !persona.removed ? (
+                      <span className="basis-full">Duplicate this persona to edit a copy</span>
+                    ) : null}
+                  </div>
+                }
+                control={
+                  <>
+                    {persona.removed ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={locked}
+                        aria-label={`Restore ${persona.displayName}`}
+                        onClick={() => void restorePersona(persona.personaId)}
+                      >
+                        <Undo2Icon className="size-4" />
+                        Restore
+                      </Button>
+                    ) : (
                       <Switch
                         checked={persona.enabled}
-                        disabled={busy}
+                        disabled={locked}
                         aria-label={`Enable ${persona.displayName}`}
                         onCheckedChange={(enabled) => void toggleAgent(persona.personaId, enabled)}
                       />
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        disabled={busy || persona.edit === null}
-                        aria-label={`Edit ${persona.displayName}`}
-                        title={
-                          persona.edit
-                            ? `Edit ${persona.displayName}`
-                            : "Duplicate this persona to edit a copy"
-                        }
-                        onClick={() => {
-                          if (persona.edit && effectiveEnvironmentId)
-                            setEditing({
-                              environmentId: effectiveEnvironmentId,
-                              initial: persona.edit,
-                            });
-                        }}
+                    )}
+                    <Menu>
+                      <MenuTrigger
+                        disabled={busy}
+                        aria-label={`More actions for ${persona.displayName}`}
+                        render={<Button variant="ghost" size="icon-sm" />}
                       >
-                        <PencilIcon className="size-4" />
-                      </Button>
-                    </>
-                  )}
-                  <Menu>
-                    <MenuTrigger
-                      disabled={busy}
-                      aria-label={`More actions for ${persona.displayName}`}
-                      render={<Button variant="ghost" size="icon-sm" />}
-                    >
-                      <EllipsisVerticalIcon className="size-4" />
-                    </MenuTrigger>
-                    <MenuPopup align="end">
-                      <MenuItem onClick={() => void duplicatePersona(persona.personaId)}>
-                        Duplicate as personal persona
-                      </MenuItem>
-                      <MenuItem onClick={() => void exportPersona(persona.personaId)}>
-                        Export YAML
-                      </MenuItem>
-                      {otherEnvironments.length > 0 ? (
-                        <MenuSub>
-                          <MenuSubTrigger>Copy to environment</MenuSubTrigger>
-                          <MenuSubPopup>
-                            {otherEnvironments.map((environment) => (
-                              <MenuItem
-                                key={environment.environmentId}
-                                onClick={() =>
-                                  void copyPersona(persona.personaId, {
-                                    environmentId: environment.environmentId,
-                                    label: environment.label,
-                                  })
-                                }
-                              >
-                                {environment.label}
-                              </MenuItem>
-                            ))}
-                          </MenuSubPopup>
-                        </MenuSub>
-                      ) : null}
-                    </MenuPopup>
-                  </Menu>
-                  {persona.removed ? null : (
-                    <Button
-                      variant="destructive-outline"
-                      size="icon-sm"
-                      disabled={busy}
-                      aria-label={`Remove ${persona.displayName}`}
-                      title={`Remove ${persona.displayName}`}
-                      onClick={() => void removePersona(persona.personaId)}
-                    >
-                      <Trash2Icon className="size-4" />
-                    </Button>
-                  )}
-                </div>
-              }
-            />
-          ))
+                        <MoreHorizontalIcon className="size-4" />
+                      </MenuTrigger>
+                      <MenuPopup align="end">
+                        {persona.removed ? null : (
+                          <MenuItem
+                            disabled={locked || persona.edit === null}
+                            onClick={() => {
+                              if (persona.edit && effectiveEnvironmentId)
+                                setEditing({
+                                  environmentId: effectiveEnvironmentId,
+                                  initial: persona.edit,
+                                });
+                            }}
+                          >
+                            <PencilIcon />
+                            Edit
+                          </MenuItem>
+                        )}
+                        <MenuItem
+                          disabled={!canOperate || persona.availability === "unsupported"}
+                          onClick={() => void duplicatePersona(persona.personaId)}
+                        >
+                          <CopyIcon />
+                          Duplicate as personal persona
+                        </MenuItem>
+                        <MenuItem onClick={() => void exportPersona(persona.personaId)}>
+                          <DownloadIcon />
+                          Export YAML
+                        </MenuItem>
+                        {otherEnvironments.length > 0 ? (
+                          <MenuSub>
+                            <MenuSubTrigger>Copy to environment</MenuSubTrigger>
+                            <MenuSubPopup>
+                              {otherEnvironments.map((environment) => (
+                                <MenuItem
+                                  key={environment.environmentId}
+                                  onClick={() =>
+                                    void copyPersona(persona.personaId, {
+                                      environmentId: environment.environmentId,
+                                      label: environment.label,
+                                    })
+                                  }
+                                >
+                                  {environment.label}
+                                </MenuItem>
+                              ))}
+                            </MenuSubPopup>
+                          </MenuSub>
+                        ) : null}
+                        {persona.removed ? null : (
+                          <>
+                            <MenuSeparator />
+                            <MenuItem
+                              variant="destructive"
+                              disabled={locked}
+                              onClick={() => void removePersona(persona.personaId)}
+                            >
+                              <Trash2Icon />
+                              Remove
+                            </MenuItem>
+                          </>
+                        )}
+                      </MenuPopup>
+                    </Menu>
+                  </>
+                }
+              />
+            );
+          })
         )}
       </SettingsSection>
 
       {effectiveEnvironmentId !== null ? (
         <SettingsSection
           title="Library sources"
-          description="Folders this environment reads YAML definitions from. Paths are on the environment's machine; relative paths resolve from its state directory."
+          headerAction={
+            librarySources.data && !librarySources.isPending && !librarySources.error ? (
+              <Button
+                size="xs"
+                variant="ghost-muted"
+                disabled={locked}
+                onClick={() => setPicking("library-folder")}
+              >
+                <PlusIcon aria-hidden="true" className="size-3" />
+                Add folder
+              </Button>
+            ) : null
+          }
         >
           {librarySources.isPending ? (
             <SettingsRow title="Loading folders" description="Reading the library configuration." />
@@ -685,93 +672,102 @@ export function AgentLibrarySettings() {
               ) : null}
               {librarySources.data.folders.map((folder) => {
                 const nudges = agentPersonaFolderNudges(folder.git);
+                const configured = librarySources.data?.configured;
+                const canOpen = folder.exists && availableEditors.length > 0;
                 return (
                   <SettingsRow
                     key={folder.configuredPath}
-                    title={
-                      <span className="inline-flex flex-wrap items-center gap-2">
-                        <span className="font-mono text-sm">{folder.configuredPath}</span>
-                        <Badge
-                          variant={
-                            folder.exists || !librarySources.data?.configured ? "outline" : "error"
-                          }
-                        >
-                          {agentPersonaFolderStatusLabel(folder, librarySources.data?.configured)}
-                        </Badge>
-                      </span>
-                    }
+                    title={<span className="font-mono text-sm">{folder.configuredPath}</span>}
                     description={
-                      <>
-                        {folder.path !== folder.configuredPath ? (
-                          <span className="block font-mono text-xs">{folder.path}</span>
-                        ) : null}
+                      folder.path !== folder.configuredPath || !configured ? (
+                        <>
+                          {folder.path !== folder.configuredPath ? (
+                            <span className="block font-mono text-xs">{folder.path}</span>
+                          ) : null}
+                          {configured ? null : (
+                            <span className="block">
+                              Adding a folder replaces the bundled examples.
+                            </span>
+                          )}
+                        </>
+                      ) : null
+                    }
+                    status={
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <Badge variant={folder.exists || !configured ? "outline" : "error"}>
+                          {agentPersonaFolderStatusLabel(folder, configured)}
+                        </Badge>
                         {nudges.map((nudge) => (
-                          <span key={nudge} className="block text-warning-foreground">
+                          <span key={nudge} className="text-warning-foreground">
                             {nudge}
                           </span>
                         ))}
-                      </>
+                      </div>
                     }
                     control={
-                      <div className="flex items-center gap-2">
-                        {folder.exists && availableEditors.length > 0 ? (
-                          <Button
-                            variant="ghost"
-                            size="icon-sm"
-                            disabled={busy}
-                            aria-label={`Open ${folder.configuredPath} in editor`}
-                            title="Open in editor"
-                            onClick={() => void openFolder(folder.path)}
-                          >
-                            <ExternalLinkIcon className="size-4" />
-                          </Button>
-                        ) : null}
-                        <Button
-                          variant="destructive-outline"
-                          size="icon-sm"
+                      <Menu>
+                        <MenuTrigger
                           disabled={busy}
-                          aria-label={`Stop reading ${folder.configuredPath}`}
-                          title="Remove folder from the library"
-                          onClick={() =>
-                            void saveFolders(
-                              (librarySources.data?.folders ?? [])
-                                .map(({ configuredPath }) => configuredPath)
-                                .filter((candidate) => candidate !== folder.configuredPath),
-                            )
-                          }
+                          aria-label={`Actions for ${folder.configuredPath}`}
+                          render={<Button variant="ghost" size="icon-sm" />}
                         >
-                          <Trash2Icon className="size-4" />
-                        </Button>
-                      </div>
+                          <MoreHorizontalIcon className="size-4" />
+                        </MenuTrigger>
+                        <MenuPopup align="end">
+                          {canOpen ? (
+                            <>
+                              <MenuItem
+                                disabled={locked}
+                                onClick={() => void openFolder(folder.path)}
+                              >
+                                <ExternalLinkIcon />
+                                Open in editor
+                              </MenuItem>
+                              <MenuSeparator />
+                            </>
+                          ) : null}
+                          <MenuItem
+                            variant="destructive"
+                            disabled={locked}
+                            onClick={() =>
+                              void saveFolders(
+                                (librarySources.data?.folders ?? [])
+                                  .map(({ configuredPath }) => configuredPath)
+                                  .filter((candidate) => candidate !== folder.configuredPath),
+                              )
+                            }
+                          >
+                            <Trash2Icon />
+                            Stop reading folder
+                          </MenuItem>
+                        </MenuPopup>
+                      </Menu>
                     }
                   />
                 );
               })}
-              <SettingsRow
-                title="Add folder"
-                description={
-                  librarySources.data.configured
-                    ? "Files are read on every catalog request, so edits and git pulls apply without a restart."
-                    : "Bundled examples appear until a folder is configured or the default folder exists. Adding a folder writes agent-personas.json."
-                }
-                control={
-                  <Button variant="outline" disabled={busy} onClick={() => setPickingFolder(true)}>
-                    <PlusIcon aria-hidden="true" className="size-4" />
-                    Add folder
-                  </Button>
-                }
-              />
             </>
           ) : null}
         </SettingsSection>
       ) : null}
-      {pickingFolder && effectiveEnvironmentId ? (
+      {picking && effectiveEnvironmentId ? (
         <AgentFolderPickerDialog
+          key={picking}
           environmentId={effectiveEnvironmentId}
           environmentLabel={selectedEnvironment?.label ?? "this environment"}
-          onClose={() => setPickingFolder(false)}
+          mode={picking === "import-file" ? "file" : "folder"}
+          title={
+            picking === "library-folder"
+              ? "Choose a library folder"
+              : picking === "import-file"
+                ? "Import a persona file"
+                : "Import a persona folder"
+          }
+          confirmLabel={picking === "library-folder" ? "Choose folder" : "Import"}
+          onClose={() => setPicking(null)}
           onSelect={(path) => {
-            setPickingFolder(false);
+            setPicking(null);
+            if (picking !== "library-folder") return void importFromPath(path);
             void saveFolders([
               ...(librarySources.data?.folders ?? []).map(({ configuredPath }) => configuredPath),
               path,
@@ -805,6 +801,8 @@ export function AgentLibrarySettings() {
           }}
         />
       ) : null}
+      <CrewApprovalSettings />
+      <PlaybookLibrarySettings environmentId={effectiveEnvironmentId} />
     </SettingsPageContainer>
   );
 }

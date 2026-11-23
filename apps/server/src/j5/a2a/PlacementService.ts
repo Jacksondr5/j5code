@@ -3,13 +3,14 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import {
-  SquadronId,
+  LedgerProjectId,
   Participant,
   ParticipantId,
   isHumanParticipantId,
+  isOutsideAgentParticipantId,
   participantId as participantIdOf,
 } from "./contracts.ts";
 import {
@@ -20,7 +21,7 @@ import {
   type RecordParticipantPlacementInput,
 } from "./placementContracts.ts";
 
-export class PlacementStorageError extends Schema.TaggedErrorClass<PlacementStorageError>()(
+export class PlacementStorageError extends Schema.TaggedError<PlacementStorageError>()(
   "PlacementStorageError",
   {
     operation: Schema.String,
@@ -28,65 +29,65 @@ export class PlacementStorageError extends Schema.TaggedErrorClass<PlacementStor
   },
 ) {}
 
-export class PlacementSquadronNotFoundError extends Schema.TaggedErrorClass<PlacementSquadronNotFoundError>()(
-  "PlacementSquadronNotFoundError",
-  { squadronId: SquadronId },
+export class PlacementProjectNotFoundError extends Schema.TaggedError<PlacementProjectNotFoundError>()(
+  "PlacementProjectNotFoundError",
+  { projectId: LedgerProjectId },
 ) {
   override get message(): string {
-    return `Placement squadron state is missing for ${this.squadronId}. Create the squadron before placing participants.`;
+    return `Project ${this.projectId} has no agent-to-agent ledger yet, so nothing can be placed in it.`;
   }
 }
 
-export class PlacementParticipantNotFoundError extends Schema.TaggedErrorClass<PlacementParticipantNotFoundError>()(
+export class PlacementParticipantNotFoundError extends Schema.TaggedError<PlacementParticipantNotFoundError>()(
   "PlacementParticipantNotFoundError",
-  { squadronId: SquadronId, participantId: ParticipantId },
+  { projectId: LedgerProjectId, participantId: ParticipantId },
 ) {
   override get message(): string {
-    return `Placement participant state is missing for ${this.participantId} in squadron ${this.squadronId}. Join the participant before changing placement.`;
+    return `Placement participant state is missing for ${this.participantId} in project ${this.projectId}. Join the participant before changing placement.`;
   }
 }
 
-export class PlacementParentNotFoundError extends Schema.TaggedErrorClass<PlacementParentNotFoundError>()(
+export class PlacementParentNotFoundError extends Schema.TaggedError<PlacementParentNotFoundError>()(
   "PlacementParentNotFoundError",
-  { squadronId: SquadronId, parentParticipantId: ParticipantId },
+  { projectId: LedgerProjectId, parentParticipantId: ParticipantId },
 ) {
   override get message(): string {
-    return `Placement parent state is missing for ${this.parentParticipantId} in squadron ${this.squadronId}. Choose an active participant or root.`;
+    return `Placement parent state is missing for ${this.parentParticipantId} in project ${this.projectId}. Choose an active participant or root.`;
   }
 }
 
-export class PlacementParentIneligibleError extends Schema.TaggedErrorClass<PlacementParentIneligibleError>()(
+export class PlacementParentIneligibleError extends Schema.TaggedError<PlacementParentIneligibleError>()(
   "PlacementParentIneligibleError",
-  { squadronId: SquadronId, parentParticipantId: ParticipantId },
+  { projectId: LedgerProjectId, parentParticipantId: ParticipantId },
 ) {
   override get message(): string {
-    return `Placement parent state is ineligible-non-agent for ${this.parentParticipantId} in squadron ${this.squadronId}. Placement parents are agent-only; choose an agent participant or root.`;
+    return `Placement parent state is ineligible-non-agent for ${this.parentParticipantId} in project ${this.projectId}. Placement parents are agent-only; choose an agent participant or root.`;
   }
 }
 
-export class PlacementAlreadyExistsError extends Schema.TaggedErrorClass<PlacementAlreadyExistsError>()(
+export class PlacementAlreadyExistsError extends Schema.TaggedError<PlacementAlreadyExistsError>()(
   "PlacementAlreadyExistsError",
-  { squadronId: SquadronId, participantId: ParticipantId },
+  { projectId: LedgerProjectId, participantId: ParticipantId },
 ) {
   override get message(): string {
-    return `Placement state already exists for ${this.participantId} in squadron ${this.squadronId}; creation cannot rewrite immutable provenance.`;
+    return `Placement state already exists for ${this.participantId} in project ${this.projectId}; creation cannot rewrite immutable provenance.`;
   }
 }
 
-export class PlacementHumanTargetError extends Schema.TaggedErrorClass<PlacementHumanTargetError>()(
+export class PlacementHumanTargetError extends Schema.TaggedError<PlacementHumanTargetError>()(
   "PlacementHumanTargetError",
   {
     operation: Schema.Literal("record-creation"),
-    squadronId: SquadronId,
+    projectId: LedgerProjectId,
     participantId: ParticipantId,
   },
 ) {
   override get message(): string {
-    return `Placement participant state is immutable-human for ${this.participantId} in squadron ${this.squadronId}; ${this.operation} only accepts agent participants.`;
+    return `Placement participant state is immutable-human for ${this.participantId} in project ${this.projectId}; ${this.operation} only accepts agent participants.`;
   }
 }
 
-export class PlacementCycleError extends Schema.TaggedErrorClass<PlacementCycleError>()(
+export class PlacementCycleError extends Schema.TaggedError<PlacementCycleError>()(
   "PlacementCycleError",
   {
     participantId: ParticipantId,
@@ -99,16 +100,16 @@ export class PlacementCycleError extends Schema.TaggedErrorClass<PlacementCycleE
   }
 }
 
-export class PlacementGraphCorruptError extends Schema.TaggedErrorClass<PlacementGraphCorruptError>()(
+export class PlacementGraphCorruptError extends Schema.TaggedError<PlacementGraphCorruptError>()(
   "PlacementGraphCorruptError",
-  { squadronId: SquadronId, path: Schema.Array(ParticipantId) },
+  { projectId: LedgerProjectId, path: Schema.Array(ParticipantId) },
 ) {
   override get message(): string {
-    return `Placement graph state is already cyclic or exceeds its placement bound in squadron ${this.squadronId}: ${this.path.join(" -> ")}. Repair the placement projection before retrying.`;
+    return `Placement graph state is already cyclic or exceeds its placement bound in project ${this.projectId}: ${this.path.join(" -> ")}. Repair the placement projection before retrying.`;
   }
 }
 
-export class PlacementCommandConflictError extends Schema.TaggedErrorClass<PlacementCommandConflictError>()(
+export class PlacementCommandConflictError extends Schema.TaggedError<PlacementCommandConflictError>()(
   "PlacementCommandConflictError",
   { commandId: Schema.String, existingParticipantId: ParticipantId },
 ) {
@@ -119,7 +120,7 @@ export class PlacementCommandConflictError extends Schema.TaggedErrorClass<Place
 
 export type PlacementError =
   | PlacementStorageError
-  | PlacementSquadronNotFoundError
+  | PlacementProjectNotFoundError
   | PlacementParticipantNotFoundError
   | PlacementParentNotFoundError
   | PlacementParentIneligibleError
@@ -131,7 +132,7 @@ export type PlacementError =
 
 const PlacementErrorSchema = Schema.Union([
   PlacementStorageError,
-  PlacementSquadronNotFoundError,
+  PlacementProjectNotFoundError,
   PlacementParticipantNotFoundError,
   PlacementParentNotFoundError,
   PlacementParentIneligibleError,
@@ -150,19 +151,19 @@ export interface ParticipantPlacementServiceShape {
   ) => Effect.Effect<PlacementMutationResult, PlacementError>;
   /** Imminent A2 spawn/verb slice reads the newly recorded placement. */
   readonly readPlacement: (input: {
-    readonly squadronId: SquadronId;
+    readonly projectId: LedgerProjectId;
     readonly participantId: ParticipantId;
   }) => Effect.Effect<ParticipantPlacement | null, PlacementError>;
-  /** Live `list_participants` enrichment read surface. */
+  /** Live `j5_list_participants` enrichment read surface. */
   readonly listParticipants: (
-    squadronId: SquadronId,
+    projectId: LedgerProjectId,
   ) => Effect.Effect<ReadonlyArray<ParticipantPlacementView>, PlacementError>;
   /**
    * Placement descendants in leaves-first order, including the requested root.
    * The in-flight A9 AR2 pre-archive provider is the named consumer.
    */
   readonly listSubtree: (input: {
-    readonly squadronId: SquadronId;
+    readonly projectId: LedgerProjectId;
     readonly participantId: ParticipantId;
   }) => Effect.Effect<ReadonlyArray<ParticipantPlacementView>, PlacementError>;
 }
@@ -173,11 +174,9 @@ export class ParticipantPlacementService extends Context.Service<
 >()("t3/j5/a2a/PlacementService/ParticipantPlacementService") {}
 
 /**
- * Internal write seam for multi-service transactions. drainPermit and
- * lifecyclePermit are independent peers that both precede appendPermit; callers
- * must then preserve appendPermit ≺ mutationPermit ≺ DB. This Semaphore(1)
- * permit is non-reentrant: acquire it before BEGIN and use the provided raw
- * in-transaction API instead of re-acquiring it through the public mutation.
+ * Internal write seam for multi-service transactions. drainPermit and lifecyclePermit both precede
+ * appendPermit; then appendPermit ≺ mutationPermit ≺ DB. The Semaphore(1) permit is non-reentrant:
+ * acquire it before BEGIN and use the raw in-transaction API, never the public mutation.
  */
 export interface ParticipantPlacementTransactionWriterShape {
   readonly withPermit: <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.Effect<A, E, R>;
@@ -195,7 +194,7 @@ interface EventRow {
   readonly seq: number;
   readonly command_id: string;
   readonly request_fingerprint: string;
-  readonly squadron_id: string;
+  readonly project_id: string;
   readonly participant_id: string;
   readonly kind: "participant.placement_created" | "participant.reparented";
   readonly actor: "human" | "agent" | "platform";
@@ -211,7 +210,7 @@ interface EventRow {
 }
 
 interface PlacementRow {
-  readonly squadron_id: string;
+  readonly project_id: string;
   readonly participant_id: string;
   readonly provenance_kind: "spawned-by" | "forked-from" | "unknown";
   readonly provenance_participant_id: string | null;
@@ -223,7 +222,7 @@ interface PlacementRow {
 
 interface ParticipantRow {
   readonly payload: string;
-  readonly squadron_id: string;
+  readonly project_id: string;
   readonly participant_id: string;
   readonly provenance_kind: "spawned-by" | "forked-from" | "unknown" | null;
   readonly provenance_participant_id: string | null;
@@ -263,7 +262,7 @@ const provenanceFromRow = (row: {
 
 const placementFromRow = (row: PlacementRow) =>
   decodePlacement({
-    squadronId: row.squadron_id,
+    projectId: row.project_id,
     participantId: row.participant_id,
     provenance: provenanceFromRow(row),
     placementParentId: row.placement_parent_id,
@@ -283,7 +282,7 @@ const eventFromRow = (row: EventRow) =>
       ? {
           seq: row.seq,
           commandId: row.command_id,
-          squadronId: row.squadron_id,
+          projectId: row.project_id,
           participantId: row.participant_id,
           kind: row.kind,
           actor: row.actor,
@@ -300,7 +299,7 @@ const eventFromRow = (row: EventRow) =>
           // Reparent identity fields are non-null by the event-table CHECK.
           seq: row.seq,
           commandId: row.command_id,
-          squadronId: row.squadron_id,
+          projectId: row.project_id,
           participantId: row.participant_id,
           kind: row.kind,
           actor: "human",
@@ -340,7 +339,9 @@ const creationFingerprint = (input: RecordParticipantPlacementInput): string => 
           };
   return JSON.stringify({
     type: "record_creation",
-    squadronId: input.squadronId,
+    // Stored and compared as text on replay, so this key and its position are fixed; migration
+    // 031 rewrote older rows to match.
+    projectId: input.projectId,
     participantId: input.participantId,
     actor: input.actor,
     ...provenanceFields,
@@ -357,88 +358,109 @@ export const layer: Layer.Layer<
     const sql = yield* SqlClient.SqlClient;
     const mutationPermit = yield* Semaphore.make(1);
 
-    const ensureSquadron = Effect.fn("j5.a2a.placement.ensureSquadron")(function* (
-      squadronId: SquadronId,
+    const ensureProjectLedger = Effect.fn("j5.a2a.placement.ensureProjectLedger")(function* (
+      projectId: LedgerProjectId,
     ) {
       const rows = yield* sql<{ readonly id: string }>`
-          SELECT id FROM j5_a2a_squadron WHERE id = ${squadronId} LIMIT 1
+          SELECT project_id AS id FROM j5_a2a_project_ledger WHERE project_id = ${projectId} LIMIT 1
         `;
-      if (rows[0] === undefined) return yield* new PlacementSquadronNotFoundError({ squadronId });
+      if (rows[0] === undefined) return yield* new PlacementProjectNotFoundError({ projectId });
     });
 
     const ensureParticipant = Effect.fn("j5.a2a.placement.ensureParticipant")(function* (
-      squadronId: SquadronId,
+      projectId: LedgerProjectId,
       participantId: ParticipantId,
     ) {
       const rows = yield* sql<{ readonly participant_id: string }>`
           SELECT participant_id
-          FROM j5_a2a_squadron_membership
-          WHERE squadron_id = ${squadronId} AND participant_id = ${participantId}
+          FROM j5_a2a_membership
+          WHERE project_id = ${projectId} AND participant_id = ${participantId}
           LIMIT 1
         `;
       if (rows[0] === undefined) {
-        return yield* new PlacementParticipantNotFoundError({ squadronId, participantId });
+        return yield* new PlacementParticipantNotFoundError({ projectId, participantId });
       }
     });
 
     const ensureProvenanceParticipant = Effect.fn("j5.a2a.placement.ensureProvenanceParticipant")(
-      function* (squadronId: SquadronId, participantId: ParticipantId) {
+      function* (
+        projectId: LedgerProjectId,
+        participantId: ParticipantId,
+        /** A spawner may live in another project on this server; a fork's source may not. */
+        anyProject: boolean,
+      ) {
+        // An outside agent joins no ledger, so there is no join to find. The spawn records its
+        // label in this same transaction.
+        if (anyProject && isOutsideAgentParticipantId(participantId)) return;
         const rows = yield* sql<{ readonly participant_id: string }>`
           SELECT json_extract(payload, '$.participant.id') AS participant_id
           FROM j5_a2a_comm_event
-          WHERE squadron_id = ${squadronId}
-            AND kind = 'participant.joined'
+          WHERE (${anyProject ? 1 : 0} = 1 OR project_id = ${projectId})
+            AND kind IN ('participant.joined', 'participant.moved')
             AND json_extract(payload, '$.participant.id') = ${participantId}
           LIMIT 1
         `;
         if (rows[0] === undefined) {
-          return yield* new PlacementParticipantNotFoundError({ squadronId, participantId });
+          return yield* new PlacementParticipantNotFoundError({ projectId, participantId });
         }
       },
     );
 
     const ensureParent = Effect.fn("j5.a2a.placement.ensureParent")(function* (
-      squadronId: SquadronId,
+      projectId: LedgerProjectId,
       parentParticipantId: ParticipantId | null,
     ) {
       if (parentParticipantId === null) return;
       if (isHumanParticipantId(parentParticipantId)) {
         return yield* new PlacementParentIneligibleError({
-          squadronId,
+          projectId,
           parentParticipantId,
         });
       }
       const rows = yield* sql<{ readonly participant_id: string }>`
           SELECT participant_id
-          FROM j5_a2a_squadron_membership
-          WHERE squadron_id = ${squadronId} AND participant_id = ${parentParticipantId}
+          FROM j5_a2a_membership
+          WHERE project_id = ${projectId} AND participant_id = ${parentParticipantId}
           LIMIT 1
         `;
       if (rows[0] === undefined) {
-        return yield* new PlacementParentNotFoundError({ squadronId, parentParticipantId });
+        return yield* new PlacementParentNotFoundError({ projectId, parentParticipantId });
       }
     });
 
     const isCurrentParticipant = Effect.fn("j5.a2a.placement.isCurrentParticipant")(function* (
-      squadronId: SquadronId,
+      projectId: LedgerProjectId,
       participantId: ParticipantId,
     ) {
       const rows = yield* sql<{ readonly participant_id: string }>`
             SELECT participant_id
-            FROM j5_a2a_squadron_membership
-            WHERE squadron_id = ${squadronId} AND participant_id = ${participantId}
+            FROM j5_a2a_membership
+            WHERE project_id = ${projectId} AND participant_id = ${participantId}
+            LIMIT 1
+          `;
+      return rows[0] !== undefined;
+    });
+
+    /** An agent that is a participant of some project on this server now. */
+    const isParticipantSomewhere = Effect.fn("j5.a2a.placement.isParticipantSomewhere")(function* (
+      participantId: ParticipantId,
+    ) {
+      const rows = yield* sql<{ readonly participant_id: string }>`
+            SELECT participant_id
+            FROM j5_a2a_membership
+            WHERE participant_id = ${participantId}
             LIMIT 1
           `;
       return rows[0] !== undefined;
     });
 
     const selectPlacement = Effect.fn("j5.a2a.placement.selectPlacement")(function* (
-      squadronId: SquadronId,
+      projectId: LedgerProjectId,
       participantId: ParticipantId,
     ) {
       const rows = yield* sql<PlacementRow>`
           SELECT
-            squadron_id,
+            project_id,
             participant_id,
             provenance_kind,
             provenance_participant_id,
@@ -447,7 +469,7 @@ export const layer: Layer.Layer<
             created_event_seq,
             updated_event_seq
           FROM j5_a2a_participant_placement
-          WHERE squadron_id = ${squadronId} AND participant_id = ${participantId}
+          WHERE project_id = ${projectId} AND participant_id = ${participantId}
           LIMIT 1
         `;
       return rows[0] === undefined ? null : yield* placementFromRow(rows[0]);
@@ -461,7 +483,7 @@ export const layer: Layer.Layer<
               seq,
               command_id,
               request_fingerprint,
-              squadron_id,
+              project_id,
               participant_id,
               kind,
               actor,
@@ -494,7 +516,7 @@ export const layer: Layer.Layer<
         });
       }
       const placement = yield* selectPlacement(
-        SquadronId.make(row.squadron_id),
+        LedgerProjectId.make(row.project_id),
         ParticipantId.make(row.participant_id),
       );
       if (placement === null) {
@@ -508,12 +530,12 @@ export const layer: Layer.Layer<
     });
 
     const allocateSeq = Effect.fn("j5.a2a.placement.allocateSeq")(function* (
-      squadronId: SquadronId,
+      projectId: LedgerProjectId,
     ) {
       const rows = yield* sql<{ readonly next_seq: number }>`
           SELECT COALESCE(MAX(seq), 0) + 1 AS next_seq
           FROM j5_a2a_placement_event
-          WHERE squadron_id = ${squadronId}
+          WHERE project_id = ${projectId}
         `;
       const seq = rows[0]?.next_seq;
       if (seq === undefined) {
@@ -527,18 +549,28 @@ export const layer: Layer.Layer<
     )(function* (input: RecordParticipantPlacementInput) {
       switch (input.provenance.kind) {
         case "spawned-by":
-          if (input.provenance.source === "j5_spawn") {
-            return input.provenance.spawnedByParticipantId;
+          if (
+            input.provenance.source === "j5_spawn" &&
+            !(yield* isCurrentParticipant(input.projectId, input.provenance.spawnedByParticipantId))
+          ) {
+            // A spawner may spawn into another project. It is recorded as provenance and is no
+            // parent there: the placement tree is one project's, so the agent is a root in its
+            // own. An outside agent is in no project, so what it spawns is always a root. Any
+            // other spawner that is in no project at all is returned for `ensureParent` to refuse.
+            return isOutsideAgentParticipantId(input.provenance.spawnedByParticipantId) ||
+              (yield* isParticipantSomewhere(input.provenance.spawnedByParticipantId))
+              ? null
+              : input.provenance.spawnedByParticipantId;
           }
           return (yield* isCurrentParticipant(
-            input.squadronId,
+            input.projectId,
             input.provenance.spawnedByParticipantId,
           ))
             ? input.provenance.spawnedByParticipantId
             : null;
         case "forked-from": {
           const source = yield* selectPlacement(
-            input.squadronId,
+            input.projectId,
             input.provenance.sourceParticipantId,
           );
           return source?.placementParentId ?? null;
@@ -549,13 +581,13 @@ export const layer: Layer.Layer<
     });
 
     const assertAcyclic = Effect.fn("j5.a2a.placement.assertAcyclic")(function* (input: {
-      readonly squadronId: SquadronId;
+      readonly projectId: LedgerProjectId;
       readonly participantId: ParticipantId;
       readonly requestedParentId: ParticipantId | null;
     }) {
       if (input.requestedParentId === null) return;
       const countRows = yield* sql<{ readonly count: number }>`
-          SELECT COUNT(*) AS count FROM j5_a2a_participant_placement WHERE squadron_id = ${input.squadronId}
+          SELECT COUNT(*) AS count FROM j5_a2a_participant_placement WHERE project_id = ${input.projectId}
         `;
       const placementBound = (countRows[0]?.count ?? 0) + 1;
       const visited = new Set<ParticipantId>();
@@ -571,11 +603,11 @@ export const layer: Layer.Layer<
           });
         }
         if (visited.has(current) || path.length > placementBound) {
-          return yield* new PlacementGraphCorruptError({ squadronId: input.squadronId, path });
+          return yield* new PlacementGraphCorruptError({ projectId: input.projectId, path });
         }
         visited.add(current);
         const placement: ParticipantPlacement | null = yield* selectPlacement(
-          input.squadronId,
+          input.projectId,
           current,
         );
         current = placement?.placementParentId ?? null;
@@ -588,18 +620,18 @@ export const layer: Layer.Layer<
       if (isHumanParticipantId(input.participantId)) {
         return yield* new PlacementHumanTargetError({
           operation: "record-creation",
-          squadronId: input.squadronId,
+          projectId: input.projectId,
           participantId: input.participantId,
         });
       }
       const fingerprint = creationFingerprint(input);
       const replayed = yield* replay(input.commandId, fingerprint);
       if (replayed !== null) return replayed;
-      yield* ensureSquadron(input.squadronId);
-      yield* ensureParticipant(input.squadronId, input.participantId);
-      if ((yield* selectPlacement(input.squadronId, input.participantId)) !== null) {
+      yield* ensureProjectLedger(input.projectId);
+      yield* ensureParticipant(input.projectId, input.participantId);
+      if ((yield* selectPlacement(input.projectId, input.participantId)) !== null) {
         return yield* new PlacementAlreadyExistsError({
-          squadronId: input.squadronId,
+          projectId: input.projectId,
           participantId: input.participantId,
         });
       }
@@ -611,8 +643,14 @@ export const layer: Layer.Layer<
             : null;
       if (provenanceParticipantId !== null) {
         // Immutable provenance may retain a departed source, but it must name
-        // an identity that actually joined this squadron at least once.
-        yield* ensureProvenanceParticipant(input.squadronId, provenanceParticipantId);
+        // an identity that actually joined at least once: this project for a fork's source,
+        // any project on this server for a spawner, which may spawn into another project.
+        // An outside agent spawner joins none.
+        yield* ensureProvenanceParticipant(
+          input.projectId,
+          provenanceParticipantId,
+          input.provenance.kind === "spawned-by" && input.provenance.source === "j5_spawn",
+        );
       }
       if (provenanceParticipantId === input.participantId) {
         return yield* new PlacementCycleError({
@@ -622,13 +660,13 @@ export const layer: Layer.Layer<
         });
       }
       const placementParentId = yield* resolveProvenanceDefaultParent(input);
-      yield* ensureParent(input.squadronId, placementParentId);
+      yield* ensureParent(input.projectId, placementParentId);
       yield* assertAcyclic({
-        squadronId: input.squadronId,
+        projectId: input.projectId,
         participantId: input.participantId,
         requestedParentId: placementParentId,
       });
-      const seq = yield* allocateSeq(input.squadronId);
+      const seq = yield* allocateSeq(input.projectId);
       const provenanceKind = input.provenance.kind;
       const provenanceSource = input.provenance.kind === "unknown" ? null : input.provenance.source;
       yield* sql`
@@ -636,7 +674,7 @@ export const layer: Layer.Layer<
               seq,
               command_id,
               request_fingerprint,
-              squadron_id,
+              project_id,
               participant_id,
               kind,
               actor,
@@ -653,7 +691,7 @@ export const layer: Layer.Layer<
               ${seq},
               ${input.commandId},
               ${fingerprint},
-              ${input.squadronId},
+              ${input.projectId},
               ${input.participantId},
               'participant.placement_created',
               ${input.actor},
@@ -670,7 +708,7 @@ export const layer: Layer.Layer<
           `;
       yield* sql`
             INSERT INTO j5_a2a_participant_placement (
-              squadron_id,
+              project_id,
               participant_id,
               provenance_kind,
               provenance_participant_id,
@@ -679,7 +717,7 @@ export const layer: Layer.Layer<
               created_event_seq,
               updated_event_seq
             ) VALUES (
-              ${input.squadronId},
+              ${input.projectId},
               ${input.participantId},
               ${provenanceKind},
               ${provenanceParticipantId},
@@ -693,7 +731,7 @@ export const layer: Layer.Layer<
         seq,
         command_id: input.commandId,
         request_fingerprint: fingerprint,
-        squadron_id: input.squadronId,
+        project_id: input.projectId,
         participant_id: input.participantId,
         kind: "participant.placement_created",
         actor: input.actor,
@@ -707,7 +745,7 @@ export const layer: Layer.Layer<
         placement_parent_id: placementParentId,
         created_at: input.createdAt,
       });
-      const placement = yield* selectPlacement(input.squadronId, input.participantId);
+      const placement = yield* selectPlacement(input.projectId, input.participantId);
       if (placement === null) {
         return yield* new PlacementStorageError({ operation: "read created placement" });
       }
@@ -721,25 +759,25 @@ export const layer: Layer.Layer<
         );
 
     const listParticipantsEffect = Effect.fn("j5.a2a.placement.listParticipants")(function* (
-      squadronId: SquadronId,
+      projectId: LedgerProjectId,
     ) {
-      yield* ensureSquadron(squadronId);
+      yield* ensureProjectLedger(projectId);
       const rows = yield* sql<ParticipantRow>`
             SELECT
               m.payload,
-              m.squadron_id,
+              m.project_id,
               m.participant_id,
               m.archived_at,
               p.provenance_kind,
               p.provenance_participant_id,
               p.provenance_source,
-              CASE WHEN EXISTS (SELECT 1 FROM j5_a2a_squadron_membership parent
-                WHERE parent.squadron_id = m.squadron_id AND parent.participant_id = p.placement_parent_id)
+              CASE WHEN EXISTS (SELECT 1 FROM j5_a2a_membership parent
+                WHERE parent.project_id = m.project_id AND parent.participant_id = p.placement_parent_id)
                 THEN p.placement_parent_id ELSE NULL END AS placement_parent_id
-            FROM j5_a2a_squadron_membership m
-            LEFT JOIN j5_a2a_participant_placement p
-              ON p.squadron_id = m.squadron_id AND p.participant_id = m.participant_id
-            WHERE m.squadron_id = ${squadronId}
+            FROM j5_a2a_membership m
+            -- A placement stays where it was made when Turn into project moves the agent.
+            LEFT JOIN j5_a2a_participant_placement p ON p.participant_id = m.participant_id
+            WHERE m.project_id = ${projectId}
             ORDER BY m.participant_id
           `;
       return yield* Effect.forEach(
@@ -749,7 +787,7 @@ export const layer: Layer.Layer<
             const participant = yield* decodeParticipant(row.payload);
             const id = participantIdOf(participant);
             return {
-              squadronId,
+              projectId,
               participant,
               participantId: id,
               threadId: participant.kind === "agent" ? participant.threadId : null,
@@ -777,24 +815,30 @@ export const layer: Layer.Layer<
     });
 
     const service = ParticipantPlacementService.of({
-      recordCreation: (input) =>
-        mutationPermit
+      recordCreation: Effect.fn("ParticipantPlacementService.recordCreation")(function (input) {
+        return mutationPermit
           .withPermit(sql.withTransaction(recordCreationInTransaction(input)))
-          .pipe(Effect.mapError(preserveDomainError("record participant placement"))),
-      readPlacement: ({ squadronId, participantId }) =>
-        Effect.gen(function* () {
-          yield* ensureSquadron(squadronId);
-          return yield* selectPlacement(squadronId, participantId);
-        }).pipe(Effect.mapError(preserveDomainError("read participant placement"))),
-      listParticipants: (squadronId) =>
-        listParticipantsEffect(squadronId).pipe(
-          Effect.mapError(preserveDomainError("list participant placements")),
-        ),
-      listSubtree: ({ squadronId, participantId }) =>
-        Effect.gen(function* () {
-          yield* ensureSquadron(squadronId);
-          yield* ensureParticipant(squadronId, participantId);
-          const participants = yield* listParticipantsEffect(squadronId);
+          .pipe(Effect.mapError(preserveDomainError("record participant placement")));
+      }),
+      readPlacement: Effect.fn("j5.a2a.placement.readPlacement")(
+        function* ({ projectId, participantId }) {
+          yield* ensureProjectLedger(projectId);
+          return yield* selectPlacement(projectId, participantId);
+        },
+        Effect.mapError(preserveDomainError("read participant placement")),
+      ),
+      listParticipants: Effect.fn("ParticipantPlacementService.listParticipants")(
+        function (projectId) {
+          return listParticipantsEffect(projectId).pipe(
+            Effect.mapError(preserveDomainError("list participant placements")),
+          );
+        },
+      ),
+      listSubtree: Effect.fn("j5.a2a.placement.listSubtree")(
+        function* ({ projectId, participantId }) {
+          yield* ensureProjectLedger(projectId);
+          yield* ensureParticipant(projectId, participantId);
+          const participants = yield* listParticipantsEffect(projectId);
           const byId = new Map(
             participants.map((participant) => [participant.participantId, participant]),
           );
@@ -810,27 +854,32 @@ export const layer: Layer.Layer<
           const visited = new Set<ParticipantId>();
           const path: Array<ParticipantId> = [];
           const ordered: Array<ParticipantPlacementView> = [];
-          const visit = (id: ParticipantId): Effect.Effect<void, PlacementGraphCorruptError> =>
-            Effect.gen(function* () {
-              if (visiting.has(id)) {
-                return yield* new PlacementGraphCorruptError({ squadronId, path: [...path, id] });
-              }
-              if (visited.has(id)) return;
-              visiting.add(id);
-              path.push(id);
-              for (const childId of children.get(id) ?? []) yield* visit(childId);
-              path.pop();
-              visiting.delete(id);
-              visited.add(id);
-              const participant = byId.get(id);
-              if (participant !== undefined) ordered.push(participant);
-            });
+          const visit = Effect.fn("j5.a2a.placement.visit")(function* (
+            id: ParticipantId,
+          ): Effect.fn.Return<void, PlacementGraphCorruptError> {
+            if (visiting.has(id)) {
+              return yield* new PlacementGraphCorruptError({ projectId, path: [...path, id] });
+            }
+            if (visited.has(id)) return;
+            visiting.add(id);
+            path.push(id);
+            for (const childId of children.get(id) ?? []) yield* visit(childId);
+            path.pop();
+            visiting.delete(id);
+            visited.add(id);
+            const participant = byId.get(id);
+            if (participant !== undefined) ordered.push(participant);
+          });
           yield* visit(participantId);
           return ordered;
-        }).pipe(Effect.mapError(preserveDomainError("list placement subtree"))),
+        },
+        Effect.mapError(preserveDomainError("list placement subtree")),
+      ),
     });
     const transactionWriter = ParticipantPlacementTransactionWriter.of({
-      withPermit: (effect) => mutationPermit.withPermit(effect),
+      withPermit: Effect.fn("ParticipantPlacementTransactionWriter.withPermit")(function (effect) {
+        return mutationPermit.withPermit(effect);
+      }),
       recordCreationInTransaction,
     });
     return Context.make(ParticipantPlacementService, service).pipe(

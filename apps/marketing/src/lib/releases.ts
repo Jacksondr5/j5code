@@ -1,9 +1,9 @@
-const REPO = "pingdotgg/t3code";
+const REPO = "Jacksondr5/j5code";
 
 export const RELEASES_URL = `https://github.com/${REPO}/releases`;
 
 const API_URL = `https://api.github.com/repos/${REPO}/releases/latest`;
-const CACHE_KEY = "t3code-latest-release";
+const CACHE_KEY = "j5code-latest-release";
 
 export interface ReleaseAsset {
   name: string;
@@ -20,11 +20,35 @@ export async function fetchLatestRelease(): Promise<Release> {
   const cached = sessionStorage.getItem(CACHE_KEY);
   if (cached) return JSON.parse(cached);
 
-  const data = await fetch(API_URL).then((r) => r.json());
-
-  if (data?.assets) {
-    sessionStorage.setItem(CACHE_KEY, JSON.stringify(data));
+  // A rate limit (403) or a missing release (404) still resolves with a JSON
+  // error body, so check both the status and the shape before trusting it.
+  const response = await fetch(API_URL);
+  if (!response.ok) throw new Error(`GitHub releases API returned ${response.status}`);
+  const data = (await response.json()) as Partial<Release>;
+  if (typeof data.tag_name !== "string" || !Array.isArray(data.assets)) {
+    throw new Error("GitHub releases API returned no release");
   }
 
-  return data;
+  sessionStorage.setItem(CACHE_KEY, JSON.stringify(data));
+  return data as Release;
+}
+
+/** The desktop installer whose file name ends with `suffix`, such as `-arm64.dmg` or `-x64.exe`. */
+export function pickAsset(assets: ReleaseAsset[], suffix: string): string | undefined {
+  return assets.find((a) => a.name.endsWith(suffix))?.browser_download_url;
+}
+
+export function pickMacAsset(assets: ReleaseAsset[]): string | undefined {
+  return pickAsset(assets, "-arm64.dmg");
+}
+
+export function detectPlatform(): "mac" | "win" | "linux" | undefined {
+  const ua = navigator.userAgent;
+  // iPhones and older iPads cannot run the DMG. Modern iPadOS reports a
+  // Macintosh user agent and is indistinguishable here.
+  if (/iPhone|iPad|iPod/.test(ua)) return undefined;
+  if (/Mac/.test(ua)) return "mac";
+  if (/Win/.test(ua)) return "win";
+  if (/Linux|X11/.test(ua)) return "linux";
+  return undefined;
 }

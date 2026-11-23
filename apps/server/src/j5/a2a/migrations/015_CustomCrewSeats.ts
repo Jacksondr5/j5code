@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 // A seat may run without a saved agent (Jackson's review, 2026-09-17): the person names and briefs
 // it on the card, or the Captain proposes it with no agent id, and it runs on the Captain's own

@@ -1,0 +1,140 @@
+import {
+  AuthAccessWriteScope,
+  type ContextMenuItem,
+  type ScopedThreadRef,
+} from "@t3tools/contracts";
+import type { PersonLevel } from "@t3tools/contracts/j5";
+
+import { readEnvironmentScope } from "../../state/session";
+import { openSharingDialog } from "./sharingDialogs";
+
+const SHARE_THREAD = "j5:share-thread";
+const LEAVE_THREAD = "j5:leave-thread";
+export type SharingMenuActionId = typeof SHARE_THREAD | typeof LEAVE_THREAD;
+
+/**
+ * What the thread's server says of the person: whether they own it, their level over the thread,
+ * whether they hold a level on the thread itself, which is what they can leave, whatever their
+ * device may manage, and whether they may start a thread in its project. The first owner leaves
+ * nothing. `null` while the server has not answered, or for a session that is no person's.
+ */
+export interface SharingMenuAccess {
+  readonly owner: boolean;
+  readonly level: PersonLevel | null;
+  readonly holdsThread: boolean;
+  readonly startsInProject: boolean;
+}
+
+// `access.ts`, which owns the connection runtime, hands the read over when it loads; until then
+// everyone is read as an Owner, and the server refuses what is not theirs.
+let accessOn: (thread: ScopedThreadRef) => SharingMenuAccess | null = () => null;
+
+export function provideSharingMenuAccess(
+  read: (thread: ScopedThreadRef) => SharingMenuAccess | null,
+) {
+  accessOn = read;
+}
+
+// Not an Owner's: for now archiving and deleting are for Owners, and project settings are part of
+// Settings, which is theirs (People and access AC14, AC27). A Viewer changes nothing, the read
+// marker included, which is one value for everyone on the thread (Shared conversations AC19).
+const OWNERS_ONLY: ReadonlySet<string> = new Set(["archive", "delete", "project-settings"]);
+const NOT_A_VIEWERS: ReadonlySet<string> = new Set(["mark-unread"]);
+// Upstream offers a new thread to a connection that writes nothing, as local navigation; a person
+// who cannot start one in the thread's project is shown it disabled, as upstream shows an action a
+// connection lacks (AC14).
+const STARTS_A_THREAD: ReadonlySet<string> = new Set(["new-thread-on-branch"]);
+
+/**
+ * "Share thread…" follows "Copy" (AC34), disabled without "Manage access" as upstream shows actions
+ * a device lacks. Non-Owners lose Owners' items, and "Leave thread" takes Archive's place when they
+ * hold a level on the thread itself (AC48). "New thread on <branch>" is disabled for someone who
+ * cannot start a thread in the project. Upstream's own items are left as built.
+ */
+export function withSharingMenuItems<Id extends string>(
+  items: ReadonlyArray<ContextMenuItem<Id>>,
+  thread: ScopedThreadRef,
+): ReadonlyArray<ContextMenuItem<Id | SharingMenuActionId>> {
+  return sharingMenuItems(items, accessOn(thread), {
+    canShare: readEnvironmentScope(thread.environmentId, AuthAccessWriteScope),
+  });
+}
+
+/** `withSharingMenuItems` with what it reads given; see there. */
+export function sharingMenuItems<Id extends string>(
+  items: ReadonlyArray<ContextMenuItem<Id>>,
+  access: SharingMenuAccess | null,
+  device: { readonly canShare: boolean },
+): ReadonlyArray<ContextMenuItem<Id | SharingMenuActionId>> {
+  const share: ContextMenuItem<SharingMenuActionId> = {
+    id: SHARE_THREAD,
+    label: "Share thread…",
+    icon: "users",
+    disabled: !device.canShare,
+  };
+  const removed = (item: ContextMenuItem<Id>) =>
+    access !== null &&
+    ((!access.owner && OWNERS_ONLY.has(item.id)) ||
+      (access.level === "viewer" && NOT_A_VIEWERS.has(item.id)));
+  const kept = items
+    .filter((item) => !removed(item))
+    .map((item) =>
+      access !== null && !access.startsInProject && STARTS_A_THREAD.has(item.id)
+        ? { ...item, disabled: true }
+        : item,
+    );
+  const copy = kept.findIndex((item) => item.id === "copy");
+  const withShare: ReadonlyArray<ContextMenuItem<Id | SharingMenuActionId>> =
+    copy === -1 ? [...kept, share] : [...kept.slice(0, copy + 1), share, ...kept.slice(copy + 1)];
+  if (access === null || !access.holdsThread) return withShare;
+  const leave: ContextMenuItem<SharingMenuActionId> = {
+    id: LEAVE_THREAD,
+    label: "Leave thread",
+    destructive: true,
+    separatorBefore: true,
+  };
+  // Where Archive stands or stood: before it, or whatever upstream listed after it, or at the end.
+  const archive = items.findIndex((item) => item.id === "archive");
+  const after =
+    archive === -1
+      ? -1
+      : withShare.findIndex((item) => items.indexOf(item as ContextMenuItem<Id>) >= archive);
+  const before = after === -1 ? withShare.length : after;
+  return [...withShare.slice(0, before), leave, ...withShare.slice(before)];
+}
+
+/**
+ * `withSharingMenuItems` around a builder of upstream's, for a call site that builds the list
+ * inside the call that shows it: wrapping the builder leaves that call's arguments where they are.
+ */
+export const buildWithSharingMenuItems =
+  <State, Id extends string>(
+    build: (state: State) => ReadonlyArray<ContextMenuItem<Id>>,
+    thread: ScopedThreadRef,
+  ) =>
+  (state: State) =>
+    withSharingMenuItems(build(state), thread);
+
+/** Runs an item J5 added and says so, leaving every other id to upstream's own handling. */
+export function runSharingMenuAction<Id extends string>(
+  action: Id | SharingMenuActionId,
+  thread: ScopedThreadRef,
+): action is SharingMenuActionId {
+  if (action === SHARE_THREAD) {
+    openSharingDialog({
+      kind: "share",
+      environmentId: thread.environmentId,
+      scope: { kind: "thread", threadId: thread.threadId },
+    });
+    return true;
+  }
+  if (action === LEAVE_THREAD) {
+    openSharingDialog({
+      kind: "leave",
+      environmentId: thread.environmentId,
+      scope: { kind: "thread", threadId: thread.threadId },
+    });
+    return true;
+  }
+  return false;
+}

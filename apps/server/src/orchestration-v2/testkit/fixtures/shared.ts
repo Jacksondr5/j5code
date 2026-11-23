@@ -2,6 +2,7 @@ import { assert } from "@effect/vitest";
 import {
   type ChatAttachment,
   CommandId,
+  isOrchestrationV2WorkActive,
   MessageId,
   ProjectId,
   ThreadId,
@@ -17,15 +18,17 @@ import {
   type ProviderDriverKind,
   type ProviderReplayTranscript,
   type ProviderUserInputAnswers,
+  type RuntimeMode,
 } from "@t3tools/contracts";
 import type * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
+import * as Predicate from "effect/Predicate";
 
 import type {
   OrchestratorV2ScenarioResult,
   OrchestratorV2ScenarioStep,
 } from "../OrchestratorScenario.ts";
-import { IdAllocatorV2, type IdAllocatorV2Error } from "../../IdAllocator.ts";
+import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import type { RuntimePolicyV2Override } from "../../RuntimePolicy.ts";
 
 export const SIMPLE_PROMPT = "Respond with the following text: fixture simple ok";
@@ -47,18 +50,61 @@ export const MESSAGE_STEERING_INITIAL_PROMPT =
   "Respond with exactly: steering fixture initial response";
 export const SUBAGENT_PROMPT =
   "Spawn 2 subagents, one to read package.json and one to read tsconfig.json";
-export const SUBAGENT_V2_PROMPT = "just say hello";
+export const SUBAGENT_V2_NESTED_PROMPT =
+  "Spawn one subagent and tell it to spawn its own subagent, which must in turn spawn one more subagent whose only task is to reply with exactly: Hello. Each agent waits for its child and replies with exactly what the child said. Wait for your subagent, then reply with exactly what it said.";
+export const SUBAGENT_V2_PROMPT =
+  "Spawn one subagent whose only task is to reply with exactly: Hello. Wait for it to finish, then reply with exactly what it said.";
+export const SUBAGENT_V2_APPROVAL_PROMPT =
+  "Do not run any commands yourself. Spawn one subagent whose only task is to run this exact shell command: printf 'subagent approval fixture' > subagent-approval.txt and then reply with exactly: Written. Wait for it to finish, then reply with exactly what it said.";
+export const SUBAGENT_V2_NESTED_APPROVAL_PROMPT =
+  "Do not run any commands yourself. Spawn one subagent and tell it not to run any commands itself but to spawn its own subagent, whose only task is to run this exact shell command: printf 'nested approval fixture' > nested-approval.txt and then reply with exactly: Written. Each agent waits for its child and replies with exactly what the child said. Wait for your subagent, then reply with exactly what it said.";
 export const OPENCODE_SUBAGENT_PROMPT =
   "Use the task tool exactly once. Delegate to the general subagent with this prompt: Respond exactly CHILD_OK. After the task completes, respond exactly PARENT_OK.";
 export const SUBAGENT_CONTINUE_PROMPT =
   "Spawn one subagent and have it reply exactly: initial subagent response";
 export const SUBAGENT_CONTINUE_PARENT_PROMPT =
-  "@hooke have the same subagent reply exactly: continued subagent response";
+  "Have the same subagent you spawned earlier reply exactly: continued subagent response";
 export const SUBAGENT_CONTINUE_CHILD_PROMPT = "Reply exactly: continued subagent response";
+export const OPENCODE2_SIMPLE_PROMPT =
+  "Think carefully step by step about whether 391 is prime, showing your reasoning, then answer in one short sentence.";
+export const OPENCODE2_TOOL_CALL_PROMPT =
+  "Use the read tool to read hello.txt, then run the shell command `echo TOOL_OK` with the bash tool, then reply DONE.";
+export const OPENCODE2_INTERRUPT_PROMPT =
+  "Run the shell command `sleep 60 && echo LATE` with the bash tool, then reply DONE.";
+export const OPENCODE2_PERMISSION_PROMPT =
+  "Run the shell command `echo FIRST` with the bash tool. After it completes, run `echo SECOND` with the bash tool. Then reply with what happened.";
+export const OPENCODE2_STEER_PROMPT =
+  "Run the shell command `sleep 12 && echo A` with the bash tool, then reply DONE_A.";
+export const OPENCODE2_STEER_TEXT = "Also mention the word STEERED in your final reply.";
+export const OPENCODE2_QUEUED_PROMPT = "Reply exactly QUEUED_B.";
+export const OPENCODE2_CANCELLED_PROMPT = "Reply exactly QUEUED_C.";
+export const OPENCODE2_REVERT_FIRST_PROMPT =
+  "Create a file named reverted.txt containing the word ALPHA using the write tool, then reply DONE.";
+export const OPENCODE2_REVERT_SECOND_PROMPT =
+  "Overwrite reverted.txt so it contains the word BETA using the write tool, then reply DONE.";
+export const OPENCODE2_QUESTION_PROMPT =
+  "Before doing anything, use the question tool to ask me which color I prefer, offering the options red and blue. After I answer, reply with only the chosen color.";
+export const OPENCODE2_SUBAGENT_PROMPT =
+  "Use the subagent tool to delegate to the explore subagent with the prompt: 'List the files in the current directory and report their names.' Wait for it, then summarize its answer in one line.";
+export const OPENCODE2_NESTED_BACKGROUND_PROMPT =
+  "Use the subagent tool (foreground, do not set background) to delegate to the general subagent with this exact prompt: 'Use the subagent tool with background set to true to delegate to the general subagent with the prompt: Run the shell command `sleep 25` with the shell tool, then reply exactly GRANDCHILD_OK. As soon as it is launched, reply exactly MIDDLE_OK and end your turn without waiting for it.' Wait for that subagent to return, then reply exactly ROOT_OK.";
+export const OPENCODE2_BACKGROUND_PROMPT =
+  "Use the subagent tool with background enabled to delegate to the general subagent with the prompt: 'Run the shell command `sleep 20` with the bash tool and then reply exactly CHILD_OK.' As soon as it is launched, reply exactly PARENT_OK and end your turn without waiting for it.";
+export const OPENCODE2_COMPACTION_FIRST_PROMPT = "Remember the codeword PAPAYA. Reply OK.";
+export const OPENCODE2_COMPACTION_RECALL_PROMPT = "What was the codeword? One word.";
+export const OPENCODE2_RESTART_PROMPT =
+  "Run the shell command `sleep 25 && echo RESUMED` with the bash tool, then reply with its output.";
+export const OPENCODE2_RESTART_RECALL_PROMPT =
+  "What did I last ask you to run? Answer in one short sentence.";
+export const OPENCODE2_COMMAND_PROMPT = "/hello WORLD";
+export const OPENCODE2_SKILL_PROMPT = "Use $greet to say hi in three words.";
 export const TURN_INTERRUPT_PROMPT =
   "Do not answer immediately. First run the local shell command `sleep 30`, then respond with exactly: interrupt fixture should not finish naturally.";
 export const TURN_INTERRUPT_MID_TOOL_PROMPT =
   "Run this exact local command: `node -e \"console.log('interrupt fixture tool started'); setTimeout(() => {}, 30000)\"`. Do not answer until it completes, then respond exactly: interrupt fixture should not finish naturally.";
+const COMMAND_OUTPUT_STREAMING_COMMAND =
+  "for i in 1 2 3 4; do printf '\\033[32mstream line %s\\033[0m\\n' $i; sleep 1; done; printf 'progress 50%%\\rprogress 100%%\\n'";
+export const COMMAND_OUTPUT_STREAMING_PROMPT = `Run this exact shell command in the foreground and wait for it to finish: \`${COMMAND_OUTPUT_STREAMING_COMMAND}\`. Then respond exactly: command output fixture complete`;
 export const TURN_INTERRUPT_RECOVERY_PROMPT =
   "Respond with exactly: interrupt recovery fixture complete";
 export const MESSAGE_STEERING_STEER_PROMPT =
@@ -71,40 +117,9 @@ export const THREAD_ROLLBACK_AFTER_PROMPT = "Repeat the conversation verbatim.";
 export const THREAD_FORK_NATIVE_SOURCE_PROMPT =
   "Respond with the following text: source fork seed ok";
 export const THREAD_FORK_NATIVE_TARGET_PROMPT = "Respond with the following text: fork native ok";
-export const THREAD_FORK_NATIVE_CONTINUE_SOURCE_MARKER = "source-marker-7Q9V";
-export const THREAD_FORK_NATIVE_CONTINUE_FORK_MARKER = "fork-marker-2K4M";
-export const THREAD_FORK_NATIVE_CONTINUE_RECALL = `${THREAD_FORK_NATIVE_CONTINUE_SOURCE_MARKER}|${THREAD_FORK_NATIVE_CONTINUE_FORK_MARKER}`;
-export const THREAD_FORK_NATIVE_CONTINUE_SOURCE_PROMPT = `Remember the opaque marker ${THREAD_FORK_NATIVE_CONTINUE_SOURCE_MARKER} for later in this conversation. Respond with exactly: source marker stored`;
-export const THREAD_FORK_NATIVE_CONTINUE_FIRST_PROMPT = `Remember the second opaque marker ${THREAD_FORK_NATIVE_CONTINUE_FORK_MARKER} for later in this conversation. Respond with exactly: fork marker stored`;
-export const THREAD_FORK_NATIVE_CONTINUE_SECOND_PROMPT =
-  "Return the two opaque markers previously provided in chronological order, separated by a single | character. Respond with only the markers and separator.";
-export const THREAD_FORK_NATIVE_SIBLINGS_SOURCE_MARKER = "sibling-source-8R3D";
-export const THREAD_FORK_NATIVE_SIBLINGS_FIRST_MARKER = "sibling-first-5L2P";
-export const THREAD_FORK_NATIVE_SIBLINGS_SECOND_MARKER = "sibling-second-9N6C";
-export const THREAD_FORK_NATIVE_SIBLINGS_SOURCE_PROMPT = `Remember the opaque marker ${THREAD_FORK_NATIVE_SIBLINGS_SOURCE_MARKER} for later in this conversation. Respond with exactly: sibling source stored`;
-export const THREAD_FORK_NATIVE_SIBLINGS_FIRST_PROMPT = `Remember the fork-local marker ${THREAD_FORK_NATIVE_SIBLINGS_FIRST_MARKER}. Return the source marker followed by this marker, separated by |. Respond with only the markers and separator.`;
-export const THREAD_FORK_NATIVE_SIBLINGS_SECOND_PROMPT = `Remember the fork-local marker ${THREAD_FORK_NATIVE_SIBLINGS_SECOND_MARKER}. Return the source marker followed by this marker, separated by |. Respond with only the markers and separator.`;
-export const THREAD_MERGE_BACK_SOURCE_MARKER = "merge-source-4H8Q";
-export const THREAD_MERGE_BACK_FORK_MARKER = "merge-fork-7T2W";
-export const THREAD_MERGE_BACK_SOURCE_PROMPT = `Remember the opaque marker ${THREAD_MERGE_BACK_SOURCE_MARKER} for later in this conversation. Respond with exactly: merge source stored`;
-export const THREAD_MERGE_BACK_FORK_PROMPT = `Remember the fork-local marker ${THREAD_MERGE_BACK_FORK_MARKER}. Respond with exactly: merge fork stored`;
-export const THREAD_MERGE_BACK_HANDOFF_PROMPT = [
-  "Context handoff (merge_back / fork_delta_summary):",
-  "Merge-back context from forked conversation.",
-  "",
-  "Fork delta:",
-  `- User introduced opaque marker ${THREAD_MERGE_BACK_FORK_MARKER}.`,
-  "- Assistant confirmed: merge fork stored",
-  "",
-  "User message:",
-  "Retain the transferred fork marker for later. Respond with exactly: merge delta stored",
-].join("\n");
-export const THREAD_MERGE_BACK_RECALL = `${THREAD_MERGE_BACK_SOURCE_MARKER}|${THREAD_MERGE_BACK_FORK_MARKER}`;
-export const THREAD_MERGE_BACK_RECALL_PROMPT =
-  "Return the source marker followed by the transferred fork marker, separated by a single | character. Respond with only the markers and separator.";
-export const THREAD_MERGE_BACK_SIBLINGS_SOURCE_MARKER = "merge-sibling-source-3C7K";
-export const THREAD_MERGE_BACK_SIBLINGS_FIRST_MARKER = "merge-sibling-first-6V2J";
-export const THREAD_MERGE_BACK_SIBLINGS_SECOND_MARKER = "merge-sibling-second-9X5B";
+const THREAD_MERGE_BACK_SIBLINGS_SOURCE_MARKER = "merge-sibling-source-3C7K";
+const THREAD_MERGE_BACK_SIBLINGS_FIRST_MARKER = "merge-sibling-first-6V2J";
+const THREAD_MERGE_BACK_SIBLINGS_SECOND_MARKER = "merge-sibling-second-9X5B";
 export const THREAD_MERGE_BACK_SIBLINGS_SOURCE_PROMPT = `Remember the opaque marker ${THREAD_MERGE_BACK_SIBLINGS_SOURCE_MARKER} for later in this conversation. Respond with exactly: merge sibling source stored`;
 export const THREAD_MERGE_BACK_SIBLINGS_FIRST_FORK_PROMPT = `Remember the fork-local marker ${THREAD_MERGE_BACK_SIBLINGS_FIRST_MARKER}. Respond with exactly: first merge sibling stored`;
 export const THREAD_MERGE_BACK_SIBLINGS_SECOND_FORK_PROMPT = `Remember the fork-local marker ${THREAD_MERGE_BACK_SIBLINGS_SECOND_MARKER}. Respond with exactly: second merge sibling stored`;
@@ -151,12 +166,20 @@ export const PROPOSED_PLAN_PROMPT =
   "Create a short implementation plan for adding deterministic replay fixtures. Do not ask questions. Present the final plan in a proposed plan block.";
 export const WEB_SEARCH_PROMPT =
   "Search the web for FIFA World Cup ticket pricing, then answer exactly: web search fixture complete";
+export const SKILL_INVOCATION_PROMPT = "$review README.md";
+export const SKILL_INVOCATION_CURSOR_MESSAGE = "/review README.md";
 
 export type OrchestratorFixtureInputStep =
   | {
       readonly type: "message";
       readonly text: string;
       readonly attachments?: ReadonlyArray<ChatAttachment>;
+    }
+  | {
+      /** Forks the thread at a run into a second thread, then sends `text` there. */
+      readonly type: "fork";
+      readonly fromRunIndex: number;
+      readonly text: string;
     }
   | {
       readonly type: "queue_message";
@@ -177,6 +200,13 @@ export type OrchestratorFixtureInputStep =
     }
   | {
       readonly type: "await_run_status";
+      readonly targetRunIndex: number;
+      readonly status: OrchestrationV2RunStatus;
+      readonly waitForTurnItemType?: OrchestrationV2TurnItem["type"];
+    }
+  | {
+      /** Replay finishes background-held runs through the adapter's debounce receipt. */
+      readonly type: "finish_held_run";
       readonly targetRunIndex: number;
       readonly status: OrchestrationV2RunStatus;
     }
@@ -204,6 +234,14 @@ export type OrchestratorFixtureInputStep =
       readonly type: "interrupt";
       readonly targetRunIndex: number;
       readonly waitForTurnItemType?: OrchestrationV2TurnItem["type"];
+      /** With waitForTurnItemType: wait until that item has this status. */
+      readonly waitForTurnItemStatus?: OrchestrationV2TurnItem["status"];
+      /** With waitForTurnItemType: wait for it in one of the run's subagent threads. */
+      readonly inSubagentThread?: boolean;
+    }
+  | {
+      readonly type: "stop_background_work";
+      readonly targetRunIndex: number;
     }
   | {
       readonly type: "release_replay_gate_after_waiting";
@@ -216,6 +254,7 @@ export type OrchestratorFixtureInputStep =
         OrchestrationV2Command,
         { readonly type: "runtime-request.respond" }
       >["decision"];
+      readonly shellSnapshotKeyWhilePending?: string;
     }
   | {
       readonly type: "answer_next_user_input_request";
@@ -227,16 +266,20 @@ export type OrchestratorFixtureInputStep =
       readonly checkpointSuffix: string;
     }
   | {
-      /**
-       * Advance the deterministic test clock, e.g. past the provider session
-       * manager's idle timeout so the next message must reopen the session.
-       */
       readonly type: "advance_clock";
       readonly duration: Duration.Input;
+    }
+  | {
+      /** Picks another model of the same provider instance; later messages use it. */
+      readonly type: "set_model";
+      readonly model: string;
     };
 
 export interface OrchestratorFixtureInput {
   readonly interactionMode?: ProviderInteractionMode;
+  readonly runtimeMode?: RuntimeMode;
+  /** Files committed before replay, keyed by relative path; seed the same files when recording so workspace reads match. */
+  readonly workspaceFiles?: Readonly<Record<string, string>>;
   readonly steps: ReadonlyArray<OrchestratorFixtureInputStep>;
 }
 
@@ -247,6 +290,8 @@ export interface ProviderOrchestratorReplayVariant {
   readonly transcriptEntriesThroughLabel?: string;
   readonly modelSelection: ModelSelection;
   readonly runtimePolicyOverride?: RuntimePolicyV2Override;
+  readonly runContinuationWorker?: boolean;
+  readonly expectedAbsentWorkspacePaths?: ReadonlyArray<string>;
   readonly assertOutput: (
     result: OrchestratorV2ScenarioResult,
     transcript: ProviderReplayTranscript,
@@ -272,7 +317,7 @@ export interface FixtureIds {
 
 export const CODEX_MODEL_SELECTION = {
   instanceId: ProviderInstanceId.make("codex"),
-  model: "gpt-5.4",
+  model: "gpt-6-luna",
 } satisfies ModelSelection;
 
 export const CLAUDE_MODEL_SELECTION = {
@@ -285,15 +330,43 @@ export const CURSOR_MODEL_SELECTION = {
   model: "composer-2.5",
 } satisfies ModelSelection;
 
+export const MUSE_MODEL_SELECTION = {
+  instanceId: ProviderInstanceId.make("muse"),
+  model: "muse-spark-1.3-contributor",
+} satisfies ModelSelection;
+
 export const GROK_MODEL_SELECTION = {
   instanceId: ProviderInstanceId.make("grok"),
   model: "grok-build",
+} satisfies ModelSelection;
+
+/** fx fixtures run on fx's Default; the replay adapter has no probed model, so it writes none. */
+export const FX_MODEL_SELECTION = {
+  instanceId: ProviderInstanceId.make("fx"),
+  model: "default",
+} satisfies ModelSelection;
+
+/** Kiro's cheapest listed model, so recordings stay cheap and do not depend on "auto" routing. */
+export const KIRO_MODEL_SELECTION = {
+  instanceId: ProviderInstanceId.make("kiro"),
+  model: "claude-haiku-4.5",
 } satisfies ModelSelection;
 
 export const OPENCODE_MODEL_SELECTION = {
   instanceId: ProviderInstanceId.make("opencode"),
   model: "openai/gpt-5.4-mini",
   options: [{ id: "agent", value: "build" }],
+} satisfies ModelSelection;
+
+export const OPENCODE2_MODEL_SELECTION = {
+  instanceId: ProviderInstanceId.make("opencode"),
+  model: "opencode/space-bunny-free",
+  options: [{ id: "variant", value: "high" }],
+} satisfies ModelSelection;
+
+export const PI_MODEL_SELECTION = {
+  instanceId: ProviderInstanceId.make("pi"),
+  model: "openrouter/deepseek/deepseek-v4-flash",
 } satisfies ModelSelection;
 
 export const ACP_REGISTRY_MODEL_SELECTION = {
@@ -350,12 +423,13 @@ export const RESTRICTED_GRANULAR_POLICY = {
   },
 } as const satisfies RuntimePolicyV2Override;
 
-export function createThreadCommand(input: {
+function createThreadCommand(input: {
   readonly commandId: CommandId;
   readonly ids: FixtureIds;
   readonly scenario: string;
   readonly modelSelection: ModelSelection;
   readonly interactionMode?: ProviderInteractionMode;
+  readonly runtimeMode?: RuntimeMode;
 }): OrchestrationV2Command {
   return {
     type: "thread.create",
@@ -366,14 +440,14 @@ export function createThreadCommand(input: {
     projectId: input.ids.projectId,
     title: `Replay fixture: ${input.scenario}`,
     modelSelection: input.modelSelection,
-    runtimeMode: "full-access",
+    runtimeMode: input.runtimeMode ?? "full-access",
     interactionMode: input.interactionMode ?? "default",
     branch: null,
     worktreePath: null,
   };
 }
 
-export function dispatchMessageCommand(input: {
+function dispatchMessageCommand(input: {
   readonly commandId: CommandId;
   readonly ids: FixtureIds;
   readonly modelSelection: ModelSelection;
@@ -412,9 +486,13 @@ export function materializeFixtureInput(input: {
   readonly fixtureInput: OrchestratorFixtureInput;
   readonly driver: ProviderDriverKind;
   readonly modelSelection: ModelSelection;
-}): Effect.Effect<MaterializedOrchestratorFixtureInput, IdAllocatorV2Error, IdAllocatorV2> {
+}): Effect.Effect<
+  MaterializedOrchestratorFixtureInput,
+  IdAllocator.IdAllocatorV2Error,
+  IdAllocator.IdAllocatorV2
+> {
   return Effect.gen(function* () {
-    const idAllocator = yield* IdAllocatorV2;
+    const idAllocator = yield* IdAllocator.IdAllocatorV2;
     const projectId = yield* idAllocator.allocate.project({ fixtureName: input.scenario });
     const threadId = yield* idAllocator.allocate.thread({
       fixtureName: input.scenario,
@@ -425,11 +503,14 @@ export function materializeFixtureInput(input: {
     const steps: Array<OrchestratorV2ScenarioStep> = [];
     let messageIndex = 0;
     let runIndex = 0;
+    let forkThreadId: ThreadId | undefined;
     const activeRunDispatchKeys = new Set<string>();
 
     const runIdFor = (runOrdinal: number) =>
       idAllocator.derive.run({ threadId: ids.threadId, ordinal: runOrdinal });
 
+    // A `set_model` step changes the selection every later message carries.
+    let modelSelection = input.modelSelection;
     const pushDispatch = (
       command: OrchestrationV2Command,
       options: {
@@ -458,13 +539,21 @@ export function materializeFixtureInput(input: {
         }),
         ids,
         scenario: input.scenario,
-        modelSelection: input.modelSelection,
+        modelSelection,
         ...(input.fixtureInput.interactionMode === undefined
           ? {}
           : { interactionMode: input.fixtureInput.interactionMode }),
+        ...(input.fixtureInput.runtimeMode === undefined
+          ? {}
+          : { runtimeMode: input.fixtureInput.runtimeMode }),
       }),
     );
 
+    // Multiple requests keep runs busy between answers; wait for each request, not thread idle.
+    const answersNext = (stepIndex: number) => {
+      const next = input.fixtureInput.steps[stepIndex + 1]?.type;
+      return next === "approve_next_runtime_request" || next === "answer_next_user_input_request";
+    };
     for (const [stepIndex, step] of input.fixtureInput.steps.entries()) {
       switch (step.type) {
         case "message":
@@ -478,7 +567,11 @@ export function materializeFixtureInput(input: {
                   nextStep.type === "queue_message" ||
                   (nextStep.type === "restart" && nextStep.targetRunIndex === runIndex) ||
                   (nextStep.type === "release_replay_gate_after_waiting" &&
-                    nextStep.targetRunIndex === runIndex))) ||
+                    nextStep.targetRunIndex === runIndex) ||
+                  // Continuations start while busy; waiting for idle would deadlock.
+                  (nextStep.type === "await_run_status" && nextStep.targetRunIndex > runIndex) ||
+                  // Held open until the test clock moves, so it cannot go idle first.
+                  nextStep.type === "finish_held_run")) ||
               nextStep?.type === "approve_next_runtime_request" ||
               nextStep?.type === "answer_next_user_input_request";
             const key = `run:${runIndex}`;
@@ -489,7 +582,7 @@ export function materializeFixtureInput(input: {
                   commandName: `message-${messageIndex}`,
                 }),
                 ids,
-                modelSelection: input.modelSelection,
+                modelSelection,
                 messageId: yield* idAllocator.allocate.message({
                   threadId: ids.threadId,
                   ordinal: messageIndex,
@@ -523,7 +616,7 @@ export function materializeFixtureInput(input: {
                 commandName: `queue-message-${messageIndex}`,
               }),
               ids,
-              modelSelection: input.modelSelection,
+              modelSelection,
               messageId: yield* idAllocator.allocate.message({
                 threadId: ids.threadId,
                 ordinal: messageIndex,
@@ -565,6 +658,22 @@ export function materializeFixtureInput(input: {
             runId: runIdFor(step.targetRunIndex),
             status: step.status,
           });
+          if (step.waitForTurnItemType !== undefined) {
+            steps.push({
+              type: "await_run_turn_item",
+              threadId: ids.threadId,
+              runId: runIdFor(step.targetRunIndex),
+              itemType: step.waitForTurnItemType,
+            });
+          }
+          break;
+        case "finish_held_run":
+          steps.push({
+            type: "finish_held_run",
+            threadId: ids.threadId,
+            runId: runIdFor(step.targetRunIndex),
+            status: step.status,
+          });
           break;
         case "capture_shell_snapshot":
           steps.push({ type: "capture_shell_snapshot", key: step.key });
@@ -596,7 +705,9 @@ export function materializeFixtureInput(input: {
             answers: step.answers,
           };
           steps.push({ type: "advance_clock", duration: "1 millis" });
-          steps.push({ type: "await_thread_idle", threadId: ids.threadId });
+          if (!answersNext(stepIndex)) {
+            steps.push({ type: "await_thread_idle", threadId: ids.threadId });
+          }
           break;
         case "approve_next_runtime_request":
           pushDispatch(
@@ -620,9 +731,14 @@ export function materializeFixtureInput(input: {
             threadId: ids.threadId,
             commandId: commands.at(-1)!.commandId,
             decision: step.decision ?? "accept",
+            ...(step.shellSnapshotKeyWhilePending === undefined
+              ? {}
+              : { shellSnapshotKeyWhilePending: step.shellSnapshotKeyWhilePending }),
           };
           steps.push({ type: "advance_clock", duration: "1 millis" });
-          steps.push({ type: "await_thread_idle", threadId: ids.threadId });
+          if (!answersNext(stepIndex)) {
+            steps.push({ type: "await_thread_idle", threadId: ids.threadId });
+          }
           break;
         case "steer":
           messageIndex += 1;
@@ -638,7 +754,7 @@ export function materializeFixtureInput(input: {
                 commandName: `steer-${messageIndex}`,
               }),
               ids,
-              modelSelection: input.modelSelection,
+              modelSelection,
               messageId: yield* idAllocator.allocate.message({
                 threadId: ids.threadId,
                 ordinal: messageIndex,
@@ -678,7 +794,7 @@ export function materializeFixtureInput(input: {
                 commandName: `restart-${messageIndex}`,
               }),
               ids,
-              modelSelection: input.modelSelection,
+              modelSelection,
               messageId: yield* idAllocator.allocate.message({
                 threadId: ids.threadId,
                 ordinal: messageIndex,
@@ -716,6 +832,10 @@ export function materializeFixtureInput(input: {
               threadId: ids.threadId,
               runId: runIdFor(step.targetRunIndex),
               itemType: step.waitForTurnItemType,
+              ...(step.waitForTurnItemStatus === undefined
+                ? {}
+                : { itemStatus: step.waitForTurnItemStatus }),
+              ...(step.inSubagentThread === true ? { inSubagentThreads: true } : {}),
             });
           }
           pushDispatch(
@@ -736,6 +856,24 @@ export function materializeFixtureInput(input: {
           steps.push({ type: "advance_clock", duration: "1 millis" });
           steps.push({ type: "await_thread_idle", threadId: ids.threadId });
           break;
+        case "stop_background_work":
+          steps.push({ type: "await_thread_idle", threadId: ids.threadId });
+          steps.push({ type: "capture_shell_snapshot", key: "before-stop" });
+          pushDispatch(
+            {
+              type: "run.interrupt",
+              commandId: yield* idAllocator.allocate.command({
+                fixtureName: input.scenario,
+                commandName: `stop-background-work-${step.targetRunIndex}`,
+              }),
+              threadId: ids.threadId,
+              runId: runIdFor(step.targetRunIndex),
+              holdQueue: true,
+            },
+            { advanceClockAfter: false },
+          );
+          steps.push({ type: "await_no_background_work", threadId: ids.threadId });
+          break;
         case "release_replay_gate_after_waiting":
           steps.push({
             type: "release_replay_gate_after_waiting",
@@ -747,6 +885,56 @@ export function materializeFixtureInput(input: {
         case "advance_clock":
           steps.push({ type: "advance_clock", duration: step.duration });
           break;
+        case "set_model":
+          modelSelection = { ...input.modelSelection, model: step.model };
+          pushDispatch({
+            type: "thread.model-selection.set",
+            commandId: yield* idAllocator.allocate.command({
+              fixtureName: input.scenario,
+              commandName: `set-model-${step.model}`,
+            }),
+            threadId: ids.threadId,
+            modelSelection,
+          });
+          break;
+        case "fork":
+          {
+            const targetThreadId = yield* idAllocator.allocate.thread({
+              fixtureName: `${input.scenario}-fork`,
+              projectId: ids.projectId,
+            });
+            forkThreadId = targetThreadId;
+            pushDispatch({
+              type: "thread.fork",
+              createdBy: "user",
+              creationSource: "web",
+              commandId: yield* idAllocator.allocate.command({
+                fixtureName: input.scenario,
+                commandName: "thread-fork",
+              }),
+              sourceThreadId: ids.threadId,
+              targetThreadId,
+              sourcePoint: { type: "run", runId: runIdFor(step.fromRunIndex) },
+              title: "Forked thread",
+            });
+            pushDispatch(
+              dispatchMessageCommand({
+                commandId: yield* idAllocator.allocate.command({
+                  fixtureName: input.scenario,
+                  commandName: "fork-message",
+                }),
+                ids: { ...ids, threadId: targetThreadId },
+                modelSelection,
+                messageId: yield* idAllocator.allocate.message({
+                  threadId: targetThreadId,
+                  ordinal: 1,
+                }),
+                text: step.text,
+              }),
+            );
+            steps.push({ type: "await_thread_idle", threadId: targetThreadId });
+          }
+          break;
         case "rollback":
           {
             const scopeId = yield* idAllocator.allocate.checkpointScope({
@@ -755,6 +943,7 @@ export function materializeFixtureInput(input: {
             });
             pushDispatch({
               type: "checkpoint.rollback",
+              restoreFiles: false,
               commandId: yield* idAllocator.allocate.command({
                 fixtureName: input.scenario,
                 commandName: `rollback-${step.checkpointSuffix}`,
@@ -779,9 +968,15 @@ export function materializeFixtureInput(input: {
     return {
       commands,
       steps,
-      projectionThreadIds: [ids.threadId],
+      projectionThreadIds:
+        forkThreadId === undefined ? [ids.threadId] : [ids.threadId, forkThreadId],
     };
   });
+}
+
+/** Reads `key` from a recorded frame or payload of unknown shape. */
+export function field(value: unknown, key: string): unknown {
+  return Predicate.hasProperty(value, key) ? value[key] : undefined;
 }
 
 export function projectionFor(
@@ -846,7 +1041,7 @@ export function assertRunOrdinals(
   );
 }
 
-export function assertRunsHaveRootNodes(projection: OrchestrationV2ThreadProjection) {
+function assertRunsHaveRootNodes(projection: OrchestrationV2ThreadProjection) {
   for (const run of projection.runs) {
     assert.isNotNull(run.rootNodeId, `run ${run.id} must have a root node`);
     assert.isTrue(
@@ -856,7 +1051,7 @@ export function assertRunsHaveRootNodes(projection: OrchestrationV2ThreadProject
   }
 }
 
-export function assertRootNodesCountForRuns(projection: OrchestrationV2ThreadProjection) {
+function assertRootNodesCountForRuns(projection: OrchestrationV2ThreadProjection) {
   const rootNodes = projection.nodes.filter((node) => node.kind === "root_turn");
   assert.isAtLeast(rootNodes.length, projection.runs.length);
   for (const node of rootNodes) {
@@ -864,7 +1059,7 @@ export function assertRootNodesCountForRuns(projection: OrchestrationV2ThreadPro
   }
 }
 
-export function assertProviderTurnsReferenceNodes(projection: OrchestrationV2ThreadProjection) {
+function assertProviderTurnsReferenceNodes(projection: OrchestrationV2ThreadProjection) {
   for (const providerTurn of projection.providerTurns) {
     assert.isTrue(
       projection.nodes.some((node) => node.id === providerTurn.nodeId),
@@ -877,7 +1072,7 @@ export function assertProviderTurnsReferenceNodes(projection: OrchestrationV2Thr
   }
 }
 
-export function assertTurnItemsAreOrdered(projection: OrchestrationV2ThreadProjection) {
+function assertTurnItemsAreOrdered(projection: OrchestrationV2ThreadProjection) {
   const ordinals = projection.turnItems.map((item) => item.ordinal);
   assert.deepEqual(
     ordinals,
@@ -885,7 +1080,7 @@ export function assertTurnItemsAreOrdered(projection: OrchestrationV2ThreadProje
   );
 }
 
-export function assertTurnItemsReferenceProjection(projection: OrchestrationV2ThreadProjection) {
+function assertTurnItemsReferenceProjection(projection: OrchestrationV2ThreadProjection) {
   for (const item of projection.turnItems) {
     if (item.runId !== null) {
       assert.isTrue(
@@ -928,7 +1123,7 @@ export function assertVisibleTurnItemsMirrorLocalTurnItems(
   }
 }
 
-export function assertMessagesReferenceProjection(projection: OrchestrationV2ThreadProjection) {
+function assertMessagesReferenceProjection(projection: OrchestrationV2ThreadProjection) {
   for (const message of projection.messages) {
     if (message.runId !== null) {
       assert.isTrue(
@@ -945,9 +1140,7 @@ export function assertMessagesReferenceProjection(projection: OrchestrationV2Thr
   }
 }
 
-export function assertRuntimeRequestsReferenceProjection(
-  projection: OrchestrationV2ThreadProjection,
-) {
+function assertRuntimeRequestsReferenceProjection(projection: OrchestrationV2ThreadProjection) {
   for (const request of projection.runtimeRequests) {
     const requestNode = projection.nodes.find((node) => node.id === request.nodeId);
     assert.isTrue(
@@ -1004,6 +1197,111 @@ export function assertNoExtraAppRunsForProviderChildren(input: {
     input.expectedAppRuns,
     "provider child activity must not create additional app runs",
   );
+}
+
+export function assertProviderNativeSubagentRootTurns(result: OrchestratorV2ScenarioResult) {
+  const activity = (statuses: ReadonlyArray<OrchestrationV2ExecutionNode["status"]>) =>
+    statuses
+      .map((status) => (isOrchestrationV2WorkActive(status) ? "active" : status))
+      .filter((status, index, all) => status !== all[index - 1]);
+  for (const projection of result.projections.values()) {
+    for (const subagent of projection.subagents) {
+      if (subagent.origin !== "provider_native" || subagent.childThreadId === null) continue;
+      const childThreadId = subagent.childThreadId;
+      const child = result.projections.get(childThreadId);
+      assert.isDefined(child, `missing child thread for subagent ${subagent.id}`);
+      assert.equal(child.thread.creationSource, "provider");
+      assert.deepEqual(child.thread.forkedFrom, { type: "node", nodeId: subagent.id });
+      assert.lengthOf(child.runs, 0);
+      const roots = child.nodes.filter((node) => node.kind === "root_turn");
+      assert.isNotEmpty(roots, `child ${childThreadId} must have a root turn`);
+      for (const root of roots) assert.isNull(root.runId);
+
+      const runByChildUpdate = new Map<string, string | undefined>();
+      for (const event of result.domainEvents) {
+        if (event.threadId !== childThreadId) continue;
+        const update = `${event.type}:${JSON.stringify(event.payload)}`;
+        const storedBy = runByChildUpdate.get(update);
+        if (runByChildUpdate.has(update) && storedBy !== event.runId) {
+          assert.fail(
+            `child ${childThreadId} stored ${event.type} in ${storedBy} and ${event.runId}`,
+          );
+        }
+        runByChildUpdate.set(update, event.runId);
+      }
+
+      const rootEvents = result.domainEvents.flatMap((event, index) =>
+        event.type === "node.updated" &&
+        event.payload.threadId === childThreadId &&
+        event.payload.kind === "root_turn"
+          ? [{ index, status: event.payload.status }]
+          : [],
+      );
+      const firstItemIndex = result.domainEvents.findIndex(
+        (event) =>
+          event.type === "turn-item.updated" &&
+          event.payload.threadId === childThreadId &&
+          event.payload.type !== "user_message",
+      );
+      assert.equal(rootEvents[0]?.status, "running");
+      if (firstItemIndex !== -1) {
+        assert.isBelow(
+          rootEvents[0]?.index ?? Infinity,
+          firstItemIndex,
+          `child ${childThreadId} must be working before its first item`,
+        );
+      }
+      const subagentStatuses = result.domainEvents.flatMap((event) =>
+        event.type === "subagent.updated" && event.payload.id === subagent.id
+          ? [event.payload.status]
+          : [],
+      );
+      const rootActivity = activity(rootEvents.map((event) => event.status));
+      const subagentActivity = activity(subagentStatuses);
+      const wokenAfterEnd =
+        child.subagents.length > 0 && rootActivity.length > subagentActivity.length;
+      assert.deepEqual(
+        wokenAfterEnd ? rootActivity.slice(0, subagentActivity.length) : rootActivity,
+        subagentActivity,
+        `child ${childThreadId} root turn must follow subagent ${subagent.id}`,
+      );
+      if (wokenAfterEnd) {
+        assert.notEqual(rootActivity.at(-1), "active", `child ${childThreadId} must end its turns`);
+        const childSubagentIds = new Set(child.subagents.map((nested) => nested.id));
+        const nestedEndIndexes = result.domainEvents.flatMap((event, index) =>
+          event.type === "subagent.updated" &&
+          childSubagentIds.has(event.payload.id) &&
+          !isOrchestrationV2WorkActive(event.payload.status)
+            ? [index]
+            : [],
+        );
+        const subagentEndIndex = result.domainEvents.findLastIndex(
+          (event) =>
+            event.type === "subagent.updated" &&
+            event.payload.id === subagent.id &&
+            !isOrchestrationV2WorkActive(event.payload.status),
+        );
+        const wakeStarts = rootEvents.filter(
+          (event, position) =>
+            event.index > subagentEndIndex &&
+            isOrchestrationV2WorkActive(event.status) &&
+            !isOrchestrationV2WorkActive(rootEvents[position - 1]?.status ?? "completed"),
+        );
+        assert.isNotEmpty(wakeStarts, `child ${childThreadId} woke without a new turn`);
+        assert.isAtMost(
+          wakeStarts.length,
+          nestedEndIndexes.length,
+          `child ${childThreadId} woke more often than its subagents ended`,
+        );
+        for (const wake of wakeStarts) {
+          assert.isTrue(
+            nestedEndIndexes.some((endIndex) => endIndex < wake.index),
+            `child ${childThreadId} woke before any of its subagents ended`,
+          );
+        }
+      }
+    }
+  }
 }
 
 export function assertExecutionNodeKinds(
@@ -1071,10 +1369,7 @@ export function assertRuntimeRequestCounts(
   }
 }
 
-export function countReplayLabelsWithPrefix(
-  transcript: ProviderReplayTranscript,
-  prefix: string,
-): number {
+function countReplayLabelsWithPrefix(transcript: ProviderReplayTranscript, prefix: string): number {
   return transcript.entries.filter(
     (entry) => entry.type !== "runtime_exit" && (entry.label?.startsWith(prefix) ?? false),
   ).length;
@@ -1115,6 +1410,28 @@ export function assertConversationMessageRoles(
   );
 }
 
+export function assertNoAcpClientFileOrTerminalRequests(transcript: ProviderReplayTranscript) {
+  const frames = transcript.entries.flatMap((entry) =>
+    entry.type === "runtime_exit"
+      ? []
+      : [entry.frame as { method?: unknown; params?: { clientCapabilities?: unknown } }],
+  );
+  assert.deepInclude(
+    frames.find((frame) => frame.method === "initialize")?.params?.clientCapabilities ?? {},
+    { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
+    "T3 must not advertise client fs or terminals",
+  );
+  assert.deepEqual(
+    frames.flatMap((frame) =>
+      typeof frame.method === "string" && /^(fs|terminal)\//u.test(frame.method)
+        ? [frame.method]
+        : [],
+    ),
+    [],
+    "the agent must not route file or terminal work through T3",
+  );
+}
+
 export function assertUserMessagesInclude(
   projection: OrchestrationV2ThreadProjection,
   expectedTexts: ReadonlyArray<string>,
@@ -1125,20 +1442,6 @@ export function assertUserMessagesInclude(
         (item) => item.type === "user_message" && item.text.includes(expectedText),
       ),
       `expected user input to include ${JSON.stringify(expectedText)}`,
-    );
-  }
-}
-
-export function assertUserMessagesExclude(
-  projection: OrchestrationV2ThreadProjection,
-  rejectedTexts: ReadonlyArray<string>,
-) {
-  for (const rejectedText of rejectedTexts) {
-    assert.isFalse(
-      projection.turnItems.some(
-        (item) => item.type === "user_message" && item.text.includes(rejectedText),
-      ),
-      `expected user input to exclude ${JSON.stringify(rejectedText)}`,
     );
   }
 }
@@ -1180,5 +1483,13 @@ export function assertUserMessageInputIntents(
       .filter((item) => item.type === "user_message")
       .map((item) => item.inputIntent),
     expectedIntents,
+  );
+}
+
+export function backgroundNotifications(projection: OrchestrationV2ThreadProjection) {
+  return projection.turnItems.flatMap((item) =>
+    item.type === "notification"
+      ? [{ summary: item.summary, outcome: item.outcome, source: item.source }]
+      : [],
   );
 }

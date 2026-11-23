@@ -1,4 +1,7 @@
-import type { OrchestrationV2AgentPersonaCatalog } from "@t3tools/contracts";
+import {
+  isAgentPersonaAuthorityPolicy,
+  type OrchestrationV2AgentPersonaCatalog,
+} from "@t3tools/contracts";
 import { agentMentionReplacement } from "@t3tools/shared/j5/agentMention";
 
 /** Stable IDs keep mentions unambiguous when display names are edited or duplicated. */
@@ -19,6 +22,8 @@ export function agentPersonaMentionItems(
     .filter(
       (persona) =>
         persona.availability.status === "available" &&
+        // A default policy this app does not know is unsupported here, so it is not offered.
+        isAgentPersonaAuthorityPolicy(persona.defaultAuthorityPolicy) &&
         (options.matchPrefixOnly
           ? [persona.personaId, persona.displayName].some((value) =>
               value.toLowerCase().startsWith(search),
@@ -27,7 +32,7 @@ export function agentPersonaMentionItems(
               value.toLowerCase().includes(search),
             )),
     )
-    .toSorted((a, b) => a.displayName.localeCompare(b.displayName))
+    .sort((a, b) => a.displayName.localeCompare(b.displayName))
     .slice(0, 20)
     .map((persona) => ({
       id: `agent:${persona.personaId}`,

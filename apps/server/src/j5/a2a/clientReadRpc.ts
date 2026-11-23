@@ -1,0 +1,211 @@
+import { AuthAccessReadScope, AuthOrchestrationReadScope, ThreadId } from "@t3tools/contracts";
+import {
+  J5ActionError,
+  J5_CLIENT_READ_WS_METHODS,
+  type CrewArchiveWorktreesRequest,
+  type CrewWorktreeCleanupListRequest,
+  type FleetReadRequest,
+  type HumanInboxListRequest,
+  type OpenInboxCountRequest,
+  type ParticipantIdentitiesRequest,
+  type PreArchiveFactsRequest,
+  type ThreadHomesRequest,
+} from "@t3tools/contracts/j5";
+import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
+
+import { failAsJ5ActionError } from "../rpcActionError.ts";
+import { connectionPersonId } from "../sharing/connectionPerson.ts";
+import { connectionReads, connectionWrites, isOwner } from "../sharing/connectionWriter.ts";
+import { PersonAccess, type SessionIdentity } from "../sharing/PersonAccess.ts";
+import { SharedThreads } from "../sharing/SharedThreads.ts";
+import { ClientReadsService } from "./ClientReadsService.ts";
+import { ParticipantId } from "./contracts.ts";
+import { PeerAdminService } from "./PeerAdminService.ts";
+import { ReadChanges } from "./ReadChanges.ts";
+
+const METHODS = J5_CLIENT_READ_WS_METHODS;
+
+/**
+ * Each method's scope, spread into upstream's table through `wsRpcScopes.ts`. Reading the ledger
+ * needs read scope; the peer list carries the `access:read` scope Settings → Connections does.
+ */
+export const CLIENT_READ_RPC_SCOPES = {
+  [METHODS.listHumanInbox]: AuthOrchestrationReadScope,
+  [METHODS.readOpenInboxCount]: AuthOrchestrationReadScope,
+  [METHODS.listCrewProposals]: AuthOrchestrationReadScope,
+  [METHODS.listCrewRuntimeRequests]: AuthOrchestrationReadScope,
+  [METHODS.listCrewMemberships]: AuthOrchestrationReadScope,
+  [METHODS.readFleet]: AuthOrchestrationReadScope,
+  [METHODS.listSpawnedChildren]: AuthOrchestrationReadScope,
+  [METHODS.readPreArchiveFacts]: AuthOrchestrationReadScope,
+  [METHODS.readCrewArchiveWorktrees]: AuthOrchestrationReadScope,
+  [METHODS.listCrewWorktreeCleanups]: AuthOrchestrationReadScope,
+  [METHODS.readParticipantIdentities]: AuthOrchestrationReadScope,
+  [METHODS.listPeers]: AuthAccessReadScope,
+  [METHODS.subscribeReadChanges]: AuthOrchestrationReadScope,
+} as const;
+
+/** A person the request names who is not one of this server's people is a refusal, not a fault. */
+const inboxFailure = failAsJ5ActionError({
+  refusals: [
+    "A2AHumanPersonIdError",
+    "A2AParticipantNotFoundError",
+    "A2ALocalOperatorNotFoundError",
+  ],
+  failed: "Reading the Inbox failed.",
+});
+
+const failed = (message: string) => failAsJ5ActionError({ refusals: [], failed: message });
+const isJ5ActionError = Schema.is(J5ActionError);
+
+/** An id that is not one names nobody, so it stays unknown rather than failing the ids beside it. */
+const isParticipantId = Schema.is(ParticipantId);
+
+/** Handlers for `J5ClientReadRpcGroup`: each calls one service method and maps its failure. */
+export const makeClientReadRpcHandlers = Effect.fn("j5.makeClientReadRpcHandlers")(function* (
+  session: SessionIdentity,
+) {
+  const clientReads = yield* ClientReadsService;
+  const peers = yield* PeerAdminService;
+  const changes = yield* ReadChanges;
+  const people = yield* PersonAccess;
+  const shared = yield* SharedThreads;
+  // The inbox is the connection's own person's, whatever the client asks.
+  const personOf = connectionPersonId(session).pipe(Effect.provideService(PersonAccess, people));
+  // A Crew's requests are listed to whoever can write to its Captain's thread (Crews AC23).
+  const writes = connectionWrites(session).pipe(
+    Effect.provideService(PersonAccess, people),
+    Effect.provideService(SharedThreads, shared),
+  );
+  const reaches = connectionReads(session).pipe(
+    Effect.provideService(PersonAccess, people),
+    Effect.provideService(SharedThreads, shared),
+  );
+  // Listed to Owners only: removing worktrees is the Owner's call, so no one else has anything
+  // to answer, and the count is of what waits on the person.
+  const cleanupsReached = Effect.fn("j5.a2a.clientReadRpc.cleanupsReached")(function* (
+    status: CrewWorktreeCleanupListRequest["status"],
+  ) {
+    if (!(yield* isOwner(session).pipe(Effect.provideService(PersonAccess, people)))) return [];
+    return yield* clientReads
+      .crewWorktreeCleanups(status)
+      .pipe(Effect.catch(failed("Reading worktree cleanups failed.")));
+  });
+  return {
+    [METHODS.listHumanInbox]: (input: HumanInboxListRequest) =>
+      personOf.pipe(
+        Effect.flatMap((personId) =>
+          clientReads
+            .humanInbox({ status: input.status, personId })
+            .pipe(Effect.catch(inboxFailure)),
+        ),
+      ),
+    [METHODS.readOpenInboxCount]: (_input: OpenInboxCountRequest) =>
+      personOf.pipe(
+        Effect.flatMap((personId) =>
+          clientReads.openInboxCount(personId).pipe(Effect.catch(inboxFailure)),
+        ),
+        // An open worktree cleanup waits on a person like an ask does.
+        Effect.flatMap((counted) =>
+          cleanupsReached("open").pipe(
+            Effect.map((open) => ({ ...counted, count: counted.count + open.length })),
+          ),
+        ),
+      ),
+    [METHODS.listCrewWorktreeCleanups]: Effect.fn("j5.a2a.clientReadRpc.listCrewWorktreeCleanups")(
+      function* (input: CrewWorktreeCleanupListRequest) {
+        return { items: yield* cleanupsReached(input.status) };
+      },
+    ),
+    [METHODS.listCrewProposals]: Effect.fn("j5.a2a.clientReadRpc.listCrewProposals")(function* () {
+      const listed = yield* clientReads.crewProposals.pipe(
+        Effect.catch(failed("Reading crew proposals failed.")),
+      );
+      // Listed to whoever reaches the Captain: a Viewer sees a roster's prompt and how it was
+      // answered, with nothing to press (Shared conversations AC11).
+      const reachesCaptain = yield* reaches;
+      return {
+        proposals: yield* Effect.filter(listed.proposals, (proposal) =>
+          reachesCaptain(Effect.succeed(ThreadId.make(proposal.captainThreadId))),
+        ),
+      };
+    }),
+    [METHODS.listCrewRuntimeRequests]: Effect.fn("j5.a2a.clientReadRpc.listCrewRuntimeRequests")(
+      function* () {
+        const listed = yield* clientReads.crewRuntimeRequests.pipe(
+          Effect.catch(failed("Reading crew requests failed.")),
+        );
+        const mayAnswer = yield* writes;
+        // A seat's approval or question is the seat's own prompt: whoever writes to the seat's
+        // thread answers it, everyone who writes to its Captain's included.
+        const requests = yield* Effect.filter(listed.requests, (request) =>
+          mayAnswer(Effect.succeed(request.threadId)),
+        );
+        if (listed.questions === undefined) return { requests };
+        const questions = yield* Effect.filter(listed.questions, (question) =>
+          mayAnswer(Effect.succeed(question.threadId)),
+        );
+        return { requests, questions };
+      },
+    ),
+    [METHODS.listCrewMemberships]: Effect.fn("j5.a2a.clientReadRpc.listCrewMemberships")(function* (
+      input: ThreadHomesRequest,
+    ) {
+      // A narrowed person is told the Crews of the threads they reach, and no others.
+      const reachesThread = yield* reaches;
+      const threadIds = yield* Effect.filter(input.threadIds, (threadId) =>
+        reachesThread(Effect.succeed(threadId)),
+      );
+      return yield* clientReads
+        .crewMemberships(threadIds)
+        .pipe(Effect.catch(failed("Crew membership read failed.")));
+    }),
+    [METHODS.readFleet]: (input: FleetReadRequest) =>
+      clientReads
+        .fleet(input.includeRetired === true)
+        .pipe(Effect.catch(failed("Fleet read failed."))),
+    [METHODS.listSpawnedChildren]: Effect.fn("j5.a2a.clientReadRpc.listSpawnedChildren")(function* (
+      input: ThreadHomesRequest,
+    ) {
+      // A narrowed person hears only of the threads they reach, spawners and children included.
+      const reachesThread = yield* reaches;
+      return yield* clientReads
+        .spawnedChildren(input.threadIds, (threadId) => reachesThread(Effect.succeed(threadId)))
+        .pipe(
+          // A failed reach check already carries its own code, as in the other narrowed reads.
+          Effect.catchIf(
+            (error) => !isJ5ActionError(error),
+            failed("Spawned children read failed."),
+          ),
+        );
+    }),
+    [METHODS.readPreArchiveFacts]: (input: PreArchiveFactsRequest) =>
+      clientReads
+        .preArchiveFacts(input.threadId)
+        .pipe(Effect.catch(failed("Pre-archive fact lookup failed."))),
+    [METHODS.readCrewArchiveWorktrees]: Effect.fn("j5.a2a.clientReadRpc.readCrewArchiveWorktrees")(
+      function* (input: CrewArchiveWorktreesRequest) {
+        const listed = yield* clientReads
+          .crewArchiveWorktrees(input.crewInstanceIds)
+          .pipe(Effect.catch(failed("Crew worktree lookup failed.")));
+        // A worktree's path is shown to whoever reaches its Crew's Captain.
+        const reachesCaptain = yield* reaches;
+        const worktrees = yield* Effect.filter(listed, (entry) =>
+          reachesCaptain(Effect.succeed(entry.captainThreadId)),
+        );
+        return {
+          worktrees: worktrees.map(
+            ({ captainThreadId: _captainThreadId, ...estimate }) => estimate,
+          ),
+        };
+      },
+    ),
+    [METHODS.readParticipantIdentities]: (input: ParticipantIdentitiesRequest) =>
+      clientReads
+        .participantIdentities({ participantIds: input.participantIds.filter(isParticipantId) })
+        .pipe(Effect.catch(failed("Client read failed."))),
+    [METHODS.listPeers]: () => peers.list.pipe(Effect.catch(failed("Listing peers failed."))),
+    [METHODS.subscribeReadChanges]: () => changes.changes,
+  };
+});

@@ -1,8 +1,12 @@
 import {
+  isRuntimeModeAbove,
+  managedRuntimeModeCeilingMessage,
   ModelSelection,
   OrchestrationV2AppThread,
   ProjectId,
   ProviderInstanceId,
+  RuntimeMode,
+  ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -10,17 +14,13 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
-import * as ProjectionProjects from "../persistence/Services/ProjectionProjects.ts";
+import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import { makeAgentPersonaRuntimePolicyResolver } from "../j5/agents/agentPersonaRuntime.ts";
-import {
-  ProviderAdapterV2RuntimePolicy,
-  type ProviderAdapterV2RuntimePolicy as ProviderAdapterV2RuntimePolicyType,
-} from "./ProviderAdapter.ts";
+import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+import * as ServerSettings from "../serverSettings.ts";
+import * as ProjectStore from "./ProjectStore.ts";
 
-/**
- * ERRORS
- */
-export class RuntimePolicyResolveError extends Schema.TaggedErrorClass<RuntimePolicyResolveError>()(
+export class RuntimePolicyResolveError extends Schema.TaggedError<RuntimePolicyResolveError>()(
   "RuntimePolicyResolveError",
   {
     projectId: ProjectId,
@@ -33,7 +33,31 @@ export class RuntimePolicyResolveError extends Schema.TaggedErrorClass<RuntimePo
   }
 }
 
-export const RuntimePolicyV2Error = Schema.Union([RuntimePolicyResolveError]);
+/**
+ * A turn would start in a mode above the policy's ceiling. The orchestrator refuses those when
+ * they are dispatched; this catches the ones it never saw, such as a run resumed after a restart
+ * on a thread whose mode predates the policy.
+ */
+export class RuntimePolicyAboveCeilingError extends Schema.TaggedError<RuntimePolicyAboveCeilingError>()(
+  "RuntimePolicyAboveCeilingError",
+  {
+    threadId: ThreadId,
+    runtimeMode: RuntimeMode,
+    maxRuntimeMode: RuntimeMode,
+    organization: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `${managedRuntimeModeCeilingMessage(this.organization, this.maxRuntimeMode)} Switch this thread's mode to continue.`;
+  }
+}
+
+export const isRuntimePolicyAboveCeilingError = Schema.is(RuntimePolicyAboveCeilingError);
+
+export const RuntimePolicyV2Error = Schema.Union([
+  RuntimePolicyResolveError,
+  RuntimePolicyAboveCeilingError,
+]);
 export type RuntimePolicyV2Error = typeof RuntimePolicyV2Error.Type;
 
 export const RuntimePolicyV2Override = Schema.Struct({
@@ -44,14 +68,11 @@ export const RuntimePolicyV2Override = Schema.Struct({
 });
 export type RuntimePolicyV2Override = typeof RuntimePolicyV2Override.Type;
 
-/**
- * SERVICE DEFINITION
- */
 export interface RuntimePolicyV2Shape {
   readonly resolve: (input: {
     readonly thread: OrchestrationV2AppThread;
     readonly modelSelection: ModelSelection;
-  }) => Effect.Effect<ProviderAdapterV2RuntimePolicyType, RuntimePolicyV2Error>;
+  }) => Effect.Effect<ProviderAdapter.ProviderAdapterV2RuntimePolicy, RuntimePolicyV2Error>;
 }
 
 export class RuntimePolicyV2 extends Context.Service<RuntimePolicyV2, RuntimePolicyV2Shape>()(
@@ -67,33 +88,93 @@ const resolveThreadPolicy = makeAgentPersonaRuntimePolicyResolver(
     }),
 );
 
-/**
- * IMPLEMENTATIONS
- */
 export const layer: Layer.Layer<RuntimePolicyV2> = Layer.effect(
   RuntimePolicyV2,
   Effect.gen(function* () {
     const resolve = yield* resolveThreadPolicy;
     return RuntimePolicyV2.of({
-      resolve: (input) => resolve({ thread: input.thread, cwd: input.thread.worktreePath }),
+      resolve: Effect.fn("RuntimePolicyV2.resolve")(function (input) {
+        return resolve({ thread: input.thread, cwd: input.thread.worktreePath });
+      }),
     });
   }),
 );
 
-export const layerFromProjectRepository: Layer.Layer<
+function providerRuntimeMode(
+  runtimeMode: RuntimeMode,
+  supportedRuntimeModes: ReadonlyArray<RuntimeMode> | undefined,
+): RuntimeMode {
+  return supportedRuntimeModes === undefined ||
+    supportedRuntimeModes.length === 0 ||
+    supportedRuntimeModes.includes(runtimeMode)
+    ? runtimeMode
+    : "approval-required";
+}
+
+const refuseAboveCeiling = (
+  managedPolicy: ServerSettings.ServerSettingsService["Service"]["managedPolicy"],
+  thread: OrchestrationV2AppThread,
+) => {
+  const maxRuntimeMode = managedPolicy?.limits?.maxRuntimeMode;
+  return managedPolicy !== undefined &&
+    maxRuntimeMode !== undefined &&
+    isRuntimeModeAbove(thread.runtimeMode, maxRuntimeMode)
+    ? Effect.fail(
+        new RuntimePolicyAboveCeilingError({
+          threadId: thread.id,
+          runtimeMode: thread.runtimeMode,
+          maxRuntimeMode,
+          organization: managedPolicy.organization,
+        }),
+      )
+    : Effect.void;
+};
+
+/** Lays the policy's ceiling over another runtime policy, as `layerFromProjectStore` does. */
+export const layerEnforcingCeiling: Layer.Layer<
   RuntimePolicyV2,
   never,
-  ProjectionProjects.ProjectionProjectRepository
+  RuntimePolicyV2 | ServerSettings.ServerSettingsService
 > = Layer.effect(
   RuntimePolicyV2,
   Effect.gen(function* () {
-    const projects = yield* ProjectionProjects.ProjectionProjectRepository;
+    const base = yield* RuntimePolicyV2;
+    const { managedPolicy } = yield* ServerSettings.ServerSettingsService;
+    return RuntimePolicyV2.of({
+      resolve: Effect.fn("RuntimePolicyV2.resolveWithinCeiling")(function* (input) {
+        yield* refuseAboveCeiling(managedPolicy, input.thread);
+        return yield* base.resolve(input);
+      }),
+    });
+  }),
+);
+
+export const layerFromProjectStore: Layer.Layer<
+  RuntimePolicyV2,
+  never,
+  | ProjectStore.ProjectStoreV2
+  | ProviderInstanceRegistry.ProviderInstanceRegistry
+  | ServerSettings.ServerSettingsService
+> = Layer.effect(
+  RuntimePolicyV2,
+  Effect.gen(function* () {
+    const projects = yield* ProjectStore.ProjectStoreV2;
+    const providerInstances = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
     const resolve = yield* resolveThreadPolicy;
+    // The same ceiling the orchestrator enforces, fixed for the server's life.
+    const { managedPolicy } = yield* ServerSettings.ServerSettingsService;
+    const maxRuntimeMode = managedPolicy?.limits?.maxRuntimeMode;
     return RuntimePolicyV2.of({
       resolve: Effect.fn("RuntimePolicyV2.resolve")(function* (input) {
+        yield* refuseAboveCeiling(managedPolicy, input.thread);
+        const instance = yield* providerInstances.getInstance(input.modelSelection.instanceId);
+        const supportedRuntimeModes =
+          instance === undefined
+            ? undefined
+            : (yield* instance.snapshot.getSnapshot).supportedRuntimeModes;
         const cwd =
           input.thread.worktreePath ??
-          (yield* projects.getById({ projectId: input.thread.projectId }).pipe(
+          (yield* projects.get(input.thread.projectId).pipe(
             Effect.mapError(
               (cause) =>
                 new RuntimePolicyResolveError({
@@ -116,7 +197,12 @@ export const layerFromProjectRepository: Layer.Layer<
               }),
             ),
           ));
-        return yield* resolve({ thread: input.thread, cwd });
+        const policy = yield* resolve({ thread: input.thread, cwd });
+        return ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
+          ...policy,
+          runtimeMode: providerRuntimeMode(policy.runtimeMode, supportedRuntimeModes),
+          ...(maxRuntimeMode === undefined ? {} : { maxRuntimeMode }),
+        });
       }),
     });
   }),
@@ -133,7 +219,7 @@ export function layerWithOverride(
         resolve: (input) =>
           base.resolve(input).pipe(
             Effect.map((policy) =>
-              ProviderAdapterV2RuntimePolicy.make({
+              ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
                 ...policy,
                 ...(override.cwd === undefined ? {} : { cwd: override.cwd }),
                 ...(override.approvalPolicy === undefined

@@ -6,11 +6,13 @@ import type { CrewProposal, CrewProposalSeat } from "./AgentCrewProposalService.
 import { formatRunFailureField } from "./runFailures.ts";
 
 /**
- * How a seat's first turn went, measured from its run: `started` once provider activity is recorded
- * (or the run completed), `failed` when the run failed before the report, `pending`
- * when the report's window closed before either.
+ * How a seat's launch and first turn went: `started` once provider activity is recorded (or the run
+ * completed), `failed` when the run failed first, `pending` when the window closed first.
+ * `not_started`: the thread exists but its home or brief failed; `not_created`: no thread, so not
+ * on the roster.
  */
 export type SeatStartVerdict =
+  | { readonly kind: "waiting" }
   | { readonly kind: "started" }
   | {
       readonly kind: "failed";
@@ -18,7 +20,9 @@ export type SeatStartVerdict =
       readonly runStatus: string;
       readonly failure: OrchestrationV2ProviderFailure | null;
     }
-  | { readonly kind: "pending" };
+  | { readonly kind: "pending" }
+  | { readonly kind: "not_started"; readonly detail: string }
+  | { readonly kind: "not_created"; readonly detail: string };
 
 export interface CrewRosterChanges {
   readonly added: ReadonlyArray<string>;
@@ -76,10 +80,18 @@ export const crewRosterChanges = (
     renamed,
     runtimeChanged,
     instructionsChanged: retained
-      .filter(({ previous, seat }) => previous.instructions !== seat.instructions)
+      .filter(
+        ({ previous, seat }) =>
+          previous.instructions !== seat.instructions ||
+          previous.personaInstructions !== seat.personaInstructions,
+      )
       .map(({ seat }) => seat.seat),
   };
 };
+
+/** A launch-step error as one report field: escaped so it cannot add lines or close the block. */
+const reportField = (detail: string) =>
+  detail.replace(/[&<>\r\n\u2028\u2029]/g, (character) => `&#${character.charCodeAt(0)};`);
 
 const changesLine = (changes: CrewRosterChanges) => {
   const parts = [
@@ -96,8 +108,10 @@ const changesLine = (changes: CrewRosterChanges) => {
   return parts.length === 0 ? "none" : parts.join("; ");
 };
 
+// `decided_by` is there only in a shared conversation, where more than one person could have
+// answered (Shared conversations AC10); every other Captain reads the notice as it always was.
 const head = (proposal: CrewProposal, decision: "approved" | "declined") =>
-  `<j5_crew_gate>\nproposal_id: ${proposal.id}\nkind: ${proposal.kind}\ndecision: ${decision}\ncrew_name: ${proposal.displayName}`;
+  `<j5_crew_gate>\nproposal_id: ${proposal.id}\nkind: ${proposal.kind}${proposal.approvalMode === "automatic" ? "\napproval_mode: automatic" : ""}\ndecision: ${decision}${proposal.decidedBy == null ? "" : `\ndecided_by: ${reportField(proposal.decidedBy)}`}\ncrew_name: ${proposal.displayName}`;
 
 /** The platform-composed notice a Captain receives when the person declines: measured facts only. */
 export const crewDeclinedNoticeText = (proposal: CrewProposal) =>
@@ -114,29 +128,50 @@ export const crewLaunchReportText = (input: {
   readonly instance: AgentCrewInstance;
   readonly verdicts: ReadonlyMap<string, SeatStartVerdict>;
   readonly windowMs: number;
+  /** The playbook the Crew follows, with its live title (its name when the file can't be read). */
+  readonly playbook?: { readonly name: string; readonly title: string } | null;
 }) => {
   const { proposal, instance, verdicts } = input;
+  const playbook = input.playbook ?? null;
   const changes = crewRosterChanges(
     proposal.requestedSeats,
     proposal.approvedSeats ?? proposal.requestedSeats,
   );
   const started = [...verdicts].filter(([, verdict]) => verdict.kind === "started").length;
-  const failed = [...verdicts].filter(([, verdict]) => verdict.kind === "failed");
+  // A seat that exists but never got its first turn is a failed seat to the Captain; the step
+  // that failed takes the run status's place.
+  const failed = [...verdicts].filter(
+    ([, verdict]) => verdict.kind === "failed" || verdict.kind === "not_started",
+  );
+  const notCreated = [...verdicts].flatMap(([seat, verdict]) =>
+    verdict.kind === "not_created" ? [{ seat, detail: verdict.detail }] : [],
+  );
   const pending = [...verdicts].filter(([, verdict]) => verdict.kind === "pending");
   const windowSeconds = Math.round(input.windowMs / 1000);
-  const launch = `launch: ${started} started, ${failed.length} failed, ${pending.length} start unconfirmed after ${windowSeconds}s`;
-  const failedLines = failed.map(
-    ([seat, verdict]) =>
-      `seat_failed: ${seat} | ${verdict.kind === "failed" ? verdict.runStatus : ""} | ${formatRunFailureField(verdict.kind === "failed" ? verdict.failure : null)}`,
+  const waiting = [...verdicts].filter(([, verdict]) => verdict.kind === "waiting").length;
+  const launchCounts = `launch: ${waiting > 0 ? `${waiting} created and waiting for work, ` : ""}${started} started, ${failed.length} failed, ${notCreated.length} not created, ${pending.length} start unconfirmed after ${windowSeconds}s`;
+  const launch =
+    waiting > 0 && pending.length === 0
+      ? `launch: ${waiting} created and waiting for work, ${started} started, ${failed.length} failed, ${notCreated.length} not created`
+      : launchCounts;
+  const failedLines = failed.map(([seat, verdict]) =>
+    verdict.kind === "not_started"
+      ? `seat_failed: ${seat} | not_started | ${reportField(verdict.detail)}`
+      : `seat_failed: ${seat} | ${verdict.kind === "failed" ? verdict.runStatus : ""} | ${formatRunFailureField(verdict.kind === "failed" ? verdict.failure : null)}`,
+  );
+  const notCreatedLines = notCreated.map(
+    ({ seat, detail }) => `seat_not_created: ${seat} | ${reportField(detail)}`,
   );
   const pendingLines = pending.map(([seat]) => `seat_pending: ${seat}`);
   const roster = instance.members
     .map((member) => {
       const verdict = verdicts.get(member.seatName);
       const isNew = member.addedVersion === instance.version && proposal.kind === "addition";
-      return `- ${member.seatName}: participant_id=${member.participantId} persona=${member.agentId ?? ""} thread_id=${member.threadId}${
-        verdict === undefined ? "" : ` start=${verdict.kind}`
-      }${isNew ? " (new)" : ""}`;
+      const start =
+        verdict === undefined
+          ? ""
+          : ` start=${verdict.kind === "not_started" || verdict.kind === "not_created" ? "failed" : verdict.kind}`;
+      return `- ${member.seatName}: participant_id=${member.participantId} persona=${member.agentId ?? ""} thread_id=${member.threadId}${start}${isNew ? " (new)" : ""}`;
     })
     .join("\n");
   const block = [
@@ -149,25 +184,41 @@ export const crewLaunchReportText = (input: {
     ...failed.flatMap(([, verdict]) =>
       verdict.kind === "failed" ? [`failed_run: ${verdict.runId}`] : [],
     ),
+    ...notCreatedLines,
     ...pendingLines,
+    ...(playbook === null
+      ? []
+      : [`playbook: ${reportField(playbook.name)} | ${reportField(playbook.title)}`]),
     `roster:\n${roster}`,
     "</j5_crew_gate>",
   ].join("\n");
   const prose: Array<string> = [];
   if (failed.length > 0)
     prose.push(
-      `${failed.length} of ${verdicts.size} seats failed; each seat_failed line carries the run's error. The platform raises provider sign-in and permission failures in the human inbox. Re-brief the seat with send_message once the provider works; ask the user about other failures when their help is needed. Seats that started have your brief and this roster.`,
+      `${failed.length} of ${verdicts.size} seats failed; each seat_failed line carries the run's error. The platform raises provider sign-in and permission failures in the human inbox. Re-brief the seat with j5_send_message once the provider works; ask the user about other failures when their help is needed. Seats that started have your brief and this roster.`,
+    );
+  if (notCreated.length > 0)
+    prose.push(
+      `${notCreated.length} ${notCreated.length === 1 ? "seat was" : "seats were"} never created (${notCreated.map(({ seat }) => seat).join(", ")}); each seat_not_created line says why. ${notCreated.length === 1 ? "It is" : "They are"} not on the roster and cannot be messaged. If the work still needs ${notCreated.length === 1 ? "that seat" : "those seats"}, ask for ${notCreated.length === 1 ? "it" : "them"} again with j5_request_crew_member.`,
     );
   if (pending.length > 0)
     prose.push(
-      `${pending.length} ${pending.length === 1 ? "seat has" : "seats have"} no confirmed provider activity after ${windowSeconds}s; its first turn may still be queued, and you will hear from it when it finishes.`,
+      `${pending.length} ${pending.length === 1 ? "seat has" : "seats have"} no confirmed provider activity after ${windowSeconds}s; its first turn may still be queued, and the platform tells you if it fails.`,
     );
-  if (failed.length === 0 && pending.length === 0)
+  if (waiting > 0)
     prose.push(
-      "Your crew is running. Each seat has your brief and this roster; coordinate with send_message, and ask the user through the inbox for decisions you cannot make from the brief.",
+      "Send each member its first assignment with j5_send_message when it has work; the first delivery includes the shared brief and current roster. Reuse finished members for follow-up work in the same thread.",
+    );
+  if (waiting === 0 && failed.length === 0 && notCreated.length === 0 && pending.length === 0)
+    prose.push(
+      "Your crew is running. Each seat has your brief and this roster; coordinate with j5_send_message, and ask the user with j5_send_message (expect_reply=true) for decisions you cannot make from the brief.",
+    );
+  if (playbook !== null && proposal.kind === "roster")
+    prose.push(
+      `This Crew follows playbook ${playbook.name}. Start it with j5_playbook_start(name: "${playbook.name}", client_request_id, crew_instance_id: "${instance.id}"). The platform hands each step to the seat that owns it; unowned steps are yours.`,
     );
   prose.push(
-    "Seats are told to message you with their results; do not ask for the same results again. End your turn and read them as they arrive.",
+    "Seats are told to message you with their results; do not ask for the same results again. Members run their own review loops and message you only for a review pass, a blocker, a disagreement they could not settle, or their final result or step report: you resolve technical disagreements within the agreed scope yourself, and ask the user only when product intent or their judgment is needed; when you do, ask with j5_send_message to the user with expect_reply=true, not a native question tool, so the request reaches their Inbox, state the disagreement, the options as a list and your recommendation, and keep working on what does not depend on the answer. End your turn and read their messages as they arrive.",
   );
   return `${block}\n\n${prose.join(" ")}`;
 };

@@ -1,0 +1,42 @@
+---
+import InboxVignette from "./InboxVignette.astro";
+import { INBOX_ITEMS } from "./inbox";
+
+/**
+ * The Inbox section: the live piece of the Inbox, then what changed. Its heading and intro are
+ * the page's hero while it leads the page, so the section itself opens on the vignette.
+ */
+---
+
+<section id="inbox" class="feature">
+  <div class="container">
+    <p class="inbox-hint live-only">
+      Try it: the ringed parts are where to start. Open the pull request, answer the question, switch the panel's tabs.
+      <button type="button" class="inbox-reset" data-inbox-reset>Start over</button>
+    </p>
+    <InboxVignette />
+    <ul class="items items--5">
+      {INBOX_ITEMS.map((item) => <li><h3>{item.title}</h3><p>{item.body}</p></li>)}
+    </ul>
+  </div>
+</section>
+
+<style>
+  .inbox-hint {
+    margin-bottom: 18px;
+    font-size: 15px;
+    color: var(--wn-muted);
+  }
+
+  .inbox-reset {
+    margin-left: 6px;
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    color: var(--wn-fg);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    cursor: pointer;
+  }
+</style>

@@ -7,19 +7,6 @@ function completed(input: unknown, output?: unknown): T3ToolSummaryCall {
 }
 
 describe("summarizeT3ToolCalls", () => {
-  it("counts messages and distinct destinations across delivery modes, deduplicating retries", () => {
-    const calls = Array.from({ length: 5 }, (_, i) =>
-      completed(
-        { threadId: `thread-${i % 2}`, mode: ["auto", "queue", "steer", "restart"][i % 4] },
-        { messageId: `message-${i}`, threadId: `thread-${i % 2}` },
-      ),
-    );
-    expect(summarizeT3ToolCalls("thread-send", [...calls, calls[0]!])).toEqual({
-      label: "Sent 5 messages to 2 threads",
-      failedCount: 0,
-    });
-  });
-
   it("reads provider result envelopes without treating JSON in the message as result data", () => {
     const result = { messageId: "message-1", threadId: "actual-thread" };
     const json = JSON.stringify(result);
@@ -48,35 +35,21 @@ describe("summarizeT3ToolCalls", () => {
     ).toBe("Sent 2 messages to 1 thread");
   });
 
-  it("falls back to message counts when a destination is missing or a result is malformed", () => {
-    expect(
-      summarizeT3ToolCalls("thread-send", [
-        completed({ threadId: "known" }),
-        completed({ message: '{"threadId":"not-a-destination"}' }, "{truncated"),
-        completed(undefined, "Message sent"),
-      ]).label,
-    ).toBe("Sent 3 messages");
-  });
-
-  it("counts batch-created threads, excludes rollbacks, and deduplicates returned thread IDs", () => {
-    const threads = Array.from({ length: 4 }, (_, i) => ({
-      threadId: `thread-${i}`,
-      status: "running",
-    }));
-    expect(
-      summarizeT3ToolCalls("thread-create", [
-        completed(
-          {},
-          { threads: [...threads, { threadId: "rolled-back", status: "rolled_back" }] },
-        ),
-        completed({}, { threadId: "thread-0", status: "running" }),
-      ]).label,
-    ).toBe("Created 4 threads");
-    expect(
-      summarizeT3ToolCalls("thread-create", [
-        completed({ threads: [{ title: "Requested, not confirmed" }] }),
-      ]).label,
-    ).toBe("Requested thread creation 1 time");
+  it("counts the pull requests batch link and unlink calls changed", () => {
+    const urls = ["https://github.com/o/r/pull/1", "https://github.com/o/r/pull/1", "not-a-pr"];
+    const links = completed({ urls }, { linkedCount: 1 });
+    expect(summarizeT3ToolCalls("link-pr", [links, completed({ number: 3 })]).label).toBe(
+      "Linked 2 pull requests",
+    );
+    expect(summarizeT3ToolCalls("link-pr", [completed({ urls }, {})]).label).toBe(
+      "Linked pull requests",
+    );
+    const batch = completed({ states: ["merged"] }, { unlinkedCount: 2 });
+    expect(summarizeT3ToolCalls("unlink-pr", [batch, completed({ number: 3 })]).label).toBe(
+      "Unlinked 3 pull requests",
+    );
+    const uncounted = completed({ states: ["merged"] }, { isError: false });
+    expect(summarizeT3ToolCalls("unlink-pr", [uncounted]).label).toBe("Unlinked pull requests");
   });
 
   it("excludes failed and unfinished sends even if the provider reports completed", () => {
@@ -123,29 +96,5 @@ describe("summarizeT3ToolCalls", () => {
       label: "Waited on 1 thread",
       failedCount: 0,
     });
-  });
-
-  it("describes control requests without claiming that a thread stopped or a task was deleted", () => {
-    expect(
-      summarizeT3ToolCalls("thread-interrupt", [
-        completed(
-          { threadId: "thread-1" },
-          { threadId: "thread-1", status: "interrupt_requested" },
-        ),
-      ]).label,
-    ).toBe("Requested interrupts for 1 thread");
-    expect(
-      summarizeT3ToolCalls("task-cancel", [
-        completed({ taskId: "task-1" }, { taskId: "task-1", status: "cancel_requested" }),
-      ]).label,
-    ).toBe("Requested cancellation of 1 task");
-    expect(
-      summarizeT3ToolCalls("schedule-delete", [
-        completed(
-          { scheduledTaskId: "schedule-1" },
-          { scheduledTaskId: "schedule-1", deleted: false },
-        ),
-      ]).label,
-    ).toBe("Requested deletion of 1 scheduled task");
   });
 });

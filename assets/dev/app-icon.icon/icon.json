@@ -6,9 +6,9 @@
     {
       "layers": [
         {
-          "glass": true,
+          "glass": false,
           "image-name": "text.svg",
-          "name": "Text",
+          "name": "Boat",
           "position": {
             "scale": 8.5,
             "translation-in-points": [0, 0]

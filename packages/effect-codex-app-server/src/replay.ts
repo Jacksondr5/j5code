@@ -1,3 +1,4 @@
+import { pipe } from "effect/Function";
 import * as Cause from "effect/Cause";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -9,7 +10,6 @@ import * as Sink from "effect/Sink";
 import * as Stdio from "effect/Stdio";
 import * as Stream from "effect/Stream";
 
-import { CodexAppServerClient } from "./client.ts";
 import * as CodexClient from "./client.ts";
 import * as CodexError from "./errors.ts";
 
@@ -44,7 +44,7 @@ export const CodexAppServerReplayTranscript = Schema.Struct({
 export type CodexAppServerReplayTranscript = typeof CodexAppServerReplayTranscript.Type;
 const decodeOutboundJsonFrame = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 
-export class CodexAppServerReplayJsonParseError extends Schema.TaggedErrorClass<CodexAppServerReplayJsonParseError>()(
+export class CodexAppServerReplayJsonParseError extends Schema.TaggedError<CodexAppServerReplayJsonParseError>()(
   "CodexAppServerReplayJsonParseError",
   {
     scenario: Schema.String,
@@ -57,7 +57,7 @@ export class CodexAppServerReplayJsonParseError extends Schema.TaggedErrorClass<
   }
 }
 
-export class CodexAppServerReplayExhaustedError extends Schema.TaggedErrorClass<CodexAppServerReplayExhaustedError>()(
+export class CodexAppServerReplayExhaustedError extends Schema.TaggedError<CodexAppServerReplayExhaustedError>()(
   "CodexAppServerReplayExhaustedError",
   {
     scenario: Schema.String,
@@ -70,7 +70,7 @@ export class CodexAppServerReplayExhaustedError extends Schema.TaggedErrorClass<
   }
 }
 
-export class CodexAppServerReplayUnexpectedOutboundError extends Schema.TaggedErrorClass<CodexAppServerReplayUnexpectedOutboundError>()(
+export class CodexAppServerReplayUnexpectedOutboundError extends Schema.TaggedError<CodexAppServerReplayUnexpectedOutboundError>()(
   "CodexAppServerReplayUnexpectedOutboundError",
   {
     scenario: Schema.String,
@@ -84,7 +84,7 @@ export class CodexAppServerReplayUnexpectedOutboundError extends Schema.TaggedEr
   }
 }
 
-export class CodexAppServerReplayFrameMismatchError extends Schema.TaggedErrorClass<CodexAppServerReplayFrameMismatchError>()(
+export class CodexAppServerReplayFrameMismatchError extends Schema.TaggedError<CodexAppServerReplayFrameMismatchError>()(
   "CodexAppServerReplayFrameMismatchError",
   {
     scenario: Schema.String,
@@ -99,7 +99,7 @@ export class CodexAppServerReplayFrameMismatchError extends Schema.TaggedErrorCl
   }
 }
 
-export class CodexAppServerReplayRuntimeExitError extends Schema.TaggedErrorClass<CodexAppServerReplayRuntimeExitError>()(
+export class CodexAppServerReplayRuntimeExitError extends Schema.TaggedError<CodexAppServerReplayRuntimeExitError>()(
   "CodexAppServerReplayRuntimeExitError",
   {
     scenario: Schema.String,
@@ -113,26 +113,12 @@ export class CodexAppServerReplayRuntimeExitError extends Schema.TaggedErrorClas
   }
 }
 
-export class CodexAppServerReplayIncompleteError extends Schema.TaggedErrorClass<CodexAppServerReplayIncompleteError>()(
-  "CodexAppServerReplayIncompleteError",
-  {
-    scenario: Schema.String,
-    cursor: Schema.Number,
-    remaining: Schema.Number,
-  },
-) {
-  override get message(): string {
-    return `Codex app-server replay ended with ${this.remaining} unconsumed entries in scenario ${this.scenario}.`;
-  }
-}
-
 export const CodexAppServerReplayError = Schema.Union([
   CodexAppServerReplayJsonParseError,
   CodexAppServerReplayExhaustedError,
   CodexAppServerReplayUnexpectedOutboundError,
   CodexAppServerReplayFrameMismatchError,
   CodexAppServerReplayRuntimeExitError,
-  CodexAppServerReplayIncompleteError,
 ]);
 export type CodexAppServerReplayError = typeof CodexAppServerReplayError.Type;
 
@@ -242,30 +228,57 @@ function normalizeReplayFrame(value: unknown): unknown {
     normalized.params = params;
   }
 
-  if (
-    (normalized.method === "thread/start" ||
-      normalized.method === "thread/resume" ||
-      normalized.method === "thread/fork") &&
-    typeof normalized.params === "object" &&
-    normalized.params !== null
-  ) {
-    // Runtime-scoped thread settings are supplied by the host and commonly
-    // contain machine-local cwd and short-lived MCP authorization headers.
-    // They are orthogonal to the recorded provider protocol behavior.
-    const params = { ...(normalized.params as Record<string, unknown>) };
-    delete params.cwd;
-    delete params.model;
-    delete params.config;
-    normalized.params = params;
-  }
-
   return normalized;
 }
 
-function sameFrame(left: unknown, right: unknown): boolean {
-  return (
-    stableStringify(normalizeReplayFrame(left)) === stableStringify(normalizeReplayFrame(right))
+function recorderThreadConfigKeys(transcript: CodexAppServerReplayTranscript): ReadonlySet<string> {
+  const keys = transcript.metadata?.recorderThreadConfigKeys;
+  return new Set(Array.isArray(keys) ? keys.filter((key) => typeof key === "string") : []);
+}
+
+/**
+ * `cwd`, `model`, host-supplied MCP servers (machine-local URLs, short-lived
+ * authorization headers) and the T3 thread id vary per machine or run, and
+ * recorder-only keys are not the client's.
+ */
+function normalizeThreadRequest(frame: unknown, ignoredConfigKeys: ReadonlySet<string>): unknown {
+  if (typeof frame !== "object" || frame === null) return frame;
+  const record = frame as Record<string, unknown>;
+  if (
+    (record.method !== "thread/start" &&
+      record.method !== "thread/resume" &&
+      record.method !== "thread/fork") ||
+    typeof record.params !== "object" ||
+    record.params === null
+  ) {
+    return frame;
+  }
+  const { cwd: _cwd, model: _model, config, ...params } = record.params as Record<string, unknown>;
+  if (typeof config !== "object" || config === null) return { ...record, params };
+  const owned = Object.fromEntries(
+    Object.entries(config as Record<string, unknown>).filter(
+      ([key]) =>
+        key !== "mcp_servers" &&
+        !key.startsWith("mcp_servers.") &&
+        key !== "shell_environment_policy.set.T3CODE_THREAD_ID",
+    ),
   );
+  for (const key of ignoredConfigKeys) delete owned[key];
+  return { ...record, params: { ...params, config: owned } };
+}
+
+function sameFrame(
+  left: unknown,
+  right: unknown,
+  ignoredConfigKeys: ReadonlySet<string> = new Set(),
+): boolean {
+  const normalize = (frame: unknown) =>
+    pipe(
+      normalizeReplayFrame(frame),
+      (request) => normalizeThreadRequest(request, ignoredConfigKeys),
+      stableStringify,
+    );
+  return normalize(left) === normalize(right);
 }
 
 function normalizeLegacyInboundFrame(value: unknown): unknown {
@@ -281,11 +294,11 @@ function normalizeLegacyInboundFrame(value: unknown): unknown {
   );
   if (
     typeof normalized.id === "string" &&
-    normalized.sessionId === undefined &&
     "modelProvider" in normalized &&
     "status" in normalized
   ) {
-    normalized.sessionId = normalized.id;
+    if (normalized.sessionId === undefined) normalized.sessionId = normalized.id;
+    if (normalized.projectId === undefined) normalized.projectId = null;
   }
   if (
     (normalized.method === "item/started" || normalized.method === "item/completed") &&
@@ -313,6 +326,18 @@ function normalizeLegacyInboundFrame(value: unknown): unknown {
     }
     normalized.params = params;
   }
+  if (
+    normalized.method === "item/tool/requestUserInput" &&
+    typeof normalized.params === "object" &&
+    normalized.params !== null
+  ) {
+    const params = { ...(normalized.params as Record<string, unknown>) };
+    // Codex treats a legacy request without `isBlocking` as blocking.
+    if (params.isBlocking === undefined) {
+      params.isBlocking = true;
+    }
+    normalized.params = params;
+  }
   return normalized;
 }
 
@@ -331,8 +356,8 @@ function replayTransportError(
 
 export function layerReplay(
   transcript: CodexAppServerReplayTranscript,
-): Layer.Layer<CodexAppServerClient, CodexAppServerReplayError> {
-  return Layer.effect(CodexAppServerClient, makeReplayClient(transcript));
+): Layer.Layer<CodexClient.CodexAppServerClient, CodexAppServerReplayError> {
+  return Layer.effect(CodexClient.CodexAppServerClient, makeReplayClient(transcript));
 }
 
 export const makeReplayDriver = Effect.fn("effect-codex-app-server/replay.makeReplayDriver")(
@@ -350,19 +375,17 @@ export const makeReplayDriver = Effect.fn("effect-codex-app-server/replay.makeRe
 
 export function layerReplayWithDriver(
   driver: CodexAppServerReplayDriver,
-): Layer.Layer<CodexAppServerClient, CodexAppServerReplayError> {
-  return Layer.effect(CodexAppServerClient, makeReplayClientWithState(driver));
+): Layer.Layer<CodexClient.CodexAppServerClient, CodexAppServerReplayError> {
+  return Layer.effect(CodexClient.CodexAppServerClient, makeReplayClientWithState(driver));
 }
 
-export const makeReplayClient = Effect.fn("effect-codex-app-server/replay.makeReplayClient")(
-  function* (
-    transcript: CodexAppServerReplayTranscript,
-    options: CodexClient.CodexAppServerClientOptions = {},
-  ) {
-    const driver = yield* makeReplayDriver(transcript);
-    return yield* makeReplayClientWithState(driver, options);
-  },
-);
+const makeReplayClient = Effect.fn("effect-codex-app-server/replay.makeReplayClient")(function* (
+  transcript: CodexAppServerReplayTranscript,
+  options: CodexClient.CodexAppServerClientOptions = {},
+) {
+  const driver = yield* makeReplayDriver(transcript);
+  return yield* makeReplayClientWithState(driver, options);
+});
 
 const makeReplayClientWithState = Effect.fn(
   "effect-codex-app-server/replay.makeReplayClientWithState",
@@ -371,6 +394,7 @@ const makeReplayClientWithState = Effect.fn(
   options: CodexClient.CodexAppServerClientOptions = {},
 ) {
   const transcript = driver.transcript;
+  const ignoredThreadConfigKeys = recorderThreadConfigKeys(transcript);
   const input = yield* Queue.unbounded<Uint8Array, Cause.Done<void>>();
   const state = driver.state;
   const outboundRemainder = yield* Ref.make("");
@@ -460,7 +484,7 @@ const makeReplayClientWithState = Effect.fn(
             return;
           }
 
-          if (!sameFrame(entry.frame, actual)) {
+          if (!sameFrame(entry.frame, actual, ignoredThreadConfigKeys)) {
             yield* failReplay(
               new CodexAppServerReplayFrameMismatchError({
                 scenario: transcript.scenario,

@@ -1,8 +1,14 @@
 import { useSyncExternalStore } from "react";
 
+import {
+  type ComposerThreadTarget,
+  resolveComposerDraftKey,
+  useComposerDraftStore,
+} from "../../composerDraftStore";
+
 /**
  * Which persona a new-task draft should launch as, keyed by the route's thread key.
- * Session-local like the squadron draft carrier: the server resolves and pins the real
+ * Session-local: the server resolves and pins the real
  * assignment at first send, so nothing here needs to persist.
  */
 let snapshot: Readonly<Record<string, string>> = {};
@@ -24,8 +30,7 @@ export const selectDraftAgent = (draftKey: string, personaId: string | null) => 
 
 export const clearDraftAgent = (draftKey: string) => selectDraftAgent(draftKey, null);
 
-export const readDraftAgentPersonaId = (draftKey: string): string | null =>
-  snapshot[draftKey] ?? null;
+const readDraftAgentPersonaId = (draftKey: string): string | null => snapshot[draftKey] ?? null;
 
 export function useDraftAgentPersonaId(draftKey: string | null): string | null {
   return useSyncExternalStore(subscribe, () =>
@@ -37,4 +42,27 @@ export function useDraftAgentPersonaId(draftKey: string | null): string | null {
 export const draftAgentPersonaLaunch = (draftKey: string) => {
   const personaId = readDraftAgentPersonaId(draftKey);
   return personaId === null ? {} : { agentPersona: { personaId } };
+};
+
+/**
+ * After a successful first send. A persona launches on the route the server resolves, so the
+ * draft's model picks never ran: they are dropped, or the started thread's composer would show
+ * them and an effort change would switch the worker onto a model nobody picked.
+ */
+export const finishDraftAgentSend = (draftKey: string, draftTarget: ComposerThreadTarget) => {
+  if (readDraftAgentPersonaId(draftKey) !== null) {
+    useComposerDraftStore.setState((state) => {
+      const key = resolveComposerDraftKey(state, draftTarget);
+      const draft = key === null ? undefined : state.draftsByThreadKey[key];
+      if (key === null || draft === undefined) return state;
+      const { modelSelectionExplicit: _explicit, ...rest } = draft;
+      return {
+        draftsByThreadKey: {
+          ...state.draftsByThreadKey,
+          [key]: { ...rest, activeProvider: null, modelSelectionByProvider: {} },
+        },
+      };
+    });
+  }
+  clearDraftAgent(draftKey);
 };

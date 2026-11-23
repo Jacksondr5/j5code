@@ -1,6 +1,6 @@
 import * as Schema from "effect/Schema";
-import * as Rpc from "effect/unstable/rpc/Rpc";
-import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
+import * as Rpc from "effect/rpc/Rpc";
+import * as RpcGroup from "effect/rpc/RpcGroup";
 
 import { EnvironmentAuthorizationError } from "../auth.ts";
 import {
@@ -11,9 +11,11 @@ import {
   ThreadId,
   TrimmedNonEmptyString,
 } from "../baseSchemas.ts";
+import { ProviderOptionSelections, type SelectProviderOptionDescriptor } from "../model.ts";
 import { ModelSelection } from "../modelSelection.ts";
 import { RuntimeMode } from "../providerPolicy.ts";
-import { ProviderDriverKind } from "../providerInstance.ts";
+import { ProviderDriverKind, ProviderInstanceId } from "../providerInstance.ts";
+import type { ServerProviderModel } from "../server.ts";
 
 /**
  * J5-owned agent persona wire schemas. Upstream orchestration structs reference only
@@ -42,6 +44,9 @@ export type AgentPersonaId = typeof AgentPersonaId.Type;
 export const BuiltInAgentPersonaId = Schema.Literals(BUILT_IN_AGENT_PERSONA_IDS);
 export type BuiltInAgentPersonaId = typeof BuiltInAgentPersonaId.Type;
 
+export const AgentPersonaAccess = Schema.Literals(["read-only", "workspace-write", "full-access"]);
+export type AgentPersonaAccess = typeof AgentPersonaAccess.Type;
+
 export const AgentPersonaAuthorityPolicy = Schema.Literals([
   "read-only",
   "workspace-write",
@@ -49,23 +54,18 @@ export const AgentPersonaAuthorityPolicy = Schema.Literals([
   "critic-fix",
   "diagnostic",
   "publish-only",
+  "full-access",
 ]);
 export type AgentPersonaAuthorityPolicy = typeof AgentPersonaAuthorityPolicy.Type;
+export const isAgentPersonaAuthorityPolicy = Schema.is(AgentPersonaAuthorityPolicy);
 
-export const BUILT_IN_AGENT_ARTIFACT_IDS = [
-  "ContextBrief",
-  "PlanHandoff",
-  "PlanCritique",
-  "CodeCompleteHandoff",
-  "ReviewHandoff",
-  "PublicationReceipt",
-  "DiagnosisHandoff",
-  "DiagnosisCritique",
-  "ReviewInbox",
-] as const;
-
-export const BuiltInAgentArtifactId = Schema.Literals(BUILT_IN_AGENT_ARTIFACT_IDS);
-export type BuiltInAgentArtifactId = typeof BuiltInAgentArtifactId.Type;
+/**
+ * A policy as the server reports it. Read models accept any name so a policy added by a newer
+ * server costs one unsupported row instead of the whole payload; what clients send and what the
+ * server validates stay on the closed `AgentPersonaAuthorityPolicy`.
+ */
+export const AgentPersonaReportedAuthorityPolicy = Schema.String;
+export type AgentPersonaReportedAuthorityPolicy = typeof AgentPersonaReportedAuthorityPolicy.Type;
 
 export const OrchestrationV2AgentPersonaRequest = Schema.Struct({
   personaId: AgentPersonaId,
@@ -73,21 +73,116 @@ export const OrchestrationV2AgentPersonaRequest = Schema.Struct({
 });
 export type OrchestrationV2AgentPersonaRequest = typeof OrchestrationV2AgentPersonaRequest.Type;
 
-/** Immutable launch-time provenance; definitionDigest references an environment-owned snapshot. */
+/** A limit on agent-picked personas that an "Allow this once" exception can waive. */
+export const AgentPersonaPickConstraint = Schema.Literals([
+  "model-not-eligible",
+  "access-above-caller",
+]);
+export type AgentPersonaPickConstraint = typeof AgentPersonaPickConstraint.Type;
+
+/** Why a persona launch was refused, the same on every launch path. */
+export const AgentPersonaBlockCode = Schema.Literals([
+  "library_empty",
+  "persona_not_found",
+  "persona_disabled",
+  "persona_invalid",
+  "models_exhausted",
+  "library_unreadable",
+]);
+export type AgentPersonaBlockCode = typeof AgentPersonaBlockCode.Type;
+
+/**
+ * A refused persona launch, as an ask to the person shows it. `waivable` is the one limit that
+ * "Allow this once" would lift for one launch; null when no single waiver lets it run.
+ */
+export const AgentPersonaEscalationView = Schema.Struct({
+  escalationId: Schema.String,
+  personaId: Schema.String,
+  waivable: Schema.NullOr(AgentPersonaPickConstraint),
+  status: Schema.Literals(["open", "granted", "used"]),
+  /** J5's own account of the block, shown apart from the agent's words so they can't alter it. */
+  summary: Schema.String,
+});
+export type AgentPersonaEscalationView = typeof AgentPersonaEscalationView.Type;
+
+/**
+ * A persona create or edit an agent drafted, as an ask to the person shows it. "Save persona"
+ * writes it to the library while it is open; a saved draft is never saved again.
+ */
+export const AgentPersonaDraftView = Schema.Struct({
+  draftId: Schema.String,
+  personaId: Schema.String,
+  mode: Schema.Literals(["create", "edit"]),
+  /** An edit of a folder persona, which saves as an environment override. */
+  overridesFolder: Schema.Boolean,
+  status: Schema.Literals(["open", "saved"]),
+  /** J5's own account of the draft, shown apart from the agent's words. */
+  summary: Schema.String,
+});
+export type AgentPersonaDraftView = typeof AgentPersonaDraftView.Type;
+
+/**
+ * Who picked the persona, which sets its limits: a person's pick runs on its own models with its
+ * saved access; an agent's is held to Models for custom members and the caller's access.
+ */
+export const AgentPersonaPickSource = Schema.Union([
+  Schema.Struct({ kind: Schema.Literal("person") }),
+  Schema.Struct({ kind: Schema.Literal("agent") }),
+  Schema.Struct({ kind: Schema.Literal("allow-once"), waived: AgentPersonaPickConstraint }),
+]);
+export type AgentPersonaPickSource = typeof AgentPersonaPickSource.Type;
+
+/**
+ * How an independent reviewer's model relates to the authors of the work it reviews, decided once
+ * at creation. `same-model-as-author` wins over `unknown-authors`; neither is an independent review.
+ */
+export const AgentPersonaReviewIndependence = Schema.Struct({
+  outcome: Schema.Literals(["different-model", "same-model-as-author", "unknown-authors"]),
+  /** Model ids (slugs) the authors ran on. */
+  authorModels: Schema.Array(TrimmedNonEmptyString),
+  authorThreadIds: Schema.Array(ThreadId),
+  /** Some work was done where J5 cannot see the model, such as a provider-native subagent. */
+  partlyUnknown: Schema.Boolean,
+  /** The server reorders away from the authors; a model a person or an agent chose is kept. */
+  modelChosenBy: Schema.Literals(["server", "person", "agent"]),
+});
+export type AgentPersonaReviewIndependence = typeof AgentPersonaReviewIndependence.Type;
+
+/**
+ * Launch-time provenance; definitionDigest references an environment-owned snapshot. The model
+ * fields (`resolved*`) follow a person's model switch; everything else is fixed at launch.
+ */
 export const OrchestrationV2AgentPersonaAssignment = Schema.Struct({
   personaId: AgentPersonaId,
   definitionVersion: PositiveInt,
   definitionDigest: Schema.optional(Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/))),
   displayName: Schema.optional(TrimmedNonEmptyString),
-  authorityPolicy: AgentPersonaAuthorityPolicy,
+  authorityPolicy: AgentPersonaReportedAuthorityPolicy,
   resolvedRoute: Schema.Literals(["primary", "fallback", "override"]),
+  resolvedEntryIndex: Schema.optional(NonNegativeInt),
   resolvedDriver: ProviderDriverKind,
   resolvedModelSelection: ModelSelection,
   /** Human-approved crew access, independent of the persona behavior instructions. */
   runtimeModeOverride: Schema.optional(RuntimeMode),
+  /** The snapshot carries instructions the person edited at launch, so it never matches the library's. */
+  instructionsEdited: Schema.optional(Schema.Boolean),
+  /** Absent on assignments made before pick sources were recorded. */
+  pickSource: Schema.optional(AgentPersonaPickSource),
+  /** Present only for a persona flagged as an independent reviewer. */
+  reviewIndependence: Schema.optional(AgentPersonaReviewIndependence),
+  /** Present once a person switched the worker off its launch model. */
+  modelSwitchedBy: Schema.optional(Schema.Literal("person")),
 });
 export type OrchestrationV2AgentPersonaAssignment =
   typeof OrchestrationV2AgentPersonaAssignment.Type;
+
+/** The assignment as the server issues it in commands, where only known policies are valid. */
+export const OrchestrationV2AgentPersonaCommandAssignment = Schema.Struct({
+  ...OrchestrationV2AgentPersonaAssignment.fields,
+  authorityPolicy: AgentPersonaAuthorityPolicy,
+});
+export type OrchestrationV2AgentPersonaCommandAssignment =
+  typeof OrchestrationV2AgentPersonaCommandAssignment.Type;
 
 /** Why one route of a definition could not be used in this environment. */
 export const AgentPersonaRouteFailureCode = Schema.Literals([
@@ -100,15 +195,23 @@ export const AgentPersonaRouteFailureCode = Schema.Literals([
   "model-not-advertised",
   "reasoning-effort-not-advertised",
   "authority-not-enforceable",
+  "usage-limit",
+  "option-not-advertised",
+  /** Outside Models for custom members; only an agent's pick reports it, never the catalog. */
+  "model-not-eligible",
+  /** Broader access on this driver than the agent picking it runs with; only an agent's pick. */
+  "access-above-caller",
 ]);
 export type AgentPersonaRouteFailureCode = typeof AgentPersonaRouteFailureCode.Type;
 
 /** One rejected route with the reasons every candidate provider gave. */
 export const AgentPersonaRouteAttempt = Schema.Struct({
   route: Schema.Literals(["primary", "fallback"]),
-  driver: Schema.Literals(["codex", "claudeAgent"]),
+  entryIndex: Schema.optional(NonNegativeInt),
+  instanceId: Schema.optional(ProviderInstanceId),
+  driver: Schema.optional(ProviderDriverKind),
   model: TrimmedNonEmptyString,
-  reasoningEffort: TrimmedNonEmptyString,
+  reasoningEffort: Schema.optional(TrimmedNonEmptyString),
   failures: Schema.Array(AgentPersonaRouteFailureCode),
 });
 export type AgentPersonaRouteAttempt = typeof AgentPersonaRouteAttempt.Type;
@@ -117,6 +220,7 @@ export const OrchestrationV2AgentPersonaAvailability = Schema.Union([
   Schema.Struct({
     status: Schema.Literal("available"),
     resolvedRoute: Schema.Literals(["primary", "fallback"]),
+    resolvedEntryIndex: Schema.optional(NonNegativeInt),
     resolvedDriver: ProviderDriverKind,
     resolvedModelSelection: ModelSelection,
   }),
@@ -135,15 +239,68 @@ export const OrchestrationV2AgentPersonaAvailability = Schema.Union([
 export type OrchestrationV2AgentPersonaAvailability =
   typeof OrchestrationV2AgentPersonaAvailability.Type;
 
+/** Any provider driver; launch checks whether a signed-in instance advertises the model. */
 export const AgentPersonaModelTarget = Schema.Struct({
-  driver: Schema.Literals(["codex", "claudeAgent"]),
+  driver: ProviderDriverKind,
   model: TrimmedNonEmptyString,
   reasoningEffort: TrimmedNonEmptyString,
 });
 export type AgentPersonaModelTarget = typeof AgentPersonaModelTarget.Type;
+
+/** Legacy targets stay intact so immutable snapshot digests do not change. */
+export const AgentPersonaModelEntry = Schema.Union([
+  AgentPersonaModelTarget,
+  Schema.Struct({
+    instanceId: ProviderInstanceId,
+    model: TrimmedNonEmptyString,
+    options: Schema.optionalKey(ProviderOptionSelections),
+    reasoningEffort: Schema.optionalKey(Schema.Never),
+  }).check(
+    Schema.makeFilter((selection) => {
+      const ids = (selection.options ?? []).map(({ id }) => id);
+      return new Set(ids).size === ids.length;
+    }),
+  ),
+]);
+export type AgentPersonaModelEntry = typeof AgentPersonaModelEntry.Type;
+export const AgentPersonaModelRoute = Schema.Array(AgentPersonaModelEntry).check(
+  Schema.isMinLength(1),
+);
+
+export const AgentPersonaModelEntryStatus = Schema.Struct({
+  index: NonNegativeInt,
+  target: AgentPersonaModelEntry,
+  modelSelection: Schema.optional(ModelSelection),
+  failures: Schema.Array(AgentPersonaRouteFailureCode),
+});
+export type AgentPersonaModelEntryStatus = typeof AgentPersonaModelEntryStatus.Type;
+
+/**
+ * The select option that carries a model's reasoning level. Providers name it differently:
+ * Codex and Grok `reasoningEffort`, Claude and Cursor `effort` or `reasoning`, OpenCode
+ * `variant`, Pi `thinking`.
+ */
+export function agentPersonaReasoningDescriptor(
+  model: Pick<ServerProviderModel, "capabilities"> | undefined,
+): SelectProviderOptionDescriptor | undefined {
+  for (const descriptor of model?.capabilities?.optionDescriptors ?? []) {
+    if (descriptor.type === "select" && isAgentPersonaReasoningOptionId(descriptor.id))
+      return descriptor;
+  }
+  return undefined;
+}
+const AGENT_PERSONA_REASONING_OPTION_IDS = new Set([
+  "reasoningEffort",
+  "effort",
+  "reasoning",
+  "variant",
+  "thinking",
+]);
+export const isAgentPersonaReasoningOptionId = (id: string) =>
+  AGENT_PERSONA_REASONING_OPTION_IDS.has(id);
 export const AgentPersonaEditableDetails = Schema.Struct({
   definitionDigest: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
-  modelRoute: Schema.Tuple([AgentPersonaModelTarget, AgentPersonaModelTarget]),
+  modelRoute: AgentPersonaModelRoute,
 });
 export const AGENT_PERSONA_INSTRUCTIONS_MAX_LENGTH = 32768;
 const AgentPersonaInstructions = Schema.String.check(
@@ -156,12 +313,14 @@ export const AgentPersonaEditInput = Schema.Struct({
   displayName: TrimmedNonEmptyString.check(Schema.isMaxLength(65536)),
   description: TrimmedNonEmptyString.check(Schema.isMaxLength(65536)),
   instructions: AgentPersonaInstructions,
-  authorityPolicy: AgentPersonaAuthorityPolicy,
-  modelRoute: Schema.Tuple([AgentPersonaModelTarget, AgentPersonaModelTarget]),
+  access: AgentPersonaAccess,
+  modelRoute: AgentPersonaModelRoute,
+  /** Omitted keeps the stored flag, so an older client cannot clear it. */
+  independentReviewer: Schema.optional(Schema.Boolean),
 });
 export type AgentPersonaEditInput = typeof AgentPersonaEditInput.Type;
 
-/** The full definition as stored; the catalog omits instructions to keep lists small. */
+/** Read view with a legacy two-model summary; `models` retains the complete ordered list. */
 export const AgentPersonaDefinitionView = Schema.Struct({
   id: AgentPersonaId,
   version: PositiveInt,
@@ -169,14 +328,14 @@ export const AgentPersonaDefinitionView = Schema.Struct({
   description: TrimmedNonEmptyString,
   instructions: AgentPersonaInstructions,
   acceptedInput: Schema.optional(TrimmedNonEmptyString),
-  artifacts: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
-  inputArtifacts: Schema.optional(Schema.Array(TrimmedNonEmptyString)),
-  outputArtifact: Schema.optional(TrimmedNonEmptyString),
   authority: Schema.Struct({
-    defaultPolicy: AgentPersonaAuthorityPolicy,
-    allowedPolicies: Schema.Array(AgentPersonaAuthorityPolicy),
+    defaultPolicy: AgentPersonaReportedAuthorityPolicy,
+    allowedPolicies: Schema.Array(AgentPersonaReportedAuthorityPolicy),
   }),
   modelRoute: Schema.Tuple([AgentPersonaModelTarget, AgentPersonaModelTarget]),
+  models: Schema.optional(Schema.NonEmptyArray(AgentPersonaModelEntry)),
+  access: Schema.optional(AgentPersonaAccess),
+  independentReviewer: Schema.optional(Schema.Boolean),
 });
 export type AgentPersonaDefinitionView = typeof AgentPersonaDefinitionView.Type;
 
@@ -186,8 +345,9 @@ export const AgentPersonaCreateInput = Schema.Struct({
   displayName: TrimmedNonEmptyString.check(Schema.isMaxLength(65536)),
   description: TrimmedNonEmptyString.check(Schema.isMaxLength(65536)),
   instructions: AgentPersonaInstructions,
-  authorityPolicy: AgentPersonaAuthorityPolicy,
-  modelRoute: Schema.Tuple([AgentPersonaModelTarget, AgentPersonaModelTarget]),
+  access: AgentPersonaAccess,
+  modelRoute: AgentPersonaModelRoute,
+  independentReviewer: Schema.optional(Schema.Boolean),
 });
 export type AgentPersonaCreateInput = typeof AgentPersonaCreateInput.Type;
 
@@ -201,33 +361,52 @@ export type AgentPersonaOrigin = typeof AgentPersonaOrigin.Type;
 
 /** Environment-specific, presentation-safe view of one library persona. */
 export const OrchestrationV2AgentPersonaCatalogEntry = Schema.Struct({
+  modelEntries: Schema.optional(Schema.Array(AgentPersonaModelEntryStatus)),
   personaId: AgentPersonaId,
   imported: Schema.optional(Schema.Boolean),
   origin: Schema.optional(AgentPersonaOrigin),
+  /** An imported copy that overrides a folder persona: that folder definition's file. */
+  overridesFolder: Schema.optional(TrimmedNonEmptyString),
   /** A source or bundled definition the user removed; it stays listed so it can be restored. */
   removed: Schema.optional(Schema.Boolean),
   /** Content digest of the current definition; compared with launch snapshots to show drift. */
   definitionDigest: Schema.optional(Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/))),
-  editable: Schema.optional(AgentPersonaEditableDetails),
+  orderedEditable: Schema.optional(AgentPersonaEditableDetails),
   definitionVersion: PositiveInt,
   displayName: TrimmedNonEmptyString,
   description: TrimmedNonEmptyString,
   acceptedInput: Schema.optional(TrimmedNonEmptyString),
-  outputArtifact: Schema.optional(TrimmedNonEmptyString),
-  defaultAuthorityPolicy: AgentPersonaAuthorityPolicy,
-  allowedAuthorityPolicies: Schema.Array(AgentPersonaAuthorityPolicy),
+  access: Schema.optional(AgentPersonaAccess),
+  models: Schema.optional(Schema.NonEmptyArray(AgentPersonaModelEntry)),
+  /** Reviewers prefer a model that didn't write the work they review; never a block. */
+  independentReviewer: Schema.optional(Schema.Boolean),
+  defaultAuthorityPolicy: AgentPersonaReportedAuthorityPolicy,
+  allowedAuthorityPolicies: Schema.Array(AgentPersonaReportedAuthorityPolicy),
   availability: OrchestrationV2AgentPersonaAvailability,
 });
 export type OrchestrationV2AgentPersonaCatalogEntry =
   typeof OrchestrationV2AgentPersonaCatalogEntry.Type;
 
-export class AgentPersonaCatalogError extends Schema.TaggedErrorClass<AgentPersonaCatalogError>()(
+export class AgentPersonaCatalogError extends Schema.TaggedError<AgentPersonaCatalogError>()(
   "AgentPersonaCatalogError",
   { message: Schema.String },
 ) {}
 
+/** The provider drivers whose sandbox enforces one runtime policy; the editor shows these. */
+export const AgentPersonaPolicyEnforcement = Schema.Struct({
+  policy: AgentPersonaReportedAuthorityPolicy,
+  drivers: Schema.Array(ProviderDriverKind),
+});
+export type AgentPersonaPolicyEnforcement = typeof AgentPersonaPolicyEnforcement.Type;
+
 export const OrchestrationV2AgentPersonaCatalog = Schema.Struct({
+  /** Invalid source files excluded from this catalog. Optional for older servers. */
+  diagnostics: Schema.optional(
+    Schema.Array(Schema.Struct({ path: Schema.String, message: Schema.String })),
+  ),
   personas: Schema.Array(OrchestrationV2AgentPersonaCatalogEntry),
+  /** Absent from servers that predate it. */
+  policyEnforcement: Schema.optional(Schema.Array(AgentPersonaPolicyEnforcement)),
 });
 export type OrchestrationV2AgentPersonaCatalog = typeof OrchestrationV2AgentPersonaCatalog.Type;
 
@@ -242,18 +421,22 @@ export const AgentPersonaImportConflict = Schema.Struct({
   definitionDigest: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
 });
 export type AgentPersonaImportConflict = typeof AgentPersonaImportConflict.Type;
-export class AgentPersonaImportConflictError extends Schema.TaggedErrorClass<AgentPersonaImportConflictError>()(
+export class AgentPersonaImportConflictError extends Schema.TaggedError<AgentPersonaImportConflictError>()(
   "AgentPersonaImportConflictError",
   { message: Schema.String, conflicts: Schema.Array(AgentPersonaImportConflict) },
 ) {}
 
+export const AgentPersonaImportFile = Schema.Struct({
+  name: TrimmedNonEmptyString.check(Schema.isMaxLength(1024)),
+  content: Schema.String.check(Schema.isMaxLength(AGENT_PERSONA_IMPORT_MAX_BYTES)),
+});
+export type AgentPersonaImportFile = typeof AgentPersonaImportFile.Type;
+
 export const AgentPersonaImportInput = Schema.Struct({
-  files: Schema.Array(
-    Schema.Struct({
-      name: TrimmedNonEmptyString.check(Schema.isMaxLength(1024)),
-      content: Schema.String.check(Schema.isMaxLength(AGENT_PERSONA_IMPORT_MAX_BYTES)),
-    }),
-  ).check(Schema.isMinLength(1), Schema.isMaxLength(AGENT_PERSONA_IMPORT_MAX_FILES)),
+  files: Schema.Array(AgentPersonaImportFile).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(AGENT_PERSONA_IMPORT_MAX_FILES),
+  ),
   replaceExisting: Schema.Boolean,
   skippedPersonaIds: Schema.optional(
     Schema.Array(AgentPersonaId).check(Schema.isMaxLength(AGENT_PERSONA_IMPORT_MAX_FILES)),
@@ -320,7 +503,7 @@ export const AgentPersonaLibrarySources = Schema.Struct({
   folders: Schema.Array(AgentPersonaLibraryFolder),
 });
 export type AgentPersonaLibrarySources = typeof AgentPersonaLibrarySources.Type;
-export const AGENT_PERSONA_LIBRARY_MAX_FOLDERS = 32;
+const AGENT_PERSONA_LIBRARY_MAX_FOLDERS = 32;
 export const AgentPersonaLibraryFoldersInput = Schema.Struct({
   folders: Schema.Array(TrimmedNonEmptyString.check(Schema.isMaxLength(4096))).check(
     Schema.isMaxLength(AGENT_PERSONA_LIBRARY_MAX_FOLDERS),
@@ -330,7 +513,7 @@ export type AgentPersonaLibraryFoldersInput = typeof AgentPersonaLibraryFoldersI
 
 /**
  * A saved agent's declared output artifact, tracked per task. The agent writes it to the
- * project's shared artifacts through write_artifact; the server checks at run end, asks once
+ * project's shared artifacts through j5_write_artifact; the server checks at run end, asks once
  * when it is missing (`nudged`), and marks it `missing` if the follow-up ends without it.
  */
 export const AgentHandoffStatus = Schema.Literals(["written", "nudged", "missing"]);
@@ -348,15 +531,15 @@ export const AgentHandoff = Schema.Struct({
 });
 export type AgentHandoff = typeof AgentHandoff.Type;
 
-// ---------------------------------------------------------------------------
 // Library management RPCs. These ride the upstream WebSocket RPC transport via one
 // `WsRpcGroup.merge(...)` call so environment scoping, remote connections, and
 // mobile keep working without a second wire path, while every definition stays here.
-// ---------------------------------------------------------------------------
 
 export const J5_AGENT_PERSONA_WS_METHODS = {
   getAgentPersonaCatalog: "j5.agentPersonas.getCatalog",
   importAgentPersonas: "j5.agentPersonas.import",
+  listAgentPersonaImportFiles: "j5.agentPersonas.listImportFiles",
+  readAgentPersonaImportFiles: "j5.agentPersonas.readImportFiles",
   editImportedAgentPersona: "j5.agentPersonas.editImported",
   setImportedAgentPersonaEnabled: "j5.agentPersonas.setImportedEnabled",
   removeImportedAgentPersona: "j5.agentPersonas.removeImported",
@@ -370,7 +553,6 @@ export const J5_AGENT_PERSONA_WS_METHODS = {
   setAgentPersonaLibraryFolders: "j5.agentPersonas.setLibraryFolders",
   setAgentPersonaEnabled: "j5.agentPersonas.setEnabled",
   getAgentHandoffs: "j5.agentPersonas.getHandoffs",
-  subscribeAgentHandoffRefreshes: "j5.agentPersonas.subscribeHandoffRefreshes",
 } as const;
 
 export const J5AgentPersonaRpcSchemas = {
@@ -381,6 +563,28 @@ export const J5AgentPersonaRpcSchemas = {
   importAgentPersonas: {
     input: AgentPersonaImportInput,
     output: Schema.Struct({ importedIds: Schema.Array(AgentPersonaId) }),
+  },
+  /** YAML files directly inside a folder on the environment's machine, for the import picker. */
+  listAgentPersonaImportFiles: {
+    input: Schema.Struct({ directory: TrimmedNonEmptyString.check(Schema.isMaxLength(4096)) }),
+    output: Schema.Struct({
+      files: Schema.Array(
+        Schema.Struct({ name: TrimmedNonEmptyString, fullPath: TrimmedNonEmptyString }),
+      ),
+    }),
+  },
+  /**
+   * Reads one YAML file, or every YAML file under a folder, from the environment's machine so
+   * the result can go through `importAgentPersonas` and its conflict confirmation unchanged.
+   */
+  readAgentPersonaImportFiles: {
+    input: Schema.Struct({ path: TrimmedNonEmptyString.check(Schema.isMaxLength(4096)) }),
+    output: Schema.Struct({
+      files: Schema.Array(AgentPersonaImportFile).check(
+        Schema.isMinLength(1),
+        Schema.isMaxLength(AGENT_PERSONA_IMPORT_MAX_FILES),
+      ),
+    }),
   },
   editImportedAgentPersona: {
     input: AgentPersonaEditInput,
@@ -441,36 +645,41 @@ export const J5AgentPersonaRpcSchemas = {
     }),
     output: Schema.Struct({ handoffs: Schema.Array(AgentHandoff) }),
   },
-  /** Emits a revision after every handoff row write; clients refetch `getAgentHandoffs` on it. */
-  subscribeAgentHandoffRefreshes: {
-    input: Schema.Struct({}),
-    output: NonNegativeInt,
-  },
 } as const;
 
 const catalogErrors = Schema.Union([EnvironmentAuthorizationError, AgentPersonaCatalogError]);
 
-export const WsJ5GetAgentPersonaCatalogRpc = Rpc.make(
-  J5_AGENT_PERSONA_WS_METHODS.getAgentPersonaCatalog,
+const WsJ5GetAgentPersonaCatalogRpc = Rpc.make(J5_AGENT_PERSONA_WS_METHODS.getAgentPersonaCatalog, {
+  payload: J5AgentPersonaRpcSchemas.getAgentPersonaCatalog.input,
+  success: J5AgentPersonaRpcSchemas.getAgentPersonaCatalog.output,
+  error: catalogErrors,
+});
+const WsJ5ImportAgentPersonasRpc = Rpc.make(J5_AGENT_PERSONA_WS_METHODS.importAgentPersonas, {
+  payload: J5AgentPersonaRpcSchemas.importAgentPersonas.input,
+  success: J5AgentPersonaRpcSchemas.importAgentPersonas.output,
+  error: Schema.Union([
+    EnvironmentAuthorizationError,
+    AgentPersonaCatalogError,
+    AgentPersonaImportConflictError,
+  ]),
+});
+const WsJ5ListAgentPersonaImportFilesRpc = Rpc.make(
+  J5_AGENT_PERSONA_WS_METHODS.listAgentPersonaImportFiles,
   {
-    payload: J5AgentPersonaRpcSchemas.getAgentPersonaCatalog.input,
-    success: J5AgentPersonaRpcSchemas.getAgentPersonaCatalog.output,
+    payload: J5AgentPersonaRpcSchemas.listAgentPersonaImportFiles.input,
+    success: J5AgentPersonaRpcSchemas.listAgentPersonaImportFiles.output,
     error: catalogErrors,
   },
 );
-export const WsJ5ImportAgentPersonasRpc = Rpc.make(
-  J5_AGENT_PERSONA_WS_METHODS.importAgentPersonas,
+const WsJ5ReadAgentPersonaImportFilesRpc = Rpc.make(
+  J5_AGENT_PERSONA_WS_METHODS.readAgentPersonaImportFiles,
   {
-    payload: J5AgentPersonaRpcSchemas.importAgentPersonas.input,
-    success: J5AgentPersonaRpcSchemas.importAgentPersonas.output,
-    error: Schema.Union([
-      EnvironmentAuthorizationError,
-      AgentPersonaCatalogError,
-      AgentPersonaImportConflictError,
-    ]),
+    payload: J5AgentPersonaRpcSchemas.readAgentPersonaImportFiles.input,
+    success: J5AgentPersonaRpcSchemas.readAgentPersonaImportFiles.output,
+    error: catalogErrors,
   },
 );
-export const WsJ5EditImportedAgentPersonaRpc = Rpc.make(
+const WsJ5EditImportedAgentPersonaRpc = Rpc.make(
   J5_AGENT_PERSONA_WS_METHODS.editImportedAgentPersona,
   {
     payload: J5AgentPersonaRpcSchemas.editImportedAgentPersona.input,
@@ -478,7 +687,7 @@ export const WsJ5EditImportedAgentPersonaRpc = Rpc.make(
     error: catalogErrors,
   },
 );
-export const WsJ5SetImportedAgentPersonaEnabledRpc = Rpc.make(
+const WsJ5SetImportedAgentPersonaEnabledRpc = Rpc.make(
   J5_AGENT_PERSONA_WS_METHODS.setImportedAgentPersonaEnabled,
   {
     payload: J5AgentPersonaRpcSchemas.setImportedAgentPersonaEnabled.input,
@@ -486,7 +695,7 @@ export const WsJ5SetImportedAgentPersonaEnabledRpc = Rpc.make(
     error: catalogErrors,
   },
 );
-export const WsJ5RemoveImportedAgentPersonaRpc = Rpc.make(
+const WsJ5RemoveImportedAgentPersonaRpc = Rpc.make(
   J5_AGENT_PERSONA_WS_METHODS.removeImportedAgentPersona,
   {
     payload: J5AgentPersonaRpcSchemas.removeImportedAgentPersona.input,
@@ -494,7 +703,7 @@ export const WsJ5RemoveImportedAgentPersonaRpc = Rpc.make(
     error: catalogErrors,
   },
 );
-export const WsJ5RemoveSourceAgentPersonaRpc = Rpc.make(
+const WsJ5RemoveSourceAgentPersonaRpc = Rpc.make(
   J5_AGENT_PERSONA_WS_METHODS.removeSourceAgentPersona,
   {
     payload: J5AgentPersonaRpcSchemas.removeSourceAgentPersona.input,
@@ -502,12 +711,12 @@ export const WsJ5RemoveSourceAgentPersonaRpc = Rpc.make(
     error: catalogErrors,
   },
 );
-export const WsJ5RemoveAgentPersonaRpc = Rpc.make(J5_AGENT_PERSONA_WS_METHODS.removeAgentPersona, {
+const WsJ5RemoveAgentPersonaRpc = Rpc.make(J5_AGENT_PERSONA_WS_METHODS.removeAgentPersona, {
   payload: J5AgentPersonaRpcSchemas.removeAgentPersona.input,
   success: J5AgentPersonaRpcSchemas.removeAgentPersona.output,
   error: catalogErrors,
 });
-export const WsJ5RestoreSourceAgentPersonaRpc = Rpc.make(
+const WsJ5RestoreSourceAgentPersonaRpc = Rpc.make(
   J5_AGENT_PERSONA_WS_METHODS.restoreSourceAgentPersona,
   {
     payload: J5AgentPersonaRpcSchemas.restoreSourceAgentPersona.input,
@@ -516,28 +725,25 @@ export const WsJ5RestoreSourceAgentPersonaRpc = Rpc.make(
   },
 );
 
-export const WsJ5CreateAgentPersonaRpc = Rpc.make(J5_AGENT_PERSONA_WS_METHODS.createAgentPersona, {
+const WsJ5CreateAgentPersonaRpc = Rpc.make(J5_AGENT_PERSONA_WS_METHODS.createAgentPersona, {
   payload: J5AgentPersonaRpcSchemas.createAgentPersona.input,
   success: J5AgentPersonaRpcSchemas.createAgentPersona.output,
   error: catalogErrors,
 });
 
-export const WsJ5ReadAgentPersonaRpc = Rpc.make(J5_AGENT_PERSONA_WS_METHODS.readAgentPersona, {
+const WsJ5ReadAgentPersonaRpc = Rpc.make(J5_AGENT_PERSONA_WS_METHODS.readAgentPersona, {
   payload: J5AgentPersonaRpcSchemas.readAgentPersona.input,
   success: J5AgentPersonaRpcSchemas.readAgentPersona.output,
   error: catalogErrors,
 });
 
-export const WsJ5GetAgentPersonaUsageRpc = Rpc.make(
-  J5_AGENT_PERSONA_WS_METHODS.getAgentPersonaUsage,
-  {
-    payload: J5AgentPersonaRpcSchemas.getAgentPersonaUsage.input,
-    success: J5AgentPersonaRpcSchemas.getAgentPersonaUsage.output,
-    error: catalogErrors,
-  },
-);
+const WsJ5GetAgentPersonaUsageRpc = Rpc.make(J5_AGENT_PERSONA_WS_METHODS.getAgentPersonaUsage, {
+  payload: J5AgentPersonaRpcSchemas.getAgentPersonaUsage.input,
+  success: J5AgentPersonaRpcSchemas.getAgentPersonaUsage.output,
+  error: catalogErrors,
+});
 
-export const WsJ5GetAgentPersonaLibrarySourcesRpc = Rpc.make(
+const WsJ5GetAgentPersonaLibrarySourcesRpc = Rpc.make(
   J5_AGENT_PERSONA_WS_METHODS.getAgentPersonaLibrarySources,
   {
     payload: J5AgentPersonaRpcSchemas.getAgentPersonaLibrarySources.input,
@@ -546,7 +752,7 @@ export const WsJ5GetAgentPersonaLibrarySourcesRpc = Rpc.make(
   },
 );
 
-export const WsJ5SetAgentPersonaLibraryFoldersRpc = Rpc.make(
+const WsJ5SetAgentPersonaLibraryFoldersRpc = Rpc.make(
   J5_AGENT_PERSONA_WS_METHODS.setAgentPersonaLibraryFolders,
   {
     payload: J5AgentPersonaRpcSchemas.setAgentPersonaLibraryFolders.input,
@@ -555,35 +761,24 @@ export const WsJ5SetAgentPersonaLibraryFoldersRpc = Rpc.make(
   },
 );
 
-export const WsJ5SetAgentPersonaEnabledRpc = Rpc.make(
-  J5_AGENT_PERSONA_WS_METHODS.setAgentPersonaEnabled,
-  {
-    payload: J5AgentPersonaRpcSchemas.setAgentPersonaEnabled.input,
-    success: J5AgentPersonaRpcSchemas.setAgentPersonaEnabled.output,
-    error: catalogErrors,
-  },
-);
+const WsJ5SetAgentPersonaEnabledRpc = Rpc.make(J5_AGENT_PERSONA_WS_METHODS.setAgentPersonaEnabled, {
+  payload: J5AgentPersonaRpcSchemas.setAgentPersonaEnabled.input,
+  success: J5AgentPersonaRpcSchemas.setAgentPersonaEnabled.output,
+  error: catalogErrors,
+});
 
-export const WsJ5GetAgentHandoffsRpc = Rpc.make(J5_AGENT_PERSONA_WS_METHODS.getAgentHandoffs, {
+const WsJ5GetAgentHandoffsRpc = Rpc.make(J5_AGENT_PERSONA_WS_METHODS.getAgentHandoffs, {
   payload: J5AgentPersonaRpcSchemas.getAgentHandoffs.input,
   success: J5AgentPersonaRpcSchemas.getAgentHandoffs.output,
   error: catalogErrors,
 });
 
-export const WsJ5SubscribeAgentHandoffRefreshesRpc = Rpc.make(
-  J5_AGENT_PERSONA_WS_METHODS.subscribeAgentHandoffRefreshes,
-  {
-    payload: J5AgentPersonaRpcSchemas.subscribeAgentHandoffRefreshes.input,
-    success: J5AgentPersonaRpcSchemas.subscribeAgentHandoffRefreshes.output,
-    error: EnvironmentAuthorizationError,
-    stream: true,
-  },
-);
-
 /** Merged into `WsRpcGroup` by one appended call; no other upstream registration exists. */
 export const J5AgentPersonaRpcGroup = RpcGroup.make(
   WsJ5GetAgentPersonaCatalogRpc,
   WsJ5ImportAgentPersonasRpc,
+  WsJ5ListAgentPersonaImportFilesRpc,
+  WsJ5ReadAgentPersonaImportFilesRpc,
   WsJ5EditImportedAgentPersonaRpc,
   WsJ5SetImportedAgentPersonaEnabledRpc,
   WsJ5RemoveImportedAgentPersonaRpc,
@@ -597,5 +792,4 @@ export const J5AgentPersonaRpcGroup = RpcGroup.make(
   WsJ5SetAgentPersonaLibraryFoldersRpc,
   WsJ5SetAgentPersonaEnabledRpc,
   WsJ5GetAgentHandoffsRpc,
-  WsJ5SubscribeAgentHandoffRefreshesRpc,
 );

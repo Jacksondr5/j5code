@@ -1,172 +1,49 @@
 ---
-import Layout from "../layouts/Layout.astro";
-
-const documents = [
-  {
-    number: "01",
-    title: "Privacy Policy",
-    description: "How T3 Code handles information, connected services, and your privacy choices.",
-    href: "/privacy-policy",
-  },
-  {
-    number: "02",
-    title: "Terms of Service",
-    description: "The terms that govern your use of T3 Code and T3 Tools-operated services.",
-    href: "/terms-of-service",
-  },
-  {
-    number: "03",
-    title: "Security Policy",
-    description: "Our security practices, responsible disclosure process, and shared responsibilities.",
-    href: "/security-policy",
-  },
-] as const;
+import Document from "../components/Document.astro";
+import { CONTACT_EMAIL, GITHUB_REPOSITORY_URL, LICENSE_URL, T3_SITE_URL } from "../lib/site";
 ---
 
-<Layout
-  title="Legal — T3 Code"
-  description="Privacy, terms, and security documents for T3 Code."
-  pageClass="legal-document-page"
+<Document
+  title="Legal"
+  description="J5 Code's license, its relationship to T3 Code, and whose terms apply to the services it connects to."
+  updated="2026-10-04"
 >
-  <div class="legal-index">
-    <header class="legal-index-hero">
-      <p class="eyebrow">T3 Tools, Inc. / Legal</p>
-      <h1>Legal</h1>
-      <p>Policies and terms for T3 Code, collected in one place.</p>
-    </header>
+  <p>
+    J5 Code is open-source software maintained by Jackson Miller. It is free, and its source is at{" "}
+    <a href={GITHUB_REPOSITORY_URL} target="_blank" rel="noopener noreferrer">github.com/Jacksondr5/j5code</a>.
+  </p>
 
-    <nav class="document-list" aria-label="Legal documents">
-      {documents.map((document) => (
-        <a href={document.href} class="document-card">
-          <span class="document-number">{document.number}</span>
-          <span class="document-copy">
-            <strong>{document.title}</strong>
-            <span>{document.description}</span>
-          </span>
-          <span class="document-arrow" aria-hidden="true">&#8599;</span>
-        </a>
-      ))}
-    </nav>
-  </div>
-</Layout>
+  <h2>License</h2>
+  <p>
+    J5 Code is released under the{" "}
+    <a href={LICENSE_URL} target="_blank" rel="noopener noreferrer">MIT License</a>. The license
+    says what you may do with the software, and that it comes without warranty.
+  </p>
 
-<style>
-  .legal-index {
-    width: min(960px, calc(100% - 64px));
-    margin: 0 auto;
-    padding: clamp(72px, 10vw, 132px) 0 112px;
-  }
+  <h2>T3 Code</h2>
+  <p>
+    J5 Code is a fork of <a href={T3_SITE_URL} target="_blank" rel="noopener noreferrer">T3 Code</a>,
+    which is made by T3 Tools Inc. and also MIT licensed. J5 Code is an independent project: T3
+    Tools does not make, endorse, or support it.
+  </p>
+  <p>
+    T3 Connect and T3 Account are T3 Tools' hosted services. J5 Code does not run them, and J5 Code
+    releases are not set up to use them.
+  </p>
 
-  .legal-index-hero {
-    max-width: 680px;
-    animation: fade-in 0.7s ease-out both;
-  }
+  <h2>Services you connect</h2>
+  <p>
+    J5 Code runs coding agents through providers you choose and sign in to yourself, such as
+    OpenAI, Anthropic, and Cursor. Your use of each provider is under that provider's terms and
+    privacy policy, not J5 Code's.
+  </p>
 
-  .legal-index h1 {
-    margin-top: 18px;
-    font-size: clamp(4rem, 10vw, 7.4rem);
-    font-weight: 500;
-    letter-spacing: -0.04em;
-    line-height: 0.9;
-  }
+  <h2>Privacy</h2>
+  <p>
+    The <a href="/privacy-policy">privacy page</a> says what J5 Code sends from your machines and
+    how to turn it off.
+  </p>
 
-  .legal-index-hero > p:last-child {
-    margin-top: 30px;
-    color: var(--fg-muted);
-    font-size: clamp(1.05rem, 2vw, 1.3rem);
-    line-height: 1.65;
-  }
-
-  .document-list {
-    display: grid;
-    margin-top: clamp(64px, 9vw, 96px);
-    border-top: 1px solid var(--border);
-  }
-
-  .document-card {
-    display: grid;
-    grid-template-columns: 42px minmax(0, 1fr) auto;
-    gap: 24px;
-    align-items: center;
-    padding: 30px 8px;
-    border-bottom: 1px solid var(--border);
-    transition: background-color 0.18s ease, padding 0.18s ease;
-  }
-
-  .document-number {
-    color: var(--accent);
-    font-family: var(--font-mono);
-    font-size: 0.7rem;
-    letter-spacing: 0.1em;
-  }
-
-  .document-copy {
-    display: grid;
-    gap: 7px;
-  }
-
-  .document-copy strong {
-    color: var(--fg);
-    font-size: 1.2rem;
-    font-weight: 500;
-    letter-spacing: -0.02em;
-  }
-
-  .document-copy > span {
-    color: var(--fg-dim);
-    font-size: 0.9rem;
-    line-height: 1.55;
-  }
-
-  .document-arrow {
-    color: var(--fg-dim);
-    font-size: 1.25rem;
-    transition: color 0.18s ease, transform 0.18s ease;
-  }
-
-  @media (hover: hover) and (pointer: fine) {
-    .document-card:hover {
-      padding-left: 16px;
-      padding-right: 16px;
-      background: rgba(255, 255, 255, 0.025);
-    }
-
-    .document-card:hover .document-arrow {
-      color: var(--fg);
-      transform: translate(2px, -2px);
-    }
-  }
-
-  @media (max-width: 820px) {
-    .legal-index {
-      width: min(100% - 40px, 720px);
-      padding-top: 56px;
-      padding-bottom: 80px;
-    }
-
-    .document-card {
-      grid-template-columns: 30px minmax(0, 1fr) auto;
-      gap: 14px;
-      padding: 24px 4px;
-    }
-  }
-
-  @media (max-width: 420px) {
-    .legal-index {
-      width: calc(100% - 32px);
-      padding-top: 42px;
-    }
-
-    .legal-index h1 {
-      font-size: 4.4rem;
-    }
-
-    .document-copy strong {
-      font-size: 1.08rem;
-    }
-
-    .document-copy > span {
-      font-size: 0.84rem;
-    }
-  }
-</style>
+  <h2>Contact</h2>
+  <p><a href={`mailto:${CONTACT_EMAIL}`}>{CONTACT_EMAIL}</a></p>
+</Document>

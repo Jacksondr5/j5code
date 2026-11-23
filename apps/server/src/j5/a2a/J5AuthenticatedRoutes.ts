@@ -1,51 +1,28 @@
 import * as Layer from "effect/Layer";
 
-import { agentCrewReadsHttpRouteLayer } from "./AgentCrewReadsHttp.ts";
-import { crewArchiveHttpRouteLayer } from "./CrewArchiveHttp.ts";
-import { crewProposalsHttpRouteLayer } from "./CrewProposalsHttp.ts";
-import { crewStopHttpRouteLayer } from "./CrewStopHttp.ts";
-import { fleetReadsHttpRouteLayer } from "./FleetReadsHttp.ts";
-import { spawnedChildrenHttpRouteLayer } from "./SpawnedChildrenHttp.ts";
-import {
-  CLIENT_READS_OPEN_COUNT_PATH,
-  CLIENT_READS_PARTICIPANT_HOMES_PATH,
-  CLIENT_READS_PARTICIPANT_IDENTITIES_PATH,
-  makeClientReadsHttpRouteLayer,
-} from "./ClientReadsHttp.ts";
-import { humanInboxHttpRouteLayer } from "./HumanInboxHttp.ts";
+import { linkSessionHttpRouteLayer } from "./LinkSessionHttp.ts";
 import { machineSenderHttpRouteLayer } from "./MachineSenderHttp.ts";
-import { preArchiveFactsHttpRouteLayer } from "./PreArchiveFactsHttp.ts";
-import { layer as squadronManagementServiceLayer } from "./SquadronManagementService.ts";
-import { squadronHttpRouteLayer } from "./SquadronHttp.ts";
-import { threadHomesHttpRouteLayer } from "./ThreadHomesHttp.ts";
-import { layer as agentHandoffArtifactDeleteLayer } from "../agents/agentHandoffArtifactDelete.ts";
+import { peerHttpRouteLayer } from "./PeerHttp.ts";
 import { artifactHttpRouteLayer } from "../artifacts/ArtifactHttp.ts";
 import { layer as artifactWorkspaceLayer } from "../artifacts/ArtifactWorkspace.ts";
+import { cliPairingHttpRouteLayer } from "../sharing/CliPairingHttp.ts";
+import { guestProjectIconRouteLayer } from "../sharing/GuestProjectIcons.ts";
+import { linkHttpRouteLayer } from "../sharing/LinkHttp.ts";
+import { sessionRenewalRouteLayer } from "../sharing/SessionRenewal.ts";
 
 /**
- * One authenticated J5 route aggregate. New J5 HTTP route layers enter here
- * rather than adding another upstream server composition seam.
+ * One authenticated J5 route aggregate, so new J5 HTTP routes add no upstream seam. Client reads
+ * and acts are WebSocket RPCs (`wsRpc.ts`); these serve other servers, scripts, the `j5` CLI, and
+ * artifact reads too large for the socket. Session renewal (`SessionRenewal.ts`) and link describe
+ * and join (`LinkHttp.ts`) need no sign-in: they trust their own tokens.
  */
 export const j5AuthenticatedRoutesLayer = Layer.mergeAll(
-  agentCrewReadsHttpRouteLayer,
-  crewArchiveHttpRouteLayer,
-  crewProposalsHttpRouteLayer,
-  crewStopHttpRouteLayer,
-  fleetReadsHttpRouteLayer,
-  spawnedChildrenHttpRouteLayer,
   artifactHttpRouteLayer,
-  humanInboxHttpRouteLayer,
   machineSenderHttpRouteLayer,
-  preArchiveFactsHttpRouteLayer,
-  squadronHttpRouteLayer,
-  threadHomesHttpRouteLayer,
-  makeClientReadsHttpRouteLayer({
-    participantHome: CLIENT_READS_PARTICIPANT_HOMES_PATH,
-    participantIdentities: CLIENT_READS_PARTICIPANT_IDENTITIES_PATH,
-    openInboxCount: CLIENT_READS_OPEN_COUNT_PATH,
-  }),
-).pipe(
-  Layer.provide(artifactWorkspaceLayer),
-  Layer.provide(agentHandoffArtifactDeleteLayer),
-  Layer.provide(squadronManagementServiceLayer),
-);
+  peerHttpRouteLayer,
+  linkSessionHttpRouteLayer,
+  guestProjectIconRouteLayer,
+  sessionRenewalRouteLayer,
+  linkHttpRouteLayer,
+  cliPairingHttpRouteLayer,
+).pipe(Layer.provide(artifactWorkspaceLayer));

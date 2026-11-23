@@ -2,7 +2,6 @@ import {
   ModelSelection,
   OrchestrationV2ThreadProjection,
   ProviderSessionId,
-  ProviderThreadId,
   ThreadId,
 } from "@t3tools/contracts";
 import { modelSelectionsEqual } from "@t3tools/shared/model";
@@ -21,13 +20,11 @@ import {
 
 export interface ProviderSwitchPlanV2 {
   readonly instanceChanged: boolean;
-  readonly modelChanged: boolean;
-  readonly targetProviderThreadId: ProviderThreadId | null;
   readonly releaseProviderSessionIds: ReadonlyArray<ProviderSessionId>;
   readonly transition: ProviderSessionTransition;
 }
 
-export class ProviderSwitchPlanError extends Schema.TaggedErrorClass<ProviderSwitchPlanError>()(
+export class ProviderSwitchPlanError extends Schema.TaggedError<ProviderSwitchPlanError>()(
   "ProviderSwitchPlanError",
   {
     threadId: ThreadId,
@@ -38,7 +35,10 @@ export class ProviderSwitchPlanError extends Schema.TaggedErrorClass<ProviderSwi
 
 export interface ProviderSwitchServiceV2Shape {
   readonly plan: (input: {
-    readonly projection: OrchestrationV2ThreadProjection;
+    readonly projection: Pick<
+      OrchestrationV2ThreadProjection,
+      "thread" | "providerSessions" | "providerThreads"
+    >;
     readonly targetModelSelection: ModelSelection;
   }) => Effect.Effect<ProviderSwitchPlanV2, ProviderSwitchPlanError>;
 }
@@ -47,6 +47,10 @@ export class ProviderSwitchServiceV2 extends Context.Service<
   ProviderSwitchServiceV2,
   ProviderSwitchServiceV2Shape
 >()("t3/orchestration-v2/ProviderSwitchService/ProviderSwitchServiceV2") {}
+
+const isLiveProviderSession = (
+  session: OrchestrationV2ThreadProjection["providerSessions"][number],
+) => session.status !== "stopped" && session.status !== "error";
 
 export const layer: Layer.Layer<
   ProviderSwitchServiceV2,
@@ -57,11 +61,10 @@ export const layer: Layer.Layer<
   Effect.gen(function* () {
     const adapters = yield* ProviderAdapterRegistry.ProviderAdapterRegistryV2;
     return ProviderSwitchServiceV2.of({
-      plan: ({ projection, targetModelSelection }) =>
-        Effect.gen(function* () {
+      plan: Effect.fn("ProviderSwitchService.plan")(
+        function* ({ projection, targetModelSelection }) {
           const current = projection.thread.modelSelection;
           const instanceChanged = current.instanceId !== targetModelSelection.instanceId;
-          const modelChanged = current.model !== targetModelSelection.model;
           const getMetadata = (instanceId: typeof current.instanceId) =>
             adapters.getMetadata !== undefined
               ? adapters.getMetadata(instanceId)
@@ -80,21 +83,31 @@ export const layer: Layer.Layer<
           const currentInstance = yield* Effect.option(getMetadata(current.instanceId));
           const targetInstance = yield* Effect.option(getMetadata(targetModelSelection.instanceId));
           const targetAdapter = yield* Effect.option(adapters.get(targetModelSelection.instanceId));
-          const currentSession = projection.providerSessions
+          const currentSessions = projection.providerSessions
             .filter((session) => session.providerInstanceId === current.instanceId)
             .toSorted(
               (left, right) =>
                 DateTime.toEpochMillis(right.updatedAt) - DateTime.toEpochMillis(left.updatedAt),
-            )[0];
+            );
+          const currentSession = currentSessions.find(isLiveProviderSession);
+          const negotiatedCapabilities =
+            currentSession?.capabilities ?? currentSessions[0]?.capabilities;
+          const currentProviderThread = projection.providerThreads.find(
+            (thread) =>
+              thread.id === projection.thread.activeProviderThreadId &&
+              thread.providerInstanceId === current.instanceId &&
+              thread.nativeThreadRef !== null,
+          );
           const selectionTransition =
             current.instanceId === targetModelSelection.instanceId &&
             !modelSelectionsEqual(current, targetModelSelection) &&
             Option.isSome(targetAdapter) &&
-            currentSession !== undefined
+            Option.isSome(currentInstance) &&
+            (currentSession !== undefined || currentProviderThread !== undefined)
               ? yield* targetAdapter.value.planSelectionTransition({
                   current,
                   target: targetModelSelection,
-                  sessionCapabilities: currentSession.capabilities,
+                  sessionCapabilities: negotiatedCapabilities ?? currentInstance.value.capabilities,
                 })
               : undefined;
           const transition =
@@ -105,7 +118,8 @@ export const layer: Layer.Layer<
                 } as const)
               : decideProviderSessionTransition({
                   current:
-                    Option.isNone(currentInstance) || currentSession === undefined
+                    Option.isNone(currentInstance) ||
+                    (currentSession === undefined && currentProviderThread === undefined)
                       ? null
                       : {
                           driver: currentInstance.value.driver,
@@ -116,8 +130,10 @@ export const layer: Layer.Layer<
                           modelSelection: current,
                           runtimeMode: projection.thread.runtimeMode,
                           interactionMode: projection.thread.interactionMode,
-                          workspace: currentSession.cwd,
-                          capabilities: currentSession.capabilities,
+                          workspace:
+                            currentSession?.cwd ??
+                            projection.thread.worktreePath ??
+                            "<unresolved-workspace>",
                         },
                   target: {
                     driver: targetInstance.value.driver,
@@ -132,7 +148,6 @@ export const layer: Layer.Layer<
                       projection.thread.worktreePath ??
                       currentSession?.cwd ??
                       "<unresolved-workspace>",
-                    capabilities: targetInstance.value.capabilities,
                     available: targetInstance.value.enabled,
                   },
                   ...(selectionTransition === undefined ? {} : { selectionTransition }),
@@ -144,21 +159,11 @@ export const layer: Layer.Layer<
               cause: transition.reason,
             });
           }
-          const targetProviderThread = projection.providerThreads
-            .filter(
-              (thread) =>
-                thread.appThreadId === projection.thread.id &&
-                thread.ownerNodeId === null &&
-                thread.providerInstanceId === targetModelSelection.instanceId,
-            )
-            .toSorted(
-              (left, right) =>
-                DateTime.toEpochMillis(right.updatedAt) - DateTime.toEpochMillis(left.updatedAt),
-            )[0];
           const releaseProviderSessionIds = projection.providerSessions
             .filter((session) => {
-              if (session.status === "stopped" || session.status === "error") return false;
+              if (!isLiveProviderSession(session)) return false;
               if (transition.type === "restart_and_resume") {
+                // Release only the replaced session; peers can serve pooled or delegated bindings.
                 return session.id === currentSession?.id;
               }
               if (transition.type === "create_with_handoff") {
@@ -169,21 +174,22 @@ export const layer: Layer.Layer<
             .map((session) => session.id);
           return {
             instanceChanged,
-            modelChanged,
-            targetProviderThreadId: targetProviderThread?.id ?? null,
             releaseProviderSessionIds,
             transition,
           };
-        }).pipe(
-          Effect.mapError(
-            (cause) =>
-              new ProviderSwitchPlanError({
-                threadId: projection.thread.id,
-                targetProviderInstanceId: targetModelSelection.instanceId,
-                cause,
-              }),
+        },
+        (effect, { projection, targetModelSelection }) =>
+          effect.pipe(
+            Effect.mapError(
+              (cause) =>
+                new ProviderSwitchPlanError({
+                  threadId: projection.thread.id,
+                  targetProviderInstanceId: targetModelSelection.instanceId,
+                  cause,
+                }),
+            ),
           ),
-        ),
+      ),
     });
   }),
 );

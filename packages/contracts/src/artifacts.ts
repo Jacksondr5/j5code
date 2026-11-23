@@ -2,7 +2,6 @@ import * as Schema from "effect/Schema";
 
 import { NonNegativeInt, ProjectId } from "./baseSchemas.ts";
 
-export const ARTIFACT_LIST_PATH = "/api/j5/artifacts/list";
 export const ARTIFACT_READ_PATH = "/api/j5/artifacts/read";
 
 export const ArtifactEntry = Schema.Struct({
@@ -37,7 +36,7 @@ export const ArtifactWriteResult = Schema.Struct({
 });
 export type ArtifactWriteResult = typeof ArtifactWriteResult.Type;
 
-export class ArtifactMcpFailure extends Schema.TaggedErrorClass<ArtifactMcpFailure>()(
+export class ArtifactMcpFailure extends Schema.TaggedError<ArtifactMcpFailure>()(
   "ArtifactMcpFailure",
   {
     code: Schema.Literals([
@@ -77,7 +76,7 @@ export const ArtifactChangeEvent = Schema.Struct({
 });
 export type ArtifactChangeEvent = typeof ArtifactChangeEvent.Type;
 
-export class ArtifactWatchError extends Schema.TaggedErrorClass<ArtifactWatchError>()(
+export class ArtifactWatchError extends Schema.TaggedError<ArtifactWatchError>()(
   "ArtifactWatchError",
   {
     projectId: ProjectId,

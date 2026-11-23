@@ -1,0 +1,53 @@
+---
+import Layout from "../layouts/Layout.astro";
+import Boat from "../components/Boat.astro";
+import ServerForm from "../components/ServerForm.astro";
+import "../styles/link-page.css";
+---
+
+<Layout title="Open a thread — J5 Code" description="A link to a thread in J5 Code. It opens for people connected to the thread's server who can see it.">
+  <div class="link-page">
+    <div class="heading-boat"><Boat tone="dark" size={56} /></div>
+
+    <section class="panel" id="thread-link" hidden>
+      <h1 class="heading display">Open this thread</h1>
+      <p class="subheading">It opens in J5 Code if you're connected to the server it runs on and can see the thread.</p>
+
+      <div class="actions">
+        <a class="btn btn-primary" id="open-app" href="/download">Open in J5 Code</a>
+        <a class="btn btn-ghost" href="/download">Get J5 Code</a>
+      </div>
+
+      <ServerForm label="Using J5 Code in a browser? Open the thread on your server." />
+    </section>
+
+    <section class="panel" id="thread-link-error" hidden>
+      <h1 class="heading display">Could not open the link</h1>
+      <p class="subheading" id="error-text"></p>
+      <div class="actions">
+        <a class="btn btn-ghost" href="/download">Get J5 Code</a>
+      </div>
+    </section>
+
+    <noscript>
+      <p class="subheading">This page needs JavaScript to read the link.</p>
+    </noscript>
+  </div>
+</Layout>
+
+<script>
+  import { wireServerForm } from "../lib/serverForm";
+  import { readThreadLinkPage } from "../lib/threadLink";
+
+  const byId = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
+  const page = readThreadLinkPage(window.location.href);
+
+  if (!page.ok) {
+    byId("error-text").textContent = page.error;
+    byId("thread-link-error").hidden = false;
+  } else {
+    byId<HTMLAnchorElement>("open-app").href = page.value.deepLink;
+    wireServerForm(page.value.appPath);
+    byId("thread-link").hidden = false;
+  }
+</script>

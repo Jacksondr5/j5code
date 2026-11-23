@@ -1,4 +1,6 @@
 import { assert, it } from "@effect/vitest";
+import { agentPersonaEscalationsTestLayer } from "../test-support/agentPersonaEscalations.ts";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CommandId,
@@ -16,26 +18,41 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
-import { makeOrchestratorV2ReplayLayerWithRegistry } from "../../orchestration-v2/testkit/ProviderReplayHarness.ts";
-import { makeLayer } from "../../orchestration-v2/ProviderAdapterRegistry.ts";
-import type { ProviderAdapterV2Shape } from "../../orchestration-v2/ProviderAdapter.ts";
+import { RemoteDelegation } from "../../peer/RemoteDelegation.ts";
+import { layerMemory as SqlitePersistenceMemory } from "../../persistence/Sqlite.ts";
+import { layerWithRegistry as makeOrchestratorV2ReplayLayerWithRegistry } from "../../orchestration-v2/testkit/ProviderReplayHarness.ts";
+import { layerFromAdapters as makeLayer } from "../../orchestration-v2/ProviderAdapterRegistry.ts";
+import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import { CodexProviderCapabilitiesV2 } from "../../orchestration-v2/Adapters/CodexAdapterV2.ts";
 import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";
 import * as Projections from "../../orchestration-v2/ProjectionStore.ts";
 import * as Threads from "../../orchestration-v2/ThreadManagementService.ts";
+import * as CommandReceiptStore from "../../orchestration-v2/CommandReceiptStore.ts";
+import { ThreadLaunchService } from "../../orchestration-v2/ThreadLaunchService.ts";
+import * as ServerSettings from "../../serverSettings.ts";
+import { GitVcsDriver } from "../../vcs/GitVcsDriver.ts";
 import * as Mcp from "../../mcp/OrchestratorMcpService.ts";
 import { McpInvocationContext } from "../../mcp/McpInvocationContext.ts";
-import { ProviderRegistry } from "../../provider/Services/ProviderRegistry.ts";
+import * as ProjectService from "../../project/ProjectService.ts";
+import * as SecretRequests from "../../secrets/SecretRequests.ts";
+import { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
 import { ScheduledTaskService } from "../../scheduledTasks/ScheduledTaskService.ts";
 import { BUILT_IN_AGENT_PERSONAS } from "./agentPersonas.ts";
+import { personaLibraryLayer } from "../test-support/personaLibrary.ts";
 import { delegateTask } from "./agentDelegation.ts";
+import { CrewMemberModels } from "./crewMemberModels.ts";
+import {
+  crewMemberModelsLayer,
+  permissiveCrewMemberModels,
+} from "../test-support/crewMemberModels.ts";
 import { invokeAgent } from "./agentInvocation.ts";
 
 const modelSelection = {
   instanceId: ProviderInstanceId.make("codex"),
   model: BUILT_IN_AGENT_PERSONAS.scout.modelRoute[0].model,
 };
+const otherModel = "gpt-5.6-other";
+const plainModel = "gpt-5.6-plain";
 const provider: ServerProvider = {
   instanceId: modelSelection.instanceId,
   driver: ProviderDriverKind.make("codex"),
@@ -49,8 +66,8 @@ const provider: ServerProvider = {
   slashCommands: [],
   skills: [],
   models: [
-    {
-      slug: modelSelection.model,
+    ...[modelSelection.model, otherModel].map((slug) => ({
+      slug,
       name: "Model",
       isCustom: false,
       capabilities: {
@@ -58,12 +75,17 @@ const provider: ServerProvider = {
           {
             id: "reasoningEffort",
             label: "Reasoning",
-            type: "select",
-            options: [{ id: "high", label: "High" }],
+            type: "select" as const,
+            options: [
+              { id: "high", label: "High", isDefault: true },
+              { id: "low", label: "Low" },
+            ],
           },
         ],
       },
-    },
+    })),
+    // A model that advertises no reasoning option has no level to hold.
+    { slug: plainModel, name: "Plain", isCustom: false, capabilities: null },
   ],
 };
 const adapter = {
@@ -72,106 +94,163 @@ const adapter = {
   getCapabilities: () => Effect.succeed(CodexProviderCapabilitiesV2),
   planSelectionTransition: () => Effect.succeed({ type: "apply_on_next_turn" as const }),
   openSession: () => Effect.die("live provider execution is disabled in this test"),
-} as ProviderAdapterV2Shape;
+} as ProviderAdapter.ProviderAdapterV2["Service"];
 const database = SqlitePersistenceMemory;
+const adapters = makeLayer([adapter]);
 const orchestration = makeOrchestratorV2ReplayLayerWithRegistry(
   { name: "j5-agent-subagent" },
-  makeLayer([adapter]),
+  adapters,
   { databaseLayer: database, runEffectWorker: false },
 );
-const threads = Threads.layer.pipe(Layer.provide(orchestration));
+const settings = ServerSettings.layerTest({});
+const threads = Threads.layer.pipe(
+  Layer.provide(orchestration),
+  Layer.provide(settings),
+  Layer.provide(CommandReceiptStore.layer.pipe(Layer.provide(database))),
+);
 const registry = Layer.mock(ProviderRegistry)({ getProviders: Effect.succeed([provider]) });
 const mcp = Mcp.layer.pipe(
   Layer.provide(threads),
   Layer.provide(registry),
+  Layer.provide(adapters),
   Layer.provide(Layer.mock(ScheduledTaskService)({})),
-  Layer.provide(NodeServices.layer),
+  Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
+  Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
+  Layer.provide(Layer.mock(GitVcsDriver)({})),
+  Layer.provide(Layer.mock(ThreadLaunchService)({})),
+  Layer.provide(Layer.mock(RemoteDelegation)({})),
+  Layer.provide(settings),
+  Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
 );
-const testLayer = Layer.mergeAll(
-  orchestration,
-  threads,
-  registry,
-  mcp,
-  Projections.layer.pipe(Layer.provide(database)),
-  NodeServices.layer,
-);
+const makeTestLayer = (memberModels: Layer.Layer<CrewMemberModels>) =>
+  Layer.mergeAll(
+    orchestration,
+    threads,
+    registry,
+    mcp,
+    memberModels,
+    agentPersonaEscalationsTestLayer(),
+    Projections.layer.pipe(Layer.provide(database)),
+    Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
+  ).pipe(
+    Layer.provideMerge(personaLibraryLayer("j5-saved-subagent-", [BUILT_IN_AGENT_PERSONAS.scout])),
+  );
+const testLayer = makeTestLayer(permissiveCrewMemberModels);
 
-it.effect("persists the saved persona on a nested child and reuses that child on retry", () =>
-  Effect.gen(function* () {
-    const orchestrator = yield* OrchestratorV2;
-    const projections = yield* Projections.ProjectionStoreV2;
-    const now = yield* DateTime.now;
-    const threadId = ThreadId.make("parent");
-    const runId = RunId.make("parent-run");
-    const nodeId = NodeId.make("parent-node");
-    yield* orchestrator.dispatch({
-      type: "thread.create",
-      commandId: CommandId.make("parent-create"),
-      createdBy: "user",
-      creationSource: "web",
+/** A parent thread with an active run, as the tool call of a running agent sees it. */
+const runningParent = Effect.gen(function* () {
+  const orchestrator = yield* OrchestratorV2;
+  const projections = yield* Projections.ProjectionStoreV2;
+  const now = yield* DateTime.now;
+  const threadId = ThreadId.make("parent");
+  const runId = RunId.make("parent-run");
+  const nodeId = NodeId.make("parent-node");
+  yield* orchestrator.dispatch({
+    type: "thread.create",
+    commandId: CommandId.make("parent-create"),
+    createdBy: "user",
+    creationSource: "web",
+    threadId,
+    projectId: ProjectId.make("project"),
+    title: "Parent conversation",
+    modelSelection,
+    runtimeMode: "full-access",
+    interactionMode: "default",
+    branch: null,
+    worktreePath: null,
+  });
+  yield* projections.apply({
+    id: EventId.make("parent-run-event"),
+    type: "run.updated",
+    threadId,
+    occurredAt: now,
+    payload: {
+      id: runId,
       threadId,
-      projectId: ProjectId.make("project"),
-      title: "Parent conversation",
+      ordinal: 1,
+      providerInstanceId: modelSelection.instanceId,
       modelSelection,
-      runtimeMode: "full-access",
-      interactionMode: "default",
-      branch: null,
-      worktreePath: null,
-    });
-    yield* projections.apply({
-      id: EventId.make("parent-run-event"),
-      type: "run.updated",
+      providerThreadId: null,
+      userMessageId: MessageId.make("parent-message"),
+      rootNodeId: nodeId,
+      activeAttemptId: null,
+      status: "running",
+      requestedAt: now,
+      startedAt: now,
+      completedAt: null,
+      checkpointId: null,
+      contextHandoffId: null,
+    },
+  });
+  yield* projections.apply({
+    id: EventId.make("parent-node-event"),
+    type: "node.updated",
+    threadId,
+    occurredAt: now,
+    payload: {
+      id: nodeId,
       threadId,
-      occurredAt: now,
-      payload: {
-        id: runId,
-        threadId,
-        ordinal: 1,
-        providerInstanceId: modelSelection.instanceId,
-        modelSelection,
-        providerThreadId: null,
-        userMessageId: MessageId.make("parent-message"),
-        rootNodeId: nodeId,
-        activeAttemptId: null,
-        status: "running",
-        requestedAt: now,
-        startedAt: now,
-        completedAt: null,
-        checkpointId: null,
-        contextHandoffId: null,
-      },
-    });
-    yield* projections.apply({
-      id: EventId.make("parent-node-event"),
-      type: "node.updated",
-      threadId,
-      occurredAt: now,
-      payload: {
-        id: nodeId,
-        threadId,
-        runId,
-        parentNodeId: null,
-        rootNodeId: nodeId,
-        kind: "root_turn",
-        status: "running",
-        countsForRun: true,
-        providerThreadId: null,
-        providerTurnId: null,
-        nativeItemRef: null,
-        runtimeRequestId: null,
-        checkpointScopeId: null,
-        startedAt: now,
-        completedAt: null,
-      },
-    });
-    const scope = {
-      environmentId: EnvironmentId.make("environment"),
+      runId,
+      parentNodeId: null,
+      rootNodeId: nodeId,
+      kind: "root_turn",
+      status: "running",
+      countsForRun: true,
+      providerThreadId: null,
+      providerTurnId: null,
+      nativeItemRef: null,
+      runtimeRequestId: null,
+      checkpointScopeId: null,
+      startedAt: now,
+      completedAt: null,
+    },
+  });
+  const scope = {
+    environmentId: EnvironmentId.make("environment"),
+    requestNamespace: "session",
+    thread: {
       threadId,
       providerInstanceId: modelSelection.instanceId,
       providerSessionId: "session",
-      capabilities: new Set(["orchestration" as const]),
-      issuedAt: 1,
-    };
+    },
+    client: undefined,
+    capabilities: new Set(["orchestration" as const]),
+    issuedAt: 1,
+  };
+  /** The message that started the running turn, as a person typed it. */
+  const personTyped = (text: string) =>
+    projections.apply({
+      id: EventId.make("parent-message-event"),
+      type: "message.updated",
+      threadId,
+      occurredAt: now,
+      payload: {
+        createdBy: "user",
+        creationSource: "web",
+        id: MessageId.make("parent-message"),
+        threadId,
+        runId,
+        nodeId,
+        role: "user",
+        text,
+        attachments: [],
+        streaming: false,
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+  return { orchestrator, scope, threadId, personTyped };
+});
+
+/** A local delegate's thread; only a task sent to a linked environment has none. */
+const localChild = (result: { readonly childThreadId: ThreadId | null }): ThreadId => {
+  if (result.childThreadId === null) throw new Error("expected a local child thread");
+  return result.childThreadId;
+};
+
+it.effect("persists the saved persona on a nested child and reuses that child on retry", () =>
+  Effect.gen(function* () {
+    const { orchestrator, scope, threadId } = yield* runningParent;
     const request = invokeAgent({
       personaId: "scout",
       task: "Return a short evidence brief.",
@@ -181,7 +260,7 @@ it.effect("persists the saved persona on a nested child and reuses that child on
     const repeated = yield* request;
     assert.equal(first.childThreadId, repeated.childThreadId);
     const parent = yield* orchestrator.getThreadProjection(threadId);
-    const child = yield* orchestrator.getThreadProjection(first.childThreadId);
+    const child = yield* orchestrator.getThreadProjection(localChild(first));
     assert.lengthOf(parent.subagents, 1);
     assert.equal(parent.thread.agentPersonaAssignment, undefined);
     assert.equal(child.thread.lineage.relationshipToParent, "subagent");
@@ -199,7 +278,7 @@ it.effect("persists the saved persona on a nested child and reuses that child on
       clientRequestId: "delegate-request",
     }).pipe(Effect.provideService(McpInvocationContext, scope));
     assert.equal(
-      (yield* orchestrator.getThreadProjection(viaDelegate.childThreadId)).thread
+      (yield* orchestrator.getThreadProjection(localChild(viaDelegate))).thread
         .agentPersonaAssignment?.personaId,
       "scout",
     );
@@ -213,8 +292,168 @@ it.effect("persists the saved persona on a nested child and reuses that child on
     const plain = yield* delegateTask({ task: "Plain child work.", clientRequestId: "plain" }).pipe(
       Effect.provideService(McpInvocationContext, scope),
     );
-    const plainChild = yield* orchestrator.getThreadProjection(plain.childThreadId);
+    const plainChild = yield* orchestrator.getThreadProjection(localChild(plain));
     assert.equal(plainChild.thread.agentPersonaAssignment, undefined);
     assert.equal(plainChild.thread.lineage.relationshipToParent, "subagent");
   }).pipe(Effect.provide(testLayer)),
+);
+
+const settingsLayer = ServerSettings.layerTest({});
+const listedLayer = Layer.merge(
+  makeTestLayer(
+    crewMemberModelsLayer({
+      providers: [provider],
+      settingsLayer,
+      projectTitle: "Billing Migration",
+    }),
+  ),
+  settingsLayer,
+);
+
+it.effect("holds a plain delegated child to the list, inherited model included", () =>
+  Effect.gen(function* () {
+    const { orchestrator, scope, personTyped } = yield* runningParent;
+    const settings = yield* ServerSettings.ServerSettingsService;
+    const asParent = Effect.provideService(McpInvocationContext, scope);
+    const plain = (clientRequestId: string, target?: { readonly model: string }) =>
+      delegateTask({
+        task: "Plain child work.",
+        clientRequestId,
+        ...(target === undefined
+          ? {}
+          : { target: { providerInstanceId: modelSelection.instanceId, model: target.model } }),
+      }).pipe(asParent);
+
+    // Until a list is saved, the child inherits the parent's model as it always did.
+    const free = yield* plain("free");
+    assert.equal(
+      (yield* orchestrator.getThreadProjection(localChild(free))).thread.modelSelection.model,
+      modelSelection.model,
+    );
+
+    // The parent's own model is off the list, so inheriting it is refused with what to use.
+    yield* settings.updateSettings({
+      crewMemberModels: [{ instanceId: modelSelection.instanceId, model: otherModel }],
+    });
+    const refused = yield* plain("inherits").pipe(Effect.flip);
+    assert.equal(refused.code, "model_unavailable");
+    for (const part of [
+      modelSelection.model,
+      "Billing Migration",
+      "Models for custom members in Agent Setup",
+      `codex/${otherModel}`,
+      "Retry with target",
+    ])
+      assert.include(refused.message, part);
+
+    // The agent's own pick of a persona is held to the list too; the person's runs on the
+    // persona's own model whatever the list says. An explicit checked target works.
+    const scout = (clientRequestId: string) =>
+      delegateTask({
+        task: "Return a short evidence brief.",
+        persona: "scout",
+        clientRequestId,
+      }).pipe(asParent);
+    const agentPick = yield* scout("agent-pick").pipe(Effect.flip);
+    assert.include(
+      agentPick.message,
+      `${modelSelection.model} on Codex is not checked in Models for custom members`,
+    );
+    yield* personTyped("@persona:scout check the evidence");
+    const persona = yield* scout("persona");
+    assert.equal(
+      (yield* orchestrator.getThreadProjection(localChild(persona))).thread.modelSelection.model,
+      modelSelection.model,
+    );
+    const explicit = yield* plain("explicit", { model: otherModel });
+    assert.equal(
+      (yield* orchestrator.getThreadProjection(localChild(explicit))).thread.modelSelection.model,
+      otherModel,
+    );
+
+    // A list saved afterwards does not refuse the retry of a delegation already accepted.
+    yield* settings.updateSettings({ crewMemberModels: [] });
+    const replayed = yield* plain("explicit", { model: otherModel });
+    assert.equal(replayed.childThreadId, explicit.childThreadId);
+    const none = yield* plain("fresh", { model: otherModel }).pipe(Effect.flip);
+    assert.include(none.message, "nothing is checked");
+  }).pipe(Effect.provide(listedLayer)),
+);
+
+it.effect("holds a plain delegated child to the level list, an inherited level included", () =>
+  Effect.gen(function* () {
+    const { orchestrator, scope, personTyped } = yield* runningParent;
+    const settings = yield* ServerSettings.ServerSettingsService;
+    const asParent = Effect.provideService(McpInvocationContext, scope);
+    const plain = (
+      clientRequestId: string,
+      target?: { readonly model: string; readonly level?: string },
+    ) =>
+      delegateTask({
+        task: "Plain child work.",
+        clientRequestId,
+        ...(target === undefined
+          ? {}
+          : {
+              target: {
+                providerInstanceId: modelSelection.instanceId,
+                model: target.model,
+                ...(target.level === undefined
+                  ? {}
+                  : { options: [{ id: "reasoningEffort", value: target.level }] }),
+              },
+            }),
+      }).pipe(asParent);
+    const level = { instanceId: modelSelection.instanceId, level: "low" };
+
+    // The parent runs on its model's default level, high, which this list leaves out.
+    yield* settings.updateSettings({ crewMemberReasoning: [level] });
+    const refused = yield* plain("inherits").pipe(Effect.flip);
+    assert.equal(refused.code, "model_unavailable");
+    for (const part of [
+      `Reasoning level high of ${modelSelection.model}`,
+      "Billing Migration",
+      "Models for custom members in Agent Setup",
+      `Eligible levels for ${modelSelection.model}: low.`,
+      "Retry with target options",
+    ])
+      assert.include(refused.message, part);
+
+    // The agent's own pick of a persona is held to the level list; a persona the person picked
+    // runs on its own level. A model with no reasoning option has nothing to hold, and an
+    // explicit checked level works.
+    const scout = (clientRequestId: string) =>
+      delegateTask({
+        task: "Return a short evidence brief.",
+        persona: "scout",
+        clientRequestId,
+      }).pipe(asParent);
+    assert.include(
+      (yield* scout("agent-pick").pipe(Effect.flip)).message,
+      "is not checked in Models for custom members",
+    );
+    yield* personTyped("Ask @persona:scout for evidence.");
+    const persona = yield* scout("persona");
+    assert.equal(
+      (yield* orchestrator.getThreadProjection(localChild(persona))).thread.modelSelection.model,
+      modelSelection.model,
+    );
+    yield* plain("plain-model", { model: plainModel });
+    const explicit = yield* plain("explicit", { model: otherModel, level: "low" });
+    assert.equal(
+      (yield* orchestrator.getThreadProjection(localChild(explicit))).thread.modelSelection.model,
+      otherModel,
+    );
+    const unchecked = yield* plain("unchecked", { model: otherModel, level: "high" }).pipe(
+      Effect.flip,
+    );
+    assert.include(unchecked.message, `Reasoning level high of ${otherModel}`);
+
+    // A list saved afterwards does not refuse the retry of a delegation already accepted.
+    yield* settings.updateSettings({ crewMemberReasoning: [] });
+    const replayed = yield* plain("explicit", { model: otherModel, level: "low" });
+    assert.equal(replayed.childThreadId, explicit.childThreadId);
+    const none = yield* plain("fresh", { model: otherModel, level: "low" }).pipe(Effect.flip);
+    assert.include(none.message, "No reasoning level");
+  }).pipe(Effect.provide(listedLayer)),
 );

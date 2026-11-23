@@ -35,27 +35,53 @@ interface JsonRpcMessage {
 }
 
 const encodedTranscript = process.env.T3_ACP_REPLAY_TRANSCRIPT;
+const transcriptPath = process.env.T3_ACP_REPLAY_TRANSCRIPT_PATH;
 const statusPath = process.env.T3_ACP_REPLAY_STATUS_PATH;
 const replayWorkspace = process.env.T3_ACP_REPLAY_WORKSPACE ?? process.cwd();
 
-if (encodedTranscript === undefined || statusPath === undefined) {
+if ((encodedTranscript === undefined && transcriptPath === undefined) || statusPath === undefined) {
   process.stderr.write("ACP replay requires transcript and status environment variables.\n");
   process.exit(2);
 }
 
 const replayStatusPath = statusPath;
 const transcript = JSON.parse(
-  Buffer.from(encodedTranscript, "base64").toString("utf8"),
+  transcriptPath === undefined
+    ? Buffer.from(encodedTranscript ?? "", "base64").toString("utf8")
+    : NodeFS.readFileSync(transcriptPath, "utf8"),
 ) as ReplayTranscript;
-let cursor = 0;
+/**
+ * A recording can span processes: a `runtime_exit` mid-transcript marks where
+ * one agent process ended, and a respawned replay agent continues from the
+ * cursor the previous one left in the status file.
+ */
+function resumedCursor(): number {
+  try {
+    const previous = JSON.parse(NodeFS.readFileSync(statusPath ?? "", "utf8")) as {
+      readonly cursor?: unknown;
+      readonly failure?: unknown;
+    };
+    const resumeAt = typeof previous.cursor === "number" ? previous.cursor : 0;
+    return previous.failure === undefined &&
+      transcript.entries[resumeAt - 1]?.type === "runtime_exit"
+      ? resumeAt
+      : 0;
+  } catch {
+    return 0;
+  }
+}
+let cursor = resumedCursor();
 let stopped = false;
 let nextAgentRequestId = 1;
 const pendingClientRequestIds = new Map<string, string | number>();
 const pendingAgentRequestMethods = new Map<string, string>();
 
+// The test reads status while this agent may still be running; rename makes each
+// write atomic so a reader never sees a truncated file.
 function writeStatus(failure?: unknown): void {
+  const temporaryStatusPath = `${replayStatusPath}.${process.pid}.tmp`;
   NodeFS.writeFileSync(
-    replayStatusPath,
+    temporaryStatusPath,
     JSON.stringify({
       scenario: transcript.scenario,
       cursor,
@@ -64,6 +90,7 @@ function writeStatus(failure?: unknown): void {
     }),
     "utf8",
   );
+  NodeFS.renameSync(temporaryStatusPath, replayStatusPath);
 }
 
 function stableStringify(value: unknown): string {
@@ -135,11 +162,6 @@ function stopWithFailure(detail: string, actual?: unknown): void {
   process.stdin.pause();
 }
 
-function advance(): void {
-  cursor += 1;
-  writeStatus();
-}
-
 function send(message: JsonRpcMessage): void {
   process.stdout.write(`${JSON.stringify(message)}\n`);
 }
@@ -170,55 +192,68 @@ function logicalIncoming(message: JsonRpcMessage): LogicalFrame | undefined {
   };
 }
 
-function emitInbound(frame: LogicalFrame): void {
+function materializeInbound(value: unknown): unknown {
+  if (typeof value === "string") return expandExpectedString(value);
+  if (Array.isArray(value)) return value.map(materializeInbound);
+  if (typeof value !== "object" || value === null) return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [key, materializeInbound(entry)]),
+  );
+}
+
+function inboundMessage(recorded: LogicalFrame): JsonRpcMessage | undefined {
+  const frame = materializeInbound(recorded) as LogicalFrame;
   switch (frame.kind) {
     case "notification":
-      send({
+      return {
         jsonrpc: "2.0",
         method: frame.method,
         ...(frame.params === undefined ? {} : { params: frame.params }),
-      });
-      return;
+      };
     case "request": {
       const id = nextAgentRequestId;
       nextAgentRequestId += 1;
       pendingAgentRequestMethods.set(String(id), frame.method);
-      send({
+      return {
         jsonrpc: "2.0",
         id,
         method: frame.method,
         ...(frame.params === undefined ? {} : { params: frame.params }),
         headers: [],
-      });
-      return;
+      };
     }
     case "response": {
       const id = pendingClientRequestId(frame.method);
       if (id === undefined) {
         stopWithFailure(`No pending client request for ${frame.method}`, frame);
-        return;
+        return undefined;
       }
       pendingClientRequestIds.delete(frame.method);
-      send({
+      return {
         jsonrpc: "2.0",
         id,
         ...(frame.result === undefined ? {} : { result: frame.result }),
         ...(frame.error === undefined ? {} : { error: frame.error }),
-      });
+      };
     }
   }
 }
 
+// T3 may kill the agent after its last reply. Record the batch, including trailing
+// runtime exits, before publishing any frames.
 function flushInbound(): void {
+  const messages: Array<JsonRpcMessage> = [];
   while (!stopped) {
     const entry = transcript.entries[cursor];
-    if (entry === undefined || entry.type === "expect_outbound") return;
+    if (entry === undefined || entry.type === "expect_outbound") break;
     if (entry.type === "runtime_exit") {
       if (entry.status !== "success" && entry.status !== "cancelled") {
         stopWithFailure(`Recorded runtime exit was ${entry.status ?? "unknown"}`, entry.error);
-        return;
+        break;
       }
-      advance();
+      cursor += 1;
+      // Frames after a mid-transcript exit belong to the next process.
+      if (cursor < transcript.entries.length) break;
       continue;
     }
     const frame = entry.frame as LogicalFrame;
@@ -229,12 +264,15 @@ function flushInbound(): void {
       typeof frame.method !== "string"
     ) {
       stopWithFailure("Invalid emit_inbound logical ACP frame", entry.frame);
-      return;
+      break;
     }
-    emitInbound(frame);
-    if (stopped) return;
-    advance();
+    const message = inboundMessage(frame);
+    if (message === undefined) break;
+    messages.push(message);
+    cursor += 1;
   }
+  if (!stopped) writeStatus();
+  messages.forEach(send);
 }
 
 function handleMessage(message: JsonRpcMessage): void {
@@ -246,6 +284,7 @@ function handleMessage(message: JsonRpcMessage): void {
   }
   const entry = transcript.entries[cursor];
   if (entry?.type !== "expect_outbound" || !matchesExpected(entry.frame, actual)) {
+    stopWithFailure("Unexpected outbound ACP frame", actual);
     if (actual.kind === "request" && message.id !== undefined && message.id !== null) {
       send({
         jsonrpc: "2.0",
@@ -253,7 +292,6 @@ function handleMessage(message: JsonRpcMessage): void {
         error: { code: -32603, message: "ACP replay frame mismatch" },
       });
     }
-    stopWithFailure("Unexpected outbound ACP frame", actual);
     return;
   }
   if (actual.kind === "request" && message.id !== undefined && message.id !== null) {
@@ -261,11 +299,10 @@ function handleMessage(message: JsonRpcMessage): void {
   } else if (actual.kind === "response" && message.id !== undefined && message.id !== null) {
     pendingAgentRequestMethods.delete(String(message.id));
   }
-  advance();
+  cursor += 1;
   flushInbound();
 }
 
-writeStatus();
 flushInbound();
 
 const input = NodeReadline.createInterface({ input: process.stdin, crlfDelay: Infinity });
@@ -279,7 +316,8 @@ input.on("line", (line) => {
 });
 
 input.on("close", () => {
-  if (!stopped && cursor !== transcript.entries.length) {
+  const processEnded = transcript.entries[cursor - 1]?.type === "runtime_exit";
+  if (!stopped && cursor !== transcript.entries.length && !processEnded) {
     stopWithFailure("ACP replay input closed before transcript completion");
   }
 });

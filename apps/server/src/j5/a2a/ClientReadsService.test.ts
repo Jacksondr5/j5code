@@ -1,109 +1,150 @@
 import { assert, it } from "@effect/vitest";
-import { ThreadId } from "@t3tools/contracts";
+import { AgentPersonaEscalations } from "../agents/agentPersonaEscalation.ts";
+import { agentPersonaDraftsTestLayer } from "../test-support/agentPersonaDrafts.ts";
+import { agentPersonaEscalationsTestLayer } from "../test-support/agentPersonaEscalations.ts";
+import { ThreadId, TrimmedNonEmptyString } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { runMigrations } from "../../persistence/Migrations.ts";
+import { PlaybookCrewRelay } from "../playbooks/PlaybookCrewRelay.ts";
+import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
+import { AgentCrewInstanceService } from "./AgentCrewInstanceService.ts";
+import { AgentCrewProposalService } from "./AgentCrewProposalService.ts";
+import { ArchiveCrewService } from "./ArchiveCrewService.ts";
+import { CrewWorktrees } from "./CrewWorktrees.ts";
+import { A2AArchiveFacts } from "./ArchiveFactsService.ts";
+import { CrewRuntimeRequestService } from "./CrewRuntimeRequestService.ts";
+import { ParticipantPlacementService } from "./PlacementService.ts";
 import { A2AHumanInbox, layer as humanInboxLayer } from "./HumanInboxService.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
+import { recordOutsideAgentName } from "./outsideAgentNames.ts";
 import {
   ClientReadsService,
   explainOpenInboxCountStatement,
+  explainPeerSenderLabelStatement,
   layer as clientReadsLayer,
 } from "./ClientReadsService.ts";
-import { CommCommandId, ParticipantId, SquadronId, type AgentParticipant } from "./contracts.ts";
+import {
+  CommCommandId,
+  ParticipantId,
+  LedgerProjectId,
+  type AgentParticipant,
+} from "./contracts.ts";
 
 const firstPerson = ParticipantId.make("human:person-one");
 const secondPerson = ParticipantId.make("human:person-two");
 
 const makeTestLayer = () => {
-  const database = NodeSqliteClient.layerMemory();
+  const database = NodeSqliteClient.layer({ filename: ":memory:" });
+  // One escalation store, read by the service and filed by a test.
+  const escalations = agentPersonaEscalationsTestLayer();
   const ledger = ledgerLayer.pipe(Layer.provide(database));
   const inbox = humanInboxLayer.pipe(Layer.provide(ledger), Layer.provide(database));
-  const clientReads = clientReadsLayer.pipe(Layer.provide(inbox), Layer.provide(database));
-  return Layer.mergeAll(database, ledger, inbox, clientReads);
+  // These tests read identities and the open count; the Crew, Fleet and archive reads the service
+  // also carries are never reached, so their services stand in unimplemented.
+  const unreached = Layer.mergeAll(
+    Layer.mock(ParticipantPlacementService)({}),
+    Layer.mock(AgentCrewInstanceService)({}),
+    Layer.mock(AgentCrewProposalService)({}),
+    Layer.mock(CrewRuntimeRequestService)({}),
+    Layer.mock(PlaybookCrewRelay)({}),
+    Layer.mock(PlaybookStore)({}),
+    Layer.mock(A2AArchiveFacts)({}),
+    Layer.mock(ArchiveCrewService)({}),
+    Layer.mock(CrewWorktrees)({}),
+    escalations,
+    agentPersonaDraftsTestLayer(),
+  );
+  const clientReads = clientReadsLayer.pipe(
+    Layer.provide(inbox),
+    Layer.provide(ledger),
+    Layer.provide(unreached),
+    Layer.provide(database),
+  );
+  return Layer.mergeAll(database, ledger, inbox, clientReads, escalations);
 };
 
-it.effect(
-  "reads immutable homes and total batched identities without participant-id normalization",
-  () =>
-    Effect.gen(function* () {
-      yield* runMigrations();
-      yield* runJ5A2AMigrations();
-      const ledger = yield* A2ALedger;
-      const reads = yield* ClientReadsService;
-      const sql = yield* SqlClient.SqlClient;
+it.effect("reads total batched identities without participant-id normalization", () =>
+  Effect.gen(function* () {
+    yield* runMigrations();
+    yield* runJ5A2AMigrations();
+    const ledger = yield* A2ALedger;
+    const reads = yield* ClientReadsService;
+    const sql = yield* SqlClient.SqlClient;
 
-      const alpha: AgentParticipant = {
-        kind: "agent",
-        id: ParticipantId.make("agent:j5:a2a:thread:client-reads:alpha"),
-        threadId: ThreadId.make("thread:client-reads:alpha"),
-      };
-      const beta: AgentParticipant = {
-        kind: "agent",
-        id: ParticipantId.make("agent:j5:a2a:thread%3Aclient-reads%3Abeta"),
-        threadId: ThreadId.make("thread:client-reads:beta"),
-      };
-      const alphaSquadron = SquadronId.make("squadron:client-reads:alpha");
-      const betaSquadron = SquadronId.make("squadron:client-reads:beta");
-      const createdAt = "2026-08-29T00:00:00.000Z";
-      const earlierDuplicateJoinAt = "2026-08-28T00:00:00.000Z";
-      const laterDuplicateJoinAt = "2026-08-30T00:00:00.000Z";
+    const alpha: AgentParticipant = {
+      kind: "agent",
+      id: ParticipantId.make("agent:j5:a2a:thread:client-reads:alpha"),
+      threadId: ThreadId.make("thread:client-reads:alpha"),
+    };
+    const beta: AgentParticipant = {
+      kind: "agent",
+      id: ParticipantId.make("agent:j5:a2a:thread%3Aclient-reads%3Abeta"),
+      threadId: ThreadId.make("thread:client-reads:beta"),
+    };
+    const deleted: AgentParticipant = {
+      kind: "agent",
+      id: ParticipantId.make("agent:j5:a2a:thread:client-reads:deleted"),
+      threadId: ThreadId.make("thread:client-reads:deleted"),
+    };
+    const alphaProject = LedgerProjectId.make("project:client-reads:alpha");
+    const betaProject = LedgerProjectId.make("project:client-reads:beta");
+    const createdAt = "2026-08-29T00:00:00.000Z";
+    const earlierDuplicateJoinAt = "2026-08-28T00:00:00.000Z";
+    const laterDuplicateJoinAt = "2026-08-30T00:00:00.000Z";
 
-      const join = Effect.fn("test.j5.a2a.clientReads.join")(function* (input: {
-        readonly squadronId: SquadronId;
-        readonly name: string;
-        readonly agent: AgentParticipant;
-      }) {
-        yield* ledger.createSquadron({
-          squadron: { id: input.squadronId, name: input.name, createdAt },
-        });
-        yield* ledger.appendEvents({
-          commandId: CommCommandId.make(`command:client-reads:join:${input.agent.id}`),
-          squadronId: input.squadronId,
-          acceptedAt: createdAt,
-          events: [
-            {
-              kind: "participant.joined",
-              sender: null,
-              receiver: input.agent.id,
-              exchangeId: null,
-              correlationId: null,
-              payload: { participant: input.agent },
-              createdAt,
-            },
-          ],
-        });
-      });
-      yield* join({ squadronId: alphaSquadron, name: "Alpha Squadron", agent: alpha });
-      yield* join({ squadronId: betaSquadron, name: "Beta Squadron", agent: beta });
+    const join = Effect.fn("test.j5.a2a.clientReads.join")(function* (input: {
+      readonly projectId: LedgerProjectId;
+      readonly agent: AgentParticipant;
+    }) {
+      yield* ledger.ensureProject({ projectId: input.projectId, createdAt });
       yield* ledger.appendEvents({
-        commandId: CommCommandId.make("command:client-reads:leave:beta"),
-        squadronId: betaSquadron,
+        commandId: CommCommandId.make(`command:client-reads:join:${input.agent.id}`),
+        projectId: input.projectId,
         acceptedAt: createdAt,
         events: [
           {
-            kind: "participant.left",
+            kind: "participant.joined",
             sender: null,
-            receiver: beta.id,
+            receiver: input.agent.id,
             exchangeId: null,
             correlationId: null,
-            payload: { participant: beta },
+            payload: { participant: input.agent },
             createdAt,
           },
         ],
       });
-      const legacyHuman = ParticipantId.make("human:legacy-history");
-      const duplicateHistory = ParticipantId.make("agent:client-reads:duplicate-history");
-      yield* sql`
+    });
+    yield* join({ projectId: alphaProject, agent: alpha });
+    yield* join({ projectId: betaProject, agent: beta });
+    yield* ledger.appendEvents({
+      commandId: CommCommandId.make("command:client-reads:leave:beta"),
+      projectId: betaProject,
+      acceptedAt: createdAt,
+      events: [
+        {
+          kind: "participant.left",
+          sender: null,
+          receiver: beta.id,
+          exchangeId: null,
+          correlationId: null,
+          payload: { participant: beta },
+          createdAt,
+        },
+      ],
+    });
+    const legacyHuman = ParticipantId.make("human:legacy-history");
+    const duplicateHistory = ParticipantId.make("agent:client-reads:duplicate-history");
+    yield* sql`
         INSERT INTO j5_a2a_comm_event (
-          seq, squadron_id, kind, sender, receiver, exchange_id, correlation_id,
+          seq, project_id, kind, sender, receiver, exchange_id, correlation_id,
           payload, created_at, command_id
         ) VALUES (
-          2, ${alphaSquadron}, 'participant.joined', NULL, ${duplicateHistory}, NULL, NULL,
+          2, ${alphaProject}, 'participant.joined', NULL, ${duplicateHistory}, NULL, NULL,
           json_object(
             'participant',
             json_object(
@@ -115,12 +156,12 @@ it.effect(
           ${laterDuplicateJoinAt}, NULL
         )
       `;
-      yield* sql`
+    yield* sql`
         INSERT INTO j5_a2a_comm_event (
-          seq, squadron_id, kind, sender, receiver, exchange_id, correlation_id,
+          seq, project_id, kind, sender, receiver, exchange_id, correlation_id,
           payload, created_at, command_id
         ) VALUES (
-          3, ${betaSquadron}, 'participant.joined', NULL, ${duplicateHistory}, NULL, NULL,
+          3, ${betaProject}, 'participant.joined', NULL, ${duplicateHistory}, NULL, NULL,
           json_object(
             'participant',
             json_object(
@@ -132,17 +173,17 @@ it.effect(
           ${earlierDuplicateJoinAt}, NULL
         )
       `;
-      yield* sql`
+    yield* sql`
         INSERT INTO j5_a2a_comm_event (
-          seq, squadron_id, kind, sender, receiver, exchange_id, correlation_id,
+          seq, project_id, kind, sender, receiver, exchange_id, correlation_id,
           payload, created_at, command_id
         ) VALUES (
-          3, ${alphaSquadron}, 'participant.joined', NULL, ${legacyHuman}, NULL, NULL,
+          3, ${alphaProject}, 'participant.joined', NULL, ${legacyHuman}, NULL, NULL,
           json_object('participant', json_object('kind', 'human', 'id', ${legacyHuman})),
           ${createdAt}, NULL
         )
       `;
-      yield* sql`
+    yield* sql`
         INSERT INTO orchestration_v2_projection_threads (
           thread_id, project_id, title, default_provider, runtime_mode,
           interaction_mode, active_provider_thread_id, created_at, updated_at,
@@ -152,7 +193,7 @@ it.effect(
           'default', NULL, ${createdAt}, ${createdAt}, NULL, NULL, '{}'
         )
       `;
-      yield* sql`
+    yield* sql`
         INSERT INTO orchestration_v2_projection_threads (
           thread_id, project_id, title, default_provider, runtime_mode,
           interaction_mode, active_provider_thread_id, created_at, updated_at,
@@ -163,7 +204,7 @@ it.effect(
           'default', NULL, ${createdAt}, ${createdAt}, NULL, NULL, '{}'
         )
       `;
-      yield* sql`
+    yield* sql`
         INSERT INTO orchestration_v2_projection_threads (
           thread_id, project_id, title, default_provider, runtime_mode,
           interaction_mode, active_provider_thread_id, created_at, updated_at,
@@ -173,50 +214,102 @@ it.effect(
           'default', NULL, ${createdAt}, ${createdAt}, NULL, NULL, '{}'
         )
       `;
+    yield* sql`
+        INSERT INTO orchestration_v2_projection_threads (
+          thread_id, project_id, title, default_provider, runtime_mode,
+          interaction_mode, active_provider_thread_id, created_at, updated_at,
+          archived_at, deleted_at, payload_json
+        ) VALUES (
+          (${deleted.threadId}), 'project:client-reads', 'Deleted Thread', 'codex', 'full-access',
+          'default', NULL, ${createdAt}, ${createdAt}, NULL, ${createdAt}, '{}'
+        )
+      `;
 
-      const missing = ParticipantId.make("agent:client-reads:missing");
-      const missingThread = ThreadId.make("thread:client-reads:missing");
-      const homes = yield* reads.threadHomes([
-        beta.threadId,
-        ThreadId.make("thread:client-reads:duplicate-history:second"),
-        missingThread,
-        alpha.threadId,
-        beta.threadId,
-      ]);
-      assert.deepStrictEqual(homes, [
+    yield* join({
+      projectId: LedgerProjectId.make("project:client-reads:deleted"),
+      agent: deleted,
+    });
+    const missing = ParticipantId.make("agent:client-reads:missing");
+    const identities = yield* reads.participantIdentities({
+      participantIds: [beta.id, duplicateHistory, missing, alpha.id, beta.id, deleted.id],
+    });
+    assert.deepStrictEqual(identities, {
+      entries: [
+        { participantId: beta.id, identity: { kind: "unknown" } },
         {
-          threadId: beta.threadId,
-          home: { kind: "known", squadron: { id: betaSquadron, name: "Beta Squadron" } },
-        },
-        {
-          threadId: ThreadId.make("thread:client-reads:duplicate-history:second"),
-          home: { kind: "known", squadron: { id: betaSquadron, name: "Beta Squadron" } },
-        },
-        { threadId: missingThread, home: { kind: "unknown" } },
-        {
-          threadId: alpha.threadId,
-          home: { kind: "known", squadron: { id: alphaSquadron, name: "Alpha Squadron" } },
-        },
-      ]);
-
-      const identities = yield* reads.participantIdentities({
-        participantIds: [beta.id, duplicateHistory, missing, alpha.id, beta.id],
-      });
-      assert.deepStrictEqual(identities, {
-        entries: [
-          { participantId: beta.id, identity: { kind: "unknown" } },
-          {
-            participantId: duplicateHistory,
-            identity: { kind: "known", displayName: "Earlier Duplicate Thread" },
+          participantId: duplicateHistory,
+          identity: {
+            kind: "known",
+            displayName: "Earlier Duplicate Thread",
+            threadId: ThreadId.make("thread:client-reads:duplicate-history:second"),
           },
-          { participantId: missing, identity: { kind: "unknown" } },
-          { participantId: alpha.id, identity: { kind: "known", displayName: "Alpha Thread" } },
+        },
+        { participantId: missing, identity: { kind: "unknown" } },
+        {
+          participantId: alpha.id,
+          identity: { kind: "known", displayName: "Alpha Thread", threadId: alpha.threadId },
+        },
+        // A deleted thread keeps its name but has nothing to open.
+        { participantId: deleted.id, identity: { kind: "known", displayName: "Deleted Thread" } },
+      ],
+    });
+    assert.deepStrictEqual(yield* reads.participantIdentities({ participantIds: [] }), {
+      entries: [],
+    });
+  }).pipe(Effect.provide(makeTestLayer())),
+);
+
+it.effect("names an outside agent by the label it signed in with", () =>
+  Effect.gen(function* () {
+    yield* runMigrations();
+    yield* runJ5A2AMigrations();
+    const sql = yield* SqlClient.SqlClient;
+    const reads = yield* ClientReadsService;
+    const known = ParticipantId.make("outside:session-known");
+    const unseen = ParticipantId.make("outside:session-unseen");
+    yield* recordOutsideAgentName(sql, {
+      participantId: known,
+      name: "Claude Code (laptop)",
+      at: "2026-10-12T00:00:00.000Z",
+    });
+    assert.deepStrictEqual(
+      yield* reads.participantIdentities({ participantIds: [known, unseen] }),
+      {
+        entries: [
+          {
+            participantId: known,
+            identity: { kind: "known", displayName: "Claude Code (laptop)" },
+          },
+          { participantId: unseen, identity: { kind: "unknown" } },
         ],
-      });
-      assert.deepStrictEqual(yield* reads.participantIdentities({ participantIds: [] }), {
-        entries: [],
-      });
-    }).pipe(Effect.provide(makeTestLayer())),
+      },
+    );
+  }).pipe(Effect.provide(makeTestLayer())),
+);
+
+it.effect("names a person by their name, and leaves one who has given none unnamed", () =>
+  Effect.gen(function* () {
+    yield* runMigrations();
+    yield* runJ5A2AMigrations();
+    const sql = yield* SqlClient.SqlClient;
+    const reads = yield* ClientReadsService;
+    const at = "2026-10-24T00:00:00.000Z";
+    yield* sql`
+      INSERT INTO j5_a2a_human_person (person_id, is_local_operator, display_name, created_at)
+      VALUES (${firstPerson}, 1, NULL, ${at}), (${secondPerson}, 0, 'Priya', ${at})
+    `;
+    const nobody = ParticipantId.make("human:nobody");
+    assert.deepStrictEqual(
+      yield* reads.participantIdentities({ participantIds: [secondPerson, firstPerson, nobody] }),
+      {
+        entries: [
+          { participantId: secondPerson, identity: { kind: "known", displayName: "Priya" } },
+          { participantId: firstPerson, identity: { kind: "unknown" } },
+          { participantId: nobody, identity: { kind: "unknown" } },
+        ],
+      },
+    );
+  }).pipe(Effect.provide(makeTestLayer())),
 );
 
 it.effect(
@@ -228,15 +321,19 @@ it.effect(
       const inbox = yield* A2AHumanInbox;
       const reads = yield* ClientReadsService;
       const sql = yield* SqlClient.SqlClient;
-      const squadronId = SquadronId.make("squadron:client-reads:count");
+      const projectId = LedgerProjectId.make("project:client-reads:count");
       const createdAt = "2026-08-29T00:00:00.000Z";
       yield* sql`
-        INSERT INTO j5_a2a_squadron (id, name, created_at)
-        VALUES (${squadronId}, 'Count Squadron', ${createdAt})
+        INSERT INTO j5_a2a_project_ledger (project_id, created_at)
+        VALUES (${projectId}, ${createdAt})
       `;
       yield* sql`
         INSERT INTO j5_a2a_human_person (person_id, is_local_operator, created_at)
         VALUES (${firstPerson}, 1, ${createdAt}), (${secondPerson}, 0, ${createdAt})
+      `;
+      yield* sql`
+        INSERT INTO j5_a2a_person_level (person_id, scope_kind, scope_id, level, created_at, updated_at)
+        VALUES (${secondPerson}, 'server', '', 'collaborator', ${createdAt}, ${createdAt})
       `;
       const insertExchange = Effect.fn("test.j5.a2a.clientReads.exchange")(function* (input: {
         readonly id: string;
@@ -249,22 +346,22 @@ it.effect(
         const senderId = `agent:client-reads:sender:${input.id}`;
         yield* sql`
           INSERT INTO j5_a2a_exchange (
-            squadron_id, exchange_id, sender_id, receiver_id, status, intent, urgency,
+            project_id, exchange_id, sender_id, receiver_id, status, intent, urgency,
             opened_seq, closed_seq, created_at, updated_at
           ) VALUES (
-            ${squadronId}, ${exchangeId}, ${senderId}, ${input.personId},
+            ${projectId}, ${exchangeId}, ${senderId}, ${input.personId},
             ${input.exchangeStatus}, 'Count fixture', 'soon', 1,
             ${input.exchangeStatus === "closed" ? 2 : null}, ${createdAt}, ${createdAt}
           )
         `;
         yield* sql`
           INSERT INTO j5_a2a_human_inbox (
-            person_id, squadron_id, exchange_id, sender_id, intent, urgency,
+            person_id, project_id, exchange_id, sender_id, intent, urgency,
             latest_message_id, latest_message, opened_seq, opened_at, status,
             terminal_seq, terminal_at, terminal_disposition, terminal_cause,
             terminal_facts, terminal_notice_message_id
           ) VALUES (
-            ${input.personId}, ${squadronId}, ${exchangeId}, ${senderId},
+            ${input.personId}, ${projectId}, ${exchangeId}, ${senderId},
             'Count fixture', 'soon', ${messageId}, 'Count fixture',
             1, ${createdAt}, ${input.inboxStatus},
             ${input.inboxStatus === "open" ? null : 2},
@@ -318,4 +415,195 @@ it.effect(
         "the literal open-count predicate should use the partial person index",
       );
     }).pipe(Effect.provide(makeTestLayer())),
+);
+
+it.effect(
+  "names a sender homed on a peer by the label its server sent, and places its thread there",
+  () =>
+    Effect.gen(function* () {
+      yield* runMigrations();
+      yield* runJ5A2AMigrations();
+      const ledger = yield* A2ALedger;
+      const reads = yield* ClientReadsService;
+      const sql = yield* SqlClient.SqlClient;
+      const project = LedgerProjectId.make("project:client-reads:peer");
+      const remoteSender = ParticipantId.make("agent:j5:a2a:thread:remote-asker");
+      const local: AgentParticipant = {
+        kind: "agent",
+        id: ParticipantId.make("agent:j5:a2a:thread:client-reads:local"),
+        threadId: ThreadId.make("thread:client-reads:local"),
+      };
+      const createdAt = "2026-09-21T00:00:00.000Z";
+      yield* ledger.ensureProject({ projectId: project, createdAt });
+      yield* ledger.appendEvents({
+        commandId: CommCommandId.make("command:client-reads:peer:join"),
+        projectId: project,
+        acceptedAt: createdAt,
+        events: [
+          {
+            kind: "participant.joined",
+            sender: null,
+            receiver: local.id,
+            exchangeId: null,
+            correlationId: null,
+            payload: { participant: local },
+            createdAt,
+          },
+        ],
+      });
+      // Deliveries from one remote sender into two projects here. Each project
+      // numbers its own rows, so the renamed sender's latest label sits at a
+      // lower seq than an older one; the time this server recorded each wins.
+      const other = LedgerProjectId.make("project:client-reads:peer:other");
+      yield* ledger.ensureProject({ projectId: other, createdAt });
+      const received = (inProject: LedgerProjectId, seq: number, label: string, at: string) => sql`
+      INSERT INTO j5_a2a_comm_event (
+        seq, project_id, kind, sender, receiver, exchange_id, correlation_id,
+        payload, created_at, command_id
+      ) VALUES (
+        ${seq}, ${inProject}, 'message.received', ${remoteSender}, ${local.id}, NULL,
+        ${`correlation:client-reads:peer:${inProject}:${String(seq)}`},
+        ${JSON.stringify({
+          originProjectId: "project:home",
+          originEnvironmentId: "environment-home",
+          senderLabel: label,
+          message: {},
+        })},
+        ${at}, ${`command:client-reads:peer:${inProject}:${String(seq)}`}
+      )
+    `;
+      yield* received(project, 500, "Old title", "2026-09-21T00:01:00.000Z");
+      yield* received(other, 10, "Incident asker", "2026-09-21T00:02:00.000Z");
+
+      const identities = yield* reads.participantIdentities({
+        participantIds: [remoteSender, local.id],
+      });
+      assert.deepStrictEqual(identities, {
+        entries: [
+          {
+            participantId: remoteSender,
+            identity: {
+              kind: "known",
+              displayName: "Incident asker",
+              threadId: ThreadId.make("thread:remote-asker"),
+              threadEnvironmentId: TrimmedNonEmptyString.make("environment-home"),
+            },
+          },
+          { participantId: local.id, identity: { kind: "unknown" } },
+        ],
+      });
+      // Two rows recorded at the same instant: the tie falls to project id, so one label wins.
+      yield* received(other, 11, "Tie in other", "2026-09-21T00:03:00.000Z");
+      yield* received(project, 501, "Tie in peer", "2026-09-21T00:03:00.000Z");
+      const tied = yield* reads.participantIdentities({ participantIds: [remoteSender] });
+      assert.deepStrictEqual(tied.entries, [
+        {
+          participantId: remoteSender,
+          identity: {
+            kind: "known",
+            displayName: "Tie in other",
+            threadId: ThreadId.make("thread:remote-asker"),
+            threadEnvironmentId: TrimmedNonEmptyString.make("environment-home"),
+          },
+        },
+      ]);
+
+      // Each id asked about is one backward seek on the recency index: no scan, no sort.
+      const plan = yield* explainPeerSenderLabelStatement(sql, [remoteSender]);
+      const rendered = plan.map((row) => row.detail).join(" | ");
+      const ledgerReads = plan.filter((row) => /\b(?:SCAN|SEARCH) event\b/.test(row.detail));
+      assert.equal(ledgerReads.length, 1, `one read of the ledger per id: ${rendered}`);
+      assert.match(
+        ledgerReads[0]!.detail,
+        /^SEARCH event USING INDEX j5_a2a_comm_event_received_label_recency_idx \(sender=\?\)/,
+        rendered,
+      );
+      assert.notMatch(rendered, /TEMP B-TREE/, `the index order is the answer order: ${rendered}`);
+    }).pipe(Effect.provide(makeTestLayer())),
+);
+
+it.effect("puts an escalation only on the ask that carries it", () =>
+  Effect.gen(function* () {
+    yield* runMigrations();
+    yield* runJ5A2AMigrations();
+    const reads = yield* ClientReadsService;
+    const escalations = yield* AgentPersonaEscalations;
+    const sql = yield* SqlClient.SqlClient;
+    const projectId = LedgerProjectId.make("project:client-reads:escalation");
+    const createdAt = "2026-11-06T00:00:00.000Z";
+    yield* sql`
+      INSERT INTO j5_a2a_project_ledger (project_id, created_at)
+      VALUES (${projectId}, ${createdAt})
+    `;
+    yield* sql`
+      INSERT INTO j5_a2a_human_person (person_id, is_local_operator, created_at)
+      VALUES (${firstPerson}, 1, ${createdAt})
+    `;
+    const ask = Effect.fn("test.j5.a2a.clientReads.escalationAsk")(function* (id: string) {
+      const exchangeId = `exchange:client-reads:${id}`;
+      yield* sql`
+        INSERT INTO j5_a2a_exchange (
+          project_id, exchange_id, sender_id, receiver_id, status, intent, urgency,
+          opened_seq, closed_seq, created_at, updated_at
+        ) VALUES (
+          ${projectId}, ${exchangeId}, ${`agent:client-reads:${id}`}, ${firstPerson},
+          'open', ${id}, 'soon', 1, NULL, ${createdAt}, ${createdAt}
+        )
+      `;
+      yield* sql`
+        INSERT INTO j5_a2a_human_inbox (
+          person_id, project_id, exchange_id, sender_id, intent, urgency,
+          latest_message_id, latest_message, opened_seq, opened_at, status,
+          terminal_seq, terminal_at, terminal_disposition, terminal_cause,
+          terminal_facts, terminal_notice_message_id
+        ) VALUES (
+          ${firstPerson}, ${projectId}, ${exchangeId}, ${`agent:client-reads:${id}`},
+          ${id}, 'soon', ${`message:client-reads:${id}`}, ${id},
+          1, ${createdAt}, 'open', NULL, NULL, NULL, NULL, NULL, NULL
+        )
+      `;
+      return exchangeId;
+    });
+    const blocked = yield* ask("blocked-persona");
+    yield* ask("ordinary-question");
+    const escalationId = yield* escalations.record({
+      callerParticipantId: "agent:client-reads:blocked-persona",
+      personaId: "reviewer",
+      code: "models_exhausted",
+      summary: "Persona reviewer is blocked.",
+      waivable: "access-above-caller",
+      scope: {
+        definitionDigest: "digest",
+        entries: [
+          {
+            entryIndex: 0,
+            instanceId: "codex",
+            model: "gpt-6",
+            options: [],
+            runtimeMode: "full-access",
+          },
+        ],
+      },
+    });
+    yield* escalations.linkAsk({ escalationId, exchangeId: blocked });
+
+    const { items } = yield* reads.humanInbox({ status: "open", personId: firstPerson });
+    assert.deepStrictEqual(
+      items.map((item) => [item.intent, item.escalation]),
+      [
+        [
+          "blocked-persona",
+          {
+            escalationId,
+            personaId: "reviewer",
+            waivable: "access-above-caller",
+            status: "open",
+            summary:
+              "Persona reviewer is blocked. Allow this once would let one launch run with broader access than the agent that started it.",
+          },
+        ],
+        ["ordinary-question", undefined],
+      ],
+    );
+  }).pipe(Effect.provide(makeTestLayer())),
 );

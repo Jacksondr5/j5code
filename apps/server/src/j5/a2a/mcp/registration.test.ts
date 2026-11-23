@@ -1,87 +1,628 @@
-import { assert, it } from "@effect/vitest";
+import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
+import * as SpawnAgentService from "../SpawnAgentService.ts";
+import * as RequestReplayService from "../RequestReplayService.ts";
+import * as Orchestrator from "../../../orchestration-v2/Orchestrator.ts";
+import * as ProjectionStore from "../../../orchestration-v2/ProjectionStore.ts";
+import * as DeviceService from "../../../device/DeviceService.ts";
+import * as ServerConfig from "../../../config.ts";
+import { expect, it } from "@effect/vitest";
+import { NodeHttpServer } from "@effect/platform-node";
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { McpServer } from "effect/unstable/ai";
+import { PeerForwarding } from "../../../peer/PeerForwarding.ts";
+import { PeerLinkRequests } from "../../../peer/PeerLinkRequests.ts";
+import { PeerLinks } from "../../../peer/PeerLinks.ts";
+import { RemoteDelegation } from "../../../peer/RemoteDelegation.ts";
+import * as Schema from "effect/Schema";
+import { HttpBody, HttpClient, HttpRouter } from "effect/http";
 
-import { OrchestratorV2 } from "../../../orchestration-v2/Orchestrator.ts";
-import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
-import { ProviderRegistry } from "../../../provider/Services/ProviderRegistry.ts";
-import { ScheduledTaskService } from "../../../scheduledTasks/ScheduledTaskService.ts";
-import { AgentCrewInstanceService } from "../AgentCrewInstanceService.ts";
-import { ArchiveAgentService } from "../ArchiveAgentService.ts";
-import { ArchiveCrewService } from "../ArchiveCrewService.ts";
-import { CrewStopService } from "../CrewStopService.ts";
-import { CrewProposalService } from "../CrewProposalService.ts";
-import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
-import { A2AHomeRegistrar } from "../HomeRegistrar.ts";
+import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
+import * as GitWorkflowService from "../../../git/GitWorkflowService.ts";
+import { A2A_SEND_TOOL_DESCRIPTION } from "../EnvelopeFormatter.ts";
 import { A2ALedger } from "../LedgerService.ts";
+import { noneLayer as peerDirectoryNoneLayer } from "../PeerDirectory.ts";
 import { ParticipantPlacementService } from "../PlacementService.ts";
 import { A2ASendService } from "../SendService.ts";
+import { A2ADeliveryWorker } from "../DeliveryWorker.ts";
+import { A2AHomeRegistrar } from "../HomeRegistrar.ts";
+import { AgentCrewInstanceService } from "../AgentCrewInstanceService.ts";
+import { ArchiveCrewService } from "../ArchiveCrewService.ts";
+import { CrewProposalService } from "../CrewProposalService.ts";
+import { AgentPersonaDrafts } from "../../agents/agentPersonaDrafts.ts";
+import { AgentPersonaEscalations } from "../../agents/agentPersonaEscalation.ts";
+import { CrewMemberModels } from "../../agents/crewMemberModels.ts";
+import { CrewStopService } from "../CrewStopService.ts";
+import { PeerRegistryService } from "../PeerRegistryService.ts";
+import { PlaybookCrewRelay } from "../../playbooks/PlaybookCrewRelay.ts";
+import { PlaybookStore } from "../../playbooks/PlaybookStore.ts";
 import { SpawnCompositionService } from "../SpawnCompositionService.ts";
-import { SquadronJoinService } from "../SquadronJoinService.ts";
-import { SquadronProjectReferences } from "../SquadronProjectReferences.ts";
-import { A2A_SEND_TOOL_DESCRIPTION } from "../EnvelopeFormatter.ts";
-import {
-  J5OrchestratorSurfaceRegistrationLive,
-  J5ToolkitRegistrationLive,
-} from "./registration.ts";
+import { SpawnWorkspaceService } from "../spawnWorkspace.ts";
+import { ThreadRegistration } from "../ThreadRegistration.ts";
+import * as ProviderAdapterRegistry from "../../../orchestration-v2/ProviderAdapterRegistry.ts";
+import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
+import * as ProjectService from "../../../project/ProjectService.ts";
+import * as PullRequestReviewGuideService from "../../../pullRequest/PullRequestReviewGuideService.ts";
+import * as ProjectSetupScriptRunner from "../../../project/ProjectSetupScriptRunner.ts";
+import * as SqlitePersistence from "../../../persistence/Sqlite.ts";
+import * as ProviderRegistry from "../../../provider/ProviderRegistry.ts";
+import * as ScheduledTaskService from "../../../scheduledTasks/ScheduledTaskService.ts";
+import * as SecretRequests from "../../../secrets/SecretRequests.ts";
+import * as ServerSettings from "../../../serverSettings.ts";
+import * as VcsStatusBroadcaster from "../../../vcs/VcsStatusBroadcaster.ts";
+import * as ServerSecretStore from "../../../auth/ServerSecretStore.ts";
+import * as ManagedProjectFolders from "../../../project/ManagedProjectFolders.ts";
+import * as ThreadLaunchService from "../../../orchestration-v2/ThreadLaunchService.ts";
+import * as ThreadSearch from "../../../orchestration-v2/ThreadSearch.ts";
+import * as PreviewManager from "../../../preview/Manager.ts";
+import * as SourceControlRepositoryService from "../../../sourceControl/SourceControlRepositoryService.ts";
+import * as GitVcsDriver from "../../../vcs/GitVcsDriver.ts";
+import * as McpHttpServer from "../../../mcp/McpHttpServer.ts";
+import * as McpSessionRegistry from "../../../mcp/McpSessionRegistry.ts";
+import * as PreviewAutomationBroker from "../../../mcp/PreviewAutomationBroker.ts";
+import * as PreviewBrowser from "../../../preview/PreviewBrowser.ts";
+import { noDocumentTextLayer } from "../../test-support/documentText.ts";
 
-const Dependencies = Layer.mergeAll(
-  Layer.mock(ThreadManagementService)({}),
-  Layer.mock(OrchestratorV2)({}),
-  Layer.mock(ProviderRegistry)({}),
-  Layer.mock(ScheduledTaskService)({}),
+const layerStubServices = Layer.mergeAll(
+  noDocumentTextLayer,
+  Layer.mock(Orchestrator.OrchestratorV2)({
+    getShellSnapshot: () =>
+      Effect.succeed({
+        schemaVersion: 1,
+        snapshotSequence: 0,
+        projects: [],
+        threads: [],
+        archivedThreads: [],
+      }),
+  }),
+  Layer.mock(A2ASendService)({ listParticipants: () => Effect.succeed([]) }),
+  Layer.mock(ParticipantPlacementService)({ listParticipants: () => Effect.succeed([]) }),
+  Layer.mock(A2ALedger)({ listProjectLedgers: () => Effect.succeed([]) }),
+  peerDirectoryNoneLayer,
+  Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
+  Layer.mock(DeviceService.DeviceService)({}),
+  Layer.mock(ThreadManagementService.ThreadManagementService)({}),
+  Layer.mock(ProviderRegistry.ProviderRegistry)({}),
+  Layer.mock(ProviderAdapterRegistry.ProviderAdapterRegistryV2)({}),
+  Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+  Layer.mock(SecretRequests.SecretRequests)({}),
+  Layer.mock(ProjectService.ProjectService)({}),
+  Layer.mock(PullRequestReviewGuideService.PullRequestReviewGuideService)({}),
+  ServerSettings.layerTest({}),
+  Layer.mock(GitWorkflowService.GitWorkflowService)({}),
+  Layer.mock(ProjectSetupScriptRunner.ProjectSetupScriptRunner)({}),
+  Layer.mock(VcsStatusBroadcaster.VcsStatusBroadcaster)({}),
+  Layer.mock(GitVcsDriver.GitVcsDriver)({}),
+  Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({ namedProjectsRoot: "/unused" }),
+  Layer.mock(PreviewManager.PreviewManager)({}),
+  Layer.mock(ServerSecretStore.ServerSecretStore)({}),
+  Layer.mock(SourceControlRepositoryService.SourceControlRepositoryService)({}),
+  Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
+  Layer.mock(ThreadSearch.ThreadSearch)({}),
+  // J5 tools declare these at registration; listing tools never calls them.
   Layer.mock(A2ADeliveryWorker)({}),
   Layer.mock(A2AHomeRegistrar)({}),
-  Layer.mock(A2ALedger)({}),
-  Layer.mock(ParticipantPlacementService)({}),
-  Layer.mock(A2ASendService)({}),
-  Layer.mock(SpawnCompositionService)({}),
   Layer.mock(AgentCrewInstanceService)({}),
-  Layer.mock(ArchiveAgentService)({}),
-  Layer.mock(SquadronJoinService)({}),
-  Layer.mock(SquadronProjectReferences)({}),
   Layer.mock(ArchiveCrewService)({}),
-  Layer.mock(CrewStopService)({}),
   Layer.mock(CrewProposalService)({}),
-  NodeServices.layer,
+  Layer.mock(CrewMemberModels)({}),
+  Layer.mock(AgentPersonaEscalations)({}),
+  Layer.mock(AgentPersonaDrafts)({}),
+  Layer.mock(CrewStopService)({}),
+  Layer.mock(PeerRegistryService)({}),
+  Layer.mock(PlaybookCrewRelay)({}),
+  Layer.mock(PlaybookStore)({}),
+  Layer.mock(SpawnCompositionService)({}),
+  Layer.mock(RequestReplayService.RequestReplayService)({}),
+  SpawnAgentService.layer,
+  Layer.mock(SpawnWorkspaceService)({}),
+  Layer.mock(ThreadRegistration)({}),
 );
 
-const TestLayer = Layer.mergeAll(
-  J5OrchestratorSurfaceRegistrationLive,
-  J5ToolkitRegistrationLive,
-).pipe(Layer.provideMerge(McpServer.McpServer.layer), Layer.provide(Dependencies));
+const ToolsListPayload = Schema.fromJsonString(
+  Schema.Struct({
+    result: Schema.Struct({
+      tools: Schema.Array(
+        Schema.Struct({
+          name: Schema.String,
+          description: Schema.optional(Schema.String),
+          inputSchema: Schema.Struct({ type: Schema.optional(Schema.String) }),
+          annotations: Schema.optional(
+            Schema.Struct({
+              readOnlyHint: Schema.optional(Schema.Boolean),
+              destructiveHint: Schema.optional(Schema.Boolean),
+              openWorldHint: Schema.optional(Schema.Boolean),
+            }),
+          ),
+        }),
+      ),
+    }),
+  }),
+);
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
+const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 
-it.effect("registers the exact composed production J5 orchestration surface", () =>
-  Effect.gen(function* () {
-    const server = yield* McpServer.McpServer;
-    assert.deepStrictEqual(server.tools.map(({ tool }) => tool.name).toSorted(), [
-      "archive_agent",
-      "archive_crew",
-      "clear_own_ask",
-      "delegate_task",
-      "delete_scheduled_task",
-      "join_squadron",
-      "list_participants",
-      "list_personas",
-      "list_scheduled_tasks",
-      "list_squadrons",
-      "orchestrator_capabilities",
-      "propose_crew",
-      "request_crew_member",
-      "schedule_task",
-      "send_message",
-      "spawn_agent",
-      "stop_agent",
-      "stop_crew",
-      "t3_thread_list",
-      "t3_thread_read",
-      "task_cancel",
-      "task_status",
-      "update_scheduled_task",
-    ]);
-    const sendTool = server.tools.find(({ tool }) => tool.name === "send_message")?.tool;
-    assert.equal(sendTool?.description, A2A_SEND_TOOL_DESCRIPTION);
-  }).pipe(Effect.provide(TestLayer)),
+const decodeRpcFailure = Schema.decodeUnknownEffect(
+  Schema.Struct({ error: Schema.Struct({ code: Schema.Number, message: Schema.String }) }),
+);
+
+const decodeToolsListPayload = Schema.decodeUnknownEffect(ToolsListPayload);
+const decodeToolCallPayload = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(
+    Schema.Struct({
+      result: Schema.Struct({
+        isError: Schema.optional(Schema.Boolean),
+        content: Schema.Array(Schema.Struct({ type: Schema.Literal("text"), text: Schema.String })),
+      }),
+    }),
+  ),
+);
+
+it.effect("production mcp layer lists worktree tools over http", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const served = yield* HttpRouter.serve(McpHttpServer.layer, {
+        disableListenLog: true,
+        disableLogger: true,
+      }).pipe(
+        Layer.provideMerge(McpSessionRegistry.layer),
+        Layer.provide(McpProviderSessions.layer),
+        Layer.provide(Layer.mock(RemoteDelegation)({})),
+        // Upstream's link tools, admitted by J5 (register D42), stay hidden while links are off.
+        Layer.provide(
+          Layer.mergeAll(
+            Layer.mock(PeerForwarding)({}),
+            Layer.mock(PeerLinkRequests)({}),
+            Layer.mock(PeerLinks)({}),
+          ),
+        ),
+        Layer.provide(
+          Layer.mock(ServerEnvironment.ServerEnvironment)({
+            getEnvironmentId: Effect.succeed("environment-scratch" as never),
+          }),
+        ),
+        Layer.provide(PreviewAutomationBroker.layer),
+        Layer.provide(PreviewBrowser.layer),
+        Layer.provide(SqlitePersistence.layerMemory),
+        Layer.provide(layerStubServices),
+        Layer.build,
+      );
+
+      const sessions = Context.get(served, McpSessionRegistry.McpSessionRegistry);
+      const credential = yield* sessions.issue({
+        threadId: ThreadId.make("thread-scratch"),
+        providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+      });
+
+      const httpClient = yield* HttpClient.HttpClient;
+      const unauthorizedResponse = yield* httpClient.post("/mcp", {
+        headers: { accept: "application/json, text/event-stream" },
+        body: HttpBody.text(
+          `{"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"unauthorized","version":"1.0.0"}}}`,
+          "application/json",
+        ),
+      });
+      expect(unauthorizedResponse.status).toBe(401);
+      const foreignRegistry = yield* McpSessionRegistry.__testing.make({ now: () => 1 }).pipe(
+        Effect.provideService(ServerEnvironment.ServerEnvironment, {
+          getEnvironmentId: Effect.succeed(EnvironmentId.make("environment-other")),
+          getDescriptor: Effect.die("unused foreign environment descriptor"),
+        }),
+      );
+      const foreignCredential = yield* foreignRegistry.issue({
+        threadId: ThreadId.make("thread-scratch"),
+        providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+      });
+      const wrongEnvironmentResponse = yield* httpClient.post("/mcp", {
+        headers: {
+          accept: "application/json, text/event-stream",
+          authorization: foreignCredential.config.authorizationHeader,
+        },
+        body: HttpBody.text(
+          `{"jsonrpc":"2.0","id":0,"method":"tools/call","params":{"name":"j5_list_participants","arguments":{}}}`,
+          "application/json",
+        ),
+      });
+      expect(wrongEnvironmentResponse.status).toBe(401);
+
+      const auth = credential.config.authorizationHeader;
+      const initResponse = yield* httpClient.post("/mcp", {
+        headers: {
+          accept: "application/json, text/event-stream",
+          authorization: auth,
+        },
+        body: HttpBody.text(
+          `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"scratch","version":"1.0.0"}}}`,
+          "application/json",
+        ),
+      });
+      expect(initResponse.status).toBe(200);
+      const sessionId = initResponse.headers["mcp-session-id"];
+
+      const listResponse = yield* httpClient.post("/mcp", {
+        headers: {
+          accept: "application/json, text/event-stream",
+          authorization: auth,
+          "mcp-protocol-version": "2025-06-18",
+          ...(sessionId ? { "mcp-session-id": sessionId } : {}),
+        },
+        body: HttpBody.text(
+          `{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}`,
+          "application/json",
+        ),
+      });
+      const bodyText = yield* listResponse.text;
+      const payload = yield* decodeToolsListPayload(bodyText.match(/\{.*\}/s)![0]);
+      const tools = payload.result.tools;
+      const toolNames = tools.map((tool) => tool.name);
+      expect(toolNames).toContain("t3_worktree_handoff");
+      expect(toolNames).toContain("t3_worktree_status");
+      expect(toolNames).toContain("preview_status");
+      expect(toolNames).toContain("orchestrator_capabilities");
+      expect(toolNames).toContain("schedule_task");
+      expect(toolNames).toContain("t3_thread_list");
+      expect(toolNames).toContain("t3_thread_read");
+      // Waiting on and stopping threads are upstream's (register D42).
+      expect(toolNames).toContain("t3_thread_wait");
+      expect(toolNames).toContain("t3_thread_interrupt");
+      // J5 re-declares delegate_task with a saved-agent parameter and keeps its status/cancel pair.
+      expect(toolNames).toContain("delegate_task");
+      expect(toolNames).toContain("task_status");
+      expect(toolNames).toContain("task_cancel");
+      for (const excluded of [
+        "t3_thread_launch",
+        "t3_project_delete",
+        "create_threads",
+        "t3_thread_start",
+        "t3_thread_send",
+        // An agent attaches files with j5_send_message.
+        "t3_thread_send_attachments",
+      ]) {
+        expect(toolNames).not.toContain(excluded);
+      }
+      // J5 uses the same authenticated transport and one shared registration
+      // that later J5 milestones extend inside the fork-owned toolkit.
+      expect(toolNames).toContain("j5_send_message");
+      expect(toolNames).toContain("j5_list_participants");
+      expect(tools.find((tool) => tool.name === "j5_send_message")?.description).toBe(
+        A2A_SEND_TOOL_DESCRIPTION,
+      );
+      expect(toolNames.toSorted()).toEqual([
+        "delegate_task",
+        "delete_scheduled_task",
+        "device_close",
+        "device_list",
+        "device_open",
+        "device_screenshot",
+        "html_preview",
+        "html_render",
+        "j5_archive_crew",
+        "j5_clear_own_ask",
+        "j5_list_artifacts",
+        "j5_list_participants",
+        "j5_list_personas",
+        "j5_playbook_back",
+        "j5_playbook_cancel",
+        "j5_playbook_complete",
+        "j5_playbook_current",
+        "j5_playbook_list",
+        "j5_playbook_next",
+        "j5_playbook_read",
+        "j5_playbook_reselect",
+        "j5_playbook_save",
+        "j5_playbook_start",
+        "j5_propose_crew",
+        "j5_propose_persona",
+        "j5_read_artifact",
+        "j5_read_persona",
+        "j5_request_crew_member",
+        "j5_send_message",
+        "j5_spawn_agent",
+        "j5_stop_crew",
+        "j5_write_artifact",
+        "link_pull_request",
+        "link_pull_requests",
+        "list_scheduled_tasks",
+        "list_thread_pull_requests",
+        "orchestrator_capabilities",
+        "preview_act",
+        "preview_dialog",
+        "preview_evaluate",
+        "preview_navigate",
+        "preview_open",
+        "preview_recording_start",
+        "preview_recording_stop",
+        "preview_resize",
+        "preview_set_appearance",
+        "preview_snapshot",
+        "preview_status",
+        "preview_wait_for",
+        "read_pull_request_guide",
+        "request_secret",
+        "run_scheduled_task_now",
+        "schedule_task",
+        "t3_attachment_discard",
+        "t3_attachment_prepare_upload",
+        "t3_background_wait",
+        "t3_environment_preferences_update",
+        "t3_environment_read",
+        "t3_pending_request",
+        "t3_preview_close",
+        "t3_preview_list",
+        "t3_project_clone",
+        "t3_project_create",
+        "t3_project_list",
+        "t3_project_read",
+        "t3_project_update",
+        "t3_queue",
+        "t3_thread_configure",
+        "t3_thread_interrupt",
+        "t3_thread_list",
+        "t3_thread_organize",
+        "t3_thread_read",
+        "t3_thread_search",
+        "t3_thread_transfer",
+        "t3_thread_update",
+        "t3_thread_wait",
+        "t3_workflow_stop",
+        "t3_worktree_handoff",
+        "t3_worktree_list",
+        "t3_worktree_status",
+        "task_cancel",
+        "task_status",
+        "unlink_pull_request",
+        "unlink_pull_requests",
+        "unwatch_pull_request",
+        "watch_pull_request",
+        "write_pull_request_guides",
+      ]);
+
+      const restricted = yield* sessions.issue({
+        threadId: ThreadId.make("thread-without-browser"),
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        browserToolsAvailable: false,
+      });
+      const restrictedInit = yield* httpClient.post("/mcp", {
+        headers: {
+          accept: "application/json, text/event-stream",
+          authorization: restricted.config.authorizationHeader,
+        },
+        body: HttpBody.text(
+          encodeJson({
+            jsonrpc: "2.0",
+            id: 0,
+            method: "initialize",
+            params: {
+              protocolVersion: "2025-06-18",
+              capabilities: {},
+              clientInfo: { name: "restricted", version: "1" },
+            },
+          }),
+          "application/json",
+        ),
+      });
+      expect(restrictedInit.status).toBe(200);
+      const restrictedSessionId = restrictedInit.headers["mcp-session-id"];
+      const callRestricted = Effect.fn(function* (id: number, name: string) {
+        const response = yield* httpClient.post("/mcp", {
+          headers: {
+            accept: "application/json, text/event-stream",
+            authorization: restricted.config.authorizationHeader,
+            "mcp-protocol-version": "2025-06-18",
+            ...(restrictedSessionId ? { "mcp-session-id": restrictedSessionId } : {}),
+          },
+          body: HttpBody.text(
+            encodeJson({
+              jsonrpc: "2.0",
+              id,
+              method: "tools/call",
+              params: { name, arguments: {} },
+            }),
+            "application/json",
+          ),
+        });
+        expect(response.status).toBe(200);
+        const text = yield* response.text;
+        return yield* decodeToolCallPayload(text.match(/\{.*\}/s)![0]);
+      });
+      for (const [index, name] of ["t3_thread_launch", "t3_project_delete"].entries()) {
+        const response = yield* httpClient.post("/mcp", {
+          headers: {
+            accept: "application/json, text/event-stream",
+            authorization: restricted.config.authorizationHeader,
+            "mcp-protocol-version": "2025-06-18",
+            ...(restrictedSessionId ? { "mcp-session-id": restrictedSessionId } : {}),
+          },
+          body: HttpBody.text(
+            encodeJson({
+              jsonrpc: "2.0",
+              id: 100 + index,
+              method: "tools/call",
+              params: { name, arguments: {} },
+            }),
+            "application/json",
+          ),
+        });
+        const responseText = yield* response.text;
+        const refused = yield* decodeRpcFailure(decodeJson(responseText.match(/\{.*\}/s)![0]));
+        expect(refused.error.code).toBe(-32602);
+        expect(refused.error.message).toContain(name);
+      }
+      // J5's tools were renamed with a `j5_` prefix and kept no aliases. An agent resumed from
+      // before the rename may still call an old name; it gets the unknown-tool error by name.
+      const j5ToolNames = toolNames.filter((name) => name.startsWith("j5_"));
+      expect(j5ToolNames).toHaveLength(24);
+      for (const [index, name] of j5ToolNames.map((name) => name.slice("j5_".length)).entries()) {
+        expect(toolNames).not.toContain(name);
+        const response = yield* httpClient.post("/mcp", {
+          headers: {
+            accept: "application/json, text/event-stream",
+            authorization: restricted.config.authorizationHeader,
+            "mcp-protocol-version": "2025-06-18",
+            ...(restrictedSessionId ? { "mcp-session-id": restrictedSessionId } : {}),
+          },
+          body: HttpBody.text(
+            encodeJson({
+              jsonrpc: "2.0",
+              id: 200 + index,
+              method: "tools/call",
+              params: { name, arguments: {} },
+            }),
+            "application/json",
+          ),
+        });
+        const responseText = yield* response.text;
+        const refused = yield* decodeRpcFailure(decodeJson(responseText.match(/\{.*\}/s)![0]));
+        expect(refused.error.code).toBe(-32602);
+        expect(refused.error.message).toBe(`Tool '${name}' not found`);
+      }
+      const deniedPreview = yield* callRestricted(3, "preview_status");
+      expect(deniedPreview.result.isError).toBe(true);
+      expect(deniedPreview.result.content[0]?.text).toContain("preview");
+      const allowedDirectory = yield* callRestricted(4, "j5_list_participants");
+      expect(allowedDirectory.result.isError).not.toBe(true);
+      expect(decodeJson(allowedDirectory.result.content[0]!.text)).toEqual({
+        participants: [],
+        next_cursor: null,
+        total: 0,
+        unread_peer_count: 0,
+      });
+
+      const handoff = tools.find((tool) => tool.name === "t3_worktree_handoff");
+      expect(handoff?.annotations?.readOnlyHint).toBe(false);
+      expect(handoff?.annotations?.destructiveHint).toBe(true);
+      expect(handoff?.annotations?.openWorldHint).toBe(true);
+      const status = tools.find((tool) => tool.name === "t3_worktree_status");
+      expect(status?.annotations?.readOnlyHint).toBe(true);
+      expect(status?.annotations?.destructiveHint).toBe(false);
+
+      // MCP requires every tool input schema to be a top-level object schema.
+      // A non-object schema (e.g. the anyOf produced by an empty
+      // Schema.Struct({})) makes clients reject the entire server.
+      for (const tool of tools) {
+        expect(tool.inputSchema.type, `inputSchema.type of ${tool.name}`).toBe("object");
+      }
+    }),
+  ).pipe(
+    Effect.provide(
+      Layer.mergeAll(
+        NodeHttpServer.layerTest,
+        Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
+        ServerConfig.layerTest(process.cwd(), { prefix: "j5-mcp-registration-" }).pipe(
+          Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+        ),
+      ),
+    ),
+  ),
+);
+
+it.effect("offers t3_thread_launch to another environment's link and lets it call it", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const token = "linked-client-token";
+      yield* HttpRouter.serve(McpHttpServer.layer, {
+        disableListenLog: true,
+        disableLogger: true,
+      }).pipe(
+        Layer.provide(McpSessionRegistry.layer),
+        Layer.provide(
+          Layer.succeed(McpHttpServer.McpClientAuthenticator, {
+            authenticate: (request) =>
+              Effect.succeed(
+                request.headers.authorization === `Bearer ${token}`
+                  ? {
+                      environmentId: EnvironmentId.make("environment-scratch"),
+                      requestNamespace: `client:${token}`,
+                      thread: undefined,
+                      client: {
+                        sessionId: token,
+                        label: "J5 Code · laptop",
+                        access: "full-access" as const,
+                        linked: true,
+                      },
+                      capabilities: new Set([
+                        "orchestration",
+                        "worktree",
+                        "pull-requests",
+                      ] as const),
+                      issuedAt: 1,
+                    }
+                  : undefined,
+              ),
+          }),
+        ),
+        Layer.provide(McpProviderSessions.layer),
+        Layer.provide(Layer.mock(RemoteDelegation)({})),
+        Layer.provide(
+          Layer.mergeAll(
+            Layer.mock(PeerForwarding)({}),
+            Layer.mock(PeerLinkRequests)({}),
+            Layer.mock(PeerLinks)({}),
+          ),
+        ),
+        Layer.provide(
+          Layer.mock(ServerEnvironment.ServerEnvironment)({
+            getEnvironmentId: Effect.succeed("environment-scratch" as never),
+          }),
+        ),
+        Layer.provide(PreviewAutomationBroker.layer),
+        Layer.provide(PreviewBrowser.layer),
+        Layer.provide(SqlitePersistence.layerMemory),
+        // A link reaches this server only while linked environments are on.
+        Layer.provide(ServerSettings.layerTest({ linkedEnvironmentsEnabled: true })),
+        Layer.provide(layerStubServices),
+        Layer.build,
+      );
+      const httpClient = yield* HttpClient.HttpClient;
+      const headers = {
+        accept: "application/json, text/event-stream",
+        authorization: `Bearer ${token}`,
+      };
+      const init = yield* httpClient.post("/mcp", {
+        headers,
+        body: HttpBody.text(
+          `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"link","version":"1.0.0"}}}`,
+          "application/json",
+        ),
+      });
+      expect(init.status).toBe(200);
+      const rpc = (id: number, method: string, params: object) =>
+        httpClient
+          .post("/mcp", {
+            headers: {
+              ...headers,
+              "mcp-protocol-version": "2025-06-18",
+              "mcp-session-id": init.headers["mcp-session-id"]!,
+            },
+            body: HttpBody.text(
+              JSON.stringify({ jsonrpc: "2.0", id, method, params }),
+              "application/json",
+            ),
+          })
+          .pipe(Effect.flatMap((response) => response.text));
+      const list = yield* rpc(2, "tools/list", {});
+      const payload = yield* decodeToolsListPayload(list.match(/\{.*\}/s)![0]);
+      expect(payload.result.tools.map((tool) => tool.name)).toContain("t3_thread_launch");
+      // The call reaches the launch handler as a tool result, where an agent's session is refused
+      // the unknown tool (-32602) above. The handler's own services are stubs here.
+      const called = yield* rpc(3, "tools/call", {
+        name: "t3_thread_launch",
+        arguments: { projectId: "project-scratch", title: "Delegated", message: "Do it" },
+      });
+      yield* decodeToolCallPayload(called.match(/\{.*\}/s)![0]);
+    }),
+  ).pipe(
+    Effect.provide(
+      Layer.mergeAll(
+        NodeHttpServer.layerTest,
+        Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
+        ServerConfig.layerTest(process.cwd(), { prefix: "j5-mcp-registration-" }).pipe(
+          Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+        ),
+      ),
+    ),
+  ),
 );

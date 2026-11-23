@@ -13,7 +13,7 @@ import * as Schema from "effect/Schema";
 
 import * as ResourceTelemetry from "../resourceTelemetry/ResourceTelemetry.ts";
 
-export class ProcessSignalFailed extends Schema.TaggedErrorClass<ProcessSignalFailed>()(
+export class ProcessSignalFailed extends Schema.TaggedError<ProcessSignalFailed>()(
   "ProcessSignalFailed",
   {
     pid: Schema.Number,
@@ -54,6 +54,7 @@ function canSignalCategory(category: ResourceTelemetryProcessCategory): boolean 
   );
 }
 
+/** @public */
 export const make = Effect.fn("makeProcessDiagnostics")(function* () {
   const telemetry = yield* ResourceTelemetry.ResourceTelemetry;
   const refreshedTelemetry = telemetry.refresh.pipe(Effect.catch(() => telemetry.latest));
@@ -93,7 +94,7 @@ export const make = Effect.fn("makeProcessDiagnostics")(function* () {
           pid: input.pid,
           signal: input.signal,
           signaled: false,
-          message: Option.some("Refusing to signal the T3 server process."),
+          message: Option.some("Refusing to signal the J5 server process."),
         };
       }
       const current = yield* telemetry.refresh.pipe(Effect.option);
@@ -126,7 +127,7 @@ export const make = Effect.fn("makeProcessDiagnostics")(function* () {
           pid: input.pid,
           signal: input.signal,
           signaled: false,
-          message: Option.some(`Process ${input.pid} is not a signalable T3 backend descendant.`),
+          message: Option.some(`Process ${input.pid} is not a signalable J5 backend descendant.`),
         };
       }
       return yield* Effect.try({

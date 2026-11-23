@@ -2,7 +2,7 @@ import type { AgentPersonaFolderGitStatus } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcess, ChildProcessSpawner } from "effect/process";
 
 const GIT_TIMEOUT = "5 seconds";
 
@@ -26,14 +26,15 @@ export const agentPersonaFolderGitStatus = Effect.fn("j5.agentPersonaFolderGitSt
 ) {
   const spawner = yield* Effect.serviceOption(ChildProcessSpawner.ChildProcessSpawner);
   if (Option.isNone(spawner)) return null;
-  const git = (args: ReadonlyArray<string>) =>
-    Effect.gen(function* () {
-      const child = yield* spawner.value.spawn(ChildProcess.make("git", args, { cwd: folder }));
-      const [stdout, exitCode] = yield* Effect.all([collect(child.stdout), child.exitCode], {
-        concurrency: "unbounded",
-      });
-      return exitCode === 0 ? stdout : null;
-    }).pipe(Effect.scoped);
+  const git = Effect.fn("j5.agents.agentPersonaLibraryGit.git")(function* (
+    args: ReadonlyArray<string>,
+  ) {
+    const child = yield* spawner.value.spawn(ChildProcess.make("git", args, { cwd: folder }));
+    const [stdout, exitCode] = yield* Effect.all([collect(child.stdout), child.exitCode], {
+      concurrency: "unbounded",
+    });
+    return exitCode === 0 ? stdout : null;
+  }, Effect.scoped);
   const status: AgentPersonaFolderGitStatus | null = yield* Effect.gen(function* () {
     const root = yield* git(["rev-parse", "--show-toplevel"]);
     if (root === null || root.trim() === "") return null;
@@ -50,7 +51,7 @@ export const agentPersonaFolderGitStatus = Effect.fn("j5.agentPersonaFolderGitSt
     };
   }).pipe(
     Effect.timeout(GIT_TIMEOUT),
-    Effect.catch(() => Effect.succeed(null)),
+    Effect.orElseSucceed(() => null),
   );
   return status;
 });

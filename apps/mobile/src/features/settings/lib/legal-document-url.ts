@@ -1,4 +1,4 @@
-const DEFAULT_MARKETING_SITE_URL = "https://t3.codes";
+const DEFAULT_MARKETING_SITE_URL = "https://j5.codes";
 
 function resolveMarketingSiteUrl(override: string | undefined): URL {
   try {
@@ -22,17 +22,11 @@ function marketingSiteDocumentUrl(path: string): string {
   return new URL(path, MARKETING_SITE_URL).toString();
 }
 
-export const PRIVACY_POLICY_URL = marketingSiteDocumentUrl("privacy-policy");
-export const SECURITY_POLICY_URL = marketingSiteDocumentUrl("security-policy");
-export const TERMS_OF_SERVICE_URL = marketingSiteDocumentUrl("terms-of-service");
+const PRIVACY_POLICY_URL = marketingSiteDocumentUrl("privacy-policy");
 export const LEGAL_URL = marketingSiteDocumentUrl("legal");
 
-export const ALLOWED_LEGAL_DOCUMENT_URLS = [
-  LEGAL_URL,
-  PRIVACY_POLICY_URL,
-  TERMS_OF_SERVICE_URL,
-  SECURITY_POLICY_URL,
-] as const;
+// J5 publishes no terms of service or security policy page, so neither is linked or allowed.
+const ALLOWED_LEGAL_DOCUMENT_URLS = [LEGAL_URL, PRIVACY_POLICY_URL] as const;
 
 function webDocumentIdentity(value: string): string | null {
   try {

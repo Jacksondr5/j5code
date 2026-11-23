@@ -1,0 +1,317 @@
+import { J5_A2A_DELIVERY_MESSAGE_PREFIX } from "@t3tools/client-runtime/j5/user-message";
+import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { describe, expect, it } from "vite-plus/test";
+
+import {
+  j5FoldHeader,
+  j5TimelineSenderRef,
+  presentJ5QueuedMessage,
+  presentJ5TimelineNotice,
+  resolveJ5FeedMessage,
+  type J5Timeline,
+} from "./timelinePresentation";
+
+const delivery = (createdBy: "agent" | "user" | "system", text: string) => ({
+  id: `${J5_A2A_DELIVERY_MESSAGE_PREFIX}${createdBy}`,
+  role: "user",
+  createdBy,
+  text,
+});
+const timeline = (viewerParticipantId: string | null): J5Timeline => ({
+  environmentId: EnvironmentId.make("environment-here"),
+  viewerParticipantId,
+  labels: new Map(),
+  threads: new Map(),
+  pending: new Set(),
+  accessConfirmed: true,
+  narrow: false,
+  threadListLive: true,
+  sharedAuthors: new Map(),
+});
+
+const askRaw = [
+  "[Cross-agent message from agent:captain in project project-alpha (Alpha)]",
+  "",
+  "Which schema version do we target?",
+  "",
+  'Reply once with j5_send_message(to="agent:captain", exchange_id="exchange:one", message="...") to close the exchange. Follow-ups from the asker carrying this id join the same exchange.',
+].join("\n");
+const inboxReplyRaw = [
+  "[Message from Priya (human:priya)]",
+  "",
+  "Target v2.",
+  "",
+  "The platform closed this exchange when this reply was sent. No further reply is required.",
+].join("\n");
+const briefRaw = [
+  "<j5_spawn_context>",
+  "participant_id: agent:child",
+  "project_id: project-alpha",
+  "project_title: Alpha",
+  "spawned_by: agent:spawner",
+  "</j5_spawn_context>",
+  "",
+  "<j5_crew_context>",
+  "crew: Wave 1",
+  "",
+  "<spawner_brief>",
+  "Build the timeline.",
+  "</spawner_brief>",
+].join("\n");
+const silenceRaw = [
+  "[Cross-agent messaging system notice: turn-ended-no-reply]",
+  "",
+  "agent:captain's turn ended without replying on exchange:one. The latest delivered message was processed.",
+  "",
+  "This is a platform-authored delivery signal, not a peer reply.",
+].join("\n");
+
+describe("resolveJ5FeedMessage", () => {
+  it("folds an agent's letter on the left, without its envelope", () => {
+    const row = resolveJ5FeedMessage(delivery("agent", askRaw), timeline(null));
+    expect(row).toMatchObject({
+      attribution: "agent",
+      side: "left",
+      text: "Which schema version do we target?",
+      preview: "Which schema version do we target?",
+      j5: { badge: "expects-reply", senderId: "agent:captain" },
+    });
+  });
+
+  it("previews a Crew seat's brief by the spawner's words, not the crew context", () => {
+    const row = resolveJ5FeedMessage(
+      {
+        id: "message:j5:a2a:mcp:session:spawn-brief:key",
+        role: "user",
+        createdBy: "agent",
+        text: briefRaw,
+      },
+      timeline(null),
+    );
+    expect(row).toMatchObject({
+      attribution: "agent",
+      side: "left",
+      preview: "Build the timeline.",
+    });
+    expect(row.text).not.toContain("<j5_spawn_context>");
+  });
+
+  it("puts an Inbox reply on the right only for the person who sent it", () => {
+    const reply = delivery("user", inboxReplyRaw);
+    expect(resolveJ5FeedMessage(reply, timeline("human:priya"))).toMatchObject({
+      attribution: null,
+      side: "right",
+      text: "Target v2.",
+      j5: { group: "person", viaInbox: true },
+    });
+    expect(resolveJ5FeedMessage(reply, timeline("human:sam"))).toMatchObject({
+      side: "left",
+      text: "Target v2.",
+      j5: { group: "other-person", senderName: "Priya" },
+    });
+  });
+
+  it("puts another person's message in a shared conversation on the left, and the reader's on the right", () => {
+    const typed = {
+      id: "message-typed",
+      role: "user",
+      createdBy: "user" as const,
+      text: "Ship it.",
+    };
+    const author = {
+      messageId: "message-typed",
+      name: "Priya",
+      level: "collaborator" as const,
+      editedBy: null,
+      note: null,
+      storedPrefix: "",
+    };
+    const shared = (you: boolean): J5Timeline => ({
+      ...timeline("human:sam"),
+      sharedAuthors: new Map([["message-typed", { ...author, you }]]),
+    });
+    expect(resolveJ5FeedMessage(typed, shared(false))).toMatchObject({
+      side: "left",
+      sharedAuthor: { name: "Priya" },
+    });
+    expect(resolveJ5FeedMessage(typed, shared(true))).toMatchObject({ side: "right" });
+    expect(resolveJ5FeedMessage(typed, timeline("human:sam"))).toMatchObject({
+      side: "right",
+      sharedAuthor: undefined,
+    });
+  });
+
+  it("leaves a message J5 cannot read to upstream's row as stored, on the left if the platform's", () => {
+    const unknown = delivery("agent", "[Cross-agent message from x]\n\nv7");
+    expect(resolveJ5FeedMessage(unknown, timeline(null))).toMatchObject({
+      j5: null,
+      side: "right",
+      preview: null,
+      text: unknown.text,
+    });
+    const platform = { id: "other", role: "user", createdBy: "system" as const, text: "Hm." };
+    expect(resolveJ5FeedMessage(platform, timeline(null))).toMatchObject({
+      j5: null,
+      prompt: null,
+      side: "left",
+    });
+  });
+
+  it("sends a playbook step to upstream's Automation row under J5's heading", () => {
+    const step = {
+      id: "message:step",
+      role: "user",
+      createdBy: "system" as const,
+      text: "<j5_playbook_step>\nstep: build | Build the timeline\nposition: 2 of 3\n</j5_playbook_step>\n<step_prompt>\nBuild it.\n</step_prompt>\n",
+    };
+    expect(resolveJ5FeedMessage(step, timeline(null))).toMatchObject({
+      attribution: "automation",
+      text: "Build it.",
+      side: "left",
+      prompt: {
+        kind: "playbook-step",
+        label: "Playbook step 2 of 3",
+        preview: "Build the timeline",
+      },
+    });
+  });
+});
+
+describe("presentJ5QueuedMessage", () => {
+  it("names a queued delivery's sender and shows its letter, not the envelope", () => {
+    expect(presentJ5QueuedMessage(delivery("agent", askRaw), timeline(null))).toMatchObject({
+      j5: { group: "participant", senderId: "agent:captain", badge: "expects-reply" },
+      preview: "Which schema version do we target?",
+    });
+    expect(
+      presentJ5QueuedMessage(delivery("user", inboxReplyRaw), timeline("human:priya")),
+    ).toMatchObject({ j5: { group: "person", viaInbox: true }, preview: "Target v2." });
+  });
+
+  it("leaves a message typed in the thread to upstream's row", () => {
+    const typed = { id: "message:typed", role: "user", createdBy: "user" as const, text: "Hi" };
+    expect(presentJ5QueuedMessage(typed, timeline(null))).toBeNull();
+  });
+});
+
+describe("presentJ5TimelineNotice", () => {
+  const labels = new Map([["agent:captain", "Captain"]]);
+
+  it("names the participants in a notice's line and detail", () => {
+    expect(presentJ5TimelineNotice(delivery("system", silenceRaw), labels)).toEqual({
+      kind: "line",
+      noticeKind: "silence",
+      summary: "Captain's turn ended without replying",
+      detail: "The latest delivered message was processed.",
+    });
+  });
+
+  it("reads a Crew notice for its lines, and leaves a delivery notice it cannot read to upstream", () => {
+    expect(
+      presentJ5TimelineNotice(
+        delivery("system", "[Cross-agent messaging system notice: v7]\n\n?"),
+        labels,
+      ),
+    ).toBeNull();
+    expect(
+      presentJ5TimelineNotice(
+        {
+          id: "message:crew",
+          role: "user",
+          createdBy: "system",
+          text: "<j5_crew_gate>\nproposal_id: crew:proposal:1\nkind: roster\ndecision: declined\n</j5_crew_gate>",
+        },
+        labels,
+      ),
+    ).toMatchObject({ kind: "crew", notice: { kind: "gate", decision: "declined" } });
+  });
+
+  it("shows what a Crew member was told as a line of its own, not as the reader's message", () => {
+    expect(
+      presentJ5TimelineNotice(
+        {
+          id: "message:j5:crew-context:abc",
+          role: "user",
+          createdBy: "system",
+          text: "<j5_crew_delivery_context>\n<j5_crew_roster_changed>\njoined: security\n</j5_crew_roster_changed>\n</j5_crew_delivery_context>",
+        },
+        labels,
+      ),
+    ).toEqual({
+      kind: "context",
+      title: "Roster changed",
+      text: "<j5_crew_roster_changed>\njoined: security\n</j5_crew_roster_changed>",
+    });
+  });
+
+  it("leaves letters and upstream's own messages to their rows", () => {
+    expect(presentJ5TimelineNotice(delivery("agent", askRaw), labels)).toBeNull();
+    expect(
+      presentJ5TimelineNotice(
+        { id: "message:pr-watch:1", role: "user", createdBy: "system", text: "PR merged" },
+        labels,
+      ),
+    ).toBeNull();
+  });
+});
+
+describe("j5FoldHeader", () => {
+  const named: J5Timeline = { ...timeline(null), labels: new Map([["agent:captain", "Captain"]]) };
+
+  it("names the sender once open, and drops the summary the body opens with", () => {
+    const row = resolveJ5FeedMessage(delivery("agent", askRaw), named);
+    const summary = row.preview ?? "";
+    expect(j5FoldHeader(row, named, false, summary)).toEqual({ label: "", summary });
+    expect(j5FoldHeader(row, named, true, summary)).toEqual({ label: "Captain", summary: "" });
+  });
+
+  it("leaves an unnamed sender to upstream's sender-thread label", () => {
+    const row = resolveJ5FeedMessage(delivery("agent", askRaw), timeline(null));
+    expect(j5FoldHeader(row, timeline(null), true, row.preview ?? "")).toEqual({ summary: "" });
+  });
+
+  it("keeps a Crew seat brief's task in the open header, since its body opens with the Crew", () => {
+    const row = resolveJ5FeedMessage(
+      {
+        id: "message:j5:a2a:mcp:session:spawn-brief:key",
+        role: "user",
+        createdBy: "agent",
+        text: briefRaw,
+      },
+      timeline(null),
+    );
+    expect(j5FoldHeader(row, timeline(null), true, row.preview ?? "")).toEqual({
+      summary: "Build the timeline.",
+    });
+  });
+});
+
+describe("j5TimelineSenderRef", () => {
+  const here = EnvironmentId.make("environment-here");
+  const letter = { ...delivery("agent", askRaw), senderThreadId: "thread-captain" };
+  const sender = (overrides: Partial<J5Timeline>) =>
+    j5TimelineSenderRef(letter, resolveJ5FeedMessage(letter, timeline(null)).j5, {
+      ...timeline(null),
+      ...overrides,
+    });
+
+  it("gives a narrower person only the sender thread the server named for them", () => {
+    // After a re-pair the thread list can still hold the last person's Captain thread.
+    expect(sender({ narrow: true })).toBeNull();
+    const named = { environmentId: here, threadId: ThreadId.make("thread-named") };
+    expect(sender({ narrow: true, threads: new Map([["agent:captain", named]]) })).toEqual(named);
+    expect(sender({})).toEqual({ environmentId: here, threadId: "thread-captain" });
+  });
+
+  it("names no sender thread until the server says who the new person is", () => {
+    expect(sender({ accessConfirmed: false })).toBeNull();
+  });
+
+  it("links a narrower person's sender only once the thread list was read for them", () => {
+    const named = { environmentId: here, threadId: ThreadId.make("thread-captain") };
+    const threads = new Map([["agent:captain", named]]);
+    // Re-paired as a Viewer, the list still holds the Owner's threads while it resyncs.
+    expect(sender({ narrow: true, threads, threadListLive: false })).toBeNull();
+    expect(sender({ narrow: true, threads, threadListLive: true })).toEqual(named);
+  });
+});

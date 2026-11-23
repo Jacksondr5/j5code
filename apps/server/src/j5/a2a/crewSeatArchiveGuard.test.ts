@@ -6,14 +6,14 @@ import * as Layer from "effect/Layer";
 import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
 import { makeCrewSeatArchiveGuard } from "./crewSeatArchiveGuard.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
-import { ParticipantId, SquadronId } from "./contracts.ts";
+import { ParticipantId, LedgerProjectId } from "./contracts.ts";
 
 const seatThread = ThreadId.make("thread:seat");
 const retiredSeatThread = ThreadId.make("thread:retired-seat");
 const plainThread = ThreadId.make("thread:plain");
 const instance = (id: string, archivedAt: string | null): AgentCrewInstance => ({
   id,
-  squadronId: SquadronId.make("squadron:guard"),
+  projectId: LedgerProjectId.make("project:guard"),
   captainParticipantId: ParticipantId.make("agent:j5:a2a:thread:captain"),
   captainThreadId: ThreadId.make("thread:captain"),
   displayName: "Review Pair",

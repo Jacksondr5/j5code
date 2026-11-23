@@ -4,7 +4,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import { runMigrations } from "./Migrations.ts";
 
 export interface CandidateCursor {
@@ -17,7 +17,7 @@ export interface CandidateQuery {
   readonly after?: CandidateCursor;
   readonly limit: number;
 }
-export class CandidateReadError extends Schema.TaggedErrorClass<CandidateReadError>()(
+export class CandidateReadError extends Schema.TaggedError<CandidateReadError>()(
   "CandidateReadError",
   { cause: Schema.Defect() },
 ) {}
@@ -70,11 +70,12 @@ export const layer = Layer.effect(
     const sql = yield* SqlClient.SqlClient;
     yield* runMigrations();
     return QueuedRunCandidates.of({
-      list: (input) =>
-        candidateStatement(sql, input).pipe(
+      list: Effect.fn("QueuedRunCandidates.list")(function (input) {
+        return candidateStatement(sql, input).pipe(
           Effect.flatMap((rows) => Effect.forEach(rows, (row) => decode(row.payload_json))),
           Effect.mapError((cause) => new CandidateReadError({ cause })),
-        ),
+        );
+      }),
     });
   }),
 );

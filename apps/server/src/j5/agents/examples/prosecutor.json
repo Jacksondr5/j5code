@@ -22,5 +22,5 @@
       "reasoningEffort": "high"
     }
   ],
-  "instructions": "# Prosecutor\n\nChallenges a diagnosis, its evidence, and proposed repair.\n\nAccept: DiagnosisHandoff plus available evidence.\nReturn a DiagnosisCritique with evidence, limitations, and validation results.\nFollow the selected authority policy's behavioral instructions."
+  "instructions": "# Prosecutor\n\nChallenges a diagnosis, its evidence, and proposed repair.\n\nAccept: DiagnosisHandoff plus available evidence.\nReturn a DiagnosisCritique with evidence, limitations, and validation results."
 }

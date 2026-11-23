@@ -2,44 +2,43 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import type { SqlError } from "effect/unstable/sql/SqlError";
+import * as SqlClient from "effect/sql/SqlClient";
+import type { SqlError } from "effect/sql/SqlError";
 
 import { A2ALedger, A2AStorageError, type A2ALedgerError } from "./LedgerService.ts";
 import {
   type CommCommandId,
   machineParticipantIdForName,
   ParticipantId,
-  SquadronId,
+  LedgerProjectId,
 } from "./contracts.ts";
 
 /**
- * Registered machine senders: cron jobs, watchdogs and scripts that talk to the
- * fleet from outside any agent session. A machine has one immutable Squadron
- * home like an agent, but no thread: it sends plain messages and never
- * receives. Its `participant.joined` event is the ledger fact; the table read
- * here is that fact's projection.
+ * Registered machine senders (cron jobs, watchdogs, scripts) that talk to the fleet from outside
+ * any agent session. A machine has one immutable project home but no thread: it sends plain
+ * messages and never receives. The table is the projection of its `participant.joined` ledger
+ * event.
  */
 
 /** Server-unique, shell-friendly: the part after `machine:`. */
-export const MACHINE_PARTICIPANT_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const MACHINE_PARTICIPANT_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 export interface MachineParticipantRecord {
   readonly participantId: ParticipantId;
-  readonly squadronId: SquadronId;
-  readonly squadronName: string;
+  readonly projectId: LedgerProjectId;
+  readonly projectTitle: string;
   readonly name: string;
   readonly createdAt: string;
 }
 
 export interface RegisterMachineParticipantInput {
   readonly commandId: CommCommandId;
-  readonly squadronId: SquadronId;
+  readonly projectId: LedgerProjectId;
   readonly name: string;
   readonly acceptedAt: string;
 }
 
-export class MachineParticipantInvalidNameError extends Schema.TaggedErrorClass<MachineParticipantInvalidNameError>()(
+export class MachineParticipantInvalidNameError extends Schema.TaggedError<MachineParticipantInvalidNameError>()(
   "MachineParticipantInvalidNameError",
   { name: Schema.String },
 ) {
@@ -48,25 +47,34 @@ export class MachineParticipantInvalidNameError extends Schema.TaggedErrorClass<
   }
 }
 
-export class MachineParticipantNameTakenError extends Schema.TaggedErrorClass<MachineParticipantNameTakenError>()(
+export class MachineParticipantNameTakenError extends Schema.TaggedError<MachineParticipantNameTakenError>()(
   "MachineParticipantNameTakenError",
   {
     participantId: Schema.String,
-    existingSquadronId: Schema.String,
-    requestedSquadronId: Schema.String,
+    existingProjectId: Schema.String,
+    requestedProjectId: Schema.String,
   },
 ) {
   override get message(): string {
-    return `Machine participant ${this.participantId} already has immutable home ${this.existingSquadronId}; registration requested ${this.requestedSquadronId}. Choose another name, or reuse the existing participant.`;
+    return `Machine participant ${this.participantId} is already registered in project ${this.existingProjectId}; registration requested ${this.requestedProjectId}. Choose another name, or reuse the existing participant.`;
   }
 }
 
-export class MachineParticipantNotFoundError extends Schema.TaggedErrorClass<MachineParticipantNotFoundError>()(
+export class MachineParticipantProjectNotFoundError extends Schema.TaggedError<MachineParticipantProjectNotFoundError>()(
+  "MachineParticipantProjectNotFoundError",
+  { projectId: Schema.String },
+) {
+  override get message(): string {
+    return `Project ${this.projectId} does not exist on this server. Pass the id of an existing project as --project.`;
+  }
+}
+
+export class MachineParticipantNotFoundError extends Schema.TaggedError<MachineParticipantNotFoundError>()(
   "MachineParticipantNotFoundError",
   { participantId: Schema.String },
 ) {
   override get message(): string {
-    return `Machine participant ${this.participantId} is not registered. Register it with \`j5 a2a participant create --squadron <id> --name <name>\`.`;
+    return `Machine participant ${this.participantId} is not registered. Register it with \`j5 a2a participant create --project <id> --name <name>\`.`;
   }
 }
 
@@ -75,10 +83,11 @@ export type MachineParticipantError =
   | SqlError
   | MachineParticipantInvalidNameError
   | MachineParticipantNameTakenError
+  | MachineParticipantProjectNotFoundError
   | MachineParticipantNotFoundError;
 
 export interface MachineParticipantServiceShape {
-  /** Idempotent: the same name in the same Squadron returns the existing record with `created: false`. */
+  /** Idempotent: the same name in the same project returns the existing record with `created: false`. */
   readonly register: (
     input: RegisterMachineParticipantInput,
   ) => Effect.Effect<
@@ -98,16 +107,16 @@ export class MachineParticipantService extends Context.Service<
 
 interface MachineRow {
   readonly participant_id: string;
-  readonly squadron_id: string;
-  readonly squadron_name: string;
+  readonly project_id: string;
+  readonly project_title: string;
   readonly name: string;
   readonly created_at: string;
 }
 
 const recordFromRow = (row: MachineRow): MachineParticipantRecord => ({
   participantId: ParticipantId.make(row.participant_id),
-  squadronId: SquadronId.make(row.squadron_id),
-  squadronName: row.squadron_name,
+  projectId: LedgerProjectId.make(row.project_id),
+  projectTitle: row.project_title,
   name: row.name,
   createdAt: row.created_at,
 });
@@ -123,74 +132,88 @@ export const layer: Layer.Layer<MachineParticipantService, never, A2ALedger | Sq
         const rows = yield* sql<MachineRow>`
           SELECT
             machine.participant_id,
-            machine.squadron_id,
-            squadron.name AS squadron_name,
+            machine.project_id,
+            COALESCE(project.title, ledger.project_id) AS project_title,
             machine.name,
             machine.created_at
           FROM j5_a2a_machine_participant AS machine
-          JOIN j5_a2a_squadron AS squadron ON squadron.id = machine.squadron_id
+          JOIN j5_a2a_project_ledger AS ledger ON ledger.project_id = machine.project_id
+          LEFT JOIN projection_projects AS project ON project.project_id = machine.project_id
           WHERE machine.participant_id = ${participantId}
           LIMIT 1
         `;
         return rows[0] === undefined ? null : recordFromRow(rows[0]);
       });
 
-      const register: MachineParticipantServiceShape["register"] = (input) =>
-        Effect.gen(function* () {
-          if (!MACHINE_PARTICIPANT_NAME_PATTERN.test(input.name)) {
-            return yield* new MachineParticipantInvalidNameError({ name: input.name });
-          }
-          const participantId = machineParticipantIdForName(input.name);
-          yield* ledger.readSquadron(input.squadronId);
-          const existing = yield* readRow(participantId);
-          if (existing !== null && existing.squadronId !== input.squadronId) {
-            return yield* new MachineParticipantNameTakenError({
-              participantId,
-              existingSquadronId: existing.squadronId,
-              requestedSquadronId: input.squadronId,
-            });
-          }
-          if (existing !== null) return { participant: existing, created: false };
-
-          const appended = yield* ledger.append({
-            commandId: input.commandId,
-            squadronId: input.squadronId,
-            acceptedAt: input.acceptedAt,
-            event: {
-              kind: "participant.joined",
-              sender: null,
-              receiver: participantId,
-              exchangeId: null,
-              correlationId: null,
-              payload: { participant: { kind: "machine", id: participantId, name: input.name } },
-              createdAt: input.acceptedAt,
-            },
+      const register: MachineParticipantServiceShape["register"] = Effect.fn(
+        "j5.a2a.machine.register",
+      )(function* (input) {
+        if (!MACHINE_PARTICIPANT_NAME_PATTERN.test(input.name)) {
+          return yield* new MachineParticipantInvalidNameError({ name: input.name });
+        }
+        const participantId = machineParticipantIdForName(input.name);
+        const projects = yield* sql<{ readonly project_id: string }>`
+            SELECT project_id FROM projection_projects
+            WHERE project_id = ${input.projectId} AND deleted_at IS NULL
+          `;
+        if (projects.length === 0) {
+          return yield* new MachineParticipantProjectNotFoundError({
+            projectId: input.projectId,
           });
-          const registered = yield* readRow(participantId);
-          if (registered === null) {
-            return yield* new A2AStorageError({ operation: "project machine participant join" });
-          }
-          return { participant: registered, created: appended.committed };
-        });
+        }
+        // A machine can be a project's first participant.
+        yield* ledger.ensureProject({ projectId: input.projectId, createdAt: input.acceptedAt });
+        const existing = yield* readRow(participantId);
+        if (existing !== null && existing.projectId !== input.projectId) {
+          return yield* new MachineParticipantNameTakenError({
+            participantId,
+            existingProjectId: existing.projectId,
+            requestedProjectId: input.projectId,
+          });
+        }
+        if (existing !== null) return { participant: existing, created: false };
 
-      const resolve: MachineParticipantServiceShape["resolve"] = (participantId) =>
-        Effect.gen(function* () {
-          const row = yield* readRow(participantId);
-          if (row === null) return yield* new MachineParticipantNotFoundError({ participantId });
-          return row;
+        const appended = yield* ledger.append({
+          commandId: input.commandId,
+          projectId: input.projectId,
+          acceptedAt: input.acceptedAt,
+          event: {
+            kind: "participant.joined",
+            sender: null,
+            receiver: participantId,
+            exchangeId: null,
+            correlationId: null,
+            payload: { participant: { kind: "machine", id: participantId, name: input.name } },
+            createdAt: input.acceptedAt,
+          },
         });
+        const registered = yield* readRow(participantId);
+        if (registered === null) {
+          return yield* new A2AStorageError({ operation: "project machine participant join" });
+        }
+        return { participant: registered, created: appended.committed };
+      });
+
+      const resolve: MachineParticipantServiceShape["resolve"] = Effect.fn(
+        "j5.a2a.machine.resolve",
+      )(function* (participantId) {
+        const row = yield* readRow(participantId);
+        if (row === null) return yield* new MachineParticipantNotFoundError({ participantId });
+        return row;
+      });
 
       const list: MachineParticipantServiceShape["list"] = () =>
         sql<MachineRow>`
           SELECT
             machine.participant_id,
-            machine.squadron_id,
-            squadron.name AS squadron_name,
+            machine.project_id,
+            COALESCE(project.title, ledger.project_id) AS project_title,
             machine.name,
             machine.created_at
           FROM j5_a2a_machine_participant AS machine
-          JOIN j5_a2a_squadron AS squadron ON squadron.id = machine.squadron_id
-          ORDER BY machine.squadron_id, machine.participant_id
+          JOIN j5_a2a_project_ledger AS ledger ON ledger.project_id = machine.project_id
+          LEFT JOIN projection_projects AS project ON project.project_id = machine.project_id
+          ORDER BY machine.project_id, machine.participant_id
         `.pipe(Effect.map((rows) => rows.map(recordFromRow)));
 
       return MachineParticipantService.of({ register, resolve, list });

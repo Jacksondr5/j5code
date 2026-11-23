@@ -15,7 +15,7 @@ const registered = (overrides: Partial<client.PreArchiveFacts> = {}): client.Arc
   facts: {
     state: "registered",
     threadId: ThreadId.make("thread:archive-flow"),
-    squadronId: "squadron:archive-flow",
+    projectId: "project:archive-flow",
     participantId: "agent:archive-flow",
     retired: false,
     openExchanges: [],
@@ -54,12 +54,12 @@ describe("archive flow", () => {
   });
 
   it("builds every consequential fact into the existing dialog's two-line rows", () => {
-    const inboundOpenedAt = new Date(Date.now() - 4 * 60 * 60_000).toISOString();
-    const outboundOpenedAt = new Date(Date.now() - 15 * 60_000).toISOString();
+    const inboundOpenedAt = "2026-01-01T08:00:00.000Z";
+    const outboundOpenedAt = "2026-01-01T11:45:00.000Z";
     const preflight = registered({
       openExchanges: [
         {
-          squadronId: "squadron:archive-flow",
+          projectId: "project:archive-flow",
           exchangeId: "exchange:inbound",
           direction: "inbound",
           replyObligation: "participant-owes-reply",
@@ -69,7 +69,7 @@ describe("archive flow", () => {
           openedAt: inboundOpenedAt,
         },
         {
-          squadronId: "squadron:archive-flow",
+          projectId: "project:archive-flow",
           exchangeId: "exchange:outbound",
           direction: "outbound",
           replyObligation: "counterparty-owes-reply",
@@ -87,9 +87,9 @@ describe("archive flow", () => {
     expect(needsArchiveWarning(preflight)).toBe(true);
     expect(warning.message).toBe("Archive Release agent?");
     expect(warning.confirmLabel).toBe("Archive anyway");
-    expect(markup).toContain("Also archives 1 agent placed under Release agent:");
+    expect(markup).toContain("1 agent placed under Release agent keeps running:");
     expect(markup).toContain("Child");
-    expect(markup).toContain("2 open asks will be terminated — counterparties are notified");
+    expect(markup).toContain("2 open asks will be terminated (counterparties are notified)");
     expect(markup).toContain("Blocking");
     expect(markup).toContain("From");
     expect(markup).toContain("Waiter");
@@ -125,6 +125,20 @@ describe("archive flow", () => {
     expect(archive).toHaveBeenCalledTimes(1);
   });
 
+  it("names the agents beneath that keep running, leaving the Crew's seats to the Crew", () => {
+    const preflight = registered({
+      liveCrews: [reviewPair],
+      placementSubtree: { state: "known", participantIds: ["agent:child", "agent:critic"] },
+    });
+    const markup = renderToStaticMarkup(
+      formatArchiveWarning({ threadTitle: "Captain", preflight }).content,
+    );
+    const keptRunning = markup.slice(markup.indexOf("keeps running:"));
+    expect(markup).toContain("1 agent placed under Captain keeps running:");
+    expect(keptRunning).toContain("Child");
+    expect(keptRunning).not.toContain("Critic");
+  });
+
   it("refuses to archive a Crew seat on its own, as archive_agent does for agents", async () => {
     vi.spyOn(client, "readArchivePreflight").mockResolvedValue(
       registered({
@@ -145,7 +159,7 @@ describe("archive flow", () => {
     expect(archive).not.toHaveBeenCalled();
   });
 
-  it("treats a missing or failed Crew read as a fact to warn about, not as no Crews", () => {
+  it("treats a failed Crew read as a fact to warn about, not as no Crews", () => {
     const failed = registered({ liveCrews: null });
     expect(needsArchiveWarning(failed)).toBe(true);
     expect(
@@ -153,11 +167,6 @@ describe("archive flow", () => {
         formatArchiveWarning({ threadTitle: "Captain", preflight: failed }).content,
       ),
     ).toContain("Crews it commands: couldn&#x27;t check.");
-    const { liveCrews: _absent, ...older } = registered().facts as Extract<
-      client.PreArchiveFacts,
-      { state: "registered" }
-    >;
-    expect(needsArchiveWarning({ facts: older, participantLabels: new Map() })).toBe(true);
     expect(needsArchiveWarning(registered({ liveCrews: [] }))).toBe(false);
   });
 
@@ -180,14 +189,14 @@ describe("archive flow", () => {
     const preflight = registered({
       openExchanges: [
         {
-          squadronId: "squadron:archive-flow",
+          projectId: "project:archive-flow",
           exchangeId: "exchange:unknown",
           direction: "inbound",
           replyObligation: "participant-owes-reply",
           counterpartyId: unknownParticipantId,
           intent: "Need an answer before archive",
           urgency: "fyi",
-          openedAt: new Date().toISOString(),
+          openedAt: "2026-01-01T12:00:00.000Z",
         },
       ],
     });
@@ -204,14 +213,14 @@ describe("archive flow", () => {
     const preflight = registered({
       openExchanges: [
         {
-          squadronId: "squadron:archive-flow",
+          projectId: "project:archive-flow",
           exchangeId: "exchange:human",
           direction: "outbound",
           replyObligation: "counterparty-owes-reply",
           counterpartyId: humanParticipantId,
           intent: "Please confirm the rollout",
           urgency: "soon",
-          openedAt: new Date().toISOString(),
+          openedAt: "2026-01-01T12:00:00.000Z",
         },
       ],
     });
@@ -329,14 +338,14 @@ describe("archive flow", () => {
       return registered({
         openExchanges: [
           {
-            squadronId: "squadron:archive-flow",
+            projectId: "project:archive-flow",
             exchangeId: "exchange:remote-inbound",
             direction: "inbound",
             replyObligation: "participant-owes-reply",
             counterpartyId: "agent:waiter",
             intent: "Wait for the remote archive",
             urgency: "blocking",
-            openedAt: new Date().toISOString(),
+            openedAt: "2026-01-01T12:00:00.000Z",
           },
         ],
       });

@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 // Rename the live schema forward while migrations 001/002 remain byte-stable for existing homes.
 export default Effect.gen(function* () {

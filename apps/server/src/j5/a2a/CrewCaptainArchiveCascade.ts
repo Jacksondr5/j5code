@@ -1,4 +1,9 @@
-import type { OrchestrationV2StoredEvent, ThreadId } from "@t3tools/contracts";
+import type {
+  OrchestrationV2Command,
+  OrchestrationV2StoredEvent,
+  OrchestrationV2ThreadShell,
+  ThreadId,
+} from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -6,26 +11,33 @@ import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
 
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
-import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
+import { isAutoSettlementCandidate } from "../../orchestration-v2/ThreadSettlementService.ts";
+import {
+  AgentCrewInstanceService,
+  crewArchiveThreads,
+  type AgentCrewInstance,
+} from "./AgentCrewInstanceService.ts";
 import { ArchiveCrewService } from "./ArchiveCrewService.ts";
+import { CrewWorktrees } from "./CrewWorktrees.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
 import { crewSeatRequestKey, lifecycleCommandId } from "./spawnIds.ts";
+import { getThreadRecordsIfPresent } from "./threadProjectionReads.ts";
 
 const CASCADE_SESSION = "j5-captain-archive-cascade";
 
 export interface CrewCaptainArchiveCascadeShape {
   /**
-   * When a committed archive or deletion lands on a thread that commands live Crews, retire
-   * those Crews as units. Returns the ids retired, or null when the event was not a Captain's.
+   * When a Captain's lifecycle event commits, carry its Crews with it: archive or delete retires
+   * its live Crews as units, unarchive brings back the Crews its archive retired, and settle or
+   * unsettle does the same to every seat of its live Crews. Returns the ids of the Crews it acted
+   * on, or null when the event was not a Captain's.
    */
   readonly handleStoredEvent: (
     stored: OrchestrationV2StoredEvent,
   ) => Effect.Effect<ReadonlyArray<string> | null>;
   /**
-   * The boot sweep: retire every live Crew whose Captain thread is already archived or gone.
-   * Covers a cascade that exhausted its in-session attempts and an archive that landed
-   * while the server was down, since the event stream resumes
-   * from its high-water mark. Returns the ids retired.
+   * The boot sweep, for an archive or delete the stream missed while the server was down: retire
+   * live Crews whose Captain is archived or gone. Returns the ids of the Crews it retired.
    */
   readonly reconcile: Effect.Effect<ReadonlyArray<string>>;
 }
@@ -36,36 +48,51 @@ export class CrewCaptainArchiveCascade extends Context.Service<
 >()("t3/j5/a2a/CrewCaptainArchiveCascade") {}
 
 /**
- * A Captain is never archived alone (Crews AC17). Agents are refused up front: `archive_agent`
- * names the Crew to retire first. A person's archive cannot be refused after the fact, because
- * upstream's `thread.archive` has already committed by the time J5 sees it, from the web sidebar,
- * a mobile swipe, or any future door. So the one place that sees every archive compensates: the
- * live Crews the thread commanded retire as units through the same service the Captain and the
- * Fleet page use, with the person's act as the confirmation. Command ids derive from the Captain
- * and the Crew, so a replayed event converges on the same commands and an already retired Crew
- * replays as already archived.
+ * Whether a Captain's settle carries this seat: only if upstream's `isAutoSettlementCandidate`
+ * would let auto-settle take it. The auto-settle opt-out and an unsettle's "active" override are
+ * exceptions: they hold off only automatic settling, not a person's explicit Captain settle
+ * (register D14).
+ */
+const seatFollowsCaptainSettle = (shell: OrchestrationV2ThreadShell, nowMs: number) =>
+  isAutoSettlementCandidate(
+    {
+      ...shell,
+      autoSettleDisabledAt: null,
+      settledOverride: shell.settledOverride === "active" ? null : shell.settledOverride,
+    },
+    nowMs,
+  );
+
+/**
+ * A Crew never outlives its Captain (Crews AC17). Upstream's command has committed when J5 sees it,
+ * from any door, so this reactor carries the Crews along: an archive retires them as units, stamped
+ * so the unarchive restores them; settle and unsettle go to each seat. Command ids derive from
+ * Captain, Crew, seat and occurrence, so replays converge. A failed Crew is logged, skipped.
  */
 export const layer = Layer.effect(
   CrewCaptainArchiveCascade,
   Effect.gen(function* () {
     const crews = yield* AgentCrewInstanceService;
     const archives = yield* ArchiveCrewService;
+    const worktrees = yield* CrewWorktrees;
     const threads = yield* ThreadManagementService;
 
     const retire = Effect.fn("j5.a2a.captainArchiveCascade.retire")(function* (
       captainThreadId: ThreadId,
       instance: AgentCrewInstance,
+      occurrence: string,
     ) {
-      const requestKey = `${captainThreadId}:${instance.id}`;
+      const requestKey = `${captainThreadId}:${instance.id}:${occurrence}`;
       const archivedAt = DateTime.formatIso(yield* DateTime.now);
       const outcome = yield* archives.archive({
         providerSessionId: CASCADE_SESSION,
         callerParticipantId: null,
-        squadronId: instance.squadronId,
+        projectId: instance.projectId,
         crewInstanceId: instance.id,
         clientRequestKey: requestKey,
         confirmationSatisfied: true,
         archivedAt,
+        withCaptain: true,
         commandIds: (seatName) => ({
           interruptCommandId: lifecycleCommandId({
             providerSessionId: CASCADE_SESSION,
@@ -86,93 +113,220 @@ export const layer = Layer.effect(
       });
     });
 
-    // Retry transient failures in this session with the same command identities. Keep the
-    // bound small so a broken Crew cannot prevent other Captains' events from being handled.
-    const retireWithRetry = Effect.fn("j5.a2a.captainArchiveCascade.retireWithRetry")(function* (
+    /** Run one Crew's step once; a failure is logged and reads as not acted on. */
+    const once = <E>(
       captainThreadId: ThreadId,
       instance: AgentCrewInstance,
-    ) {
-      for (let attempt = 1; attempt <= 3; attempt++) {
-        const done = yield* retire(captainThreadId, instance).pipe(
-          Effect.as(true),
-          Effect.catchCause((cause) =>
-            Effect.logWarning("J5 Captain archive attempt failed", {
-              captainThreadId,
-              crewInstanceId: instance.id,
-              attempt,
-              cause,
-            }).pipe(Effect.as(false)),
-          ),
-        );
-        if (done) return true;
-      }
-      return false;
-    });
-
-    const handleStoredEvent: CrewCaptainArchiveCascadeShape["handleStoredEvent"] = (stored) =>
-      Effect.gen(function* () {
-        const event = stored.event;
-        if (event.type !== "thread.archived" && event.type !== "thread.deleted") return null;
-        const threadId = event.threadId;
-        // Placement and membership rows may already be gone for a deleted thread; the Crew
-        // record names its Captain's thread directly, so the lookup needs no home.
-        const involving = yield* crews.listInvolving({
-          threadIds: [threadId],
-          participantIds: [participantIdForThread(threadId)],
-        });
-        const commanded = involving.filter(
-          (instance) => instance.captainThreadId === threadId && instance.archivedAt === null,
-        );
-        if (commanded.length === 0) return null;
-        const retired: Array<string> = [];
-        for (const instance of commanded) {
-          if (yield* retireWithRetry(threadId, instance)) retired.push(instance.id);
-        }
-        return retired;
-      }).pipe(
+      step: Effect.Effect<void, E>,
+    ) =>
+      step.pipe(
+        Effect.as(true),
         Effect.catchCause((cause) =>
-          Effect.logWarning("J5 Captain archive cascade skipped", { cause }).pipe(Effect.as(null)),
+          Effect.logWarning("J5 Captain lifecycle cascade failed for a Crew", {
+            captainThreadId,
+            crewInstanceId: instance.id,
+            cause,
+          }).pipe(Effect.as(false)),
         ),
       );
 
+    const seatCommandId = (
+      captainThreadId: ThreadId,
+      instance: AgentCrewInstance,
+      seatName: string,
+      operation: string,
+      occurrence: string,
+    ) =>
+      lifecycleCommandId({
+        providerSessionId: CASCADE_SESSION,
+        requestKey: crewSeatRequestKey(`${captainThreadId}:${instance.id}:${occurrence}`, seatName),
+        operation,
+      });
+
     /**
-     * Archived or deleted: either way the Captain no longer commands, so its Crews retire. A
-     * deleted thread keeps its projection with `deletedAt` set, so both read as facts; a
-     * projection that cannot be read is the store's problem and leaves the Crew alone this pass.
+     * Settle or unsettle every seat of one live Crew that is not already there, except an archived
+     * seat or one with no live thread. Settle skips a seat upstream's auto-settle would leave alone
+     * (see `seatFollowsCaptainSettle`). Unsettle only reaches settled seats, so a seat that never
+     * settled keeps upstream's automatic settlement.
      */
-    const captainIsGone = Effect.fn("j5.a2a.captainArchiveCascade.captainIsGone")(function* (
+    const moveSeats = Effect.fn("j5.a2a.captainArchiveCascade.moveSeats")(function* (
+      captainThreadId: ThreadId,
+      instance: AgentCrewInstance,
+      to: "settle" | "unsettle",
+      occurrence: string,
+    ) {
+      let moved = false;
+      const nowMs = DateTime.toEpochMillis(yield* DateTime.now);
+      for (const member of instance.members) {
+        const seat = yield* threads.getThreadShell(member.threadId);
+        if (seat === null || seat.archivedAt !== null) continue;
+        const settled = seat.settledOverride === "settled";
+        if (to === "settle" ? !seatFollowsCaptainSettle(seat, nowMs) : !settled) continue;
+        const commandId = seatCommandId(
+          captainThreadId,
+          instance,
+          member.seatName,
+          `captain-${to}`,
+          occurrence,
+        );
+        const command: OrchestrationV2Command =
+          to === "settle"
+            ? { type: "thread.settle", commandId, threadId: member.threadId }
+            : { type: "thread.unsettle", commandId, threadId: member.threadId, reason: "user" };
+        yield* threads.dispatch(command);
+        moved = true;
+      }
+      if (moved)
+        yield* Effect.logInfo(`J5 Captain ${to}d; its Crew's seats followed`, {
+          captainThreadId,
+          crewInstanceId: instance.id,
+        });
+    });
+
+    /**
+     * Bring back a Crew that retired with its Captain: unarchive each archived seat (the lifecycle
+     * reactor restores its agent), then clear the Crew's stamp last, so a restore cut short leaves
+     * it retired and archiving and unarchiving the Captain again resumes it.
+     */
+    const restore = Effect.fn("j5.a2a.captainArchiveCascade.restore")(function* (
+      captainThreadId: ThreadId,
+      instance: AgentCrewInstance,
+      occurrence: string,
+    ) {
+      yield* crews.serialize(
+        instance.id,
+        Effect.gen(function* () {
+          // Replaced members' threads come back too; they stay replaced, off the roster.
+          for (const member of crewArchiveThreads(instance)) {
+            const seat = yield* getThreadRecordsIfPresent(threads, member.threadId, []);
+            if (seat === null || seat.thread.archivedAt === null) continue;
+            yield* threads.dispatch({
+              type: "thread.unarchive",
+              commandId: seatCommandId(
+                captainThreadId,
+                instance,
+                member.seatName,
+                "captain-unarchive",
+                occurrence,
+              ),
+              threadId: member.threadId,
+            });
+          }
+          // Its worktrees are in use again: an open approval to remove them is moot.
+          if (yield* crews.restoreWithCaptain(instance.id))
+            yield* worktrees.withdrawCleanup(instance.id);
+        }),
+      );
+      yield* Effect.logInfo("J5 Captain unarchived; its Crew came back with it", {
+        captainThreadId,
+        crewInstanceId: instance.id,
+      });
+    });
+
+    const commandedBy = Effect.fn("j5.a2a.captainArchiveCascade.commandedBy")(function* (
+      threadId: ThreadId,
+    ) {
+      // Placement and membership rows may already be gone for a deleted thread; the Crew
+      // record names its Captain's thread directly, so the lookup needs no home.
+      const involving = yield* crews.listInvolving({
+        threadIds: [threadId],
+        participantIds: [participantIdForThread(threadId)],
+      });
+      return involving.filter((instance) => instance.captainThreadId === threadId);
+    });
+
+    const handleStoredEvent: CrewCaptainArchiveCascadeShape["handleStoredEvent"] = Effect.fn(
+      "j5.a2a.captainArchiveCascade.handleStoredEvent",
+    )(
+      function* (stored) {
+        const event = stored.event;
+        const threadId = event.threadId;
+        const occurrence = String(event.id);
+        const acted: Array<string> = [];
+        switch (event.type) {
+          case "thread.archived":
+          case "thread.deleted": {
+            const live = (yield* commandedBy(threadId)).filter(
+              (instance) => instance.archivedAt === null,
+            );
+            if (live.length === 0) return null;
+            for (const instance of live)
+              if (yield* once(threadId, instance, retire(threadId, instance, occurrence)))
+                acted.push(instance.id);
+            return acted;
+          }
+          case "thread.unarchived": {
+            const retired = yield* crews.listRetiredWithCaptain(threadId);
+            if (retired.length === 0) return null;
+            for (const instance of retired)
+              if (yield* once(threadId, instance, restore(threadId, instance, occurrence)))
+                acted.push(instance.id);
+            return acted;
+          }
+          case "thread.settled":
+          case "thread.unsettled": {
+            const live = (yield* commandedBy(threadId)).filter(
+              (instance) => instance.archivedAt === null,
+            );
+            if (live.length === 0) return null;
+            const to = event.type === "thread.settled" ? "settle" : "unsettle";
+            for (const instance of live)
+              if (yield* once(threadId, instance, moveSeats(threadId, instance, to, occurrence)))
+                acted.push(instance.id);
+            return acted;
+          }
+          default:
+            return null;
+        }
+      },
+      Effect.catchCause((cause) =>
+        Effect.logWarning("J5 Captain lifecycle cascade skipped", { cause }).pipe(Effect.as(null)),
+      ),
+    );
+
+    /**
+     * When the Captain's thread was archived or deleted, as an ISO timestamp; null while it is
+     * live. A deleted thread keeps its projection with `deletedAt` set, so both read as facts; a
+     * projection that cannot be read is the store's problem, and the sweep leaves that Captain's
+     * Crews alone this pass.
+     */
+    const captainGoneAt = Effect.fn("j5.a2a.captainArchiveCascade.captainGoneAt")(function* (
       instance: AgentCrewInstance,
     ) {
-      const read = yield* Effect.result(threads.getThreadProjection(instance.captainThreadId));
-      if (Result.isSuccess(read))
-        return read.success.thread.archivedAt !== null || read.success.thread.deletedAt !== null;
-      yield* Effect.logWarning("J5 Captain archive sweep could not read a Captain thread", {
-        captainThreadId: instance.captainThreadId,
-        crewInstanceId: instance.id,
-        cause: read.failure,
-      });
-      return false;
+      const read = yield* Effect.result(threads.getThreadRecords(instance.captainThreadId, []));
+      if (Result.isFailure(read)) {
+        yield* Effect.logWarning("J5 Captain archive sweep could not read a Captain thread", {
+          captainThreadId: instance.captainThreadId,
+          crewInstanceId: instance.id,
+          cause: read.failure,
+        });
+        return null;
+      }
+      const goneAt = read.success.thread.deletedAt ?? read.success.thread.archivedAt;
+      return goneAt === null ? null : DateTime.formatIso(goneAt);
     });
 
     const reconcile: CrewCaptainArchiveCascadeShape["reconcile"] = Effect.gen(function* () {
-      const live = yield* crews.listLive();
       const retired: Array<string> = [];
-      for (const instance of live) {
+      for (const instance of yield* crews.listLive()) {
         // A defect while reading one Captain skips that Crew, not the sweep.
-        const gone = yield* captainIsGone(instance).pipe(
+        const goneAt = yield* captainGoneAt(instance).pipe(
           Effect.catchCause((cause) =>
             Effect.logWarning("J5 Captain archive sweep could not read a Captain thread", {
               captainThreadId: instance.captainThreadId,
               crewInstanceId: instance.id,
               cause,
-            }).pipe(Effect.as(false)),
+            }).pipe(Effect.as(null)),
           ),
         );
-        if (!gone) continue;
-        // One Crew's failed retirement (a seat that would not archive, a store hiccup) is logged
-        // and left for the next boot; the sweep still reaches every other orphaned Crew.
-        const done = yield* retireWithRetry(instance.captainThreadId, instance);
-        if (done) retired.push(instance.id);
+        if (goneAt === null) continue;
+        // The Captain's archive time names this occurrence, so a Captain archived again after an
+        // unarchive gets fresh command ids. One Crew's failed retirement is logged and left for
+        // the next boot; the sweep still reaches every other orphaned Crew.
+        const occurrence = `sweep:${goneAt}`;
+        const captain = instance.captainThreadId;
+        if (yield* once(captain, instance, retire(captain, instance, occurrence)))
+          retired.push(instance.id);
       }
       if (retired.length > 0)
         yield* Effect.logInfo("J5 Captain archive sweep retired orphaned Crews", { retired });

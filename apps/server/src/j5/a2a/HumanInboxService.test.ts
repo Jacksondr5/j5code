@@ -1,12 +1,12 @@
-import { makeCrewFailureAlert, needsHumanForCrewFailure } from "./crewFailureAlert.ts";
 import { EffectOutboxV2 } from "../../orchestration-v2/EffectOutbox.ts";
 import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";
 import { assert, it } from "@effect/vitest";
-import { ThreadId } from "@t3tools/contracts";
+import { ChatAttachmentId, ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { FetchHttpClient } from "effect/http";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
@@ -18,14 +18,18 @@ import {
 } from "./DeliveryTransport.ts";
 import { A2AHumanInbox, layer as humanInboxLayer } from "./HumanInboxService.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
+import { noneLayer as peerDirectoryNoneLayer } from "./PeerDirectory.ts";
+import { runMigrations } from "../../persistence/Migrations.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
+import { PeerRegistryService } from "./PeerRegistryService.ts";
 import { A2ASendService, layer as sendLayer } from "./SendService.ts";
 import {
   CommCommandId,
   ExchangeId,
-  SquadronId,
+  LedgerProjectId,
   ParticipantId,
   type AgentParticipant,
+  type SendMessageInput,
   type HumanParticipant,
 } from "./contracts.ts";
 
@@ -39,11 +43,17 @@ const secondPerson: HumanParticipant = {
 };
 
 const makeTestLayer = (deliveries: Ref.Ref<ReadonlyArray<AgentDeliveryInput>>) => {
-  const database = NodeSqliteClient.layerMemory();
+  const database = NodeSqliteClient.layer({ filename: ":memory:" });
   const ledger = ledgerLayer.pipe(Layer.provide(database));
-  const send = sendLayer.pipe(Layer.provide(ledger), Layer.provide(database));
+  const send = sendLayer.pipe(
+    Layer.provide(peerDirectoryNoneLayer),
+    Layer.provide(ledger),
+    Layer.provide(database),
+  );
   const inbox = humanInboxLayer.pipe(Layer.provide(ledger), Layer.provide(database));
   const liveTransport = deliveryTransportLive.pipe(
+    Layer.provide(FetchHttpClient.layer),
+    Layer.provide(Layer.mock(PeerRegistryService)({})),
     Layer.provide(database),
     Layer.provide(Layer.mock(ThreadManagementService)({})),
     Layer.provide(Layer.mock(OrchestratorV2)({})),
@@ -56,6 +66,7 @@ const makeTestLayer = (deliveries: Ref.Ref<ReadonlyArray<AgentDeliveryInput>>) =
       return A2ADeliveryTransport.of({
         deliverAgent: (input) => Ref.update(deliveries, (current) => [...current, input]),
         cancelAgent: production.cancelAgent,
+        deliverPeer: () => Effect.die("peer delivery is not under test"),
         deliverHuman: production.deliverHuman,
       });
     }),
@@ -69,11 +80,12 @@ const makeTestLayer = (deliveries: Ref.Ref<ReadonlyArray<AgentDeliveryInput>>) =
 };
 
 it.effect(
-  "ranks open cross-Squadron exchanges and projects a second person's answer into A4-owned history",
+  "ranks open cross-project exchanges and projects a second person's answer into A4-owned history",
   () =>
     Effect.gen(function* () {
       const deliveries = yield* Ref.make<ReadonlyArray<AgentDeliveryInput>>([]);
       yield* Effect.gen(function* () {
+        yield* runMigrations();
         yield* runJ5A2AMigrations();
         const ledger = yield* A2ALedger;
         const send = yield* A2ASendService;
@@ -86,6 +98,12 @@ it.effect(
             (${firstPerson.id}, 1, '2026-08-23T00:00:00.000Z'),
             (${secondPerson.id}, 0, '2026-08-23T00:00:00.000Z')
         `;
+        yield* sql`
+        INSERT INTO j5_a2a_person_level (person_id, scope_kind, scope_id, level, created_at, updated_at)
+        VALUES
+          (${firstPerson.id}, 'server', '', 'owner', ${"2026-08-23T00:00:00.000Z"}, ${"2026-08-23T00:00:00.000Z"}),
+          (${secondPerson.id}, 'server', '', 'collaborator', ${"2026-08-23T00:00:00.000Z"}, ${"2026-08-23T00:00:00.000Z"})
+      `;
         assert.equal(yield* inbox.resolvePersonId(), firstPerson.id);
         assert.equal(yield* inbox.resolvePersonId(secondPerson.id), secondPerson.id);
         const unregistered = yield* Effect.flip(
@@ -100,22 +118,16 @@ it.effect(
           readonly urgency: "blocking" | "soon" | "fyi";
           readonly openedAt: string;
         }) {
-          const squadronId = SquadronId.make(`squadron:human-inbox:${input.suffix}`);
+          const projectId = LedgerProjectId.make(`project:human-inbox:${input.suffix}`);
           const agent: AgentParticipant = {
             kind: "agent",
             id: ParticipantId.make(`agent:human-inbox:${input.suffix}`),
             threadId: ThreadId.make(`thread:human-inbox:${input.suffix}`),
           };
-          yield* ledger.createSquadron({
-            squadron: {
-              id: squadronId,
-              name: `Squadron ${input.suffix}`,
-              createdAt: input.openedAt,
-            },
-          });
+          yield* ledger.ensureProject({ projectId: projectId, createdAt: input.openedAt });
           yield* ledger.appendEvents({
             commandId: CommCommandId.make(`command:human-inbox:join:${input.suffix}`),
-            squadronId,
+            projectId,
             acceptedAt: input.openedAt,
             events: [
               {
@@ -140,7 +152,7 @@ it.effect(
             acceptedAt: input.openedAt,
           });
           yield* worker.drain;
-          return { agent, squadronId, exchangeId: sent.exchangeId! };
+          return { agent, projectId, exchangeId: sent.exchangeId! };
         });
 
         yield* open({
@@ -181,7 +193,7 @@ it.effect(
 
         const humanMemberships = yield* sql<{ readonly count: number }>`
           SELECT COUNT(*) AS count
-          FROM j5_a2a_squadron_membership
+          FROM j5_a2a_membership
           WHERE participant_kind = 'human' OR participant_id LIKE 'human:%'
         `;
         assert.deepStrictEqual(humanMemberships, [{ count: 0 }]);
@@ -191,7 +203,7 @@ it.effect(
           firstInbox.map((item) => item.intent),
           ["Older blocking request", "Newer blocking request", "Soon request", "Old FYI persists"],
         );
-        assert.deepStrictEqual(new Set(firstInbox.map((item) => item.squadronId)).size, 4);
+        assert.deepStrictEqual(new Set(firstInbox.map((item) => item.projectId)).size, 4);
         assert.deepStrictEqual(
           firstInbox.map((item) => item.senderThreadId),
           [
@@ -225,7 +237,7 @@ it.effect(
         );
         assert.equal(unknownClear._tag, "A2AClearOwnAskUnknownExchangeError");
         assert.include(unknownClear.message, "no agent-facing own-open-asks read");
-        assert.include(unknownClear.message, "original send_message result");
+        assert.include(unknownClear.message, "original j5_send_message result");
         assert.include(unknownClear.message, "do not retry this unknown id");
         const mismatchedClear = yield* Effect.flip(
           send.clearOwnAsk({
@@ -238,7 +250,7 @@ it.effect(
         assert.equal(mismatchedClear._tag, "A2AClearOwnAskSenderMismatchError");
         assert.include(
           mismatchedClear.message,
-          `Do not retry clear_own_ask for exchange ${senderCleared.exchangeId} from this thread`,
+          `Do not retry j5_clear_own_ask for exchange ${senderCleared.exchangeId} from this thread`,
         );
         assert.include(mismatchedClear.message, "other exchanges are unaffected");
         const collidingCommandId = CommCommandId.make(
@@ -328,7 +340,7 @@ it.effect(
         assert.equal(alreadyClosedClear._tag, "A2AClearOwnAskAlreadyClosedError");
         assert.equal(
           alreadyClosedClear.message,
-          `Exchange ${senderCleared.exchangeId} is already closed; clear_own_ask made no change.`,
+          `Exchange ${senderCleared.exchangeId} is already closed; j5_clear_own_ask made no change.`,
         );
         assert.notInclude(alreadyClosedClear.message, "send_message");
 
@@ -369,7 +381,7 @@ it.effect(
           SELECT delivery.message_text, inbox.status, inbox.terminal_disposition
           FROM j5_a2a_delivery AS delivery
           JOIN j5_a2a_human_inbox AS inbox
-            ON inbox.squadron_id = delivery.squadron_id
+            ON inbox.project_id = delivery.project_id
            AND inbox.exchange_id = delivery.exchange_id
           WHERE delivery.message_id = ${answered.messageId}
         `;
@@ -411,8 +423,8 @@ it.effect(
               payload: {
                 messageId: answered.messageId,
                 text: exactAnswer,
-                originSquadronId: second.squadronId,
-                receiverSquadronId: second.squadronId,
+                originProjectId: second.projectId,
+                receiverProjectId: second.projectId,
                 exchangeRole: "reply",
                 envelopeChannel: "peer",
               },
@@ -429,33 +441,239 @@ it.effect(
     }),
 );
 
+// A Captain's adjudication ask is an ordinary ask to the person, so the one answer path serves the
+// Inbox and the Captain's thread alike: the thread finds its asks by `senderThreadId`.
+it.effect("shows follow-ups beneath the ask they join, and an answer closes only its own ask", () =>
+  Effect.gen(function* () {
+    const deliveries = yield* Ref.make<ReadonlyArray<AgentDeliveryInput>>([]);
+    yield* Effect.gen(function* () {
+      yield* runMigrations();
+      yield* runJ5A2AMigrations();
+      const ledger = yield* A2ALedger;
+      const send = yield* A2ASendService;
+      const inbox = yield* A2AHumanInbox;
+      const worker = yield* A2ADeliveryWorker;
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`
+        INSERT INTO j5_a2a_human_person (person_id, is_local_operator, created_at)
+        VALUES (${firstPerson.id}, 1, '2026-08-23T00:00:00.000Z')
+      `;
+      yield* sql`
+        INSERT INTO j5_a2a_person_level (person_id, scope_kind, scope_id, level, created_at, updated_at)
+        VALUES (${firstPerson.id}, 'server', '', 'owner', '2026-08-23T00:00:00.000Z', '2026-08-23T00:00:00.000Z')
+      `;
+      const projectId = LedgerProjectId.make("project:several-asks");
+      const agent: AgentParticipant = {
+        kind: "agent",
+        id: ParticipantId.make("agent:several-asks"),
+        threadId: ThreadId.make("thread:several-asks"),
+      };
+      yield* ledger.ensureProject({ projectId, createdAt: "2026-08-23T00:00:00.000Z" });
+      yield* ledger.appendEvents({
+        commandId: CommCommandId.make("command:several-asks:setup"),
+        projectId,
+        acceptedAt: "2026-08-23T00:00:00.000Z",
+        events: [
+          {
+            kind: "participant.joined",
+            sender: null,
+            receiver: agent.id,
+            exchangeId: null,
+            correlationId: null,
+            payload: { participant: agent },
+            createdAt: "2026-08-23T00:00:00.000Z",
+          },
+        ],
+      });
+      const message = (suffix: string, fields: Partial<SendMessageInput>) =>
+        send.send({
+          commandId: CommCommandId.make(`command:several-asks:${suffix}`),
+          senderThreadId: agent.threadId,
+          to: firstPerson.id,
+          message: suffix,
+          acceptedAt: "2026-08-23T01:00:00.000Z",
+          ...fields,
+        });
+      const asking = { expectReply: true, urgency: "soon" } as const;
+      const merge = yield* message("Merge now?", { ...asking, intent: "Merge timing" });
+      const branch = yield* message("Delete the branch?", { ...asking, intent: "Old branch" });
+      yield* worker.drain;
+      yield* message("The audit finished.", { regarding: merge.exchangeId! });
+      yield* message("CI is green too.", { regarding: merge.exchangeId! });
+      yield* worker.drain;
+
+      const open = yield* inbox.list(firstPerson.id);
+      const mergeItem = open.find((item) => item.exchangeId === merge.exchangeId);
+      const branchItem = open.find((item) => item.exchangeId === branch.exchangeId);
+      assert.lengthOf(open, 2);
+      assert.equal(mergeItem?.message, "Merge now?");
+      assert.deepStrictEqual(
+        mergeItem?.followUps?.map((followUp) => followUp.message),
+        ["The audit finished.", "CI is green too."],
+      );
+      assert.equal(branchItem?.message, "Delete the branch?");
+      assert.notProperty(branchItem, "followUps");
+
+      yield* inbox.answer({
+        commandId: CommCommandId.make("command:several-asks:answer"),
+        personId: firstPerson.id,
+        exchangeId: merge.exchangeId!,
+        message: "Merge it.",
+        acceptedAt: "2026-08-23T02:00:00.000Z",
+      });
+      const stillOpen = yield* inbox.list(firstPerson.id);
+      assert.deepStrictEqual(
+        stillOpen.map((item) => item.exchangeId),
+        [branch.exchangeId],
+      );
+      const late = yield* Effect.flip(message("Too late.", { regarding: merge.exchangeId! }));
+      assert.equal(late._tag, "A2AExchangeNotOpenError");
+    }).pipe(Effect.provide(makeTestLayer(deliveries)));
+  }),
+);
+
+it.effect("answers a Captain's ask once from either view and drops a withdrawn ask from both", () =>
+  Effect.gen(function* () {
+    const deliveries = yield* Ref.make<ReadonlyArray<AgentDeliveryInput>>([]);
+    yield* Effect.gen(function* () {
+      yield* runMigrations();
+      yield* runJ5A2AMigrations();
+      const ledger = yield* A2ALedger;
+      const send = yield* A2ASendService;
+      const inbox = yield* A2AHumanInbox;
+      const worker = yield* A2ADeliveryWorker;
+      const sql = yield* SqlClient.SqlClient;
+      const at = "2026-10-27T10:00:00.000Z";
+      yield* sql`
+        INSERT INTO j5_a2a_human_person (person_id, is_local_operator, created_at)
+        VALUES (${firstPerson.id}, 1, ${at})
+      `;
+      yield* sql`
+        INSERT INTO j5_a2a_person_level (person_id, scope_kind, scope_id, level, created_at, updated_at)
+        VALUES (${firstPerson.id}, 'server', '', 'owner', ${at}, ${at})
+      `;
+      const projectId = LedgerProjectId.make("project:captain-ask");
+      const captain: AgentParticipant = {
+        kind: "agent",
+        id: ParticipantId.make("agent:captain-ask"),
+        threadId: ThreadId.make("thread:captain-ask"),
+      };
+      yield* ledger.ensureProject({ projectId, createdAt: at });
+      yield* ledger.appendEvents({
+        commandId: CommCommandId.make("command:captain-ask:join"),
+        projectId,
+        acceptedAt: at,
+        events: [
+          {
+            kind: "participant.joined",
+            sender: null,
+            receiver: captain.id,
+            exchangeId: null,
+            correlationId: null,
+            payload: { participant: captain },
+            createdAt: at,
+          },
+        ],
+      });
+      const ask = Effect.fn("test.j5.a2a.captainAsk.ask")(function* (suffix: string) {
+        const sent = yield* send.send({
+          commandId: CommCommandId.make(`command:captain-ask:${suffix}`),
+          senderThreadId: captain.threadId,
+          to: firstPerson.id,
+          message: `Which option? ${suffix}`,
+          expectReply: true,
+          intent: `Decide ${suffix}`,
+          urgency: "blocking",
+          acceptedAt: at,
+        });
+        yield* worker.drain;
+        return sent.exchangeId!;
+      });
+      const captainThreadAsks = (status?: "answered") =>
+        inbox
+          .list(firstPerson.id, status)
+          .pipe(
+            Effect.map((items) =>
+              items
+                .filter((item) => item.senderThreadId === captain.threadId)
+                .map((item) => item.exchangeId),
+            ),
+          );
+
+      const answeredAsk = yield* ask("answered");
+      assert.deepStrictEqual(yield* captainThreadAsks(), [answeredAsk]);
+
+      const answered = yield* inbox.answer({
+        commandId: CommCommandId.make("command:captain-ask:reply:thread"),
+        personId: firstPerson.id,
+        exchangeId: answeredAsk,
+        message: "Option B",
+        acceptedAt: at,
+      });
+      const secondView = yield* Effect.flip(
+        inbox.answer({
+          commandId: CommCommandId.make("command:captain-ask:reply:inbox"),
+          personId: firstPerson.id,
+          exchangeId: answeredAsk,
+          message: "Option A",
+          acceptedAt: at,
+        }),
+      );
+      assert.equal(secondView._tag, "A2AExchangeNotOpenError");
+
+      const withdrawnAsk = yield* ask("withdrawn");
+      assert.deepStrictEqual(yield* captainThreadAsks(), [withdrawnAsk]);
+      yield* send.clearOwnAsk({
+        commandId: CommCommandId.make("command:captain-ask:clear"),
+        senderThreadId: captain.threadId,
+        exchangeId: withdrawnAsk,
+        acceptedAt: at,
+      });
+      yield* worker.drain;
+
+      assert.deepStrictEqual(yield* captainThreadAsks(), []);
+      assert.deepStrictEqual(yield* captainThreadAsks("answered"), [answeredAsk]);
+      const replies = (yield* Ref.get(deliveries)).filter(
+        (delivery) => delivery.exchangeRole === "reply",
+      );
+      assert.deepStrictEqual(
+        replies.map((delivery) => [delivery.messageId, delivery.receiverId, delivery.message]),
+        [[answered.messageId, captain.id, "Option B"]],
+      );
+    }).pipe(Effect.provide(makeTestLayer(deliveries)));
+  }),
+);
+
 it.effect(
-  "platform Crew failures share the human inbox, preserve open asks and replay after an answer",
+  "an answer's files are claimed into the asking agent's thread and delivered with it",
   () =>
     Effect.gen(function* () {
       const deliveries = yield* Ref.make<ReadonlyArray<AgentDeliveryInput>>([]);
       yield* Effect.gen(function* () {
+        yield* runMigrations();
         yield* runJ5A2AMigrations();
+        const at = "2026-11-05T00:00:00.000Z";
         const sql = yield* SqlClient.SqlClient;
+        yield* sql`
+        INSERT INTO j5_a2a_human_person (person_id, is_local_operator, created_at)
+        VALUES (${firstPerson.id}, 1, ${at})
+      `;
+        yield* sql`
+        INSERT INTO j5_a2a_person_level (person_id, scope_kind, scope_id, level, created_at, updated_at)
+        VALUES (${firstPerson.id}, 'server', '', 'owner', ${at}, ${at})
+      `;
         const ledger = yield* A2ALedger;
-        const inbox = yield* A2AHumanInbox;
         const worker = yield* A2ADeliveryWorker;
-        const send = yield* A2ASendService;
-        const alert = yield* makeCrewFailureAlert;
-        const at = "2026-09-18T12:00:00.000Z";
-        const squadronId = SquadronId.make("squadron:alerts");
+        const projectId = LedgerProjectId.make("project:human-inbox:files");
         const agent: AgentParticipant = {
           kind: "agent",
-          id: ParticipantId.make("agent:captain"),
-          threadId: ThreadId.make("thread:captain"),
+          id: ParticipantId.make("agent:human-inbox:files"),
+          threadId: ThreadId.make("thread:human-inbox:files"),
         };
-        yield* sql`INSERT INTO j5_a2a_human_person (person_id, is_local_operator, created_at) VALUES (${firstPerson.id}, 1, ${at})`;
-        yield* ledger.createSquadron({
-          squadron: { id: squadronId, name: "Alerts", createdAt: at },
-        });
+        yield* ledger.ensureProject({ projectId, createdAt: at });
         yield* ledger.appendEvents({
-          commandId: CommCommandId.make("join:alerts"),
-          squadronId,
+          commandId: CommCommandId.make("command:human-inbox:join:files"),
+          projectId,
           acceptedAt: at,
           events: [
             {
@@ -469,63 +687,54 @@ it.effect(
             },
           ],
         });
-        const existing = yield* send.send({
-          commandId: CommCommandId.make("ask:alerts"),
+        const asked = yield* (yield* A2ASendService).send({
+          commandId: CommCommandId.make("command:human-inbox:ask:files"),
           senderThreadId: agent.threadId,
           to: firstPerson.id,
-          message: "Choose the release date",
+          message: "Which layout looks right?",
           expectReply: true,
-          intent: "Release date",
-          urgency: "blocking",
+          intent: "Pick a layout",
+          urgency: "soon",
           acceptedAt: at,
         });
-        const input = {
-          instance: { squadronId, captainParticipantId: agent.id, displayName: "Review" },
-          seatName: "critic",
-          runId: "run:failed-auth",
-          failure: {
-            class: "provider_error" as const,
-            message: "OAuth token has expired",
-            code: null,
-            retryable: false,
-          },
+        yield* worker.drain;
+
+        const upload = {
+          type: "image" as const,
+          id: ChatAttachmentId.make("pending-00000000-0000-4000-8000-000000000000"),
+          name: "layout.png",
+          mimeType: "image/png",
+          sizeBytes: 3,
         };
-        assert.isFalse(
-          needsHumanForCrewFailure({ ...input.failure, message: "Cannot reach API server" }),
+        const claimed = { ...upload, id: ChatAttachmentId.make("claimed-layout") };
+        const claimedFor: Array<ThreadId> = [];
+        yield* (yield* A2AHumanInbox).answer(
+          {
+            commandId: CommCommandId.make("command:human-inbox:answer:files"),
+            personId: firstPerson.id,
+            exchangeId: asked.exchangeId!,
+            message: "The second one.",
+            attachments: [upload],
+            acceptedAt: at,
+          },
+          undefined,
+          (threadId, attachments) =>
+            Effect.sync(() => {
+              claimedFor.push(threadId);
+              assert.deepStrictEqual(attachments, [upload]);
+              return [claimed];
+            }),
         );
-        yield* alert(input);
-        yield* alert(input);
-        yield* alert({
-          ...input,
-          runId: "run:failed-permission",
-          seatName: "builder",
-          failure: { ...input.failure, class: "permission_error" },
-        });
         yield* worker.drain;
-        const items = yield* inbox.list(firstPerson.id);
-        assert.lengthOf(items, 1);
-        assert.equal(items[0]!.exchangeId, existing.exchangeId);
-        assert.include(items[0]!.message, "Choose the release date");
-        assert.include(items[0]!.message, 'seat "critic"');
-        assert.include(items[0]!.message, 'seat "builder"');
-        assert.equal(items[0]!.message.split('seat "critic"').length, 2);
-        yield* inbox.answer({
-          commandId: CommCommandId.make("answer:alerts"),
-          personId: firstPerson.id,
-          exchangeId: items[0]!.exchangeId,
-          message: "Signed in. Please retry.",
-          acceptedAt: at,
-        });
-        yield* worker.drain;
-        assert.lengthOf(yield* Ref.get(deliveries), 1);
-        yield* alert(input);
-        assert.lengthOf(yield* inbox.list(firstPerson.id), 0);
-        yield* alert({ ...input, runId: "run:another-failure" });
-        yield* worker.drain;
-        const next = yield* inbox.list(firstPerson.id);
-        assert.lengthOf(next, 1);
-        assert.equal(next[0]!.urgency, "blocking");
-        assert.include(next[0]!.message, "Platform notice:");
+
+        assert.deepStrictEqual(claimedFor, [agent.threadId]);
+        const replies = (yield* Ref.get(deliveries)).filter(
+          (delivery) => delivery.exchangeRole === "reply",
+        );
+        assert.deepStrictEqual(
+          replies.map((delivery) => delivery.attachments),
+          [[claimed]],
+        );
       }).pipe(Effect.provide(makeTestLayer(deliveries)));
-    }).pipe(Effect.scoped),
+    }),
 );

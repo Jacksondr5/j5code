@@ -1,114 +1,376 @@
-import type { ProjectId } from "@t3tools/contracts";
-import type {
-  AnswerHumanExchangeRequest,
-  CrewProposalResolveRequest,
-  CrewProposalPreviewRequest,
-  CrewArchiveRequest,
-  CrewStopRequest,
-  FleetReadRequest,
+import {
+  type ClientGuardedRpcTag,
+  J5_ARTIFACT_WS_METHODS,
+  type EnvironmentId,
+} from "@t3tools/contracts";
+import {
+  J5_CLIENT_ACTION_WS_METHODS,
+  J5_CLIENT_READ_WS_METHODS,
+  J5_PLAYBOOK_WS_METHODS,
+  type J5ReadRevisionKey,
 } from "@t3tools/contracts/j5";
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
-import * as SubscriptionRef from "effect/SubscriptionRef";
-import type { HttpClient } from "effect/unstable/http";
-import type { Atom } from "effect/unstable/reactivity";
+import { AsyncResult, Atom } from "effect/reactivity";
 
 import type { EnvironmentRegistry } from "../connection/registry.ts";
 import { EnvironmentSupervisor } from "../connection/supervisor.ts";
-import { createEnvironmentCommand, createEnvironmentQueryAtomFamily } from "../state/runtime.ts";
-import * as J5Http from "./http.ts";
+import {
+  EnvironmentRpcUnavailableError,
+  type EnvironmentRpcInput,
+  type EnvironmentUnaryRpcTag,
+  request,
+} from "../rpc/client.ts";
+import {
+  createEnvironmentQueryAtomFamily,
+  createEnvironmentRpcCommand,
+  createEnvironmentRpcQueryAtomFamily,
+  createEnvironmentRpcSubscriptionAtomFamily,
+} from "../state/runtime.ts";
+import { connectionIsKnownNarrow } from "./sharing.ts";
 
-const preparedConnection = Effect.gen(function* () {
+const defectText = (defect: unknown) => (defect instanceof Error ? defect.message : String(defect));
+
+/** A server too old to have the method answers with an "Unknown request tag" defect. */
+const isUnknownRequestTag = (cause: Cause.Cause<unknown>, tag: string) =>
+  cause.reasons.some(
+    (reason) =>
+      Cause.isDieReason(reason) &&
+      defectText(reason.defect).includes(`Unknown request tag: ${tag}`),
+  );
+
+/** That defect as a failure the control or view shows, in the words upstream uses for a server that must be updated. */
+const needsNewerServer = (environmentId: EnvironmentId, subject: "action" | "view") =>
+  new EnvironmentRpcUnavailableError({
+    environmentId,
+    message: `This ${subject} needs a newer server. Update the server hosting this environment, then try again.`,
+  });
+
+/**
+ * A J5 action as a permission-aware command: `permissionAtom` says whether the session may run it,
+ * and the same grant is checked again when it runs.
+ */
+const createJ5ActionCommand = <R, E, TTag extends EnvironmentUnaryRpcTag>(
+  runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>,
+  label: string,
+  tag: TTag,
+) => {
+  const command = createEnvironmentRpcCommand(runtime, { label, tag });
+  const run: typeof command.run = async (registry, target) => {
+    const result = await command.run(registry, target);
+    return AsyncResult.isFailure(result) && isUnknownRequestTag(result.cause, tag)
+      ? AsyncResult.failure(Cause.fail(needsNewerServer(target.environmentId, "action")))
+      : result;
+  };
+  return { ...command, run };
+};
+
+type J5ReadTag = Exclude<EnvironmentUnaryRpcTag, ClientGuardedRpcTag>;
+
+/**
+ * The J5 reads a client still sends for a person who reaches less than the whole server: those
+ * the server answers for the person's scope (`j5/sharing/AccessGate.ts`'s allow-list, plus the
+ * inbox and Crew reads). A read the server starts to allow must be added here too.
+ */
+const READS_A_NARROW_PERSON_SENDS: ReadonlySet<string> = new Set([
+  J5_ARTIFACT_WS_METHODS.listArtifacts,
+  J5_PLAYBOOK_WS_METHODS.readLibrary,
+  J5_PLAYBOOK_WS_METHODS.listThreadRuns,
+  J5_CLIENT_READ_WS_METHODS.readParticipantIdentities,
+  J5_CLIENT_READ_WS_METHODS.listHumanInbox,
+  J5_CLIENT_READ_WS_METHODS.readOpenInboxCount,
+  J5_CLIENT_READ_WS_METHODS.listCrewProposals,
+  J5_CLIENT_READ_WS_METHODS.listCrewRuntimeRequests,
+  J5_CLIENT_READ_WS_METHODS.listCrewMemberships,
+  J5_CLIENT_READ_WS_METHODS.listSpawnedChildren,
+]);
+
+/**
+ * One J5 read over the environment's socket. Once the connection is known to be a narrowed
+ * person's, only `READS_A_NARROW_PERSON_SENDS` go out, since the server refuses the rest (People
+ * and access AC23). The check does not wait for that answer, so no one's reads are delayed.
+ */
+const j5Read = Effect.fn("j5.read")(function* <TTag extends J5ReadTag>(
+  tag: TTag,
+  input: EnvironmentRpcInput<TTag>,
+) {
   const supervisor = yield* EnvironmentSupervisor;
-  const prepared = yield* SubscriptionRef.get(supervisor.prepared);
-  const state = yield* SubscriptionRef.get(supervisor.state);
-  if (Option.isNone(prepared) || state.phase !== "connected") {
-    return yield* new J5Http.J5HttpError({ status: 0, detail: "The environment is disconnected." });
+  if (!READS_A_NARROW_PERSON_SENDS.has(tag) && (yield* connectionIsKnownNarrow)) {
+    return yield* new EnvironmentRpcUnavailableError({
+      environmentId: supervisor.target.environmentId,
+      message: "This is not shared with you on this server.",
+    });
   }
-  return prepared.value;
+  return yield* request(tag, input).pipe(
+    Effect.catchCauseIf(
+      (cause) => isUnknownRequestTag(cause, tag),
+      () => Effect.fail(needsNewerServer(supervisor.target.environmentId, "view")),
+    ),
+  );
 });
 
 /** J5 uses the same environment registry, query lifecycle, and command dispatch as other features. */
 export function createJ5EnvironmentAtoms<R, E>(
-  runtime: Atom.AtomRuntime<EnvironmentRegistry | HttpClient.HttpClient | R, E>,
+  runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>,
 ) {
+  // Which reads the server says went out of date. A query that names its revisions here re-reads
+  // when one of them moves, and holds this subscription open for as long as it is mounted.
+  const readChanges = createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+    label: "j5:read-changes",
+    tag: J5_CLIENT_READ_WS_METHODS.subscribeReadChanges,
+  });
+  // One value per set of revisions, so a query re-reads only when a revision it depends on moved.
+  const readRevisions = Atom.family((key: string) => {
+    const [environmentId, ...keys] = JSON.parse(key) as [EnvironmentId, ...J5ReadRevisionKey[]];
+    return Atom.make((get) => {
+      const revisions = Option.getOrNull(
+        AsyncResult.value(get(readChanges({ environmentId, input: {} }))),
+      );
+      return revisions === null ? null : keys.map((name) => revisions[name]).join(":");
+    }).pipe(Atom.withLabel(`j5:read-revisions:${key}`));
+  });
+  const rereadOn =
+    (...keys: ReadonlyArray<J5ReadRevisionKey>) =>
+    (target: { readonly environmentId: EnvironmentId }) =>
+      readRevisions(JSON.stringify([target.environmentId, ...keys]));
+  const playbookChanges = createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+    label: "j5:playbook-changes",
+    tag: J5_PLAYBOOK_WS_METHODS.subscribeChanges,
+    idleTtlMs: 0,
+  });
   return {
-    squadrons: createEnvironmentQueryAtomFamily(runtime, {
-      label: "j5:squadrons",
-      staleTimeMs: 30_000,
-      execute: (_input: Record<string, never>) =>
-        preparedConnection.pipe(Effect.flatMap(J5Http.listSquadrons)),
+    readChanges,
+    /** A `refreshTrigger` for a read made elsewhere that one of the server's revisions covers. */
+    rereadOn,
+    playbookChanges,
+    playbookRuns: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "j5:playbook-runs",
+      tag: J5_PLAYBOOK_WS_METHODS.listRuns,
+      execute: (input) => j5Read(J5_PLAYBOOK_WS_METHODS.listRuns, input),
+      staleTimeMs: 2_500,
     }),
-    inbox: createEnvironmentQueryAtomFamily(runtime, {
+    playbookLibrary: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "j5:playbook-library",
+      tag: J5_PLAYBOOK_WS_METHODS.readLibrary,
+      refreshTrigger: (target) =>
+        playbookChanges({ environmentId: target.environmentId, input: {} }),
+      execute: (input) => j5Read(J5_PLAYBOOK_WS_METHODS.readLibrary, input),
+      staleTimeMs: 0,
+    }),
+    playbookSources: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "j5:playbook-sources",
+      tag: J5_PLAYBOOK_WS_METHODS.readSources,
+      refreshTrigger: (target) =>
+        playbookChanges({ environmentId: target.environmentId, input: {} }),
+      execute: (input) => j5Read(J5_PLAYBOOK_WS_METHODS.readSources, input),
+      staleTimeMs: 0,
+    }),
+    savePlaybook: createJ5ActionCommand(
+      runtime,
+      "j5:save-playbook",
+      J5_PLAYBOOK_WS_METHODS.savePlaybook,
+    ),
+    setPlaybookFolders: createJ5ActionCommand(
+      runtime,
+      "j5:playbook-folders",
+      J5_PLAYBOOK_WS_METHODS.setFolders,
+    ),
+    deletePlaybook: createJ5ActionCommand(
+      runtime,
+      "j5:delete-playbook",
+      J5_PLAYBOOK_WS_METHODS.deletePlaybook,
+    ),
+    listArtifacts: createEnvironmentRpcCommand(runtime, {
+      label: "j5:list-artifacts",
+      tag: J5_ARTIFACT_WS_METHODS.listArtifacts,
+      execute: (input) => j5Read(J5_ARTIFACT_WS_METHODS.listArtifacts, input),
+    }),
+    deleteArtifact: createJ5ActionCommand(
+      runtime,
+      "j5:delete-artifact",
+      J5_ARTIFACT_WS_METHODS.deleteArtifact,
+    ),
+    deleteAllArtifacts: createJ5ActionCommand(
+      runtime,
+      "j5:delete-all-artifacts",
+      J5_ARTIFACT_WS_METHODS.deleteAllArtifacts,
+    ),
+    exportPlaybook: createEnvironmentRpcCommand(runtime, {
+      label: "j5:export-playbook",
+      tag: J5_PLAYBOOK_WS_METHODS.exportPlaybook,
+    }),
+    renamePlaybook: createJ5ActionCommand(
+      runtime,
+      "j5:rename-playbook",
+      J5_PLAYBOOK_WS_METHODS.renamePlaybook,
+    ),
+    playbooks: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "j5:playbooks",
+      tag: J5_PLAYBOOK_WS_METHODS.listThreadRuns,
+      execute: (input) => j5Read(J5_PLAYBOOK_WS_METHODS.listThreadRuns, input),
+      staleTimeMs: 2_500,
+    }),
+    inbox: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "j5:inbox",
+      tag: J5_CLIENT_READ_WS_METHODS.listHumanInbox,
+      execute: (input) => j5Read(J5_CLIENT_READ_WS_METHODS.listHumanInbox, input),
       staleTimeMs: 7_500,
-      execute: (input: { readonly status: "open" | "answered"; readonly personId?: string }) =>
-        preparedConnection.pipe(
-          Effect.flatMap((prepared) =>
-            J5Http.listHumanInbox(prepared, input.status, input.personId),
-          ),
-        ),
+      refreshTrigger: rereadOn("inbox"),
     }),
-    openCount: createEnvironmentQueryAtomFamily(runtime, {
+    openCount: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "j5:inbox-count",
+      tag: J5_CLIENT_READ_WS_METHODS.readOpenInboxCount,
+      execute: (input) => j5Read(J5_CLIENT_READ_WS_METHODS.readOpenInboxCount, input),
       staleTimeMs: 7_500,
-      execute: (input: { readonly personId?: string }) =>
-        preparedConnection.pipe(
-          Effect.flatMap((prepared) => J5Http.readOpenInboxCount(prepared, input.personId)),
-        ),
+      refreshTrigger: rereadOn("inbox"),
     }),
-    // The Fleet page reads every connected environment's roster; it changes on the scale of turns.
-    fleet: createEnvironmentQueryAtomFamily(runtime, {
+    // The Fleet page reads every connected environment's roster: its agents and their open
+    // Exchanges, and its Crews with their seats.
+    fleet: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "j5:fleet",
+      tag: J5_CLIENT_READ_WS_METHODS.readFleet,
+      execute: (input) => j5Read(J5_CLIENT_READ_WS_METHODS.readFleet, input),
       staleTimeMs: 30_000,
-      execute: (input: FleetReadRequest) =>
-        preparedConnection.pipe(Effect.flatMap((prepared) => J5Http.readFleet(prepared, input))),
+      refreshTrigger: rereadOn("crew", "fleet"),
+    }),
+    // The sidebar asks about the rows it shows, a batch at a time (`scopedThreadReadStore`).
+    listCrewMemberships: createEnvironmentRpcCommand(runtime, {
+      label: "j5:crew-memberships",
+      tag: J5_CLIENT_READ_WS_METHODS.listCrewMemberships,
+      execute: (input) => j5Read(J5_CLIENT_READ_WS_METHODS.listCrewMemberships, input),
+    }),
+    listSpawnedChildren: createEnvironmentRpcCommand(runtime, {
+      label: "j5:spawned-children",
+      tag: J5_CLIENT_READ_WS_METHODS.listSpawnedChildren,
+      execute: (input) => j5Read(J5_CLIENT_READ_WS_METHODS.listSpawnedChildren, input),
+    }),
+    // What the archive dialog lists before a thread is archived, and the names it lists them by.
+    readPreArchiveFacts: createEnvironmentRpcCommand(runtime, {
+      label: "j5:pre-archive-facts",
+      tag: J5_CLIENT_READ_WS_METHODS.readPreArchiveFacts,
+      execute: (input) => j5Read(J5_CLIENT_READ_WS_METHODS.readPreArchiveFacts, input),
+    }),
+    // What archiving a Crew would do with its seats' worktrees; shown beside the facts above.
+    readCrewArchiveWorktrees: createEnvironmentRpcCommand(runtime, {
+      label: "j5:crew-archive-worktrees",
+      tag: J5_CLIENT_READ_WS_METHODS.readCrewArchiveWorktrees,
+      execute: (input) => j5Read(J5_CLIENT_READ_WS_METHODS.readCrewArchiveWorktrees, input),
+    }),
+    readParticipantIdentities: createEnvironmentRpcCommand(runtime, {
+      label: "j5:participant-identities",
+      tag: J5_CLIENT_READ_WS_METHODS.readParticipantIdentities,
+      execute: (input) => j5Read(J5_CLIENT_READ_WS_METHODS.readParticipantIdentities, input),
     }),
     // Crew gates are read per environment like the inbox; a Captain on any connected server
     // reaches the human's bell and thread.
     crewProposals: createEnvironmentQueryAtomFamily(runtime, {
       label: "j5:crew-proposals",
       staleTimeMs: 7_500,
+      refreshTrigger: rereadOn("crew"),
       execute: (_input: Record<string, never>) =>
-        preparedConnection.pipe(Effect.flatMap(J5Http.listCrewProposals)),
-    }),
-    previewCrewProposal: createEnvironmentCommand(runtime, {
-      label: "j5:preview-crew-proposal",
-      execute: (input: CrewProposalPreviewRequest) =>
-        preparedConnection.pipe(
-          Effect.flatMap((prepared) => J5Http.previewCrewProposal(prepared, input)),
+        j5Read(J5_CLIENT_READ_WS_METHODS.listCrewProposals, {}).pipe(
+          Effect.map((response) => response.proposals),
         ),
     }),
-    resolveCrewProposal: createEnvironmentCommand(runtime, {
-      label: "j5:resolve-crew-proposal",
-      execute: (input: CrewProposalResolveRequest) =>
-        preparedConnection.pipe(
-          Effect.flatMap((prepared) => J5Http.resolveCrewProposal(prepared, input)),
+    previewCrewProposal: createJ5ActionCommand(
+      runtime,
+      "j5:preview-crew-proposal",
+      J5_CLIENT_ACTION_WS_METHODS.previewCrewProposal,
+    ),
+    resolveCrewProposal: createJ5ActionCommand(
+      runtime,
+      "j5:resolve-crew-proposal",
+      J5_CLIENT_ACTION_WS_METHODS.resolveCrewProposal,
+    ),
+    archiveCrew: createJ5ActionCommand(
+      runtime,
+      "j5:archive-crew",
+      J5_CLIENT_ACTION_WS_METHODS.archiveCrew,
+    ),
+    // Seat approvals and placed agents' native-question links, refreshed by request and roster changes.
+    crewRuntimeRequests: createEnvironmentQueryAtomFamily(runtime, {
+      label: "j5:crew-runtime-requests",
+      staleTimeMs: 7_500,
+      refreshTrigger: rereadOn("crew", "runtimeRequests", "fleet"),
+      execute: (_input: Record<string, never>) =>
+        j5Read(J5_CLIENT_READ_WS_METHODS.listCrewRuntimeRequests, {}),
+    }),
+    // The Inbox's worktree cleanup approval: one per Crew archive that kept unfinished worktrees.
+    crewWorktreeCleanups: createEnvironmentQueryAtomFamily(runtime, {
+      label: "j5:crew-worktree-cleanups",
+      staleTimeMs: 7_500,
+      refreshTrigger: rereadOn("inbox"),
+      execute: (input: { readonly status: "open" | "decided" }) =>
+        j5Read(J5_CLIENT_READ_WS_METHODS.listCrewWorktreeCleanups, input),
+    }),
+    answerCrewWorktreeCleanup: createJ5ActionCommand(
+      runtime,
+      "j5:answer-crew-worktree-cleanup",
+      J5_CLIENT_ACTION_WS_METHODS.answerCrewWorktreeCleanup,
+    ),
+    respondCrewRuntimeRequest: createJ5ActionCommand(
+      runtime,
+      "j5:respond-crew-runtime-request",
+      J5_CLIENT_ACTION_WS_METHODS.respondCrewRuntimeRequest,
+    ),
+    stopCrew: createJ5ActionCommand(runtime, "j5:stop-crew", J5_CLIENT_ACTION_WS_METHODS.stopCrew),
+    answerHumanExchange: createJ5ActionCommand(
+      runtime,
+      "j5:answer-exchange",
+      J5_CLIENT_ACTION_WS_METHODS.answerHumanExchange,
+    ),
+    allowPersonaOnce: createJ5ActionCommand(
+      runtime,
+      "j5:allow-persona-once",
+      J5_CLIENT_ACTION_WS_METHODS.allowPersonaOnce,
+    ),
+    savePersonaDraft: createJ5ActionCommand(
+      runtime,
+      "j5:save-persona-draft",
+      J5_CLIENT_ACTION_WS_METHODS.savePersonaDraft,
+    ),
+    // Polls, backlogs and errors change while Connections stays open; each moves the `peers`
+    // revision. A polling peer's heartbeat moves it well inside the two-minute online window.
+    peers: createEnvironmentQueryAtomFamily(runtime, {
+      label: "j5:peers",
+      staleTimeMs: 30_000,
+      refreshTrigger: rereadOn("peers"),
+      execute: (_input: Record<string, never>) =>
+        j5Read(J5_CLIENT_READ_WS_METHODS.listPeers, {}).pipe(
+          Effect.map((response) => response.peers),
         ),
     }),
-    archiveCrew: createEnvironmentCommand(runtime, {
-      label: "j5:archive-crew",
-      execute: (input: CrewArchiveRequest) =>
-        preparedConnection.pipe(Effect.flatMap((prepared) => J5Http.archiveCrew(prepared, input))),
-    }),
-    stopCrew: createEnvironmentCommand(runtime, {
-      label: "j5:stop-crew",
-      execute: (input: CrewStopRequest) =>
-        preparedConnection.pipe(Effect.flatMap((prepared) => J5Http.stopCrew(prepared, input))),
-    }),
-    createSquadron: createEnvironmentCommand(runtime, {
-      label: "j5:create-squadron",
-      execute: (input: { readonly name: string; readonly projectId: ProjectId }) =>
-        preparedConnection.pipe(
-          Effect.flatMap((prepared) => J5Http.createSquadron(prepared, input)),
-        ),
-    }),
-    answerHumanExchange: createEnvironmentCommand(runtime, {
-      label: "j5:answer-exchange",
-      execute: (input: AnswerHumanExchangeRequest) =>
-        preparedConnection.pipe(
-          Effect.flatMap((prepared) => J5Http.answerHumanExchange(prepared, input)),
-        ),
-    }),
+    issuePeerCredential: createJ5ActionCommand(
+      runtime,
+      "j5:issue-peer-credential",
+      J5_CLIENT_ACTION_WS_METHODS.issuePeerCredential,
+    ),
+    addPeer: createJ5ActionCommand(runtime, "j5:add-peer", J5_CLIENT_ACTION_WS_METHODS.addPeer),
+    listPeerAddresses: createJ5ActionCommand(
+      runtime,
+      "j5:peer-addresses",
+      J5_CLIENT_ACTION_WS_METHODS.listPeerAddresses,
+    ),
+    probePeer: createJ5ActionCommand(
+      runtime,
+      "j5:probe-peer",
+      J5_CLIENT_ACTION_WS_METHODS.probePeer,
+    ),
+    removePeer: createJ5ActionCommand(
+      runtime,
+      "j5:remove-peer",
+      J5_CLIENT_ACTION_WS_METHODS.removePeer,
+    ),
+    changePeerOrigin: createJ5ActionCommand(
+      runtime,
+      "j5:change-peer-origin",
+      J5_CLIENT_ACTION_WS_METHODS.changePeerOrigin,
+    ),
+    forgetEnvironmentLink: createJ5ActionCommand(
+      runtime,
+      "j5:forget-environment-link",
+      J5_CLIENT_ACTION_WS_METHODS.forgetEnvironmentLink,
+    ),
   };
 }

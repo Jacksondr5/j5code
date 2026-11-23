@@ -1,0 +1,48 @@
+# Artifacts
+
+Artifacts are planning documents generated while an agent works, such as plans, specifications,
+research notes, and diagrams. J5 Code stores these files in its application data, outside the
+repository, and shows them in the Artifacts page.
+
+Use Artifacts for durable, user-consumable planning outputs that should remain available across
+threads and agents. Do not use it for source code, build output, logs, temporary scratch files, or
+ordinary repository documentation.
+
+Open Artifacts from the folder icon at the bottom of the sidebar. Choose a project workspace, then
+choose a file to preview it. Markdown, text, source files, common image formats, and sandboxed HTML
+documents can be previewed without opening an editor. HTML previews cannot run scripts or access
+J5 Code's page context.
+
+You can permanently delete the selected file, or use **Delete all** to remove every artifact in the
+selected project. Both actions require confirmation and cannot be undone. Deleting an artifact also
+removes any earlier versions kept inside it.
+
+From a project thread, you can also open the right panel and choose **Artifacts**. This view stays
+scoped to the current project workspace, so planning documents remain beside the conversation while
+you work. Artifact file references in chat use a distinct **Artifact** chip; choose one to open that
+document directly in the Artifacts panel.
+
+To find text in an artifact, click its preview and press Cmd+F (Ctrl+F on Windows and Linux). The
+browser's own find opens on the web; the desktop app opens a find bar at the top right of the
+preview, where Enter and Shift+Enter move between matches and Esc closes it. Either way the search
+covers the whole window, so the count includes matches in the chat beside the artifact.
+
+On mobile, tap an `artifacts/…` link in a thread or an ask to read that artifact. **All artifacts** lists the
+project's other artifacts. Mobile shows Markdown, text, images and sandboxed HTML, and cannot
+delete artifacts. Pull down to refresh.
+
+While the Artifacts page is open, its file list and the selected preview update automatically when
+an agent creates, edits, or removes a project artifact.
+
+When a provider emits a structured proposed plan, J5 Code saves the completed plan automatically as
+the shared `artifacts/plan.md`. Agents use J5 Code's artifact tools to create and read other planning
+documents. Files under `handoffs/` keep every version inside the one file, newest first, when an agent
+rewrites them; every other artifact is replaced on write. Artifacts are shared by every agent working in the project rather than partitioned by
+thread. The `artifacts/` prefix shown in chat is a logical path and does not create a directory in
+the repository, so no Git ignore rule is needed.
+
+Artifacts are local to the environment and project where they were generated. They are
+not synced between machines.
+
+Older tasks recorded a handoff status for a persona's declared file; see **Older tasks** in
+[Personas](personas.md).

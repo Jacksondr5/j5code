@@ -1,17 +1,19 @@
+import { J5ThreadRegistrationLayer } from "../runtimeLayer.ts";
+import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
+import { SourceControlProviderRegistry } from "../../../sourceControl/SourceControlProviderRegistry.ts";
 import * as GitWorkflow from "../../../git/GitWorkflowService.ts";
 import * as ProjectService from "../../../project/ProjectService.ts";
 /**
- * Dev-only disposable A2A delivery seed support.
- *
- * A6 multi-statement-truncation lesson: never seed this flow with a raw
- * multi-statement SQL string. Each scenario's durable state uses production
- * services in one transaction, so it either has a complete receipt or rolls
- * back. Run only while the target T3 server is stopped; this process owns the
- * one database accessor and exits completely after printing its receipt.
+ * Dev-only disposable A2A delivery seed. State is written by production services, never raw
+ * multi-statement SQL. A scenario is not one transaction: the terminal-run reactor takes a thread's
+ * lock then reads the database, so a transaction held across a dispatch deadlocks; a partial run
+ * leaves rows, so discard the home. Run only with the target server stopped.
  */
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CommandId,
+  EnvironmentId,
   MessageId,
   ProjectId,
   ProviderDriverKind,
@@ -19,7 +21,7 @@ import {
   ThreadId,
   type ModelSelection,
 } from "@t3tools/contracts";
-import * as Crypto from "effect/Crypto";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -28,15 +30,21 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { FetchHttpClient } from "effect/http";
+import * as SqlClient from "effect/sql/SqlClient";
+import { isSqlError } from "effect/sql/SqlError";
 import * as NodeOS from "node:os";
 
+import { resolveWorktreeT3Home } from "@t3tools/shared/devHome";
+
+import { EnvironmentAuth } from "../../../auth/EnvironmentAuth.ts";
 import * as CheckpointStore from "../../../checkpointing/CheckpointStore.ts";
+import * as ServerEnvironment from "../../../environment/ServerEnvironment.ts";
 import { ServerConfig } from "../../../config.ts";
 import { layer as mcpSessionRegistryTestLayer } from "../../../mcp/McpSessionRegistry.testkit.ts";
 import {
-  OrchestrationV2EventSinkLayerLive,
-  OrchestrationV2LayerLive,
+  layerEventSink as OrchestrationV2EventSinkLayerLive,
+  layer as UpstreamOrchestrationV2LayerLive,
 } from "../../../orchestration-v2/runtimeLayer.ts";
 import {
   EffectOutboxV2,
@@ -47,25 +55,31 @@ import {
   latestActiveRun,
   ThreadManagementService,
 } from "../../../orchestration-v2/ThreadManagementService.ts";
-import { makeSqlitePersistenceLive } from "../../../persistence/Layers/Sqlite.ts";
-import type { ProviderAdapterV2Shape } from "../../../orchestration-v2/ProviderAdapter.ts";
+import { layerFromPath as makeSqlitePersistenceLive } from "../../../persistence/Sqlite.ts";
+import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import { CodexProviderCapabilitiesV2 } from "../../../orchestration-v2/Adapters/CodexAdapterV2.ts";
-import type { ProviderInstance } from "../../../provider/ProviderDriver.ts";
-import { ProviderInstanceRegistry } from "../../../provider/Services/ProviderInstanceRegistry.ts";
+import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
+import { ProviderInstanceRegistry } from "../../../provider/ProviderInstanceRegistry.ts";
 import { ServerSettingsService } from "../../../serverSettings.ts";
 import * as VcsDriverRegistry from "../../../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../../../vcs/VcsProcess.ts";
 import {
   deliveryCommandId,
   deliveryMessageId,
-  live as deliveryTransportLayer,
+  live as deliveryTransportLive,
 } from "../DeliveryTransport.ts";
 import { manualLayer as deliveryWorkerLayer, A2ADeliveryWorker } from "../DeliveryWorker.ts";
 import { formatClosedHumanEnvelope } from "../EnvelopeFormatter.ts";
 import { A2AHumanInbox, layer as humanInboxLayer } from "../HumanInboxService.ts";
+import { layer as peerRegistryLayer } from "../PeerRegistryService.ts";
 import { ensureLocalOperatorHumanPerson } from "../HumanPersonRegistry.ts";
 import { A2ALedger, layer as ledgerLayer } from "../LedgerService.ts";
+import { noneLayer as peerDirectoryNoneLayer } from "../PeerDirectory.ts";
 import { A2ASendService, layer as sendServiceLayer } from "../SendService.ts";
+import {
+  MachineParticipantService,
+  layer as machineParticipantLayer,
+} from "../MachineParticipantService.ts";
 import { layer as agentCrewInstanceLayer } from "../AgentCrewInstanceService.ts";
 import { A2ASilenceDetector, manualLayer as silenceDetectorLayer } from "../SilenceDetector.ts";
 import {
@@ -75,8 +89,12 @@ import {
   LedgerMessageId,
   ParticipantId,
   SILENCE_DETECTOR_PARTICIPANT_ID,
-  SquadronId,
+  LedgerProjectId,
 } from "../contracts.ts";
+
+const OrchestrationV2LayerLive = UpstreamOrchestrationV2LayerLive.pipe(
+  Layer.provideMerge(J5ThreadRegistrationLayer),
+);
 
 const fakeProviderInstanceId = ProviderInstanceId.make("j5-dev-seed-unavailable");
 const fakeModelSelection = {
@@ -117,6 +135,12 @@ export interface DevDeliverySeedReceipt {
       readonly noticeDeliveryMessageId: MessageId;
       readonly targetThreadId: ThreadId;
     };
+    readonly machineMessage: {
+      readonly senderParticipantId: ParticipantId;
+      readonly ledgerMessageId: LedgerMessageId;
+      readonly deliveryMessageId: MessageId;
+      readonly targetThreadId: ThreadId;
+    };
     readonly rawFutureEnvelope: {
       readonly ledgerMessageId: LedgerMessageId;
       readonly deliveryMessageId: MessageId;
@@ -147,12 +171,12 @@ export interface DevDeliverySeedReceipt {
   };
 }
 
-export class DevDeliverySeedArgumentError extends Schema.TaggedErrorClass<DevDeliverySeedArgumentError>()(
+export class DevDeliverySeedArgumentError extends Schema.TaggedError<DevDeliverySeedArgumentError>()(
   "DevDeliverySeedArgumentError",
   { message: Schema.String },
 ) {}
 
-export class DevDeliverySeedServerOffError extends Schema.TaggedErrorClass<DevDeliverySeedServerOffError>()(
+export class DevDeliverySeedServerOffError extends Schema.TaggedError<DevDeliverySeedServerOffError>()(
   "DevDeliverySeedServerOffError",
   { cause: Schema.Defect() },
 ) {
@@ -161,19 +185,14 @@ export class DevDeliverySeedServerOffError extends Schema.TaggedErrorClass<DevDe
   }
 }
 
-class DevDeliverySeedPreflightRollback extends Schema.TaggedErrorClass<DevDeliverySeedPreflightRollback>()(
+class DevDeliverySeedPreflightRollback extends Schema.TaggedError<DevDeliverySeedPreflightRollback>()(
   "DevDeliverySeedPreflightRollback",
   {},
 ) {}
 
-class DevDeliverySeedScenarioError extends Schema.TaggedErrorClass<DevDeliverySeedScenarioError>()(
+class DevDeliverySeedScenarioError extends Schema.TaggedError<DevDeliverySeedScenarioError>()(
   "DevDeliverySeedScenarioError",
   { name: Schema.String, cause: Schema.Defect() },
-) {}
-
-class DevDeliverySeedControlledRollbackError extends Schema.TaggedErrorClass<DevDeliverySeedControlledRollbackError>()(
-  "DevDeliverySeedControlledRollbackError",
-  {},
 ) {}
 
 const isDevDeliverySeedPreflightRollback = Schema.is(DevDeliverySeedPreflightRollback);
@@ -193,9 +212,15 @@ const isInside = (path: Path.Path, candidate: string, parent: string) => {
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
 };
 
-/** Require an existing, absolute disposable T3 home; resolves symlinks before rejecting live state. */
-export const validateIsolatedBaseDir = (baseDir: string) =>
-  Effect.gen(function* () {
+/**
+ * Require an existing, absolute disposable T3 home; resolves symlinks before rejecting live state.
+ *
+ * Thread worktrees live below the shared home, at `~/.j5code/worktrees/...`. A
+ * linked git worktree's own `.j5code` is that checkout's disposable dev state,
+ * so a base directory inside one is accepted wherever the worktree lives.
+ */
+export const validateIsolatedBaseDir = Effect.fn("j5.a2a.devDeliverySeed.validateIsolatedBaseDir")(
+  function* (baseDir: string) {
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     if (!path.isAbsolute(baseDir)) {
@@ -207,16 +232,14 @@ export const validateIsolatedBaseDir = (baseDir: string) =>
     const configuredSharedHomes = [".t3", ".j5code"].map((name) =>
       path.resolve(NodeOS.homedir(), name),
     );
-    const sharedHomes = yield* Effect.all(
-      configuredSharedHomes.map((sharedHome) =>
-        fileSystem
-          .exists(sharedHome)
-          .pipe(
-            Effect.flatMap((exists) =>
-              exists ? fileSystem.realPath(sharedHome) : Effect.succeed(sharedHome),
-            ),
+    const sharedHomes = yield* Effect.forEach(configuredSharedHomes, (sharedHome) =>
+      fileSystem
+        .exists(sharedHome)
+        .pipe(
+          Effect.flatMap((exists) =>
+            exists ? fileSystem.realPath(sharedHome) : Effect.succeed(sharedHome),
           ),
-      ),
+        ),
     );
     let existingParent = requested;
     while (!(yield* fileSystem.exists(existingParent))) {
@@ -224,41 +247,48 @@ export const validateIsolatedBaseDir = (baseDir: string) =>
       if (parent === existingParent) break;
       existingParent = parent;
     }
-    const canonicalExistingParent = yield* fileSystem.realPath(existingParent);
-    if (
-      sharedHomes.some(
-        (sharedHome) =>
-          isInside(path, requested, sharedHome) ||
-          isInside(path, canonicalExistingParent, sharedHome),
-      )
-    ) {
-      return yield* new DevDeliverySeedArgumentError({
-        message:
-          "--base-dir must not be ~/.t3 or ~/.j5code or anything below either, including their userdata directories.",
-      });
+    // The requested path with every existing symlink resolved, before anything is created.
+    const canonicalRequested = path.resolve(
+      yield* fileSystem.realPath(existingParent),
+      path.relative(existingParent, requested),
+    );
+    const isSharedState = Effect.fn(function* (candidate: string) {
+      if (!sharedHomes.some((sharedHome) => isInside(path, candidate, sharedHome))) return false;
+      const worktreeHome = yield* resolveWorktreeT3Home(candidate);
+      return (
+        worktreeHome === undefined ||
+        !isInside(path, candidate, worktreeHome) ||
+        sharedHomes.some((sharedHome) => isInside(path, sharedHome, worktreeHome))
+      );
+    });
+    const sharedStateError = new DevDeliverySeedArgumentError({
+      message:
+        "--base-dir must not be ~/.t3 or ~/.j5code or anything below either, including their userdata directories. The one exception is a linked git worktree's own .j5code.",
+    });
+    if ((yield* isSharedState(requested)) || (yield* isSharedState(canonicalRequested))) {
+      return yield* sharedStateError;
     }
     yield* fileSystem.makeDirectory(requested, { recursive: true });
     const resolvedBaseDir = yield* fileSystem.realPath(requested);
-    if (sharedHomes.some((sharedHome) => isInside(path, resolvedBaseDir, sharedHome))) {
-      return yield* new DevDeliverySeedArgumentError({
-        message:
-          "--base-dir must not be ~/.t3 or ~/.j5code or anything below either, including their userdata directories.",
-      });
+    if (yield* isSharedState(resolvedBaseDir)) {
+      return yield* sharedStateError;
     }
     return resolvedBaseDir;
-  });
+  },
+);
 
 const databasePathFor = (path: Path.Path, baseDir: string) =>
-  path.resolve(baseDir, "userdata", "state.sqlite");
+  path.resolve(baseDir, "userdata", "statev2.sqlite");
 
 const seededId = (runId: string, suffix: string) => `${runId}:${suffix}`;
 
-const isDatabaseContention = (cause: unknown) =>
-  /SQLITE_BUSY|database is locked|database is busy/i.test(
-    `${String(cause)} ${cause instanceof Error ? String(cause.cause) : ""}`,
-  );
+/** SQLite reports a busy or locked database as a lock timeout, possibly wrapped by a service error. */
+const isDatabaseContention = (cause: unknown): boolean =>
+  isSqlError(cause)
+    ? cause.reason._tag === "LockTimeoutError"
+    : cause instanceof Error && isDatabaseContention(cause.cause);
 
-const unavailableAdapter: ProviderAdapterV2Shape = {
+const unavailableAdapter: ProviderAdapter.ProviderAdapterV2["Service"] = {
   instanceId: fakeProviderInstanceId,
   driver: fakeDriver,
   getCapabilities: () => Effect.succeed(CodexProviderCapabilitiesV2),
@@ -268,13 +298,29 @@ const unavailableAdapter: ProviderAdapterV2Shape = {
     Effect.die("The disposable A2A seed runner must never open a provider session."),
 };
 
-const makeRuntimeLayer = (databasePath: string, baseDir: string) => {
-  const database = makeSqlitePersistenceLive(databasePath).pipe(Layer.provide(NodeServices.layer));
-  const config = ServerConfig.layerTest(process.cwd(), baseDir);
+const makeRuntimeLayer = (databasePath: string, baseDir: string, cwd: string) => {
+  const database = makeSqlitePersistenceLive(databasePath).pipe(
+    Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+  );
+  const config = ServerConfig.layerTest(cwd, baseDir);
+  // The seed never crosses servers: the peer registry is real but empty.
+  const peerRegistry = peerRegistryLayer.pipe(
+    Layer.provide(FetchHttpClient.layer),
+    Layer.provide(Layer.mock(EnvironmentAuth)({ listSessions: () => Effect.succeed([]) })),
+    Layer.provide(
+      Layer.mock(ServerEnvironment.ServerEnvironment)({
+        getEnvironmentId: Effect.succeed(EnvironmentId.make("environment:a2a-seed")),
+      }),
+    ),
+  );
+  const deliveryTransportLayer = deliveryTransportLive.pipe(
+    Layer.provide(FetchHttpClient.layer),
+    Layer.provide(peerRegistry),
+  );
   const vcs = VcsDriverRegistry.layer.pipe(
     Layer.provide(VcsProcess.layer),
     Layer.provide(config),
-    Layer.provide(NodeServices.layer),
+    Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
   );
   const checkpoint = CheckpointStore.layer.pipe(Layer.provide(vcs));
   const fakeProvider: ProviderInstance = {
@@ -286,13 +332,15 @@ const makeRuntimeLayer = (databasePath: string, baseDir: string) => {
     },
     displayName: "J5 disposable seed unavailable provider",
     enabled: false,
-    snapshot: {} as ProviderInstance["snapshot"],
+    // No supportedRuntimeModes: every runtime mode runs as stored.
+    snapshot: { getSnapshot: Effect.succeed({}) } as unknown as ProviderInstance["snapshot"],
     orchestrationAdapter: unavailableAdapter,
     textGeneration: {} as ProviderInstance["textGeneration"],
   };
   const providers = Layer.succeed(ProviderInstanceRegistry, {
-    getInstance: (instanceId) =>
-      Effect.succeed(instanceId === fakeProviderInstanceId ? fakeProvider : undefined),
+    getInstance: Effect.fn("ProviderInstanceRegistry.getInstance")(function (instanceId) {
+      return Effect.succeed(instanceId === fakeProviderInstanceId ? fakeProvider : undefined);
+    }),
     listInstances: Effect.succeed([fakeProvider]),
     listUnavailable: Effect.succeed([]),
     streamChanges: Stream.empty,
@@ -306,16 +354,27 @@ const makeRuntimeLayer = (databasePath: string, baseDir: string) => {
   ).pipe(
     Layer.provide(Layer.mock(GitWorkflow.GitWorkflowService)({})),
     Layer.provide(
+      Layer.mock(SourceControlProviderRegistry)({
+        resolveLink: () => Effect.die("The delivery seed does not resolve title links."),
+      }),
+    ),
+    Layer.provide(
       Layer.mock(ProjectService.ProjectService)({
-        getById: () => Effect.succeed(Option.none()),
+        getById: () => Effect.succeedNone,
       }),
     ),
     Layer.provide(mcpSessionRegistryTestLayer),
+    Layer.provide(McpProviderSessions.layer),
     Layer.provide(checkpoint),
     Layer.provide(config),
-    Layer.provide(ServerSettingsService.layerTest()),
+    // Upstream refuses a send to a provider instance the settings don't enable.
+    Layer.provide(
+      ServerSettingsService.layerTest({
+        providerInstances: { [fakeProviderInstanceId]: { driver: fakeDriver, enabled: true } },
+      }),
+    ),
     Layer.provide(providers),
-    Layer.provide(NodeServices.layer),
+    Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     Layer.provideMerge(database),
   );
   const deliveryWorker = deliveryWorkerLayer.pipe(Layer.provideMerge(deliveryTransportLayer));
@@ -324,10 +383,11 @@ const makeRuntimeLayer = (databasePath: string, baseDir: string) => {
     Layer.provideMerge(agentCrewInstanceLayer),
   );
   const a2a = Layer.mergeAll(
-    sendServiceLayer,
+    sendServiceLayer.pipe(Layer.provide(peerDirectoryNoneLayer)),
     deliveryWorker,
     silenceDetector,
     humanInboxLayer,
+    machineParticipantLayer,
   ).pipe(Layer.provideMerge(ledgerLayer), Layer.provide(orchestration));
   // Reuse the same outbox layer reference as the V2 event sink so the receipt
   // can prove each provider-start effect is cancelled before this process exits.
@@ -335,14 +395,19 @@ const makeRuntimeLayer = (databasePath: string, baseDir: string) => {
   return Layer.mergeAll(orchestration, a2a, exposedOutbox);
 };
 
-const readAllEvents = (squadronId: SquadronId) =>
-  Effect.gen(function* () {
-    const ledger = yield* A2ALedger;
-    return (yield* ledger.readEvents({ squadronId, cursor: { afterSeq: 0 }, limit: 1_000 })).events;
-  });
+const readAllEvents = Effect.fn("j5.a2a.devDeliverySeed.readAllEvents")(function* (
+  ledgerProjectId: LedgerProjectId,
+) {
+  const ledger = yield* A2ALedger;
+  return (yield* ledger.readEvents({
+    projectId: ledgerProjectId,
+    cursor: { afterSeq: 0 },
+    limit: 1_000,
+  })).events;
+});
 
-const deliveredEventFor = (squadronId: SquadronId, messageId: LedgerMessageId) =>
-  readAllEvents(squadronId).pipe(
+const deliveredEventFor = (ledgerProjectId: LedgerProjectId, messageId: LedgerMessageId) =>
+  readAllEvents(ledgerProjectId).pipe(
     Effect.flatMap((events) => {
       const delivered = events.find(
         (event) =>
@@ -358,12 +423,12 @@ const deliveredEventFor = (squadronId: SquadronId, messageId: LedgerMessageId) =
     }),
   );
 
-const interruptActiveSeedRun = (input: {
-  readonly projectId: ProjectId;
-  readonly threadId: ThreadId;
-  readonly commandId: CommandId;
-}) =>
-  Effect.gen(function* () {
+const interruptActiveSeedRun = Effect.fn("j5.a2a.devDeliverySeed.interruptActiveSeedRun")(
+  function* (input: {
+    readonly projectId: ProjectId;
+    readonly threadId: ThreadId;
+    readonly commandId: CommandId;
+  }) {
     const threads = yield* ThreadManagementService;
     const before = yield* threads.getThreadProjection(input.threadId);
     const active = latestActiveRun(before);
@@ -388,36 +453,24 @@ const interruptActiveSeedRun = (input: {
       );
     }
     return active.id;
-  });
+  },
+);
 
-const atomicScenario = <A, E, R>(name: string, effect: Effect.Effect<A, E, R>) =>
-  Effect.flatMap(SqlClient.SqlClient, (sql) =>
-    sql
-      .withTransaction(effect)
-      .pipe(Effect.mapError((cause) => new DevDeliverySeedScenarioError({ name, cause }))),
-  );
+const scenario = <A, E, R>(name: string, effect: Effect.Effect<A, E, R>) =>
+  effect.pipe(Effect.mapError((cause) => new DevDeliverySeedScenarioError({ name, cause })));
 
 /**
  * Takes and rolls back a real production-ledger write before any scenario.
  * A busy DB reaches the caller as a clear server-off precondition failure.
  */
-const assertTargetServerStopped = (input: {
-  readonly squadronId: SquadronId;
-  readonly createdAt: string;
-}) =>
-  Effect.gen(function* () {
+const assertTargetServerStopped = Effect.fn("j5.a2a.devDeliverySeed.assertTargetServerStopped")(
+  function* (input: { readonly projectId: LedgerProjectId; readonly createdAt: string }) {
     const sql = yield* SqlClient.SqlClient;
     const ledger = yield* A2ALedger;
     yield* sql
       .withTransaction(
         ledger
-          .createSquadron({
-            squadron: {
-              id: input.squadronId,
-              name: `J5 disposable server-off preflight ${input.squadronId}`,
-              createdAt: input.createdAt,
-            },
-          })
+          .ensureProject({ projectId: input.projectId, createdAt: input.createdAt })
           .pipe(Effect.andThen(Effect.fail(new DevDeliverySeedPreflightRollback()))),
       )
       .pipe(
@@ -427,22 +480,23 @@ const assertTargetServerStopped = (input: {
             : Effect.fail(new DevDeliverySeedServerOffError({ cause })),
         ),
       );
-  });
+  },
+);
 
-const joinScenarioAgents = (input: {
-  readonly squadronId: SquadronId;
-  readonly senderId: ParticipantId;
-  readonly senderThreadId: ThreadId;
-  readonly receiverId: ParticipantId;
-  readonly receiverThreadId: ThreadId;
-  readonly acceptedAt: string;
-  readonly commandId: CommCommandId;
-}) =>
-  Effect.gen(function* () {
+const joinScenarioAgents = Effect.fn("j5.a2a.devDeliverySeed.joinScenarioAgents")(
+  function* (input: {
+    readonly projectId: LedgerProjectId;
+    readonly senderId: ParticipantId;
+    readonly senderThreadId: ThreadId;
+    readonly receiverId: ParticipantId;
+    readonly receiverThreadId: ThreadId;
+    readonly acceptedAt: string;
+    readonly commandId: CommCommandId;
+  }) {
     const ledger = yield* A2ALedger;
     yield* ledger.appendEvents({
       commandId: input.commandId,
-      squadronId: input.squadronId,
+      projectId: input.projectId,
       acceptedAt: input.acceptedAt,
       events: [
         {
@@ -469,22 +523,37 @@ const joinScenarioAgents = (input: {
         },
       ],
     });
-  });
+  },
+);
 
-export const runDevDeliverySeed = (requestedBaseDir: string) =>
-  Effect.gen(function* () {
+/**
+ * Seeds the delivery scenarios into `requestedBaseDir`.
+ *
+ * By default the seed makes its own project rooted at `process.cwd()`. Pass
+ * `project` to put the seed threads into a project that already exists in the
+ * home, so the home keeps one project per directory.
+ */
+export const runDevDeliverySeed = Effect.fn("j5.a2a.devDeliverySeed.runDevDeliverySeed")(
+  function* (
+    requestedBaseDir: string,
+    options: {
+      readonly project?: { readonly id: ProjectId; readonly workspaceRoot: string };
+    } = {},
+  ) {
     const baseDir = yield* validateIsolatedBaseDir(requestedBaseDir);
     const path = yield* Path.Path;
-    const crypto = yield* Crypto.Crypto;
-    const runId = `j5-a2a-seed-${yield* crypto.randomUUIDv4}`;
+    const crypto = yield* SecureRandom.SecureRandom;
+    const runId = `j5-a2a-seed-${yield* crypto.uuidV4().pipe(Effect.orDie)}`;
     const now = DateTime.formatIso(yield* DateTime.now);
-    const projectId = ProjectId.make(`project:${runId}`);
+    const projectId = options.project?.id ?? ProjectId.make(`project:${runId}`);
+    const workspaceRoot = options.project?.workspaceRoot ?? process.cwd();
     const senderThreadId = ThreadId.make(`thread:${runId}:sender`);
     const receiverThreadId = ThreadId.make(`thread:${runId}:receiver`);
     const senderId = ParticipantId.make(`agent:${runId}:sender`);
     const receiverId = ParticipantId.make(`agent:${runId}:receiver`);
-    const squadronId = SquadronId.make(`squadron:${runId}`);
-    const runtime = makeRuntimeLayer(databasePathFor(path, baseDir), baseDir);
+    // A thread's home is its project, so the ledger is keyed by the project's id.
+    const ledgerProjectId = LedgerProjectId.make(projectId);
+    const runtime = makeRuntimeLayer(databasePathFor(path, baseDir), baseDir, workspaceRoot);
 
     const seed = Effect.gen(function* () {
       const threads = yield* ThreadManagementService;
@@ -493,22 +562,44 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
       const deliveries = yield* A2ADeliveryWorker;
       const silence = yield* A2ASilenceDetector;
       const inbox = yield* A2AHumanInbox;
+      const machines = yield* MachineParticipantService;
       const outbox = yield* EffectOutboxV2;
 
       yield* assertTargetServerStopped({
-        squadronId: SquadronId.make(seededId(runId, "server-off-preflight")),
+        projectId: LedgerProjectId.make(seededId(runId, "server-off-preflight")),
         createdAt: now,
       });
-      // This is the production host-local registry bootstrap, deliberately outside
-      // a scenario transaction: it has no Squadron or thread state and must exist
-      // before the real HumanInbox send/answer scenario can address a person.
+      // This is the production host-local registry bootstrap: it has no project or thread
+      // state and must exist before the real HumanInbox send/answer scenario can address a person.
       const localOperatorPersonId = yield* ensureLocalOperatorHumanPerson(
         yield* SqlClient.SqlClient,
       );
 
-      yield* atomicScenario(
+      yield* scenario(
         "bootstrap",
         Effect.gen(function* () {
+          const sql = yield* SqlClient.SqlClient;
+          if (options.project === undefined) {
+            // The seed runs no project commands, so it writes the project row the ledger reads
+            // titles from and a machine registration requires.
+            yield* sql`
+              INSERT INTO projection_projects (
+                project_id, title, workspace_root, scripts_json, created_at, updated_at, deleted_at
+              ) VALUES (
+                ${projectId}, 'J5 disposable A2A seed', ${workspaceRoot}, '[]', ${now}, ${now}, NULL
+              )
+            `;
+          } else {
+            const existing = yield* sql<{ readonly workspaceRoot: string }>`
+              SELECT workspace_root AS "workspaceRoot" FROM projection_projects
+              WHERE project_id = ${projectId} AND deleted_at IS NULL
+            `;
+            if (existing[0]?.workspaceRoot !== workspaceRoot) {
+              return yield* Effect.die(
+                `Project ${projectId} is not registered at ${workspaceRoot} in this home.`,
+              );
+            }
+          }
           yield* threads.dispatch({
             type: "thread.create",
             commandId: CommandId.make(seededId(runId, "bootstrap:sender-thread")),
@@ -519,7 +610,7 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
             runtimeMode: "full-access",
             interactionMode: "default",
             branch: null,
-            worktreePath: process.cwd(),
+            worktreePath: workspaceRoot,
             createdBy: "system",
             creationSource: "server",
           });
@@ -533,15 +624,13 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
             runtimeMode: "full-access",
             interactionMode: "default",
             branch: null,
-            worktreePath: process.cwd(),
+            worktreePath: workspaceRoot,
             createdBy: "system",
             creationSource: "server",
           });
-          yield* ledger.createSquadron({
-            squadron: { id: squadronId, name: `J5 disposable A2A ${runId}`, createdAt: now },
-          });
+          yield* ledger.ensureProject({ projectId: ledgerProjectId, createdAt: now });
           yield* joinScenarioAgents({
-            squadronId,
+            projectId: ledgerProjectId,
             senderId,
             senderThreadId,
             receiverId,
@@ -552,7 +641,7 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
         }),
       );
 
-      const ta1 = yield* atomicScenario(
+      const ta1 = yield* scenario(
         "ta1-peer-exchange",
         Effect.gen(function* () {
           const result = yield* sender.send({
@@ -581,7 +670,7 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
         }),
       );
 
-      const ta2 = yield* atomicScenario(
+      const ta2 = yield* scenario(
         "ta2-human-answer",
         Effect.gen(function* () {
           const opened = yield* sender.send({
@@ -631,6 +720,10 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
           const reply = projected.messages.find((message) => message.id === replyDeliveryMessageId);
           const expectedEnvelope = formatClosedHumanEnvelope({
             senderId: localOperatorPersonId,
+            answeredAsk: {
+              exchangeId: opened.exchangeId,
+              intent: "Seed a real HumanInbox answer delivery.",
+            },
             message: replyText,
           });
           if (
@@ -659,7 +752,7 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
         }),
       );
 
-      const ta3 = yield* atomicScenario(
+      const ta3 = yield* scenario(
         "ta3-silence",
         Effect.gen(function* () {
           const source = yield* sender.send({
@@ -680,14 +773,14 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
             threadId: receiverThreadId,
             commandId: CommandId.make(seededId(runId, "ta3:cancel-provider-start")),
           });
-          const delivered = yield* deliveredEventFor(squadronId, source.messageId);
+          const delivered = yield* deliveredEventFor(ledgerProjectId, source.messageId);
           const notices = yield* silence.handleDeliveryEvent(delivered);
           const notice = notices[0];
           if (notice?.kind !== "silence.notice") {
             return yield* Effect.die("TA3 seed did not produce a silence notice.");
           }
           const noticeMessageId = LedgerMessageId.make(
-            `message:j5:a2a:silence:${encodeURIComponent(squadronId)}:${encodeURIComponent(source.exchangeId)}:${encodeURIComponent(source.messageId)}`,
+            `message:j5:a2a:silence:${encodeURIComponent(ledgerProjectId)}:${encodeURIComponent(source.exchangeId)}:${encodeURIComponent(source.messageId)}`,
           );
           yield* deliveries.drain;
           yield* interruptActiveSeedRun({
@@ -705,13 +798,46 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
         }),
       );
 
-      const rawFutureEnvelope = yield* atomicScenario(
+      const machineMessage = yield* scenario(
+        "machine-message",
+        Effect.gen(function* () {
+          const { participant } = yield* machines.register({
+            commandId: CommCommandId.make(seededId(runId, "machine:register")),
+            projectId: ledgerProjectId,
+            // Machine names are unique across projects, and every run makes a
+            // new project, so a reused home needs a per-run name.
+            name: `seed-watchdog-${runId.slice(-12)}`,
+            acceptedAt: now,
+          });
+          const result = yield* sender.sendAsMachine({
+            commandId: CommCommandId.make(seededId(runId, "machine:send")),
+            senderParticipantId: participant.participantId,
+            to: receiverId,
+            message: "Machine delivery seed: the nightly check passed. No reply is possible.",
+            acceptedAt: now,
+          });
+          yield* deliveries.drain;
+          yield* interruptActiveSeedRun({
+            projectId,
+            threadId: receiverThreadId,
+            commandId: CommandId.make(seededId(runId, "machine:cancel-provider-start")),
+          });
+          return {
+            senderParticipantId: participant.participantId,
+            ledgerMessageId: result.messageId,
+            deliveryMessageId: deliveryMessageId(result.messageId),
+            targetThreadId: receiverThreadId,
+          };
+        }),
+      );
+
+      const rawFutureEnvelope = yield* scenario(
         "raw-future-envelope",
         Effect.gen(function* () {
           const messageId = LedgerMessageId.make(seededId(runId, "raw:future-envelope"));
           yield* ledger.appendEvents({
             commandId: CommCommandId.make(seededId(runId, "raw:future-envelope")),
-            squadronId,
+            projectId: ledgerProjectId,
             acceptedAt: now,
             events: [
               {
@@ -723,8 +849,8 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
                 payload: {
                   messageId,
                   text: "[Cross-agent messaging system notice: template-v999]\n\nThis deliberately future/unrecognized envelope must render as raw text.\n\nNo current renderer template owns this body.",
-                  originSquadronId: squadronId,
-                  receiverSquadronId: squadronId,
+                  originProjectId: ledgerProjectId,
+                  receiverProjectId: ledgerProjectId,
                   exchangeRole: "none",
                   envelopeChannel: "silence_notice",
                 },
@@ -746,7 +872,7 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
         }),
       );
 
-      const normalNonA2AContrast = yield* atomicScenario(
+      const normalNonA2AContrast = yield* scenario(
         "normal-non-a2a-contrast",
         Effect.gen(function* () {
           const messageId = MessageId.make(`message:mcp:${runId}:thread-send:contrast`);
@@ -789,6 +915,7 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
         deliveryCommandId(ta2.replyLedgerMessageId),
         deliveryCommandId(ta3.sourceLedgerMessageId),
         deliveryCommandId(ta3.noticeLedgerMessageId),
+        deliveryCommandId(machineMessage.ledgerMessageId),
         deliveryCommandId(rawFutureEnvelope.ledgerMessageId),
         CommandId.make(seededId(runId, "normal:mcp-send")),
       ];
@@ -822,6 +949,7 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
           ta1PeerExchange: ta1,
           ta2HumanAnswer: ta2,
           ta3Silence: ta3,
+          machineMessage,
           rawFutureEnvelope,
           normalNonA2AContrast,
         },
@@ -846,63 +974,11 @@ export const runDevDeliverySeed = (requestedBaseDir: string) =>
       } satisfies DevDeliverySeedReceipt;
     }).pipe(Effect.provide(runtime));
     return yield* seed.pipe(
-      Effect.catch((cause) =>
-        isDevDeliverySeedServerOffError(cause) || !isDatabaseContention(cause)
-          ? Effect.fail(cause)
-          : Effect.fail(new DevDeliverySeedServerOffError({ cause })),
+      Effect.catchIf(
+        (cause) => !isDevDeliverySeedServerOffError(cause) && isDatabaseContention(cause),
+        (cause) => Effect.fail(new DevDeliverySeedServerOffError({ cause })),
       ),
     );
-  }).pipe(Effect.provide(NodeServices.layer));
-
-/** Test-only proof that nested production writes roll back as one durable scenario. */
-export const verifyDevDeliverySeedRollback = (requestedBaseDir: string) =>
-  Effect.gen(function* () {
-    const baseDir = yield* validateIsolatedBaseDir(requestedBaseDir);
-    const path = yield* Path.Path;
-    const crypto = yield* Crypto.Crypto;
-    const runId = `j5-a2a-rollback-${yield* crypto.randomUUIDv4}`;
-    const squadronId = SquadronId.make(`squadron:${runId}`);
-    const senderId = ParticipantId.make(`agent:${runId}:sender`);
-    const senderThreadId = ThreadId.make(`thread:${runId}:sender`);
-    const createdAt = DateTime.formatIso(yield* DateTime.now);
-    const runtime = makeRuntimeLayer(databasePathFor(path, baseDir), baseDir);
-    return yield* Effect.gen(function* () {
-      const ledger = yield* A2ALedger;
-      const failedScenario = yield* Effect.exit(
-        atomicScenario(
-          "controlled-mid-scenario-failure",
-          Effect.gen(function* () {
-            yield* ledger.createSquadron({
-              squadron: { id: squadronId, name: `J5 rollback ${runId}`, createdAt },
-            });
-            yield* ledger.appendEvents({
-              commandId: CommCommandId.make(seededId(runId, "membership")),
-              squadronId,
-              acceptedAt: createdAt,
-              events: [
-                {
-                  kind: "participant.joined",
-                  sender: null,
-                  receiver: senderId,
-                  exchangeId: null,
-                  correlationId: null,
-                  payload: {
-                    participant: { kind: "agent", id: senderId, threadId: senderThreadId },
-                  },
-                  createdAt,
-                },
-              ],
-            });
-            return yield* new DevDeliverySeedControlledRollbackError();
-          }),
-        ),
-      );
-      if (failedScenario._tag !== "Failure") {
-        return yield* Effect.die("Controlled rollback scenario unexpectedly committed.");
-      }
-      const squads = yield* ledger.listSquadrons();
-      if (squads.some((squadron) => squadron.id === squadronId)) {
-        return yield* Effect.die("Controlled rollback left durable A2A state behind.");
-      }
-    }).pipe(Effect.provide(runtime));
-  }).pipe(Effect.provide(NodeServices.layer));
+  },
+  Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+);

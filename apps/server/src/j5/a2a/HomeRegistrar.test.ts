@@ -5,29 +5,38 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import {
   A2AHomeRegistrar,
+  explainHomeStatements,
   participantIdForThread,
+  threadIdForParticipant,
   layer as homeRegistrarLayer,
 } from "./HomeRegistrar.ts";
 import { A2ALedger, layer as ledgerLayer } from "./LedgerService.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
-import { CommCommandId, ParticipantId, SquadronId } from "./contracts.ts";
+import { CommCommandId, ParticipantId, LedgerProjectId } from "./contracts.ts";
 
 const createdAt = "2026-08-19T15:30:00.000Z";
-const database = NodeSqliteClient.layerMemory();
+
+it("reads an agent's thread back out of its participant id, and nothing else's", () => {
+  const threadId = ThreadId.make("thread:j5:a2a:mcp:session:spawn:1");
+  assert.equal(threadIdForParticipant(participantIdForThread(threadId)), threadId);
+  for (const other of ["human:local", "machine:watchdog", "outside:session-1", "agent:j5:a2a:"])
+    assert.isNull(threadIdForParticipant(other));
+});
+const database = NodeSqliteClient.layer({ filename: ":memory:" });
 const ledger = ledgerLayer.pipe(Layer.provide(database));
 const registrar = homeRegistrarLayer.pipe(Layer.provide(ledger), Layer.provide(database));
 const testLayer = Layer.mergeAll(database, ledger, registrar);
 
-const createSquadron = Effect.fn("test.j5.a2a.createSquadron")(function* (squadronId: SquadronId) {
+const createProjectLedger = Effect.fn("test.j5.a2a.createProjectLedger")(function* (
+  projectId: LedgerProjectId,
+) {
   const ledgerService = yield* A2ALedger;
-  yield* ledgerService.createSquadron({
-    squadron: { id: squadronId, name: `Home ${squadronId}`, createdAt },
-  });
+  yield* ledgerService.ensureProject({ projectId: projectId, createdAt });
 });
 
 const countJoined = Effect.fn("test.j5.a2a.countJoined")(function* (threadId: ThreadId) {
@@ -41,34 +50,48 @@ const countJoined = Effect.fn("test.j5.a2a.countJoined")(function* (threadId: Th
   return rows[0]?.count ?? 0;
 });
 
+it.effect("finds a participant's home through indexes, never by reading the whole ledger", () =>
+  Effect.gen(function* () {
+    yield* runJ5A2AMigrations();
+    const plans = explainHomeStatements(yield* SqlClient.SqlClient);
+    const byThread = (yield* plans.byThread).map((row) => row.detail).join(" | ");
+    assert.include(byThread, "j5_a2a_comm_event_agent_home_thread_idx");
+    assert.include(byThread, "j5_a2a_comm_event_moved_thread_idx");
+    const byParticipant = (yield* plans.byParticipant).map((row) => row.detail).join(" | ");
+    assert.include(byParticipant, "j5_a2a_comm_event_joined_participant_idx");
+    assert.include(byParticipant, "j5_a2a_comm_event_moved_participant_idx");
+    for (const plan of [byThread, byParticipant]) assert.notMatch(plan, /\bSCAN\b/);
+  }).pipe(Effect.provide(testLayer)),
+);
+
 it.effect("registers one immutable home with the authoritative creation inputs", () =>
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
     const service = yield* A2AHomeRegistrar;
     const sql = yield* SqlClient.SqlClient;
-    const squadronId = SquadronId.make("squadron:registrar:initial");
+    const projectId = LedgerProjectId.make("project:registrar:initial");
     const threadId = ThreadId.make("thread:registrar:initial");
     const commandId = CommCommandId.make("command:registrar:initial");
-    yield* createSquadron(squadronId);
+    yield* createProjectLedger(projectId);
 
     const home = yield* service.registerAtCreation({
-      squadronId,
+      projectId,
       threadId,
       createdAt,
       commandId,
     });
 
     assert.deepStrictEqual(home, {
-      squadronId,
+      projectId,
       participantId: participantIdForThread(threadId),
     });
     const events = yield* sql<{
       readonly command_id: string;
       readonly created_at: string;
       readonly receiver: string;
-      readonly squadron_id: string;
+      readonly project_id: string;
     }>`
-      SELECT command_id, created_at, receiver, squadron_id
+      SELECT command_id, created_at, receiver, project_id
       FROM j5_a2a_comm_event
       WHERE kind = 'participant.joined'
     `;
@@ -77,7 +100,7 @@ it.effect("registers one immutable home with the authoritative creation inputs",
         command_id: commandId,
         created_at: createdAt,
         receiver: home.participantId,
-        squadron_id: squadronId,
+        project_id: projectId,
       },
     ]);
   }).pipe(Effect.provide(testLayer)),
@@ -87,15 +110,15 @@ it.effect("replays the exact creation key without appending a second join", () =
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
     const service = yield* A2AHomeRegistrar;
-    const squadronId = SquadronId.make("squadron:registrar:replay");
+    const projectId = LedgerProjectId.make("project:registrar:replay");
     const threadId = ThreadId.make("thread:registrar:replay");
     const input = {
-      squadronId,
+      projectId,
       threadId,
       createdAt,
       commandId: CommCommandId.make("command:registrar:replay"),
     };
-    yield* createSquadron(squadronId);
+    yield* createProjectLedger(projectId);
 
     const initial = yield* service.registerAtCreation(input);
     const replay = yield* service.registerAtCreation(input);
@@ -109,18 +132,18 @@ it.effect("returns the same durable home when a fresh command id repeats its cre
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
     const service = yield* A2AHomeRegistrar;
-    const squadronId = SquadronId.make("squadron:registrar:fresh-command-replay");
+    const projectId = LedgerProjectId.make("project:registrar:fresh-command-replay");
     const threadId = ThreadId.make("thread:registrar:fresh-command-replay");
-    yield* createSquadron(squadronId);
+    yield* createProjectLedger(projectId);
 
     const initial = yield* service.registerAtCreation({
-      squadronId,
+      projectId,
       threadId,
       createdAt,
       commandId: CommCommandId.make("command:registrar:fresh-command-replay:initial"),
     });
     const replay = yield* service.registerAtCreation({
-      squadronId,
+      projectId,
       threadId,
       createdAt,
       commandId: CommCommandId.make("command:registrar:fresh-command-replay:retry"),
@@ -138,13 +161,13 @@ it.effect(
       yield* runJ5A2AMigrations();
       const service = yield* A2AHomeRegistrar;
       const ledgerService = yield* A2ALedger;
-      const squadronId = SquadronId.make("squadron:registrar:historical-id");
+      const projectId = LedgerProjectId.make("project:registrar:historical-id");
       const threadId = ThreadId.make("thread:registrar:historical-id");
       const historicalId = ParticipantId.make("agent:j5:a2a:thread%3Aregistrar%3Ahistorical-id");
-      yield* createSquadron(squadronId);
+      yield* createProjectLedger(projectId);
       yield* ledgerService.append({
         commandId: CommCommandId.make("command:registrar:historical-id:original"),
-        squadronId,
+        projectId,
         acceptedAt: createdAt,
         event: {
           kind: "participant.joined",
@@ -158,53 +181,67 @@ it.effect(
       });
 
       const replay = yield* service.registerAtCreation({
-        squadronId,
+        projectId,
         threadId,
         createdAt,
         commandId: CommCommandId.make("command:registrar:historical-id:retry"),
       });
 
       assert.equal(participantIdForThread(threadId), "agent:j5:a2a:thread:registrar:historical-id");
-      assert.deepStrictEqual(replay, { squadronId, participantId: historicalId });
+      assert.deepStrictEqual(replay, { projectId, participantId: historicalId });
       assert.equal(yield* countJoined(threadId), 1);
     }).pipe(Effect.provide(testLayer)),
 );
 
-it.effect("rejects changed creation inputs when the command id replays", () =>
-  Effect.gen(function* () {
-    yield* runJ5A2AMigrations();
-    const service = yield* A2AHomeRegistrar;
-    const squadronId = SquadronId.make("squadron:registrar:command-conflict");
-    const threadId = ThreadId.make("thread:registrar:command-conflict");
-    const commandId = CommCommandId.make("command:registrar:command-conflict");
-    yield* createSquadron(squadronId);
-    yield* service.registerAtCreation({ squadronId, threadId, createdAt, commandId });
+it.effect(
+  "returns the existing home for a replay and rejects the command id on another thread",
+  () =>
+    Effect.gen(function* () {
+      yield* runJ5A2AMigrations();
+      const service = yield* A2AHomeRegistrar;
+      const projectId = LedgerProjectId.make("project:registrar:command-conflict");
+      const threadId = ThreadId.make("thread:registrar:command-conflict");
+      const otherThreadId = ThreadId.make("thread:registrar:command-conflict:other");
+      const commandId = CommCommandId.make("command:registrar:command-conflict");
+      yield* createProjectLedger(projectId);
+      const home = yield* service.registerAtCreation({
+        projectId,
+        threadId,
+        createdAt,
+        commandId,
+      });
 
-    const error = yield* Effect.flip(
-      service.registerAtCreation({
-        squadronId,
+      // A thread that already has a home keeps it: later creation inputs are not compared.
+      const replay = yield* service.registerAtCreation({
+        projectId,
         threadId,
         createdAt: "2026-08-19T15:30:01.000Z",
         commandId,
-      }),
-    );
+      });
+      assert.deepStrictEqual(replay, home);
+      assert.equal(yield* countJoined(threadId), 1);
 
-    assert.equal(error._tag, "A2AHomeCommandConflictError");
-    assert.equal(yield* countJoined(threadId), 1);
-  }).pipe(Effect.provide(testLayer)),
+      const error = yield* Effect.flip(
+        service.registerAtCreation({ projectId, threadId: otherThreadId, createdAt, commandId }),
+      );
+
+      assert.equal(error._tag, "A2AHomeCommandConflictError");
+      assert.equal(yield* countJoined(threadId), 1);
+      assert.equal(yield* countJoined(otherThreadId), 0);
+    }).pipe(Effect.provide(testLayer)),
 );
 
-it.effect("rejects a conflicting home without appending into the requested squadron", () =>
+it.effect("rejects a conflicting home without appending into the requested project", () =>
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
     const service = yield* A2AHomeRegistrar;
-    const existingSquadronId = SquadronId.make("squadron:registrar:existing");
-    const requestedSquadronId = SquadronId.make("squadron:registrar:requested");
+    const existingProjectId = LedgerProjectId.make("project:registrar:existing");
+    const requestedProjectId = LedgerProjectId.make("project:registrar:requested");
     const threadId = ThreadId.make("thread:registrar:conflict");
-    yield* createSquadron(existingSquadronId);
-    yield* createSquadron(requestedSquadronId);
+    yield* createProjectLedger(existingProjectId);
+    yield* createProjectLedger(requestedProjectId);
     yield* service.registerAtCreation({
-      squadronId: existingSquadronId,
+      projectId: existingProjectId,
       threadId,
       createdAt,
       commandId: CommCommandId.make("command:registrar:existing"),
@@ -212,7 +249,7 @@ it.effect("rejects a conflicting home without appending into the requested squad
 
     const error = yield* Effect.flip(
       service.registerAtCreation({
-        squadronId: requestedSquadronId,
+        projectId: requestedProjectId,
         threadId,
         createdAt,
         commandId: CommCommandId.make("command:registrar:requested"),
@@ -221,23 +258,23 @@ it.effect("rejects a conflicting home without appending into the requested squad
 
     assert.equal(error._tag, "A2AHomeConflictError");
     if (error._tag === "A2AHomeConflictError") {
-      assert.equal(error.existingSquadronId, existingSquadronId);
-      assert.equal(error.requestedSquadronId, requestedSquadronId);
+      assert.equal(error.existingProjectId, existingProjectId);
+      assert.equal(error.requestedProjectId, requestedProjectId);
     }
     assert.equal(yield* countJoined(threadId), 1);
   }).pipe(Effect.provide(testLayer)),
 );
 
-it.effect("rejects an existing home before validating a different requested squadron", () =>
+it.effect("rejects an existing home before validating a different requested project", () =>
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
     const service = yield* A2AHomeRegistrar;
-    const existingSquadronId = SquadronId.make("squadron:registrar:precheck-existing");
-    const requestedSquadronId = SquadronId.make("squadron:registrar:precheck-missing");
+    const existingProjectId = LedgerProjectId.make("project:registrar:precheck-existing");
+    const requestedProjectId = LedgerProjectId.make("project:registrar:precheck-missing");
     const threadId = ThreadId.make("thread:registrar:precheck-conflict");
-    yield* createSquadron(existingSquadronId);
+    yield* createProjectLedger(existingProjectId);
     yield* service.registerAtCreation({
-      squadronId: existingSquadronId,
+      projectId: existingProjectId,
       threadId,
       createdAt,
       commandId: CommCommandId.make("command:registrar:precheck-existing"),
@@ -245,7 +282,7 @@ it.effect("rejects an existing home before validating a different requested squa
 
     const error = yield* Effect.flip(
       service.registerAtCreation({
-        squadronId: requestedSquadronId,
+        projectId: requestedProjectId,
         threadId,
         createdAt,
         commandId: CommCommandId.make("command:registrar:precheck-requested"),
@@ -254,8 +291,8 @@ it.effect("rejects an existing home before validating a different requested squa
 
     assert.equal(error._tag, "A2AHomeConflictError");
     if (error._tag === "A2AHomeConflictError") {
-      assert.equal(error.existingSquadronId, existingSquadronId);
-      assert.equal(error.requestedSquadronId, requestedSquadronId);
+      assert.equal(error.existingProjectId, existingProjectId);
+      assert.equal(error.requestedProjectId, requestedProjectId);
     }
     assert.equal(yield* countJoined(threadId), 1);
   }).pipe(Effect.provide(testLayer)),
@@ -266,14 +303,14 @@ it.effect("distinguishes no home and exact replay does not reactivate ended memb
     yield* runJ5A2AMigrations();
     const service = yield* A2AHomeRegistrar;
     const ledgerService = yield* A2ALedger;
-    const squadronId = SquadronId.make("squadron:registrar:lookup");
+    const projectId = LedgerProjectId.make("project:registrar:lookup");
     const threadId = ThreadId.make("thread:registrar:lookup");
-    yield* createSquadron(squadronId);
+    yield* createProjectLedger(projectId);
 
     const missing = yield* Effect.flip(service.getHomeForThread(threadId));
     assert.equal(missing._tag, "A2AHomeNotFoundError");
     const registration = {
-      squadronId,
+      projectId,
       threadId,
       createdAt,
       commandId: CommCommandId.make("command:registrar:lookup"),
@@ -281,7 +318,7 @@ it.effect("distinguishes no home and exact replay does not reactivate ended memb
     const home = yield* service.registerAtCreation(registration);
     yield* ledgerService.append({
       commandId: CommCommandId.make("command:registrar:lookup:left"),
-      squadronId,
+      projectId,
       acceptedAt: createdAt,
       event: {
         kind: "participant.left",
@@ -298,14 +335,14 @@ it.effect("distinguishes no home and exact replay does not reactivate ended memb
 
     assert.deepStrictEqual(yield* service.getHomeForThread(threadId), home);
     assert.deepStrictEqual(yield* service.registerAtCreation(registration), home);
-    assert.deepStrictEqual(yield* ledgerService.listMembership(squadronId), []);
+    assert.deepStrictEqual(yield* ledgerService.listMembership(projectId), []);
   }).pipe(Effect.provide(testLayer)),
 );
 
 it.effect("recovers a conflicting home committed between precheck and append", () =>
   Effect.scoped(
     Effect.gen(function* () {
-      const databaseContext = yield* Layer.build(NodeSqliteClient.layerMemory());
+      const databaseContext = yield* Layer.build(NodeSqliteClient.layer({ filename: ":memory:" }));
       const sql = Context.get(databaseContext, SqlClient.SqlClient);
       const databaseLayer = Layer.succeed(SqlClient.SqlClient, sql);
       yield* runJ5A2AMigrations().pipe(Effect.provide(databaseLayer));
@@ -313,22 +350,18 @@ it.effect("recovers a conflicting home committed between precheck and append", (
       const realLedger = Context.get(ledgerContext, A2ALedger);
       const appendEntered = yield* Deferred.make<void>();
       const releaseAppend = yield* Deferred.make<void>();
-      const requestedSquadronId = SquadronId.make("squadron:registrar:race:requested");
-      const winningSquadronId = SquadronId.make("squadron:registrar:race:winner");
+      const requestedProjectId = LedgerProjectId.make("project:registrar:race:requested");
+      const winningProjectId = LedgerProjectId.make("project:registrar:race:winner");
       const threadId = ThreadId.make("thread:registrar:race");
-      yield* realLedger.createSquadron({
-        squadron: { id: requestedSquadronId, name: "Requested", createdAt },
-      });
-      yield* realLedger.createSquadron({
-        squadron: { id: winningSquadronId, name: "Winner", createdAt },
-      });
+      yield* realLedger.ensureProject({ projectId: requestedProjectId, createdAt });
+      yield* realLedger.ensureProject({ projectId: winningProjectId, createdAt });
 
       const blockedLedger = A2ALedger.of({
         ...realLedger,
-        append: (command) =>
+        appendEvents: (command) =>
           Deferred.succeed(appendEntered, undefined).pipe(
             Effect.andThen(Deferred.await(releaseAppend)),
-            Effect.andThen(realLedger.append(command)),
+            Effect.andThen(realLedger.appendEvents(command)),
           ),
       });
       const registrarContext = yield* Layer.build(
@@ -344,7 +377,7 @@ it.effect("recovers a conflicting home committed between precheck and append", (
       const blockedRegistrar = Context.get(registrarContext, A2AHomeRegistrar);
       const registrationFiber = yield* blockedRegistrar
         .registerAtCreation({
-          squadronId: requestedSquadronId,
+          projectId: requestedProjectId,
           threadId,
           createdAt,
           commandId: CommCommandId.make("command:registrar:race:requested"),
@@ -354,7 +387,7 @@ it.effect("recovers a conflicting home committed between precheck and append", (
       yield* Deferred.await(appendEntered);
       yield* realLedger.append({
         commandId: CommCommandId.make("command:registrar:race:winner"),
-        squadronId: winningSquadronId,
+        projectId: winningProjectId,
         acceptedAt: createdAt,
         event: {
           kind: "participant.joined",
@@ -379,8 +412,8 @@ it.effect("recovers a conflicting home committed between precheck and append", (
       if (outcome._tag === "Failure") {
         assert.equal(outcome.failure._tag, "A2AHomeConflictError");
         if (outcome.failure._tag === "A2AHomeConflictError") {
-          assert.equal(outcome.failure.existingSquadronId, winningSquadronId);
-          assert.equal(outcome.failure.requestedSquadronId, requestedSquadronId);
+          assert.equal(outcome.failure.existingProjectId, winningProjectId);
+          assert.equal(outcome.failure.requestedProjectId, requestedProjectId);
         }
       }
       const joined = yield* sql<{ readonly count: number }>`
@@ -398,15 +431,15 @@ it.effect("enforces one historical agent home at the database boundary", () =>
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
     const ledgerService = yield* A2ALedger;
-    const firstSquadronId = SquadronId.make("squadron:registrar:index:first");
-    const secondSquadronId = SquadronId.make("squadron:registrar:index:second");
+    const firstProjectId = LedgerProjectId.make("project:registrar:index:first");
+    const secondProjectId = LedgerProjectId.make("project:registrar:index:second");
     const threadId = ThreadId.make("thread:registrar:index");
-    yield* createSquadron(firstSquadronId);
-    yield* createSquadron(secondSquadronId);
+    yield* createProjectLedger(firstProjectId);
+    yield* createProjectLedger(secondProjectId);
 
     yield* ledgerService.append({
       commandId: CommCommandId.make("command:registrar:index:first"),
-      squadronId: firstSquadronId,
+      projectId: firstProjectId,
       acceptedAt: createdAt,
       event: {
         kind: "participant.joined",
@@ -427,7 +460,7 @@ it.effect("enforces one historical agent home at the database boundary", () =>
     const error = yield* Effect.flip(
       ledgerService.append({
         commandId: CommCommandId.make("command:registrar:index:second"),
-        squadronId: secondSquadronId,
+        projectId: secondProjectId,
         acceptedAt: createdAt,
         event: {
           kind: "participant.joined",
@@ -452,22 +485,25 @@ it.effect("enforces one historical agent home at the database boundary", () =>
   }).pipe(Effect.provide(testLayer)),
 );
 
-it.effect("requires the caller-selected squadron to exist before registration", () =>
+it.effect("opens the project ledger for a project's first participant", () =>
   Effect.gen(function* () {
     yield* runJ5A2AMigrations();
     const service = yield* A2AHomeRegistrar;
-    const threadId = ThreadId.make("thread:registrar:missing-squadron");
+    const sql = yield* SqlClient.SqlClient;
+    const projectId = LedgerProjectId.make("project:registrar:missing");
+    const threadId = ThreadId.make("thread:registrar:missing-project");
 
-    const error = yield* Effect.flip(
-      service.registerAtCreation({
-        squadronId: SquadronId.make("squadron:registrar:missing"),
-        threadId,
-        createdAt,
-        commandId: CommCommandId.make("command:registrar:missing-squadron"),
-      }),
-    );
+    const home = yield* service.registerAtCreation({
+      projectId,
+      threadId,
+      createdAt,
+      commandId: CommCommandId.make("command:registrar:missing-project"),
+    });
 
-    assert.equal(error._tag, "SquadronNotFoundError");
-    assert.equal(yield* countJoined(threadId), 0);
+    assert.deepStrictEqual(home, { projectId, participantId: participantIdForThread(threadId) });
+    assert.deepStrictEqual(yield* sql`SELECT project_id, created_at FROM j5_a2a_project_ledger`, [
+      { project_id: projectId, created_at: createdAt },
+    ]);
+    assert.equal(yield* countJoined(threadId), 1);
   }).pipe(Effect.provide(testLayer)),
 );

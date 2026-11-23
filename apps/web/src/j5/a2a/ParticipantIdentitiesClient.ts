@@ -1,28 +1,95 @@
+import type { ParticipantIdentities } from "@t3tools/client-runtime/j5/participant-identity";
 import type { EnvironmentId } from "@t3tools/contracts";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 
-import { readParticipantLabels } from "./archiveFlowClient";
+import { useConnectedEnvironmentIds } from "../../state/environments";
+import { readParticipantIdentities, readParticipantLabels } from "./archiveFlowClient";
 
-/** One identity read for every J5 surface; unknowns deliberately stay absent. */
-export function useParticipantLabels(
+const NO_IDENTITIES: ParticipantIdentities = { labels: new Map(), threads: new Map() };
+
+/**
+ * One identity read for every J5 surface; unknowns deliberately stay absent. A read sent before
+ * the environment connects fails, so the read waits for the connection and runs again on each
+ * reconnect: a page load, a secondary environment, or a server restart.
+ */
+export function useParticipantIdentities(
   environmentId: EnvironmentId,
   participantIds: ReadonlyArray<string>,
-) {
-  const key = Array.from(new Set(participantIds)).sort().join("\0");
-  const [result, setResult] = useState({ key: "", labels: new Map<string, string>() });
+): ParticipantIdentities {
+  const idsKey = Array.from(new Set(participantIds)).sort().join("\0");
+  // A result answers one environment's ids; another environment's never stands in for it.
+  const key = `${environmentId}\n${idsKey}`;
+  const connected = useConnectedEnvironmentIds().includes(environmentId);
+  const [result, setResult] = useState({ key: "", identities: NO_IDENTITIES });
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reads identities from the server for the ids on screen, and drops a stale answer when they change.
   useEffect(() => {
-    const ids = key === "" ? [] : key.split("\0");
-    if (ids.length === 0) {
-      setResult({ key, labels: new Map() });
-      return;
-    }
+    if (idsKey === "" || !connected) return;
+    const ids = idsKey.split("\0");
     let active = true;
-    void readParticipantLabels(environmentId, ids).then((next) => {
-      if (active) setResult({ key, labels: next });
+    void readParticipantIdentities(environmentId, ids).then((next) => {
+      if (active) setResult({ key, identities: next });
     });
     return () => {
       active = false;
     };
-  }, [environmentId, key]);
-  return useMemo(() => (result.key === key ? result.labels : new Map()), [key, result]);
+  }, [connected, environmentId, idsKey, key]);
+  return result.key === key ? result.identities : NO_IDENTITIES;
+}
+
+export function useParticipantLabels(
+  environmentId: EnvironmentId,
+  participantIds: ReadonlyArray<string>,
+) {
+  return useParticipantIdentities(environmentId, participantIds).labels;
+}
+
+export interface ScopedParticipantRef {
+  readonly environmentId: EnvironmentId;
+  readonly participantId: string;
+  readonly connected: boolean;
+}
+
+/**
+ * Labels for participants spread across environments, such as a merged inbox. Each environment
+ * resolves its own participants once it is connected, so saved items shown while offline pick up
+ * names on reconnect. Previous labels stay visible while a changed set reloads.
+ */
+export function useScopedParticipantLabels(refs: ReadonlyArray<ScopedParticipantRef>) {
+  const key = Array.from(
+    new Set(
+      refs
+        .filter((ref) => ref.connected)
+        .map((ref) => JSON.stringify([ref.environmentId, ref.participantId])),
+    ),
+  )
+    .sort()
+    .join("\n");
+  const [labels, setLabels] = useState<ReadonlyMap<EnvironmentId, ReadonlyMap<string, string>>>(
+    () => new Map(),
+  );
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- reads labels from each server for the participants on screen, and drops a stale answer when they change.
+  useEffect(() => {
+    const byEnvironment = new Map<EnvironmentId, Array<string>>();
+    for (const entry of key === "" ? [] : key.split("\n")) {
+      const [environmentId, participantId] = JSON.parse(entry) as [EnvironmentId, string];
+      byEnvironment.set(environmentId, [
+        ...(byEnvironment.get(environmentId) ?? []),
+        participantId,
+      ]);
+    }
+    let active = true;
+    void Promise.all(
+      Array.from(
+        byEnvironment,
+        async ([environmentId, ids]) =>
+          [environmentId, await readParticipantLabels(environmentId, ids)] as const,
+      ),
+    ).then((entries) => {
+      if (active) setLabels((current) => new Map([...current, ...entries]));
+    });
+    return () => {
+      active = false;
+    };
+  }, [key]);
+  return labels;
 }

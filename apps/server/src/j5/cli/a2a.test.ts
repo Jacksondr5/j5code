@@ -2,19 +2,22 @@
 import * as NodeHttp from "node:http";
 import type * as NodeNet from "node:net";
 
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
+import { peerCredentialRejectedReason, peerPollStoppedError } from "@t3tools/contracts/j5";
 import * as NetService from "@t3tools/shared/Net";
 import * as Clock from "effect/Clock";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { Command } from "effect/unstable/cli";
+import { Command } from "effect/cli";
 import { afterEach, beforeEach, vi } from "vite-plus/test";
 
-import { cli } from "../../bin.ts";
+import { cli } from "../../binCli.ts";
 import { A2A_EXIT_CODES } from "./a2a.ts";
 
-const CliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NetService.layer);
+const CliRuntimeLayer = Layer.mergeAll(NodeServices.layer, NodeCrypto.layer, NetService.layer);
 const runCli = (args: ReadonlyArray<string>) =>
   Command.runWith(cli, { version: "0.0.0" })(args).pipe(Effect.provide(CliRuntimeLayer));
 
@@ -95,6 +98,7 @@ afterEach(() => {
 });
 
 const lastJson = () => JSON.parse(logged.at(-1) ?? "null") as Record<string, unknown>;
+const lastText = () => logged.at(-1) ?? "";
 
 const sendArgs = (origin: string, extra: ReadonlyArray<string> = ["--token", "t"]) => [
   "a2a",
@@ -251,14 +255,49 @@ it.live(
     ),
 );
 
+it.live(
+  "rejects a token that cannot be a bearer header with exit 3, never the retryable exit 6",
+  () =>
+    withStub(
+      () => ({ status: 200, body: receipt }),
+      (stub) =>
+        Effect.gen(function* () {
+          const capturedHelp =
+            "DESCRIPTION\n  Issue a bearer token.\n\nUSAGE\n  j5 a2a token issue";
+          for (const verb of ["send", "whoami", "list"]) {
+            process.exitCode = undefined;
+            const args =
+              verb === "send"
+                ? sendArgs(stub.origin, ["--token", capturedHelp])
+                : ["a2a", verb, "--origin", stub.origin, "--token", capturedHelp, "--json"];
+            yield* runCli(args);
+            assert.equal(process.exitCode, A2A_EXIT_CODES.unauthenticated, verb);
+            assert.equal(lastJson().error, "token_malformed", verb);
+          }
+          assert.equal(stub.requests.length, 0);
+        }),
+    ),
+);
+
+it.live("treats an origin that is not an http(s) URL as a usage error", () =>
+  Effect.gen(function* () {
+    for (const origin of ["127.0.0.1:3773", "ftp://127.0.0.1"]) {
+      process.exitCode = undefined;
+      yield* runCli(["a2a", "whoami", "--origin", origin, "--token", "t", "--json"]);
+      assert.equal(process.exitCode, A2A_EXIT_CODES.usage, origin);
+      assert.equal(lastJson().error, "usage", origin);
+    }
+  }),
+);
+
 it.live("lists the roster as one line per participant and answers whoami", () => {
   const roster = {
     participants: [
       {
         participantId: "agent:j5:a2a:thread:sentinel",
         kind: "agent",
-        squadronId: "squadron:monitoring",
-        squadronName: "Monitoring",
+        projectId: "project:monitoring",
+        projectTitle: "Monitoring",
         displayName: "obs-sentinel",
         threadId: "thread:sentinel",
         archived: false,
@@ -275,8 +314,8 @@ it.live("lists the roster as one line per participant and answers whoami", () =>
       {
         participantId: "machine:watchdog",
         kind: "machine",
-        squadronId: "squadron:monitoring",
-        squadronName: "Monitoring",
+        projectId: "project:monitoring",
+        projectTitle: "Monitoring",
         displayName: "watchdog",
         threadId: null,
         archived: false,
@@ -289,8 +328,8 @@ it.live("lists the roster as one line per participant and answers whoami", () =>
   const whoami = {
     participant: {
       participantId: "machine:watchdog",
-      squadronId: "squadron:monitoring",
-      squadronName: "Monitoring",
+      projectId: "project:monitoring",
+      projectTitle: "Monitoring",
       name: "watchdog",
       createdAt: "2026-09-15T00:00:00.000Z",
     },
@@ -320,3 +359,303 @@ it.live("lists the roster as one line per participant and answers whoami", () =>
       }),
   );
 });
+
+/** A record as a server from before poll mode answers it, with none of the poll-mode fields. */
+const homePeer = {
+  environmentId: "environment-home",
+  label: "Home",
+  origin: "https://home.example:3773",
+  credentialExpiresAt: "2036-09-16T00:00:00.000Z",
+  inboundSession: "active",
+  createdAt: "2026-09-16T00:00:00.000Z",
+};
+/** The same record decoded here: a peer of an older server sends directly, nothing waits for it, and it holds no line. */
+const homePeerDecoded = {
+  ...homePeer,
+  linkMode: "push",
+  lastPolledAt: null,
+  lastError: null,
+  waitingCount: 0,
+  oldestWaitingAt: null,
+  lineAddress: null,
+};
+
+it.live("issues a peer credential, adds, lists, and removes a peer through the admin routes", () =>
+  withStub(
+    (request) =>
+      request.url === "/api/j5/a2a/peers/credentials"
+        ? {
+            status: 201,
+            body: {
+              environmentId: "environment-work",
+              credential: "home-will-present-this",
+              sessionId: "auth-session:peer",
+              subject: "peer:environment-home",
+              expiresAt: "2027-01-01T00:00:00.000Z",
+            },
+          }
+        : request.url === "/api/j5/a2a/peers" && request.method === "POST"
+          ? { status: 201, body: { peer: homePeer, created: true } }
+          : request.url === "/api/j5/a2a/peers"
+            ? { status: 200, body: { peers: [homePeer] } }
+            : request.url === "/api/j5/a2a/peers/remove"
+              ? { status: 200, body: { removed: true, revokedSessions: 1 } }
+              : { status: 404, body: { error: "not_found", message: "no" } },
+    (stub) =>
+      Effect.gen(function* () {
+        const common = ["--origin", stub.origin, "--token", "admin", "--json"];
+        yield* runCli([
+          "a2a",
+          "peer",
+          "credential",
+          "--for",
+          "environment-home",
+          "--label",
+          "Home",
+          ...common,
+        ]);
+        assert.equal(process.exitCode, undefined);
+        assert.deepStrictEqual(stub.requests[0]!.body, {
+          environmentId: "environment-home",
+          label: "Home",
+        });
+        assert.equal(stub.requests[0]!.authorization, "Bearer admin");
+        assert.equal(lastJson().credential, "home-will-present-this");
+        assert.equal(lastJson().environmentId, "environment-work");
+
+        yield* runCli([
+          "a2a",
+          "peer",
+          "add",
+          "--peer-origin",
+          "https://home.example:3773/",
+          "--credential",
+          "issued-by-home",
+          ...common,
+        ]);
+        assert.equal(process.exitCode, undefined);
+        assert.deepStrictEqual(
+          stub.requests[1]!.body,
+          { origin: "https://home.example:3773", credential: "issued-by-home" },
+          "the peer names itself at hello; no name is typed here",
+        );
+        assert.deepStrictEqual(lastJson().peer, homePeerDecoded);
+
+        yield* runCli(["a2a", "peer", "list", ...common]);
+        assert.equal(stub.requests[2]!.method, "GET");
+        assert.deepStrictEqual(lastJson().peers, [homePeerDecoded]);
+
+        yield* runCli(["a2a", "peer", "remove", "--environment", "environment-home", ...common]);
+        assert.deepStrictEqual(stub.requests[3]!.body, { environmentId: "environment-home" });
+        assert.deepStrictEqual(lastJson(), {
+          ok: true,
+          exit_code: 0,
+          removed: true,
+          revokedSessions: 1,
+        });
+      }),
+  ),
+);
+
+it.live(
+  "lists each peer's health as Settings does: online, offline since, or not polled yet",
+  () => {
+    const recent = DateTime.formatIso(DateTime.subtract(DateTime.nowUnsafe(), { seconds: 30 }));
+    const old = "2020-01-01T00:00:00.000Z";
+    const peers = [
+      {
+        ...homePeerDecoded,
+        environmentId: "environment-laptop",
+        label: "JM-LT-04213",
+        linkMode: "store",
+        origin: null,
+        credentialExpiresAt: null,
+        lastPolledAt: recent,
+        waitingCount: 2,
+        oldestWaitingAt: "2026-10-02T11:00:00.000Z",
+      },
+      {
+        ...homePeerDecoded,
+        environmentId: "environment-vm",
+        label: "Work VM",
+        linkMode: "poll",
+        origin: "https://vm.example:3773",
+        lastPolledAt: old,
+        lastError: "could not reach Work VM: ECONNREFUSED",
+      },
+      {
+        ...homePeerDecoded,
+        environmentId: "environment-mac",
+        label: "Home Mac",
+        linkMode: "store",
+        origin: null,
+        credentialExpiresAt: null,
+      },
+      homePeerDecoded,
+      {
+        ...homePeerDecoded,
+        environmentId: "environment-office",
+        label: "Office VM",
+        linkMode: "poll",
+        origin: "https://office.example:3773",
+        lastPolledAt: recent,
+        lastError: peerPollStoppedError(peerCredentialRejectedReason("Office VM")),
+      },
+    ];
+    return withStub(
+      () => ({ status: 200, body: { peers } }),
+      (stub) =>
+        Effect.gen(function* () {
+          yield* runCli(["a2a", "peer", "list", "--origin", stub.origin, "--token", "admin"]);
+          assert.equal(process.exitCode, undefined);
+          const [laptop, vm, mac, home, office] = lastText().split("\n");
+          assert.include(laptop, `online, last polled ${recent}`);
+          assert.include(laptop, "2 waiting since 2026-10-02T11:00:00.000Z");
+          assert.include(vm, `offline since ${old}`);
+          assert.include(vm, "last error: could not reach Work VM: ECONNREFUSED");
+          assert.include(mac, "has not polled yet");
+          assert.notInclude(home ?? "", "polled", "a peer sending directly has no poll health");
+          assert.include(office, `polling stopped: ${peerCredentialRejectedReason("Office VM")}`);
+          assert.notInclude(
+            office,
+            "Polling stopped:",
+            "the poller's mark is shown once, stripped",
+          );
+          assert.notInclude(
+            office,
+            "online",
+            "a stopped poller claims nothing about its last poll",
+          );
+          assert.notInclude(office, "last error", "the stop reason is said once");
+          assert.notInclude(vm, "inbound", "a poller holds no session from the server it polls");
+          assert.include(laptop, "inbound:");
+        }),
+    );
+  },
+);
+
+it.live(
+  "issues a store credential and adds a peer to poll, for a server that cannot be reached",
+  () =>
+    withStub(
+      (request) =>
+        request.url === "/api/j5/a2a/peers/credentials"
+          ? {
+              status: 201,
+              body: {
+                environmentId: "environment-vm",
+                credential: "laptop-will-present-this",
+                sessionId: "auth-session:peer",
+                subject: "peer:environment-laptop",
+                expiresAt: "2036-10-02T00:00:00.000Z",
+              },
+            }
+          : {
+              status: 201,
+              body: {
+                peer: { ...homePeerDecoded, label: "Work VM", linkMode: "poll" },
+                created: true,
+              },
+            },
+      (stub) =>
+        Effect.gen(function* () {
+          const common = ["--origin", stub.origin, "--token", "admin"];
+          yield* runCli([
+            "a2a",
+            "peer",
+            "credential",
+            "--for",
+            "environment-laptop",
+            "--store",
+            ...common,
+          ]);
+          assert.deepStrictEqual(stub.requests[0]!.body, {
+            environmentId: "environment-laptop",
+            store: true,
+          });
+          assert.include(lastText(), "--poll", "the next step says to poll");
+
+          yield* runCli([
+            "a2a",
+            "peer",
+            "add",
+            "--peer-origin",
+            "https://vm.example:3773",
+            "--credential",
+            "issued-by-vm",
+            "--poll",
+            ...common,
+          ]);
+          assert.equal(process.exitCode, undefined);
+          assert.deepStrictEqual(stub.requests[1]!.body, {
+            origin: "https://vm.example:3773",
+            credential: "issued-by-vm",
+            poll: true,
+          });
+          assert.include(lastText(), "This server polls it for its messages");
+        }),
+    ),
+);
+
+it.live("maps peer-add refusals: unreachable origin exits 6, a foreign credential exits 5", () =>
+  Effect.gen(function* () {
+    const cases: ReadonlyArray<{ readonly reply: StubReply; readonly exitCode: number }> = [
+      {
+        reply: { status: 502, body: { error: "peer_unreachable", message: "ECONNREFUSED" } },
+        exitCode: A2A_EXIT_CODES.unreachable,
+      },
+      {
+        reply: {
+          status: 409,
+          body: { error: "peer_credential_mismatch", message: "issued for another server" },
+        },
+        exitCode: A2A_EXIT_CODES.refused,
+      },
+      {
+        reply: { status: 400, body: { error: "peer_is_self", message: "that is you" } },
+        exitCode: A2A_EXIT_CODES.usage,
+      },
+    ];
+    for (const testCase of cases) {
+      yield* withStub(
+        () => testCase.reply,
+        (stub) =>
+          Effect.gen(function* () {
+            process.exitCode = undefined;
+            yield* runCli([
+              "a2a",
+              "peer",
+              "add",
+              "--peer-origin",
+              "https://home.example:3773",
+              "--credential",
+              "t",
+              "--origin",
+              stub.origin,
+              "--token",
+              "admin",
+              "--json",
+            ]);
+            assert.equal(process.exitCode, testCase.exitCode, String(testCase.reply.status));
+            assert.equal(lastJson().error, (testCase.reply.body as { error: string }).error);
+          }),
+      );
+    }
+
+    process.exitCode = undefined;
+    yield* runCli([
+      "a2a",
+      "peer",
+      "add",
+      "--peer-origin",
+      "https://x.example",
+      "--token",
+      "t",
+      "--origin",
+      "http://127.0.0.1:1",
+      "--json",
+    ]);
+    assert.equal(process.exitCode, A2A_EXIT_CODES.usage, "a missing credential is a usage error");
+    assert.equal(lastJson().error, "usage");
+  }),
+);

@@ -1,6 +1,9 @@
 #!/usr/bin/env node
+import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
+import { J5ThreadRegistrationLayer } from "./a2a/runtimeLayer.ts";
 // @effect-diagnostics nodeBuiltinImport:off globalTimersInEffect:off globalDateInEffect:off globalConsole:off - Standalone host-side benchmark owns an isolated process and temporary SQLite state.
 
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   CommandId,
@@ -12,9 +15,8 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
@@ -25,18 +27,23 @@ import { GitWorkflowService } from "../git/GitWorkflowService.ts";
 import { ProjectService } from "../project/ProjectService.ts";
 import { layer as mcpSessionRegistryTestLayer } from "../mcp/McpSessionRegistry.testkit.ts";
 import {
-  OrchestrationV2EventSinkLayerLive,
-  OrchestrationV2LayerLive,
+  layerEventSink as OrchestrationV2EventSinkLayerLive,
+  layer as UpstreamOrchestrationV2LayerLive,
 } from "../orchestration-v2/runtimeLayer.ts";
 import { CodexProviderCapabilitiesV2 } from "../orchestration-v2/Adapters/CodexAdapterV2.ts";
 import { OrchestratorV2, type OrchestratorV2Shape } from "../orchestration-v2/Orchestrator.ts";
-import type { ProviderAdapterV2Shape } from "../orchestration-v2/ProviderAdapter.ts";
-import { makeSqlitePersistenceLive } from "../persistence/Layers/Sqlite.ts";
-import { ProviderInstanceRegistry } from "../provider/Services/ProviderInstanceRegistry.ts";
-import type { ProviderInstance } from "../provider/ProviderDriver.ts";
+import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
+import { layerFromPath as makeSqlitePersistenceLive } from "../persistence/Sqlite.ts";
+import { SourceControlProviderRegistry } from "../sourceControl/SourceControlProviderRegistry.ts";
+import { ProviderInstanceRegistry } from "../provider/ProviderInstanceRegistry.ts";
+import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
 import { ServerSettingsService } from "../serverSettings.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
+
+const OrchestrationV2LayerLive = UpstreamOrchestrationV2LayerLive.pipe(
+  Layer.provideMerge(J5ThreadRegistrationLayer),
+);
 
 const FLEET_SIZE = 30;
 const BASELINE_SAMPLES = 30;
@@ -45,7 +52,7 @@ const INTERACTIVE_BATCH_MS = 1_000;
 
 const keepState = process.argv.includes("--keep-state");
 const stateRoot = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "j5-fleet-load-"));
-const dbPath = NodePath.join(stateRoot, "userdata", "state.sqlite");
+const dbPath = NodePath.join(stateRoot, "userdata", "statev2.sqlite");
 
 const modelSelection = {
   instanceId: ProviderInstanceId.make("codex"),
@@ -59,7 +66,7 @@ const orchestrationAdapter = {
   getCapabilities: () => Effect.succeed(CodexProviderCapabilitiesV2),
   planSelectionTransition: () => Effect.succeed({ type: "apply_on_next_turn" }),
   openSession: () => Effect.die("The J5 load harness does not start provider turns."),
-} as ProviderAdapterV2Shape;
+} as ProviderAdapter.ProviderAdapterV2["Service"];
 
 const providerInstance = {
   instanceId: modelSelection.instanceId,
@@ -70,14 +77,18 @@ const providerInstance = {
   },
   displayName: "J5 fake provider",
   enabled: true,
-  snapshot: {} as ProviderInstance["snapshot"],
+  // No supportedRuntimeModes: every runtime mode runs as stored.
+  snapshot: { getSnapshot: Effect.succeed({}) } as unknown as ProviderInstance["snapshot"],
   orchestrationAdapter,
   textGeneration: {} as ProviderInstance["textGeneration"],
 } satisfies ProviderInstance;
 
 const ProviderRegistryTestLayer = Layer.succeed(ProviderInstanceRegistry, {
-  getInstance: (instanceId) =>
-    Effect.succeed(instanceId === providerInstance.instanceId ? providerInstance : undefined),
+  getInstance: Effect.fn("ProviderInstanceRegistry.getInstance")(function (instanceId) {
+    return Effect.succeed(
+      instanceId === providerInstance.instanceId ? providerInstance : undefined,
+    );
+  }),
   listInstances: Effect.succeed([providerInstance]),
   listUnavailable: Effect.succeed([]),
   streamChanges: Stream.empty,
@@ -99,8 +110,14 @@ const SqlitePersistenceLive = makeSqlitePersistenceLive(dbPath).pipe(
 
 const HarnessLayer = Layer.merge(OrchestrationV2LayerLive, OrchestrationV2EventSinkLayerLive).pipe(
   Layer.provide(Layer.mock(GitWorkflowService)({})),
-  Layer.provide(Layer.mock(ProjectService)({ getById: () => Effect.succeed(Option.none()) })),
+  Layer.provide(
+    Layer.mock(SourceControlProviderRegistry)({
+      resolveLink: () => Effect.die("The J5 load harness does not resolve title links."),
+    }),
+  ),
+  Layer.provide(Layer.mock(ProjectService)({ getById: () => Effect.succeedNone })),
   Layer.provide(mcpSessionRegistryTestLayer),
+  Layer.provide(McpProviderSessions.layer),
   Layer.provideMerge(SqlitePersistenceLive),
   Layer.provide(CheckpointStoreTestLayer),
   Layer.provide(ServerConfigLayer),
@@ -132,19 +149,17 @@ function databaseBytes(): number {
   );
 }
 
-function timedDispatch(
+const timedDispatch = Effect.fn("j5.fleetLoad.timedDispatch")(function* (
   orchestrator: OrchestratorV2Shape,
   command: Parameters<OrchestratorV2Shape["dispatch"]>[0],
 ) {
-  return Effect.gen(function* () {
-    const startedAt = performance.now();
-    const events = yield* orchestrator.dispatch(command);
-    return {
-      elapsedMs: performance.now() - startedAt,
-      storedEvents: events.storedEvents.length,
-    };
-  });
-}
+  const startedAt = performance.now();
+  const events = yield* orchestrator.dispatch(command);
+  return {
+    elapsedMs: performance.now() - startedAt,
+    storedEvents: events.storedEvents.length,
+  };
+});
 
 const program = Effect.gen(function* () {
   const orchestrator = yield* OrchestratorV2;
@@ -310,7 +325,11 @@ const program = Effect.gen(function* () {
 });
 
 try {
-  const result = await Effect.runPromise(Effect.scoped(program.pipe(Effect.provide(HarnessLayer))));
+  const result = await Effect.runPromise(
+    Effect.scoped(
+      program.pipe(Effect.provide(HarnessLayer.pipe(Layer.provideMerge(NodeCrypto.layer)))),
+    ),
+  );
   console.log(JSON.stringify(result, null, 2));
 } finally {
   if (!keepState) NodeFS.rmSync(stateRoot, { recursive: true, force: true });
