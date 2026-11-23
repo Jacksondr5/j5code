@@ -15,7 +15,7 @@ import {
   git,
   candidate,
   command,
-  verificationEnvironment,
+  type VerificationRunner,
   publicationBaseBranch,
   resolveBase,
 } from "./GitWorkspace.ts";
@@ -211,33 +211,8 @@ async function fixture() {
   return { root, repository, baseCommit, remote };
 }
 
-it("uses the project Node runtime for checks despite an older Node first on PATH", async () => {
-  const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "j5-runtime-"));
-  try {
-    const oldBin = NodePath.join(root, "old-bin");
-    await NodeFSP.mkdir(oldBin);
-    await NodeFSP.writeFile(NodePath.join(oldBin, "node"), "#!/bin/sh\nexit 71\n", { mode: 0o755 });
-    const vp = NodePath.join(root, "vp");
-    await NodeFSP.writeFile(
-      vp,
-      `#!${process.execPath}\nconsole.log(JSON.stringify({node_path:process.execPath}));\n`,
-      { mode: 0o755 },
-    );
-    const inherited = { ...process.env, PATH: `${oldBin}${NodePath.delimiter}${process.env.PATH}` };
-    assert.equal((await command(root, "node", ["--version"], { env: inherited })).exitCode, 71);
-    const env = await verificationEnvironment(root, [{ executable: vp }], inherited);
-    const result = await command(root, "node", ["-p", "process.execPath"], { env });
-    assert.equal(result.exitCode, 0);
-    assert.equal(result.output.trim(), process.execPath);
-    assert.equal(inherited.PATH.startsWith(oldBin), true);
-    assert.strictEqual(
-      await verificationEnvironment(root, [{ executable: "git" }], inherited),
-      inherited,
-    );
-  } finally {
-    await NodeFSP.rm(root, { recursive: true, force: true });
-  }
-});
+const runFixtureCheck: VerificationRunner = (worktree, check, signal) =>
+  command(worktree, check.executable, check.args, { signal });
 
 it.effect(
   "runs the development sequence through failed-check repair, restart, both gates and one draft",
@@ -349,7 +324,7 @@ it.effect(
             return { status: "completed" as const, output };
           }),
       };
-      const adapters = { ...makeCodeAdapters(f.root, api), persona };
+      const adapters = { ...makeCodeAdapters(f.root, api, runFixtureCheck), persona };
       yield* makeWorker(store, [development], adapters, "worker-1").drain(1);
       let run = yield* store.get(initial.id);
       assert.equal(run.phase, "plan_approval");
@@ -550,7 +525,7 @@ it.effect(
             };
           }),
       };
-      const adapters = { ...makeCodeAdapters(f.root), persona };
+      const adapters = { ...makeCodeAdapters(f.root, undefined, runFixtureCheck), persona };
       yield* makeWorker(store, [development], adapters, "correction-worker").drain(1);
       let run = yield* store.get(initial.id);
       assert.equal(run.phase, "plan_approval");
@@ -1209,11 +1184,11 @@ it.effect("invalidates an approved correction when candidate files change", () =
     yield* Effect.promise(() =>
       NodeFSP.writeFile(NodePath.join(f.repository, "value.txt"), "changed"),
     );
-    const result = yield* makeCodeAdapters(f.root).validation!.reconcile(
-      diagnosisAction,
-      run,
-      () => Effect.void,
-    );
+    const result = yield* makeCodeAdapters(
+      f.root,
+      undefined,
+      runFixtureCheck,
+    ).validation!.reconcile(diagnosisAction, run, () => Effect.void);
     assert.equal(result.status, "blocked");
     if (result.status === "blocked") {
       assert.equal(result.failureCategory, "candidate_changed");

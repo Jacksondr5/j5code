@@ -1,11 +1,11 @@
 // @effect-diagnostics nodeBuiltinImport:off - native Git/process boundary also used by publication fixtures; Effect owns scheduling above this adapter.
 import * as NodeAsyncHooks from "node:async_hooks";
 import * as NodeChildProcess from "node:child_process";
+import * as NodeCrypto from "node:crypto";
 import * as NodeFSP from "node:fs/promises";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import * as NodeUtil from "node:util";
-import * as Schema from "effect/Schema";
 import { hash } from "../../workflow/Definition.ts";
 
 const commandSignal = new NodeAsyncHooks.AsyncLocalStorage<AbortSignal>();
@@ -15,7 +15,6 @@ export const withCommandSignal = <A>(
 ): Promise<A> => commandSignal.run(signal, operation);
 
 const exec = NodeUtil.promisify(NodeChildProcess.execFile);
-const decodeRuntime = Schema.decodeUnknownSync(Schema.Struct({ node_path: Schema.String }));
 export async function command(
   cwd: string,
   executable: string,
@@ -58,7 +57,12 @@ export async function git(
   args: readonly string[],
   env?: NodeJS.ProcessEnv,
 ): Promise<string> {
-  const result = await command(cwd, "git", args, env ? { env } : {});
+  const result = await command(
+    cwd,
+    "git",
+    ["-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false", ...args],
+    env ? { env } : {},
+  );
   if (result.exitCode !== 0) throw new Error(`git ${args[0]} failed: ${result.output}`);
   return result.output.trim();
 }
@@ -145,27 +149,80 @@ export async function receipt(root: string, id: string): Promise<unknown | undef
   if (!(await exists(path))) return undefined;
   return JSON.parse(await NodeFSP.readFile(path, "utf8"));
 }
-export async function verificationEnvironment(
+export type VerificationRunner = (
   worktree: string,
-  checks: readonly { executable: string }[],
-  env: NodeJS.ProcessEnv = process.env,
-): Promise<NodeJS.ProcessEnv> {
-  const vite = checks.find((check) => NodePath.basename(check.executable) === "vp");
-  if (!vite) return env;
-  // Vite+ built-ins such as lint can launch Node from PATH rather than the project runtime.
-  const runtime = await command(worktree, vite.executable, ["env", "current", "--json"], { env });
-  if (runtime.exitCode !== 0)
-    throw new Error(`Cannot resolve verification Node runtime: ${runtime.output}`);
-  const node = decodeRuntime(JSON.parse(runtime.output)).node_path;
-  if (!NodePath.isAbsolute(node) || !(await exists(node))) {
-    throw new Error(`Invalid verification Node runtime: ${node}`);
+  check: { readonly executable: string; readonly args: readonly string[] },
+  signal: AbortSignal,
+) => Promise<{ exitCode: number; output: string }>;
+
+async function prepareVerification(signal: AbortSignal): Promise<VerificationRunner> {
+  const image = process.env.J5_WORKFLOW_VALIDATION_IMAGE?.trim();
+  if (!image) {
+    throw new Error(
+      "Configure J5_WORKFLOW_VALIDATION_IMAGE with a local workflow validation image",
+    );
   }
-  const pathKey = Object.keys(env).find((key) => key.toUpperCase() === "PATH") ?? "PATH";
-  return {
-    ...env,
-    [pathKey]: [NodePath.dirname(node), env[pathKey]].filter(Boolean).join(NodePath.delimiter),
-  };
+  const result = await command(
+    NodeOS.tmpdir(),
+    "docker",
+    ["image", "inspect", "--format", "{{.Id}}", "--", image],
+    { signal },
+  );
+  const imageId = result.output.trim();
+  if (result.exitCode !== 0 || !/^sha256:[0-9a-f]{64}$/.test(imageId))
+    throw new Error("The configured workflow validation image is unavailable locally");
+  return isolatedVerification(imageId);
 }
+
+const isolatedVerification =
+  (imageId: string): VerificationRunner =>
+  async (worktree, check, signal) => {
+    // Only the candidate worktree is mounted. The image supplies the toolchain and its own PATH.
+    const name = `j5-workflow-check-${NodeCrypto.randomUUID()}`;
+    const source = `"source=${worktree.replaceAll('"', '""')}"`;
+    const uid = process.getuid?.();
+    const gid = process.getgid?.();
+    const user = uid && gid !== undefined ? `${uid}:${gid}` : "65534:65534";
+    const args = [
+      "run",
+      "--rm",
+      "--name",
+      name,
+      "--init",
+      "--pull=never",
+      "--network=none",
+      "--cap-drop=ALL",
+      "--security-opt=no-new-privileges",
+      "--read-only",
+      "--pids-limit=512",
+      "--tmpfs",
+      "/tmp",
+      "--env",
+      "HOME=/tmp",
+      "--user",
+      user,
+      "--workdir",
+      "/workspace",
+      "--mount",
+      `type=bind,${source},target=/workspace`,
+      "--entrypoint",
+      check.executable,
+      imageId,
+      ...check.args,
+    ];
+    try {
+      const result = await command(NodeOS.tmpdir(), "docker", args, { signal });
+      if ([125, 126, 127].includes(result.exitCode))
+        throw new Error("The workflow validation container could not start the check");
+      return result;
+    } finally {
+      if (signal.aborted) {
+        await command(NodeOS.tmpdir(), "docker", ["rm", "-f", name], {
+          signal: new AbortController().signal,
+        });
+      }
+    }
+  };
 
 export async function validation(
   worktree: string,
@@ -178,11 +235,12 @@ export async function validation(
   actionId: string,
   signal: AbortSignal,
   correctionApproval: { gateRevision: number; artifactHash: string; actor: string } | null = null,
+  runCheck?: VerificationRunner,
 ) {
   const saved = await receipt(root, actionId);
   if (saved !== undefined) return saved;
   if (!checks.length) throw new Error("Required verification commands are missing");
-  const env = await verificationEnvironment(worktree, checks);
+  const verify = runCheck ?? (await prepareVerification(signal));
   const before = await candidate(worktree, baseCommit);
   const marker = NodePath.join(root, "receipts", `${hash(actionId)}.started`);
   await NodeFSP.mkdir(NodePath.join(root, "receipts"), { recursive: true });
@@ -191,7 +249,7 @@ export async function validation(
   await NodeFSP.writeFile(marker, before.codeIdentity, { flag: "wx", flush: true });
   const results = [];
   for (const check of checks) {
-    const result = await command(worktree, check.executable, check.args, { signal, env });
+    const result = await verify(worktree, check, signal);
     results.push({ ...check, ...result });
   }
   const after = await candidate(worktree, baseCommit);

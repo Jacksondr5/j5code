@@ -227,6 +227,11 @@ All persona definitions, source discovery, snapshot storage, routing, authority 
 
 The existing runtime-panel polish is a separate stack concern and is not rewritten by the folder-library fix. The integration review reduced the launch hook to a J5 helper call and kept the runtime-policy seam generic. Broader upstream refactors remain outside this exception. Focused tests and scoped typechecks are the verification boundary; browser/simulator validation is a separate user-authorized step.
 
+A workflow owns preparation of its deferred initial run.
+`apps/server/src/orchestration-v2/ProviderRuntimeRecoveryService.ts` calls
+J5's `isWorkflowInitialMessage` before cancelling a preparing run so the workflow
+can replay the existing launch receipt after a restart.
+
 ### Fork-owned migration lane
 
 J5 schema migrations use a J5-owned migrator, tracking table, and migration-id space. Never register

@@ -15,6 +15,7 @@ import * as EffectOutbox from "./EffectOutbox.ts";
 import * as EventSink from "./EventSink.ts";
 import * as IdAllocator from "./IdAllocator.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
+import { isWorkflowInitialMessage } from "../j5/workflow/AgentAdapter.ts";
 import { ServerSettingsService } from "../serverSettings.ts";
 import { restartContinuationRun } from "./RestartContinuation.ts";
 
@@ -140,6 +141,12 @@ export const make = Effect.gen(function* () {
       const now = yield* DateTime.now;
       const runs = [] as Array<OrchestrationV2ThreadProjection["runs"][number]>;
       for (const run of nonterminalRuns(projection)) {
+        if (
+          run.status === "preparing" &&
+          run.userMessageId != null &&
+          isWorkflowInitialMessage(projection.thread.id, run.userMessageId)
+        )
+          continue;
         if (run.status === "waiting") {
           const checkpointEffects = yield* outbox
             .listByCommandId(CommandId.make(`command:effect:checkpoint.capture:${run.id}`))

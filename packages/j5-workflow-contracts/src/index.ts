@@ -182,15 +182,17 @@ export const StartRequest = Schema.Struct({
   definitionId: Schema.String,
   squadronId: Schema.String,
   baseRef: Schema.String,
-  request: Schema.String.check(Schema.isMinLength(1)),
-  evidence: Schema.Array(Schema.String),
+  request: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(64_000)),
+  evidence: Schema.Array(Schema.String.check(Schema.isMaxLength(8_000))).check(
+    Schema.isMaxLength(32),
+  ),
 });
 export const GateRequest = Schema.Struct({
   ...Mutation.fields,
   gateRevision: Schema.Number,
   artifactHash: Schema.String,
   decision: Decision.fields.decision,
-  feedback: Schema.String,
+  feedback: Schema.String.check(Schema.isMaxLength(20_000)),
 });
 export const MetadataRequest = Schema.Struct({
   ...Mutation.fields,

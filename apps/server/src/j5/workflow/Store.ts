@@ -107,15 +107,20 @@ const requestTitle = (inputs: unknown): string => {
   }
   return "Development workflow";
 };
-const storedAction = (action: Action): StoredAction => {
-  const { input, ...metadata } = action;
-  return { ...metadata, inputHash: hash(input) };
+const storedAction = (action: Action, inputHash: string): StoredAction => {
+  const { input: _input, ...metadata } = action;
+  return { ...metadata, inputHash };
 };
 const storedArtifact = (artifact: Artifact): StoredArtifact => {
   const { content: _content, ...metadata } = artifact;
   return metadata;
 };
-const snapshotOf = (run: Run): RunSnapshot => ({
+const snapshotOf = (
+  run: Run,
+  actions = run.actions.map((action) => storedAction(action, hash(action.input))),
+  inputsHash = hash(run.inputs),
+  executionHash = hash(run.execution),
+): RunSnapshot => ({
   id: run.id,
   definitionId: run.definitionId,
   definitionVersion: run.definitionVersion,
@@ -124,8 +129,8 @@ const snapshotOf = (run: Run): RunSnapshot => ({
   projectId: run.projectId,
   repository: run.repository,
   baseCommit: run.baseCommit,
-  inputsHash: hash(run.inputs),
-  executionHash: hash(run.execution),
+  inputsHash,
+  executionHash,
   phase: run.phase,
   revision: run.revision,
   status: run.status,
@@ -136,7 +141,7 @@ const snapshotOf = (run: Run): RunSnapshot => ({
   ...(run.restart === undefined ? {} : { restart: run.restart }),
   ...(run.definitionUpgrades === undefined ? {} : { definitionUpgrades: run.definitionUpgrades }),
   gate: run.gate,
-  actions: run.actions.map(storedAction),
+  actions,
   artifacts: run.artifacts.map(storedArtifact),
   approvals: run.approvals,
   visits: run.visits,
@@ -192,13 +197,16 @@ export const makeStore = Effect.gen(function* () {
     return yield* decodeRun(hydrated);
   });
 
-  const get = Effect.fn("WorkflowStore.get")(function* (id: string) {
+  const getSnapshot = Effect.fn("WorkflowStore.getSnapshot")(function* (id: string) {
     const rows = yield* sql<{ payload: string; readVersion: number }>`SELECT payload,
       read_version AS readVersion FROM j5_workflow_runs WHERE id=${id}`;
     if (!rows[0])
       return yield* new WorkflowError({ code: "not_found", detail: `Unknown workflow ${id}` });
-    const run = yield* hydrate(parseSnapshot(rows[0].payload), true);
-    return { ...run, readVersion: rows[0].readVersion };
+    return { ...parseSnapshot(rows[0].payload), readVersion: rows[0].readVersion };
+  });
+
+  const get = Effect.fn("WorkflowStore.get")(function* (id: string) {
+    return yield* hydrate(yield* getSnapshot(id), true);
   });
 
   const detail = Effect.fn("WorkflowStore.detail")(function* (id: string) {
@@ -297,8 +305,7 @@ export const makeStore = Effect.gen(function* () {
     });
   });
 
-  const putValue = (value: unknown) => {
-    const valueHash = hash(value);
+  const putValue = (value: unknown, valueHash: string) => {
     return sql`INSERT OR IGNORE INTO j5_workflow_values(hash, payload)
       VALUES (${valueHash}, ${canonical(value)})`;
   };
@@ -349,17 +356,42 @@ export const makeStore = Effect.gen(function* () {
     commandId: string,
     event: Event,
     now: number,
+    previous: Run,
+    previousSnapshot: RunSnapshot | undefined,
   ) {
-    for (const value of [
-      run.inputs,
-      run.execution,
-      ...run.actions.map((action) => action.input),
-      ...run.artifacts.map((item) => item.content),
-    ]) {
-      yield* putValue(value);
-    }
+    const previousActions = new Map(previous.actions.map((action) => [action.id, action]));
+    const previousActionHashes = new Map(
+      previousSnapshot?.actions.map((action) => [action.id, action.inputHash]),
+    );
+    const previousArtifacts = new Set(previousSnapshot?.artifacts.map((artifact) => artifact.id));
+    const inputsHash =
+      previousSnapshot && previous.inputs === run.inputs
+        ? previousSnapshot.inputsHash
+        : hash(run.inputs);
+    const executionHash =
+      previousSnapshot && previous.execution === run.execution
+        ? previousSnapshot.executionHash
+        : hash(run.execution);
+    if (inputsHash !== previousSnapshot?.inputsHash) yield* putValue(run.inputs, inputsHash);
+    if (executionHash !== previousSnapshot?.executionHash)
+      yield* putValue(run.execution, executionHash);
+
+    const actions: StoredAction[] = [];
     for (const action of run.actions) {
-      const inputHash = hash(action.input);
+      const prior = previousActions.get(action.id);
+      const priorHash = previousActionHashes.get(action.id);
+      const inputHash =
+        priorHash !== undefined && prior?.input === action.input ? priorHash : hash(action.input);
+      actions.push(storedAction(action, inputHash));
+      if (
+        prior !== undefined &&
+        priorHash === inputHash &&
+        prior.status === action.status &&
+        prior.resultArtifactId === action.resultArtifactId &&
+        prior.externalIdentity === action.externalIdentity
+      )
+        continue;
+      if (inputHash !== priorHash) yield* putValue(action.input, inputHash);
       yield* sql`INSERT INTO j5_workflow_actions(
           id, run_id, phase, revision, task, attempt, kind, adapter, status,
           deadline, input_hash, result_artifact_id, identity
@@ -370,13 +402,17 @@ export const makeStore = Effect.gen(function* () {
           ${action.externalIdentity ?? null}
         ) ON CONFLICT(id) DO UPDATE SET
           status=excluded.status,
+          input_hash=excluded.input_hash,
           result_artifact_id=excluded.result_artifact_id,
           identity=coalesce(j5_workflow_actions.identity, excluded.identity)
         WHERE j5_workflow_actions.status IS NOT excluded.status
+          OR j5_workflow_actions.input_hash IS NOT excluded.input_hash
           OR j5_workflow_actions.result_artifact_id IS NOT excluded.result_artifact_id
           OR (j5_workflow_actions.identity IS NULL AND excluded.identity IS NOT NULL)`;
     }
     for (const item of run.artifacts) {
+      if (previousArtifacts.has(item.id)) continue;
+      yield* putValue(item.content, item.hash);
       yield* sql`INSERT OR IGNORE INTO j5_workflow_artifacts(
           id, run_id, hash, producer, phase, revision, attempt, governs_json
         ) VALUES (
@@ -384,11 +420,9 @@ export const makeStore = Effect.gen(function* () {
           ${item.revision}, ${item.attempt}, ${canonical(item.governs)}
         )`;
     }
-    const priorVersions = yield* sql<{ readVersion: number }>`SELECT read_version AS readVersion
-      FROM j5_workflow_runs WHERE id=${run.id}`;
-    const readVersion = (priorVersions[0]?.readVersion ?? 0) + 1;
+    const readVersion = (previousSnapshot?.readVersion ?? 0) + 1;
     const responseRun = { ...run, readVersion };
-    const snapshot = snapshotOf(responseRun);
+    const snapshot = snapshotOf(responseRun, actions, inputsHash, executionHash);
     const payload = canonical(snapshot);
     yield* sql`INSERT INTO j5_workflow_runs(
         id, definition_id, definition_version, definition_hash, squadron_id,
@@ -455,13 +489,15 @@ export const makeStore = Effect.gen(function* () {
             });
         }
         let previous: Run;
+        let previousSnapshot: RunSnapshot | undefined;
         if (input.initial) {
           const exists = yield* sql`SELECT id FROM j5_workflow_runs WHERE id=${input.runId}`;
           if (exists.length)
             return yield* new WorkflowError({ code: "conflict", detail: "Run already exists" });
           previous = input.initial;
         } else {
-          previous = yield* get(input.runId);
+          previousSnapshot = yield* getSnapshot(input.runId);
+          previous = yield* hydrate(previousSnapshot, true);
         }
         if (previous.revision !== input.expectedRevision)
           return yield* new WorkflowError({ code: "conflict", detail: "Run revision changed" });
@@ -479,8 +515,29 @@ export const makeStore = Effect.gen(function* () {
             : { ...next, updatedAt: DateTime.formatIso(DateTime.makeUnsafe(input.now)) };
         const saved =
           next === previous
-            ? { payload: canonical(snapshotOf(previous)), run: previous }
-            : yield* save(persisted, input.commandId, input.event, input.now);
+            ? {
+                payload: canonical(
+                  previousSnapshot
+                    ? snapshotOf(
+                        previous,
+                        previous.actions.map((action, index) =>
+                          storedAction(action, previousSnapshot.actions[index]!.inputHash),
+                        ),
+                        previousSnapshot.inputsHash,
+                        previousSnapshot.executionHash,
+                      )
+                    : snapshotOf(previous),
+                ),
+                run: previous,
+              }
+            : yield* save(
+                persisted,
+                input.commandId,
+                input.event,
+                input.now,
+                previous,
+                previousSnapshot,
+              );
         yield* sql`INSERT INTO j5_workflow_receipts(command_id, input_hash, run_id, payload)
           VALUES (${input.commandId}, ${inputHash}, ${next.id}, ${saved.payload})`;
         return saved.run;

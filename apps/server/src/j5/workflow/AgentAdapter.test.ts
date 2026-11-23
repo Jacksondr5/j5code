@@ -1,5 +1,7 @@
 import { testExecution } from "./testFixtures.ts";
 import { assert, it } from "@effect/vitest";
+import { CommandId, ThreadId, type OrchestrationV2ThreadProjection } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -95,6 +97,7 @@ it.effect("blocks legacy workflows before launch and cancels an unlaunched actio
 
 it.effect("reuses the exact saved assignment for retries and output corrections", () => {
   const captured: ThreadLaunchInput[] = [];
+  let replayPreparing = false;
   const assignment = testExecution.personas.scout;
   const input = {
     personaId: "scout",
@@ -153,6 +156,7 @@ it.effect("reuses the exact saved assignment for retries and output corrections"
       },
     ]) {
       yield* adapter.reconcile(current, run, () => Effect.void).pipe(Effect.flip);
+      replayPreparing = captured.length === 1;
     }
     assert.lengthOf(captured, 3);
     for (const launch of captured) {
@@ -164,8 +168,28 @@ it.effect("reuses the exact saved assignment for retries and output corrections"
   }).pipe(
     Effect.provide(
       Layer.mergeAll(
-        Layer.mock(ThreadManagementService)({}),
-        Layer.mock(CommandReceiptStoreV2)({ getByCommandId: () => Effect.succeed(Option.none()) }),
+        Layer.mock(ThreadManagementService)({
+          getThreadProjection: () =>
+            Effect.succeed({
+              runs: [{ userMessageId: "action:message", status: "preparing" }],
+            } as unknown as OrchestrationV2ThreadProjection),
+        }),
+        Layer.mock(CommandReceiptStoreV2)({
+          getByCommandId: (commandId) =>
+            Effect.succeed(
+              replayPreparing
+                ? Option.some({
+                    commandId: CommandId.make(commandId),
+                    threadId: ThreadId.make("workflow-recovery"),
+                    commandType: "message.dispatch",
+                    acceptedAt: DateTime.makeUnsafe(0),
+                    resultSequence: 1,
+                    status: "accepted",
+                    error: null,
+                  })
+                : Option.none(),
+            ),
+        }),
         Layer.mock(ThreadLaunchService)({
           launch: (launch) => {
             captured.push(launch);

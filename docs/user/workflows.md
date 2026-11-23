@@ -28,8 +28,12 @@ reject the plan when no further plan-review cycle is available, the workflow rea
 reviewer dissent. Requesting further changes after the revision budget is exhausted
 requires a new run.
 
-Builder implements the approved plan; the server executes its exact checks, then Critic
-and Sentry review the validated candidate. Failed checks and blocking implementation
+Builder implements the approved plan. The server runs the approved checks in a container
+with the candidate worktree mounted and networking disabled. Set
+`J5_WORKFLOW_VALIDATION_IMAGE` on the server to a trusted local Docker image that contains
+the project's check tools and offline dependencies. The server uses an already loaded image
+and does not pass its credentials or environment into the container. Critic and Sentry then
+review the validated candidate. Failed checks and blocking implementation
 reviews require repairs. There are at most two plan revisions and two implementation
 repair rounds. Implementation-repair exhaustion continues to block the run.
 

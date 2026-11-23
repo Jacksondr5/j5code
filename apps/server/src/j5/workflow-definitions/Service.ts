@@ -278,6 +278,12 @@ export const makeService = Effect.gen(function* () {
       }
     >,
   ) {
+    const receiptInput =
+      event.type === "restart_phase" ? { runId: id, expectedRevision, event } : undefined;
+    if (receiptInput !== undefined) {
+      const replay = yield* store.receipt(commandId, receiptInput);
+      if (replay) return yield* present(replay);
+    }
     const run = yield* store.get(id);
     if (event.type !== "cancel" && !hasWorkflowSnapshots(run.execution))
       return yield* new WorkflowError({ code: "invalid", detail: legacyWorkflowMessage });
@@ -374,6 +380,7 @@ export const makeService = Effect.gen(function* () {
         commandId,
         runId: id,
         expectedRevision,
+        ...(receiptInput === undefined ? {} : { receiptInput }),
         event:
           commandEvent.type === "retry" && run.recovery === "restore_definition"
             ? { type: "recover" }

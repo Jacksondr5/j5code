@@ -102,15 +102,7 @@ export async function commit(worktree: string, baseCommit: string, metadata: Met
   if ((await git(worktree, ["write-tree"])) !== metadata.tree)
     throw new Error("Staged tree does not match approval");
   await verifyCandidate(worktree, baseCommit, metadata);
-  await git(worktree, [
-    "-c",
-    "core.hooksPath=/dev/null",
-    "-c",
-    "commit.gpgsign=false",
-    "commit",
-    "-m",
-    metadata.commitMessage,
-  ]);
+  await git(worktree, ["-c", "commit.gpgsign=false", "commit", "-m", metadata.commitMessage]);
   const result = await git(worktree, ["rev-parse", "HEAD"]);
   if ((await git(worktree, ["rev-parse", "HEAD^{tree}"])) !== metadata.tree)
     throw new Error("Committed tree changed");
@@ -120,7 +112,11 @@ export async function push(worktree: string, baseCommit: string, metadata: Metad
   await verifyCandidate(worktree, baseCommit, metadata);
   if ((await git(worktree, ["rev-parse", "HEAD"])) !== sha)
     throw new Error("Approved commit changed");
-  if ((await git(worktree, ["remote", "get-url", "origin"])) !== metadata.repository)
+  if (
+    (await git(worktree, ["remote", "get-url", "--all", "origin"])) !== metadata.repository ||
+    (await git(worktree, ["remote", "get-url", "--push", "--all", "origin"])) !==
+      metadata.repository
+  )
     throw new Error("Approved remote changed");
   const ref = `refs/heads/${metadata.headBranch}`;
   let remote = (await git(worktree, ["ls-remote", "origin", ref])).split(/\s/)[0];

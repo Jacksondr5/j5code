@@ -26,6 +26,7 @@ const decodeWorkspace = Schema.decodeUnknownSync(Handoff.Workspace);
 export function makeCodeAdapters(
   root: string,
   github = Publication.github,
+  runCheck?: Workspace.VerificationRunner,
 ): Record<string, Adapter> {
   const running = new Map<string, AbortController>();
   const getWorkspace = (run: Run) => decodeWorkspace(latest(run, "workspace").content);
@@ -194,6 +195,7 @@ export function makeCodeAdapters(
                         actor: approval.actor,
                       }
                     : null,
+                  runCheck,
                 ),
               ),
             };

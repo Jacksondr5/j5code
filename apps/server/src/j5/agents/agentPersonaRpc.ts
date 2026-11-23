@@ -38,7 +38,8 @@ type Input<K extends keyof typeof J5AgentPersonaRpcSchemas> =
   (typeof J5AgentPersonaRpcSchemas)[K]["input"]["Type"];
 
 const isImportConflict = Schema.is(AgentPersonaImportConflictError);
-const catalogError = (cause: unknown) => new AgentPersonaCatalogError({ message: String(cause) });
+const catalogError = (_cause: unknown) =>
+  new AgentPersonaCatalogError({ message: "The persona library request failed." });
 const TRACE = { "rpc.aggregate": "j5AgentPersonas" } as const;
 
 /** Handlers for `J5AgentPersonaRpcGroup`; spread once into the upstream handler object. */

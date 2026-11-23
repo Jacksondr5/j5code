@@ -9,6 +9,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Stream from "effect/Stream";
+import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { stringify } from "yaml";
 import { ServerConfig, layerTest } from "../../config.ts";
 import { ProjectService } from "../../project/ProjectService.ts";
@@ -100,6 +101,34 @@ it.effect(
       assert.deepEqual((yield* store.get(first.id)).execution, accepted.execution);
       const failed = yield* restarted.start({ ...input, commandId: "new" }).pipe(Effect.flip);
       assert.include(failed.detail, "Invalid persona file");
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`UPDATE j5_workflow_runs SET
+        payload = json_set(payload, '$.phase', 'plan_review', '$.status', 'blocked',
+          '$.failureCategory', 'action_deadline_expired', '$.visits.plan_review', 1)
+        WHERE id = ${first.id}`;
+      const restart = {
+        type: "restart_phase",
+        targetDefinitionHash: accepted.definitionHash,
+        actor: "owner",
+        compatibleDefinitionUpgrade: false,
+      } as const;
+      const restartedPhase = yield* restarted.mutate(
+        first.id,
+        "restart",
+        accepted.revision,
+        restart,
+      );
+      assert.equal(restartedPhase.status, "restarting");
+      assert.deepEqual(
+        yield* restarted.mutate(first.id, "restart", accepted.revision, restart),
+        restartedPhase,
+      );
+      assert.equal(
+        (yield* restarted
+          .mutate(first.id, "restart", accepted.revision, { ...restart, actor: "other-owner" })
+          .pipe(Effect.flip)).code,
+        "conflict",
+      );
       const legacy = {
         ...accepted,
         id: "legacy",

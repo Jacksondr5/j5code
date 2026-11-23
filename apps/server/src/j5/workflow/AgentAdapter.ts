@@ -39,6 +39,12 @@ const decodeCorrection = Schema.decodeUnknownEffect(
 const decodeJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json));
 const failure = (error: unknown) => new WorkflowError({ code: "invalid", detail: String(error) });
 const threadIdFor = (id: string) => ThreadId.make(`thread:wf:${hash(id)}`);
+export function isWorkflowInitialMessage(threadId: ThreadId, messageId: string): boolean {
+  if (!threadId.startsWith("thread:wf:")) return false;
+  const actionId = /^(wf:[a-f0-9]{64}):message$/.exec(messageId)?.[1];
+  return actionId !== undefined && threadIdFor(actionId) === threadId;
+}
+
 export const findActionRun = <T extends { readonly userMessageId: string }>(
   runs: readonly T[],
   actionId: string,
@@ -68,7 +74,9 @@ export const makeAgentAdapter = Effect.gen(function* () {
         let projection = Option.isSome(receipt)
           ? yield* threads.getThreadProjection(threadId)
           : null;
-        if (!projection?.runs.some((item) => item.userMessageId === messageId)) {
+        const existingRun =
+          projection === null ? undefined : findActionRun(projection.runs, action.id);
+        if (existingRun === undefined || existingRun.status === "preparing") {
           const assignment = readWorkflowExecution(run.execution).personas[
             input.personaId as keyof typeof workflowAuthorities
           ];

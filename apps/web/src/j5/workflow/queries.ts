@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import type { Artifact, ArtifactMetadata, RunDetail } from "@j5/workflow-contracts";
+import type { ArtifactMetadata, RunDetail } from "@j5/workflow-contracts";
 import { WorkflowEntries } from "@j5/workflow-contracts/sidebar";
 import type { EnvironmentId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -33,7 +33,17 @@ export interface WorkflowQueryTarget<Input> {
 const keyOf = <Input>(target: WorkflowQueryTarget<Input>) => JSON.stringify(target);
 const listCache = new Map<string, typeof WorkflowEntries.Type>();
 const detailCache = new Map<string, RunDetail>();
-const artifactCache = new Map<string, Artifact>();
+const workflowCacheLimit = 100;
+
+function remember<T>(cache: Map<string, T>, key: string, value: T): T {
+  cache.delete(key);
+  cache.set(key, value);
+  if (cache.size > workflowCacheLimit) {
+    const oldest = cache.keys().next();
+    if (!oldest.done) cache.delete(oldest.value);
+  }
+  return value;
+}
 const emptyWorkflowQuery = Atom.make(AsyncResult.initial<never, never>(false)).pipe(
   Atom.withLabel("j5-workflow:empty"),
 );
@@ -67,9 +77,8 @@ export const retainWorkflowListReference = (key: string, next: typeof WorkflowEn
       );
     })
   )
-    return previous;
-  listCache.set(key, next);
-  return next;
+    return remember(listCache, key, previous);
+  return remember(listCache, key, next);
 };
 export const retainNewestRunDetail = (previous: RunDetail | undefined, next: RunDetail | null) =>
   next === null || (previous !== undefined && next.readVersion <= previous.readVersion)
@@ -115,11 +124,10 @@ export const workflowDetailQuery = Atom.family((key: string) => {
       Effect.promise(async () => {
         const previous = detailCache.get(key);
         const next = await readRun(target.input.runId, previous?.readVersion);
-        const selected = retainNewestRunDetail(previous, next);
+        const selected = retainNewestRunDetail(detailCache.get(key) ?? previous, next);
         if (selected === undefined)
           throw new Error("Workflow detail was not cached for 304 response");
-        detailCache.set(key, selected);
-        return selected;
+        return remember(detailCache, key, selected);
       }),
     ).pipe(
       Atom.swr({ staleTime: 5_000, revalidateOnMount: true }),
@@ -136,12 +144,9 @@ export const workflowArtifactQuery = Atom.family((key: string) => {
   }>;
   return Atom.make(
     Effect.promise(async () => {
-      const cached = artifactCache.get(key);
-      if (cached !== undefined) return cached;
       const artifact = await readArtifact(target.input.runId, target.input.artifact.id);
       if (artifact.hash !== target.input.artifact.hash)
         throw new Error("Workflow artifact hash changed");
-      artifactCache.set(key, artifact);
       return artifact;
     }),
   ).pipe(

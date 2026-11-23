@@ -12,7 +12,11 @@ import {
   RunStatus,
   StartRequest,
 } from "@j5/workflow-contracts";
-import { AuthOrchestrationReadScope, AuthOrchestrationOperateScope } from "@t3tools/contracts";
+import {
+  AuthAccessWriteScope,
+  AuthOrchestrationReadScope,
+  AuthOrchestrationOperateScope,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -51,6 +55,8 @@ const authenticate = (operate: boolean) =>
     );
     const scope = operate ? AuthOrchestrationOperateScope : AuthOrchestrationReadScope;
     if (!session.scopes.includes(scope)) return yield* failEnvironmentScopeRequired(scope);
+    if (!session.scopes.includes(AuthAccessWriteScope))
+      return yield* failEnvironmentScopeRequired(AuthAccessWriteScope);
     return session;
   });
 
@@ -63,14 +69,25 @@ export const workflowHttpLayer = Layer.unwrap(
         const session = yield* authenticate(operate);
         const request = yield* HttpServerRequest.HttpServerRequest;
         const url = new URL(request.url, "http://workflow.local");
-        const parts = url.pathname.split("/").filter(Boolean);
-        const id = parts[3] ? decodeURIComponent(parts[3]) : undefined;
+        let parts: string[];
+        try {
+          parts = url.pathname.split("/").filter(Boolean).map(decodeURIComponent);
+        } catch {
+          return HttpServerResponse.jsonUnsafe(
+            { message: "Invalid workflow path" },
+            { status: 400 },
+          );
+        }
+        const id = parts[3];
         if (!operate) {
           if (id === "sidebar") {
             const offset = Number(url.searchParams.get("offset") ?? 0);
+            const limit = Number(url.searchParams.get("limit") ?? 50);
             const status = url.searchParams.get("status") ?? "";
             if (!Number.isSafeInteger(offset) || offset < 0)
               return HttpServerResponse.jsonUnsafe({ message: "Invalid offset" }, { status: 400 });
+            if (!Number.isSafeInteger(limit) || limit <= 0)
+              return HttpServerResponse.jsonUnsafe({ message: "Invalid limit" }, { status: 400 });
             if (status !== "" && !isRunStatus(status))
               return HttpServerResponse.jsonUnsafe({ message: "Invalid status" }, { status: 400 });
             return HttpServerResponse.jsonUnsafe(
@@ -78,7 +95,7 @@ export const workflowHttpLayer = Layer.unwrap(
                 url.searchParams.get("squadronId") ?? "",
                 (url.searchParams.get("q") ?? "").slice(0, 240),
                 offset,
-                Number(url.searchParams.get("limit") ?? 50),
+                limit,
                 status,
               ).pipe(Effect.provideService(SqlClient.SqlClient, sql)),
             );
@@ -99,7 +116,7 @@ export const workflowHttpLayer = Layer.unwrap(
             return HttpServerResponse.jsonUnsafe({ definitions: service.definitions });
           if (id && parts[4] === "artifacts" && parts[5])
             return HttpServerResponse.jsonUnsafe({
-              artifact: yield* service.artifact(id, decodeURIComponent(parts[5])),
+              artifact: yield* service.artifact(id, parts[5]),
             });
           if (id) {
             const knownVersion = url.searchParams.get("ifReadVersion");
@@ -174,14 +191,17 @@ export const workflowHttpLayer = Layer.unwrap(
         Effect.catchTags({
           SqlError: (error) => failEnvironmentInternal("internal_error", error),
           WorkflowError: (error) =>
-            Effect.succeed(
-              HttpServerResponse.jsonUnsafe(
-                { message: error.detail, error: { code: error.code, detail: error.detail } },
-                {
-                  status: error.code === "conflict" ? 409 : error.code === "not_found" ? 404 : 400,
-                },
-              ),
-            ),
+            error.code === "storage"
+              ? failEnvironmentInternal("internal_error", error)
+              : Effect.succeed(
+                  HttpServerResponse.jsonUnsafe(
+                    { message: error.detail, error: { code: error.code, detail: error.detail } },
+                    {
+                      status:
+                        error.code === "conflict" ? 409 : error.code === "not_found" ? 404 : 400,
+                    },
+                  ),
+                ),
           SchemaError: () =>
             Effect.succeed(
               HttpServerResponse.jsonUnsafe(
