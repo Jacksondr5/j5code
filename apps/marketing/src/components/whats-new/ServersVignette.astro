@@ -1,0 +1,78 @@
+---
+import Icon from "./Icon.astro";
+
+/**
+ * The thread's Servers list for an environment on another machine (chat/ThreadServersPanel.tsx).
+ * The cable button forwards a port to this computer; it works here as it does in the desktop app.
+ */
+const servers = [
+  { port: 5173, source: "Agent", process: "vite", forwarded: true },
+  { port: 8787, source: "Terminal", process: "wrangler", forwarded: false },
+];
+---
+
+<div class="app servers" data-vignette data-servers>
+  <p class="detail-a__heading">Servers</p>
+  <ul class="servers__list">
+    {
+      servers.map((server) => (
+        <li class="servers__row" data-forwarded={server.forwarded ? "true" : "false"}>
+          <Icon name="globe" class="t-muted" />
+          <span class="servers__lines">
+            <span class="servers__host">localhost:{server.port}</span>
+            <span class="servers__meta">
+              <span class="servers__to">Forwarded to :{server.port} · </span>{server.source} · {server.process}
+            </span>
+          </span>
+          <button
+            type="button"
+            class="btn-a btn-a--ghost btn-a--icon-xs servers__forward"
+            data-forward
+            data-port={server.port}
+            aria-pressed={server.forwarded ? "true" : "false"}
+            aria-label={
+              server.forwarded
+                ? `Stop forwarding localhost:${server.port}`
+                : `Forward localhost:${server.port} to this machine`
+            }
+            data-tip={
+              server.forwarded
+                ? `Forwarded to localhost:${server.port} on this machine. Click to stop.`
+                : "Forward to this machine, for any app here"
+            }
+          >
+            <Icon name="cable" />
+          </button>
+        </li>
+      ))
+    }
+  </ul>
+</div>
+
+<style>
+  /* Not clipped like the other windows: the forward button's tooltip opens above the panel. */
+  .servers {
+    padding: 8px 8px 12px;
+    border: 1px solid var(--wn-window-edge, var(--a-border));
+    border-radius: 12px;
+    background: var(--a-card);
+    box-shadow: var(--wn-window-shadow, none);
+  }
+  .servers__list { list-style: none; display: flex; flex-direction: column; gap: 2px; }
+
+  .servers__row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 44px;
+    padding: 6px 6px 6px 10px;
+    border-radius: 8px;
+  }
+
+  .servers__row:hover { background: color-mix(in srgb, var(--a-fg) 4%, transparent); }
+  .servers__lines { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+  .servers__host { font-size: 14px; font-weight: 500; line-height: 16px; color: color-mix(in srgb, var(--a-fg) 85%, transparent); }
+  .servers__meta { font-size: 11px; line-height: 16px; color: var(--a-muted-fg); }
+  .servers__row[data-forwarded="false"] .servers__to { display: none; }
+  .servers__forward[aria-pressed="true"] :global(.ico) { color: var(--a-primary); }
+</style>

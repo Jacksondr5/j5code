@@ -5,10 +5,16 @@
  */
 .wn {
   --wn-bg: var(--canvas);
+  --wn-surface: #fbf7ee;
   --wn-fg: var(--ink);
   --wn-muted: var(--ink-muted);
+  --wn-dim: var(--ink-dim);
   --wn-line: rgba(18, 32, 47, 0.14);
+  --wn-line-strong: rgba(18, 32, 47, 0.32);
+  --wn-tint: rgba(18, 32, 47, 0.045);
+  --wn-tint-strong: rgba(18, 32, 47, 0.16);
   --wn-grid: rgba(18, 32, 47, 0.05);
+  --wn-j5: var(--brass-deep);
   --wn-window-edge: rgba(18, 32, 47, 0.18);
   --wn-window-shadow: 0 1px 0 rgba(18, 32, 47, 0.04), 0 26px 50px -30px rgba(18, 32, 47, 0.5);
   color-scheme: light;
@@ -20,13 +26,39 @@
   color: var(--wn-fg);
 }
 
+/* Open water between stretches of chart paper, as the home page alternates them. */
+.wn .band--deep {
+  --wn-bg: var(--navy-950);
+  --wn-surface: var(--navy-900);
+  --wn-fg: var(--foam);
+  --wn-muted: var(--foam-muted);
+  --wn-dim: var(--foam-dim);
+  --wn-line: var(--line);
+  --wn-line-strong: var(--line-strong);
+  --wn-tint: rgba(223, 233, 238, 0.04);
+  --wn-tint-strong: rgba(223, 233, 238, 0.16);
+  --wn-j5: var(--brass);
+  --wn-window-edge: rgba(223, 233, 238, 0.2);
+  --wn-window-shadow: 0 40px 80px -36px rgba(0, 0, 0, 0.9);
+  margin-top: 96px;
+  background: linear-gradient(180deg, var(--navy-950) 0%, var(--navy-900) 100%);
+  color: var(--wn-fg);
+  color-scheme: dark;
+}
+
 @media (prefers-color-scheme: dark) {
   .wn {
     --wn-bg: var(--navy-950);
+    --wn-surface: var(--navy-900);
     --wn-fg: var(--foam);
     --wn-muted: var(--foam-muted);
+    --wn-dim: var(--foam-dim);
     --wn-line: var(--line);
+    --wn-line-strong: var(--line-strong);
+    --wn-tint: rgba(223, 233, 238, 0.04);
+    --wn-tint-strong: rgba(223, 233, 238, 0.16);
     --wn-grid: rgba(223, 233, 238, 0.035);
+    --wn-j5: var(--brass);
     --wn-window-edge: rgba(223, 233, 238, 0.16);
     --wn-window-shadow: 0 30px 60px -30px rgba(0, 0, 0, 0.85);
     color-scheme: dark;
@@ -57,9 +89,63 @@
   display: none;
 }
 
+/* A pennant says whose work a section is: filled for J5 Code's own, hollow for T3 Code's. */
+.wn .pennant {
+  width: 14px;
+  height: 10px;
+  flex-shrink: 0;
+}
+
+.wn .pennant--j5 {
+  fill: var(--wn-j5);
+}
+
+.wn .pennant--t3 {
+  fill: none;
+  stroke: var(--wn-muted);
+  stroke-width: 1.2;
+}
+
 .wn .feature {
   padding: 88px 0 0;
   scroll-margin-top: 48px;
+}
+
+.wn .feature.band--deep {
+  padding: 88px 0 96px;
+}
+
+.wn .band--deep + .band--deep {
+  margin-top: 0;
+}
+
+.wn .feature__head {
+  max-width: 720px;
+  margin-bottom: 32px;
+}
+
+.wn .origin {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--wn-muted);
+}
+
+.wn .feature__head h2 {
+  font-size: clamp(28px, 3.1vw, 40px);
+  line-height: 1.08;
+  text-wrap: balance;
+}
+
+.wn .feature__intro {
+  max-width: 62ch;
+  margin-top: 14px;
+  font-size: 17px;
+  line-height: 1.6;
+  color: var(--wn-muted);
 }
 
 .wn .items {
@@ -67,6 +153,20 @@
   display: grid;
   gap: 28px 40px;
   margin-top: 40px;
+}
+
+.wn .items--2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 0;
+}
+
+.wn .items--3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 0;
+}
+
+.wn .items--4 {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .wn .items--5 {
@@ -101,6 +201,7 @@
 }
 
 @media (max-width: 1000px) {
+  .wn .items--4,
   .wn .items--5 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -115,6 +216,9 @@
     padding-top: 64px;
   }
 
+  .wn .items--2,
+  .wn .items--3,
+  .wn .items--4,
   .wn .items--5 {
     grid-template-columns: 1fr;
   }

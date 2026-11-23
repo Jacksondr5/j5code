@@ -25,6 +25,22 @@ export interface Highlight {
 /** Newest first. Add an entry at the top. */
 export const HIGHLIGHTS: ReadonlyArray<Highlight> = [
   {
+    id: "2026-11-issues",
+    title: "Issues, beside your threads",
+    description:
+      "A new Issues page lists your projects' issues from GitHub, GitLab, Azure DevOps, Forgejo and Linear. Open one beside the list, link it to a thread, and let agents link the issues they work on.",
+    learnMoreUrl: "https://j5.codes/whats-new/0-0-54#issues",
+    clients: ["web", "desktop"],
+  },
+  {
+    id: "2026-11-t3-code-0-1-11",
+    title: "Also new, from T3 Code 0.1.11",
+    description:
+      "Agents can open, review and merge pull requests, and read failing CI logs. The app comes in ten languages, /clear starts a fresh session, and there is much more.",
+    learnMoreUrl: "https://j5.codes/whats-new/0-0-54#t3-code",
+    clients: ["web", "desktop"],
+  },
+  {
     id: "2026-11-inbox-mirrors-thread",
     title: "The Inbox works like a thread",
     description:

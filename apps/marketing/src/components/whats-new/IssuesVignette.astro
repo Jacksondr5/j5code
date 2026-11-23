@@ -1,0 +1,559 @@
+---
+import Icon from "./Icon.astro";
+import Mark from "./Mark.astro";
+import type { MarkName } from "./icons";
+
+/**
+ * The Issues page with one issue open beside the list, after apps/web's IssuesPage, IssueRow and
+ * IssueDetailPanel. The tracker tabs above the window stand in for the page's tracker filter;
+ * selecting a row opens that issue, and the link button links it to a thread. Invented data.
+ */
+interface Issue {
+  key: string;
+  title: string;
+  author: string;
+  avatar: string;
+  scope: string;
+  age: string;
+  comments?: number;
+  label?: { name: string; color: string };
+  assignee?: string;
+  body: string;
+  pr?: { number: string; title: string };
+}
+
+interface Tracker {
+  id: MarkName;
+  name: string;
+  host: string;
+  projects: number;
+  issues: ReadonlyArray<Issue>;
+}
+
+const trackers: ReadonlyArray<Tracker> = [
+  {
+    id: "github",
+    name: "GitHub",
+    host: "github.com",
+    projects: 2,
+    issues: [
+      {
+        key: "#412",
+        title: "Uploads over 2 GB time out",
+        author: "mara",
+        avatar: "#3b8fae",
+        scope: "lighthouse/charts",
+        age: "2h ago",
+        comments: 4,
+        label: { name: "bug", color: "#d73a4a" },
+        assignee: "ines",
+        body: "A chart bundle over 2 GB stops at 98% and the request times out. Smaller bundles are fine.",
+        pr: { number: "#418", title: "Stream large uploads in parts" },
+      },
+      {
+        key: "#77",
+        title: "Explain the tide datum options",
+        author: "jonas",
+        avatar: "#a67f2a",
+        scope: "lighthouse/almanac",
+        age: "5h ago",
+        label: { name: "documentation", color: "#0075ca" },
+        body: "The guide lists the three datum options but never says which one the charts use by default.",
+      },
+    ],
+  },
+  {
+    id: "gitlab",
+    name: "GitLab",
+    host: "gitlab.com",
+    projects: 1,
+    issues: [
+      {
+        key: "#57",
+        title: "Harbor map tiles blur at 2x",
+        author: "pilar",
+        avatar: "#c8442d",
+        scope: "lighthouse/harbor-map",
+        age: "1d ago",
+        comments: 2,
+        label: { name: "frontend", color: "#6f42c1" },
+        body: "On a high-density display the tiles are drawn at half size and scaled up.",
+      },
+    ],
+  },
+  {
+    id: "azure-devops",
+    name: "Azure DevOps",
+    host: "dev.azure.com",
+    projects: 1,
+    issues: [
+      {
+        key: "#1203",
+        title: "Nightly sync fails after the token rotates",
+        author: "sven",
+        avatar: "#2f7d5b",
+        scope: "lighthouse/sync",
+        age: "1d ago",
+        comments: 1,
+        body: "The job keeps the old token in memory and fails until someone restarts it.",
+      },
+    ],
+  },
+  {
+    id: "forgejo",
+    name: "Forgejo",
+    host: "git.lighthouse.example",
+    projects: 1,
+    issues: [
+      {
+        key: "#18",
+        title: "Buoy feed parser rejects negative depths",
+        author: "odile",
+        avatar: "#5f6a76",
+        scope: "lighthouse/buoys",
+        age: "3d ago",
+        label: { name: "parser", color: "#e99695" },
+        body: "Depths below the datum are negative in the feed, and the parser drops the whole row.",
+      },
+    ],
+  },
+  {
+    id: "linear",
+    name: "Linear",
+    host: "linear.app",
+    projects: 1,
+    issues: [
+      {
+        key: "TID-88",
+        title: "Tide table export drops the last row",
+        author: "ines",
+        avatar: "#3b8fae",
+        scope: "Tides",
+        age: "4d ago",
+        comments: 2,
+        label: { name: "export", color: "#f2c94c" },
+        body: "Exporting a month of tide tables leaves out the final day.",
+      },
+    ],
+  },
+];
+
+// The threads the "Link issue to a thread" picker offers.
+const threads = [
+  { id: "upload", title: "Fix the large upload timeout", project: "charts" },
+  { id: "datum", title: "Write the tide datum guide", project: "almanac" },
+  { id: "tiles", title: "Sharpen the harbor map tiles", project: "harbor-map" },
+];
+
+const all = trackers.flatMap((tracker) => tracker.issues.map((issue) => ({ tracker, issue })));
+const id = (key: string) => `wn-issue-${key.replace(/[^a-z0-9]/gi, "").toLowerCase()}`;
+---
+
+<div class="issues" data-issues>
+  <div class="issues__tabs" role="group" aria-label="Show issues from">
+    <button type="button" class="issues__tab" data-tracker="all" aria-pressed="true">All trackers</button>
+    {
+      trackers.map((tracker) => (
+        <button type="button" class="issues__tab" data-tracker={tracker.id} aria-pressed="false">
+          <Mark name={tracker.id} />
+          {tracker.name}
+        </button>
+      ))
+    }
+  </div>
+
+  <div class="app app--window issues__window" data-vignette>
+    <div class="issues__list">
+      <div class="topbar-a"><span>Issues</span></div>
+      <div class="issues__toolbar" aria-hidden="true">
+        <span class="issues__search"><Icon name="search" />Search issues</span>
+        <span class="btn-a btn-a--outline"><Icon name="arrow-down-up" />Sort</span>
+        <span class="btn-a btn-a--outline"><Icon name="list-filter" />Filters</span>
+        <span class="btn-a btn-a--outline issues__views"><Icon name="bookmark" />Views<Icon name="chevron-down" class="ico-3" /></span>
+      </div>
+      <div class="issues__groups">
+        {
+          trackers.map((tracker, groupIndex) => (
+            <section class="issues__group seq" data-group={tracker.id} style={`--at: ${0.15 + groupIndex * 0.12}s`}>
+              <h4 class="group-a">
+                <Mark name={tracker.id} />
+                {tracker.name} <span>· {tracker.host}</span>
+                <span>· {tracker.projects} {tracker.projects === 1 ? "project" : "projects"}</span>
+              </h4>
+              {tracker.issues.map((issue) => (
+                <button
+                  type="button"
+                  class="issue-a"
+                  data-issue={id(issue.key)}
+                  aria-pressed={issue.key === "#412" ? "true" : "false"}
+                >
+                  <Icon name="circle-dot" class="t-open" />
+                  <span class="issue-a__lines">
+                    <span class="issue-a__line1">
+                      <span class="issue-a__key">{issue.key}</span>
+                      <span class="issue-a__title truncate">{issue.title}</span>
+                      <span class="issue-a__status">
+                        {issue.assignee && <span class="avatar-a" style="--av: #2f7d5b">{issue.assignee[0]}</span>}
+                        {issue.comments && (
+                          <span class="issues__count tnum"><Icon name="message-square" />{issue.comments}</span>
+                        )}
+                      </span>
+                    </span>
+                    <span class="issue-a__meta">
+                      <span class="avatar-a avatar-a--sm" style={`--av: ${issue.avatar}`}>{issue.author[0]}</span>
+                      <span class="truncate">{issue.author}</span>
+                      <Mark name={tracker.id} />
+                      <span class="truncate">{issue.scope}</span>
+                      {issue.label && (
+                        <span class="badge-a badge-a--label issues__label" style={`--label: ${issue.label.color}`}>
+                          {issue.label.name}
+                        </span>
+                      )}
+                      <span class="issue-a__time tnum">{issue.age}</span>
+                    </span>
+                  </span>
+                </button>
+              ))}
+            </section>
+          ))
+        }
+      </div>
+    </div>
+
+    <div class="issues__dialog" data-picker hidden>
+      <div class="popup-a issues__picker" role="dialog" aria-modal="true" aria-label="Link issue to a thread">
+        <label class="issues__picker-input">
+          <Icon name="search" />
+          <input
+            type="text"
+            role="combobox"
+            aria-expanded="true"
+            aria-controls="wn-thread-list"
+            aria-autocomplete="list"
+            aria-label="Choose a thread"
+            placeholder="Search threads or projects..."
+            data-picker-search
+          />
+        </label>
+        <div class="issues__picker-list" id="wn-thread-list" role="listbox" aria-label="Threads">
+          {
+            threads.map((thread) => (
+              <button
+                type="button"
+                class="option-a"
+                role="option"
+                aria-selected="false"
+                tabindex="-1"
+                id={`wn-thread-${thread.id}`}
+                data-thread={thread.id}
+              >
+                <Icon name="message-square" />
+                <span class="issues__picker-lines">
+                  <span class="truncate">{thread.title}</span>
+                  <span class="truncate t-muted issues__picker-project">{thread.project}</span>
+                </span>
+                <span class="issues__picked t-muted" hidden><Icon name="check" class="ico-35" />Linked</span>
+              </button>
+            ))
+          }
+          <p class="issues__picker-empty" data-picker-empty hidden>No active threads found.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="issues__detail">
+      {
+        all.map(({ tracker, issue }) => (
+          <article class="issues__panel" id={id(issue.key)} hidden={issue.key !== "#412"}>
+            <div class="issues__panel-top">
+              <span class="t-muted truncate">{issue.scope}</span>
+              <span class="issues__key t-open-text">{issue.key}<Icon name="external-link" /></span>
+              <span class="issues__spacer" />
+              <span class="btn-a btn-a--outline btn-a--xs" aria-hidden="true">
+                <Icon name="circle-dot" class="t-open" />Open<Icon name="chevron-down" class="ico-3" />
+              </span>
+              <span class="btn-a btn-a--ghost btn-a--xs tnum" data-linked-count hidden>
+                <Icon name="message-square" /><span data-linked-number>1</span>
+              </span>
+              <button
+                type="button"
+                class="btn-a btn-a--ghost btn-a--icon-xs"
+                data-link
+                aria-haspopup="dialog"
+                aria-label="Link to thread"
+                data-tip="Link to thread"
+                data-tip-side="bottom"
+              >
+                <Icon name="link-2" />
+              </button>
+            </div>
+            <h4 class="issues__title">{issue.title}</h4>
+            <p class="issues__byline">
+              <span class="avatar-a avatar-a--sm" style={`--av: ${issue.avatar}`}>{issue.author[0]}</span>
+              {issue.author}<span class="issues__dot">·</span>opened {issue.age}
+            </p>
+            <dl class="issues__fields">
+              <dt><Icon name="tag" class="ico-35" />Labels</dt>
+              <dd>
+                {issue.label ? (
+                  <span class="badge-a badge-a--label issues__chip" style={`--label: ${issue.label.color}`}>{issue.label.name}</span>
+                ) : (
+                  "None"
+                )}
+              </dd>
+              <dt><Icon name="users" class="ico-35" />Assignees</dt>
+              <dd>
+                {issue.assignee ? (
+                  <span class="issues__person"><span class="avatar-a" style="--av: #2f7d5b">{issue.assignee[0]}</span>{issue.assignee}</span>
+                ) : (
+                  "None"
+                )}
+              </dd>
+            </dl>
+            <p class="issues__section"><Icon name="chevron-right" class="ico-35 issues__chev" />Description</p>
+            <p class="issues__body">{issue.body}</p>
+            {issue.pr && (
+              <>
+                <p class="issues__section"><Icon name="chevron-right" class="ico-35 issues__chev" />Linked pull requests</p>
+                <p class="issues__pr">
+                  <Icon name="git-pull-request-arrow" class="t-open" />
+                  <span class="truncate">{issue.pr.title}</span>
+                  <span class="t-muted issues__pr-meta">Closes this issue · {issue.pr.number}</span>
+                </p>
+              </>
+            )}
+            <p class="issues__section"><Icon name="chevron-right" class="ico-35 issues__chev" />Activity ({issue.comments ?? 0})</p>
+            <p class="issues__tracker t-muted"><Mark name={tracker.id} class="ico-35" />On {tracker.name}</p>
+          </article>
+        ))
+      }
+    </div>
+  </div>
+</div>
+
+<style>
+  .issues__tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+
+  .issues__tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 34px;
+    padding: 0 14px;
+    border: 1px solid var(--wn-line);
+    border-radius: 999px;
+    font: 500 13.5px var(--font-sans);
+    color: var(--wn-muted);
+    transition:
+      color 0.15s ease,
+      border-color 0.15s ease,
+      background-color 0.15s ease;
+  }
+
+  .issues__tab :global(.ico) { width: 15px; height: 15px; }
+  .issues__tab:hover { color: var(--wn-fg); border-color: var(--wn-line-strong); }
+  .issues__tab[aria-pressed="true"] {
+    color: var(--wn-fg);
+    border-color: var(--wn-fg);
+    background: var(--wn-tint);
+  }
+
+  .issues__window {
+    display: grid;
+    grid-template-columns: minmax(0, 13fr) minmax(0, 10fr);
+    min-height: 520px;
+  }
+
+  .issues__list { min-width: 0; padding-bottom: 20px; }
+
+  .issues__toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 20px 0;
+  }
+
+  .issues__search {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1;
+    min-width: 150px;
+    height: 32px;
+    padding: 0 11px;
+    border: 1px solid var(--a-input);
+    border-radius: 8px;
+    background: var(--a-control);
+    box-shadow: var(--a-shadow);
+    color: var(--a-muted-fg);
+  }
+
+  .issues__groups {
+    display: flex;
+    flex-direction: column;
+    gap: 22px;
+    padding: 18px 8px 0;
+  }
+
+  .issues__group[hidden] { display: none; }
+  .issues__group h4 { margin-bottom: 4px; }
+  .issues__count { display: inline-flex; align-items: center; gap: 2px; }
+
+  .issues__detail {
+    min-width: 0;
+    border-left: 1px solid var(--a-border);
+    background: var(--a-bg);
+  }
+
+  .issues__panel { padding: 14px 16px 20px; }
+  .issues__panel[hidden] { display: none; }
+
+  .issues__panel-top {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 28px;
+    font-size: 12px;
+    font-weight: 500;
+  }
+
+  .issues__key { display: inline-flex; align-items: center; gap: 2px; flex-shrink: 0; }
+  .issues__key :global(.ico) { width: 10px; height: 10px; }
+  .issues__spacer { flex: 1; }
+  .issues__panel-top [hidden] { display: none; }
+
+  /* The "Link issue to a thread" dialog: a thread picker over the page (ThreadLinkPicker.tsx). */
+  .issues__dialog {
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    padding: 72px 16px 16px;
+    background: rgb(0 0 0 / 24%);
+    animation: wn-fade-in 0.15s ease;
+  }
+
+  .issues__dialog[hidden] { display: none; }
+
+  .issues__picker {
+    width: min(448px, 100%);
+    padding: 0;
+    border-radius: 12px;
+    animation: wn-in 0.2s cubic-bezier(0.2, 0.7, 0.2, 1);
+  }
+
+  .issues__picker-input {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--a-border);
+    color: var(--a-muted-fg);
+  }
+
+  .issues__picker-input input {
+    flex: 1;
+    min-width: 0;
+    height: 44px;
+    border: 0;
+    outline: 0;
+    background: none;
+    font: 400 14px var(--a-font);
+    color: var(--a-fg);
+  }
+
+  .issues__picker-input input::placeholder { color: var(--a-muted-fg); }
+  .issues__picker-list { display: flex; flex-direction: column; padding: 4px; }
+  .issues__picker-list :global(.option-a) { min-height: 44px; }
+  .issues__picker-list :global(.option-a[hidden]) { display: none; }
+  .issues__picker-list :global(.option-a[aria-selected="true"]) { background: var(--a-accent); }
+  .issues__picker-list :global(.option-a:disabled) { opacity: 0.64; cursor: default; }
+  .issues__picker-list :global(.option-a > .ico) { color: var(--a-muted-fg); }
+  .issues__picker-lines { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+  .issues__picker-project { font-size: 12px; }
+  .issues__picked { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; }
+  .issues__picked[hidden] { display: none; }
+  .issues__picker-empty { padding: 24px 12px; font-size: 14px; color: var(--a-muted-fg); text-align: center; }
+  .issues__picker-empty[hidden] { display: none; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .issues__dialog,
+    .issues__picker { animation: none; }
+  }
+
+  .issues__title {
+    margin-top: 6px;
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.375;
+  }
+
+  .issues__byline {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+    font-size: 12px;
+    color: var(--a-muted-fg);
+  }
+
+  .issues__dot { opacity: 0.5; }
+
+  .issues__fields {
+    display: grid;
+    grid-template-columns: 6rem minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+    margin-top: 16px;
+    font-size: 12px;
+  }
+
+  .issues__fields dt { display: flex; align-items: center; gap: 6px; color: var(--a-muted-fg); }
+  .issues__fields dd { min-height: 24px; display: flex; align-items: center; }
+  .issues__chip { height: 18px; padding: 0 3px; font-size: 12px; }
+  .issues__person { display: inline-flex; align-items: center; gap: 6px; }
+
+  .issues__section {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 12px 0 8px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--a-muted-fg);
+  }
+
+  .issues__section :global(.issues__chev) { opacity: 0.6; rotate: 90deg; }
+  .issues__body { font-size: 14px; line-height: 1.625; }
+
+  .issues__pr {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    margin: 0 -8px;
+    border-radius: 6px;
+    font-size: 14px;
+  }
+
+  .issues__pr-meta { margin-left: auto; flex-shrink: 0; font-size: 12px; }
+  .issues__tracker { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+
+  @media (max-width: 860px) {
+    .issues__window { grid-template-columns: 1fr; min-height: 0; }
+    .issues__detail { border-left: 0; border-top: 1px solid var(--a-border); }
+    .issues__toolbar { padding-inline: 12px; }
+    .issues__list :global(.topbar-a) { padding-inline: 14px; height: 44px; }
+    .issues__toolbar .issues__views { display: none; }
+    .issues__groups { padding-inline: 2px; gap: 16px; }
+    .issues__groups :global(.issues__label) { display: none; }
+  }
+</style>

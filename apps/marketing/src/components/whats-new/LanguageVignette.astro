@@ -1,0 +1,115 @@
+---
+import Icon from "./Icon.astro";
+
+/**
+ * Settings → General → Display → Language, with its picker open. Choosing a language switches
+ * the row to that language, using the app's own translations (apps/web/src/i18n/translations),
+ * and sets the page's large word beside the picker to "Language" in it.
+ */
+const locales = [
+  { code: "en", name: "English", display: "Display", language: "Language", system: "System default", hint: "System default follows your browser or OS language." },
+  { code: "de", name: "Deutsch", display: "Anzeige", language: "Sprache", system: "Systemstandard", hint: "Systemstandard folgt der Sprache deines Browsers oder Betriebssystems." },
+  { code: "es", name: "Español", display: "Pantalla", language: "Idioma", system: "Del sistema", hint: "Con «Del sistema» se usa el idioma de tu navegador o sistema operativo." },
+  { code: "fr", name: "Français", display: "Affichage", language: "Langue", system: "Par défaut du système", hint: "L’option Système suit la langue de votre navigateur ou de votre OS." },
+  { code: "ja", name: "日本語", display: "表示", language: "言語", system: "システムのデフォルト", hint: "「システムのデフォルト」を選ぶと、ブラウザーまたは OS の言語に従います。" },
+  { code: "ko", name: "한국어", display: "표시", language: "언어", system: "시스템 기본값", hint: "시스템 기본값은 브라우저 또는 OS 언어를 따릅니다." },
+  { code: "pt-BR", name: "Português (Brasil)", display: "Exibição", language: "Idioma", system: "Padrão do sistema", hint: "\"Padrão do sistema\" usa o idioma do navegador ou do sistema operacional." },
+  { code: "ru", name: "Русский", display: "Отображение", language: "Язык", system: "Как в системе", hint: "«Как в системе» использует язык браузера или ОС." },
+  { code: "sv", name: "Svenska", display: "Visning", language: "Språk", system: "Systemstandard", hint: "Systemstandard följer webbläsarens eller operativsystemets språk." },
+  { code: "zh", name: "中文（简体）", display: "显示", language: "语言", system: "系统默认", hint: "系统默认跟随浏览器或操作系统的语言。" },
+];
+---
+
+<div class="lang" data-vignette data-language data-locales={JSON.stringify(locales)}>
+  <div class="app app--window lang__window">
+    <p class="settings-a__heading" data-t="display">Display</p>
+    <div class="settings-a">
+      <div class="settings-a__row">
+        <div>
+          <p class="settings-a__title" data-t="language">Language</p>
+          <p class="settings-a__desc" data-t="hint">System default follows your browser or OS language.</p>
+        </div>
+        <span class="select-a" aria-hidden="true"><span data-t="current">English</span><Icon name="chevron-down" /></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="lang__below">
+    <p class="lang__word display" data-t="language" data-word aria-hidden="true">Language</p>
+    <div class="app lang__float">
+      <div class="popup-a seq" style="--at: 0.35s" role="listbox" aria-label="Language">
+        <button type="button" class="option-a" role="option" aria-selected="false" data-locale="en" data-system>
+          <span data-t="system">System default</span>
+        </button>
+        {
+          locales.map((locale) => (
+            <button
+              type="button"
+              class="option-a"
+              role="option"
+              aria-selected={locale.code === "en" ? "true" : "false"}
+              data-locale={locale.code}
+              lang={locale.code}
+            >
+              {locale.name}
+            </button>
+          ))
+        }
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .lang__window { padding: 18px 16px 16px; }
+
+  /* The open picker hangs from its trigger, out over the window's edge, as a popup does. */
+  .lang__below {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 200px;
+    align-items: center;
+    gap: 24px;
+    padding-right: 33px;
+    margin-top: -26px;
+  }
+
+  .lang__float {
+    position: relative;
+    z-index: 1;
+    background: none;
+  }
+
+  .lang__float .popup-a { transform-origin: 100% 0; }
+
+  .lang__word {
+    padding: 40px 0 0 8px;
+    font-size: clamp(40px, 5.4vw, 76px);
+    line-height: 1;
+    color: var(--wn-fg);
+    overflow-wrap: anywhere;
+  }
+
+  .lang__word:global(.is-swapped) {
+    animation: wn-in 0.35s cubic-bezier(0.2, 0.7, 0.2, 1);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .lang__word:global(.is-swapped) { animation: none; }
+  }
+
+  @media (max-width: 560px) {
+    .lang__window { padding: 14px 10px 12px; }
+    .lang__window :global(.settings-a__row) { grid-template-columns: 1fr; gap: 12px; }
+    /* The trigger sits on the left here, so the list opens under it and the word moves right. */
+    .lang__below {
+      grid-template-columns: 176px minmax(0, 1fr);
+      gap: 12px;
+      padding: 0 0 0 11px;
+      margin-top: -22px;
+      align-items: start;
+    }
+    .lang__float { order: -1; }
+    .lang__float .popup-a { transform-origin: 0 0; }
+    .lang__word { padding: 44px 0 0; font-size: 34px; text-align: center; }
+  }
+</style>

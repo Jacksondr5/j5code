@@ -1,0 +1,65 @@
+---
+import Icon from "./Icon.astro";
+
+/**
+ * Settings → Maintenance: the Background activity section with its "Keep awake while agents work"
+ * switch, and the Database section's reclaim row with J5 Code's name in it (SettingsPanels.tsx,
+ * BackgroundActivitySettings.tsx, DatabaseStorageNotice.tsx).
+ */
+---
+
+<div class="app app--window upkeep" data-vignette>
+  <p class="settings-a__heading">Background activity</p>
+  <div class="settings-a">
+    <div class="settings-a__row" aria-hidden="true">
+      <div>
+        <p class="settings-a__title">Background activity</p>
+        <p class="settings-a__desc">Pauses probes for idle clients, locked hosts, or low power mode.</p>
+      </div>
+      <span class="select-a upkeep__select">Balanced<Icon name="chevron-down" /></span>
+    </div>
+    <div class="settings-a__row">
+      <div>
+        <p class="settings-a__title" id="wn-keep-awake">Keep awake while agents work</p>
+        <p class="settings-a__desc">
+          Stop the computer from going to sleep while agents are working, and let it sleep once they finish. Closing a
+          laptop lid still puts it to sleep.
+        </p>
+      </div>
+      <button type="button" class="switch-a" role="switch" aria-checked="true" aria-labelledby="wn-keep-awake" data-switch></button>
+    </div>
+  </div>
+
+  <p class="settings-a__heading upkeep__second">Database</p>
+  <div class="settings-a" aria-hidden="true">
+    <div class="settings-a__row">
+      <div>
+        <p class="settings-a__title">Reclaim freed database space</p>
+        <p class="settings-a__desc">These databases still hold space freed by history cleanup.</p>
+      </div>
+    </div>
+    <div class="settings-a__row upkeep__reclaim">
+      <div>
+        <p class="settings-a__title">2.1 GiB on lighthouse</p>
+        <p class="settings-a__desc">Restarts J5 Code there. It will be offline for about 2 min.</p>
+      </div>
+      <div class="upkeep__buttons">
+        <span class="btn-a btn-a--outline btn-a--xs">Reclaim</span>
+        <span class="btn-a btn-a--ghost btn-a--xs">Dismiss</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .upkeep { padding: 18px 16px 16px; }
+  .upkeep__second { margin-top: 22px; }
+  .upkeep__buttons { display: flex; align-items: center; gap: 6px; }
+  .upkeep .upkeep__select { min-width: 132px; }
+
+  @media (max-width: 480px) {
+    .upkeep { padding: 14px 10px 12px; }
+    .upkeep :global(.settings-a__row) { gap: 14px; }
+    .upkeep__reclaim { grid-template-columns: 1fr; }
+  }
+</style>
