@@ -1,0 +1,150 @@
+---
+import Icon from "./Icon.astro";
+
+/**
+ * A thread using the pull request tools, with the thread details column beside it: the work-log
+ * rows are TimelineWorkEntryRow's ("Read CI logs", "Re-ran CI", "Merged a pull request"), the
+ * check rows are PullRequestChecksPopover's, and the stack list is the PR badge's tooltip.
+ * One check fails, is read and re-run, passes, and the stack merges bottom to top.
+ */
+const checks = [
+  { name: "lint", flaky: false },
+  { name: "typecheck", flaky: false },
+  { name: "test (1/3)", flaky: false },
+  { name: "test (2/3)", flaky: true },
+  { name: "test (3/3)", flaky: false },
+];
+
+const stack = [
+  { number: "#418", title: "Stream large uploads in parts", at: 4.4 },
+  { number: "#417", title: "Add a resumable upload session", at: 4.2 },
+  { number: "#416", title: "Split the upload client from the form", at: 4.0 },
+];
+---
+
+<div class="app app--window prs" data-vignette role="img" aria-label="An agent reads a failing check's log, re-runs it, and merges a stack of three pull requests">
+  <div class="prs__thread">
+    <div class="bubble-a seq" style="--at: 0.2s">A check failed on #418. Find out why, then merge the stack.</div>
+    <div class="prs__work">
+      <div class="work-a seq" style="--at: 0.9s">
+        <Icon name="git-pull-request-arrow" /><span>Read CI logs</span><Icon name="chevron-right" />
+      </div>
+      <div class="work-a seq" style="--at: 1.9s">
+        <Icon name="git-pull-request-arrow" /><span>Re-ran CI</span><Icon name="chevron-right" />
+      </div>
+      <div class="work-a seq" style="--at: 3.9s">
+        <Icon name="git-pull-request-arrow" /><span>Merged a pull request</span><Icon name="chevron-right" />
+      </div>
+    </div>
+    <p class="reply-a seq" style="--at: 4.9s">
+      The runner lost its network halfway through test (2/3). I re-ran that check, it passed, and I merged the
+      stack: #416, #417 and #418.
+    </p>
+  </div>
+
+  <div class="prs__side">
+    <p class="detail-a__heading">Checks</p>
+    <ul class="prs__checks">
+      {
+        checks.map((check) => (
+          <li>
+            {check.flaky ? (
+              <span class="flip">
+                <Icon name="circle-x" class="ico-35 t-fail seq-from" style="--at: 1.9s" />
+                <Icon name="loader-circle" class="ico-35 t-pending seq-mid prs__spin" style="--at: 1.9s; --until: 3.2s" />
+                <Icon name="circle-check" class="ico-35 t-open seq-to" style="--at: 3.2s" />
+              </span>
+            ) : (
+              <Icon name="circle-check" class="ico-35 t-open" />
+            )}
+            <span class="truncate">{check.name}</span>
+            {check.flaky ? (
+              <span class="flip prs__status">
+                <span class="seq-from" style="--at: 1.9s">Failed</span>
+                <span class="seq-mid" style="--at: 1.9s; --until: 3.2s">Running</span>
+                <span class="seq-to" style="--at: 3.2s">Passed</span>
+              </span>
+            ) : (
+              <span class="prs__status">Passed</span>
+            )}
+          </li>
+        ))
+      }
+    </ul>
+
+    <p class="detail-a__heading prs__stack-heading"><Icon name="layers" class="ico-3" />stack · 3</p>
+    <ul class="prs__stack">
+      {
+        stack.map((layer) => (
+          <li>
+            <span class="flip">
+              <Icon name="git-pull-request-arrow" class="ico-3 t-open seq-from" style={`--at: ${layer.at}s`} />
+              <Icon name="git-merge" class="ico-3 t-done seq-to" style={`--at: ${layer.at}s`} />
+            </span>
+            <span class="mono tnum">{layer.number}</span>
+            <span class="truncate prs__layer">{layer.title}</span>
+          </li>
+        ))
+      }
+    </ul>
+  </div>
+</div>
+
+<style>
+  .prs {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 272px;
+  }
+
+  .prs__thread {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+    padding: 20px;
+  }
+
+  .prs__work { display: flex; flex-direction: column; }
+
+  .prs__side {
+    min-width: 0;
+    padding: 8px 8px 14px;
+    border-left: 1px solid var(--a-border);
+    background: var(--a-card);
+  }
+
+  .prs__checks,
+  .prs__stack {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    font-size: 12px;
+  }
+
+  .prs__checks li,
+  .prs__stack li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 26px;
+    padding: 0 10px;
+  }
+
+  .prs__status { margin-left: auto; color: var(--a-muted-fg); justify-items: end; }
+  .prs__stack-heading { gap: 6px; margin-top: 10px; }
+  .prs__layer { color: color-mix(in srgb, var(--a-fg) 75%, transparent); }
+
+  /* One turn while the check runs, not a spinner that never stops. */
+  :global(.wn-motion [data-play] .prs__spin) {
+    animation:
+      wn-fade-in 0.3s ease var(--at) both,
+      wn-fade-out 0.3s ease var(--until) forwards,
+      wn-turn 1.3s linear var(--at) 1;
+  }
+
+  @media (max-width: 720px) {
+    .prs { grid-template-columns: 1fr; }
+    .prs__thread { padding: 14px; }
+    .prs__side { border-left: 0; border-top: 1px solid var(--a-border); }
+  }
+</style>
