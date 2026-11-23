@@ -52,9 +52,12 @@ export class AccessRenewalError extends Schema.TaggedError<AccessRenewalError>()
   },
 ) {
   override get message(): string {
+    // `saved: false` is only set by removing a person, whose devices end before the removal.
     return this.saved === true
       ? `The change was saved, but these sessions are still live: ${this.sessionId}. End them by hand in Sharing & access.`
-      : `Could not end device ${this.sessionId}'s session so that it renews; nothing was changed.`;
+      : this.saved === false
+        ? "The person was not removed: one of their devices could not be signed out. Devices already signed out stay signed out. Try again, or end it in Sharing & access."
+        : `Could not end device ${this.sessionId}'s session so that it renews; nothing was changed.`;
   }
 }
 
