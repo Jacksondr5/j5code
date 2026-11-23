@@ -72,7 +72,7 @@ import {
   setInboxAnswerText,
   useInboxAnswerTexts,
 } from "./inboxAnswerDrafts";
-import { AnswerSendErrorAlert } from "./AnswerSendErrorAlert";
+import { AnswerErrorAlert } from "./AnswerErrorAlert";
 import { InboxReplyEditor } from "./InboxReplyEditor";
 import { J5RecordPanel } from "./J5RecordPanel";
 import { OwnerAskAction } from "./OwnerAskAction";
@@ -363,7 +363,7 @@ function OpenInboxItem({
   });
   const [dragActive, setDragActive] = useState(false);
   const addFiles = support === null || closedText !== null || pending ? null : intake.addFiles;
-  const readiness = attachments.ready(itemKey, item.environmentId);
+  const readiness = attachments.ready(itemKey, item.environmentId, intake.preparing);
   const waitingOn = "blocked" in readiness ? readiness.blocked : null;
   const sendable =
     canAnswer && closedText === null && answerToDeliver(answerText) !== null && waitingOn === null;
@@ -481,7 +481,7 @@ function OpenInboxItem({
                 support={support}
               />
               {/* As upstream's composer: the error shows, the words stay, and sending again retries. */}
-              {error === null ? null : <AnswerSendErrorAlert message={error} />}
+              {error === null ? null : <AnswerErrorAlert message={error} />}
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-1">
                   <OpenThreadButton

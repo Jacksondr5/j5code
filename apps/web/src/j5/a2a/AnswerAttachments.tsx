@@ -10,7 +10,6 @@ import {
   ComposerFilePreviewDialog,
 } from "../../components/chat/ComposerAttachmentStrip";
 import {
-  composerOtherFilesForPresentation,
   isPreviewableComposerVideo,
   shouldHandleComposerAttachmentPaste,
 } from "../../components/chat/composerAttachmentFiles";
@@ -18,7 +17,10 @@ import {
   ExpandedImageDialogHost,
   openExpandedImagePreview,
 } from "../../components/chat/ExpandedImageDialog";
-import { usePreparingComposerImages } from "../../components/chat/preparingComposerImages";
+import {
+  countPreparingComposerImages,
+  usePreparingComposerImages,
+} from "../../components/chat/preparingComposerImages";
 import { WorkspaceFileDropOverlay } from "../../components/chat/TimelineOverlays";
 import { useComposerAttachmentIntake } from "../../components/chat/useComposerAttachmentIntake";
 import { splitTransferredFiles } from "../../components/chat/workspaceFileDrop";
@@ -39,6 +41,7 @@ import {
 } from "../../lib/attachmentUploadQueue";
 import { attachmentUploadBlockReason } from "../../lib/attachmentUploadState";
 import { useServerConfigs } from "../../state/entities";
+import { AnswerErrorAlert } from "./AnswerErrorAlert";
 import {
   clearInboxAnswerDraft,
   inboxAnswerDraftId,
@@ -53,7 +56,6 @@ const NO_ATTACHMENTS: ReadonlyArray<AnswerAttachment> = [];
 const NO_IMAGES: ReadonlyArray<ComposerImageAttachment> = [];
 const NO_FILES: ReadonlyArray<ComposerFileAttachment> = [];
 const NO_IDS: ReadonlyArray<string> = [];
-const NO_INLINE_FILES: ReadonlySet<string> = new Set();
 const NO_PENDING_INPUTS: never[] = [];
 
 function without<T>(record: Readonly<Record<string, T>>, key: string): Record<string, T> {
@@ -125,7 +127,11 @@ export function useAnswerAttachments() {
     ready: (
       key: string,
       environmentId: EnvironmentId,
+      /** Images still being converted or shrunk: the intake's count while rendering, so it re-reads. */
+      preparing: number = countPreparingComposerImages(composerTargetKey(inboxAnswerDraftId(key))),
     ): { readonly attachments: ReadonlyArray<ChatAttachment> } | { readonly blocked: string } => {
+      // A preparing image joins the draft later; sending now would leave it out.
+      if (preparing > 0) return { blocked: "Wait for the image to finish preparing." };
       const attachments = list(key);
       if (attachments.length === 0) return { attachments: [] };
       const lost = attachments.find(needsReattach);
@@ -208,6 +214,8 @@ export function useAnswerAttachmentIntake(input: {
     insertAttachmentReferences: () => false,
   });
   return {
+    /** How many images are still being converted or shrunk; pass it to `ready` while rendering. */
+    preparing: preparing.length,
     addFiles: (files: ReadonlyArray<File>) => void intake.addComposerAttachments([...files]),
     removeImage: intake.removeComposerImage,
     removeFile: (fileId: string) => {
@@ -312,8 +320,11 @@ export function AnswerAttachmentStrip(props: {
   const [previewFileId, setPreviewFileId] = useState<string | null>(null);
   const images = draft?.images ?? NO_IMAGES;
   const files = draft?.files ?? NO_FILES;
-  const videos = files.filter((file) => isPreviewableComposerVideo(file, props.environmentId));
-  const otherFiles = composerOtherFilesForPresentation(files, props.environmentId, NO_INLINE_FILES);
+  // A video restored after a reload has no bytes; its row opens the uploaded copy in the preview.
+  const videos = files.filter(
+    (file) => file.file !== null && isPreviewableComposerVideo(file, props.environmentId),
+  );
+  const otherFiles = files.filter((file) => !videos.includes(file));
   const previewFile = files.find((file) => file.id === previewFileId);
   const maxFileBytes = props.support?.maxFileBytes ?? null;
   const viewerKey = `j5-answer:${props.answerKey}`;
@@ -346,7 +357,7 @@ export function AnswerAttachmentStrip(props: {
           nonPersistedImageIds={draft?.nonPersistedImageIds ?? NO_IDS}
           snapShotAnimations={false}
           onExpandImage={(preview) => openExpandedImagePreview(viewerKey, preview)}
-          // A video's file is gone after a reload until it is attached again.
+          // Only videos with their bytes are tiled, and those open in the image viewer.
           onFileOpen={() => undefined}
           onRemoveImage={removeImage}
           onRemoveFile={removeFile}
@@ -372,11 +383,7 @@ export function AnswerAttachmentStrip(props: {
         />
       ) : null}
       <ExpandedImageDialogHost threadKey={viewerKey} />
-      {props.error === null ? null : (
-        <p className="text-sm text-destructive" role="alert">
-          {props.error}
-        </p>
-      )}
+      {props.error === null ? null : <AnswerErrorAlert message={props.error} />}
     </div>
   );
 }

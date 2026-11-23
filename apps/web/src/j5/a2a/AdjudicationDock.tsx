@@ -32,7 +32,7 @@ import {
   useAnswerAttachments,
   useAnswerUploads,
 } from "./AnswerAttachments";
-import { AnswerSendErrorAlert } from "./AnswerSendErrorAlert";
+import { AnswerErrorAlert } from "./AnswerErrorAlert";
 import { InboxReplyEditor } from "./InboxReplyEditor";
 import { J5RecordPanel } from "./J5RecordPanel";
 import { answerToDeliver, useAnswerSends } from "./answerSends";
@@ -124,7 +124,7 @@ export function AdjudicationDock(props: {
   const openFor = formatElapsedDurationLabel(shown.openedAt);
   const threadRef = threadId == null ? undefined : scopeThreadRef(environmentId, threadId);
 
-  const readiness = attachments.ready(answerKey, environmentId);
+  const readiness = attachments.ready(answerKey, environmentId, intake.preparing);
   const waitingOn = "blocked" in readiness ? readiness.blocked : null;
   const addFiles = support === null || !isOpen || pending ? null : intake.addFiles;
   const sendable = isOpen && message !== null && waitingOn === null;
@@ -264,7 +264,7 @@ export function AdjudicationDock(props: {
             support={support}
           />
           {/* As upstream's composer: the error shows, the words stay, and sending again retries. */}
-          {error === null ? null : <AnswerSendErrorAlert message={error} />}
+          {error === null ? null : <AnswerErrorAlert message={error} />}
           <div className="flex items-center justify-end gap-2">
             {addFiles === null ? null : (
               <AnswerAttachButton
