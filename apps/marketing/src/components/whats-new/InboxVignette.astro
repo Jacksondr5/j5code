@@ -268,6 +268,7 @@ const sign = { add: "+", del: "-", ctx: "" };
                   role="tab"
                   class="tab-a"
                   data-inbox-tab={tab.surface}
+                  aria-controls={`inbox-surface-${tab.surface}`}
                   data-kind={tab.kind}
                   aria-selected={tab.selected ? "true" : "false"}
                   hidden={tab.later}
@@ -316,7 +317,7 @@ const sign = { add: "+", del: "-", ctx: "" };
       ))
     }
 
-    <div class="inbox__pr" data-inbox-surface="pr" hidden>
+    <div class="inbox__pr" id="inbox-surface-pr" role="tabpanel" aria-label="Pull request #42" data-inbox-surface="pr" hidden>
       <p class="inbox__pr-top">
         <span class="t-muted">harbor/todo-app</span>
         <span class="t-open-text inbox__pr-key">#42<Icon name="external-link" /></span>
@@ -348,7 +349,14 @@ const sign = { add: "+", del: "-", ctx: "" };
 
     {
       diffs.map((diff) => (
-        <div class="diff" data-inbox-surface={diff.id} hidden={diff.id !== "diff-pr"}>
+        <div
+          class="diff"
+          id={`inbox-surface-${diff.id}`}
+          role="tabpanel"
+          aria-label="Diff"
+          data-inbox-surface={diff.id}
+          hidden={diff.id !== "diff-pr"}
+        >
           <p class="diff__bar" aria-hidden="true">
             <span class="btn-a btn-a--secondary btn-a--xs">Changes<Icon name="chevron-down" /></span>
             <span class="diff__range truncate">{diff.branch} → Automatic</span>
@@ -390,11 +398,11 @@ const sign = { add: "+", del: "-", ctx: "" };
       ))
     }
 
-    <div data-inbox-surface="files" hidden>
+    <div id="inbox-surface-files" role="tabpanel" aria-label="Files" data-inbox-surface="files" hidden>
       <InboxExplorer />
     </div>
 
-    <div class="arts" data-inbox-surface="artifacts" aria-label="Artifacts" hidden>
+    <div class="arts" id="inbox-surface-artifacts" role="tabpanel" aria-label="Artifacts" data-inbox-surface="artifacts" hidden>
       <div class="arts__list">
         <p class="arts__bar" aria-hidden="true">
           <span>Files</span><Icon name="refresh-cw" class="ico-35" /><span class="arts__delete">Delete all</span>
@@ -407,7 +415,7 @@ const sign = { add: "+", del: "-", ctx: "" };
       </div>
     </div>
 
-    <div class="inbox__filetab" data-inbox-surface="file" hidden>
+    <div class="inbox__filetab" id="inbox-surface-file" role="tabpanel" aria-label="README.md" data-inbox-surface="file" hidden>
       <p class="inbox__crumbs">todo-app<Icon name="chevron-right" class="ico-3" /><span>README.md</span></p>
       <div class="inbox__file">
         <ol class="inbox__code mono">

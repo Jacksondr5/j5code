@@ -95,6 +95,9 @@ function wireInbox(root: HTMLElement, inbox: HTMLElement) {
     const surface = selected()?.dataset.inboxTab;
     for (const entry of select(inbox, "[data-inbox-surface]"))
       entry.hidden = entry.dataset.inboxSurface !== surface;
+    // One tab stop per strip: Tab reaches the selected tab, and the arrows move between tabs.
+    for (const tab of select(inbox, '[role="tab"]'))
+      tab.tabIndex = tab.getAttribute("aria-selected") === "true" ? 0 : -1;
     const shown = panelShown();
     for (const link of links)
       link.setAttribute("aria-pressed", String(shown && link.dataset.inboxOpen === surface));
@@ -143,6 +146,20 @@ function wireInbox(root: HTMLElement, inbox: HTMLElement) {
     });
   }
   for (const tab of select(inbox, '[role="tab"]')) tab.addEventListener("click", () => pick(tab));
+  for (const strip of select(inbox, '[role="tablist"]')) {
+    strip.addEventListener("keydown", (event) => {
+      const step = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+      if (step === 0) return;
+      // Only the tabs that are open take part; a surface not added yet is not a stop.
+      const tabs = select(strip, '[role="tab"]').filter((tab) => !tab.hidden);
+      const at = tabs.indexOf(document.activeElement as HTMLElement);
+      const next = tabs[(at + step + tabs.length) % tabs.length];
+      if (!next) return;
+      event.preventDefault();
+      pick(next);
+      next.focus();
+    });
+  }
   for (const entry of heads) {
     wireAddMenu(
       entry,
@@ -181,7 +198,7 @@ function wireInbox(root: HTMLElement, inbox: HTMLElement) {
     if (event.key !== "Tab") return;
     // The sheet is modal, so Tab goes round what it shows and never to the page behind it.
     const stops = select(inbox, "button, summary").filter(
-      (stop) => stop.offsetParent !== null && !stop.closest("[inert]"),
+      (stop) => stop.offsetParent !== null && stop.tabIndex >= 0 && !stop.closest("[inert]"),
     );
     const at = stops.indexOf(document.activeElement as HTMLElement);
     const next = stops[(at + (event.shiftKey ? -1 : 1) + stops.length) % stops.length];
@@ -191,10 +208,16 @@ function wireInbox(root: HTMLElement, inbox: HTMLElement) {
   narrow.addEventListener(
     "change",
     () => {
+      // This runs before the narrow layout hides anything, so focus is still where it was.
+      const active = document.activeElement;
+      const inPanel =
+        active instanceof HTMLElement &&
+        inbox.contains(active) &&
+        (active === max || active.closest(".inbox__panel") !== null);
       inbox.style.minHeight = "";
       settle();
-      // A window narrowed with the panel open now has a sheet over what held focus.
-      if (sheetOpen()) toggle?.focus({ preventScroll: true });
+      // Narrowing puts a sheet over what held focus, or hides the panel that held it.
+      if (sheetOpen() || (narrow.matches && inPanel)) toggle?.focus({ preventScroll: true });
     },
     { signal: live.signal },
   );
