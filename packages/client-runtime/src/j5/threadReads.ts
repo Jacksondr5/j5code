@@ -45,6 +45,12 @@ function applyPersonalReadChange(
 ): PersonalReadMarkers {
   if (change.kind === "snapshot")
     return new Map(change.markers.map((marker) => [marker.threadId, marker.lastVisitedAt]));
+  const previous = markers.get(change.marker.threadId);
+  if (
+    previous !== undefined &&
+    DateTime.toEpochMillis(previous) === DateTime.toEpochMillis(change.marker.lastVisitedAt)
+  )
+    return markers;
   return new Map(markers).set(change.marker.threadId, change.marker.lastVisitedAt);
 }
 
@@ -65,16 +71,23 @@ export function createPersonalThreadReadAtoms<R, E>(
                 onSome: (session) =>
                   Stream.unwrap(
                     Effect.gen(function* () {
-                      const config = yield* session.initialConfig;
-                      if (config.environment.capabilities.j5PersonalThreadReads !== true) {
+                      const config = yield* Effect.option(session.initialConfig);
+                      if (
+                        Option.isNone(config) ||
+                        config.value.environment.capabilities.j5PersonalThreadReads !== true
+                      ) {
                         personId = undefined;
                         return Stream.succeed(undefined);
                       }
-                      const access = yield* session.client[
-                        J5_ACCESS_WS_METHODS.getConnectionAccess
-                      ]({});
-                      const nextPerson = access.kind === "person" ? access.personId : undefined;
-                      const changedPerson = nextPerson !== personId || nextPerson === undefined;
+                      const access = yield* Effect.option(
+                        session.client[J5_ACCESS_WS_METHODS.getConnectionAccess]({}),
+                      );
+                      if (Option.isNone(access) || access.value.kind !== "person") {
+                        personId = undefined;
+                        return Stream.succeed(undefined);
+                      }
+                      const nextPerson = access.value.personId;
+                      const changedPerson = nextPerson !== personId;
                       personId = nextPerson;
                       const updates = subscribe(J5_THREAD_READ_WS_METHODS.subscribe, {}).pipe(
                         Stream.scan(() => EMPTY_MARKERS, applyPersonalReadChange),

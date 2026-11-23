@@ -9,6 +9,7 @@ import {
   type AuthSessionState,
 } from "@t3tools/contracts";
 import {
+  J5ActionError,
   J5_ACCESS_WS_METHODS,
   J5_THREAD_READ_WS_METHODS,
   type PersonalThreadReadChange,
@@ -18,6 +19,7 @@ import * as Clock from "effect/Clock";
 import * as TestClock from "effect/testing/TestClock";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Deferred from "effect/Deferred";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
@@ -320,5 +322,38 @@ it.effect("clears the previous person's cache before a new person's snapshot", (
         Stream.runHead,
       ),
     ).toEqual(Option.some(undefined));
+  }).pipe(Effect.scoped),
+);
+
+it.effect("resubscribes after the connection access handshake fails", () =>
+  Effect.gen(function* () {
+    const { runtime, registry, session } = yield* setup(true);
+    const healthy = Option.getOrThrow(yield* SubscriptionRef.get(session));
+    const attempted = yield* Deferred.make<void>();
+    yield* SubscriptionRef.set(
+      session,
+      Option.some({
+        ...healthy,
+        client: {
+          ...healthy.client,
+          [J5_ACCESS_WS_METHODS.getConnectionAccess]: (() =>
+            Deferred.succeed(attempted, undefined).pipe(
+              Effect.andThen(
+                Effect.fail(new J5ActionError({ code: "disconnected", message: "Disconnected" })),
+              ),
+            )) as RpcSession["client"][typeof J5_ACCESS_WS_METHODS.getConnectionAccess],
+        },
+      }),
+    );
+    const atom = createPersonalThreadReadAtoms(runtime).markersAtom(environmentId);
+    yield* AtomRegistry.mount(registry, atom);
+    yield* Deferred.await(attempted);
+    yield* SubscriptionRef.set(session, Option.some(healthy));
+    expect(
+      yield* AtomRegistry.toStream(registry, atom).pipe(
+        Stream.filter((markers) => markers?.get(threadId) === at),
+        Stream.runHead,
+      ),
+    ).toEqual(Option.some(new Map([[threadId, at]])));
   }).pipe(Effect.scoped),
 );

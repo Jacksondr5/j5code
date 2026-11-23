@@ -16,9 +16,9 @@ import * as PersonAccess from "./PersonAccess.ts";
 import * as ThreadReads from "./ThreadReadState.ts";
 
 const threadId = ThreadId.make("thread:personal-read");
-const completedAt = DateTime.makeUnsafe("2026-10-31T12:00:00.000Z");
+const completedAt = DateTime.makeUnsafe("1969-12-31T23:59:30.000Z");
 const issuedAt = "1970-01-01T00:00:00.000Z";
-const readAt = "2026-10-31T12:01:00.000Z";
+const readAt = "1970-01-01T00:00:00.000Z";
 const owner = {
   scopes: ["orchestration:read", "orchestration:operate"],
   sessionId: AuthSessionId.make("session:owner"),
@@ -109,7 +109,7 @@ it.effect("preserves search-open ranking without advancing the shared read marke
   Effect.gen(function* () {
     const reads = yield* seed;
     const threads = yield* ThreadManagementService;
-    const previous = "2026-10-30T00:00:00.000Z";
+    const previous = "1969-12-31T00:00:00.000Z";
     yield* threads.dispatch({
       type: "thread.visit",
       threadId,
@@ -225,14 +225,14 @@ it.effect(
         commandId: CommandId.make("alice-unread"),
         threadId,
       });
-      assert.equal(DateTime.formatIso(unread.lastVisitedAt), "2026-10-31T11:59:59.999Z");
+      assert.equal(DateTime.formatIso(unread.lastVisitedAt), "1969-12-31T23:59:29.999Z");
       for (const queue of [aliceFeed, phoneFeed])
         assert.deepEqual(yield* Queue.take(queue), { kind: "changed", marker: unread });
       const sql = yield* SqlClient.SqlClient;
       assert.deepEqual(
         yield* sql`SELECT person_id, last_visited_at FROM j5_thread_read ORDER BY person_id`,
         [
-          { person_id: alice.person.personId, last_visited_at: "2026-10-31T11:59:59.999Z" },
+          { person_id: alice.person.personId, last_visited_at: "1969-12-31T23:59:29.999Z" },
           { person_id: bob.person.personId, last_visited_at: readAt },
         ].sort((a, b) => a.person_id.localeCompare(b.person_id)),
       );
@@ -258,7 +258,7 @@ it.effect("replays retries without undoing newer actions and rejects reused comm
     const [snapshot] = yield* reads.subscribe(owner).pipe(Stream.take(1), Stream.runCollect);
     assert.equal(
       snapshot?.kind === "snapshot" && DateTime.formatIso(snapshot.markers[0]!.lastVisitedAt),
-      "2026-10-31T11:59:59.999Z",
+      "1969-12-31T23:59:29.999Z",
     );
     yield* reads.visit(owner, { ...visit, issuedAt, commandId: CommandId.make("new-read") });
     yield* reads.markUnread(owner, unreadInput);
@@ -266,7 +266,7 @@ it.effect("replays retries without undoing newer actions and rejects reused comm
       ...visit,
       issuedAt,
       commandId: CommandId.make("stale-read"),
-      visitedAt: "2026-10-30T00:00:00.000Z",
+      visitedAt: "1969-12-31T00:00:00.000Z",
     });
     const [current] = yield* reads.subscribe(owner).pipe(Stream.take(1), Stream.runCollect);
     assert.equal(
@@ -335,7 +335,7 @@ it.effect("refuses mark unread without a completed run", () =>
   }).pipe(Effect.provide(layer(false))),
 );
 
-it.effect("upgrades migration 57 and migrates existing markers only to the first owner", () =>
+it.effect("upgrades migration 59 and migrates existing markers only to the first owner", () =>
   Effect.gen(function* () {
     yield* seed;
     yield* viewer("Alice");
@@ -351,17 +351,17 @@ it.effect("upgrades migration 57 and migrates existing markers only to the first
     const sql = yield* SqlClient.SqlClient;
     yield* sql`DROP TABLE j5_thread_read`;
     yield* sql`DROP TABLE j5_thread_read_command`;
-    yield* sql`DELETE FROM j5_a2a_migrations WHERE migration_id = 58`;
+    yield* sql`DELETE FROM j5_a2a_migrations WHERE migration_id = 60`;
     const before = yield* sql<{
       readonly migration_id: number;
       readonly name: string;
     }>`SELECT migration_id, name FROM j5_a2a_migrations ORDER BY migration_id`;
-    assert.equal(before.at(-1)?.migration_id, 57);
+    assert.equal(before.at(-1)?.migration_id, 59);
     yield* runJ5A2AMigrations();
     yield* runJ5A2AMigrations();
     assert.deepEqual(
       yield* sql`SELECT migration_id, name FROM j5_a2a_migrations ORDER BY migration_id`,
-      [...before, { migration_id: 58, name: "PersonalThreadReads" }],
+      [...before, { migration_id: 60, name: "PersonalThreadReads" }],
     );
     assert.deepEqual(yield* sql`SELECT * FROM j5_thread_read`, [
       { person_id: reach.person.personId, thread_id: threadId, last_visited_at: readAt },
@@ -427,6 +427,7 @@ it.effect("validates personal command ids and both timestamps at the service bou
       { ...input, issuedAt: "not-a-date" },
       { ...input, issuedAt: "1970-01-02T00:00:00.000Z" },
       { ...input, visitedAt: "not-a-date" },
+      { ...input, visitedAt: "1970-01-02T00:00:00.000Z" },
     ])
       assert.equal(
         (yield* reads.visit(owner, invalid).pipe(Effect.flip)).reason,

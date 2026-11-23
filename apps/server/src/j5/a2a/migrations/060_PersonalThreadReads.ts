@@ -25,6 +25,7 @@ export default Effect.gen(function* () {
     )
   `;
   yield* sql`CREATE INDEX j5_thread_read_command_expiry ON j5_thread_read_command (issued_at)`;
+  yield* sql`CREATE INDEX j5_thread_read_command_person_time ON j5_thread_read_command (person_id, issued_at)`;
   const tables = yield* sql`
     SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'orchestration_v2_projection_threads'
   `;

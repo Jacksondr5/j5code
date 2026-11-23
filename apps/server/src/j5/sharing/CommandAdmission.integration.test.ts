@@ -3,7 +3,6 @@ import { AuthSessionId, CommandId, ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
-import * as TestClock from "effect/testing/TestClock";
 
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import * as ProviderRegistryMock from "../../provider/testUtils/providerRegistryMock.ts";
@@ -31,36 +30,7 @@ const layerFor = (harness: ReturnType<typeof makeHarness>) =>
     Layer.provideMerge(ProviderRegistryMock.layer()),
   );
 
-let counter = 0;
-/** What upstream's palette sends when a thread is opened from a search. */
-const visit = Effect.fn("test.visit")(function* (
-  session: PersonAccess.SessionIdentity,
-  searchQuery: string,
-) {
-  counter += 1;
-  const admission = yield* makeCommandAdmission(() => Effect.void, session);
-  const threads = yield* ThreadManagementService;
-  yield* admission.dispatchCommand(
-    {
-      type: "thread.visit",
-      commandId: CommandId.make(`command:visit:${counter}`),
-      threadId,
-      visitedAt: `2026-10-31T00:00:0${counter}.000Z`,
-      opened: true,
-      searchQuery,
-    },
-    threads.dispatch,
-  );
-  const sql = yield* SqlClient.SqlClient;
-  const [row] = yield* sql<{ readonly opens: string | null; readonly visited: string | null }>`
-    SELECT json_extract(payload_json, '$.opens') AS opens,
-      json_extract(payload_json, '$.lastVisitedAt') AS visited
-    FROM orchestration_v2_projection_threads WHERE thread_id = ${threadId}
-  `;
-  return row!;
-});
-
-it.effect("a shared person's visit moves the read marker and leaves the owner's opens", () => {
+it.effect("refuses legacy read writes before they can affect anyone else's state", () => {
   const harness = makeHarness();
   return Effect.gen(function* () {
     const people = yield* PersonAccess.PersonAccess;
@@ -80,16 +50,6 @@ it.effect("a shared person's visit moves the read marker and leaves the owner's 
       worktreePath: null,
     });
 
-    const owner = yield* visit(
-      {
-        sessionId: AuthSessionId.make("session:owner"),
-        subject: "administrative-bootstrap",
-      },
-      "amberquartz",
-    );
-    assert.isNotNull(owner.opens);
-    assert.include(owner.opens!, "amberquartz");
-
     const collaborator = yield* people.createPerson({ displayName: "Builder" });
     yield* people.setLevel({
       personId: collaborator.personId,
@@ -102,10 +62,23 @@ it.effect("a shared person's visit moves the read marker and leaves the owner's 
       personId: collaborator.personId,
       ceiling: null,
     });
-    // Past upstream's window that folds two opens into one.
-    yield* TestClock.adjust("1 day");
-    const shared = yield* visit({ sessionId: session, subject: "one-time-token" }, "violetvault");
-    assert.strictEqual(shared.opens, owner.opens);
-    assert.isTrue(shared.visited! > owner.visited!);
+    const admission = yield* makeCommandAdmission(() => Effect.void, {
+      sessionId: session,
+      subject: "one-time-token",
+    });
+    const base = { commandId: CommandId.make("command:visit:legacy"), threadId };
+    for (const command of [
+      { ...base, type: "thread.visit", visitedAt: "2026-10-31T00:00:00.000Z", opened: true },
+      { ...base, type: "thread.mark-unread" },
+    ] as const) {
+      const error = yield* admission.dispatchCommand(command, threads.dispatch).pipe(Effect.flip);
+      assert.include(error.message, "Use personal thread read commands.");
+    }
+    const sql = yield* SqlClient.SqlClient;
+    const [row] = yield* sql<{ readonly visited: string | null }>`
+      SELECT json_extract(payload_json, '$.lastVisitedAt') AS visited
+      FROM orchestration_v2_projection_threads WHERE thread_id = ${threadId}
+    `;
+    assert.isNull(row!.visited);
   }).pipe(Effect.provide(layerFor(harness)));
 });

@@ -29,6 +29,8 @@ import {
 export const READ_RETRY_WINDOW_MS = 24 * 60 * 60 * 1000;
 export const READ_RECEIPT_LIMIT = 65_536;
 const FUTURE_SKEW_MS = 60_000;
+const READ_BURST_LIMIT = 120;
+const READ_BURST_WINDOW_MS = 60_000;
 type ReadSession = SessionIdentity & { readonly scopes: ReadonlyArray<string> };
 
 export class ThreadReadStateError extends Schema.TaggedError<ThreadReadStateError>()(
@@ -127,7 +129,10 @@ const make = Effect.gen(function* () {
       return yield* new ThreadReadStateError({ reason: "invalid-request" });
     const now = yield* Clock.currentTimeMillis;
     const issuedAt = DateTime.toEpochMillis(issued.value);
-    if (issuedAt > now + FUTURE_SKEW_MS)
+    if (
+      issuedAt > now + FUTURE_SKEW_MS ||
+      (Option.isSome(visited) && DateTime.toEpochMillis(visited.value) > now + FUTURE_SKEW_MS)
+    )
       return yield* new ThreadReadStateError({ reason: "invalid-request" });
     if (issuedAt < now - READ_RETRY_WINDOW_MS)
       return yield* new ThreadReadStateError({ reason: "expired-request" });
@@ -195,6 +200,13 @@ const make = Effect.gen(function* () {
             const transactionNow = yield* Clock.currentTimeMillis;
             if (issuedAt < transactionNow - READ_RETRY_WINDOW_MS)
               return yield* new ThreadReadStateError({ reason: "expired-request" });
+            const [recent] = yield* sql`
+              SELECT 1 FROM j5_thread_read_command
+              WHERE person_id = ${personId} AND issued_at >= ${transactionNow - READ_BURST_WINDOW_MS}
+              LIMIT 1 OFFSET ${READ_BURST_LIMIT - 1}
+            `;
+            if (recent !== undefined)
+              return yield* new ThreadReadStateError({ reason: "receipt-limit" });
             yield* sql`DELETE FROM j5_thread_read_command WHERE issued_at < ${transactionNow - READ_RETRY_WINDOW_MS}`;
             const [count] = yield* sql<{ readonly total: number }>`
               SELECT COUNT(*) AS total FROM j5_thread_read_command WHERE person_id = ${personId}
@@ -221,7 +233,7 @@ const make = Effect.gen(function* () {
       `;
             yield* sql`
         INSERT INTO j5_thread_read_command (person_id, command_id, request_digest, thread_id, last_visited_at, issued_at)
-        VALUES (${personId}, ${input.commandId}, ${digest}, ${input.threadId}, ${saved!.last_visited_at}, ${issuedAt})
+        VALUES (${personId}, ${input.commandId}, ${digest}, ${input.threadId}, ${saved!.last_visited_at}, ${Math.max(issuedAt, transactionNow)})
       `;
             return {
               threadId: input.threadId,

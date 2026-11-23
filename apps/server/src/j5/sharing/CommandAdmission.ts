@@ -82,8 +82,6 @@ const NARROWED_COMMAND_SCOPES: {
   "thread.unpin": onThread,
   "thread.pin.reorder": onThread,
   "thread.active.reorder": onThread,
-  "thread.visit": onThread,
-  "thread.mark-unread": onThread,
   "thread.metadata.update": onThread,
   "thread.pull-request.link": onThread,
   "thread.pull-request.unlink": onThread,
@@ -244,6 +242,12 @@ export const makeCommandAdmission = Effect.fn("j5.sharing.commandAdmission.makeC
     const checked = Effect.fn("j5.sharing.commandAdmission.checked")(function* (
       command: OrchestrationV2Command,
     ) {
+      if (
+        reach.kind === "person" &&
+        (command.type === "thread.visit" || command.type === "thread.mark-unread")
+      ) {
+        return yield* refused("Use personal thread read commands.");
+      }
       // Whoever can write to a thread may delete its side chats, which upstream also deletes
       // when an unused one is closed (decision 9 of the v0.1.7 advance).
       if (command.type === "thread.delete" && !owner) {
@@ -275,12 +279,6 @@ export const makeCommandAdmission = Effect.fn("j5.sharing.commandAdmission.makeC
         | undefined;
       if (scopeOf === undefined) return yield* refused(NOT_SHARED);
       yield* requireLevel(scopeOf(command), "collaborator");
-      if (command.type === "thread.visit") {
-        // The thread's `opens` rank its owner's Cmd+K, so a narrowed person's open and the query
-        // that found it do not count; their visit still moves the read marker.
-        const { opened: _opened, searchQuery: _searchQuery, ...visit } = command;
-        return visit;
-      }
       return command;
     });
 

@@ -207,6 +207,7 @@ const threadEvent = (
     readonly title?: string;
     readonly parent?: ThreadId;
     readonly opens?: OrchestrationV2ThreadOpens;
+    readonly lastVisitedAt?: DateTime.Utc;
     readonly guestShare?: ThreadGuestShare;
   },
 ): OrchestrationV2DomainEvent => {
@@ -243,7 +244,7 @@ const threadEvent = (
       archivedAt: null,
       settledOverride: null,
       settledAt: null,
-      lastVisitedAt: null,
+      lastVisitedAt: input.lastVisitedAt ?? null,
       ...(input.opens === undefined ? {} : { opens: input.opens }),
       ...(input.guestShare === undefined ? {} : { guestShare: input.guestShare }),
       deletedAt: null,
@@ -1136,7 +1137,7 @@ live(
       score: 2,
       picks: [{ query: "salary review", at: 1 }],
     } satisfies OrchestrationV2ThreadOpens;
-    yield* write("thread.created", { id: opened, projectId: shared, opens });
+    yield* write("thread.created", { id: opened, projectId: shared, opens, lastVisitedAt: NOW });
     const personId = yield* guest({ kind: "thread", threadId: opened });
     const opensSent = (who: keyof typeof SESSIONS) =>
       firstSnapshot(who).pipe(
@@ -1147,6 +1148,11 @@ live(
       opened,
     );
     assert.deepStrictEqual(stored?.opens, opens);
+    assert.deepStrictEqual(stored?.lastVisitedAt, NOW);
+    assert.deepStrictEqual(
+      (yield* firstSnapshot("guest")).threads[0]?.lastVisitedAt,
+      DateTime.makeUnsafe(0),
+    );
     assert.deepStrictEqual(yield* opensSent("guest"), [false]);
     yield* access.setLevel({
       personId,
