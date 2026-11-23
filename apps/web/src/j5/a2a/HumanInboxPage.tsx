@@ -63,12 +63,14 @@ import {
   useAnswerAttachments,
   useRestoredAnswerUploads,
 } from "./AnswerAttachments";
+import { answerSendCallbacks, answerToDeliver, useAnswerSends } from "./answerSends";
 import { answerHumanExchange } from "./humanInboxClient";
 import {
   pruneInboxAnswerDrafts,
   setInboxAnswerText,
   useInboxAnswerTexts,
 } from "./inboxAnswerDrafts";
+import { AnswerSendErrorAlert } from "./AnswerSendErrorAlert";
 import { J5RecordPanel } from "./J5RecordPanel";
 import { OwnerAskAction } from "./OwnerAskAction";
 import { useScopedParticipantLabels } from "./ParticipantIdentitiesClient";
@@ -308,7 +310,8 @@ function OpenInboxItem({
   answer,
   answerText,
   attachments,
-  pendingExchangeId,
+  pending,
+  error,
   onOpenThread,
   senderLabels,
   projectNameOf,
@@ -331,7 +334,9 @@ function OpenInboxItem({
   readonly projectNameOf: ProjectNameOf;
   readonly answerText: string;
   readonly attachments: AnswerAttachmentsState;
-  readonly pendingExchangeId: string | null;
+  /** This ask's answer is being delivered; other asks stay answerable meanwhile. */
+  readonly pending: boolean;
+  readonly error: string | null;
   readonly showEnvironment: boolean;
   readonly onOpenThread: (item: HumanInboxItem) => void;
 }) {
@@ -349,12 +354,14 @@ function OpenInboxItem({
   const support = useAnswerAttachmentSupport(item.environmentId);
   useRestoredAnswerUploads(itemKey, item.environmentId, canAnswer && closed === undefined);
   const addFiles =
-    support === null || closedText !== null || pendingExchangeId !== null
+    support === null || closedText !== null || pending
       ? null
       : (files: ReadonlyArray<File>) =>
           attachments.add(itemKey, item.environmentId, support.maxFileBytes, files);
   const readiness = attachments.ready(itemKey, item.environmentId);
   const waitingOn = "blocked" in readiness ? readiness.blocked : null;
+  const sendable =
+    canAnswer && closedText === null && answerToDeliver(answerText) !== null && waitingOn === null;
   return (
     <li className="border-b border-border/70 last:border-b-0">
       <details
@@ -433,6 +440,7 @@ function OpenInboxItem({
                 id={answerId}
                 onChange={(event) => setInboxAnswerText(itemKey, event.currentTarget.value)}
                 placeholder="Type the answer exactly as it should be delivered"
+                readOnly={!canAnswer || closedText !== null}
                 value={answerText}
                 {...(addFiles === null ? {} : answerAttachmentInputHandlers(addFiles))}
               />
@@ -441,10 +449,10 @@ function OpenInboxItem({
                 attachments={attachments.list(itemKey)}
                 environmentId={item.environmentId}
                 error={attachments.error(itemKey)}
-                onRemove={
-                  pendingExchangeId === null ? (id) => attachments.remove(itemKey, id) : null
-                }
+                onRemove={pending ? null : (id) => attachments.remove(itemKey, id)}
               />
+              {/* As upstream's composer: the error shows, the words stay, and sending again retries. */}
+              {error === null ? null : <AnswerSendErrorAlert message={error} />}
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-1">
                   <OpenThreadButton
@@ -466,18 +474,13 @@ function OpenInboxItem({
                 ) : (
                   <div className="flex flex-wrap items-center justify-end gap-2">
                     <OwnerAskAction
-                      disabled={!item.sourceReady || pendingExchangeId !== null}
+                      disabled={!item.sourceReady || pending}
                       environmentId={item.environmentId}
                       item={item}
                       size="default"
                     />
                     <Button
-                      disabled={
-                        !canAnswer ||
-                        pendingExchangeId !== null ||
-                        answerText.length === 0 ||
-                        waitingOn !== null
-                      }
+                      disabled={!sendable || pending}
                       title={
                         canAnswer
                           ? (waitingOn ?? undefined)
@@ -486,7 +489,7 @@ function OpenInboxItem({
                       onClick={() => answer(item)}
                       type="button"
                     >
-                      {pendingExchangeId === scopedInboxItemKey(item) ? "Delivering…" : "Answer"}
+                      {pending ? "Delivering…" : "Answer"}
                     </Button>
                   </div>
                 )}
@@ -613,7 +616,7 @@ export function HumanInboxPage() {
   const personScopes = JSON.stringify(
     openSources.sources.map((source) => [source.environmentId, source.data?.personId ?? null]),
   );
-  const [pendingExchangeId, setPendingExchangeId] = useState<string | null>(null);
+  const sends = useAnswerSends();
   // An item that closed while the person was answering it stays in place with their words. It is
   // kept in the render it closes in, so its open row is never unmounted and drawn again closed;
   // `closedWith` is the answered list as it was then, to tell a later read of it.
@@ -659,7 +662,6 @@ export function HumanInboxPage() {
         closedWith.get(key) !== answeredSources && source?.status === "ready" && !source.refreshing,
     };
   };
-  const [error, setError] = useState<string | null>(null);
   const answerAttempts = useRef(new Map<string, HumanInboxAnswerAttempt>());
   useInboxRefresh();
   const runtimeRequests = useCrewRuntimeRequests();
@@ -729,9 +731,11 @@ export function HumanInboxPage() {
 
   const answer = async (item: HumanInboxItem) => {
     const itemKey = scopedInboxItemKey(item);
-    const message = answers[itemKey] ?? "";
+    const message = answerToDeliver(answers[itemKey] ?? "");
     const readiness = answerAttachments.ready(itemKey, item.environmentId);
-    if (message.length === 0 || !item.sourceReady || "blocked" in readiness) return;
+    // A kept ask has closed (AC17); its words stay to read, not to send.
+    if (message === null || !item.sourceReady || kept.has(itemKey) || "blocked" in readiness)
+      return;
     await submitHumanInboxAnswer({
       item,
       message,
@@ -741,9 +745,7 @@ export function HumanInboxPage() {
       send: answerHumanExchange,
       refresh,
       notifyChanged: notifyHumanInboxChanged,
-      onAccepted: () => answerAttachments.delivered(itemKey),
-      setPendingExchangeId,
-      setError,
+      ...answerSendCallbacks(sends, itemKey, () => answerAttachments.delivered(itemKey)),
     });
   };
 
@@ -811,29 +813,11 @@ export function HumanInboxPage() {
               </ul>
             ) : null}
 
-            {error ? (
-              <div
-                aria-live="polite"
-                className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-md bg-destructive/8 px-4 py-3 text-sm text-destructive-foreground"
-              >
-                <span>{error}</span>
-                <Button
-                  onClick={() => void refresh().catch(() => undefined)}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  Try again
-                </Button>
-              </div>
-            ) : null}
-
             <CrewRuntimeRequestsSection requests={runtimeRequests} onOpenThread={openCrewThread} />
             <NativeQuestionInboxSection questions={nativeQuestions} onOpenThread={openCrewThread} />
 
             {complete &&
             !loading &&
-            error === null &&
             shownItems.length === 0 &&
             cleanups.inPlace.length === 0 &&
             runtimeRequests.length === 0 &&
@@ -858,7 +842,8 @@ export function HumanInboxPage() {
                     item={item}
                     key={scopedInboxItemKey(item)}
                     onOpenThread={openThread}
-                    pendingExchangeId={pendingExchangeId}
+                    pending={sends.isPending(scopedInboxItemKey(item))}
+                    error={sends.errorOf(scopedInboxItemKey(item))}
                     senderLabels={senderLabels}
                     projectNameOf={projectNameOf}
                     showEnvironment={showEnvironment}

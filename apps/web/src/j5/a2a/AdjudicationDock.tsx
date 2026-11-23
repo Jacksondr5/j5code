@@ -30,7 +30,11 @@ import {
   useAnswerAttachments,
   useRestoredAnswerUploads,
 } from "./AnswerAttachments";
+import { AnswerSendErrorAlert } from "./AnswerSendErrorAlert";
 import { J5RecordPanel } from "./J5RecordPanel";
+import { answerToDeliver, useAnswerSends } from "./answerSends";
+import { ownFileDropTargetProps } from "./answerFileDrop";
+import { useClaimedStashShortcut } from "./claimedStashShortcut";
 import { OwnerAskAction } from "./OwnerAskAction";
 import { answerHumanExchange, type HumanInboxItem } from "./humanInboxClient";
 import { setInboxAnswerText, useInboxAnswerTexts } from "./inboxAnswerDrafts";
@@ -74,16 +78,14 @@ export function AdjudicationDock(props: {
   const wordsOf = (item: HumanInboxItem) => texts[keyOf(item)] ?? "";
   const [expanded, setExpanded] = useState<ReadonlySet<string>>(new Set());
   const [picked, setPicked] = useState<string | null>(null);
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const sends = useAnswerSends();
   const [refused, setRefused] = useState<ReadonlyArray<HumanInboxItem>>([]);
-  const attempt = useRef<{
-    exchangeId: string;
-    message: string;
-    attachmentIds: string;
-    clientRequestId: string;
-  } | null>(null);
+  // By exchange, so a send on one ask never replaces another's request id.
+  const attempts = useRef(
+    new Map<string, { message: string; attachmentIds: string; clientRequestId: string }>(),
+  );
   const support = useAnswerAttachmentSupport(environmentId);
+  const claimStashShortcut = useClaimedStashShortcut();
 
   const asks = adjudicationAsks({
     items: query.data?.items ?? [],
@@ -107,7 +109,10 @@ export function AdjudicationDock(props: {
   const { shown, others, next: nextAsk } = view;
   const isOpen = (query.data?.items ?? []).some((item) => item.exchangeId === shown.exchangeId);
   const answerKey = keyOf(shown);
-  const message = wordsOf(shown);
+  const words = wordsOf(shown);
+  const message = answerToDeliver(words);
+  const pending = sends.isPending(answerKey);
+  const error = sends.errorOf(answerKey);
   const urgency = urgencyBadge[shown.urgency];
   const openFor = formatElapsedDurationLabel(shown.openedAt);
   const threadRef = threadId == null ? undefined : scopeThreadRef(environmentId, threadId);
@@ -120,28 +125,35 @@ export function AdjudicationDock(props: {
       : (files: ReadonlyArray<File>) =>
           attachments.add(answerKey, environmentId, support.maxFileBytes, files);
   const answerId = `adjudication-answer-${encodeURIComponent(shown.exchangeId)}`;
+  const sendable = isOpen && message !== null && waitingOn === null;
+  // The whole ask takes a dropped file while it can, so the thread never takes it too; when it
+  // can't, a drop on it goes to the thread as anywhere else.
+  const fileInput = addFiles === null ? null : answerAttachmentInputHandlers(addFiles);
+  const dropTarget =
+    fileInput === null
+      ? {}
+      : { ...ownFileDropTargetProps, onDragOver: fileInput.onDragOver, onDrop: fileInput.onDrop };
 
   const answer = async () => {
-    if (message === "" || "blocked" in readiness) return;
+    if (!sendable || message === null || "blocked" in readiness) return;
     const attachmentIds = readiness.attachments.map((attachment) => attachment.id).join("\n");
     // A retry of the same words and files reuses its request id, so a lost reply cannot answer twice.
+    const previous = attempts.current.get(shown.exchangeId);
     const request =
-      attempt.current?.exchangeId === shown.exchangeId &&
-      attempt.current.message === message &&
-      attempt.current.attachmentIds === attachmentIds
-        ? attempt.current
-        : { exchangeId: shown.exchangeId, message, attachmentIds, clientRequestId: randomUUID() };
-    attempt.current = request;
-    setPending(true);
-    setError(null);
+      previous?.message === message && previous.attachmentIds === attachmentIds
+        ? previous
+        : { message, attachmentIds, clientRequestId: randomUUID() };
+    attempts.current.set(shown.exchangeId, request);
+    sends.setPending(answerKey, true);
+    sends.setError(answerKey, null);
     try {
       await answerHumanExchange(environmentId, {
-        exchangeId: request.exchangeId,
+        exchangeId: shown.exchangeId,
         message: request.message,
         ...(readiness.attachments.length === 0 ? {} : { attachments: readiness.attachments }),
         clientRequestId: request.clientRequestId,
       });
-      attempt.current = null;
+      attempts.current.delete(shown.exchangeId);
       attachments.delivered(answerKey);
       notifyHumanInboxChanged(environmentId);
       query.refresh();
@@ -150,10 +162,13 @@ export function AdjudicationDock(props: {
         setRefused((current) => [...current, shown]);
         query.refresh();
       } else {
-        setError(cause instanceof Error ? cause.message : "Could not deliver the answer.");
+        sends.setError(
+          answerKey,
+          cause instanceof Error ? cause.message : "Could not deliver the answer.",
+        );
       }
     }
-    setPending(false);
+    sends.setPending(answerKey, false);
   };
 
   const questionText = (text: string) => (
@@ -170,7 +185,7 @@ export function AdjudicationDock(props: {
   return (
     <ComposerBanner.Attachment>
       <ComposerBanner.Root density="comfortable" data-testid="adjudication-dock">
-        <div className="flex flex-col gap-2 px-2 py-1">
+        <div className="flex flex-col gap-2 px-2 py-1" {...dropTarget} {...claimStashShortcut}>
           <div className="flex flex-wrap items-center gap-2 text-muted-foreground">
             <span>Question for you</span>
             {openFor ? <span>· open {openFor}</span> : null}
@@ -218,8 +233,9 @@ export function AdjudicationDock(props: {
             id={answerId}
             onChange={(event) => setInboxAnswerText(answerKey, event.currentTarget.value)}
             placeholder="Type the answer exactly as it should be delivered"
-            value={message}
-            {...(addFiles === null ? {} : answerAttachmentInputHandlers(addFiles))}
+            readOnly={!isOpen}
+            value={words}
+            {...(fileInput === null ? {} : { onPaste: fileInput.onPaste })}
           />
           <AnswerAttachmentList
             answerKey={answerKey}
@@ -228,11 +244,8 @@ export function AdjudicationDock(props: {
             error={attachments.error(answerKey)}
             onRemove={pending ? null : (id) => attachments.remove(answerKey, id)}
           />
-          {error ? (
-            <p className="text-sm text-destructive" role="alert">
-              {error}
-            </p>
-          ) : null}
+          {/* As upstream's composer: the error shows, the words stay, and sending again retries. */}
+          {error === null ? null : <AnswerSendErrorAlert message={error} />}
           <div className="flex items-center justify-end gap-2">
             {addFiles === null ? null : (
               <AnswerAttachButton
@@ -253,7 +266,7 @@ export function AdjudicationDock(props: {
             ) : null}
             {isOpen ? (
               <Button
-                disabled={pending || message === "" || waitingOn !== null}
+                disabled={!sendable || pending}
                 onClick={() => void answer()}
                 size="sm"
                 title={waitingOn ?? undefined}
