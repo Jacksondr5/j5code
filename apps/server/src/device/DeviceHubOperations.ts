@@ -27,6 +27,9 @@ const runsOnXcode26Runtime = (version: string) => Number(/^iOS (\d+)/.exec(versi
 const DEFAULT_DISPLAY_SCREENSHOT = `f=$(mktemp -t t3-screenshot) || exit 1
 trap 'rm -f "$f"' 0
 xcrun simctl io "$1" screenshot --type=png "$f" >/dev/null && base64 -i "$f"`;
+// The hub waits up to 30 seconds for a stopped emulator to leave adb, after the
+// kill itself; a shorter wait reports a shutdown that is still completing as failed.
+const SHUTDOWN_TIMEOUT = Duration.seconds(45);
 
 const HubDevice = Schema.Struct({
   id: Schema.String,
@@ -294,7 +297,9 @@ export const makeDeviceHubOperations = (options: {
     function* (device) {
       const postShutdown = (path: string, body: Record<string, string>) =>
         postJson(path, body, "shutdown").pipe(
-          Effect.flatMap((request) => hubJson(request, HubActionResult, "shutdown")),
+          Effect.flatMap((request) =>
+            hubJson(request, HubActionResult, "shutdown", SHUTDOWN_TIMEOUT),
+          ),
           Effect.flatMap((result) =>
             result.ok
               ? Effect.void
