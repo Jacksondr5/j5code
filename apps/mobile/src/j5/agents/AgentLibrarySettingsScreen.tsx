@@ -8,7 +8,7 @@ import { PersonaSheet, type PersonaSheetActionRow } from "./PersonaSheet";
 import { AgentFolderPickerModal } from "./AgentFolderPickerModal";
 import { useSettingsFormNavigation } from "./SettingsFormScreen";
 import { sendWhenReconnected } from "./watchEnvironmentSessions";
-import { personaRowMarker, personaSheetActions } from "./personaSheet";
+import { personaRowMarker, personaSheetActions } from "./personaSheetActions";
 import { Menu } from "../../components/ui/Menu";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import {
