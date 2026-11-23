@@ -36,9 +36,9 @@ A small re-test you run yourself is fine; say it was yours.
 File each bug the test finds outside your change as an issue, after checking
 that the base has it too.
 
-Put the report's videos in the PR description beside the screenshots. Once
-the description is saved, check each plays for a signed-out viewer: this must
-print `200 video/mp4`.
+Put the report's screenshots and videos in the PR description. Once the
+description is saved, check each loads for a signed-out viewer: this must
+print `200 image/png` (or another `image/` type) or `200 video/mp4`.
 
 ```bash
 curl -sL -o /dev/null -w '%{http_code} %{content_type}\n' "<url>"
@@ -282,54 +282,32 @@ remote branch, such as `origin/j5/main`: a local branch can be behind. Open
 each server in its own tab. Capture at 1280x800 as test-t3-app describes.
 Every pair shows the full screen, plus a crop when the change is small:
 reviewers judge each "after" screen as a whole, not only the part that
-changed. Then upload:
+changed. Then upload them as described in "Upload", below.
 
-```bash
-node scripts/j5/pr-evidence.ts <pr> --pair "<caption>" <before.png> <after.png>
-```
-
-Repeat `--pair` for each state. For a state the change adds, use
-`--new "<caption>" <after.png>`. It prints the before/after table for the PR
-description. Run `rebuild` with no flag when you are done, which removes the
-base checkout. It refuses if you edited a file there, so do not.
+Run `rebuild` with no flag when you are done, which removes the base
+checkout. It refuses if you edited a file there, so do not.
 
 ## PR videos
 
 Motion, timing, or an interaction sequence needs a video. Record base and head
 with the same steps, each on its own server as for screenshots.
 
-1. Resize the tab to 1280x800, call `preview_recording_start`, do the steps,
-   then call `preview_recording_stop`. It returns an MP4 in the server's data
-   directory. Copy it out under a name that says what it shows: GitHub shows
-   the name above the player.
-2. Open the PR in a new tab with `preview_open`, passing the "GitHub Video
-   Upload" profile from `preview_status` as `profileId`. If there is no PR
-   yet, open its tracking issue. That profile is signed in to the developer's
-   GitHub account: open nothing else under it.
-3. Call `preview_act` with `action: "upload"`, `locator: "#fc-new_comment_field"`
-   and the MP4's path in `paths`. GitHub uploads it and writes a
-   `https://github.com/user-attachments/assets/<id>` URL into the comment
-   box. `preview_wait_for` cannot see text in that box, so read
-   `document.getElementById("new_comment_field").value` with
-   `preview_evaluate` until the URL is there.
-4. Empty the box (set its value to `""` and dispatch an `input` event), never
-   submit it, and close the tab.
-5. Check GitHub renders the URL as a player. This must print `<video`:
+Resize the tab to 1280x800, call `preview_recording_start`, do the steps,
+then call `preview_recording_stop`. It returns an MP4 in the server's data
+directory. Copy it out under a name that says what it shows: GitHub shows the
+name above the player. Then upload it as described in "Upload".
 
-   ```bash
-   printf '%s' "<url>" | jq -Rs '{text: ., mode: "gfm", context: "Jacksondr5/j5code"}' \
-     | gh api markdown --input - | grep -o '<video'
-   ```
+## Upload
 
-   This checks rendering only. The URL refuses signed-out requests until a
-   posted PR or comment contains it, so whoever opens the PR checks playback
-   (see "Ask for a test"). `curl -sI` gets a 403 even then; use a GET.
+Screenshots and videos go up as GitHub attachments, through the PR's comment
+box in the Browser panel, without posting the comment. The
+[`pr-evidence` skill](https://github.com/Jacksondr5/jstack/tree/main/skills/pr-evidence)
+has the steps. Never push them to a branch: a branch is public, browsable and
+copied into every fork.
 
-6. Put each URL in the report with its caption. In the PR description, each
-   URL goes on a line of its own, which GitHub renders as a player.
-
-If the profile is missing, or GitHub shows it signed out, stop and ask the
-developer to sign in to it. Never sign in yourself.
+Put each URL in the report with its caption. The URLs refuse signed-out
+requests until a posted PR or comment contains them, so whoever opens the PR
+checks them (see "Ask for a test").
 
 ## A server for the developer
 
