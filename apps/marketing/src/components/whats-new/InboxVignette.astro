@@ -1,0 +1,475 @@
+---
+import Icon from "./Icon.astro";
+import Mark from "./Mark.astro";
+
+/**
+ * The Inbox with the asking agent's panel beside it (apps/web/src/j5/a2a/HumanInboxPage.tsx,
+ * InboxThreadPanel.tsx); a sheet over it in a narrow window, as in the app. Both links are live.
+ * The reply box is drawn plain: its look changes when it becomes the composer's editor.
+ */
+const tree = [
+  { name: "src", folder: true, open: true, depth: 0 },
+  { name: "cli.js", depth: 1 },
+  { name: "todo.js", depth: 1 },
+  { name: "test", folder: true, depth: 0 },
+  { name: "package.json", depth: 0 },
+  { name: "README.md", depth: 0, current: true },
+];
+---
+
+<div class="app app--window inbox" data-vignette data-inbox data-panel="open">
+  <div class="inbox__page">
+    <div class="topbar-a"><span>Inbox</span></div>
+    <div class="inbox__main">
+      <div class="inbox__head">
+        <div>
+          <h4 class="inbox__title">Inbox</h4>
+          <p class="inbox__count">2 questions open</p>
+        </div>
+        <span class="btn-a btn-a--ghost btn-a--sm" aria-hidden="true"><Icon name="refresh-cw" />Refresh</span>
+      </div>
+
+      <ol class="inbox__list">
+        <li>
+          <div class="inbox__summary">
+            <span class="badge-a badge-a--md badge-a--warning inbox__badge">Soon</span>
+            <div class="inbox__lines">
+              <p class="inbox__from"><b>Release checker</b><i>·</i>todo-app<i>·</i>open 12m</p>
+              <p class="inbox__ask">Merge the sort-order fix now?</p>
+            </div>
+            <Icon name="chevron-right" class="inbox__chevron" />
+          </div>
+          <div class="inbox__body">
+            <p class="inbox__message">
+              PR #42 moves completed todos to the bottom of the list. The change is small, but the CLI's
+              <code>list</code> output order changes with it. Merge now, or hold it for the 0.4 release?
+            </p>
+            <p class="inbox__message">
+              <button type="button" class="inbox__link" data-inbox-open="pr" aria-pressed="true">
+                <Mark name="github" />Sort completed todos last #42
+              </button>
+            </p>
+            <textarea class="inbox__reply" rows="3" aria-label="Answer Merge the sort-order fix now?" placeholder="Type the answer exactly as it should be delivered" data-inbox-reply>Merge it now, and add a line to the changelog about the new order.</textarea>
+            <div class="inbox__actions" aria-hidden="true">
+              <span class="btn-a btn-a--ghost btn-a--sm">Open thread<Icon name="arrow-up-right" class="ico-35" /></span>
+              <span class="btn-a btn-a--ghost btn-a--sm inbox__attach"><Icon name="paperclip" /></span>
+              <span class="btn-a btn-a--primary inbox__answer" data-inbox-answer>Answer</span>
+            </div>
+          </div>
+        </li>
+        <li>
+          <div class="inbox__summary">
+            <span class="badge-a badge-a--md badge-a--secondary inbox__badge">FYI</span>
+            <div class="inbox__lines">
+              <p class="inbox__from"><b>Docs writer</b><i>·</i>todo-app<i>·</i>open 40m</p>
+              <p class="inbox__ask">Rename the <code>done</code> flag in the README?</p>
+            </div>
+            <Icon name="chevron-right" class="inbox__chevron" />
+          </div>
+          <div class="inbox__body">
+            <p class="inbox__message">
+              The README still calls it <code>done</code>, but the code says <code>completed</code> everywhere. OK to
+              rename it in the docs?
+              <button type="button" class="inbox__link inbox__link--file" data-inbox-open="file" aria-pressed="false">
+                <Icon name="file-text" />README.md · L24
+              </button>
+            </p>
+            <textarea class="inbox__reply" rows="3" aria-label="Answer Rename the done flag in the README?" placeholder="Type the answer exactly as it should be delivered" data-inbox-reply></textarea>
+            <div class="inbox__actions" aria-hidden="true">
+              <span class="btn-a btn-a--ghost btn-a--sm">Open thread<Icon name="arrow-up-right" class="ico-35" /></span>
+              <span class="btn-a btn-a--ghost btn-a--sm inbox__attach"><Icon name="paperclip" /></span>
+              <span class="btn-a btn-a--primary inbox__answer inbox__answer--off" data-inbox-answer>Answer</span>
+            </div>
+          </div>
+        </li>
+      </ol>
+    </div>
+  </div>
+
+  <div class="inbox__panel seq" style="--at: 0.5s">
+    <div data-inbox-panel="pr">
+      <div class="tabs-a">
+        <span class="tab-a" aria-current="true"><Icon name="git-pull-request-arrow" class="t-open" />#42</span>
+        <span class="tab-a"><Icon name="file-diff" />Diff</span>
+        <span class="tab-a"><Icon name="files" />Files</span>
+        <span class="inbox__controls">
+          <Icon name="maximize-2" />
+          <button type="button" class="btn-a btn-a--ghost btn-a--icon-xs" data-inbox-close aria-label="Close the panel"><Icon name="panel-right" /></button>
+        </span>
+      </div>
+      <p class="inbox__thread"><b>Release checker</b><i>·</i><span class="truncate">Sort-order fix</span></p>
+      <div class="inbox__pr">
+        <p class="inbox__pr-top">
+          <span class="t-muted">harbor/todo-app</span>
+          <span class="t-open-text inbox__pr-key">#42<Icon name="external-link" /></span>
+          <span class="btn-a btn-a--outline btn-a--xs inbox__pr-state"><Icon name="git-pull-request-arrow" class="t-open" />Open</span>
+        </p>
+        <h4 class="inbox__pr-title">Sort completed todos last</h4>
+        <p class="inbox__pr-meta">
+          <span class="avatar-a avatar-a--sm" style="--av: #3b8fae">r</span>release-checker<i>·</i>updated 12m ago
+        </p>
+        <p class="inbox__pr-branch">
+          <span class="mono">main</span><Icon name="arrow-left" class="ico-3" /><span class="mono">fix/sort-completed</span>
+          <span class="inbox__pr-files"><Icon name="file-diff" class="ico-35" />3 files <b class="t-open-text">+38</b> <b class="inbox__del">−12</b></span>
+        </p>
+        <p class="inbox__pr-tabs">
+          <span class="inbox__segments"><b>Summary</b><span>Timeline</span><span>Code</span></span>
+          <span class="inbox__checks"><Icon name="circle-check" class="ico-35 t-open" />5 of 5 passing</span>
+        </p>
+        <p class="inbox__pr-heading">Description</p>
+        <p class="inbox__pr-body">
+          Completed todos now sort after open ones, in the list view and in <code>todo list</code>. Order within each
+          group is unchanged.
+        </p>
+      </div>
+    </div>
+
+    <div data-inbox-panel="file" hidden>
+      <div class="tabs-a">
+        <span class="tab-a" aria-current="true"><Icon name="file-text" />README.md</span>
+        <span class="tab-a"><Icon name="plus" /></span>
+        <span class="inbox__controls">
+          <Icon name="maximize-2" />
+          <button type="button" class="btn-a btn-a--ghost btn-a--icon-xs" data-inbox-close aria-label="Close the panel"><Icon name="panel-right" /></button>
+        </span>
+      </div>
+      <p class="inbox__thread"><b>Docs writer</b><i>·</i><span class="truncate">README cleanup</span></p>
+      <p class="inbox__crumbs">todo-app<Icon name="chevron-right" class="ico-3" /><span>README.md</span></p>
+      <div class="inbox__file">
+        <ol class="inbox__code mono">
+          <li>## Marking a todo finished</li>
+          <li>&nbsp;</li>
+          <li>Each todo is one line in `todos.json`.</li>
+          <li class="inbox__line">Set `done: true` and it moves to the end.</li>
+          <li>&nbsp;</li>
+          <li>```sh</li>
+          <li>todo complete 3</li>
+          <li>```</li>
+        </ol>
+        <div class="inbox__tree" aria-hidden="true">
+          <p class="inbox__tree-search"><Icon name="search" class="ico-35" />Search files</p>
+          {
+            tree.map((entry) => (
+              <p class:list={["inbox__tree-row", { "inbox__tree-row--current": entry.current }]} style={`--depth: ${entry.depth}`}>
+                <Icon
+                  name={entry.folder ? "chevron-right" : "file-text"}
+                  class:list={["ico-35", { "inbox__tree-open": entry.open }]}
+                />
+                {entry.name}
+              </p>
+            ))
+          }
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  .inbox {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    min-height: 540px;
+  }
+
+  .inbox[data-panel="closed"] { grid-template-columns: minmax(0, 1fr); }
+  .inbox[data-panel="closed"] .inbox__panel { display: none; }
+
+  .inbox i { font-style: normal; opacity: 0.6; margin: 0 6px; }
+  .inbox code {
+    padding: 1px 4px;
+    border-radius: 4px;
+    background: var(--a-accent);
+    font: 0.92em var(--a-mono);
+  }
+
+  .inbox__main { padding: 8px 28px 24px; }
+
+  .inbox__head {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 16px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--a-border);
+  }
+
+  .inbox__title { font-size: 24px; font-weight: 600; letter-spacing: -0.025em; line-height: 1.33; }
+  .inbox__count { margin-top: 4px; font-size: 14px; color: var(--a-muted-fg); }
+
+  .inbox__list { list-style: none; }
+  .inbox__list > li + li { border-top: 1px solid color-mix(in srgb, var(--a-border) 70%, transparent); }
+
+  .inbox__summary {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+    padding: 16px 4px;
+  }
+
+  .inbox__badge { margin-top: 2px; text-transform: uppercase; letter-spacing: 0.025em; }
+  .inbox__lines { min-width: 0; flex: 1; }
+  .inbox__from { font-size: 12px; color: var(--a-muted-fg); }
+  .inbox__from b { font-weight: 500; color: color-mix(in srgb, var(--a-fg) 80%, transparent); }
+  .inbox__ask { margin-top: 4px; font-size: 16px; font-weight: 600; line-height: 1.375; text-wrap: pretty; }
+  .inbox__ask code { font-weight: 500; }
+  .inbox :global(.inbox__chevron) { margin-top: 4px; color: var(--a-muted-fg); rotate: 90deg; }
+
+  .inbox__body {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 16px 4px 20px 0;
+    margin-left: 96px;
+    border-top: 1px solid color-mix(in srgb, var(--a-border) 50%, transparent);
+  }
+
+  .inbox__message { font-size: 14px; line-height: 1.625; color: color-mix(in srgb, var(--a-fg) 90%, transparent); }
+
+  /* ChatMarkdown's links: link-blue, with a dotted underline on the one whose tab is open. */
+  .inbox__link {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    border: 0;
+    background: none;
+    font: 500 14px/1.625 var(--a-font);
+    color: var(--a-primary);
+    text-align: left;
+    text-decoration: underline dotted transparent;
+    text-underline-offset: 3px;
+    cursor: pointer;
+    transition: text-decoration-color 0.15s ease;
+  }
+
+  .inbox__link :global(.ico) { width: 14px; height: 14px; color: var(--a-fg); }
+  .inbox__link:is(:hover, [aria-pressed="true"]) { text-decoration-color: currentColor; }
+
+  /* A file link is a chip: the file's icon, then its name and line in the file tint. */
+  .inbox__link--file {
+    margin-left: 4px;
+    color: var(--inbox-file);
+    font-weight: 600;
+    text-decoration: none;
+  }
+
+  .inbox__link--file :global(.ico) { color: var(--a-muted-fg); }
+
+  .inbox {
+    --inbox-file: oklch(45% 0.085 224.283);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    .inbox {
+      --inbox-file: oklch(78.9% 0.154 211.53);
+    }
+  }
+
+  .inbox__reply {
+    width: 100%;
+    min-height: 76px;
+    margin-top: 6px;
+    padding: 8px 11px;
+    border: 1px solid var(--a-input);
+    border-radius: 8px;
+    background: var(--a-control);
+    box-shadow: var(--a-shadow);
+    font: 400 14px/1.5 var(--a-font);
+    color: var(--a-fg);
+    resize: none;
+  }
+
+  .inbox__reply:focus-visible { outline: 2px solid var(--a-primary); outline-offset: -1px; }
+  .inbox__reply::placeholder { color: var(--a-muted-fg); }
+  .inbox__actions { display: flex; align-items: center; gap: 4px; }
+  .inbox .inbox__attach { width: 28px; padding: 0; }
+  .inbox .inbox__attach :global(.ico) { width: 16px; height: 16px; margin: 0; }
+  .inbox__answer { margin-left: auto; }
+  .inbox__answer--off { opacity: 0.64; }
+
+  .inbox__panel {
+    min-width: 0;
+    border-left: 1px solid var(--a-border);
+    background: var(--a-bg);
+  }
+
+  .inbox__panel [hidden] { display: none; }
+  .inbox__controls {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+    padding-right: 4px;
+    color: var(--a-muted-fg);
+  }
+
+  /* InboxThreadPanelHeader: whose panel this is. */
+  .inbox__thread {
+    display: flex;
+    align-items: center;
+    height: 32px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--a-border);
+    font-size: 12px;
+    color: var(--a-muted-fg);
+  }
+
+  .inbox__thread b { font-weight: 500; color: color-mix(in srgb, var(--a-fg) 80%, transparent); white-space: nowrap; }
+
+  .inbox__pr { padding: 12px 16px 20px; }
+  .inbox__pr-top { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; }
+  .inbox__pr-key { display: inline-flex; align-items: center; gap: 2px; }
+  .inbox__pr-key :global(.ico) { width: 10px; height: 10px; }
+  .inbox__pr-state { margin-left: auto; }
+  .inbox__pr-title { margin-top: 6px; font-size: 16px; font-weight: 600; line-height: 1.375; }
+  .inbox__pr-meta { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 12px; color: var(--a-muted-fg); }
+  .inbox__pr-meta i { margin: 0; }
+
+  .inbox__pr-branch {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin-top: 14px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid var(--a-border);
+    font-size: 12px;
+    color: var(--a-muted-fg);
+  }
+
+  .inbox__pr-files { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; }
+  .inbox__pr-files b { font-weight: 500; }
+  .inbox__del { color: var(--a-destructive-text); }
+
+  .inbox__pr-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    padding: 10px 0;
+    font-size: 12px;
+    color: var(--a-muted-fg);
+  }
+
+  .inbox__segments { display: inline-flex; gap: 2px; padding: 2px; border-radius: 8px; background: var(--a-accent); font-size: 13px; }
+  .inbox__segments > * { padding: 3px 10px; border-radius: 6px; font-weight: 500; }
+  .inbox__segments b { background: var(--a-card); color: var(--a-fg); box-shadow: var(--a-shadow); }
+  .inbox__checks { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; white-space: nowrap; }
+  .inbox__pr-heading { margin-top: 6px; font-size: 12px; font-weight: 500; color: var(--a-muted-fg); }
+  .inbox__pr-body { margin-top: 8px; font-size: 14px; line-height: 1.625; }
+
+  .inbox__crumbs {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 32px;
+    padding: 0 14px;
+    font-size: 12px;
+    color: var(--a-muted-fg);
+  }
+
+  .inbox__crumbs span { color: var(--a-fg); }
+
+  /* The file tab: the file on the left, the workspace's tree on the right. */
+  .inbox__file {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 168px;
+    border-top: 1px solid var(--a-border);
+  }
+
+  .inbox__code {
+    min-width: 0;
+    padding: 8px 0 20px;
+    font-size: 12.5px;
+    line-height: 20px;
+    list-style: none;
+    counter-reset: line 20;
+  }
+
+  .inbox__code li {
+    display: flex;
+    gap: 14px;
+    padding: 0 12px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    counter-increment: line;
+  }
+
+  .inbox__code li::before {
+    content: counter(line);
+    flex: 0 0 2ch;
+    text-align: right;
+    color: var(--a-muted-fg);
+  }
+
+  .inbox__code .inbox__line { background: color-mix(in srgb, var(--a-primary) 12%, transparent); }
+
+  .inbox__tree {
+    padding: 8px 6px 16px;
+    border-left: 1px solid var(--a-border);
+    font-size: 13px;
+  }
+
+  .inbox__tree-search {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 28px;
+    padding: 0 8px;
+    margin-bottom: 4px;
+    color: var(--a-muted-fg);
+  }
+
+  .inbox__tree-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 24px;
+    padding-left: calc(8px + var(--depth) * 16px);
+    border-radius: 6px;
+  }
+
+  .inbox__tree-row :global(.ico) { color: var(--a-muted-fg); }
+  .inbox__tree-row :global(.inbox__tree-open) { rotate: 90deg; }
+  .inbox__tree-row--current { background: var(--a-accent); font-weight: 500; }
+
+  @media (max-width: 860px) {
+    .inbox { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+    .inbox__main { padding: 4px 14px 16px; }
+    .inbox :global(.topbar-a) { padding-inline: 14px; height: 44px; }
+    .inbox__body { margin-left: 0; }
+    .inbox__summary { gap: 12px; }
+    .inbox :global(.tabs-a) { height: 44px; }
+
+    /* Below the app's own breakpoint the panel is a sheet over the Inbox, opened by a link. */
+    /* The sheet slides in when a link opens it; it takes no part in the scroll-in sequence. */
+    .inbox .inbox__panel.seq {
+      position: absolute;
+      inset: 0 0 0 10%;
+      z-index: 2;
+      overflow-y: auto;
+      box-shadow:
+        0 0 0 100vmax rgb(0 0 0 / 28%),
+        -16px 0 40px -20px rgb(0 0 0 / 50%);
+      opacity: 1;
+      animation: inbox-sheet 0.28s cubic-bezier(0.2, 0.7, 0.2, 1);
+    }
+
+    .inbox:not([data-sheet]) .inbox__panel { display: none; }
+    /* With the sheet shut, no link's tab is showing. */
+    .inbox:not([data-sheet]) .inbox__link[aria-pressed="true"]:not(:hover) { text-decoration-color: transparent; }
+    .inbox { scroll-margin-top: 64px; }
+    .inbox__file { grid-template-columns: minmax(0, 1fr); }
+    .inbox__tree { display: none; }
+  }
+
+  @keyframes inbox-sheet {
+    from {
+      translate: 100% 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .inbox .inbox__panel.seq { animation: none; }
+  }
+</style>

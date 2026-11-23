@@ -1,0 +1,80 @@
+/*
+ * Vignette motion. The markup is the finished state. lib/whatsNew.ts adds .wn-motion (only when
+ * motion is allowed) and sets data-play on a vignette the first time it is seen; each step then
+ * plays once at its --at and comes to rest. Nothing loops.
+ *
+ *   .seq       appears at --at
+ *   .seq-from  shows until --at, then leaves (stack it with a .seq-to in a .flip)
+ *   .seq-mid   shows from --at until --until
+ *   .seq-to    takes over at --at
+ */
+.flip {
+  display: inline-grid;
+  align-items: center;
+}
+
+.flip > * {
+  grid-area: 1 / 1;
+}
+
+.seq-from,
+.seq-mid {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .wn-motion [data-vignette]:not([data-play]) :is(.seq, .seq-to, .seq-mid) {
+    opacity: 0;
+  }
+
+  .wn-motion [data-vignette]:not([data-play]) .seq-from {
+    opacity: 1;
+  }
+}
+
+.wn-motion [data-play] .seq {
+  animation: wn-in 0.5s cubic-bezier(0.2, 0.7, 0.2, 1) var(--at, 0s) backwards;
+}
+
+.wn-motion [data-play] .seq-to {
+  animation: wn-fade-in 0.3s ease var(--at, 0s) backwards;
+}
+
+.wn-motion [data-play] .seq-from {
+  animation: wn-fade-out 0.3s ease var(--at, 0s) backwards;
+}
+
+.wn-motion [data-play] .seq-mid {
+  animation:
+    wn-fade-in 0.3s ease var(--at, 0s) both,
+    wn-fade-out 0.3s ease var(--until, 1s) forwards;
+}
+
+@keyframes wn-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
+}
+
+@keyframes wn-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes wn-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-play] :is(.seq, .seq-to, .seq-from, .seq-mid),
+  [data-play] * {
+    animation: none !important;
+  }
+}
