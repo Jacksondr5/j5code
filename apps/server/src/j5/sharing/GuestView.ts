@@ -23,6 +23,7 @@ import {
   type ScheduledTaskListResult,
   ThreadId,
 } from "@t3tools/contracts";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import { identity } from "effect/Function";
 import * as Queue from "effect/Queue";
@@ -71,6 +72,9 @@ const reduceEnvironment = (
   // Viewer nothing J5 reads by project or thread: a thread's Playbook runs, the inbox, Crew asks.
   capabilities: {
     repositoryIdentity: false,
+    ...(environment.capabilities.j5PersonalThreadReads === undefined
+      ? {}
+      : { j5PersonalThreadReads: environment.capabilities.j5PersonalThreadReads }),
     ...(environment.capabilities.j5ProjectLedger === undefined
       ? {}
       : { j5ProjectLedger: environment.capabilities.j5ProjectLedger }),
@@ -195,6 +199,9 @@ const reduceProject = (project: OrchestrationProjectShell): OrchestrationProject
   updatedAt: project.updatedAt,
 });
 
+// Preserve the distinction between imported and fresh history without exposing visit times.
+const seededReadMarker = DateTime.makeUnsafe(0);
+
 /**
  * A thread as any narrowed connection is told of it. `opens` holds the last Cmd+K queries that
  * picked the thread, which are the owner's searches (decision 6, 2026-10-24).
@@ -202,7 +209,10 @@ const reduceProject = (project: OrchestrationProjectShell): OrchestrationProject
 const narrowThread = ({
   opens: _opens,
   ...thread
-}: OrchestrationV2ThreadShell): OrchestrationV2ThreadShell => thread;
+}: OrchestrationV2ThreadShell): OrchestrationV2ThreadShell => ({
+  ...thread,
+  lastVisitedAt: thread.lastVisitedAt == null ? null : seededReadMarker,
+});
 
 /** A thread as a Viewer's client is told of it: no folder of the host. */
 const reduceThread = (shell: OrchestrationV2ThreadShell): OrchestrationV2ThreadShell => {
@@ -219,7 +229,10 @@ const narrowAppThread = ({
   opens: _opens,
   guestShare: _guestShare,
   ...thread
-}: OrchestrationV2AppThread): OrchestrationV2AppThread => thread;
+}: OrchestrationV2AppThread): OrchestrationV2AppThread => ({
+  ...thread,
+  lastVisitedAt: thread.lastVisitedAt == null ? null : seededReadMarker,
+});
 
 const narrowProjection = (
   projection: OrchestrationV2ThreadProjection,

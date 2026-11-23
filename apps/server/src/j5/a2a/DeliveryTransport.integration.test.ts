@@ -175,6 +175,7 @@ import {
 } from "./contracts.ts";
 import { noDocumentTextLayer } from "../test-support/documentText.ts";
 
+const isOrganizeInput = Schema.is(J5AdaptedThreadToolkit.tools.t3_thread_organize.parametersSchema);
 const decodeSentFact = Schema.decodeUnknownEffect(Schema.fromJsonString(MessageSentPayload));
 const decodeToolFailure = Schema.decodeUnknownEffect(
   Schema.Struct({ code: Schema.String, message: Schema.String }),
@@ -3333,6 +3334,7 @@ it.effect("organize refuses a Crew seat and applies reversible lifecycle once", 
             issuedAt: 1,
           }),
         );
+      assert.isFalse(isOrganizeInput({ threadId: source.threadId, action: "mark_unread" }));
       const member = yield* seedTarget(
         "organize-member",
         modelSelection.model,

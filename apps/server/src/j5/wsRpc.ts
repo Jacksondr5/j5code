@@ -9,6 +9,7 @@ import {
   J5AccessRpcGroup,
   J5ClientActionRpcGroup,
   J5PeopleRpcGroup,
+  J5ThreadReadsRpcGroup,
   J5SharedConversationRpcGroup,
   J5ClientReadRpcGroup,
   J5PlaybookRpcGroup,
@@ -43,6 +44,8 @@ import { People } from "./sharing/People.ts";
 import { PersonAccess, type SessionIdentity } from "./sharing/PersonAccess.ts";
 import { SharedConversation } from "./sharing/SharedConversation.ts";
 import { SharedThreads } from "./sharing/SharedThreads.ts";
+import { ThreadReadState } from "./sharing/ThreadReadState.ts";
+import { makeThreadReadRpcHandlers } from "./sharing/threadReadRpc.ts";
 import { makeSkillCatalogRpcHandlers } from "./skills/skillCatalogRpc.ts";
 import { makeSkillLinkRpcHandlers } from "./skills/skillLinkRpc.ts";
 
@@ -55,6 +58,7 @@ const J5WsRpcGroup = J5AgentPersonaRpcGroup.merge(
   J5ClientActionRpcGroup,
   J5AccessRpcGroup,
   J5PeopleRpcGroup,
+  J5ThreadReadsRpcGroup,
   J5SharedConversationRpcGroup,
   J5ClientReadRpcGroup,
 );
@@ -76,6 +80,7 @@ type J5WsRpcServices =
   | Links
   | Access
   | SharedConversation
+  | ThreadReadState
   | SharedThreads;
 
 /**
@@ -97,6 +102,7 @@ export const j5WsRpcServices = Effect.context<J5WsRpcServices>().pipe(
       Links,
       Access,
       SharedConversation,
+      ThreadReadState,
       SharedThreads,
     ),
   ),
@@ -125,6 +131,7 @@ export const layerJ5WsRpc = (
         }),
         ...(yield* makeClientActionRpcHandlers(session)),
         ...(yield* makeClientReadRpcHandlers(session)),
+        ...(yield* makeThreadReadRpcHandlers(session)),
         ...(yield* makeAgentPersonaRpcHandlers({
           providers: providerRegistry.getProviders,
         })),

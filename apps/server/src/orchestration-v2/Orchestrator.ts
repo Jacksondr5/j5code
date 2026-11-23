@@ -2942,8 +2942,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       });
     }
     const movesForward =
-      thread.lastVisitedAt === null ||
-      DateTime.toEpochMillis(visitedAt.value) > DateTime.toEpochMillis(thread.lastVisitedAt);
+      command.preserveReadMarker !== true &&
+      (thread.lastVisitedAt === null ||
+        DateTime.toEpochMillis(visitedAt.value) > DateTime.toEpochMillis(thread.lastVisitedAt));
     const occurredAt = yield* DateTime.now;
     // Opens are timed by the server clock so devices with skewed clocks agree.
     const opens = command.opened

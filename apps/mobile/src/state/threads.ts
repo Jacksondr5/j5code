@@ -1,5 +1,6 @@
 import { createChildThreadApprovalsAtom } from "@t3tools/client-runtime/state/thread-requests";
 import { useAtomValue } from "@effect/atom-react";
+import { createPersonalThreadReadAtoms } from "@t3tools/client-runtime/j5/threadReads";
 import {
   createEnvironmentThreadDetailAtoms,
   createEnvironmentThreadShellAtoms,
@@ -38,12 +39,15 @@ export const threadEnvironment = createThreadEnvironmentAtoms(
   threadFamilies.snapshotAtom,
 );
 export const environmentThreads = createEnvironmentThreadStateAtoms(connectionAtomRuntime);
+const personalReads = createPersonalThreadReadAtoms(connectionAtomRuntime);
 export const environmentThreadDetails = createEnvironmentThreadDetailAtoms(
   environmentThreads.stateAtom,
+  personalReads.markersAtom,
 );
 export const environmentThreadShells = createEnvironmentThreadShellAtoms({
   catalogValueAtom: environmentCatalog.catalogValueAtom,
   snapshotAtom: threadEnvironment.snapshotAtom,
+  personalReadMarkersAtom: personalReads.markersAtom,
   hiddenThreadTagsAtom: serverEnvironment.hiddenThreadTagsAtom,
 });
 export const childThreadApprovalsAtom = createChildThreadApprovalsAtom({
