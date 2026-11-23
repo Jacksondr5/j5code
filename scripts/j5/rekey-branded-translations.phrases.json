@@ -1,0 +1,46 @@
+[
+  {
+    "english": {
+      "upstream": "Use `npx t3@latest` if `t3` is missing or outdated",
+      "j5": "Run J5 Code's installer if `j5` is missing or outdated"
+    },
+    "locales": {
+      "de": {
+        "upstream": "Verwende `npx t3@latest`, wenn `t3` fehlt oder veraltet ist",
+        "j5": "Führe das Installationsprogramm von J5 Code aus, wenn `j5` fehlt oder veraltet ist"
+      },
+      "es": {
+        "upstream": "Usa `npx t3@latest` si falta `t3` o está desactualizado",
+        "j5": "Ejecuta el instalador de J5 Code si falta `j5` o está desactualizado"
+      },
+      "fr": {
+        "upstream": "Utilisez `npx t3@latest` si `t3` est absent ou obsolète",
+        "j5": "Exécutez le programme d’installation de J5 Code si `j5` est absent ou obsolète"
+      },
+      "ja": {
+        "upstream": "`t3` がない、または古い場合は `npx t3@latest` を使い",
+        "j5": "`j5` がない、または古い場合は J5 Code のインストーラーを実行し"
+      },
+      "ko": {
+        "upstream": "`t3`이 없거나 오래되었으면 `npx t3@latest`를 사용하고",
+        "j5": "`j5`가 없거나 오래되었으면 J5 Code 설치 프로그램을 실행하고"
+      },
+      "pt-BR": {
+        "upstream": "Use `npx t3@latest` se o `t3` estiver ausente ou desatualizado",
+        "j5": "Execute o instalador do J5 Code se o `j5` estiver ausente ou desatualizado"
+      },
+      "ru": {
+        "upstream": "Используйте `npx t3@latest`, если `t3` отсутствует или устарел",
+        "j5": "Запустите установщик J5 Code, если `j5` отсутствует или устарел"
+      },
+      "sv": {
+        "upstream": "Använd `npx t3@latest` om `t3` saknas eller är inaktuellt",
+        "j5": "Kör J5 Codes installationsprogram om `j5` saknas eller är inaktuellt"
+      },
+      "zh": {
+        "upstream": "如果 `t3` 缺失或过旧，请使用 `npx t3@latest`",
+        "j5": "如果 `j5` 缺失或过旧，请运行 J5 Code 的安装程序"
+      }
+    }
+  }
+]

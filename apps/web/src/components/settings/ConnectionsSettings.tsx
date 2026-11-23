@@ -52,6 +52,7 @@ import { FoldedSettingsSection } from "./FoldedSettingsSection";
 import { LoadBalancingSettings } from "./LoadBalancingSettings";
 import { PullRequestRoutingSettings } from "./PullRequestRoutingSettings";
 import { LinkedEnvironmentsSection } from "../../j5/links/LinkedEnvironmentsSection";
+import { T3_CONNECT_OFFERED } from "../../j5/sharing/t3Connect";
 import { Input } from "../ui/input";
 import {
   Dialog,
@@ -777,6 +778,8 @@ function ConnectionsSettingsContent({
   // With approval off a revoked T3 Connect device signs straight back in, so offer to turn it
   // on. Older servers have no such setting, and revoking there goes ahead as before.
   const connectApprovalOff =
+    // J5: no Connect, so no approval to offer (FORK.md case 92).
+    T3_CONNECT_OFFERED &&
     accessEnvironment?.serverConfig?.settings.requireConnectDeviceApproval === false;
   const requestConnectRevoke = (title: string, revoke: () => Promise<void>) => {
     if (connectApprovalOff && canWriteAccess) setPendingConnectRevoke({ title, revoke });
@@ -1374,6 +1377,7 @@ function ConnectionsSettingsContent({
                 canReadRelay={canReadRelay}
                 canManageRelay={canManageRelay}
                 connectDeviceApproval={
+                  !T3_CONNECT_OFFERED ||
                   accessServerConfig?.settings.requireConnectDeviceApproval === undefined
                     ? null
                     : {
@@ -1470,7 +1474,8 @@ function ConnectionsSettingsContent({
               </ScrollArea>
             </FoldedSettingsSection>
           ) : null}
-          {canReadAccess &&
+          {T3_CONNECT_OFFERED &&
+          canReadAccess &&
           connectDevices !== null &&
           (connectDeviceRequests.length > 0 || connectDevices.length > 0) ? (
             <ConnectDeviceApprovalSettings
@@ -1481,11 +1486,13 @@ function ConnectionsSettingsContent({
               requestRevoke={requestConnectRevoke}
             />
           ) : null}
-          <RevokeConnectDeviceDialog
-            request={pendingConnectRevoke}
-            onClose={() => setPendingConnectRevoke(null)}
-            requireApproval={requireConnectApproval}
-          />
+          {T3_CONNECT_OFFERED ? (
+            <RevokeConnectDeviceDialog
+              request={pendingConnectRevoke}
+              onClose={() => setPendingConnectRevoke(null)}
+              requireApproval={requireConnectApproval}
+            />
+          ) : null}
           <AlertDialog
             open={pendingDesktopServerExposureMode !== null && canManageLocalBackend}
             onOpenChange={(open) => {

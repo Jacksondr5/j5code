@@ -76,8 +76,14 @@ the app opens; until then that server shows nothing.
 
 ## What changes for people who are not Owners
 
-Settings shows only Appearance, SnapShots, Open-source licenses and People to someone who owns no
-connected server. On the mobile app it shows the pages about the phone itself: its look and input,
-its servers, notifications and About. A New thread, a fork or a new project is offered only where
-the person may start one. A device reconnects once when its person's level changes. Someone who has lost everything they were given sees "Nothing is shared with you" until an
-Owner shares something again.
+Settings shows only General, Appearance, SnapShots, Open-source licenses and People to someone who
+owns no connected server. On the mobile app it shows the pages about the phone itself: its look,
+language and input, its servers, notifications and About. A Collaborator also sees **Voice**, to
+turn on voice input for their own device; only an Owner can change its key or models. A New thread,
+a fork or a new project is offered only where the person may start one.
+
+When a person's level changes, a browser open at that server's own address reconnects once. For
+now, the mobile app, and web or desktop where that server was added as another environment, must be
+paired again with a new link. Someone who has
+lost everything they were given sees "Nothing is shared with you" until an Owner shares something
+again.

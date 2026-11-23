@@ -283,8 +283,8 @@ it.layer(NodeServices.layer)("t3 update launcher", (it) => {
             mode: 0o755,
           });
         }
-        const launcher = path.join(root, "bin/t3");
-        const alias = path.join(root, "alias/t3");
+        const launcher = path.join(root, "bin/j5");
+        const alias = path.join(root, "alias/j5");
         yield* fs.makeDirectory(path.dirname(launcher), { recursive: true });
         yield* fs.makeDirectory(path.dirname(alias), { recursive: true });
         yield* fs.writeFileString(launcher, posixLauncherScript(entry("1.0.0")), { mode: 0o755 });
@@ -310,7 +310,7 @@ it.layer(NodeServices.layer)("t3 update launcher", (it) => {
 
         // Like the shell, a relative PATH entry resolves from the working directory, and a
         // script nobody can execute is passed over.
-        const unrunnable = path.join(root, "unrunnable/t3");
+        const unrunnable = path.join(root, "unrunnable/j5");
         yield* fs.makeDirectory(path.dirname(unrunnable), { recursive: true });
         yield* fs.writeFileString(unrunnable, posixLauncherScript(entry("2.0.0")), { mode: 0o644 });
         yield* fs.writeFileString(launcher, posixLauncherScript(entry("2.0.0")), { mode: 0o755 });
@@ -667,19 +667,20 @@ it.layer(NodeServices.layer)("t3 update checks the database before switching", (
   const blockedReason = "This database has migrations that t3@0.1.8 does not know: 79_example.";
 
   it.effect.each([
+    // J5: every J5 release since 0.0.48 speaks protocol 4, so an older target is asked under 4 too.
     {
       name: "installs an older target that accepts this database",
       targetVersion: "0.1.8",
-      launcherProtocol: 3,
+      launcherProtocol: SERVICE_LAUNCHER_PROTOCOL,
       preflight: preflightOutput(
-        JSON.stringify({ status: "ready", version: "0.1.8", launcherProtocol: 3 }),
+        JSON.stringify({ status: "ready", version: "0.1.8", launcherProtocol: SERVICE_LAUNCHER_PROTOCOL }),
       ),
       failure: undefined,
     },
     {
       name: "refuses an older target the database is too new for",
       targetVersion: "0.1.8",
-      launcherProtocol: 3,
+      launcherProtocol: SERVICE_LAUNCHER_PROTOCOL,
       preflight: preflightOutput(
         JSON.stringify({ status: "blocked", version: "0.1.8", reason: blockedReason }),
       ),
@@ -688,10 +689,10 @@ it.layer(NodeServices.layer)("t3 update checks the database before switching", (
     {
       name: "refuses an older target too old to check the database",
       targetVersion: "0.1.8",
-      launcherProtocol: 3,
+      launcherProtocol: SERVICE_LAUNCHER_PROTOCOL,
       preflight: preflightOutput("", 1),
       failure:
-        "t3@0.1.8 could not confirm it supports this database (its check exited with code 1), so t3 did not switch to it.",
+        "j5@0.1.8 could not confirm it supports this database (its check exited with code 1), so j5 did not switch to it.",
     },
     {
       // Newer builds keep accepting the current launcher protocol, which may drop 3.

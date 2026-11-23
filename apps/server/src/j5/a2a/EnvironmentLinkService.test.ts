@@ -306,12 +306,35 @@ const linksAnsweringAs = (answeringAs: string) =>
       ),
       Layer.provide(Layer.succeed(PeerLinks.LoopbackHost, noOwnLoopback)),
       Layer.provide(
-        Layer.mock(ServerEnvironment.ServerEnvironment)({ getEnvironmentId: Effect.succeed(home) }),
+        Layer.mock(ServerEnvironment.ServerEnvironment)({
+          getEnvironmentId: Effect.succeed(home),
+          getDescriptor: Effect.succeed({ environmentId: home, label: "Home" } as never),
+        }),
       ),
       Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "j5-link-loopback-" })),
       Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
     ),
   ).pipe(Effect.map((context) => Context.get(context, PeerLinks.PeerLinks)));
+
+it.effect("names a line, not its address, when signing in to it fails", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      // The line answers as the expected environment, then answers the sign-in with no client.
+      const links = yield* linksAnsweringAs(work);
+      const failed = yield* links
+        .link({
+          url: "http://127.77.0.1:1",
+          pairingCode: "unused",
+          access: "auto",
+          expectedEnvironmentId: work,
+          expectedLabel: "Work",
+        })
+        .pipe(Effect.flip);
+      assert.include(failed.message, "Its line");
+      assert.notInclude(failed.message, "127.77.0.1");
+    }),
+  ),
+);
 
 it.effect("probes a same-machine server and a line instead of calling them this machine", () =>
   Effect.scoped(

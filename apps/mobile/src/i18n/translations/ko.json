@@ -1068,7 +1068,7 @@
   "8be698cbd7c7cd5a": "이 링크는 J5 Code가 읽을 수 없는 풀 리퀘스트를 가리킵니다.",
   "df1915cc1c939ef9": "이 링크에는 프롬프트가 없습니다.",
   "ec34330464820995": "이 링크는 J5 Code가 읽을 수 없는 저장소를 가리킵니다.",
-  "4dac88bf6eacccb1": "After you stop, {environment} sends the recording to OpenRouter. OpenRouter chooses who runs your model. J5 Code requests zero data retention; your OpenRouter account may allow safety retention.",
+  "4dac88bf6eacccb1": "녹음을 멈추면 {environment}이(가) 녹음을 OpenRouter로 보냅니다. 모델을 실행할 곳은 OpenRouter가 정합니다. J5는 데이터 보존 안 함을 요청하지만, OpenRouter 계정 설정에 따라 안전 목적 보존이 허용될 수 있습니다.",
   "81b64c298285297c": "녹음을 멈추면 {environment}이(가) 녹음과 프로젝트 이름 등 어휘 힌트를 {provider}(으)로 보냅니다.",
   "615ce9f2edf7208f": "풀 리퀘스트 연결",
   "4ece383dad280e57": "풀 리퀘스트 연결",

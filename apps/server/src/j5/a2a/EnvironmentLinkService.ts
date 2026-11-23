@@ -10,6 +10,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
 import * as Stream from "effect/Stream";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as HttpBody from "effect/http/HttpBody";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
@@ -40,7 +41,10 @@ export class EnvironmentLinkService extends Context.Service<
 
 const makeServices = Effect.gen(function* () {
   const links = yield* PeerLinks.PeerLinks;
-  const httpClient = yield* HttpClient.HttpClient;
+  // The link's token goes only to the origin it was made for, as upstream's link client does.
+  const httpClient = HttpClient.transform(yield* HttpClient.HttpClient, (response) =>
+    Effect.provideService(response, FetchHttpClient.RequestInit, { redirect: "manual" }),
+  );
   const environment = yield* ServerEnvironment.ServerEnvironment;
   const lines = yield* LineRegistry;
 

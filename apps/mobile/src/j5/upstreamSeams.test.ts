@@ -390,6 +390,30 @@ const SEAMS: ReadonlyArray<Seam> = [
     reaches: ["return GUEST_LINKS_OFFERED && offered;"],
   },
   {
+    file: "App.tsx",
+    record: "case 92: no Connect, so no device approval coordinator",
+    from: "./j5/sharing/t3Connect",
+    reaches: ["{T3_CONNECT_OFFERED ? <ConnectDeviceApprovalCoordinator /> : null}"],
+  },
+  {
+    file: "features/threads/ThreadHeader.tsx",
+    record: "case 90: the split-view compose button follows the person's level",
+    from: "../../j5/sharing/startAccess",
+    reaches: [
+      "const startsSomewhere = useStartsSomewhere();",
+      "onCompose={props.draft || !startsSomewhere ? undefined : startNewTask}",
+    ],
+  },
+  {
+    file: "features/layout/workspace/AndroidWorkspaceNavigation.android.tsx",
+    record: "case 90: the rail's New button follows the person's level",
+    from: "../../../j5/sharing/startAccess",
+    reaches: [
+      "const startsSomewhere = useStartsSomewhere();",
+      "newEnabled={connectionState.hasConnections && startsSomewhere}",
+    ],
+  },
+  {
     file: "features/layout/workspace/useWorkspaceCompose.ts",
     record: "case 90: starting follows the person's level",
     from: "../../../j5/sharing/startAccess",

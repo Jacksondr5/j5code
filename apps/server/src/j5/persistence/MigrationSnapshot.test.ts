@@ -83,8 +83,12 @@ const createDatabase = (dbPath: string, upstream: number, j5: number) => {
   }
 };
 
-/** This build knows upstream's 1–10 and J5's 1–5. */
-const build = { upstreamMigrationIds: [8, 9, 10], j5MigrationIds: [4, 5] };
+/** This build knows upstream's 1–10 and J5's 1–5, and no run-observability migration. */
+const build = {
+  upstreamMigrationIds: [8, 9, 10],
+  j5MigrationIds: [4, 5],
+  runObservabilityMigrationIds: [],
+};
 
 const snapshotsIn = (directory: string) =>
   NodeFS.readdirSync(directory)
@@ -150,6 +154,16 @@ it.effect("snapshots a database with a pending J5 ledger migration", () =>
   ),
 );
 
+it.effect("snapshots a database whose run-observability lane alone is pending", () =>
+  withDatabasePath(({ dbPath, directory }) =>
+    Effect.gen(function* () {
+      createDatabase(dbPath, 10, 5);
+      yield* snapshotBeforeMigrations(dbPath, { ...build, runObservabilityMigrationIds: [1] });
+      assert.deepStrictEqual(snapshotsIn(directory), ["statev2.pre-migration-u010-j005.sqlite"]);
+    }),
+  ),
+);
+
 it.effect("snapshots an upstream database that has no J5 ledger yet", () =>
   withDatabasePath(({ dbPath, directory }) =>
     Effect.gen(function* () {
@@ -168,7 +182,11 @@ it.effect("takes no snapshot when nothing is pending, or when the database is ah
       createDatabase(dbPath, 10, 5);
       yield* snapshotBeforeMigrations(dbPath, build);
       // A newer build's database: neither migrator would run anything.
-      yield* snapshotBeforeMigrations(dbPath, { upstreamMigrationIds: [9], j5MigrationIds: [4] });
+      yield* snapshotBeforeMigrations(dbPath, {
+        upstreamMigrationIds: [9],
+        j5MigrationIds: [4],
+        runObservabilityMigrationIds: [],
+      });
       assert.deepStrictEqual(NodeFS.readdirSync(directory), ["statev2.sqlite"]);
     }),
   ),
@@ -448,12 +466,11 @@ it.effect("a failed copy publishes nothing, and startup stops before the databas
   ),
 );
 
-it.effect("fails when the database cannot be read", () =>
+it.effect("leaves a file that is not SQLite to upstream's open, which names it", () =>
   withDatabasePath(({ dbPath, directory }) =>
     Effect.gen(function* () {
       NodeFS.writeFileSync(dbPath, "this is not a SQLite database, and is long enough to say so");
-      const error = yield* Effect.flip(snapshotBeforeMigrations(dbPath, build));
-      assert.instanceOf(error, MigrationSnapshotError);
+      yield* snapshotBeforeMigrations(dbPath, build);
       assert.deepStrictEqual(snapshotsIn(directory), []);
     }),
   ),

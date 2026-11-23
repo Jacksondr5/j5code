@@ -1068,7 +1068,7 @@
   "8be698cbd7c7cd5a": "此链接指向 J5 Code 无法读取的 pull request。",
   "df1915cc1c939ef9": "此链接不包含提示词。",
   "ec34330464820995": "此链接指向 J5 Code 无法读取的仓库。",
-  "4dac88bf6eacccb1": "After you stop, {environment} sends the recording to OpenRouter. OpenRouter chooses who runs your model. J5 Code requests zero data retention; your OpenRouter account may allow safety retention.",
+  "4dac88bf6eacccb1": "停止录音后，{environment} 会将录音发送至 OpenRouter。OpenRouter 决定由谁运行模型。J5 会请求不保留数据；你的 OpenRouter 账户可能允许出于安全目的保留数据。",
   "81b64c298285297c": "停止后，{environment} 会将你的录音和词汇提示（包括项目名称）发送到 {provider}。",
   "615ce9f2edf7208f": "关联 PR",
   "4ece383dad280e57": "关联 PR",

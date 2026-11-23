@@ -27,6 +27,7 @@ import { useAndroidWorkspaceRoot } from "./AndroidWorkspaceTabsProvider";
 import { useNavigationTabOrder, useHiddenNavigationTabs } from "./navigation-tabs";
 import { useWorkspaceTabs } from "./WorkspaceTabsContext";
 import { FLOATING_TABS, floatingTabsMetrics } from "./floating-workspace-tabs";
+import { useStartsSomewhere } from "../../../j5/sharing/startAccess";
 
 // Matches RAIL_WIDTH in the native rail.
 export const ANDROID_WORKSPACE_RAIL_WIDTH = 72;
@@ -80,6 +81,7 @@ export function AndroidWorkspaceNavigation(props: {
   const insets = useSafeAreaInsets();
   const toolbar = useToolbarLayout();
   const connectionState = useWorkspaceConnectionState();
+  const startsSomewhere = useStartsSomewhere();
   const keyboardVisible = useSoftKeyboardShowing();
   const { layout } = useAdaptiveWorkspaceLayout();
   const { themeAppearance, themeVariables: colors } = useAppearancePreferences();
@@ -123,7 +125,8 @@ export function AndroidWorkspaceNavigation(props: {
         selectedTab={selectedTab}
         dark={themeAppearance === "dark"}
         textScale={scale}
-        newEnabled={connectionState.hasConnections}
+        // J5: only for someone who may start a thread (FORK.md case 90).
+        newEnabled={connectionState.hasConnections && startsSomewhere}
         safeAreaTop={toolbar.paddingTop}
         safeAreaBottom={insets.bottom}
         headerHeight={toolbar.height}

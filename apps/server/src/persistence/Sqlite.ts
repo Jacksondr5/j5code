@@ -12,6 +12,10 @@ import { hasPendingMigrations } from "./Migrations.ts";
 import { initializeV2Database } from "./initializeV2Database.ts";
 import { runJ5CompatibleUpstreamMigrations } from "../j5/persistence/UpstreamMigrationCompatibility.ts";
 import { hasPendingJ5A2AMigrations, runJ5A2AMigrations } from "../j5/a2a/Migrations.ts";
+import {
+  hasPendingRunObservabilityMigrations,
+  runMigrations as runRunObservabilityMigrations,
+} from "../j5/run-observability/Migrations.ts";
 import { snapshotBeforeMigrations } from "../j5/persistence/MigrationSnapshot.ts";
 import * as ServerConfig from "../config.ts";
 import * as ServerOwnership from "../serverOwnership.ts";
@@ -53,14 +57,21 @@ const damagedDatabaseError = (dbPath: string, cause: SqlError.SqlError) =>
     }),
   });
 
-// J5: upstream's migrations, then J5's own lane (FORK.md "Fork-owned migration lane").
+// J5: upstream's migrations, then J5's own lanes (FORK.md "Fork-owned migration lane").
 const runMigrations = () =>
-  Effect.andThen(runJ5CompatibleUpstreamMigrations(), runJ5A2AMigrations());
+  runJ5CompatibleUpstreamMigrations().pipe(
+    Effect.andThen(runJ5A2AMigrations()),
+    Effect.andThen(runRunObservabilityMigrations()),
+  );
 
 // CLI commands open the server's database from another process; migrating behind its owner changes the schema it runs on.
 const runMigrationsAsOwner = Effect.fn("SqlitePersistence.runMigrationsAsOwner")(function* () {
   // With nothing pending, runMigrations only validates the recorded history and writes nothing.
-  if (!(yield* hasPendingMigrations()) && !(yield* hasPendingJ5A2AMigrations()))
+  if (
+    !(yield* hasPendingMigrations()) &&
+    !(yield* hasPendingJ5A2AMigrations()) &&
+    !(yield* hasPendingRunObservabilityMigrations())
+  )
     return yield* runMigrations();
   const { serverRuntimeStatePath } = yield* ServerConfig.ServerConfig;
   yield* ServerOwnership.holdServerOwnershipLock(serverRuntimeStatePath).pipe(

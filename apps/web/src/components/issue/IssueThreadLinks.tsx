@@ -25,6 +25,7 @@ import {
 import { issueEnvironment } from "~/state/issues";
 import { useEnvironmentQuery } from "~/state/query";
 import { useEnvironmentScope } from "~/state/session";
+import { useCanOperateThread } from "~/j5/sharing/access";
 import { environmentThreadShells, threadEnvironment } from "~/state/threads";
 import { useAtomCommand } from "~/state/use-atom-command";
 
@@ -52,7 +53,11 @@ export function IssueThreadLinks({
 }) {
   const gt = useGT();
   const thread = useThreadShell(threadRef?.environmentId === environmentId ? threadRef : null);
-  const canOperate = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
+  // J5: linking this thread needs the person's level on it (FORK.md case 90).
+  const canOperateThread = useCanOperateThread(environmentId, thread?.id ?? null);
+  const canOperate =
+    useEnvironmentScope(environmentId, AuthOrchestrationOperateScope) &&
+    (thread === null || canOperateThread);
   const listsThreads =
     useServerConfigs().get(environmentId)?.environment.capabilities.issueLinkedThreads === true;
   const link = useAtomCommand(threadEnvironment.linkIssue, { reportFailure: false });

@@ -21,6 +21,8 @@ import * as ProcessRunner from "../processRunner.ts";
 import * as ServerOwnership from "../serverOwnership.ts";
 import { migrationManifest, runMigrations } from "./Migrations.ts";
 import * as SqlitePersistence from "./Sqlite.ts";
+import { runJ5A2AMigrations } from "../j5/a2a/Migrations.ts";
+import { runMigrations as runRunObservabilityMigrations } from "../j5/run-observability/Migrations.ts";
 
 const workerData = vi.hoisted((): Array<unknown> => []);
 
@@ -196,6 +198,8 @@ const migrateTo = (toMigrationInclusive?: number) =>
   Effect.gen(function* () {
     const { dbPath } = yield* ServerConfig.ServerConfig;
     yield* runMigrations({ toMigrationInclusive }).pipe(
+      // J5: a current home has J5's lanes too (FORK.md "Fork-owned migration lane").
+      Effect.andThen(toMigrationInclusive === undefined ? migrateJ5Lanes : Effect.void),
       Effect.provide(NodeSqliteClient.layer({ filename: dbPath })),
     );
   });
@@ -210,6 +214,8 @@ const latestRecordedMigrationId = Effect.gen(function* () {
   }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: dbPath })));
   return rows[0]?.id;
 });
+
+const migrateJ5Lanes = runJ5A2AMigrations().pipe(Effect.andThen(runRunObservabilityMigrations()));
 
 const layerT3Home = ServerConfig.layerTest(process.cwd(), { prefix: "t3-sqlite-cli-" });
 
@@ -226,6 +232,27 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("layerCliConfig",
       );
 
       assert.equal(yield* latestRecordedMigrationId, recorded);
+      assert.equal(opened._tag, "Failure");
+      if (opened._tag === "Failure") {
+        assert.instanceOf(opened.failure, SqlitePersistence.ServerOwnsDatabaseError);
+      }
+    }).pipe(Effect.scoped, Effect.provide(layerT3Home)),
+  );
+
+  it.effect("does not migrate a J5 lane behind a running server either", () =>
+    Effect.gen(function* () {
+      const { dbPath } = yield* ServerConfig.ServerConfig;
+      yield* runMigrations().pipe(
+        Effect.andThen(runJ5A2AMigrations()),
+        Effect.provide(NodeSqliteClient.layer({ filename: dbPath })),
+      );
+      yield* ownT3Home();
+
+      const opened = yield* Effect.void.pipe(
+        Effect.provide(SqlitePersistence.layerCliConfig),
+        Effect.result,
+      );
+
       assert.equal(opened._tag, "Failure");
       if (opened._tag === "Failure") {
         assert.instanceOf(opened.failure, SqlitePersistence.ServerOwnsDatabaseError);

@@ -618,7 +618,9 @@ MANAGED_FILE="$STATE_DIR/managed"
 LOG_FILE="$STATE_DIR/server.log"
 RUNNER_FILE="$STATE_DIR/run-t3.sh"
 RUNNER_NEXT="$STATE_DIR/run-t3.next.$$"
-LAUNCH_LOCK="$DEFAULT_SERVER_HOME/ssh-launch/.launch.lock"
+# J5: launch records stay in ~/.t3/ssh-launch, where STATE_DIR is (FORK.md case 15), so the
+# lock and the sibling scans below look there, not under the J5 home.
+LAUNCH_LOCK="$HOME/.t3/ssh-launch/.launch.lock"
 LAUNCH_BREAK_LOCK="$LAUNCH_LOCK.break"
 @@T3_ENSURE_T3_HOME_SCRIPT@@
 mkdir -p "$STATE_DIR"
@@ -873,7 +875,7 @@ return 1
 # Another desktop's server stays external. Only this first adoption runs
 # before the replace decision, which the previous key's runner settles.
 if adopt_default_server && [ -n "$ADOPTED_PID" ] && [ -n "$LAUNCHER_ID" ]; then
-  for SIBLING_DIR in "$DEFAULT_SERVER_HOME"/ssh-launch/*; do
+  for SIBLING_DIR in "$HOME"/.t3/ssh-launch/*; do
     [ "$SIBLING_DIR" != "$STATE_DIR" ] && [ "$(cat "$SIBLING_DIR/managed" 2>/dev/null || true)" = "managed" ] || continue
     [ "$(cat "$SIBLING_DIR/pid" 2>/dev/null || true)" = "$ADOPTED_PID" ] && managed_server_running "$ADOPTED_PID" || continue
     [ "$(cat "$SIBLING_DIR/launcher" 2>/dev/null || true)" = "$LAUNCHER_ID" ] || break
@@ -922,8 +924,10 @@ fi
 # publish one; another alias's launch record still names it. Only one server
 # owns the home, so the first live one decides.
 if [ -z "$REMOTE_PORT" ] && [ -z "$DEFAULT_RUNTIME_INFO" ]; then
-  for SIBLING_DIR in "$DEFAULT_SERVER_HOME"/ssh-launch/*; do
+  for SIBLING_DIR in "$HOME"/.t3/ssh-launch/*; do
     [ "$SIBLING_DIR" != "$STATE_DIR" ] && [ "$(cat "$SIBLING_DIR/managed" 2>/dev/null || true)" = "managed" ] || continue
+    # J5: an installed T3 Code keeps its records here too; only a J5 runner's server is this home's.
+    grep -qF "/.j5code/runtime/" "$SIBLING_DIR/run-t3.sh" 2>/dev/null || continue
     managed_server_running "$(cat "$SIBLING_DIR/pid" 2>/dev/null || true)" || continue
     REMOTE_PORT="$(cat "$SIBLING_DIR/port" 2>/dev/null || true)"
     if [ -n "$REMOTE_PORT" ] && wait_ready "@@T3_REUSE_READY_TIMEOUT_MS@@"; then

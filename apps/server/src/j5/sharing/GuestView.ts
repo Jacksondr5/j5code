@@ -249,6 +249,11 @@ const narrowThreadItem = (
   if (item.kind === "event" && carriesThread(item.event)) {
     return { ...item, event: { ...item.event, payload: narrowAppThread(item.event.payload) } };
   }
+  // A visit carries the thread's `opens` without the rest of it.
+  if (item.kind === "event" && item.event.type === "thread.visit-recorded") {
+    const { opens: _opens, ...visit } = item.event.payload;
+    return { ...item, event: { ...item.event, payload: visit } };
+  }
   return item;
 };
 

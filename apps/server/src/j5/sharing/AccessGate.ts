@@ -7,6 +7,7 @@ import {
   EnvironmentAuthorizationError,
   J5_ARTIFACT_WS_METHODS,
   ORCHESTRATION_V2_WS_METHODS,
+  AuthSessionId,
   ProjectId,
   RpcScopeAuthorization,
   ThreadId,
@@ -58,7 +59,7 @@ import { layer as peopleLayer } from "./People.ts";
 import {
   type MessageAsset,
   PersonAccess,
-  type PersonAccessStorageError,
+  PersonAccessStorageError,
   type SessionIdentity,
   type SessionReach,
   isWide,
@@ -500,6 +501,22 @@ export const layerGatedEnvironmentAuth = Layer.effect(
      * renewal mark, so an ended device stays ended (AC49, AC50). Both commit together: a live
      * session that is no one's would make links as no one's (`PairingIntents.recordForCreator`).
      */
+    /** Cuts every live session of a device key loose from its person, as upstream ends them all. */
+    const unbindKeySessions = (proofKeyThumbprint: string) =>
+      sql<{ readonly session_id: string }>`
+        SELECT session_id FROM auth_sessions
+        WHERE proof_key_thumbprint = ${proofKeyThumbprint} AND revoked_at IS NULL
+      `.pipe(
+        Effect.mapError(
+          (cause) => new PersonAccessStorageError({ operation: "read a device's sessions", cause }),
+        ),
+        Effect.flatMap((rows) =>
+          Effect.forEach(rows, (row) => access.unbindSession(AuthSessionId.make(row.session_id)), {
+            discard: true,
+          }),
+        ),
+      );
+
     const unbound = <A, E, R>(
       unbind: Effect.Effect<unknown, PersonAccessStorageError>,
       revoke: Effect.Effect<A, E, R>,
@@ -594,11 +611,30 @@ export const layerGatedEnvironmentAuth = Layer.effect(
           return unbound(access.unbindSession(sessionId), inner.revokeSession(sessionId));
         },
       ),
-      // `auth session revoke` from the CLI; a device-key session takes its key's other
-      // sessions with it, which a key renewing in place does not have (FORK.md case 79).
+      // `auth session revoke` from the CLI; a device-key session takes every session of its key
+      // with it, a device that paired again with the same key among them (FORK.md case 79).
       revokeClient: Effect.fn("EnvironmentAuth.EnvironmentAuth.revokeClient")(function (sessionId) {
-        return unbound(access.unbindSession(sessionId), inner.revokeClient(sessionId));
+        const unbindClient = sql<{ readonly key: string | null }>`
+          SELECT proof_key_thumbprint AS key FROM auth_sessions WHERE session_id = ${sessionId}
+        `.pipe(
+          Effect.mapError(
+            (cause) => new PersonAccessStorageError({ operation: "read a device's key", cause }),
+          ),
+          Effect.flatMap(([row]) =>
+            row?.key == null ? access.unbindSession(sessionId) : unbindKeySessions(row.key),
+          ),
+        );
+        return unbound(unbindClient, inner.revokeClient(sessionId));
       }),
+      // Upstream ends every session on a device key; each one bound to a person goes with it.
+      revokeConnectDevice: Effect.fn("EnvironmentAuth.EnvironmentAuth.revokeConnectDevice")(
+        function (proofKeyThumbprint) {
+          return unbound(
+            unbindKeySessions(proofKeyThumbprint),
+            inner.revokeConnectDevice(proofKeyThumbprint),
+          );
+        },
+      ),
       revokeClientSession: Effect.fn("EnvironmentAuth.EnvironmentAuth.revokeClientSession")(
         function (currentSessionId, targetSessionId) {
           return currentSessionId === targetSessionId

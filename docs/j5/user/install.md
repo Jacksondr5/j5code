@@ -22,9 +22,8 @@ This puts `j5` in `~/.local/bin` and keeps downloaded versions and your data in
 `~/.j5code` (set `J5CODE_HOME` to use another directory). If `~/.local/bin` isn't
 on your `PATH`, the installer adds one line to your shell's startup file (zsh,
 bash, or fish) that puts the directory at the end of `PATH`, so `j5` works in new
-terminals. `j5 uninstall` removes that line, and the `j5` link the desktop app's Settings
-placed in `/opt/homebrew/bin`, `/usr/local/bin` or `~/bin`. If it can't write to
-that folder it says so and leaves the link for you to delete. For other shells, add the directory
+terminals. `j5 uninstall` removes that line, and the `j5` link and line the desktop
+app added. If it can't remove a link it says so and leaves the link for you to delete. For other shells, add the directory
 yourself. To keep the installer away from your startup files, set
 `J5CODE_NO_MODIFY_PATH=1` when you run it; it prints the directory to add. Set
 `T3CODE_CHANNEL=nightly` to install the nightly train, or `T3CODE_VERSION` to pin an
@@ -38,21 +37,23 @@ irm https://github.com/Jacksondr5/j5code/releases/latest/download/install.ps1 | 
 
 This puts `j5.cmd` in `~\.local\bin` and keeps downloaded versions and your data
 in `~\.j5code`. If `~\.local\bin` isn't on your `PATH`, the installer says so; add
-it yourself. Windows has no background service, so run `j5` or `j5 serve` when you
-want the server up.
+it yourself. To keep the server running, run `j5 service install`: it starts when
+you sign in, as the `j5code-<domain>-<user name>` task in Task Scheduler. The
+Windows service is new and hasn't been tried on a Windows machine yet; if it gives
+you trouble, run `j5` or `j5 serve` when you want the server up.
 
 Upgrading a server that was installed from npm (`@jacksondr5/j5code` 0.0.43 or
 earlier)? Follow [Migrating to release archives](./migrating-to-release-archives.md)
 once; later updates use `j5 update`.
 
-| Task                                             | Command                                                                          |
-| ------------------------------------------------ | -------------------------------------------------------------------------------- |
-| Start the server and open the web app            | `j5`                                                                             |
-| Start the server without a browser               | `j5 serve`                                                                       |
-| Keep it running in the background (macOS, Linux) | `j5 service install` ([details](../../user/background-service.md))               |
-| Move to the newest release                       | `j5 update`                                                                      |
-| Reclaim database space                           | `j5 doctor` ([details](../../user/background-service.md#reclaim-database-space)) |
-| Remove it again                                  | `j5 uninstall`                                                                   |
+| Task                                  | Command                                                                          |
+| ------------------------------------- | -------------------------------------------------------------------------------- |
+| Start the server and open the web app | `j5`                                                                             |
+| Start the server without a browser    | `j5 serve`                                                                       |
+| Keep it running in the background     | `j5 service install` ([details](../../user/background-service.md))               |
+| Move to the newest release            | `j5 update`                                                                      |
+| Reclaim database space                | `j5 doctor` ([details](../../user/background-service.md#reclaim-database-space)) |
+| Remove it again                       | `j5 uninstall`                                                                   |
 
 Run `j5 --help` for the full reference. To start in a new working
 directory, use an explicit path such as `j5 ./my-project`. A bare directory name
@@ -87,18 +88,20 @@ publishes no desktop build for other platforms and no package-manager listing;
 
 Agents and terminals the app runs can use the `j5` command without any setup: the
 app keeps a launcher for its built-in CLI at `~/.j5code/bin/j5` and gives them that
-directory. The app doesn't change your own `PATH` or shell startup files unless
-you ask.
+directory. The app changes your shell startup files only when you ask.
 
 ### The `j5` command
 
-The desktop app includes the `j5` command-line tool. To run it from your own
-terminal, open **Settings → About** and choose **Install** next to
-**j5 command**. It adds a `j5` link to a folder on your `PATH`; on Windows it adds
-the app's command folder to your `PATH`. Open a new terminal afterwards.
-**Remove** takes it off again. If another `j5` already runs first in your
-terminal, such as one from the command-line installer, the app tells you and
-leaves it as it is.
+The desktop app includes the `j5` command-line tool. A new install sets it up on
+first launch; after an update, or any time, choose **Install** next to
+**j5 command** in **Settings → About**. On macOS it adds a `j5` link in
+`~/.local/bin` (or `~/bin`); on Windows it adds the app's command folder to your
+`PATH`. Open a new terminal afterwards. If the folder isn't on your `PATH`,
+**Add to PATH** on the Welcome page or in **Settings → About** adds one line to
+your shell's startup file, marked as J5 Code's like the command-line installer's
+line, so `j5 uninstall` removes it. **Remove** takes the command off, and the app doesn't
+add it again. If you already have another `j5`, such as one from the command-line
+installer, it stays as it is.
 
 ### Open a project from a terminal
 
@@ -126,5 +129,5 @@ lists where J5 Code differs from them.
 - [Providers](../../user/install.md#providers): install and sign in to the agents you use.
 - [Working with threads](../../user/thread-sidebar.md): start tasks and organize parallel work.
 - [Remote access](../../user/remote-access.md): connect from another device.
-- [Running in the background](../../user/background-service.md): keep a Linux or macOS host available.
+- [Running in the background](../../user/background-service.md): keep a host available.
 - [Updating](../../user/updating.md): update the app and connected servers.

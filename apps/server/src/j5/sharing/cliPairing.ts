@@ -27,7 +27,11 @@ import { Flag } from "effect/cli";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http";
 
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
+import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../../config.ts";
+import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
+import * as SqlitePersistence from "../../persistence/Sqlite.ts";
+import * as ManagedPolicy from "../../policy/ManagedPolicy.ts";
 import * as ProcessRunner from "../../processRunner.ts";
 import { ServerAlreadyRunningError, acquireServerOwnership } from "../../serverOwnership.ts";
 import { isProcessAlive, readPersistedServerRuntimeState } from "../../serverRuntimeState.ts";
@@ -178,7 +182,8 @@ export const pairingLinkForPerson = Effect.fn("j5.sharing.cliPairing.pairingLink
       // Upstream's link as upstream makes it, with no record of a person.
       return {
         link: yield* input.mint(input.scopes.scopes),
-        said: "Made a link for a device the server does not know yet: whoever pairs it is asked who they are before they can use anything.",
+        // A key-bound session cannot renew after answering, so a phone would have to pair again.
+        said: "Made a link for a device the server does not know yet: whoever pairs it is asked who they are before they can use anything. For a phone, make the link with --person instead: a phone that answers has to pair again.",
       };
     }
     if (Option.isNone(flags.person)) {
@@ -514,7 +519,17 @@ export const pairingLinkFromCli = Effect.fn("j5.sharing.cliPairing.pairingLinkFr
             ...(Option.isSome(input.label) ? { label: input.label.value } : {}),
           }),
       });
-    }).pipe(Effect.provide(runtime(cliEnvironmentAuth(EnvironmentAuth.layerRuntime))));
+    }).pipe(Effect.provide(runtime(cliEnvironmentAuth(ownedHomeAuth))));
   },
   Effect.scoped,
+);
+
+/**
+ * Upstream's `EnvironmentAuth.layerRuntime` on `layerConfig`: this CLI already holds the home's
+ * lock, which `layerCliConfig` would wait on to migrate, as upstream's `project` command does.
+ */
+const ownedHomeAuth = EnvironmentAuth.layer.pipe(
+  Layer.provideMerge(ManagedPolicy.layer),
+  Layer.provideMerge(Layer.mergeAll(ServerSecretStore.layer, SqlitePersistence.layerConfig)),
+  Layer.provideMerge(ServerEnvironment.layerIdentity),
 );

@@ -637,7 +637,7 @@ export function withMessageSenderNote(
           : agent && message.creationSource === "mcp"
             ? "[J5 Code: this message came through J5 Code's tools, not from the user typing in this chat.]"
             : undefined;
-  // J5: a delivery's envelope already names its sender (register D4, FORK.md case 26).
+  // J5: a delivery's envelope already names its sender (register D48).
   if (note === undefined || LEADING_COMMAND.test(text) || carriesJ5DeliveryEnvelope(text))
     return text;
   return text === "" ? note : `${note}\n\n${text}`;

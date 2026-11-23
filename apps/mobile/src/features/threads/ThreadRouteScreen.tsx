@@ -406,7 +406,15 @@ function ThreadRouteContent(
   const selectedThreadDetail = Option.getOrNull(selectedThreadDetailState.data);
   const { selectedThreadCwd } = useSelectedThreadWorktree();
   const startSideChat = useStartSideChat();
-  const composer = useThreadComposerState({ startSideChat });
+  const composer = useThreadComposerState({
+    // J5: a typed `/side` is refused like the side chat button (FORK.md case 90).
+    startSideChat: canForkThread
+      ? startSideChat
+      : () =>
+          Promise.reject(
+            new Error("Starting a side chat needs a Collaborator level on this thread's project."),
+          ),
+  });
   // J5 (case 99): a shared conversation shows each person's message as they typed it.
   const selectedThreadFeed = useSharedConversationFeed(
     selectedThread?.environmentId ?? null,

@@ -11,18 +11,42 @@ Two pages are replaced outright: [Install J5 Code](./install.md) and
 
 | T3 Code's guides say                                          | In J5 Code                                                                       |
 | ------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `t3`, as in `t3 serve`, `t3 connect`, `t3 service install`    | `j5`, as in `j5 serve`, `j5 connect`, `j5 service install`                       |
+| `t3`, as in `t3 serve`, `t3 update`, `t3 service install`     | `j5`, as in `j5 serve`, `j5 update`, `j5 service install`                        |
+| The **t3 command** row in Settings → About                    | **j5 command**                                                                   |
 | `npx t3@latest`                                               | Not available: J5 Code publishes nothing to npm                                  |
 | T3 home, `~/.t3`, `T3CODE_HOME`                               | J5 home, `~/.j5code`, `J5CODE_HOME` (`T3CODE_HOME` is ignored)                   |
 | `t3code.service`, `com.t3tools.t3code.service`                | `j5code.service`, `codes.jackson.j5code.service`                                 |
 | `~/Library/LaunchAgents/com.t3tools.t3code.service.plist`     | `~/Library/LaunchAgents/codes.jackson.j5code.service.plist`                      |
+| The `t3code-<domain>-<user name>` task in Task Scheduler      | `j5code-<domain>-<user name>`                                                    |
 | The worktree branch prefix `t3/`                              | `j5code/`                                                                        |
 | `https://app.t3.codes/new?…` and `t3code://` links            | `https://j5.codes/new?…` and `j5code://` links                                   |
 | Releases on `pingdotgg/t3code` and on npm                     | Releases on [`Jacksondr5/j5code`](https://github.com/Jacksondr5/j5code/releases) |
 | The App Store, Google Play, TestFlight, and Android beta apps | None: J5 Code has no mobile app in a store                                       |
 
 Other environment variables keep T3 Code's names, such as `T3CODE_HOST`, `T3CODE_CHANNEL` and
-`T3CODE_TELEMETRY_ENABLED`. T3 Connect is T3 Code's relay, and J5 Code uses it under that name.
+`T3CODE_TELEMETRY_ENABLED`. T3 Connect is T3 Code's hosted relay; J5 Code doesn't offer it (see
+[Features that need T3 Connect](#features-that-need-t3-connect)).
+
+## Languages
+
+J5 Code's screens that T3 Code also has follow your language setting, as T3 Code's guides
+describe. Screens only J5 Code has, such as the Fleet page and the Inbox, are in English for now.
+
+## Features that need T3 Connect
+
+J5 Code doesn't offer T3 Connect, so the features that work only through it are left out, and
+the guides that describe them don't apply:
+
+- **Share with guest**, in [Guest links](../../user/guest-links.md), on web, desktop and mobile.
+  To bring someone into a thread, share it with a person instead; see
+  [People and sharing](./people-and-sharing.md).
+- **Use J5 Code in another app (MCP)**, the setup in the command palette and
+  **Settings → Sharing & access** that [Outside agents](../../user/outside-agents.md) starts
+  with. Use its **Something else…** route instead: copy the environment's MCP URL and add it in
+  the app as a remote MCP server with OAuth.
+- The **Phone** section of the [Welcome page](../../user/welcome-page.md).
+- Approving new devices that sign in through T3 Connect.
+- `j5 connect`, T3 Connect sign-in, and [T3 Connect troubleshooting](../../user/t3-connect-troubleshooting.md).
 
 ## Updating
 
@@ -100,6 +124,9 @@ use tools on another. In J5 Code on web and desktop, a link does more, and you s
 
 ### Link servers
 
+You can link two servers on the same machine, at a loopback address such as `127.0.0.1`, which
+T3 Code refuses. The address must still answer as the server you picked.
+
 1. Open **Settings → Environments → Linked environments** and choose **Link**. J5 Code also offers
    this when you add an environment; choose **Not now** to skip it.
 2. Pick the server to link, and tick the servers to link it with. A server that can't be linked
@@ -118,9 +145,10 @@ Every pair is one row under **Linked environments**.
 
 - **Change a level** with the pair's Tools pickers, at any time. Two servers that only exchange
   messages gain tools the same way: choose a level in place of **Off**.
-- **Renew** tools before or after their 30 days run out. Near the end the row offers **Renew**;
-  before that it is in the row's menu (**⋯**). One renewal covers both directions, and messages
-  keep working in the meantime.
+- **Tools stay on while agents use them.** Tools unused for 30 days run out, and the row says when
+  that will happen. Once they have run out, the row offers **Renew**; **Renew tools** is also in
+  the row's menu (**⋯**). One renewal covers both directions, and messages keep working in the
+  meantime.
 - **Remove…**, in the row's menu, ends the link on both servers. To stop only what one server's
   agents may do on the other, set that direction to **Off**. If this app can manage only one of
   the two servers, it warns that the other keeps its side until you remove the link there too.
@@ -133,7 +161,10 @@ for. Pick the server and the level, then **Link**. If that server isn't in this 
 Agents can ask once a server has its first link.
 
 A link made in the mobile app, or with `j5 environment link`, works as T3 Code's guide describes:
-one direction, with no messages. Its row on web and desktop offers **Set up messaging**.
+one direction, with no messages. Its row on web and desktop offers **Set up messaging**. This
+includes linking several environments at once, which the mobile app and
+`j5 environment link --from` offer; on web and desktop, **Link several…** isn't offered, so link
+each pair in turn.
 
 ## Scripts on the host
 

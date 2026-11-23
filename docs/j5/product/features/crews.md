@@ -55,8 +55,8 @@ A message to a member or Captain with a running turn lands one of three ways, se
 | --------------------------------- | --------------------------------------------------- | ------------------------------------------------------------------ |
 | Codex, GPT 6 models               | steers directly                                     | steers directly                                                    |
 | Codex, other models               | queues                                              | steers directly                                                    |
-| Claude                            | steers directly, once its running tool calls finish | steers directly                                                    |
-| Cursor                            | queues                                              | steers by interrupt-restart                                        |
+| Claude                            | steers directly, once its running tool calls finish | steers directly, once its running tool calls finish                |
+| Cursor                            | queues                                              | steers directly                                                    |
 | OpenCode, Pi and Muse; ACP agents | queues                                              | directly (OpenCode, Pi, Muse) or by interrupt-restart (ACP agents) |
 
 A steer that races a Stop is a known case ([FORK.md](../../../FORK.md) case 26).
@@ -189,3 +189,4 @@ A steer that races a Stop is a known case ([FORK.md](../../../FORK.md) case 26).
 - 2026-11-06 — a blocked persona escalates: a refused seat gives one of six codes with its reasons, the Captain asks the person once with the escalation, and an Owner can allow that one seat past one limit (Bryant; [#785](https://github.com/Jacksondr5/j5code/issues/785)).
 - 2026-11-06 — a Captain can replace a seat: the new member launches, then takes the unfinished steps, and the replaced member is stopped and leaves the roster as a plain agent (Bryant; [#784](https://github.com/Jacksondr5/j5code/issues/784)).
 - 2026-11-07 — a Captain may wait on a seat with `t3_thread_wait`, at the cost of the notices queued behind its turn; members may run delegates as well as provider Subagents; Crews across machines are Later (Jackson, 2026-11-06 and 2026-11-07; [record](../../worklog/2026-11-07-agent-tool-boundary-session.md)).
+- 2026-11-22 — at the advance onto T3 Code v0.1.11: a steer to a Claude member, asked for or not, waits for its running tool calls, and an asked-for steer to a Cursor member steers its live run without restarting it, as upstream now does (Jackson; [divergence D4](../upstream.md)).

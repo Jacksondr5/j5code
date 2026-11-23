@@ -519,6 +519,62 @@ function membersOfGroup(group: number): ReadonlyArray<number> {
     .filter((pid) => processGroupOf(pid) === group);
 }
 
+/**
+ * Groups led by a descendant of `leader`, other than its own: `vp` starts the server in a group
+ * of its own under the dev runner. `table` holds [pid, parent pid, group] for every process.
+ * Only a group whose leader is itself in the tree counts, so a shared group never does.
+ */
+export function descendantGroupsFromTable(
+  table: ReadonlyArray<readonly [number, number, number]>,
+  leader: number,
+): ReadonlyArray<number> {
+  const descendants = new Set([leader]);
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const [pid, parent] of table) {
+      if (descendants.has(parent) && !descendants.has(pid)) {
+        descendants.add(pid);
+        grew = true;
+      }
+    }
+  }
+  return [
+    ...new Set(
+      table
+        .filter(([pid, , group]) => descendants.has(pid) && group !== leader)
+        .map(([, , group]) => group)
+        .filter((group) => descendants.has(group)),
+    ),
+  ];
+}
+
+/** [pid, parent pid, group] for every process; macOS from `ps -A -o pid=,ppid=,pgid=`. */
+export function processTableFromPs(output: string): ReadonlyArray<readonly [number, number, number]> {
+  return output
+    .split("\n")
+    .map((line) => line.trim().split(/\s+/).map(Number))
+    .filter((row) => row.length === 3 && row.every(Number.isInteger))
+    .map(([pid, parent, group]) => [pid!, parent!, group!] as const);
+}
+
+function descendantGroupsOf(leader: number): ReadonlyArray<number> {
+  if (IS_MACOS) {
+    const output = NodeChildProcess.execFileSync("ps", ["-A", "-o", "pid=,ppid=,pgid="], {
+      encoding: "utf8",
+    });
+    return descendantGroupsFromTable(processTableFromPs(output), leader);
+  }
+  const table = NodeFS.readdirSync("/proc")
+    .filter((entry) => /^\d+$/.test(entry))
+    .flatMap((entry) => {
+      const fields = statFieldsOf(Number(entry));
+      return fields === undefined
+        ? []
+        : [[Number(entry), Number(fields[1]), Number(fields[2])] as const];
+    });
+  return descendantGroupsFromTable(table, leader);
+}
+
 export function listenerOn(port: number): number | undefined {
   if (IS_MACOS) {
     const pid = probeOutput("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"])?.split("\n")[0];
@@ -557,26 +613,44 @@ interface ServerRecord {
   /** The dev runner's pid. It is spawned detached, so this is also its process group id. */
   readonly processGroup: number;
   readonly leaderStartTime: string;
+  /**
+   * Groups led by a process under the dev runner (`vp` starts the server in its own), recorded
+   * once seen so `stop` still reaches them after the runner is gone.
+   */
+  readonly childGroups?: ReadonlyArray<{ readonly group: number; readonly leaderStartTime: string }>;
 }
 
 export type ServerState =
   | { readonly kind: "stopped" }
-  | { readonly kind: "running"; readonly group: number; readonly facts: ServerLogFacts }
+  | {
+      readonly kind: "running";
+      readonly group: number;
+      /** Every group of ours that still has processes: the runner's and those under it. */
+      readonly groups: ReadonlyArray<number>;
+      readonly facts: ServerLogFacts;
+    }
   /** Ours, but its port has no listener: still starting, or the server inside it crashed. */
-  | { readonly kind: "notServing"; readonly group: number; readonly reason: string }
+  | {
+      readonly kind: "notServing";
+      readonly group: number;
+      readonly groups: ReadonlyArray<number>;
+      readonly reason: string;
+    }
   | { readonly kind: "unverified"; readonly group: number; readonly reason: string };
 
 /**
  * Whether the recorded group is ours (its leader is still the spawned process, by pid and start
  * time, running from the worktree), which needs no healthy server, and whether it is serving
- * (the log's port's listener is in the group). A live group that is not ours is reported, never
- * signalled.
+ * (the log's port's listener is in that group or one led under it). A live group that is not
+ * ours is reported, never signalled.
  */
 export function classifyServer(input: {
   readonly worktree: string;
   readonly record: ServerRecord | undefined;
   readonly facts: ServerLogFacts;
   readonly groupMembers: (group: number) => ReadonlyArray<number>;
+  /** Groups led by a descendant of the runner, other than its own. */
+  readonly descendantGroupsOf: (leader: number) => ReadonlyArray<number>;
   readonly listenerOn: (port: number) => number | undefined;
   readonly processGroupOf: (pid: number) => number | undefined;
   readonly startTimeOf: (pid: number) => string | undefined;
@@ -586,7 +660,6 @@ export function classifyServer(input: {
   if (record === undefined) return { kind: "stopped" };
   const group = record.processGroup;
   const members = input.groupMembers(group);
-  if (members.length === 0) return { kind: "stopped" };
 
   const insideWorktree = (pid: number) => {
     const cwd = input.cwdOf(pid);
@@ -594,44 +667,79 @@ export function classifyServer(input: {
   };
   // Identity first: nothing below may call a group ours unless its leader is
   // still the process that was spawned, whatever is listening on the port.
-  if (input.startTimeOf(group) !== record.leaderStartTime || !insideWorktree(group)) {
+  if (
+    members.length > 0 &&
+    (input.startTimeOf(group) !== record.leaderStartTime || !insideWorktree(group))
+  ) {
     return {
       kind: "unverified",
       group,
       reason: `Process group ${group} still has processes (${members.join(", ")}), but its leader is not the process this script started, so it will not signal them. Inspect with \`ps -o pid,pgid,args -g ${group}\`.`,
     };
   }
+  // A recorded child group counts only while the same process leads it, from the worktree.
+  const recordedChildren = (record.childGroups ?? [])
+    .filter(
+      (child) =>
+        input.startTimeOf(child.group) === child.leaderStartTime && insideWorktree(child.group),
+    )
+    .map((child) => child.group);
+  const liveChildren = members.length > 0 ? input.descendantGroupsOf(group) : [];
+  const groups = [...new Set([group, ...recordedChildren, ...liveChildren])].filter(
+    (candidate) => input.groupMembers(candidate).length > 0,
+  );
+  if (groups.length === 0) return { kind: "stopped" };
+
   const listener = facts.serverPort === undefined ? undefined : input.listenerOn(facts.serverPort);
+  const listenerGroup = listener === undefined ? undefined : input.processGroupOf(listener);
   const notServing =
     facts.serverPort === undefined
       ? "The server log does not report a port yet."
       : listener === undefined
         ? `Nothing is listening on port ${facts.serverPort}.`
-        : input.processGroupOf(listener) !== group
-          ? `Port ${facts.serverPort} is owned by process ${listener}, which is not in the recorded group.`
+        : listenerGroup === undefined || !groups.includes(listenerGroup)
+          ? `Port ${facts.serverPort} is owned by process ${listener}, which is not in the recorded group or one started under it.`
           : !insideWorktree(listener)
             ? `The listener on port ${facts.serverPort} does not run from this worktree.`
             : undefined;
   return notServing === undefined
-    ? { kind: "running", group, facts }
-    : { kind: "notServing", group, reason: notServing };
+    ? { kind: "running", group, groups, facts }
+    : { kind: "notServing", group, groups, reason: notServing };
 }
 
 export function currentServerState(paths: ServerPaths): ServerState {
-  return classifyServer({
+  const record = NodeFS.existsSync(paths.record)
+    ? (JSON.parse(NodeFS.readFileSync(paths.record, "utf8")) as ServerRecord)
+    : undefined;
+  const state = classifyServer({
     worktree: NodeFS.realpathSync(paths.worktree),
-    record: NodeFS.existsSync(paths.record)
-      ? (JSON.parse(NodeFS.readFileSync(paths.record, "utf8")) as ServerRecord)
-      : undefined,
+    record,
     facts: readServerLog(
       NodeFS.existsSync(paths.log) ? NodeFS.readFileSync(paths.log, "utf8") : "",
     ),
     groupMembers: membersOfGroup,
+    descendantGroupsOf,
     listenerOn,
     processGroupOf,
     startTimeOf,
     cwdOf,
   });
+  // Remember groups found under the runner, so stop reaches them even once it is gone.
+  if (record !== undefined && (state.kind === "running" || state.kind === "notServing")) {
+    const known = new Set([record.processGroup, ...(record.childGroups ?? []).map((c) => c.group)]);
+    const found = state.groups.flatMap((group) => {
+      const leaderStartTime = known.has(group) ? undefined : startTimeOf(group);
+      return leaderStartTime === undefined ? [] : [{ group, leaderStartTime }];
+    });
+    if (found.length > 0 && NodeFS.existsSync(paths.record)) {
+      const updated: ServerRecord = {
+        ...record,
+        childGroups: [...(record.childGroups ?? []), ...found],
+      };
+      NodeFS.writeFileSync(paths.record, `${JSON.stringify(updated)}\n`);
+    }
+  }
+  return state;
 }
 
 export const selfCommand = (paths: ServerPaths, command: string) =>
@@ -1332,26 +1440,42 @@ Otherwise read the log, then start it again:
   ${paths.log}
   ${selfCommand(paths, "restart")}`;
 
-/** Signals this script's own process group and waits for every member to exit. */
-export async function stopGroup(group: number): Promise<void> {
+/**
+ * Signals this script's own process groups (the runner's and those led under it, which
+ * `classifyServer` proved ours) and waits for every member to exit.
+ */
+export async function stopGroups(groups: ReadonlyArray<number>): Promise<void> {
+  const remaining = () => groups.flatMap((group) => membersOfGroup(group));
+  const signal = (name: NodeJS.Signals) => {
+    for (const group of groups) {
+      try {
+        process.kill(-group, name);
+      } catch {
+        // Already gone.
+      }
+    }
+  };
   const waitForExit = async (timeoutMs: number) => {
     const deadline = Date.now() + timeoutMs;
-    while (membersOfGroup(group).length > 0) {
+    while (remaining().length > 0) {
       if (Date.now() > deadline) return false;
       await NodeTimersPromises.setTimeout(200);
     }
     return true;
   };
-  process.kill(-group, "SIGTERM");
+  signal("SIGTERM");
   if (await waitForExit(STOP_TIMEOUT_MS)) return;
   console.log(`Still running after ${STOP_TIMEOUT_MS / 1000} seconds; killing the group.`);
-  process.kill(-group, "SIGKILL");
+  signal("SIGKILL");
   if (!(await waitForExit(5_000))) {
     throw new LiveTestRefusal(
-      `Process group ${group} survived SIGKILL: ${membersOfGroup(group).join(", ")}.`,
+      `Process groups ${groups.join(", ")} survived SIGKILL: ${remaining().join(", ")}.`,
     );
   }
 }
+
+/** Signals one process group this script started and waits for every member to exit. */
+export const stopGroup = (group: number) => stopGroups([group]);
 
 /**
  * Waits for a server this script started to be ready and returns what its log
@@ -1402,7 +1526,7 @@ async function waitUntilReady(
       requireShare,
     });
     if (refusal !== undefined) {
-      await stopGroup(state.group);
+      await stopGroups(state.groups);
       NodeFS.rmSync(paths.record, { force: true });
       throw new LiveTestRefusal(`${refusal} It has been stopped.`);
     }
@@ -2656,7 +2780,7 @@ async function stop(
       console.log(`J5 Code live-test server${name}: STOPPED (it was not running)`);
       continue;
     }
-    await stopGroup(state.group);
+    await stopGroups(state.groups);
     NodeFS.rmSync(server.record, { force: true });
     console.log(`J5 Code live-test server${name}: STOPPED`);
   }

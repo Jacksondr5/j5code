@@ -1068,7 +1068,7 @@
   "8be698cbd7c7cd5a": "Эта ссылка указывает на пул-реквест, который J5 Code не может прочитать.",
   "df1915cc1c939ef9": "В этой ссылке нет промпта.",
   "ec34330464820995": "Эта ссылка указывает на репозиторий, который J5 Code не может прочитать.",
-  "4dac88bf6eacccb1": "After you stop, {environment} sends the recording to OpenRouter. OpenRouter chooses who runs your model. J5 Code requests zero data retention; your OpenRouter account may allow safety retention.",
+  "4dac88bf6eacccb1": "После остановки {environment} отправит запись в OpenRouter. OpenRouter выбирает, кто запустит вашу модель. J5 запрашивает нулевое хранение данных; ваш аккаунт OpenRouter может разрешать хранение для проверки безопасности.",
   "81b64c298285297c": "После остановки {environment} отправит вашу запись и подсказки словаря, включая названия проектов, в {provider}.",
   "615ce9f2edf7208f": "Привязать пул-реквест",
   "4ece383dad280e57": "Привязать пул-реквесты",

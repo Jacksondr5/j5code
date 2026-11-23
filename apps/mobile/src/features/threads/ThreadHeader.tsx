@@ -8,6 +8,7 @@ import {
 } from "../layout/AdaptiveWorkspaceLayout";
 import type { ThreadInspectorMode } from "./thread-inspector-navigation";
 import { useWorkspaceBackNavigation } from "../layout/workspace/useAndroidWorkspaceNavigation";
+import { useStartsSomewhere } from "../../j5/sharing/startAccess";
 import {
   threadTerminalMenu,
   useThreadGitMenuDefinition,
@@ -45,13 +46,15 @@ export function ThreadHeader(props: {
       ]
     : [];
   const menus = [gitMenu, terminalMenu].filter((menu): menu is AppBarMenu => menu !== null);
+  // J5: compose is offered only to someone who may start a thread (FORK.md case 90).
+  const startsSomewhere = useStartsSomewhere();
 
   return (
     <AppBar
       title={props.title}
       subtitle={props.subtitle}
       onBackToList={goBack}
-      onCompose={props.draft ? undefined : startNewTask}
+      onCompose={props.draft || !startsSomewhere ? undefined : startNewTask}
       backInSplitView={
         props.onReturnToThread
           ? {

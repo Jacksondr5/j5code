@@ -2,7 +2,9 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
+import * as SqlClient from "effect/sql/SqlClient";
 import * as TestClock from "effect/testing/TestClock";
 
 import { makeDpopKey } from "../../auth/dpop.testkit.ts";
@@ -60,6 +62,39 @@ it.layer(layer)("a J5 link's device session", (it) => {
       yield* TestClock.adjust("2 hours");
       const renewed = yield* auth.renewAccessToken(paired.access_token, key.thumbprint, Effect.void);
       assert.strictEqual((yield* sessions.verify(renewed.access_token)).sessionId, sessionId);
+    }),
+  );
+
+  it.effect("is cut loose from its person when its device key is revoked", () =>
+    Effect.gen(function* () {
+      const auth = yield* EnvironmentAuth.EnvironmentAuth;
+      const sessions = yield* SessionStore.SessionStore;
+      const links = yield* Links;
+      const people = yield* PersonAccess.PersonAccess;
+      const sql = yield* SqlClient.SqlClient;
+      const owner = yield* people.firstOwner;
+      yield* people.setName({ personId: owner.personId, displayName: "Owner" });
+      const dana = yield* person("Dana", [{ scope: { kind: "server" }, level: "viewer" }]);
+      const link = yield* links.create(ownerDesktop, { kind: "device", personId: dana.personId });
+      const joined = yield* links.join({ token: link.token, name: undefined, session: null });
+      if (joined.kind !== "pair") return assert.fail(joined.kind);
+      const key = makeDpopKey();
+      const paired = yield* auth.exchangeBootstrapCredentialForAccessToken(
+        joined.credential,
+        undefined,
+        requestMetadata,
+        { proofKeyThumbprint: key.thumbprint },
+      );
+      const { sessionId } = yield* sessions.verify(paired.access_token);
+      const bound = () =>
+        sql<{ readonly n: number }>`
+          SELECT COUNT(*) AS n FROM j5_a2a_person_session WHERE session_id = ${sessionId}
+        `.pipe(Effect.map((rows) => rows[0]?.n ?? 0));
+      assert.strictEqual(yield* bound(), 1);
+
+      assert.isTrue(yield* auth.revokeConnectDevice(key.thumbprint));
+      assert.strictEqual(yield* bound(), 0);
+      assert.isTrue(Exit.isFailure(yield* Effect.exit(sessions.verify(paired.access_token))));
     }),
   );
 });

@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { rebrandTranslation, rekeyLocale, upstreamKeyOf } from "./rekey-branded-translations.ts";
+import {
+  PHRASES,
+  rebrandTranslation,
+  rekeyLocale,
+  upstreamKeyOf,
+} from "./rekey-branded-translations.ts";
 
 describe("rekey-branded-translations", () => {
   it("swaps the brand the English changed and keeps the names J5 keeps", () => {
@@ -24,6 +29,41 @@ describe("rekey-branded-translations", () => {
         '"T3CODE_HOME points at the J5 home"',
       ),
     ).toBe('"T3CODE_HOME zeigt auf das J5-Home"');
+  });
+
+  it("carries a bare T3 that became J5 Code, t3@ that became j5, and a rewritten sentence", () => {
+    expect(
+      upstreamKeyOf(JSON.stringify("J5 Code requests zero data retention"), {
+        a: "T3 requests zero data retention",
+      }),
+    ).toBe("a");
+    expect(upstreamKeyOf(JSON.stringify("Reconnected on j5 {version}."), {
+      a: "Reconnected on t3@{version}.",
+    })).toBe("a");
+    expect(
+      rebrandTranslation('"Mit t3@{version} neu verbunden."', '"Reconnected on t3@{version}."', '"Reconnected on j5 {version}."'),
+    ).toBe('"Mit j5 {version} neu verbunden."');
+    expect(
+      rebrandTranslation(
+        '"Zum Beispiel ergibt t3 oder t3/ den Namen t3/add-search."',
+        '"For example, t3 or t3/ produces t3/add-search."',
+        '"For example, j5code or j5code/ produces j5code/add-search."',
+      ),
+      "a branch prefix the English made j5code",
+    ).toBe('"Zum Beispiel ergibt j5code oder j5code/ den Namen j5code/add-search."');
+    const [rewrite] = PHRASES;
+    if (rewrite === undefined) throw new Error("no phrases");
+    const oldEnglish = `Stop it. ${rewrite.english.upstream}. Then reopen T3 Code.`;
+    const newEnglish = `Stop it. ${rewrite.english.j5}. Then reopen J5 Code.`;
+    expect(upstreamKeyOf(JSON.stringify(newEnglish), { a: oldEnglish })).toBe("a");
+    expect(
+      rebrandTranslation(
+        JSON.stringify(`Stoppe ihn. ${rewrite.locales.de!.upstream}. Öffne T3 Code dann erneut.`),
+        JSON.stringify(oldEnglish),
+        JSON.stringify(newEnglish),
+        "de",
+      ),
+    ).toBe(JSON.stringify(`Stoppe ihn. ${rewrite.locales.de!.j5}. Öffne J5 Code dann erneut.`));
   });
 
   it("finds upstream's key only for a string that differs in its brand alone", () => {
@@ -55,5 +95,6 @@ describe("rekey-branded-translations", () => {
     });
     expect(result.catalog).toEqual({ fresh: "J5 Code aktualisieren", j5: "Open the Inbox" });
     expect(result.missing).toEqual([]);
+    expect(result.leftEnglish).toEqual(["j5"]);
   });
 });

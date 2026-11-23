@@ -1068,7 +1068,7 @@
   "8be698cbd7c7cd5a": "Ce lien désigne une pull request que J5 Code ne peut pas lire.",
   "df1915cc1c939ef9": "Ce lien ne contient aucun prompt.",
   "ec34330464820995": "Ce lien désigne un dépôt que J5 Code ne peut pas lire.",
-  "4dac88bf6eacccb1": "After you stop, {environment} sends the recording to OpenRouter. OpenRouter chooses who runs your model. J5 Code requests zero data retention; your OpenRouter account may allow safety retention.",
+  "4dac88bf6eacccb1": "Une fois l’enregistrement arrêté, {environment} l’envoie à OpenRouter. OpenRouter choisit qui exécute votre modèle. J5 demande une conservation nulle des données ; votre compte OpenRouter peut autoriser une conservation à des fins de sécurité.",
   "81b64c298285297c": "Une fois l’enregistrement arrêté, {environment} envoie votre enregistrement et des indications de vocabulaire, y compris les noms de projets, à {provider}.",
   "615ce9f2edf7208f": "Associer une pull request",
   "4ece383dad280e57": "Associer des pull requests",

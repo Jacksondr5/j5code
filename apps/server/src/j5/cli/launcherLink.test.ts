@@ -6,6 +6,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 
+import { posixLauncherScript } from "../../cloud/pinnedRuntime.ts";
 import { repointCliLauncherToSelf } from "./launcherLink.ts";
 
 // A home whose installer link still runs the version before an in-app update.
@@ -38,7 +39,8 @@ it.layer(NodeServices.layer)("j5 launcher link", (it) => {
       );
 
       assert.equal(Option.getOrUndefined(repointed), link);
-      assert.equal(yield* fs.readLink(link), running);
+      // The legacy link becomes the launcher script upstream's installers now write.
+      assert.equal(yield* fs.readFileString(link), posixLauncherScript(running));
     }).pipe(
       Effect.scoped,
       Effect.provideService(HostProcess.Platform, "linux"),

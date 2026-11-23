@@ -8,6 +8,8 @@ import { useGT } from "gt-react";
 import { useState, type DragEvent, type ReactNode } from "react";
 
 import { useOpenLocalWorkspace } from "../../hooks/useOpenLocalWorkspace";
+import { useCanAddProject } from "../../j5/sharing/access";
+import { usePrimaryEnvironmentId } from "../../state/environments";
 import { randomUUID } from "../../lib/utils";
 import { resolveDroppedFolderPath } from "../chat/folderDrop";
 import { splitTransferredFiles } from "../chat/workspaceFileDrop";
@@ -31,6 +33,8 @@ export function SidebarFolderDrop(props: { children: ReactNode }) {
   const gt = useGT();
   const [isActive, setIsActive] = useState(false);
   const openLocalWorkspace = useOpenLocalWorkspace();
+  // J5: someone who may not add a project here is offered no drop zone (FORK.md case 90).
+  const canAddProject = useCanAddProject(usePrimaryEnvironmentId());
   const bridge = window.desktopBridge;
   const setActive = (active: boolean) => setFileDragActive(setIsActive, active);
 
@@ -83,7 +87,7 @@ export function SidebarFolderDrop(props: { children: ReactNode }) {
   };
 
   const onDragOver = (event: DragEvent) => {
-    if (!isFileDrag(event)) return;
+    if (!isFileDrag(event) || !canAddProject) return;
     if (event.defaultPrevented) {
       setActive(false);
       return;
@@ -104,7 +108,7 @@ export function SidebarFolderDrop(props: { children: ReactNode }) {
         setActive(false);
       }}
       onDrop={(event) => {
-        if (!isFileDrag(event)) return;
+        if (!isFileDrag(event) || !canAddProject) return;
         const claimedByRow = event.defaultPrevented;
         event.preventDefault();
         setActive(false);

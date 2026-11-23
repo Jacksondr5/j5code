@@ -1068,7 +1068,7 @@
   "8be698cbd7c7cd5a": "Den här länken pekar på en pull request som J5 Code inte kan läsa.",
   "df1915cc1c939ef9": "Den här länken har ingen prompt.",
   "ec34330464820995": "Den här länken pekar på ett repo som J5 Code inte kan läsa.",
-  "4dac88bf6eacccb1": "After you stop, {environment} sends the recording to OpenRouter. OpenRouter chooses who runs your model. J5 Code requests zero data retention; your OpenRouter account may allow safety retention.",
+  "4dac88bf6eacccb1": "När du stoppar skickar {environment} inspelningen till OpenRouter. OpenRouter väljer vem som kör din modell. J5 begär att ingen data sparas; ditt OpenRouter-konto kan tillåta lagring av säkerhetsskäl.",
   "81b64c298285297c": "När du stoppar skickar {environment} din inspelning och dina ordförrådstips, inklusive projektnamn, till {provider}.",
   "615ce9f2edf7208f": "Länka en pull request",
   "4ece383dad280e57": "Länka pull requests",

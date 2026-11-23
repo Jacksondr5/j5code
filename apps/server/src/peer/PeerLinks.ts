@@ -377,7 +377,7 @@ const make = Effect.gen(function* () {
       if (redirect === null) {
         return yield* new PeerLinkError({
           reason: "incompatible",
-          message: `${origin} answered the sign-in with an address this version cannot read. Update both environments.`,
+          message: `${readableOrigin(origin)} answered the sign-in with an address this version cannot read. Update both environments.`,
         });
       }
       const code = redirect.searchParams.get("code");
@@ -420,7 +420,7 @@ const make = Effect.gen(function* () {
             Effect.fail(
               new PeerLinkError({
                 reason: "incompatible",
-                message: `${origin} answered in a shape this version does not understand. Update both environments.`,
+                message: `${readableOrigin(origin)} answered in a shape this version does not understand. Update both environments.`,
                 cause,
               }),
             ),
@@ -428,7 +428,7 @@ const make = Effect.gen(function* () {
             Effect.fail(
               new PeerLinkError({
                 reason: "unreachable",
-                message: `${origin} stopped answering while linking.`,
+                message: `${readableOrigin(origin)} stopped answering while linking.`,
                 cause,
               }),
             ),
