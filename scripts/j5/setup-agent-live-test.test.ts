@@ -559,7 +559,7 @@ describe("liveTestEnvironment", () => {
       KEEP: "1",
       T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "false",
       J5CODE_DEV_OWNER_NAME: "",
-      J5CODE_SERVER_NAME: `${NodeOS.hostname()} test (tree)`,
+      J5CODE_SERVER_NAME: "Test (tree)",
       NODE_OPTIONS: "--disable-warning=ExperimentalWarning",
       PATH: `/work/tree/node_modules/.bin${NodePath.delimiter}/usr/bin`,
     });
