@@ -56,13 +56,15 @@ import { RelativeTime } from "../../components/RelativeTime";
 import { RelativeAge } from "../RelativeAge";
 import {
   AnswerAttachButton,
-  AnswerAttachmentList,
+  AnswerAttachmentStrip,
   type AnswerAttachmentsState,
   answerAttachmentInputHandlers,
+  useAnswerAttachmentIntake,
   useAnswerAttachmentSupport,
   useAnswerAttachments,
-  useRestoredAnswerUploads,
+  useAnswerUploads,
 } from "./AnswerAttachments";
+import { WorkspaceFileDropOverlay } from "../../components/chat/TimelineOverlays";
 import { answerSendCallbacks, answerToDeliver, useAnswerSends } from "./answerSends";
 import { answerHumanExchange } from "./humanInboxClient";
 import {
@@ -353,17 +355,20 @@ function OpenInboxItem({
   const itemKey = scopedInboxItemKey(item);
   const editorRef = useRef<ComposerPromptEditorHandle>(null);
   const support = useAnswerAttachmentSupport(item.environmentId);
-  useRestoredAnswerUploads(itemKey, item.environmentId, canAnswer && closed === undefined);
-  const addFiles =
-    support === null || closedText !== null || pending
-      ? null
-      : (files: ReadonlyArray<File>) =>
-          attachments.add(itemKey, item.environmentId, support.maxFileBytes, files);
+  useAnswerUploads(itemKey, item.environmentId, canAnswer && closed === undefined);
+  const intake = useAnswerAttachmentIntake({
+    answerKey: itemKey,
+    support,
+    onError: (message) => attachments.setError(itemKey, message),
+  });
+  const [dragActive, setDragActive] = useState(false);
+  const addFiles = support === null || closedText !== null || pending ? null : intake.addFiles;
   const readiness = attachments.ready(itemKey, item.environmentId);
   const waitingOn = "blocked" in readiness ? readiness.blocked : null;
   const sendable =
     canAnswer && closedText === null && answerToDeliver(answerText) !== null && waitingOn === null;
-  const fileInput = addFiles === null ? null : answerAttachmentInputHandlers(addFiles);
+  const fileInput =
+    addFiles === null ? null : answerAttachmentInputHandlers(addFiles, setDragActive);
   return (
     <li className="border-b border-border/70 last:border-b-0">
       <details
@@ -437,10 +442,17 @@ function OpenInboxItem({
           ) : (
             <div className="mt-4 flex flex-col gap-3">
               <div
+                className="relative"
                 {...(fileInput === null
                   ? {}
-                  : { onDragOver: fileInput.onDragOver, onDrop: fileInput.onDrop })}
+                  : {
+                      onDragEnter: fileInput.onDragEnter,
+                      onDragOver: fileInput.onDragOver,
+                      onDragLeave: fileInput.onDragLeave,
+                      onDrop: fileInput.onDrop,
+                    })}
               >
+                {dragActive && fileInput !== null ? <WorkspaceFileDropOverlay /> : null}
                 {/* A collapsed ask mounts no editor: the Inbox can list many, and the words are stored. */}
                 {expanded ? (
                   <InboxReplyEditor
@@ -459,12 +471,13 @@ function OpenInboxItem({
                   />
                 ) : null}
               </div>
-              <AnswerAttachmentList
+              <AnswerAttachmentStrip
                 answerKey={itemKey}
-                attachments={attachments.list(itemKey)}
+                delivering={pending}
                 environmentId={item.environmentId}
                 error={attachments.error(itemKey)}
-                onRemove={pending ? null : (id) => attachments.remove(itemKey, id)}
+                intake={intake}
+                support={support}
               />
               {/* As upstream's composer: the error shows, the words stay, and sending again retries. */}
               {error === null ? null : <AnswerSendErrorAlert message={error} />}
