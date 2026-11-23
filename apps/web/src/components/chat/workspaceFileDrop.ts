@@ -1,3 +1,5 @@
+import { isInsideOwnFileDropTarget } from "../../j5/a2a/answerFileDrop";
+
 interface WorkspaceFileDragEvent {
   readonly dataTransfer: {
     readonly types: ReadonlyArray<string>;
@@ -9,6 +11,7 @@ interface WorkspaceFileDragEvent {
     }>;
     dropEffect: string;
   };
+  readonly target: EventTarget | null;
   readonly relatedTarget: EventTarget | null;
   readonly currentTarget: {
     contains(target: Node | null): boolean;
@@ -78,6 +81,7 @@ export function makeWorkspaceFileDropHandlers(host: WorkspaceFileDropHost) {
       if (!isFileDrag(event)) return;
       event.preventDefault();
       host.setDragActive(false);
+      if (isInsideOwnFileDropTarget(event.target)) return;
       const { files, folders } = splitTransferredFiles(event.dataTransfer);
       if (files.length > 0) host.addFiles(files);
       if (folders.length > 0) host.addFolders(folders);

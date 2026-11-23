@@ -596,7 +596,7 @@ export default defineConfig({
           "**/{test-fixtures,*TestFixtures}.ts",
           "apps/mobile/src/features/development/**",
           "packages/client-runtime/src/rpc/**",
-          // J5: J5's own screens stay English until they are translated (FORK.md case 126).
+          // J5: J5's own screens stay English until they are translated (FORK.md case 129).
           "**/src/j5/**",
         ],
         rules: { "t3code/no-untranslated-copy": "error" },

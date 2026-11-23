@@ -6,6 +6,7 @@ import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
@@ -27,6 +28,7 @@ import { A2ALifecycleService, manualLayer as lifecycleLayer } from "./LifecycleS
 import { resolveThreadHome } from "./HomeRegistrar.ts";
 import { ParticipantPlacementService, layer as placementLayer } from "./PlacementService.ts";
 import { PlacementCommandId } from "./placementContracts.ts";
+import { PersonAccess, layer as personAccessLayer } from "../sharing/PersonAccess.ts";
 import { runMigrations } from "../../persistence/Migrations.ts";
 import { runJ5A2AMigrations } from "./Migrations.ts";
 import { A2AParticipantArchivedError, A2ASendService, layer as sendLayer } from "./SendService.ts";
@@ -125,6 +127,7 @@ const makeTestLayer = (
     threadManagement,
     lifecycle,
     placements,
+    personAccessLayer.pipe(Layer.provide(database)),
   );
 };
 
@@ -833,6 +836,59 @@ it.effect(
           (yield* Ref.get(notices)).some((entry) => entry.input.message.includes("was deleted")),
         );
       }).pipe(Effect.provide(makeTestLayer(notices)));
+    }),
+);
+
+it.effect(
+  "deleting a thread mid-placement-chain announces that the agents beneath it left a person's reach",
+  () =>
+    Effect.gen(function* () {
+      const notices = yield* Ref.make<ReadonlyArray<DeliveredNotice>>([]);
+      yield* Effect.gen(function* () {
+        yield* runMigrations();
+        yield* runJ5A2AMigrations();
+        const projectId = LedgerProjectId.make("project:lifecycle:delete-reach");
+        const root: AgentParticipant = {
+          kind: "agent",
+          id: ParticipantId.make("agent:lifecycle:root"),
+          threadId: ThreadId.make("thread:lifecycle:root"),
+        };
+        yield* createProjectLedger(projectId);
+        const placements = yield* ParticipantPlacementService;
+        for (const [agent, parent] of [
+          [root, null],
+          [sender, root],
+          [receiver, sender],
+        ] as const) {
+          yield* join(projectId, agent, `delete-reach:${agent.id}`);
+          yield* placements.recordCreation({
+            commandId: PlacementCommandId.make(`delete-reach:${agent.id}`),
+            projectId,
+            participantId: agent.id,
+            actor: "platform",
+            provenance:
+              parent === null
+                ? { kind: "unknown", source: "native_or_unobserved" }
+                : { kind: "spawned-by", spawnedByParticipantId: parent.id, source: "j5_spawn" },
+            createdAt: openedAt,
+          });
+        }
+        const access = yield* PersonAccess;
+        const person = yield* access.createPerson({ displayName: "Contractor" });
+        yield* access.setLevel({
+          personId: person.personId,
+          scope: { kind: "thread", threadId: root.threadId },
+          level: "viewer",
+        });
+        assert.strictEqual(yield* access.threadLevel(person.personId, receiver.threadId), "viewer");
+
+        const changes = yield* access.subscribeChanges;
+        yield* (yield* A2ALifecycleService).handleStoredEvent(
+          retiredThreadEvent("thread.deleted", sender.threadId, 1),
+        );
+        assert.deepStrictEqual(yield* PubSub.takeUpTo(changes, 16), [person.personId]);
+        assert.isNull(yield* access.threadLevel(person.personId, receiver.threadId));
+      }).pipe(Effect.scoped, Effect.provide(makeTestLayer(notices)));
     }),
 );
 

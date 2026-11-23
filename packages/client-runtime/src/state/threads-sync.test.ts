@@ -52,7 +52,7 @@ import { v2Now, v2Projection, v2ThreadId } from "./orchestrationV2TestFixtures.t
 import { onThreadRequestsResolved, type ThreadRequestsResolved } from "./threadRequests.ts";
 import { EMPTY_THREAD_HISTORY_META } from "./threadHistoryMerge.ts";
 import * as ThreadHistoryController from "./threadHistoryController.ts";
-import { forgetReplacedCredential } from "../j5/replacedCredential.ts";
+import { dropReplacedRetainedState, forgetReplacedCredential } from "../j5/replacedCredential.ts";
 import {
   EMPTY_ENVIRONMENT_THREAD_STATE,
   makeEnvironmentThreadState,
@@ -2371,8 +2371,14 @@ describe("EnvironmentThreads", () => {
 
   it.effect("does not recreate a cache a re-pair cleared from its finalizer", () =>
     Effect.gen(function* () {
+      const resumeCache: NonNullable<Parameters<typeof makeEnvironmentThreadState>[1]> = {
+        snapshot: undefined,
+        owner: undefined,
+      };
       const scope = yield* Scope.make();
-      const harness = yield* makeHarness().pipe(Effect.provideService(Scope.Scope, scope));
+      const harness = yield* makeHarness({ resumeCache }).pipe(
+        Effect.provideService(Scope.Scope, scope),
+      );
       yield* Queue.offer(harness.inputs, snapshot(BASE_PROJECTION));
       yield* awaitThreadState(harness.observed, (value) => value.status === "live");
       yield* TestClock.adjust("500 millis");
@@ -2388,8 +2394,13 @@ describe("EnvironmentThreads", () => {
         TARGET.environmentId,
         Effect.void,
       );
+      // The thread's atom reads the retained state before the old state's finalizer has run.
+      dropReplacedRetainedState(TARGET.environmentId, resumeCache);
       yield* Scope.close(scope, Exit.void);
       expect(yield* Ref.get(harness.savedThreads)).toHaveLength(1);
+      // The state kept in memory for a quick reopen was the last person's too.
+      const successor = yield* makeHarness({ resumeCache });
+      expect(Option.isNone((yield* SubscriptionRef.get(successor.threadState)).data)).toBe(true);
     }),
   );
 

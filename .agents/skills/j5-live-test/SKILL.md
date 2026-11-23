@@ -36,9 +36,9 @@ A small re-test you run yourself is fine; say it was yours.
 File each bug the test finds outside your change as an issue, after checking
 that the base has it too.
 
-Put the report's videos in the PR description beside the screenshots. Once
-the description is saved, check each plays for a signed-out viewer: this must
-print `200 video/mp4`.
+Put the report's screenshots and videos in the PR description. Once the
+description is saved, check each loads for a signed-out viewer: this must
+print `200 image/png` (or another `image/` type) or `200 video/mp4`.
 
 ```bash
 curl -sL -o /dev/null -w '%{http_code} %{content_type}\n' "<url>"
@@ -279,55 +279,86 @@ sent through the UI.
 Use `--base <ref>` so base and head show the same data. The ref is the PR's
 own base, which for a stacked PR is the layer beneath it. Fetch, then name the
 remote branch, such as `origin/j5/main`: a local branch can be behind. Open
-each server in its own tab. Capture at 1280x800 as test-t3-app describes,
-then upload:
+each server in its own tab. Capture at 1280x800 as test-t3-app describes.
+Every pair shows the full screen, plus a crop when the change is small:
+reviewers judge each "after" screen as a whole, not only the part that
+changed. Capture every state the change touches: empty, loading, error, the
+populated case, and any state it adds. If a state is hard to reach, say so
+rather than skip it. Then upload them as described in "Upload", below.
 
-```bash
-node scripts/j5/pr-evidence.ts <pr> --pair "<caption>" <before.png> <after.png>
-```
-
-Repeat `--pair` for each state. For a state the change adds, use
-`--new "<caption>" <after.png>`. It prints the before/after table for the PR
-description. Run `rebuild` with no flag when you are done, which removes the
-base checkout. It refuses if you edited a file there, so do not.
+Run `rebuild` with no flag when you are done, which removes the base
+checkout. It refuses if you edited a file there, so do not.
 
 ## PR videos
 
 Motion, timing, or an interaction sequence needs a video. Record base and head
 with the same steps, each on its own server as for screenshots.
 
-1. Resize the tab to 1280x800, call `preview_recording_start`, do the steps,
-   then call `preview_recording_stop`. It returns an MP4 in the server's data
-   directory. Copy it out under a name that says what it shows: GitHub shows
-   the name above the player.
-2. Open the PR in a new tab with `preview_open`, passing the "GitHub Video
-   Upload" profile from `preview_status` as `profileId`. If there is no PR
-   yet, open its tracking issue. That profile is signed in to the developer's
-   GitHub account: open nothing else under it.
-3. Call `preview_act` with `action: "upload"`, `locator: "#fc-new_comment_field"`
-   and the MP4's path in `paths`. GitHub uploads it and writes a
-   `https://github.com/user-attachments/assets/<id>` URL into the comment
-   box. `preview_wait_for` cannot see text in that box, so read
-   `document.getElementById("new_comment_field").value` with
-   `preview_evaluate` until the URL is there.
-4. Empty the box (set its value to `""` and dispatch an `input` event), never
-   submit it, and close the tab.
-5. Check GitHub renders the URL as a player. This must print `<video`:
+Resize the tab to 1280x800, call `preview_recording_start`, do the steps,
+then call `preview_recording_stop`. It returns an MP4 in the server's data
+directory. Copy it out under a name that says what it shows: GitHub shows the
+name above the player. Then upload it as described in "Upload".
 
-   ```bash
-   printf '%s' "<url>" | jq -Rs '{text: ., mode: "gfm", context: "Jacksondr5/j5code"}' \
-     | gh api markdown --input - | grep -o '<video'
-   ```
+## Upload
 
-   This checks rendering only. The URL refuses signed-out requests until a
-   posted PR or comment contains it, so whoever opens the PR checks playback
-   (see "Ask for a test"). `curl -sI` gets a 403 even then; use a GET.
+Screenshots and videos go up as GitHub attachments, through the PR's comment
+box in the Browser panel, without posting the comment. GitHub hosts them, and
+plays video only from its own attachments. Never push them to a branch: a
+branch is public, browsable and copied into every fork. Never commit them to
+the PR's branch either.
 
-6. Put each URL in the report with its caption. In the PR description, each
-   URL goes on a line of its own, which GitHub renders as a player.
+Check each file is what it claims to be first: `file shot.png` must say "PNG
+image data" and `file clip.mp4` "ISO Media". Tools sometimes write JPEG or
+WebP bytes under a `.png` name, which GitHub won't render.
 
-If the profile is missing, or GitHub shows it signed out, stop and ask the
-developer to sign in to it. Never sign in yourself.
+The upload uses a Browser panel profile kept for this job. It is an ordinary
+profile in the developer's own J5 Code instance, which they signed in to
+GitHub themselves, often named "GitHub Video Upload". `preview_status` lists
+the profiles. It holds the developer's GitHub session, so open nothing but
+the PR under it. If there is no such profile, or GitHub shows it signed out,
+stop and ask the developer to sign in to it. Never sign in yourself.
+
+1. Open the PR in a new tab with `preview_open`, passing that profile's id as
+   `profileId`. If there is no PR yet, open its tracking issue.
+2. Click the comment box ("Leave a comment"), then its "Paste, drop, or click
+   to add files" button. A file picker opens.
+3. Answer it with `preview_act`, `action: "upload"`, and every file's
+   absolute path in `paths`. Several files go in one call.
+4. Wait until the box holds one `https://github.com/user-attachments/assets/…`
+   URL per file. `preview_wait_for` cannot see text in that box, so read it
+   with `preview_evaluate` on `textarea[placeholder="Leave a comment"]`.
+   GitHub writes an `<img>` tag for each image and a bare URL for each video.
+   If the count doesn't match the files, post nothing: retry once, then
+   report it.
+5. Empty the box (select all, delete), check it is empty, and close the tab.
+   Never submit the comment.
+
+An upload stays private (a signed-out GET returns 404) until a posted PR or
+comment embeds it, and only GitHub Support can delete it afterwards. Upload
+only what goes in the PR.
+
+## Present
+
+Put each URL in the report with its caption, and in the PR description:
+
+- Before/after pairs, each with a one-line caption saying which state it
+  shows. A video URL goes on a line of its own, which GitHub renders as a
+  player.
+- Alt text names the caption and the side:
+  `alt="Viewer search with no matches, after"`, not `alt="After"` or the file
+  name GitHub filled in. Viewers that show images on their own, like J5's,
+  show only the alt text.
+- Keep captions to what the image shows. Commit SHAs, temp paths and capture
+  logs bury the images.
+- When a later push changes the UI, replace the images in the description
+  with new uploads under new names. Don't post a new evidence comment on
+  every push.
+- If you couldn't capture something, say so. Never imply a UI was verified
+  when it wasn't.
+
+Once the description is saved, whoever opens the PR checks each link loads
+for a signed-out viewer (see "Ask for a test"). It can take a few seconds to
+turn from 404 to 200.
 
 ## A server for the developer
 

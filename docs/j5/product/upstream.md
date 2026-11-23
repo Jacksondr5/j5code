@@ -154,18 +154,6 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 
 **Decided:** Jackson, 2026-11-09 ([record](../worklog/2026-11-09-one-link-flow-session.md)) and 2026-11-19 (the card kept as upstream answers it, and the server's part in ending a link's session), and 2026-11-22, at the advance onto v0.1.11 (links renew while used as upstream's do, with Renew offered only once a direction's actions have run out, replacing the 2026-11-19 rule that only a person renews a link; "Link several…" left out of the web flow for now). Recorded in FORK.md cases 121 to 123.
 
-#### D48. J5's envelope is the only sender line on a J5 delivery
-
-**Upstream:** since v0.1.11, a message the person did not type reaches the model with a bracketed line before its text that says who sent it: the agent in another thread, an agent on a linked environment, a scheduled task, or the app's tools, "not the user" (pingdotgg/t3code#39306). A message that begins with a slash command or a skill mention is left as sent.
-
-**J5:** a message that carries J5's delivery envelope reaches the model without upstream's line, because the envelope already names the sender, the Exchange and how to reply. Upstream's own sends, which carry no envelope, keep the line, in J5's words: "J5 Code" and "J5 thread".
-
-**Why:** two sender lines for one message, in two formats, say the same thing twice, and upstream's names only a thread id where J5's envelope names the participant. J5's envelope is what its agents are told to read ([agent-to-agent communication](a2a/index.md)).
-
-**Consequences:** one import and one condition in upstream's `packages/contracts/src/orchestrationV2.ts`, with the test for an envelope in a J5-owned contracts file (FORK.md case 127). `EnvelopeFormatter.test.ts` checks every envelope J5 writes against that test, so a new envelope header cannot slip past it and pick up upstream's line too. At each advance, check whether upstream's line gained a case or moved out of `withMessageSenderNote`.
-
-**Decided:** Jackson, 2026-11-22, at the advance onto v0.1.11.
-
 #### D49. A server on this machine can be linked at a loopback address
 
 **Upstream:** since v0.1.11, linking to a machine the app knows refuses any loopback address as this machine ("is this machine, not …"), because anything running here could answer as the machine picked (pingdotgg/t3code#34139). A server is still linked only where it answers with the environment id the link expects.
@@ -177,6 +165,18 @@ Letter codes in the Decided lines (SC2, QS1, AR3, and so on) are rulings recorde
 **Consequences:** no edit to upstream's files: J5's link service gives upstream's `LoopbackHost` reference, which upstream exposes for its tests, a J5 constant that answers no (FORK.md cases 118 and 121). Any process on this machine that answers with the expected environment id would be linked. At each advance, check that upstream still reads loopback through that reference and has added no other refusal of this machine.
 
 **Decided:** Jackson, 2026-11-22, at the advance onto v0.1.11, under his 2026-11-07 ruling that forgery is not a design consideration.
+
+#### D50. J5's envelope is the only sender line on a J5 delivery
+
+**Upstream:** since v0.1.11, a message the person did not type reaches the model with a bracketed line before its text that says who sent it: the agent in another thread, an agent on a linked environment, a scheduled task, or the app's tools, "not the user" (pingdotgg/t3code#39306). A message that begins with a slash command or a skill mention is left as sent.
+
+**J5:** a message that carries J5's delivery envelope reaches the model without upstream's line, because the envelope already names the sender, the Exchange and how to reply. Upstream's own sends, which carry no envelope, keep the line, in J5's words: "J5 Code" and "J5 thread".
+
+**Why:** two sender lines for one message, in two formats, say the same thing twice, and upstream's names only a thread id where J5's envelope names the participant. J5's envelope is what its agents are told to read ([agent-to-agent communication](a2a/index.md)).
+
+**Consequences:** one import and one condition in upstream's `packages/contracts/src/orchestrationV2.ts`, with the test for an envelope in a J5-owned contracts file (FORK.md case 130). `EnvelopeFormatter.test.ts` checks every envelope J5 writes against that test, so a new envelope header cannot slip past it and pick up upstream's line too. At each advance, check whether upstream's line gained a case or moved out of `withMessageSenderNote`.
+
+**Decided:** Jackson, 2026-11-22, at the advance onto v0.1.11.
 
 ### New threads
 
@@ -572,6 +572,18 @@ Recorded in `FORK.md` cases 69 to 73, 78 and 80.
 
 **Decided:** Abraham, 2026-10-30, approved implementation and a PR in the notification-volume conversation.
 
+#### D48. Returning to the app keeps focus in an artifact
+
+**Upstream:** when the app window regains focus, `shouldRefocusComposerOnWindowFocus` moves focus to the composer unless it's in a text field, an iframe, a dialog, a menu or a few other places. Focus on other content, such as a panel's scroll area, goes to the composer.
+
+**J5:** focus inside the Artifacts surface (`[data-j5-artifacts-surface]`, the right-panel tab and the `/artifacts` page) stays where it is when the window regains focus.
+
+**Why:** reading an artifact and finding text in it with Cmd/Ctrl+F should survive switching to another app and back. With upstream's rule, the next Cmd/Ctrl+F after returning opened thread find instead of the artifact's find. J5's desktop find bar also triggers this: it's a view of its own, so closing it with Esc returns to the page as a window focus.
+
+**Consequences:** one selector in upstream's `ChatView.logic.ts` exclusion list, imported from J5's `artifactFind.ts` (FORK.md case 126). Check the list at each advance. It can retire if upstream stops refocusing the composer when focus is on panel content.
+
+**Decided:** Jackson, 2026-11-22 ([#1152](https://github.com/Jacksondr5/j5code/issues/1152), PR [#1153](https://github.com/Jacksondr5/j5code/pull/1153)). Recorded in FORK.md case 126.
+
 ### Awaiting a decision
 
 These already diverge on `j5/main`, but no human ruling is on record. Each landed as an implementer's call inside a merged PR. The person rules on each one; an approved entry moves up into its section, and a rejected one becomes a fix. None is waiting now.
@@ -717,4 +729,5 @@ J5 kept a run from resuming after a usage-limit reset when the person had presse
 - 2026-11-16 — D46: the mapping sits in `PeerMcpClient.ts` and the hook in `McpToolAccess.routed` and J5's `delegate_task` handler, where the build found the cause and the agent's tool name; held calls are forgotten on a restart (council review of the build plan, [#951](https://github.com/Jacksondr5/j5code/issues/951)).
 - 2026-11-19 — D47 added: on web and desktop, linking two servers is one flow that sets up messages (peering) and a level for actions in each direction (upstream's links), in place of upstream's Linked environments section, its link dialog and J5's Peer servers section; upstream's mechanism, mobile and the command line are unchanged (Jackson, 2026-11-09; [record](../worklog/2026-11-09-one-link-flow-session.md)).
 - 2026-11-19 — D47 as built: upstream's card and its `linked` answer on a live link are kept, so a level changes only on the pair's row; a link's holder tells the other server which server it is and asks it to revoke the link's session when the link is forgotten; a line's address is left out of what a person or agent reads (Jackson, 2026-11-19; [#1004](https://github.com/Jacksondr5/j5code/issues/1004)).
-- 2026-11-22 — the advance onto upstream's stable v0.1.11: D6 retired, since upstream shows every fresh start (its give-back moot), and D31 retired, since upstream reads the `gh` default; D2 admits all 21 new tools (107 tools), holds `tool_search` to what its caller may see, hides J5's thread-only tools from outside clients and leaves `freshContext` out of agents' reach; D4's Claude exception runs on upstream's own steering, a person's steer included, its exit condition is met for Claude and Cursor, and the queue default waits for #1188; D17 and D18 note that the clients no longer offer plan mode; D19 adds the Windows service's names and the sleep inhibitor's label; D20 follows upstream's Windows service, J5-named; D25 carries upstream's translations to rebranded strings and keeps J5's own screens in English until #1180; D27 says Welcome page; D28 follows upstream's first-launch link and Add to PATH with J5's marker, takes upstream's repoint at a commit in place of J5's at every start, and shares upstream's launcher protocol 4; D33 follows upstream's key-bound renewal, with such devices paired again by hand after a change of level until #1190, makes a J5 link's session renewable, shows Language to everyone and Voice to Collaborators, and says Welcome page; D40 widened to every feature that needs T3 Connect; D46 maps upstream's stalled handshake to `peer_unreachable`; D47's links renew while used, "Link several…" waits on #1189, and the link-session claim is taken on trust (Captain's call); D2 also notes upstream's remote worktree refusal that names a hidden tool, and D33 a key-bound device from a link made for no one, which pairs again after answering (Captain's call); D48 added, J5's envelope the only sender line on a J5 delivery; D49 added, a server on this machine can be linked at a loopback address (Jackson's decisions of 2026-11-22; FORK.md's pin log).
+- 2026-11-22 — D48 added: returning to the app keeps focus inside the Artifacts surface instead of moving it to the composer (Jackson, [#1152](https://github.com/Jacksondr5/j5code/issues/1152)).
+- 2026-11-22 — the advance onto upstream's stable v0.1.11: D6 retired, since upstream shows every fresh start (its give-back moot), and D31 retired, since upstream reads the `gh` default; D2 admits all 21 new tools (107 tools), holds `tool_search` to what its caller may see, hides J5's thread-only tools from outside clients and leaves `freshContext` out of agents' reach; D4's Claude exception runs on upstream's own steering, a person's steer included, its exit condition is met for Claude and Cursor, and the queue default waits for #1188; D17 and D18 note that the clients no longer offer plan mode; D19 adds the Windows service's names and the sleep inhibitor's label; D20 follows upstream's Windows service, J5-named; D25 carries upstream's translations to rebranded strings and keeps J5's own screens in English until #1180; D27 says Welcome page; D28 follows upstream's first-launch link and Add to PATH with J5's marker, takes upstream's repoint at a commit in place of J5's at every start, and shares upstream's launcher protocol 4; D33 follows upstream's key-bound renewal, with such devices paired again by hand after a change of level until #1190, makes a J5 link's session renewable, shows Language to everyone and Voice to Collaborators, and says Welcome page; D40 widened to every feature that needs T3 Connect; D46 maps upstream's stalled handshake to `peer_unreachable`; D47's links renew while used, "Link several…" waits on #1189, and the link-session claim is taken on trust (Captain's call); D2 also notes upstream's remote worktree refusal that names a hidden tool, and D33 a key-bound device from a link made for no one, which pairs again after answering (Captain's call); D50 added, J5's envelope the only sender line on a J5 delivery; D49 added, a server on this machine can be linked at a loopback address (Jackson's decisions of 2026-11-22; FORK.md's pin log).

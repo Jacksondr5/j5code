@@ -352,17 +352,17 @@ Result: as `j5_propose_crew`. Only the Captain can add a seat. The member is add
 
 ### Seat finish notices
 
-There is no Crew-specific artifact verb, and a seat owes no file. When a seat's run fails, or
-completes while the seat owes no reply, the seat finish notifier posts one platform-composed
-`<j5_seat_finished>` notice into the Captain's thread: the run status (completed or failed, with
-the run's error when it failed), the seat, its Crew, and its participant and thread ids. The
-seat's reply, its last finished assistant message of that run, follows in `<seat_reply>`, cut at
-4,000 characters with a line saying so. A notice posts the first time a seat finishes and again
-only when its facts changed, and a notice that arrives while the Captain's turn runs folds into
-the one queued behind it. Interrupted and cancelled runs are not finishes: `j5_stop_crew`
-interrupts seats so they can be briefed again, and nothing is reported then. Ids derive from the
-run, so a redelivered event cannot post twice; a failed dispatch is retried by the next finish or
-the boot sweep. Read-only Codex and Claude personas have `j5_write_artifact` pre-approved so a
+There is no Crew-specific artifact verb, and a seat owes no file. A seat reports its own result to
+its Captain with `j5_send_message`; a completed run posts nothing. When a seat's run fails, the
+seat finish notifier posts one platform-composed `<j5_seat_finished>` notice into the Captain's
+thread: `run_status: failed` with the run's error, the seat, its Crew, its participant and
+thread ids, and the `run_id`. The seat's reply, its last finished assistant message of that run,
+follows in `<seat_reply>`, cut at 4,000 characters with a line saying so. Each failed run posts
+one notice, and a notice that arrives while the Captain's turn runs folds into the one queued
+behind it. Interrupted and cancelled runs are not failures:
+`j5_stop_crew` interrupts seats so they can be briefed again, and nothing is reported then. Ids
+derive from the run, so a redelivered event cannot post twice; a failed dispatch is retried by the
+next failure or the boot sweep. Read-only Codex and Claude personas have `j5_write_artifact` pre-approved so a
 seat can write a file its assignment asks for, and `delegate_task` with `task_status` and
 `task_cancel` beside it, because a Crew member refused `j5_spawn_agent` is sent to
 provider-native Subagents and a verb the sandbox then rejects is no way out: artifacts live in
@@ -420,7 +420,7 @@ the current facts are a subset of the confirmed ones, so a retry after a partial
 the job; new work on any seat makes it stale and yields a fresh token. Partial failures name the
 seats retired so far and the seat that failed; retry with the same `client_request_id` and token.
 
-**Members are never archived one by one (R14):** `t3_thread_organize` refuses archiving an active Crew seat, just as client archive/delete does. Retire the unit through `j5_archive_crew` or Archive crew on the Fleet page. Archiving its Captain retains the crew cascade. A member that finishes with nothing owed is
+**Members are never archived one by one (R14):** `t3_thread_organize` refuses archiving an active Crew seat, just as client archive/delete does. Retire the unit through `j5_archive_crew` or Archive crew on the Fleet page. Archiving its Captain retains the crew cascade. A member's failed run is
 reported to its Captain; the platform never settles a seat because its run finished, and settlement is not archive. `t3_thread_interrupt` on a member is still allowed;
 stopping retires nothing.
 
@@ -578,3 +578,4 @@ run; `j5_stop_crew` doesn't, and unarchiving doesn't restart it.
 - 2026-11-19 — the link tools cover the actions part of a link: approving a request on web or desktop sets up messages too, and forgetting one leaves them ([Cross-device](../cross-device.md), divergence D47; Jackson, 2026-11-09; [record](../../worklog/2026-11-09-one-link-flow-session.md)).
 - 2026-11-19 — a new ask to a person returns `ifAnsweredInThread`, so the agent learns to withdraw an ask the person settles in its thread; `j5_clear_own_ask`'s own description is unseen until a harness loads the deferred tool (Jackson, 2026-11-19; [#1107](https://github.com/Jacksondr5/j5code/issues/1107)).
 - 2026-11-22 — at the advance onto T3 Code v0.1.11: `auto` is left out for now rather than as a harm, since upstream's default no longer aborts a running turn; the tools that need a calling thread are hidden from outside agents, as upstream hides its own, where they used to be listed and refused; AC34 (Jackson; [divergence D4](../upstream.md), [divergence D2](../upstream.md)).
+- 2026-11-22 — a seat finish notice posts only for a failed run; a completed run posts nothing and the seat reports its own result (Jackson; [#1191](https://github.com/Jacksondr5/j5code/issues/1191)).

@@ -62,6 +62,7 @@ import { layer as spawnWorkspaceLayer } from "./spawnWorkspace.ts";
 import * as RequestReplayService from "./RequestReplayService.ts";
 import { layer as sharedConversationLayer } from "../sharing/SharedConversation.ts";
 import { layer as sharedThreadsLayer } from "../sharing/SharedThreads.ts";
+import { layer as threadMovesLayer } from "../sharing/ThreadMoves.ts";
 import { layer as exchangeAnalyticsLayer } from "../analytics/ExchangeAnalytics.ts";
 import { layer as fleetSnapshotLayer } from "../analytics/FleetSnapshot.ts";
 import { layer as threadAnalyticsLayer } from "../analytics/ThreadAnalytics.ts";
@@ -257,6 +258,8 @@ const makeJ5A2AAuxiliaryLayer = (
     readChangesLayer,
     // The feeds follow the one peer registry, provided below, whose writes move `peers`.
     readChangeFeedsLayer.pipe(Layer.provide(readChangesLayer), Layer.provide(playbookStoreLayer)),
+    // A thread moved to another project re-checks every narrowed feed, as a grant does.
+    threadMovesLayer,
     // Moves the one store's revision when the YAML of an active run changes on disk.
     playbookDefinitionWatchLayer.pipe(Layer.provide(playbookStoreLayer)),
     // Shared conversations: what a person's message carries to the agent, and who wrote it. It

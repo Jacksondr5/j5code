@@ -1,6 +1,12 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { type EnvironmentId, ThreadId } from "@t3tools/contracts";
+import {
+  type EnvironmentId,
+  type ProjectId,
+  type ScopedThreadRef,
+  ThreadId,
+} from "@t3tools/contracts";
 import { useNavigation } from "@react-navigation/native";
+import * as Option from "effect/Option";
 import { useState } from "react";
 
 import { FilePreviewModal, type FilePreviewSource } from "../../components/ui/FilePreviewModal";
@@ -25,9 +31,13 @@ import {
   SelectableMarkdownText,
 } from "../../native/SelectableMarkdownText";
 import { useMarkdownImageSource } from "../../native/useMarkdownImageSource";
+import { useQuietThreadShell } from "../../state/entities";
+import { useEnvironmentThread } from "../../state/threads";
+import { ArtifactMarkdownImage } from "./ArtifactMarkdownImage";
 import { useThreadCwd } from "./useThreadCwd";
 import {
   artifactLinkContextMenu,
+  artifactPathForMarkdownLink,
   onArtifactLinkMenuAction,
   openArtifactLink,
   type ArtifactLinkContext,
@@ -35,12 +45,16 @@ import {
 import { withBlockImages } from "./blockImages";
 
 /**
- * Markdown read in one thread's workspace: `artifacts/…` links open J5's artifact viewer, as on
- * web, other file links open the file from the workspace root, and images resolve from it.
+ * Markdown read in one thread's workspace: `artifacts/…` links and images come from J5's artifact
+ * store, as on web, other file links open the file from the workspace root, and images resolve
+ * from it. Artifacts belong to the thread's project; with none known, their images are unavailable.
  */
 export function WorkspaceMarkdown(props: {
   readonly markdown: string;
-  readonly links: ArtifactLinkContext & { readonly workspaceRoot: string };
+  readonly links: ArtifactLinkContext & {
+    readonly workspaceRoot: string;
+    readonly projectId: ProjectId | null;
+  };
 }) {
   const navigation = useNavigation();
   const styles = useMarkdownPreviewStyles();
@@ -53,6 +67,20 @@ export function WorkspaceMarkdown(props: {
   const [preview, setPreview] = useState<FilePreviewSource | null>(null);
   // Images draw at their own size within the width, as the timeline's do; a press opens them.
   const renderImage: MarkdownImageRenderer = (image) => {
+    const artifactPath = artifactPathForMarkdownLink(image.href, links.workspaceRoot);
+    if (artifactPath !== null) {
+      return links.projectId === null ? (
+        <ThreadMarkdownImageUnavailable alt={image.alt} />
+      ) : (
+        <ArtifactMarkdownImage
+          environmentId={links.environmentId as EnvironmentId}
+          projectId={links.projectId}
+          path={artifactPath}
+          alt={image.alt}
+          onPressPreview={setPreview}
+        />
+      );
+    }
     const media = resolveMobileMarkdownMediaSource(image.href, {
       threadId: ThreadId.make(links.threadId),
       workspaceRoot: links.workspaceRoot,
@@ -128,12 +156,13 @@ export function SenderMarkdown(props: {
 }) {
   const navigation = useNavigation();
   const styles = useMarkdownPreviewStyles();
-  // Loads the thread when its shell isn't here, so a worktree's links never resolve in the root.
-  const workspaceRoot = useThreadCwd(
+  const senderThread =
     props.senderThreadId === null
       ? null
-      : scopeThreadRef(props.environmentId, ThreadId.make(props.senderThreadId)),
-  );
+      : scopeThreadRef(props.environmentId, ThreadId.make(props.senderThreadId));
+  // Loads the thread when its shell isn't here, so a worktree's links never resolve in the root.
+  const workspaceRoot = useThreadCwd(senderThread);
+  const projectId = useThreadProjectId(senderThread);
   if (props.senderThreadId === null || workspaceRoot === null) {
     return <SelectableMarkdownText markdown={props.markdown} textStyle={styles.nativeTextStyle} />;
   }
@@ -145,7 +174,18 @@ export function SenderMarkdown(props: {
         environmentId: String(props.environmentId),
         threadId: props.senderThreadId,
         workspaceRoot,
+        projectId,
       }}
     />
   );
+}
+
+/** The thread's project, from its shell or, when that isn't here, the thread itself. */
+function useThreadProjectId(ref: ScopedThreadRef | null): ProjectId | null {
+  const shell = useQuietThreadShell(ref);
+  const detail = useEnvironmentThread(
+    shell === null ? (ref?.environmentId ?? null) : null,
+    shell === null ? (ref?.threadId ?? null) : null,
+  );
+  return shell?.projectId ?? Option.getOrNull(detail.data)?.thread.projectId ?? null;
 }

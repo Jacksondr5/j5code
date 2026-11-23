@@ -8,9 +8,11 @@ import {
   EventId,
   GuestShareId,
   type OrchestrationV2DomainEvent,
+  type OrchestrationV2ServerCommand,
   type OrchestrationV2ThreadOpens,
   type OrchestrationV2ShellStreamItem,
   type OrchestrationV2ThreadStreamItem,
+  type PreviewEvent,
   ProjectId,
   type ScheduledTaskListResult,
   ProviderDriverKind,
@@ -22,11 +24,14 @@ import {
   type ThreadGuestShare,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
+import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
@@ -42,11 +47,14 @@ import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import * as ProjectEnrichmentService from "../../project/ProjectEnrichmentService.ts";
 import * as ProjectService from "../../project/ProjectService.ts";
 import { subscribeOrchestrationV2Shell, subscribeOrchestrationV2Thread } from "../../ws.ts";
-import type { PersonScope } from "@t3tools/contracts/j5";
+import { J5_ACCESS_WS_METHODS, type PersonScope } from "@t3tools/contracts/j5";
 
 import { humanPersonRegistryLayer } from "../a2a/HumanPersonRegistry.ts";
+import { Access } from "./Access.ts";
+import { makeAccessRpcHandlers } from "./accessRpc.ts";
 import * as GuestView from "./GuestView.ts";
 import * as PersonAccess from "./PersonAccess.ts";
+import * as ThreadMoves from "./ThreadMoves.ts";
 
 const AT = "2026-10-12T00:00:00.000Z";
 const NOW = DateTime.makeUnsafe(AT);
@@ -122,6 +130,7 @@ const layerTest = Layer.mergeAll(
   layerManagement,
   layerProjects,
   PersonAccess.layer.pipe(Layer.provideMerge(humanPersonRegistryLayer)),
+  ThreadMoves.layer,
 ).pipe(Layer.provideMerge(ProjectStore.layer), Layer.provideMerge(layerPersistence));
 
 const project = Effect.fn("test.project")(function* (id: string) {
@@ -251,6 +260,19 @@ const write = Effect.fn("test.write")(function* (
   const sink = yield* EventSink.EventSinkV2;
   const stored = yield* sink.write({ events: [threadEvent(type, input)] });
   return stored.at(-1)!.sequence;
+});
+
+/** Moves a thread to another project as upstream's Turn into project commits it. */
+const move = Effect.fn("test.move")(function* (id: string, projectId: ProjectId) {
+  const sink = yield* EventSink.EventSinkV2;
+  yield* sink.commitCommand({
+    commandId: CommandId.make(`move:${id}:${projectId}`),
+    threadId: ThreadId.make(id),
+    commandType: "thread.project.adopt-folder" satisfies OrchestrationV2ServerCommand["type"],
+    acceptedAt: NOW,
+    events: [threadEvent("thread.metadata-updated", { id, projectId })],
+    effects: [],
+  });
 });
 
 /** A Viewer for `GUEST`'s session, at the scopes given. */
@@ -868,6 +890,61 @@ live(
 );
 
 live(
+  "a thread moved to a project the guest doesn't hold leaves their feed without a reconnect",
+  Effect.gen(function* () {
+    const shared = yield* project("project:shared");
+    const other = yield* project("project:other");
+    const moved = ThreadId.make("thread:moved");
+    const there = ThreadId.make("thread:there");
+    yield* write("thread.created", { id: moved, projectId: shared });
+    yield* write("thread.created", { id: there, projectId: other });
+    // The thread grant puts the other project in the sidebar already, so the move names a
+    // project the client holds and would pass on its own.
+    yield* guest({ kind: "project", projectId: shared }, { kind: "thread", threadId: there });
+    const isSnapshot = (item: OrchestrationV2ShellStreamItem) => item.kind === "snapshot";
+    const threads = (items: ReadonlyArray<OrchestrationV2ShellStreamItem>) =>
+      snapshotOf(items)
+        .threads.map((thread) => thread.id as string)
+        .toSorted();
+
+    const feed = yield* open(GUEST);
+    assert.deepStrictEqual(threads(yield* until(feed, synchronized)), [moved, there]);
+
+    yield* move(moved, other);
+    assert.deepStrictEqual(threads(yield* until(feed, isSnapshot)), [there]);
+  }).pipe(Effect.scoped),
+);
+
+live(
+  "a thread moved into a project the person holds raises their level on it at once",
+  Effect.gen(function* () {
+    const shared = yield* project("project:shared");
+    const other = yield* project("project:other");
+    const moved = ThreadId.make("thread:moved");
+    yield* write("thread.created", { id: moved, projectId: other });
+    yield* guest({ kind: "project", projectId: shared });
+    const handlers = yield* makeAccessRpcHandlers({
+      people: yield* PersonAccess.PersonAccess,
+      access: yield* Access.pipe(Effect.provide(Layer.mock(Access)({}))),
+      session: GUEST,
+    });
+    const levels = yield* Queue.unbounded<string | null>();
+    yield* handlers[J5_ACCESS_WS_METHODS.subscribeThreadLevel]({ threadId: moved }).pipe(
+      Stream.runForEach((item) => Queue.offer(levels, item.level)),
+      Effect.forkScoped({ startImmediately: true }),
+    );
+    assert.strictEqual(yield* Queue.take(levels), null);
+
+    // No level is written: only the move's announcement makes the stream read again.
+    yield* move(moved, shared);
+    assert.strictEqual(yield* Queue.take(levels), "viewer");
+
+    yield* move(moved, other);
+    assert.strictEqual(yield* Queue.take(levels), null);
+  }).pipe(Effect.scoped),
+);
+
+live(
   "a project grant lists the project's threads, and the project even when it has none",
   Effect.gen(function* () {
     const shared = yield* project("project:shared");
@@ -1318,10 +1395,139 @@ live(
     };
     const view = yield* GuestView.connectionView(GUEST);
     assert.deepStrictEqual(withWebhook(yield* view.scheduledTasks(Effect.succeed(list))), expected);
-    const streamed = yield* Stream.runCollect(view.scheduledTasksStream(Stream.make(list)));
+    const streamed = yield* Stream.runCollect(
+      view.scheduledTasksStream(Stream.make(list)).pipe(Stream.take(1)),
+    );
     assert.deepStrictEqual(streamed.map(withWebhook), [expected]);
   }).pipe(Effect.scoped),
 );
+
+live(
+  "a person's task feed is read again when what they reach changes, without a task update",
+  Effect.gen(function* () {
+    const access = yield* PersonAccess.PersonAccess;
+    const shared = yield* project("project:shared");
+    const bound = ThreadId.make("thread:bound");
+    yield* write("thread.created", { id: bound, projectId: shared });
+    yield* write("thread.created", { id: "thread:granted", projectId: shared });
+    const personId = yield* guest({ kind: "thread", threadId: ThreadId.make("thread:granted") });
+    const boundTo = (threadId: string) =>
+      ({
+        tasks: [{ id: "task:bound", projectId: shared, threadId: ThreadId.make(threadId) }],
+      }) as unknown as ScheduledTaskListResult;
+    const stored = yield* Ref.make(boundTo(bound));
+    const view = yield* GuestView.connectionView(GUEST);
+    const listed = yield* Queue.unbounded<ReadonlyArray<string>>();
+    // The feed reads the stored list once and stays open, as the live feed does between changes.
+    const feed = Stream.concat(Stream.fromEffect(Ref.get(stored)), Stream.never);
+    yield* view.scheduledTasksStream(feed).pipe(
+      Stream.runForEach((result) =>
+        Queue.offer(
+          listed,
+          result.tasks.map((task) => task.id),
+        ),
+      ),
+      Effect.forkScoped({ startImmediately: true }),
+    );
+    assert.deepStrictEqual(yield* Queue.take(listed), []);
+
+    const scope = { kind: "thread", threadId: bound } as const;
+    yield* access.setLevel({ personId, scope, level: "viewer" });
+    assert.deepStrictEqual(yield* Queue.take(listed), ["task:bound"]);
+
+    // The task moves to a thread the person doesn't reach before its own update is delivered: a
+    // reach change in between reads the binding afresh rather than the one last sent.
+    yield* Ref.set(stored, boundTo("thread:hidden"));
+    yield* access.announce(personId);
+    assert.deepStrictEqual(yield* Queue.take(listed), []);
+
+    yield* Ref.set(stored, boundTo(bound));
+    yield* access.removeLevel({ personId, scope });
+    assert.deepStrictEqual(yield* Queue.take(listed), []);
+  }).pipe(Effect.scoped),
+);
+
+// A slow client leaves a list queued behind a restart. It is dropped, and the fresh read is next.
+for (const change of ["grant", "thread move"] as const) {
+  live(
+    `a queued task list respects reach across a ${change}`,
+    Effect.gen(function* () {
+      const access = yield* PersonAccess.PersonAccess;
+      const home = yield* project("project:home");
+      const hidden = yield* project("project:hidden");
+      const anchor = ThreadId.make("thread:anchor");
+      const bound = ThreadId.make("thread:bound");
+      const other = ThreadId.make("thread:other");
+      yield* write("thread.created", { id: anchor, projectId: home });
+      yield* write("thread.created", { id: bound, projectId: home });
+      yield* write("thread.created", { id: other, projectId: hidden });
+      const personId = yield* guest({ kind: "thread", threadId: anchor });
+      if (change === "thread move") {
+        yield* access.setLevel({
+          personId,
+          scope: { kind: "project", projectId: home },
+          level: "collaborator",
+        });
+      }
+      const empty: ScheduledTaskListResult = { tasks: [] };
+      const listAt = (threadId: ThreadId, projectId: ProjectId) =>
+        ({
+          tasks: [
+            {
+              id: "task:fixture",
+              threadId,
+              projectId,
+              webhook: { url: "https://example.invalid/fixture" },
+            },
+          ],
+        }) as unknown as ScheduledTaskListResult;
+      const stored = yield* Ref.make(listAt(bound, home));
+      const runs = yield* Ref.make(0);
+      const paused = yield* Deferred.make<void>();
+      const resume = yield* Deferred.make<void>();
+      const oldQueued = yield* Deferred.make<void>();
+      const freshQueued = yield* Deferred.make<void>();
+      const park = (ready: Deferred.Deferred<void>) =>
+        Stream.fromEffect(Deferred.succeed(ready, undefined).pipe(Effect.andThen(Effect.never)));
+      const source = Stream.unwrap(
+        Effect.gen(function* () {
+          const run = yield* Ref.updateAndGet(runs, (count) => count + 1);
+          const read = Stream.fromEffect(Ref.get(stored));
+          return run === 1
+            ? Stream.concat(Stream.succeed(empty), Stream.concat(read, park(oldQueued)))
+            : Stream.concat(read, park(freshQueued));
+        }),
+      );
+      const view = yield* GuestView.connectionView(GUEST);
+      const consumer = yield* view.scheduledTasksStream(source).pipe(
+        Stream.tap(() =>
+          Deferred.succeed(paused, undefined).pipe(Effect.andThen(Deferred.await(resume))),
+        ),
+        Stream.take(2),
+        Stream.runCollect,
+        Effect.forkScoped,
+      );
+
+      yield* Deferred.await(paused);
+      yield* Deferred.await(oldQueued);
+      if (change === "grant") {
+        yield* Ref.set(stored, listAt(other, hidden));
+        yield* access.setLevel({
+          personId,
+          scope: { kind: "thread", threadId: bound },
+          level: "collaborator",
+        });
+      } else {
+        yield* Ref.set(stored, listAt(bound, hidden));
+        yield* move(bound, hidden);
+      }
+      yield* Deferred.await(freshQueued);
+      yield* Deferred.succeed(resume, undefined);
+
+      assert.deepStrictEqual(yield* Fiber.join(consumer), [empty, empty]);
+    }).pipe(Effect.scoped),
+  );
+}
 
 live(
   "tells a Viewer the skills of the projects they reach by name, and none of their files",
@@ -1355,5 +1561,148 @@ live(
     const serverView = (yield* GuestView.connectionView(GUEST)).config(withSkills);
     assert.deepStrictEqual(names(serverView), ["project-skill", "host-skill"]);
     assert.notInclude(JSON.stringify(serverView), HOST_PATH);
+  }).pipe(Effect.scoped),
+);
+
+/** The Inbox browser's tabs ride the preview feed under this id, which names no thread. */
+const INBOX_BROWSER = "j5-inbox-browser";
+let previewRevision = 0;
+const tabEvent = (threadId: string): PreviewEvent =>
+  ({
+    type: "navigated",
+    threadId,
+    tabId: `tab:${threadId}`,
+    createdAt: AT,
+    serverEpoch: "epoch",
+    revision: ++previewRevision,
+    snapshot: { url: `https://host/${threadId}` },
+  }) as unknown as PreviewEvent;
+const tabsTold = (view: GuestView.ConnectionView, ...threadIds: ReadonlyArray<string>) =>
+  Stream.runCollect(view.previewEvents(Stream.fromIterable(threadIds.map(tabEvent)))).pipe(
+    Effect.map((events) => events.map((event) => event.threadId)),
+  );
+
+live(
+  "tells a thread's Collaborator of that thread's browser tabs only, and of one shared later",
+  Effect.gen(function* () {
+    const access = yield* PersonAccess.PersonAccess;
+    const projectId = yield* project("project:tabs");
+    yield* write("thread.created", { id: "thread:theirs", projectId });
+    yield* write("thread.created", { id: "thread:later", projectId });
+    yield* write("thread.created", { id: "thread:watched", projectId });
+    const personId = yield* guest({ kind: "thread", threadId: ThreadId.make("thread:watched") });
+    yield* access.setLevel({
+      personId,
+      scope: { kind: "thread", threadId: ThreadId.make("thread:theirs") },
+      level: "collaborator",
+    });
+    const view = yield* GuestView.connectionView(GUEST);
+    assert.deepStrictEqual(
+      yield* tabsTold(view, "thread:theirs", "thread:later", "thread:watched", INBOX_BROWSER),
+      ["thread:theirs"],
+    );
+
+    // A level given while the feed is open reaches it without a reconnect.
+    const source = yield* Queue.unbounded<PreviewEvent>();
+    const told = yield* Queue.unbounded<string>();
+    yield* view.previewEvents(Stream.fromQueue(source)).pipe(
+      Stream.runForEach((event) => Queue.offer(told, event.threadId)),
+      Effect.forkScoped({ startImmediately: true }),
+    );
+    yield* Queue.offer(source, tabEvent("thread:later"));
+    yield* Queue.offer(source, tabEvent("thread:theirs"));
+    assert.strictEqual(yield* Queue.take(told), "thread:theirs");
+    yield* access.setLevel({
+      personId,
+      scope: { kind: "thread", threadId: ThreadId.make("thread:later") },
+      level: "collaborator",
+    });
+    yield* Queue.offer(source, tabEvent("thread:later"));
+    assert.strictEqual(yield* Queue.take(told), "thread:later");
+
+    // A level taken away stops the next event, even on a feed that already told that thread.
+    yield* access.removeLevel({
+      personId,
+      scope: { kind: "thread", threadId: ThreadId.make("thread:later") },
+    });
+    yield* Queue.offer(source, tabEvent("thread:later"));
+    yield* Queue.offer(source, tabEvent("thread:theirs"));
+    assert.strictEqual(yield* Queue.take(told), "thread:theirs");
+  }).pipe(Effect.scoped),
+);
+
+live(
+  "tells a project's Collaborator of its threads' browser tabs, not another project's or the Inbox browser's",
+  Effect.gen(function* () {
+    const access = yield* PersonAccess.PersonAccess;
+    const written = yield* project("project:written");
+    const other = yield* project("project:other");
+    yield* write("thread.created", { id: "thread:written-a", projectId: written });
+    yield* write("thread.created", { id: "thread:written-b", projectId: written });
+    yield* write("thread.created", { id: "thread:other", projectId: other });
+    // A Viewer of the whole server reaches every thread, and the Inbox browser's id too.
+    const personId = yield* guest({ kind: "server" });
+    yield* access.setLevel({
+      personId,
+      scope: { kind: "project", projectId: written },
+      level: "collaborator",
+    });
+    assert.deepStrictEqual(
+      yield* tabsTold(
+        yield* GuestView.connectionView(GUEST),
+        "thread:written-a",
+        "thread:other",
+        INBOX_BROWSER,
+        "thread:written-b",
+      ),
+      ["thread:written-a", "thread:written-b"],
+    );
+  }).pipe(Effect.scoped),
+);
+
+live(
+  "stops a thread's browser tabs on an open feed when the thread moves out of the project, and resumes when it moves back",
+  Effect.gen(function* () {
+    const access = yield* PersonAccess.PersonAccess;
+    const written = yield* project("project:written");
+    const other = yield* project("project:other");
+    yield* write("thread.created", { id: "thread:moved", projectId: written });
+    yield* write("thread.created", { id: "thread:stays", projectId: written });
+    const personId = yield* guest();
+    yield* access.setLevel({
+      personId,
+      scope: { kind: "project", projectId: written },
+      level: "collaborator",
+    });
+    const view = yield* GuestView.connectionView(GUEST);
+    const source = yield* Queue.unbounded<PreviewEvent>();
+    const told = yield* Queue.unbounded<string>();
+    yield* view.previewEvents(Stream.fromQueue(source)).pipe(
+      Stream.runForEach((event) => Queue.offer(told, event.threadId)),
+      Effect.forkScoped({ startImmediately: true }),
+    );
+    yield* Queue.offer(source, tabEvent("thread:moved"));
+    assert.strictEqual(yield* Queue.take(told), "thread:moved");
+
+    yield* move("thread:moved", other);
+    yield* Queue.offer(source, tabEvent("thread:moved"));
+    yield* Queue.offer(source, tabEvent("thread:stays"));
+    assert.strictEqual(yield* Queue.take(told), "thread:stays");
+
+    yield* move("thread:moved", written);
+    yield* Queue.offer(source, tabEvent("thread:moved"));
+    assert.strictEqual(yield* Queue.take(told), "thread:moved");
+  }).pipe(Effect.scoped),
+);
+
+live(
+  "gives someone server-wide upstream's browser-tab feed itself",
+  Effect.gen(function* () {
+    const access = yield* PersonAccess.PersonAccess;
+    const feed = Stream.make(tabEvent("thread:anything"), tabEvent(INBOX_BROWSER));
+    assert.strictEqual((yield* GuestView.connectionView(MEMBER)).previewEvents(feed), feed);
+    const personId = yield* guest();
+    yield* access.setLevel({ personId, scope: { kind: "server" }, level: "collaborator" });
+    assert.strictEqual((yield* GuestView.connectionView(GUEST)).previewEvents(feed), feed);
   }).pipe(Effect.scoped),
 );

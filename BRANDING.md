@@ -283,7 +283,7 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
   i18n:generate`, `node scripts/j5/rekey-branded-translations.ts` gives each rebranded key
   upstream's translations with T3 swapped for J5, keeping T3 Connect, T3 Chat and `T3CODE_` names
   (Jackson's decision A2 of 2026-11-22; FORK.md "Advancing"). J5's own screens stay English for
-  now (FORK.md case 126).
+  now (FORK.md case 129).
 - Copy upstream added at v0.1.11 that a person reads:
   - the web tab title, stamped into `index.html` by `apps/web/vite.config.ts` from
     `J5_BRANDING.desktop.baseName`, where upstream's passes "T3 Code";
@@ -315,7 +315,7 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
 - Agent-facing text upstream added at v0.1.11: the sender note
   `withMessageSenderNote` puts before an agent's, a scheduled task's or a tool's message
   (`packages/contracts/src/orchestrationV2.ts`: "J5 Code: the agent in J5 thread …", left off J5's
-  enveloped deliveries, FORK.md case 127) and the Codex replay fixture that records it
+  enveloped deliveries, FORK.md case 130) and the Codex replay fixture that records it
   (`delegated_task_status`, FORK.md "Advancing"); the theme guide (`THEME_GUIDE` in
   `packages/shared/src/themeCss.ts`) and the theme, issue and `tool_search` tool descriptions
   under `apps/server/src/mcp/toolkits/`; the pull-request watch's text to agents in

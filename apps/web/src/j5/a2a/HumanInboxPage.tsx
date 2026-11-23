@@ -1,5 +1,15 @@
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { ProjectId, ThreadId, type EnvironmentId } from "@t3tools/contracts";
+import {
+  ProjectId,
+  ThreadId,
+  type EnvironmentId,
+  type ServerProviderSkill,
+} from "@t3tools/contracts";
+import { resolveProviderSkillsForCwd } from "@t3tools/client-runtime/providerSkills";
+import { MessageCopyButton } from "../../components/chat/MessageCopyButton";
+import { useClientSettings } from "../../hooks/useSettings";
+import { useEnvironmentProviders } from "../../state/environments";
+import { formatChatTimestampTooltip } from "../../timestampFormat";
 import { scopedInboxItemKey } from "@t3tools/contracts/j5";
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -27,7 +37,7 @@ import {
   InboxIcon,
   RefreshCwIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { type SyntheticEvent, useEffect, useRef, useState } from "react";
 
 import ChatMarkdown from "../../components/ChatMarkdown";
 import { WorkspaceBreadcrumb, WorkspaceBreadcrumbItem } from "../../components/WorkspaceBreadcrumb";
@@ -36,29 +46,34 @@ import { Badge } from "../../components/ui/badge";
 import { Button } from "../../components/ui/button";
 import { ScrollArea } from "../../components/ui/scroll-area";
 import { SidebarInset } from "../../components/ui/sidebar";
-import { Textarea } from "../../components/ui/textarea";
+import type { ComposerPromptEditorHandle } from "../../components/ComposerPromptEditorTiptap";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip";
 import { isElectron } from "../../env";
 import { randomUUID } from "../../lib/utils";
-import { useProject, useThreadShell } from "../../state/entities";
+import { useProject } from "../../state/entities";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { RelativeTime } from "../../components/RelativeTime";
 import { RelativeAge } from "../RelativeAge";
 import {
   AnswerAttachButton,
-  AnswerAttachmentList,
+  AnswerAttachmentStrip,
+  AnswerDropOverlay,
   type AnswerAttachmentsState,
   answerAttachmentInputHandlers,
+  useAnswerAttachmentIntake,
   useAnswerAttachmentSupport,
   useAnswerAttachments,
-  useRestoredAnswerUploads,
+  useAnswerUploads,
 } from "./AnswerAttachments";
+import { answerSendCallbacks, answerToDeliver, useAnswerSends } from "./answerSends";
 import { answerHumanExchange } from "./humanInboxClient";
 import {
   pruneInboxAnswerDrafts,
   setInboxAnswerText,
   useInboxAnswerTexts,
 } from "./inboxAnswerDrafts";
+import { AnswerErrorAlert } from "./AnswerErrorAlert";
+import { InboxReplyEditor } from "./InboxReplyEditor";
 import { J5RecordPanel } from "./J5RecordPanel";
 import { OwnerAskAction } from "./OwnerAskAction";
 import { useScopedParticipantLabels } from "./ParticipantIdentitiesClient";
@@ -94,7 +109,10 @@ import {
 import { useLogicalProjects } from "../logicalProjects";
 import { createVisibleRefreshHook } from "../useVisibleRefresh";
 import { notifyHumanInboxChanged } from "./humanInboxRefresh";
-import { useConnectionAccess } from "../sharing/access";
+import { j5Sharing, useConnectionAccess } from "../sharing/access";
+import { armInboxThreadPanel, reachesAskingThreadPanel } from "./inboxThreadPanelState";
+import { InboxWithThreadPanel } from "./InboxThreadPanel";
+import { useSenderThread } from "./useSenderThread";
 
 type HumanInboxAnswers = Readonly<Record<string, string>>;
 type SenderLabels = ReadonlyMap<EnvironmentId, ReadonlyMap<string, string>>;
@@ -102,6 +120,7 @@ type SenderLabels = ReadonlyMap<EnvironmentId, ReadonlyMap<string, string>>;
 type ProjectNameOf = (item: HumanInboxItem) => string;
 
 const noLabels: ReadonlyMap<string, string> = new Map();
+const NO_SKILLS: ReadonlyArray<ServerProviderSkill> = [];
 
 function SenderName({
   item,
@@ -182,25 +201,46 @@ function OpenThreadButton({
 }
 
 /**
- * An agent's message, rendered as the sender's thread renders it. Relative file links resolve
- * against the sender's worktree, or the project's root once the sender has left the roster.
+ * An agent's message, rendered as the sender's thread renders it. Its links open where they would
+ * in that thread, in the thread's own right panel, which the Inbox then shows beside the asks.
+ * Relative file links resolve against the sender's worktree, or the project's root once the sender
+ * has left the roster; an ask with no thread here keeps links that need no panel.
  */
-export function InboxMessage({ item }: { readonly item: HumanInboxItem }) {
+export function InboxMessage({
+  item,
+  agentLabel,
+  expanded,
+}: {
+  readonly item: HumanInboxItem;
+  readonly agentLabel: string;
+  /** Whether the ask is open for reading; a collapsed ask loads nothing of its thread. */
+  readonly expanded: boolean;
+}) {
   const threadRef =
     item.senderThreadId === null
       ? null
       : scopeThreadRef(item.environmentId, ThreadId.make(item.senderThreadId));
-  const thread = useThreadShell(threadRef);
-  const project = useProject(scopeProjectRef(item.environmentId, ProjectId.make(item.projectId)));
+  // A server that is down answers nothing, so only a connected one is asked.
+  const sender = useSenderThread(threadRef, expanded && item.connected);
+  const access = useConnectionAccess(item.environmentId);
+  const operable = useAtomValue(
+    j5Sharing.threadOperable(item.environmentId, threadRef?.threadId ?? null),
+  );
+  const panelRef =
+    threadRef !== null && sender.known && reachesAskingThreadPanel(access, operable)
+      ? threadRef
+      : undefined;
+  // The sender's project, which a move into another project changes after the ask was sent.
+  const project = useProject(
+    scopeProjectRef(item.environmentId, ProjectId.make(sender.projectId ?? item.projectId)),
+  );
   const cwd = project
     ? projectScriptCwd({
         project: { cwd: project.workspaceRoot },
-        worktreePath: thread?.worktreePath ?? null,
+        worktreePath: sender.worktreePath,
       })
     : undefined;
   const navigate = useNavigate();
-  // The Inbox shows no thread panel, so artifact links open the Artifacts page and web links
-  // open as they do outside a thread.
   const openArtifact = (path: string) =>
     void navigate({
       to: "/artifacts",
@@ -210,20 +250,51 @@ export function InboxMessage({ item }: { readonly item: HumanInboxItem }) {
         path,
       },
     });
+  // The skills of the provider the sender runs on, so `$skill` names render as the thread's chips.
+  const provider = useEnvironmentProviders()
+    .get(item.environmentId)
+    ?.find((candidate) => candidate.instanceId === sender.providerInstanceId);
+  const skills = provider === undefined ? NO_SKILLS : resolveProviderSkillsForCwd(provider, cwd);
   const markdown = (text: string) => (
-    <ChatMarkdown
-      className="max-w-[72ch] text-sm text-foreground/90"
-      cwd={cwd}
-      environmentId={item.environmentId}
-      lineBreaks={shouldPreserveAssistantLineBreaks(text)}
-      text={text}
-      threadRef={threadRef ?? undefined}
-      onOpenArtifact={openArtifact}
-      noThreadPanel
-    />
+    <div className="group/inbox-message flex flex-col gap-1">
+      <ChatMarkdown
+        className="max-w-[72ch] text-sm text-foreground/90"
+        cwd={cwd}
+        environmentId={item.environmentId}
+        lineBreaks={shouldPreserveAssistantLineBreaks(text)}
+        skills={skills}
+        text={text}
+        threadRef={panelRef}
+        {...(panelRef === undefined ? { onOpenArtifact: openArtifact } : {})}
+      />
+      {/* Shown on hover, focus or a touch screen, as under a thread's agent reply. */}
+      <div className="w-fit opacity-0 transition-opacity duration-200 pointer-coarse:opacity-100 focus-within:opacity-100 group-hover/inbox-message:opacity-100">
+        <MessageCopyButton text={text} variant="ghost" />
+      </div>
+    </div>
   );
+  // While the sender's thread loads, its links wait rather than open as an ask with no thread;
+  // the text stays readable and selectable.
+  const hold = (event: SyntheticEvent) => {
+    if (!(event.target instanceof Element) || event.target.closest("a, button") === null) return;
+    event.preventDefault();
+    event.stopPropagation();
+  };
+  const arm = sender.pending
+    ? hold
+    : panelRef === undefined
+      ? undefined
+      : () => armInboxThreadPanel({ ref: panelRef, agentLabel });
   return (
-    <div className="flex flex-col gap-4">
+    // The context menu arms too: its items, "Open in integrated browser" among them, can come
+    // from a native menu that sends no click.
+    <div
+      aria-busy={sender.pending || undefined}
+      className="flex flex-col gap-4"
+      onAuxClickCapture={sender.pending ? hold : undefined}
+      onClickCapture={arm}
+      onContextMenuCapture={arm}
+    >
       {markdown(item.message)}
       {item.escalation === undefined ? null : <J5RecordPanel text={item.escalation.summary} />}
       {item.personaDraft === undefined ? null : <J5RecordPanel text={item.personaDraft.summary} />}
@@ -242,7 +313,8 @@ function OpenInboxItem({
   answer,
   answerText,
   attachments,
-  pendingExchangeId,
+  pending,
+  error,
   onOpenThread,
   senderLabels,
   projectNameOf,
@@ -265,11 +337,15 @@ function OpenInboxItem({
   readonly projectNameOf: ProjectNameOf;
   readonly answerText: string;
   readonly attachments: AnswerAttachmentsState;
-  readonly pendingExchangeId: string | null;
+  /** This ask's answer is being delivered; other asks stay answerable meanwhile. */
+  readonly pending: boolean;
+  readonly error: string | null;
   readonly showEnvironment: boolean;
   readonly onOpenThread: (item: HumanInboxItem) => void;
 }) {
   const urgency = urgencyPresentation[item.urgency];
+  const [expanded, setExpanded] = useState(false);
+  const timestampFormat = useClientSettings((settings) => settings.timestampFormat);
   const mayAnswer = useAtomValue(
     j5Environment.answerHumanExchange.permissionAtom(item.environmentId),
   );
@@ -277,19 +353,28 @@ function OpenInboxItem({
   const ownName = useOwnName(item.environmentId);
   const closedText = closed === undefined ? null : closedLine({ ...closed, ownName });
   const itemKey = scopedInboxItemKey(item);
-  const answerId = `inbox-answer-${encodeURIComponent(itemKey)}`;
+  const editorRef = useRef<ComposerPromptEditorHandle>(null);
   const support = useAnswerAttachmentSupport(item.environmentId);
-  useRestoredAnswerUploads(itemKey, item.environmentId, canAnswer && closed === undefined);
-  const addFiles =
-    support === null || closedText !== null || pendingExchangeId !== null
-      ? null
-      : (files: ReadonlyArray<File>) =>
-          attachments.add(itemKey, item.environmentId, support.maxFileBytes, files);
-  const readiness = attachments.ready(itemKey, item.environmentId);
+  useAnswerUploads(itemKey, item.environmentId, canAnswer && closed === undefined);
+  const intake = useAnswerAttachmentIntake({
+    answerKey: itemKey,
+    support,
+    onError: (message) => attachments.setError(itemKey, message),
+  });
+  const [dragActive, setDragActive] = useState(false);
+  const addFiles = support === null || closedText !== null || pending ? null : intake.addFiles;
+  const readiness = attachments.ready(itemKey, item.environmentId, intake.preparing);
   const waitingOn = "blocked" in readiness ? readiness.blocked : null;
+  const sendable =
+    canAnswer && closedText === null && answerToDeliver(answerText) !== null && waitingOn === null;
+  const fileInput =
+    addFiles === null ? null : answerAttachmentInputHandlers(addFiles, setDragActive);
   return (
     <li className="border-b border-border/70 last:border-b-0">
-      <details className="group/details">
+      <details
+        className="group/details"
+        onToggle={(event) => setExpanded(event.currentTarget.open)}
+      >
         <summary className="flex cursor-pointer list-none items-start gap-3 px-1 py-4 outline-hidden marker:hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:gap-4 [&::-webkit-details-marker]:hidden">
           <Badge className="mt-0.5" variant={urgency.variant}>
             <span className="uppercase tracking-wide">{urgency.label}</span>
@@ -316,9 +401,16 @@ function OpenInboxItem({
               {closed === undefined ? (
                 <>
                   <span aria-hidden>·</span>
-                  <time className="tabular-nums" dateTime={item.openedAt}>
-                    open <RelativeAge timestamp={item.openedAt} fallback="" />
-                  </time>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={<time className="tabular-nums" dateTime={item.openedAt} />}
+                    >
+                      open <RelativeAge timestamp={item.openedAt} fallback="" />
+                    </TooltipTrigger>
+                    <TooltipPopup>
+                      {formatChatTimestampTooltip(item.openedAt, timestampFormat)}
+                    </TooltipPopup>
+                  </Tooltip>
                 </>
               ) : null}
             </div>
@@ -332,32 +424,64 @@ function OpenInboxItem({
           />
         </summary>
         <div className="border-t border-border/50 px-1 pb-5 pt-4 sm:ms-24 sm:px-0 sm:pe-1">
-          <InboxMessage item={item} />
+          <InboxMessage
+            expanded={expanded}
+            item={item}
+            agentLabel={
+              presentParticipantIdentity({
+                participantId: item.senderId,
+                participantLabels: senderLabels.get(item.environmentId) ?? noLabels,
+              }).label
+            }
+          />
           {closedText === null && !item.connected ? (
             // Read-only until its server is back; words typed earlier are kept for then.
             <p className="mt-4 text-sm text-muted-foreground">
               {askWaitsForServerLine(item.environmentLabel)}
             </p>
           ) : (
-            <div className="mt-4 flex flex-col gap-3">
-              <Textarea
-                aria-label={`Answer ${item.intent}`}
-                className="min-h-24 resize-y"
-                id={answerId}
-                onChange={(event) => setInboxAnswerText(itemKey, event.currentTarget.value)}
-                placeholder="Type the answer exactly as it should be delivered"
-                value={answerText}
-                {...(addFiles === null ? {} : answerAttachmentInputHandlers(addFiles))}
-              />
-              <AnswerAttachmentList
+            // The whole reply takes a dropped file, as the composer's whole form does.
+            <div
+              className="relative mt-4 flex flex-col gap-3"
+              {...(fileInput === null
+                ? {}
+                : {
+                    onDragEnter: fileInput.onDragEnter,
+                    onDragOver: fileInput.onDragOver,
+                    onDragLeave: fileInput.onDragLeave,
+                    onDrop: fileInput.onDrop,
+                  })}
+            >
+              {dragActive && fileInput !== null ? <AnswerDropOverlay /> : null}
+              <div>
+                {/* A collapsed ask mounts no editor: the Inbox can list many, and the words are stored. */}
+                {expanded ? (
+                  <InboxReplyEditor
+                    ariaLabel={`Answer ${item.intent}`}
+                    draftKey={itemKey}
+                    editorRef={editorRef}
+                    environmentId={item.environmentId}
+                    onChange={(value) => setInboxAnswerText(itemKey, value)}
+                    onPaste={fileInput?.onPaste}
+                    onSubmit={() => {
+                      if (sendable && !pending) answer(item);
+                    }}
+                    placeholder="Type the answer exactly as it should be delivered"
+                    readOnly={!canAnswer || closedText !== null}
+                    value={answerText}
+                  />
+                ) : null}
+              </div>
+              <AnswerAttachmentStrip
                 answerKey={itemKey}
-                attachments={attachments.list(itemKey)}
+                delivering={pending}
                 environmentId={item.environmentId}
                 error={attachments.error(itemKey)}
-                onRemove={
-                  pendingExchangeId === null ? (id) => attachments.remove(itemKey, id) : null
-                }
+                intake={intake}
+                support={support}
               />
+              {/* As upstream's composer: the error shows, the words stay, and sending again retries. */}
+              {error === null ? null : <AnswerErrorAlert message={error} />}
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-1">
                   <OpenThreadButton
@@ -367,7 +491,7 @@ function OpenInboxItem({
                   />
                   {addFiles === null || !canAnswer ? null : (
                     <AnswerAttachButton
-                      focusAnswer={() => document.getElementById(answerId)?.focus()}
+                      focusAnswer={() => editorRef.current?.focusAtEnd()}
                       onFiles={addFiles}
                     />
                   )}
@@ -379,18 +503,13 @@ function OpenInboxItem({
                 ) : (
                   <div className="flex flex-wrap items-center justify-end gap-2">
                     <OwnerAskAction
-                      disabled={!item.sourceReady || pendingExchangeId !== null}
+                      disabled={!item.sourceReady || pending}
                       environmentId={item.environmentId}
                       item={item}
                       size="default"
                     />
                     <Button
-                      disabled={
-                        !canAnswer ||
-                        pendingExchangeId !== null ||
-                        answerText.length === 0 ||
-                        waitingOn !== null
-                      }
+                      disabled={!sendable || pending}
                       title={
                         canAnswer
                           ? (waitingOn ?? undefined)
@@ -399,7 +518,7 @@ function OpenInboxItem({
                       onClick={() => answer(item)}
                       type="button"
                     >
-                      {pendingExchangeId === scopedInboxItemKey(item) ? "Delivering…" : "Answer"}
+                      {pending ? "Delivering…" : "Answer"}
                     </Button>
                   </div>
                 )}
@@ -526,7 +645,7 @@ export function HumanInboxPage() {
   const personScopes = JSON.stringify(
     openSources.sources.map((source) => [source.environmentId, source.data?.personId ?? null]),
   );
-  const [pendingExchangeId, setPendingExchangeId] = useState<string | null>(null);
+  const sends = useAnswerSends();
   // An item that closed while the person was answering it stays in place with their words. It is
   // kept in the render it closes in, so its open row is never unmounted and drawn again closed;
   // `closedWith` is the answered list as it was then, to tell a later read of it.
@@ -572,7 +691,6 @@ export function HumanInboxPage() {
         closedWith.get(key) !== answeredSources && source?.status === "ready" && !source.refreshing,
     };
   };
-  const [error, setError] = useState<string | null>(null);
   const answerAttempts = useRef(new Map<string, HumanInboxAnswerAttempt>());
   useInboxRefresh();
   const runtimeRequests = useCrewRuntimeRequests();
@@ -642,9 +760,11 @@ export function HumanInboxPage() {
 
   const answer = async (item: HumanInboxItem) => {
     const itemKey = scopedInboxItemKey(item);
-    const message = answers[itemKey] ?? "";
+    const message = answerToDeliver(answers[itemKey] ?? "");
     const readiness = answerAttachments.ready(itemKey, item.environmentId);
-    if (message.length === 0 || !item.sourceReady || "blocked" in readiness) return;
+    // A kept ask has closed (AC17); its words stay to read, not to send.
+    if (message === null || !item.sourceReady || kept.has(itemKey) || "blocked" in readiness)
+      return;
     await submitHumanInboxAnswer({
       item,
       message,
@@ -654,9 +774,7 @@ export function HumanInboxPage() {
       send: answerHumanExchange,
       refresh,
       notifyChanged: notifyHumanInboxChanged,
-      onAccepted: () => answerAttachments.delivered(itemKey),
-      setPendingExchangeId,
-      setError,
+      ...answerSendCallbacks(sends, itemKey, () => answerAttachments.delivered(itemKey)),
     });
   };
 
@@ -681,7 +799,7 @@ export function HumanInboxPage() {
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <InboxWithThreadPanel>
         <WorkspacePageHeader electron={isElectron}>
           <WorkspaceBreadcrumb ariaLabel="Inbox breadcrumb">
             <WorkspaceBreadcrumbItem current>Inbox</WorkspaceBreadcrumbItem>
@@ -724,29 +842,11 @@ export function HumanInboxPage() {
               </ul>
             ) : null}
 
-            {error ? (
-              <div
-                aria-live="polite"
-                className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-md bg-destructive/8 px-4 py-3 text-sm text-destructive-foreground"
-              >
-                <span>{error}</span>
-                <Button
-                  onClick={() => void refresh().catch(() => undefined)}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                >
-                  Try again
-                </Button>
-              </div>
-            ) : null}
-
             <CrewRuntimeRequestsSection requests={runtimeRequests} onOpenThread={openCrewThread} />
             <NativeQuestionInboxSection questions={nativeQuestions} onOpenThread={openCrewThread} />
 
             {complete &&
             !loading &&
-            error === null &&
             shownItems.length === 0 &&
             cleanups.inPlace.length === 0 &&
             runtimeRequests.length === 0 &&
@@ -771,7 +871,8 @@ export function HumanInboxPage() {
                     item={item}
                     key={scopedInboxItemKey(item)}
                     onOpenThread={openThread}
-                    pendingExchangeId={pendingExchangeId}
+                    pending={sends.isPending(scopedInboxItemKey(item))}
+                    error={sends.errorOf(scopedInboxItemKey(item))}
                     senderLabels={senderLabels}
                     projectNameOf={projectNameOf}
                     showEnvironment={showEnvironment}
@@ -798,7 +899,7 @@ export function HumanInboxPage() {
             />
           </main>
         </ScrollArea>
-      </div>
+      </InboxWithThreadPanel>
     </SidebarInset>
   );
 }

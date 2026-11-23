@@ -110,7 +110,7 @@ const WHOLE_TEXT_NAMES = new Set([
 // Names shown as-is in every language. Removed from the text before looking for words.
 const PROPER_NOUNS = [
   "T3 Code",
-  // J5: FORK.md case 126.
+  // J5: FORK.md case 129.
   "J5 Code",
   "T3 Connect",
   "T3 Chat",

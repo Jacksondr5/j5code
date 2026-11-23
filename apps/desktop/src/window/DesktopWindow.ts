@@ -44,6 +44,7 @@ import { m } from "../i18n/messages.ts";
 import * as DesktopRendererHistory from "../telemetry/DesktopRendererHistory.ts";
 import { makeQuitShortcutHandler } from "./QuitHold.ts";
 import { copyContextMenuImage } from "./ContextMenuImage.ts";
+import { installFindBar } from "../j5/FindBar.ts";
 
 const TITLEBAR_HEIGHT = 40;
 
@@ -506,6 +507,7 @@ export const make = Effect.gen(function* () {
 
     pendingMainReveals.set(window, Effect.void);
     yield* rendererHistory.register(window.webContents, { surface: "main" });
+    installFindBar(window, environment);
     if (environment.platform === "darwin") {
       window.setAutoHideCursor(false);
     }
