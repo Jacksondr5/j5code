@@ -24,8 +24,10 @@ import {
   type ThreadGuestShare,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
+import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
@@ -1417,6 +1419,88 @@ live(
     assert.deepStrictEqual(yield* Queue.take(listed), []);
   }).pipe(Effect.scoped),
 );
+
+// A slow client leaves a list queued behind a restart. It is dropped, and the fresh read is next.
+for (const change of ["grant", "thread move"] as const) {
+  live(
+    `a queued task list respects reach across a ${change}`,
+    Effect.gen(function* () {
+      const access = yield* PersonAccess.PersonAccess;
+      const home = yield* project("project:home");
+      const hidden = yield* project("project:hidden");
+      const anchor = ThreadId.make("thread:anchor");
+      const bound = ThreadId.make("thread:bound");
+      const other = ThreadId.make("thread:other");
+      yield* write("thread.created", { id: anchor, projectId: home });
+      yield* write("thread.created", { id: bound, projectId: home });
+      yield* write("thread.created", { id: other, projectId: hidden });
+      const personId = yield* guest({ kind: "thread", threadId: anchor });
+      if (change === "thread move") {
+        yield* access.setLevel({
+          personId,
+          scope: { kind: "project", projectId: home },
+          level: "collaborator",
+        });
+      }
+      const empty: ScheduledTaskListResult = { tasks: [] };
+      const listAt = (threadId: ThreadId, projectId: ProjectId) =>
+        ({
+          tasks: [
+            {
+              id: "task:fixture",
+              threadId,
+              projectId,
+              webhook: { url: "https://example.invalid/fixture" },
+            },
+          ],
+        }) as unknown as ScheduledTaskListResult;
+      const stored = yield* Ref.make(listAt(bound, home));
+      const runs = yield* Ref.make(0);
+      const paused = yield* Deferred.make<void>();
+      const resume = yield* Deferred.make<void>();
+      const oldQueued = yield* Deferred.make<void>();
+      const freshQueued = yield* Deferred.make<void>();
+      const park = (ready: Deferred.Deferred<void>) =>
+        Stream.fromEffect(Deferred.succeed(ready, undefined).pipe(Effect.andThen(Effect.never)));
+      const source = Stream.unwrap(
+        Effect.gen(function* () {
+          const run = yield* Ref.updateAndGet(runs, (count) => count + 1);
+          const read = Stream.fromEffect(Ref.get(stored));
+          return run === 1
+            ? Stream.concat(Stream.succeed(empty), Stream.concat(read, park(oldQueued)))
+            : Stream.concat(read, park(freshQueued));
+        }),
+      );
+      const view = yield* GuestView.connectionView(GUEST);
+      const consumer = yield* view.scheduledTasksStream(source).pipe(
+        Stream.tap(() =>
+          Deferred.succeed(paused, undefined).pipe(Effect.andThen(Deferred.await(resume))),
+        ),
+        Stream.take(2),
+        Stream.runCollect,
+        Effect.forkScoped,
+      );
+
+      yield* Deferred.await(paused);
+      yield* Deferred.await(oldQueued);
+      if (change === "grant") {
+        yield* Ref.set(stored, listAt(other, hidden));
+        yield* access.setLevel({
+          personId,
+          scope: { kind: "thread", threadId: bound },
+          level: "collaborator",
+        });
+      } else {
+        yield* Ref.set(stored, listAt(bound, hidden));
+        yield* move(bound, hidden);
+      }
+      yield* Deferred.await(freshQueued);
+      yield* Deferred.succeed(resume, undefined);
+
+      assert.deepStrictEqual(yield* Fiber.join(consumer), [empty, empty]);
+    }).pipe(Effect.scoped),
+  );
+}
 
 live(
   "tells a Viewer the skills of the projects they reach by name, and none of their files",

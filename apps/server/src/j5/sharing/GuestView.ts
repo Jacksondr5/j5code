@@ -26,6 +26,7 @@ import {
 import * as Effect from "effect/Effect";
 import { identity } from "effect/Function";
 import * as Queue from "effect/Queue";
+import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import type * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
@@ -473,19 +474,31 @@ const narrowedView = (
     ).pipe(Effect.map((tasks) => ({ tasks: tasks.flat() })));
   return {
     scheduledTasks: (list) => list.pipe(Effect.flatMap(reachableTasks)),
-    // Begins again each time what the person reaches changes, as the sidebar does. Running the
-    // feed again reads the list afresh, and each run filters its own lists, so a list waiting
-    // behind a restart was filtered with the reach it was read under, never a newer one.
+    // Begins again each time what the person reaches changes, as the sidebar does, reading the
+    // list afresh. A list an older run left queued behind the restart is dropped, so nothing read
+    // or filtered under an earlier reach is delivered after it.
     scheduledTasksStream: (stream) =>
       Stream.unwrap(
         Effect.gen(function* () {
           const reachChanges = yield* access.subscribeChanges;
+          const current = yield* Ref.make(0);
           return Stream.concat(
             Stream.make(undefined),
             Stream.fromSubscription(reachChanges).pipe(
               Stream.filter((changed) => changed === personId),
             ),
-          ).pipe(Stream.switchMap(() => stream.pipe(Stream.mapEffect(reachableTasks))));
+          ).pipe(
+            Stream.mapEffect(() => Ref.updateAndGet(current, (run) => run + 1)),
+            Stream.switchMap((run) => stream.pipe(Stream.map((result) => ({ run, result })))),
+            Stream.mapEffect(({ run, result }) =>
+              Ref.get(current).pipe(
+                Effect.flatMap((latest) =>
+                  latest === run ? reachableTasks(result) : Effect.succeed(undefined),
+                ),
+              ),
+            ),
+            Stream.filter((result): result is ScheduledTaskListResult => result !== undefined),
+          );
         }),
       ),
     config: writes ? identity : (config) => reduceServerConfig(config, skillsShown),
