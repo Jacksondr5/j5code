@@ -24,6 +24,7 @@ import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerConfig from "../config.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
 import * as PeerLinks from "../peer/PeerLinks.ts";
+import { noOwnLoopbackLayer } from "../j5/a2a/ownLoopback.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as ManagedPolicy from "../policy/ManagedPolicy.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
@@ -44,6 +45,8 @@ const runWithPeerLinks = Effect.fn("environment.runWithPeerLinks")(function* <A,
     Effect.flatMap(run),
     Effect.provide(
       PeerLinks.layer.pipe(
+        // J5: no loopback address counts as this machine (register D49, FORK.md case 118).
+        Layer.provide(noOwnLoopbackLayer),
         Layer.provide(
           Layer.mergeAll(
             ServerSecretStore.layer,

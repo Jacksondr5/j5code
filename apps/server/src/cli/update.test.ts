@@ -664,7 +664,7 @@ it.layer(NodeServices.layer)("t3 update checks the database before switching", (
     stdoutInvalidUtf8: false,
     stderrInvalidUtf8: false,
   });
-  const blockedReason = "This database has migrations that t3@0.1.8 does not know: 79_example.";
+  const blockedReason = "This database has migrations that j5@0.1.8 does not know: 79_example.";
 
   it.effect.each([
     // J5: every J5 release since 0.0.48 speaks protocol 4, so an older target is asked under 4 too.

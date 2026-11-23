@@ -18,6 +18,7 @@ import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
 import * as PeerLinks from "../../peer/PeerLinks.ts";
 import { isLineHost } from "./line/lineAddress.ts";
+import { noOwnLoopbackLayer } from "./ownLoopback.ts";
 import { layer as lineRegistryLayer, LineRegistry } from "./line/LineRegistry.ts";
 
 const LINK_SESSION_TIMEOUT = Duration.seconds(10);
@@ -163,12 +164,6 @@ const makeServices = Effect.gen(function* () {
   );
 });
 
-/**
- * No address counts as this machine: J5 links same-machine servers at 127.0.0.1/[::1], and a line
- * at 127.77.x.y. The answer must still name the environment the link expects.
- */
-export const noOwnLoopback = (_host: string): boolean => false;
-
 /** Over whichever `PeerLinks` it is given: upstream's in the server, a stand-in under test. */
 export const layerOver = Layer.effectContext(makeServices);
 
@@ -178,7 +173,7 @@ export const layerOver = Layer.effectContext(makeServices);
  */
 export const layer = layerOver.pipe(
   Layer.provide(PeerLinks.layer),
-  Layer.provide(Layer.succeed(PeerLinks.LoopbackHost, noOwnLoopback)),
+  Layer.provide(noOwnLoopbackLayer),
   // The one registry: Effect builds this layer once however many layers name it.
   Layer.provide(lineRegistryLayer),
 );

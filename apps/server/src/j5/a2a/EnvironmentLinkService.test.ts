@@ -23,12 +23,8 @@ import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
 import * as PeerLinks from "../../peer/PeerLinks.ts";
 import * as Sqlite from "../../persistence/Sqlite.ts";
 import * as ServerSettings from "../../serverSettings.ts";
-import {
-  EnvironmentLinkService,
-  layerOver,
-  LINE_WAIT,
-  noOwnLoopback,
-} from "./EnvironmentLinkService.ts";
+import { EnvironmentLinkService, layerOver, LINE_WAIT } from "./EnvironmentLinkService.ts";
+import { noOwnLoopbackLayer } from "./ownLoopback.ts";
 import { LineClosedError } from "./line/LineMux.ts";
 import { LineRegistry, type LineUp } from "./line/LineRegistry.ts";
 
@@ -314,7 +310,7 @@ const linksAnsweringAs = (answeringAs: string) =>
           ),
         ),
       ),
-      Layer.provide(Layer.succeed(PeerLinks.LoopbackHost, noOwnLoopback)),
+      Layer.provide(noOwnLoopbackLayer),
       Layer.provide(
         Layer.mock(ServerEnvironment.ServerEnvironment)({
           getEnvironmentId: Effect.succeed(home),

@@ -101,4 +101,43 @@ it.layer(layer)("a J5 link's device session", (it) => {
       assert.isTrue(Exit.isFailure(yield* Effect.exit(sessions.verify(paired.access_token))));
     }),
   );
+
+  it.effect("revoked from another device, takes every session of its key off its person", () =>
+    Effect.gen(function* () {
+      const auth = yield* EnvironmentAuth.EnvironmentAuth;
+      const sessions = yield* SessionStore.SessionStore;
+      const links = yield* Links;
+      const people = yield* PersonAccess.PersonAccess;
+      const sql = yield* SqlClient.SqlClient;
+      const owner = yield* people.firstOwner;
+      yield* people.setName({ personId: owner.personId, displayName: "Owner" });
+      const pair = Effect.fn("test.pair")(function* (name: string, thumbprint: string) {
+        const who = yield* person(name, [{ scope: { kind: "server" }, level: "viewer" }]);
+        const link = yield* links.create(ownerDesktop, { kind: "device", personId: who.personId });
+        const joined = yield* links.join({ token: link.token, name: undefined, session: null });
+        if (joined.kind !== "pair") return yield* Effect.die(joined.kind);
+        const paired = yield* auth.exchangeBootstrapCredentialForAccessToken(
+          joined.credential,
+          undefined,
+          requestMetadata,
+          { proofKeyThumbprint: thumbprint },
+        );
+        return (yield* sessions.verify(paired.access_token)).sessionId;
+      });
+      const phone = makeDpopKey();
+      const first = yield* pair("Ola", phone.thumbprint);
+      const second = yield* pair("Ola again", phone.thumbprint);
+      const caller = yield* pair("Ines", makeDpopKey().thumbprint);
+      const bound = (sessionId: string) =>
+        sql<{ readonly n: number }>`
+          SELECT COUNT(*) AS n FROM j5_a2a_person_session WHERE session_id = ${sessionId}
+        `.pipe(Effect.map((rows) => rows[0]?.n ?? 0));
+
+      yield* auth.revokeClientSession(caller, first);
+      assert.deepStrictEqual(
+        [yield* bound(first), yield* bound(second), yield* bound(caller)],
+        [0, 0, 1],
+      );
+    }),
+  );
 });

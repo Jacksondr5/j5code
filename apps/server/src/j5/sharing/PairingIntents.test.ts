@@ -297,50 +297,53 @@ it.layer(accessLayer)("PairingIntents", (it) => {
     }),
   );
 
-  it.effect("refuses a Connections link whose maker's device is ended while it is made", () =>
-    Effect.gen(function* () {
-      const intents = yield* PairingIntents;
-      const sessions = yield* SessionStore.SessionStore;
-      const maker = yield* person("Ending", [{ scope: { kind: "server" }, level: "owner" }]);
-      const laptop = yield* device(maker.personId, LEVEL_PERMISSIONS.owner);
-      // Upstream's revoke waits here, once the gate has cut the laptop loose from its person.
-      const revoking = yield* Deferred.make<void>();
-      const resume = yield* Deferred.make<void>();
-      const auth = yield* EnvironmentAuth.EnvironmentAuth.pipe(
-        Effect.provide(
-          AccessGate.layerGatedEnvironmentAuth.pipe(
-            Layer.provide(
-              Layer.mock(EnvironmentAuth.EnvironmentAuth)({
-                revokeSession: (sessionId) =>
-                  Deferred.succeed(revoking, undefined).pipe(
-                    Effect.andThen(Deferred.await(resume)),
-                    Effect.andThen(sessions.revoke(sessionId)),
-                    Effect.orDie,
-                  ),
-              }),
+  it.effect(
+    "records a link made while its maker's device is ending as the maker's, never no one's",
+    () =>
+      Effect.gen(function* () {
+        const intents = yield* PairingIntents;
+        const sessions = yield* SessionStore.SessionStore;
+        const maker = yield* person("Ending", [{ scope: { kind: "server" }, level: "owner" }]);
+        const laptop = yield* device(maker.personId, LEVEL_PERMISSIONS.owner);
+        // Upstream's revoke waits here; the gate cuts the laptop loose only once it has ended.
+        const revoking = yield* Deferred.make<void>();
+        const resume = yield* Deferred.make<void>();
+        const auth = yield* EnvironmentAuth.EnvironmentAuth.pipe(
+          Effect.provide(
+            AccessGate.layerGatedEnvironmentAuth.pipe(
+              Layer.provide(
+                Layer.mock(EnvironmentAuth.EnvironmentAuth)({
+                  revokeSession: (sessionId) =>
+                    Deferred.succeed(revoking, undefined).pipe(
+                      Effect.andThen(Deferred.await(resume)),
+                      Effect.andThen(sessions.revoke(sessionId)),
+                      Effect.orDie,
+                    ),
+                }),
+              ),
             ),
           ),
-        ),
-      );
+        );
 
-      // Another device ends the laptop just as upstream has minted a link on it.
-      const ending = yield* auth.revokeSession(laptop.sessionId).pipe(Effect.forkChild);
-      yield* Deferred.await(revoking);
-      // The record runs as far as it can while the revoke is paused: before the cut and the
-      // revoke were one transaction, to its end, finding the laptop no one's and still live.
-      const recording = yield* recordConnectionsLinkCreator({
-        creator: laptop.identity,
-        link: { id: "pairing:ending", credential: "credential-ending" },
-        scopes: LEVEL_PERMISSIONS.owner,
-      }).pipe(Effect.forkChild({ startImmediately: true }));
-      yield* Deferred.succeed(resume, undefined);
-      yield* Fiber.join(ending);
+        // Another device ends the laptop just as upstream has minted a link on it.
+        const ending = yield* auth.revokeSession(laptop.sessionId).pipe(Effect.forkChild);
+        yield* Deferred.await(revoking);
+        // The record runs while the revoke is paused, with the laptop still live and still its
+        // person's: a session is cut loose only after upstream has ended it.
+        const recording = yield* recordConnectionsLinkCreator({
+          creator: laptop.identity,
+          link: { id: "pairing:ending", credential: "credential-ending" },
+          scopes: LEVEL_PERMISSIONS.owner,
+        }).pipe(Effect.forkChild({ startImmediately: true }));
+        yield* Deferred.succeed(resume, undefined);
+        yield* Fiber.join(ending);
 
-      // Refused, so upstream's handler revokes the link rather than leave it approving as no one.
-      const recorded = yield* Fiber.join(recording).pipe(Effect.result);
-      assert.isTrue(Result.isFailure(recorded), "the link was recorded as no one's");
-      if (Result.isFailure(recorded)) assert.strictEqual(recorded.failure.reason, "no_person");
-      assert.isNull(yield* intents.intentOf("credential-ending"));
-    }),
+        yield* Fiber.join(recording);
+        assert.strictEqual(
+          (yield* intents.intentOf("credential-ending"))?.personId,
+          maker.personId,
+          "the link was recorded as no one's",
+        );
+      }),
   );
 });
