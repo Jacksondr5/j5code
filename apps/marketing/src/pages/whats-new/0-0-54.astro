@@ -49,6 +49,7 @@ const RELEASE = "0.0.54";
 
     <nav class="manifest" aria-labelledby="wn-manifest">
       <div class="container">
+        <div class="sheet manifest__sheet">
         <div class="manifest__head">
           <h2 class="display" id="wn-manifest">In this release</h2>
           <p class="manifest__key">
@@ -71,6 +72,7 @@ const RELEASE = "0.0.54";
             ))
           }
         </ol>
+        </div>
       </div>
     </nav>
 
@@ -194,6 +196,8 @@ const RELEASE = "0.0.54";
   .manifest {
     padding: 56px 0 8px;
   }
+
+  .manifest__sheet { padding-bottom: 12px; }
 
   .manifest__head {
     display: flex;

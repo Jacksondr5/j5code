@@ -198,8 +198,8 @@ const T3_PENNANT = "M0.6 0.6h12L8.7 5l3.9 4.4H0.6z";
         </p>
         <h1 class="display" data-rise style="--d: 80ms">Your agents need you less. J5 Code comes to Windows.</h1>
         <p class="hero__lead" data-rise style="--d: 160ms">
-          Crews and personas that need you less, a Windows app in beta, links between your machines, and everything
-          J5 Code takes in from T3 Code {UPSTREAM_RANGE}.
+          Crews and personas that bring you only what needs you, a Windows app in beta, links between your machines,
+          and everything J5 Code takes in from T3 Code {UPSTREAM_RANGE}.
         </p>
       </div>
       <div class="hero__waterline" aria-hidden="true">
@@ -215,6 +215,7 @@ const T3_PENNANT = "M0.6 0.6h12L8.7 5l3.9 4.4H0.6z";
 
     <nav class="manifest" aria-labelledby="wn-manifest">
       <div class="container">
+        <div class="sheet manifest__sheet">
         <div class="manifest__head">
           <h2 class="display" id="wn-manifest">In this release</h2>
           <p class="manifest__key">
@@ -237,6 +238,7 @@ const T3_PENNANT = "M0.6 0.6h12L8.7 5l3.9 4.4H0.6z";
             ))
           }
         </ol>
+        </div>
       </div>
     </nav>
 
@@ -308,7 +310,7 @@ const T3_PENNANT = "M0.6 0.6h12L8.7 5l3.9 4.4H0.6z";
             <h2 class="display">Inbox and people</h2>
             <p class="feature__intro">Answer more completely, and share more easily.</p>
           </div>
-          <div>
+          <div class="sheet">
             <p class="try live-only">
               Try it: attach another file, then answer.
               <button type="button" data-piece-reset="answer">Start over</button>
@@ -477,6 +479,7 @@ const T3_PENNANT = "M0.6 0.6h12L8.7 5l3.9 4.4H0.6z";
   }
 
   .manifest { padding: 56px 0 8px; }
+  .manifest__sheet { padding-bottom: 12px; }
 
   .manifest__head {
     display: flex;
@@ -538,7 +541,7 @@ const T3_PENNANT = "M0.6 0.6h12L8.7 5l3.9 4.4H0.6z";
 
   .split .feature__head { margin-bottom: 0; }
   .split--text { align-items: start; }
-  .split--text .items { padding-top: 34px; }
+  .split--text .items { margin-top: 30px; }
 
   /* Two pieces of the app side by side, each under its own line of what to try. */
   .pair {
@@ -569,7 +572,7 @@ const T3_PENNANT = "M0.6 0.6h12L8.7 5l3.9 4.4H0.6z";
     .hero__boat--1 { right: 50%; }
     .hero__boat--2 { right: 28%; }
     .split { grid-template-columns: 1fr; gap: 32px; }
-    .split--text .items { padding-top: 0; }
+    .split--text .items { margin-top: 0; }
     .pair { grid-template-columns: 1fr; gap: 48px; }
   }
 
