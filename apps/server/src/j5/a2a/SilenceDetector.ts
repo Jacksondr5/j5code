@@ -273,6 +273,28 @@ const makeLayer = (daemon: boolean) =>
         threads.getThreadRecords(threadId, ["runs", "messages"], { messageRoles: ["user"] });
 
       /**
+       * A steer the run ended without reading is moved to a new run by upstream after this event
+       * (`requeueUnreadSteers` in Orchestrator.ts), and that run owes its reply, not this one.
+       */
+      const steerLeftUnread = (threadId: ThreadId, runId: RunId, messageId: LedgerMessageId) =>
+        threads
+          .getThreadRecords(threadId, ["turnItems"], {
+            turnItemTypes: ["user_message"],
+            turnItemStatuses: ["pending"],
+            turnItemRunIds: [runId],
+          })
+          .pipe(
+            Effect.map(({ turnItems }) =>
+              turnItems.some(
+                (item) =>
+                  item.type === "user_message" &&
+                  item.messageId === deliveryMessageId(messageId) &&
+                  (item.inputIntent === "steer" || item.inputIntent === "promoted_queued_to_steer"),
+              ),
+            ),
+          );
+
+      /**
        * A seat's failed run reaches its Captain as a Crew fact, from the launch report or the
        * seat's finish notice, with the run's error. The same failure framed here as an unanswered
        * ask would be the Captain's third telling of one death (Jackson's dogfood, 2026-09-17).
@@ -763,7 +785,9 @@ const makeLayer = (daemon: boolean) =>
           // An Exchange stays open after its notice; later runs need not read the thread for it.
           if (yield* alreadyNoticed(exchange, delivery.message_id)) continue;
           thread ??= yield* readRunsAndMessages(stored.event.threadId);
-          if (owingRun(thread, LedgerMessageId.make(delivery.message_id))?.id !== run.id) continue;
+          const messageId = LedgerMessageId.make(delivery.message_id);
+          if (owingRun(thread, messageId)?.id !== run.id) continue;
+          if (yield* steerLeftUnread(stored.event.threadId, run.id, messageId)) continue;
           const payload = yield* deriveNotice(
             run,
             stored.event.threadId,

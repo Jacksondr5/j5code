@@ -8,7 +8,7 @@
     "j5-testflight": {
       "extends": "production",
       "corepack": false,
-      "node": "26.12.1",
+      "node": "26.13.1",
       "pnpm": "12.14.0",
       "distribution": "store"
     },

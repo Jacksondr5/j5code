@@ -3,6 +3,7 @@ import { CommandId, ThreadId, type OrchestrationV2Command } from "@t3tools/contr
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
+import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
 import { makeCrewSeatArchiveGuard } from "./crewSeatArchiveGuard.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
@@ -23,6 +24,23 @@ const instance = (id: string, archivedAt: string | null): AgentCrewInstance => (
   archivedAt,
   members: [],
 });
+/** Threads whose delegated tasks are still running. */
+const threadsDelegating = (delegating: ReadonlyArray<ThreadId>) =>
+  Layer.mock(ThreadManagementService)({
+    getThreadRecords: (threadId) =>
+      Effect.succeed({
+        subagents: delegating.includes(threadId)
+          ? [
+              {
+                origin: "app_owned",
+                childThreadId: ThreadId.make("thread:child"),
+                status: "running",
+              },
+            ]
+          : [],
+      } as never),
+  });
+
 const command = (type: "thread.archive" | "thread.delete" | "thread.pin", threadId: ThreadId) =>
   ({
     type,
@@ -35,6 +53,7 @@ it.effect(
   () =>
     Effect.gen(function* () {
       const crews = Layer.mock(AgentCrewInstanceService)({
+        listInvolving: () => Effect.succeed([]),
         findMembership: (participantId) =>
           Effect.succeed(
             participantId === participantIdForThread(seatThread)
@@ -52,7 +71,9 @@ it.effect(
                 : null,
           ),
       });
-      const guard = yield* makeCrewSeatArchiveGuard.pipe(Effect.provide(crews));
+      const guard = yield* makeCrewSeatArchiveGuard.pipe(
+        Effect.provide(Layer.merge(crews, threadsDelegating([]))),
+      );
       const refused = yield* guard(command("thread.archive", seatThread)).pipe(Effect.flip);
       assert.equal(refused._tag, "CrewSeatArchivedAloneError");
       assert.include(refused.message, "seat critic of Crew Review Pair");
@@ -71,7 +92,45 @@ it.effect("lets the archive through when the Crew store cannot be read", () =>
     const crews = Layer.mock(AgentCrewInstanceService)({
       findMembership: () => Effect.die(new Error("database locked")),
     });
-    const guard = yield* makeCrewSeatArchiveGuard.pipe(Effect.provide(crews));
+    const guard = yield* makeCrewSeatArchiveGuard.pipe(
+      Effect.provide(Layer.merge(crews, threadsDelegating([]))),
+    );
     yield* guard(command("thread.archive", seatThread));
+  }),
+);
+
+it.effect("refuses a Captain's archive while a seat of its Crew runs delegated tasks", () =>
+  Effect.gen(function* () {
+    const captain = ThreadId.make("thread:captain");
+    const crew = {
+      ...instance("crew:live", null),
+      members: [
+        {
+          seatName: "builder",
+          agentId: null,
+          participantId: participantIdForThread(seatThread),
+          threadId: seatThread,
+          addedVersion: 1,
+          reason: null,
+        },
+      ],
+    } as AgentCrewInstance;
+    const crews = Layer.mock(AgentCrewInstanceService)({
+      findMembership: () => Effect.succeed(null),
+      listInvolving: () => Effect.succeed([crew]),
+    });
+    const guardWith = (delegating: ReadonlyArray<ThreadId>) =>
+      makeCrewSeatArchiveGuard.pipe(
+        Effect.provide(Layer.merge(crews, threadsDelegating(delegating))),
+      );
+
+    const refused = yield* (yield* guardWith([seatThread]))(
+      command("thread.archive", captain),
+    ).pipe(Effect.flip);
+    assert.equal(refused._tag, "CaptainCrewDelegatingError");
+    assert.include(refused.message, "seat(s) builder");
+    assert.include(refused.message, "Nothing was archived");
+    // Nothing delegating: the Captain archives, and its Crew retires after it.
+    yield* (yield* guardWith([]))(command("thread.archive", captain));
   }),
 );

@@ -394,7 +394,7 @@ import {
   usePersonaRouteToFollow,
 } from "../j5/agents/personaComposerSelection";
 import { useDraftAgentAssignment } from "../j5/agents/useDraftAgentAssignment";
-import { useCanOperateThread } from "../j5/sharing/access";
+import { useCanForkThread, useCanOperateThread } from "../j5/sharing/access";
 import { PlaybookComposerControl } from "../j5/playbooks/PlaybookComposerControl";
 import { useDraftEnvironmentRouting } from "./chat/useDraftEnvironmentRouting";
 import { branchMismatchBannerItem, extensionStatusBannerItem } from "./chat/ThreadActivityBanners";
@@ -470,6 +470,8 @@ export default function ChatView(props: ChatViewProps) {
   } = props;
   const embedded = parentPanel !== undefined;
   const canOperateThread = useCanOperateThread(environmentId, threadId);
+  // J5: a side chat is a fork, so it needs the project's level (FORK.md case 90).
+  const canForkThread = useCanForkThread(environmentId, threadId);
   const canOperateTerminal = useEnvironmentScope(environmentId, AuthTerminalOperateScope);
   const draftId = routeKind === "draft" ? props.draftId : null;
   const handleNewThread = useNewThreadHandler();
@@ -2897,6 +2899,7 @@ export default function ChatView(props: ChatViewProps) {
   const sideChatsOffered =
     !embedded &&
     canOperateThread &&
+    canForkThread &&
     activeThread?.lineage.sideChat !== true &&
     !isSubagentThread &&
     serverConfig?.environment.capabilities.sideChats === true;

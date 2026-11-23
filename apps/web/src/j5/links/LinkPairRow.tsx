@@ -371,7 +371,7 @@ export function LinkPairRow({
               <EllipsisIcon className="size-3.5" />
             </MenuTrigger>
             <MenuPopup align="end">
-              {renewableSides(pair).length > 0 ? (
+              {renewDue && renewableSides(pair).length > 0 ? (
                 <MenuItem onClick={() => void renew()}>
                   <RefreshCwIcon />
                   Renew tools
@@ -492,9 +492,7 @@ export function LinkPairRow({
               );
             })}
             {expiryLine === null ? null : (
-              <Detail
-                tone={expiry.kind === "expired" ? "destructive" : "muted"}
-              >
+              <Detail tone={expiry.kind === "expired" ? "destructive" : "muted"}>
                 {expiryLine}
               </Detail>
             )}

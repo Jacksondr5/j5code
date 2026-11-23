@@ -1,10 +1,4 @@
-import {
-  CommandId,
-  isOrchestrationV2WorkActive,
-  OrchestrationV2RunStatus,
-  RunId,
-  ThreadId,
-} from "@t3tools/contracts";
+import { CommandId, OrchestrationV2RunStatus, RunId, ThreadId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -30,6 +24,7 @@ import {
 import { A2ALedger } from "./LedgerService.ts";
 import { A2ALifecycleService } from "./LifecycleService.ts";
 import { stopThread } from "./stopThread.ts";
+import { runsDelegatedTasks } from "./crewSeatArchiveGuard.ts";
 import { getThreadRecordsIfPresent } from "./threadProjectionReads.ts";
 import {
   ExchangeDroppedPayload,
@@ -668,20 +663,16 @@ export const layer = Layer.effect(
       };
     });
 
-    // Upstream's own test for the archive it refuses (`hasRunningDelegatedTasks` in Orchestrator.ts).
-    const runsDelegatedTasks = (threadId: ThreadId) =>
-      threadManagement.getThreadRecords(threadId, ["subagents"]).pipe(
-        Effect.map(({ subagents }) =>
-          subagents.some(
-            (task) =>
-              task.origin === "app_owned" &&
-              task.childThreadId !== null &&
-              isOrchestrationV2WorkActive(task.status),
+    return ArchiveAgentService.of({
+      archive,
+      readFacts,
+      runsDelegatedTasks: Effect.fn("ArchiveAgentService.runsDelegatedTasks")(
+        (threadId: ThreadId) =>
+          runsDelegatedTasks(threadId).pipe(
+            Effect.provideService(ThreadManagementService, threadManagement),
+            Effect.orDie,
           ),
-        ),
-        Effect.orDie,
-      );
-
-    return ArchiveAgentService.of({ archive, readFacts, runsDelegatedTasks });
+      ),
+    });
   }),
 );

@@ -2034,9 +2034,9 @@ export const layer: Layer.Layer<
                       ? {}
                       : { attachments: [...missedAttachments, ...turnInput.message.attachments] }),
                   },
-                  ...(text === request
+                  ...(text === userText
                     ? {}
-                    : { inlineContextLength: text.length - request.length }),
+                    : { inlineContextLength: text.length - userText.length }),
                 });
           yield* operation.pipe(
             // Clear pending handoff markers for refused prompts so the next turn retains the native session.

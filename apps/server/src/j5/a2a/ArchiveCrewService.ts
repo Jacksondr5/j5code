@@ -182,7 +182,7 @@ export class ArchiveCrewDelegatedTasksError extends Schema.TaggedError<ArchiveCr
   { crewInstanceId: Schema.String, seats: Schema.Array(Schema.String) },
 ) {
   override get message(): string {
-    return `Crew ${this.crewInstanceId} was not archived: seat(s) ${this.seats.join(", ")} still have running delegated tasks. Wait for them or cancel them with task_cancel, then retry j5_archive_crew. Nothing was archived.`;
+    return `Crew ${this.crewInstanceId} was not archived: seat(s) ${this.seats.join(", ")} still have running delegated tasks. Stop those seats (their tasks stop with them) or wait, then archive again. Nothing was archived.`;
   }
 }
 
@@ -477,7 +477,8 @@ export const layer = Layer.effect(
         const delegating: Array<string> = [];
         for (const member of facts.members) {
           if (member.neverCreated || member.alreadyArchived) continue;
-          if (yield* archiveAgent.runsDelegatedTasks(member.threadId)) delegating.push(member.seatName);
+          if (yield* archiveAgent.runsDelegatedTasks(member.threadId))
+            delegating.push(member.seatName);
         }
         if (
           input.withCaptain === true &&

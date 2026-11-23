@@ -115,12 +115,15 @@ const thread: {
   thread: { archivedAt: string | null; deletedAt: string | null };
   runs: Array<OrchestrationV2Run>;
   messages: Array<{ readonly id: MessageId; readonly runId: RunId }>;
-} = { thread: { archivedAt: null, deletedAt: null }, runs: [], messages: [] };
+  /** Pending `user_message` items: a steer the run has not read yet. */
+  pendingSteers: Array<{ readonly runId: RunId; readonly messageId: MessageId }>;
+} = { thread: { archivedAt: null, deletedAt: null }, runs: [], messages: [], pendingSteers: [] };
 
 const threadMock = (overrides: Partial<ThreadManagementService["Service"]> = {}) => {
   thread.thread = { archivedAt: null, deletedAt: null };
   thread.runs = [runOf(terminalEvent("completed"))];
   thread.messages = [];
+  thread.pendingSteers = [];
   return Layer.mock(ThreadManagementService)({
     getThreadRecords: (() => Effect.succeed(thread)) as never,
     ...overrides,
@@ -147,6 +150,12 @@ const makeTestLayer = () => {
                   status: "failed",
                   failure: failureDetail,
                 },
+                ...thread.pendingSteers.map((steer) => ({
+                  ...steer,
+                  type: "user_message",
+                  status: "pending",
+                  inputIntent: "steer",
+                })),
               ],
             }
           : thread,
@@ -698,6 +707,36 @@ it.effect("follows a queued ask promoted into the running turn (#435)", () =>
     assert.lengthOf(notices, 1);
     assert.equal(notices[0]?.state, "turn-ended-no-reply");
     assert.equal(notices[0]?.runId, runOf(running).id);
+  }).pipe(Effect.provide(makeTestLayer())),
+);
+
+it.effect("waits for the run a steer Claude left unread is moved to", () =>
+  Effect.gen(function* () {
+    yield* seed();
+    const steered = otherRun("steered", 5, 101);
+    const ask = yield* seedInbound(2, runOf(steered).id);
+    // The run ended before Claude read the steer; upstream moves it to a new run after this event.
+    thread.pendingSteers = [
+      { runId: runOf(steered).id, messageId: deliveryMessageId(ask.messageId) },
+    ];
+    thread.runs = [runOf(steered)];
+    const detector = yield* A2ASilenceDetector;
+    yield* detector.handleStoredEvent(steered);
+    assert.lengthOf(yield* readNotices(), 0, "the run the steer moves to can still answer it");
+
+    thread.pendingSteers = [];
+    thread.messages = thread.messages.map((message) =>
+      message.id === deliveryMessageId(ask.messageId)
+        ? { ...message, runId: carrierRunId }
+        : message,
+    );
+    const carrier = carrierRun(ask.messageId, 7, 102);
+    thread.runs = [runOf(steered), runOf(carrier)];
+    yield* detector.handleStoredEvent(carrier);
+    const notices = yield* readNotices();
+    assert.lengthOf(notices, 1);
+    assert.equal(notices[0]?.state, "turn-ended-no-reply");
+    assert.equal(notices[0]?.runId, carrierRunId);
   }).pipe(Effect.provide(makeTestLayer())),
 );
 

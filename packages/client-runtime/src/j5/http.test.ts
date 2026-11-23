@@ -30,7 +30,8 @@ function relayAuthorization(tokens: ReadonlyArray<string>, httpBaseUrl = "https:
     authorizeBearer: () => Effect.die("bearer authorization is not used by relay reads"),
     authorizeDpop: () => Effect.die("socket authorization is not used by HTTP reads"),
     authorizeDirectDpop: () => Effect.die("direct socket authorization is not used by relay reads"),
-    authorizeDirectDpopHttp: () => Effect.die("direct HTTP authorization is not used by relay reads"),
+    authorizeDirectDpopHttp: () =>
+      Effect.die("direct HTTP authorization is not used by relay reads"),
     rememberCheckedDescriptor: () => Effect.void,
     renewDpopBeforeExpiry: () => Effect.die("HTTP reads do not renew a socket's token"),
     authorizeDpopHttp: (input) => {
@@ -144,6 +145,63 @@ it.effect("signs fresh DPoP proofs for the actual method and remote URL", () =>
       ["DPoP relay-token", "proof-2"],
     ]);
   }),
+);
+
+it.effect(
+  "renews a paired key-bound (direct DPoP) credential through the authorization service",
+  () =>
+    Effect.gen(function* () {
+      const requests: Request[] = [];
+      const fetch: typeof globalThis.fetch = async (input, init) => {
+        requests.push(new Request(input, init));
+        return Response.json({});
+      };
+      const directConnection = { connectionId: "direct-1", httpBaseUrl: "https://direct.test" };
+      const environmentId = EnvironmentId.make("direct");
+      const paired: PreparedConnection = {
+        environmentId,
+        label: "direct",
+        httpBaseUrl: "https://direct.test",
+        socketUrl: "wss://direct.test/ws",
+        httpAuthorization: { ...relayToken("captured-token"), directConnection },
+        target: new BearerConnectionTarget({
+          environmentId,
+          label: "direct",
+          connectionId: "direct-1",
+        }),
+      };
+      const renewals: Array<{ connectionId: string; rejectedAccessToken?: string }> = [];
+      const { service } = relayAuthorization([]);
+      const signer = {
+        thumbprint: Effect.succeed("test-thumbprint"),
+        createProof: () => Effect.succeed("proof"),
+      };
+      yield* read(paired).pipe(
+        Effect.provide(layerRemoteHttpClient(fetch)),
+        Effect.provideService(RemoteEnvironmentAuthorization, {
+          ...service,
+          authorizeDirectDpopHttp: (connection, rejectedAccessToken) => {
+            renewals.push({
+              connectionId: connection.connectionId,
+              ...(rejectedAccessToken === undefined ? {} : { rejectedAccessToken }),
+            });
+            return Effect.succeed({ ...relayToken("renewed-token"), directConnection: connection });
+          },
+        }),
+        Effect.provideService(ManagedRelayDpopSigner, signer),
+      );
+      expect(renewals).toEqual([{ connectionId: "direct-1" }]);
+      expect(requests[0]?.headers.get("authorization")).toBe("DPoP renewed-token");
+      // Without the service, as on a runtime that lacks the connection layer, the read can't start.
+      const error = yield* read(paired).pipe(
+        Effect.provide(layerRemoteHttpClient(fetch)),
+        Effect.provideService(ManagedRelayDpopSigner, signer),
+        Effect.flip,
+      );
+      expect(error.message).toBe(
+        "No relay authorization service is available for the environment request.",
+      );
+    }),
 );
 
 it.effect("refreshes a rejected relay token once and retries the same request", () =>
