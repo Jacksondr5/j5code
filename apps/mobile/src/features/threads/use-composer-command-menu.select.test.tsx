@@ -14,6 +14,14 @@ vi.mock("../../state/use-composer-drafts", () => ({
   useComposerDraftSelection: () => null,
 }));
 vi.mock("../../lib/uuid", () => ({ uuidv4: () => "context-id" }));
+// J5 (cases 49, Playbooks): the `@` picker and playbook library; the real modules load Expo's runtime.
+vi.mock("../../j5/agents/useAgentMentionPicker", () => ({
+  useAgentMentionPicker: () => ({ items: [], isPending: false, error: null }),
+}));
+vi.mock("../../j5/state", () => ({ j5Environment: { playbookLibrary: vi.fn() } }));
+vi.mock("../../state/query", () => ({
+  useEnvironmentQuery: () => ({ data: undefined, isPending: false, error: null }),
+}));
 vi.mock("../../state/server", () => ({
   serverEnvironment: {
     providersValueAtom: vi.fn(),

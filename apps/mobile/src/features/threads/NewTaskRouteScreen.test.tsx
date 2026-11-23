@@ -102,6 +102,12 @@ vi.mock("../../state/entities", () => ({
   useServerConfigs: () => new Map([[environmentId, { scratchWorkspaceRoot: "/scratch" }]]),
 }));
 vi.mock("../../state/projects", () => ({ projectEnvironment: { openScratch: {} } }));
+// J5 (case 90): the person's level allows every door here; the real module loads Expo's runtime.
+vi.mock("../../j5/sharing/startAccess", () => ({
+  noStartableProjectState: () => null,
+  useAddsProjectSomewhere: () => true,
+  useCanAddProject: () => true,
+}));
 vi.mock("../../state/use-atom-command", () => ({ useAtomCommand: () => harness.openScratch }));
 vi.mock("../../state/use-composer-drafts", () => ({ retargetSavedNewTaskDraft: vi.fn() }));
 vi.mock("../../state/use-remote-environment-registry", () => ({
