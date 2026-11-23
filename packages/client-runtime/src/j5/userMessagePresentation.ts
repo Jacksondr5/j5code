@@ -45,6 +45,7 @@ export type J5NoticeKind =
   | "not-delivered"
   | "exchange-dropped"
   | "exchange-withdrawn"
+  | "back-in-reach"
   | "crew-gate"
   | "crew-seats"
   | "crew-context"

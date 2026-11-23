@@ -42,6 +42,8 @@ import { layer as peerDirectoryLayer } from "./PeerDirectory.ts";
 import { layer as peerInboundLayer } from "./PeerInboundService.ts";
 import { layer as peerStoreLayer } from "./PeerStoreService.ts";
 import { layer as peerPollerLayer } from "./PeerPoller.ts";
+import { layer as lineRegistryLayer } from "./line/LineRegistry.ts";
+import { layer as unreachableCallsLayer } from "./line/UnreachableCalls.ts";
 import { layer as peerRemovalLayer } from "./PeerRemovalService.ts";
 import { layer as peerRegistryLayer } from "./PeerRegistryService.ts";
 import { layer as readChangeFeedsLayer } from "./ReadChangeFeeds.ts";
@@ -53,6 +55,7 @@ import { layer as humanInboxLayer } from "./HumanInboxService.ts";
 import { layer as clientActionsLayer } from "./ClientActionsService.ts";
 import { layer as clientReadsLayer } from "./ClientReadsService.ts";
 import { layer as peerAdminLayer } from "./PeerAdminService.ts";
+import { layer as linkSessionLayer } from "./LinkSessionService.ts";
 import { layer as threadRegistrationLayer } from "./ThreadRegistration.ts";
 import { layer as spawnCompositionLayer } from "./SpawnCompositionService.ts";
 import { layer as spawnWorkspaceLayer } from "./spawnWorkspace.ts";
@@ -60,6 +63,7 @@ import * as RequestReplayService from "./RequestReplayService.ts";
 import { layer as sharedConversationLayer } from "../sharing/SharedConversation.ts";
 import { layer as threadReadStateLayer } from "../sharing/ThreadReadState.ts";
 import { layer as sharedThreadsLayer } from "../sharing/SharedThreads.ts";
+import { layer as threadMovesLayer } from "../sharing/ThreadMoves.ts";
 import { layer as exchangeAnalyticsLayer } from "../analytics/ExchangeAnalytics.ts";
 import { layer as fleetSnapshotLayer } from "../analytics/FleetSnapshot.ts";
 import { layer as threadAnalyticsLayer } from "../analytics/ThreadAnalytics.ts";
@@ -223,6 +227,14 @@ const makeJ5A2AAuxiliaryLayer = (
     peerStoreProvided,
     peerPollerProvided,
     peerRemovalProvided,
+    // The lines peers that poll this server hold; the same object reaches upstream's link services
+    // through `layerRoutingHttpClient` in server.ts, so Effect builds it once.
+    lineRegistryLayer,
+    // Tells a thread when a server it could not reach holds a line here again (register D46).
+    unreachableCallsLayer.pipe(
+      Layer.provide(lineRegistryLayer),
+      Layer.provide(deliveryWorkerProvided),
+    ),
     rosterLayer,
     sendServiceProvided,
     deliveryWorkerProvided,
@@ -247,6 +259,8 @@ const makeJ5A2AAuxiliaryLayer = (
     readChangesLayer,
     // The feeds follow the one peer registry, provided below, whose writes move `peers`.
     readChangeFeedsLayer.pipe(Layer.provide(readChangesLayer), Layer.provide(playbookStoreLayer)),
+    // A thread moved to another project re-checks every narrowed feed, as a grant does.
+    threadMovesLayer,
     // Moves the one store's revision when the YAML of an active run changes on disk.
     playbookDefinitionWatchLayer.pipe(Layer.provide(playbookStoreLayer)),
     // Shared conversations: what a person's message carries to the agent, and who wrote it. It
@@ -262,7 +276,8 @@ const makeJ5A2AAuxiliaryLayer = (
   return Layer.mergeAll(
     clientReadsLayer,
     clientActionsLayer,
-    peerAdminLayer,
+    // Removing a peer also ends the sessions its links hold here; the link routes share the service.
+    peerAdminLayer.pipe(Layer.provideMerge(linkSessionLayer)),
     artifactDeletionProvided,
   ).pipe(Layer.provideMerge(runtimeWithoutClientReads));
 };

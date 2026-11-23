@@ -1,9 +1,7 @@
-import {
-  j5MessageAuthorName,
-  j5SenderThreadRef,
-} from "@t3tools/client-runtime/j5/participant-identity";
+import { j5MessageAuthorName } from "@t3tools/client-runtime/j5/participant-identity";
 import {
   crewApprovalSummary,
+  crewDeclinedDetail,
   crewDeclinedSummary,
   crewNoticeLines,
   type CrewNoticePresentation,
@@ -26,6 +24,7 @@ import { useQuietThreadShell } from "../../state/entities";
 import { PersonAvatar } from "../sharing/PersonAvatar";
 import { SharedConversationNote } from "../sharing/SharedConversationNote";
 import {
+  j5TimelineSenderRef,
   presentJ5TimelineNotice,
   type J5FeedMessagePresentation,
   type J5Timeline,
@@ -93,6 +92,7 @@ const NOTICE_ICONS: Partial<Record<J5NoticeKind, AppSymbolName>> = {
   "not-delivered": "exclamationmark.circle",
   "exchange-dropped": "slash.circle",
   "exchange-withdrawn": "arrow.uturn.backward",
+  "back-in-reach": "wifi",
 };
 
 /** The icon for each of J5's prompts in upstream's Automation row. */
@@ -205,9 +205,6 @@ function CrewNotice(props: {
 }) {
   const { notice, timestampLabel, environmentId } = props;
   if (notice.kind === "gate" && notice.decision === "declined") {
-    const requested = notice.requestedSeats
-      .map((seat) => `${seat.seat} (${seat.agentId})`)
-      .join(", ");
     return (
       <View className="mb-5 items-start px-1">
         <J5NoticeLine
@@ -215,9 +212,7 @@ function CrewNotice(props: {
           summary={crewDeclinedSummary(notice)}
           timestampLabel={timestampLabel}
         >
-          <J5NoticeDetailText
-            text={`${requested.length === 0 ? "" : `Requested: ${requested}\n\n`}The Captain can revise the request and propose again.`}
-          />
+          <J5NoticeDetailText text={crewDeclinedDetail(notice)} />
         </J5NoticeLine>
       </View>
     );
@@ -304,15 +299,10 @@ function useSenderThread(
   presentation: J5FeedMessagePresentation,
   timeline: J5Timeline,
 ) {
-  const ref = j5SenderThreadRef({
-    environmentId: timeline.environmentId,
-    presentation: presentation.j5,
-    messageSenderThreadId: message.senderThreadId,
-    participantThreads: timeline.threads,
-  });
+  const ref = j5TimelineSenderRef(message, presentation.j5, timeline);
   // A peer's thread opens only from a client connected to that peer, and only if the person can
   // see it there; the client's own thread list answers both.
-  const shell = useQuietThreadShell(presentation.j5?.group === "participant" ? ref : null);
+  const shell = useQuietThreadShell(ref);
   return { ref: shell === null ? null : ref, title: shell?.title };
 }
 
@@ -386,17 +376,44 @@ function ParticipantAuthorLine(props: {
   readonly j5: Extract<J5UserMessagePresentation, { group: "participant" }>;
 }) {
   const { j5 } = props;
+  const openLinkedThread = useOpenLinkedThread();
   const sender = useSenderThread(props.message, props.presentation, props.timeline);
-  const name = j5MessageAuthorName({
-    presentation: j5,
-    participantLabels: props.timeline.labels,
-    senderThreadTitle: sender.title,
-  });
+  // A sender whose name is on its way keeps the line's height without a stand-in word.
+  const named =
+    j5.senderId === null || !props.timeline.pending.has(j5.senderId) || !!sender.title?.trim();
+  const name = named
+    ? j5MessageAuthorName({
+        presentation: j5,
+        participantLabels: props.timeline.labels,
+        senderThreadTitle: sender.title,
+      })
+    : " ";
+  const { ref } = sender;
   return (
     <View className="mb-1 max-w-[85%] flex-row items-center gap-1.5 pl-1">
-      <Text className="shrink font-t3-medium text-xs text-foreground" numberOfLines={1}>
-        {name}
-      </Text>
+      {/* The sender's name opens its thread where the reader can see it, as web's link does. */}
+      {ref === null ? (
+        <Text className="shrink font-t3-medium text-xs text-foreground" numberOfLines={1}>
+          {name}
+        </Text>
+      ) : (
+        <Pressable
+          accessibilityRole="link"
+          accessibilityHint="Opens the sender's thread"
+          hitSlop={6}
+          className="shrink"
+          onPress={() =>
+            openLinkedThread({
+              environmentId: String(ref.environmentId),
+              threadId: String(ref.threadId),
+            })
+          }
+        >
+          <Text className="font-t3-medium text-xs text-foreground" numberOfLines={1}>
+            {name}
+          </Text>
+        </Pressable>
+      )}
       {j5.tag === "brief" ? (
         <Text className="shrink-0 text-xs text-foreground-muted">· brief</Text>
       ) : null}

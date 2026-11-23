@@ -17,7 +17,6 @@ import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
-import * as SqlClient from "effect/sql/SqlClient";
 
 import { EventSinkStreamError, EventSinkV2 } from "../../orchestration-v2/EventSink.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
@@ -47,6 +46,7 @@ it("provider errors cannot split a finish digest or replace participant fields",
     crewName: "Review",
     participantId: "real-participant",
     threadId: "real-thread",
+    runId: "run:1",
     runStatus: "failed",
     reply: null,
     failure: {
@@ -75,6 +75,7 @@ it("cuts a long reply and says so, keeping the seat's thread id for the rest", (
       crewName: "Review",
       participantId: "real-participant",
       threadId: "real-thread",
+      runId: "run:1",
       runStatus: "completed",
       failure: null,
       reply,
@@ -294,7 +295,7 @@ const terminalRunEvent = (
     },
   }) as unknown as OrchestrationV2StoredEvent;
 
-it.effect("tells the Captain how each finished seat ended, and settles nothing", () =>
+it.effect("tells the Captain only when a seat's run failed, and settles nothing", () =>
   Effect.gen(function* () {
     const database = NodeSqliteClient.layer({ filename: ":memory:" });
     const storage = Layer.mergeAll(ledgerLayer, crewInstanceLayer).pipe(
@@ -302,7 +303,6 @@ it.effect("tells the Captain how each finished seat ended, and settles nothing",
     );
     const context = yield* Layer.build(storage);
     yield* runJ5A2AMigrations().pipe(Effect.provide(context));
-    const sql = Context.get(context, SqlClient.SqlClient);
     yield* Context.get(context, A2ALedger).ensureProject({
       projectId: projectId,
       createdAt: DateTime.formatIso(createdAt),
@@ -342,16 +342,6 @@ it.effect("tells the Captain how each finished seat ended, and settles nothing",
         },
       ],
     });
-    // The critic still owes the captain a reply.
-    yield* sql`
-      INSERT INTO j5_a2a_exchange (
-        project_id, exchange_id, sender_id, receiver_id, status, intent, urgency,
-        opened_seq, closed_seq, created_at, updated_at
-      ) VALUES (
-        ${projectId}, 'exchange:review', ${captain}, ${critic}, 'open', 'Review it', NULL,
-        1, NULL, ${DateTime.formatIso(createdAt)}, ${DateTime.formatIso(createdAt)}
-      )
-    `;
     const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationV2ServerCommand>>([]);
     // The launch report covers a failed first turn while it is pending; here the builder's.
     const covered = yield* Ref.make<ReadonlySet<string>>(new Set());
@@ -379,26 +369,10 @@ it.effect("tells the Captain how each finished seat ended, and settles nothing",
     );
     yield* Effect.gen(function* () {
       const notifier = yield* CrewSeatFinishNotifier;
-      // The notifier reports a finished seat whatever happened and tells the Captain how it ended,
-      // so a seat that produced nothing is never silent. The seat's thread is not settled:
-      // upstream's own rules decide that.
-      assert.equal(
-        yield* notifier.handleStoredEvent(terminalRunEvent(builderThread, "run:1")),
-        builderThread,
-      );
-      const builderCommands = yield* Ref.get(dispatched);
-      assert.lengthOf(builderCommands, 1);
-      const builderNotice = builderCommands[0];
-      assert.equal(builderNotice?.type, "message.dispatch");
-      if (builderNotice?.type === "message.dispatch") {
-        assert.equal(builderNotice.threadId, captainThread);
-        assert.include(builderNotice.text, "<j5_seat_finished>");
-        assert.include(builderNotice.text, "seat: builder");
-        assert.include(builderNotice.text, "run_status: completed");
-        assert.notInclude(builderNotice.text, "handoff");
-        assert.notInclude(builderNotice.text, "<seat_reply>");
-      }
-      assert.isNull(yield* notifier.handleStoredEvent(terminalRunEvent(criticThread, "run:2")));
+      // A completed run tells the Captain nothing: the seat reports its own result. The seat's
+      // thread is not settled either: upstream's own rules decide that.
+      assert.isNull(yield* notifier.handleStoredEvent(terminalRunEvent(builderThread, "run:1")));
+      assert.isNull(yield* notifier.handleStoredEvent(terminalRunEvent(criticThread, "run:2b")));
       assert.isNull(yield* notifier.handleStoredEvent(terminalRunEvent(captainThread, "run:3")));
       assert.isNull(yield* notifier.handleStoredEvent(terminalRunEvent(strangerThread, "run:4")));
       assert.isNull(
@@ -417,7 +391,7 @@ it.effect("tells the Captain how each finished seat ended, and settles nothing",
           },
         } as unknown as OrchestrationV2StoredEvent),
       );
-      assert.lengthOf(yield* Ref.get(dispatched), 1);
+      assert.lengthOf(yield* Ref.get(dispatched), 0);
       // A stopped seat is not a finished seat: j5_stop_crew interrupts so the seat can be briefed
       // again, and nothing reaches the Captain (Crews AC21).
       assert.isNull(
@@ -426,14 +400,14 @@ it.effect("tells the Captain how each finished seat ended, and settles nothing",
       assert.isNull(
         yield* notifier.handleStoredEvent(terminalRunEvent(scoutThread, "run:s0b", "cancelled")),
       );
-      assert.lengthOf(yield* Ref.get(dispatched), 1);
+      assert.lengthOf(yield* Ref.get(dispatched), 0);
 
       // A failed run is still reported and the Captain learns it failed.
       assert.equal(
         yield* notifier.handleStoredEvent(terminalRunEvent(scoutThread, "run:s1", "failed")),
         scoutThread,
       );
-      const scoutNotice = (yield* Ref.get(dispatched))[1];
+      const scoutNotice = (yield* Ref.get(dispatched))[0];
       assert.equal(scoutNotice?.type, "message.dispatch");
       if (scoutNotice?.type === "message.dispatch") {
         // The outcome leads, and the run's error rides with it (none was recorded here).
@@ -445,32 +419,23 @@ it.effect("tells the Captain how each finished seat ended, and settles nothing",
         assert.include(scoutNotice.text, "seat: scout");
         assert.notInclude(scoutNotice.text, "handoff");
       }
-      // A failed run is reported even while the seat owes a reply: the silence detector says
-      // nothing about a seat's failure to its Captain, so this is the one telling.
-      assert.equal(
-        yield* notifier.handleStoredEvent(terminalRunEvent(criticThread, "run:2f", "failed")),
-        criticThread,
-      );
-      assert.lengthOf(yield* Ref.get(dispatched), 3);
       // A first turn that failed while the launch report is pending is that report's to tell.
       yield* Ref.set(covered, new Set([builderThread]));
       assert.isNull(
         yield* notifier.handleStoredEvent(terminalRunEvent(builderThread, "run:1f", "failed")),
       );
-      assert.lengthOf(yield* Ref.get(dispatched), 3);
+      assert.lengthOf(yield* Ref.get(dispatched), 1);
       yield* Ref.set(covered, new Set());
 
-      // Once the critic's reply is closed, its notice carries the seat's reply: the last finished
-      // assistant message of that run with any text, not a draft, a blank or streaming row, or
-      // another run's.
-      yield* sql`UPDATE j5_a2a_exchange SET status = 'closed' WHERE exchange_id = 'exchange:review'`;
+      // The notice carries the seat's reply: the last finished assistant message of that run with
+      // any text, not a draft, a blank or streaming row, or another run's.
       assert.equal(
-        yield* notifier.handleStoredEvent(terminalRunEvent(criticThread, "run:2b")),
+        yield* notifier.handleStoredEvent(terminalRunEvent(criticThread, "run:2b", "failed")),
         criticThread,
       );
       const commands = yield* Ref.get(dispatched);
-      assert.lengthOf(commands, 4);
-      const notice = commands[3];
+      assert.lengthOf(commands, 2);
+      const notice = commands[1];
       assert.equal(notice?.type, "message.dispatch");
       if (notice?.type === "message.dispatch") {
         assert.equal(notice.threadId, captainThread);
@@ -489,10 +454,10 @@ it.effect("tells the Captain how each finished seat ended, and settles nothing",
       // A later run of the same seat ends with a reply of its own, and that is what the Captain
       // is told: each run's facts, reply included, make its own notice.
       assert.equal(
-        yield* notifier.handleStoredEvent(terminalRunEvent(criticThread, "run:2c")),
+        yield* notifier.handleStoredEvent(terminalRunEvent(criticThread, "run:2c", "failed")),
         criticThread,
       );
-      const second = (yield* Ref.get(dispatched))[4];
+      const second = (yield* Ref.get(dispatched))[2];
       assert.equal(second?.type, "message.dispatch");
       if (second?.type === "message.dispatch") {
         assert.include(second.text, "<seat_reply>\nA later run's reply.\n</seat_reply>");
@@ -522,7 +487,8 @@ it.effect(
         crewName: "Fold Crew",
         participantId: scout,
         threadId: scoutThread,
-        runStatus: "completed",
+        runId: "run:s2",
+        runStatus: "failed",
         failure: null,
         reply: null,
       });
@@ -572,6 +538,7 @@ it.effect(
         crewName: "Other Crew",
         participantId: participantIdForThread(ThreadId.make("thread:other-scout")),
         threadId: ThreadId.make("thread:other-scout"),
+        runId: "run:other",
         runStatus: "failed",
         failure: null,
         reply: null,
@@ -599,9 +566,10 @@ it.effect(
       );
       yield* Effect.gen(function* () {
         const notifier = yield* CrewSeatFinishNotifier;
-        // The scout finishing again with the same facts: the Captain already holds that notice.
+        // The same run reported again (a redelivered event or the boot sweep): the Captain already
+        // holds that notice.
         assert.equal(
-          yield* notifier.handleStoredEvent(terminalRunEvent(scoutThread, "run:s2")),
+          yield* notifier.handleStoredEvent(terminalRunEvent(scoutThread, "run:s2", "failed")),
           scoutThread,
         );
         assert.deepStrictEqual(
@@ -640,13 +608,14 @@ it.effect(
           }),
         );
         assert.equal(
-          yield* notifier.handleStoredEvent(terminalRunEvent(scoutThread, "run:s3", "failed")),
+          yield* notifier.handleStoredEvent(terminalRunEvent(scoutThread, "run:s1", "failed")),
           scoutThread,
         );
         const fresh = (yield* Ref.get(dispatched))[1];
         assert.equal(fresh?.type, "message.dispatch");
-        if (fresh?.type === "message.dispatch") assert.include(fresh.text, "run_status: failed");
-        // The same finish again, now that this scout's own failed notice is the newest, is silent.
+        if (fresh?.type === "message.dispatch")
+          assert.include(fresh.text, "failure: provider_error");
+        // The same run again, now that this scout's own notice for it is the newest, is silent.
         yield* Ref.set(
           captain,
           captainProjection({
@@ -662,13 +631,30 @@ it.effect(
           }),
         );
         assert.equal(
-          yield* notifier.handleStoredEvent(terminalRunEvent(scoutThread, "run:s4", "failed")),
+          yield* notifier.handleStoredEvent(terminalRunEvent(scoutThread, "run:s1", "failed")),
           scoutThread,
         );
         assert.deepStrictEqual(
           (yield* Ref.get(dispatched)).slice(2).map((command) => command.type),
           [],
         );
+        // A later run failing with word-for-word the same facts still tells the Captain: completed
+        // runs in between post nothing, so it is a new failure, not a repeat of the old notice.
+        yield* Ref.set(
+          captain,
+          captainProjection({
+            running: false,
+            messages: [{ id: "msg:old", text: scoutNotice, at: "2026-09-09T16:05:00Z" }],
+          }),
+        );
+        assert.equal(
+          yield* notifier.handleStoredEvent(terminalRunEvent(scoutThread, "run:s6", "failed")),
+          scoutThread,
+        );
+        const repeat = (yield* Ref.get(dispatched))[2];
+        assert.equal(repeat?.type, "message.dispatch");
+        if (repeat?.type === "message.dispatch")
+          assert.equal(repeat.text, scoutNotice.replace("run_id: run:s2", "run_id: run:s6"));
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped),
 );
@@ -733,12 +719,14 @@ it.effect(
       );
       yield* Effect.gen(function* () {
         const notifier = yield* CrewSeatFinishNotifier;
-        assert.isNull(yield* notifier.handleStoredEvent(terminalRunEvent(scoutThread, "run:r1")));
+        assert.isNull(
+          yield* notifier.handleStoredEvent(terminalRunEvent(scoutThread, "run:r1", "failed")),
+        );
         assert.lengthOf(yield* Ref.get(dispatched), 0);
         // The next pass finds the seat still unreported and delivers the notice.
         yield* Ref.set(noticesFail, false);
         assert.equal(
-          yield* notifier.handleStoredEvent(terminalRunEvent(scoutThread, "run:r1")),
+          yield* notifier.handleStoredEvent(terminalRunEvent(scoutThread, "run:r1", "failed")),
           scoutThread,
         );
         assert.deepStrictEqual(
@@ -749,7 +737,7 @@ it.effect(
     }).pipe(Effect.scoped),
 );
 
-it.effect("the boot sweep tells the Captain about a finished seat nothing reported", () =>
+it.effect("the boot sweep tells the Captain about a failed seat nothing reported", () =>
   Effect.gen(function* () {
     const database = NodeSqliteClient.layer({ filename: ":memory:" });
     const storage = Layer.mergeAll(ledgerLayer, crewInstanceLayer).pipe(
@@ -770,7 +758,7 @@ it.effect("the boot sweep tells the Captain about a finished seat nothing report
       brief: "Finish the work.",
       createdAt: DateTime.formatIso(createdAt),
       members: [
-        // Finished while the server was down: reported now.
+        // Failed while the server was down: reported now.
         {
           seatName: "scout",
           agentId: "scout",
@@ -789,7 +777,7 @@ it.effect("the boot sweep tells the Captain about a finished seat nothing report
       ],
     });
     const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationV2ServerCommand>>([]);
-    let newestStatus: "failed" | "interrupted" = "interrupted";
+    let newestStatus: "completed" | "failed" | "interrupted" = "interrupted";
     const finished = (threadId: ThreadId) =>
       ({
         ...projection(threadId),
@@ -837,6 +825,10 @@ it.effect("the boot sweep tells the Captain about a finished seat nothing report
     );
     yield* Effect.gen(function* () {
       const notifier = yield* CrewSeatFinishNotifier;
+      assert.deepStrictEqual(yield* notifier.reconcile, []);
+      assert.deepStrictEqual(yield* Ref.get(dispatched), []);
+      // A seat whose newest run completed reports its own result; the sweep tells nothing.
+      newestStatus = "completed";
       assert.deepStrictEqual(yield* notifier.reconcile, []);
       assert.deepStrictEqual(yield* Ref.get(dispatched), []);
       newestStatus = "failed";

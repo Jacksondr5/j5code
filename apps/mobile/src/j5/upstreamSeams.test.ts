@@ -90,12 +90,6 @@ const SEAMS: ReadonlyArray<Seam> = [
     reaches: ["expandPlaybookPrompt(draft.text.trim())"],
   },
   {
-    file: "features/threads/ThreadDetailScreen.tsx",
-    record: "case 45: native playbook composer control",
-    from: "../../j5/playbooks/PlaybookComposerControl",
-    reaches: ["<PlaybookComposerControl", "hasServerThread={"],
-  },
-  {
     file: "features/threads/ThreadComposer.tsx",
     record:
       "PR #75–#86 role library; saved-agent mentions: handoff artifacts, draft-as-agent; case 49",
@@ -167,7 +161,9 @@ const SEAMS: ReadonlyArray<Seam> = [
     from: "../../j5/sharing/sharedConversation",
     reaches: [
       "<PromptAnsweredBy",
+      "fitText={answeredByFollowsLabel(row.projectedItem.item, answered)}",
       "alone={historyHasQuestion && expanded}",
+      "answered={answered}",
       "!row.workEntry.questionAnswer",
       "historyHasQuestion && expanded ? null : displayText",
     ],
@@ -187,16 +183,41 @@ const SEAMS: ReadonlyArray<Seam> = [
     ],
   },
   {
-    file: "features/threads/thread-list-v2-items.tsx",
-    record: "case 115: spawned agents under their spawner's row",
-    from: "../../j5/crew/CaptainSeats",
-    reaches: ["<CaptainSeatsToggle", "<CaptainSeats", "statusLabels={STATUS_LABEL_BY_STATUS}"],
+    file: "features/threads/ThreadAgentsSheet.tsx",
+    record: "case 115: spawned agents in the Agents sheet",
+    from: "../../j5/crew/J5ThreadAgents",
+    reaches: ["<J5ThreadAgents", "subagents.length === 0 && !hasJ5Agents"],
+  },
+  {
+    file: "features/threads/ThreadDetailScreen.tsx",
+    record: "case 115: the Agents pill counts spawned agents",
+    from: "../../j5/crew/J5ThreadAgents",
+    reaches: ["useJ5AgentsPillSegment("],
   },
   {
     file: "features/threads/useThreadListV2.ts",
     record: "case 115: agent-spawned threads leave the top level",
     from: "../../j5/crew/spawnedChildren",
     reaches: ["const threads = useCrewListedThreads(input.threads);"],
+  },
+  {
+    file: "features/home/HomeScreen.tsx",
+    record: "case 115: a list waiting for its first answer is loading",
+    from: "../../j5/crew/spawnedChildren",
+    reaches: [
+      "const j5ListWaiting = useCrewListWaiting(props.threads);",
+      "(!j5ListWaiting && props.threads.some(",
+      "j5ListWaiting ? connectingWorkspace(props.catalogState) : props.catalogState",
+    ],
+  },
+  {
+    file: "features/threads/ThreadNavigationSidebar.tsx",
+    record: "case 115: a list waiting for its first answer is loading",
+    from: "../../j5/crew/spawnedChildren",
+    reaches: [
+      "const j5ListWaiting = useCrewListWaiting(threads);",
+      "catalogState.isLoadingConnections || j5ListWaiting",
+    ],
   },
   {
     file: "features/settings/SettingsAgentsRouteScreen.tsx",
@@ -266,9 +287,33 @@ const SEAMS: ReadonlyArray<Seam> = [
   },
   {
     file: "features/threads/ThreadDetailScreen.tsx",
-    record: "case 114: J5 rows above the composer",
+    record: "case 114: J5's attention carousel above the composer",
     from: "../../j5/composer/J5ComposerControls",
-    reaches: ["<J5ComposerControls"],
+    reaches: [
+      "<J5ComposerControls",
+      "maxHeight={pendingUserInputMaxHeight}",
+      "composerBottomInset={composerBottomInset}",
+      "popoverHeight={composerPopoverHeight}",
+      "slot={j5Slot.controls}",
+      "onAnswerFocusChange={handleOwnedInputFocusChange}",
+    ],
+  },
+  {
+    file: "features/threads/ThreadDetailScreen.tsx",
+    record: "case 114: J5's answer panel takes the composer's place",
+    from: "../../j5/composer/composerSlot",
+    reaches: [
+      "const j5Slot = useJ5ComposerSlot();",
+      "j5Slot.hidesComposer;",
+      "j5Slot.onOverlayLayout(event);",
+      "{j5Slot.hidesComposer ? <View style={{ height: composerBottomInset }} /> : null}",
+    ],
+  },
+  {
+    file: "features/threads/ComposerCommandPopover.tsx",
+    record: "case 124: the @ popover heads its leading personas",
+    from: "../../j5/composer/PopoverPersonaGroup",
+    reaches: ["leadingPersonaCount(props.triggerKind, props.items)", "<PopoverGroupHeading"],
   },
   {
     file: "features/threads/ThreadFeed.tsx",
@@ -324,7 +369,31 @@ const SEAMS: ReadonlyArray<Seam> = [
     file: "features/threads/NewTaskRouteScreen.tsx",
     record: "case 90: starting follows the person's level",
     from: "../../j5/sharing/startAccess",
-    reaches: ["noStartableProjectState({"],
+    reaches: [
+      "noStartableProjectState({",
+      "useAddsProjectSomewhere() && catalogState.hasReadyEnvironment",
+      "canAddProject={canAddProject}",
+      "useCanAddProject(scratchOption?.environmentId ?? null)",
+      "scratchOption !== null && canAddScratch &&",
+    ],
+  },
+  {
+    file: "features/home/AndroidHomeFab.android.tsx",
+    record: "case 90: starting follows the person's level",
+    from: "../../j5/sharing/startAccess",
+    reaches: ["const startsSomewhere = useStartsSomewhere();", "startsSomewhere &&"],
+  },
+  {
+    file: "features/workspace/WorkspaceToolbar.ios.tsx",
+    record: "case 90: starting follows the person's level",
+    from: "../../j5/sharing/startAccess",
+    reaches: ["const startsSomewhere = useStartsSomewhere();", "!startsSomewhere ||"],
+  },
+  {
+    file: "features/workspace/WorkspaceNativeTabs.ios.tsx",
+    record: "case 90: starting follows the person's level",
+    from: "../../j5/sharing/startAccess",
+    reaches: ["const startsSomewhere = useStartsSomewhere();", "startsSomewhere &&"],
   },
   {
     file: "features/threads/NewTaskDraftScreen.tsx",

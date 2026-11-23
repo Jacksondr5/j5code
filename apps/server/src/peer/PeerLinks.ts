@@ -34,6 +34,7 @@ import { isLocalLoopbackHost, isTailnetHost } from "@t3tools/shared/hostClassifi
 
 import * as ServerSecretStore from "../auth/ServerSecretStore.ts";
 import * as ServerEnvironment from "../environment/ServerEnvironment.ts";
+import { atReadableAddresses } from "../j5/a2a/line/lineAddress.ts";
 import * as ServerSettings from "../serverSettings.ts";
 
 const PeerHttpApi = HttpApi.make(EnvironmentHttpApi.identifier)
@@ -386,7 +387,7 @@ const make = Effect.gen(function* () {
         message:
           refusals.length === checked.length
             ? `This environment could not reach ${name}: ${refusals.join(" ")}`
-            : `This environment could not reach ${name} at ${urls.join(", ")}.`,
+            : `This environment could not reach ${name}${atReadableAddresses(urls)}.`,
       });
     }
     // Each address is kept once, even when two spellings share an origin.
@@ -596,7 +597,8 @@ const make = Effect.gen(function* () {
       if (Option.isNone(url)) {
         return yield* new PeerLinkError({
           reason: "unreachable",
-          message: `${link.label} did not answer at ${link.urls.join(", ")}.`,
+          // J5: a line's address is left out; it is this server's loopback and names nothing.
+          message: `${link.label} did not answer${atReadableAddresses(link.urls)}.`,
         });
       }
       // A link made before the peer had to fence linked work, or a peer moved

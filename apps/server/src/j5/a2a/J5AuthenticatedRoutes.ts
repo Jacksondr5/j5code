@@ -1,5 +1,6 @@
 import * as Layer from "effect/Layer";
 
+import { linkSessionHttpRouteLayer } from "./LinkSessionHttp.ts";
 import { machineSenderHttpRouteLayer } from "./MachineSenderHttp.ts";
 import { peerHttpRouteLayer } from "./PeerHttp.ts";
 import { artifactHttpRouteLayer } from "../artifacts/ArtifactHttp.ts";
@@ -19,6 +20,7 @@ export const j5AuthenticatedRoutesLayer = Layer.mergeAll(
   artifactHttpRouteLayer,
   machineSenderHttpRouteLayer,
   peerHttpRouteLayer,
+  linkSessionHttpRouteLayer,
   guestProjectIconRouteLayer,
   sessionRenewalRouteLayer,
   linkHttpRouteLayer,

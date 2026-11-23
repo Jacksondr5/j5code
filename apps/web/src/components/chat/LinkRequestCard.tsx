@@ -40,6 +40,7 @@ import { Input } from "../ui/input";
 import { Radio, RadioGroup } from "../ui/radio-group";
 import { WizardFooter, WizardHeader, WizardPanel, WizardPopup, WizardSteps } from "../ui/wizard";
 import { WorkLogRow } from "./WorkLog";
+import { J5LinkRequestDialog } from "../../j5/links/LinkRequestDialog";
 
 const accessLabel = (access: AuthMcpClientAccess) => accessConfig[access].label;
 
@@ -151,7 +152,8 @@ function PendingLinkRequest(props: {
           Only a session that manages access here can answer this.
         </p>
       )}
-      <LinkRequestDialog
+      {/* J5: answering also sets up messaging, in J5's dialog (FORK.md case 123). */}
+      <J5LinkRequestDialog
         environmentId={props.environmentId}
         item={item}
         open={open}
@@ -199,7 +201,7 @@ function resolveTarget(
 /** The dialog's steps: where to link, then what agents may do there. */
 type LinkStep = "machine" | "access";
 
-function LinkRequestDialog(props: {
+export function LinkRequestDialog(props: {
   readonly environmentId: EnvironmentId;
   readonly item: LinkRequestItem;
   readonly open: boolean;

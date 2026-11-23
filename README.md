@@ -30,19 +30,25 @@ J5 Code drives the coding agents already set up on your machine. Install and sig
 
 ### Command line
 
-A self-contained server for macOS (Apple silicon) and Linux x64. No Node.js or npm is needed:
+A self-contained server for macOS (Apple silicon), Linux x64 and Windows x64. No Node.js or npm is needed:
 
 ```bash
 curl -fsSL https://j5.codes/install.sh | sh
 ```
 
-Then run `j5` to start the server and open the web app. `j5 service install` keeps it running in the background, `j5 update` moves to a newer release, and `j5 --help` has the full reference. Data lives in `~/.j5code` (override with `J5CODE_HOME`).
+On Windows, in PowerShell:
 
-Intel Macs, Linux on ARM, and Windows have no build yet. The [install guide](./docs/j5/user/install.md#other-platforms) covers running a server from source there.
+```powershell
+irm https://github.com/Jacksondr5/j5code/releases/latest/download/install.ps1 | iex
+```
+
+Then run `j5` to start the server and open the web app. `j5 service install` keeps it running in the background on macOS and Linux, `j5 update` moves to a newer release, and `j5 --help` has the full reference. Data lives in `~/.j5code` (override with `J5CODE_HOME`).
+
+Intel Macs and Linux on ARM have no build yet. The [install guide](./docs/j5/user/install.md#other-platforms) covers running a server from source there.
 
 ### Desktop app
 
-Download the macOS (Apple silicon) app from [j5.codes/download](https://j5.codes/download) or [GitHub Releases](https://github.com/Jacksondr5/j5code/releases). It is the only desktop build today. `winget`, Homebrew, and AUR packages named T3 Code install upstream T3 Code, not J5 Code.
+Download the macOS (Apple silicon) or Windows x64 app from [j5.codes/download](https://j5.codes/download) or [GitHub Releases](https://github.com/Jacksondr5/j5code/releases). The Windows app is in beta and isn't code-signed yet. `winget`, Homebrew, and AUR packages named T3 Code install upstream T3 Code, not J5 Code.
 
 ### Mobile app
 

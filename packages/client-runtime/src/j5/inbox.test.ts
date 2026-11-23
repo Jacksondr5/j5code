@@ -10,11 +10,13 @@ import {
 import type { J5ReadSource } from "./readSources.ts";
 import {
   answeredByLine,
+  closedInboxAnswerKeys,
   closedLine,
   inboxBellPresentation,
   mergeHumanInboxSources,
   mergeOpenInboxCounts,
   nextKeptItems,
+  ownerAskAction,
   splitRecordText,
   submitHumanInboxAnswer,
   writesNowhere,
@@ -175,6 +177,32 @@ describe("an inbox item someone was answering when it closed", () => {
       }),
     ).toBe("Priya answered");
   });
+});
+
+it("drops saved answers whose ask a server's read no longer lists, unless kept on the page", () => {
+  const key = (environmentId: string, exchangeId: string, personId = "human:alpha") =>
+    JSON.stringify([environmentId, personId, "project:shared", exchangeId]);
+  const open = (exchangeId: string) => ({ ...item, exchangeId });
+
+  const closed = closedInboxAnswerKeys({
+    openSources: {
+      isReady: true,
+      sources: [
+        source("local", { personId: "human:alpha", items: [open("open")] }),
+        source("remote", { personId: "human:alpha", items: [] }, { status: "offline" }),
+      ],
+    },
+    itemKeys: [
+      key("local", "open"),
+      key("local", "answered"),
+      key("local", "kept"),
+      key("local", "open", "human:previous"),
+      key("remote", "offline-server"),
+    ],
+    kept: new Set([key("local", "kept")]),
+  });
+
+  expect(closed).toEqual([key("local", "answered"), key("local", "open", "human:previous")]);
 });
 
 describe("what a kept item says", () => {
@@ -451,7 +479,7 @@ describe("splitRecordText", () => {
         "    modelRoute:",
         "      - driver: claudeAgent",
         "    ",
-        '    instructions: "A long single line that should scroll rather than wrap."',
+        '    instructions: "A long single line that should wrap under its own indent."',
       ].join("\n"),
       "Saving takes an Owner's Save persona button on this ask.",
     ].join("\n\n");
@@ -461,8 +489,18 @@ describe("splitRecordText", () => {
         text: "J5 recorded this persona draft: a new persona, demo-helper, for this server's library. Its full definition:",
       },
       {
+        // Each line keeps its indent apart from its words, so a wrapped line stays under its own.
         kind: "block",
-        text: 'id: demo-helper\nmodelRoute:\n  - driver: claudeAgent\n\ninstructions: "A long single line that should scroll rather than wrap."',
+        lines: [
+          { indent: "", text: "id: demo-helper" },
+          { indent: "", text: "modelRoute:" },
+          { indent: "  ", text: "- driver: claudeAgent" },
+          { indent: "", text: "" },
+          {
+            indent: "",
+            text: 'instructions: "A long single line that should wrap under its own indent."',
+          },
+        ],
       },
       { kind: "prose", text: "Saving takes an Owner's Save persona button on this ask." },
     ]);
@@ -471,5 +509,47 @@ describe("splitRecordText", () => {
   it("leaves a record with no indented block as the exact prose", () => {
     const record = "Persona reviewer is blocked.\n- displayName: one\n\n<b>Owner approved</b>";
     expect(splitRecordText(record)).toEqual([{ kind: "prose", text: record }]);
+  });
+});
+
+describe("ownerAskAction", () => {
+  const escalation = {
+    escalationId: "esc:1",
+    personaId: "reviewer",
+    waivable: "model-not-eligible" as const,
+    status: "open" as const,
+    summary: "Blocked.",
+  };
+  const draft = {
+    draftId: "draft:1",
+    personaId: "reviewer",
+    mode: "create" as const,
+    overridesFolder: false,
+    status: "open" as const,
+    summary: "Draft.",
+  };
+
+  it("offers Allow this once only for an open block an Owner can lift", () => {
+    expect(ownerAskAction({ escalation })).toMatchObject({
+      kind: "allow-once",
+      detail:
+        "Lets reviewer start once on a model Models for custom members doesn't check. Later launches keep its usual limits.",
+    });
+    expect(ownerAskAction({ escalation: { ...escalation, waivable: null } })).toBeNull();
+    expect(ownerAskAction({ escalation: { ...escalation, status: "granted" } })).toBeNull();
+  });
+
+  it("offers Save persona for an open draft, saying what it saves", () => {
+    expect(ownerAskAction({ personaDraft: draft })?.detail).toBe(
+      "Adds reviewer to this server's persona library, for everyone on it.",
+    );
+    expect(ownerAskAction({ personaDraft: { ...draft, mode: "edit" } })?.detail).toBe(
+      "Saves the edit to reviewer for everyone on this server.",
+    );
+    expect(
+      ownerAskAction({ personaDraft: { ...draft, mode: "edit", overridesFolder: true } })?.detail,
+    ).toMatch(/^Saves reviewer as an override of the team persona/);
+    expect(ownerAskAction({ personaDraft: { ...draft, status: "saved" } })).toBeNull();
+    expect(ownerAskAction({})).toBeNull();
   });
 });

@@ -7,12 +7,13 @@ import * as SqlClient from "effect/sql/SqlClient";
 
 import { Access } from "../sharing/Access.ts";
 import { PersonAccess } from "../sharing/PersonAccess.ts";
-import { PROJECT, device, thread } from "../sharing/test-support/accessHarness.ts";
+import { OTHER_PROJECT, PROJECT, device, thread } from "../sharing/test-support/accessHarness.ts";
 import { conversationLayer } from "../sharing/test-support/conversationHarness.ts";
 import { makeClientActionRpcHandlers } from "./clientActionRpc.ts";
 import { ClientActionsService } from "./ClientActionsService.ts";
 import { makeClientReadRpcHandlers } from "./clientReadRpc.ts";
 import { ClientReadsService } from "./ClientReadsService.ts";
+import { EnvironmentLinkService } from "./EnvironmentLinkService.ts";
 import { PeerAdminService } from "./PeerAdminService.ts";
 import { layer as readChangesLayer } from "./ReadChanges.ts";
 
@@ -24,6 +25,7 @@ import { layer as readChangesLayer } from "./ReadChanges.ts";
 const AT = "2026-10-18T00:00:00.000Z";
 const CAPTAIN = "thread:captain" as ThreadId;
 const SEAT = "thread:seat" as ThreadId;
+const ELSEWHERE = "thread:elsewhere" as ThreadId;
 
 const crewServices = Layer.mergeAll(
   Layer.mock(ClientReadsService)({
@@ -45,6 +47,11 @@ const crewServices = Layer.mergeAll(
           reason: null,
         })),
       ),
+    // Answers with the threads the handler's reach check passes, so a test reads that reach.
+    spawnedChildren: (_threadIds, reaches) =>
+      Effect.filter([CAPTAIN, SEAT, ELSEWHERE], reaches).pipe(
+        Effect.map((reached) => ({ entries: [], spawnedByAgent: reached })),
+      ),
   }),
   Layer.mock(ClientActionsService)({
     resolveCrewProposal: () => Effect.succeed({ proposal: {} as never, crewInstanceId: null }),
@@ -59,6 +66,7 @@ const crewServices = Layer.mergeAll(
       }),
   }),
   Layer.mock(PeerAdminService)({}),
+  Layer.mock(EnvironmentLinkService)({}),
   readChangesLayer,
 );
 
@@ -71,7 +79,8 @@ const connection = Effect.fn("test.connection")(function* (
   const access = yield* Access;
   const person = yield* people.createPerson({ displayName: name });
   for (const held of levels) yield* access.setLevel({ personId: person.personId, ...held });
-  return (yield* device(person.personId, LEVEL_PERMISSIONS.collaborator)).identity;
+  const { identity } = yield* device(person.personId, LEVEL_PERMISSIONS.collaborator);
+  return { ...identity, personId: person.personId };
 });
 
 const handlersFor = (session: { readonly sessionId: string; readonly subject: string }) =>
@@ -203,4 +212,44 @@ it.effect("shows a Crew's worktree paths to whoever reaches its Captain, and to 
     ]);
     assert.deepStrictEqual((yield* read(elsewhere)).worktrees, []);
   }).pipe(Effect.provide(conversationLayer)),
+);
+
+it.effect(
+  "tells each person of the spawned agents they reach, and no more after a level goes",
+  () =>
+    Effect.gen(function* () {
+      yield* seed;
+      yield* thread(ELSEWHERE, OTHER_PROJECT);
+      const reached = (session: { readonly sessionId: string; readonly subject: string }) =>
+        handlersFor(session).pipe(
+          Effect.flatMap(({ reads }) =>
+            reads["j5.fleet.listSpawnedChildren"]({ threadIds: [CAPTAIN, SEAT, ELSEWHERE] }),
+          ),
+          Effect.map((answer) => answer.spawnedByAgent),
+        );
+      const onSeat = yield* connection("Tia", [
+        { scope: { kind: "thread", threadId: SEAT }, level: "viewer" },
+      ]);
+      assert.deepStrictEqual(yield* reached(onSeat), [SEAT]);
+
+      const project = { kind: "project", projectId: PROJECT } as const;
+      const onProject = yield* connection("Pat", [{ scope: project, level: "viewer" }]);
+      // One set of handlers, as one connection holds, so reach is read per request.
+      const { reads: projectReads } = yield* handlersFor(onProject);
+      const reachedOnProject = projectReads["j5.fleet.listSpawnedChildren"]({
+        threadIds: [CAPTAIN, SEAT, ELSEWHERE],
+      }).pipe(Effect.map((answer) => answer.spawnedByAgent));
+      assert.deepStrictEqual(yield* reachedOnProject, [CAPTAIN, SEAT]);
+
+      // Down to the seat alone: the next read on the same connection follows.
+      const access = yield* Access;
+      const { personId } = onProject;
+      yield* access.setLevel({
+        personId,
+        scope: { kind: "thread", threadId: SEAT },
+        level: "viewer",
+      });
+      yield* access.removeLevel({ personId, scope: project });
+      assert.deepStrictEqual(yield* reachedOnProject, [SEAT]);
+    }).pipe(Effect.provide(conversationLayer)),
 );

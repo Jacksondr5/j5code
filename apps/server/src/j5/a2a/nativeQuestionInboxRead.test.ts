@@ -223,6 +223,24 @@ it.effect.each(["live", "message"] as const)(
     }),
 );
 
+it.effect("lists one row for a thread whose question was asked again after a restart", () =>
+  Effect.gen(function* () {
+    const fixture = yield* setup;
+    const peer = ThreadId.make("thread:asked-again");
+    // A restart leaves the first question answerable by message; the resumed turn asks it again.
+    yield* fixture.add(peer, [
+      question("before-restart", { responseCapability: { type: "message" } }),
+      question("asked-again", {
+        createdAt: DateTime.makeUnsafe("2026-10-19T12:05:00.000Z"),
+      }),
+    ]);
+    assert.deepEqual(
+      (yield* fixture.read).map((item) => [item.requestId, item.responseCapability]),
+      [["asked-again", "live"]],
+    );
+  }),
+);
+
 it.effect("lists a spawned Peer's question once after Turn into project moved it", () =>
   Effect.gen(function* () {
     const fixture = yield* setup;

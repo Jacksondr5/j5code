@@ -4,9 +4,12 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   crewPreviewIsComplete,
   crewPreviewRuntimeForSeats,
+  crewProposalReview,
   crewSeatStopsForApprovals,
   describeCrewSeatWorkspace,
   describePersonaSwap,
+  heldCrewApprovalSends,
+  rememberPreviewedSeats,
   removedSeatSteps,
   removeSeat,
   rosterGatesForThread,
@@ -52,6 +55,31 @@ describe("crew gate routing", () => {
     expect(
       rosterGatesForThread([proposal({ approvalMode: "automatic" })], "thread:captain"),
     ).toEqual([]);
+  });
+});
+
+describe("crewProposalReview", () => {
+  const open = proposal({});
+
+  it("keeps the proposal this page is answering while the list drops it", () => {
+    // The server publishes the decision before the answer returns, so the list can drop the
+    // proposal first; the page must not flash "Already answered" at the person who answered.
+    expect(crewProposalReview([], open.id, open)).toEqual({ kind: "open", proposal: open });
+    expect(crewProposalReview(null, open.id, open)).toEqual({ kind: "open", proposal: open });
+  });
+
+  it("shows the list's state when this page isn't answering", () => {
+    expect(crewProposalReview(null, open.id, null)).toEqual({ kind: "loading" });
+    expect(crewProposalReview([open], open.id, null)).toEqual({ kind: "open", proposal: open });
+    // Answered elsewhere, or this page's own answer failed and let go.
+    expect(crewProposalReview([], open.id, null)).toEqual({
+      kind: "answered",
+      detail: "This Crew proposal is no longer open.",
+    });
+    expect(crewProposalReview([proposal({ status: "declined" })], open.id, null)).toEqual({
+      kind: "answered",
+      detail: "This Crew proposal was declined.",
+    });
   });
 });
 
@@ -150,12 +178,12 @@ describe("crew seat workspace line", () => {
 describe("crew preview binding", () => {
   const critic: CrewProposalSeat = { seat: "critic", agentId: "critic", reason: "Reviews" };
   const builder: CrewProposalSeat = { seat: "builder", agentId: null, reason: "Builds" };
-  const runtime = (seat: string) =>
-    ({ seat, model: "Haiku 5.5", reasoning: "low", access: "Full access" }) as never;
+  const runtime = (seat: string, access = "Full access") =>
+    ({ seat, model: "Haiku 5.5", reasoning: "low", access }) as never;
   const preview = (seats: ReadonlyArray<string>, approvalToken = "token") => ({
     proposalId: "proposal:1",
     approvalToken,
-    seats: seats.map(runtime),
+    seats: seats.map((seat) => runtime(seat)),
   });
 
   it("counts only a preview of exactly the seats on screen", () => {
@@ -183,5 +211,57 @@ describe("crew preview binding", () => {
     expect(
       crewPreviewRuntimeForSeats(rows, [critic, builder], [critic]).map((row) => row.seat),
     ).toEqual(["critic"]);
+  });
+
+  it("remembers a removed seat's runtime, so restoring it shows the runtime again", () => {
+    const both = rememberPreviewedSeats(
+      [],
+      [critic, builder],
+      preview(["critic", "builder"]).seats,
+    );
+    const afterRemove = rememberPreviewedSeats(both, [critic], [runtime("critic", "Supervised")]);
+    const restored = crewPreviewRuntimeForSeats(
+      afterRemove.map((row) => row.runtime),
+      afterRemove.map((row) => row.seat),
+      [critic, builder],
+    );
+    expect(restored.map((row) => [row.seat, row.access])).toEqual([
+      ["builder", "Full access"],
+      ["critic", "Supervised"],
+    ]);
+  });
+
+  it("sends a held Approve only with a preview of the seats shown, resolved as shown", () => {
+    const held = {
+      proposalId: "proposal:1",
+      seats: [critic, builder],
+      runtime: [runtime("critic"), runtime("builder")],
+    };
+    // The token arrives after the tap, for the same seats resolved the same way.
+    expect(heldCrewApprovalSends(held, preview(["critic", "builder"], "fresh"))).toBe(true);
+    // The server now resolves a seat differently: show it, and let the person approve again.
+    expect(
+      heldCrewApprovalSends(held, {
+        ...preview([]),
+        seats: [runtime("critic"), runtime("builder", "Supervised")],
+      }),
+    ).toBe(false);
+    // Tapped before any runtime was on screen.
+    expect(heldCrewApprovalSends({ ...held, runtime: [] }, preview(["critic", "builder"]))).toBe(
+      false,
+    );
+    // A Remove or Restore between the tap and the token: the preview is of other seats.
+    expect(heldCrewApprovalSends(held, preview(["critic"]))).toBe(false);
+    expect(
+      heldCrewApprovalSends(
+        { ...held, seats: [critic], runtime: [runtime("critic")] },
+        preview(["critic", "builder"]),
+      ),
+    ).toBe(false);
+    // The preview failed, or answered for another proposal.
+    expect(heldCrewApprovalSends(held, null)).toBe(false);
+    expect(
+      heldCrewApprovalSends(held, { ...preview(["critic", "builder"]), proposalId: "proposal:2" }),
+    ).toBe(false);
   });
 });

@@ -25,7 +25,7 @@ import {
 import type { WorktreeSetupCardProps } from "./worktree-setup-card";
 import type { ComposerTextPaste } from "../../native/T3ComposerEditor.types";
 import { J5ComposerControls } from "../../j5/composer/J5ComposerControls";
-import { PlaybookComposerControl } from "../../j5/playbooks/PlaybookComposerControl";
+import { useJ5ComposerSlot } from "../../j5/composer/composerSlot";
 import { type EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import type { HandoffEndpoints } from "@t3tools/client-runtime/handoff";
@@ -201,6 +201,7 @@ import { ComposerPopoverHost } from "./ComposerPopoverHost";
 import { ThreadFeed, type ThreadFeedHandle, type ThreadFeedHistoryControls } from "./ThreadFeed";
 import { WorkspaceMutationIdProvider } from "./WorkspaceMutationIdProvider";
 import { useThreadTurnSubagents } from "./ThreadAgentsSheet";
+import { useJ5AgentsPillSegment } from "../../j5/crew/J5ThreadAgents";
 import { ComposerQueuedEditBanner } from "./ComposerQueuedEdit";
 import { useThreadQueuedCount } from "./ThreadQueueControl";
 import { ThreadGuestShareBar } from "./ThreadGuestShareBar";
@@ -483,7 +484,12 @@ function ThreadDetailBody(
   const composerError = useAtomValue(threadComposerErrorsAtom)[selectedThreadKey]?.message ?? null;
   const queuedCount = useThreadQueuedCount(props.selectedThreadDetailRef);
   const turnSubagents = useThreadTurnSubagents(props.selectedThreadDetailRef);
-  const agentsSegment = resolveSubagentPillSegment(turnSubagents);
+  // J5 (case 115): the pill counts the Crew seats and Peer Agents this thread spawned too.
+  const agentsSegment = useJ5AgentsPillSegment(
+    props.selectedThreadDetailRef,
+    turnSubagents,
+    resolveSubagentPillSegment(turnSubagents),
+  );
   const defaultComposerEditorRef = useRef<ComposerEditorHandle>(null);
   const composerEditorRef = props.draftMode?.editorRef ?? defaultComposerEditorRef;
   const isProviderSubagent = isProviderNativeSubagentThread(props.selectedThread.source);
@@ -915,8 +921,12 @@ function ThreadDetailBody(
   } | null>(null);
   const activeUserInputRequestId = props.activePendingUserInput?.requestId ?? null;
   const questionInFlow = Platform.OS === "android" && activeUserInputRequestId !== null;
+  // J5 (case 114): J5's open answer panel takes the composer's place, as upstream's question card does.
+  const j5Slot = useJ5ComposerSlot();
   const composerSlotHidden =
-    activeUserInputRequestId !== null || props.creationState?.kind === "failed";
+    activeUserInputRequestId !== null ||
+    props.creationState?.kind === "failed" ||
+    j5Slot.hidesComposer;
   const pendingMessageEditBlocked =
     queuedRunEditBlockedReason({ openQuestionCount: activeUserInputRequestId === null ? 0 : 1 }) !==
     null;
@@ -1019,6 +1029,7 @@ function ThreadDetailBody(
   const [usageLimitsLayout, setUsageLimitsLayout] = useState({ overlay: 0, panel: 0 });
   const handleComposerOverlayLayout = (event: LayoutChangeEvent) => {
     if (!questionInFlow) onComposerLayout(event);
+    j5Slot.onOverlayLayout(event);
     if (!usageLimitsOpen) return;
     const overlay = event.nativeEvent.layout.height;
     setUsageLimitsLayout((current) =>
@@ -1603,18 +1614,16 @@ function ThreadDetailBody(
                     {!props.draftMode &&
                       !props.activePendingApproval &&
                       !props.activePendingUserInput && (
-                        <>
-                          <J5ComposerControls
-                            key={`j5:${selectedThreadKey}`}
-                            environmentId={props.environmentId}
-                            threadId={props.selectedThread.id}
-                          />
-                          <PlaybookComposerControl
-                            key={selectedThreadKey}
-                            environmentId={props.environmentId}
-                            threadId={props.selectedThread.id}
-                          />
-                        </>
+                        <J5ComposerControls
+                          key={`j5:${selectedThreadKey}`}
+                          environmentId={props.environmentId}
+                          threadId={props.selectedThread.id}
+                          maxHeight={pendingUserInputMaxHeight}
+                          composerBottomInset={composerBottomInset}
+                          popoverHeight={composerPopoverHeight}
+                          slot={j5Slot.controls}
+                          onAnswerFocusChange={handleOwnedInputFocusChange}
+                        />
                       )}
                     {props.queuedRunEdit !== null ? (
                       <Animated.View
@@ -1761,6 +1770,8 @@ function ThreadDetailBody(
                   </ComposerPanels>
                 </View>
 
+                {/* J5 (case 114): the hidden composer's bottom inset, under J5's answer panel. */}
+                {j5Slot.hidesComposer ? <View style={{ height: composerBottomInset }} /> : null}
                 <View style={composerSlotHidden ? { display: "none" } : undefined}>
                   {isProviderSubagent ? (
                     <View

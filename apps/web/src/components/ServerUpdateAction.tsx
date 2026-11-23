@@ -94,6 +94,8 @@ export interface ServerUpdateTarget {
   readonly channel?: DesktopUpdateChannel;
   /** A track switch's checked release migration; the host re-checks its own database. */
   readonly targetDatabaseMigration?: number;
+  /** J5: the checked release's J5 ledger heads, which the host re-checks too. */
+  readonly targetJ5DatabaseMigrations?: Readonly<Record<string, number>>;
   /** The host already runs its track's newest build and only saves the track. */
   readonly trackOnly?: boolean;
 }
@@ -140,6 +142,9 @@ export function useServerUpdate() {
         ...(target.targetDatabaseMigration === undefined
           ? {}
           : { targetDatabaseMigration: target.targetDatabaseMigration }),
+        ...(target.targetJ5DatabaseMigrations === undefined
+          ? {}
+          : { targetJ5DatabaseMigrations: target.targetJ5DatabaseMigrations }),
       },
     });
     pendingUpdateEnvironmentIds.delete(environmentId);

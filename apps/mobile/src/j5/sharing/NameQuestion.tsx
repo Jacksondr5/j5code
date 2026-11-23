@@ -11,7 +11,7 @@ import { isPersonName } from "@t3tools/contracts/j5";
 import { useState } from "react";
 import { Modal, ScrollView, View } from "react-native";
 import { KeyboardAvoidingView } from "react-native-keyboard-controller";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 
 import { AppText as Text, AppTextInput as TextInput } from "../../components/ui/AppText";
 import * as Dialog from "../../components/ui/Dialog";
@@ -39,7 +39,7 @@ export function NameQuestionHost() {
 }
 
 /**
- * "What should people and agents on <server> call you?", asked before a device uses the server
+ * "What should we call you?", asked on a server before a device uses it
  * (People and access AC5, AC6), as web's `NameDialog` asks it. A device the server cannot place may
  * put it off with "Not now" until the app next starts, and anyone may forget the server with
  * "Remove this server"; both touch only this server.
@@ -67,6 +67,8 @@ function NameQuestion({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const naming = kind === "first-owner" || choice === SOMEONE_NEW;
+  const peopleSettled =
+    kind === "first-owner" || claimable.data !== null || claimable.error !== null;
 
   const save = async () => {
     const typed = name.trim();
@@ -121,10 +123,10 @@ function NameQuestion({
       ],
     );
 
-  const nameInput = (label: string) => (
+  const nameInput = (
     <TextInput
-      accessibilityLabel={label}
-      placeholder={label}
+      accessibilityLabel="Your name"
+      placeholder="Your name"
       autoFocus={kind === "first-owner" || people.length === 0}
       autoCapitalize="words"
       autoCorrect={false}
@@ -143,96 +145,120 @@ function NameQuestion({
 
   return (
     // Full screen, so it can't be swiped away; "Not now" and "Remove this server" are the ways out.
-    <Modal visible animationType="slide" presentationStyle="fullScreen" onRequestClose={() => {}}>
-      {/* SafeAreaView takes no className, so the theme surface and flex go on a View. */}
-      <View className="flex-1 bg-screen">
-        <SafeAreaView style={{ flex: 1 }}>
-          <KeyboardAvoidingView automaticOffset behavior="padding" style={{ flex: 1 }}>
-            <ScrollView keyboardShouldPersistTaps="handled" contentContainerClassName="gap-5 p-5">
-              <View className="gap-2">
-                <Text accessibilityRole="header" className="text-2xl font-t3-semibold">
-                  What should people and agents on {serverName} call you?
-                </Text>
-                {kind === "claim" ? (
-                  <Text className="text-foreground-muted">
-                    This device is paired but the server does not know who it belongs to.
-                  </Text>
-                ) : null}
-              </View>
-              {people.length > 0 ? (
-                <ListSection>
-                  {people.map((person, index) => {
-                    const level = offeredLevel(person.levels);
-                    return (
+    // It opens once the people list has settled, so the input's place and focus are final.
+    <Modal
+      visible={peopleSettled}
+      animationType="slide"
+      presentationStyle="fullScreen"
+      onRequestClose={() => {}}
+    >
+      {/* A Modal is its own native hierarchy, so it measures its own safe area. SafeAreaView takes
+          no className, so the theme surface and flex go on a View. */}
+      <SafeAreaProvider style={{ flex: 1 }}>
+        <View className="flex-1 bg-screen">
+          <SafeAreaView style={{ flex: 1 }}>
+            {/* Clips the keyboard's scroll below the status bar. */}
+            <View className="flex-1 overflow-hidden">
+              <KeyboardAvoidingView automaticOffset behavior="padding" style={{ flex: 1 }}>
+                <ScrollView
+                  keyboardShouldPersistTaps="handled"
+                  contentContainerClassName="gap-5 p-5"
+                >
+                  <View className="gap-3">
+                    <View className="gap-0.5">
+                      <Text
+                        accessibilityRole="header"
+                        textRole="title"
+                        className="font-t3-bold text-foreground"
+                      >
+                        What should we call you?
+                      </Text>
+                      <Text textRole="body" className="text-foreground-muted">
+                        on {serverName}
+                      </Text>
+                    </View>
+                    {kind === "claim" ? (
+                      <Text textRole="footnote" className="text-foreground-muted">
+                        This device is paired but the server does not know who it belongs to.
+                      </Text>
+                    ) : null}
+                  </View>
+                  {people.length > 0 ? (
+                    <ListSection>
+                      {people.map((person, index) => {
+                        const level = offeredLevel(person.levels);
+                        return (
+                          <ListChoiceRow
+                            key={person.personId}
+                            label={person.name}
+                            description={level === null ? undefined : levelLabel(level)}
+                            selected={choice === person.personId}
+                            separated={index > 0}
+                            disabled={busy}
+                            onPress={() => {
+                              setChoice(person.personId);
+                              setError(null);
+                            }}
+                          />
+                        );
+                      })}
                       <ListChoiceRow
-                        key={person.personId}
-                        label={person.name}
-                        description={level === null ? undefined : levelLabel(level)}
-                        selected={choice === person.personId}
-                        separated={index > 0}
+                        label="Someone new"
+                        selected={choice === SOMEONE_NEW}
+                        separated
                         disabled={busy}
                         onPress={() => {
-                          setChoice(person.personId);
+                          setChoice(SOMEONE_NEW);
                           setError(null);
                         }}
                       />
-                    );
-                  })}
-                  <ListChoiceRow
-                    label="Someone new"
-                    selected={choice === SOMEONE_NEW}
-                    separated
-                    disabled={busy}
-                    onPress={() => {
-                      setChoice(SOMEONE_NEW);
-                      setError(null);
-                    }}
+                    </ListSection>
+                  ) : null}
+                  {naming ? nameInput : null}
+                  {claimable.error === null || busy ? null : (
+                    <Text className="text-sm text-foreground-muted">
+                      The people on this server could not be listed: {claimable.error}
+                    </Text>
+                  )}
+                  {error === null ? null : (
+                    <Text accessibilityRole="alert" className="text-sm text-danger-foreground">
+                      {error}
+                    </Text>
+                  )}
+                  <Button
+                    label={busy ? "Saving…" : "Continue"}
+                    tone="primary"
+                    fullWidth
+                    loading={busy}
+                    disabled={naming && name.trim() === ""}
+                    onPress={() => void save()}
                   />
-                </ListSection>
-              ) : null}
-              {naming ? nameInput(people.length > 0 ? "Someone new" : "Your name") : null}
-              {claimable.error === null || busy ? null : (
-                <Text className="text-sm text-foreground-muted">
-                  The people on this server could not be listed: {claimable.error}
-                </Text>
-              )}
-              {error === null ? null : (
-                <Text accessibilityRole="alert" className="text-sm text-danger-foreground">
-                  {error}
-                </Text>
-              )}
-              <Button
-                label={busy ? "Saving…" : "Continue"}
-                tone="primary"
-                fullWidth
-                loading={busy}
-                disabled={naming && name.trim() === ""}
-                onPress={() => void save()}
-              />
-              {/* Ways out that touch only this server. A device the server cannot place reaches nothing
+                  {/* Ways out that touch only this server. A device the server cannot place reaches nothing
                 there until it says whose it is, so it may put the question off; the first owner
                 already holds the server, so only naming or removing it ends their question (AC6). */}
-              {kind === "claim" ? (
-                <Button
-                  label="Not now"
-                  tone="secondary"
-                  fullWidth
-                  disabled={busy}
-                  accessibilityHint={`Asks again the next time the app opens. Until then, ${serverName} shows nothing.`}
-                  onPress={putOff}
-                />
-              ) : null}
-              <Button
-                label="Remove this server"
-                tone="text"
-                fullWidth
-                disabled={busy}
-                onPress={confirmRemove}
-              />
-            </ScrollView>
-          </KeyboardAvoidingView>
-        </SafeAreaView>
-      </View>
+                  {kind === "claim" ? (
+                    <Button
+                      label="Not now"
+                      tone="secondary"
+                      fullWidth
+                      disabled={busy}
+                      accessibilityHint={`Asks again the next time the app opens. Until then, ${serverName} shows nothing.`}
+                      onPress={putOff}
+                    />
+                  ) : null}
+                  <Button
+                    label="Remove this server"
+                    tone="text"
+                    fullWidth
+                    disabled={busy}
+                    onPress={confirmRemove}
+                  />
+                </ScrollView>
+              </KeyboardAvoidingView>
+            </View>
+          </SafeAreaView>
+        </View>
+      </SafeAreaProvider>
     </Modal>
   );
 }

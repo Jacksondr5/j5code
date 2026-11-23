@@ -88,6 +88,32 @@ function AskRow({ row }: { readonly row: ArchiveWarningRow }) {
   );
 }
 
+/** A name on its own full-width line, with what's known about it underneath (rubric §3.8). */
+function FactRow(props: {
+  readonly title: string;
+  readonly middleEllipsis?: boolean;
+  readonly details: ReadonlyArray<string | null>;
+}) {
+  const details = props.details.filter((detail) => detail !== null).join(" · ");
+  return (
+    <View>
+      <AppText
+        textRole="footnote"
+        className="text-foreground"
+        numberOfLines={props.middleEllipsis ? 1 : undefined}
+        ellipsizeMode={props.middleEllipsis ? "middle" : undefined}
+      >
+        {props.title}
+      </AppText>
+      {details === "" ? null : (
+        <AppText textRole="label" className="text-foreground-muted">
+          {details}
+        </AppText>
+      )}
+    </View>
+  );
+}
+
 function WorktreeList({
   heading,
   worktrees,
@@ -97,25 +123,24 @@ function WorktreeList({
 }) {
   if (worktrees.length === 0) return null;
   return (
-    <View className="gap-1">
+    <View className="gap-2">
       <AppText textRole="body" className="font-t3-medium text-foreground">
         {heading}
       </AppText>
-      {worktrees.map((worktree) => (
-        <View key={`${worktree.crewInstanceId}:${worktree.seat}`} className="flex-row gap-2">
-          <AppText textRole="caption" className="uppercase text-foreground-muted">
-            {worktree.seat}
-          </AppText>
-          <AppText textRole="footnote" className="min-w-0 shrink text-foreground">
-            {worktreeShortPath(worktree.path)}
-          </AppText>
-          {worktree.reason === null ? null : (
-            <AppText textRole="label" className="ml-auto text-foreground-muted">
-              {worktreeReasonLabel[worktree.reason]}
-            </AppText>
-          )}
-        </View>
-      ))}
+      {worktrees.map((worktree) => {
+        const path = worktreeShortPath(worktree.path);
+        return (
+          <FactRow
+            key={`${worktree.crewInstanceId}:${worktree.seat}`}
+            title={path}
+            middleEllipsis
+            details={[
+              path.includes(worktree.seat) ? null : worktree.seat,
+              worktree.reason === null ? null : worktreeReasonLabel[worktree.reason],
+            ]}
+          />
+        );
+      })}
     </View>
   );
 }
@@ -177,29 +202,21 @@ function ArchiveWarningFacts({ payload }: { readonly payload: ArchiveWarningPayl
             {crews.length === 1 ? "retires" : "retire"} with it, every seat together:
           </AppText>
           {crews.map((crew) => (
-            <View key={crew.crewInstanceId} className="gap-1 rounded-xl bg-grouped-card px-4 py-3">
+            <View key={crew.crewInstanceId} className="gap-2 rounded-xl bg-grouped-card px-4 py-3">
               <AppText textRole="footnote" className="font-t3-medium text-foreground">
                 Crew · {crew.crewName} ({crew.seats.length}{" "}
                 {crew.seats.length === 1 ? "seat" : "seats"})
               </AppText>
-              {crew.seats.map((seat) => {
-                const consequences = archiveWarningSeatConsequences(seat);
-                return (
-                  <View key={seat.seat} className="flex-row items-baseline gap-2">
-                    <AppText textRole="caption" className="uppercase text-foreground-muted">
-                      {seat.seat}
-                    </AppText>
-                    <AppText textRole="footnote" className="min-w-0 shrink text-foreground">
-                      {seat.participant.displayName}
-                    </AppText>
-                    {consequences === "" ? null : (
-                      <AppText textRole="label" className="ml-auto text-foreground-muted">
-                        {consequences}
-                      </AppText>
-                    )}
-                  </View>
-                );
-              })}
+              {crew.seats.map((seat) => (
+                <FactRow
+                  key={seat.seat}
+                  title={seat.participant.displayName}
+                  details={[
+                    seat.participant.displayName === seat.seat ? null : seat.seat,
+                    archiveWarningSeatConsequences(seat) || null,
+                  ]}
+                />
+              ))}
             </View>
           ))}
         </View>

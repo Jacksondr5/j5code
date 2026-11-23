@@ -20,7 +20,9 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import { HttpClient, HttpClientRequest, type HttpClientResponse } from "effect/http";
 
+import { ServerConfig } from "../../config.ts";
 import { EventSinkV2 } from "../../orchestration-v2/EventSink.ts";
+import { keepLineUp, localTarget } from "./line/LineClient.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { A2ALedger } from "./LedgerService.ts";
 import { PeerInboundService, peerDeliveryRefusal } from "./PeerInboundService.ts";
@@ -135,6 +137,8 @@ const make = Effect.fn("j5.a2a.peer.poller.make")(function* (daemon: boolean) {
   const threadEvents = yield* EventSinkV2;
   const httpClient = yield* HttpClient.HttpClient;
   const states = yield* Ref.make(new Map<string, PollState>());
+  // A server that knows its own address can hold a line; tests that drive polls alone have none.
+  const serverConfig = yield* Effect.serviceOption(ServerConfig);
 
   const stateOf = (environmentId: string) =>
     Ref.get(states).pipe(Effect.map((map) => map.get(environmentId)));
@@ -386,10 +390,54 @@ const make = Effect.fn("j5.a2a.peer.poller.make")(function* (daemon: boolean) {
       );
   });
 
+  /**
+   * When the loop starts, and after each poll the storing server answered, its line is opened if it
+   * takes one and none is up. The
+   * line lives in the loop's fiber, so it ends with the loop; a refused credential stops it until
+   * the loop restarts, as it stops polling.
+   */
+  const lineKeeper = Effect.sync(() => {
+    let line: Fiber.Fiber<void> | null = null;
+    let refused = false;
+    // A server that advertises a line but keeps refusing it is redialled after each poll; say so once.
+    let lastRefusal: string | null = null;
+    return Effect.fn("j5.a2a.peer.poller.keepLine")(function* (environmentId: string) {
+      if (Option.isNone(serverConfig) || refused || line !== null) return;
+      const takesLine = yield* peers.capabilities(environmentId).pipe(
+        Effect.map((capabilities) => capabilities.line === true),
+        Effect.orElseSucceed(() => false),
+      );
+      if (!takesLine) return;
+      const peer = yield* peers.connection(environmentId).pipe(Effect.orElseSucceed(() => null));
+      if (peer === null || peer.origin === null || peer.credential === null) return;
+      line = yield* keepLineUp({
+        origin: peer.origin,
+        credential: peer.credential,
+        local: localTarget(serverConfig.value),
+        onEnd: (ended) => {
+          if (ended.kind === "rejected") refused = true;
+          // A line that was up and closed is worth a log line; failed redials and repeated refusals
+          // are not, as the poll loop already reports an outage.
+          if (ended.kind === "closed" && !ended.opened) return Effect.void;
+          if (ended.kind === "refused" && ended.reason === lastRefusal) return Effect.void;
+          lastRefusal = ended.kind === "refused" ? ended.reason : null;
+          return Effect.logInfo("J5 A2A peer line ended", {
+            peer: peer.label,
+            reason: ended.reason,
+          });
+        },
+      }).pipe(Effect.asVoid, Effect.ensuring(Effect.sync(() => (line = null))), Effect.forkChild);
+    });
+  });
+
   /** One peer's loop, until polling stops. */
   const pollLoop = Effect.fn("j5.a2a.peer.poller.pollLoop")(function* (environmentId: string) {
     let backoff = BACKOFF_START;
     let cuts = 0;
+    const keepLine = yield* lineKeeper;
+    // Before the first poll, whose answer may be held for the whole hold: a link to this server is
+    // made through the line seconds after it is set up to poll, and after a restart.
+    yield* keepLine(environmentId);
     while (true) {
       // Each poll listens for a roster change only while it is held, then lets go.
       const outcome = yield* Effect.scoped(
@@ -423,6 +471,7 @@ const make = Effect.fn("j5.a2a.peer.poller.make")(function* (daemon: boolean) {
           break;
         default:
           backoff = BACKOFF_START;
+          yield* keepLine(environmentId);
       }
     }
   });

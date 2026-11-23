@@ -1,0 +1,533 @@
+---
+import type { ImageMetadata } from "astro";
+import { Image } from "astro:assets";
+import Layout from "../../layouts/Layout.astro";
+import agentSetupCrews from "../../assets/whats-new-0-0-52/agent-setup-crews.png";
+import crewProposal from "../../assets/whats-new-0-0-52/crew-proposal.png";
+import inboxAttachment from "../../assets/whats-new-0-0-52/inbox-attachment.png";
+import linksRow from "../../assets/whats-new-0-0-52/links-row.png";
+import { T3_SITE_URL, UPSTREAM_REPOSITORY_URL } from "../../lib/site";
+
+interface Item {
+  title: string;
+  body: string;
+}
+
+interface Shot {
+  src: ImageMetadata;
+  alt: string;
+  caption: string;
+}
+
+interface Group {
+  id: string;
+  heading: string;
+  intro: string;
+  items: ReadonlyArray<Item>;
+  shots?: ReadonlyArray<Shot>;
+  more?: { label: string; href: string };
+}
+
+// J5 Code 0.0.52, the first stable after 0.0.51. Earlier builds link to /whats-new/0-1-3, which
+// now redirects to the T3 Code section here (vercel.ts).
+const groups: ReadonlyArray<Group> = [
+  {
+    id: "links",
+    heading: "Your agents can work across machines",
+    intro:
+      "Link two J5 servers once. Agents on each can message agents on the other, hand them tasks and use its tools, at the access you choose.",
+    items: [
+      {
+        title: "One link sets it up",
+        body: "Link two servers from Settings → Environments → Linked environments, right after you add a server, or by approving an agent's request to link. J5 finds the address each server reaches the other at, and you can enter another.",
+      },
+      {
+        title: "A level for each direction",
+        body: "Each direction has its own Tools level, from Off, which leaves messages only, to Full access. Tools last 30 days, and you can renew them.",
+      },
+      {
+        title: "Through a firewall",
+        body: "A laptop nothing can reach can still be linked. It collects its own messages, and while it runs, the other server's agents can use tools on it.",
+      },
+      {
+        title: "Agents know when a machine is away",
+        body: "A call to a linked machine that isn't answering fails with a reason that says so.",
+      },
+      {
+        title: "Remove means remove",
+        body: "Removing a link ends its messages and its tools access.",
+      },
+    ],
+    shots: [
+      {
+        src: linksRow,
+        alt: "A linked pair in Settings → Environments, with messages sent directly both ways and a Tools level for each direction",
+        caption: "One row per linked pair: messages both ways, and a Tools level for each direction.",
+      },
+    ],
+    more: { label: "How linking works", href: "/linking" },
+  },
+  {
+    id: "windows",
+    heading: "J5 Code on Windows, in beta",
+    intro: "Windows x64 now gets every release: the desktop app and the j5 server.",
+    items: [
+      {
+        title: "The desktop app",
+        body: "Download the installer from the download page. It isn't code-signed yet, so Windows warns before it runs it.",
+      },
+      {
+        title: "The server",
+        body: "Install it from PowerShell with the command on the download page, then run j5. Windows has no background service, so the server runs while j5 does.",
+      },
+    ],
+    more: { label: "Download J5 Code", href: "/download" },
+  },
+  {
+    id: "crews",
+    heading: "Crews",
+    intro: "A Crew does more on its own and brings you only what needs you.",
+    items: [
+      {
+        title: "A quieter Captain",
+        body: "A Captain's chat shows only what needs you.",
+      },
+      {
+        title: "Proposals in the composer",
+        body: "Review, edit and approve a Crew's roster above the Captain's composer.",
+      },
+      {
+        title: "Start on their own",
+        body: "Turn on Auto-approve new Crews in Settings → Agent Setup → Crews, for every project or just one, and choose the models and reasoning levels custom members may use.",
+      },
+      {
+        title: "Members start with work",
+        body: "A member starts on its first assignment, not before.",
+      },
+      {
+        title: "Replace a seat",
+        body: "A Captain can move a seat to another model. The new member takes over its unfinished playbook steps.",
+      },
+      {
+        title: "One question, two places",
+        body: "A decision only you can make appears in your Inbox and above the Captain's composer. Answer it in either.",
+      },
+      {
+        title: "Tidy archives",
+        body: "Archiving a Crew removes its clean, merged worktrees, squash-merged ones included. One Inbox item asks about the rest.",
+      },
+      {
+        title: "Lineage",
+        body: "A thread's details show the Peer Agents and Crews it started.",
+      },
+    ],
+    shots: [
+      {
+        src: crewProposal,
+        alt: "A two-member Crew proposal above the Captain's composer, with Decline and Approve Crew",
+        caption: "Review a Crew's roster above the Captain's composer.",
+      },
+      {
+        src: agentSetupCrews,
+        alt: "Settings → Agent Setup → Crews, with Auto-approve new Crews turned on for a project and the models custom members may use",
+        caption: "Let a project's Crews start on their own, and choose the models custom members may use.",
+      },
+    ],
+  },
+  {
+    id: "personas",
+    heading: "Personas",
+    intro: "Personas stay what you made them, even when an agent is the one picking.",
+    items: [
+      {
+        title: "Who picked sets the limits",
+        body: "A persona you start runs as saved. One an agent picks never gets more access than that agent has, and runs only on models you've allowed.",
+      },
+      {
+        title: "Allow this once",
+        body: "A persona an agent can't start says why and asks you in the Inbox. When one limit stood in the way, such as a model you haven't allowed, an Owner can allow it once. The next launch meets the usual limits again.",
+      },
+      {
+        title: "Agents draft, you save",
+        body: "Ask an agent to change a persona. It drafts the change, and an Owner saves it from the ask with Save persona.",
+      },
+      {
+        title: "An ordered model list",
+        body: "A persona tries its models in order and skips a provider account that has reported running out of quota.",
+      },
+      {
+        title: "Three access levels",
+        body: "Read-only, workspace write or full access.",
+      },
+      {
+        title: "Independent reviewers",
+        body: "Mark a persona as an independent reviewer, and it prefers a model that didn't write the work it reviews.",
+      },
+      {
+        title: "Switch a worker's model",
+        body: "Move a worker to another model from the composer, for example when its provider hits a usage limit.",
+      },
+    ],
+  },
+  {
+    id: "inbox",
+    heading: "Inbox and people",
+    intro: "Answer more completely, and share more easily.",
+    items: [
+      {
+        title: "Answer with a file",
+        body: "Attach screenshots and files to an Inbox answer.",
+      },
+      {
+        title: "Several asks at once",
+        body: "An agent can ask you several things at once, each as its own item.",
+      },
+      {
+        title: "Settled is settled",
+        body: "Settle a question in the agent's own thread, and the agent is told to take it off your Inbox.",
+      },
+      {
+        title: "Links that open",
+        body: "Web and artifact links in Inbox messages open, and a reply you haven't sent survives leaving the page.",
+      },
+      {
+        title: "People",
+        body: "Search Settings → People, and widen someone's access from their row. People a thread is shared with can search its messages.",
+      },
+    ],
+    shots: [
+      {
+        src: inboxAttachment,
+        alt: "An Inbox answer to an agent's question with a screenshot attached, ready to send",
+        caption: "Attach a screenshot to an Inbox answer.",
+      },
+    ],
+  },
+  {
+    id: "more",
+    heading: "Updates, agent tools and fixes",
+    intro: "Smaller changes across J5 Code.",
+    items: [
+      {
+        title: "One switch for every machine",
+        body: "In the desktop app, Settings → About → Update track moves the app and the connected machines it can update to Stable or Nightly.",
+      },
+      {
+        title: "Safer updates",
+        body: "An update or track switch started from the app first checks that the new build can read the server's database.",
+      },
+      {
+        title: "For your agents",
+        body: "J5's tools return thread links, and j5 thread drives threads from a terminal again. t3_thread_interrupt with stop: true replaces j5_stop_agent.",
+      },
+      {
+        title: "Fixes",
+        body: "A Claude reply no longer folds away when another agent's message arrives. A question shows once in the Inbox after a restart. The project filter stays put. Notification sounds have a volume slider.",
+      },
+    ],
+  },
+];
+
+// A lone capture (1x) shows no wider than taken and no taller than 640px. Captures that share a
+// row grow by their aspect ratio, so they end up the same height.
+const shotStyle = (src: ImageMetadata, count: number) =>
+  count > 1
+    ? `--grow: ${(src.width / src.height).toFixed(4)}`
+    : `width: ${Math.min(src.width, 800, Math.round((640 * src.width) / src.height))}px`;
+
+// T3 Code's own work, credited by name and kept apart from J5's.
+const upstream: ReadonlyArray<Item> = [
+  {
+    title: "A new design",
+    body: "A true black dark mode, dimmer read threads and simpler composer controls. Settings and Usage open over the thread you're in.",
+  },
+  {
+    title: "Side chats",
+    body: "Start a message with /side to ask about a thread while it keeps working. Bring the answer back when you want it.",
+  },
+  {
+    title: "Search inside messages",
+    body: "Cmd+K finds text inside messages, not just thread titles.",
+  },
+  {
+    title: "Local commits in the Diff pane",
+    body: "Review the commits you haven't pushed yet in the Diff pane.",
+  },
+  {
+    title: "Approvals don't block the composer",
+    body: "Sending a message while an agent waits for approval declines the request and steers your message in.",
+  },
+  {
+    title: "Compact idle Claude threads",
+    body: "Choose when an idle Claude thread over 200,000 tokens is compacted, under Settings → Providers → Advanced.",
+  },
+];
+---
+
+<Layout
+  title="What's new in 0.0.52 — J5 Code"
+  description="Your agents can work across machines, a Windows app in beta, Crews and personas that need you less, and T3 Code 0.1.3 to 0.1.7."
+>
+  <div class="whats-new">
+    <section class="hero">
+      <div class="container hero-inner">
+        <p class="eyebrow">What's new · J5 Code 0.0.52</p>
+        <h1 class="display">Your agents can work across machines, and need you less.</h1>
+        <p class="lead">
+          Links between your machines, a Windows app in beta, Crews and personas that need you
+          less, and everything J5 Code takes in from T3 Code 0.1.3 to 0.1.7.
+        </p>
+      </div>
+    </section>
+
+    {
+      groups.map((group, index) => (
+        <section id={group.id} class={index % 2 === 0 ? "paper" : "deep"}>
+          <div class="container">
+            <div class="section-head">
+              <h2 class="display">{group.heading}</h2>
+              <p>{group.intro}</p>
+            </div>
+            {group.shots && (
+              <div class:list={["shots", { "shots--row": group.shots.length > 1 }]}>
+                {group.shots.map((shot) => (
+                  <figure style={shotStyle(shot.src, group.shots?.length ?? 1)}>
+                    <Image src={shot.src} alt={shot.alt} />
+                    <figcaption>{shot.caption}</figcaption>
+                  </figure>
+                ))}
+              </div>
+            )}
+            <ul class="items">
+              {group.items.map((item) => (
+                <li>
+                  <h3>{item.title}</h3>
+                  <p>{item.body}</p>
+                </li>
+              ))}
+            </ul>
+            {group.more && (
+              <p class="more">
+                <a href={group.more.href}>{group.more.label} →</a>
+              </p>
+            )}
+          </div>
+        </section>
+      ))
+    }
+
+    <section id="t3-code" class={groups.length % 2 === 0 ? "paper" : "deep"}>
+      <div class="container">
+        <div class="section-head">
+          <h2 class="display">From T3 Code 0.1.3 to 0.1.7</h2>
+          <p>
+            J5 Code is built on <a href={T3_SITE_URL} target="_blank" rel="noopener noreferrer">T3 Code</a>,
+            and this release brings in its work from 0.1.3 to 0.1.7. The highlights:
+          </p>
+        </div>
+        <ul class="items">
+          {
+            upstream.map((item) => (
+              <li>
+                <h3>{item.title}</h3>
+                <p>{item.body}</p>
+              </li>
+            ))
+          }
+        </ul>
+        <p class="more">
+          …and many smaller fixes.{" "}
+          <a href={`${UPSTREAM_REPOSITORY_URL}/releases`} target="_blank" rel="noopener noreferrer">See T3 Code's release notes →</a>
+        </p>
+      </div>
+    </section>
+  </div>
+</Layout>
+
+<style>
+  /* Sections alternate chart paper and open water, as the linking page does. */
+  section {
+    position: relative;
+    padding: 80px 0;
+    border-top: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--fg);
+    scroll-margin-top: 64px;
+  }
+
+  .paper {
+    --bg: var(--canvas);
+    --fg: var(--ink);
+    --fg-muted: var(--ink-muted);
+    --fg-dim: var(--ink-dim);
+    --border: var(--canvas-line);
+    color-scheme: light;
+    background-image:
+      linear-gradient(to right, rgba(18, 32, 47, 0.05) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(18, 32, 47, 0.05) 1px, transparent 1px);
+    background-size: 56px 56px;
+  }
+
+  .deep {
+    background: linear-gradient(180deg, var(--navy-950) 0%, var(--navy-900) 55%, #1a2f4a 100%);
+  }
+
+  .hero {
+    padding: 104px 0 96px;
+    border-top: 0;
+    background:
+      radial-gradient(ellipse 70% 55% at 50% -10%, rgba(59, 143, 174, 0.22), transparent 70%),
+      linear-gradient(180deg, var(--navy-900) 0%, var(--navy-950) 70%);
+  }
+
+  .hero-inner {
+    text-align: center;
+  }
+
+  .eyebrow {
+    font: 600 11px var(--font-mono);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--brass);
+    margin-bottom: 20px;
+  }
+
+  h1 {
+    font-size: clamp(34px, 4.6vw, 60px);
+    max-width: 28ch;
+    margin: 0 auto 24px;
+    text-wrap: balance;
+  }
+
+  .lead {
+    color: var(--fg-muted);
+    font-size: clamp(16px, 1.4vw, 19px);
+    line-height: 1.6;
+    max-width: 640px;
+    margin: 0 auto;
+  }
+
+  .section-head a,
+  .more a {
+    color: var(--fg);
+    text-decoration: underline;
+    text-decoration-color: var(--border-strong);
+    text-underline-offset: 3px;
+  }
+
+  .section-head {
+    max-width: 760px;
+    margin-bottom: 40px;
+  }
+
+  .section-head h2 {
+    font-size: clamp(28px, 3.2vw, 40px);
+    line-height: 1.08;
+  }
+
+  .section-head p {
+    color: var(--fg-muted);
+    font-size: 18px;
+    line-height: 1.55;
+    max-width: 640px;
+    margin-top: 14px;
+  }
+
+  .shots {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 32px;
+    margin-bottom: 48px;
+  }
+
+  .shots--row {
+    flex-wrap: nowrap;
+  }
+
+  .shots--row figure {
+    flex: var(--grow) 1 0%;
+    min-width: 0;
+  }
+
+  figure {
+    margin: 0;
+  }
+
+  figure {
+    max-width: 100%;
+  }
+
+  figure :global(img) {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 12px;
+    border: 1px solid var(--border);
+    box-shadow: 0 14px 36px -20px rgba(18, 32, 47, 0.35);
+  }
+
+  figcaption {
+    margin-top: 10px;
+    color: var(--fg-dim);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  .items {
+    list-style: none;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 28px 56px;
+  }
+
+  .items li {
+    padding-top: 18px;
+    border-top: 1px solid var(--border);
+  }
+
+  h3 {
+    font-family: var(--font-display);
+    font-size: 21px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    line-height: 1.25;
+    margin-bottom: 6px;
+  }
+
+  .items p {
+    color: var(--fg-muted);
+    font-size: 15px;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+  }
+
+  .more {
+    margin-top: 36px;
+    color: var(--fg-muted);
+    font-size: 15px;
+  }
+
+  @media (max-width: 820px) {
+    section {
+      padding: 64px 0;
+    }
+
+    .hero {
+      padding: 72px 0 64px;
+    }
+
+    .items {
+      grid-template-columns: 1fr;
+    }
+
+    .shots--row {
+      flex-direction: column;
+    }
+
+    .shots--row figure {
+      flex: none;
+      width: 100%;
+    }
+  }
+</style>

@@ -369,7 +369,7 @@ const homePeer = {
   inboundSession: "active",
   createdAt: "2026-09-16T00:00:00.000Z",
 };
-/** The same record decoded here: a peer of an older server sends directly, and nothing waits for it. */
+/** The same record decoded here: a peer of an older server sends directly, nothing waits for it, and it holds no line. */
 const homePeerDecoded = {
   ...homePeer,
   linkMode: "push",
@@ -377,6 +377,7 @@ const homePeerDecoded = {
   lastError: null,
   waitingCount: 0,
   oldestWaitingAt: null,
+  lineAddress: null,
 };
 
 it.live("issues a peer credential, adds, lists, and removes a peer through the admin routes", () =>

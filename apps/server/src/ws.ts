@@ -192,6 +192,7 @@ import * as ProviderAuthService from "./provider/ProviderAuthService.ts";
 import { makeProviderInstallation } from "./provider/providerInstallation.ts";
 import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as NpmRelease from "./cloud/npmRelease.ts";
+import * as J5ReleaseLookup from "./j5/updates/J5ReleaseLookup.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as SecretResolver from "@t3tools/secret-provider-core/server/SecretResolver";
@@ -3193,7 +3194,8 @@ export const layerWsRpc = (
         [WS_METHODS.previewClearProfile]: (input) => serverBrowser.clearProfile(input.profileId),
         [WS_METHODS.previewReportProfiles]: (input) => reportProfiles(input),
         [WS_METHODS.previewReportStatus]: (input) => previewManager.reportStatus(input),
-        [WS_METHODS.subscribePreviewEvents]: (_input) => previewManager.events,
+        [WS_METHODS.subscribePreviewEvents]: (_input) =>
+          j5View.previewEvents(previewManager.events),
         [WS_METHODS.deviceConfigure]: (input) => deviceService.configure(input),
         [WS_METHODS.deviceTestHost]: (input) => deviceService.testHost(input),
         [WS_METHODS.deviceEasAccount]: (input) => deviceService.easAccount(input),
@@ -3614,4 +3616,8 @@ export const layer = Layer.unwrap(
       ),
     );
   }),
-).pipe(Layer.provide(ArtifactWorkspace.layer), Layer.provide(NpmRelease.layer));
+).pipe(
+  Layer.provide(ArtifactWorkspace.layer),
+  // J5: release lookups read J5's GitHub releases, not npm (FORK.md case 40).
+  Layer.provide(J5ReleaseLookup.layer),
+);

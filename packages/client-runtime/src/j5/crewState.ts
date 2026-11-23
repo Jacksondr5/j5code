@@ -120,3 +120,38 @@ export const formatCrewStateSummary = (summary: CrewStateSummary): string | null
   );
   return parts.length === 0 ? null : parts.join(" · ");
 };
+
+/** A spawned agent's status on a row, in the tones upstream's agent rows use. */
+export interface CrewAgentStatus {
+  readonly tone: "working" | "completed" | "failed" | "stopped";
+  readonly label: string;
+}
+
+const STATE_STATUS: Partial<Record<CrewSeatState, CrewAgentStatus>> = {
+  running: { tone: "working", label: "Working" },
+  "needs-you": { tone: "working", label: "Needs you" },
+  failed: { tone: "failed", label: "Failed" },
+  settled: { tone: "completed", label: "Settled" },
+  "not-started": { tone: "stopped", label: "Not started" },
+  archived: { tone: "stopped", label: "Archived" },
+  unknown: { tone: "stopped", label: "Unknown" },
+};
+
+/**
+ * A replaced member says so before anything its last run says; a quiet seat says how its last run
+ * ended, and a quiet solo agent stays "Idle", as on web.
+ */
+export const crewAgentStatus = (
+  agent: { readonly isSeat: boolean; readonly replacedBy: string | null },
+  thread: CrewSeatThread | undefined,
+): CrewAgentStatus => {
+  if (agent.replacedBy !== null)
+    return { tone: "stopped", label: `Replaced by ${agent.replacedBy}` };
+  const state = classifyCrewSeat(thread);
+  const known = STATE_STATUS[state];
+  if (known !== undefined) return known;
+  const label = agent.isSeat
+    ? seatQuietLabel({ notStarted: thread?.notStarted, runtime: thread?.runtime })
+    : "Idle";
+  return { tone: label === "Completed" ? "completed" : "stopped", label };
+};

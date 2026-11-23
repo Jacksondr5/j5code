@@ -10,6 +10,7 @@ import {
   highestLevel,
   levelReaches,
 } from "@t3tools/contracts/j5";
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as SubscriptionRef from "effect/SubscriptionRef";
@@ -132,6 +133,28 @@ export const sharingAllowsStart = (
   });
 
 /**
+ * Whether a connection may start anything on its server: a project of its own, or a thread in a
+ * project it holds. Read from its levels alone, so it is known before the server lists projects.
+ */
+export const sharingAllowsStartAnywhere = (access: KnownConnectionAccess): boolean =>
+  access?.kind === "person"
+    ? access.levels.some(
+        (held) => held.scope.kind !== "thread" && levelReaches(held.level, "collaborator"),
+      )
+    : sharingAllowsStart(access, null);
+
+/**
+ * Whether some saved server lets this device start what `allows` asks: that server's levels and its
+ * session's "Operate tasks" (`operates`) together, so one server's grant opens no other's door.
+ * With no saved server nothing is refused, so upstream's doors stay as they are.
+ */
+export const someServerAllowsStart = (
+  servers: ReadonlyArray<{ readonly access: KnownConnectionAccess; readonly operates: boolean }>,
+  allows: (access: KnownConnectionAccess) => boolean,
+): boolean =>
+  servers.length === 0 || servers.some((server) => server.operates && allows(server.access));
+
+/**
  * Which server, if any, is asked "What should people and agents on <server> call you?" now:
  * a device the server cannot place (People and access AC5), or the first owner with no name yet
  * (AC6). One server at a time, in the order they are listed. Neither can be put off: each is
@@ -175,15 +198,16 @@ export const nameIsInUse = (error: unknown) =>
   (error as { readonly code?: unknown } | null)?.code === "PersonNameTakenError";
 
 /**
- * Whether upstream's "Permissions have changed / pair again" notice is for a connection. One J5
- * places as a person, or as a device it will ask about, has its permissions renewed when that
- * person's level changes, so pairing again never applies to it. The notice is held back until the
- * server answers; a server that cannot answer (from before people) keeps upstream's notice.
+ * Whether upstream's "Permissions have changed / pair again" notice is for a connection: not a
+ * person's or a device J5 will ask about, whose permissions follow the level. A pending read, or
+ * one that failed on the way (as during a re-pair), is no answer. A server from before people
+ * refuses the read as an unknown method, a defect, and keeps upstream's notice.
  */
 export function permissionNoticeApplies(
   answer: AsyncResult.AsyncResult<KnownConnectionAccess, unknown>,
 ): boolean {
   if (answer._tag === "Initial") return false;
+  if (answer._tag === "Failure" && !Cause.hasDies(answer.cause)) return false;
   const access = Option.getOrNull(AsyncResult.value(answer));
   return access?.kind !== "person" && access?.kind !== "unknown";
 }
@@ -403,10 +427,10 @@ export function ownerOnlySettingsNotice(input: {
 }): { readonly title: string; readonly body: string } {
   const server = input.serverName ?? "this server";
   return {
-    title: "Coming soon",
+    title: "Only an Owner can change this",
     body: input.writesSomewhere
-      ? `Only an Owner of ${server} can change this here for now. Ask an Owner, or ask an agent on a thread you can write to.`
-      : `Only an Owner of ${server} can change this here for now. Ask an Owner.`,
+      ? `Ask an Owner of ${server}, or an agent on a thread you can write to.`
+      : `Ask an Owner of ${server}.`,
   };
 }
 

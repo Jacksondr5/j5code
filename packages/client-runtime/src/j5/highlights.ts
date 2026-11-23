@@ -25,41 +25,35 @@ export interface Highlight {
 /** Newest first. Add an entry at the top. */
 export const HIGHLIGHTS: ReadonlyArray<Highlight> = [
   {
-    id: "2026-11-side-chats",
-    title: "Side chats",
+    id: "2026-11-inbox-mirrors-thread",
+    title: "The Inbox works like a thread",
     description:
-      "Ask without derailing. Start a message with /side or /btw to ask about a thread while it keeps working. Bring the answer back when you want it.",
+      "Links in an agent's question open in its own panel beside the Inbox, and the reply box works like the composer.",
     clients: ["web", "desktop"],
   },
   {
-    id: "2026-11-upstream-0-1-7",
-    title: "Also new: pinned projects and Force stop",
+    id: "2026-11-release-0-0-52-links",
+    title: "Your agents can work across machines",
     description:
-      "Pin and archive projects, review local commits in the Diff pane, run a scheduled task once, answer a delegated task's approvals from its parent, and Force stop an agent that ignores Stop. Cmd+K finds text inside messages.",
-    learnMoreUrl: "https://j5.codes/whats-new/0-1-3",
-    clients: ["web", "desktop"],
-  },
-  {
-    id: "2026-10-new-design",
-    title: "A new look",
-    description:
-      "J5 Code has a refreshed design: a true black dark mode, dimmer read threads and simpler composer controls.",
-    clients: ["web", "desktop"],
-  },
-  {
-    id: "2026-10-timeline-fold",
-    title: "Your messages stay in view",
-    description:
-      "Messages from agents now fold to one line showing who sent them and whether they expect a reply. Click one to read it.",
-    clients: ["web", "desktop"],
-  },
-  {
-    id: "2026-10-peering",
-    title: "Agents across your machines",
-    description:
-      "Peer J5 on more than one machine, and agents on each can message the others as easily as the one next to them.",
-    learnMoreUrl: "https://j5.codes/peering",
+      "Link two J5 servers and your agents can message agents on the other one, hand them tasks, and use its tools at the access you choose, even when it's a laptop behind a firewall. One link sets it all up.",
+    learnMoreUrl: "https://j5.codes/linking",
     art: "peering",
+    clients: ["web", "desktop"],
+  },
+  {
+    id: "2026-11-release-0-0-52-crews-personas",
+    title: "Crews and personas need you less",
+    description:
+      "Crews can start on their own when you allow it, and a Captain's chat shows only what needs you. A persona an agent picks never gets more access than that agent has; when one is blocked, you can allow it once.",
+    learnMoreUrl: "https://j5.codes/whats-new/0-0-52#crews",
+    clients: ["web", "desktop"],
+  },
+  {
+    id: "2026-11-release-0-0-52-also-new",
+    title: "Also new",
+    description:
+      "Windows app in beta. Side chats with /side. A refreshed design. An improved Inbox. And much more.",
+    learnMoreUrl: "https://j5.codes/whats-new/0-0-52",
     clients: ["web", "desktop"],
   },
 ];

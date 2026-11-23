@@ -271,6 +271,10 @@
       "types": "./src/j5/shellProfile.ts",
       "import": "./src/j5/shellProfile.ts"
     },
+    "./j5/databaseMigrations": {
+      "types": "./src/j5/databaseMigrations.ts",
+      "import": "./src/j5/databaseMigrations.ts"
+    },
     "./composerTrigger": {
       "types": "./src/composerTrigger.ts",
       "import": "./src/composerTrigger.ts"

@@ -280,8 +280,8 @@ export function countFleetProjects<
 }
 
 /**
- * Every seat, every Captain a seat names, and every agent with a placed child: the rows re-read on
- * a roster change, so that cost follows involvement, not the thread list. The live read carries no
+ * Every seat, every Captain a seat names, and every placed agent and its parent: the rows re-read
+ * on a roster change, so that cost follows involvement, not the thread list. The live read carries no
  * retired Crew, so a Captain whose last Crew retired is not named here; its chip clears because
  * the row still holds one (see refreshCrewMembershipRows).
  */
@@ -302,7 +302,11 @@ export function fleetInvolvedThreadRefs(
         involve(agent.participantId);
         involve(agent.crew.captainParticipantId);
       }
-      if (agent.placementParentId !== null) involve(agent.placementParentId);
+      // The placed agent too: whether it shows at the top level follows its spawner's archive.
+      if (agent.placementParentId !== null) {
+        involve(agent.placementParentId);
+        involve(agent.participantId);
+      }
     }
   }
   return [...refs.values()];

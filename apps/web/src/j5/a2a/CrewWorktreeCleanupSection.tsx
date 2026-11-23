@@ -34,6 +34,7 @@ import {
   outcomeReason,
   outcomeSummary,
   pickedCleanupPaths,
+  placeWorktreeCleanups,
   pullRequestLabel,
   sliceCleanupRows,
   toggleCleanupPath,
@@ -59,15 +60,7 @@ export function useWorktreeCleanupInbox() {
   const [pendingKey, setPendingKey] = useState<string | null>(null);
   const [errors, setErrors] = useState<Readonly<Record<string, string>>>({});
 
-  const decidedByKey = new Map(decided.map((item) => [worktreeCleanupKey(item), item]));
-  const openKeys = open.map(worktreeCleanupKey);
-  const inPlace = [...new Set([...openKeys, ...pinned.keys()])].flatMap((key) => {
-    const item = pinned.has(key)
-      ? (decidedByKey.get(key) ?? pinned.get(key))
-      : open[openKeys.indexOf(key)];
-    return item === null || item === undefined ? [] : [item];
-  });
-  const shelf = decided.filter((item) => !pinned.has(worktreeCleanupKey(item)));
+  const { inPlace, shelf } = placeWorktreeCleanups({ open, decided, answeredHere: pinned });
 
   const answer = async (item: ScopedWorktreeCleanup, removePaths: ReadonlyArray<string>) => {
     const key = worktreeCleanupKey(item);

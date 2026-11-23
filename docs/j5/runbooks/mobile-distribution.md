@@ -73,5 +73,6 @@ connection path. Mobile feature parity is tracked in J5 issue #40; remote
 inbox routing is tracked separately in #105. A signed build is not
 evidence that those feature gaps are resolved.
 
-Desktop distribution uses the existing manual `J5 Weekly Full Build` workflow
-or the [local macOS packaging procedure](macos-packaging.md).
+Desktop distribution uses `J5 Nightly`, `J5 Release`, and `J5 Signed macOS Build`
+(see [macOS packaging](macos-packaging.md#github-actions)), or the
+[local macOS packaging procedure](macos-packaging.md).

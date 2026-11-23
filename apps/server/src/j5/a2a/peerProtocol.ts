@@ -5,7 +5,11 @@ import {
 } from "@t3tools/contracts/j5";
 
 /** What this server tells every peer it can do, in a hello and in both directions of a poll. */
-export const ownPeerCapabilities = { poll: true, landing: true } satisfies PeerCapabilities;
+export const ownPeerCapabilities = {
+  poll: true,
+  landing: true,
+  line: true,
+} satisfies PeerCapabilities;
 
 /**
  * The one compare for both directions of peering. Each server states its peer protocol version on

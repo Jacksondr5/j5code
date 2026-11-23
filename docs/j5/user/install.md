@@ -11,8 +11,8 @@ not J5 Code.
 
 ## Command line
 
-J5 Code publishes a self-contained server for macOS (Apple silicon) and Linux
-x64. It needs no Node.js or npm:
+J5 Code publishes a self-contained server for macOS (Apple silicon), Linux x64
+and Windows x64. It needs no Node.js or npm:
 
 ```bash
 curl -fsSL https://github.com/Jacksondr5/j5code/releases/latest/download/install.sh | sh
@@ -29,6 +29,17 @@ yourself. To keep the installer away from your startup files, set
 `J5CODE_NO_MODIFY_PATH=1` when you run it; it prints the directory to add. Set
 `T3CODE_CHANNEL=nightly` to install the nightly train, or `T3CODE_VERSION` to pin an
 exact version.
+
+On Windows x64, install it from PowerShell instead:
+
+```powershell
+irm https://github.com/Jacksondr5/j5code/releases/latest/download/install.ps1 | iex
+```
+
+This puts `j5.cmd` in `~\.local\bin` and keeps downloaded versions and your data
+in `~\.j5code`. If `~\.local\bin` isn't on your `PATH`, the installer says so; add
+it yourself. Windows has no background service, so run `j5` or `j5 serve` when you
+want the server up.
 
 Upgrading a server that was installed from npm (`@jacksondr5/j5code` 0.0.43 or
 earlier)? Follow [Migrating to release archives](./migrating-to-release-archives.md)
@@ -53,7 +64,7 @@ for an independent server.
 
 ### Other platforms
 
-There is no `j5` executable for Intel Macs, Linux on ARM, or Windows. To run a
+There is no `j5` executable for Intel Macs or Linux on ARM. To run a
 server there, build it from source with `vp`, which provides the Node version it needs
 ([Install vp](https://github.com/Jacksondr5/j5code#install-vp)):
 
@@ -68,8 +79,9 @@ update it with `git pull` and a rebuild.
 
 ## Desktop app
 
-Download the macOS (Apple silicon) app from
-[GitHub Releases](https://github.com/Jacksondr5/j5code/releases). J5 Code
+Download the macOS (Apple silicon) or Windows x64 app from
+[GitHub Releases](https://github.com/Jacksondr5/j5code/releases). The Windows app
+is in beta and isn't code-signed yet, so Windows warns before it runs it. J5 Code
 publishes no desktop build for other platforms and no package-manager listing;
 `winget`, Homebrew, and AUR packages named T3 Code install upstream T3 Code.
 

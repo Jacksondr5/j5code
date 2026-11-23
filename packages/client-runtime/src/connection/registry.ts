@@ -35,6 +35,7 @@ import type {
 } from "./model.ts";
 import { ConnectionBlockedError } from "./model.ts";
 import * as Persistence from "../platform/persistence.ts";
+import { forgetReplacedCredential, replacesCredential } from "../j5/replacedCredential.ts";
 import * as EnvironmentSupervisor from "./supervisor.ts";
 import * as ConnectionDriver from "./driver.ts";
 import * as ConnectionWakeups from "./wakeups.ts";
@@ -575,6 +576,10 @@ export const make = Effect.gen(function* () {
           yield* assertKnownAddress(route);
         }
         const previous = (yield* SubscriptionRef.get(entries)).get(environmentId);
+        // J5 (case 125): a replaced credential's cache is cleared before the new one is stored.
+        if (previous !== undefined && (yield* replacesCredential(credentials, registration))) {
+          yield* forgetReplacedCredential(cache, environmentId, closeServiceScope(environmentId));
+        }
         let entry = registered;
         if (previous !== undefined) {
           const existing = connectionRoutes(previous);

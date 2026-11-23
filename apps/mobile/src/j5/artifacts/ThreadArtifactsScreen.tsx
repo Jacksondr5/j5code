@@ -5,36 +5,28 @@ import {
 } from "@t3tools/client-runtime/j5/artifacts";
 import type { ArtifactContent, ArtifactEntry, EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { StackActions, useNavigation, type StaticScreenProps } from "@react-navigation/native";
-import { ThreadId } from "@t3tools/contracts";
-import { RefreshControl, View } from "react-native";
+import { useState } from "react";
+import { Platform, RefreshControl, View } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+import { FilePreviewModal, type FilePreviewSource } from "../../components/FilePreviewModal";
+import { AppBar } from "../../components/ui/AppBar";
 import { AppText } from "../../components/ui/AppText";
-import { Button } from "../../components/ui/Button";
 import { EmptyState } from "../../components/ui/EmptyState";
 import { ListRow } from "../../components/ui/ListRow";
 import { ListSection } from "../../components/ui/ListSection";
+import { ScreenContent } from "../../components/ui/ScreenContent";
 import { ScreenScrollView } from "../../components/ui/ScreenScrollView";
-import { useMarkdownPreviewStyles } from "../../features/files/FileMarkdownPreview";
-import {
-  fileRoutePathSegments,
-  resolveWorkspaceRelativeFilePath,
-} from "../../features/files/filePath";
+import { fileRoutePathSegments } from "../../features/files/filePath";
 import { ThreadMarkdownImageView } from "../../features/threads/ThreadMarkdownImage";
-import { resolveMarkdownLinkPresentation } from "../../lib/markdownLinks";
-import { tryOpenExternalUrl } from "../../lib/openExternalUrl";
+import { copyTextWithHaptic } from "../../lib/copyTextWithHaptic";
 import { relativeTime } from "../../lib/time";
-import { SelectableMarkdownText } from "../../native/SelectableMarkdownText";
-import { useMarkdownImageSource } from "../../native/useMarkdownImageSource";
-import { NativeStackScreenOptions } from "../../native/StackHeader";
+import { useNativeColumnLayoutMetrics } from "../../native/native-layout-metrics";
 import { useThreadSelection } from "../../state/use-thread-selection";
 import { listArtifacts, readArtifact } from "./artifactClient";
-import {
-  artifactLinkContextMenu,
-  onArtifactLinkMenuAction,
-  openArtifactLink,
-  type ArtifactLinkContext,
-} from "./artifactLinks";
 import { useServerRead } from "./serverRead";
+import { ArtifactHtmlPreview } from "./ArtifactHtmlPreview";
+import { WorkspaceMarkdown } from "./WorkspaceMarkdown";
 
 type ThreadArtifactsParams = StaticScreenProps<{
   readonly environmentId: string;
@@ -44,16 +36,33 @@ type ThreadArtifactsParams = StaticScreenProps<{
 type ThreadArtifactParams = StaticScreenProps<{
   readonly environmentId: string;
   readonly threadId: string;
-  readonly path: string | string[];
+  /** Missing when an app link names no artifact. */
+  readonly path?: string | string[];
 }>;
 
 /** Artifacts belong to the thread's project, on the thread's server. */
 function useArtifactProject(params: { readonly environmentId: string }) {
-  const { selectedThread } = useThreadSelection();
+  const { selectedThread, selectedThreadProject } = useThreadSelection();
   const projectId = selectedThread?.projectId ?? null;
   return {
     environmentId: params.environmentId as EnvironmentId,
     projectId: projectId as ProjectId | null,
+    title: selectedThreadProject?.title,
+  };
+}
+
+/** Back as upstream's file viewer does: to the screen below, or to the thread from a link. */
+function useBack(params: { readonly environmentId: string; readonly threadId: string }) {
+  const navigation = useNavigation();
+  return () => {
+    if (navigation.canGoBack()) navigation.goBack();
+    else
+      navigation.dispatch(
+        StackActions.replace("Thread", {
+          environmentId: params.environmentId,
+          threadId: params.threadId,
+        }),
+      );
   };
 }
 
@@ -68,117 +77,100 @@ export function ThreadArtifactsScreen(props: ThreadArtifactsParams) {
   const navigation = useNavigation();
   const { environmentId, threadId } = props.route.params;
   const project = useArtifactProject(props.route.params);
+  const back = useBack(props.route.params);
   const { load, refreshing, refresh } = useServerRead<ReadonlyArray<ArtifactEntry>>(
     project.projectId === null ? null : `${environmentId}:${project.projectId}`,
     () => listArtifacts({ environmentId: project.environmentId, projectId: project.projectId! }),
   );
   return (
-    <ScreenScrollView
-      contentInsetAdjustmentBehavior="automatic"
-      className="flex-1 bg-sheet"
-      contentContainerClassName="gap-4 px-4 py-4"
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
-    >
-      <NativeStackScreenOptions options={{ title: "Artifacts" }} />
-      {project.projectId === null ? (
-        <EmptyState title="Artifacts unavailable" detail="This thread has no project." />
-      ) : load.status === "loading" ? (
-        <AppText className="text-foreground-muted">Loading artifacts…</AppText>
-      ) : load.status === "error" ? (
-        <EmptyState title="Couldn't read artifacts" detail={load.message} />
-      ) : load.value.length === 0 ? (
-        <EmptyState
-          title="No artifacts yet"
-          detail="Plans, specs and handoffs that agents write in this project appear here."
-        />
-      ) : (
-        <ListSection title="This project">
-          {load.value.map((entry) => (
-            <ListRow
-              key={entry.path}
-              icon="doc.text"
-              label={entry.path}
-              detail={[
-                sizeLabel(entry.byteLength),
-                entry.modifiedAt === null ? null : relativeTime(entry.modifiedAt),
-              ]
-                .filter((part) => part !== null)
-                .join(" · ")}
-              onPress={() =>
-                navigation.dispatch(
-                  StackActions.push("ThreadArtifact", {
-                    environmentId,
-                    threadId,
-                    path: fileRoutePathSegments(entry.path),
-                  }),
-                )
-              }
+    <View className="flex-1 bg-sheet">
+      <AppBar title="Artifacts" subtitle={project.title} onBack={back} hideBottomBorder />
+      <ScreenContent>
+        <ScreenScrollView
+          contentInsetAdjustmentBehavior="automatic"
+          className="flex-1 bg-sheet"
+          contentContainerClassName="gap-4 px-4 py-4"
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
+        >
+          {project.projectId === null ? (
+            <EmptyState title="Artifacts unavailable" detail="This thread has no project." />
+          ) : load.status === "loading" ? (
+            <AppText className="text-foreground-muted">Loading artifacts…</AppText>
+          ) : load.status === "error" ? (
+            <EmptyState title="Couldn't read artifacts" detail={load.message} />
+          ) : load.value.length === 0 ? (
+            <EmptyState
+              title="No artifacts yet"
+              detail="Plans, specs and handoffs that agents write in this project appear here."
             />
-          ))}
-        </ListSection>
-      )}
-    </ScreenScrollView>
+          ) : (
+            <ListSection title="This project">
+              {load.value.map((entry) => (
+                <ListRow
+                  key={entry.path}
+                  icon="doc.text"
+                  label={entry.path}
+                  detail={[
+                    sizeLabel(entry.byteLength),
+                    entry.modifiedAt === null ? null : relativeTime(entry.modifiedAt),
+                  ]
+                    .filter((part) => part !== null)
+                    .join(" · ")}
+                  onPress={() =>
+                    navigation.dispatch(
+                      StackActions.push("ThreadArtifact", {
+                        environmentId,
+                        threadId,
+                        path: fileRoutePathSegments(entry.path),
+                      }),
+                    )
+                  }
+                />
+              ))}
+            </ListSection>
+          )}
+        </ScreenScrollView>
+      </ScreenContent>
+    </View>
   );
 }
 
-/**
- * An artifact's Markdown. Its `artifacts/…` links open the viewer, as on web, and its other links
- * resolve from the workspace root, as web's do.
- */
-function ArtifactMarkdown(props: {
-  readonly markdown: string;
-  readonly links: ArtifactLinkContext & { readonly workspaceRoot: string };
-}) {
-  const navigation = useNavigation();
-  const styles = useMarkdownPreviewStyles();
-  const { links } = props;
-  const resolveImageSource = useMarkdownImageSource({
-    environmentId: links.environmentId as EnvironmentId,
-    threadId: ThreadId.make(links.threadId),
-    workspaceRoot: links.workspaceRoot,
-  });
-  const onLinkPress = (href: string) => {
-    if (openArtifactLink(href, links)) return;
-    const presentation = resolveMarkdownLinkPresentation(href);
-    const relativePath =
-      presentation.kind === "file"
-        ? resolveWorkspaceRelativeFilePath(links.workspaceRoot, presentation.path)
-        : null;
-    if (relativePath !== null) {
-      navigation.navigate("ThreadFile", {
-        environmentId: links.environmentId,
-        threadId: links.threadId,
-        path: fileRoutePathSegments(relativePath),
-      });
-      return;
-    }
-    if (presentation.href) void tryOpenExternalUrl(presentation.href, "markdown-link");
-  };
-  return (
-    <SelectableMarkdownText
-      markdown={props.markdown}
-      textStyle={styles.nativeTextStyle}
-      resolveImageSource={resolveImageSource}
-      onLinkPress={onLinkPress}
-      fileContextMenu={(href) => artifactLinkContextMenu(href, links.workspaceRoot)}
-      onFileContextMenuAction={(href, actionId) => onArtifactLinkMenuAction(href, actionId, links)}
-    />
-  );
-}
-
-function ArtifactBody(props: { readonly content: ArtifactContent }) {
+function ArtifactBody(props: { readonly content: ArtifactContent; readonly frameHeight: number }) {
   const { content } = props;
+  const [preview, setPreview] = useState<FilePreviewSource | null>(null);
   const kind = artifactPreviewKind(content);
   if (kind === "image") {
-    return (
+    const svg = artifactExtension(content.path) === "svg";
+    const image = (
       <ThreadMarkdownImageView
         uri={artifactDataUrl(content)}
         sourceKey={content.path}
         unavailable={false}
         alt={content.path}
-        format={artifactExtension(content.path) === "svg" ? "svg" : undefined}
-        onPressPreview={() => {}}
+        format={svg ? "svg" : undefined}
+        onPressPreview={(source) => setPreview({ ...source, name: content.path.split("/").at(-1) })}
       />
+    );
+    // Upstream's Android full-screen viewer can't draw SVG, so there an SVG is only an image.
+    if (svg && Platform.OS === "android") {
+      return (
+        <View
+          pointerEvents="none"
+          accessible
+          accessibilityRole="image"
+          accessibilityLabel={content.path}
+        >
+          <View collapsable={false} importantForAccessibility="no-hide-descendants">
+            {image}
+          </View>
+        </View>
+      );
+    }
+    return (
+      <>
+        {image}
+        <FilePreviewModal source={preview} onRequestClose={() => setPreview(null)} />
+      </>
     );
   }
   if (kind === "binary") {
@@ -189,9 +181,16 @@ function ArtifactBody(props: { readonly content: ArtifactContent }) {
       />
     );
   }
-  // HTML shows as its source: a phone has no sandboxed frame to run it in safely.
+  if (kind === "html") {
+    return (
+      <ArtifactHtmlPreview html={content.content} path={content.path} height={props.frameHeight} />
+    );
+  }
   return (
-    <AppText className="font-mono text-sm text-foreground" selectable>
+    <AppText
+      className="text-sm text-foreground ios:font-[family-name:Menlo] android:font-mono"
+      selectable
+    >
       {content.content}
     </AppText>
   );
@@ -200,56 +199,104 @@ function ArtifactBody(props: { readonly content: ArtifactContent }) {
 export function ThreadArtifactScreen(props: ThreadArtifactParams) {
   const navigation = useNavigation();
   const { environmentId, threadId } = props.route.params;
-  const path = Array.isArray(props.route.params.path)
-    ? props.route.params.path.join("/")
-    : props.route.params.path;
+  const routePath = props.route.params.path;
+  const path = (Array.isArray(routePath) ? routePath.join("/") : routePath) || null;
   const project = useArtifactProject(props.route.params);
+  const back = useBack(props.route.params);
   const { selectedThreadProject } = useThreadSelection();
   const workspaceRoot =
     (selectedThreadProject as { readonly workspaceRoot?: string } | null)?.workspaceRoot ?? null;
   const { load, refreshing, refresh } = useServerRead<ArtifactContent>(
-    project.projectId === null ? null : `${environmentId}:${project.projectId}:${path}`,
+    project.projectId === null || path === null
+      ? null
+      : `${environmentId}:${project.projectId}:${path}`,
     () =>
       readArtifact({
         environmentId: project.environmentId,
         projectId: project.projectId!,
-        path,
+        path: path!,
       }),
   );
-  // One scroll view registered with the header, so iOS insets it under the transparent header
-  // and the status bar like upstream's screens; the path row scrolls with the document.
+  const columnMetrics = useNativeColumnLayoutMetrics();
+  const insets = useSafeAreaInsets();
+  const [viewportHeight, setViewportHeight] = useState(0);
+  // The HTML frame fills the room the scroll view shows, so it scrolls inside without the page
+  // scrolling first. iOS's header floats over the scroll view; Android's AppBar sits above it.
+  const headerInset = Platform.OS === "ios" ? (columnMetrics?.safeArea.top ?? insets.top) : 0;
+  const frameHeight = Math.max(320, viewportHeight - headerInset - insets.bottom - 28);
+  const fullPath = `artifacts/${path ?? ""}`;
+  const directory = fullPath.slice(0, fullPath.lastIndexOf("/"));
   return (
-    <ScreenScrollView
-      contentInsetAdjustmentBehavior="automatic"
-      className="flex-1 bg-sheet"
-      contentContainerClassName="gap-4 px-4 py-4"
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
-    >
-      <NativeStackScreenOptions options={{ title: path.split("/").at(-1) ?? "Artifact" }} />
-      <View className="flex-row items-center justify-between gap-3">
-        <AppText textRole="label" className="min-w-0 shrink text-foreground-muted" selectable>
-          artifacts/{path}
-        </AppText>
-        <Button
-          label="All artifacts"
-          tone="text"
-          onPress={() => navigation.navigate("ThreadArtifacts", { environmentId, threadId })}
-        />
-      </View>
-      {project.projectId === null ? (
-        <EmptyState title="Artifact unavailable" detail="This thread has no project." />
-      ) : load.status === "loading" ? (
-        <AppText className="text-foreground-muted">Opening artifact…</AppText>
-      ) : load.status === "error" ? (
-        <EmptyState title="Couldn't open this artifact" detail={load.message} />
-      ) : artifactPreviewKind(load.value) === "markdown" && workspaceRoot !== null ? (
-        <ArtifactMarkdown
-          markdown={load.value.content}
-          links={{ navigation, environmentId, threadId, workspaceRoot }}
-        />
-      ) : (
-        <ArtifactBody content={load.value} />
-      )}
-    </ScreenScrollView>
+    <View className="flex-1 bg-sheet">
+      <AppBar
+        title={path?.split("/").at(-1) ?? "Artifact"}
+        subtitle={path === null ? undefined : directory}
+        onBack={back}
+        hideBottomBorder
+        menus={[
+          {
+            title: "Artifact actions",
+            icon: "ellipsis",
+            separateBackground: false,
+            items: [
+              {
+                id: "all-artifacts",
+                title: "All artifacts",
+                icon: "list.bullet",
+                onPress: () => navigation.navigate("ThreadArtifacts", { environmentId, threadId }),
+              },
+              ...(path === null
+                ? []
+                : [
+                    {
+                      id: "copy-path",
+                      title: "Copy path",
+                      icon: "doc.on.doc",
+                      onPress: () => copyTextWithHaptic(fullPath),
+                    },
+                  ]),
+            ],
+          },
+        ]}
+      />
+      <ScreenContent>
+        <ScreenScrollView
+          contentInsetAdjustmentBehavior="automatic"
+          className="flex-1 bg-sheet"
+          contentContainerClassName="gap-4 px-4 py-4"
+          onLayout={(event) => setViewportHeight(event.nativeEvent.layout.height)}
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
+        >
+          {path === null ? (
+            <EmptyState title="Couldn't open this artifact" detail="This link names no artifact." />
+          ) : project.projectId === null ? (
+            <EmptyState title="Artifact unavailable" detail="This thread has no project." />
+          ) : load.status === "loading" ? (
+            <AppText className="text-foreground-muted">Opening artifact…</AppText>
+          ) : load.status === "error" ? (
+            <EmptyState title="Couldn't open this artifact" detail={load.message} />
+          ) : load.value.content.length === 0 ? (
+            <EmptyState
+              variant="plain"
+              title="This artifact is empty"
+              detail="It has no content."
+            />
+          ) : artifactPreviewKind(load.value) === "markdown" && workspaceRoot !== null ? (
+            <WorkspaceMarkdown
+              markdown={load.value.content}
+              links={{
+                navigation,
+                environmentId,
+                threadId,
+                workspaceRoot,
+                projectId: project.projectId,
+              }}
+            />
+          ) : (
+            <ArtifactBody content={load.value} frameHeight={frameHeight} />
+          )}
+        </ScreenScrollView>
+      </ScreenContent>
+    </View>
   );
 }

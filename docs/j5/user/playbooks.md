@@ -3,14 +3,15 @@
 Playbooks give an agent an ordered sequence of prompts. The agent does the work
 in its existing thread and decides when to advance. The progress bar above the
 chat box shows the current stage and whether the run is active, completed, or
-cancelled. A checked stage means the agent moved past it, not that its work was
-verified.
+cancelled. On the phone it is a card that shows only while a run is active. A
+checked stage means the agent moved past it, not that its work was verified.
 
 Open **Settings → Agent Setup** to manage playbooks. Playbooks in the environment
 library are available across all projects and worktrees on its environment. Choose
 **Create playbook** to work with Playbook Author, or **Import YAML** to add a finished
 definition without a project. A project chosen for an authoring or playbook
-conversation only determines where that conversation opens.
+conversation only determines where that conversation opens. On mobile, both open a
+new chat: pick the project from its heading, then send.
 
 On web and desktop, import a YAML file from your device or paste its contents. On
 mobile, paste the YAML. Names use lowercase letters, digits, and hyphens, so

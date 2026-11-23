@@ -8,7 +8,7 @@ import { PersonaSheet, type PersonaSheetActionRow } from "./PersonaSheet";
 import { AgentFolderPickerModal } from "./AgentFolderPickerModal";
 import { useSettingsFormNavigation } from "./SettingsFormScreen";
 import { sendWhenReconnected } from "./watchEnvironmentSessions";
-import { personaRowMarker, personaSheetActions } from "./personaSheet";
+import { personaRowMarker, personaSheetActions } from "./personaSheetActions";
 import { Menu } from "../../components/ui/Menu";
 import { SymbolView } from "../../components/ui/AppSymbol";
 import {
@@ -237,15 +237,16 @@ function OwnerAgentLibrarySettingsScreen() {
   const setAgentEnabled = useAtomCommand(agentPersonaEnvironment.setAgentPersonaEnabled, {
     reportFailure: false,
   });
-  /** Resolves whether the server took the change, so the row can drop its pending value. */
+  /**
+   * Resolves whether the server took the change, so the row can drop its pending value. It leaves
+   * `busy` alone, which would dim every other row while it saves; the server serializes the writes.
+   */
   async function toggleAgent(personaId: string, enabled: boolean): Promise<boolean> {
     if (effectiveEnvironmentId === null || busy) return false;
-    setBusy(true);
     const result = await setAgentEnabled({
       environmentId: effectiveEnvironmentId,
       input: { personaId, enabled },
     });
-    setBusy(false);
     if (result._tag === "Failure") {
       setNotification(failureNotice("Persona action failed", result));
       return false;
@@ -521,7 +522,7 @@ function OwnerAgentLibrarySettingsScreen() {
                 key={`${effectiveEnvironmentId}:${persona.personaId}`}
                 persona={persona}
                 borderTop={index > 0}
-                locked={locked}
+                canOperate={canOperate}
                 busy={busy}
                 onToggle={(enabled) => toggleAgent(persona.personaId, enabled)}
                 onOpen={() => setViewing(persona.personaId)}
@@ -596,6 +597,9 @@ function OwnerAgentLibrarySettingsScreen() {
         <SettingsSection title="Crews">
           <InfoRow text="Crew settings (auto-approve, member models and reasoning) are in Agent Setup on web and desktop. The phone follows them." />
         </SettingsSection>
+        <SettingsSection title="Skills">
+          <InfoRow text="Skills are installed and linked to providers in Settings → Skills on web and desktop. Installed skills work in chat here." />
+        </SettingsSection>
       </ScreenScrollView>
       {notification ? (
         <AgentLibraryToast notification={notification} onDismiss={dismissNotification} />
@@ -615,6 +619,7 @@ function OwnerAgentLibrarySettingsScreen() {
         <PersonaSheet
           key={`${effectiveEnvironmentId}:${viewedPersona.personaId}`}
           environmentId={effectiveEnvironmentId}
+          environmentLabel={environmentLabel}
           persona={viewedPersona}
           usageLine={(() => {
             const entry = usageById.get(viewedPersona.personaId);
@@ -683,7 +688,7 @@ type PresentedPersona = ReturnType<typeof presentAgentPersonaCatalog>[number];
 function PersonaRow(props: {
   readonly persona: PresentedPersona;
   readonly borderTop: boolean;
-  readonly locked: boolean;
+  readonly canOperate: boolean;
   readonly busy: boolean;
   readonly onToggle: (enabled: boolean) => Promise<boolean>;
   readonly onOpen: () => void;
@@ -719,7 +724,9 @@ function PersonaRow(props: {
       >
         <Text
           textRole="body"
-          className={enabled && !persona.removed ? "text-foreground" : "text-foreground-muted"}
+          className={
+            persona.enabled && !persona.removed ? "text-foreground" : "text-foreground-muted"
+          }
           numberOfLines={1}
         >
           {persona.displayName}
@@ -741,10 +748,12 @@ function PersonaRow(props: {
           // React Native's Switch sets alignSelf: flex-start, which ignores the row's centring.
           style={{ alignSelf: "center" }}
           value={enabled}
-          // One change at a time: a second tap before the reread lands would race it.
-          disabled={props.locked || pending !== null}
+          // Not disabled while a change saves, since a dimmed switch reads as a redraw.
+          disabled={!props.canOperate}
           accessibilityLabel={`Enable ${persona.displayName}`}
           onValueChange={(next) => {
+            // One change at a time: a second tap before the reread lands would race it.
+            if (pending !== null) return;
             setPending(next);
             void props.onToggle(next).then((saved) => {
               if (!saved) setPending(null);

@@ -37,8 +37,11 @@ export function personaDetailRows(
       },
   usageLine: string | null,
   providers: ReadonlyArray<ServerProvider> = [],
+  environmentLabel?: string,
 ): ReadonlyArray<PersonaDetailRow> {
-  const source = persona.origin?.kind === "folder" ? persona.origin.path : persona.originLabel;
+  const origin = persona.origin?.kind === "folder" ? persona.origin.path : persona.originLabel;
+  const source =
+    origin === null || environmentLabel === undefined ? origin : `${origin} on ${environmentLabel}`;
   return [
     { label: "Status", value: persona.availabilityLabel },
     ...persona.blockedReasons.map((reason) => ({

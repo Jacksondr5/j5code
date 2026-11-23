@@ -1,5 +1,11 @@
+// @effect-diagnostics nodeBuiltinImport:off - the line test needs a real server to dial.
+import * as NodeHttp from "node:http";
+import type * as NodeNet from "node:net";
+
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ThreadId, type OrchestrationV2StoredEvent } from "@t3tools/contracts";
 import {
+  J5_PEER_API_PATHS,
   PeerPollRequest,
   peerPollStoppedError,
   peerPollStoppedReason,
@@ -28,6 +34,7 @@ import {
   type HttpClientRequest,
 } from "effect/http";
 
+import * as ServerConfig from "../../config.ts";
 import { EventSinkV2 } from "../../orchestration-v2/EventSink.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { A2ALedger } from "./LedgerService.ts";
@@ -73,6 +80,7 @@ const vmPeer: PeerConnection = {
   lastError: null,
   waitingCount: 0,
   oldestWaitingAt: null,
+  lineAddress: null,
   roster: null,
 };
 
@@ -281,6 +289,8 @@ const makeTestLayer = (
     /** Stands in for the registry's poll peers, read again on each change. */
     readonly connections?: PeerRegistryServiceShape["connections"];
     readonly changes?: Stream.Stream<void>;
+    /** The storing server takes a line, dialled at this origin; this server then knows its own address. */
+    readonly lineOrigin?: string;
   } = {},
 ) => {
   const http = Layer.succeed(
@@ -303,8 +313,15 @@ const makeTestLayer = (
     Layer.mock(PeerRegistryService)({
       connection: (environmentId) =>
         Effect.succeed(
-          environmentId === vm ? { ...vmPeer, createdAt: harness.peerCreatedAt.value } : null,
+          environmentId === vm
+            ? {
+                ...vmPeer,
+                createdAt: harness.peerCreatedAt.value,
+                origin: options.lineOrigin ?? vmPeer.origin,
+              }
+            : null,
         ),
+      capabilities: () => Effect.succeed({ line: options.lineOrigin !== undefined }),
       connections: options.connections ?? (() => Effect.succeed([vmPeer])),
       subscribeChanges: Effect.succeed(options.changes ?? Stream.never),
       selfLabel: Effect.succeed("JM-LT-04213"),
@@ -377,10 +394,47 @@ const makeTestLayer = (
   );
   return (options.daemon === true ? peerPollerLayer : manualLayer).pipe(
     Layer.provide(dependencies),
+    Layer.provide(
+      options.lineOrigin === undefined
+        ? Layer.empty
+        : ServerConfig.layerTest(process.cwd(), { prefix: "j5-peer-poller-" }).pipe(
+            Layer.provide(NodeServices.layer),
+          ),
+    ),
   );
 };
 
 const pollOnce = Effect.flatMap(PeerPoller, (poller) => poller.pollOnce(vm));
+
+it.live("dials its line when its loop starts, before the first poll is answered", () =>
+  Effect.gen(function* () {
+    const harness = yield* makeHarness;
+    const dialled = yield* Deferred.make<string>();
+    const storer = yield* Effect.acquireRelease(
+      Effect.callback<NodeHttp.Server>((resume) => {
+        const server = NodeHttp.createServer();
+        server.on("upgrade", (request, socket) => {
+          Deferred.doneUnsafe(dialled, Effect.succeed(request.url ?? ""));
+          socket.destroy();
+        });
+        server.listen(0, "127.0.0.1", () => resume(Effect.succeed(server)));
+      }),
+      (server) => Effect.sync(() => server.close()),
+    );
+    const { port } = storer.address() as NodeNet.AddressInfo;
+    yield* Effect.gen(function* () {
+      yield* PeerPoller;
+      // No answer is queued, so the first poll is held: a dial that waited for it would never come.
+      assert.equal(yield* Deferred.await(dialled), J5_PEER_API_PATHS.line);
+      assert.equal(harness.polls.length, 0, "no poll has been answered yet");
+    }).pipe(
+      Effect.provide(
+        makeTestLayer(harness, { daemon: true, lineOrigin: `http://127.0.0.1:${String(port)}` }),
+      ),
+      Effect.scoped,
+    );
+  }).pipe(Effect.scoped),
+);
 
 it.effect("sends its roster only when it changed, and carries and refreshes both names", () =>
   Effect.gen(function* () {

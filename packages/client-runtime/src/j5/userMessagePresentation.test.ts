@@ -619,6 +619,18 @@ describe("groups 4 and 5: classified, drawn elsewhere", () => {
       "agent:asker withdrew its ask",
       "It no longer needs an answer.\n\nYour reply obligation has ended; do not reply to this Exchange.",
     ],
+    [
+      "a server back in reach",
+      "Laptop is reachable again.",
+      "linked environment reachable again",
+      [
+        "These calls you made there got no answer, so some may have run there before it stopped:\n- delegate_task at 2026-11-16T14:02:11.000Z",
+        "Check what ran there (t3_thread_list, task_status) before you retry, or retry with the same clientRequestId. Nothing was retried for you.",
+      ],
+      "back-in-reach",
+      "Laptop is reachable again",
+      "These calls you made there got no answer, so some may have run there before it stopped:\n- delegate_task at 2026-11-16T14:02:11.000Z\n\nCheck what ran there (t3_thread_list, task_status) before you retry, or retry with the same clientRequestId. Nothing was retried for you.",
+    ],
   ])("reads %s", (_name, first, type, more, kind, summary, detail) => {
     const raw = [
       `[Cross-agent messaging system notice: ${type}]`,

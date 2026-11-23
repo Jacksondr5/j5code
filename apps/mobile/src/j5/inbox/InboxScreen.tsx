@@ -3,43 +3,55 @@ import {
   mergeCrewRuntimeRequestSources,
   mergeNativeQuestionInboxSources,
 } from "@t3tools/client-runtime/j5/crew-inbox-requests";
-import { mergeWorktreeCleanupSources } from "@t3tools/client-runtime/j5/crew-worktree-cleanup";
 import {
-  answeredByLine,
+  askWaitsForServerLine,
   closedLine,
   j5SourceNotice,
   mergeHumanInboxSources,
   type PresentedHumanInboxItem,
 } from "@t3tools/client-runtime/j5/inbox";
 import { presentParticipantIdentity } from "@t3tools/client-runtime/j5/participant-identity";
+import {
+  type ScopedWorktreeCleanup,
+  worktreeCleanupKey,
+} from "@t3tools/client-runtime/j5/crew-worktree-cleanup";
 import { spansMultipleEnvironments } from "@t3tools/client-runtime/j5/readSources";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { scopedInboxItemKey } from "@t3tools/contracts/j5";
 import { useFocusEffect } from "@react-navigation/native";
-import { useCallback, useState } from "react";
+import { type ComponentProps, forwardRef, useCallback, useState } from "react";
 import { Platform, Pressable, RefreshControl, View } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
+import Animated from "react-native-reanimated";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { SymbolView } from "../../components/ui/AppSymbol";
-import { AppText as Text, AppTextInput as TextInput } from "../../components/ui/AppText";
-import { Button } from "../../components/ui/Button";
+import { AppText as Text } from "../../components/ui/AppText";
 import { EmptyState } from "../../components/ui/EmptyState";
-import { ScreenScrollView } from "../../components/ui/ScreenScrollView";
-import { useMarkdownPreviewStyles } from "../../features/files/FileMarkdownPreview";
+import { Notice } from "../../components/ui/Notice";
 import { useOpenLinkedThread } from "../../features/threads/useOpenLinkedThread";
 import { relativeTime } from "../../lib/time";
+import { NativeScrollViewMarker } from "../../native/NativeScrollViewMarker";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
-import { SelectableMarkdownText } from "../../native/SelectableMarkdownText";
 import { j5Sharing } from "../sharing/guestAccess";
+import { SenderMarkdown } from "../artifacts/WorkspaceMarkdown";
+import { J5Card, J5CardEyebrow, J5LinkCard } from "../components/J5Card";
 import { j5Environment } from "../state";
+import { AnswerArea } from "./AnswerArea";
 import { type ClosedItem, useInboxAnswers } from "./inboxAnswers";
 import { AgentQuestionsSection, SeatApprovalsSection } from "./InboxCrewRequests";
-import { WorktreeCleanupsSection } from "./InboxWorktreeCleanups";
+import {
+  DecidedCleanupRow,
+  useWorktreeCleanupInbox,
+  WorktreeCleanupsSection,
+} from "./InboxWorktreeCleanups";
 import { J5RecordPanel } from "./J5RecordPanel";
 import {
   answeredInboxQueryAtom,
   answeredInboxSourcesAtom,
   crewRequestSourcesAtom,
+  decidedWorktreeCleanupQueryAtom,
+  decidedWorktreeCleanupSourcesAtom,
   openInboxQueryAtom,
   openInboxSourcesAtom,
   readInboxSources,
@@ -49,9 +61,9 @@ import {
   worktreeCleanupSourcesAtom,
 } from "./inboxSources";
 import { createPullRefresh } from "./inboxPullRefresh.logic";
-import { useScopedParticipantLabels } from "./senderLabels";
+import { useScopedParticipantLabels, type ScopedParticipantLabels } from "./senderLabels";
 
-type SenderLabels = ReadonlyMap<EnvironmentId, ReadonlyMap<string, string>>;
+type SenderLabels = ScopedParticipantLabels;
 
 const NO_LABELS: ReadonlyMap<string, string> = new Map();
 
@@ -61,11 +73,14 @@ const URGENCY = {
   fyi: { label: "FYI", className: "text-foreground-muted" },
 } as const;
 
+/** Null while the name is on its way, so the line does not swap a stand-in for it. */
 const senderName = (item: PresentedHumanInboxItem, labels: SenderLabels) =>
-  presentParticipantIdentity({
-    participantId: item.senderId,
-    participantLabels: labels.get(item.environmentId) ?? NO_LABELS,
-  }).label;
+  labels.isPending(item.environmentId, item.senderId)
+    ? null
+    : presentParticipantIdentity({
+        participantId: item.senderId,
+        participantLabels: labels.labels.get(item.environmentId) ?? NO_LABELS,
+      }).label;
 
 /** The reader's own name on an item's server, so "Priya answered" can read "You answered". */
 function useOwnName(environmentId: EnvironmentId): string | null {
@@ -77,6 +92,7 @@ function refreshAll() {
   refreshInboxSources(openInboxSourcesAtom, openInboxQueryAtom);
   refreshInboxSources(answeredInboxSourcesAtom, answeredInboxQueryAtom);
   refreshInboxSources(worktreeCleanupSourcesAtom, worktreeCleanupQueryAtom);
+  refreshInboxSources(decidedWorktreeCleanupSourcesAtom, decidedWorktreeCleanupQueryAtom);
   refreshCrewRequestSources();
 }
 
@@ -94,13 +110,15 @@ export function InboxScreen() {
   const seatApprovals = mergeCrewRuntimeRequestSources(crewSources);
   const agentQuestions = mergeNativeQuestionInboxSources(crewSources);
   const cleanupSources = useAtomValue(worktreeCleanupSourcesAtom);
-  const cleanups = mergeWorktreeCleanupSources(cleanupSources);
+  const decidedCleanupSources = useAtomValue(decidedWorktreeCleanupSourcesAtom);
+  const cleanups = useWorktreeCleanupInbox();
   const showEnvironment = spansMultipleEnvironments([
     ...items,
     ...answered,
     ...seatApprovals,
     ...agentQuestions,
-    ...cleanups,
+    ...cleanups.inPlace,
+    ...cleanups.shelf,
   ]);
   const labels = useScopedParticipantLabels(
     [...items, ...answered].map((item) => ({
@@ -109,7 +127,13 @@ export function InboxScreen() {
       connected: item.connected,
     })),
   );
-  const answers = useInboxAnswers({ openSources, items, answeredSources, answered });
+  const answers = useInboxAnswers({
+    openSources,
+    items,
+    answeredSources,
+    answered,
+    pruneClosed: true,
+  });
   // Reads again each time the Inbox comes into view; between visits the server's inbox signal
   // rereads it. No timer.
   useFocusEffect(useCallback(() => refreshAll(), []));
@@ -120,33 +144,37 @@ export function InboxScreen() {
   const [pullToRefresh] = useState(() =>
     createPullRefresh({ read: readInboxSources, onChange: setRefreshing }),
   );
-  const notices = [
-    ...new Set(
-      [
-        ...openSources.sources,
-        ...answeredSources.sources,
-        ...crewSources.sources,
-        ...cleanupSources.sources,
-      ].flatMap((source) => {
-        const notice = j5SourceNotice(source);
-        return notice === null ? [] : [notice];
-      }),
-    ),
-  ];
+  // A connected server whose read is still on its way gets no notice: it would show and leave
+  // again within a frame or two as the Inbox opens.
+  const notices = new Map(
+    [
+      ...openSources.sources,
+      ...answeredSources.sources,
+      ...crewSources.sources,
+      ...cleanupSources.sources,
+      ...decidedCleanupSources.sources,
+    ].flatMap((source) => {
+      const notice = source.status === "loading" ? null : j5SourceNotice(source);
+      return notice === null ? [] : [[notice, source.status === "offline"] as const];
+    }),
+  );
+  const insets = useSafeAreaInsets();
   const content = (
     <>
       <NativeStackScreenOptions options={{ title: "Inbox" }} />
-      {notices.map((notice) => (
-        <Text key={notice} className="text-sm text-foreground-muted">
-          {notice}
-        </Text>
+      {[...notices].map(([notice, offline]) => (
+        <Notice
+          key={notice}
+          message={notice}
+          icon={offline ? "wifi.slash" : "exclamationmark.triangle"}
+        />
       ))}
       <SeatApprovalsSection requests={seatApprovals} />
       <AgentQuestionsSection questions={agentQuestions} showEnvironment={showEnvironment} />
       {answers.shownItems.length === 0 ? (
         seatApprovals.length > 0 ||
         agentQuestions.length > 0 ||
-        cleanups.length > 0 ? null : loading ? (
+        cleanups.inPlace.length > 0 ? null : loading ? (
           <Text className="text-foreground-muted">Loading your inbox…</Text>
         ) : (
           <EmptyState
@@ -177,47 +205,66 @@ export function InboxScreen() {
           })}
         </View>
       )}
-      <WorktreeCleanupsSection items={cleanups} showEnvironment={showEnvironment} />
-      <AnsweredShelf items={answered} labels={labels} showEnvironment={showEnvironment} />
+      <WorktreeCleanupsSection
+        items={cleanups.inPlace}
+        pendingKey={cleanups.pendingKey}
+        errors={cleanups.errors}
+        onAnswer={(item, removePaths) => void cleanups.answer(item, removePaths)}
+        showEnvironment={showEnvironment}
+      />
+      <AnsweredShelf
+        items={answered}
+        cleanups={cleanups.shelf}
+        labels={labels}
+        showEnvironment={showEnvironment}
+      />
     </>
   );
   const refreshControl = (
     <RefreshControl refreshing={refreshing} onRefresh={() => void pullToRefresh()} />
   );
-  // iOS keeps upstream's scroll view, which registers with the native header, and lets it move the
-  // focused answer box above the keyboard, as upstream's commit sheet does. Android has no header
-  // marker, so keyboard-controller's scroll view brings the box being typed in clear of the keyboard.
-  return Platform.OS === "ios" ? (
-    <ScreenScrollView
-      automaticallyAdjustKeyboardInsets
+  // keyboard-controller keeps the focused answer box, and the Answer row below it, clear of the
+  // keyboard on both platforms. The offset is measured from the caret, so it spans the rest of an
+  // empty box and the row.
+  return (
+    <KeyboardAwareScrollView
+      bottomOffset={140}
       contentInsetAdjustmentBehavior="automatic"
       className="flex-1 bg-sheet"
-      contentContainerClassName="gap-4 px-4 py-4"
+      contentContainerClassName="gap-4 px-5 pt-4"
+      contentContainerStyle={{
+        // Upstream's page bottom padding, and Android's content width cap as ScreenScrollView applies it.
+        paddingBottom: Math.max(insets.bottom, 18) + 18,
+        ...(Platform.OS === "android" ? { width: "100%", maxWidth: 720, alignSelf: "center" } : {}),
+      }}
       keyboardShouldPersistTaps="handled"
       refreshControl={refreshControl}
-    >
-      {content}
-    </ScreenScrollView>
-  ) : (
-    <KeyboardAwareScrollView
-      bottomOffset={80}
-      className="flex-1 bg-sheet"
-      contentContainerClassName="gap-4 px-4 py-4"
-      // Android's content width cap, as upstream's ScreenScrollView applies it.
-      contentContainerStyle={{ width: "100%", maxWidth: 720, alignSelf: "center" }}
-      keyboardShouldPersistTaps="handled"
-      refreshControl={refreshControl}
+      {...(Platform.OS === "ios" ? { ScrollViewComponent: InboxScrollView } : {})}
     >
       {content}
     </KeyboardAwareScrollView>
   );
 }
 
+// iOS registers the screen's scroll view with its header through the marker, which must hold the
+// scroll view itself; keyboard-controller wraps its scroll view in a view of its own, so the marker
+// goes inside, around the scroll view it renders, as ThreadFeed's does.
+const InboxScrollView = forwardRef<Animated.ScrollView, ComponentProps<typeof Animated.ScrollView>>(
+  function InboxScrollView(props, ref) {
+    return (
+      <NativeScrollViewMarker style={{ flex: 1 }}>
+        <Animated.ScrollView ref={ref} {...props} />
+      </NativeScrollViewMarker>
+    );
+  },
+);
+
 function ItemMeta(props: {
   readonly item: PresentedHumanInboxItem;
   readonly labels: SenderLabels;
   readonly showEnvironment: boolean;
   readonly trailing?: string | null;
+  readonly numberOfLines?: number;
 }) {
   const { item } = props;
   const parts = [
@@ -230,7 +277,7 @@ function ItemMeta(props: {
     props.trailing ?? null,
   ].filter((part): part is string => part !== null && part !== "");
   return (
-    <Text className="text-xs text-foreground-muted" numberOfLines={2}>
+    <Text className="text-xs text-foreground-muted" numberOfLines={props.numberOfLines ?? 2}>
       {parts.join(" · ")}
     </Text>
   );
@@ -260,7 +307,7 @@ function InboxItem(props: {
   const canAnswer = item.sourceReady && mayAnswer;
   const closedText = props.closed === undefined ? null : closedLine({ ...props.closed, ownName });
   return (
-    <View className="rounded-2xl border-continuous bg-card px-4 py-3">
+    <J5Card>
       <Pressable
         accessibilityRole="button"
         accessibilityState={{ expanded }}
@@ -269,9 +316,7 @@ function InboxItem(props: {
         className="gap-1"
       >
         <View className="flex-row items-center gap-2">
-          <Text className={`text-xs font-t3-semibold uppercase ${urgency.className}`}>
-            {urgency.label}
-          </Text>
+          <J5CardEyebrow label={urgency.label} className={urgency.className} />
           <View className="flex-1" />
           <SymbolView
             name={expanded ? "chevron.down" : "chevron.right"}
@@ -279,7 +324,7 @@ function InboxItem(props: {
             tintColorClassName="accent-icon-muted"
           />
         </View>
-        <Text className="text-base font-t3-semibold">{item.intent}</Text>
+        <Text className="text-base font-t3-bold">{item.intent}</Text>
         <ItemMeta
           item={item}
           labels={props.labels}
@@ -289,45 +334,35 @@ function InboxItem(props: {
       </Pressable>
       {expanded ? (
         <View className="mt-3 gap-3 border-t border-border-subtle pt-3">
-          <InboxMessage markdown={item.message} />
+          <InboxMessage item={item} markdown={item.message} />
           {[item.escalation?.summary, item.personaDraft?.summary].map((record) =>
             record === undefined ? null : <J5RecordPanel key={record} text={record} />,
           )}
           {item.followUps?.map((followUp) => (
             <View className="gap-1" key={followUp.messageId}>
               <Text className="text-xs font-t3-medium text-foreground-muted">Follow-up</Text>
-              <InboxMessage markdown={followUp.message} />
+              <InboxMessage item={item} markdown={followUp.message} />
             </View>
           ))}
-          {/* Above the answer box, so it stays in view whenever the box is: iOS scrolls only the
-              focused box itself clear of the keyboard. */}
-          <View className="flex-row flex-wrap items-center justify-between gap-2">
-            <OpenSenderThread item={item} />
-            {closedText !== null ? (
-              <Text className="text-sm text-foreground-muted">{closedText}</Text>
-            ) : (
-              <Button
-                label={props.delivering ? "Delivering…" : "Answer"}
-                tone="primary"
-                loading={props.delivering}
-                disabled={!canAnswer || props.anyDelivering || props.answerText.length === 0}
-                accessibilityHint={
-                  canAnswer
-                    ? undefined
-                    : "This server is unavailable or this connection is read-only."
-                }
-                onPress={props.onAnswer}
-              />
-            )}
-          </View>
-          <TextInput
-            accessibilityLabel={`Answer ${item.intent}`}
-            multiline
-            placeholder="Type the answer exactly as it should be delivered"
-            value={props.answerText}
-            onChangeText={props.onChangeAnswer}
-            style={{ minHeight: 96, textAlignVertical: "top" }}
-          />
+          {closedText === null && !item.connected ? (
+            // Read-only until its server is back; words typed earlier are kept for then.
+            <Text className="text-sm text-foreground-muted">
+              {askWaitsForServerLine(item.environmentLabel)}
+            </Text>
+          ) : (
+            <AnswerArea
+              item={item}
+              text={props.answerText}
+              onChangeText={props.onChangeAnswer}
+              inputStyle={{ minHeight: 96, textAlignVertical: "top" }}
+              leading={<OpenSenderThread item={item} />}
+              closedText={closedText}
+              sending={props.delivering}
+              busy={props.anyDelivering && !props.delivering}
+              canAnswer={canAnswer}
+              onAnswer={props.onAnswer}
+            />
+          )}
           {props.error === null ? null : (
             <Text accessibilityRole="alert" className="text-sm text-danger-foreground">
               {props.error}
@@ -335,13 +370,22 @@ function InboxItem(props: {
           )}
         </View>
       ) : null}
-    </View>
+    </J5Card>
   );
 }
 
-function InboxMessage(props: { readonly markdown: string }) {
-  const styles = useMarkdownPreviewStyles();
-  return <SelectableMarkdownText markdown={props.markdown} textStyle={styles.nativeTextStyle} />;
+/** An ask's words, with its links and images read in the sender's thread, as web reads them. */
+function InboxMessage(props: {
+  readonly item: PresentedHumanInboxItem;
+  readonly markdown: string;
+}) {
+  return (
+    <SenderMarkdown
+      markdown={props.markdown}
+      environmentId={props.item.environmentId}
+      senderThreadId={props.item.senderThreadId}
+    />
+  );
 }
 
 function OpenSenderThread(props: { readonly item: PresentedHumanInboxItem }) {
@@ -361,9 +405,10 @@ function OpenSenderThread(props: { readonly item: PresentedHumanInboxItem }) {
           threadId: item.senderThreadId,
         })
       }
+      className="min-h-9 shrink justify-center active:opacity-70"
     >
       <Text
-        className={`font-t3-medium text-sm ${available ? "text-foreground-secondary" : "text-foreground-muted"}`}
+        className={`font-t3-medium text-sm ${available ? "text-primary-text" : "text-foreground-muted"}`}
       >
         {available
           ? "Open thread"
@@ -377,11 +422,13 @@ function OpenSenderThread(props: { readonly item: PresentedHumanInboxItem }) {
 
 function AnsweredShelf(props: {
   readonly items: ReadonlyArray<PresentedHumanInboxItem>;
+  readonly cleanups: ReadonlyArray<ScopedWorktreeCleanup>;
   readonly labels: SenderLabels;
   readonly showEnvironment: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  if (props.items.length === 0) return null;
+  const count = props.items.length + props.cleanups.length;
+  if (count === 0) return null;
   return (
     <View className="gap-2">
       <Pressable
@@ -395,7 +442,7 @@ function AnsweredShelf(props: {
           size={12}
           tintColorClassName="accent-icon-muted"
         />
-        <Text className="font-t3-medium text-foreground-muted">Answered {props.items.length}</Text>
+        <Text className="font-t3-medium text-foreground-muted">Answered {count}</Text>
       </Pressable>
       {open
         ? props.items.map((item) => (
@@ -403,6 +450,15 @@ function AnsweredShelf(props: {
               key={scopedInboxItemKey(item)}
               item={item}
               labels={props.labels}
+              showEnvironment={props.showEnvironment}
+            />
+          ))
+        : null}
+      {open
+        ? props.cleanups.map((item) => (
+            <DecidedCleanupRow
+              key={worktreeCleanupKey(item)}
+              item={item}
               showEnvironment={props.showEnvironment}
             />
           ))
@@ -417,18 +473,43 @@ function AnsweredItem(props: {
   readonly showEnvironment: boolean;
 }) {
   const { item } = props;
-  const answeredBy = answeredByLine(item.answeredBy, useOwnName(item.environmentId));
-  const when = item.terminalAt ? `answered ${relativeTime(item.terminalAt)}` : "answered";
+  const openLinkedThread = useOpenLinkedThread();
+  const ownName = useOwnName(item.environmentId);
+  const answerer =
+    item.answeredBy === null || item.answeredBy === undefined
+      ? null
+      : item.answeredBy === ownName
+        ? "you"
+        : item.answeredBy;
+  const answered = answerer === null ? "answered" : `answered by ${answerer}`;
+  const { senderThreadId } = item;
   return (
-    <View className="gap-1 rounded-2xl bg-card px-4 py-3">
+    // The whole card opens the sender's thread; offline, or with the sender gone, it is inert.
+    <J5LinkCard
+      accessibilityLabel={`Open ${item.intent}`}
+      onPress={
+        item.connected && senderThreadId !== null
+          ? () =>
+              openLinkedThread({
+                environmentId: String(item.environmentId),
+                threadId: senderThreadId,
+              })
+          : null
+      }
+    >
       <Text className="text-sm font-t3-medium">{item.intent}</Text>
       <ItemMeta
         item={item}
         labels={props.labels}
         showEnvironment={props.showEnvironment}
-        trailing={answeredBy === null ? when : `${when} · ${answeredBy}`}
+        numberOfLines={1}
       />
-      <OpenSenderThread item={item} />
-    </View>
+      <Text className="text-xs text-foreground-muted">
+        {item.terminalAt ? `${answered} · ${relativeTime(item.terminalAt)}` : answered}
+      </Text>
+      {item.connected && senderThreadId === null ? (
+        <Text className="text-xs text-foreground-muted">The sender is no longer in the roster</Text>
+      ) : null}
+    </J5LinkCard>
   );
 }

@@ -1,0 +1,64 @@
+---
+import Icon from "./Icon.astro";
+
+/** The workspace's file explorer: the whole Files tab, and the column beside an open file. */
+interface Props {
+  current?: string;
+}
+
+const { current } = Astro.props;
+const tree = [
+  { name: "src", folder: true, open: true, depth: 0 },
+  { name: "cli.js", depth: 1 },
+  { name: "todo.js", depth: 1 },
+  { name: "test", folder: true, depth: 0 },
+  { name: "package.json", depth: 0 },
+  { name: "README.md", depth: 0 },
+];
+---
+
+<div class="explorer" aria-hidden="true">
+  <p class="explorer__bar">
+    <Icon name="refresh-cw" class="ico-35" /><span>Search files</span><Icon name="chevrons-up-down" class="ico-35" />
+  </p>
+  {
+    tree.map((entry) => (
+      <p class:list={["explorer__row", { "explorer__row--current": entry.name === current }]} style={`--depth: ${entry.depth}`}>
+        <Icon name={entry.folder ? "chevron-right" : "file-text"} class:list={["ico-35", { explorer__open: entry.open }]} />
+        {entry.name}
+      </p>
+    ))
+  }
+</div>
+
+<style>
+  .explorer {
+    padding: 8px 6px 16px;
+    font-size: 13px;
+  }
+
+  .explorer__bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 28px;
+    padding: 0 8px;
+    margin-bottom: 4px;
+    color: var(--a-muted-fg);
+  }
+
+  .explorer__bar span { flex: 1; }
+
+  .explorer__row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    height: 24px;
+    padding-left: calc(8px + var(--depth) * 16px);
+    border-radius: 6px;
+  }
+
+  .explorer__row :global(.ico) { color: var(--a-muted-fg); }
+  .explorer__row :global(.explorer__open) { rotate: 90deg; }
+  .explorer__row--current { background: var(--a-accent); font-weight: 500; }
+</style>

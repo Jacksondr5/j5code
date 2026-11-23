@@ -28,6 +28,7 @@ import { useDeviceType } from "../../native/native-layout-metrics";
 import { WorkspaceSidebarTabs } from "./WorkspaceSidebarTabs";
 import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
 import { useSelectWorkspaceTab } from "./useSelectWorkspaceTab";
+import { useStartsSomewhere } from "../../j5/sharing/startAccess";
 
 const PULL_REQUEST_ICON = require("../../../assets/icons/pull-request.png");
 
@@ -85,6 +86,8 @@ export function WorkspaceNativeTabs(props: {
   const compactTabs = useCompactWorkspaceTabs();
   const { layout, startNewTask } = useAdaptiveWorkspaceLayout();
   const floatingTabs = useFloatingWorkspaceTabs();
+  // J5: compose is offered only to someone who may start a thread (FORK.md case 90).
+  const startsSomewhere = useStartsSomewhere();
   const { width } = useWindowDimensions();
   const { colors } = useControlTheme();
   const selectedTab = workspace.state.selectedTab;
@@ -172,7 +175,10 @@ export function WorkspaceNativeTabs(props: {
             compact={floatingTabs}
             reserveComposeSpace={floatingTabs}
             onNewTask={
-              floatingTabs && !workspace.settingsOpen && selectedTab === "threads"
+              floatingTabs &&
+              startsSomewhere &&
+              !workspace.settingsOpen &&
+              selectedTab === "threads"
                 ? startNewTask
                 : undefined
             }

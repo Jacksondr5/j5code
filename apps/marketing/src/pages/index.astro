@@ -223,11 +223,11 @@ const harnesses = [
             </div>
             <h3>Cross-server A2A</h3>
             <p>
-              Peer the machines you run J5 on and agents message each other across them, no matter
+              Link the machines you run J5 on and agents message each other across them, no matter
               where they are. Give each machine its own capabilities and let an agent borrow them
               from anywhere.
             </p>
-            <a class="feature-link" href="/peering">How peering works<span aria-hidden="true"> &rarr;</span></a>
+            <a class="feature-link" href="/linking">How linking works<span aria-hidden="true"> &rarr;</span></a>
           </div>
           <div class="feature-stage">
             <PeeringCardScene /><PeeringCardScene compact />
@@ -327,7 +327,7 @@ const harnesses = [
         <h2 class="display">On the Horizon</h2>
         <p>
           These features will take your agents even further. Other people in front of your agents,
-          more platforms, and a fleet that's easier to keep in view.
+          and a fleet that's easier to keep in view.
         </p>
       </div>
 
@@ -361,15 +361,6 @@ const harnesses = [
       </div>
 
       <div class="horizon-grid horizon-grid--minor">
-        <article class="horizon-col horizon-col--plain">
-          <div class="feature-top">
-            <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5.5l8-1.2v7.2H3zM12.5 4l8.5-1.3v8.8h-8.5zM3 12.5h8v7.2l-8-1.2zM12.5 12.5H21v8.8L12.5 20z"/></svg>
-            <Pennant status="horizon" />
-          </div>
-          <h3>Windows support</h3>
-          <p>Run J5 clients on Windows.</p>
-        </article>
-
         <article class="horizon-col horizon-col--plain">
           <div class="feature-top">
             <svg class="glyph" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="8"/><path d="M12 4V1.5M12 20v2.5M4 12H1.5M20 12h2.5M6.3 6.3L4.6 4.6M17.7 17.7l1.7 1.7M6.3 17.7l-1.7 1.7M17.7 6.3l1.7-1.7M12 9V4M12 15v5M9 12H4M15 12h5"/></svg>
@@ -445,7 +436,7 @@ const harnesses = [
         <CopyCommand command={INSTALL_COMMAND} />
       </div>
       <p class="cta-note">
-        Apple Silicon app today. The installer puts a self-contained server on macOS or Linux x64.
+        Apps for Apple Silicon Macs and Windows (beta). The installer puts a self-contained server on macOS or Linux x64.
         <a href="/download">All download options</a>
       </p>
     </div>
@@ -1111,7 +1102,6 @@ const harnesses = [
   }
 
   .horizon-grid--minor {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
     margin-top: 18px;
   }
 

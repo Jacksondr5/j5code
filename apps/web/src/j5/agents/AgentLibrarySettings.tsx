@@ -300,16 +300,16 @@ function MemberAgentLibrarySettings() {
   const setAgentEnabled = useAtomCommand(agentPersonaEnvironment.setAgentPersonaEnabled, {
     reportFailure: false,
   });
+  // Leaves `busy` alone, which would disable every other control while it saves; the server
+  // serializes the writes.
   async function toggleAgent(personaId: string, enabled: boolean) {
     if (effectiveEnvironmentId === null || busy) return;
     const environmentId = effectiveEnvironmentId;
-    setBusy(true);
     await runPersonaAction("Persona action failed", async () => {
       const result = await setAgentEnabled({ environmentId, input: { personaId, enabled } });
       if (result._tag === "Failure") throw squashAtomCommandFailure(result);
       catalog.refresh();
     });
-    setBusy(false);
   }
   async function removePersona(personaId: string) {
     if (effectiveEnvironmentId === null || busy) return;

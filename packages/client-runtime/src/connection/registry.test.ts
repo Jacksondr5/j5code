@@ -168,6 +168,9 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
     ) => Effect.Effect<ConnectionBlockedError | undefined>;
     readonly initialDisabled?: ReadonlyArray<EnvironmentId>;
     readonly directEndpoints?: ServerConfig["directEndpoints"];
+    readonly beforeCacheClear?: (
+      environmentId: EnvironmentId,
+    ) => Effect.Effect<void, Persistence.ConnectionPersistenceError>;
   },
 ) {
   const storedTargets = yield* Ref.make<ReadonlyArray<ConnectionTarget>>(initialTargets);
@@ -297,11 +300,14 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
     removeVcsRefs: () => Effect.void,
     clearVcsRefs: () => Effect.void,
     clear: (environmentId) =>
-      Ref.update(shellCache, (current) => {
-        const next = new Map(current);
-        next.delete(environmentId);
-        return next;
-      }).pipe(
+      (options?.beforeCacheClear?.(environmentId) ?? Effect.void).pipe(
+        Effect.andThen(
+          Ref.update(shellCache, (current) => {
+            const next = new Map(current);
+            next.delete(environmentId);
+            return next;
+          }),
+        ),
         Effect.andThen(
           Ref.update(cacheClears, (environmentIds) => [...environmentIds, environmentId]),
         ),
@@ -1279,10 +1285,26 @@ describe("EnvironmentRegistry", () => {
   it.effect("moves prepared credential observers when re-pairing an unchanged environment", () =>
     Effect.gen(function* () {
       const replacementCredential = new BearerConnectionCredential({ token: "replacement-token" });
+      const clearFails = yield* Ref.make(false);
       const harness = yield* makeHarness(
         [BEARER_TARGET],
         [BEARER_PROFILE],
         [[BEARER_TARGET.connectionId, BEARER_CREDENTIAL]],
+        {
+          beforeCacheClear: () =>
+            Ref.getAndSet(clearFails, false).pipe(
+              Effect.flatMap((fails) =>
+                fails
+                  ? Effect.fail(
+                      new Persistence.ConnectionPersistenceError({
+                        operation: "clear-environment",
+                        message: "Storage is unavailable.",
+                      }),
+                    )
+                  : Effect.void,
+              ),
+            ),
+        },
       );
 
       yield* Effect.gen(function* () {
@@ -1331,13 +1353,24 @@ describe("EnvironmentRegistry", () => {
           RELAY_TARGET.environmentId,
           (state) => state.phase === "connected",
         );
-        yield* registry.register(
+        const bearerRegistration = (credential: BearerConnectionCredential) =>
           new BearerConnectionRegistration({
             target: new BearerConnectionTarget({ ...BEARER_TARGET }),
             profile: new BearerConnectionProfile({ ...BEARER_PROFILE }),
-            credential: replacementCredential,
-          }),
+            credential,
+          });
+        // J5: a clear that fails fails the re-pair before the new credential is stored, so the
+        // new credential never reads the last one's rows, and trying again clears.
+        yield* Ref.set(clearFails, true);
+        const failed = yield* Effect.exit(
+          registry.register(bearerRegistration(replacementCredential)),
         );
+        expect(Exit.isFailure(failed)).toBe(true);
+        expect((yield* Ref.get(harness.storedCredentials)).get(BEARER_TARGET.connectionId)).toEqual(
+          BEARER_CREDENTIAL,
+        );
+        expect(yield* Ref.get(harness.cacheClears)).toEqual([]);
+        yield* registry.register(bearerRegistration(replacementCredential));
         yield* Deferred.await(replacementObserved);
         yield* Fiber.interrupt(subscription);
 
@@ -1346,6 +1379,11 @@ describe("EnvironmentRegistry", () => {
           replacementCredential.token,
         ]);
         expect(yield* Ref.get(followedSupervisors)).toBe(2);
+        // J5: a new credential can be a narrower person, who must not see the last one's threads.
+        expect(yield* Ref.get(harness.cacheClears)).toEqual([BEARER_TARGET.environmentId]);
+        // The same credential again, as editing the connection does, keeps what it cached.
+        yield* registry.register(bearerRegistration(replacementCredential));
+        expect(yield* Ref.get(harness.cacheClears)).toEqual([BEARER_TARGET.environmentId]);
       }).pipe(Effect.provide(harness.layer), Effect.scoped);
     }),
   );

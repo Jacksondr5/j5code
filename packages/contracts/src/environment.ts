@@ -192,6 +192,8 @@ export const ExecutionEnvironmentDescriptor = Schema.Struct({
   orchestrationProtocolVersion: Schema.optionalKey(Schema.Int),
   /** Highest migration this server's database holds; absent on older servers. */
   databaseMigration: Schema.optionalKey(Schema.Int),
+  /** J5: the newest migration in each J5 ledger, keyed by table; absent on older servers. */
+  j5DatabaseMigrations: Schema.optionalKey(Schema.Record(Schema.String, Schema.Int)),
   capabilities: ExecutionEnvironmentCapabilities,
 });
 export type ExecutionEnvironmentDescriptor = typeof ExecutionEnvironmentDescriptor.Type;

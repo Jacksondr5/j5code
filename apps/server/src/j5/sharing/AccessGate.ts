@@ -338,7 +338,6 @@ const ACCESS_RPC_RULES: Partial<Record<WsRpcMethod, AccessRpcRule>> = {
 
   // The server's own surfaces (AC23), read by someone who holds a level at server scope.
   [J5_CLIENT_READ_WS_METHODS.readFleet]: serverHome,
-  [J5_CLIENT_READ_WS_METHODS.listSpawnedChildren]: serverHome,
   [J5_AGENT_PERSONA_WS_METHODS.getAgentPersonaCatalog]: serverHome,
   [J5_AGENT_PERSONA_WS_METHODS.readAgentPersona]: serverHome,
   [J5_AGENT_PERSONA_WS_METHODS.getAgentPersonaUsage]: serverHome,
@@ -353,6 +352,7 @@ const ACCESS_RPC_RULES: Partial<Record<WsRpcMethod, AccessRpcRule>> = {
   [J5_CLIENT_READ_WS_METHODS.listCrewProposals]: narrowed,
   [J5_CLIENT_READ_WS_METHODS.listCrewRuntimeRequests]: narrowed,
   [J5_CLIENT_READ_WS_METHODS.listCrewMemberships]: narrowed,
+  [J5_CLIENT_READ_WS_METHODS.listSpawnedChildren]: narrowed,
   [J5_CLIENT_ACTION_WS_METHODS.previewCrewProposal]: narrowed,
   [J5_CLIENT_ACTION_WS_METHODS.resolveCrewProposal]: narrowed,
   [J5_CLIENT_ACTION_WS_METHODS.respondCrewRuntimeRequest]: narrowed,

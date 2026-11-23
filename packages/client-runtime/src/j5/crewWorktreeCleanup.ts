@@ -38,6 +38,28 @@ export function mergeWorktreeCleanupSources(
     );
 }
 
+/**
+ * Where each cleanup shows. Open ones and those answered on this device stay in place; an answered
+ * one shows as the decided read has it, or as its answer returned it until that read arrives. A
+ * refused answer (`null`) waits for the decided read. The other decided ones go on the shelf.
+ */
+export function placeWorktreeCleanups(input: {
+  readonly open: ReadonlyArray<ScopedWorktreeCleanup>;
+  readonly decided: ReadonlyArray<ScopedWorktreeCleanup>;
+  readonly answeredHere: ReadonlyMap<string, ScopedWorktreeCleanup | null>;
+}) {
+  const decidedByKey = new Map(input.decided.map((item) => [worktreeCleanupKey(item), item]));
+  const openKeys = input.open.map(worktreeCleanupKey);
+  const inPlace = [...new Set([...openKeys, ...input.answeredHere.keys()])].flatMap((key) => {
+    const item = input.answeredHere.has(key)
+      ? (decidedByKey.get(key) ?? input.answeredHere.get(key))
+      : input.open[openKeys.indexOf(key)];
+    return item === null || item === undefined ? [] : [item];
+  });
+  const shelf = input.decided.filter((item) => !input.answeredHere.has(worktreeCleanupKey(item)));
+  return { inPlace, shelf };
+}
+
 /** Five rows show before "Show N more". */
 const WORKTREE_CLEANUP_VISIBLE_ROWS = 5;
 

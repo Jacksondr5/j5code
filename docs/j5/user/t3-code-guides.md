@@ -31,8 +31,6 @@ Other environment variables keep T3 Code's names, such as `T3CODE_HOST`, `T3CODE
 - Servers update from releases on GitHub (`Jacksondr5/j5code`), not from npm. **Update
   everything** asks each server for the app's own version; if that version has no J5 Code
   release, such as a development build, that server's update fails and says so.
-- The Stable or Nightly track is chosen for each desktop app on its own, and choosing it does not
-  move your servers.
 - A server installed from npm (`@jacksondr5/j5code` 0.0.43 or earlier) cannot update itself to a
   release archive: **Update server** fails because no newer npm version exists. Follow
   [Migrating to release archives](./migrating-to-release-archives.md) on that machine once; later
@@ -79,7 +77,63 @@ additions:
 
 In [Remote access](../../user/remote-access.md), the desktop app's first SSH launch downloads the
 J5 Code server release for the desktop app's version to `~/.j5code/runtime` on the host. The host
-must be Linux x64 or an Apple Silicon Mac, the platforms J5 Code publishes.
+must be Linux x64 or an Apple Silicon Mac.
+
+## Linked environments
+
+In [Remote access](../../user/remote-access.md), a linked environment lets agents on one machine
+use tools on another. In J5 Code on web and desktop, a link does more, and you set it up once:
+
+- **A link also carries messages.** Agents on two linked J5 Code servers can message each other,
+  in both directions. [Connecting two J5 servers](./j5-peering.md) explains how messages travel.
+- **Each direction has its own Tools level.** You choose what agents on each server may do on the
+  other: **Off**, which leaves messages only, or one of T3 Code's access levels. Both start at
+  Supervised.
+- **You don't paste a pairing code, and rarely type an address.** Add the other server to this app
+  first, with **Add environment** and a pairing link that manages access. J5 Code finds the
+  address each server reaches the other at; when it can't, or you know a better one, enter it
+  under **Change**. Tools need an https address or a Tailscale name (ending `.ts.net`): where J5
+  Code finds only a plain http address, it asks for one of those, or for that direction's tools
+  to be Off. You also don't need to visit
+  **Settings → Labs**: choosing a level turns on the Linked environments beta on the servers
+  involved, and says which.
+
+### Link servers
+
+1. Open **Settings → Environments → Linked environments** and choose **Link**. J5 Code also offers
+   this when you add an environment; choose **Not now** to skip it.
+2. Pick the server to link, and tick the servers to link it with. A server that can't be linked
+   says why.
+3. Each ticked server says how messages will travel between the two. J5 Code checks which server
+   can reach which and picks the safer way: a server that may be off polls, so messages for it
+   wait until it does. Choose **Change** to pick another way,
+   or to give that pair its own Tools levels.
+4. Choose the two Tools levels, then **Link**. Each pair then says whether it was linked. If
+   tools could not be set up in one direction, messages still work and that direction is left
+   **Off**: choose a level on the pair's row to try again.
+
+### Change, renew or remove a link
+
+Every pair is one row under **Linked environments**.
+
+- **Change a level** with the pair's Tools pickers, at any time. Two servers that only exchange
+  messages gain tools the same way: choose a level in place of **Off**.
+- **Renew** tools before or after their 30 days run out. Near the end the row offers **Renew**;
+  before that it is in the row's menu (**⋯**). One renewal covers both directions, and messages
+  keep working in the meantime.
+- **Remove…**, in the row's menu, ends the link on both servers. To stop only what one server's
+  agents may do on the other, set that direction to **Off**. If this app can manage only one of
+  the two servers, it warns that the other keeps its side until you remove the link there too.
+
+### When an agent asks for a link
+
+An agent's link request sets up messages too, and tools in the one direction the agent asked
+for. Pick the server and the level, then **Link**. If that server isn't in this app, add it under
+**Environments** first. When a link's tools have run out, the agent's next request renews them.
+Agents can ask once a server has its first link.
+
+A link made in the mobile app, or with `j5 environment link`, works as T3 Code's guide describes:
+one direction, with no messages. Its row on web and desktop offers **Set up messaging**.
 
 ## Scripts on the host
 

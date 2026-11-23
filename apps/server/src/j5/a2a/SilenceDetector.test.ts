@@ -39,10 +39,11 @@ import {
 } from "./AgentCrewInstanceService.ts";
 import type { ClaudeAgentSdkQuerySession } from "../../orchestration-v2/Adapters/ClaudeAdapterV2.ts";
 import {
+  j5ClaimMissedClaudeSteer,
   j5ClaudeSteerFields,
+  j5NoteMissedClaudeSteers,
   j5ObserveClaudeSteer,
   j5OfferClaudeSteer,
-  j5ClaudeSteerHoldsResult,
 } from "./claudeAgentSteers.ts";
 import { A2ADeliveryWorker, manualLayer as deliveryWorkerLayer } from "./DeliveryWorker.ts";
 import {
@@ -829,7 +830,6 @@ it.effect.each([
         is_error: false,
         terminal_reason: "completed",
       } as SDKResultMessage;
-      assert.isTrue(j5ClaudeSteerHoldsResult(query, providerTurnId, result));
       const ended = terminalEvent(status, 100, {
         id: carrierRunId,
         userMessageId: MessageId.make("message:silence:upstream"),
@@ -845,7 +845,10 @@ it.effect.each([
       yield* (yield* A2ASilenceDetector).handleStoredEvent(ended);
 
       assert.lengthOf(yield* readRemovedNotices(), 0);
-      assert.isFalse(j5ClaudeSteerHoldsResult(query, providerTurnId, result));
+      // A late result for the released turn finds no steer left to run.
+      const nativeThreadId = `native-thread:silence:${status}:${registered}`;
+      j5NoteMissedClaudeSteers({ query, nativeThreadId, providerTurnId, result });
+      assert.isUndefined(j5ClaimMissedClaudeSteer(nativeThreadId, query));
     }).pipe(Effect.provide(Layer.merge(makeTestLayer(), NodeCrypto.layer))),
 );
 

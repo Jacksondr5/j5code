@@ -76,7 +76,6 @@ import * as McpHttpServer from "./mcp/McpHttpServer.ts";
 import * as PeerForwarding from "./peer/PeerForwarding.ts";
 import * as RemoteDelegation from "./peer/RemoteDelegation.ts";
 import * as PeerLinkRequests from "./peer/PeerLinkRequests.ts";
-import * as PeerLinks from "./peer/PeerLinks.ts";
 import * as PeerMcpClient from "./peer/PeerMcpClient.ts";
 import * as McpSessionRegistry from "./mcp/McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "./mcp/PreviewAutomationBroker.ts";
@@ -150,6 +149,11 @@ import { gateEnvironmentAuth } from "./j5/sharing/AccessGate.ts";
 import { gateMcpOAuth } from "./j5/sharing/McpApproval.ts";
 import { peopleLayer as J5PeopleLive } from "./j5/sharing/PairingIntents.ts";
 import { J5A2AAuxiliaryLayer, J5ThreadRegistrationLayer } from "./j5/a2a/runtimeLayer.ts";
+import { layer as J5EnvironmentLinksLive } from "./j5/a2a/EnvironmentLinkService.ts";
+import {
+  layer as J5LineRegistryLive,
+  layerRoutingHttpClient as J5LineRoutingHttpClient,
+} from "./j5/a2a/line/LineRegistry.ts";
 import { layer as J5ArtifactRunFinalizationObserverLive } from "./j5/artifacts/ArtifactRunFinalizationObserver.ts";
 import { layer as J5ArtifactWorkspaceLive } from "./j5/artifacts/ArtifactWorkspace.ts";
 import {
@@ -832,7 +836,10 @@ const layerMakeRoutes = Layer.mergeAll(
   Layer.provide(
     PeerForwarding.layer.pipe(
       Layer.provideMerge(PeerMcpClient.layer),
-      Layer.provideMerge(PeerLinks.layer),
+      // J5: upstream's PeerLinks with each link's session claimed, and J5's forget (FORK.md case 121).
+      Layer.provideMerge(J5EnvironmentLinksLive),
+      // J5: a link to a server that polls this one goes through that server's line.
+      Layer.provide(J5LineRoutingHttpClient.pipe(Layer.provide(J5LineRegistryLive))),
     ),
   ),
   Layer.provide(PreviewAutomationBroker.layer),

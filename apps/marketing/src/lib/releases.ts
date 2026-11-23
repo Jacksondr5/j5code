@@ -33,9 +33,13 @@ export async function fetchLatestRelease(): Promise<Release> {
   return data as Release;
 }
 
-/** The Apple Silicon DMG is the only desktop artifact the fork publishes today. */
+/** The desktop installer whose file name ends with `suffix`, such as `-arm64.dmg` or `-x64.exe`. */
+export function pickAsset(assets: ReleaseAsset[], suffix: string): string | undefined {
+  return assets.find((a) => a.name.endsWith(suffix))?.browser_download_url;
+}
+
 export function pickMacAsset(assets: ReleaseAsset[]): string | undefined {
-  return assets.find((a) => a.name.endsWith("-arm64.dmg"))?.browser_download_url;
+  return pickAsset(assets, "-arm64.dmg");
 }
 
 export function detectPlatform(): "mac" | "win" | "linux" | undefined {

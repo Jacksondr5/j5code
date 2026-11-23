@@ -22,9 +22,14 @@ scoped to the current project workspace, so planning documents remain beside the
 you work. Artifact file references in chat use a distinct **Artifact** chip; choose one to open that
 document directly in the Artifacts panel.
 
-On mobile, tap an `artifacts/…` link in a thread to read that artifact. **All artifacts** lists the
-project's other artifacts. Mobile shows Markdown, text and images, shows HTML as its source, and
-cannot delete artifacts. Pull down to refresh.
+To find text in an artifact, click its preview and press Cmd+F (Ctrl+F on Windows and Linux). The
+browser's own find opens on the web; the desktop app opens a find bar at the top right of the
+preview, where Enter and Shift+Enter move between matches and Esc closes it. Either way the search
+covers the whole window, so the count includes matches in the chat beside the artifact.
+
+On mobile, tap an `artifacts/…` link in a thread or an ask to read that artifact. **All artifacts** lists the
+project's other artifacts. Mobile shows Markdown, text, images and sandboxed HTML, and cannot
+delete artifacts. Pull down to refresh.
 
 While the Artifacts page is open, its file list and the selected preview update automatically when
 an agent creates, edits, or removes a project artifact.

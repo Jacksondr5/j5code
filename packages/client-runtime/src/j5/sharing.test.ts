@@ -7,6 +7,7 @@ import {
   J5_CLIENT_READ_WS_METHODS,
   type PersonLevel,
 } from "@t3tools/contracts/j5";
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -35,8 +36,11 @@ import {
   serverToAskNameFor,
   sharingAllowsOperate,
   sharingAllowsStart,
+  sharingAllowsStartAnywhere,
+  someServerAllowsStart,
   threadLevelFor,
   threadLevelInProject,
+  type KnownConnectionAccess,
 } from "./sharing.ts";
 import { createJ5EnvironmentAtoms } from "./state.ts";
 
@@ -153,6 +157,14 @@ const environments = Effect.fn(function* (
               otherReads.push(`${environmentId}:artifacts`);
               return Effect.succeed({ entries: [] });
             },
+            [J5_CLIENT_READ_WS_METHODS.listSpawnedChildren]: () => {
+              otherReads.push(`${environmentId}:spawned`);
+              return Effect.succeed({ entries: [], spawnedByAgent: [] });
+            },
+            [J5_CLIENT_READ_WS_METHODS.listCrewMemberships]: () => {
+              otherReads.push(`${environmentId}:memberships`);
+              return Effect.succeed({ entries: [] });
+            },
             [J5_ACCESS_WS_METHODS.getConnectionAccess]: () => {
               asked.push(`${environmentId}:connection`);
               return answer(access);
@@ -267,6 +279,7 @@ describe("what a connection may start", () => {
     const access = person([{ scope: { kind: "thread", threadId: THREAD }, level: "collaborator" }]);
     expect(sharingAllowsStart(access, PROJECT)).toBe(false);
     expect(sharingAllowsStart(access, null)).toBe(false);
+    expect(sharingAllowsStartAnywhere(access)).toBe(false);
   });
 
   it("lets a project's Collaborator start threads there and add no project", () => {
@@ -277,6 +290,7 @@ describe("what a connection may start", () => {
     expect(sharingAllowsStart(access, PROJECT)).toBe(true);
     expect(sharingAllowsStart(access, "project:other")).toBe(false);
     expect(sharingAllowsStart(access, null)).toBe(false);
+    expect(sharingAllowsStartAnywhere(access)).toBe(true);
   });
 
   it("lets a Viewer here who writes to another thread start nothing here", () => {
@@ -285,11 +299,13 @@ describe("what a connection may start", () => {
       { scope: { kind: "thread", threadId: THREAD }, level: "collaborator" },
     ]);
     expect(sharingAllowsStart(access, PROJECT)).toBe(false);
+    expect(sharingAllowsStartAnywhere(access)).toBe(false);
   });
 
   it("lets a server's Viewer start nothing anywhere", () => {
     expect(sharingAllowsStart(SERVER_VIEWER, PROJECT)).toBe(false);
     expect(sharingAllowsStart(SERVER_VIEWER, null)).toBe(false);
+    expect(sharingAllowsStartAnywhere(SERVER_VIEWER)).toBe(false);
   });
 
   it("lets a server's Collaborator or Owner, or a service, start anything", () => {
@@ -299,12 +315,43 @@ describe("what a connection may start", () => {
     for (const access of [collaborator, OWNER, { kind: "service" } as const]) {
       expect(sharingAllowsStart(access, PROJECT)).toBe(true);
       expect(sharingAllowsStart(access, null)).toBe(true);
+      expect(sharingAllowsStartAnywhere(access)).toBe(true);
     }
   });
 
   it("withholds nothing before the server answers, and everything from an unplaced device", () => {
     expect(sharingAllowsStart(null, null)).toBe(true);
     expect(sharingAllowsStart({ kind: "unknown" }, PROJECT)).toBe(false);
+    expect(sharingAllowsStartAnywhere(null)).toBe(true);
+    expect(sharingAllowsStartAnywhere({ kind: "unknown" })).toBe(false);
+  });
+
+  it("offers a door only where one server's levels and its session's Operate tasks both allow", () => {
+    const addsProject = (access: KnownConnectionAccess) => sharingAllowsStart(access, null);
+    for (const allows of [addsProject, sharingAllowsStartAnywhere]) {
+      expect(someServerAllowsStart([], allows)).toBe(true);
+      // An Owner on a device paired read-only.
+      expect(someServerAllowsStart([{ access: OWNER, operates: false }], allows)).toBe(false);
+      // Ownership on one server and Operate tasks on another open neither.
+      expect(
+        someServerAllowsStart(
+          [
+            { access: OWNER, operates: false },
+            { access: SERVER_VIEWER, operates: true },
+          ],
+          allows,
+        ),
+      ).toBe(false);
+      expect(
+        someServerAllowsStart(
+          [
+            { access: SERVER_VIEWER, operates: true },
+            { access: OWNER, operates: true },
+          ],
+          allows,
+        ),
+      ).toBe(true);
+    }
   });
 });
 
@@ -419,10 +466,20 @@ describe("a connection that holds two threads of a server", () => {
         false,
       );
       expect(yield* refused(atoms.fleet({ environmentId: SHARED_SERVER, input: {} }))).toBe(true);
+      // The rows it reaches: which of them an agent spawned, and their Crew chips.
+      const rows = { environmentId: SHARED_SERVER, input: { threadIds: [VIEWED] } };
+      const spawned = yield* Effect.promise(() => atoms.listSpawnedChildren.run(registry, rows));
+      expect(AsyncResult.isSuccess(spawned)).toBe(true);
+      const memberships = yield* Effect.promise(() =>
+        atoms.listCrewMemberships.run(registry, rows),
+      );
+      expect(AsyncResult.isSuccess(memberships)).toBe(true);
       expect(otherReads).toEqual([
         `${SHARED_SERVER}:artifacts`,
         `${SHARED_SERVER}:inbox`,
         `${SHARED_SERVER}:crew`,
+        `${SHARED_SERVER}:spawned`,
+        `${SHARED_SERVER}:memberships`,
       ]);
       expect(fleetReads).toEqual([]);
     }),
@@ -533,11 +590,17 @@ describe("upstream's notice to pair again", () => {
     expect(permissionNoticeApplies(AsyncResult.success({ kind: "unknown" as const }))).toBe(false);
   });
 
-  it("waits for the server's answer", () => {
+  it("waits for the server's answer, and a read that failed on the way is no answer", () => {
     expect(permissionNoticeApplies(AsyncResult.initial())).toBe(false);
+    expect(
+      permissionNoticeApplies(AsyncResult.failure(Cause.fail(new Error("socket closed")))),
+    ).toBe(false);
   });
 
   it("stays upstream's for a server from before people and for a session that is no person's", () => {
+    expect(
+      permissionNoticeApplies(AsyncResult.failure(Cause.die("Unknown request tag: j5.access"))),
+    ).toBe(true);
     expect(permissionNoticeApplies(AsyncResult.success(null))).toBe(true);
     expect(permissionNoticeApplies(AsyncResult.success({ kind: "service" as const }))).toBe(true);
   });
@@ -563,20 +626,20 @@ describe("whether the person owns a connected server", () => {
 describe("an Owner's Settings page, reached by someone who owns no server", () => {
   it("names the server and says who to ask", () => {
     expect(ownerOnlySettingsNotice({ serverName: "openclaw", writesSomewhere: true })).toEqual({
-      title: "Coming soon",
-      body: "Only an Owner of openclaw can change this here for now. Ask an Owner, or ask an agent on a thread you can write to.",
+      title: "Only an Owner can change this",
+      body: "Ask an Owner of openclaw, or an agent on a thread you can write to.",
     });
   });
 
   it("does not send someone who writes nowhere to an agent", () => {
     expect(ownerOnlySettingsNotice({ serverName: "openclaw", writesSomewhere: false }).body).toBe(
-      "Only an Owner of openclaw can change this here for now. Ask an Owner.",
+      "Ask an Owner of openclaw.",
     );
   });
 
   it("says this server when the server has no name to show", () => {
     expect(ownerOnlySettingsNotice({ serverName: null, writesSomewhere: false }).body).toBe(
-      "Only an Owner of this server can change this here for now. Ask an Owner.",
+      "Ask an Owner of this server.",
     );
   });
 });

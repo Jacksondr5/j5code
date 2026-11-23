@@ -902,6 +902,8 @@ export type ServerNpmReleaseInput = typeof ServerNpmReleaseInput.Type;
 export const ServerNpmRelease = Schema.Struct({
   version: Schema.String,
   databaseMigration: Schema.optionalKey(Schema.Int),
+  /** J5: the release's newest migration in each J5 ledger, keyed by table. */
+  j5DatabaseMigrations: Schema.optionalKey(Schema.Record(Schema.String, Schema.Int)),
 });
 export type ServerNpmRelease = typeof ServerNpmRelease.Type;
 
@@ -910,7 +912,7 @@ export class ServerNpmReleaseError extends Schema.TaggedError<ServerNpmReleaseEr
   { reason: Schema.String },
 ) {
   override get message(): string {
-    return `Could not check the configured npm registry: ${this.reason}`;
+    return `Could not check J5's releases: ${this.reason}`;
   }
 }
 
@@ -921,6 +923,8 @@ export const ServerSelfUpdateInput = Schema.Struct({
   channel: Schema.optionalKey(DesktopUpdateChannelSchema),
   /** The target release's highest migration; the host refuses to leave Nightly without it. */
   targetDatabaseMigration: Schema.optionalKey(Schema.Int),
+  /** J5: the target release's J5 ledger heads; the host refuses to cross tracks without them. */
+  targetJ5DatabaseMigrations: Schema.optionalKey(Schema.Record(Schema.String, Schema.Int)),
 });
 export type ServerSelfUpdateInput = typeof ServerSelfUpdateInput.Type;
 

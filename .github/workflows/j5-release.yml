@@ -17,7 +17,9 @@ name: J5 Release
 #     the background service, and SSH remote launch all download from here.
 # J5 no longer publishes to npm (FORK.md release-archive case).
 #
-# A build whose version is `<x.y.z>-preview.<yyyymmdd>.<n>` publishes a preview:
+# A manual run publishes only a preview, from the J5 Signed macOS Build run it
+# names, at the version that run's branch commits. A version
+# `<x.y.z>-preview.<yyyymmdd>.<n>` is a preview:
 # a GitHub pre-release that never becomes "latest", so the stable installer
 # URL, `j5 update`, and desktop updates never pick it up. Maintainers cut one
 # from an unmerged branch to test installs and updates before a release; see
@@ -26,10 +28,11 @@ name: J5 Release
 # A version `<x.y.z>-nightly.<yyyymmdd>.<n>` publishes a nightly: also a
 # pre-release that never becomes "latest", but with `nightly-mac.yml`, the feed
 # desktop apps on the nightly update track follow. Nightlies come only from J5
-# Nightly, which calls this workflow with a commit and a version; a manual run
-# refuses a nightly version, and a call refuses any other. The version is
-# then stamped into the manifests at build time instead of being read from them,
-# and the desktop app is built by this run's `desktop` job.
+# Nightly, and stable releases only from J5 Stable, which promotes a nightly's
+# commit. Both call this workflow with a commit and a version, which is stamped
+# into the manifests at build time instead of being read from them, and the
+# desktop app is built by this run's `desktop` job. A call with `draft` leaves
+# the release as a draft, for a dry run.
 #
 # The builds run side by side and only `release` waits for all of them. Each
 # macOS job is one more wait for a scarce macOS runner, so there are two:
@@ -37,9 +40,9 @@ name: J5 Release
 # monitor.
 #
 # No checkout here sets `persist-credentials: false`: it makes checkout fail on
-# the vendored gitlinks (FORK.md, "J5 CI and packaging"). The one job with a
-# write token, `release`, runs no code from the repository, and the jobs that
-# do run repository code hold a read-only token.
+# the vendored gitlinks (FORK.md, "J5 CI and packaging"). The jobs with a
+# write token, `resolve` and `release`, run no code from the repository, and
+# the jobs that do run repository code hold a read-only token.
 
 on:
   workflow_dispatch:
@@ -58,6 +61,10 @@ on:
         description: Version to stamp and publish
         type: string
         required: true
+      draft:
+        description: Leave the release as a draft
+        type: boolean
+        default: false
     secrets:
       CSC_LINK:
         required: true
@@ -77,10 +84,16 @@ permissions:
 concurrency:
   group: j5-release
   cancel-in-progress: false
+  # Without it a manual preview queued behind a waiting stable call cancels that call.
+  queue: max
 
 jobs:
   resolve:
     runs-on: ubuntu-24.04
+    # A read-only token is not shown draft releases, and this job looks for a stray one.
+    permissions:
+      contents: write
+      actions: read
     outputs:
       ref: ${{ steps.source.outputs.ref }}
       version: ${{ steps.source.outputs.version }}
@@ -139,15 +152,15 @@ jobs:
             if (channel === null) {
               throw new Error(`This workflow requires a stable (x.y.z), preview (x.y.z-preview.<date>.<n>) or nightly (x.y.z-nightly.<date>.<n>) version; found ${version}.`);
             }
-            // A nightly reaches every install on the nightly track, so it comes only from J5
-            // Nightly, which builds j5/main. A manual run never publishes one, whatever version
-            // the branch commits.
-            if (!stamp && channel === 'nightly') {
-              throw new Error(`Nightlies are published by J5 Nightly, not by a manual J5 Release; found ${version}.`);
+            // A nightly reaches every install on the nightly track and a stable release every
+            // install, so they come only from J5 Nightly, which builds j5/main, and J5 Stable,
+            // which promotes a nightly. A manual run never publishes one, whatever version the
+            // branch commits.
+            if (!stamp && channel !== 'preview') {
+              throw new Error(`A manual J5 Release publishes only a preview; nightlies come from J5 Nightly and stable releases from J5 Stable. Found ${version}.`);
             }
-            // Nothing calls this workflow with a stable or preview version until promotion exists.
-            if (stamp && channel !== 'nightly') {
-              throw new Error(`A calling workflow can publish only a nightly; found ${version}.`);
+            if (stamp && channel === 'preview') {
+              throw new Error(`A calling workflow publishes a nightly or a stable release; found ${version}.`);
             }
             // Release archives replace the npm package from 0.0.44 on; an older
             // version number would be offered as a downgrade to every installed
@@ -163,12 +176,9 @@ jobs:
             // rather than report "already published".
             const tag = `v${version}`;
             let published = false;
-            let release = null;
-            try {
-              ({ data: release } = await github.rest.repos.getReleaseByTag({ ...context.repo, tag }));
-            } catch (error) {
-              if (error.status !== 404) throw error;
-            }
+            // The get-by-tag endpoint never returns a draft, so read the list, which does.
+            const releases = await github.paginate(github.rest.repos.listReleases, { ...context.repo, per_page: 100 });
+            const release = releases.find(candidate => candidate.tag_name === tag) ?? null;
             if (release !== null) {
               let tagSha = null;
               try {
@@ -176,10 +186,14 @@ jobs:
                 ({ data: { sha: tagSha } } = await github.rest.repos.getCommit({ ...context.repo, ref: tag }));
               } catch (error) {
                 // A draft release may not have created its tag yet.
-                if (error.status !== 404 && error.status !== 422) throw error;
+                if (error.status !== 404 && !(error.status === 422 && /No commit found/.test(error.message))) throw error;
               }
               if (tagSha !== null && tagSha !== sha) {
                 throw new Error(`Release ${tag} already exists at ${tagSha}, but this build is ${sha}. Bump the version before releasing.`);
+              }
+              // A draft has no tag, so a draft a failed run left for another commit passes the check above.
+              if (release.draft && release.target_commitish !== sha) {
+                throw new Error(`A draft release for ${tag} targets ${release.target_commitish}, not ${sha}. Delete it with \`gh release delete ${tag} --yes\` and run again.`);
               }
               published = tagSha === sha && !release.draft && release.assets.some(asset => asset.name === 'SHA256SUMS');
             }
@@ -437,10 +451,18 @@ jobs:
       - name: Smoke-test CLI archive
         run: pnpm exec node scripts/smoke-cli-archive.ts --archive "release-cli/t3-$RELEASE_VERSION-${{ matrix.key }}.tar.gz" --expect-version "$RELEASE_VERSION"
 
+      # The migrations this release's server knows, which a track switch checks
+      # against each machine's database (#927). Every archive has the same ones.
+      - name: Write release metadata
+        if: matrix.key == 'linux-x64'
+        run: pnpm exec node apps/server/src/j5/updates/printReleaseMetadata.ts > release-cli/release-metadata.json
+
       - uses: actions/upload-artifact@v7
         with:
           name: j5-cli-${{ matrix.key }}
-          path: release-cli/t3-*-${{ matrix.key }}.tar.gz
+          path: |
+            release-cli/t3-*-${{ matrix.key }}.tar.gz
+            release-cli/release-metadata.json
           if-no-files-found: error
           retention-days: 30
 
@@ -511,6 +533,7 @@ jobs:
       RELEASE_VERSION: ${{ needs.resolve.outputs.version }}
       RELEASE_SHA: ${{ needs.resolve.outputs.ref }}
       RELEASE_CHANNEL: ${{ needs.resolve.outputs.channel }}
+      RELEASE_DRAFT: ${{ inputs.draft == true }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -569,6 +592,8 @@ jobs:
           for archive in "${archives[@]}"; do
             test -f "release-assets/$archive"
           done
+          # Every lookup of this release reads it, so a malformed file must stop the release.
+          jq -e '(.databaseMigration | type == "number" and . == floor) and (.j5DatabaseMigrations | type == "object" and length > 0 and all(.[]; type == "number" and . == floor))' release-assets/release-metadata.json
           cp scripts/install.sh scripts/install.ps1 release-assets/
           # Checksums come from the exact bytes being uploaded.
           (cd release-assets && sha256sum "${archives[@]}" install.sh install.ps1 > SHA256SUMS)
@@ -578,10 +603,34 @@ jobs:
         run: |
           set -euo pipefail
           tag="v$RELEASE_VERSION"
-          if tag_sha="$(gh api "repos/$GH_REPO/commits/$tag" --jq .sha 2>/dev/null)"; then
-            test "$tag_sha" = "$RELEASE_SHA"
+          # Prints the tag's commit, or nothing when the tag does not exist (HTTP 404, or 422 "No commit found").
+          # Any other error, such as a 403, stops the run.
+          tag_commit() {
+            local sha
+            if sha="$(gh api "repos/$GH_REPO/commits/$tag" --jq .sha 2>"$RUNNER_TEMP/tag.err")"; then
+              echo "$sha"
+            else
+              grep -qE 'HTTP 404|No commit found' "$RUNNER_TEMP/tag.err" || { cat "$RUNNER_TEMP/tag.err" >&2; return 1; }
+            fi
+          }
+          tag_sha="$(tag_commit)"
+          if [[ -n "$tag_sha" && "$tag_sha" != "$RELEASE_SHA" ]]; then
+            echo "::error::$tag already exists at $tag_sha, not $RELEASE_SHA."
+            exit 1
           fi
-          if ! gh release view "$tag" >/dev/null 2>&1; then
+          # A draft has no tag yet, so a draft a failed run left for another commit
+          # passes the check above; publishing into it would mislabel this build.
+          release_exists=false
+          if target="$(gh release view "$tag" --json targetCommitish --jq .targetCommitish 2>"$RUNNER_TEMP/view.err")"; then
+            release_exists=true
+            if [[ "$target" != "$RELEASE_SHA" ]]; then
+              echo "::error::A release for $tag already targets $target, not $RELEASE_SHA. Delete that draft, or promote a newer nightly."
+              exit 1
+            fi
+          else
+            grep -q 'release not found' "$RUNNER_TEMP/view.err" || { cat "$RUNNER_TEMP/view.err" >&2; exit 1; }
+          fi
+          if [[ "$release_exists" != true ]]; then
             if [[ "$RELEASE_CHANNEL" == nightly ]]; then
               cat > "$RUNNER_TEMP/release-notes.md" <<EOF
           J5 Code $RELEASE_VERSION (nightly)
@@ -639,7 +688,33 @@ jobs:
             if [[ "$RELEASE_CHANNEL" != stable ]]; then prerelease=(--prerelease); fi
             gh release create "$tag" --target "$RELEASE_SHA" --title "J5 Code $RELEASE_VERSION" --notes-file "$RUNNER_TEMP/release-notes.md" --draft "${prerelease[@]}"
           fi
+          # A re-run job reuses the resolve job's outputs, so read the release as it is now.
+          if [[ "$(gh release view "$tag" --json isDraft --jq .isDraft)" != true ]]; then
+            echo "::error::$tag is already published; this run leaves it unchanged. If a later job failed, dispatch the caller again with the same version (J5 Stable: -f nightly=<the tag in its summary>); it skips the builds and runs only what is left."
+            exit 1
+          fi
           gh release upload "$tag" release-assets/* --clobber
+          if [[ "$RELEASE_DRAFT" == true ]]; then
+            echo "::notice::Left $tag as a draft. Delete it with: gh release delete $tag -R $GH_REPO --yes"
+            exit 0
+          fi
+          tag_sha="$(tag_commit)"
+          if [[ -n "$tag_sha" && "$tag_sha" != "$RELEASE_SHA" ]]; then
+            echo "::error::$tag now exists at $tag_sha, not $RELEASE_SHA."
+            exit 1
+          fi
+          if [[ "$RELEASE_CHANNEL" == stable ]]; then
+            # Marked latest, an older version would be offered to every install as a downgrade.
+            if ! latest="$(gh api "repos/$GH_REPO/releases/latest" --jq .tag_name 2>"$RUNNER_TEMP/latest.err")"; then
+              grep -q 'HTTP 404' "$RUNNER_TEMP/latest.err" || { cat "$RUNNER_TEMP/latest.err" >&2; exit 1; }
+              latest=""
+            fi
+            latest="${latest#v}"
+            if [[ "$(printf '%s\n' "$latest" "$RELEASE_VERSION" | sort -V | tail -n 1)" != "$RELEASE_VERSION" ]]; then
+              echo "::error::$RELEASE_VERSION is older than the latest stable release, $latest; $tag stays a draft."
+              exit 1
+            fi
+          fi
           # A preview or nightly must never become "latest": the stable installer
           # URL and stable desktop updates resolve through it.
           if [[ "$RELEASE_CHANNEL" != stable ]]; then

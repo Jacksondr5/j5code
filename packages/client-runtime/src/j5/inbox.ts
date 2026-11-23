@@ -1,11 +1,13 @@
 import type { ChatAttachment, EnvironmentId } from "@t3tools/contracts";
 import {
   type ConnectionAccess,
+  type HumanInboxItem,
   type HumanInboxResponse,
   type ScopedHumanInboxItem,
   scopedInboxItemKey,
 } from "@t3tools/contracts/j5";
 
+import { ALLOW_ONCE_LIFTS } from "./agentPersonas.ts";
 import type { J5ReadSource, J5ReadSources } from "./readSources.ts";
 
 export type PresentedHumanInboxItem = ScopedHumanInboxItem & {
@@ -73,29 +75,48 @@ export function inboxBellPresentation(input: {
   return { badge, label };
 }
 
-export interface RecordPart {
-  readonly kind: "prose" | "block";
+export interface RecordLine {
+  readonly indent: string;
   readonly text: string;
 }
 
+export type RecordPart =
+  | { readonly kind: "prose"; readonly text: string }
+  | { readonly kind: "block"; readonly lines: ReadonlyArray<RecordLine> };
+
 /**
  * J5's record split into its prose and the indented blocks it quotes, such as a persona draft's
- * definition, so a block can keep its layout. Indentation alone decides: four leading spaces.
+ * definition. Indentation alone decides: four leading spaces. A block's lines keep their own
+ * indent apart from their words, so a long line can wrap under itself.
  */
 export function splitRecordText(text: string): ReadonlyArray<RecordPart> {
-  const parts: Array<RecordPart> = [];
+  const runs: Array<{ kind: RecordPart["kind"]; lines: Array<string> }> = [];
   for (const line of text.split("\n")) {
     const kind = line.startsWith("    ") ? "block" : "prose";
     const body = kind === "block" ? line.slice(4) : line;
-    const last = parts[parts.length - 1];
-    if (last?.kind === kind) parts[parts.length - 1] = { kind, text: `${last.text}\n${body}` };
-    else parts.push({ kind, text: body });
+    const last = runs[runs.length - 1];
+    if (last?.kind === kind) last.lines.push(body);
+    else runs.push({ kind, lines: [body] });
   }
-  return parts.flatMap((part) => {
-    const trimmed = part.kind === "prose" ? part.text.replace(/^\n+|\n+$/g, "") : part.text;
-    return trimmed === "" ? [] : [{ kind: part.kind, text: trimmed }];
+  return runs.flatMap((run): Array<RecordPart> => {
+    if (run.kind === "block")
+      return [
+        {
+          kind: "block",
+          lines: run.lines.map((line) => {
+            const indent = /^ */.exec(line)![0];
+            return { indent: line.trim() === "" ? "" : indent, text: line.slice(indent.length) };
+          }),
+        },
+      ];
+    const prose = run.lines.join("\n").replace(/^\n+|\n+$/g, "");
+    return prose === "" ? [] : [{ kind: "prose", text: prose }];
   });
 }
+
+/** What an open ask says in place of its answer box while its server isn't connected. */
+export const askWaitsForServerLine = (environmentLabel: string) =>
+  `${environmentLabel} isn't connected. You can answer when it's back.`;
 
 export function j5SourceNotice(source: J5ReadSource<unknown>): string | null {
   switch (source.status) {
@@ -149,6 +170,31 @@ export function nextKeptItems<Item>(input: {
   return next.size === input.kept.size && [...next.keys()].every((key) => input.kept.has(key))
     ? input.kept
     : next;
+}
+
+/**
+ * The saved answers, by `scopedInboxItemKey`, whose ask a server's latest read no longer lists for
+ * this person: answered, withdrawn, or asked of someone else. An ask kept on the page with its
+ * words (AC17) keeps them, and so does every ask on a server without a current read.
+ */
+export function closedInboxAnswerKeys(input: {
+  readonly openSources: J5ReadSources<HumanInboxResponse>;
+  readonly itemKeys: Iterable<string>;
+  readonly kept: ReadonlySet<string>;
+}): ReadonlyArray<string> {
+  const openByEnvironment = new Map<string, ReadonlySet<string>>();
+  for (const source of input.openSources.sources) {
+    if (source.status !== "ready" || source.data === null) continue;
+    const { environmentId } = source;
+    openByEnvironment.set(
+      environmentId,
+      new Set(source.data.items.map((item) => scopedInboxItemKey({ ...item, environmentId }))),
+    );
+  }
+  return [...input.itemKeys].filter((itemKey) => {
+    const open = openByEnvironment.get((JSON.parse(itemKey) as [string])[0]);
+    return open !== undefined && !open.has(itemKey) && !input.kept.has(itemKey);
+  });
 }
 
 /**
@@ -259,4 +305,51 @@ export function keepForPersonScopes(personScopes: string) {
       (people.get(environmentId) === null || people.get(environmentId) === personId)
     );
   };
+}
+
+/**
+ * What an answer may carry on a server: an answer sends only uploads, so a server that takes no
+ * uploads takes no attachments, and one that takes no file uploads takes images only.
+ */
+export function answerAttachmentSupport(
+  capabilities:
+    | {
+        readonly attachmentUploads?: boolean;
+        readonly fileAttachments?: { readonly maxUploadBytes: number };
+      }
+    | undefined,
+): { readonly maxFileBytes: number | null } | null {
+  return capabilities?.attachmentUploads === true
+    ? { maxFileBytes: capabilities.fileAttachments?.maxUploadBytes ?? null }
+    : null;
+}
+
+/**
+ * The one Owner action an ask carries while it is still open to take: "Allow this once" for a
+ * blocked persona launch, or "Save persona" for an agent's persona draft. `detail` says what it does.
+ */
+export function ownerAskAction(item: Pick<HumanInboxItem, "escalation" | "personaDraft">) {
+  const { escalation, personaDraft } = item;
+  if (escalation?.status === "open" && escalation.waivable !== null)
+    return {
+      kind: "allow-once" as const,
+      label: "Allow this once",
+      pendingLabel: "Allowing…",
+      failed: "Could not allow it once.",
+      detail: `Lets ${escalation.personaId} start once on ${ALLOW_ONCE_LIFTS[escalation.waivable]}. Later launches keep its usual limits.`,
+    };
+  if (personaDraft?.status === "open")
+    return {
+      kind: "save-persona" as const,
+      label: "Save persona",
+      pendingLabel: "Saving…",
+      failed: "Could not save the persona.",
+      detail:
+        personaDraft.mode === "create"
+          ? `Adds ${personaDraft.personaId} to this server's persona library, for everyone on it.`
+          : personaDraft.overridesFolder
+            ? `Saves ${personaDraft.personaId} as an override of the team persona for everyone on this server. Later team updates stay hidden until the override is removed and the team persona restored.`
+            : `Saves the edit to ${personaDraft.personaId} for everyone on this server.`,
+    };
+  return null;
 }

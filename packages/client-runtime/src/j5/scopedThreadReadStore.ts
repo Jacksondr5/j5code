@@ -15,6 +15,23 @@ interface EnvironmentReads {
   scopeReadState: ScopedThreadReadState;
 }
 
+/**
+ * The environments whose revision moved since `heard` last saw it, recorded as heard now. A first
+ * sighting counts as a move; a revision not yet read (`null`) moves nothing.
+ */
+export const takeMovedRevisions = (
+  heard: Map<EnvironmentId, string>,
+  revisions: ReadonlyArray<readonly [EnvironmentId, string | null]>,
+): ReadonlySet<EnvironmentId> => {
+  const moved = new Set<EnvironmentId>();
+  for (const [environmentId, revision] of revisions) {
+    if (revision === null || heard.get(environmentId) === revision) continue;
+    heard.set(environmentId, revision);
+    moved.add(environmentId);
+  }
+  return moved;
+};
+
 /** Every J5 per-thread read caps a request at 500 ids; batches stay well under it. */
 const THREAD_READ_BATCH_SIZE = 200;
 

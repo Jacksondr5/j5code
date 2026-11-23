@@ -12,6 +12,7 @@ import {
   type OrchestrationV2ThreadProjection,
   type OrchestrationV2ThreadShell,
   type OrchestrationV2ThreadStreamItem,
+  type PreviewEvent,
   type ProjectId,
   type ServerConfig,
   type ServerConfigStreamEvent,
@@ -20,11 +21,12 @@ import {
   type ServerProviderModel,
   type ServerProviderSkill,
   type ScheduledTaskListResult,
-  type ThreadId,
+  ThreadId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import { identity } from "effect/Function";
 import * as Queue from "effect/Queue";
+import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import type * as SqlClient from "effect/sql/SqlClient";
 import * as Stream from "effect/Stream";
@@ -287,6 +289,10 @@ export interface ConnectionView {
   readonly threadStream: <E, R>(
     stream: Stream.Stream<OrchestrationV2ThreadStreamItem, E, R>,
   ) => Stream.Stream<OrchestrationV2ThreadStreamItem, E, R>;
+  /** Upstream's feed of every thread's browser tabs, their addresses included. */
+  readonly previewEvents: <E, R>(
+    stream: Stream.Stream<PreviewEvent, E, R>,
+  ) => Stream.Stream<PreviewEvent, E, R>;
   /** Upstream's one-shot thread load, the same detail without the feed. */
   readonly threadProjection: <E, R>(
     load: Effect.Effect<OrchestrationV2ThreadProjection, E, R>,
@@ -315,6 +321,7 @@ const MEMBER_VIEW: ConnectionView = {
   lifecycleStream: identity,
   shellStream: (input, subscribe) => subscribe(input),
   threadStream: identity,
+  previewEvents: identity,
   threadProjection: identity,
   searchThreads: (input, search) => search(input),
 };
@@ -470,7 +477,33 @@ const narrowedView = (
     ).pipe(Effect.map((tasks) => ({ tasks: tasks.flat() })));
   return {
     scheduledTasks: (list) => list.pipe(Effect.flatMap(reachableTasks)),
-    scheduledTasksStream: (stream) => stream.pipe(Stream.mapEffect(reachableTasks)),
+    // Begins again each time what the person reaches changes, as the sidebar does, reading the
+    // list afresh. A list whose run is no longer the latest, before or after it is filtered, is
+    // dropped, so nothing read or filtered under an earlier reach is delivered after it.
+    scheduledTasksStream: (stream) =>
+      Stream.unwrap(
+        Effect.gen(function* () {
+          const reachChanges = yield* access.subscribeChanges;
+          const current = yield* Ref.make(0);
+          return Stream.concat(
+            Stream.make(undefined),
+            Stream.fromSubscription(reachChanges).pipe(
+              Stream.filter((changed) => changed === personId),
+            ),
+          ).pipe(
+            Stream.mapEffect(() => Ref.updateAndGet(current, (run) => run + 1)),
+            Stream.switchMap((run) => stream.pipe(Stream.map((result) => ({ run, result })))),
+            Stream.mapEffect(({ run, result }) =>
+              Effect.gen(function* () {
+                if ((yield* Ref.get(current)) !== run) return [];
+                const shown = yield* reachableTasks(result);
+                return (yield* Ref.get(current)) === run ? [shown] : [];
+              }),
+            ),
+            Stream.flatMap((shown) => Stream.fromIterable(shown)),
+          );
+        }),
+      ),
     config: writes ? identity : (config) => reduceServerConfig(config, skillsShown),
     // Every later provider, settings, keybinding, theme and usage update is dropped rather than
     // reduced: a Viewer's client keeps the providers and models it was told of when it connected.
@@ -529,6 +562,23 @@ const narrowedView = (
         }),
       ).pipe(Stream.mapError(shellFailure)),
     threadStream: (stream) => stream.pipe(Stream.map(narrowThreadItem)),
+    /**
+     * A tab is told only on a thread the person holds Collaborator on, as `AccessGate`'s preview
+     * rules ask; a tab of no thread, such as the Inbox browser's, never (only a server level covers
+     * it, and a narrowed one is below Collaborator). Reach is read on each event, so a share taken
+     * away, or a thread moved to a project the person doesn't reach, ends with the next one.
+     */
+    previewEvents: (stream) =>
+      personId === null
+        ? Stream.empty
+        : stream.pipe(
+            Stream.filterEffect((event) =>
+              access.threadLevel(personId, ThreadId.make(event.threadId)).pipe(
+                Effect.map((level) => levelReaches(level, "collaborator")),
+                Effect.orElseSucceed(() => false),
+              ),
+            ),
+          ),
     threadProjection: (load) => load.pipe(Effect.map(narrowProjection)),
     // Reach is read on each search, so a share taken away ends with the next one. A narrowed
     // sidebar has no older-settled cut, so the older-settled rows, read from every settled

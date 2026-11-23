@@ -15,6 +15,8 @@ import {
   resolveVersionMismatch,
   supportsDesktopAppUpdate,
 } from "~/versionSkew";
+import type { J5DatabaseMigrations } from "@t3tools/shared/j5/databaseMigrations";
+import { j5ChannelSwitchBlockReason } from "~/j5/updates/channelSwitch";
 import type { ServerUpdateOutcome, ServerUpdateTarget } from "../ServerUpdateAction";
 
 export interface UpdateEverythingMachine {
@@ -145,6 +147,8 @@ export interface ChannelSwitchRelease {
   readonly channel: DesktopUpdateChannel;
   readonly version: string;
   readonly databaseMigration: number | undefined;
+  /** J5: the release's J5 ledger heads. */
+  readonly j5DatabaseMigrations?: J5DatabaseMigrations | undefined;
 }
 
 export const channelSwitchLabel = (channel: DesktopUpdateChannel) =>
@@ -159,6 +163,7 @@ function channelSwitchBlockReason(
   fromVersion: string,
   release: ChannelSwitchRelease,
   currentMigration: number | undefined,
+  currentJ5Migrations: J5DatabaseMigrations | undefined,
 ): string | null {
   if (!crossesTrack(fromVersion, release)) return null;
   const from = channelSwitchLabel(desktopUpdateChannelOf(fromVersion));
@@ -169,9 +174,17 @@ function channelSwitchBlockReason(
   if (release.databaseMigration === undefined) {
     return `${release.version} predates database checks; wait for a newer ${channelSwitchLabel(release.channel)} release`;
   }
-  return currentMigration > release.databaseMigration
-    ? `its database has changes ${release.version} does not support yet; stay on ${from} until ${channelSwitchLabel(release.channel)} has them`
-    : null;
+  if (currentMigration > release.databaseMigration) {
+    return `its database has changes ${release.version} does not support yet; stay on ${from} until ${channelSwitchLabel(release.channel)} has them`;
+  }
+  // J5: J5's ledgers count too (FORK.md case 120).
+  return j5ChannelSwitchBlockReason({
+    version: release.version,
+    from,
+    to: channelSwitchLabel(release.channel),
+    database: currentJ5Migrations,
+    release: release.j5DatabaseMigrations,
+  });
 }
 
 /** This app's reinstall restarts every server it hosts, so each of their databases must allow the
@@ -183,6 +196,7 @@ export function localSwitchBlockReason(
   hosted: ReadonlyArray<{
     readonly connected: boolean;
     readonly databaseMigration: number | undefined;
+    readonly j5DatabaseMigrations?: J5DatabaseMigrations | undefined;
   }>,
   backendCount: number,
 ): string | null {
@@ -196,7 +210,14 @@ export function localSwitchBlockReason(
   }
   return (
     hosted
-      .map((server) => channelSwitchBlockReason(appVersion, release, server.databaseMigration))
+      .map((server) =>
+        channelSwitchBlockReason(
+          appVersion,
+          release,
+          server.databaseMigration,
+          server.j5DatabaseMigrations,
+        ),
+      )
       .find((reason) => reason !== null) ?? null
   );
 }
@@ -248,6 +269,9 @@ export function collectChannelSwitchTargets(
       ...(release.databaseMigration === undefined
         ? {}
         : { targetDatabaseMigration: release.databaseMigration }),
+      ...(release.j5DatabaseMigrations === undefined
+        ? {}
+        : { targetJ5DatabaseMigrations: release.j5DatabaseMigrations }),
     });
     const serverVersion = config?.environment.serverVersion;
     const sameTrack = serverVersion !== undefined && isOnTrack(serverVersion, release.channel);
@@ -286,6 +310,7 @@ export function collectChannelSwitchTargets(
       serverVersion,
       release,
       config.environment.databaseMigration,
+      config.environment.j5DatabaseMigrations,
     );
     if (blocked !== null) {
       skip(blocked);
@@ -297,7 +322,7 @@ export function collectChannelSwitchTargets(
       compareSemverVersions(release.version, serverVersion) <= 0
     ) {
       skip(
-        `run \`t3 update --channel ${release.channel === "nightly" ? "nightly" : "stable"} --allow-downgrade\` there`,
+        `run \`j5 update --channel ${release.channel === "nightly" ? "nightly" : "stable"} --allow-downgrade\` there`,
       );
       continue;
     }

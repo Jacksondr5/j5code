@@ -82,6 +82,8 @@ const READS_A_NARROW_PERSON_SENDS: ReadonlySet<string> = new Set([
   J5_CLIENT_READ_WS_METHODS.readOpenInboxCount,
   J5_CLIENT_READ_WS_METHODS.listCrewProposals,
   J5_CLIENT_READ_WS_METHODS.listCrewRuntimeRequests,
+  J5_CLIENT_READ_WS_METHODS.listCrewMemberships,
+  J5_CLIENT_READ_WS_METHODS.listSpawnedChildren,
 ]);
 
 /**
@@ -364,6 +366,11 @@ export function createJ5EnvironmentAtoms<R, E>(
       runtime,
       "j5:change-peer-origin",
       J5_CLIENT_ACTION_WS_METHODS.changePeerOrigin,
+    ),
+    forgetEnvironmentLink: createJ5ActionCommand(
+      runtime,
+      "j5:forget-environment-link",
+      J5_CLIENT_ACTION_WS_METHODS.forgetEnvironmentLink,
     ),
   };
 }

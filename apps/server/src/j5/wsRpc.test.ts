@@ -46,6 +46,7 @@ import {
   PeerAdminService,
   PeerCredentialLinkModeError,
 } from "./a2a/PeerAdminService.ts";
+import { EnvironmentLinkService } from "./a2a/EnvironmentLinkService.ts";
 import { PeerUnreachableError } from "./a2a/PeerRegistryService.ts";
 import { ArtifactDeletion, ArtifactProjectUnavailableError } from "./artifacts/ArtifactDeletion.ts";
 import { makeArtifactRpcHandlers } from "./artifacts/artifactRpc.ts";
@@ -205,6 +206,9 @@ const clientFor = (scopes: ReadonlyArray<AuthEnvironmentScope>) =>
               entries: [],
             },
           }),
+      }),
+      Layer.mock(EnvironmentLinkService)({
+        forget: () => reached("forget link", { removed: true, sessionRevoked: true, detail: null }),
       }),
       Layer.mock(PeerAdminService)({
         issueCredential: (input) =>
@@ -369,6 +373,9 @@ const callEach = (client: Effect.Success<ReturnType<typeof clientFor>>["client"]
     ),
     [ACTIONS.listPeerAddresses]: outcome(client[ACTIONS.listPeerAddresses]({})),
     [ACTIONS.probePeer]: outcome(client[ACTIONS.probePeer]({ origin: "https://vm.example:3773" })),
+    [ACTIONS.forgetEnvironmentLink]: outcome(
+      client[ACTIONS.forgetEnvironmentLink]({ environmentId: "environment-vm" }),
+    ),
     [J5_ARTIFACT_WS_METHODS.deleteArtifact]: outcome(
       client[J5_ARTIFACT_WS_METHODS.deleteArtifact]({
         projectId,
@@ -431,6 +438,7 @@ describe("J5 client action RPC scopes", () => {
       ACTIONS.changePeerOrigin,
       ACTIONS.listPeerAddresses,
       ACTIONS.probePeer,
+      ACTIONS.forgetEnvironmentLink,
     ]) {
       assert.equal(J5_RPC_SCOPES[method], AuthAccessWriteScope, method);
     }
@@ -451,15 +459,16 @@ describe("J5 client action RPC scopes", () => {
             : {
                 served: false,
                 tag: "EnvironmentAuthorizationError",
-                requiredPermission: method.startsWith("j5.peers.")
-                  ? AuthAccessWriteScope
-                  : method.startsWith("j5.playbooks.") ||
-                      method === ACTIONS.archiveCrew ||
-                      method === ACTIONS.answerCrewWorktreeCleanup ||
-                      method === ACTIONS.allowPersonaOnce ||
-                      method === ACTIONS.savePersonaDraft
-                    ? AuthSettingsWriteScope
-                    : AuthOrchestrationOperateScope,
+                requiredPermission:
+                  method.startsWith("j5.peers.") || method.startsWith("j5.links.")
+                    ? AuthAccessWriteScope
+                    : method.startsWith("j5.playbooks.") ||
+                        method === ACTIONS.archiveCrew ||
+                        method === ACTIONS.answerCrewWorktreeCleanup ||
+                        method === ACTIONS.allowPersonaOnce ||
+                        method === ACTIONS.savePersonaDraft
+                      ? AuthSettingsWriteScope
+                      : AuthOrchestrationOperateScope,
               },
           method,
         );

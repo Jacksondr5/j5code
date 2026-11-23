@@ -343,6 +343,13 @@ it.layer(testLayer)("access gate", (it) => {
         yield* call(session, ORCHESTRATION_V2_WS_METHODS.searchThreads, { query: "plan" }),
         "ran",
       );
+      // So does the sidebar's agents-under-a-row read (`PlacementService.test.ts`).
+      assert.strictEqual(
+        yield* call(session, J5_CLIENT_READ_WS_METHODS.listSpawnedChildren, {
+          threadIds: [mine, other],
+        }),
+        "ran",
+      );
     }),
   );
 

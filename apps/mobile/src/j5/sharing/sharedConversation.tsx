@@ -13,6 +13,7 @@ import type { ThreadAuthors } from "@t3tools/contracts/j5";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
 import { useEffect, useState } from "react";
+import { View } from "react-native";
 
 import { AppText as Text } from "../../components/ui/AppText";
 import type { ThreadFeedEntry } from "../../lib/threadActivity";
@@ -141,20 +142,36 @@ export function useSharedConversationFeed(
 export function PromptAnsweredBy(props: {
   readonly environmentId: EnvironmentId;
   readonly item: { readonly threadId: ThreadId };
-  /**
-   * Nothing precedes it in the row, so it reads as a sentence rather than a trailing clause, and
-   * says "Answered" where no one is recorded (an unshared thread), so the header is never empty.
-   */
+  /** Nothing precedes it in the row, so it drops the separator. */
   readonly alone?: boolean;
+  /**
+   * The row is an answered question, so it says so even where no one is recorded (an unshared
+   * thread): "· answered" folded, "answered" opened.
+   */
+  readonly answered?: boolean;
 }) {
   const { answers } = useThreadAuthorIndex(props.environmentId, props.item.threadId);
   const by = isSettledPrompt(props.item) ? answers.get(props.item.requestId) : undefined;
-  if (by === undefined && !props.alone) return null;
+  if (by === undefined && !props.alone && !props.answered)
+    // The label fits its text on a prompt's row, so the row's end stays where it was.
+    return answeredByFollowsLabel(props.item, false) ? <View className="flex-1" /> : null;
+  // Lowercase in every state, as web's "· answered by Priya" is.
+  const said = props.alone ? "answered" : "· answered";
   return (
-    <Text numberOfLines={1} className="shrink-0 pl-1 pr-1.5 text-sm text-foreground-muted">
-      {by === undefined
-        ? "Answered"
-        : `${props.alone ? "Answered by" : "· answered by"} ${by.you ? "you" : (by.name ?? "someone")}`}
-    </Text>
+    <>
+      <Text
+        numberOfLines={1}
+        // After a question, the question truncates first and a long name stops at half the row.
+        // Alone, it takes the row and cancels the gap-1.5 around the empty label before it.
+        className={`pr-1.5 text-sm text-foreground-muted ${props.alone ? "-ml-1.5 min-w-0 flex-1" : "max-w-[50%] shrink-0 pl-1"}`}
+      >
+        {by === undefined ? said : `${said} by ${by.you ? "you" : (by.name ?? "someone")}`}
+      </Text>
+      {props.alone ? null : <View className="flex-1" />}
+    </>
   );
 }
+
+/** A prompt's row whose label `PromptAnsweredBy` follows, right after the text (IN-29). */
+export const answeredByFollowsLabel = (item: unknown, answered: boolean) =>
+  answered || isSettledPrompt(item);

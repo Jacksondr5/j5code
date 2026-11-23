@@ -1,5 +1,5 @@
 {
-  "version": 29,
+  "version": 30,
   "peerMessage": "[Cross-agent message from {{senderId}} in project {{origin}}{{senderServer}}]\n\n{{message}}\n\n{{exchangeInstruction}}",
   "senderServer": ", on {{serverName}}",
   "machineMessage": "[Message from automation {{senderId}} in project {{origin}}]\n\n{{message}}\n\n{{machineInstruction}}",
@@ -20,5 +20,6 @@
   "receiverLimitAutoResumeNotice": "{{receiverId}} hit its provider's usage limit and continues automatically at {{resetAt}}. Your message is saved and will run then, in the order it was sent. Don't send it again.",
   "receiverLimitPausedNotice": "{{receiverId}} hit its provider's usage limit and is paused until a person continues it. Your message is saved and will run then, in the order it was sent. Don't send it again.",
   "receiverQueueHeldNotice": "{{receiverId}}'s queue is on hold, so your message waits until a person resumes it. It will run then, in the order it was sent. Don't send it again.",
+  "askWithdrawInstruction": "If this ask is settled in an ordinary message in your thread instead of in the Inbox, withdraw it so it leaves the Inbox: call j5_clear_own_ask with exchange_id \"{{exchangeId}}\" and a new client_request_id. An answer given on the ask itself reaches you as a reply and closes it without that.",
   "clearOwnAskToolDescription": "Withdraw an ask you sent: closes your open exchange without a reply message. Use when the answer already arrived outside the exchange — for example, the human answered you directly in your thread — so the obligation exits their inbox honestly. Only the exchange's sender may clear it; the closure is recorded as sender-cleared, distinct from an answered exchange. Reuse client_request_id to retry safely."
 }

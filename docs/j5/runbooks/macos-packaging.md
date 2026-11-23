@@ -69,19 +69,41 @@ T3 Code.
 
 ## GitHub Actions
 
-For a public release:
+A stable release promotes a nightly that has been dogfooded. Work on `j5/main` and nightlies carry
+on while it is cut:
 
-1. Bump the release versions with `node scripts/update-release-package-versions.ts <version>`. It
-   writes the same version into `apps/server`, `apps/desktop`, `apps/web`, and `packages/contracts`
-   `package.json`. Commit the change and push it as `j5/release-<version>`.
-2. Run `J5 Signed macOS Build` on that branch. Keep the branch at the same commit until publication:
-   GitHub restricts release creation with the standard Actions token when the target commit is no
-   longer a branch head or tag.
-3. After CI and the signed build pass, run `J5 Release` with that build's numeric run ID.
-4. After publication, bring the version bump into `j5/main` with a PR so `j5/main` never reports an
-   older version than the latest release.
-5. In that PR, update the `Released pin:` line in `FORK.md` to the release's version and the
-   upstream pin, branch and frozen date it was built on. j5.codes reads that line.
+1. Run `J5 Stable` on `j5/main`:
+   `gh workflow run j5-stable.yml -R Jacksondr5/j5code --ref j5/main [-f nightly=v<x.y.z>-nightly.<date>.<n>]`.
+   Without `nightly` it promotes the newest nightly. It rebuilds that nightly's commit as `x.y.z`
+   and publishes it as the latest release. It stops before building if `vx.y.z` already exists at
+   another commit or `x.y.z` is older than the latest stable release.
+2. It then pushes `j5/release-<x.y.z>`: `j5/main` with the four manifests at `x.y.z` and FORK.md's
+   `Released pin:` set to the upstream pin the nightly was built on. j5.codes reads that line. Open
+   the pull request from the link in the run's summary; the workflow cannot open it itself.
+
+The next nightly counts up from `x.y.z` (after `0.0.52`, `0.0.53-nightly.*`) whether or not that
+pull request has merged: `J5 Nightly` reads the latest stable release as well as the committed
+version.
+
+If only the bump job failed, use **Re-run failed jobs**. If the release was published but another
+job failed, dispatch J5 Stable again with `-f nightly=<tag>`, using the tag named in the failed
+run's summary: the run sees the release is published, skips the builds, and pushes the bump branch.
+Don't use **Re-run all jobs** on a run started without `nightly`: it picks the newest nightly
+again, which may be a newer one.
+
+If publishing the draft fails, for example because GitHub refuses to let the Actions token tag an
+older commit, publish it by hand. First check that no newer stable release exists, since `--latest`
+would move every install back to `x.y.z`:
+`gh api repos/Jacksondr5/j5code/releases/latest --jq .tag_name`. Only if that prints an older
+version (or nothing), run `gh release edit v<x.y.z> -R Jacksondr5/j5code --draft=false --latest`;
+otherwise promote a newer nightly instead. Then make the bump branch by hand:
+`node scripts/update-release-package-versions.ts <x.y.z>` on `j5/main`, set FORK.md's
+`Released pin:` from the nightly commit's `Current pin:`, and push it as `j5/release-<x.y.z>`.
+
+To try it without publishing, add `-f dry_run=true`, with `--ref <branch>` to try a branch's changes
+to the workflows. A dry run builds everything into a draft release that nothing reads and pushes no
+branch. A dry run of a version that is already published makes no draft, so delete only a draft:
+`[[ "$(gh release view v<x.y.z> -R Jacksondr5/j5code --json isDraft --jq .isDraft)" == true ]] && gh release delete v<x.y.z> -R Jacksondr5/j5code --yes`.
 
 For a preview, to test installs and updates from a branch before it merges:
 
@@ -89,8 +111,10 @@ For a preview, to test installs and updates from a branch before it merges:
    `node scripts/update-release-package-versions.ts <x.y.z>-preview.<yyyymmdd>.<n>`, using the next
    release's `x.y.z`, today's date, and a counter that starts at 1. Commit and push it as
    `j5/preview-<x.y.z>-<n>`. This branch is never merged.
-2. Run `J5 Signed macOS Build` on that branch, then `J5 Release` with that build's run ID, as for a
-   public release. Keep the branch at that commit until the release is published.
+2. Run `J5 Signed macOS Build` on that branch, then `J5 Release` with that build's numeric run ID.
+   Keep the branch at that commit until the release is published: GitHub restricts release
+   creation with the standard Actions token when the target commit is no longer a branch head or
+   tag.
 3. Install it by naming the version; nothing offers a preview on its own:
    - **Fresh server:** use the installer attached to that release, which is the one under test:
      `curl -fsSL https://github.com/Jacksondr5/j5code/releases/download/v<version>/install.sh | T3CODE_VERSION=<version> sh`.
@@ -113,10 +137,12 @@ A preview is a GitHub pre-release and is never marked latest. The stable install
 A nightly is `j5/main` as it stands, published for daily use ahead of a stable release. Nothing is
 committed for one: the version is stamped into the four manifests during the build.
 
-To publish one, run `J5 Nightly` on `j5/main`. It takes no inputs. It names the build
-`<x.y.z>-nightly.<yyyymmdd>.<run>`, where `x.y.z` is the next patch after the version `j5/main`
-commits, then runs the signed macOS build and the release for that commit. The result is a GitHub
-pre-release, never marked latest, tagged `v<version>`.
+`J5 Nightly` runs every day at 11:17 UTC and builds only when `j5/main` has moved since the last
+nightly, published at least six hours earlier. To publish one now, run `J5 Nightly` on `j5/main`;
+a run started by hand always builds. It takes no inputs. It names the build
+`<x.y.z>-nightly.<yyyymmdd>.<run>`, where `x.y.z` is the next patch after the newer of the version
+`j5/main` commits and the latest stable release, then runs the signed macOS build and the release
+for that commit. The result is a GitHub pre-release, never marked latest, tagged `v<version>`.
 
 If the release job fails, re-run the failed job in that run: it reuses the draft release the first
 attempt created. Running `J5 Nightly` again instead gets a new version and leaves that draft, with
@@ -131,14 +157,16 @@ To move a machine to nightlies:
   `curl -fsSL https://github.com/Jacksondr5/j5code/releases/latest/download/install.sh | T3CODE_CHANNEL=nightly sh`.
 - **Installed server:** `j5 update --channel nightly`. A server on a nightly follows nightlies, so
   later a plain `j5 update` takes the next one.
-- **Mac app:** **Settings → General → Update track → Nightly**. The app then updates itself to the
-  nightly build in place: one install, one profile and one database, as with upstream's.
+- **Mac app:** **Settings → About → Update track → Nightly**. This moves the app and every
+  connected machine it can, as upstream's does, and lists the ones it skips and why. The app
+  updates itself in place: one install, one profile and one database.
 
 To return to stable when the stable build knows every migration the nightly ran:
 
 - **Server:** `j5 update --channel stable`, adding `--allow-downgrade` while the newest stable is
   older than the nightly.
-- **Mac app:** **Update track → Stable**.
+- **Mac app:** **Update track → Stable**. The switch checks each machine's database against the
+  stable release and skips a machine whose database it doesn't support, saying why.
 
 That is the case when the stable release was cut from the nightly's commit or a later one. It is
 also the case when no nightly you ran migrated the database, which you can check: the server took
@@ -218,17 +246,17 @@ the time to repeat step 2.
   `t3-<version>-linux-x64.tar.gz` and `t3-<version>-win32-x64.zip` (unsigned), built and
   smoke-tested in the release run from the same commit. The executable embeds a newer Node than the
   one tests run on, so the run also runs the database startup tests on that Node, on Linux and macOS;
-- `install.sh`, `install.ps1`, and `SHA256SUMS` over the archives and both installers.
+- `install.sh`, `install.ps1`, and `SHA256SUMS` over the archives and both installers;
+- `release-metadata.json`, the database migration levels the release carries.
 
 Run by hand with a build's run ID, its resolve job reads the version from the build commit's four
-manifests, which must agree. Called by `J5 Nightly`, it is given the commit and the version, stamps
-the version before building the CLI archives, and publishes the desktop build made earlier in the
-same run. A run by hand publishes only a stable or preview version and refuses a nightly one,
-whatever the branch commits: a nightly comes only from `J5 Nightly`, and a call publishes nothing
-else. The version must be at least 0.0.44 (0.0.43 and earlier were npm releases). If a release for that
-version already exists at a different commit, the run fails: bump the version and build again. If
-it is already published from the same commit with `SHA256SUMS` attached, the run does nothing. The
-workflow uses GitHub-hosted runners and does not deploy relay or Vercel services.
+manifests, which must agree, and publishes only a preview. Called by `J5 Nightly` or `J5 Stable`,
+it is given the commit and a nightly or stable version, stamps the version before building, and
+builds the desktop app in the same run. The version must be at least 0.0.44 (0.0.43 and earlier
+were npm releases). If a release for that version already exists at a different commit, or a draft
+left by a failed run targets one, the run fails. If it is already published from the same commit
+with `SHA256SUMS` attached, the run does nothing. The workflow uses GitHub-hosted runners and does
+not deploy relay or Vercel services.
 
 The install one-liner (`https://github.com/Jacksondr5/j5code/releases/latest/download/install.sh`),
 `j5 update`, the background service, and desktop SSH remote launch all download from these releases.
@@ -241,7 +269,7 @@ link beside it so a server from before the rename can run the update check that 
 signs with Developer ID, and notarizes the app. It verifies the mounted app's identity (J5 Code, or
 J5 Code (Nightly) for a nightly version), signature, notarization ticket, and Gatekeeper assessment
 before uploading artifacts for 30 days. It does not create a GitHub Release. Run by hand it builds
-the branch it was started on at the version that branch commits; `J5 Nightly` calls it with a
+the branch it was started on at the version that branch commits; `J5 Release` calls it with a
 commit and a version to stamp. The workflow uses the Apple signing secrets and
 `APPLE_TEAM_ID` repository variable; it converts the P12 export to a Keychain-compatible format.
 Clerk passkey provisioning is only required when Clerk/passkey configuration is supplied.
@@ -256,6 +284,3 @@ turn it on.
 
 - `J5 CI` runs formatting, lint, typecheck, and unit-test gates on every PR, and on
   pushes to `j5/main`, `j5/release-<version>`, and `j5/preview-<x.y.z>-<n>`.
-- `J5 Weekly Full Build` runs Mondays at 08:23 UTC and on manual dispatch. It runs the full suite,
-  full build, produces the ad-hoc signed Apple Silicon DMG/ZIP, verifies the mounted app, and uploads
-  the artifacts for 30 days.

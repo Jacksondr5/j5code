@@ -6,14 +6,37 @@ import { scopedThreadKey, scopeThreadRef } from "../environment/scoped.ts";
 import {
   groupSpawnedChildren,
   isSidebarMember,
+  j5AgentsPillSegment,
   replaceSpawnedChildren,
   selectSpawnedChildRows,
-  spawnedChildrenCountLabel,
   spawnedChildrenNeedAttention,
   spawnedChildrenRows,
   spawnedGroupExpansionKey,
   stoppableCrew,
 } from "./spawnedChildren.ts";
+
+describe("the Agents pill with spawned agents", () => {
+  const turn = (liveCount: number, total: number) =>
+    ({ liveCount, subagents: Array.from({ length: total }) }) as unknown as Parameters<
+      typeof j5AgentsPillSegment
+    >[0];
+  const upstream = { label: "1/2", accessibilityLabel: "1 of 2 agents working" };
+
+  it("leaves upstream's segment alone without spawned agents, and adds them otherwise", () => {
+    expect(j5AgentsPillSegment(turn(1, 2), upstream, { running: 0, total: 0 })).toBe(upstream);
+    expect(j5AgentsPillSegment(null, null, { running: 0, total: 0 })).toBeNull();
+    expect(j5AgentsPillSegment(turn(1, 2), upstream, { running: 1, total: 3 })).toEqual({
+      label: "2/5",
+      accessibilityLabel: "2 of 5 agents working",
+    });
+    // An idle Crew keeps the pill between turns, counting an older turn's subagents the sheet lists.
+    expect(j5AgentsPillSegment(turn(0, 2), null, { running: 0, total: 3 })).toEqual({
+      label: "5 agents",
+      accessibilityLabel: "5 agents, none working",
+    });
+    expect(j5AgentsPillSegment(null, null, { running: 0, total: 1 })?.label).toBe("1 agent");
+  });
+});
 
 describe("sidebar membership", () => {
   it("moves an agent-spawned thread under its spawner unless it is pinned", () => {
@@ -105,8 +128,6 @@ describe("spawned children under a sidebar row", () => {
       ],
     );
     expect(groups.map((group) => group.needsAttention)).toEqual([false, true, false]);
-    expect(spawnedChildrenCountLabel(groups)).toBe("3 seats · 1 agent");
-    expect(spawnedChildrenCountLabel(groups.slice(2))).toBe("1 agent");
     expect(groups[1]!.rows.map(({ child }) => child.threadId)).toEqual(["critic", "builder"]);
     expect(groupSpawnedChildren([])).toEqual([]);
     expect(spawnedGroupExpansionKey("env:a", "captain", "crew:crew:1")).toBe(

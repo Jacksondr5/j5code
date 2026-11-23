@@ -1,0 +1,206 @@
+name: J5 Stable
+
+# Promotes a published nightly to a stable release: the nightly's commit, built
+# again as the nightly's version without its suffix (`0.0.52-nightly.20261121.19`
+# becomes `0.0.52`) and published as "latest". J5 Release builds the desktop app
+# and the CLI archives and publishes them; a nightly's own builds carry its
+# version and its nightly feeds, so they cannot be reused.
+#
+# J5 Nightly takes its base from the newest stable release as well as from the
+# committed manifests, so the next nightly is `0.0.53-nightly.*` whether or not
+# the version bump this workflow pushes has merged into j5/main.
+#
+# A dry run builds everything into a draft release that nothing reads, and
+# pushes no branch. Delete the draft afterwards.
+
+on:
+  workflow_dispatch:
+    inputs:
+      nightly:
+        description: Nightly to promote, such as v0.0.52-nightly.20261121.19. Defaults to the newest.
+        required: false
+        type: string
+      dry_run:
+        description: Leave the release as a draft and push no version bump
+        required: false
+        type: boolean
+        default: false
+
+permissions: {}
+
+# Shared with J5 Nightly, which reads the newest stable release to pick its version.
+# `queue: max` keeps every waiting run instead of only the newest.
+concurrency:
+  group: j5-publish
+  cancel-in-progress: false
+  queue: max
+
+jobs:
+  resolve:
+    name: Resolve the nightly and its stable version
+    if: github.repository == 'Jacksondr5/j5code'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      ref: ${{ steps.version.outputs.ref }}
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Resolve the nightly and its stable version
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NIGHTLY: ${{ inputs.nightly }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          # Another branch's workflows are unreviewed; only a dry run may use them.
+          if [[ "$GITHUB_REF" != "refs/heads/j5/main" && "$DRY_RUN" != true ]]; then
+            echo "::error::Run J5 Stable on j5/main, whose workflows it uses; this run was started on $GITHUB_REF."
+            exit 1
+          fi
+          tag="$NIGHTLY"
+          if [[ -z "$tag" ]]; then
+            tag="$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases?per_page=100" \
+              --jq '.[] | select(.draft | not) | select(.tag_name | test("-nightly\\.")) | [.published_at, .tag_name] | @tsv' \
+              | sort | tail -n 1 | cut -f 2)"
+            if [[ -z "$tag" ]]; then
+              echo "::error::No published nightly found. Run J5 Nightly first."
+              exit 1
+            fi
+          fi
+          tag="v${tag#v}"
+          if [[ ! "$tag" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)-nightly\.[0-9]{8}\.[0-9]+$ ]]; then
+            echo "::error::$tag is not a nightly tag."
+            exit 1
+          fi
+          version="${BASH_REMATCH[1]}"
+          # A nightly that was never published was never offered to anyone to run.
+          if [[ "$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$tag" --jq '.draft')" != "false" ]]; then
+            echo "::error::$tag is not a published release."
+            exit 1
+          fi
+          ref="$(gh api "repos/$GITHUB_REPOSITORY/commits/$tag" --jq '.sha')"
+          # Fail before the signed builds when this version is already released from another commit.
+          # A missing tag is HTTP 404, or 422 "No commit found"; any other error stops the run.
+          if taken="$(gh api "repos/$GITHUB_REPOSITORY/commits/v$version" --jq '.sha' 2>"$RUNNER_TEMP/taken.err")"; then
+            if [[ "$taken" != "$ref" ]]; then
+              echo "::error::v$version is already released from $taken, not $tag ($ref). Promote a newer nightly."
+              exit 1
+            fi
+          else
+            grep -qE 'HTTP 404|No commit found' "$RUNNER_TEMP/taken.err" || { cat "$RUNNER_TEMP/taken.err" >&2; exit 1; }
+          fi
+          # Published as latest, an older version would be offered to every install as a downgrade.
+          # A 404 means no stable release yet; any other error stops the run.
+          if ! latest="$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq '.tag_name' 2>"$RUNNER_TEMP/latest.err")"; then
+            grep -q 'HTTP 404' "$RUNNER_TEMP/latest.err" || { cat "$RUNNER_TEMP/latest.err" >&2; exit 1; }
+            latest=""
+          fi
+          latest="${latest#v}"
+          if [[ "$latest" != "$version" && "$(printf '%s\n' "$latest" "$version" | sort -V | tail -n 1)" != "$version" ]]; then
+            echo "::error::$version is older than the latest stable release, $latest. Promote a newer nightly."
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "ref=$ref" >> "$GITHUB_OUTPUT"
+          echo "::notice::Promoting $tag ($ref) to J5 Code $version$([[ "$DRY_RUN" == true ]] && echo ' as a draft')."
+          echo "Promoting \`$tag\` (\`$ref\`) to J5 Code $version. To finish a failed run, dispatch J5 Stable again with \`-f nightly=$tag\`." >> "$GITHUB_STEP_SUMMARY"
+
+  release:
+    name: Release
+    needs: resolve
+    permissions:
+      contents: write
+      actions: read
+    uses: ./.github/workflows/j5-release.yml
+    with:
+      ref: ${{ needs.resolve.outputs.ref }}
+      version: ${{ needs.resolve.outputs.version }}
+      draft: ${{ inputs.dry_run == true }}
+    secrets:
+      CSC_LINK: ${{ secrets.CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+      APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+
+  # Pushes j5/release-<version>: j5/main with the four manifests at the stable
+  # version and FORK.md's `Released pin:` set from the nightly commit's
+  # `Current pin:`. The Actions token cannot open the pull request, and CI would
+  # not run on one it opened, so a maintainer opens it from the link this prints.
+  # Runs no repository code, since it holds a write token.
+  version_bump:
+    name: Push the version bump for j5/main
+    needs: [resolve, release]
+    # Explicit, because a re-dispatch whose release jobs all skip can skip this job under the implicit success().
+    if: ${{ !cancelled() && !failure() && needs.resolve.result == 'success' && inputs.dry_run != true }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      RELEASE_VERSION: ${{ needs.resolve.outputs.version }}
+      RELEASE_SHA: ${{ needs.resolve.outputs.ref }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: j5/main
+          sparse-checkout: |
+            FORK.md
+            apps/server/package.json
+            apps/desktop/package.json
+            apps/web/package.json
+            packages/contracts/package.json
+          sparse-checkout-cone-mode: false
+
+      - name: Commit and push the version bump
+        run: |
+          set -euo pipefail
+          committed="$(jq -r .version apps/desktop/package.json)"
+          if [[ "$(printf '%s\n' "$committed" "$RELEASE_VERSION" | sort -V | tail -n 1)" == "$committed" ]]; then
+            echo "::notice::j5/main already reports J5 Code $committed; no version bump needed."
+            exit 0
+          fi
+          branch="j5/release-$RELEASE_VERSION"
+          if git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
+            echo "::error::$branch already exists. Open or merge its pull request, or delete the branch and re-run this job."
+            exit 1
+          fi
+          for manifest in apps/server/package.json apps/desktop/package.json apps/web/package.json packages/contracts/package.json; do
+            sed -i -E "0,/\"version\": \"[^\"]*\"/s//\"version\": \"$RELEASE_VERSION\"/" "$manifest"
+          done
+          git fetch --depth=1 origin "$RELEASE_SHA"
+          # Read to a file first: `grep -m 1` on a pipe exits early, and the writer's SIGPIPE fails the step under pipefail.
+          git show "$RELEASE_SHA:FORK.md" > "$RUNNER_TEMP/FORK.md"
+          pin_line="$(grep -m 1 '^Current pin: ' "$RUNNER_TEMP/FORK.md" || true)"
+          pin_sha="$(sed -nE 's/^Current pin: `([0-9a-f]{40})`.*/\1/p' <<<"$pin_line")"
+          pin_branch="$(sed -nE 's/^Current pin: .* (on|from) `([^`]+)`.*/\2/p' <<<"$pin_line")"
+          pin_frozen="$(sed -nE 's/^Current pin: .*frozen ([0-9]{4}-[0-9]{2}-[0-9]{2}).*/\1/p' <<<"$pin_line")"
+          if [[ -z "$pin_sha" || -z "$pin_branch" || -z "$pin_frozen" ]]; then
+            echo "::error::Could not read the upstream pin from FORK.md at $RELEASE_SHA: $pin_line"
+            exit 1
+          fi
+          sed -i -E "s|^Released pin: .*|Released pin: \`$pin_sha\`, from \`$pin_branch\` (in J5 Code $RELEASE_VERSION, frozen $pin_frozen).|" FORK.md
+          git diff
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "chore(release): j5/main reports J5 Code $RELEASE_VERSION"
+          git push origin "HEAD:refs/heads/$branch"
+          url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/j5/main...$branch?expand=1"
+          echo "::notice::Open the version bump pull request: $url"
+          echo "Open the version bump pull request: $url" >> "$GITHUB_STEP_SUMMARY"
+
+      # These gitlinks belong to vendored manifests, not this repository.
+      # Remove them only from the disposable index before checkout's cleanup.
+      - name: Exclude vendored gitlinks from checkout cleanup
+        if: always()
+        run: |
+          python3 - <<'PYTHON'
+          import subprocess
+          entries = subprocess.check_output(["git", "ls-files", "--stage", "-z", ".repos"])
+          paths = [entry.split(b"\t", 1)[1] for entry in entries.split(b"\0") if entry.startswith(b"160000 ")]
+          if paths:
+              subprocess.run(["git", "update-index", "--force-remove", "-z", "--stdin"], input=b"\0".join(paths) + b"\0", check=True)
+          PYTHON

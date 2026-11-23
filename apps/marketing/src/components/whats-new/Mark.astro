@@ -1,0 +1,23 @@
+---
+import { MARKS, type MarkName } from "./icons";
+
+/** A tracker or harness mark, from the same artwork the app ships. */
+interface Props {
+  name: MarkName;
+  class?: string;
+  style?: string;
+}
+
+const { name, class: className, style } = Astro.props;
+const mark = MARKS[name];
+---
+
+<svg
+  class:list={["ico", "ico--mark", className]}
+  viewBox={mark.viewBox}
+  fill="none"
+  style={style}
+  aria-hidden="true"
+  focusable="false"
+  set:html={mark.body}
+/>

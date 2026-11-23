@@ -7,6 +7,7 @@ import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
 import * as ThreadManagementService from "./ThreadManagementService.ts";
 import { isUndeliveredMailboxSteer } from "./NotificationMailbox.ts";
+import { j5DispatchMissedClaudeSteer } from "../j5/a2a/claudeAgentSteers.ts";
 
 const CONTINUATION_MESSAGE_TEXT = "Background task completed.";
 
@@ -178,6 +179,13 @@ export const layer = Layer.effectDiscard(
               }),
             );
           yield* clearRetryAttempt(retryKey);
+          return;
+        }
+        // J5: FORK.md case 89, the Claude adapter names a missed agent steer this turn runs.
+        if (
+          request.messageId !== undefined &&
+          (yield* j5DispatchMissedClaudeSteer(threads, request.threadId, request.messageId))
+        ) {
           return;
         }
         const messageId =

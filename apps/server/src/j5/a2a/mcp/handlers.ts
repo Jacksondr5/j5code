@@ -527,7 +527,11 @@ const handlers = {
           exchangeId: result.exchangeId,
         });
       yield* worker.notify;
-      return yield* withDeliveryNotice(result, {
+      // Only the ask's Allow once or Save persona button acts on it, so a chat "yes" must not withdraw it.
+      const { ifAnsweredInThread: _hint, ...withoutHint } = result;
+      const sent =
+        escalationId === undefined && personaDraftId === undefined ? result : withoutHint;
+      return yield* withDeliveryNotice(sent, {
         receiverId: input.to,
         callerThreadId: scope.thread.threadId,
         mode,

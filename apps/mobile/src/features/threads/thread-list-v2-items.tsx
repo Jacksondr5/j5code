@@ -39,7 +39,6 @@ import { SymbolView, type AppSymbolName } from "../../components/ui/AppSymbol";
 import { AppText as Text } from "../../components/ui/AppText";
 import { Menu } from "../../components/ui/Menu";
 import { AgentIdentityChip } from "../../j5/agents/AgentIdentityChip";
-import { CaptainSeats, CaptainSeatsToggle } from "../../j5/crew/CaptainSeats";
 import { EnvironmentMachineSymbol } from "../../components/EnvironmentMachineSymbol";
 import { ProjectFavicon } from "../../components/ProjectFavicon";
 import { ProviderIcon, ProviderInstanceIcon } from "../../components/ProviderIcon";
@@ -1278,14 +1277,6 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         ) : (
           <View className="flex-1" />
         )}
-        <CaptainSeatsToggle
-          thread={thread}
-          mutedClassName={
-            selected
-              ? selectedThreadRowColors.mutedForegroundClassName
-              : rowAppearance.tertiaryForegroundClassName
-          }
-        />
         {pr ? (
           <Pressable
             // Padding cancelled by negative margin grows the touch target into
@@ -1449,14 +1440,6 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
               />
             ) : null}
           </View>
-          <CaptainSeatsToggle
-            thread={thread}
-            mutedClassName={
-              selected
-                ? selectedThreadRowColors.mutedForegroundClassName
-                : rowAppearance.tertiaryForegroundClassName
-            }
-          />
           {props.hasQueuedMessages ? <QueuedMessageIcon selected={selected} /> : null}
           <Text
             className={cn(
@@ -1477,21 +1460,8 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       </RowPressable>
     );
 
-  const captainSeats = (
-    <CaptainSeats
-      thread={thread}
-      statusLabels={STATUS_LABEL_BY_STATUS}
-      onSelectThread={onSelectThread}
-    />
-  );
-
   if (!canOperateThread)
-    return (
-      <>
-        <View style={rowAppearance.swipeContainerStyle}>{rowContent(() => {})}</View>
-        {captainSeats}
-      </>
-    );
+    return <View style={rowAppearance.swipeContainerStyle}>{rowContent(() => {})}</View>;
 
   return (
     <View collapsable={false}>
@@ -1547,7 +1517,6 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           </Menu>
         )}
       </ThreadSwipeable>
-      {captainSeats}
     </View>
   );
 });
