@@ -475,8 +475,8 @@ const narrowedView = (
   return {
     scheduledTasks: (list) => list.pipe(Effect.flatMap(reachableTasks)),
     // Begins again each time what the person reaches changes, as the sidebar does, reading the
-    // list afresh. A list an older run left queued behind the restart is dropped, so nothing read
-    // or filtered under an earlier reach is delivered after it.
+    // list afresh. A list whose run is no longer the latest, before or after it is filtered, is
+    // dropped, so nothing read or filtered under an earlier reach is delivered after it.
     scheduledTasksStream: (stream) =>
       Stream.unwrap(
         Effect.gen(function* () {
@@ -491,13 +491,11 @@ const narrowedView = (
             Stream.mapEffect(() => Ref.updateAndGet(current, (run) => run + 1)),
             Stream.switchMap((run) => stream.pipe(Stream.map((result) => ({ run, result })))),
             Stream.mapEffect(({ run, result }) =>
-              Ref.get(current).pipe(
-                Effect.flatMap((latest) =>
-                  latest === run
-                    ? reachableTasks(result).pipe(Effect.map((shown) => [shown]))
-                    : Effect.succeed([]),
-                ),
-              ),
+              Effect.gen(function* () {
+                if ((yield* Ref.get(current)) !== run) return [];
+                const shown = yield* reachableTasks(result);
+                return (yield* Ref.get(current)) === run ? [shown] : [];
+              }),
             ),
             Stream.flatMap((shown) => Stream.fromIterable(shown)),
           );
