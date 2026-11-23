@@ -76,7 +76,11 @@ function wireInbox(root: HTMLElement) {
       event.preventDefault();
       closeButton()?.focus({ preventScroll: true });
     });
-    narrow.addEventListener("change", settle);
+    narrow.addEventListener("change", () => {
+      settle();
+      // A window narrowed with the panel open now has a sheet over what held focus.
+      if (sheetOpen()) closeButton()?.focus({ preventScroll: true });
+    });
     settle();
     // Answer is available once there is something to send, as in the app.
     for (const reply of select<HTMLTextAreaElement>(inbox, "[data-inbox-reply]")) {

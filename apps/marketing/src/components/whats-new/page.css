@@ -41,6 +41,17 @@
   outline-color: var(--wn-fg);
 }
 
+/* With reduced motion nothing on the page moves, hover and press feedback included. */
+@media (prefers-reduced-motion: reduce) {
+  .wn *,
+  .wn *::before,
+  .wn *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
+  }
+}
+
 /* Hints that ask the reader to try something show only once the script that makes it work runs. */
 .wn:not([data-live]) .live-only {
   display: none;

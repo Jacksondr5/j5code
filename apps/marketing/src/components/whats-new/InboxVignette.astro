@@ -352,7 +352,13 @@ const tree = [
   }
 
   .inbox__segments { display: inline-flex; gap: 2px; padding: 2px; border-radius: 8px; background: var(--a-accent); font-size: 13px; }
-  .inbox__segments > * { padding: 3px 10px; border-radius: 6px; font-weight: 500; }
+  /* A shade deeper than the app's muted tone, which measures 4.4:1 on this strip by day. */
+  .inbox__segments > * {
+    padding: 3px 10px;
+    border-radius: 6px;
+    font-weight: 500;
+    color: color-mix(in srgb, var(--a-muted-fg) 75%, var(--a-fg));
+  }
   .inbox__segments b { background: var(--a-card); color: var(--a-fg); box-shadow: var(--a-shadow); }
   .inbox__checks { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; white-space: nowrap; }
   .inbox__pr-heading { margin-top: 6px; font-size: 12px; font-weight: 500; color: var(--a-muted-fg); }
