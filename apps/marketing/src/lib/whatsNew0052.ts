@@ -494,7 +494,7 @@ const wireProposal: Wire = (piece, signal) => {
       option.hidden = option.dataset.only !== model;
   };
   const startLevels = JSON.parse(veil.dataset.crewLevels ?? "{}") as Record<string, string>;
-  const levelFor = (model: string) => startLevels[model] ?? "Provider default";
+  const levelFor = (model: string) => startLevels[model] ?? "";
   const firstModel = (models: HTMLElement | null) =>
     (models && one(models, '[role="option"]')?.dataset.value) ?? "";
   // While the dialog is open, the rest of the page is out of reach, as under the app's backdrop.

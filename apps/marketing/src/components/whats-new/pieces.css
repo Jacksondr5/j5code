@@ -80,7 +80,8 @@
   outline-offset: 2px;
 }
 
-/* On one that is also ringed, it clears the ring. */
+/* On one that is also ringed, the focus ring takes the ring's place: two would crowd a chip's
+   neighbours. */
 .wn[data-live]
   .piece
   [data-hot]:is(
@@ -88,7 +89,8 @@
     [aria-pressed="true"],
     [role="switch"][aria-checked="true"]
   ):focus-visible {
-  outline-offset: 7px;
+  box-shadow: none;
+  animation: none;
 }
 
 /* ui/select.tsx with its popup: SelectTrigger, SelectPopup and SelectItem. */

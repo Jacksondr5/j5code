@@ -35,7 +35,7 @@ const runtimes = [
     provider: "claude",
     models: plain(["Haiku 5.5", "Sonnet 5.5", "Opus 5.5"]),
     levels: [
-      ...plain(["Provider default", "Low", "Medium", "High", "Extra High", "Max"]),
+      ...plain(["Low", "Medium", "High", "Extra High", "Max"]),
       { value: "Ultracode", label: "Ultracode", only: "Opus 5.5" },
       ...plain(["Ultrathink"]),
     ],
@@ -43,7 +43,7 @@ const runtimes = [
   {
     provider: "codex",
     models: plain(["GPT-6.2-Sol", "GPT-6.1-Sol", "GPT-6-Sol"]),
-    levels: plain(["Provider default", "Low", "Medium", "High", "Extra High", "Max", "Ultra"]),
+    levels: plain(["Low", "Medium", "High", "Extra High", "Max", "Ultra"]),
   },
 ];
 
