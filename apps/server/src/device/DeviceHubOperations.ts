@@ -13,6 +13,9 @@ import type { DeviceHostReady, DeviceOperations, HostDevice } from "./DeviceHost
 
 const BOOT_TIMEOUT = Duration.minutes(3);
 const SCREENSHOT_TIMEOUT = Duration.seconds(20);
+// The hub waits up to 30 seconds for a stopped emulator to leave adb, after the
+// kill itself; a shorter wait reports a shutdown that is still completing as failed.
+const SHUTDOWN_TIMEOUT = Duration.seconds(45);
 
 const HubDevice = Schema.Struct({
   id: Schema.String,
@@ -53,6 +56,14 @@ const errorHead = (error: string) => {
     .filter(Boolean)
     .join(" ");
 };
+
+// `adb devices` lists one `<serial>\t<state>` line per device, among its header and
+// daemon messages.
+const adbSerials = (stdout: string) =>
+  stdout
+    .split(/\r?\n/)
+    .filter((line) => line.includes("\t"))
+    .map((line) => line.split("\t")[0]!.trim());
 
 const vendorPrefix = (platform: DevicePlatform) =>
   platform === "ios" ? "/vendor/serve-sim" : "/vendor/serve-emu";
@@ -203,7 +214,9 @@ export const makeDeviceHubOperations = (options: {
     function* (device) {
       const postShutdown = (path: string, body: Record<string, string>) =>
         postJson(path, body, "shutdown").pipe(
-          Effect.flatMap((request) => hubJson(request, HubActionResult, "shutdown")),
+          Effect.flatMap((request) =>
+            hubJson(request, HubActionResult, "shutdown", SHUTDOWN_TIMEOUT),
+          ),
           Effect.flatMap((result) =>
             result.ok
               ? Effect.void
@@ -232,7 +245,22 @@ export const makeDeviceHubOperations = (options: {
               ),
             ),
           )
-        : postShutdown("/api/devices/shutdown", { platform: device.platform, id: device.id });
+        : postShutdown("/api/devices/shutdown", { platform: device.platform, id: device.id }).pipe(
+            // The hub's shutdown succeeds only once the serial leaves adb. A retry after a
+            // shutdown that finished late has no serial left to kill and fails, so a serial adb
+            // no longer lists in any state counts as shut down, as the hub itself decides.
+            Effect.catch((cause) =>
+              run("adb", ["devices"]).pipe(
+                Effect.flatMap((adb) =>
+                  adb.code === 0 && !adbSerials(adb.stdout).includes(device.id)
+                    ? Effect.logInfo("Android emulator was already shut down", {
+                        deviceId: device.id,
+                      })
+                    : Effect.fail(cause),
+                ),
+              ),
+            ),
+          );
     },
   );
 
