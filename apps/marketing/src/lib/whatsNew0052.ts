@@ -474,7 +474,7 @@ const wireProposal: Wire = (piece, signal) => {
     const seat = seatName(field("seat")?.value ?? "");
     const error = !SEAT_NAME.test(seat)
       ? "Seat names are lowercase words joined by hyphens."
-      : rows().some((row) => row !== editing && row.dataset.seat === seat)
+      : rows().some((row) => row !== editing && seatName(row.dataset.seat ?? "") === seat)
         ? `Seat ${seat} already exists.`
         : (field("instructions")?.value.trim() ?? "") === ""
           ? "Give the custom crew member its instructions."
@@ -486,16 +486,17 @@ const wireProposal: Wire = (piece, signal) => {
     }
     if (save) save.disabled = error !== null;
   };
-  // A model offers only some of its provider's levels; one it lacks falls back to the default.
+  // A model offers only some of its provider's levels, and starts at its own default one.
   const fitLevels = () => {
     const provider = pickValue(pick("provider"));
     const model = pickValue(pick(`model-${provider}`));
-    const levels = pick(`level-${provider}`);
-    if (!levels) return;
-    for (const option of select(levels, "[data-only]"))
+    for (const option of select(pick(`level-${provider}`) ?? veil, "[data-only]"))
       option.hidden = option.dataset.only !== model;
-    if (one(levels, '[aria-selected="true"]')?.hidden) setPick(levels, "Provider default");
   };
+  const startLevels = JSON.parse(veil.dataset.crewLevels ?? "{}") as Record<string, string>;
+  const levelFor = (model: string) => startLevels[model] ?? "Provider default";
+  const firstModel = (models: HTMLElement | null) =>
+    (models && one(models, '[role="option"]')?.dataset.value) ?? "";
   // While the dialog is open, the rest of the page is out of reach, as under the app's backdrop.
   let blocked: HTMLElement[] = [];
   const release = () => {
@@ -511,7 +512,7 @@ const wireProposal: Wire = (piece, signal) => {
       instructions = "",
       provider = "claude",
       model = "Haiku 5.5",
-      level = "Provider default",
+      level = levelFor(model),
       access = "full-access",
       workspace = "captain",
     } = row?.dataset ?? {};
@@ -534,11 +535,11 @@ const wireProposal: Wire = (piece, signal) => {
     setPick(pick("provider"), provider);
     // Every provider's lists start from this member, so nothing is left over from the last one.
     for (const models of select(veil, '[data-pick^="model-"]')) {
-      const own = models.dataset.pick === `model-${provider}`;
-      setPick(models, own ? model : (one(models, '[role="option"]')?.dataset.value ?? ""));
+      const of = (models.dataset.pick ?? "").slice("model-".length);
+      const chosen = of === provider ? model : firstModel(models);
+      setPick(models, chosen);
+      setPick(pick(`level-${of}`), of === provider ? level : levelFor(chosen));
     }
-    for (const levels of select(veil, '[data-pick^="level-"]'))
-      setPick(levels, levels.dataset.pick === `level-${provider}` ? level : "Provider default");
     setPick(pick("access"), access);
     setPick(pick("workspace"), workspace);
     showOnly("for", provider);
@@ -564,8 +565,17 @@ const wireProposal: Wire = (piece, signal) => {
     event.stopPropagation();
     const name = (event.target as HTMLElement).dataset.pick;
     const value = (event as CustomEvent<string>).detail;
-    if (name === "provider") showOnly("for", value);
     if (name === "workspace") showOnly("place", value);
+    // A different model starts with its own defaults, never a level left from another, as in
+    // the app; a different provider starts at its first model.
+    const provider = name === "provider" ? value : name?.startsWith("model-") ? name.slice(6) : "";
+    if (provider === "") return;
+    const models = pick(`model-${provider}`);
+    if (name === "provider") {
+      showOnly("for", value);
+      setPick(models, firstModel(models));
+    }
+    setPick(pick(`level-${provider}`), levelFor(pickValue(models)));
     fitLevels();
   });
   veil.addEventListener("keydown", (event) => {
@@ -601,7 +611,8 @@ const wireProposal: Wire = (piece, signal) => {
     if (!row) return;
     if (!editing) list.append(row);
     Object.assign(row.dataset, {
-      seat: seatName(field("seat")?.value ?? ""),
+      // The roster shows a name as typed; it takes its final form when the Crew is approved.
+      seat: (field("seat")?.value ?? "").trim(),
       instructions: field("instructions")?.value ?? "",
       provider,
       model: pickValue(pick(`model-${provider}`)),

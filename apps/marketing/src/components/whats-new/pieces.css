@@ -80,6 +80,17 @@
   outline-offset: 2px;
 }
 
+/* On one that is also ringed, it clears the ring. */
+.wn[data-live]
+  .piece
+  [data-hot]:is(
+    .btn-a--primary,
+    [aria-pressed="true"],
+    [role="switch"][aria-checked="true"]
+  ):focus-visible {
+  outline-offset: 7px;
+}
+
 /* ui/select.tsx with its popup: SelectTrigger, SelectPopup and SelectItem. */
 .app .pick {
   position: relative;
