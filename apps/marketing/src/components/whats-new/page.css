@@ -78,8 +78,10 @@
 }
 
 /* Five narrow columns: a title that wraps must not push its text below its neighbours'. */
-.wn .items--5 h3 {
-  min-height: 2.5em;
+@media (min-width: 1001px) {
+  .wn .items--5 h3 {
+    min-height: 2.5em;
+  }
 }
 
 .wn .items p {
@@ -106,9 +108,5 @@
 
   .wn .items--5 {
     grid-template-columns: 1fr;
-  }
-
-  .wn .items--5 h3 {
-    min-height: 0;
   }
 }
