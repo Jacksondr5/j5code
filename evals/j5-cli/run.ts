@@ -27,6 +27,7 @@ import {
 } from "../mcp-tool-use/run.ts";
 import { runClaude } from "./claude.ts";
 import { runCodex } from "./codex.ts";
+import { gradeSteer, steerFor } from "./steer.ts";
 import { emptyUsage, shellUsage, type Usage } from "./usage.ts";
 import { type McpSample, startMcpServer } from "./mcp.ts";
 import {
@@ -105,7 +106,8 @@ if (cases.length === 0 && !values.merge) throw new Error("No case matches --case
 if (values["dry-run"]) {
   for (const testCase of cases) {
     const { history, prompt } = splitConversation(sampleFor(testCase, model, catalog));
-    console.log(JSON.stringify({ id: testCase.id, history, prompt }, null, 2));
+    const steer = steerFor(testCase);
+    console.log(JSON.stringify({ id: testCase.id, history, prompt, steer }, null, 2));
   }
   process.exit(0);
 }
@@ -210,7 +212,10 @@ const collect = async (): Promise<{ rows: Array<Row>; regressions: Array<string>
       await Effect.runPromise(Scope.close(deviceScope, Exit.void));
     }
     const durationMs = Date.now() - startedAt;
-    const checks = run ? gradeSample(testCase.expect, run) : [];
+    const steer = steerFor(testCase);
+    const checks = run
+      ? [...gradeSample(testCase.expect, run), ...(steer ? gradeSteer(steer, run) : [])]
+      : [];
     const pass = run !== undefined && checks.every((check) => check.pass);
     const row: Row = {
       id: testCase.id,

@@ -13,7 +13,7 @@ import { CLAUDE_BINARY, query } from "./sdk.ts";
 import type { Sample } from "./upstream.ts";
 import { addClaudeResult, emptyUsage, shellUsage } from "./usage.ts";
 
-const SIM_DIR = "/tmp/eval-sim";
+export const SIM_DIR = "/tmp/eval-sim";
 const SHELL_MODEL = "claude-haiku-5-5";
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === "object" && value !== null && !Array.isArray(value);

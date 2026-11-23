@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off globalDate:off
+// @effect-diagnostics nodeBuiltinImport:off globalDate:off globalTimers:off
 /**
  * Runs one sample on the real Claude Code, through the SDK J5's adapter uses and with the options
  * J5 sends. A case's earlier turns become a session file in Claude Code's own format, which the
@@ -10,12 +10,38 @@ import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 import { ProviderInstanceId } from "@t3tools/contracts";
 
-import { makeClaudeQueryOptions } from "../../apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts";
+import {
+  makeClaudeQueryOptions,
+  makeClaudeUserMessage,
+} from "../../apps/server/src/orchestration-v2/Adapters/ClaudeAdapterV2.ts";
 import { normalizeToolInput, normalizeToolName, type SampleRun } from "../mcp-tool-use/run.ts";
-import { CLAUDE_BINARY, type HookCallback, query } from "./sdk.ts";
-import { fileContents, printCommand, simulate } from "./shell.ts";
+import { CLAUDE_BINARY, type HookCallback, query, type SDKUserMessage } from "./sdk.ts";
+import { fileContents, printCommand, SIM_DIR, simulate } from "./shell.ts";
+import { heldCommand, steerFor, whenExists } from "./steer.ts";
 import { addClaudeResult, emptyUsage, type Usage } from "./usage.ts";
 import { type Sample, splitConversation, UNSUPPORTED_EMPTY_PROMPT } from "./upstream.ts";
+
+/**
+ * Where the session file holds the steer: Claude Code's queued_command attachment and, on CLIs
+ * that record API requests, the request message that carried it to the model.
+ */
+const steerTranscript = (cwd: string, sessionId: string | undefined, steer: string) => {
+  if (sessionId === undefined) return [];
+  const file = NodePath.join(
+    NodeOS.homedir(),
+    ".claude/projects",
+    cwd.replaceAll("/", "-"),
+    `${sessionId}.jsonl`,
+  );
+  if (!NodeFS.existsSync(file)) return [];
+  const marker = JSON.stringify(steer.split("\n")[0]).slice(1, -1);
+  return NodeFS.readFileSync(file, "utf8")
+    .split("\n")
+    .filter((line) => line.includes(marker))
+    .map((line) => JSON.parse(line) as Record<string, unknown>)
+    .filter((entry) => entry.type === "attachment" || entry.type === "api-request-blob")
+    .map(({ type, message, attachment }) => ({ type, message, attachment }));
+};
 
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -76,18 +102,25 @@ const writeSession = (
   return sessionId;
 };
 
-/** Answers shell and file calls from the simulator by rewriting them before they run. */
+/**
+ * Answers shell and file calls from the simulator by rewriting them before they run. `hold` may
+ * wrap a Bash command so it keeps running while a steer is delivered.
+ */
 const simulatingHook =
-  (sample: Sample): HookCallback =>
+  (
+    sample: Sample,
+    hold?: (original: string, command: string) => string | undefined,
+  ): HookCallback =>
   async (input) => {
     if (input.hook_event_name !== "PreToolUse" || !isRecord(input.tool_input)) return {};
     const tool = input.tool_name;
     const toolInput = { ...input.tool_input };
     if (tool !== "Bash" && tool !== "Read") return {};
     const { output, file } = await simulate(sample, tool, toolInput);
+    const printed = tool === "Bash" ? printCommand(output, file) : "";
     const updatedInput =
       tool === "Bash"
-        ? { ...toolInput, command: printCommand(output, file) }
+        ? { ...toolInput, command: hold?.(String(toolInput.command), printed) ?? printed }
         : { ...toolInput, file_path: fileContents(output, file) };
     return {
       hookSpecificOutput: {
@@ -98,10 +131,40 @@ const simulatingHook =
     };
   };
 
+/** Streaming input, as J5's adapter feeds Claude Code: messages can be pushed mid-turn. */
+const makeInput = () => {
+  const pending: Array<SDKUserMessage> = [];
+  let wake: (() => void) | undefined;
+  let closed = false;
+  return {
+    push: (message: SDKUserMessage) => {
+      pending.push(message);
+      wake?.();
+    },
+    close: () => {
+      closed = true;
+      wake?.();
+    },
+    async *messages() {
+      while (true) {
+        const next = pending.shift();
+        if (next !== undefined) yield next;
+        else if (closed) return;
+        else await new Promise<void>((resolve) => (wake = resolve));
+      }
+    },
+  };
+};
+
+// Claude Code reports a uuid-stamped queued message with a command_lifecycle frame. If none
+// arrives in this long, the hold is released anyway and the row shows no lifecycle.
+const STEER_QUEUE_TIMEOUT_MS = 15_000;
+
 export const runClaude = async (
   sample: Sample,
   options: {
     readonly model: string;
+    readonly effort: string;
     readonly cwd: string;
     readonly mcpUrl: string;
     readonly maxTurns: number;
@@ -120,7 +183,11 @@ export const runClaude = async (
   if (prompt === undefined) throw new Error(UNSUPPORTED_EMPTY_PROMPT);
   const resumeId = writeSession(sample, history, { ...options, version });
   const j5Options = makeClaudeQueryOptions({
-    modelSelection: { instanceId: ProviderInstanceId.make("claudeAgent"), model: options.model },
+    modelSelection: {
+      instanceId: ProviderInstanceId.make("claudeAgent"),
+      model: options.model,
+      options: [{ id: "effort", value: options.effort }],
+    },
     nativeThreadId: resumeId ?? NodeCrypto.randomUUID(),
     resume: resumeId !== undefined,
     cwd: options.cwd,
@@ -129,10 +196,44 @@ export const runClaude = async (
     permissionMode: "bypassPermissions",
     allowDangerouslySkipPermissions: true,
   });
+  const steer = steerFor(testCase);
+  const input = makeInput();
+  const steerUuid = NodeCrypto.randomUUID();
+  const lifecycle: Array<string> = [];
+  let queued: () => void = () => {};
+  const steerQueued = new Promise<void>((resolve) => (queued = resolve));
+  let held = false;
+  const holdFiles = {
+    started: NodePath.join(SIM_DIR, `${steerUuid}.started`),
+    release: NodePath.join(SIM_DIR, `${steerUuid}.release`),
+  };
+  // Once the held command is running, push the steer, wait until Claude Code queues it, release.
+  const deliver = async () => {
+    await whenExists(holdFiles.started);
+    input.push(makeClaudeUserMessage({ text: steer!.message, priority: "next", uuid: steerUuid }));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      steerQueued,
+      new Promise((resolve) => (timer = setTimeout(resolve, STEER_QUEUE_TIMEOUT_MS))),
+    ]);
+    clearTimeout(timer);
+    NodeFS.writeFileSync(holdFiles.release, "");
+  };
+  const hold =
+    steer === undefined
+      ? undefined
+      : (original: string, command: string) => {
+          if (held || !new RegExp(steer.during).test(original)) return undefined;
+          held = true;
+          void deliver();
+          return heldCommand(command, holdFiles);
+        };
   const hooks = {
     ...j5Options.hooks,
-    PreToolUse: [...(j5Options.hooks?.PreToolUse ?? []), { hooks: [simulatingHook(sample)] }],
+    PreToolUse: [...(j5Options.hooks?.PreToolUse ?? []), { hooks: [simulatingHook(sample, hold)] }],
   };
+  if (steer !== undefined)
+    input.push(makeClaudeUserMessage({ text: prompt, uuid: NodeCrypto.randomUUID() }));
   const run: SampleRun & { calls: Array<SampleRun["calls"][number]> } = {
     calls: [],
     text: "",
@@ -142,9 +243,11 @@ export const runClaude = async (
   options.signal.addEventListener("abort", () => abortController.abort(options.signal.reason));
   const steps = new Map<string, number>();
   let finalText: string | undefined;
+  let sessionId: string | undefined;
+  let results = 0;
   try {
     for await (const message of query({
-      prompt,
+      prompt: steer === undefined ? prompt : input.messages(),
       options: {
         ...j5Options,
         hooks,
@@ -153,6 +256,12 @@ export const runClaude = async (
         abortController,
       },
     })) {
+      sessionId ??= message.session_id;
+      const frame = message as { type: string; command_uuid?: unknown; state?: unknown };
+      if (frame.type === "command_lifecycle" && frame.command_uuid === steerUuid) {
+        lifecycle.push(String(frame.state));
+        queued();
+      }
       if (message.type === "assistant") {
         const id = message.message.id;
         if (!steps.has(id)) steps.set(id, steps.size);
@@ -184,6 +293,9 @@ export const runClaude = async (
                   .join("\n");
         }
       } else if (message.type === "result") {
+        // The streaming input stays open for a steer; the sample ends with the turn.
+        results += 1;
+        input.close();
         addClaudeResult(usage, message);
         run.stopReason = message.subtype === "success" ? "end_turn" : message.subtype;
         if (message.subtype === "success") finalText = message.result;
@@ -192,9 +304,23 @@ export const runClaude = async (
   } catch (cause) {
     // Running out of turns ends the sample, as upstream's step limit does; it is graded.
     if (run.stopReason !== "error_max_turns") throw cause;
+  } finally {
+    input.close();
+  }
+  if (steer !== undefined && !held) {
+    throw new Error("The agent never ran the held command, so no steer was sent.");
   }
   return {
     ...run,
+    ...(steer === undefined
+      ? {}
+      : {
+          steer: {
+            lifecycle,
+            results,
+            transcript: steerTranscript(options.cwd, sessionId, steer.message),
+          },
+        }),
     ...(finalText === undefined ? {} : { finalText }),
     linked: [...sample.linked],
     ...(sample.devices ? { launchers: [...sample.devices.launchers] } : {}),
