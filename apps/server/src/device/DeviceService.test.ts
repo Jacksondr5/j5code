@@ -10,12 +10,17 @@ import {
   type ServerSettings as Settings,
   type SshDeviceHostConfig,
 } from "@t3tools/contracts";
+// @effect-diagnostics-next-line nodeBuiltinImport:off -- Runs the real console probe as the device host does.
+import * as NodeChildProcess from "node:child_process";
+import * as NodeNet from "node:net";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NetService from "@t3tools/shared/Net";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
+import * as TestClock from "effect/testing/TestClock";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as SecretResolver from "@t3tools/secret-provider-core/server/SecretResolver";
@@ -192,7 +197,13 @@ const fixture = Effect.fn("fixture")(function* (
   const run = (command: string) =>
     command === "emulator"
       ? Effect.succeed({ code: 0, stdout: "Pixel_API_35\n", stderr: "" })
-      : Ref.get(encoderResult);
+      : command === "adb"
+        ? Effect.sync(() => ({
+            code: 0,
+            stdout: `List of devices attached\n${booted ? "emulator-5554\tdevice\n" : ""}`,
+            stderr: "",
+          }))
+        : Ref.get(encoderResult);
   const ready: DeviceHost.DeviceHostReady = {
     nodePath: process.execPath,
     hub: { origin: "http://device.test" },
@@ -1158,6 +1169,271 @@ it.effect.each([
       }
     }).pipe(Effect.provide(ServerSettings.layerTest({ enableDeviceSupport: true })), Effect.scoped),
 );
+
+describe("Android close with shutdown", () => {
+  const serial = DeviceId.make("emulator-5554");
+  const avd = "test-pixel";
+
+  // A hub whose shutdown of `serial` answers with `shutdownReply`, and a host whose
+  // `adb devices` answers with `adbReply` and whose emulator console answers `console`
+  // (the probe's exit code: 0 accepted, 3 refused, other no answer); each is read when asked.
+  const makeAndroidService = (fixture: {
+    shutdownReply: () => Response;
+    adbReply: () => { code: number; stdout: string; stderr: string };
+    booted: () => boolean;
+    console?: () => number;
+    shutdownDelay?: Duration.Input;
+  }) =>
+    Effect.gen(function* () {
+      const shutdowns: string[] = [];
+      const http = HttpClient.make((request) =>
+        Effect.gen(function* () {
+          const path = new URL(request.url).pathname;
+          if (path === "/api/devices") {
+            return HttpClientResponse.fromWeb(
+              request,
+              Response.json({
+                simulators: [],
+                emulators: [
+                  fixture.booted()
+                    ? {
+                        id: serial,
+                        name: avd,
+                        platform: "android",
+                        version: "16",
+                        physical: false,
+                        booted: true,
+                      }
+                    : {
+                        id: avd,
+                        name: avd,
+                        platform: "android",
+                        version: "16",
+                        physical: false,
+                        booted: false,
+                      },
+                ],
+              }),
+            );
+          }
+          if (path === "/api/devices/shutdown") {
+            shutdowns.push(path);
+            if (fixture.shutdownDelay !== undefined) yield* Effect.sleep(fixture.shutdownDelay);
+            return HttpClientResponse.fromWeb(request, fixture.shutdownReply());
+          }
+          throw new Error(`Unexpected hub path: ${path}`);
+        }),
+      );
+      const commands: string[] = [];
+      const run: DeviceHost.DeviceHostReady["run"] = (command, args) =>
+        Effect.sync(() => {
+          commands.push([command, ...args].join(" "));
+          if (command === "emulator") return { code: 0, stdout: `${avd}\n`, stderr: "" };
+          if (command === "adb") return fixture.adbReply();
+          if (command === process.execPath && args.at(-1) === "5554") {
+            return { code: fixture.console?.() ?? 3, stdout: "", stderr: "" };
+          }
+          // The ffmpeg encoder probe that opening an emulator runs.
+          return { code: 0, stdout: " V....D libx264", stderr: "" };
+        });
+      const ready: DeviceHost.DeviceHostReady = {
+        nodePath: process.execPath,
+        hub: { origin: "http://device.test" },
+        devices: makeDeviceHubOperations({
+          hostId: LOCAL_DEVICE_HOST_ID,
+          origin: "http://device.test",
+          http,
+          run,
+          androidAvailable: Effect.succeed(true),
+        }),
+        helpers: { serveSimAxSettings: null, serveSimCli: null },
+        run,
+      };
+      const host: DeviceHost.DeviceHost["Service"] = {
+        id: LOCAL_DEVICE_HOST_ID,
+        label: "This machine",
+        summary: Effect.succeed({
+          id: LOCAL_DEVICE_HOST_ID,
+          kind: "local",
+          label: "Emulator host",
+          platforms: [{ platform: "android", available: true }],
+          hubInstalled: true,
+          agentDeviceInstalled: false,
+        }),
+        platformAvailability: (platform) => Effect.succeed({ platform, available: true }),
+        ensureReady: () => Effect.succeed(ready),
+        ensureAgentReady: () => Effect.die("Agent access is not used in this test"),
+        current: Effect.succeed(ready),
+        stopAgent: Effect.void,
+        stop: Effect.void,
+      };
+      const service = yield* DeviceService.makeWithHosts(new Map([[host.id, host]])).pipe(
+        Effect.provide(NodeCrypto.layer),
+      );
+      return { service, shutdowns, commands };
+    });
+
+  const adbListing = (...lines: string[]) => ({
+    code: 0,
+    stdout: ["* daemon started successfully", "List of devices attached", ...lines, ""].join("\n"),
+    stderr: "",
+  });
+  // What the hub answers once `adb emu kill` finds no such serial.
+  const hubRejects = () =>
+    Response.json({
+      ok: false,
+      errors: [{ message: "[android-utils] Failed to run `adb emu kill`:" }],
+    });
+
+  it.effect(
+    "a retry closes the session after a first shutdown failed while the emulator was exiting",
+    () =>
+      Effect.gen(function* () {
+        let booted = true;
+        let adb = adbListing(`${serial}\tdevice`);
+        let reply = () => Response.json({ ok: false, error: "Error: timed out" }, { status: 500 });
+        const { service } = yield* makeAndroidService({
+          shutdownReply: () => {
+            // The emulator keeps exiting after the hub has given up on it.
+            if (booted) adb = adbListing(`${serial}\toffline`);
+            return reply();
+          },
+          adbReply: () => adb,
+          booted: () => booted,
+          console: () => (booted ? 0 : 3),
+        });
+        const threadId = ThreadId.make("android-close-retry");
+        yield* service.open({ threadId, deviceId: serial, platform: "android" });
+        expect((yield* service.state).sessions.map((session) => session.deviceId)).toEqual([
+          serial,
+        ]);
+
+        // adb still lists the serial, offline, so the session stays open for a retry.
+        const first = yield* Effect.exit(
+          service.close({ threadId, deviceId: serial, shutdown: true }),
+        );
+        expect(Exit.isFailure(first)).toBe(true);
+        expect((yield* service.state).sessions).toHaveLength(1);
+
+        // The emulator has exited; the hub now has no serial to kill.
+        booted = false;
+        adb = adbListing();
+        reply = hubRejects;
+        yield* service.close({ threadId, deviceId: serial, shutdown: true });
+        expect((yield* service.state).sessions).toEqual([]);
+        expect(
+          (yield* service.state).devices.find((device) => device.platform === "android")?.booted,
+        ).toBe(false);
+      }).pipe(
+        Effect.provide(ServerSettings.layerTest({ enableDeviceSupport: true })),
+        Effect.scoped,
+      ),
+  );
+
+  it.effect.each([
+    { case: "adb still lists the serial", adb: () => adbListing(`${serial}\tdevice`), console: 0 },
+    {
+      case: "adb lists the serial offline",
+      adb: () => adbListing(`${serial}\toffline`),
+      console: 0,
+    },
+    {
+      case: "adb separates the serial with spaces after a daemon message",
+      adb: () => adbListing(`${serial}          device product:sdk_gphone64 transport_id:3`),
+      console: 0,
+    },
+    {
+      case: "adb fails",
+      adb: () => ({ code: 1, stdout: "", stderr: "adb: no server" }),
+      console: 3,
+    },
+    // adb loses a running emulator while its server restarts.
+    { case: "adb has lost it but its console still answers", adb: () => adbListing(), console: 0 },
+    { case: "its console gives no answer", adb: () => adbListing(), console: 2 },
+  ])("a rejected shutdown keeps the session open when $case", ({ adb, console }) =>
+    Effect.gen(function* () {
+      const { service, commands } = yield* makeAndroidService({
+        shutdownReply: hubRejects,
+        adbReply: adb,
+        booted: () => true,
+        console: () => console,
+      });
+      const threadId = ThreadId.make("android-close-rejected");
+      yield* service.open({ threadId, deviceId: serial, platform: "android" });
+      const exit = yield* Effect.exit(
+        service.close({ threadId, deviceId: serial, shutdown: true }),
+      );
+      expect(Exit.isFailure(exit)).toBe(true);
+      expect(commands).toContain("adb devices");
+      expect((yield* service.state).sessions).toHaveLength(1);
+    }).pipe(Effect.provide(ServerSettings.layerTest({ enableDeviceSupport: true })), Effect.scoped),
+  );
+
+  // The emulator listens on 127.0.0.1 and ::1 separately, and either can fail to bind.
+  it.each(["127.0.0.1", "::1", null] as const)(
+    "the console probe sees a console listening on %s",
+    async (host) => {
+      const server = NodeNet.createServer();
+      await new Promise<void>((resolve) => server.listen(0, host ?? "127.0.0.1", resolve));
+      const port = (server.address() as NodeNet.AddressInfo).port;
+      if (host === null) await new Promise<void>((resolve) => server.close(() => resolve()));
+      try {
+        const probe = await new Promise<number | null>((resolve) =>
+          NodeChildProcess.execFile(
+            process.execPath,
+            ["-e", DeviceService.EMULATOR_CONSOLE_PROBE, String(port)],
+            (error) => resolve(error ? (typeof error.code === "number" ? error.code : null) : 0),
+          ),
+        );
+        expect(probe).toBe(host === null ? DeviceService.EMULATOR_CONSOLE_REFUSED : 0);
+      } finally {
+        if (host !== null) server.close();
+      }
+    },
+  );
+
+  it.effect("a rejected shutdown of an AVD by name is not read as an exited emulator", () =>
+    Effect.gen(function* () {
+      const { service, commands } = yield* makeAndroidService({
+        shutdownReply: hubRejects,
+        adbReply: () => adbListing(),
+        booted: () => false,
+      });
+      yield* service.list;
+      // adb lists serials, so an AVD name is never listed, running or not.
+      const exit = yield* Effect.exit(
+        service.shutdown({ deviceId: DeviceId.make(avd), platform: "android" }),
+      );
+      expect(Exit.isFailure(exit)).toBe(true);
+      expect(commands).not.toContain("adb devices");
+    }).pipe(Effect.provide(ServerSettings.layerTest({ enableDeviceSupport: true })), Effect.scoped),
+  );
+
+  it.effect("waits for a shutdown the hub takes longer than 15 seconds to confirm", () =>
+    Effect.gen(function* () {
+      let booted = true;
+      const { service, commands } = yield* makeAndroidService({
+        shutdownReply: () => {
+          booted = false;
+          return Response.json({ ok: true });
+        },
+        adbReply: () => adbListing(`${serial}\tdevice`),
+        booted: () => booted,
+        // The hub allows 30 seconds for the serial to leave adb after the kill.
+        shutdownDelay: Duration.seconds(32),
+      });
+      const threadId = ThreadId.make("android-close-slow");
+      yield* service.open({ threadId, deviceId: serial, platform: "android" });
+      const closing = yield* Effect.forkChild(
+        service.close({ threadId, deviceId: serial, shutdown: true }),
+      );
+      yield* TestClock.adjust(Duration.seconds(32));
+      expect(Exit.isSuccess(yield* Fiber.await(closing))).toBe(true);
+      expect(commands).not.toContain("adb devices");
+      expect((yield* service.state).sessions).toEqual([]);
+    }).pipe(Effect.provide(ServerSettings.layerTest({ enableDeviceSupport: true })), Effect.scoped),
+  );
+});
 
 it.effect.each([LOCAL_DEVICE_HOST_ID, "ssh-fixture"])(
   "retains hub inventory on %s when AVD enumeration fails and recovers on retry",

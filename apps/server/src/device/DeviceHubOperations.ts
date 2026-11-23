@@ -13,6 +13,9 @@ import type { DeviceHostReady, DeviceOperations, HostDevice } from "./DeviceHost
 
 const BOOT_TIMEOUT = Duration.minutes(3);
 const SCREENSHOT_TIMEOUT = Duration.seconds(20);
+// The hub waits up to 30 seconds for a stopped emulator to leave adb, after the
+// kill itself; a shorter wait reports a shutdown that is still completing as failed.
+const SHUTDOWN_TIMEOUT = Duration.seconds(45);
 
 const HubDevice = Schema.Struct({
   id: Schema.String,
@@ -203,7 +206,9 @@ export const makeDeviceHubOperations = (options: {
     function* (device) {
       const postShutdown = (path: string, body: Record<string, string>) =>
         postJson(path, body, "shutdown").pipe(
-          Effect.flatMap((request) => hubJson(request, HubActionResult, "shutdown")),
+          Effect.flatMap((request) =>
+            hubJson(request, HubActionResult, "shutdown", SHUTDOWN_TIMEOUT),
+          ),
           Effect.flatMap((result) =>
             result.ok
               ? Effect.void
