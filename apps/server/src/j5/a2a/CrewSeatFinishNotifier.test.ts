@@ -46,6 +46,7 @@ it("provider errors cannot split a finish digest or replace participant fields",
     crewName: "Review",
     participantId: "real-participant",
     threadId: "real-thread",
+    runId: "run:1",
     runStatus: "failed",
     reply: null,
     failure: {
@@ -74,6 +75,7 @@ it("cuts a long reply and says so, keeping the seat's thread id for the rest", (
       crewName: "Review",
       participantId: "real-participant",
       threadId: "real-thread",
+      runId: "run:1",
       runStatus: "completed",
       failure: null,
       reply,
@@ -485,6 +487,7 @@ it.effect(
         crewName: "Fold Crew",
         participantId: scout,
         threadId: scoutThread,
+        runId: "run:s2",
         runStatus: "failed",
         failure: null,
         reply: null,
@@ -535,6 +538,7 @@ it.effect(
         crewName: "Other Crew",
         participantId: participantIdForThread(ThreadId.make("thread:other-scout")),
         threadId: ThreadId.make("thread:other-scout"),
+        runId: "run:other",
         runStatus: "failed",
         failure: null,
         reply: null,
@@ -562,7 +566,8 @@ it.effect(
       );
       yield* Effect.gen(function* () {
         const notifier = yield* CrewSeatFinishNotifier;
-        // The scout finishing again with the same facts: the Captain already holds that notice.
+        // The same run reported again (a redelivered event or the boot sweep): the Captain already
+        // holds that notice.
         assert.equal(
           yield* notifier.handleStoredEvent(terminalRunEvent(scoutThread, "run:s2", "failed")),
           scoutThread,
@@ -610,7 +615,7 @@ it.effect(
         assert.equal(fresh?.type, "message.dispatch");
         if (fresh?.type === "message.dispatch")
           assert.include(fresh.text, "failure: provider_error");
-        // The same finish again, now that this scout's own failed notice is the newest, is silent.
+        // The same run again, now that this scout's own notice for it is the newest, is silent.
         yield* Ref.set(
           captain,
           captainProjection({
@@ -633,6 +638,23 @@ it.effect(
           (yield* Ref.get(dispatched)).slice(2).map((command) => command.type),
           [],
         );
+        // A later run failing with word-for-word the same facts still tells the Captain: completed
+        // runs in between post nothing, so it is a new failure, not a repeat of the old notice.
+        yield* Ref.set(
+          captain,
+          captainProjection({
+            running: false,
+            messages: [{ id: "msg:old", text: scoutNotice, at: "2026-09-09T16:05:00Z" }],
+          }),
+        );
+        assert.equal(
+          yield* notifier.handleStoredEvent(terminalRunEvent(scoutThread, "run:s6", "failed")),
+          scoutThread,
+        );
+        const repeat = (yield* Ref.get(dispatched))[2];
+        assert.equal(repeat?.type, "message.dispatch");
+        if (repeat?.type === "message.dispatch")
+          assert.equal(repeat.text, scoutNotice.replace("run_id: run:s2", "run_id: run:s6"));
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.scoped),
 );

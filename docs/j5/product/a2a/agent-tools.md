@@ -355,11 +355,11 @@ Result: as `j5_propose_crew`. Only the Captain can add a seat. The member is add
 There is no Crew-specific artifact verb, and a seat owes no file. A seat reports its own result to
 its Captain with `j5_send_message`; a completed run posts nothing. When a seat's run fails, the
 seat finish notifier posts one platform-composed `<j5_seat_finished>` notice into the Captain's
-thread: `run_status: failed` with the run's error, the seat, its Crew, and its participant and
-thread ids. The seat's reply, its last finished assistant message of that run, follows in
-`<seat_reply>`, cut at 4,000 characters with a line saying so. A notice posts the first time a
-seat fails and again only when its facts changed, and a notice that arrives while the Captain's
-turn runs folds into the one queued behind it. Interrupted and cancelled runs are not failures:
+thread: `run_status: failed` with the run's error, the seat, its Crew, its participant and
+thread ids, and the `run_id`. The seat's reply, its last finished assistant message of that run,
+follows in `<seat_reply>`, cut at 4,000 characters with a line saying so. Each failed run posts
+one notice, and a notice that arrives while the Captain's turn runs folds into the one queued
+behind it. Interrupted and cancelled runs are not failures:
 `j5_stop_crew` interrupts seats so they can be briefed again, and nothing is reported then. Ids
 derive from the run, so a redelivered event cannot post twice; a failed dispatch is retried by the
 next failure or the boot sweep. Read-only Codex and Claude personas have `j5_write_artifact` pre-approved so a
@@ -420,7 +420,7 @@ the current facts are a subset of the confirmed ones, so a retry after a partial
 the job; new work on any seat makes it stale and yields a fresh token. Partial failures name the
 seats retired so far and the seat that failed; retry with the same `client_request_id` and token.
 
-**Members are never archived one by one (R14):** `t3_thread_organize` refuses archiving an active Crew seat, just as client archive/delete does. Retire the unit through `j5_archive_crew` or Archive crew on the Fleet page. Archiving its Captain retains the crew cascade. A member that finishes with nothing owed is
+**Members are never archived one by one (R14):** `t3_thread_organize` refuses archiving an active Crew seat, just as client archive/delete does. Retire the unit through `j5_archive_crew` or Archive crew on the Fleet page. Archiving its Captain retains the crew cascade. A member's failed run is
 reported to its Captain; the platform never settles a seat because its run finished, and settlement is not archive. `t3_thread_interrupt` on a member is still allowed;
 stopping retires nothing.
 

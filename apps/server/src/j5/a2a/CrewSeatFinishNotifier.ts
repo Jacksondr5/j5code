@@ -26,8 +26,8 @@ import { lifecycleCommandId, lifecycleId } from "./spawnIds.ts";
 
 /**
  * A seat's failed run tells its Captain, with the run's error and the seat's reply; a completed run
- * tells nothing, as the seat reports its own result. The seat is never settled. A notice repeats
- * only when its facts changed, and one arriving mid-turn folds into the seat notice already queued.
+ * tells nothing, as the seat reports its own result. The seat is never settled. Each run is told
+ * once, and a notice arriving mid-turn folds into the seat notice already queued.
  */
 export interface CrewSeatFinishNotifierShape {
   /** Returns the seat thread whose Captain was told, or null when the event needed no action. */
@@ -134,6 +134,8 @@ export const seatFinishedNoticeText = (input: {
   readonly crewName: string;
   readonly participantId: string;
   readonly threadId: string;
+  /** Makes each run's notice distinct, so only the same run reported twice reads as unchanged. */
+  readonly runId: string;
   readonly runStatus: string;
   /** The run's recorded error when it failed; the notice leads with it. */
   readonly failure: OrchestrationV2ProviderFailure | null;
@@ -141,7 +143,7 @@ export const seatFinishedNoticeText = (input: {
 }) => {
   const failureLine =
     input.runStatus === "failed" ? `\nfailure: ${formatRunFailureField(input.failure)}` : "";
-  const head = `<j5_seat_finished>\nrun_status: ${input.runStatus}${failureLine}\nseat: ${input.seatName}\ncrew: ${input.crewName}\nparticipant_id: ${input.participantId}\nthread_id: ${input.threadId}\n</j5_seat_finished>`;
+  const head = `<j5_seat_finished>\nrun_status: ${input.runStatus}${failureLine}\nseat: ${input.seatName}\ncrew: ${input.crewName}\nparticipant_id: ${input.participantId}\nthread_id: ${input.threadId}\nrun_id: ${input.runId}\n</j5_seat_finished>`;
   if (input.reply === null) return head;
   const cut = input.reply.length > REPLY_MAX_CHARS;
   // Never leave half of a surrogate pair at the cut.
@@ -209,6 +211,7 @@ const makeLayer = (daemon: boolean) =>
           crewName: instance.displayName,
           participantId: participantIdForThread(threadId),
           threadId,
+          runId: run.id,
           runStatus: run.status,
           failure: runFailureDetail(projection, run.id),
           reply,
