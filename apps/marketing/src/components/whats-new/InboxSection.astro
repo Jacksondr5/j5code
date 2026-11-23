@@ -10,7 +10,10 @@ import { INBOX_ITEMS } from "./inbox";
 
 <section id="inbox" class="feature">
   <div class="container">
-    <p class="inbox-hint live-only">Try it: open the pull request, then the file in the second question.</p>
+    <p class="inbox-hint live-only">
+      Try it: the ringed parts are where to start. Open the pull request, answer the question, switch the panel's tabs.
+      <button type="button" class="inbox-reset" data-inbox-reset>Start over</button>
+    </p>
     <InboxVignette />
     <ul class="items items--5">
       {INBOX_ITEMS.map((item) => <li><h3>{item.title}</h3><p>{item.body}</p></li>)}
@@ -23,5 +26,17 @@ import { INBOX_ITEMS } from "./inbox";
     margin-bottom: 18px;
     font-size: 15px;
     color: var(--wn-muted);
+  }
+
+  .inbox-reset {
+    margin-left: 6px;
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    color: var(--wn-fg);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    cursor: pointer;
   }
 </style>
