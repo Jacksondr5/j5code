@@ -138,9 +138,8 @@ export interface AccessShape {
       | { readonly kind: "new"; readonly displayName: string },
   ) => Effect.Effect<ParticipantId, ChangeError | PersonNameTakenError | DeviceAlreadyClaimedError>;
   /**
-   * Revokes for renewal every live device whose permissions are not what its person's level and
-   * its ceiling give now. Run once at startup, so a device paired under an older mapping, or a
-   * guest's device from before levels, renews into the mapping this server has.
+   * Revokes for renewal every live device holding a permission its person's level and its ceiling
+   * no longer give. Run once at startup; a device only short of a newly added one keeps its session.
    */
   readonly renewOutdatedDevices: Effect.Effect<number, ChangeError>;
   readonly subscribe: Effect.Effect<PubSub.Subscription<AccessChange>, never, Scope.Scope>;
@@ -481,7 +480,10 @@ const make = Effect.gen(function* () {
         yield* committed(
           Effect.gen(function* () {
             for (const device of yield* liveDevices(record.person.personId)) {
-              if (!samePermissions(devicePermissions(highest, device.ceiling), device.scopes)) {
+              // Jackson, 2026-11-23 (AC16): only a device holding more than its level ends here;
+              // one short of a newly added permission gains it at its next renewal.
+              const target = devicePermissions(highest, device.ceiling);
+              if (device.scopes.some((scope) => !target.includes(scope))) {
                 yield* revokeForRenewal(device.sessionId);
                 renewed += 1;
               }
@@ -521,9 +523,9 @@ export const layer: Layer.Layer<
 > = Layer.effect(Access, make);
 
 /**
- * Renews at startup every device whose permissions are not what its level gives: a guest's device
- * from before levels, or any device after an upstream advance reshaped the mapping. If it cannot
- * be done the server does not start, rather than run with devices above their level.
+ * Renews at startup every device holding more than its level gives: a guest's device from before
+ * levels, or one an upstream advance's new mapping narrows. If it cannot be done the server does
+ * not start, rather than run with devices above their level.
  */
 export const renewOutdatedDevicesAtStartup = Layer.effectDiscard(
   Effect.gen(function* () {

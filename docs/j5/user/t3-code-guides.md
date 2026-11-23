@@ -66,9 +66,8 @@ the guides that describe them don't apply:
 
 ### Updating to the release based on T3 Code 0.1.11
 
-- Owners gain one more permission, so on the first start after the update every Owner's device,
-  except the first owner's, reconnects once to pick it up. A phone, or a server added to web or
-  desktop as another environment, may have to be paired again instead.
+- Owners gain one more permission. Their devices keep their sessions through the update and pick
+  it up the next time their session is renewed, so no device reconnects or pairs again for it.
 
 ### Updating to the release based on T3 Code 0.1.7
 

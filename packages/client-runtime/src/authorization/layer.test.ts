@@ -389,6 +389,51 @@ describe("RemoteEnvironmentAuthorization", () => {
     }),
   );
 
+  // J5 (FORK.md case 70): a device J5 ended for a new level gets its renewed session this way.
+  it.effect("renews a direct DPoP token its host refused before expiry, and keeps it", () =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness({
+        responses: [
+          authInvalid(),
+          (init: RequestInit) => {
+            const fields = new URLSearchParams(
+              init.body instanceof Uint8Array
+                ? new TextDecoder().decode(init.body)
+                : String(init.body),
+            );
+            expect(fields.get("subject_token")).toBe("ended-direct-token");
+            return accessToken("renewed-direct-token");
+          },
+          websocketTicket("direct-ticket"),
+        ],
+        descriptor: DESCRIPTOR,
+        credentials: [
+          [
+            "direct-1",
+            new DpopConnectionCredential({
+              accessToken: "ended-direct-token",
+              expiresAtEpochMs: Number.MAX_SAFE_INTEGER,
+            }),
+          ],
+        ],
+      });
+
+      const stored = yield* Effect.gen(function* () {
+        const remote = yield* RemoteEnvironmentAuthorization.RemoteEnvironmentAuthorization;
+        const credentials = yield* ConnectionCredentialStore.ConnectionCredentialStore;
+        yield* remote.authorizeDirectDpop({
+          expectedEnvironmentId: ENVIRONMENT_ID,
+          connectionId: "direct-1",
+          httpBaseUrl: ENDPOINT.httpBaseUrl,
+          wsBaseUrl: ENDPOINT.wsBaseUrl,
+        });
+        return yield* credentials.get("direct-1");
+      }).pipe(Effect.provide(harness.layer));
+
+      expect(Option.getOrThrow(stored)).toMatchObject({ accessToken: "renewed-direct-token" });
+    }),
+  );
+
   it.effect("renews another direct host while the first host is unresponsive", () =>
     Effect.gen(function* () {
       const started = Promise.withResolvers<void>();

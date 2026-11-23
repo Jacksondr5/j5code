@@ -350,10 +350,20 @@ it.layer(accessLayer)("Access", (it) => {
         "preview:operate",
       ]);
       const settled = yield* device(guest.personId, [AuthOrchestrationReadScope]);
+      // Jackson, 2026-11-23 (AC16): a device only short of a permission an advance added keeps
+      // its session and gains it at its next renewal.
+      const owner = yield* person("Owner before relay", [
+        { scope: { kind: "server" }, level: "owner" },
+      ]);
+      const short = yield* device(
+        owner.personId,
+        LEVEL_PERMISSIONS.owner.filter((scope) => scope !== "relay:configure"),
+      );
 
       assert.strictEqual(yield* access.renewOutdatedDevices, 1);
       assert.isFalse(yield* isLive(browser.sessionId));
       assert.isTrue(yield* isLive(settled.sessionId));
+      assert.isTrue(yield* isLive(short.sessionId));
     }),
   );
 });

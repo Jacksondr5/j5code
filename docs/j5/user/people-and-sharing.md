@@ -50,8 +50,7 @@ to pair through your tailnet, as for any pairing link.
 what the person's level allows.
 
 `j5 auth pairing create` without `--person` makes a link for a device the server does not know yet.
-Whoever opens it is asked who they are before they can use anything. For now, don't use it for a
-phone: the mobile app has to pair again after it answers. Use `j5 pair --person` instead.
+Whoever opens it is asked who they are before they can use anything.
 
 ## People
 
@@ -83,8 +82,8 @@ language and input, its servers, notifications and About. A Collaborator also se
 turn on voice input for their own device; only an Owner can change its key or models. A New thread,
 a fork or a new project is offered only where the person may start one.
 
-When a person's level changes, a browser open at that server's own address reconnects once. For
-now, the mobile app, and web or desktop where that server was added as another environment, must be
-paired again with a new link. Someone who has
+When a person's level changes, each of their devices reconnects once with the new level, the
+mobile app and web or desktop where that server was added as another environment included. A device
+that was offline longer than its session lasts is paired again with a new link. Someone who has
 lost everything they were given sees "Nothing is shared with you" until an Owner shares something
 again.

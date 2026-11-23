@@ -1,4 +1,10 @@
-import type { AuthClientMetadata, AuthSessionId } from "@t3tools/contracts";
+import {
+  type AuthAccessTokenResult,
+  AuthAccessTokenType,
+  type AuthClientMetadata,
+  type AuthSessionId,
+} from "@t3tools/contracts";
+import { encodeOAuthScope } from "@t3tools/shared/oauthScope";
 import { J5_SESSION_RENEW_PATH, devicePermissions, highestLevel } from "@t3tools/contracts/j5";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
@@ -17,14 +23,17 @@ import { ParticipantId } from "../a2a/contracts.ts";
 import { PersonAccess } from "./PersonAccess.ts";
 
 /**
- * Where a device whose session J5 ended for renewal gets a new one (AC17); upstream checks a
- * token's signature before revocation, so the old token proves which session it was. Only a
- * J5-marked session renews (not expired, DPoP-bound or reused), never beyond the old expiry, with
- * what its level and ceiling give now. Mark, level and issue commit together: one renewal a token.
+ * How a device whose session J5 ended for renewal gets a new one (AC17): a bearer session on J5's
+ * route, a key-bound one through upstream's token endpoint (the gate's `renewAccessToken`). Only a
+ * J5-marked session renews, never beyond the old expiry, with what its level and ceiling give now.
+ * Mark, level and issue commit together: one renewal a token.
  */
 
 /** What upstream says of a browser session presented from another origin. */
 const { FOREIGN_ORIGIN_DIAGNOSTIC } = EnvironmentAuth;
+
+// As upstream's key-bound tokens last (`RENEWABLE_ACCESS_TOKEN_TTL` in EnvironmentAuth.ts).
+const KEY_BOUND_TOKEN_TTL = Duration.hours(1);
 
 // As upstream answers every credential it issues (`auth/http.ts`).
 const CREDENTIAL_RESPONSE_HEADERS = { "cache-control": "no-store", pragma: "no-cache" } as const;
@@ -37,6 +46,32 @@ class NotRenewableError extends Schema.TaggedError<NotRenewableError>()("NotRene
 
 const StoredCeiling = Schema.fromJsonString(Schema.Array(Schema.String));
 const decodeCeiling = Schema.decodeUnknownOption(StoredCeiling);
+
+export const isNotRenewable = Schema.is(NotRenewableError);
+const isInvalidCredential = Schema.is(EnvironmentAuth.ServerAuthInvalidCredentialError);
+const isRevokedToken = Schema.is(SessionStore.SessionTokenRevokedError);
+
+/**
+ * The session upstream's renewal refused as revoked, and only that: `SessionStore.renew` says so
+ * after checking the token's signature, `rnw` and key, before it consumes the proof (case 70).
+ */
+export const revokedSessionOf = (error: unknown): AuthSessionId | undefined =>
+  isInvalidCredential(error) && isRevokedToken(error.cause) ? error.cause.sessionId : undefined;
+
+/** Upstream's answer for an issued access token (`toAccessTokenResult` in EnvironmentAuth.ts). */
+export const accessTokenResult = (session: SessionStore.IssuedSession) =>
+  DateTime.now.pipe(
+    Effect.map((now): AuthAccessTokenResult => ({
+      access_token: session.token,
+      issued_token_type: AuthAccessTokenType,
+      token_type: session.proofKeyThumbprint ? "DPoP" : "Bearer",
+      expires_in: Math.max(
+        0,
+        Math.floor((session.expiresAt.epochMilliseconds - now.epochMilliseconds) / 1000),
+      ),
+      scope: encodeOAuthScope(session.scopes),
+    })),
+  );
 
 const refusal = (status: number, error: string, message: string) =>
   HttpServerResponse.jsonUnsafe(
@@ -72,11 +107,13 @@ export const makeSessionRenewal = (services: {
 }) => {
   const { sessions: store, repository, people, sql } = services;
 
-  const renew = Effect.fn("j5.sharing.sessionRenewal.renew")(function* (sessionId: AuthSessionId) {
+  /** The ended session's row while time is left on it, and its mark, taken once. */
+  const takeMark = Effect.fn("j5.sharing.sessionRenewal.takeMark")(function* (
+    sessionId: AuthSessionId,
+  ) {
     const record = yield* repository.getById({ sessionId });
     if (Option.isNone(record)) return yield* new NotRenewableError({});
     const old = record.value;
-    if (old.method === "dpop-access-token") return yield* new NotRenewableError({});
     const remaining = DateTime.distance(yield* DateTime.now, old.expiresAt);
     if (Duration.toMillis(remaining) <= 0) return yield* new NotRenewableError({});
     const consumed = yield* sql<{
@@ -96,12 +133,46 @@ export const makeSessionRenewal = (services: {
         : Option.getOrElse(decodeCeiling(binding.ceiling_scopes), () => []);
     const levels = yield* people.listLevels(personId);
     const scopes = devicePermissions(highestLevel(levels.map((held) => held.level)), ceiling);
+    return { old, remaining, personId, ceiling, scopes };
+  });
+
+  const renew = Effect.fn("j5.sharing.sessionRenewal.renew")(function* (sessionId: AuthSessionId) {
+    const { old, remaining, personId, ceiling, scopes } = yield* takeMark(sessionId);
+    if (old.method === "dpop-access-token") return yield* new NotRenewableError({});
     const issued = yield* store.issue({
       ttl: remaining,
       subject: old.subject,
       method: old.method,
       scopes,
       client: clientOf(old.client),
+    });
+    yield* people.bindSession({ sessionId: issued.sessionId, personId, ceiling });
+    return issued;
+  });
+
+  /**
+   * A key-bound session J5 ended for renewal, asked for through upstream's token endpoint, which
+   * has checked the token's signature, its `rnw` and that the proof's key is the token's. The new
+   * session keeps that key and the old row's expiry; it is never extended here.
+   */
+  const renewKeyBound = Effect.fn("j5.sharing.sessionRenewal.renewKeyBound")(function* (
+    sessionId: AuthSessionId,
+    proofKeyThumbprint: string,
+  ) {
+    const key = yield* repository.getProofKeyThumbprint({ sessionId });
+    if (Option.getOrUndefined(key) !== proofKeyThumbprint) {
+      return yield* new NotRenewableError({});
+    }
+    const { old, remaining, personId, ceiling, scopes } = yield* takeMark(sessionId);
+    if (old.method !== "dpop-access-token") return yield* new NotRenewableError({});
+    const issued = yield* store.issue({
+      ttl: Duration.min(KEY_BOUND_TOKEN_TTL, remaining),
+      subject: old.subject,
+      method: old.method,
+      scopes,
+      client: clientOf(old.client),
+      proofKeyThumbprint,
+      renewalWindow: remaining,
     });
     yield* people.bindSession({ sessionId: issued.sessionId, personId, ceiling });
     return issued;
@@ -119,7 +190,11 @@ export const makeSessionRenewal = (services: {
     return yield* sql.withTransaction(renew(revoked));
   });
 
-  return { renewToken };
+  return {
+    renewToken,
+    renewKeyBound: (sessionId: AuthSessionId, proofKeyThumbprint: string) =>
+      sql.withTransaction(renewKeyBound(sessionId, proofKeyThumbprint)),
+  };
 };
 
 export const sessionRenewalRouteLayer = Layer.unwrap(
