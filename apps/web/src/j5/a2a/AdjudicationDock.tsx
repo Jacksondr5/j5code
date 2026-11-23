@@ -25,6 +25,7 @@ import {
 import {
   AnswerAttachButton,
   AnswerAttachmentStrip,
+  AnswerDropOverlay,
   answerAttachmentInputHandlers,
   useAnswerAttachmentIntake,
   useAnswerAttachmentSupport,
@@ -32,7 +33,6 @@ import {
   useAnswerUploads,
 } from "./AnswerAttachments";
 import { AnswerSendErrorAlert } from "./AnswerSendErrorAlert";
-import { WorkspaceFileDropOverlay } from "../../components/chat/TimelineOverlays";
 import { InboxReplyEditor } from "./InboxReplyEditor";
 import { J5RecordPanel } from "./J5RecordPanel";
 import { answerToDeliver, useAnswerSends } from "./answerSends";
@@ -199,7 +199,7 @@ export function AdjudicationDock(props: {
           {...dropTarget}
           {...claimComposerShortcuts}
         >
-          {dragActive && fileInput !== null ? <WorkspaceFileDropOverlay /> : null}
+          {dragActive && fileInput !== null ? <AnswerDropOverlay /> : null}
           <div className="flex flex-wrap items-center gap-2 text-muted-foreground">
             <span>Question for you</span>
             {openFor ? <span>· open {openFor}</span> : null}

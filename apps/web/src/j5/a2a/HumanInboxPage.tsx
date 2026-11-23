@@ -57,6 +57,7 @@ import { RelativeAge } from "../RelativeAge";
 import {
   AnswerAttachButton,
   AnswerAttachmentStrip,
+  AnswerDropOverlay,
   type AnswerAttachmentsState,
   answerAttachmentInputHandlers,
   useAnswerAttachmentIntake,
@@ -64,7 +65,6 @@ import {
   useAnswerAttachments,
   useAnswerUploads,
 } from "./AnswerAttachments";
-import { WorkspaceFileDropOverlay } from "../../components/chat/TimelineOverlays";
 import { answerSendCallbacks, answerToDeliver, useAnswerSends } from "./answerSends";
 import { answerHumanExchange } from "./humanInboxClient";
 import {
@@ -440,19 +440,20 @@ function OpenInboxItem({
               {askWaitsForServerLine(item.environmentLabel)}
             </p>
           ) : (
-            <div className="mt-4 flex flex-col gap-3">
-              <div
-                className="relative"
-                {...(fileInput === null
-                  ? {}
-                  : {
-                      onDragEnter: fileInput.onDragEnter,
-                      onDragOver: fileInput.onDragOver,
-                      onDragLeave: fileInput.onDragLeave,
-                      onDrop: fileInput.onDrop,
-                    })}
-              >
-                {dragActive && fileInput !== null ? <WorkspaceFileDropOverlay /> : null}
+            // The whole reply takes a dropped file, as the composer's whole form does.
+            <div
+              className="relative mt-4 flex flex-col gap-3"
+              {...(fileInput === null
+                ? {}
+                : {
+                    onDragEnter: fileInput.onDragEnter,
+                    onDragOver: fileInput.onDragOver,
+                    onDragLeave: fileInput.onDragLeave,
+                    onDrop: fileInput.onDrop,
+                  })}
+            >
+              {dragActive && fileInput !== null ? <AnswerDropOverlay /> : null}
+              <div>
                 {/* A collapsed ask mounts no editor: the Inbox can list many, and the words are stored. */}
                 {expanded ? (
                   <InboxReplyEditor

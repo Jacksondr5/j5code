@@ -19,6 +19,7 @@ import {
   openExpandedImagePreview,
 } from "../../components/chat/ExpandedImageDialog";
 import { usePreparingComposerImages } from "../../components/chat/preparingComposerImages";
+import { WorkspaceFileDropOverlay } from "../../components/chat/TimelineOverlays";
 import { useComposerAttachmentIntake } from "../../components/chat/useComposerAttachmentIntake";
 import { splitTransferredFiles } from "../../components/chat/workspaceFileDrop";
 import {
@@ -261,6 +262,18 @@ export function answerAttachmentInputHandlers(
       onFiles(files);
     },
   };
+}
+
+/**
+ * The composer's "Drop files to attach" highlight over a reply. The composer's form is padded and
+ * the overlay sits inside that padding; a reply has none, so the overlay is drawn around it.
+ */
+export function AnswerDropOverlay() {
+  return (
+    <div className="pointer-events-none absolute -inset-3 z-40">
+      <WorkspaceFileDropOverlay />
+    </div>
+  );
 }
 
 export function AnswerAttachButton(props: {
