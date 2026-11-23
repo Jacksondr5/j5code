@@ -10,6 +10,7 @@ import { makeThreadRequestsResolvedAnnouncer } from "@t3tools/client-runtime/sta
 import { useLayoutEffect, useRef, type ComponentProps } from "react";
 import { expect, it, vi } from "vite-plus/test";
 import { userEvent } from "vite-plus/test/browser";
+import "~/index.css";
 
 vi.mock(import("../ChatMarkdown"), async (importOriginal) => ({
   ...(await importOriginal()),
@@ -62,7 +63,9 @@ it("bounds long questions and resets their scroll position when the question cha
   );
   await using screen = await render(panel(0));
   const viewport = () => {
-    const element = screen.container.querySelector<HTMLElement>('[data-slot="scroll-area-viewport"]');
+    const element = screen.container.querySelector<HTMLElement>(
+      '[data-slot="scroll-area-viewport"]',
+    );
     if (!element) throw new Error("Expected a question scroll viewport");
     return element;
   };
