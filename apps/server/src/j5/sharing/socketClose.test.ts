@@ -79,6 +79,17 @@ it.layer(layer)("J5 ends a device's session outside its own transaction", (it) =
     }),
   );
 
+  it.effect("when the server starts and it holds more than its level", () =>
+    Effect.gen(function* () {
+      const access = yield* Access.Access;
+      const viewer = yield* person("Outdated", [{ scope: { kind: "server" }, level: "viewer" }]);
+      const old = yield* device(viewer.personId, LEVEL_PERMISSIONS.collaborator);
+
+      yield* access.renewOutdatedDevices;
+      assert.deepStrictEqual(inTransaction(old.sessionId), [false]);
+    }),
+  );
+
   it.effect("when its person is removed", () =>
     Effect.gen(function* () {
       const access = yield* Access.Access;
