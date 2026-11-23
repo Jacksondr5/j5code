@@ -173,7 +173,7 @@ const upstream: ReadonlyArray<Item> = [
 
 const contents = [
   { href: "#windows", title: "J5 Code on Windows, in beta", line: "The desktop app and the j5 server.", origin: "j5" },
-  { href: "#crews", title: "Crews", line: "Rosters you approve in the composer, or not at all.", origin: "j5" },
+  { href: "#crews", title: "Crews", line: "Approve a roster in the composer, or let Crews start on their own.", origin: "j5" },
   { href: "#personas", title: "Personas", line: "Limits that hold when an agent is the one picking.", origin: "j5" },
   { href: "#inbox", title: "Inbox and people", line: "Answer with a file. Search People.", origin: "j5" },
   { href: "#links", title: "Links between machines", line: "Agents message and use tools across your servers.", origin: "j5" },
@@ -198,8 +198,8 @@ const T3_PENNANT = "M0.6 0.6h12L8.7 5l3.9 4.4H0.6z";
         </p>
         <h1 class="display" data-rise style="--d: 80ms">Your agents need you less. J5 Code comes to Windows.</h1>
         <p class="hero__lead" data-rise style="--d: 160ms">
-          Crews and personas that bring you only what needs you, a Windows app in beta, links between your machines,
-          and everything J5 Code takes in from T3 Code {UPSTREAM_RANGE}.
+          Crews and personas that need you less, a Windows app in beta, links between your machines, and everything
+          J5 Code takes in from T3 Code {UPSTREAM_RANGE}.
         </p>
       </div>
       <div class="hero__waterline" aria-hidden="true">
@@ -314,6 +314,7 @@ const T3_PENNANT = "M0.6 0.6h12L8.7 5l3.9 4.4H0.6z";
               <button type="button" data-piece-reset="answer">Start over</button>
             </p>
             <AnswerVignette />
+            <p class="piece-note">Attach a screenshot to an Inbox answer.</p>
           </div>
         </div>
         <ul class="items items--5">
@@ -340,6 +341,9 @@ const T3_PENNANT = "M0.6 0.6h12L8.7 5l3.9 4.4H0.6z";
               <button type="button" data-piece-reset="links">Start over</button>
             </p>
             <LinksVignette />
+            <p class="piece-note">
+              One row per linked pair: messages both ways, and a Tools level for each direction.
+            </p>
           </div>
         </div>
         <ul class="items items--5">

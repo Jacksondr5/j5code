@@ -54,10 +54,10 @@ const cap = (seat: string) => seat[0]?.toUpperCase() + seat.slice(1);
       I've proposed a Crew of two: one member to build the chart and one to review it. Approve the roster and I'll
       hand them their first assignments.
     </p>
-    <p class="crewp__notice" data-crew-notice="approve" hidden>
+    <p class="crewp__notice" tabindex="-1" data-crew-notice="approve" hidden>
       <Icon name="users" class="ico-35" /><span data-crew-notice-text>Crew approved · 2 members</span>
     </p>
-    <p class="crewp__notice" data-crew-notice="decline" hidden>
+    <p class="crewp__notice" tabindex="-1" data-crew-notice="decline" hidden>
       <Icon name="users" class="ico-35" /><span>Crew Tide chart · roster declined</span>
     </p>
   </div>
@@ -104,7 +104,6 @@ const cap = (seat: string) => seat[0]?.toUpperCase() + seat.slice(1);
                   <p class="crewp__reason" data-crew-reason>{member.reason}</p>
                   <p class="crewp__extra" data-crew-workspace hidden />
                   <p class="crewp__extra crewp__extra--warn" data-crew-asks hidden>Asks for approvals</p>
-                  <p class="crewp__extra crewp__extra--error" role="alert" data-crew-error hidden />
                 </div>
                 <div class="crewp__tools">
                   <button type="button" class="btn-a btn-a--ghost btn-a--icon-xs" aria-label={`Edit seat ${member.seat}`} data-crew-edit data-hot={member.seat === "builder" ? "" : undefined}>
@@ -158,7 +157,7 @@ const cap = (seat: string) => seat[0]?.toUpperCase() + seat.slice(1);
         </label>
         <div class="crewp__field">
           Persona
-          <Pick name="persona" label="Persona" value="custom" options={[{ value: "custom", label: "Custom member" }]} align="start" />
+          <Pick name="persona" label="Persona" value="custom" options={[{ value: "custom", label: "Custom member" }]} />
         </div>
         <label class="crewp__field crewp__field--wide">
           Instructions
@@ -172,7 +171,7 @@ const cap = (seat: string) => seat[0]?.toUpperCase() + seat.slice(1);
           runtimes.map((runtime) => (
             <div class="crewp__field" data-crew-for={runtime.provider} hidden={runtime.provider !== "claude"}>
               Model
-              <Pick name={`model-${runtime.provider}`} label="Model" value={runtime.models[0]?.value ?? ""} options={runtime.models} align="start" />
+              <Pick name={`model-${runtime.provider}`} label="Model" value={runtime.models[0]?.value ?? ""} options={runtime.models} />
             </div>
           ))
         }
@@ -186,7 +185,7 @@ const cap = (seat: string) => seat[0]?.toUpperCase() + seat.slice(1);
         }
         <div class="crewp__field">
           Access
-          <Pick name="access" label="Access" value="full-access" options={access} align="start" class="pick--up" />
+          <Pick name="access" label="Access" value="full-access" options={access} class="pick--up" />
         </div>
         <div class="crewp__field">
           Workspace
@@ -214,6 +213,8 @@ const cap = (seat: string) => seat[0]?.toUpperCase() + seat.slice(1);
         </div>
       </div>
 
+      <p class="crewp__problem" role="alert" data-crew-problem hidden></p>
+
       <div class="crewp__dialog-foot">
         <p>Changes apply to the proposal. Nobody starts yet.</p>
         <button type="button" class="btn-a btn-a--outline" data-crew-cancel>Cancel</button>
@@ -234,7 +235,6 @@ const cap = (seat: string) => seat[0]?.toUpperCase() + seat.slice(1);
         <p class="crewp__reason" data-crew-reason>Added by the user</p>
         <p class="crewp__extra" data-crew-workspace hidden></p>
         <p class="crewp__extra crewp__extra--warn" data-crew-asks hidden>Asks for approvals</p>
-        <p class="crewp__extra crewp__extra--error" role="alert" data-crew-error hidden></p>
       </div>
       <div class="crewp__tools">
         <button type="button" class="btn-a btn-a--ghost btn-a--icon-xs" data-crew-edit><Icon name="pencil" /></button>
@@ -363,7 +363,7 @@ const cap = (seat: string) => seat[0]?.toUpperCase() + seat.slice(1);
 
   .crewp__extra { margin-top: 4px; color: var(--a-muted-fg); }
   .crewp__extra--warn { color: var(--a-warning-fg); }
-  .crewp__extra--error { color: var(--a-destructive-text); }
+  .crewp__problem { margin: -8px 24px 20px; font-size: 12px; color: var(--a-destructive-text); }
   .crewp__tools { display: flex; flex-shrink: 0; gap: 4px; }
 
   .crewp__footer {
@@ -506,7 +506,7 @@ const cap = (seat: string) => seat[0]?.toUpperCase() + seat.slice(1);
     padding: 0 11px;
     border: 1px solid var(--a-input);
     border-radius: 8px;
-    background: var(--a-bg);
+    background: var(--a-control);
     box-shadow: var(--a-shadow);
     font: 400 14px/20px var(--a-font);
     color: var(--a-fg);
@@ -552,5 +552,9 @@ const cap = (seat: string) => seat[0]?.toUpperCase() + seat.slice(1);
     .crewp__fields { grid-template-columns: 1fr; padding: 16px; }
     .crewp__dialog-head,
     .crewp__dialog-foot { padding: 14px 16px; }
+    /* Below the app's sm width the footer stacks, with the primary button first. */
+    .crewp__dialog-foot { flex-direction: column-reverse; align-items: stretch; }
+    .crewp__dialog-foot p { flex: none; }
+    .crewp__problem { margin-inline: 16px; }
   }
 </style>

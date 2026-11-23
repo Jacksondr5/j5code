@@ -18,10 +18,12 @@ interface Props {
   options: ReadonlyArray<Option>;
   size?: "xs" | "sm";
   align?: "start" | "end";
+  /** Ringed as something to try. */
+  hot?: boolean;
   class?: string;
 }
 
-const { name, label, value, options, size = "sm", align = "end", class: className } = Astro.props;
+const { name, label, value, options, size = "sm", align = "end", hot, class: className } = Astro.props;
 ---
 
 <div class:list={["pick", className]} data-pick={name}>
@@ -32,6 +34,7 @@ const { name, label, value, options, size = "sm", align = "end", class: classNam
     aria-expanded="false"
     aria-label={label}
     data-pick-trigger
+    data-hot={hot ? "" : undefined}
   >
     <span data-pick-value>{options.find((option) => option.value === value)?.label}</span>
     <Icon name="chevron-down" />

@@ -133,15 +133,26 @@ const total = providers.reduce((sum, provider) => sum + provider.models.length, 
                     <Mark name={provider.mark} class="ico-35" />
                     <b>{provider.name}</b>
                   </button>
-                  <span class="t-muted tnum" data-provider-count />
-                  <button type="button" class="crewset__all" data-provider-all>Check all</button>
+                  <span class="t-muted tnum crewset__tally" data-provider-count>
+                    {provider.models.filter((model) => !unchecked.has(model)).length} of {provider.models.length} models
+                    · {provider.levels.length} of {provider.levels.length} levels
+                  </span>
+                  <button type="button" class="crewset__all" data-provider-all>
+                    {provider.models.some((model) => unchecked.has(model)) ? "Check all" : "Uncheck all"}
+                  </button>
                 </div>
                 <div class="crewset__chips" hidden={index !== 0} data-provider-body>
                   <p class="crewset__label">Models</p>
                   <ul>
                     {provider.models.map((model) => (
                       <li>
-                        <button type="button" class="crewset__chip" aria-pressed={unchecked.has(model) ? "false" : "true"} data-chip="model">
+                        <button
+                          type="button"
+                          class="crewset__chip"
+                          aria-pressed={unchecked.has(model) ? "false" : "true"}
+                          data-chip="model"
+                          data-hot={model === "GPT-6.2-Sol" ? "" : undefined}
+                        >
                           {model}
                         </button>
                       </li>
@@ -337,6 +348,8 @@ const total = providers.reduce((sum, provider) => sum + provider.models.length, 
     .crewset__page { padding: 14px 10px 12px; }
     .crewset__scope { padding: 0 6px; }
     .crewset__panel { padding: 4px 10px 10px; }
-    .crewset__provider-head { flex-wrap: wrap; }
+    /* The name and its button keep the first line; the counts take a line of their own under them. */
+    .crewset__provider-head { flex-wrap: wrap; row-gap: 2px; }
+    .crewset__tally { order: 1; flex-basis: 100%; padding-left: 22px; }
   }
 </style>

@@ -68,6 +68,7 @@ const directions = [
                 value={direction.level}
                 options={levels(direction.holder, direction.other)}
                 size="xs"
+                hot={direction.holder === "lighthouse"}
                 class="links__pick"
               />
             </div>

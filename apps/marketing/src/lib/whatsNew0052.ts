@@ -138,23 +138,30 @@ const wireCrewSettings: Wire = (piece) => {
   const providers = select(piece, "[data-provider]");
   const key = (chip: HTMLElement) =>
     `${chip.closest<HTMLElement>("[data-provider]")?.dataset.provider}:${chip.dataset.chip}:${chip.textContent?.trim()}`;
-  const everything = () => new Set(chips.map(key));
+  const ofKind = (kind: string) => chips.filter((chip) => chip.dataset.chip === kind);
   const pressed = (chip: HTMLElement) => chip.getAttribute("aria-pressed") === "true";
 
-  // Each setting has the server's value and, perhaps, one project's own. A list that was never
-  // saved is null, and allows everything.
+  // Each setting has the server's value and, perhaps, one project's own. Models and levels are
+  // two settings, as in the app. A list that was never saved is null, and allows everything.
+  interface List {
+    env: Set<string> | null;
+    project: Set<string> | null;
+  }
   const auto: { env: boolean; project: boolean | null } = { env: false, project: true };
-  const lists: { env: Set<string> | null; project: Set<string> | null } = {
-    env: new Set(chips.filter(pressed).map(key)),
-    project: null,
-  };
+  const models: List = { env: new Set(ofKind("model").filter(pressed).map(key)), project: null };
+  const levels: List = { env: null, project: null };
+  const listOf = (kind: string | undefined) => (kind === "level" ? levels : models);
   const atProject = () => piece.dataset.scope === "project";
   const autoNow = () => (atProject() ? (auto.project ?? auto.env) : auto.env);
-  const listNow = () => (atProject() ? (lists.project ?? lists.env) : lists.env);
-  const allowed = (chip: HTMLElement) => listNow()?.has(key(chip)) ?? true;
-  const save = (next: Set<string>) => {
-    if (atProject()) lists.project = next;
-    else lists.env = next;
+  const now = (list: List) => (atProject() ? (list.project ?? list.env) : list.env);
+  const allowed = (chip: HTMLElement) => now(listOf(chip.dataset.chip))?.has(key(chip)) ?? true;
+  // The first change to a list that allows everything starts from the whole catalog.
+  const edit = (kind: string, change: (next: Set<string>) => void) => {
+    const list = listOf(kind);
+    const next = new Set(now(list) ?? ofKind(kind).map(key));
+    change(next);
+    if (atProject()) list.project = next;
+    else list.env = next;
   };
 
   const paintMark = (name: string, envSet: boolean, overridden: boolean) => {
@@ -171,11 +178,12 @@ const wireCrewSettings: Wire = (piece) => {
     mark.dataset.tip = tip;
     mark.setAttribute("aria-label", tip);
   };
-  const paintReset = (name: string, shown: boolean, tip: string) => {
+  const paintReset = (name: string, shown: boolean, tip: string, label: string) => {
     const reset = one(piece, `[data-reset="${name}"]`);
     if (!reset) return;
     reset.hidden = !shown;
     reset.dataset.tip = atProject() ? "Reset to inherited value" : tip;
+    reset.setAttribute("aria-label", `Reset ${label} to default`);
   };
   const count = (scope: ParentNode, kind: string) => {
     const of = select(scope, `[data-chip="${kind}"]`);
@@ -185,35 +193,43 @@ const wireCrewSettings: Wire = (piece) => {
   const paint = () => {
     one(piece, "[data-auto]")?.setAttribute("aria-checked", String(autoNow()));
     paintMark("auto", auto.env, auto.project !== null);
+    // At project scope the row is named for its title; on the server, for the setting.
     paintReset(
       "auto",
       atProject() ? auto.project !== null : auto.env,
       "Reset Crew auto-approval to off",
+      atProject() ? "Auto-approve new Crews" : "Crew auto-approval",
     );
-    paintMark("models", lists.env !== null, lists.project !== null);
+    const saved = (scope: "env" | "project") => models[scope] !== null || levels[scope] !== null;
+    paintMark("models", saved("env"), saved("project"));
     paintReset(
       "models",
-      (atProject() ? lists.project : lists.env) !== null,
+      saved(atProject() ? "project" : "env"),
       "Reset to every model and level",
+      "Models for custom members",
     );
+    const scope = one(piece, '[data-pick="scope"]');
+    const scopeName = scope ? one(scope, "[data-pick-value]")?.textContent : "";
+    if (scope)
+      one(scope, "[data-pick-trigger]")?.setAttribute("aria-label", `Project: ${scopeName}`);
 
     for (const chip of chips) chip.setAttribute("aria-pressed", String(allowed(chip)));
     for (const provider of providers) {
-      const models = count(provider, "model");
-      const levels = count(provider, "level");
+      const own = { models: count(provider, "model"), levels: count(provider, "level") };
       const line = one(provider, "[data-provider-count]");
       if (line)
-        line.textContent = `${models.checked} of ${models.total} models · ${levels.checked} of ${levels.total} levels`;
+        line.textContent = `${own.models.checked} of ${own.models.total} models · ${own.levels.checked} of ${own.levels.total} levels`;
       const all = one(provider, "[data-provider-all]");
-      const full = models.checked === models.total && levels.checked === levels.total;
+      const full =
+        own.models.checked === own.models.total && own.levels.checked === own.levels.total;
       if (all) all.textContent = full ? "Uncheck all" : "Check all";
     }
-    const models = count(piece, "model");
+    const checked = count(piece, "model");
     const total = one(piece, "[data-models-count]");
-    if (total) total.textContent = `${models.checked} of ${models.total}`;
+    if (total) total.textContent = `${checked.checked} of ${checked.total}`;
     const warning = one(piece, "[data-warning]");
     const text =
-      models.checked === 0
+      checked.checked === 0
         ? "No models allowed, so custom members can't start."
         : count(piece, "level").checked === 0
           ? "No reasoning levels allowed, so custom members can't use models that have them."
@@ -232,10 +248,13 @@ const wireCrewSettings: Wire = (piece) => {
   });
   for (const reset of select(piece, "[data-reset]")) {
     reset.addEventListener("click", () => {
-      const state = reset.dataset.reset === "auto" ? auto : lists;
-      if (atProject()) state.project = null;
-      else if (state === auto) auto.env = false;
-      else lists.env = null;
+      if (reset.dataset.reset === "auto") {
+        if (atProject()) auto.project = null;
+        else auto.env = false;
+      } else {
+        // The row's one reset clears both of its settings.
+        for (const list of [models, levels]) list[atProject() ? "project" : "env"] = null;
+      }
       // The button hides once there is nothing to reset; the row's control is the next stop.
       one(reset.closest(".settings-a__row") ?? piece, "[data-auto], [data-models-toggle]")?.focus();
       paint();
@@ -243,22 +262,24 @@ const wireCrewSettings: Wire = (piece) => {
   }
   for (const chip of chips) {
     chip.addEventListener("click", () => {
-      const next = new Set(listNow() ?? everything());
-      if (!next.delete(key(chip))) next.add(key(chip));
-      save(next);
+      edit(chip.dataset.chip ?? "", (next) => {
+        if (!next.delete(key(chip))) next.add(key(chip));
+      });
       paint();
     });
   }
   for (const provider of providers) {
-    const own = select(provider, "[data-chip]").map(key);
+    const own = select(provider, "[data-chip]");
     one(provider, "[data-provider-all]")?.addEventListener("click", () => {
-      const next = new Set(listNow() ?? everything());
-      const full = own.every((entry) => next.has(entry));
-      for (const entry of own) {
-        if (full) next.delete(entry);
-        else next.add(entry);
+      const full = own.every(allowed);
+      for (const kind of ["model", "level"]) {
+        edit(kind, (next) => {
+          for (const chip of own.filter((entry) => entry.dataset.chip === kind)) {
+            if (full) next.delete(key(chip));
+            else next.add(key(chip));
+          }
+        });
       }
-      save(next);
       paint();
     });
     // One provider's list is open at a time, as in the app.
@@ -366,18 +387,8 @@ const wireProposal: Wire = (piece, signal) => {
 
   const paint = () => {
     const all = rows();
-    const seats = all.map((row) => row.dataset.seat ?? "");
-    let sound = true;
     for (const row of all) {
-      const {
-        seat = "",
-        provider = "",
-        model,
-        level,
-        access = "",
-        workspace,
-        instructions = "",
-      } = row.dataset;
+      const { seat = "", provider = "", model, level, access = "", workspace } = row.dataset;
       const set = (part: string, text: string | null) => {
         const target = one(row, `[data-crew-${part}]`);
         if (!target) return;
@@ -399,15 +410,6 @@ const wireProposal: Wire = (piece, signal) => {
       );
       const asks = one(row, "[data-crew-asks]");
       if (asks) asks.hidden = access === "full-access";
-      const error = !SEAT_NAME.test(seat)
-        ? "Seat names are lowercase words joined by hyphens."
-        : seats.indexOf(seat) !== seats.lastIndexOf(seat)
-          ? `Seat ${seat} already exists.`
-          : instructions.trim() === ""
-            ? "Give the custom crew member its instructions."
-            : null;
-      set("error", error);
-      if (error !== null) sound = false;
       const edit = one<HTMLButtonElement>(row, "[data-crew-edit]");
       const remove = one<HTMLButtonElement>(row, "[data-crew-remove]");
       edit?.setAttribute("aria-label", `Edit seat ${seat}`);
@@ -420,7 +422,7 @@ const wireProposal: Wire = (piece, signal) => {
     if (count) count.textContent = `${all.length} ${all.length === 1 ? "member" : "members"}`;
     add.disabled = busy;
     decline.disabled = busy;
-    approve.disabled = busy || !sound;
+    approve.disabled = busy;
   };
 
   const fold = one(piece, "[data-crew-fold]");
@@ -449,6 +451,24 @@ const wireProposal: Wire = (piece, signal) => {
   const showOnly = (attribute: string, value: string) => {
     for (const entry of select(veil, `[data-crew-${attribute}]`))
       entry.hidden = entry.getAttribute(`data-crew-${attribute}`) !== value;
+  };
+  const save = one<HTMLButtonElement>(veil, "[data-crew-save]");
+  // The dialog says what is wrong with a member as it is typed, and saves only a sound one.
+  const check = () => {
+    const seat = field("seat")?.value.trim() ?? "";
+    const error = !SEAT_NAME.test(seat)
+      ? "Seat names are lowercase words joined by hyphens."
+      : rows().some((row) => row !== editing && row.dataset.seat === seat)
+        ? `Seat ${seat} already exists.`
+        : (field("instructions")?.value.trim() ?? "") === ""
+          ? "Give the custom crew member its instructions."
+          : null;
+    const problem = one(veil, "[data-crew-problem]");
+    if (problem) {
+      problem.hidden = error === null;
+      problem.textContent = error ?? "";
+    }
+    if (save) save.disabled = error !== null;
   };
   const openDialog = (row: HTMLElement | null, from: HTMLElement) => {
     editing = row;
@@ -479,12 +499,18 @@ const wireProposal: Wire = (piece, signal) => {
     if (name) name.value = seat;
     if (text) text.value = instructions;
     setPick(pick("provider"), provider);
-    setPick(pick(`model-${provider}`), model);
-    setPick(pick(`level-${provider}`), level);
+    // Every provider's lists start from this member, so nothing is left over from the last one.
+    for (const models of select(veil, '[data-pick^="model-"]')) {
+      const own = models.dataset.pick === `model-${provider}`;
+      setPick(models, own ? model : (one(models, '[role="option"]')?.dataset.value ?? ""));
+    }
+    for (const levels of select(veil, '[data-pick^="level-"]'))
+      setPick(levels, levels.dataset.pick === `level-${provider}` ? level : "Provider default");
     setPick(pick("access"), access);
     setPick(pick("workspace"), workspace);
     showOnly("for", provider);
     showOnly("place", workspace);
+    check();
     veil.hidden = false;
     thread.inert = true;
     dock.inert = true;
@@ -520,7 +546,17 @@ const wireProposal: Wire = (piece, signal) => {
   });
   for (const cancel of select(veil, "[data-crew-cancel]"))
     cancel.addEventListener("click", closeDialog);
-  one(veil, "[data-crew-save]")?.addEventListener("click", () => {
+  veil.addEventListener("input", check);
+  // A press anywhere outside the dialog dismisses it, as in the app.
+  document.addEventListener(
+    "pointerdown",
+    (event) => {
+      const inside = one(veil, '[role="dialog"]')?.contains(event.target as Node);
+      if (!veil.hidden && !inside) closeDialog();
+    },
+    { signal },
+  );
+  save?.addEventListener("click", () => {
     const provider = pickValue(pick("provider"));
     const row =
       editing ?? (blank?.content.firstElementChild?.cloneNode(true) as HTMLElement | undefined);
@@ -564,6 +600,8 @@ const wireProposal: Wire = (piece, signal) => {
       const text = one(notice, "[data-crew-notice-text]");
       if (text) text.textContent = `Crew approved · ${count} ${count === 1 ? "member" : "members"}`;
       notice.hidden = false;
+      // The card took focus away with it; the line that replaces it is where to read on.
+      notice.focus({ preventScroll: true });
     });
   };
   approve.addEventListener("click", () => decide("approve", 800));

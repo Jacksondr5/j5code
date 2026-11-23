@@ -28,7 +28,9 @@ const files = [
       <summary class="answer__summary">
         <span class="badge-a badge-a--md badge-a--warning answer__badge">Soon</span>
         <span class="answer__lines">
-          <span class="answer__from"><b>Tide chart redesign</b><i>·</i>harbor-map<i>·</i>open 2m</span>
+          <span class="answer__from">
+            <b>Tide chart redesign</b><i aria-hidden="true">·</i><span>harbor-map</span><i aria-hidden="true">·</i><span>open 2m</span>
+          </span>
           <span class="answer__ask">Tide chart default range</span>
         </span>
         <Icon name="chevron-right" class="answer__chevron" />
@@ -100,7 +102,7 @@ const files = [
     min-height: 470px;
   }
 
-  .answer i { font-style: normal; opacity: 0.6; margin: 0 6px; }
+  .answer i { font-style: normal; opacity: 0.6; }
   .answer__main { padding: 8px 28px 24px; }
 
   .answer__head {
@@ -126,7 +128,9 @@ const files = [
   .answer__badge { margin-top: 2px; text-transform: uppercase; letter-spacing: 0.025em; }
   .answer__lines { display: block; min-width: 0; flex: 1; }
   .answer__lines > span { display: block; }
-  .answer__from { font-size: 12px; color: var(--a-muted-fg); }
+  /* Each part of the sender line wraps whole, as the app's flex row does. */
+  .answer .answer__from { display: flex; flex-wrap: wrap; gap: 4px 8px; font-size: 12px; color: var(--a-muted-fg); }
+  .answer__from > * { white-space: nowrap; }
   .answer__from b { font-weight: 500; color: color-mix(in srgb, var(--a-fg) 80%, transparent); }
   .answer__ask { margin-top: 4px; font-size: 16px; font-weight: 600; line-height: 1.375; }
 
@@ -147,7 +151,7 @@ const files = [
     padding: 5px 11px;
     border: 1px solid var(--a-input);
     border-radius: 8px;
-    background: var(--a-bg);
+    background: var(--a-control);
     box-shadow: var(--a-shadow);
     font: 400 14px/20px var(--a-font);
     color: var(--a-fg);
