@@ -474,7 +474,8 @@ const narrowedView = (
   return {
     scheduledTasks: (list) => list.pipe(Effect.flatMap(reachableTasks)),
     // Begins again each time what the person reaches changes, as the sidebar does. Running the
-    // feed again reads the list afresh, so a task's binding is never older than the reach.
+    // feed again reads the list afresh, and each run filters its own lists, so a list waiting
+    // behind a restart was filtered with the reach it was read under, never a newer one.
     scheduledTasksStream: (stream) =>
       Stream.unwrap(
         Effect.gen(function* () {
@@ -484,10 +485,7 @@ const narrowedView = (
             Stream.fromSubscription(reachChanges).pipe(
               Stream.filter((changed) => changed === personId),
             ),
-          ).pipe(
-            Stream.switchMap(() => stream),
-            Stream.mapEffect(reachableTasks),
-          );
+          ).pipe(Stream.switchMap(() => stream.pipe(Stream.mapEffect(reachableTasks))));
         }),
       ),
     config: writes ? identity : (config) => reduceServerConfig(config, skillsShown),
