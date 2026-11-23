@@ -1,5 +1,15 @@
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { ProjectId, ThreadId, type EnvironmentId } from "@t3tools/contracts";
+import {
+  ProjectId,
+  ThreadId,
+  type EnvironmentId,
+  type ServerProviderSkill,
+} from "@t3tools/contracts";
+import { resolveProviderSkillsForCwd } from "@t3tools/client-runtime/providerSkills";
+import { MessageCopyButton } from "../../components/chat/MessageCopyButton";
+import { useClientSettings } from "../../hooks/useSettings";
+import { useEnvironmentProviders } from "../../state/environments";
+import { formatChatTimestampTooltip } from "../../timestampFormat";
 import { scopedInboxItemKey } from "@t3tools/contracts/j5";
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -105,6 +115,7 @@ type SenderLabels = ReadonlyMap<EnvironmentId, ReadonlyMap<string, string>>;
 type ProjectNameOf = (item: HumanInboxItem) => string;
 
 const noLabels: ReadonlyMap<string, string> = new Map();
+const NO_SKILLS: ReadonlyArray<ServerProviderSkill> = [];
 
 function SenderName({
   item,
@@ -234,16 +245,28 @@ export function InboxMessage({
         path,
       },
     });
+  // The skills of the provider the sender runs on, so `$skill` names render as the thread's chips.
+  const provider = useEnvironmentProviders()
+    .get(item.environmentId)
+    ?.find((candidate) => candidate.instanceId === sender.providerInstanceId);
+  const skills = provider === undefined ? NO_SKILLS : resolveProviderSkillsForCwd(provider, cwd);
   const markdown = (text: string) => (
-    <ChatMarkdown
-      className="max-w-[72ch] text-sm text-foreground/90"
-      cwd={cwd}
-      environmentId={item.environmentId}
-      lineBreaks={shouldPreserveAssistantLineBreaks(text)}
-      text={text}
-      threadRef={panelRef}
-      {...(panelRef === undefined ? { onOpenArtifact: openArtifact } : {})}
-    />
+    <div className="group/inbox-message flex flex-col gap-1">
+      <ChatMarkdown
+        className="max-w-[72ch] text-sm text-foreground/90"
+        cwd={cwd}
+        environmentId={item.environmentId}
+        lineBreaks={shouldPreserveAssistantLineBreaks(text)}
+        skills={skills}
+        text={text}
+        threadRef={panelRef}
+        {...(panelRef === undefined ? { onOpenArtifact: openArtifact } : {})}
+      />
+      {/* Shown on hover, focus or a touch screen, as under a thread's agent reply. */}
+      <div className="w-fit opacity-0 transition-opacity duration-200 pointer-coarse:opacity-100 focus-within:opacity-100 group-hover/inbox-message:opacity-100">
+        <MessageCopyButton text={text} variant="ghost" />
+      </div>
+    </div>
   );
   // While the sender's thread loads, its links wait rather than open as an ask with no thread;
   // the text stays readable and selectable.
@@ -314,6 +337,7 @@ function OpenInboxItem({
 }) {
   const urgency = urgencyPresentation[item.urgency];
   const [expanded, setExpanded] = useState(false);
+  const timestampFormat = useClientSettings((settings) => settings.timestampFormat);
   const mayAnswer = useAtomValue(
     j5Environment.answerHumanExchange.permissionAtom(item.environmentId),
   );
@@ -363,9 +387,16 @@ function OpenInboxItem({
               {closed === undefined ? (
                 <>
                   <span aria-hidden>·</span>
-                  <time className="tabular-nums" dateTime={item.openedAt}>
-                    open <RelativeAge timestamp={item.openedAt} fallback="" />
-                  </time>
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={<time className="tabular-nums" dateTime={item.openedAt} />}
+                    >
+                      open <RelativeAge timestamp={item.openedAt} fallback="" />
+                    </TooltipTrigger>
+                    <TooltipPopup>
+                      {formatChatTimestampTooltip(item.openedAt, timestampFormat)}
+                    </TooltipPopup>
+                  </Tooltip>
                 </>
               ) : null}
             </div>
