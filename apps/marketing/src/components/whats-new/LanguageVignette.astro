@@ -2,9 +2,9 @@
 import Icon from "./Icon.astro";
 
 /**
- * Settings → General → Display → Language, with its picker open. Choosing a language switches
- * the row to that language, using the app's own translations (apps/web/src/i18n/translations),
- * and sets the page's large word beside the picker to "Language" in it.
+ * Settings → General → Display → Language, with its picker open. Choosing a language closes the
+ * picker and switches the row to that language, using the app's own translations
+ * (apps/web/src/i18n/translations), and sets the page's large word to "Language" in it.
  */
 const locales = [
   { code: "en", name: "English", display: "Display", language: "Language", system: "System default", hint: "System default follows your browser or OS language." },
@@ -26,10 +26,12 @@ const locales = [
     <div class="settings-a">
       <div class="settings-a__row">
         <div>
-          <p class="settings-a__title" data-t="language">Language</p>
+          <p class="settings-a__title" id="wn-language-title" data-t="language">Language</p>
           <p class="settings-a__desc" data-t="hint">System default follows your browser or OS language.</p>
         </div>
-        <span class="select-a" aria-hidden="true"><span data-t="current">English</span><Icon name="chevron-down" /></span>
+        <button type="button" class="select-a" aria-haspopup="listbox" aria-expanded="true" aria-labelledby="wn-language-title wn-language-current" data-list-trigger>
+          <span id="wn-language-current" data-t="current">English</span><Icon name="chevron-down" />
+        </button>
       </div>
     </div>
   </div>
@@ -111,5 +113,8 @@ const locales = [
     .lang__float { order: -1; }
     .lang__float .popup-a { transform-origin: 0 0; }
     .lang__word { padding: 44px 0 0; font-size: 34px; text-align: center; }
+    /* Stacked, a closed list would leave a tall gap, so here it gives its place up to the word. */
+    .lang__below:has([data-closed]) { grid-template-columns: minmax(0, 1fr); padding-left: 0; }
+    .lang__float:has([data-closed]) { display: none; }
   }
 </style>

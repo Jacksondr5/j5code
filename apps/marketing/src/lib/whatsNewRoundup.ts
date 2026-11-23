@@ -56,6 +56,41 @@ function wireListbox(options: ReadonlyArray<HTMLElement>, onSelect: (option: HTM
   });
 }
 
+/**
+ * A picker drawn open closes on a choice, as the app's Select does, and its trigger opens it
+ * again. Returns the function that closes it.
+ */
+function wireOpenList(vignette: HTMLElement) {
+  const trigger = vignette.querySelector<HTMLElement>("[data-list-trigger]");
+  const list = vignette.querySelector<HTMLElement>('[role="listbox"]');
+  if (!trigger || !list) return () => {};
+  // The page draws the list open to show it, so only one the reader opened closes on a click away.
+  let openedByReader = false;
+  const show = (open: boolean) => {
+    const focusWasInside = list.contains(document.activeElement);
+    list.toggleAttribute("data-closed", !open);
+    list.classList.toggle("is-reopened", open);
+    trigger.setAttribute("aria-expanded", String(open));
+    openedByReader = open;
+    if (open) list.querySelector<HTMLElement>('[aria-selected="true"]')?.focus();
+    else if (focusWasInside) trigger.focus();
+  };
+  trigger.addEventListener("click", () => show(list.hasAttribute("data-closed")));
+  trigger.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    event.preventDefault();
+    if (list.hasAttribute("data-closed")) show(true);
+  });
+  list.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") show(false);
+  });
+  document.addEventListener("pointerdown", (event) => {
+    if (!openedByReader || !(event.target instanceof Node)) return;
+    if (!trigger.contains(event.target) && !list.contains(event.target)) show(false);
+  });
+  return () => show(false);
+}
+
 function wireIssues(root: HTMLElement) {
   for (const issues of select(root, "[data-issues]")) {
     const tabs = select(issues, "[data-tracker]");
@@ -174,7 +209,9 @@ function wireThreadPicker(issues: HTMLElement) {
 function wireLanguage(root: HTMLElement) {
   for (const picker of select(root, "[data-language]")) {
     const locales = JSON.parse(picker.dataset.locales ?? "[]") as ReadonlyArray<Locale>;
+    const close = wireOpenList(picker);
     wireListbox(select(picker, "[data-locale]"), (option) => {
+      close();
       const locale = locales.find((entry) => entry.code === option.dataset.locale);
       if (!locale) return;
       const text: Record<string, string> = {
@@ -202,7 +239,9 @@ function wireVoice(root: HTMLElement) {
   for (const voice of select(root, "[data-voice]")) {
     const value = voice.querySelector<HTMLElement>("[data-voice-value]");
     if (!value) continue;
+    const close = wireOpenList(voice);
     wireListbox(select(voice, "[data-voice-option]"), (option) => {
+      close();
       const icon = option.querySelector("svg, img")?.cloneNode(true);
       const label = document.createElement("span");
       label.textContent = option.dataset.voiceOption ?? "";

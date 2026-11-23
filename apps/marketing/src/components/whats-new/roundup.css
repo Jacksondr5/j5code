@@ -70,6 +70,15 @@
   box-shadow: 0 16px 40px -18px rgb(0 0 0 / 55%);
 }
 
+/* A list that starts open keeps its place when it closes, so nothing under it moves. */
+.app .popup-a[data-closed] {
+  visibility: hidden;
+}
+
+.wn-motion .app .popup-a.is-reopened {
+  animation: wn-in 0.14s ease-out;
+}
+
 .app .option-a {
   display: flex;
   align-items: center;
