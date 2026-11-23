@@ -6,7 +6,6 @@ import type {
 } from "@t3tools/contracts/j5";
 import * as Cause from "effect/Cause";
 
-import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { j5Environment } from "../state";
 
 export type {
@@ -14,12 +13,13 @@ export type {
   HumanInboxResponse,
   ScopedHumanInboxItem,
 } from "@t3tools/contracts/j5";
+import { runJ5Command } from "../runCommand";
 
 export async function answerHumanExchange(
   environmentId: EnvironmentId,
   input: AnswerHumanExchangeRequest,
 ) {
-  const result = await j5Environment.answerHumanExchange.run(appAtomRegistry, {
+  const result = await runJ5Command(j5Environment.answerHumanExchange, {
     environmentId,
     input,
   });
@@ -32,7 +32,7 @@ export async function allowPersonaOnce(
   environmentId: EnvironmentId,
   input: AllowPersonaOnceRequest,
 ) {
-  const result = await j5Environment.allowPersonaOnce.run(appAtomRegistry, {
+  const result = await runJ5Command(j5Environment.allowPersonaOnce, {
     environmentId,
     input,
   });
@@ -45,7 +45,7 @@ export async function savePersonaDraft(
   environmentId: EnvironmentId,
   input: SavePersonaDraftRequest,
 ) {
-  const result = await j5Environment.savePersonaDraft.run(appAtomRegistry, {
+  const result = await runJ5Command(j5Environment.savePersonaDraft, {
     environmentId,
     input,
   });

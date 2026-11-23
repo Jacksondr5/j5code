@@ -3,15 +3,15 @@ import type { ArtifactContent, ArtifactEntry, EnvironmentId, ProjectId } from "@
 import * as Cause from "effect/Cause";
 
 import { runtime } from "../../lib/runtime";
-import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { readPreparedConnection } from "../../state/session";
 import { j5Environment } from "../state";
+import { runJ5Command } from "../runCommand";
 
 export async function listArtifacts(input: {
   readonly environmentId: EnvironmentId;
   readonly projectId: ProjectId;
 }): Promise<ReadonlyArray<ArtifactEntry>> {
-  const result = await j5Environment.listArtifacts.run(appAtomRegistry, {
+  const result = await runJ5Command(j5Environment.listArtifacts, {
     environmentId: input.environmentId,
     input: { projectId: input.projectId },
   });
@@ -32,7 +32,7 @@ export async function deleteArtifact(input: {
   readonly projectId: ProjectId;
   readonly path: string;
 }): Promise<void> {
-  const result = await j5Environment.deleteArtifact.run(appAtomRegistry, {
+  const result = await runJ5Command(j5Environment.deleteArtifact, {
     environmentId: input.environmentId,
     input: { projectId: input.projectId, path: input.path },
   });
@@ -44,7 +44,7 @@ export async function deleteAllArtifacts(input: {
   readonly environmentId: EnvironmentId;
   readonly projectId: ProjectId;
 }): Promise<void> {
-  const result = await j5Environment.deleteAllArtifacts.run(appAtomRegistry, {
+  const result = await runJ5Command(j5Environment.deleteAllArtifacts, {
     environmentId: input.environmentId,
     input: { projectId: input.projectId },
   });

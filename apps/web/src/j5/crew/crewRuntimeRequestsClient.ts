@@ -16,13 +16,14 @@ import {
   mergeCrewRuntimeRequestSources,
   mergeNativeQuestionInboxSources,
 } from "@t3tools/client-runtime/j5/crew-inbox-requests";
+import { runJ5Command } from "../runCommand";
 
 /** Answer on the environment that holds the thread; the refusal message says why it failed. */
 export async function respondCrewRuntimeRequest(
   environmentId: EnvironmentId,
   input: CrewRuntimeRequestRespondRequest,
 ) {
-  const result = await j5Environment.respondCrewRuntimeRequest.run(appAtomRegistry, {
+  const result = await runJ5Command(j5Environment.respondCrewRuntimeRequest, {
     environmentId,
     input,
   });

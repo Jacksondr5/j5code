@@ -8,8 +8,6 @@ import * as NodeChildProcess from "node:child_process";
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 
-import { J5_UPSTREAM_T3_CODE_VERSION } from "../../apps/server/src/j5/upstreamVersion.ts";
-
 type Catalog = Record<string, unknown>;
 
 export const APPS = ["apps/web", "apps/mobile", "apps/desktop"] as const;
@@ -103,11 +101,22 @@ export function rekeyLocale(input: {
   return { catalog, carried, missing };
 }
 
+/** The pinned upstream release (FORK.md case 59), whose catalogs hold the keys before the rebrand. */
+const pinnedUpstreamTag = (root: string) => {
+  const source = NodeFS.readFileSync(
+    NodePath.join(root, "apps/server/src/j5/upstreamVersion.ts"),
+    "utf8",
+  );
+  const version = /J5_UPSTREAM_T3_CODE_VERSION = "([^"]+)"/.exec(source)?.[1];
+  if (version === undefined) throw new Error("No J5_UPSTREAM_T3_CODE_VERSION in upstreamVersion.ts");
+  return `v${version}`;
+};
+
 function main() {
   const args = process.argv.slice(2);
-  const refIndex = args.indexOf("--ref");
-  const ref = refIndex === -1 ? `v${J5_UPSTREAM_T3_CODE_VERSION}` : args[refIndex + 1]!;
   const root = NodePath.resolve(import.meta.dirname, "../..");
+  const refIndex = args.indexOf("--ref");
+  const ref = refIndex === -1 ? pinnedUpstreamTag(root) : args[refIndex + 1]!;
   const untranslated: string[] = [];
   for (const app of APPS) {
     const config = JSON.parse(NodeFS.readFileSync(NodePath.join(root, app, "gt.config.json"), "utf8"));

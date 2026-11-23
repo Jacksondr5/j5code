@@ -447,6 +447,10 @@
       "types": "./src/state/threadUndo.ts",
       "default": "./src/state/threadUndo.ts"
     },
+    "./j5/replaced-credential": {
+      "types": "./src/j5/replacedCredential.ts",
+      "default": "./src/j5/replacedCredential.ts"
+    },
     "./j5/person-avatar": {
       "types": "./src/j5/personAvatar.ts",
       "default": "./src/j5/personAvatar.ts"

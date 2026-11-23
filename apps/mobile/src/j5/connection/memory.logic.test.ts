@@ -224,6 +224,10 @@ describe("credentialKey", () => {
 
     expect(credentialKey(dpop("first-access"))).toBe(credentialKey(dpop("renewed-access")));
     expect(credentialKey(dpop("first-access"))).not.toContain("access");
+    expect(
+      credentialKey(dpop("first-access"), 0),
+      "a re-pair to the same slot is another credential",
+    ).not.toBe(credentialKey(dpop("re-paired-access"), 1));
   });
 
   it("keeps a server's names through a learned route, and drops them on a re-pair", () => {

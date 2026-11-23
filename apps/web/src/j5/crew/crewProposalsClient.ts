@@ -8,7 +8,6 @@ import type {
 } from "@t3tools/contracts/j5";
 import * as Cause from "effect/Cause";
 
-import { appAtomRegistry } from "../../rpc/atomRegistry";
 import {
   crewProposalSourcesAtom,
   crewProposalsQueryAtom,
@@ -16,6 +15,7 @@ import {
   refreshJ5Sources,
 } from "../state";
 import { createVisibleRefreshHook } from "../useVisibleRefresh";
+import { runJ5Command } from "../runCommand";
 
 export type { CrewProposal, CrewProposalSeat, ScopedCrewProposal } from "@t3tools/contracts/j5";
 
@@ -32,7 +32,7 @@ export async function previewCrewProposal(
   environmentId: EnvironmentId,
   input: CrewProposalPreviewRequest,
 ) {
-  const result = await j5Environment.previewCrewProposal.run(appAtomRegistry, {
+  const result = await runJ5Command(j5Environment.previewCrewProposal, {
     environmentId,
     input,
   });
@@ -45,7 +45,7 @@ export async function resolveCrewProposal(
   environmentId: EnvironmentId,
   input: CrewProposalResolveRequest,
 ) {
-  const result = await j5Environment.resolveCrewProposal.run(appAtomRegistry, {
+  const result = await runJ5Command(j5Environment.resolveCrewProposal, {
     environmentId,
     input,
   });

@@ -7,8 +7,8 @@ import type { CrewMembershipEntry, ThreadCrewMembership } from "@t3tools/contrac
 import * as Cause from "effect/Cause";
 import { useSyncExternalStore } from "react";
 
-import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { j5Environment } from "../state";
+import { runJ5Command } from "../runCommand";
 
 export type { CrewMembershipEntry, ThreadCrewMembership } from "@t3tools/contracts/j5";
 
@@ -38,7 +38,7 @@ export function presentCrewMembership(
 
 const store = createScopedThreadReadStore<ThreadCrewMembership, CrewMembershipEntry>({
   load: async (environmentId, threadIds) => {
-    const result = await j5Environment.listCrewMemberships.run(appAtomRegistry, {
+    const result = await runJ5Command(j5Environment.listCrewMemberships, {
       environmentId,
       input: { threadIds },
     });

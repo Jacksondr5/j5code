@@ -830,6 +830,7 @@ export function IssuesPage() {
             onAddTerminal={() => undefined}
             onAddDiff={() => undefined}
             onAddFiles={() => undefined}
+            onAddArtifacts={() => undefined}
             onAddPullRequest={() => undefined}
             onAddPullRequests={() => undefined}
             onAddDevice={() => undefined}
@@ -837,6 +838,7 @@ export function IssuesPage() {
             terminalAvailable={false}
             diffAvailable={false}
             filesAvailable={false}
+            artifactsAvailable={false}
             pullRequestAvailable={false}
             pullRequestsAvailable={false}
             deviceAvailable={false}

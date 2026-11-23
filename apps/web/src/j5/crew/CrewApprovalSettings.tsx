@@ -27,7 +27,7 @@ export function CrewApprovalSettings() {
         resetAction={
           settings.crewAutoApprove ? (
             <SettingResetButton
-              label="Crew auto-approval"
+              ariaLabel="Reset Crew auto-approval to off"
               tooltip="Reset Crew auto-approval to off"
               onClick={() => updateSettings({ crewAutoApprove: false })}
             />

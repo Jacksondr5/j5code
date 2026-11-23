@@ -33,6 +33,7 @@ it("/model clears only its trigger and opens the model picker", async () => {
       draftMessage: "fix this /mod",
       ownerKey: "draft",
       environmentId: null,
+      projectId: null,
       projectCwd: null,
       selectedProviderStatus: null,
       hasThread: true,

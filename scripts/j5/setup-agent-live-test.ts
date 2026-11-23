@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off globalConsole:off globalDate:off globalFetch:off globalTimers:off - a standalone Node CLI that manages one child process group and prints instructions.
+// @effect-diagnostics nodeBuiltinImport:off globalConsole:off globalDate:off globalFetch:off globalTimers:off extendsNativeError:off - a standalone Node CLI that manages one child process group and prints instructions; it throws no error through Effect.
 /**
  * One command for an agent that live-tests J5 Code (see `USAGE` and the `j5-live-test` skill). Its
  * home lives in this worktree's `.j5code/live-test`, or under a configured homes root, apart from

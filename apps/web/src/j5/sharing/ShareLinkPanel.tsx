@@ -17,7 +17,7 @@ import { Textarea } from "../../components/ui/textarea";
 import { toastManager } from "../../components/ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../../components/ui/tooltip";
 import { isElectron } from "../../env";
-import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
+import { namedClipboardTarget, useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { desktopNetworkAccessStateAtom } from "../../state/desktopNetworkAccess";
 import { useEnvironmentHttpBaseUrl, usePrimaryEnvironmentId } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
@@ -80,7 +80,7 @@ export function ShareLinkPanel({
   // A browser on plain HTTP has no clipboard; the address is shown whole to copy by hand.
   const [showWhole, setShowWhole] = useState(false);
   const { copyToClipboard, isCopied } = useCopyToClipboard({
-    target: "link",
+    target: namedClipboardTarget("link"),
     onCopy: () => toastManager.add({ type: "success", title: "Link copied" }),
     onError: () => setShowWhole(true),
   });

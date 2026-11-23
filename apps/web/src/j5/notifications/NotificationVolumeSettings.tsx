@@ -33,7 +33,10 @@ export function NotificationVolumeSettings() {
       status={error ? <span role="alert">{error}</span> : undefined}
       resetAction={
         volume !== 1 ? (
-          <SettingResetButton label="notification volume" onClick={() => save(1)} />
+          <SettingResetButton
+            ariaLabel="Reset notification volume to default"
+            onClick={() => save(1)}
+          />
         ) : null
       }
       control={

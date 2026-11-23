@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off globalConsole:off globalFetch:off - a standalone Node CLI that runs git and prints markdown.
+// @effect-diagnostics nodeBuiltinImport:off globalConsole:off globalFetch:off extendsNativeError:off - a standalone Node CLI that runs git and prints markdown; it throws no error through Effect.
 /**
  * Publishes PR screenshots to `pr-<number>/` on `j5/evidence` and prints the description's table:
  *   node scripts/j5/pr-evidence.ts <pr> --pair "<caption>" <before.png> <after.png> --new ...
