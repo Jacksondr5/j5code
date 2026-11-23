@@ -1371,6 +1371,41 @@ live(
 );
 
 live(
+  "a person's task feed is read again when what they reach changes, without a task update",
+  Effect.gen(function* () {
+    const access = yield* PersonAccess.PersonAccess;
+    const shared = yield* project("project:shared");
+    const bound = ThreadId.make("thread:bound");
+    yield* write("thread.created", { id: bound, projectId: shared });
+    yield* write("thread.created", { id: "thread:granted", projectId: shared });
+    const personId = yield* guest({ kind: "thread", threadId: ThreadId.make("thread:granted") });
+    const list = {
+      tasks: [{ id: "task:bound", projectId: shared, threadId: bound }],
+    } as unknown as ScheduledTaskListResult;
+    const view = yield* GuestView.connectionView(GUEST);
+    const listed = yield* Queue.unbounded<ReadonlyArray<string>>();
+    // The task list emits once and stays open, as the live feed does between task changes.
+    yield* view.scheduledTasksStream(Stream.concat(Stream.make(list), Stream.never)).pipe(
+      Stream.runForEach((result) =>
+        Queue.offer(
+          listed,
+          result.tasks.map((task) => task.id),
+        ),
+      ),
+      Effect.forkScoped({ startImmediately: true }),
+    );
+    assert.deepStrictEqual(yield* Queue.take(listed), []);
+
+    const scope = { kind: "thread", threadId: bound } as const;
+    yield* access.setLevel({ personId, scope, level: "viewer" });
+    assert.deepStrictEqual(yield* Queue.take(listed), ["task:bound"]);
+
+    yield* access.removeLevel({ personId, scope });
+    assert.deepStrictEqual(yield* Queue.take(listed), []);
+  }).pipe(Effect.scoped),
+);
+
+live(
   "tells a Viewer the skills of the projects they reach by name, and none of their files",
   Effect.gen(function* () {
     const access = yield* PersonAccess.PersonAccess;

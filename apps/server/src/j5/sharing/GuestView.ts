@@ -473,7 +473,24 @@ const narrowedView = (
     ).pipe(Effect.map((tasks) => ({ tasks: tasks.flat() })));
   return {
     scheduledTasks: (list) => list.pipe(Effect.flatMap(reachableTasks)),
-    scheduledTasksStream: (stream) => stream.pipe(Stream.mapEffect(reachableTasks)),
+    // The last list is read again each time what the person reaches changes, as the sidebar is.
+    scheduledTasksStream: (stream) =>
+      Stream.unwrap(
+        Effect.gen(function* () {
+          const reachChanges = yield* access.subscribeChanges;
+          let latest: ScheduledTaskListResult | undefined;
+          const refilters = Stream.fromSubscription(reachChanges).pipe(
+            Stream.filter((changed) => changed === personId),
+            Stream.map(() => latest),
+            Stream.filter((result): result is ScheduledTaskListResult => result !== undefined),
+          );
+          return stream.pipe(
+            Stream.tap((result) => Effect.sync(() => (latest = result))),
+            Stream.merge(refilters, { haltStrategy: "left" }),
+            Stream.mapEffect(reachableTasks),
+          );
+        }),
+      ),
     config: writes ? identity : (config) => reduceServerConfig(config, skillsShown),
     // Every later provider, settings, keybinding, theme and usage update is dropped rather than
     // reduced: a Viewer's client keeps the providers and models it was told of when it connected.
