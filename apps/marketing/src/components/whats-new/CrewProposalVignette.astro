@@ -28,16 +28,21 @@ const access = [
   { value: "full-access", label: "Full access", desc: "Allow commands and edits without prompts." },
 ];
 
+// Each model's levels as 0.0.52 lists them: of these, only Opus 5.5 has Ultracode.
 const plain = (labels: ReadonlyArray<string>) => labels.map((label) => ({ value: label, label }));
 const runtimes = [
   {
     provider: "claude",
     models: plain(["Haiku 5.5", "Sonnet 5.5", "Opus 5.5"]),
-    levels: plain(["Provider default", "Low", "Medium", "High", "Extra High", "Max", "Ultracode", "Ultrathink"]),
+    levels: [
+      ...plain(["Provider default", "Low", "Medium", "High", "Extra High", "Max"]),
+      { value: "Ultracode", label: "Ultracode", only: "Opus 5.5" },
+      ...plain(["Ultrathink"]),
+    ],
   },
   {
     provider: "codex",
-    models: plain(["GPT-6-Luna", "GPT-6.1-Sol", "GPT-6.2-Sol"]),
+    models: plain(["GPT-6.2-Sol", "GPT-6.1-Sol", "GPT-6-Sol"]),
     levels: plain(["Provider default", "Low", "Medium", "High", "Extra High", "Max", "Ultra"]),
   },
 ];
@@ -48,7 +53,7 @@ const cap = (seat: string) => seat[0]?.toUpperCase() + seat.slice(1);
 <div class="app app--window piece crewp" data-vignette data-piece="proposal">
   <p class="topbar-a crewp__bar">Tide chart redesign<span class="t-muted">harbor-map</span></p>
 
-  <div class="crewp__thread" data-crew-thread>
+  <div class="crewp__thread">
     <p class="bubble-a">Put a Crew on the tide chart redesign. I want a second pair of eyes on the result.</p>
     <p class="reply-a">
       I've proposed a Crew of two: one member to build the chart and one to review it. Approve the roster and I'll
@@ -62,7 +67,7 @@ const cap = (seat: string) => seat[0]?.toUpperCase() + seat.slice(1);
     </p>
   </div>
 
-  <div class="crewp__dock" data-crew-dock>
+  <div class="crewp__dock">
     <div class="crewp__card seq" style="--at: 0.2s" data-crew-card>
       <button type="button" class="crewp__header" aria-expanded="true" aria-controls="wn-crew-roster" aria-label="Collapse Crew proposal" data-crew-fold>
         <Icon name="users" class="ico-3 t-muted" />

@@ -29,7 +29,7 @@ const files = [
         <span class="badge-a badge-a--md badge-a--warning answer__badge">Soon</span>
         <span class="answer__lines">
           <span class="answer__from">
-            <b>Tide chart redesign</b><i aria-hidden="true">·</i><span>harbor-map</span><i aria-hidden="true">·</i><span>open 2m</span>
+            <b>Tide chart redesign</b><span>harbor-map</span><span>open 2m</span>
           </span>
           <span class="answer__ask">Tide chart default range</span>
         </span>
@@ -102,7 +102,6 @@ const files = [
     min-height: 470px;
   }
 
-  .answer i { font-style: normal; opacity: 0.6; }
   .answer__main { padding: 8px 28px 24px; }
 
   .answer__head {
@@ -128,9 +127,19 @@ const files = [
   .answer__badge { margin-top: 2px; text-transform: uppercase; letter-spacing: 0.025em; }
   .answer__lines { display: block; min-width: 0; flex: 1; }
   .answer__lines > span { display: block; }
-  /* Each part of the sender line wraps whole, as the app's flex row does. */
-  .answer .answer__from { display: flex; flex-wrap: wrap; gap: 4px 8px; font-size: 12px; color: var(--a-muted-fg); }
-  .answer__from > * { white-space: nowrap; }
+  /* Each part of the sender line wraps whole. A part's dot sits in the gap before it, and the row
+     clips the dot of a part that starts a line, so no line begins or ends with one. */
+  .answer .answer__from {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 19px;
+    overflow: hidden;
+    font-size: 12px;
+    color: var(--a-muted-fg);
+  }
+
+  .answer__from > * { position: relative; white-space: nowrap; }
+  .answer__from > * + *::before { content: "·"; position: absolute; left: -11px; opacity: 0.6; }
   .answer__from b { font-weight: 500; color: color-mix(in srgb, var(--a-fg) 80%, transparent); }
   .answer__ask { margin-top: 4px; font-size: 16px; font-weight: 600; line-height: 1.375; }
 

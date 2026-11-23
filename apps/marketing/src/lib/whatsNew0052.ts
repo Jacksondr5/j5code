@@ -24,8 +24,14 @@ function setPick(pick: HTMLElement | null, value: string) {
   for (const option of select(pick, '[role="option"]')) {
     const chosen = option.dataset.value === value;
     option.setAttribute("aria-selected", String(chosen));
+    if (!chosen) continue;
     const label = one(pick, "[data-pick-value]");
-    if (chosen && label) label.textContent = option.dataset.label ?? "";
+    if (label) label.textContent = option.dataset.label ?? "";
+    // The trigger is named for its field and its value, so the value is not lost to its label.
+    one(pick, "[data-pick-trigger]")?.setAttribute(
+      "aria-label",
+      `${pick.dataset.pickLabel}: ${option.dataset.label}`,
+    );
   }
 }
 
@@ -37,7 +43,11 @@ function wirePicks(piece: HTMLElement, signal: AbortSignal) {
     if (!popup || popup.hidden === !open) return;
     popup.hidden = !open;
     one(pick, "[data-pick-trigger]")?.setAttribute("aria-expanded", String(open));
-    if (open) (one(popup, '[aria-selected="true"]') ?? one(popup, '[role="option"]'))?.focus();
+    if (open)
+      (
+        one(popup, '[aria-selected="true"]:not([hidden])') ??
+        one(popup, '[role="option"]:not([hidden])')
+      )?.focus();
   };
   for (const pick of picks) {
     const trigger = one(pick, "[data-pick-trigger]");
@@ -64,15 +74,15 @@ function wirePicks(piece: HTMLElement, signal: AbortSignal) {
         show(pick, false);
         return trigger.focus();
       }
-      const options = select(popup, '[role="option"]');
+      const options = select(popup, '[role="option"]:not([hidden])');
       const at = options.indexOf(document.activeElement as HTMLElement);
-      const step = { ArrowDown: 1, ArrowUp: -1 }[event.key];
+      const step = event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0;
       const target =
         event.key === "Home"
           ? options[0]
           : event.key === "End"
             ? options.at(-1)
-            : step === undefined
+            : step === 0
               ? undefined
               : options[(at + step + options.length) % options.length];
       if (!target) return;
@@ -208,10 +218,6 @@ const wireCrewSettings: Wire = (piece) => {
       "Reset to every model and level",
       "Models for custom members",
     );
-    const scope = one(piece, '[data-pick="scope"]');
-    const scopeName = scope ? one(scope, "[data-pick-value]")?.textContent : "";
-    if (scope)
-      one(scope, "[data-pick-trigger]")?.setAttribute("aria-label", `Project: ${scopeName}`);
 
     for (const chip of chips) chip.setAttribute("aria-pressed", String(allowed(chip)));
     for (const provider of providers) {
@@ -316,9 +322,10 @@ const wireAnswer: Wire = (piece, signal) => {
   const files = select(piece, "[data-answer-file]");
   if (!ask || !reply || !send || !attach) return;
 
-  // Answer needs something typed, and the page has only three files to attach.
+  // Answer needs something typed and nothing on its way, and the page has only three files.
+  let delivering = false;
   const follow = () => {
-    send.disabled = reply.value.length === 0;
+    send.disabled = delivering || reply.value.length === 0;
     attach.disabled = files.every((file) => !file.hidden);
   };
   reply.addEventListener("input", follow);
@@ -337,7 +344,8 @@ const wireAnswer: Wire = (piece, signal) => {
   }
   send.addEventListener("click", () => {
     send.textContent = "Delivering…";
-    send.disabled = true;
+    delivering = true;
+    follow();
     attach.hidden = true;
     for (const remove of select<HTMLButtonElement>(piece, "[data-answer-remove]"))
       remove.disabled = true;
@@ -362,7 +370,17 @@ const ACCESS: Record<string, string> = {
   auto: "Auto",
   "full-access": "Full access",
 };
-const SEAT_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/u;
+// As addSeat does: a name is lower-cased and its spaces become hyphens before it is checked.
+const SEAT_NAME = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/u;
+const seatName = (typed: string) => typed.trim().toLowerCase().replace(/\s+/gu, "-");
+/** Everything outside an element, up to the body: what a modal dialog puts out of reach. */
+function outside(element: HTMLElement) {
+  const found: HTMLElement[] = [];
+  for (let node = element; node.parentElement && node !== document.body; node = node.parentElement)
+    for (const sibling of node.parentElement.children)
+      if (sibling !== node && sibling instanceof HTMLElement) found.push(sibling);
+  return found;
+}
 const SEAT_FIELDS = ["seat", "instructions", "provider", "model", "level", "access", "workspace"];
 
 const wireProposal: Wire = (piece, signal) => {
@@ -372,11 +390,9 @@ const wireProposal: Wire = (piece, signal) => {
   const decline = one<HTMLButtonElement>(piece, "[data-crew-decline]");
   const approve = one<HTMLButtonElement>(piece, "[data-crew-approve]");
   const veil = one(piece, "[data-crew-dialog]");
-  const thread = one(piece, "[data-crew-thread]");
-  const dock = one(piece, "[data-crew-dock]");
   const blank = one<HTMLTemplateElement>(piece, "template[data-crew-row]");
   const marks = one<HTMLTemplateElement>(piece, "template[data-crew-marks]");
-  if (!card || !list || !add || !decline || !approve || !veil || !thread || !dock) return;
+  if (!card || !list || !add || !decline || !approve || !veil) return;
 
   const rows = () => select(list, "[data-crew-member]");
   const values = (row: HTMLElement) =>
@@ -455,7 +471,7 @@ const wireProposal: Wire = (piece, signal) => {
   const save = one<HTMLButtonElement>(veil, "[data-crew-save]");
   // The dialog says what is wrong with a member as it is typed, and saves only a sound one.
   const check = () => {
-    const seat = field("seat")?.value.trim() ?? "";
+    const seat = seatName(field("seat")?.value ?? "");
     const error = !SEAT_NAME.test(seat)
       ? "Seat names are lowercase words joined by hyphens."
       : rows().some((row) => row !== editing && row.dataset.seat === seat)
@@ -470,6 +486,23 @@ const wireProposal: Wire = (piece, signal) => {
     }
     if (save) save.disabled = error !== null;
   };
+  // A model offers only some of its provider's levels; one it lacks falls back to the default.
+  const fitLevels = () => {
+    const provider = pickValue(pick("provider"));
+    const model = pickValue(pick(`model-${provider}`));
+    const levels = pick(`level-${provider}`);
+    if (!levels) return;
+    for (const option of select(levels, "[data-only]"))
+      option.hidden = option.dataset.only !== model;
+    if (one(levels, '[aria-selected="true"]')?.hidden) setPick(levels, "Provider default");
+  };
+  // While the dialog is open, the rest of the page is out of reach, as under the app's backdrop.
+  let blocked: HTMLElement[] = [];
+  const release = () => {
+    for (const element of blocked) element.inert = false;
+    blocked = [];
+  };
+  signal.addEventListener("abort", release, { once: true });
   const openDialog = (row: HTMLElement | null, from: HTMLElement) => {
     editing = row;
     opener = from;
@@ -510,17 +543,18 @@ const wireProposal: Wire = (piece, signal) => {
     setPick(pick("workspace"), workspace);
     showOnly("for", provider);
     showOnly("place", workspace);
+    fitLevels();
     check();
     veil.hidden = false;
-    thread.inert = true;
-    dock.inert = true;
+    blocked = outside(veil).filter((element) => !element.inert);
+    for (const element of blocked) element.inert = true;
     name?.focus();
   };
   const closeDialog = () => {
     veil.hidden = true;
-    thread.inert = false;
-    dock.inert = false;
-    (opener?.isConnected ? opener : add).focus();
+    release();
+    // The reader may have scrolled away with the dialog open; closing it must not pull them back.
+    (opener?.isConnected ? opener : add).focus({ preventScroll: true });
     editing = null;
     opener = null;
   };
@@ -532,12 +566,13 @@ const wireProposal: Wire = (piece, signal) => {
     const value = (event as CustomEvent<string>).detail;
     if (name === "provider") showOnly("for", value);
     if (name === "workspace") showOnly("place", value);
+    fitLevels();
   });
   veil.addEventListener("keydown", (event) => {
     if (event.key === "Escape") return closeDialog();
     if (event.key !== "Tab") return;
-    // The dialog is modal, so Tab goes round it and never to the thread behind.
-    const stops = select(veil, "button, input, textarea").filter(
+    // Tab goes round the dialog. A button that is off is not a stop, or Tab would end on it.
+    const stops = select(veil, "button:not(:disabled), input, textarea").filter(
       (stop) => stop.offsetParent !== null,
     );
     const at = stops.indexOf(document.activeElement as HTMLElement);
@@ -551,8 +586,11 @@ const wireProposal: Wire = (piece, signal) => {
   document.addEventListener(
     "pointerdown",
     (event) => {
-      const inside = one(veil, '[role="dialog"]')?.contains(event.target as Node);
-      if (!veil.hidden && !inside) closeDialog();
+      const target = event.target as Node;
+      if (veil.hidden || one(veil, '[role="dialog"]')?.contains(target)) return;
+      // A press on the backdrop's own scrollbar scrolls it.
+      if (target === veil && event.offsetX >= veil.clientWidth) return;
+      closeDialog();
     },
     { signal },
   );
@@ -563,7 +601,7 @@ const wireProposal: Wire = (piece, signal) => {
     if (!row) return;
     if (!editing) list.append(row);
     Object.assign(row.dataset, {
-      seat: field("seat")?.value.trim() ?? "",
+      seat: seatName(field("seat")?.value ?? ""),
       instructions: field("instructions")?.value ?? "",
       provider,
       model: pickValue(pick(`model-${provider}`)),

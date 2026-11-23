@@ -73,6 +73,13 @@
   }
 }
 
+/* The app's focus ring is its blue, inset. On a control filled with that blue it sits outside,
+   where it can be seen. */
+.piece
+  :is(.btn-a--primary, [aria-pressed="true"], [role="switch"][aria-checked="true"]):focus-visible {
+  outline-offset: 2px;
+}
+
 /* ui/select.tsx with its popup: SelectTrigger, SelectPopup and SelectItem. */
 .app .pick {
   position: relative;
