@@ -8,9 +8,9 @@ const claim = (event: KeyboardEvent) => {
 };
 
 /**
- * Focus props that stop Mod+S (stash) and Alt+Up (edit queued message) acting on the composer
- * from inside an area such as a Captain's pinned ask. Registered on focus, so it is the newest
- * capture scope; the thread's own listener skips a key whose default is prevented.
+ * Focus props that stop Mod+S (stash), Alt+Up (edit queued) and Mod+Shift+Enter (steer queued)
+ * acting on the composer from inside an area such as a Captain's pinned ask. Registered on focus, so
+ * it is the newest capture scope; the thread's own listener skips a key whose default is prevented.
  */
 export function useClaimedComposerShortcuts() {
   const release = useRef<(() => void) | null>(null);
@@ -20,7 +20,11 @@ export function useClaimedComposerShortcuts() {
     onFocus: () => {
       if (release.current !== null) return;
       release.current = registerCommands(
-        { "composer.stash": claim, "thread.editQueuedMessage": claim },
+        {
+          "composer.stash": claim,
+          "thread.editQueuedMessage": claim,
+          "thread.steerQueuedMessage": claim,
+        },
         // The ask's editor is the composer's own, which the thread treats as composer focus.
         { capture: true, context: () => ({ composerFocus: true }) },
       );

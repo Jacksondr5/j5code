@@ -51,29 +51,34 @@ it("keeps Mod+S typed in a pinned ask from stashing the Captain's prompt", async
   expect(stash).toHaveBeenCalledOnce();
 });
 
-it("keeps Alt+Up typed in a pinned ask from pulling a queued message into the composer", async () => {
-  // Nothing here links or navigates.
-  await using screen = await render(<PinnedAsk />, { router: false });
-  // The thread's handler, which treats the ask's editor as the composer.
-  const editQueued = vi.fn((event: KeyboardEvent) => event.preventDefault());
-  using _thread = {
-    [Symbol.dispose]: registerCommands(
-      { "thread.editQueuedMessage": editQueued },
-      { capture: true, context: () => ({ composerFocus: true }) },
-    ),
-  };
-  const answer = screen.getByRole("textbox", { name: "Answer" }).element() as HTMLElement;
+const mod = navigator.platform.includes("Mac")
+  ? { metaKey: true, ctrlKey: false }
+  : { metaKey: false, ctrlKey: true };
 
-  answer.focus();
-  const event = new KeyboardEvent("keydown", {
-    key: "ArrowUp",
-    altKey: true,
-    bubbles: true,
-    cancelable: true,
-  });
-  answer.dispatchEvent(event);
+it.each([
+  ["Alt+Up", "thread.editQueuedMessage", { key: "ArrowUp", altKey: true }],
+  ["Mod+Shift+Enter", "thread.steerQueuedMessage", { key: "Enter", shiftKey: true, ...mod }],
+] as const)(
+  "keeps %s typed in a pinned ask from acting on the Captain's queued message",
+  async (_name, command, keys) => {
+    // Nothing here links or navigates.
+    await using screen = await render(<PinnedAsk />, { router: false });
+    // The thread's handler, which treats the ask's editor as the composer.
+    const thread = vi.fn((event: KeyboardEvent) => event.preventDefault());
+    using _thread = {
+      [Symbol.dispose]: registerCommands(
+        { [command]: thread },
+        { capture: true, context: () => ({ composerFocus: true }) },
+      ),
+    };
+    const answer = screen.getByRole("textbox", { name: "Answer" }).element() as HTMLElement;
 
-  // The thread's own listener skips a key whose default is prevented.
-  expect(event.defaultPrevented).toBe(true);
-  expect(editQueued).not.toHaveBeenCalled();
-});
+    answer.focus();
+    const event = new KeyboardEvent("keydown", { ...keys, bubbles: true, cancelable: true });
+    answer.dispatchEvent(event);
+
+    // The thread's own listener skips a key whose default is prevented.
+    expect(event.defaultPrevented).toBe(true);
+    expect(thread).not.toHaveBeenCalled();
+  },
+);
