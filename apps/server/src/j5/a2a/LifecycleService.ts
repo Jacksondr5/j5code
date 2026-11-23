@@ -40,6 +40,7 @@ import {
 import { A2ALedger, type A2ALedgerError, A2ALedgerTransactionWriter } from "./LedgerService.ts";
 import { findPeerCounterparty } from "./peerCounterparty.ts";
 import { PROMPT_SETTLED_EVENT, markPromptSettled } from "./promptSettlement.ts";
+import { PersonAccess, layer as personAccessLayer } from "../sharing/PersonAccess.ts";
 
 export class A2ALifecycleParticipantNotFoundError extends Schema.TaggedError<A2ALifecycleParticipantNotFoundError>()(
   "A2ALifecycleParticipantNotFoundError",
@@ -225,6 +226,7 @@ const makeLayer = (daemon: boolean) =>
       const threads = yield* ThreadManagement.ThreadManagementService;
       const registration = yield* ThreadRegistration;
       const sql = yield* SqlClient.SqlClient;
+      const access = yield* PersonAccess;
       const lifecyclePermit = yield* Semaphore.make(1);
 
       const membershipRows = Effect.fn("j5.a2a.lifecycle.membershipRows")(function* (
@@ -672,6 +674,8 @@ const makeLayer = (daemon: boolean) =>
               ? "unarchived"
               : "archived",
         );
+        // Reach climbs placements, so the agents beneath a deleted thread may have left someone's.
+        if (stored.event.type === "thread.deleted") yield* access.announcePartialReach;
         yield* sql`INSERT INTO j5_a2a_lifecycle_processed (event_id) VALUES (${stored.event.id}) ON CONFLICT DO NOTHING`;
         yield* worker.notify;
         return true;
@@ -847,5 +851,12 @@ const makeLayer = (daemon: boolean) =>
     }),
   );
 
-export const manualLayer = makeLayer(false).pipe(Layer.provide(threadRegistrationLayer));
-export const layer = makeLayer(true).pipe(Layer.provide(threadRegistrationLayer));
+// Over the server's one `PersonAccess` (the same layer object, so the same instance).
+export const manualLayer = makeLayer(false).pipe(
+  Layer.provide(threadRegistrationLayer),
+  Layer.provide(personAccessLayer),
+);
+export const layer = makeLayer(true).pipe(
+  Layer.provide(threadRegistrationLayer),
+  Layer.provide(personAccessLayer),
+);
