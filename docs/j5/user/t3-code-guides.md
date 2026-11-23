@@ -64,6 +64,12 @@ the guides that describe them don't apply:
   server keeps running its current version until you do, and later updates work from the app
   again.
 
+### Updating to the release based on T3 Code 0.1.11
+
+- Owners gain one more permission, so on the first start after the update every Owner's device,
+  except the first owner's, reconnects once to pick it up. A phone, or a server added to web or
+  desktop as another environment, may have to be paired again instead.
+
 ### Updating to the release based on T3 Code 0.1.7
 
 - The server starts trimming its event log, as T3 Code 0.1.7 does, keeping recent events. Trimmed

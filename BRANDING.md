@@ -305,6 +305,13 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
   `systemd-inhibit --list` shows (`apps/server/src/background/KeepAwake.ts`), and the iOS Agent
   Activity widget's deep link (`apps/mobile/src/widgets/AgentActivityWidget.tsx`), which opens
   the production `j5code://` scheme every build accepts, where upstream's opens `t3code://`.
+  Also the MCP server's `name`, "J5 Code" (`layerMcpTransport` in `apps/server/src/mcp/McpHttpServer.ts`),
+  which an MCP client may show, while its `t3-code` key stays (see the unchanged internals).
+- The web app's install name: `apps/web/public/manifest.webmanifest`'s `name` and `short_name` are
+  "J5 Code" (they were "T3 Code" until v0.1.11). Its icons and upstream's new web install icons
+  (`apps/web/public/icon-*.png`, `assets/*/…-web-icon-*`) are still renders of upstream's icon
+  sources; J5's can follow with the next icon export.
+- The dev runner's `--home-dir` help ("Explicit J5 Code data directory…") in `scripts/dev-runner.ts`.
 - Agent-facing text upstream added at v0.1.11: the sender note
   `withMessageSenderNote` puts before an agent's, a scheduled task's or a tool's message
   (`packages/contracts/src/orchestrationV2.ts`: "J5 Code: the agent in J5 thread …", left off J5's
@@ -349,7 +356,8 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
 - The Windows installer's running-app check (`apps/desktop/resources/installer.nsh`
   `customAppRunningMessages`) matches upstream's channel names; J5's never match, so it falls back
   to `${PRODUCT_NAME}`, which is J5's.
-- The `t3-code` MCP server key, its `T3 Code` MCP server `name` (`McpHttpServer.ts`), the Codex
+- The `t3-code` MCP server key (the server's `name` an MCP client is told, in `McpHttpServer.ts`,
+  is "J5 Code" since v0.1.11; see the audit sites), the Codex
   client info ("T3 Code", `CODEX_CLIENT_NAME` in `apps/server/src/provider/CodexProvider.ts`),
   and the Muse client info (`t3_code` / "T3 Code", `packages/provider-muse`): protocol identity
   that tool names, aliases (`t3McpToolPresentation.ts`) and recorded provider fixtures depend on.
@@ -373,9 +381,13 @@ multiple J5 checkouts can coexist. Production remains exactly `codes.jackson.j5c
   `http://127.0.0.1/t3code-peer-link` (`apps/server/src/peer/PeerLinks.ts`) and the MCP client
   name `t3code-peer` (`PeerMcpClient.ts`). They are protocol identity shared with the server at the
   other end of a link, which may be an upstream T3 Code server, and no person reads them.
-- The SSH tunnel's "Remote T3 server" message in `packages/ssh/src/tunnel.ts`, and its "T3 server
-  launch" lock messages (v0.1.11), which belong to the remote launch path that still uses
-  `~/.t3/ssh-launch` (#339).
+- The SSH tunnel's `~/.t3/ssh-launch` bookkeeping in `packages/ssh/src/tunnel.ts` (#339; FORK.md
+  case 15): since v0.1.11 the launch lock and the sibling-record scans read it there rather than
+  under the J5 home, and the port-takeover scan skips records whose runner is not under
+  `/.j5code/runtime/`. Upstream's `REMOTE_ENSURE_T3_HOME_SCRIPT`, which repairs a dangling `~/.t3`
+  link, stays for the same reason. The messages of that path keep "T3": "Remote T3 server is still
+  running…", the "T3 server launch" lock messages and "A T3 server or boot service holds…"; the
+  others say "Remote J5 server".
 - The ACP client info every ACP agent receives, `{ name: "t3-code" }`
   (`packages/provider-acp/src/server/adapter.ts`), Antigravity's included: protocol identity, like
   the MCP server key.

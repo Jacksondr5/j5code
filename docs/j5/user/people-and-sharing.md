@@ -50,7 +50,8 @@ to pair through your tailnet, as for any pairing link.
 what the person's level allows.
 
 `j5 auth pairing create` without `--person` makes a link for a device the server does not know yet.
-Whoever opens it is asked who they are before they can use anything.
+Whoever opens it is asked who they are before they can use anything. For now, don't use it for a
+phone: the mobile app has to pair again after it answers. Use `j5 pair --person` instead.
 
 ## People
 

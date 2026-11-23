@@ -4,7 +4,7 @@
  * Owner's, so a page upstream adds later is shown to Owners only until someone decides otherwise.
  * General holds only device settings, Language among them.
  */
-export const PAGES_FOR_EVERYONE: ReadonlySet<string> = new Set([
+const PAGES_FOR_EVERYONE: ReadonlySet<string> = new Set([
   "/settings/general",
   "/settings/appearance",
   "/settings/snap-shot",
@@ -16,7 +16,7 @@ export const PAGES_FOR_EVERYONE: ReadonlySet<string> = new Set([
  * Pages also shown to a Collaborator: Voice, where they opt their own device in and use what an
  * Owner set up. Its key and model controls need `settings:write`, which only Owners hold.
  */
-export const PAGES_FOR_WRITERS: ReadonlySet<string> = new Set(["/settings/voice"]);
+const PAGES_FOR_WRITERS: ReadonlySet<string> = new Set(["/settings/voice"]);
 
 export const LICENSES_PATH = "/settings/open-source-licenses";
 
