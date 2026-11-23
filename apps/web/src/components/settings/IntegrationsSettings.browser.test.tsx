@@ -101,6 +101,11 @@ vi.mock(import("../../state/entities"), async (original) => ({
   useProjects: () => projects,
   useServerConfigs: () => new Map([[environmentId, config]]),
 }));
+// J5 (case 72): Settings lists only owned servers; ownership is not what this test is about.
+vi.mock(import("../../j5/sharing/settingsAccess"), async (original) => ({
+  ...(await original()),
+  useOwnedEnvironments: ((environments: unknown) => environments) as never,
+}));
 
 import { BrowserSettingsPanel } from "./IntegrationsSettings";
 import { SettingsScopeProvider } from "./SettingsScopeContext";

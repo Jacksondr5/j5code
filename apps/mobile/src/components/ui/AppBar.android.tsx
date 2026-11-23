@@ -144,6 +144,7 @@ function AppBarView(props: AppBarProps & { readonly searchState?: SearchState })
               }
             : undefined
         }
+        trailing={props.trailing}
       />
     );
   }

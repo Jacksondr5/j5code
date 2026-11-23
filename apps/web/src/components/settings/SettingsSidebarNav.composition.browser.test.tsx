@@ -6,6 +6,11 @@ import { SidebarProvider } from "../ui/sidebar";
 import { SettingsSidebarNav } from "./SettingsSidebarNav";
 import { SETTINGS_NAV_GROUPS, SETTINGS_SECTION_LABELS } from "./settingsSearch";
 
+// J5 (case 72): Settings shows every section to an Owner, which this test's person is.
+vi.mock("../../j5/sharing/access", async (original) => ({
+  ...(await original<typeof import("../../j5/sharing/access")>()),
+  useOwnerSomewhere: () => true,
+}));
 vi.mock("./useAvailableSettingsSearchItems", () => ({
   useAvailableSettingsSearchItems: () => [
     { id: "theme", title: "Theme", to: "/settings/appearance" },

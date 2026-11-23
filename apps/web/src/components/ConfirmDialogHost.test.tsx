@@ -9,6 +9,12 @@ import {
   resolveConfirmDialogCopy,
 } from "./ConfirmDialogHost";
 
+// The rows' relative clock reads GT's messages; static markup has no initialized GT.
+vi.mock("gt-react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("gt-react")>();
+  return { ...actual, useMessages: () => actual.decodeMsg };
+});
+
 describe("archive warning confirmation content", () => {
   beforeEach(() => {
     resetConfirmDialogForTests();

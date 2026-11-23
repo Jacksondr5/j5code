@@ -6,7 +6,8 @@ import * as NodePath from "node:path";
 
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { AuthStandardClientScopes, ORCHESTRATION_PROTOCOL_VERSION } from "@t3tools/contracts";
+import { ORCHESTRATION_PROTOCOL_VERSION } from "@t3tools/contracts";
+import { LEVEL_PERMISSIONS } from "@t3tools/contracts/j5";
 import * as NetService from "@t3tools/shared/Net";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { assert, describe, expect, it } from "@effect/vitest";
@@ -337,7 +338,7 @@ describe("j5 pair", () => {
         assert.equal(credentials.length, 1);
         assert.equal(credentials[0]?.label, "j5 pair");
         // J5: an Owner's permissions, in J5's level table's order (register D36).
-        assert.sameMembers([...(credentials[0]?.scopes ?? [])], [...AuthStandardClientScopes]);
+        assert.sameMembers([...(credentials[0]?.scopes ?? [])], [...LEVEL_PERMISSIONS.owner]);
       }),
     ).pipe(
       Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),

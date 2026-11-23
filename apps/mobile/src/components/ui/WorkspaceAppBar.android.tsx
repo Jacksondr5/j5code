@@ -43,6 +43,8 @@ export interface WorkspaceAppBarProps {
     readonly actions: MenuAction[];
     readonly onSelect: (id: string) => void;
   };
+  /** J5: React Native content left of the bar's actions, as the Inbox bell (FORK.md case 102). */
+  readonly trailing?: ReactNode;
 }
 
 function createWorkspaceAppBarStore() {
@@ -211,6 +213,19 @@ function WorkspaceAppBarView(props: WorkspaceAppBarProps) {
             style={{ right: ACTION_END_INSET, top: (height - ACTION_SIZE) / 2 }}
           >
             {filterMenu}
+          </View>
+        ) : null}
+        {props.trailing && !searching ? (
+          <View
+            className="absolute items-center justify-center"
+            style={{
+              right: ACTION_END_INSET + 2 * ACTION_SIZE,
+              top: (height - ACTION_SIZE) / 2,
+              width: ACTION_SIZE,
+              height: ACTION_SIZE,
+            }}
+          >
+            {props.trailing}
           </View>
         ) : null}
       </View>

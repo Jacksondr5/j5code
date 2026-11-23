@@ -118,10 +118,11 @@ vi.mock("../state/session", async (original) => ({
   useEnvironmentScope: (_environmentId: unknown, scope: string) => scope !== scopes.denied,
   readEnvironmentScope: () => true,
 }));
-// J5 (case 90): adding a project follows the person's level, which this test grants.
+// J5 (case 90): adding a project follows the person's level, which this test grants, and
+// upstream's "Operate tasks", which it may deny.
 vi.mock("../j5/sharing/access", async (original) => ({
   ...(await original<typeof import("../j5/sharing/access")>()),
-  useCanAddProject: () => true,
+  useCanAddProject: () => scopes.denied !== AuthOrchestrationOperateScope,
 }));
 vi.mock("../state/filesystem", async (original) => ({
   ...(await original<typeof import("../state/filesystem")>()),

@@ -11,6 +11,7 @@ import { createPendingAttachmentId, resolveAttachmentPath } from "../attachmentS
 import * as ThreadMessageIntake from "./ThreadMessageIntake.ts";
 import { assert, it, vi } from "@effect/vitest";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
+import { WORKTREE_BRANCH_PREFIX } from "@t3tools/shared/git";
 import {
   ChatAttachmentId,
   ComposerContextId,
@@ -1138,7 +1139,10 @@ it.effect(
       );
       const projection = yield* preparationSettled(launched.threadId);
       assert.equal(projection.runs[0]?.status, "starting");
-      assert.match(projection.thread.branch!, /^t3\/[0-9a-f]{8}$/);
+      assert.match(
+        projection.thread.branch!,
+        new RegExp(`^${WORKTREE_BRANCH_PREFIX}/[0-9a-f]{8}$`),
+      );
       assert.equal(harness.createWorktree.mock.calls[0]?.[0]?.newRefName, projection.thread.branch);
       assert.equal(harness.runSetup.mock.calls.length, 1);
       assert.equal(harness.renameBranch.mock.calls.length, 0);

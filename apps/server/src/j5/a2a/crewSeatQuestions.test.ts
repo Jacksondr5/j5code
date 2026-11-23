@@ -93,12 +93,21 @@ const threadStartConfig = (
         { type: "expect_outbound", frame: { method: "initialized" } },
         {
           type: "expect_outbound",
-          frame: { id: 2, method: "thread/start", params: { config: expectedConfig } },
+          frame: {
+            id: 2,
+            method: "config/read",
+            params: { cwd: "/workspace", includeLayers: false },
+          },
+        },
+        { type: "emit_inbound", frame: { id: 2, result: { config: {}, origins: {} } } },
+        {
+          type: "expect_outbound",
+          frame: { id: 3, method: "thread/start", params: { config: expectedConfig } },
         },
         {
           type: "emit_inbound",
           frame: {
-            id: 2,
+            id: 3,
             result: {
               thread: {
                 id: `native-${scenario}`,

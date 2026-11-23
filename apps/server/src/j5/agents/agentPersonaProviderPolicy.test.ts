@@ -216,7 +216,16 @@ describe("full-access agent persona policy", () => {
         runtimePolicy: runtimePolicy("full-access"),
         modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.6-terra" },
       });
-      assert.equal(params.approvalPolicy, "never");
+      // Upstream's full-access policy: only MCP elicitations reach the adapter, which accepts them.
+      assert.deepEqual(params.approvalPolicy, {
+        granular: {
+          mcp_elicitations: true,
+          request_permissions: false,
+          rules: false,
+          sandbox_approval: false,
+          skill_approval: false,
+        },
+      });
       assert.equal(params.sandboxPolicy?.type, "dangerFullAccess");
     }),
   );
