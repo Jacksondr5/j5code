@@ -493,11 +493,13 @@ const narrowedView = (
             Stream.mapEffect(({ run, result }) =>
               Ref.get(current).pipe(
                 Effect.flatMap((latest) =>
-                  latest === run ? reachableTasks(result) : Effect.succeed(undefined),
+                  latest === run
+                    ? reachableTasks(result).pipe(Effect.map((shown) => [shown]))
+                    : Effect.succeed([]),
                 ),
               ),
             ),
-            Stream.filter((result): result is ScheduledTaskListResult => result !== undefined),
+            Stream.flatMap((shown) => Stream.fromIterable(shown)),
           );
         }),
       ),
