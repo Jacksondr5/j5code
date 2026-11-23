@@ -47,10 +47,14 @@ function wireInbox(root: HTMLElement) {
       if (page) page.inert = sheetOpen();
     };
     const close = () => {
+      // The panel that starts open has no opener, so focus goes to the link that shows it.
+      const shown = inbox.querySelector<HTMLElement>("[data-inbox-panel]:not([hidden])");
+      const back =
+        opener ?? links.find((link) => link.dataset.inboxOpen === shown?.dataset.inboxPanel);
       inbox.dataset.panel = "closed";
       delete inbox.dataset.sheet;
       settle();
-      opener?.focus();
+      back?.focus();
     };
     for (const link of links) {
       link.addEventListener("click", () => {
