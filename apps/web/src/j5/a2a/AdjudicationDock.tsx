@@ -30,6 +30,7 @@ import {
   useAnswerAttachments,
   useRestoredAnswerUploads,
 } from "./AnswerAttachments";
+import { AnswerSendErrorAlert } from "./AnswerSendErrorAlert";
 import { J5RecordPanel } from "./J5RecordPanel";
 import { answerToDeliver, useAnswerSends } from "./answerSends";
 import { ownFileDropTargetProps } from "./answerFileDrop";
@@ -111,7 +112,7 @@ export function AdjudicationDock(props: {
   const words = wordsOf(shown);
   const message = answerToDeliver(words);
   const pending = sends.isPending(answerKey);
-  const error = sends.errorOf(answerKey)?.message ?? null;
+  const error = sends.errorOf(answerKey);
   const urgency = urgencyBadge[shown.urgency];
   const openFor = formatElapsedDurationLabel(shown.openedAt);
   const threadRef = threadId == null ? undefined : scopeThreadRef(environmentId, threadId);
@@ -161,10 +162,10 @@ export function AdjudicationDock(props: {
         setRefused((current) => [...current, shown]);
         query.refresh();
       } else {
-        sends.setError(answerKey, {
-          message: cause instanceof Error ? cause.message : "Could not deliver the answer.",
-          delivered: false,
-        });
+        sends.setError(
+          answerKey,
+          cause instanceof Error ? cause.message : "Could not deliver the answer.",
+        );
       }
     }
     sends.setPending(answerKey, false);
@@ -243,16 +244,8 @@ export function AdjudicationDock(props: {
             error={attachments.error(answerKey)}
             onRemove={pending ? null : (id) => attachments.remove(answerKey, id)}
           />
-          {error ? (
-            <div className="flex flex-wrap items-center justify-between gap-2" role="alert">
-              <p className="text-sm text-destructive">{error}</p>
-              {sendable && !pending ? (
-                <Button onClick={() => void answer()} size="sm" type="button" variant="outline">
-                  Try again
-                </Button>
-              ) : null}
-            </div>
-          ) : null}
+          {/* As upstream's composer: the error shows, the words stay, and sending again retries. */}
+          {error === null ? null : <AnswerSendErrorAlert message={error} />}
           <div className="flex items-center justify-end gap-2">
             {addFiles === null ? null : (
               <AnswerAttachButton

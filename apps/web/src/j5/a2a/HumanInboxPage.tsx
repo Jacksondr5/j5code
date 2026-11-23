@@ -63,19 +63,14 @@ import {
   useAnswerAttachments,
   useRestoredAnswerUploads,
 } from "./AnswerAttachments";
-import {
-  type AnswerSendError,
-  answerSendCallbacks,
-  answerToDeliver,
-  retryAnswer,
-  useAnswerSends,
-} from "./answerSends";
+import { answerSendCallbacks, answerToDeliver, useAnswerSends } from "./answerSends";
 import { answerHumanExchange } from "./humanInboxClient";
 import {
   pruneInboxAnswerDrafts,
   setInboxAnswerText,
   useInboxAnswerTexts,
 } from "./inboxAnswerDrafts";
+import { AnswerSendErrorAlert } from "./AnswerSendErrorAlert";
 import { J5RecordPanel } from "./J5RecordPanel";
 import { OwnerAskAction } from "./OwnerAskAction";
 import { useScopedParticipantLabels } from "./ParticipantIdentitiesClient";
@@ -317,7 +312,6 @@ function OpenInboxItem({
   attachments,
   pending,
   error,
-  onRetry,
   onOpenThread,
   senderLabels,
   projectNameOf,
@@ -342,8 +336,7 @@ function OpenInboxItem({
   readonly attachments: AnswerAttachmentsState;
   /** This ask's answer is being delivered; other asks stay answerable meanwhile. */
   readonly pending: boolean;
-  readonly error: AnswerSendError | null;
-  readonly onRetry: (item: HumanInboxItem) => void;
+  readonly error: string | null;
   readonly showEnvironment: boolean;
   readonly onOpenThread: (item: HumanInboxItem) => void;
 }) {
@@ -458,26 +451,8 @@ function OpenInboxItem({
                 error={attachments.error(itemKey)}
                 onRemove={pending ? null : (id) => attachments.remove(itemKey, id)}
               />
-              {error === null ? null : (
-                <div
-                  className="flex flex-wrap items-center justify-between gap-3 rounded-md bg-destructive/8 px-3 py-2 text-sm text-destructive-foreground"
-                  role="alert"
-                >
-                  <span>{error.message}</span>
-                  {/* A delivered answer only re-reads; a resend needs an ask that can still take it. */}
-                  {error.delivered || (sendable && !pending) ? (
-                    <Button
-                      disabled={pending}
-                      onClick={() => onRetry(item)}
-                      size="sm"
-                      type="button"
-                      variant="outline"
-                    >
-                      Try again
-                    </Button>
-                  ) : null}
-                </div>
-              )}
+              {/* As upstream's composer: the error shows, the words stay, and sending again retries. */}
+              {error === null ? null : <AnswerSendErrorAlert message={error} />}
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-1">
                   <OpenThreadButton
@@ -774,12 +749,6 @@ export function HumanInboxPage() {
     });
   };
 
-  const retry = (item: HumanInboxItem) =>
-    retryAnswer(sends, scopedInboxItemKey(item), {
-      resend: () => void answer(item),
-      reread: () => refresh(item.environmentId),
-    });
-
   const openCrewThread = (
     request: Pick<ScopedCrewRuntimeRequest, "environmentId" | "threadId">,
   ) => {
@@ -875,7 +844,6 @@ export function HumanInboxPage() {
                     onOpenThread={openThread}
                     pending={sends.isPending(scopedInboxItemKey(item))}
                     error={sends.errorOf(scopedInboxItemKey(item))}
-                    onRetry={retry}
                     senderLabels={senderLabels}
                     projectNameOf={projectNameOf}
                     showEnvironment={showEnvironment}
