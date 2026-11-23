@@ -253,24 +253,45 @@ const make = Effect.gen(function* () {
         ),
       );
 
-  /**
-   * Marks a live device's session as one J5 ended for renewal, and ends it upstream. The mark is
-   * set only on a binding not already marked, and only together with upstream revoking a session
-   * that was live; anything else fails, and with it the change being made.
-   */
-  const revokeForRenewal = Effect.fn("j5.sharing.access.revokeForRenewal")(function* (
+  /** Marks a live device's session as one J5 ends for renewal, inside the change's transaction. */
+  const markForRenewal = Effect.fn("j5.sharing.access.markForRenewal")(function* (
     sessionId: AuthSessionId,
   ) {
     const now = DateTime.formatIso(yield* DateTime.now);
     const marked = yield* sql`
-      UPDATE j5_a2a_person_session SET renew_pending_since = ${now}
-      WHERE session_id = ${sessionId} AND renew_pending_since IS NULL
+      UPDATE j5_a2a_person_session SET renew_pending_since = COALESCE(renew_pending_since, ${now})
+      WHERE session_id = ${sessionId}
       RETURNING session_id
     `.pipe(Effect.mapError((cause) => new AccessRenewalError({ sessionId, cause })));
-    const revoked = yield* sessions
-      .revoke(sessionId)
-      .pipe(Effect.mapError((cause) => new AccessRenewalError({ sessionId, cause })));
-    if (marked.length !== 1 || !revoked) return yield* new AccessRenewalError({ sessionId });
+    if (marked.length !== 1) return yield* new AccessRenewalError({ sessionId });
+  });
+
+  /**
+   * Runs a change, then ends upstream the sessions it renews (marked for renewal) or ends, once
+   * it commits. Upstream publishes a revoke as it writes it, and a socket reads the committed
+   * row, so a revoke inside this transaction would close no socket. A revoke that fails leaves a
+   * renewed session live and marked, and the next change of the person's level ends it.
+   */
+  const committedRenewing = Effect.fn("j5.sharing.access.committedRenewing")(function* <A, E, R>(
+    body: (sessionsToEnd: {
+      readonly renew: (sessionId: AuthSessionId) => Effect.Effect<void, AccessRenewalError>;
+      readonly end: (sessionId: AuthSessionId) => Effect.Effect<void>;
+    }) => Effect.Effect<A, E, R>,
+  ) {
+    const marked: Array<AuthSessionId> = [];
+    const end = (sessionId: AuthSessionId) => Effect.sync(() => void marked.push(sessionId));
+    const result = yield* committed(
+      body({
+        renew: (sessionId) => markForRenewal(sessionId).pipe(Effect.andThen(end(sessionId))),
+        end,
+      }),
+    );
+    for (const sessionId of marked) {
+      yield* sessions
+        .revoke(sessionId)
+        .pipe(Effect.mapError((cause) => new AccessRenewalError({ sessionId, cause })));
+    }
+    return result;
   });
 
   /** The live sessions bound to a person, with the permissions each holds now. */
@@ -284,7 +305,8 @@ const make = Effect.gen(function* () {
       .pipe(Effect.mapError((cause) => new AccessRenewalError({ sessionId: "", cause })));
     return bound.flatMap((device) => {
       const session = active.find((entry) => entry.sessionId === device.sessionId);
-      return session === undefined || device.renewPendingSince !== null
+      // A marked session still live is one whose revoke failed; the next change ends it.
+      return session === undefined
         ? []
         : [{ ...device, scopes: session.permissions ?? session.scopes }];
     });
@@ -324,16 +346,13 @@ const make = Effect.gen(function* () {
    */
   const endApprovedMcpClients = Effect.fn("j5.sharing.access.endApprovedMcpClients")(function* (
     personId: ParticipantId,
+    end: (sessionId: AuthSessionId) => Effect.Effect<void>,
   ) {
     const approved = yield* sql<{ readonly session_id: AuthSessionId }>`
       DELETE FROM j5_a2a_mcp_client_approver WHERE person_id = ${personId}
       RETURNING session_id
     `.pipe(Effect.mapError(mcpStorage("read the MCP clients a person approved")));
-    for (const { session_id: sessionId } of approved) {
-      yield* sessions
-        .revoke(sessionId)
-        .pipe(Effect.mapError(mcpStorage("end an MCP client a person approved")));
-    }
+    for (const { session_id: sessionId } of approved) yield* end(sessionId);
   });
 
   /**
@@ -341,7 +360,7 @@ const make = Effect.gen(function* () {
    * transaction; then tells subscribers.
    */
   const changing = <A, E>(personId: ParticipantId, change: Effect.Effect<A, E>) =>
-    committed(
+    committedRenewing(({ renew, end }) =>
       Effect.gen(function* () {
         const before = snapshotOf(yield* people.listLevels(personId));
         yield* beforeChange(personId);
@@ -353,12 +372,12 @@ const make = Effect.gen(function* () {
         for (const device of yield* liveDevices(personId)) {
           const target = devicePermissions(highest, device.ceiling);
           if (narrowed || !samePermissions(target, device.scopes)) {
-            yield* revokeForRenewal(device.sessionId);
+            yield* renew(device.sessionId);
           }
         }
         if (before.owner && !after.owner) {
           yield* voidWaitingMcpApprovals;
-          yield* endApprovedMcpClients(personId);
+          yield* endApprovedMcpClients(personId, end);
         }
         return result;
       }),
@@ -385,7 +404,7 @@ const make = Effect.gen(function* () {
     }),
 
     removePerson: Effect.fn("j5.sharing.access.removePerson")(function* (personId) {
-      yield* committed(
+      yield* committedRenewing(({ end }) =>
         Effect.gen(function* () {
           // Read inside the transaction, so a promotion just before cannot be missed.
           const owner = snapshotOf(yield* people.listLevels(personId)).owner;
@@ -422,14 +441,10 @@ const make = Effect.gen(function* () {
           );
           yield* beforeChange(personId);
           const ended = yield* people.removePerson(personId);
-          for (const sessionId of ended) {
-            yield* sessions
-              .revoke(sessionId)
-              .pipe(Effect.mapError((cause) => new AccessRenewalError({ sessionId, cause })));
-          }
+          for (const sessionId of ended) yield* end(sessionId);
           yield* afterChange(personId);
           if (owner) yield* voidWaitingMcpApprovals;
-          yield* endApprovedMcpClients(personId);
+          yield* endApprovedMcpClients(personId, end);
         }),
       );
       yield* tell({ personId, kind: "removed" });
@@ -443,7 +458,7 @@ const make = Effect.gen(function* () {
     claimDevice: Effect.fn("j5.sharing.access.claimDevice")(function* (session, choice) {
       const reach = yield* people.sessionReach(session);
       if (reach.kind !== "unknown") return yield* new DeviceAlreadyClaimedError({});
-      const personId = yield* committed(
+      const personId = yield* committedRenewing(({ renew }) =>
         Effect.gen(function* () {
           const personId =
             choice.kind === "person"
@@ -462,7 +477,7 @@ const make = Effect.gen(function* () {
             ceiling: session.scopes,
           });
           yield* afterChange(personId);
-          yield* revokeForRenewal(session.sessionId);
+          yield* renew(session.sessionId);
           return personId;
         }),
       );
@@ -477,14 +492,14 @@ const make = Effect.gen(function* () {
       // permissions are their ceiling, and a phone among them could not renew.
       for (const record of everyone.filter((entry) => !entry.person.firstOwner)) {
         const highest = highestOf(record.levels);
-        yield* committed(
+        yield* committedRenewing(({ renew }) =>
           Effect.gen(function* () {
             for (const device of yield* liveDevices(record.person.personId)) {
               // Jackson, 2026-11-23 (AC16): only a device holding more than its level ends here;
               // one short of a newly added permission gains it only with a new session.
               const target = devicePermissions(highest, device.ceiling);
               if (device.scopes.some((scope) => !target.includes(scope))) {
-                yield* revokeForRenewal(device.sessionId);
+                yield* renew(device.sessionId);
                 renewed += 1;
               }
             }
