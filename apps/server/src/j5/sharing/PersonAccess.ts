@@ -339,7 +339,7 @@ export interface PersonAccessShape {
   readonly unbindSession: (
     sessionId: AuthSessionId,
   ) => Effect.Effect<ParticipantId | null, PersonAccessStorageError>;
-  /** The same for every session but one. */
+  /** The same for every ended session but one; a session that paired since keeps its person. */
   readonly unbindOtherSessions: (
     exceptSessionId: AuthSessionId,
   ) => Effect.Effect<ReadonlyArray<ParticipantId>, PersonAccessStorageError>;
@@ -1110,6 +1110,7 @@ const make: Layer.Layer<PersonAccess, never, SqlClient.SqlClient | ReadChanges> 
           const rows = yield* sql<{ readonly person_id: string }>`
             DELETE FROM j5_a2a_person_session
             WHERE session_id <> ${exceptSessionId}
+              AND session_id IN (SELECT session_id FROM auth_sessions WHERE revoked_at IS NOT NULL)
             RETURNING person_id
           `;
           const personIds = [...new Set(rows.map((row) => row.person_id))].map((id) =>

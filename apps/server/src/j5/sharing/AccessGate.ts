@@ -493,10 +493,11 @@ export const layerGatedEnvironmentAuth = Layer.effect(
       return allowed ? session : { ...session, scopes: [] };
     });
 
-    /** A device key's sessions, ended ones too, so a retry after a failed unbind finds them. */
+    /** A key's ended sessions, earlier ones too for a retry; a newer pairing keeps its person. */
     const keySessions = (proofKeyThumbprint: string) =>
       sql<{ readonly session_id: string }>`
-        SELECT session_id FROM auth_sessions WHERE proof_key_thumbprint = ${proofKeyThumbprint}
+        SELECT session_id FROM auth_sessions
+        WHERE proof_key_thumbprint = ${proofKeyThumbprint} AND revoked_at IS NOT NULL
       `.pipe(
         Effect.map((rows) => rows.map((row) => AuthSessionId.make(row.session_id))),
         Effect.mapError(

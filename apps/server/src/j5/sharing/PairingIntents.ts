@@ -243,10 +243,9 @@ const make: Layer.Layer<PairingIntents, never, SqlClient.SqlClient | ReadChanges
             const reach = yield* people.sessionReach(input.creator).pipe(Effect.mapError(storage));
             if (reach.kind === "service") return;
             if (reach.kind === "unknown") {
-              // Every way J5 ends a device unbinds and revokes it in one transaction, and a
-              // replaced browser session is unbound only once upstream has revoked it, so a
-              // session found unbound here and still live was never anyone's (a device no one has
-              // claimed).
+              // J5 unbinds a session only after upstream has revoked it, and only revoked ones,
+              // so a session found unbound here and still live was never anyone's (a device no
+              // one has claimed).
               const live = yield* input.creatorLive.pipe(Effect.mapError(storage));
               if (!live) return yield* new PairingIntentError({ reason: "no_person" });
               return;

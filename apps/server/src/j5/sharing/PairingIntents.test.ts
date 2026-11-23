@@ -6,6 +6,7 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import * as SessionStore from "../../auth/SessionStore.ts";
@@ -345,5 +346,50 @@ it.layer(accessLayer)("PairingIntents", (it) => {
           "the link was recorded as no one's",
         );
       }),
+  );
+
+  it.effect("keeps a device that paired again on its key after upstream ended the old one", () =>
+    Effect.gen(function* () {
+      const sessions = yield* SessionStore.SessionStore;
+      const sql = yield* SqlClient.SqlClient;
+      const holder = yield* person("Rekeyed", [{ scope: { kind: "server" }, level: "owner" }]);
+      const dpop = { method: "dpop-access-token" } as const;
+      const ended = yield* device(holder.personId, LEVEL_PERMISSIONS.owner, dpop);
+      yield* sessions.revoke(ended.sessionId);
+      // Paired on the same key once upstream's revoke committed, before J5 cuts the key loose.
+      const paired = yield* device(holder.personId, LEVEL_PERMISSIONS.owner, dpop);
+      const auth = yield* EnvironmentAuth.EnvironmentAuth.pipe(
+        Effect.provide(
+          AccessGate.layerGatedEnvironmentAuth.pipe(
+            Layer.provide(
+              Layer.mock(EnvironmentAuth.EnvironmentAuth)({
+                revokeConnectDevice: () => Effect.succeed(true),
+                revokeOtherClientSessions: () => Effect.succeed(0),
+              }),
+            ),
+          ),
+        ),
+      );
+      const bound = (sessionId: string) =>
+        sql<{ readonly n: number }>`
+          SELECT COUNT(*) AS n FROM j5_a2a_person_session WHERE session_id = ${sessionId}
+        `.pipe(Effect.map((rows) => rows[0]?.n ?? 0));
+
+      yield* auth.revokeConnectDevice("test-key");
+      assert.deepStrictEqual(
+        [yield* bound(ended.sessionId), yield* bound(paired.sessionId)],
+        [0, 1],
+      );
+
+      // Revoke every other client: only ended sessions lose their person.
+      const again = yield* device(holder.personId, LEVEL_PERMISSIONS.owner, dpop);
+      yield* sessions.revoke(again.sessionId);
+      const caller = yield* device(holder.personId, LEVEL_PERMISSIONS.owner);
+      yield* auth.revokeOtherClientSessions(caller.sessionId);
+      assert.deepStrictEqual(
+        [yield* bound(again.sessionId), yield* bound(paired.sessionId)],
+        [0, 1],
+      );
+    }),
   );
 });
