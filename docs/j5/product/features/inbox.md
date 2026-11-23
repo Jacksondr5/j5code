@@ -56,19 +56,16 @@ The inbox is **not** a backlog (a non-blocking note an agent wants to keep is a 
 
 ### The item
 
-5. Each item shows the sender, the sender's project, the intent as its subject line, the body, the urgency, and the time since it was opened, with the exact time on hover; urgency is the most prominent element. Each message in an ask can be copied, as an agent's reply can in a thread.
+5. Each item shows the sender, the sender's project, the intent as its subject line, the body, the urgency, and the time since it was opened; urgency is the most prominent element. On web and desktop, hovering that time shows the exact time, and each message in an ask can be copied, as an agent's reply can in a thread.
 6. Items are ordered by urgency first, then by age, oldest first within an urgency.
 7. A collapsed item shows the sender line and the intent; expanding it shows the body and the reply box.
-8. On web and desktop, a link in an ask opens where it would in the asking agent's thread, and anything that opens in that thread's right panel opens there with the panel shown beside the Inbox; the panel is the thread's own, so tabs opened or closed from the Inbox are opened or closed in the thread. A link in another ask switches the panel to that agent's thread. An ask whose agent has no thread the person can reach keeps plain links.
 
 ### Answering
 
-8. Replying in place delivers the person's text to the asker exactly as written, spaces and line breaks included, with the images and files they attached by pasting, dropping or picking them, closes the Exchange, and tells the agent which ask it answers, by intent and id, and that the platform closed it. A reply of only spaces and line breaks can't be sent.
-9. On web and desktop, the reply box, in the Inbox and on a Captain's pinned ask, is the composer's editor in its exact-text form, with no pickers or commands: Enter sends as the person's send setting says, and attachments are taken, previewed and uploaded as the composer takes them. A file dropped on a pinned ask, and a composer shortcut typed in it, reach the ask and never the Captain's composer.
-10. Sending one answer leaves every other ask answerable. An answer that fails to send shows why under its own ask and keeps its words, and sending it again is the retry. A reply box takes no input while the person can't answer the ask or it has closed.
-11. "Open thread" navigates to the asker's thread; an ask resolved there stays open until the agent withdraws it, and then leaves the inbox.
-12. A replied item moves to the collapsed Replied shelf and is no longer counted.
-13. An ask whose sender is archived leaves the inbox immediately, with no terminal row.
+8. Replying in place delivers the person's text to the asker exactly as written, spaces and line breaks included, with the images and files they attached by pasting, dropping or picking them, closes the Exchange, and tells the agent which ask it answers, by intent and id, and that the platform closed it. On web and desktop, a reply of only spaces and line breaks can't be sent.
+9. "Open thread" navigates to the asker's thread; an ask resolved there stays open until the agent withdraws it, and then leaves the inbox.
+10. A replied item moves to the collapsed Replied shelf and is no longer counted.
+11. An ask whose sender is archived leaves the inbox immediately, with no terminal row.
 
 ### Placement
 
@@ -89,6 +86,12 @@ The inbox is **not** a backlog (a non-blocking note an agent wants to keep is a 
 20. No worktree is picked at first. The person can keep all, which clears the item and changes nothing, pick worktrees and remove them (Remove selected is disabled while none is picked), or select all (disabled once every worktree is picked). Only an Owner sees it, counts it on the bell and answers it, from the app; no agent tool answers it.
 21. Before removing an approved worktree, J5 checks it again and skips and reports it when its commit, its list of changed files, what is in those files or what is staged differs from when the archive kept it, its commits are no longer on its branch (a nested repository or a very long list of changes can't be compared, so it is skipped), another unarchived thread now uses it, its thread was unarchived, or a provider session is open in it. A worktree already removed some other way is skipped without error, and a removal that fails is reported with its reason without stopping the others.
 22. The item resolves once: a second answer is refused with "This worktree cleanup was already answered." and the item shows its decided state, and it clears on the person's other devices. Afterwards it stays in place showing each worktree as removed, kept ("Not picked"), skipped (changed since it was filed, another thread uses it, a session is open in it, already gone, or couldn't be checked) or failed (git's own error text), and then moves to the Answered shelf as a one-line count of each. Nothing is offered to retry a skipped or failed worktree.
+
+### Reading and answering as in the thread
+
+23. On web and desktop, a link in an ask opens where it would in the asking agent's thread, and anything that opens in that thread's right panel opens there with the panel shown beside the Inbox; the panel is the thread's own, so tabs opened or closed from the Inbox are opened or closed in the thread. A link in another ask switches the panel to that agent's thread. An ask whose agent has no thread the person can reach keeps plain links.
+24. On web and desktop, the reply box, in the Inbox and on a Captain's pinned ask, is the composer's editor in its exact-text form, with no pickers or commands: Enter sends as the person's send setting says, and attachments are taken, previewed and uploaded as the composer takes them. While a pinned ask can take files, a file dropped anywhere on it goes to the answer and not to the Captain's composer; and Mod+S, Alt+Up and Mod+Shift+Enter typed in it neither stash the Captain's prompt nor edit or steer its queued messages.
+25. On web and desktop, sending one answer leaves every other ask answerable; an answer that fails to send shows why under its own ask and keeps its words, and sending it again is the retry; and a reply box takes no input while the person can't answer the ask or it has closed.
 
 ## Scenarios
 
@@ -125,4 +128,4 @@ The inbox is **not** a backlog (a non-blocking note an agent wants to keep is a 
 - 2026-11-14 — the mobile Inbox answers an Owner's worktree cleanups as web does: keep all, or remove the picked worktrees after a confirmation, with the result in place (Jackson, [#1013](https://github.com/Jacksondr5/j5code/issues/1013)).
 - 2026-11-14 — the mobile app's Inbox and pinned ask carry an Owner's **Allow this once** and **Save persona** (Jackson, [#1040](https://github.com/Jacksondr5/j5code/issues/1040)).
 - 2026-11-14 — the mobile app attaches photos, screenshots and files to an answer, in the Inbox and on the Captain's pinned card, with web's limits (Jackson, [#1041](https://github.com/Jacksondr5/j5code/issues/1041)).
-- 2026-11-22 — an ask reads and is answered as it would be in the asking agent's thread: its links open in that thread's own panel beside the Inbox, and the reply uses the composer's editor and attachment handling, still delivered exactly as written and still needing words; on mobile, links and the reply box are unchanged for now (AC5, AC8, AC23–AC25; Jackson, milestone [Inbox mirrors the thread](https://github.com/Jacksondr5/j5code/milestone/23), design agreed in the Inbox design thread).
+- 2026-11-22 — an ask reads and is answered as it would be in the asking agent's thread: its links open in that thread's own panel beside the Inbox, and the reply uses the composer's editor and attachment handling, still delivered exactly as written and still needing words; on mobile, links and the reply box are unchanged for now (AC5, AC8, AC23–AC25; Jackson, milestone [Inbox mirrors the thread](https://github.com/Jacksondr5/j5code/milestone/23): [#1173](https://github.com/Jacksondr5/j5code/issues/1173)–[#1177](https://github.com/Jacksondr5/j5code/issues/1177)).
