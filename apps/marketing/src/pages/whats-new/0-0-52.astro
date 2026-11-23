@@ -457,15 +457,23 @@ const T3_PENNANT = "M0.6 0.6h12L8.7 5l3.9 4.4H0.6z";
     .hero__crest { stroke: rgba(59, 143, 174, 0.7); stroke-width: 1.5; }
   }
 
+  /* The wave crests every sixth of the width, from 1/24, and dips halfway between. Each boat is
+     placed by its centre on a crest or in a trough, at that water's height, so it rides the wave. */
   .hero__boat {
     position: absolute;
-    bottom: 26px;
     animation: wn-sail 1.1s cubic-bezier(0.2, 0.7, 0.2, 1) 0.5s backwards;
   }
 
-  .hero__boat--1 { right: 31%; rotate: -2deg; }
-  .hero__boat--2 { right: 19%; rotate: 1.5deg; animation-delay: 0.62s; }
-  .hero__boat--3 { right: 9%; rotate: -1deg; animation-delay: 0.74s; }
+  .hero__boat--1 { left: calc(62.5% - 20px); bottom: 13px; rotate: -1.5deg; }
+  .hero__boat--2 { left: calc(70.833% - 27px); bottom: 29px; rotate: 1deg; animation-delay: 0.62s; }
+  .hero__boat--3 { left: calc(79.167% - 18px); bottom: 13px; rotate: -1deg; animation-delay: 0.74s; }
+
+  /* On a narrow page the waves are short, so each boat takes a crest of its own, a little deeper. */
+  @media (max-width: 760px) {
+    .hero__boat--1 { left: calc(54.167% - 20px); bottom: 24px; }
+    .hero__boat--2 { bottom: 24px; }
+    .hero__boat--3 { left: calc(87.5% - 18px); bottom: 24px; }
+  }
 
   @keyframes wn-sail {
     from {
@@ -546,8 +554,14 @@ const T3_PENNANT = "M0.6 0.6h12L8.7 5l3.9 4.4H0.6z";
   .pair {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    align-items: start;
-    gap: 40px;
+    gap: 0 40px;
+  }
+
+  /* The two columns share their rows, so the two windows are one height whatever is in them. */
+  .pair > div {
+    display: grid;
+    grid-template-rows: subgrid;
+    grid-row: span 3;
   }
 
   .items--flush { margin-top: 0; }
@@ -568,12 +582,11 @@ const T3_PENNANT = "M0.6 0.6h12L8.7 5l3.9 4.4H0.6z";
 
   @media (max-width: 1000px) {
     .hero { padding-top: 48px; }
-    .hero__boat--1 { right: 50%; }
-    .hero__boat--2 { right: 28%; }
     /* minmax(0, …), so a line that should shorten can't hold its column wider than the page. */
     .split { grid-template-columns: minmax(0, 1fr); gap: 32px; }
     .split--text .items { margin-top: 0; }
     .pair { grid-template-columns: minmax(0, 1fr); gap: 48px; }
+    .pair > div { display: block; }
   }
 
   @media (max-width: 640px) {

@@ -172,15 +172,23 @@ const RELEASE = "0.0.54";
     }
   }
 
+  /* The wave crests every sixth of the width, from 1/24, and dips halfway between. Each boat is
+     placed by its centre on a crest or in a trough, at that water's height, so it rides the wave. */
   .hero__boat {
     position: absolute;
-    bottom: 26px;
     animation: wn-sail 1.1s cubic-bezier(0.2, 0.7, 0.2, 1) 0.5s backwards;
   }
 
-  .hero__boat--1 { left: 9%; rotate: -2deg; }
-  .hero__boat--2 { left: 19%; rotate: 1.5deg; animation-delay: 0.62s; }
-  .hero__boat--3 { left: 31%; rotate: -1deg; animation-delay: 0.74s; }
+  .hero__boat--1 { left: calc(12.5% - 20px); bottom: 13px; rotate: -1.5deg; }
+  .hero__boat--2 { left: calc(20.833% - 27px); bottom: 29px; rotate: 1deg; animation-delay: 0.62s; }
+  .hero__boat--3 { left: calc(29.167% - 18px); bottom: 13px; rotate: -1deg; animation-delay: 0.74s; }
+
+  /* On a narrow page the waves are short, so each boat takes a crest of its own, a little deeper. */
+  @media (max-width: 760px) {
+    .hero__boat--1 { left: calc(20.833% - 20px); bottom: 24px; }
+    .hero__boat--2 { left: calc(37.5% - 27px); bottom: 24px; }
+    .hero__boat--3 { left: calc(54.167% - 18px); bottom: 24px; }
+  }
 
   @keyframes wn-sail {
     from {
@@ -275,8 +283,6 @@ const RELEASE = "0.0.54";
   @media (max-width: 1000px) {
     .hero { padding-top: 48px; }
     .hero__inner { grid-template-columns: 1fr; gap: 36px; }
-    .hero__boat--3 { left: 46%; }
-    .hero__boat--2 { left: 26%; }
   }
 
   @media (max-width: 640px) {
