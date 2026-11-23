@@ -580,7 +580,7 @@ migrations after upstream migrations.
 
 Current pin: `322f6544dfad0a3c8a0c8cbecf2c7f7874b14268`, upstream's stable release tag `v0.1.7` on `main` (released 2026-11-04, frozen 2026-11-07). The previous pin was `d2c440312e5f39d59827ed466838a623516454d6`, upstream's stable release tag `v0.1.3`.
 
-Released pin: `322f6544dfad0a3c8a0c8cbecf2c7f7874b14268`, from `main` (in J5 Code 0.0.52, frozen 2026-11-07).
+Released pin: `322f6544dfad0a3c8a0c8cbecf2c7f7874b14268`, from `main` (in J5 Code 0.0.53, frozen 2026-11-07).
 
 The released pin is the one the latest stable release is built on, and it is what j5.codes shows. It changes in the pull request that brings a stable release's version bump into `j5/main`, never in the advance itself.
 
