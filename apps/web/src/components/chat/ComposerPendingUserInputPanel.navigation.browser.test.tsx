@@ -41,7 +41,10 @@ const prompt = {
 };
 
 it("bounds long questions and resets their scroll position when the question changes", async () => {
-  const options = Array.from({ length: 35 }, (_, index) => ({ label: `Option ${index + 1}` }));
+  const options = Array.from({ length: 35 }, (_, index) => ({
+    label: `Option ${index + 1}`,
+    description: "Option detail",
+  }));
   const pendingUserInputs = [
     {
       ...prompt,
