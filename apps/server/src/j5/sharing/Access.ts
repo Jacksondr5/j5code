@@ -481,7 +481,7 @@ const make = Effect.gen(function* () {
           Effect.gen(function* () {
             for (const device of yield* liveDevices(record.person.personId)) {
               // Jackson, 2026-11-23 (AC16): only a device holding more than its level ends here;
-              // one short of a newly added permission gains it at its next renewal.
+              // one short of a newly added permission gains it only with a new session.
               const target = devicePermissions(highest, device.ceiling);
               if (device.scopes.some((scope) => !target.includes(scope))) {
                 yield* revokeForRenewal(device.sessionId);

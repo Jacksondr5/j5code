@@ -351,7 +351,7 @@ it.layer(accessLayer)("Access", (it) => {
       ]);
       const settled = yield* device(guest.personId, [AuthOrchestrationReadScope]);
       // Jackson, 2026-11-23 (AC16): a device only short of a permission an advance added keeps
-      // its session and gains it at its next renewal.
+      // its session and gains it with its next new session (a change of level, or pairing again).
       const owner = yield* person("Owner before relay", [
         { scope: { kind: "server" }, level: "owner" },
       ]);
@@ -359,11 +359,21 @@ it.layer(accessLayer)("Access", (it) => {
         owner.personId,
         LEVEL_PERMISSIONS.owner.filter((scope) => scope !== "relay:configure"),
       );
+      // Short of one and holding one its level does not give: more than its level, so it ends.
+      const writer = yield* person("Mixed writer", [
+        { scope: { kind: "server" }, level: "collaborator" },
+      ]);
+      const [, ...shortOfOne] = LEVEL_PERMISSIONS.collaborator;
+      const ownerOnly = LEVEL_PERMISSIONS.owner.filter(
+        (scope) => !LEVEL_PERMISSIONS.collaborator.includes(scope),
+      );
+      const mixed = yield* device(writer.personId, [...shortOfOne, ownerOnly[0]!]);
 
-      assert.strictEqual(yield* access.renewOutdatedDevices, 1);
+      assert.strictEqual(yield* access.renewOutdatedDevices, 2);
       assert.isFalse(yield* isLive(browser.sessionId));
       assert.isTrue(yield* isLive(settled.sessionId));
       assert.isTrue(yield* isLive(short.sessionId));
+      assert.isFalse(yield* isLive(mixed.sessionId));
     }),
   );
 });

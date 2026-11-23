@@ -67,7 +67,8 @@ the guides that describe them don't apply:
 ### Updating to the release based on T3 Code 0.1.11
 
 - Owners gain one more permission. Their devices keep their sessions through the update and pick
-  it up the next time their session is renewed, so no device reconnects or pairs again for it.
+  it up with their next new session, when their level changes or they pair again, so no device
+  reconnects or pairs again for it. The permission belongs to T3 Connect, which J5 hides.
 
 ### Updating to the release based on T3 Code 0.1.7
 
