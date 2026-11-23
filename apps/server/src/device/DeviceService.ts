@@ -117,6 +117,23 @@ export interface DeviceAgentReadiness extends DeviceReadiness {
   readonly agentDevice: DeviceHost.AgentDeviceEndpoint | null;
 }
 
+// Parsed as the hub parses `adb devices`: every line but the header, blanks and `* daemon`
+// messages names a device by its first word, whatever separates it from the state.
+const adbSerials = (stdout: string) =>
+  stdout
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && line !== "List of devices attached" && !line.startsWith("*"))
+    .map((line) => line.split(/\s+/)[0]!);
+
+// Exits 0 when the emulator console on the given port accepts a connection, and
+// EMULATOR_CONSOLE_REFUSED only when it is refused; anything else is not an answer.
+const EMULATOR_CONSOLE_REFUSED = 3;
+const EMULATOR_CONSOLE_PROBE = `const socket = require("node:net").connect(Number(process.argv[1]), "127.0.0.1");
+socket.setTimeout(5000, () => process.exit(2));
+socket.on("connect", () => process.exit(0));
+socket.on("error", (error) => process.exit(error.code === "ECONNREFUSED" ? ${EMULATOR_CONSOLE_REFUSED} : 2));`;
+
 const DeviceHostName = Schema.Struct({ id: DeviceHostId, label: Schema.optional(Schema.String) });
 const hostName = (host: typeof DeviceHostName.Type) => host.label ?? `host ${host.id}`;
 
@@ -846,12 +863,45 @@ export const makeWithHosts = Effect.fn("DeviceService.makeWithHosts")(function* 
       ),
     );
 
+  // The hub's Android shutdown fails when its emulator has already exited, as after a first
+  // attempt that outlasted the wait: adb has no serial left to kill. Exited means adb no longer
+  // lists the serial and nothing answers on its console port, since adb alone can miss a running
+  // emulator while its server restarts.
+  const androidEmulatorExited = Effect.fn("DeviceService.androidEmulatorExited")(function* (
+    ready: DeviceReadiness,
+    serial: DeviceId,
+  ) {
+    const port = /^emulator-(\d+)$/.exec(serial)?.[1];
+    if (port === undefined) return false;
+    const adb = yield* ready.run("adb", ["devices"]);
+    if (adb.code !== 0 || adbSerials(adb.stdout).includes(serial)) return false;
+    const console = yield* ready.run(ready.nodePath, ["-e", EMULATOR_CONSOLE_PROBE, port], {
+      timeoutMs: 10_000,
+    });
+    return console.code === EMULATOR_CONSOLE_REFUSED;
+  });
+
   const shutdownDevice = Effect.fn("DeviceService.shutdownDevice")(function* (
     ready: DeviceReadiness,
     deviceId: DeviceId,
     platform: DevicePlatform,
   ) {
-    yield* ready.devices.shutdown({ id: deviceId, platform });
+    yield* ready.devices
+      .shutdown({ id: deviceId, platform })
+      .pipe(
+        Effect.catch((cause) =>
+          (platform === "android"
+            ? androidEmulatorExited(ready, deviceId)
+            : Effect.succeed(false)
+          ).pipe(
+            Effect.flatMap((exited) =>
+              exited
+                ? Effect.logInfo("Android emulator was already shut down", { deviceId })
+                : Effect.fail(cause),
+            ),
+          ),
+        ),
+      );
     yield* publish((state) => ({
       ...state,
       devices: state.devices.map((device) =>

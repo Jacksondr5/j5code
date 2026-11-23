@@ -57,15 +57,6 @@ const errorHead = (error: string) => {
     .join(" ");
 };
 
-// Parsed as the hub parses `adb devices`: every line but the header, blanks and `* daemon`
-// messages names a device by its first word, whatever separates it from the state.
-const adbSerials = (stdout: string) =>
-  stdout
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter((line) => line && line !== "List of devices attached" && !line.startsWith("*"))
-    .map((line) => line.split(/\s+/)[0]!);
-
 const vendorPrefix = (platform: DevicePlatform) =>
   platform === "ios" ? "/vendor/serve-sim" : "/vendor/serve-emu";
 
@@ -246,22 +237,7 @@ export const makeDeviceHubOperations = (options: {
               ),
             ),
           )
-        : postShutdown("/api/devices/shutdown", { platform: device.platform, id: device.id }).pipe(
-            // The hub's shutdown succeeds only once the serial leaves adb. A retry after a
-            // shutdown that finished late has no serial left to kill and fails, so a serial adb
-            // no longer lists in any state counts as shut down, as the hub itself decides.
-            Effect.catch((cause) =>
-              run("adb", ["devices"]).pipe(
-                Effect.flatMap((adb) =>
-                  adb.code === 0 && !adbSerials(adb.stdout).includes(device.id)
-                    ? Effect.logInfo("Android emulator was already shut down", {
-                        deviceId: device.id,
-                      })
-                    : Effect.fail(cause),
-                ),
-              ),
-            ),
-          );
+        : postShutdown("/api/devices/shutdown", { platform: device.platform, id: device.id });
     },
   );
 

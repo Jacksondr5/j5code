@@ -1172,11 +1172,13 @@ describe("Android close with shutdown", () => {
   const avd = "test-pixel";
 
   // A hub whose shutdown of `serial` answers with `shutdownReply`, and a host whose
-  // `adb devices` answers with `adbReply`; both are read when the request arrives.
+  // `adb devices` answers with `adbReply` and whose emulator console answers `console`
+  // (the probe's exit code: 0 accepted, 3 refused, other no answer); each is read when asked.
   const makeAndroidService = (fixture: {
     shutdownReply: () => Response;
     adbReply: () => { code: number; stdout: string; stderr: string };
     booted: () => boolean;
+    console?: () => number;
     shutdownDelay?: Duration.Input;
   }) =>
     Effect.gen(function* () {
@@ -1225,6 +1227,9 @@ describe("Android close with shutdown", () => {
           commands.push([command, ...args].join(" "));
           if (command === "emulator") return { code: 0, stdout: `${avd}\n`, stderr: "" };
           if (command === "adb") return fixture.adbReply();
+          if (command === process.execPath && args.at(-1) === "5554") {
+            return { code: fixture.console?.() ?? 3, stdout: "", stderr: "" };
+          }
           // The ffmpeg encoder probe that opening an emulator runs.
           return { code: 0, stdout: " V....D libx264", stderr: "" };
         });
@@ -1292,6 +1297,7 @@ describe("Android close with shutdown", () => {
           },
           adbReply: () => adb,
           booted: () => booted,
+          console: () => (booted ? 0 : 3),
         });
         const threadId = ThreadId.make("android-close-retry");
         yield* service.open({ threadId, deviceId: serial, platform: "android" });
@@ -1322,19 +1328,32 @@ describe("Android close with shutdown", () => {
   );
 
   it.effect.each([
-    { case: "adb still lists the serial", adb: () => adbListing(`${serial}\tdevice`) },
-    { case: "adb lists the serial offline", adb: () => adbListing(`${serial}\toffline`) },
+    { case: "adb still lists the serial", adb: () => adbListing(`${serial}\tdevice`), console: 0 },
+    {
+      case: "adb lists the serial offline",
+      adb: () => adbListing(`${serial}\toffline`),
+      console: 0,
+    },
     {
       case: "adb separates the serial with spaces after a daemon message",
       adb: () => adbListing(`${serial}          device product:sdk_gphone64 transport_id:3`),
+      console: 0,
     },
-    { case: "adb fails", adb: () => ({ code: 1, stdout: "", stderr: "adb: no server" }) },
-  ])("a rejected shutdown keeps the session open when $case", ({ adb }) =>
+    {
+      case: "adb fails",
+      adb: () => ({ code: 1, stdout: "", stderr: "adb: no server" }),
+      console: 3,
+    },
+    // adb loses a running emulator while its server restarts.
+    { case: "adb has lost it but its console still answers", adb: () => adbListing(), console: 0 },
+    { case: "its console gives no answer", adb: () => adbListing(), console: 2 },
+  ])("a rejected shutdown keeps the session open when $case", ({ adb, console }) =>
     Effect.gen(function* () {
       const { service, commands } = yield* makeAndroidService({
         shutdownReply: hubRejects,
         adbReply: adb,
         booted: () => true,
+        console: () => console,
       });
       const threadId = ThreadId.make("android-close-rejected");
       yield* service.open({ threadId, deviceId: serial, platform: "android" });
@@ -1344,6 +1363,23 @@ describe("Android close with shutdown", () => {
       expect(Exit.isFailure(exit)).toBe(true);
       expect(commands).toContain("adb devices");
       expect((yield* service.state).sessions).toHaveLength(1);
+    }).pipe(Effect.provide(ServerSettings.layerTest({ enableDeviceSupport: true })), Effect.scoped),
+  );
+
+  it.effect("a rejected shutdown of an AVD by name is not read as an exited emulator", () =>
+    Effect.gen(function* () {
+      const { service, commands } = yield* makeAndroidService({
+        shutdownReply: hubRejects,
+        adbReply: () => adbListing(),
+        booted: () => false,
+      });
+      yield* service.list;
+      // adb lists serials, so an AVD name is never listed, running or not.
+      const exit = yield* Effect.exit(
+        service.shutdown({ deviceId: DeviceId.make(avd), platform: "android" }),
+      );
+      expect(Exit.isFailure(exit)).toBe(true);
+      expect(commands).not.toContain("adb devices");
     }).pipe(Effect.provide(ServerSettings.layerTest({ enableDeviceSupport: true })), Effect.scoped),
   );
 
