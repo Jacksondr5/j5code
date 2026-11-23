@@ -4,6 +4,7 @@ import { T3_SITE_URL, UPSTREAM_REPOSITORY_URL } from "../../lib/site";
 import IssuesVignette from "./IssuesVignette.astro";
 import LanguageVignette from "./LanguageVignette.astro";
 import MaintenanceVignette from "./MaintenanceVignette.astro";
+import MobileShots from "./MobileShots.astro";
 import PullRequestVignette from "./PullRequestVignette.astro";
 import ServersVignette from "./ServersVignette.astro";
 import SessionVignette from "./SessionVignette.astro";
@@ -61,21 +62,6 @@ const pullRequestItems: ReadonlyArray<Item> = [
   {
     title: "Re-run checks",
     body: "On GitHub, it re-runs the failing checks, or one check by name.",
-  },
-];
-
-const mobileItems: ReadonlyArray<Item> = [
-  {
-    title: "Select and cite",
-    body: "Long-press an agent's reply, adjust the selection and choose Cite. The quote joins your draft as a chip, and you can add a comment to it.",
-  },
-  {
-    title: "A layout for every size",
-    body: "On tablets and unfolded foldables, the sidebar, the thread and the inspector show as columns when there is room for them. When there isn't, the sidebar steps aside or floats over the page, and the inspector opens as a sheet.",
-  },
-  {
-    title: "Issues on the phone",
-    body: "Issues have a tab in the mobile app, in the slot they share with Pull requests.",
   },
 ];
 
@@ -234,9 +220,7 @@ const j5Items: ReadonlyArray<Item> = [
       <h2 class="display">On the phone and tablet</h2>
       <p class="feature__intro">The mobile app updates separately from the desktop app and the server.</p>
     </header>
-    <ul class="items items--3">
-      {mobileItems.map((item) => <li><h3>{item.title}</h3><p>{item.body}</p></li>)}
-    </ul>
+    <MobileShots />
   </div>
 </section>
 
