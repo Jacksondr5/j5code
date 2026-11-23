@@ -282,7 +282,9 @@ remote branch, such as `origin/j5/main`: a local branch can be behind. Open
 each server in its own tab. Capture at 1280x800 as test-t3-app describes.
 Every pair shows the full screen, plus a crop when the change is small:
 reviewers judge each "after" screen as a whole, not only the part that
-changed. Then upload them as described in "Upload", below.
+changed. Capture every state the change touches: empty, loading, error, the
+populated case, and any state it adds. If a state is hard to reach, say so
+rather than skip it. Then upload them as described in "Upload", below.
 
 Run `rebuild` with no flag when you are done, which removes the base
 checkout. It refuses if you edited a file there, so do not.
@@ -300,14 +302,63 @@ name above the player. Then upload it as described in "Upload".
 ## Upload
 
 Screenshots and videos go up as GitHub attachments, through the PR's comment
-box in the Browser panel, without posting the comment. The
-[`pr-evidence` skill](https://github.com/Jacksondr5/jstack/tree/main/skills/pr-evidence)
-has the steps. Never push them to a branch: a branch is public, browsable and
-copied into every fork.
+box in the Browser panel, without posting the comment. GitHub hosts them, and
+plays video only from its own attachments. Never push them to a branch: a
+branch is public, browsable and copied into every fork. Never commit them to
+the PR's branch either.
 
-Put each URL in the report with its caption. The URLs refuse signed-out
-requests until a posted PR or comment contains them, so whoever opens the PR
-checks them (see "Ask for a test").
+Check each file is what it claims to be first: `file shot.png` must say "PNG
+image data" and `file clip.mp4` "ISO Media". Tools sometimes write JPEG or
+WebP bytes under a `.png` name, which GitHub won't render.
+
+The upload uses a Browser panel profile kept for this job. It is an ordinary
+profile in the developer's own J5 Code instance, which they signed in to
+GitHub themselves, often named "GitHub Video Upload". `preview_status` lists
+the profiles. It holds the developer's GitHub session, so open nothing but
+the PR under it. If there is no such profile, or GitHub shows it signed out,
+stop and ask the developer to sign in to it. Never sign in yourself.
+
+1. Open the PR in a new tab with `preview_open`, passing that profile's id as
+   `profileId`. If there is no PR yet, open its tracking issue.
+2. Click the comment box ("Leave a comment"), then its "Paste, drop, or click
+   to add files" button. A file picker opens.
+3. Answer it with `preview_act`, `action: "upload"`, and every file's
+   absolute path in `paths`. Several files go in one call.
+4. Wait until the box holds one `https://github.com/user-attachments/assets/…`
+   URL per file. `preview_wait_for` cannot see text in that box, so read it
+   with `preview_evaluate` on `textarea[placeholder="Leave a comment"]`.
+   GitHub writes an `<img>` tag for each image and a bare URL for each video.
+   If the count doesn't match the files, post nothing: retry once, then
+   report it.
+5. Empty the box (select all, delete), check it is empty, and close the tab.
+   Never submit the comment.
+
+An upload stays private (a signed-out GET returns 404) until a posted PR or
+comment embeds it, and only GitHub Support can delete it afterwards. Upload
+only what goes in the PR.
+
+## Present
+
+Put each URL in the report with its caption, and in the PR description:
+
+- Before/after pairs, each with a one-line caption saying which state it
+  shows. A video URL goes on a line of its own, which GitHub renders as a
+  player.
+- Alt text names the caption and the side:
+  `alt="Viewer search with no matches, after"`, not `alt="After"` or the file
+  name GitHub filled in. Viewers that show images on their own, like J5's,
+  show only the alt text.
+- Keep captions to what the image shows. Commit SHAs, temp paths and capture
+  logs bury the images.
+- When a later push changes the UI, replace the images in the description
+  with new uploads under new names. Don't post a new evidence comment on
+  every push.
+- If you couldn't capture something, say so. Never imply a UI was verified
+  when it wasn't.
+
+Once the description is saved, whoever opens the PR checks each link loads
+for a signed-out viewer (see "Ask for a test"). It can take a few seconds to
+turn from 404 to 200.
 
 ## A server for the developer
 
