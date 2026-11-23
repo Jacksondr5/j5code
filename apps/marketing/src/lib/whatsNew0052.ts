@@ -145,8 +145,9 @@ const wireLinks: Wire = (piece, signal) => {
       renew.disabled = false;
       renew.textContent = "Renew";
       for (const trigger of triggers) trigger.disabled = false;
-      // Renew leaves once it has worked, so focus moves to the next thing in the row.
-      if (document.activeElement === renew) triggers[0]?.focus();
+      // Renew leaves once it has worked. A browser may already have dropped focus from it while
+      // it was off, so focus moves to the next thing in the row unless the reader has moved on.
+      if (focusLeavesWith(renew)) triggers[0]?.focus({ preventScroll: true });
       paint();
     });
   });
