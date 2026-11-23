@@ -64,7 +64,13 @@
   margin-top: 56px;
 }
 
+/* An item's title and text share their rows with its neighbours', so a title that wraps moves
+   every text in that row down with it and none sits lower than the rest. */
 .wn .items li {
+  display: grid;
+  grid-template-rows: subgrid;
+  grid-row: span 2;
+  row-gap: 6px;
   padding-top: 16px;
   border-top: 1px solid var(--wn-line);
 }
@@ -77,15 +83,7 @@
   line-height: 1.25;
 }
 
-/* Five narrow columns: a title that wraps must not push its text below its neighbours'. */
-@media (min-width: 1001px) {
-  .wn .items--5 h3 {
-    min-height: 2.5em;
-  }
-}
-
 .wn .items p {
-  margin-top: 6px;
   font-size: 15px;
   line-height: 1.6;
   color: var(--wn-muted);
