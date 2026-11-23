@@ -473,20 +473,19 @@ const narrowedView = (
     ).pipe(Effect.map((tasks) => ({ tasks: tasks.flat() })));
   return {
     scheduledTasks: (list) => list.pipe(Effect.flatMap(reachableTasks)),
-    // The last list is read again each time what the person reaches changes, as the sidebar is.
+    // Begins again each time what the person reaches changes, as the sidebar does. Running the
+    // feed again reads the list afresh, so a task's binding is never older than the reach.
     scheduledTasksStream: (stream) =>
       Stream.unwrap(
         Effect.gen(function* () {
           const reachChanges = yield* access.subscribeChanges;
-          let latest: ScheduledTaskListResult | undefined;
-          const refilters = Stream.fromSubscription(reachChanges).pipe(
-            Stream.filter((changed) => changed === personId),
-            Stream.map(() => latest),
-            Stream.filter((result): result is ScheduledTaskListResult => result !== undefined),
-          );
-          return stream.pipe(
-            Stream.tap((result) => Effect.sync(() => (latest = result))),
-            Stream.merge(refilters, { haltStrategy: "left" }),
+          return Stream.concat(
+            Stream.make(undefined),
+            Stream.fromSubscription(reachChanges).pipe(
+              Stream.filter((changed) => changed === personId),
+            ),
+          ).pipe(
+            Stream.switchMap(() => stream),
             Stream.mapEffect(reachableTasks),
           );
         }),

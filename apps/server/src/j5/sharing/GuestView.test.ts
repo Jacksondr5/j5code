@@ -29,6 +29,7 @@ import * as Exit from "effect/Exit";
 import * as Layer from "effect/Layer";
 import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
+import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 
@@ -1365,7 +1366,9 @@ live(
     };
     const view = yield* GuestView.connectionView(GUEST);
     assert.deepStrictEqual(withWebhook(yield* view.scheduledTasks(Effect.succeed(list))), expected);
-    const streamed = yield* Stream.runCollect(view.scheduledTasksStream(Stream.make(list)));
+    const streamed = yield* Stream.runCollect(
+      view.scheduledTasksStream(Stream.make(list)).pipe(Stream.take(1)),
+    );
     assert.deepStrictEqual(streamed.map(withWebhook), [expected]);
   }).pipe(Effect.scoped),
 );
@@ -1379,13 +1382,16 @@ live(
     yield* write("thread.created", { id: bound, projectId: shared });
     yield* write("thread.created", { id: "thread:granted", projectId: shared });
     const personId = yield* guest({ kind: "thread", threadId: ThreadId.make("thread:granted") });
-    const list = {
-      tasks: [{ id: "task:bound", projectId: shared, threadId: bound }],
-    } as unknown as ScheduledTaskListResult;
+    const boundTo = (threadId: string) =>
+      ({
+        tasks: [{ id: "task:bound", projectId: shared, threadId: ThreadId.make(threadId) }],
+      }) as unknown as ScheduledTaskListResult;
+    const stored = yield* Ref.make(boundTo(bound));
     const view = yield* GuestView.connectionView(GUEST);
     const listed = yield* Queue.unbounded<ReadonlyArray<string>>();
-    // The task list emits once and stays open, as the live feed does between task changes.
-    yield* view.scheduledTasksStream(Stream.concat(Stream.make(list), Stream.never)).pipe(
+    // The feed reads the stored list once and stays open, as the live feed does between changes.
+    const feed = Stream.concat(Stream.fromEffect(Ref.get(stored)), Stream.never);
+    yield* view.scheduledTasksStream(feed).pipe(
       Stream.runForEach((result) =>
         Queue.offer(
           listed,
@@ -1400,6 +1406,13 @@ live(
     yield* access.setLevel({ personId, scope, level: "viewer" });
     assert.deepStrictEqual(yield* Queue.take(listed), ["task:bound"]);
 
+    // The task moves to a thread the person doesn't reach before its own update is delivered: a
+    // reach change in between reads the binding afresh rather than the one last sent.
+    yield* Ref.set(stored, boundTo("thread:hidden"));
+    yield* access.announce(personId);
+    assert.deepStrictEqual(yield* Queue.take(listed), []);
+
+    yield* Ref.set(stored, boundTo(bound));
     yield* access.removeLevel({ personId, scope });
     assert.deepStrictEqual(yield* Queue.take(listed), []);
   }).pipe(Effect.scoped),
