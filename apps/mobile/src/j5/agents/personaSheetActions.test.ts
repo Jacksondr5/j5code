@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { personaRowMarker, personaSheetActions } from "./personaSheet";
+import { personaRowMarker, personaSheetActions } from "./personaSheetActions";
 
 describe("personaSheetActions", () => {
   it("offers only Restore for a removed persona, even an editable one", () => {
