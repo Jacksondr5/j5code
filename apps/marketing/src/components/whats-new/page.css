@@ -164,6 +164,23 @@
   background: var(--wn-surface);
 }
 
+/* One line of small text on chart paper gets a slip of the same plain paper, fitted to it. */
+.wn .slip,
+.wn .feature:not(.band--deep) .origin {
+  width: fit-content;
+  padding: 3px 9px;
+  margin-left: -9px;
+  border-radius: 7px;
+  background: var(--wn-surface);
+}
+
+/* Inside a sheet the paper is already plain. */
+.wn .sheet .slip {
+  padding: 0;
+  margin-left: 0;
+  background: none;
+}
+
 .wn .items--2 {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   margin-top: 0;

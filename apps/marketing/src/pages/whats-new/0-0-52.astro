@@ -248,7 +248,7 @@ const T3_PENNANT = "M0.6 0.6h12L8.7 5l3.9 4.4H0.6z";
           <p class="origin"><svg class="pennant pennant--j5" viewBox="0 0 14 10" aria-hidden="true"><path d={J5_PENNANT}></path></svg>J5 Code's own</p>
           <h2 class="display">J5 Code on Windows, in beta</h2>
           <p class="feature__intro">Windows x64 now gets every release: the desktop app and the j5 server.</p>
-          <p class="more"><a href="/download">Download J5 Code</a></p>
+          <p class="more slip"><a href="/download">Download J5 Code</a></p>
         </div>
         <ul class="items items--2">
           {windows.map((item) => <li><h3>{item.title}</h3><p>{item.body}</p></li>)}
@@ -479,7 +479,6 @@ const T3_PENNANT = "M0.6 0.6h12L8.7 5l3.9 4.4H0.6z";
   }
 
   .manifest { padding: 56px 0 8px; }
-  .manifest__sheet { padding-bottom: 12px; }
 
   .manifest__head {
     display: flex;
@@ -571,9 +570,10 @@ const T3_PENNANT = "M0.6 0.6h12L8.7 5l3.9 4.4H0.6z";
     .hero { padding-top: 48px; }
     .hero__boat--1 { right: 50%; }
     .hero__boat--2 { right: 28%; }
-    .split { grid-template-columns: 1fr; gap: 32px; }
+    /* minmax(0, …), so a line that should shorten can't hold its column wider than the page. */
+    .split { grid-template-columns: minmax(0, 1fr); gap: 32px; }
     .split--text .items { margin-top: 0; }
-    .pair { grid-template-columns: 1fr; gap: 48px; }
+    .pair { grid-template-columns: minmax(0, 1fr); gap: 48px; }
   }
 
   @media (max-width: 640px) {

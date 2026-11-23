@@ -453,10 +453,16 @@ const wireProposal: Wire = (piece, signal) => {
     approve.disabled = busy;
   };
 
+  // The window keeps the height it has reached, so nothing below it moves when the card folds,
+  // loses a member or leaves. "Start over" brings back a window that never held one.
+  const hold = () => {
+    piece.style.minHeight = `${piece.offsetHeight}px`;
+  };
   const fold = one(piece, "[data-crew-fold]");
   fold?.addEventListener("click", () => {
     const content = one(piece, "[data-crew-content]");
     if (!content) return;
+    hold();
     content.hidden = !content.hidden;
     fold.setAttribute("aria-expanded", String(!content.hidden));
     fold.setAttribute(
@@ -644,6 +650,7 @@ const wireProposal: Wire = (piece, signal) => {
     const edit = target.closest<HTMLElement>("[data-crew-edit]");
     if (edit) return openDialog(row, edit);
     if (!target.closest("[data-crew-remove]")) return;
+    hold();
     row.remove();
     paint();
     add.focus();
@@ -651,6 +658,7 @@ const wireProposal: Wire = (piece, signal) => {
 
   const decide = (decision: "approve" | "decline", ms: number) => {
     busy = true;
+    hold();
     if (decision === "approve") approve.textContent = "Working…";
     paint();
     later(signal, ms, () => {
