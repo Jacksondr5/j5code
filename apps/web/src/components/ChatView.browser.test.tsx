@@ -454,7 +454,9 @@ it("opens the thread actions menu for an older settled thread the shell leaves o
     // AppRoot brings its own router.
     router: false,
   });
-  await expect.element(page.getByText("older-settled: question 0")).toBeVisible();
+  // J5 (case 80): this fake never answers the message-author read, so J5 holds the server's user
+  // message back; the agent's answer shows the thread has loaded.
+  await expect.element(page.getByText("Answer 0 for older-settled.")).toBeVisible();
 
   await page.getByRole("button", { name: `Thread actions for ${thread.title}` }).click();
   // Without a bound the poll runs to the test deadline and reports a bare timeout.

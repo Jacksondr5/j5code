@@ -8,7 +8,7 @@ const fixture = vi.hoisted(() => ({
 }));
 vi.mock(import("../../state/entities"), async (importOriginal) => ({
   ...(await importOriginal()),
-  useThreadProjection: (() => ({ projection: fixture.projection })) as never,
+  useQuietThreadProjection: (() => ({ projection: fixture.projection })) as never,
 }));
 vi.mock(import("../../j5/a2a/ParticipantIdentitiesClient"), async (importOriginal) => ({
   ...(await importOriginal()),

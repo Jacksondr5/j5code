@@ -22,6 +22,7 @@ type QueuedMessage = Omit<J5UserMessageInput, "scheduledTaskId"> & {
   readonly id: string;
   readonly scheduledTaskId?: ScheduledTaskId | undefined;
   readonly senderThreadId?: string | undefined;
+  readonly linkedSender?: { readonly title: string } | undefined;
 };
 
 // A queued message spells an absent task as `undefined`, which the classifier's input leaves out.
@@ -102,7 +103,8 @@ export function J5QueuedSenderLine({ sender }: { readonly sender: J5QueuedSender
         authorName: j5MessageAuthorName({
           presentation: j5,
           participantLabels: sender.identities.labels,
-          senderThreadTitle: senderThread?.title,
+          // A linked environment's sender keeps the title it sent, as upstream's row does.
+          senderThreadTitle: senderThread?.title || sender.message.linkedSender?.title,
         }),
         senderThreadRef: senderThread === null ? null : senderThreadRef,
       }}

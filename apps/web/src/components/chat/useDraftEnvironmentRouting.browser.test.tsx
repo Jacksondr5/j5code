@@ -39,7 +39,9 @@ vi.mock("../../hooks/useLoadBalancedEnvironment", () => ({
     refreshSelection: resources.refreshSelection,
   }),
 }));
-vi.mock("../../state/entities", () => ({
+// J5: chatViewSend reaches the J5 sharing modules, which import other entity hooks.
+vi.mock(import("../../state/entities"), async (importOriginal) => ({
+  ...(await importOriginal()),
   useProjects: () => resources.projects,
   readProject: (ref: { environmentId: EnvironmentId; projectId: ProjectId }) =>
     resources.projects.find(

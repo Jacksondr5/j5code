@@ -322,7 +322,8 @@ it("shows who sent a queued message and folds automation and agent prompts", asy
   await page.getByRole("button", { name: "Open thread" }).nth(0).click({ force: true });
   expect(onOpenThread).toHaveBeenCalledExactlyOnceWith("thread:lead", "environment:test");
   // A sender in a connected linked environment keeps the title it sent and opens there.
-  await expect.element(page.getByRole("button", { name: /Title when sent/ })).toBeVisible();
+  // J5 (D38): named above the row; its thread is not loaded here, so the name is not a link.
+  await expect.element(page.getByText("Title when sent", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Open thread" }).nth(1).click({ force: true });
   expect(onOpenThread).toHaveBeenLastCalledWith("thread:linked-lead", "environment:linked");
 
