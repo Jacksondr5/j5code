@@ -188,8 +188,8 @@ jobs:
   test_server:
     name: Test Server ${{ matrix.shard }}
     runs-on: ubuntu-24.04
-    # The Chromium install below can take over eleven minutes on its own.
-    timeout-minutes: 25
+    # The Chromium install below can take over eleven minutes and the shard's tests about fourteen.
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
