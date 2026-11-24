@@ -1,11 +1,20 @@
+import { runtimeModeRank } from "../../mcp/delegatedTaskModes.ts";
+import { clientModeCeiling, type McpClientCaller } from "../../mcp/McpInvocationContext.ts";
+import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
+import { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
+import { pickDelegatedPersona } from "./agentPersonaPick.ts";
+import { CrewMemberModels } from "./crewMemberModels.ts";
 import {
+  type AgentPersonaId,
   isAgentPersonaAuthorityPolicy,
   ProviderDriverKind,
   type CommandId,
   type ModelSelection,
+  type ProjectId,
   type OrchestrationV2AgentPersonaAssignment,
   type OrchestrationV2AgentPersonaCommandAssignment,
   type OrchestrationV2AgentPersonaRequest,
+  type OrchestrationV2DelegatedPersonaPick,
   type OrchestrationV2AppThread,
   type OrchestrationV2Command,
   type OrchestrationV2DomainEvent,
@@ -168,11 +177,19 @@ export const resolveAgentPersonaLaunch = Effect.fn("j5.resolveAgentPersonaLaunch
     readonly reuseExistingThread?: boolean | undefined;
     readonly agentPersona?: OrchestrationV2AgentPersonaRequest | undefined;
     readonly modelSelection: ModelSelection;
+    readonly projectId: ProjectId;
+    readonly delegatedFrom?: unknown;
   },
   options: {
     readonly replay: boolean;
     readonly providers: Effect.Effect<ReadonlyArray<ServerProvider>>;
     readonly library: Library;
+    /** What a persona delegated from a linked machine is picked with. */
+    readonly delegatedPick?: {
+      readonly providerRegistry: ProviderRegistry["Service"];
+      readonly threads: ThreadManagementService["Service"];
+      readonly memberModels: CrewMemberModels["Service"];
+    };
   },
 ) {
   const requested: AgentPersonaLaunch = { modelSelection: input.modelSelection };
@@ -183,6 +200,24 @@ export const resolveAgentPersonaLaunch = Effect.fn("j5.resolveAgentPersonaLaunch
     });
   }
   if (options.replay) return requested;
+  // Only a launch a linked machine delegated carries its pick's limits.
+  const delegated = input.delegatedFrom === undefined ? undefined : input.agentPersona.delegated;
+  if (input.delegatedFrom !== undefined && delegated === undefined)
+    return yield* new AgentPersonaLibraryError({
+      message: `Persona ${input.agentPersona.personaId} came from another machine without who picked it, so its limits are unknown. Update both machines to the same J5 version.`,
+    });
+  if (delegated !== undefined) {
+    if (options.delegatedPick === undefined)
+      return yield* new AgentPersonaLibraryError({
+        message: "A persona delegated from another machine cannot be picked on this launch path.",
+      });
+    return yield* resolveDelegatedPersonaLaunch(
+      input.agentPersona.personaId,
+      delegated,
+      input.projectId,
+      options.delegatedPick,
+    );
+  }
   const prepared = yield* prepareAgentPersonaLaunch(
     input.agentPersona,
     yield* options.providers,
@@ -194,6 +229,75 @@ export const resolveAgentPersonaLaunch = Effect.fn("j5.resolveAgentPersonaLaunch
     agentPersonaAssignment: { ...prepared, pickSource: { kind: "person" } },
   };
   return resolved;
+});
+
+/**
+ * A persona a link session delegates, with the level set here: the link's, narrowed by any
+ * ceiling this machine holds it to and by the modes the delegating thread sent.
+ */
+export const j5DelegatedAgentPersona = (
+  request: OrchestrationV2AgentPersonaRequest,
+  client: McpClientCaller,
+): OrchestrationV2AgentPersonaRequest =>
+  request.delegated === undefined
+    ? request
+    : {
+        ...request,
+        delegated: { ...request.delegated, linkLevel: clientModeCeiling(client).runtimeMode },
+      };
+
+const blockedThere =
+  "It is blocked on that machine: have it unblocked there, or run the work on your own machine.";
+
+/**
+ * A persona a linked J5 machine delegated here, resolved from this machine's library against its
+ * models. An agent's pick is held to the narrower of the caller's access and the link's level, with
+ * the caller's sandbox; a person's pick runs as saved here, but never above the link's level.
+ */
+const resolveDelegatedPersonaLaunch = Effect.fn("j5.resolveDelegatedPersonaLaunch")(function* (
+  personaId: AgentPersonaId,
+  delegated: OrchestrationV2DelegatedPersonaPick,
+  projectId: ProjectId,
+  services: {
+    readonly providerRegistry: ProviderRegistry["Service"];
+    readonly threads: ThreadManagementService["Service"];
+    readonly memberModels: CrewMemberModels["Service"];
+  },
+) {
+  const linkLevel = delegated.linkLevel ?? "approval-required";
+  const callerMode =
+    runtimeModeRank(delegated.callerAccess.runtimeMode) < runtimeModeRank(linkLevel)
+      ? delegated.callerAccess.runtimeMode
+      : linkLevel;
+  const picked = yield* pickDelegatedPersona({
+    personaId,
+    source: delegated.pickSource,
+    caller: { access: { runtimeMode: callerMode, sandbox: delegated.callerAccess.sandbox } },
+    projectId,
+    reviewAuthors: {
+      threads: [],
+      models: delegated.authorModels,
+      partlyUnknown: delegated.authorsPartlyUnknown,
+    },
+  }).pipe(
+    Effect.provideService(ProviderRegistry, services.providerRegistry),
+    Effect.provideService(ThreadManagementService, services.threads),
+    Effect.provideService(CrewMemberModels, services.memberModels),
+    Effect.mapError(
+      (error) => new AgentPersonaLibraryError({ message: `${error.message} ${blockedThere}` }),
+    ),
+  );
+  if (
+    delegated.pickSource === "person" &&
+    runtimeModeRank(picked.runtimeMode) > runtimeModeRank(linkLevel)
+  )
+    return yield* new AgentPersonaLibraryError({
+      message: `Persona ${personaId} runs in ${picked.runtimeMode} here, broader than the link from your machine allows (${linkLevel}). Choose a persona within that level, or link the machines again with broader access.`,
+    });
+  return {
+    modelSelection: picked.assignment.resolvedModelSelection,
+    agentPersonaAssignment: picked.assignment,
+  } satisfies AgentPersonaLaunch;
 });
 
 /** After the durable create, the stored event's selection wins over the requested one. */

@@ -10,6 +10,7 @@ import {
   ThreadId,
   type ModelSelection,
   type OrchestrationV2Command,
+  type OrchestrationV2DelegatedPersonaPick,
   type ServerProvider,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -890,4 +891,103 @@ it.effect("holds a task delegated from a linked environment to the project's mem
     );
     assert.isNotNull(yield* threads.getThreadShell(ThreadId.make("thread:local")));
   }).pipe(Effect.provide(harness.layer));
+});
+
+/** A persona launch a linked J5 machine delegated here, as the box's handler passes it on. */
+const delegatedPersonaLaunch = (
+  id: string,
+  delegated?: Omit<OrchestrationV2DelegatedPersonaPick, "authorModels" | "authorsPartlyUnknown">,
+) => ({
+  ...launchInput({ command: `command:${id}`, thread: `thread:${id}` }),
+  delegatedFrom: {
+    environmentId: EnvironmentId.make("environment:linked"),
+    threadId: ThreadId.make("thread:elsewhere"),
+    title: "Elsewhere",
+  },
+  agentPersona: {
+    personaId: "builder",
+    ...(delegated === undefined
+      ? {}
+      : { delegated: { ...delegated, authorModels: [], authorsPartlyUnknown: false } }),
+  },
+});
+
+// FORK.md case 131: builder runs with Repository write on Codex, so a Supervised cap refuses it.
+it.effect(
+  "holds an agent's pick of a delegated persona to its caller's access and the link",
+  () => {
+    const harness = switchHarness();
+    return Effect.gen(function* () {
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      const refused = (id: string, delegated?: Parameters<typeof delegatedPersonaLaunch>[1]) =>
+        launches.launch(delegatedPersonaLaunch(id, delegated)).pipe(
+          Effect.flip,
+          Effect.tap(() =>
+            threads
+              .getThreadShell(ThreadId.make(`thread:${id}`))
+              .pipe(Effect.map((shell) => assert.isNull(shell))),
+          ),
+        );
+
+      const unsaid = yield* refused("delegated:unsaid");
+      assert.include(unsaid.message, "without who picked it");
+      const overLink = yield* refused("delegated:over-link", {
+        pickSource: "agent",
+        callerAccess: { runtimeMode: "full-access" },
+        linkLevel: "approval-required",
+      });
+      assert.include(overLink.message, "broader than the Supervised its caller runs with");
+      assert.include(overLink.message, "blocked on that machine");
+      const overCaller = yield* refused("delegated:over-caller", {
+        pickSource: "agent",
+        callerAccess: { runtimeMode: "approval-required" },
+        linkLevel: "full-access",
+      });
+      assert.include(overCaller.message, "broader than the Supervised its caller runs with");
+      assert.include(overCaller.message, "blocked on that machine");
+
+      const launched = yield* launches.launch(
+        delegatedPersonaLaunch("delegated:within", {
+          pickSource: "agent",
+          callerAccess: { runtimeMode: "full-access" },
+          linkLevel: "auto-accept-edits",
+        }),
+      );
+      assert.equal(launched.projection.thread.agentPersonaAssignment?.personaId, "builder");
+      assert.equal(launched.projection.thread.modelSelection.model, "gpt-5.6-sol");
+    }).pipe(Effect.provide(switchLayer(harness)), Effect.scoped);
+  },
+);
+
+it.effect("runs a person's pick of a delegated persona as saved, within the link", () => {
+  const harness = switchHarness();
+  return Effect.gen(function* () {
+    const launches = yield* ThreadLaunch.ThreadLaunchService;
+    const threads = yield* ThreadManagement.ThreadManagementService;
+    const overLink = yield* launches
+      .launch(
+        delegatedPersonaLaunch("delegated:person-over-link", {
+          pickSource: "person",
+          callerAccess: { runtimeMode: "approval-required" },
+          linkLevel: "approval-required",
+        }),
+      )
+      .pipe(Effect.flip);
+    assert.include(overLink.message, "broader than the link");
+    assert.isNull(
+      yield* threads.getThreadShell(ThreadId.make("thread:delegated:person-over-link")),
+    );
+
+    // The caller's own access does not hold a person's pick.
+    const launched = yield* launches.launch(
+      delegatedPersonaLaunch("delegated:person-within", {
+        pickSource: "person",
+        callerAccess: { runtimeMode: "approval-required" },
+        linkLevel: "auto-accept-edits",
+      }),
+    );
+    assert.equal(launched.projection.thread.agentPersonaAssignment?.personaId, "builder");
+    assert.equal(launched.projection.thread.modelSelection.model, "gpt-5.6-sol");
+  }).pipe(Effect.provide(switchLayer(harness)), Effect.scoped);
 });

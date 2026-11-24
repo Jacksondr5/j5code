@@ -1,5 +1,6 @@
 import {
   AgentPersonaId,
+  type EnvironmentId,
   ThreadId,
   OrchestratorMcpDelegateTaskInput,
   OrchestratorMcpDelegateTaskResult,
@@ -15,7 +16,12 @@ import { OrchestratorMcpService } from "../../mcp/OrchestratorMcpService.ts";
 import { UnreachableCalls } from "../a2a/line/UnreachableCallsService.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import * as ProviderRegistry from "../../provider/ProviderRegistry.ts";
+import { requireThreadScope } from "../../mcp/McpInvocationContext.ts";
+import * as PeerForwarding from "../../peer/PeerForwarding.ts";
+import { PeerRegistryService } from "../a2a/PeerRegistryService.ts";
 import { invokeAgent } from "./agentInvocation.ts";
+import { resolveCallerAccess, turnPickSource } from "./agentPersonaPick.ts";
+import { resolveReviewAuthors } from "./agentPersonaReviewIndependence.ts";
 import {
   AgentPersonaEscalations,
   AllowOnceInput,
@@ -40,7 +46,7 @@ export const J5DelegateTaskInput = Schema.Struct({
   persona: Schema.optional(
     AgentPersonaId.annotate({
       description:
-        "Persona ID to run the child as, taken from an @persona:ID mention or the Settings → Agent Setup library. The server applies its instructions, model route, reasoning, and runtime policy; omit target and runtimeMode when passing persona.",
+        "Persona ID to run the child as, taken from an @persona:ID mention or the Settings → Agent Setup library. The server applies its instructions, model route, reasoning, and runtime policy. Omit target and runtimeMode when passing persona, except target.environmentId to run it on a peered J5 machine.",
     }),
   ),
   authorThreads: Schema.optional(AuthorThreads),
@@ -55,7 +61,7 @@ export type J5DelegateTaskInput = typeof J5DelegateTaskInput.Type;
  * fallback.
  */
 export const J5_DELEGATE_TASK_DESCRIPTION =
-  "Create a subagent, the first of the two ways to get help (the second is a Crew member): start one child agent with only `task`. No parent history. Pass persona=ID when the user writes @persona:ID or asks for a persona by name, or when a persona from j5_list_personas fits the work: the server pins that persona's instructions, provider, model, reasoning, and runtime policy, so omit target and runtimeMode. A persona the user named with @persona:ID in the message that started this turn runs as saved; one you pick yourself uses only its models the project's Models for custom members checks, and is refused if it needs more access than you run with. " +
+  "Create a subagent, the first of the two ways to get help (the second is a Crew member): start one child agent with only `task`. No parent history. Pass persona=ID when the user writes @persona:ID or asks for a persona by name, or when a persona from j5_list_personas fits the work: the server pins that persona's instructions, provider, model, reasoning, and runtime policy, so omit target and runtimeMode. To run the persona on a peered J5 machine, pass only target.environmentId. A persona the user named with @persona:ID in the message that started this turn runs as saved; one you pick yourself uses only its models the project's Models for custom members checks, and is refused if it needs more access than you run with. " +
   BLOCKED_PERSONA_TOOL_TEXT +
   " For a persona j5_list_personas marks independent_reviewer, the server prefers a model that didn't write the work: yours and your delegate_task children's unless authorThreads names other threads. Give the persona a self-contained task, and if that call fails, report the error instead of substituting a plain child. Without persona, this is a plain J5-tracked child for cross-provider work, for same-provider work the native subagent tool cannot run, or for work the user wants tracked as a J5 task; for an ordinary subagent request, use your provider's native subagent mechanism instead. Without persona the child's model and reasoning level, inherited ones included, must be ones the project's Models for custom members lists allow; a refusal lists the eligible ones to retry with in `target`. Separate checkout or PR per child: `isolation:'worktree'`. Keep `taskId` for `task_status` and `task_cancel`. No secrets in `task`.";
 
@@ -75,6 +81,8 @@ export const J5DelegateTaskTool = Tool.make("delegate_task", {
     CrewMemberModels,
     // A refused persona is recorded as an escalation, and a granted one is spent.
     AgentPersonaEscalations,
+    // A persona goes only to a machine this one is peered with.
+    PeerRegistryService,
   ],
 })
   .annotate(Tool.Title, "Delegate a child task")
@@ -118,19 +126,132 @@ export const delegateTask = Effect.fn("j5.delegateTask")(function* (input: J5Del
         )
       : delegated;
   }
-  if (delegate.target !== undefined || delegate.runtimeMode !== undefined) {
+  // A persona may name only the machine it runs on: it pins everything else itself.
+  const { target, runtimeMode, ...personaDelegate } = delegate;
+  if (
+    runtimeMode !== undefined ||
+    (target !== undefined &&
+      (target.environmentId === undefined ||
+        Object.keys(target).some((key) => key !== "environmentId" && key !== "projectId")))
+  ) {
     return yield* new OrchestratorMcpFailure({
       code: "invalid_request",
       message:
-        "A persona pins its provider, model, reasoning, and runtime mode. Omit target and runtimeMode when passing persona.",
+        "A persona pins its provider, model, reasoning, and runtime mode. Omit target and runtimeMode when passing persona, except target.environmentId to run it on a peered J5 machine.",
     });
   }
-  // Both are undefined here (checked above); the destructure only narrows the type for invokeAgent.
-  const { target: _target, runtimeMode: _runtimeMode, ...personaDelegate } = delegate;
+  const scope = yield* McpInvocationContext;
+  const remote =
+    target === undefined ? undefined : PeerForwarding.remoteTarget(scope, target.environmentId);
+  // A project is named only for another machine; here a persona runs in its parent's project.
+  if (target?.projectId !== undefined && remote === undefined)
+    return yield* new OrchestratorMcpFailure({
+      code: "invalid_request",
+      message:
+        "target.projectId with a persona names a project on another machine. Omit target to run the persona here, in your own project.",
+    });
+  if (target !== undefined && remote !== undefined) {
+    return yield* delegatePersonaToPeer({
+      ...personaDelegate,
+      personaId,
+      target: { ...target, environmentId: remote },
+      ...(authorThreads === undefined ? {} : { authorThreads }),
+      ...(allowOnce === undefined ? {} : { allowOnce }),
+    });
+  }
   return yield* invokeAgent({
     personaId,
     ...personaDelegate,
     ...(authorThreads === undefined ? {} : { authorThreads }),
     ...(allowOnce === undefined ? {} : { allowOnce }),
   });
+});
+
+/**
+ * A persona delegated to a linked J5 machine, which resolves it from its own library against its
+ * own models. Only J5 machines peer, and a plain T3 Code machine would run a plain delegate in its
+ * place, so the machine must be peered. The pick's facts go with it; the machine holds the pick to
+ * them and to the link's level.
+ */
+const delegatePersonaToPeer = Effect.fn("j5.delegatePersonaToPeer")(function* (
+  input: Omit<J5DelegateTaskInput, "persona" | "authorThreads" | "allow_once" | "target"> & {
+    readonly personaId: AgentPersonaId;
+    readonly target: NonNullable<J5DelegateTaskInput["target"]> & {
+      readonly environmentId: EnvironmentId;
+    };
+    readonly authorThreads?: ReadonlyArray<ThreadId>;
+    readonly allowOnce?: string;
+  },
+) {
+  const refuse = (message: string) =>
+    Effect.fail(new OrchestratorMcpFailure({ code: "invalid_request", message }));
+  if (input.allowOnce !== undefined)
+    return yield* refuse(
+      "Allow this once lifts a block on this machine only; a persona blocked on another machine is unblocked there. Retry without allow_once, or run the persona here without target.",
+    );
+  const scope = yield* McpInvocationContext;
+  const { thread } = yield* requireThreadScope(scope, "delegate_task");
+  const environmentId = input.target.environmentId;
+  const peered = yield* (yield* PeerRegistryService)
+    .get(environmentId)
+    .pipe(
+      Effect.mapError(
+        (error) =>
+          new OrchestratorMcpFailure({ code: "orchestration_error", message: error.message }),
+      ),
+    );
+  if (peered === null)
+    return yield* refuse(
+      `This server is not peered with ${environmentId}. Only J5 machines peer, and a persona delegated to a machine that isn't one would run as a plain delegate instead. Peer the two machines, or run the persona here without target.`,
+    );
+  const parent = yield* (yield* ThreadManagementService)
+    .getThreadRecords(thread.threadId, [])
+    .pipe(
+      Effect.mapError(
+        (error) =>
+          new OrchestratorMcpFailure({ code: "orchestration_error", message: error.message }),
+      ),
+    );
+  const pickFailure = (error: { readonly message: string }) =>
+    new OrchestratorMcpFailure({ code: "invalid_request", message: error.message });
+  const pickSource = yield* turnPickSource(thread.threadId, input.personaId).pipe(
+    Effect.mapError(pickFailure),
+  );
+  const callerAccess = yield* resolveCallerAccess({ thread: parent.thread }).pipe(
+    Effect.mapError(pickFailure),
+  );
+  // An independent reviewer's authors are threads here, so their models go in their place.
+  const authors = yield* resolveReviewAuthors({
+    projectId: parent.thread.projectId,
+    threads:
+      input.authorThreads === undefined
+        ? [{ threadId: thread.threadId }]
+        : input.authorThreads.map((threadId) => ({ threadId, named: true })),
+  }).pipe(Effect.mapError(pickFailure));
+  const { personaId, authorThreads: _authorThreads, allowOnce: _allowOnce, ...delegate } = input;
+  const delegated = (yield* OrchestratorMcpService).delegateTask(scope, {
+    ...delegate,
+    title: input.title ?? personaId,
+    mode: input.mode ?? "async",
+    agentPersona: {
+      personaId,
+      delegated: {
+        pickSource,
+        callerAccess: {
+          runtimeMode: callerAccess.runtimeMode,
+          ...(callerAccess.sandbox === undefined ? {} : { sandbox: callerAccess.sandbox }),
+        },
+        authorModels: authors.models,
+        authorsPartlyUnknown: authors.partlyUnknown,
+      },
+    },
+  });
+  // A delegate on another machine that did not answer is told when its line is back (D46).
+  const unanswered = yield* Effect.serviceOption(UnreachableCalls);
+  return yield* Option.isSome(unanswered)
+    ? unanswered.value.observe(
+        { threadId: thread.threadId, environmentId, tool: "delegate_task" },
+        delegated,
+      )
+    : delegated;
 });

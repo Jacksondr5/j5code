@@ -19,6 +19,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { RemoteDelegation } from "../../peer/RemoteDelegation.ts";
+import { PeerRegistryService } from "../a2a/PeerRegistryService.ts";
 import { layerMemory as SqlitePersistenceMemory } from "../../persistence/Sqlite.ts";
 import { layerWithRegistry as makeOrchestratorV2ReplayLayerWithRegistry } from "../../orchestration-v2/testkit/ProviderReplayHarness.ts";
 import { layerFromAdapters as makeLayer } from "../../orchestration-v2/ProviderAdapterRegistry.ts";
@@ -130,6 +131,7 @@ const makeTestLayer = (memberModels: Layer.Layer<CrewMemberModels>) =>
     mcp,
     memberModels,
     agentPersonaEscalationsTestLayer(),
+    Layer.mock(PeerRegistryService)({}),
     Projections.layer.pipe(Layer.provide(database)),
     Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
   ).pipe(
@@ -295,6 +297,61 @@ it.effect("persists the saved persona on a nested child and reuses that child on
     const plainChild = yield* orchestrator.getThreadProjection(localChild(plain));
     assert.equal(plainChild.thread.agentPersonaAssignment, undefined);
     assert.equal(plainChild.thread.lineage.relationshipToParent, "subagent");
+  }).pipe(Effect.provide(testLayer)),
+);
+
+it.effect("sends a persona to a peered machine with its pick's facts, and nothing else", () =>
+  Effect.gen(function* () {
+    const { orchestrator, scope, threadId } = yield* runningParent;
+    const peered = EnvironmentId.make("environment:peered");
+    const sent: Array<Parameters<Mcp.OrchestratorMcpServiceShape["delegateTask"]>[1]> = [];
+    const machines = Layer.merge(
+      Layer.mock(Mcp.OrchestratorMcpService)({
+        delegateTask: (_scope, input) => {
+          sent.push(input);
+          return Effect.succeed({ taskId: "task:remote" } as never);
+        },
+      }),
+      Layer.mock(PeerRegistryService)({
+        get: (environmentId) =>
+          Effect.succeed(environmentId === peered ? ({ environmentId } as never) : null),
+      }),
+    );
+    const delegate = (input: Omit<Parameters<typeof delegateTask>[0], "task" | "persona">) =>
+      delegateTask({ task: "Review the change.", persona: "scout", ...input }).pipe(
+        Effect.provideService(McpInvocationContext, scope),
+        Effect.provide(machines),
+      );
+
+    for (const [input, refusal] of [
+      [
+        { target: { environmentId: EnvironmentId.make("environment:stranger") } },
+        "is not peered with",
+      ],
+      [{ target: { environmentId: peered }, allow_once: "escalation:1" }, "on this machine only"],
+      [
+        { target: { environmentId: peered, model: otherModel } },
+        "except target.environmentId to run it on a peered J5 machine",
+      ],
+    ] as const) {
+      const error = yield* delegate(input).pipe(Effect.flip);
+      assert.include(error.message, refusal);
+    }
+    assert.lengthOf(sent, 0);
+    assert.lengthOf((yield* orchestrator.getThreadProjection(threadId)).subagents, 0);
+
+    yield* delegate({ target: { environmentId: peered } });
+    assert.lengthOf(sent, 1);
+    assert.equal(sent[0]?.target?.environmentId, peered);
+    assert.deepEqual(sent[0]?.agentPersona, {
+      personaId: "scout",
+      delegated: {
+        pickSource: "agent",
+        callerAccess: { runtimeMode: "full-access" },
+        authorModels: [modelSelection.model],
+        authorsPartlyUnknown: false,
+      },
+    });
   }).pipe(Effect.provide(testLayer)),
 );
 

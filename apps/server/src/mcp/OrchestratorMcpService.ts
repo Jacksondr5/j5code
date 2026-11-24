@@ -1,4 +1,7 @@
-import type { OrchestrationV2AgentPersonaCommandAssignment } from "@t3tools/contracts";
+import type {
+  OrchestrationV2AgentPersonaCommandAssignment,
+  OrchestrationV2AgentPersonaRequest,
+} from "@t3tools/contracts";
 import {
   CommandId,
   type RunId,
@@ -181,6 +184,8 @@ export interface OrchestratorMcpServiceShape {
     scope: McpInvocationScope,
     input: OrchestratorMcpDelegateTaskInput & {
       readonly agentPersonaAssignment?: OrchestrationV2AgentPersonaCommandAssignment;
+      /** A persona a linked J5 machine resolves; only a remote target carries it (case 131). */
+      readonly agentPersona?: OrchestrationV2AgentPersonaRequest;
       /** Called with the model the child will run on, before anything is created. */
       readonly authorizeTarget?: (target: {
         readonly projectId: ProjectId;

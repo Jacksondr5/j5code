@@ -31,6 +31,7 @@ import { DispatchModeLimit } from "../../../orchestration-v2/DispatchModeLimit.t
 import { OrchestratorDispatchError } from "../../../orchestration-v2/Orchestrator.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
 import { ProviderRegistry } from "../../../provider/ProviderRegistry.ts";
+import { PeerRegistryService } from "../PeerRegistryService.ts";
 import { permissiveCrewMemberModels } from "../../test-support/crewMemberModels.ts";
 import { type AgentCrewInstance, AgentCrewInstanceService } from "../AgentCrewInstanceService.ts";
 import { participantIdForThread } from "../HomeRegistrar.ts";
@@ -124,6 +125,7 @@ const TestLayer = McpHttpServer.toolkitRegistration(
       Layer.mock(AgentCrewInstanceService)({}),
       Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
       Layer.mock(ProviderRegistry)({}),
+      Layer.mock(PeerRegistryService)({}),
       permissiveCrewMemberModels,
       agentPersonaEscalationsTestLayer(),
       agentPersonaDraftsTestLayer(),
@@ -284,6 +286,7 @@ it.effect(
             }),
             Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
             Layer.mock(ProviderRegistry)({}),
+            Layer.mock(PeerRegistryService)({}),
             permissiveCrewMemberModels,
             agentPersonaEscalationsTestLayer(),
             agentPersonaDraftsTestLayer(),

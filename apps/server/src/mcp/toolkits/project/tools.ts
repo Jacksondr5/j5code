@@ -6,6 +6,7 @@ import {
   TrimmedNonEmptyString,
   ThreadId,
   RunId,
+  OrchestrationV2AgentPersonaRequest,
   OrchestrationV2DelegatedFrom,
   OrchestrationV2RunStatus,
   OrchestrationV2ThreadLaunchWorkspaceStrategy,
@@ -159,6 +160,9 @@ const ThreadLaunchTool = Tool.make("t3_thread_launch", {
     clientRequestId: Schema.optional(OrchestratorMcpClientRequestId),
     /** Set by a linked environment launching its agent's delegated task here; ignored otherwise. */
     delegatedFrom: Schema.optional(OrchestrationV2DelegatedFrom),
+    // J5 (FORK.md case 111): the persona a linked J5 machine delegates with delegatedFrom.
+    /** Set by a linked J5 machine delegating a persona here; ignored otherwise. */
+    agentPersona: Schema.optional(OrchestrationV2AgentPersonaRequest),
   }),
   success: Schema.Struct({
     threadId: ThreadId,

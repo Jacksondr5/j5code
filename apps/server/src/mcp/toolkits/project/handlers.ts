@@ -40,6 +40,7 @@ import * as McpToolAccess from "../../McpToolAccess.ts";
 import * as OrchestrationMcp from "../../OrchestratorMcpService.ts";
 import { newCommandId, readCaller, resolveProjectId, unavailable } from "../../threadAccess.ts";
 import { ProjectToolkit } from "./tools.ts";
+import { j5DelegatedAgentPersona } from "../../../j5/agents/agentPersonaOrchestration.ts";
 
 const isAboveCeilingError = Schema.is(OrchestratorRuntimeModeAboveCeilingError);
 
@@ -254,6 +255,13 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
         const launchedModel =
           launched === null || launched.deletedAt !== null ? undefined : launched.modelSelection;
         const replaying = launchedModel !== undefined;
+        // J5 (FORK.md case 111): a persona a linked J5 machine delegates, held to the link's level.
+        const agentPersona =
+          input.agentPersona === undefined ||
+          input.delegatedFrom === undefined ||
+          scope.client?.linked !== true
+            ? undefined
+            : j5DelegatedAgentPersona(input.agentPersona, scope.client);
         if (launched !== null && replaying && launched.projectId !== projectId)
           return yield* new OrchestratorMcpFailure({
             code: "invalid_request",
@@ -280,7 +288,7 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
               );
         if (project !== undefined && input.workspaceStrategy?.type === "existing_worktree")
           yield* assertProjectWorktree(project.workspaceRoot, input.workspaceStrategy.worktreePath);
-        if (!replaying && input.modelSelection !== undefined) {
+        if (!replaying && input.modelSelection !== undefined && agentPersona === undefined) {
           const { instanceId, model } = input.modelSelection;
           const registry = yield* ProviderRegistry.ProviderRegistry;
           // The thread runs in this folder, whose own provider config can add models.
@@ -427,6 +435,7 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
           ...(linkOrigin === undefined ? {} : { linkOrigin }),
           // Kept only alongside linkOrigin: thread.create drops it otherwise.
           ...(input.delegatedFrom === undefined ? {} : { delegatedFrom: input.delegatedFrom }),
+          ...(agentPersona === undefined ? {} : { agentPersona }),
         }).pipe(
           Effect.mapError((error) => {
             if (error._tag === "AttachmentClaimError") {
