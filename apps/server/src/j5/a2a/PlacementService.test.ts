@@ -1,5 +1,5 @@
 import { assert, it } from "@effect/vitest";
-import { ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -138,6 +138,34 @@ it.effect("records a spawner from another project and makes its child a root the
       ]),
       [[child.id, null]],
     );
+  }).pipe(Effect.provide(TestLayer)),
+);
+
+it.effect("roots a child spawned from a linked machine, and refuses that spawner unlinked", () =>
+  Effect.gen(function* () {
+    const remoteSpawner = agent("remote-spawner");
+    const child = agent("remote-child");
+    const unlinkedChild = agent("unlinked-child");
+    yield* prepare([child, unlinkedChild]);
+    const remoteProvenance = {
+      ...spawnedBy(remoteSpawner),
+      spawnedByEnvironmentId: EnvironmentId.make("environment:linked"),
+    };
+
+    const recorded = yield* record({ index: 1, participant: child, provenance: remoteProvenance });
+    assert.isNull(recorded.placement.placementParentId);
+    assert.deepStrictEqual(recorded.placement.provenance, spawnedBy(remoteSpawner));
+    const replayed = yield* record({
+      index: 1,
+      participant: child,
+      provenance: spawnedBy(remoteSpawner),
+    });
+    assert.isFalse(replayed.committed);
+
+    const unlinkedError = yield* Effect.flip(
+      record({ index: 2, participant: unlinkedChild, provenance: spawnedBy(remoteSpawner) }),
+    );
+    assert.isTrue(isParticipantNotFound(unlinkedError));
   }).pipe(Effect.provide(TestLayer)),
 );
 

@@ -14,6 +14,7 @@ import { A2ALedgerTransactionWriter } from "./LedgerService.ts";
 import { ParticipantPlacementTransactionWriter, type PlacementError } from "./PlacementService.ts";
 import type { CommCommandId, LedgerProjectId } from "./contracts.ts";
 import { recordOutsideAgentName } from "./outsideAgentNames.ts";
+import { recordPeerRoute } from "./peerCounterparty.ts";
 import { ReadChanges } from "./ReadChanges.ts";
 import type {
   ParticipantPlacement,
@@ -32,6 +33,8 @@ export interface RecordSpawnFactsInput {
    * the placement so the spawner named in provenance is one this server knows.
    */
   readonly outsideSpawnerName?: string;
+  /** Set when the spawner runs on a linked J5 server: where it lives, recorded as its route. */
+  readonly peerSpawner?: { readonly environmentId: string; readonly projectId: LedgerProjectId };
   readonly createdAt: string;
 }
 
@@ -94,6 +97,14 @@ export const layer: Layer.Layer<
                     participantId: input.provenance.spawnedByParticipantId,
                     name: input.outsideSpawnerName,
                     at: input.createdAt,
+                  });
+                }
+                if (input.peerSpawner !== undefined && input.provenance.kind === "spawned-by") {
+                  yield* recordPeerRoute(sql, {
+                    participantId: input.provenance.spawnedByParticipantId,
+                    environmentId: input.peerSpawner.environmentId,
+                    projectId: input.peerSpawner.projectId,
+                    recordedAt: input.createdAt,
                   });
                 }
                 const placement = yield* placements.recordCreationInTransaction({

@@ -15,6 +15,7 @@ import { ProjectService } from "../../../project/ProjectService.ts";
 
 import {
   AgentPersonaId,
+  EnvironmentId,
   ModelSelection,
   OrchestrationV2RunStatus,
   ProviderInstanceId,
@@ -64,6 +65,8 @@ import { A2AHomeRegistrar } from "../HomeRegistrar.ts";
 import { A2ALedger } from "../LedgerService.ts";
 import { PeerDirectory } from "../PeerDirectory.ts";
 import { PeerRegistryService } from "../PeerRegistryService.ts";
+import * as PeerLinks from "../../../peer/PeerLinks.ts";
+import * as PeerMcpClient from "../../../peer/PeerMcpClient.ts";
 import { ParticipantPlacementService } from "../PlacementService.ts";
 import { A2ASendService } from "../SendService.ts";
 import { SpawnCompositionService } from "../SpawnCompositionService.ts";
@@ -311,6 +314,22 @@ export const J5SpawnAgentWorkspace = Schema.Union([
 ]);
 export type J5SpawnAgentWorkspace = typeof J5SpawnAgentWorkspace.Type;
 
+/**
+ * What a linked J5 machine's server sends with a spawn its agent asked for there, beside the
+ * `T3-Sender-Thread` that names the agent: the facts this server can't read from the header.
+ */
+export const J5LinkedSpawnFacts = Schema.Struct({
+  spawner_project_id: LedgerProjectId,
+  pick_source: Schema.Literals(["person", "agent"]),
+  caller_access: Schema.Struct({
+    runtime_mode: RuntimeMode,
+    sandbox: Schema.optional(Schema.Literals(["readOnly", "workspaceWrite"])),
+  }),
+  author_models: Schema.Array(Schema.String),
+  authors_partly_unknown: Schema.Boolean,
+});
+export type J5LinkedSpawnFacts = typeof J5LinkedSpawnFacts.Type;
+
 export const J5SpawnAgentInput = Schema.Struct({
   brief: NonEmptyString,
   title: TrimmedNonEmptyString.annotate({
@@ -381,6 +400,18 @@ export const J5SpawnAgentInput = Schema.Struct({
     description:
       'Where the Peer Agent works, chosen every time: {"type":"shared"} is your own checkout and branch, in your own project only; {"type":"root"} the project\'s main checkout; {"type":"worktree","base_ref":...} a new worktree and branch from base_ref; {"type":"existing_worktree","worktree_path":...} one of the project\'s worktrees, on its branch.',
   }),
+  // Plain, never upstream's environment target: `routed` would forward the call unchanged.
+  environment_id: Schema.optional(
+    EnvironmentId.annotate({
+      description:
+        "A linked J5 machine from t3_environment_links: start the agent there, in a project there named by project_id (t3_project_list with that environmentId) or with scratch. Omit to start it here.",
+    }),
+  ),
+  linked_spawn: Schema.optional(
+    J5LinkedSpawnFacts.annotate({
+      description: "Set by a linked J5 machine's server; ignored otherwise.",
+    }),
+  ),
   client_request_id: Schema.optional(NonEmptyString),
 });
 export type J5SpawnAgentInput = typeof J5SpawnAgentInput.Type;
@@ -393,6 +424,8 @@ export const J5SpawnAgentResult = Schema.Struct({
   run_id: Schema.NullOr(RunId),
   project_id: LedgerProjectId,
   project_title: Schema.String,
+  /** The linked machine the agent runs on, by its link's name; absent for this one. */
+  server: Schema.optional(Schema.String),
   placement: Schema.Struct({
     /**
      * The spawner, when the agent joined the spawner's own project; null in another project, and
@@ -697,7 +730,7 @@ export const J5ArchiveCrewFailure = Schema.Struct({
 export type J5ArchiveCrewFailure = typeof J5ArchiveCrewFailure.Type;
 
 export const J5_SPAWN_AGENT_DESCRIPTION =
-  "Use this when the user explicitly asks for a Peer Agent or a standalone agent they will talk to, or when an outside agent or a skill you are following names it. When nobody asked for one, it is not a way to get help with your own work: create a subagent (your native Subagent tool, or delegate_task) or put members on a Crew (j5_propose_crew). Spawn a Peer Agent: a full-citizen teammate with its own top-level thread, starting on your brief as its first turn. It joins your project unless you name another with project_id or set scratch for none, and records you as its immutable spawner; in your own project it is placed under you. It is addressable the moment this returns. In your brief, tell the new agent what it should do first and whether it should reply to you. Without a persona, choose provider and model for the work in the brief, and reasoning if the model has a reasoning option; see orchestrator_capabilities for what's available. To run a persona from j5_list_personas, set `persona` to its id: the spawn gets that persona's instructions and access level, and the server chooses from its ordered model entries when you omit provider, model, and reasoning; set them only to pin one of those entries. For a persona marked independent_reviewer, leave the model out so the server can prefer one that didn't write the work, and name the threads it reviews in author_threads when that is not your own work. A persona the user named with @persona:ID in the message that started this turn runs as saved; one you pick yourself must be within the access you run with, on an entry the project's Models for custom members checks. " +
+  "Use this when the user explicitly asks for a Peer Agent or a standalone agent they will talk to, or when an outside agent or a skill you are following names it. When nobody asked for one, it is not a way to get help with your own work: create a subagent (your native Subagent tool, or delegate_task) or put members on a Crew (j5_propose_crew). Spawn a Peer Agent: a full-citizen teammate with its own top-level thread, starting on your brief as its first turn. It joins your project unless you name another with project_id or set scratch for none, and records you as its immutable spawner; in your own project it is placed under you. It is addressable the moment this returns. To start it on another J5 machine, set environment_id to one from t3_environment_links and name a project there with project_id (t3_project_list with that environmentId) or set scratch; it needs a Full access link and peering, that machine's rules and models apply, and the result names its server. In your brief, tell the new agent what it should do first and whether it should reply to you. Without a persona, choose provider and model for the work in the brief, and reasoning if the model has a reasoning option; see orchestrator_capabilities for what's available. To run a persona from j5_list_personas, set `persona` to its id: the spawn gets that persona's instructions and access level, and the server chooses from its ordered model entries when you omit provider, model, and reasoning; set them only to pin one of those entries. For a persona marked independent_reviewer, leave the model out so the server can prefer one that didn't write the work, and name the threads it reviews in author_threads when that is not your own work. A persona the user named with @persona:ID in the message that started this turn runs as saved; one you pick yourself must be within the access you run with, on an entry the project's Models for custom members checks. " +
   BLOCKED_PERSONA_TOOL_TEXT +
   " Without a persona it runs in your permission and interaction modes, or in narrower ones you set with runtime_mode and interaction_mode. Without a persona its model and reasoning level must be ones the project's Models for custom members lists allow; an ineligible one is refused with the eligible ones. Attach files to the brief with attachments. Choose its workspace every time (see the workspace field). A new worktree is prepared after this returns, and the agent begins once it is bound, possibly while the project's setup script is still running; if preparing it fails, the agent's thread shows why, and it is not retried. Reuse client_request_id to retry the same spawn safely; reusing it with any change to the request is refused, so use a fresh one for new work.";
 
@@ -787,6 +820,11 @@ const spawnDependencies = [
   ServerConfig,
   FileSystem.FileSystem,
   DocumentText,
+  // A spawn on a linked J5 machine: the link, its call, peering, and the route recorded here.
+  PeerLinks.PeerLinks,
+  PeerMcpClient.PeerMcpClient,
+  PeerRegistryService,
+  SqlClient.SqlClient,
 ];
 
 const crewProposalDependencies = [

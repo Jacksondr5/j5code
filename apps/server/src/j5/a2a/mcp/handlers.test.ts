@@ -75,6 +75,8 @@ import {
 import { A2ALedger } from "../LedgerService.ts";
 import { PeerDirectory, noneLayer as peerDirectoryNoneLayer } from "../PeerDirectory.ts";
 import { PeerRegistryService } from "../PeerRegistryService.ts";
+import { PeerLinks } from "../../../peer/PeerLinks.ts";
+import { PeerMcpClient } from "../../../peer/PeerMcpClient.ts";
 import {
   ParticipantPlacementService,
   PlacementProjectNotFoundError,
@@ -200,6 +202,13 @@ const missingProjectId = ProjectId.make("project:j5:mcp-directory:gone");
 const serverConfigLayer = ServerConfig.layerTest(process.cwd(), {
   prefix: "j5-mcp-handlers-",
 }).pipe(Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
+/** A spawn on a linked machine needs these; tests of a spawn here never reach them. */
+const noPeerSpawn = Layer.mergeAll(
+  Layer.mock(PeerLinks)({}),
+  Layer.mock(PeerMcpClient)({}),
+  Layer.mock(PeerRegistryService)({}),
+  SqlitePersistence.layerMemory,
+);
 const unusedLifecycleDependencies = Layer.mergeAll(
   noDocumentTextLayer,
   Layer.mock(A2AHomeRegistrar)({
@@ -1495,6 +1504,7 @@ it.effect("preflights home before creation and records facts before the one stab
       Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
     );
     const layer = J5ToolkitHandlersLive.pipe(
+      Layer.provideMerge(noPeerSpawn),
       Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
       Layer.provideMerge(dependencies),
     );
@@ -1666,6 +1676,7 @@ it.effect("refuses spawn before thread creation when the caller is a Subagent", 
       Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
     );
     const layer = J5ToolkitHandlersLive.pipe(
+      Layer.provideMerge(noPeerSpawn),
       Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
       Layer.provideMerge(dependencies),
     );
@@ -1944,6 +1955,7 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
       personaLibraryLayer("j5-mcp-spawn-persona-", launchablePersonas),
     ).pipe(Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)));
     const layer = J5ToolkitHandlersLive.pipe(
+      Layer.provideMerge(noPeerSpawn),
       Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
       Layer.provideMerge(dependencies),
     );
@@ -2921,6 +2933,7 @@ it.effect("routes crew proposals through a captain that is not itself a crew mem
       Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
     );
     const layer = J5ToolkitHandlersLive.pipe(
+      Layer.provideMerge(noPeerSpawn),
       Layer.provideMerge(fakeSpawnWorkspaceLayer({ checkout: noRepository })),
       Layer.provideMerge(dependencies),
     );

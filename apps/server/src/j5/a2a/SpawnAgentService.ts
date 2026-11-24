@@ -6,11 +6,25 @@ import * as ManagedProjectFolders from "../../project/ManagedProjectFolders.ts";
 import * as ThreadManagementService from "../../orchestration-v2/ThreadManagementService.ts";
 import * as OrchestratorMcpService from "../../mcp/OrchestratorMcpService.ts";
 import {
+  type EnvironmentId,
   isAgentPersonaReasoningOptionId,
   type ModelSelection,
+  type OrchestratorMcpFailure,
   ProjectId,
+  type RuntimeMode,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
+import * as Schema from "effect/Schema";
+import * as SqlClient from "effect/sql/SqlClient";
+import { runtimeModeRank } from "../../mcp/delegatedTaskModes.ts";
+import { assertNotLinked } from "../../mcp/linkOrigin.ts";
+import { linkedEnvironmentsOff } from "../../peer/PeerForwarding.ts";
+import * as PeerLinks from "../../peer/PeerLinks.ts";
+import * as PeerMcpClient from "../../peer/PeerMcpClient.ts";
+import { UnreachableCalls } from "./line/UnreachableCallsService.ts";
+import { recordPeerRoute } from "./peerCounterparty.ts";
+import { PeerDirectory } from "./PeerDirectory.ts";
+import { PeerRegistryService } from "./PeerRegistryService.ts";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -21,10 +35,11 @@ import type { SqlError } from "effect/sql/SqlError";
 import {
   requireThreadScope,
   threadLinkFor,
+  type McpClientCaller,
   type McpInvocationScope,
   type McpThreadInvocationScope,
 } from "../../mcp/McpInvocationContext.ts";
-import { loadCaller } from "../../mcp/threadAccess.ts";
+import { loadCaller, readCaller } from "../../mcp/threadAccess.ts";
 
 import { resolveAttachmentReferences } from "../../mcp/toolkits/attachment/handlers.ts";
 import {
@@ -40,16 +55,24 @@ import {
 import { CrewMemberModels } from "../agents/crewMemberModels.ts";
 import {
   pickAgentPersona,
+  resolveCallerAccess,
   turnPickSource,
+  type AgentAccess,
   type AgentPersonaPickCaller,
   type AgentPersonaPickSourceKind,
 } from "../agents/agentPersonaPick.ts";
 import {
+  resolveReviewAuthors,
   withReviewIndependenceNote,
   type ReviewAuthorsRequest,
 } from "../agents/agentPersonaReviewIndependence.ts";
 
-import { J5PersonaBlockedError, preflightSpawnCaller, stateError } from "./AgentCaller.ts";
+import {
+  J5PeerToolError,
+  J5PersonaBlockedError,
+  preflightSpawnCaller,
+  stateError,
+} from "./AgentCaller.ts";
 import { participantIdForThread } from "./HomeRegistrar.ts";
 import { outsideAgentParticipantId, LedgerProjectId } from "./contracts.ts";
 import {
@@ -57,7 +80,12 @@ import {
   outsideSpawnHasNoCheckout,
   outsideSpawnNeedsProject,
 } from "./mcp/outsideAgent.ts";
-import type { J5SpawnAgentInput } from "./mcp/tools.ts";
+// Values used only inside functions: tools.ts imports this module for its dependency list.
+import {
+  J5SpawnAgentResult,
+  type J5LinkedSpawnFacts,
+  type J5SpawnAgentInput,
+} from "./mcp/tools.ts";
 
 import * as RequestReplayService from "./RequestReplayService.ts";
 import * as SpawnWorkspace from "./spawnWorkspace.ts";
@@ -68,6 +96,7 @@ import {
   spawnTitle,
   spawnMessageId,
   spawnFirstTurnText,
+  peerSpawnRequestKey,
 } from "./spawnIds.ts";
 import { ChatAttachmentId, type ChatAttachment, type ThreadId } from "@t3tools/contracts";
 import * as FileSystem from "effect/FileSystem";
@@ -180,11 +209,14 @@ const prepareSpawnPersona = Effect.fn("j5.a2a.mcp.prepareSpawnPersona")(function
     readonly projectId: ProjectId;
     readonly reviewAuthors: ReviewAuthorsRequest;
     readonly escalateFor: string | undefined;
+    /** The spawner is on a linked server, so a block is lifted here, not there. */
+    readonly blockedElsewhere?: boolean;
   },
 ) {
+  const { blockedElsewhere, ...pickInput } = pick;
   const { assignment, runtimeMode } = yield* pickAgentPersona({
     personaId: input.persona,
-    ...pick,
+    ...pickInput,
     allowOnce: input.allow_once,
     ...(selected === undefined || input.model === undefined
       ? {}
@@ -208,8 +240,9 @@ const prepareSpawnPersona = Effect.fn("j5.a2a.mcp.prepareSpawnPersona")(function
       return new J5PersonaBlockedError({
         code: error.code,
         state,
-        nextCommand:
-          error.constraint !== null && "approvedLevel" in pick.caller
+        nextCommand: blockedElsewhere
+          ? "It is blocked on that machine: have it unblocked there, or run the work on your own machine."
+          : error.constraint !== null && "approvedLevel" in pick.caller
             ? "Or retry with a persona within that level, or sign in again and have the person approve a higher one."
             : `Or choose another persona from j5_list_personas that fits the work, or ask the person to pick this one themselves with @persona:${input.persona}.`,
       });
@@ -316,20 +349,231 @@ const preflightSpawnUploads = Effect.fn("j5.a2a.mcp.preflightSpawnUploads")(func
   );
 });
 
+/** A spawn a linked J5 server makes for one of its agents: the agent its header names, the facts it sent. */
+const linkedSpawner = Effect.fn("j5.a2a.mcp.linkedSpawner")(function* (
+  client: McpClientCaller,
+  input: J5SpawnAgentInput,
+) {
+  const sender = client.senderThread;
+  const facts = input.linked_spawn;
+  if (sender === undefined || facts === undefined)
+    return yield* stateError(
+      "A linked machine starts an agent here only for one of its own agents, and this call named none.",
+      "Call j5_spawn_agent with environment_id from an agent on that machine, so its server names the agent.",
+    );
+  const directory = yield* Effect.serviceOption(PeerDirectory);
+  const serverName = Option.isNone(directory)
+    ? sender.environmentId
+    : yield* directory.value.serverStatus(sender.environmentId).pipe(
+        Effect.map((status) => status.name),
+        Effect.orElseSucceed(() => sender.environmentId),
+      );
+  return { sender, facts, serverName };
+});
+
+/** The narrower of the access a linked server sent for its agent and the link's level here. */
+const linkedCallerAccess = (facts: J5LinkedSpawnFacts, linkLevel: RuntimeMode): AgentAccess => ({
+  runtimeMode:
+    runtimeModeRank(facts.caller_access.runtime_mode) < runtimeModeRank(linkLevel)
+      ? facts.caller_access.runtime_mode
+      : linkLevel,
+  sandbox: facts.caller_access.sandbox,
+});
+
+// J5McpFailure's shape, declared here: tools.ts imports this module, so its values aren't ready yet.
+const decodeRemoteJ5Failure = Schema.decodeOption(
+  Schema.fromJsonString(Schema.Struct({ code: Schema.String, message: Schema.String })),
+);
+
+/**
+ * `j5_spawn_agent` on a linked J5 machine. The call goes through `PeerMcpClient` itself, not
+ * upstream's forwarding, which scopes and checks only camelCase arguments; this scopes the snake-case
+ * key and sends the facts the other machine can't read from the sender header.
+ */
+const spawnOnPeer = Effect.fn("j5.a2a.spawnOnPeer")(function* (
+  input: J5SpawnAgentInput,
+  environmentId: EnvironmentId,
+  scope: McpInvocationScope,
+) {
+  if (scope.thread === undefined)
+    return yield* stateError(
+      "An outside agent starts agents on this machine only: another machine would have no agent to name as the spawner, and no way to reach you with a reply.",
+      "Retry j5_spawn_agent without environment_id.",
+    );
+  if (input.allow_once !== undefined)
+    return yield* stateError(
+      "Allow this once lifts a block on this machine only; a persona blocked on another machine is unblocked there.",
+      "Retry without allow_once, or run the persona here without environment_id.",
+    );
+  if (input.attachments !== undefined)
+    return yield* stateError(
+      "Attachments are uploads waiting on this machine, so they can't go with an agent started on another one.",
+      "Retry without attachments, and send the files to the agent once it runs.",
+    );
+  if (input.workspace.type === "shared")
+    return yield* stateError(
+      'workspace {"type":"shared"} is your own checkout, on this machine.',
+      'Retry with workspace {"type":"root"} for the project\'s main checkout there, a new worktree, or one of its worktrees.',
+    );
+  if (input.project_id === undefined && input.scratch !== true)
+    return yield* stateError(
+      "An agent on another machine joins a project there, so j5_spawn_agent needs to be told which.",
+      "Call t3_project_list with that environmentId and retry with one of its project ids as project_id, or with scratch.",
+    );
+  const spawner = yield* preflightThreadSpawner(yield* requireThreadScope(scope, "This tool"));
+  const thread = spawner.home.thread;
+  const peerFailure = (error: OrchestratorMcpFailure) =>
+    new J5PeerToolError({ code: error.code, message: error.message });
+  const links = yield* PeerLinks.PeerLinks;
+  if (!(yield* links.enabled)) return yield* peerFailure(linkedEnvironmentsOff);
+  const { caller } = yield* readCaller().pipe(Effect.mapError(peerFailure));
+  yield* assertNotLinked({ scope, caller }, "start agents on other machines").pipe(
+    Effect.mapError(peerFailure),
+  );
+  const unreadable = (what: string) => (error: { readonly message: string }) =>
+    stateError(`${what} cannot be read now: ${error.message}`, "Retry j5_spawn_agent.");
+  const link = yield* links
+    .get(environmentId)
+    .pipe(Effect.mapError(unreadable(`The link to ${environmentId}`)));
+  if (Option.isNone(link))
+    return yield* stateError(
+      `No linked machine has environment id ${environmentId}.`,
+      "Call t3_environment_links and retry with one of its environment ids.",
+    );
+  const { label, access } = link.value;
+  if (access !== "full-access")
+    return yield* stateError(
+      `"${label}" was linked with ${access} access, and starting an agent there needs Full access, so the agent can use J5's tools there.`,
+      "Link it again with Full access, or start the agent here without environment_id.",
+    );
+  const peered = yield* (yield* PeerRegistryService)
+    .get(environmentId)
+    .pipe(Effect.mapError(unreadable(`Peering with "${label}"`)));
+  if (peered === null)
+    return yield* stateError(
+      `This server is not peered with "${label}", so an agent started there could not message you or reply.`,
+      "Peer the two machines so they can message each other, then retry.",
+    );
+
+  const pickSource =
+    input.persona === undefined
+      ? "agent"
+      : yield* turnPickSource(thread.id, input.persona).pipe(
+          Effect.mapError((error) =>
+            stateError(error.message, "Retry j5_spawn_agent once the thread is readable."),
+          ),
+        );
+  const callerAccess = yield* resolveCallerAccess({ thread }).pipe(
+    Effect.mapError((error) => stateError(error.message, "Retry j5_spawn_agent.")),
+  );
+  // Only an independent reviewer reads its authors, and their threads are here, so their models go.
+  const authors =
+    input.persona === undefined
+      ? { models: [], partlyUnknown: false }
+      : yield* resolveReviewAuthors({
+          threads:
+            input.author_threads === undefined
+              ? [{ threadId: thread.id }]
+              : input.author_threads.map((threadId) => ({ threadId, named: true })),
+        }).pipe(
+          Effect.mapError((error) =>
+            stateError(error.message, "Retry j5_spawn_agent with author_threads you can read."),
+          ),
+        );
+  const requestKey =
+    input.client_request_id ??
+    (yield* (yield* SecureRandom.SecureRandom).uuidV4().pipe(Effect.orDie));
+  const {
+    environment_id: _environment,
+    author_threads: _authors,
+    linked_spawn: _facts,
+    ...request
+  } = input;
+  const call = (yield* PeerMcpClient.PeerMcpClient).call({
+    environmentId,
+    tool: "j5_spawn_agent",
+    arguments: {
+      ...request,
+      client_request_id: peerSpawnRequestKey(spawner.requestNamespace, requestKey),
+      linked_spawn: {
+        spawner_project_id: spawner.home.ledgerProject.id,
+        pick_source: pickSource,
+        caller_access: {
+          runtime_mode: callerAccess.runtimeMode,
+          ...(callerAccess.sandbox === undefined ? {} : { sandbox: callerAccess.sandbox }),
+        },
+        author_models: authors.models,
+        authors_partly_unknown: authors.partlyUnknown,
+      } satisfies J5LinkedSpawnFacts,
+    },
+    // A person's pick runs as saved there, capped by the link's own level alone.
+    limits: {
+      runtimeMode: pickSource === "person" ? "full-access" : callerAccess.runtimeMode,
+      interactionMode: thread.interactionMode,
+    },
+    sender: { environmentId: scope.environmentId, threadId: thread.id, title: thread.title },
+    success: J5SpawnAgentResult,
+  });
+  const unanswered = yield* Effect.serviceOption(UnreachableCalls);
+  const result = yield* (
+    Option.isSome(unanswered)
+      ? unanswered.value.observe(
+          { threadId: thread.id, environmentId, tool: "j5_spawn_agent" },
+          call,
+        )
+      : call
+  ).pipe(
+    Effect.mapError((error) => {
+      // J5's own refusals there aren't upstream failure codes, so they arrive as their JSON text.
+      const refused =
+        error.code === "orchestration_error" ? decodeRemoteJ5Failure(error.message) : Option.none();
+      return new J5PeerToolError(
+        Option.isSome(refused)
+          ? { code: refused.value.code, message: `On "${label}": ${refused.value.message}` }
+          : { code: error.code, message: `"${label}": ${error.message}` },
+      );
+    }),
+  );
+  // So a message to the new agent goes there at once, before any traffic has shown the way.
+  yield* recordPeerRoute(yield* SqlClient.SqlClient, {
+    participantId: result.participant_id,
+    environmentId,
+    projectId: result.project_id,
+    recordedAt: DateTime.formatIso(yield* DateTime.now),
+  }).pipe(
+    Effect.mapError((error) =>
+      stateError(
+        `Peer Agent ${result.participant_id} started on "${label}", but the way to it could not be recorded here: ${error.message}`,
+        "Retry j5_spawn_agent with the same client_request_id to record it.",
+      ),
+    ),
+  );
+  return { ...result, server: label };
+});
+
 const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
   input: J5SpawnAgentInput,
   scope: McpInvocationScope,
 ) {
+  if (input.environment_id !== undefined && input.environment_id !== scope.environmentId)
+    return yield* spawnOnPeer(input, input.environment_id, scope);
   const crypto = yield* SecureRandom.SecureRandom;
   // An outside agent has no thread, home, project or checkout: it is recorded as the spawner
-  // and the new agent sits at the top level of the project it names.
+  // and the new agent sits at the top level of the project it names. So is an agent on a linked
+  // J5 server, named by the link's sender header.
   const outside = yield* outsideAgentCaller;
+  const linked =
+    outside?.client.linked === true ? yield* linkedSpawner(outside.client, input) : undefined;
   const spawner =
     outside === undefined
       ? yield* preflightThreadSpawner(yield* requireThreadScope(scope, "This tool"))
       : {
-          participantId: outsideAgentParticipantId(outside.client.sessionId),
-          // A new sign-in is a new session, so it is a new set of retry keys.
+          participantId:
+            linked === undefined
+              ? outsideAgentParticipantId(outside.client.sessionId)
+              : participantIdForThread(linked.sender.threadId),
+          // A new sign-in is a new session, so it is a new set of retry keys. A linked server
+          // scopes its keys to its caller before they leave.
           requestNamespace: scope.requestNamespace,
           home: undefined,
           outside,
@@ -529,26 +773,55 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
       ? undefined
       : yield* prepareSpawnPersona({ ...input, persona: personaId }, selected, {
           source:
-            home === undefined
-              ? "agent"
-              : yield* turnPickSource(home.thread.id, personaId).pipe(
-                  Effect.mapError((error) =>
-                    stateError(error.message, "Retry j5_spawn_agent once the thread is readable."),
+            linked !== undefined
+              ? linked.facts.pick_source
+              : home === undefined
+                ? "agent"
+                : yield* turnPickSource(home.thread.id, personaId).pipe(
+                    Effect.mapError((error) =>
+                      stateError(
+                        error.message,
+                        "Retry j5_spawn_agent once the thread is readable.",
+                      ),
+                    ),
                   ),
-                ),
           caller:
-            home === undefined ? { approvedLevel: limits.runtimeMode } : { thread: home.thread },
+            linked !== undefined
+              ? { access: linkedCallerAccess(linked.facts, limits.runtimeMode) }
+              : home === undefined
+                ? { approvedLevel: limits.runtimeMode }
+                : { thread: home.thread },
           projectId: target,
           // An outside agent can't ask the person, so its refusal records no escalation.
           escalateFor: home === undefined ? undefined : spawner.participantId,
           // An outside agent has no thread of its own, so with none named its authors are unknown.
+          // A linked server sends the models of the threads it named, or of its caller's own.
           reviewAuthors:
-            input.author_threads === undefined
-              ? { threads: home === undefined ? [] : [{ threadId: home.thread.id }] }
-              : {
-                  threads: input.author_threads.map((threadId) => ({ threadId, named: true })),
-                },
+            linked !== undefined
+              ? {
+                  threads: [],
+                  models: linked.facts.author_models,
+                  partlyUnknown: linked.facts.authors_partly_unknown,
+                }
+              : input.author_threads === undefined
+                ? { threads: home === undefined ? [] : [{ threadId: home.thread.id }] }
+                : {
+                    threads: input.author_threads.map((threadId) => ({ threadId, named: true })),
+                  },
+          blockedElsewhere: linked !== undefined,
         });
+  // A person's pick runs as saved, but never above the level the link was approved at.
+  if (persona !== undefined && linked !== undefined) {
+    const exceeded = exceededDispatchModeLimit(limits, {
+      runtimeMode: persona.runtimeMode,
+      interactionMode: limits.interactionMode,
+    });
+    if (exceeded !== undefined)
+      return yield* stateError(
+        `Persona ${personaId} runs in ${persona.runtimeMode}, broader than the link from your server allows here (${limits.runtimeMode}).`,
+        "Retry with a persona within that level, or link the machines again with broader access.",
+      );
+  }
   // A plain agent's selection is required above, and a persona's comes from its pick.
   const modelSelection = existing?.modelSelection ?? persona?.modelSelection ?? selected!;
   // With no mode chosen the agent gets the caller's: its thread's, or its approved level.
@@ -720,8 +993,20 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
               kind: "spawned-by",
               spawnedByParticipantId: spawner.participantId,
               source: "j5_spawn",
+              ...(linked === undefined
+                ? {}
+                : { spawnedByEnvironmentId: linked.sender.environmentId }),
             },
-            ...(outside === undefined ? {} : { outsideSpawnerName: outside.client.label }),
+            ...(linked !== undefined
+              ? {
+                  peerSpawner: {
+                    environmentId: linked.sender.environmentId,
+                    projectId: linked.facts.spawner_project_id,
+                  },
+                }
+              : outside === undefined
+                ? {}
+                : { outsideSpawnerName: outside.client.label }),
             createdAt: DateTime.formatIso(child.thread.createdAt),
           })
           .pipe(
@@ -790,9 +1075,11 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
               projectId: facts.home.projectId,
               projectTitle: targetProject.title,
               spawnedByParticipantId: spawner.participantId,
-              ...(outside === undefined
-                ? { spawnerThreadId: scope.thread?.threadId }
-                : { outsideAgentName: outside.client.label }),
+              ...(linked !== undefined
+                ? { spawnerServer: linked.serverName }
+                : outside === undefined
+                  ? { spawnerThreadId: scope.thread?.threadId }
+                  : { outsideAgentName: outside.client.label }),
             }),
             modelSelection: child.thread.modelSelection,
             runtimeMode: child.thread.runtimeMode,

@@ -1,4 +1,4 @@
-import { AuthSessionId, ThreadId } from "@t3tools/contracts";
+import { AuthSessionId, EnvironmentId, ThreadId } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 
 import { LedgerProjectId, Participant, ParticipantId } from "./contracts.ts";
@@ -16,6 +16,8 @@ export const SpawnedByParticipantProvenance = Schema.Struct({
   kind: Schema.Literal("spawned-by"),
   spawnedByParticipantId: ParticipantId,
   source: Schema.Literals(["upstream_lineage", "j5_spawn"]),
+  /** Set when the spawner's thread lives on that linked machine. Never stored or fingerprinted. */
+  spawnedByEnvironmentId: Schema.optionalKey(EnvironmentId),
 });
 export type SpawnedByParticipantProvenance = typeof SpawnedByParticipantProvenance.Type;
 

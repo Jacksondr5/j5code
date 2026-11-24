@@ -29,6 +29,7 @@ import { runJ5A2AMigrations } from "./Migrations.ts";
 import { PeerDirectory, type RemoteAgent } from "./PeerDirectory.ts";
 import { PeerRegistryService, type PeerConnection } from "./PeerRegistryService.ts";
 import { A2ASendService, layer as sendLayer } from "./SendService.ts";
+import { recordPeerRoute } from "./peerCounterparty.ts";
 import {
   CommCommandId,
   CorrelationId,
@@ -818,6 +819,38 @@ it.effect(
       assert.deepStrictEqual(rows, [
         { receiver_environment_id: "environment-Home", status: "pending" },
       ]);
+
+      // An agent spawned on Home has no traffic yet, only the route the spawn recorded; a retried
+      // spawn records it again.
+      const spawned = ParticipantId.make("agent:j5:a2a:thread:spawned");
+      const route = {
+        participantId: spawned,
+        environmentId: "environment-Home",
+        projectId: supportOnHome.projectId,
+        recordedAt: timestamp,
+      };
+      yield* recordPeerRoute(sql, route);
+      yield* recordPeerRoute(sql, route);
+      const toSpawned = yield* send.send({
+        commandId: CommCommandId.make("command:peer-outbound:asleep-spawned"),
+        senderThreadId: billing.threadId,
+        to: spawned,
+        message: "Started?",
+        acceptedAt: timestamp,
+      });
+      assert.deepStrictEqual(
+        yield* sql`
+          SELECT receiver_environment_id, receiver_project_id, status
+          FROM j5_a2a_delivery WHERE message_id = ${toSpawned.messageId}
+        `,
+        [
+          {
+            receiver_environment_id: "environment-Home",
+            receiver_project_id: supportOnHome.projectId,
+            status: "pending",
+          },
+        ],
+      );
     }).pipe(Effect.provide(makeSendLayer([], ["Home"]))),
 );
 

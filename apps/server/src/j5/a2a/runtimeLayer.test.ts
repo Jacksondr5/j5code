@@ -13,6 +13,7 @@ import * as Layer from "effect/Layer";
 import { PeerForwarding } from "../../peer/PeerForwarding.ts";
 import { PeerLinkRequests } from "../../peer/PeerLinkRequests.ts";
 import { PeerLinks } from "../../peer/PeerLinks.ts";
+import { PeerMcpClient } from "../../peer/PeerMcpClient.ts";
 import { RemoteDelegation } from "../../peer/RemoteDelegation.ts";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -87,6 +88,7 @@ const archiveDependencies = Layer.mergeAll(
   Layer.mock(PeerForwarding)({}),
   Layer.mock(PeerLinkRequests)({}),
   Layer.mock(PeerLinks)({}),
+  Layer.mock(PeerMcpClient)({}),
   // j5_spawn_agent and Crew seats prepare worktrees through upstream's launch and receipts.
   Layer.mock(ThreadLaunchService)({}),
   Layer.mock(OrchestrationCommandReceiptRepository)({}),

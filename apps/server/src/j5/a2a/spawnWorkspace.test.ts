@@ -11,6 +11,7 @@ import {
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
+  OrchestratorMcpFailure,
   ThreadId,
   type OrchestrationV2ServerCommand,
   type OrchestrationV2ThreadProjection,
@@ -37,6 +38,12 @@ import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import { McpInvocationContext, type McpInvocationScope } from "../../mcp/McpInvocationContext.ts";
+import * as PeerLinks from "../../peer/PeerLinks.ts";
+import * as PeerMcpClient from "../../peer/PeerMcpClient.ts";
+import type { PeerRecord } from "@t3tools/contracts/j5";
+import { runJ5A2AMigrations } from "./Migrations.ts";
+import { findPeerRoute } from "./peerCounterparty.ts";
+import { PeerRegistryService } from "./PeerRegistryService.ts";
 import { OrchestratorMcpService } from "../../mcp/OrchestratorMcpService.ts";
 import type { ThreadLaunchInput } from "../../orchestration-v2/ThreadLaunchService.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
@@ -51,7 +58,7 @@ import { ArchiveCrewService } from "./ArchiveCrewService.ts";
 import { CrewProposalService } from "./CrewProposalService.ts";
 import { CrewStopService } from "./CrewStopService.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
-import { A2AHomeRegistrar } from "./HomeRegistrar.ts";
+import { A2AHomeRegistrar, participantIdForThread } from "./HomeRegistrar.ts";
 import { A2ALedger } from "./LedgerService.ts";
 import { ParticipantPlacementService, PlacementStorageError } from "./PlacementService.ts";
 import { A2ASendService } from "./SendService.ts";
@@ -179,6 +186,7 @@ const invocation = {
   capabilities: new Set(["orchestration"] as const),
   issuedAt: 1,
 };
+const peerEnvironmentId = EnvironmentId.make("environment:j5:build-box");
 const ledgerProjectId = LedgerProjectId.make("ledger:j5:spawn-workspace");
 const callerParticipantId = ParticipantId.make("agent:j5:spawn-workspace-caller");
 const childParticipantId = ParticipantId.make("agent:j5:spawn-workspace-child");
@@ -230,8 +238,17 @@ const spawnHarness = (input: {
   readonly memberModels?: Layer.Layer<CrewMemberModels>;
   /** Records the ref of each fetch from origin. */
   readonly fetches?: Ref.Ref<ReadonlyArray<string>>;
+  /** A linked J5 machine, for a spawn there; this server links to none unless a test says so. */
+  readonly peer?: {
+    readonly access?: AuthMcpClientAccess;
+    readonly peered?: boolean;
+    readonly answer?: Effect.Effect<unknown, OrchestratorMcpFailure>;
+  };
 }) =>
   Effect.gen(function* () {
+    const peerCalls = yield* Ref.make<
+      ReadonlyArray<Parameters<PeerMcpClient.PeerMcpClient["Service"]["call"]>[0]>
+    >([]);
     const log = yield* Ref.make<ReadonlyArray<string>>([]);
     const commands =
       input.commands ?? (yield* Ref.make<ReadonlyArray<OrchestrationV2ServerCommand>>([]));
@@ -271,10 +288,43 @@ const spawnHarness = (input: {
                 : callerThread(threadId, input.callerRuntimeMode);
             }),
           );
+    const peer = input.peer;
     const dependencies = Layer.mergeAll(
       input.memberModels ?? permissiveCrewMemberModels,
       agentPersonaEscalationsTestLayer(),
       noDocumentTextLayer,
+      // Routes are rows in J5's own tables, so a spawn elsewhere needs them migrated.
+      peer === undefined
+        ? layerMemory
+        : Layer.effectDiscard(runJ5A2AMigrations()).pipe(Layer.provideMerge(layerMemory)),
+      Layer.mock(PeerLinks.PeerLinks)({
+        enabled: Effect.succeed(true),
+        get: (environmentId) =>
+          Effect.succeed(
+            peer === undefined || environmentId !== peerEnvironmentId
+              ? Option.none()
+              : Option.some({
+                  environmentId,
+                  label: "Build box",
+                  urls: ["http://build-box:3773"],
+                  access: peer.access ?? "full-access",
+                  linkedAt: createdAt,
+                  expiresAt: DateTime.add(createdAt, { days: 30 }),
+                  lastReachedAt: null,
+                  lastError: null,
+                }),
+          ),
+      }),
+      Layer.mock(PeerRegistryService)({
+        get: () => Effect.succeed(peer?.peered === false ? null : ({} as PeerRecord)),
+      }),
+      Layer.mock(PeerMcpClient.PeerMcpClient)({
+        call: (call) =>
+          Ref.update(peerCalls, (calls) => [...calls, call]).pipe(
+            Effect.andThen(peer?.answer ?? Effect.die("no linked machine answers in this test")),
+            Effect.map((answer) => answer as never),
+          ),
+      }),
       Layer.mock(A2ASendService)({ listParticipants: () => Effect.succeed([callerRow]) }),
       Layer.mock(A2AHomeRegistrar)({
         getHomeForThread: () =>
@@ -538,6 +588,7 @@ const spawnHarness = (input: {
       factProjects,
       folderClaims,
       recorded,
+      peerCalls,
     };
   });
 
@@ -2331,5 +2382,255 @@ it.effect("binds the first retry of a pre-upgrade spawn and holds its key to it"
       const again = yield* harness.call(args);
       assert.deepStrictEqual(again.result, first.result);
     }).pipe(Effect.provide(harness.layer));
+  }),
+);
+
+const remoteProjectId = LedgerProjectId.make("ledger:j5:build-box");
+const remoteResult = {
+  participant_id: ParticipantId.make("agent:j5:a2a:thread:build-box-child"),
+  thread_id: ThreadId.make("thread:build-box-child"),
+  link: "<t3-thread://v2/environment:j5:build-box/thread:build-box-child>",
+  run_id: null,
+  project_id: remoteProjectId,
+  project_title: "Build box project",
+  placement: {
+    placement_parent_id: null,
+    provenance: {
+      kind: "spawned-by" as const,
+      spawned_by_participant_id: callerParticipantId,
+      source: "j5_spawn" as const,
+    },
+  },
+};
+const remoteArgs = {
+  ...spawnArgs,
+  environment_id: peerEnvironmentId,
+  project_id: remoteProjectId,
+  workspace: { type: "root" },
+  client_request_id: "remote-1",
+} satisfies J5SpawnAgentInput;
+
+it.effect("starts an agent on a linked J5 machine as the caller, and records the way to it", () =>
+  Effect.gen(function* () {
+    const harness = yield* spawnHarness({
+      checkout: { isRepo: false, refName: null },
+      peer: { answer: Effect.succeed(remoteResult) },
+    });
+    yield* Effect.gen(function* () {
+      const args = { ...remoteArgs, author_threads: [invocation.thread.threadId] };
+      const spawned = yield* harness.call(args);
+      assert.isFalse(spawned.isFailure, JSON.stringify(spawned.result));
+      assert.deepStrictEqual(spawned.result, { ...remoteResult, server: "Build box" });
+      // Nothing is created here: the other machine creates the agent.
+      assert.deepStrictEqual(yield* Ref.get(harness.commands), []);
+
+      const [sent] = yield* Ref.get(harness.peerCalls);
+      assert.equal(sent?.tool, "j5_spawn_agent");
+      assert.equal(sent?.environmentId, peerEnvironmentId);
+      assert.deepStrictEqual(sent?.limits, {
+        runtimeMode: "full-access",
+        interactionMode: "default",
+      });
+      assert.deepStrictEqual(sent?.sender, {
+        environmentId: invocation.environmentId,
+        threadId: invocation.thread.threadId,
+        title: "Caller",
+      });
+      const { client_request_id: scopedKey, linked_spawn: facts, ...rest } = sent!.arguments;
+      // Scoped to the caller, as every caller here reaches that machine as the one link session.
+      assert.match(String(scopedKey), /^fwd:[0-9a-f]{64}$/);
+      assert.notProperty(rest, "environment_id");
+      assert.notProperty(rest, "author_threads");
+      assert.deepStrictEqual(facts, {
+        spawner_project_id: ledgerProjectId,
+        pick_source: "agent",
+        caller_access: { runtime_mode: "full-access" },
+        author_models: [],
+        authors_partly_unknown: false,
+      });
+
+      yield* harness.call(args);
+      const [, retried] = yield* Ref.get(harness.peerCalls);
+      assert.equal(retried?.arguments.client_request_id, scopedKey);
+      assert.deepStrictEqual(
+        yield* findPeerRoute(yield* SqlClient.SqlClient, remoteResult.participant_id),
+        { environmentId: peerEnvironmentId, projectId: remoteProjectId },
+      );
+    }).pipe(Effect.provide(harness.layer));
+  }),
+);
+
+it.effect("refuses a spawn on another machine it can't make, and starts nothing", () =>
+  Effect.gen(function* () {
+    const cases: ReadonlyArray<{
+      readonly name: string;
+      readonly peer?: NonNullable<Parameters<typeof spawnHarness>[0]["peer"]>;
+      readonly scope?: McpInvocationScope;
+      readonly args?: Partial<J5SpawnAgentInput>;
+      readonly code?: string;
+      readonly says: string;
+    }> = [
+      {
+        name: "not linked",
+        args: { environment_id: EnvironmentId.make("environment:j5:unknown") },
+        says: "t3_environment_links",
+      },
+      { name: "below Full access", peer: { access: "auto-accept-edits" }, says: "Full access" },
+      { name: "not peered", peer: { peered: false }, says: "not peered" },
+      {
+        name: "unreachable",
+        peer: {
+          answer: Effect.fail(
+            new OrchestratorMcpFailure({
+              code: "peer_unreachable",
+              message: "The linked environment stopped answering.",
+            }),
+          ),
+        },
+        code: "peer_unreachable",
+        says: '"Build box"',
+      },
+      {
+        name: "refused there",
+        peer: {
+          answer: Effect.fail(
+            new OrchestratorMcpFailure({
+              code: "orchestration_error",
+              message: JSON.stringify({
+                code: "J5AgentToolStateError",
+                message: "This server has no project ledger:j5:build-box.",
+              }),
+            }),
+          ),
+        },
+        code: "J5AgentToolStateError",
+        says: 'On "Build box": This server has no project',
+      },
+      { name: "an outside agent", scope: outsideScope("full-access"), says: "outside agent" },
+      { name: "allow_once", args: { allow_once: "escalation:1" }, says: "Allow this once" },
+      { name: "own checkout", args: { workspace: { type: "shared" } }, says: "your own checkout" },
+      { name: "no project", args: { project_id: undefined }, says: "t3_project_list" },
+    ];
+    for (const refusal of cases) {
+      const harness = yield* spawnHarness({
+        checkout: { isRepo: false, refName: null },
+        peer: { answer: Effect.succeed(remoteResult), ...refusal.peer },
+        ...(refusal.scope === undefined ? {} : { scope: refusal.scope }),
+      });
+      yield* Effect.gen(function* () {
+        const refused = yield* harness.call(
+          JSON.parse(JSON.stringify({ ...remoteArgs, ...refusal.args })),
+        );
+        assert.isTrue(refused.isFailure, refusal.name);
+        assert.include(message(refused), refusal.says, refusal.name);
+        if (refusal.code !== undefined)
+          assert.equal((refused.result as { readonly code: string }).code, refusal.code);
+        assert.deepStrictEqual(yield* Ref.get(harness.commands), [], refusal.name);
+      }).pipe(Effect.provide(harness.layer));
+    }
+  }),
+);
+
+/** A linked J5 machine's server calling for one of its agents, as upstream's link authenticator builds it. */
+const linkedScope = (input: {
+  readonly narrowedTo?: RuntimeMode;
+  readonly sender?: boolean;
+}): McpInvocationScope => ({
+  ...outsideScope("full-access", "link-session"),
+  client: {
+    sessionId: "link-session",
+    label: "Laptop",
+    access: "full-access",
+    linked: true,
+    ...(input.narrowedTo === undefined
+      ? {}
+      : { narrowedTo: { runtimeMode: input.narrowedTo, interactionMode: "default" } }),
+    ...(input.sender === false
+      ? {}
+      : {
+          senderThread: {
+            environmentId: EnvironmentId.make("environment:j5:laptop"),
+            threadId: ThreadId.make("thread:laptop-captain"),
+            title: "Captain",
+          },
+        }),
+  },
+});
+const linkedArgs = {
+  ...spawnArgs,
+  project_id: LedgerProjectId.make(otherProjectId),
+  workspace: { type: "root" },
+  client_request_id: "fwd:laptop-key",
+  linked_spawn: {
+    spawner_project_id: LedgerProjectId.make("ledger:j5:laptop"),
+    pick_source: "agent",
+    caller_access: { runtime_mode: "auto-accept-edits" },
+    author_models: [],
+    authors_partly_unknown: false,
+  },
+} satisfies J5SpawnAgentInput;
+
+it.effect("an agent on a linked machine spawns here as a root, capped by its access", () =>
+  Effect.gen(function* () {
+    const harness = yield* spawnHarness({
+      checkout: { isRepo: false, refName: null },
+      scope: linkedScope({ narrowedTo: "auto-accept-edits" }),
+    });
+    yield* Effect.gen(function* () {
+      const spawner = participantIdForThread(ThreadId.make("thread:laptop-captain"));
+      const broader = yield* harness.call({ ...linkedArgs, runtime_mode: "full-access" });
+      assert.isTrue(broader.isFailure);
+      assert.include(message(broader), "broader than your own");
+
+      const spawned = yield* harness.call(linkedArgs);
+      assert.isFalse(spawned.isFailure, JSON.stringify(spawned.result));
+      const placement = (spawned.result as { readonly placement: unknown }).placement;
+      assert.deepStrictEqual(placement, {
+        placement_parent_id: null,
+        provenance: {
+          kind: "spawned-by",
+          spawned_by_participant_id: spawner,
+          source: "j5_spawn",
+        },
+      });
+      const [fact] = yield* Ref.get(harness.recorded);
+      assert.deepStrictEqual(fact?.provenance, {
+        kind: "spawned-by",
+        spawnedByParticipantId: spawner,
+        source: "j5_spawn",
+        spawnedByEnvironmentId: EnvironmentId.make("environment:j5:laptop"),
+      });
+      assert.deepStrictEqual(fact?.peerSpawner, {
+        environmentId: EnvironmentId.make("environment:j5:laptop"),
+        projectId: LedgerProjectId.make("ledger:j5:laptop"),
+      });
+      assert.isUndefined(fact?.outsideSpawnerName);
+      const [create, brief] = yield* Ref.get(harness.commands);
+      if (create?.type === "thread.create") assert.equal(create.runtimeMode, "auto-accept-edits");
+      assert.equal(brief?.type, "message.dispatch");
+      if (brief?.type === "message.dispatch") {
+        assert.include(brief.text, `spawned_by: ${spawner}\n`);
+        assert.include(brief.text, "spawner_server: environment:j5:laptop\n");
+        assert.include(brief.text, "Reply to it with j5_send_message to spawned_by");
+        assert.notInclude(brief.text, "spawner_thread_id");
+      }
+    }).pipe(Effect.provide(harness.layer));
+  }),
+);
+
+it.effect("refuses a linked machine's spawn that names no agent of its own", () =>
+  Effect.gen(function* () {
+    for (const [scope, args] of [
+      [linkedScope({ sender: false }), linkedArgs],
+      [linkedScope({}), { ...linkedArgs, linked_spawn: undefined }],
+    ] as const) {
+      const harness = yield* spawnHarness({ checkout: { isRepo: false, refName: null }, scope });
+      yield* Effect.gen(function* () {
+        const refused = yield* harness.call(JSON.parse(JSON.stringify(args)));
+        assert.isTrue(refused.isFailure);
+        assert.include(message(refused), "only for one of its own agents");
+        assert.deepStrictEqual(yield* Ref.get(harness.commands), []);
+      }).pipe(Effect.provide(harness.layer));
+    }
   }),
 );

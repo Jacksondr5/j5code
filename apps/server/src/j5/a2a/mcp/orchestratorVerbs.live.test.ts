@@ -81,6 +81,8 @@ import { PlacementCommandId } from "../placementContracts.ts";
 import { J5A2ARuntimeLayer, J5ThreadRegistrationLayer } from "../runtimeLayer.ts";
 import { spawnThreadId } from "../spawnIds.ts";
 import { J5ToolkitHandlersLive } from "./handlers.ts";
+import { PeerLinks } from "../../../peer/PeerLinks.ts";
+import { PeerMcpClient } from "../../../peer/PeerMcpClient.ts";
 import { J5SpawnAgentResult, J5Toolkit } from "./tools.ts";
 import { noDocumentTextLayer } from "../../test-support/documentText.ts";
 
@@ -227,6 +229,9 @@ const handlersLayer = J5ToolkitHandlersLive.pipe(
     Layer.mergeAll(
       Layer.mock(ManagedProjectFolders)({ namedProjectsRoot: "/tmp/j5-luna-named-projects" }),
       Layer.mock(ProjectService.ProjectService)({}),
+      // A spawn on a linked machine needs these; this one stays here.
+      Layer.mock(PeerLinks)({}),
+      Layer.mock(PeerMcpClient)({}),
       serverConfigLayer,
     ),
   ),
@@ -265,7 +270,7 @@ const liveLayer = Layer.mergeAll(
   Layer.provide(mcpSessionRegistryTestLayer),
   Layer.provide(Layer.mock(GitVcsDriver)({})),
   Layer.provide(Layer.mergeAll(Layer.mock(GitManager)({}), Layer.mock(TerminalManager)({}))),
-  Layer.provide(SqlitePersistence.layerMemory),
+  Layer.provideMerge(SqlitePersistence.layerMemory),
   Layer.provide(checkpointStoreLayer),
   Layer.provide(serverConfigLayer),
   Layer.provide(serverSettingsLayer),
