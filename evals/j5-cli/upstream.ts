@@ -3,17 +3,16 @@
  * The parts of upstream's mcp-tool-use eval this runner shares: cases, sample state, T3 tool
  * schemas, T3 tool results and grading.
  *
- * Mirror: `withProductFields`, `SUBAGENT_WATCH_ERROR`, `codexCall` and `codexMessages` copy
- * evals/mcp-tool-use/run.ts, which does not export them. Replace them with imports once it does.
+ * Mirror: `codexCall` and `codexMessages` copy evals/mcp-tool-use/run.ts, which does not export
+ * them. Replace them with imports once it does.
  */
 import * as NodeFS from "node:fs";
 import * as NodePath from "node:path";
 import * as NodeZlib from "node:zlib";
-import { EnvironmentId, ORCHESTRATOR_MCP_RUNNING_TASK_NEXT, ThreadId } from "@t3tools/contracts";
-import { formatThreadLink } from "@t3tools/shared/threadLinks";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
+import { FetchHttpClient } from "effect/http";
 import { Tool } from "effect/ai";
 import * as McpSchema from "effect/ai/McpSchema";
 
@@ -23,14 +22,14 @@ import { AttachmentToolkit } from "../../apps/server/src/mcp/toolkits/attachment
 import { DeviceToolkit } from "../../apps/server/src/mcp/toolkits/device/tools.ts";
 import { EnvironmentToolkit } from "../../apps/server/src/mcp/toolkits/environment/tools.ts";
 import { HtmlToolkit } from "../../apps/server/src/mcp/toolkits/html/tools.ts";
+import { IssuesToolkit } from "../../apps/server/src/mcp/toolkits/issues/tools.ts";
+import { MessageToolkit } from "../../apps/server/src/mcp/toolkits/message/tools.ts";
+import { ThemeToolkit } from "../../apps/server/src/mcp/toolkits/theme/tools.ts";
 import { OrchestratorToolkit } from "../../apps/server/src/mcp/toolkits/orchestrator/tools.ts";
 import { PreviewToolkit } from "../../apps/server/src/mcp/toolkits/preview/tools.ts";
 import { PreviewControlsToolkit } from "../../apps/server/src/mcp/toolkits/previewControls/tools.ts";
 import { ProjectToolkit } from "../../apps/server/src/mcp/toolkits/project/tools.ts";
-import {
-  CHILD_PULL_REQUEST_REPORT_NEXT,
-  PullRequestsToolkit,
-} from "../../apps/server/src/mcp/toolkits/pullRequests/tools.ts";
+import { PullRequestsToolkit } from "../../apps/server/src/mcp/toolkits/pullRequests/tools.ts";
 import { ThreadToolkit } from "../../apps/server/src/mcp/toolkits/thread/tools.ts";
 import { WorktreeToolkit } from "../../apps/server/src/mcp/toolkits/worktree/tools.ts";
 import { J5AttachmentUploadToolkit } from "../../apps/server/src/j5/a2a/mcp/attachments.ts";
@@ -45,6 +44,7 @@ import {
   J5ThreadToolkit,
 } from "../../apps/server/src/j5/a2a/mcp/upstreamCatalog.ts";
 import {
+  answerToolCall,
   buildBase,
   buildMessages,
   makeSample,
@@ -188,12 +188,15 @@ const CATALOGS = {
     AttachmentToolkit,
     ProjectToolkit,
     EnvironmentToolkit,
+    ThemeToolkit,
     PreviewControlsToolkit,
     WorktreeToolkit,
     PullRequestsToolkit,
     PreviewToolkit,
+    IssuesToolkit,
     DeviceToolkit,
     HtmlToolkit,
+    MessageToolkit,
   ]),
   j5: toolsOf([
     PreviewToolkit,
@@ -206,11 +209,14 @@ const CATALOGS = {
     J5ProjectToolkit,
     J5EnvironmentToolkit,
     J5ArtifactToolkit,
+    ThemeToolkit,
     PreviewControlsToolkit,
     WorktreeToolkit,
     PullRequestsToolkit,
+    IssuesToolkit,
     DeviceToolkit,
     HtmlToolkit,
+    MessageToolkit,
   ]),
 };
 export type Catalog = keyof typeof CATALOGS;
@@ -225,6 +231,7 @@ export const t3McpTools = (testCase: McpToolUseCase, catalog: Catalog) => {
   const scope = {
     thread: { subagent: testCase.setup.role === "delegated-child" },
     linkedEnvironments: testCase.setup.linkedEnvironments === true,
+    forge: testCase.setup.forge !== false,
   } as unknown as McpInvocationContext.McpInvocationContext["Service"];
   const client = { protocolVersion: "2025-06-18", capabilities: {} };
   const enabled = (tool: Tool.Any) => {
@@ -238,60 +245,16 @@ export const t3McpTools = (testCase: McpToolUseCase, catalog: Catalog) => {
       )
     );
   };
-  return CATALOGS[catalog].filter(enabled).map((tool) => ({
-    name: tool.name,
-    description: Tool.getDescription(tool) ?? "",
-    inputSchema: advertisedJsonSchema(tool),
-  }));
+  return CATALOGS[catalog].filter(enabled).map((tool) => {
+    const meta = Context.getOrUndefined(tool.annotations, Tool.Meta);
+    return {
+      name: tool.name,
+      description: Tool.getDescription(tool) ?? "",
+      inputSchema: advertisedJsonSchema(tool),
+      ...(meta === undefined ? {} : { _meta: meta }),
+    };
+  });
 };
-
-const EVAL_ENVIRONMENT_ID = EnvironmentId.make("eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee");
-
-const withProductFields = (name: string, value: unknown, child: boolean): unknown => {
-  if (!isRecord(value)) return value;
-  const linked = (thread: unknown, idKey = "threadId") => {
-    if (!isRecord(thread) || thread.link !== undefined) return thread;
-    const id = thread[idKey] ?? thread.id;
-    return typeof id === "string"
-      ? {
-          ...thread,
-          link: formatThreadLink({
-            environmentId: EVAL_ENVIRONMENT_ID,
-            threadId: ThreadId.make(id),
-          }),
-        }
-      : thread;
-  };
-  const listed = (key: string) =>
-    Array.isArray(value[key]) ? { ...value, [key]: value[key].map((item) => linked(item)) } : value;
-  switch (name) {
-    case "delegate_task":
-    case "task_status": {
-      const task = linked(value, "childThreadId") as Record<string, unknown>;
-      const running = task.status === "running" && task.next === undefined;
-      return running ? { ...task, next: ORCHESTRATOR_MCP_RUNNING_TASK_NEXT } : task;
-    }
-    case "t3_thread_read":
-      return { ...value, thread: linked(value.thread) };
-    case "t3_thread_launch":
-    case "t3_thread_send":
-    case "run_scheduled_task_now":
-      return linked(value);
-    case "t3_thread_list":
-    case "create_threads":
-      return listed("threads");
-    case "t3_thread_search":
-      return listed("matches");
-    case "link_pull_request":
-    case "link_pull_requests":
-      return child ? { ...value, next: CHILD_PULL_REQUEST_REPORT_NEXT } : value;
-    default:
-      return value;
-  }
-};
-
-const SUBAGENT_WATCH_ERROR =
-  "This thread is a subagent, so it cannot watch pull requests. Its parent thread owns the pull request: finish your task and report back instead.";
 
 const valueText = (value: unknown) =>
   typeof value === "string" ? value : (JSON.stringify(value) ?? "");
@@ -361,9 +324,10 @@ const capabilities = (sample: Sample, value: unknown, codex: boolean, effort: st
       }
     : value;
 
+let nextToolUseId = 0;
 /**
  * T3's result for one call, as upstream answers it: device tools from the sample's device world,
- * then the case's mock, then upstream's default.
+ * J5's defaults for J5 tools, then upstream's own answer from the case's mocks and world.
  */
 export const t3Result = async (
   sample: Sample,
@@ -371,9 +335,7 @@ export const t3Result = async (
   input: Readonly<Record<string, unknown>>,
   options: { readonly codex: boolean; readonly effort: string },
 ): Promise<{ readonly value: unknown; readonly isError: boolean }> => {
-  const { setup } = sample.testCase;
-  const child = setup.role === "delegated-child";
-  const mock = setup.mocks?.[name];
+  const mock = sample.testCase.setup.mocks?.[name];
   // A mock that is a T3 device error fails inside T3's device tools, as upstream does.
   const failure = deviceFailure(mock);
   const fromWorld = mock === undefined || mock === "default" || failure !== undefined;
@@ -381,12 +343,27 @@ export const t3Result = async (
     const result = await Effect.runPromise(sample.devices.call(name, input, failure));
     return { value: result.text, isError: result.isError };
   }
-  const shaped = (value: unknown) =>
-    name === "orchestrator_capabilities"
-      ? capabilities(sample, value, options.codex, options.effort)
-      : withProductFields(name, value, child);
-  if (mock !== undefined && mock !== "default") return { value: shaped(mock), isError: false };
-  if (name === "watch_pull_request" && child) return { value: SUBAGENT_WATCH_ERROR, isError: true };
-  const value = name.startsWith("j5_") ? j5Default(sample, name, input) : undefined;
-  return { value: value ?? shaped(t3Default(sample, name, input)), isError: false };
+  if (name.startsWith("j5_") && (mock === undefined || mock === "default")) {
+    const value = j5Default(sample, name, input);
+    if (value !== undefined) return { value, isError: false };
+  }
+  if (name === "orchestrator_capabilities") {
+    const value = mock !== undefined && mock !== "default" ? mock : t3Default(sample, name, input);
+    return { value: capabilities(sample, value, options.codex, options.effort), isError: false };
+  }
+  // Upstream answers from the case's mocks and world: secret files, forge state, page sources.
+  // It refuses a tool its own sample never loaded, and the CLI loads tools itself.
+  const full = `mcp__t3-code__${name}`;
+  const tools = sample.tools as Array<{ name: string }>;
+  if (!tools.some((tool) => tool.name === full)) tools.push({ name: full });
+  // The config and HTTP client serve only its shell simulator, which T3 tools never reach.
+  const block = await Effect.runPromise(
+    answerToolCall(sample, {} as Parameters<typeof answerToolCall>[1], {
+      type: "tool_use",
+      id: `eval-t3-${nextToolUseId++}`,
+      name: full,
+      input,
+    }).pipe(Effect.orDie, Effect.provide(FetchHttpClient.layer)),
+  );
+  return { value: block.content, isError: block.is_error === true };
 };

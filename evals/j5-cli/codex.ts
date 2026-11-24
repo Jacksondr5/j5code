@@ -14,6 +14,7 @@ import {
   buildCodexTurnStartParams,
   CODEX_THREAD_CONFIG,
 } from "../../apps/server/src/orchestration-v2/Adapters/CodexAdapterV2.ts";
+import { toMcpElicitationResponse } from "../../apps/server/src/provider/CodexMcpElicitation.ts";
 import type { SampleRun } from "../mcp-tool-use/run.ts";
 import { printCommand, simulate } from "./shell.ts";
 import { emptyUsage, type Usage } from "./usage.ts";
@@ -50,6 +51,12 @@ const startAppServer = (env: NodeJS.ProcessEnv) => {
     if (message.method !== undefined && message.id !== undefined) {
       // A request from Codex, such as an approval. Full access asks for none; refuse anything else.
       if (process.env.EVAL_DEBUG) console.error(`[codex] request ${message.method}`);
+      // Full access: J5's Codex adapter accepts MCP elicitations (tool-call approvals) itself.
+      if (message.method === "mcpServer/elicitation/request") {
+        const result = toMcpElicitationResponse(message.params as never, "accept");
+        child.stdin.write(`${JSON.stringify({ id: message.id, result })}\n`);
+        return;
+      }
       child.stdin.write(
         `${JSON.stringify({ id: message.id, error: { code: -32601, message: "Not supported in the eval." } })}\n`,
       );
@@ -211,7 +218,9 @@ export const runCodex = async (
           run.calls.push(call);
           mcpCalls.set(String(item.id), call);
           if (run.calls.length > options.maxTurns * 2) {
-            void server.request("turn/interrupt", { threadId, turnId: params.turnId });
+            void server
+              .request("turn/interrupt", { threadId, turnId: params.turnId })
+              .catch(() => {});
           }
         } else if (method === "item/started" && item?.type === "collabAgentToolCall") {
           run.calls.push({ step: run.calls.length, tool: "Agent", input: item });
