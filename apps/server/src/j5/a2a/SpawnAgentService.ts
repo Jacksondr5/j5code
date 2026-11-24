@@ -458,13 +458,24 @@ const spawnOnPeer = Effect.fn("j5.a2a.spawnOnPeer")(function* (
       `"${label}" was linked with ${access} access, and starting an agent there needs Full access, so the agent can use J5's tools there.`,
       "Link it again with Full access, or start the agent here without environment_id.",
     );
-  const peered = yield* (yield* PeerRegistryService)
+  const peers = yield* PeerRegistryService;
+  const peered = yield* peers
     .get(environmentId)
     .pipe(Effect.mapError(unreadable(`Peering with "${label}"`)));
   if (peered === null)
     return yield* stateError(
       `This server is not peered with "${label}", so an agent started there could not message you or reply.`,
       "Peer the two machines so they can message each other, then retry.",
+    );
+  // An older J5 there would take the spawner for an outside agent that can't be replied to.
+  if (
+    (yield* peers
+      .capabilities(environmentId)
+      .pipe(Effect.mapError(unreadable(`What "${label}" can do`)))).spawn !== true
+  )
+    return yield* stateError(
+      `"${label}" runs an older J5 that can't start a Peer Agent for another machine.`,
+      "Update J5 there, or start the agent on your own machine without environment_id.",
     );
 
   const pickSource =
