@@ -40,7 +40,8 @@ import * as SqlClient from "effect/sql/SqlClient";
 import { McpInvocationContext, type McpInvocationScope } from "../../mcp/McpInvocationContext.ts";
 import * as PeerLinks from "../../peer/PeerLinks.ts";
 import * as PeerMcpClient from "../../peer/PeerMcpClient.ts";
-import type { PeerRecord } from "@t3tools/contracts/j5";
+import type { PeerCapabilities, PeerRecord } from "@t3tools/contracts/j5";
+import { ownPeerCapabilities } from "./peerProtocol.ts";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { findPeerRoute } from "./peerCounterparty.ts";
 import { PeerRegistryService } from "./PeerRegistryService.ts";
@@ -245,6 +246,8 @@ const spawnHarness = (input: {
     readonly answer?: Effect.Effect<unknown, OrchestratorMcpFailure>;
     /** Routes can't be written here: the route table was never made. */
     readonly routesUnwritable?: boolean;
+    /** What the linked machine says it can do; this release's by default. */
+    readonly capabilities?: PeerCapabilities;
   };
 }) =>
   Effect.gen(function* () {
@@ -319,6 +322,7 @@ const spawnHarness = (input: {
       }),
       Layer.mock(PeerRegistryService)({
         get: () => Effect.succeed(peer?.peered === false ? null : ({} as PeerRecord)),
+        capabilities: () => Effect.succeed(peer?.capabilities ?? ownPeerCapabilities),
       }),
       Layer.mock(PeerMcpClient.PeerMcpClient)({
         call: (call) =>
@@ -2479,6 +2483,11 @@ it.effect("refuses a spawn on another machine it can't make, and starts nothing"
       },
       { name: "below Full access", peer: { access: "auto-accept-edits" }, says: "Full access" },
       { name: "not peered", peer: { peered: false }, says: "not peered" },
+      {
+        name: "an older J5 there",
+        peer: { capabilities: { poll: true } },
+        says: "runs an older J5",
+      },
       {
         name: "unreachable",
         peer: {
