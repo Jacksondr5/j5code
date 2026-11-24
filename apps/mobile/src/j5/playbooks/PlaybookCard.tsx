@@ -239,10 +239,15 @@ export function PlaybookSteps(props: {
   );
 }
 
-/** A run's chip: its time today, or its date on another day. The status shows on the card face. */
+/** A run's chip: its time today, or its date and time on another day. The status shows on the card face. */
 function runChipTime(createdAt: string): string {
   const created = new Date(createdAt);
   return created.toDateString() === new Date().toDateString()
     ? created.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
-    : created.toLocaleDateString([], { month: "short", day: "numeric" });
+    : created.toLocaleString([], {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      });
 }

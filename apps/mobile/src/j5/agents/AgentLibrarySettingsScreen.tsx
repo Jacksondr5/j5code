@@ -13,7 +13,11 @@ import { useSettingsFormNavigation } from "./SettingsFormScreen";
 import { sendWhenReconnected } from "./watchEnvironmentSessions";
 import { personaRowMarker, personaSheetActions } from "./personaSheetActions";
 import { Menu } from "../../components/ui/Menu";
-import { SymbolView } from "../../components/ui/AppSymbol";
+import { SymbolView, type AppSymbolName } from "../../components/ui/AppSymbol";
+import { AppActivityIndicator } from "../../components/ui/AppActivityIndicator";
+import { ListRowLayout } from "../../components/ui/ListRowLayout";
+import { RowPressable } from "../../components/ui/RowPressable";
+import { useResolveClassNames } from "uniwind";
 import {
   agentPersonaFolderNudges,
   agentPersonaFolderStatusLabel,
@@ -84,6 +88,15 @@ function OwnerAgentLibrarySettingsScreen() {
   )
     ? selectedEnvironmentId
     : (connectedEnvironments[0]?.environmentId ?? null);
+  const connectionState = connectedEnvironments.find(
+    (environment) => environment.environmentId === effectiveEnvironmentId,
+  )?.connectionState;
+  // Every read of a server that isn't connected fails with its raw id, so the page says it once.
+  const offline =
+    connectionState !== undefined &&
+    connectionState !== "connected" &&
+    connectionState !== "connecting" &&
+    connectionState !== "reconnecting";
   const providers = useAtomValue(
     effectiveEnvironmentId === null
       ? noProvidersAtom
@@ -111,16 +124,24 @@ function OwnerAgentLibrarySettingsScreen() {
           input: {},
         }),
   );
-  // Read here too, the same atom the Playbooks section uses, so the page appears once rather
+  // Read here too, the same atoms the Playbooks section uses, so the page appears once rather
   // than section by section. A read that fails counts as settled and shows its own error.
   const playbooks = useEnvironmentQuery(
     effectiveEnvironmentId === null
       ? null
       : j5Environment.playbookLibrary({ environmentId: effectiveEnvironmentId, input: {} }),
   );
-  const settled = [catalog, librarySources, playbooks].every(
-    (query) => query.data !== null || query.error !== null,
+  const playbookSources = useEnvironmentQuery(
+    effectiveEnvironmentId === null
+      ? null
+      : j5Environment.playbookSources({ environmentId: effectiveEnvironmentId, input: {} }),
   );
+  const settled =
+    effectiveEnvironmentId === null ||
+    offline ||
+    [catalog, librarySources, playbooks, playbookSources].every(
+      (query) => query.data !== null || query.error !== null,
+    );
   const setLibraryFolders = useAtomCommand(agentPersonaEnvironment.setLibraryFolders, {
     reportFailure: false,
   });
@@ -128,9 +149,11 @@ function OwnerAgentLibrarySettingsScreen() {
   // The import row that was tapped shows the spinner; the rest keep their look (D17).
   const [importingKind, setImportingKind] = useState<"folder" | "agent" | null>(null);
   // A session that may not change the library can still read and export it.
-  const canOperate = useAtomValue(
-    agentPersonaEnvironment.createAgentPersona.permissionAtom(effectiveEnvironmentId),
-  );
+  // Writes wait for an offline server, a lasting reason, so they are the only actions it disables.
+  const canOperate =
+    useAtomValue(
+      agentPersonaEnvironment.createAgentPersona.permissionAtom(effectiveEnvironmentId),
+    ) && !offline;
   const locked = busy || !canOperate;
   // Copying a persona imports it into the target, so only targets that permit the import are offered.
   const otherEnvironments = useAtomValue(
@@ -527,13 +550,18 @@ function OwnerAgentLibrarySettingsScreen() {
               : "In a Codex or Claude conversation, type @persona:id, or @ and the start of a persona’s name, to run a persona as a subagent."
           }
         >
+          {offline ? (
+            <InfoRow
+              text={`${environmentLabel} isn't connected. Personas and Playbooks load when it's back.`}
+            />
+          ) : null}
           {effectiveEnvironmentId === null ? (
             <InfoRow text="No connected environments" />
           ) : !settled ? (
             <InfoRow text="Loading…" />
-          ) : catalog.error ? (
+          ) : catalog.error && !offline ? (
             <InfoRow tone="danger" text={catalog.error} />
-          ) : personas.length === 0 ? (
+          ) : catalog.data === null ? null : personas.length === 0 ? (
             <InfoRow text="No personas in this library" />
           ) : (
             personas.map((persona, index) => (
@@ -541,7 +569,7 @@ function OwnerAgentLibrarySettingsScreen() {
                 // Per environment too, so a pending switch value never carries across a switch.
                 key={`${effectiveEnvironmentId}:${persona.personaId}`}
                 persona={persona}
-                borderTop={index > 0}
+                borderTop={index > 0 || offline}
                 canOperate={canOperate}
                 busy={busy}
                 onToggle={(enabled) => toggleAgent(persona.personaId, enabled)}
@@ -563,19 +591,19 @@ function OwnerAgentLibrarySettingsScreen() {
           {Platform.OS === "web" || effectiveEnvironmentId === null || !settled ? null : (
             <>
               <View className="border-t border-border-subtle" />
-              <SettingsActionRow
+              <ImportRow
                 icon="doc.text"
                 label="Import persona file"
                 disabled={!canOperate}
-                loading={importingKind === "agent"}
+                importing={importingKind === "agent"}
                 onPress={() => void importSelection("agent")}
               />
               <View className="border-t border-border-subtle" />
-              <SettingsActionRow
+              <ImportRow
                 icon="folder"
                 label="Import a folder of personas"
                 disabled={!canOperate}
-                loading={importingKind === "folder"}
+                importing={importingKind === "folder"}
                 onPress={() => void importSelection("folder")}
               />
             </>
@@ -591,9 +619,9 @@ function OwnerAgentLibrarySettingsScreen() {
                 : "Folders this environment reads YAML definitions from, on its machine; relative paths resolve from its state directory. Files are read on every catalog request, so edits and git pulls apply without a restart."
             }
           >
-            {librarySources.error ? (
+            {librarySources.error && !offline ? (
               <InfoRow tone="danger" text={librarySources.error} />
-            ) : folders.length === 0 ? (
+            ) : librarySources.data === null ? null : folders.length === 0 ? (
               <InfoRow text="No source folders. Only personal and imported personas are available." />
             ) : (
               folders.map((folder, index) => (
@@ -631,7 +659,10 @@ function OwnerAgentLibrarySettingsScreen() {
         {settled ? (
           <>
             <SettingsSection title="Playbooks">
-              <PlaybookLibrarySettingsSection environmentId={effectiveEnvironmentId} />
+              <PlaybookLibrarySettingsSection
+                environmentId={effectiveEnvironmentId}
+                offline={offline}
+              />
             </SettingsSection>
             <PointerNote
               title="Crews"
@@ -691,6 +722,40 @@ async function shareAgentDefinition(fileName: string, yaml: string) {
   const uri = `${FileSystem.cacheDirectory ?? ""}${fileName}`;
   await FileSystem.writeAsStringAsync(uri, yaml);
   await Sharing.shareAsync(uri, { mimeType: "application/yaml", dialogTitle: fileName });
+}
+
+/**
+ * An import action row. While its import runs it shows a spinner but keeps its look, as persona
+ * switches do (D17); upstream's ListActionRow dims a loading row. `importSelection` ignores taps.
+ */
+function ImportRow(props: {
+  readonly icon: AppSymbolName;
+  readonly label: string;
+  readonly disabled: boolean;
+  readonly importing: boolean;
+  readonly onPress: () => void;
+}) {
+  const rippleStyle = useResolveClassNames("bg-subtle-strong");
+  return (
+    <RowPressable
+      accessibilityRole="button"
+      accessibilityLabel={props.label}
+      accessibilityState={{ disabled: props.disabled, busy: props.importing }}
+      disabled={props.disabled}
+      onPress={props.onPress}
+      android_ripple={{ color: rippleStyle.backgroundColor }}
+      className="bg-grouped-card"
+    >
+      <ListRowLayout
+        icon={props.icon}
+        label={props.label}
+        disabled={props.disabled}
+        accessory={
+          props.importing ? <AppActivityIndicator colorClassName="accent-icon" /> : undefined
+        }
+      />
+    </RowPressable>
+  );
 }
 
 /** A topic managed elsewhere: a section title and one muted line, with no card (AG-13). */

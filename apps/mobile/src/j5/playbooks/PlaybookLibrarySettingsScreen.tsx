@@ -27,8 +27,11 @@ import { useStartPlaybookConversation } from "./startPlaybookConversation";
 
 export function PlaybookLibrarySettingsSection({
   environmentId,
+  offline,
 }: {
   environmentId: EnvironmentId | null;
+  /** Agent Setup says the server isn't connected; the section holds its errors and writes. */
+  offline: boolean;
 }) {
   const { connectedEnvironments } = useRemoteConnectionStatus();
   // Playbooks are managed on the servers the person owns (People and access AC27).
@@ -39,6 +42,7 @@ export function PlaybookLibrarySettingsSection({
     <PlaybookLibrary
       key={environment.environmentId}
       environmentId={environment.environmentId}
+      offline={offline}
       label={environment.environmentLabel}
       environments={environments.map((entry) => ({
         environmentId: entry.environmentId,
@@ -54,10 +58,12 @@ function PlaybookLibrary({
   environmentId,
   label,
   environments,
+  offline,
 }: {
   environmentId: EnvironmentId;
   label: string;
   environments: ReadonlyArray<{ environmentId: EnvironmentId; label: string }>;
+  offline: boolean;
 }) {
   const [projectId, setProjectId] = useState<ProjectId | null>(null);
   // As upstream's pickers: an archived project is not offered, but the chosen one stays listed.
@@ -71,7 +77,8 @@ function PlaybookLibrary({
   const scope = project ? { projectId: project.id } : {};
   const query = useEnvironmentQuery(j5Environment.playbookLibrary({ environmentId, input: scope }));
   const sources = useEnvironmentQuery(j5Environment.playbookSources({ environmentId, input: {} }));
-  const canOperate = useAtomValue(j5Environment.savePlaybook.permissionAtom(environmentId));
+  const canOperate =
+    useAtomValue(j5Environment.savePlaybook.permissionAtom(environmentId)) && !offline;
   const setFolders = useAtomCommand(j5Environment.setPlaybookFolders, { reportFailure: false });
   const exportDefinition = useAtomCommand(j5Environment.exportPlaybook, { reportFailure: false });
   const remove = useAtomCommand(j5Environment.deletePlaybook, { reportFailure: false });
@@ -145,7 +152,7 @@ function PlaybookLibrary({
           text={`Includes ${project.title}'s .j5/playbooks folder. Those override a library playbook with the same name in that project.`}
         />
       ) : null}
-      {error || sources.error || query.error ? (
+      {error || (!offline && (sources.error || query.error)) ? (
         <InfoRow borderTop tone="danger" text={error ?? sources.error ?? query.error ?? ""} />
       ) : null}
       {query.isPending && !query.data ? <InfoRow borderTop text="Loading playbooks…" /> : null}
