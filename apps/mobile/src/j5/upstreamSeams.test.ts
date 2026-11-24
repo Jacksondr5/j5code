@@ -434,6 +434,27 @@ const SEAMS: ReadonlyArray<Seam> = [
     reaches: ["const startsSomewhere = useStartsSomewhere();", "!startsSomewhere ||"],
   },
   {
+    file: "features/keyboard/HardwareKeyboardCommandProvider.tsx",
+    record: "case 90: the New thread shortcut follows the person's level",
+    from: "../../j5/sharing/startAccess",
+    reaches: [
+      "const startsSomewhere = useStartsSomewhere();",
+      'if (startsSomewhere) commands.add("newTask");',
+      'else commands.delete("newTask");',
+    ],
+  },
+  {
+    file: "features/keyboard/CommandPalette.tsx",
+    record: "case 90: the palette's New thread and Add project follow the person's level",
+    from: "../../j5/sharing/startAccess",
+    reaches: [
+      "const startableProjects = useStartableProjects(projects);",
+      '(key !== "newTask" || startsSomewhere) && (key !== "addProject" || addsProject)',
+      "activeProject && startableProjects.includes(activeProject)",
+      "const openProjects = startableProjects.filter(",
+    ],
+  },
+  {
     file: "features/threads/NewTaskDraftScreen.tsx",
     record: "case 90: starting follows the person's level",
     from: "../../j5/sharing/startAccess",
