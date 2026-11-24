@@ -2,7 +2,7 @@ import {
   type PlaybookStagesView,
   playbookRunSelection,
   playbookStagesView,
-  presentPlaybookStages,
+  presentPlaybook,
   rememberPlaybookStagesView,
   selectedPlaybookRun,
   stepsExpandedFor,
@@ -44,15 +44,12 @@ export function usePlaybookCard(environmentId: EnvironmentId, threadId: ThreadId
     rememberPlaybookStagesView(viewKey, next);
     setViewState(next);
   };
-  const changes = useEnvironmentQuery(
-    focused && query.data ? j5Environment.playbookChanges({ environmentId, input: {} }) : null,
-  );
   usePlaybookRefresh({
     focused,
     connected: runtime?.connectionState === "connected",
     supported,
     isPending: query.isPending,
-    refreshKey: `${thread?.latestRun?.runId}:${thread?.latestRun?.status}:${changes.data}`,
+    refreshKey: `${thread?.latestRun?.runId}:${thread?.latestRun?.status}`,
     refresh: query.refresh,
   });
   const runs = query.data?.runs ?? [];
@@ -74,7 +71,7 @@ export function usePlaybookCard(environmentId: EnvironmentId, threadId: ThreadId
 export type PlaybookCardState = NonNullable<ReturnType<typeof usePlaybookCard>>;
 
 function StepSegments(props: { readonly run: PlaybookCardState["active"] }) {
-  const { steps } = presentPlaybookStages(props.run);
+  const { steps } = presentPlaybook(props.run);
   if (steps.length < 2 || steps.length > 10) return null;
   return (
     <View
@@ -86,9 +83,9 @@ function StepSegments(props: { readonly run: PlaybookCardState["active"] }) {
         <View
           key={step.id}
           className={`h-[3px] min-w-0 flex-1 rounded-full ${
-            step.status === "completed"
-              ? "bg-adaptive-emerald-600-400"
-              : step.status === "inProgress"
+            step.state === "earlier"
+              ? "bg-foreground-muted/40"
+              : step.current
                 ? "bg-primary"
                 : "bg-foreground-muted/25"
           }`}
@@ -98,34 +95,28 @@ function StepSegments(props: { readonly run: PlaybookCardState["active"] }) {
   );
 }
 
-const positionLine = (card: PlaybookCardState, run: PlaybookCardState["active"]) =>
-  card.outOfDate
-    ? "Out of date"
-    : run.issue
-      ? "Needs attention"
-      : presentPlaybookStages(run).position;
+function cardStatus(card: PlaybookCardState, run: PlaybookCardState["active"]) {
+  return card.outOfDate ? "Out of date" : run.issue ? "Needs attention" : null;
+}
 
-/** "PLAYBOOK · Step 2 of 4" and its segments, then "‹title› · ‹current step›" (D10). */
+/** The carousel face shows the current position and any open requests. */
 function PlaybookFaceRows(props: {
   readonly card: PlaybookCardState;
   readonly run: PlaybookCardState["active"];
 }) {
   const { run } = props;
+  const display = presentPlaybook(run);
   return (
     <>
       <View className="h-4 flex-row items-center gap-1.5">
         <J5CardEyebrow label="Playbook" />
         <Text numberOfLines={1} className="shrink text-xs text-foreground-muted">
-          · {positionLine(props.card, run)}
+          {[cardStatus(props.card, run), ...display.flags].filter(Boolean).join(" · ")}
         </Text>
         <StepSegments run={run} />
       </View>
       <Text numberOfLines={1} className="text-sm font-t3-medium text-foreground">
-        {run.title}
-        <Text className="text-sm font-sans text-foreground-secondary">
-          {" "}
-          · {presentPlaybookStages(run).currentTitle}
-        </Text>
+        {display.headline}
       </Text>
     </>
   );
@@ -136,8 +127,10 @@ export function PlaybookCardFace(props: { readonly card: PlaybookCardState }) {
 }
 
 export const playbookCardLabel = (card: PlaybookCardState) => {
-  const display = presentPlaybookStages(card.active);
-  return `Playbook ${card.active.title}. ${positionLine(card, card.active)}. ${display.currentTitle}`;
+  const display = presentPlaybook(card.active);
+  return ["Playbook", display.headline, ...display.flags, cardStatus(card, card.active)]
+    .filter(Boolean)
+    .join(". ");
 };
 
 /** The expanded Playbook card: alone in the row, its steps under the folded face. */
@@ -147,7 +140,7 @@ export function PlaybookSteps(props: {
 }) {
   const { card } = props;
   const { runs, shown: run, view } = card;
-  const display = presentPlaybookStages(run);
+  const display = presentPlaybook(run);
   return (
     <View className="px-4 pb-3" accessibilityLabel="Playbook progress">
       <View className={`${J5_CARD_CHROME} px-4 pb-2.5 pt-[5.25px]`}>
@@ -165,6 +158,10 @@ export function PlaybookSteps(props: {
           nestedScrollEnabled
           accessibilityLabel="Playbook stages"
         >
+          <Text className="my-2 text-xs text-foreground">{run.title}</Text>
+          {display.holder && (
+            <Text className="my-2 text-xs text-foreground-muted">{display.holder}</Text>
+          )}
           {runs.length > 1 && (
             <ScrollView horizontal className="my-2" accessibilityLabel="Playbook runs">
               {runs.map((entry, index) => (
@@ -193,12 +190,17 @@ export function PlaybookSteps(props: {
               Progress could not refresh. Showing the last received state.
             </Text>
           )}
+          {run.checkpointSummary && (
+            <Text className="my-2 text-xs text-foreground-muted">
+              Submitted for approval: {run.checkpointSummary}
+            </Text>
+          )}
           {display.revisionHistory && (
             <Text className="my-2 text-xs text-foreground-muted">{display.revisionHistory}</Text>
           )}
-          {run.cancelReason && (
+          {display.cancelReason && (
             <Text accessibilityRole="alert" className="my-2 text-xs text-foreground-muted">
-              {run.cancelReason}
+              {display.cancelReason}
             </Text>
           )}
           {display.steps.map((step, index) => (
@@ -209,26 +211,22 @@ export function PlaybookSteps(props: {
               className="flex-row items-center gap-2 py-1"
             >
               <View className="h-4 w-6 items-center justify-center">
-                {step.status === "inProgress" ? (
+                {step.current ? (
                   <View className="size-3 items-center justify-center rounded-full border border-primary">
                     <View className="size-1 rounded-full bg-primary" />
                   </View>
                 ) : (
-                  <View className={step.status === "completed" ? undefined : "opacity-40"}>
+                  <View className={step.state === "earlier" ? undefined : "opacity-40"}>
                     <SymbolView
-                      name={step.status === "completed" ? "checkmark" : "circle"}
+                      name="circle"
                       size={12}
-                      tintColorClassName={
-                        step.status === "completed"
-                          ? "accent-adaptive-emerald-600-400"
-                          : "accent-foreground-muted"
-                      }
+                      tintColorClassName="accent-foreground-muted"
                     />
                   </View>
                 )}
               </View>
               <Text
-                className={`min-w-0 flex-1 text-xs ${step.status === "completed" ? "text-foreground-muted/55" : step.status === "inProgress" ? "font-t3-medium text-foreground/90" : "text-foreground-muted/70"}`}
+                className={`min-w-0 flex-1 text-xs ${step.state === "earlier" ? "text-foreground-muted/55" : step.current ? "font-t3-medium text-foreground/90" : "text-foreground-muted/70"}`}
               >
                 {index + 1}. {step.title}
               </Text>

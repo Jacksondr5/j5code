@@ -2,18 +2,12 @@ import {
   type PlaybookStagesView,
   playbookRunSelection,
   playbookStagesView,
-  presentPlaybookStages,
+  presentPlaybook,
   rememberPlaybookStagesView,
   selectedPlaybookRun,
 } from "@t3tools/client-runtime/j5/playbooks";
 import type { PlaybookProgress } from "@t3tools/contracts/j5";
-import {
-  AlertTriangleIcon,
-  BookOpenIcon,
-  CheckIcon,
-  CircleDotIcon,
-  CircleIcon,
-} from "lucide-react";
+import { AlertTriangleIcon, BookOpenIcon, CircleDotIcon, CircleIcon } from "lucide-react";
 import { useId, useState } from "react";
 import { ComposerBanner } from "../../components/chat/ComposerBanner";
 import {
@@ -45,7 +39,7 @@ export function PlaybookStages({
   const contentId = useId();
   const run = selectedPlaybookRun(runs, view.selectedRunId);
   if (!run) return null;
-  const display = presentPlaybookStages(run);
+  const display = presentPlaybook(run);
   const historical = run.runId !== runs[0]?.runId;
   const warning = stale;
   const runItems = runs.map((entry, index) => ({
@@ -59,7 +53,7 @@ export function PlaybookStages({
           render={<button type="button" />}
           aria-expanded={expanded}
           aria-controls={expanded ? contentId : undefined}
-          aria-label={`${expanded ? "Collapse" : "Expand"} playbook: ${run.title}. ${display.status}. ${display.position}. ${display.currentTitle}${historical ? ". Earlier run" : ""}${stale ? ". Progress out of date" : ""}`}
+          aria-label={`${expanded ? "Collapse" : "Expand"} playbook: ${run.title}. ${display.status}. ${display.headline}${display.flags.length ? `. ${display.flags.join(". ")}` : ""}${historical ? ". Earlier run" : ""}${stale ? ". Progress out of date" : ""}`}
           onClick={() => setView({ ...view, expanded: !expanded })}
           onPointerDown={(event) => event.preventDefault()}
         >
@@ -68,7 +62,7 @@ export function PlaybookStages({
           </ComposerBanner.Icon>
           <ComposerBanner.Content>
             <span className="min-w-0 flex-1 truncate font-medium text-foreground/80">
-              {run.title}
+              {display.headline}
             </span>
           </ComposerBanner.Content>
           <ComposerBanner.Actions>
@@ -90,23 +84,11 @@ export function PlaybookStages({
                 {display.status}
               </span>
             ) : null}
-            <ComposerBanner.Count
-              aria-label={
-                run.total === 0
-                  ? display.position
-                  : `${display.completedSteps} of ${run.total} stages complete`
-              }
-              className={run.status === "completed" ? "text-success" : undefined}
-            >
-              {run.total === 0 ? (
-                display.position
-              ) : (
-                <>
-                  <span className="sr-only">Stage </span>
-                  {display.completedSteps}/{run.total}
-                </>
-              )}
-            </ComposerBanner.Count>
+            {display.flags.map((flag) => (
+              <span key={flag} className="text-warning">
+                {flag}
+              </span>
+            ))}
             {display.steps.length > 1 && display.steps.length <= 10 && (
               <span
                 aria-hidden
@@ -117,9 +99,9 @@ export function PlaybookStages({
                     key={step.id}
                     className={cn(
                       "h-[3px] min-w-0 flex-1 rounded-full",
-                      step.status === "completed"
-                        ? "bg-success"
-                        : step.status === "inProgress"
+                      step.state === "earlier"
+                        ? "bg-muted-foreground/40"
+                        : step.current
                           ? "bg-primary"
                           : "bg-muted-foreground/25",
                     )}
@@ -138,6 +120,8 @@ export function PlaybookStages({
             className="max-h-[min(16rem,30dvh)]"
           >
             <ComposerBanner.Body>
+              <p className="my-2 font-medium">{run.title}</p>
+              {display.holder && <p className="my-2 text-muted-foreground">{display.holder}</p>}
               {runs.length > 1 && (
                 <div className="my-2 pe-2">
                   <Select
@@ -174,9 +158,9 @@ export function PlaybookStages({
               {display.revisionHistory && (
                 <p className="my-2 text-muted-foreground">{display.revisionHistory}</p>
               )}
-              {run.cancelReason && (
+              {display.cancelReason && (
                 <p role="status" className="my-2 text-warning">
-                  {run.cancelReason}
+                  {display.cancelReason}
                 </p>
               )}
             </ComposerBanner.Body>
@@ -192,27 +176,21 @@ export function PlaybookStages({
                     <ComposerBanner.Icon
                       className={cn(
                         "h-4",
-                        step.status === "completed"
-                          ? "text-success"
-                          : step.status === "inProgress"
+                        step.state === "earlier"
+                          ? "text-muted-foreground/55"
+                          : step.current
                             ? "text-primary"
                             : "text-muted-foreground/40",
                       )}
                     >
-                      {step.status === "completed" ? (
-                        <CheckIcon />
-                      ) : step.status === "inProgress" ? (
-                        <CircleDotIcon />
-                      ) : (
-                        <CircleIcon />
-                      )}
+                      {step.current ? <CircleDotIcon /> : <CircleIcon />}
                     </ComposerBanner.Icon>
                     <ComposerBanner.Content
                       className={cn(
                         "block wrap-anywhere",
-                        step.status === "completed"
+                        step.state === "earlier"
                           ? "text-muted-foreground/55"
-                          : step.status === "inProgress"
+                          : step.current
                             ? "text-foreground/90"
                             : "text-muted-foreground/70",
                       )}

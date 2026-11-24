@@ -28,7 +28,7 @@ Playbooks are linear sequences. The initiative-level view — a plan whose nodes
 3. An agent advances a Playbook through a tool call with its expected current step; the platform never advances a step on its own.
 4. The current step and its holder are recorded facts of the owner agent’s run.
 5. On each move, the recorded holder receives the saved step instructions. Pending delivery is visible and does not imply execution.
-6. The interface shows the current step and holder beside each owner agent, with pending delivery visible.
+6. The composer shows “Step N of M · current step title” from the recorded position, not completed work. Expanding shows the playbook title, full step list with the current position marked, and the holder’s name when another agent holds it. Waiting for approval reflects the run’s open checkpoint; Blocked reflects any other open ask from its owner to a person. Every thread viewer sees the same flags, regardless of recipient, and they clear when answered or withdrawn without reloading. Web, desktop, and mobile share these semantics; the status flags reveal no other ask’s contents. Fleet shows the current step and holder beside each owner agent, with pending delivery visible.
 7. A Playbook has no branching, retry, or automation owned by the platform.
 8. Starting a run saves its parsed procedure. Editing a saved playbook changes future runs only; active runs keep their steps, prompts, title, and purpose.
 9. Deleting a saved playbook succeeds while a run uses its copy. On upgrade, active runs without a saved copy are cancelled. Past runs without a copy show their name, status, last step, and any cancellation reason without a step list.
@@ -72,3 +72,4 @@ Playbooks are linear sequences. The initiative-level view — a plan whose nodes
 - 2026-11-24 — Archiving or deleting the owner cancels its run. Recovery interrupts only the turn that received the cancelled step ([#789](https://github.com/Jacksondr5/j5code/issues/789)).
 
 - 2026-11-24 — required steps use a single Inbox exchange for the submitted work summary. The owner sees the decision in chat, and revisiting the step requires a fresh approval ([#790](https://github.com/Jacksondr5/j5code/issues/790)).
+- 2026-11-24 — The composer shows the current step and holder across web and mobile. Waiting for approval follows the checkpoint Exchange, and Blocked follows other open asks from the owner ([#791](https://github.com/Jacksondr5/j5code/issues/791)).

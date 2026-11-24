@@ -10,7 +10,7 @@ import { useVisibleRefresh } from "../useVisibleRefresh";
 
 /**
  * The visible thread owns this bounded read. It reads again when the server says a playbook run
- * or the YAML of an active one changed, when the thread's turn does, and on focus. No timer.
+ * or its owner’s asks changed, when the thread's turn does, and on focus. No timer.
  */
 export function PlaybookComposerControl(props: {
   environmentId: EnvironmentId;
@@ -28,16 +28,11 @@ export function PlaybookComposerControl(props: {
           input: { threadId: props.threadId },
         }),
   );
-  const changes = useEnvironmentQuery(
-    query.data
-      ? j5Environment.playbookChanges({ environmentId: props.environmentId, input: {} })
-      : null,
-  );
   const runs = query.data?.runs ?? [];
   useVisibleRefresh(
     query.refresh,
     environment?.connection.phase === "connected" && !unsupported && !query.isPending,
-    `${thread?.latestRun?.runId}:${thread?.latestRun?.status}:${changes.data}`,
+    `${thread?.latestRun?.runId}:${thread?.latestRun?.status}`,
   );
   return (
     <PlaybookStages

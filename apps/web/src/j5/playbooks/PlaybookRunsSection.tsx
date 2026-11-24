@@ -145,9 +145,9 @@ function PlaybookRunCard({
       {display.revisionHistory && (
         <p className="mt-1 text-xs text-muted-foreground">{display.revisionHistory}</p>
       )}
-      {run.cancelReason && (
+      {display.cancelReason && (
         <p role="status" className="mt-3 text-sm text-warning">
-          {run.cancelReason}
+          {display.cancelReason}
         </p>
       )}
     </article>
