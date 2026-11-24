@@ -176,6 +176,7 @@ const prepareSpawnPersona = Effect.fn("j5.a2a.mcp.prepareSpawnPersona")(function
   selected: ModelSelection | undefined,
   pick: {
     readonly source: AgentPersonaPickSourceKind;
+    readonly ownerThreadId?: ThreadId | undefined;
     readonly caller: AgentPersonaPickCaller;
     readonly projectId: ProjectId;
     readonly reviewAuthors: ReviewAuthorsRequest;
@@ -536,6 +537,7 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
                     stateError(error.message, "Retry j5_spawn_agent once the thread is readable."),
                   ),
                 ),
+          ownerThreadId: home?.thread.id,
           caller:
             home === undefined ? { approvedLevel: limits.runtimeMode } : { thread: home.thread },
           projectId: target,

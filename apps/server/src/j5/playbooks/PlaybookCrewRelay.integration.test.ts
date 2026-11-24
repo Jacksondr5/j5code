@@ -53,7 +53,8 @@ import { runJ5A2AMigrations } from "../a2a/Migrations.ts";
 import { J5ThreadRegistrationLayer } from "../a2a/runtimeLayer.ts";
 import { LedgerProjectId } from "../a2a/contracts.ts";
 import { makePlaybookCrewRelay } from "./PlaybookCrewRelay.ts";
-import { makePlaybookStore, playbookError, PlaybookStore } from "./PlaybookStore.ts";
+import { playbookError, PlaybookStore } from "./PlaybookStore.ts";
+import { makePlaybookStoreForTests } from "./testFixtures.ts";
 
 // The real orchestrator, command receipts, and effect worker, the way
 // DelegatedCompletionDelivery.test.ts assembles them, so the step notice's command id is
@@ -236,7 +237,7 @@ it.layer(TestLayer)("Crew playbook hand-off through the real orchestrator", (it)
       });
 
       // The seam: the write that records a finished hand-off fails once, after the dispatch.
-      const real = yield* makePlaybookStore;
+      const real = yield* makePlaybookStoreForTests;
       const failRecord = yield* Ref.make(true);
       const store = PlaybookStore.of({
         ...real,

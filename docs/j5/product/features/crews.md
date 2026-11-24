@@ -194,3 +194,4 @@ A steer that races a Stop is a known case ([FORK.md](../../../FORK.md) case 26).
 - 2026-11-22 — Later: not waking the Captain on every member finish (Jackson, 2026-10-31; [#911](https://github.com/Jacksondr5/j5code/issues/911)).
 - 2026-11-22 — only a failed seat run tells the Captain; a completed run posts nothing and the member reports its own finish (AC13). The Later item leaves the list (Jackson; [#1191](https://github.com/Jacksondr5/j5code/issues/1191)).
 - 2026-11-24 — Archiving a Crew leaves its Captain’s playbook active. Archiving the Captain cancels the run, and unarchiving the Captain leaves it in history ([#789](https://github.com/Jacksondr5/j5code/issues/789)).
+- 2026-11-24 — a Captain who owns a playbook run may launch its approved personas as person picks throughout that run, including when adding a Crew member. This replaces the stand-in rule for required personas. [#792](https://github.com/Jacksondr5/j5code/issues/792)

@@ -5,7 +5,7 @@ in its existing thread and decides when to advance. The progress bar above the
 chat box shows the current step’s position and title. This is recorded progress,
 not proof that earlier work passed. Expand it to see the full procedure and who
 holds the step. **Waiting for approval** means the run has an open checkpoint;
-**Blocked** means its owner has another open ask to a person. Everyone viewing the
+**Blocked** means the first step still needs its required persona or the owner has another open ask to a person. Everyone viewing the
 thread sees these labels, even when someone else must answer.
 On the phone, the playbook card appears while a run is active.
 
@@ -78,11 +78,9 @@ steps:
     prompt: Summarize confirmed findings and remaining uncertainty.
 ```
 
-A step can name the persona that should do it with `persona:`, using a persona id
-from Settings → Agent Setup. A step without one is done by whoever runs the playbook.
-Missing, turned-off, or unverified personas show as warnings in Settings and do not
-stop the playbook from starting. Invalid persona files leave absent personas unverified;
-fix the files reported in Settings → Agent Setup before treating them as missing.
+Use `persona:` with a saved persona ID from Settings → Agent Setup to require that persona for the step. The owner or a worker can take the step if its thread runs that persona. If any qualified worker can do the job, describe the skill in the prompt and leave out `persona:`.
+
+The run can start while a required persona is missing, turned off, or unavailable. Its step waits until the persona is available and a matching agent can take it. Settings identifies required personas that are missing or disabled. When a required persona can run but the owner agent's model or access limits restrict it, starting the run opens one approval in the owner's chat and Inbox on web and desktop. A server Owner can approve the picks for this run. The agent can then launch those saved definitions with their configured models and access.
 
 Add `approval: required` to a step when each run needs a person's sign-off before moving on. The owner submits a summary of the finished work when it tries to leave. One request appears in the Inbox and the owner's chat on web and desktop; answering either updates both on connected devices. Owners and Collaborators who can write to the owner thread may approve or decline. Viewers can read the submitted summary in the owner thread’s expanded playbook progress. Choose **Approve** or **Decline**. You can include a reason when declining, which returns to the owner; the run stays on that step until a new request is approved. Answered checkpoints appear in the Inbox’s Answered list. Use web or desktop to answer.
 

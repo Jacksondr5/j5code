@@ -32,6 +32,7 @@ import { requireOwner, requireReaches, requireWrites } from "../sharing/connecti
 import { PersonAccess, type SessionIdentity, reachPersonId } from "../sharing/PersonAccess.ts";
 import { SharedConversation } from "../sharing/SharedConversation.ts";
 import { SharedThreads } from "../sharing/SharedThreads.ts";
+import { PLAYBOOK_PERSONA_EXCHANGE_PREFIX } from "@t3tools/contracts/j5";
 import { ClientActionsService } from "./ClientActionsService.ts";
 import { crewCaptainThread } from "./crewCaptainThread.ts";
 import { EnvironmentLinkService } from "./EnvironmentLinkService.ts";
@@ -176,7 +177,12 @@ export const makeClientActionRpcHandlers = Effect.fn("j5.makeClientActionRpcHand
         ),
       ),
     [METHODS.answerHumanExchange]: (input: AnswerHumanExchangeRequest) =>
-      personOf.pipe(
+      (input.exchangeId.startsWith(PLAYBOOK_PERSONA_EXCHANGE_PREFIX)
+        ? services(requireOwner(session, "answers the playbook's persona picks")).pipe(
+            Effect.andThen(personOf),
+          )
+        : personOf
+      ).pipe(
         Effect.flatMap((personId) =>
           actions
             .answerHumanExchange({ ...input, personId }, (reply) =>

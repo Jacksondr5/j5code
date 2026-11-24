@@ -517,6 +517,8 @@ function OpenInboxItem({
                     />
                     {playbookDecision ? (
                       <PlaybookDecisionButtons
+                        environmentId={item.environmentId}
+                        exchangeId={item.exchangeId}
                         reason={answerText}
                         disabled={!canAnswer || pending || waitingOn !== null}
                         submit={(decision) => answer(item, decision)}

@@ -418,7 +418,7 @@ The thread that starts a run owns its step pointer and is the only thread allowe
 
 Each landing records its holder and sends that step's saved prompt to the holder's thread as a `<j5_playbook_step>` notice. The `delivery` state is `captain` for an owner-held step, `delivered` once the holder receives the notice, or `pending` while delivery is unresolved. A pending delivery does not mean the step was executed. `j5_playbook_current` reports the saved holder and delivery state without resending. Each landing has stable dispatch IDs, so a retry cannot duplicate the notice or silently change its target.
 
-A revision that replaces the current step accepts the same optional assignee and records its new holder atomically; without one it returns the step to the owner. A revision retaining the current step keeps its holder and refuses an assignee.
+A revision that replaces the current step accepts the same optional assignee and records its new holder atomically; without one it returns the step to the owner. A revision retaining the current step keeps its holder. When its required persona changes, the owner can name a matching assignee in the same revision.
 
 While a hand-off is pending, `j5_playbook_next`, `j5_playbook_back`, `j5_playbook_revise`, and `j5_playbook_complete` refuse with `delivery_pending`. `j5_playbook_assign(runId, expectedStepId, client_request_id, assignee?)` can reassign the current step or take it back, even if its previous delivery is stuck because a holder was archived. It atomically supersedes the old pending landing; a retry of the old request cannot revive it. `j5_playbook_cancel` remains available. The platform never advances the pointer on its own.
 

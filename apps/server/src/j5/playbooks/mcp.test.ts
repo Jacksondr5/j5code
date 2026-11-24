@@ -57,7 +57,8 @@ import { J5ToolkitHandlersLive } from "../a2a/mcp/handlers.ts";
 import { J5Toolkit } from "../a2a/mcp/tools.ts";
 import { layer as agentCrewInstanceLayer } from "../a2a/AgentCrewInstanceService.ts";
 import { layer as playbookCrewRelayLayer } from "./PlaybookCrewRelay.ts";
-import { makePlaybookStore, PlaybookStore } from "./PlaybookStore.ts";
+import { PlaybookStore } from "./PlaybookStore.ts";
+import { makePlaybookStoreForTests } from "./testFixtures.ts";
 import type { playbookTools } from "./mcp.ts";
 
 const owner = ThreadId.make("thread:playbook-mcp:worktree");
@@ -157,7 +158,7 @@ const makeFixture = (
     }
     yield* runJ5A2AMigrations();
     yield* seedPlaybookOwners([owner, rootOwner]);
-    const store = yield* makePlaybookStore;
+    const store = yield* makePlaybookStoreForTests;
     const services = Layer.mergeAll(
       Layer.succeed(PlaybookStore, store),
       Layer.mock(ThreadManagementService)({
@@ -468,7 +469,7 @@ it.effect("reads step personas and warnings through the toolkit and still starts
       code: "persona_disabled" as const,
       stepId: "research",
       persona: "planner",
-      message: `Step "research" names persona "planner", which is turned off.`,
+      message: `Step "research" has a required persona disabled in this environment: "planner".`,
     };
     const listed = yield* decodeListed((yield* call("j5_playbook_list", {})).result);
     assert.isNull(listed.playbooks[0]?.issue);
@@ -493,7 +494,20 @@ it.effect("reads step personas and warnings through the toolkit and still starts
 
     const started = yield* call("j5_playbook_start", { name: "demo", client_request_id: "start" });
     assert.isFalse(started.isFailure);
-    assert.equal((yield* decodeStep(started.result)).currentStep?.persona, "planner");
+    const blocked = yield* decodeStep(started.result);
+    assert.equal(blocked.status, "active");
+    assert.equal(blocked.delivery?.state, "blocked");
+    assert.isNull(blocked.currentStep);
+    assert.equal(blocked.requiredPersonas?.[0]?.status, "unavailable");
+    const current = yield* call("j5_playbook_current", {});
+    assert.isFalse(current.isFailure);
+    assert.deepEqual(yield* decodeStep(current.result), blocked);
+    const refused = yield* call("j5_playbook_next", {
+      runId: blocked.runId,
+      expectedStepId: blocked.currentStepId,
+      client_request_id: "advance-unassigned",
+    });
+    assert.equal((yield* decodeFailure(refused.result)).code, "required_persona_mismatch");
   }).pipe(
     Effect.scoped,
     Effect.provide(
