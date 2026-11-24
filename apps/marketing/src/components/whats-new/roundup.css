@@ -75,8 +75,16 @@
   visibility: hidden;
 }
 
+/* Its own keyframes: the list has already run wn-in, and an animation of the same name would not start again. */
 .wn-motion .app .popup-a.is-reopened {
-  animation: wn-in 0.14s ease-out;
+  animation: wn-reopen 0.14s ease-out;
+}
+
+@keyframes wn-reopen {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
 }
 
 .app .option-a {

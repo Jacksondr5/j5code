@@ -96,6 +96,9 @@ const stack = [
     grid-template-columns: minmax(0, 1fr) 272px;
   }
 
+  /* "re-ran" stays whole, which could leave one word on the last line. */
+  .prs .reply-a { text-wrap: balance; }
+
   .prs__thread {
     display: flex;
     flex-direction: column;

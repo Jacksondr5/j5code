@@ -157,6 +157,9 @@ const steps = [
 
   .story__work { display: flex; flex-direction: column; }
 
+  /* "re-ran" stays whole, which could leave one word on the last line. */
+  .story .reply-a { text-wrap: balance; }
+
   /* Only where the sequence can play: with the script running and motion allowed. */
   .story .story__replay {
     position: absolute;

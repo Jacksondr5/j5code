@@ -55,22 +55,28 @@ function wireOpenList(vignette: HTMLElement) {
   const trigger = vignette.querySelector<HTMLElement>("[data-list-trigger]");
   const list = vignette.querySelector<HTMLElement>('[role="listbox"]');
   if (!trigger || !list) return () => {};
+  // Until this runs the trigger is a drawing: out of the tab order and hidden from assistive tech.
+  trigger.removeAttribute("tabindex");
+  trigger.removeAttribute("aria-hidden");
   // The page draws the list open to show it, so only one the reader opened closes on a click away.
   let openedByReader = false;
+  const chosen = () => list.querySelector<HTMLElement>('[aria-selected="true"]');
   const show = (open: boolean) => {
     const focusWasInside = list.contains(document.activeElement);
     list.toggleAttribute("data-closed", !open);
     list.classList.toggle("is-reopened", open);
     trigger.setAttribute("aria-expanded", String(open));
     openedByReader = open;
-    if (open) list.querySelector<HTMLElement>('[aria-selected="true"]')?.focus();
+    if (open) chosen()?.focus();
     else if (focusWasInside) trigger.focus();
   };
   trigger.addEventListener("click", () => show(list.hasAttribute("data-closed")));
   trigger.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") return show(false);
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
     event.preventDefault();
     if (list.hasAttribute("data-closed")) show(true);
+    else chosen()?.focus();
   });
   list.addEventListener("keydown", (event) => {
     if (event.key === "Escape") show(false);

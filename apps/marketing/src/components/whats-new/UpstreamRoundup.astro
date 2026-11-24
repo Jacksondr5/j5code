@@ -9,7 +9,7 @@ import ServersVignette from "./ServersVignette.astro";
 import SessionVignette from "./SessionVignette.astro";
 import VoiceVignette from "./VoiceVignette.astro";
 import WelcomeVignette from "./WelcomeVignette.astro";
-import { UPSTREAM_RANGE } from "./roundup";
+import { UPSTREAM_RANGE, WORD_JOINER } from "./roundup";
 import "./roundup.css";
 
 /**
@@ -59,9 +59,8 @@ const pullRequestItems: ReadonlyArray<Item> = [
     body: "On GitHub, it reads the end of a failing check's log instead of guessing from the check's name.",
   },
   {
-    // The word joiners keep "Re-run" and "re-runs" on one line.
-    title: "Re-⁠run checks",
-    body: "On GitHub, it re-⁠runs the failing checks, or one check by name.",
+    title: `Re-${WORD_JOINER}run checks`,
+    body: `On GitHub, it re-${WORD_JOINER}runs the failing checks, or one check by name.`,
   },
 ];
 
