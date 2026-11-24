@@ -1,239 +1,150 @@
 ---
-import type { ImageMetadata } from "astro";
-import { Image } from "astro:assets";
 import Layout from "../../layouts/Layout.astro";
-import agentSetupCrews from "../../assets/whats-new-0-0-52/agent-setup-crews.png";
-import crewProposal from "../../assets/whats-new-0-0-52/crew-proposal.png";
-import inboxAttachment from "../../assets/whats-new-0-0-52/inbox-attachment.png";
-import linksRow from "../../assets/whats-new-0-0-52/links-row.png";
+import Boat from "../../components/Boat.astro";
+import AnswerVignette from "../../components/whats-new/AnswerVignette.astro";
+import CrewProposalVignette from "../../components/whats-new/CrewProposalVignette.astro";
+import CrewSettingsVignette from "../../components/whats-new/CrewSettingsVignette.astro";
+import LinksVignette from "../../components/whats-new/LinksVignette.astro";
 import { T3_SITE_URL, UPSTREAM_REPOSITORY_URL } from "../../lib/site";
+import "../../components/whats-new/app.css";
+import "../../components/whats-new/roundup.css";
+import "../../components/whats-new/motion.css";
+import "../../components/whats-new/page.css";
+import "../../components/whats-new/pieces.css";
+
+// J5 Code 0.0.52, the first stable after 0.0.51. In-app highlights link to #crews and #t3-code,
+// and /whats-new/0-1-3 redirects to #t3-code (vercel.ts), so those ids stay.
+const RELEASE = "0.0.52";
+const UPSTREAM_RANGE = "0.1.3 to 0.1.7";
 
 interface Item {
   title: string;
   body: string;
 }
 
-interface Shot {
-  src: ImageMetadata;
-  alt: string;
-  caption: string;
-}
-
-interface Group {
-  id: string;
-  heading: string;
-  intro: string;
-  items: ReadonlyArray<Item>;
-  shots?: ReadonlyArray<Shot>;
-  more?: { label: string; href: string };
-}
-
-// J5 Code 0.0.52, the first stable after 0.0.51. Earlier builds link to /whats-new/0-1-3, which
-// now redirects to the T3 Code section here (vercel.ts).
-const groups: ReadonlyArray<Group> = [
+const windows: ReadonlyArray<Item> = [
   {
-    id: "links",
-    heading: "Your agents can work across machines",
-    intro:
-      "Link two J5 servers once. Agents on each can message agents on the other, hand them tasks and use its tools, at the access you choose.",
-    items: [
-      {
-        title: "One link sets it up",
-        body: "Link two servers from Settings → Environments → Linked environments, right after you add a server, or by approving an agent's request to link. J5 finds the address each server reaches the other at, and you can enter another.",
-      },
-      {
-        title: "A level for each direction",
-        body: "Each direction has its own Tools level, from Off, which leaves messages only, to Full access. Tools last 30 days, and you can renew them.",
-      },
-      {
-        title: "Through a firewall",
-        body: "A laptop nothing can reach can still be linked. It collects its own messages, and while it runs, the other server's agents can use tools on it.",
-      },
-      {
-        title: "Agents know when a machine is away",
-        body: "A call to a linked machine that isn't answering fails with a reason that says so.",
-      },
-      {
-        title: "Remove means remove",
-        body: "Removing a link ends its messages and its tools access.",
-      },
-    ],
-    shots: [
-      {
-        src: linksRow,
-        alt: "A linked pair in Settings → Environments, with messages sent directly both ways and a Tools level for each direction",
-        caption: "One row per linked pair: messages both ways, and a Tools level for each direction.",
-      },
-    ],
-    more: { label: "How linking works", href: "/linking" },
+    title: "The desktop app",
+    body: "Download the installer from the download page. It isn't code-signed yet, so Windows warns before it runs it.",
   },
   {
-    id: "windows",
-    heading: "J5 Code on Windows, in beta",
-    intro: "Windows x64 now gets every release: the desktop app and the j5 server.",
-    items: [
-      {
-        title: "The desktop app",
-        body: "Download the installer from the download page. It isn't code-signed yet, so Windows warns before it runs it.",
-      },
-      {
-        title: "The server",
-        body: "Install it from PowerShell with the command on the download page, then run j5. Windows has no background service, so the server runs while j5 does.",
-      },
-    ],
-    more: { label: "Download J5 Code", href: "/download" },
-  },
-  {
-    id: "crews",
-    heading: "Crews",
-    intro: "A Crew does more on its own and brings you only what needs you.",
-    items: [
-      {
-        title: "A quieter Captain",
-        body: "A Captain's chat shows only what needs you.",
-      },
-      {
-        title: "Proposals in the composer",
-        body: "Review, edit and approve a Crew's roster above the Captain's composer.",
-      },
-      {
-        title: "Start on their own",
-        body: "Turn on Auto-approve new Crews in Settings → Agent Setup → Crews, for every project or just one, and choose the models and reasoning levels custom members may use.",
-      },
-      {
-        title: "Members start with work",
-        body: "A member starts on its first assignment, not before.",
-      },
-      {
-        title: "Replace a seat",
-        body: "A Captain can move a seat to another model. The new member takes over its unfinished playbook steps.",
-      },
-      {
-        title: "One question, two places",
-        body: "A decision only you can make appears in your Inbox and above the Captain's composer. Answer it in either.",
-      },
-      {
-        title: "Tidy archives",
-        body: "Archiving a Crew removes its clean, merged worktrees, squash-merged ones included. One Inbox item asks about the rest.",
-      },
-      {
-        title: "Lineage",
-        body: "A thread's details show the Peer Agents and Crews it started.",
-      },
-    ],
-    shots: [
-      {
-        src: crewProposal,
-        alt: "A two-member Crew proposal above the Captain's composer, with Decline and Approve Crew",
-        caption: "Review a Crew's roster above the Captain's composer.",
-      },
-      {
-        src: agentSetupCrews,
-        alt: "Settings → Agent Setup → Crews, with Auto-approve new Crews turned on for a project and the models custom members may use",
-        caption: "Let a project's Crews start on their own, and choose the models custom members may use.",
-      },
-    ],
-  },
-  {
-    id: "personas",
-    heading: "Personas",
-    intro: "Personas stay what you made them, even when an agent is the one picking.",
-    items: [
-      {
-        title: "Who picked sets the limits",
-        body: "A persona you start runs as saved. One an agent picks never gets more access than that agent has, and runs only on models you've allowed.",
-      },
-      {
-        title: "Allow this once",
-        body: "A persona an agent can't start says why and asks you in the Inbox. When one limit stood in the way, such as a model you haven't allowed, an Owner can allow it once. The next launch meets the usual limits again.",
-      },
-      {
-        title: "Agents draft, you save",
-        body: "Ask an agent to change a persona. It drafts the change, and an Owner saves it from the ask with Save persona.",
-      },
-      {
-        title: "An ordered model list",
-        body: "A persona tries its models in order and skips a provider account that has reported running out of quota.",
-      },
-      {
-        title: "Three access levels",
-        body: "Read-only, workspace write or full access.",
-      },
-      {
-        title: "Independent reviewers",
-        body: "Mark a persona as an independent reviewer, and it prefers a model that didn't write the work it reviews.",
-      },
-      {
-        title: "Switch a worker's model",
-        body: "Move a worker to another model from the composer, for example when its provider hits a usage limit.",
-      },
-    ],
-  },
-  {
-    id: "inbox",
-    heading: "Inbox and people",
-    intro: "Answer more completely, and share more easily.",
-    items: [
-      {
-        title: "Answer with a file",
-        body: "Attach screenshots and files to an Inbox answer.",
-      },
-      {
-        title: "Several asks at once",
-        body: "An agent can ask you several things at once, each as its own item.",
-      },
-      {
-        title: "Settled is settled",
-        body: "Settle a question in the agent's own thread, and the agent is told to take it off your Inbox.",
-      },
-      {
-        title: "Links that open",
-        body: "Web and artifact links in Inbox messages open, and a reply you haven't sent survives leaving the page.",
-      },
-      {
-        title: "People",
-        body: "Search Settings → People, and widen someone's access from their row. People a thread is shared with can search its messages.",
-      },
-    ],
-    shots: [
-      {
-        src: inboxAttachment,
-        alt: "An Inbox answer to an agent's question with a screenshot attached, ready to send",
-        caption: "Attach a screenshot to an Inbox answer.",
-      },
-    ],
-  },
-  {
-    id: "more",
-    heading: "Updates, agent tools and fixes",
-    intro: "Smaller changes across J5 Code.",
-    items: [
-      {
-        title: "One switch for every machine",
-        body: "In the desktop app, Settings → About → Update track moves the app and the connected machines it can update to Stable or Nightly.",
-      },
-      {
-        title: "Safer updates",
-        body: "An update or track switch started from the app first checks that the new build can read the server's database.",
-      },
-      {
-        title: "For your agents",
-        body: "J5's tools return thread links, and j5 thread drives threads from a terminal again. t3_thread_interrupt with stop: true replaces j5_stop_agent.",
-      },
-      {
-        title: "Fixes",
-        body: "A Claude reply no longer folds away when another agent's message arrives. A question shows once in the Inbox after a restart. The project filter stays put. Notification sounds have a volume slider.",
-      },
-    ],
+    title: "The server",
+    body: "Install it from PowerShell with the command on the download page, then run j5. Windows has no background service, so the server runs while j5 does.",
   },
 ];
 
-// A lone capture (1x) shows no wider than taken and no taller than 640px. Captures that share a
-// row grow by their aspect ratio, so they end up the same height.
-const shotStyle = (src: ImageMetadata, count: number) =>
-  count > 1
-    ? `--grow: ${(src.width / src.height).toFixed(4)}`
-    : `width: ${Math.min(src.width, 800, Math.round((640 * src.width) / src.height))}px`;
+const crews: ReadonlyArray<Item> = [
+  { title: "A quieter Captain", body: "A Captain's chat shows only what needs you." },
+  {
+    title: "Proposals in the composer",
+    body: "Review, edit and approve a Crew's roster above the Captain's composer.",
+  },
+  {
+    title: "Start on their own",
+    body: "Turn on Auto-approve new Crews in Settings → Agent Setup → Crews, for every project or just one, and choose the models and reasoning levels custom members may use.",
+  },
+  { title: "Members start with work", body: "A member starts on its first assignment, not before." },
+  {
+    title: "Replace a seat",
+    body: "A Captain can move a seat to another model. The new member takes over its unfinished playbook steps.",
+  },
+  {
+    title: "One question, two places",
+    body: "A decision only you can make appears in your Inbox and above the Captain's composer. Answer it in either.",
+  },
+  {
+    title: "Tidy archives",
+    body: "Archiving a Crew removes its clean, merged worktrees, squash-merged ones included. One Inbox item asks about the rest.",
+  },
+  { title: "Lineage", body: "A thread's details show the Peer Agents and Crews it started." },
+];
+
+const personas: ReadonlyArray<Item> = [
+  {
+    title: "Who picked sets the limits",
+    body: "A persona you start runs as saved. One an agent picks never gets more access than that agent has, and runs only on models you've allowed.",
+  },
+  {
+    title: "Allow this once",
+    body: "A persona an agent can't start says why and asks you in the Inbox. When one limit stood in the way, such as a model you haven't allowed, an Owner can allow it once. The next launch meets the usual limits again.",
+  },
+  {
+    title: "Agents draft, you save",
+    body: "Ask an agent to change a persona. It drafts the change, and an Owner saves it from the ask with Save persona.",
+  },
+  {
+    title: "An ordered model list",
+    body: "A persona tries its models in order and skips a provider account that has reported running out of quota.",
+  },
+  { title: "Three access levels", body: "Read-only, workspace write or full access." },
+  {
+    title: "Independent reviewers",
+    body: "Mark a persona as an independent reviewer, and it prefers a model that didn't write the work it reviews.",
+  },
+  {
+    title: "Switch a worker's model",
+    body: "Move a worker to another model from the composer, for example when its provider hits a usage limit.",
+  },
+];
+
+const inbox: ReadonlyArray<Item> = [
+  { title: "Answer with a file", body: "Attach screenshots and files to an Inbox answer." },
+  {
+    title: "Several asks at once",
+    body: "An agent can ask you several things at once, each as its own item.",
+  },
+  {
+    title: "Settled is settled",
+    body: "Settle a question in the agent's own thread, and the agent is told to take it off your Inbox.",
+  },
+  {
+    title: "Links that open",
+    body: "Web and artifact links in Inbox messages open, and a reply you haven't sent survives leaving the page.",
+  },
+  {
+    title: "People",
+    body: "Search Settings → People, and widen someone's access from their row. People a thread is shared with can search its messages.",
+  },
+];
+
+const links: ReadonlyArray<Item> = [
+  {
+    title: "One link sets it up",
+    body: "Link two servers from Settings → Environments → Linked environments, right after you add a server, or by approving an agent's request to link. J5 finds the address each server reaches the other at, and you can enter another.",
+  },
+  {
+    title: "A level for each direction",
+    body: "Each direction has its own Tools level, from Off, which leaves messages only, to Full access. Tools last 30 days, and you can renew them.",
+  },
+  {
+    title: "Through a firewall",
+    body: "A laptop nothing can reach can still be linked. It collects its own messages, and while it runs, the other server's agents can use tools on it.",
+  },
+  {
+    title: "Agents know when a machine is away",
+    body: "A call to a linked machine that isn't answering fails with a reason that says so.",
+  },
+  { title: "Remove means remove", body: "Removing a link ends its messages and its tools access." },
+];
+
+const more: ReadonlyArray<Item> = [
+  {
+    title: "One switch for every machine",
+    body: "In the desktop app, Settings → About → Update track moves the app and the connected machines it can update to Stable or Nightly.",
+  },
+  {
+    title: "Safer updates",
+    body: "An update or track switch started from the app first checks that the new build can read the server's database.",
+  },
+  {
+    title: "For your agents",
+    body: "J5's tools return thread links, and j5 thread drives threads from a terminal again. t3_thread_interrupt with stop: true replaces j5_stop_agent.",
+  },
+  {
+    title: "Fixes",
+    body: "A Claude reply no longer folds away when another agent's message arrives. A question shows once in the Inbox after a restart. The project filter stays put. Notification sounds have a volume slider.",
+  },
+];
 
 // T3 Code's own work, credited by name and kept apart from J5's.
 const upstream: ReadonlyArray<Item> = [
@@ -245,10 +156,7 @@ const upstream: ReadonlyArray<Item> = [
     title: "Side chats",
     body: "Start a message with /side to ask about a thread while it keeps working. Bring the answer back when you want it.",
   },
-  {
-    title: "Search inside messages",
-    body: "Cmd+K finds text inside messages, not just thread titles.",
-  },
+  { title: "Search inside messages", body: "Cmd+K finds text inside messages, not just thread titles." },
   {
     title: "Local commits in the Diff pane",
     body: "Review the commits you haven't pushed yet in the Diff pane.",
@@ -262,272 +170,427 @@ const upstream: ReadonlyArray<Item> = [
     body: "Choose when an idle Claude thread over 200,000 tokens is compacted, under Settings → Providers → Advanced.",
   },
 ];
+
+const contents = [
+  { href: "#windows", title: "J5 Code on Windows, in beta", line: "The desktop app and the j5 server.", origin: "j5" },
+  { href: "#crews", title: "Crews", line: "Approve a roster in the composer, or let Crews start on their own.", origin: "j5" },
+  { href: "#personas", title: "Personas", line: "Limits that hold when an agent is the one picking.", origin: "j5" },
+  { href: "#inbox", title: "Inbox and people", line: "Answer with a file. Search People.", origin: "j5" },
+  { href: "#links", title: "Links between machines", line: "Agents message and use tools across your servers.", origin: "j5" },
+  { href: "#more", title: "Updates, agent tools and fixes", line: "One update track for every machine.", origin: "j5" },
+  { href: "#t3-code", title: `T3 Code ${UPSTREAM_RANGE}`, line: "A new design, side chats and message search.", origin: "t3" },
+] as const;
+
+const J5_PENNANT = "M0 0h14L9.5 5 14 10H0z";
+const T3_PENNANT = "M0.6 0.6h12L8.7 5l3.9 4.4H0.6z";
 ---
 
 <Layout
-  title="What's new in 0.0.52 — J5 Code"
-  description="Your agents can work across machines, a Windows app in beta, Crews and personas that need you less, and T3 Code 0.1.3 to 0.1.7."
+  title={`What's new in ${RELEASE} — J5 Code`}
+  description={`Crews and personas that need you less, a Windows app in beta, links between your machines, and T3 Code ${UPSTREAM_RANGE}.`}
 >
-  <div class="whats-new">
+  <div class="wn" data-wn>
     <section class="hero">
-      <div class="container hero-inner">
-        <p class="eyebrow">What's new · J5 Code 0.0.52</p>
-        <h1 class="display">Your agents can work across machines, and need you less.</h1>
-        <p class="lead">
-          Links between your machines, a Windows app in beta, Crews and personas that need you
-          less, and everything J5 Code takes in from T3 Code 0.1.3 to 0.1.7.
+      <div class="container">
+        <p class="hero__tag" data-rise>
+          <svg viewBox="0 0 14 10" aria-hidden="true"><path d={J5_PENNANT}></path></svg>
+          What's new in J5 Code {RELEASE}
         </p>
+        <h1 class="display" data-rise style="--d: 80ms">Your agents need you less. J5 Code comes to Windows.</h1>
+        <p class="hero__lead" data-rise style="--d: 160ms">
+          Crews and personas that bring you only what needs you, a Windows app in beta, links between your machines,
+          and everything J5 Code takes in from T3 Code {UPSTREAM_RANGE}.
+        </p>
+      </div>
+      <div class="hero__waterline" aria-hidden="true">
+        <span class="hero__boat hero__boat--1"><Boat tone="dark" size={40} /></span>
+        <span class="hero__boat hero__boat--2"><Boat captain tone="dark" size={54} /></span>
+        <span class="hero__boat hero__boat--3"><Boat tone="dark" status="waiting" size={36} /></span>
+        <svg viewBox="0 0 1440 48" preserveAspectRatio="none">
+          <path class="hero__wave" d="M0 22 Q 60 6 120 22 T 240 22 T 360 22 T 480 22 T 600 22 T 720 22 T 840 22 T 960 22 T 1080 22 T 1200 22 T 1320 22 T 1440 22 V48 H0 Z"></path>
+          <path class="hero__crest" d="M0 22 Q 60 6 120 22 T 240 22 T 360 22 T 480 22 T 600 22 T 720 22 T 840 22 T 960 22 T 1080 22 T 1200 22 T 1320 22 T 1440 22" vector-effect="non-scaling-stroke"></path>
+        </svg>
       </div>
     </section>
 
-    {
-      groups.map((group, index) => (
-        <section id={group.id} class={index % 2 === 0 ? "paper" : "deep"}>
-          <div class="container">
-            <div class="section-head">
-              <h2 class="display">{group.heading}</h2>
-              <p>{group.intro}</p>
-            </div>
-            {group.shots && (
-              <div class:list={["shots", { "shots--row": group.shots.length > 1 }]}>
-                {group.shots.map((shot) => (
-                  <figure style={shotStyle(shot.src, group.shots?.length ?? 1)}>
-                    <Image src={shot.src} alt={shot.alt} />
-                    <figcaption>{shot.caption}</figcaption>
-                  </figure>
-                ))}
-              </div>
-            )}
-            <ul class="items">
-              {group.items.map((item) => (
-                <li>
-                  <h3>{item.title}</h3>
-                  <p>{item.body}</p>
-                </li>
-              ))}
-            </ul>
-            {group.more && (
-              <p class="more">
-                <a href={group.more.href}>{group.more.label} →</a>
-              </p>
-            )}
-          </div>
-        </section>
-      ))
-    }
-
-    <section id="t3-code" class={groups.length % 2 === 0 ? "paper" : "deep"}>
+    <nav class="manifest" aria-labelledby="wn-manifest">
       <div class="container">
-        <div class="section-head">
-          <h2 class="display">From T3 Code 0.1.3 to 0.1.7</h2>
-          <p>
-            J5 Code is built on <a href={T3_SITE_URL} target="_blank" rel="noopener noreferrer">T3 Code</a>,
-            and this release brings in its work from 0.1.3 to 0.1.7. The highlights:
+        <div class="sheet manifest__sheet">
+        <div class="manifest__head">
+          <h2 class="display" id="wn-manifest">In this release</h2>
+          <p class="manifest__key">
+            <span><svg class="pennant pennant--j5" viewBox="0 0 14 10" aria-hidden="true"><path d={J5_PENNANT}></path></svg>J5 Code's own</span>
+            <span><svg class="pennant pennant--t3" viewBox="0 0 14 10" aria-hidden="true"><path d={T3_PENNANT}></path></svg>From T3 Code {UPSTREAM_RANGE}</span>
           </p>
         </div>
-        <ul class="items">
+        <ol class="manifest__list">
           {
-            upstream.map((item) => (
+            contents.map((entry) => (
               <li>
-                <h3>{item.title}</h3>
-                <p>{item.body}</p>
+                <a href={entry.href}>
+                  <svg class:list={["pennant", `pennant--${entry.origin}`]} viewBox="0 0 14 10" role="img" aria-label={entry.origin === "j5" ? "J5 Code's own" : "From T3 Code"}>
+                    <path d={entry.origin === "j5" ? J5_PENNANT : T3_PENNANT} />
+                  </svg>
+                  <span class="manifest__title">{entry.title}</span>
+                  <span class="manifest__line">{entry.line}</span>
+                </a>
               </li>
             ))
           }
+        </ol>
+        </div>
+      </div>
+    </nav>
+
+    <section id="windows" class="feature">
+      <div class="container split split--text">
+        <div class="feature__head">
+          <p class="origin"><svg class="pennant pennant--j5" viewBox="0 0 14 10" aria-hidden="true"><path d={J5_PENNANT}></path></svg>J5 Code's own</p>
+          <h2 class="display">J5 Code on Windows, in beta</h2>
+          <p class="feature__intro">Windows x64 now gets every release: the desktop app and the j5 server.</p>
+          <p class="more slip"><a href="/download">Download J5 Code</a></p>
+        </div>
+        <ul class="items items--2">
+          {windows.map((item) => <li><h3>{item.title}</h3><p>{item.body}</p></li>)}
         </ul>
-        <p class="more">
-          …and many smaller fixes.{" "}
-          <a href={`${UPSTREAM_REPOSITORY_URL}/releases`} target="_blank" rel="noopener noreferrer">See T3 Code's release notes →</a>
+      </div>
+    </section>
+
+    <section id="crews" class="feature band--deep">
+      <div class="container">
+        <div class="feature__head">
+          <p class="origin"><svg class="pennant pennant--j5" viewBox="0 0 14 10" aria-hidden="true"><path d={J5_PENNANT}></path></svg>J5 Code's own</p>
+          <h2 class="display">Crews</h2>
+          <p class="feature__intro">A Crew does more on its own and brings you only what needs you.</p>
+        </div>
+        <div class="pair">
+          <div>
+            <p class="try live-only">
+              Try it: edit a member, then approve the Crew.
+              <button type="button" data-piece-reset="proposal">Start over</button>
+            </p>
+            <CrewProposalVignette />
+            <p class="piece-note">Review a Crew's roster above the Captain's composer.</p>
+          </div>
+          <div>
+            <p class="try live-only">
+              Try it: turn it off for this project, or uncheck a model.
+              <button type="button" data-piece-reset="crew-settings">Start over</button>
+            </p>
+            <CrewSettingsVignette />
+            <p class="piece-note">
+              Let a project's Crews start on their own, and choose the models custom members may use.
+            </p>
+          </div>
+        </div>
+        <ul class="items items--4">
+          {crews.map((item) => <li><h3>{item.title}</h3><p>{item.body}</p></li>)}
+        </ul>
+      </div>
+    </section>
+
+    <section id="personas" class="feature">
+      <div class="container">
+        <div class="feature__head">
+          <p class="origin"><svg class="pennant pennant--j5" viewBox="0 0 14 10" aria-hidden="true"><path d={J5_PENNANT}></path></svg>J5 Code's own</p>
+          <h2 class="display">Personas</h2>
+          <p class="feature__intro">Personas stay what you made them, even when an agent is the one picking.</p>
+        </div>
+        <ul class="items items--4 items--flush">
+          {personas.map((item) => <li><h3>{item.title}</h3><p>{item.body}</p></li>)}
+        </ul>
+      </div>
+    </section>
+
+    <section id="inbox" class="feature">
+      <div class="container">
+        <div class="split">
+          <div class="feature__head">
+            <p class="origin"><svg class="pennant pennant--j5" viewBox="0 0 14 10" aria-hidden="true"><path d={J5_PENNANT}></path></svg>J5 Code's own</p>
+            <h2 class="display">Inbox and people</h2>
+            <p class="feature__intro">Answer more completely, and share more easily.</p>
+          </div>
+          <div class="sheet">
+            <p class="try live-only">
+              Try it: attach another file, then answer.
+              <button type="button" data-piece-reset="answer">Start over</button>
+            </p>
+            <AnswerVignette />
+            <p class="piece-note">Attach a screenshot to an Inbox answer.</p>
+          </div>
+        </div>
+        <ul class="items items--5">
+          {inbox.map((item) => <li><h3>{item.title}</h3><p>{item.body}</p></li>)}
+        </ul>
+      </div>
+    </section>
+
+    <section id="links" class="feature band--deep">
+      <div class="container">
+        <div class="split">
+          <div class="feature__head">
+            <p class="origin"><svg class="pennant pennant--j5" viewBox="0 0 14 10" aria-hidden="true"><path d={J5_PENNANT}></path></svg>J5 Code's own</p>
+            <h2 class="display">Your agents can work across machines</h2>
+            <p class="feature__intro">
+              Link two J5 servers once. Agents on each can message agents on the other, hand them tasks and use its
+              tools, at the access you choose.
+            </p>
+            <p class="more"><a href="/linking">How linking works</a></p>
+          </div>
+          <div>
+            <p class="try live-only">
+              Try it: renew the tools, or change a level.
+              <button type="button" data-piece-reset="links">Start over</button>
+            </p>
+            <LinksVignette />
+            <p class="piece-note">
+              One row per linked pair: messages both ways, and a Tools level for each direction.
+            </p>
+          </div>
+        </div>
+        <ul class="items items--5">
+          {links.map((item) => <li><h3>{item.title}</h3><p>{item.body}</p></li>)}
+        </ul>
+      </div>
+    </section>
+
+    <section id="more" class="feature">
+      <div class="container">
+        <div class="feature__head">
+          <p class="origin"><svg class="pennant pennant--j5" viewBox="0 0 14 10" aria-hidden="true"><path d={J5_PENNANT}></path></svg>J5 Code's own</p>
+          <h2 class="display">Updates, agent tools and fixes</h2>
+          <p class="feature__intro">Smaller changes across J5 Code.</p>
+        </div>
+        <ul class="items items--4 items--flush">
+          {more.map((item) => <li><h3>{item.title}</h3><p>{item.body}</p></li>)}
+        </ul>
+      </div>
+    </section>
+
+    <section id="t3-code" class="feature band--deep">
+      <div class="container">
+        <div class="feature__head">
+          <p class="origin"><svg class="pennant pennant--t3" viewBox="0 0 14 10" aria-hidden="true"><path d={T3_PENNANT}></path></svg>From T3 Code</p>
+          <h2 class="display">From T3&nbsp;Code {UPSTREAM_RANGE}</h2>
+          <p class="feature__intro">
+            J5 Code is built on <a href={T3_SITE_URL} target="_blank" rel="noopener noreferrer">T3 Code</a>, and this
+            release brings in its work from {UPSTREAM_RANGE}. The highlights:
+          </p>
+        </div>
+        <ul class="items items--3">
+          {upstream.map((item) => <li><h3>{item.title}</h3><p>{item.body}</p></li>)}
+        </ul>
+        <p class="more more--after">
+          There are many smaller fixes besides.{" "}
+          <a href={`${UPSTREAM_REPOSITORY_URL}/releases`} target="_blank" rel="noopener noreferrer">Read T3 Code's release notes</a>.
         </p>
       </div>
     </section>
   </div>
 </Layout>
 
+<script>
+  import { startWhatsNew } from "../../lib/whatsNew";
+  import { startPieces } from "../../lib/whatsNew0052";
+
+  const root = document.querySelector<HTMLElement>("[data-wn]");
+  if (root) {
+    startWhatsNew(root);
+    startPieces(root);
+  }
+</script>
+
 <style>
-  /* Sections alternate chart paper and open water, as the linking page does. */
-  section {
-    position: relative;
-    padding: 80px 0;
-    border-top: 1px solid var(--border);
-    background: var(--bg);
-    color: var(--fg);
-    scroll-margin-top: 64px;
-  }
-
-  .paper {
-    --bg: var(--canvas);
-    --fg: var(--ink);
-    --fg-muted: var(--ink-muted);
-    --fg-dim: var(--ink-dim);
-    --border: var(--canvas-line);
-    color-scheme: light;
-    background-image:
-      linear-gradient(to right, rgba(18, 32, 47, 0.05) 1px, transparent 1px),
-      linear-gradient(to bottom, rgba(18, 32, 47, 0.05) 1px, transparent 1px);
-    background-size: 56px 56px;
-  }
-
-  .deep {
-    background: linear-gradient(180deg, var(--navy-950) 0%, var(--navy-900) 55%, #1a2f4a 100%);
-  }
-
+  /* The hero is the sea in both schemes, with the fleet on the waterline. */
   .hero {
-    padding: 104px 0 96px;
-    border-top: 0;
+    position: relative;
+    padding: 72px 0 132px;
     background:
-      radial-gradient(ellipse 70% 55% at 50% -10%, rgba(59, 143, 174, 0.22), transparent 70%),
-      linear-gradient(180deg, var(--navy-900) 0%, var(--navy-950) 70%);
+      radial-gradient(ellipse 60% 70% at 78% 30%, rgba(59, 143, 174, 0.2), transparent 70%),
+      linear-gradient(180deg, var(--navy-900) 0%, var(--navy-950) 100%);
+    color: var(--foam);
   }
 
-  .hero-inner {
-    text-align: center;
-  }
-
-  .eyebrow {
-    font: 600 11px var(--font-mono);
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
+  .hero__tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 22px;
+    font-size: 14px;
+    font-weight: 500;
     color: var(--brass);
-    margin-bottom: 20px;
   }
 
-  h1 {
-    font-size: clamp(34px, 4.6vw, 60px);
-    max-width: 28ch;
-    margin: 0 auto 24px;
+  .hero__tag svg { width: 17px; height: 12px; fill: currentColor; }
+
+  .hero h1 {
+    max-width: 19ch;
+    font-size: clamp(34px, 4.4vw, 58px);
+    line-height: 1.06;
     text-wrap: balance;
   }
 
-  .lead {
-    color: var(--fg-muted);
-    font-size: clamp(16px, 1.4vw, 19px);
+  .hero__lead {
+    max-width: 58ch;
+    margin-top: 22px;
+    font-size: clamp(16px, 1.35vw, 19px);
     line-height: 1.6;
-    max-width: 640px;
-    margin: 0 auto;
+    color: var(--foam-muted);
   }
 
-  .section-head a,
+  .hero__waterline {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: -1px;
+    height: 48px;
+    pointer-events: none;
+  }
+
+  .hero__waterline > svg { width: 100%; height: 100%; }
+  .hero__wave { fill: var(--wn-bg); }
+
+  /* At night the paper below is water too, so the crest is what the boats sit on. */
+  .hero__crest { fill: none; stroke: none; }
+
+  @media (prefers-color-scheme: dark) {
+    .hero__crest { stroke: rgba(59, 143, 174, 0.7); stroke-width: 1.5; }
+  }
+
+  /* The wave crests every sixth of the width, from 1/24, and dips halfway between. Each boat is
+     placed by its centre on a crest or in a trough, at that water's height, so it rides the wave. */
+  .hero__boat {
+    position: absolute;
+    animation: wn-sail 1.1s cubic-bezier(0.2, 0.7, 0.2, 1) 0.5s backwards;
+  }
+
+  .hero__boat--1 { left: calc(62.5% - 20px); bottom: 13px; rotate: -1.5deg; }
+  .hero__boat--2 { left: calc(70.833% - 27px); bottom: 29px; rotate: 1deg; animation-delay: 0.62s; }
+  .hero__boat--3 { left: calc(79.167% - 18px); bottom: 13px; rotate: -1deg; animation-delay: 0.74s; }
+
+  /* On a narrow page the waves are short, so each boat takes a crest of its own, a little deeper. */
+  @media (max-width: 760px) {
+    .hero__boat--1 { left: calc(54.167% - 20px); bottom: 24px; }
+    .hero__boat--2 { bottom: 24px; }
+    .hero__boat--3 { left: calc(87.5% - 18px); bottom: 24px; }
+  }
+
+  @keyframes wn-sail {
+    from {
+      opacity: 0;
+      translate: -40px 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hero__boat { animation: none; }
+  }
+
+  .manifest { padding: 56px 0 8px; }
+
+  .manifest__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px 32px;
+    margin-bottom: 20px;
+  }
+
+  .manifest__head h2 { font-size: 26px; }
+  .manifest__key { display: flex; flex-wrap: wrap; gap: 6px 22px; font-size: 13px; color: var(--wn-muted); }
+  .manifest__key span { display: inline-flex; align-items: center; gap: 8px; }
+
+  .manifest__list {
+    list-style: none;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    overflow-x: clip;
+    border-top: 1px solid var(--wn-line);
+  }
+
+  .manifest__list li { border-bottom: 1px solid var(--wn-line); }
+  .manifest__list li:last-child { position: relative; }
+
+  /* Carries the rule from the last entry across however many cells its row leaves empty. */
+  .manifest__list li:last-child::after {
+    content: "";
+    position: absolute;
+    left: 100%;
+    bottom: -1px;
+    width: 100vw;
+    border-bottom: 1px solid var(--wn-line);
+  }
+
+  .manifest__list a {
+    display: grid;
+    grid-template-columns: 14px minmax(0, 1fr);
+    align-content: start;
+    gap: 3px 12px;
+    height: 100%;
+    padding: 14px 16px 16px 2px;
+    transition: background-color 0.15s ease;
+  }
+
+  .manifest__list a:hover { background: var(--wn-tint); }
+  .manifest__list .pennant { margin-top: 6px; transition: translate 0.2s ease; }
+  .manifest__list a:hover .pennant { translate: 3px 0; }
+  .manifest__title { font-size: 15px; font-weight: 600; line-height: 22px; }
+  .manifest__line { grid-column: 2; font-size: 13.5px; line-height: 1.45; color: var(--wn-muted); }
+
+  /* A section's words beside its piece of the app. */
+  .split {
+    display: grid;
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    align-items: center;
+    gap: 56px;
+  }
+
+  .split .feature__head { margin-bottom: 0; }
+  .split--text { align-items: start; }
+  .split--text .items { margin-top: 30px; }
+
+  /* Two pieces of the app side by side, each under its own line of what to try. */
+  .pair {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0 40px;
+  }
+
+  /* The two columns share their rows, so the two windows are one height whatever is in them. */
+  .pair > div {
+    display: grid;
+    grid-template-rows: subgrid;
+    grid-row: span 3;
+  }
+
+  .items--flush { margin-top: 0; }
+
+  .feature__intro a,
   .more a {
-    color: var(--fg);
+    color: var(--wn-fg);
     text-decoration: underline;
-    text-decoration-color: var(--border-strong);
+    text-decoration-color: var(--wn-line-strong);
     text-underline-offset: 3px;
   }
 
-  .section-head {
-    max-width: 760px;
-    margin-bottom: 40px;
+  .more { margin-top: 20px; font-size: 15px; color: var(--wn-muted); }
+  .more--after { margin-top: 36px; }
+
+  /* The page ends on open water, so the last band runs to the footer. */
+  #t3-code { padding-bottom: 88px; }
+
+  @media (max-width: 1000px) {
+    .hero { padding-top: 48px; }
+    /* minmax(0, …), so a line that should shorten can't hold its column wider than the page. */
+    .split { grid-template-columns: minmax(0, 1fr); gap: 32px; }
+    .split--text .items { margin-top: 0; }
+    .pair { grid-template-columns: minmax(0, 1fr); gap: 48px; }
+    .pair > div { display: block; }
   }
 
-  .section-head h2 {
-    font-size: clamp(28px, 3.2vw, 40px);
-    line-height: 1.08;
-  }
-
-  .section-head p {
-    color: var(--fg-muted);
-    font-size: 18px;
-    line-height: 1.55;
-    max-width: 640px;
-    margin-top: 14px;
-  }
-
-  .shots {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: flex-start;
-    gap: 32px;
-    margin-bottom: 48px;
-  }
-
-  .shots--row {
-    flex-wrap: nowrap;
-  }
-
-  .shots--row figure {
-    flex: var(--grow) 1 0%;
-    min-width: 0;
-  }
-
-  figure {
-    margin: 0;
-  }
-
-  figure {
-    max-width: 100%;
-  }
-
-  figure :global(img) {
-    display: block;
-    width: 100%;
-    height: auto;
-    border-radius: 12px;
-    border: 1px solid var(--border);
-    box-shadow: 0 14px 36px -20px rgba(18, 32, 47, 0.35);
-  }
-
-  figcaption {
-    margin-top: 10px;
-    color: var(--fg-dim);
-    font-size: 13px;
-    line-height: 1.5;
-  }
-
-  .items {
-    list-style: none;
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 28px 56px;
-  }
-
-  .items li {
-    padding-top: 18px;
-    border-top: 1px solid var(--border);
-  }
-
-  h3 {
-    font-family: var(--font-display);
-    font-size: 21px;
-    font-weight: 500;
-    letter-spacing: -0.01em;
-    line-height: 1.25;
-    margin-bottom: 6px;
-  }
-
-  .items p {
-    color: var(--fg-muted);
-    font-size: 15px;
-    line-height: 1.6;
-    overflow-wrap: anywhere;
-  }
-
-  .more {
-    margin-top: 36px;
-    color: var(--fg-muted);
-    font-size: 15px;
-  }
-
-  @media (max-width: 820px) {
-    section {
-      padding: 64px 0;
-    }
-
-    .hero {
-      padding: 72px 0 64px;
-    }
-
-    .items {
-      grid-template-columns: 1fr;
-    }
-
-    .shots--row {
-      flex-direction: column;
-    }
-
-    .shots--row figure {
-      flex: none;
-      width: 100%;
-    }
+  @media (max-width: 640px) {
+    .hero { padding: 36px 0 104px; }
+    .manifest { padding-top: 40px; }
   }
 </style>

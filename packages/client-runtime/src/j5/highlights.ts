@@ -36,8 +36,8 @@ export const HIGHLIGHTS: ReadonlyArray<Highlight> = [
     id: "2026-11-t3-code-0-1-11",
     title: "Also new, from T3 Code 0.1.11",
     description:
-      "Agents can open, review and merge pull requests, and read failing CI logs. The app comes in ten languages, /clear starts a fresh session, and there is much more.",
-    learnMoreUrl: "https://j5.codes/whats-new/0-0-54#t3-code",
+      "Agents can open, review and merge pull requests, and read failing CI logs. /clear starts a fresh session, and there is much more.",
+    learnMoreUrl: "https://j5.codes/whats-new/0-0-54#pull-requests",
     clients: ["web", "desktop"],
   },
   {

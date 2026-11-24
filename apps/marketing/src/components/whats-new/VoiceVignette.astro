@@ -4,8 +4,8 @@ import Mark from "./Mark.astro";
 
 /**
  * Settings → Voice → Transcribe with, its picker open, beside the composer's recording capsule
- * (settings/VoiceSettingsPanel.tsx, chat/VoiceInputPill.tsx). Choosing a destination updates the
- * setting; the waveform plays a few beats and rests.
+ * (settings/VoiceSettingsPanel.tsx, chat/VoiceInputPill.tsx). Choosing a destination closes the
+ * picker and updates the setting; the waveform plays a few beats and rests.
  */
 const bars = [0.35, 0.6, 0.9, 0.5, 0.75, 1, 0.55, 0.3, 0.7, 0.95, 0.6, 0.4, 0.8, 0.5, 0.65, 0.9, 0.45, 0.7, 0.35, 0.6, 0.85, 0.5, 0.3, 0.55];
 ---
@@ -15,13 +15,13 @@ const bars = [0.35, 0.6, 0.9, 0.5, 0.75, 1, 0.55, 0.3, 0.7, 0.95, 0.6, 0.4, 0.8,
     <div class="settings-a">
       <div class="settings-a__row">
         <div>
-          <p class="settings-a__title">Transcribe with</p>
+          <p class="settings-a__title" id="wn-voice-title">Transcribe with</p>
           <p class="settings-a__desc">Where your speech is turned into text.</p>
         </div>
-        <span class="select-a voice__trigger" aria-hidden="true">
-          <span class="voice__value" data-voice-value><Icon name="monitor" /><span>lighthouse</span></span>
+        <button type="button" class="select-a voice__trigger" disabled aria-haspopup="listbox" aria-expanded="true" aria-labelledby="wn-voice-title wn-voice-value" data-list-trigger>
+          <span class="voice__value" id="wn-voice-value" data-voice-value><Icon name="monitor" /><span>lighthouse</span></span>
           <Icon name="chevron-down" />
-        </span>
+        </button>
       </div>
     </div>
   </div>
@@ -44,24 +44,24 @@ const bars = [0.35, 0.6, 0.9, 0.5, 0.75, 1, 0.55, 0.3, 0.7, 0.95, 0.6, 0.4, 0.8,
 
     <div class="app voice__float">
       <div class="popup-a seq" style="--at: 0.35s" role="listbox" aria-label="Transcribe with">
-        <button type="button" class="option-a" role="option" aria-selected="false" data-voice-option="Off">
+        <button type="button" class="option-a" role="option" tabindex="-1" aria-selected="false" data-voice-option="Off">
           <Icon name="mic-off" />Off
         </button>
         <p class="voice__group">On an environment</p>
-        <button type="button" class="option-a" role="option" aria-selected="true" data-voice-option="lighthouse">
+        <button type="button" class="option-a" role="option" tabindex="-1" aria-selected="true" data-voice-option="lighthouse">
           <Icon name="monitor" />lighthouse
         </button>
-        <button type="button" class="option-a" role="option" aria-selected="false" data-voice-option="harbor">
+        <button type="button" class="option-a" role="option" tabindex="-1" aria-selected="false" data-voice-option="harbor">
           <Icon name="monitor" />harbor
         </button>
         <p class="voice__group">Cloud via harbor</p>
-        <button type="button" class="option-a" role="option" aria-selected="false" data-voice-option="OpenAI" data-voice-via="harbor">
+        <button type="button" class="option-a" role="option" tabindex="-1" aria-selected="false" data-voice-option="OpenAI" data-voice-via="harbor">
           <Mark name="openai" />OpenAI
         </button>
-        <button type="button" class="option-a" role="option" aria-selected="false" data-voice-option="Grok Voice Transcribe" data-voice-via="harbor">
+        <button type="button" class="option-a" role="option" tabindex="-1" aria-selected="false" data-voice-option="Grok Voice Transcribe" data-voice-via="harbor">
           <img src="/harnesses/grok-dark.svg" alt="" width="16" height="16" class="voice__grok" />Grok Voice Transcribe
         </button>
-        <button type="button" class="option-a" role="option" aria-selected="false" data-voice-option="OpenRouter" data-voice-via="harbor">
+        <button type="button" class="option-a" role="option" tabindex="-1" aria-selected="false" data-voice-option="OpenRouter" data-voice-via="harbor">
           <Icon name="audio-lines" />OpenRouter
         </button>
       </div>
@@ -156,5 +156,7 @@ const bars = [0.35, 0.6, 0.9, 0.5, 0.75, 1, 0.55, 0.3, 0.7, 0.95, 0.6, 0.4, 0.8,
       gap: 10px;
     }
     .voice__float { order: -1; justify-self: start; width: 232px; }
+    /* Stacked, a closed list would leave a tall gap above the composer, so here it gives its place up. */
+    .voice__float:has([data-closed]) { display: none; }
   }
 </style>

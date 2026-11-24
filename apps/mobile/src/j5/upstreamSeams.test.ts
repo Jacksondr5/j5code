@@ -164,7 +164,6 @@ const SEAMS: ReadonlyArray<Seam> = [
       "fitText={answeredByFollowsLabel(row.projectedItem.item, answered)}",
       "alone={historyHasQuestion && expanded}",
       "answered={answered}",
-      "!row.workEntry.questionAnswer",
       "historyHasQuestion && expanded ? null : displayText",
     ],
   },

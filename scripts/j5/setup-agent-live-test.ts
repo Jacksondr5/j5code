@@ -342,6 +342,20 @@ export async function resolveLiveTestPaths(input: {
   };
 }
 
+/**
+ * Codex's ChatGPT apps and plugins reach the account's connectors, and one leads to the live
+ * install. The keys are the eval runner's (`evals/j5-cli/codex-requirements.toml`).
+ */
+export const CODEX_CONNECTORS_OFF = [
+  "apps",
+  "plugins",
+  "remote_plugin",
+  "plugin_sharing",
+  "tool_suggest",
+]
+  .map((feature) => `-c features.${feature}=false`)
+  .join(" ");
+
 /** The environment for anything started here: nothing inherited from the live server. */
 export function liveTestEnvironment(
   environment: NodeJS.ProcessEnv,
@@ -364,6 +378,10 @@ export function liveTestEnvironment(
     // Every server on a host otherwise names itself after the host, so a person paired to several
     // test servers can't tell them apart. No host name: it shows in PR evidence.
     J5CODE_SERVER_NAME: `Test (${NodePath.basename(worktree)})`,
+    // Upstream reads this for every Codex launch, in place of the provider's own launch args.
+    T3CODE_CODEX_LAUNCH_ARGS: [rest.T3CODE_CODEX_LAUNCH_ARGS, CODEX_CONNECTORS_OFF]
+      .filter((args) => args !== undefined && args.trim() !== "")
+      .join(" "),
     // Every node child here opens SQLite, and each process warns once that it is experimental:
     // dozens of lines that bury what a command prints. Only that kind of warning is silenced.
     NODE_OPTIONS: [rest.NODE_OPTIONS, "--disable-warning=ExperimentalWarning"]

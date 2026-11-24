@@ -339,6 +339,8 @@ const id = (key: string) => `wn-issue-${key.replace(/[^a-z0-9]/gi, "").toLowerCa
     margin-bottom: 16px;
   }
 
+  .issues__tabs[inert] { opacity: 0.55; }
+
   .issues__tab {
     display: inline-flex;
     align-items: center;
@@ -347,6 +349,8 @@ const id = (key: string) => `wn-issue-${key.replace(/[^a-z0-9]/gi, "").toLowerCa
     padding: 0 14px;
     border: 1px solid var(--wn-line);
     border-radius: 999px;
+    /* Plain paper, so no grid line runs behind the label. */
+    background: var(--wn-surface);
     font: 500 13.5px var(--font-sans);
     color: var(--wn-muted);
     transition:
@@ -360,7 +364,7 @@ const id = (key: string) => `wn-issue-${key.replace(/[^a-z0-9]/gi, "").toLowerCa
   .issues__tab[aria-pressed="true"] {
     color: var(--wn-fg);
     border-color: var(--wn-fg);
-    background: var(--wn-tint);
+    background: color-mix(in srgb, var(--wn-fg) 5%, var(--wn-surface));
   }
 
   .issues__window {

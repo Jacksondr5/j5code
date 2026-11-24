@@ -55,7 +55,9 @@ function HighlightEntry({
     >
       <div className={entry.art ? "py-3.5 ps-3.5 pe-1.5" : "px-3.5 py-3"}>
         <h3 className="text-sm leading-5 font-semibold">{entry.title}</h3>
-        <p className="mt-0.5 text-xs leading-4.25 text-muted-foreground">{entry.description}</p>
+        <p className="mt-0.5 text-xs leading-4.25 text-pretty text-muted-foreground">
+          {entry.description}
+        </p>
         {entry.learnMoreUrl ? (
           <Button
             className="mt-2.5"

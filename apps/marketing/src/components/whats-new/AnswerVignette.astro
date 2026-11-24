@@ -1,0 +1,266 @@
+---
+import Icon from "./Icon.astro";
+
+/**
+ * The Inbox with one open question and a screenshot attached to its answer (HumanInboxPage.tsx and
+ * AnswerAttachments.tsx at v0.0.52). Refresh and Open thread are drawn only, and the paperclip
+ * attaches the next of two more files in place of a file picker.
+ */
+const files = [
+  { name: "tide-chart-7-days.png", size: "18 KB", image: true, attached: true },
+  { name: "tide-chart-30-days.png", size: "21 KB", image: true, attached: false },
+  { name: "tide-table.csv", size: "3 KB", image: false, attached: false },
+];
+---
+
+<div class="app app--window piece answer" data-vignette data-piece="answer">
+  <p class="topbar-a">Inbox</p>
+  <div class="answer__main">
+    <div class="answer__head">
+      <div>
+        <p class="answer__title">Inbox</p>
+        <p class="answer__count" data-answer-count>1 question open</p>
+      </div>
+      <span class="btn-a btn-a--ghost btn-a--sm" aria-hidden="true"><Icon name="refresh-cw" />Refresh</span>
+    </div>
+
+    <details class="answer__item" open data-answer-ask>
+      <summary class="answer__summary">
+        <span class="badge-a badge-a--md badge-a--warning answer__badge">Soon</span>
+        <span class="answer__lines">
+          <span class="answer__from">
+            <b>Tide chart redesign</b><span>harbor-map</span><span>open 2m</span>
+          </span>
+          <span class="answer__ask">Tide chart default range</span>
+        </span>
+        <Icon name="chevron-right" class="answer__chevron" />
+      </summary>
+      <div class="answer__body">
+        <p class="answer__message">Should the tide chart open on 7 days or 30 days?</p>
+        <p class="answer__message">Please attach a screenshot of the view you prefer.</p>
+        <textarea class="answer__reply" rows="3" aria-label="Answer Tide chart default range" placeholder="Type the answer exactly as it should be delivered" data-answer-reply>Open on 7 days. The attached preview shows the layout and labels I'd like to keep.</textarea>
+        <ul class="answer__files" aria-label="Attachments" data-answer-files>
+          {
+            files.map((file) => (
+              <li hidden={!file.attached} data-answer-file>
+                {file.image ? (
+                  <svg class="answer__thumb" viewBox="0 0 32 32" aria-hidden="true">
+                    <rect width="32" height="32" fill="#12202f" />
+                    <path d="M0 21c4-7 7-7 11 0s7 7 11 0 7-7 10-2v13H0z" fill="#3b8fae" opacity="0.5" />
+                    <path d="M0 21c4-7 7-7 11 0s7 7 11 0 7-7 10-2" fill="none" stroke="#dfe9ee" stroke-width="1.4" />
+                    <path d="M4 7h10M4 10.5h6" stroke="#dfe9ee" stroke-width="1.4" opacity="0.7" />
+                  </svg>
+                ) : (
+                  <Icon name="file" class="t-muted answer__file-icon" />
+                )}
+                <span class="answer__file-lines">
+                  <b class="truncate">{file.name}</b>
+                  <span class="t-muted">{file.size}</span>
+                </span>
+                <button type="button" class="btn-a btn-a--ghost btn-a--icon-xs" aria-label={`Remove ${file.name}`} data-answer-remove>
+                  <Icon name="x" />
+                </button>
+              </li>
+            ))
+          }
+        </ul>
+        <div class="answer__actions">
+          <span class="btn-a btn-a--ghost btn-a--sm" aria-hidden="true">Open thread<Icon name="arrow-up-right" class="ico-35" /></span>
+          <button type="button" class="btn-a btn-a--ghost btn-a--sm answer__attach" aria-label="Attach files" data-tip="Attach files" data-tip-align="start" data-answer-attach data-hot>
+            <Icon name="paperclip" />
+          </button>
+          <button type="button" class="btn-a btn-a--primary answer__send" data-answer-send data-hot>Answer</button>
+        </div>
+      </div>
+    </details>
+
+    <div class="answer__empty" data-answer-empty hidden>
+      <span class="answer__empty-mark"><Icon name="inbox" /></span>
+      <p class="answer__empty-title">Nothing is waiting on you</p>
+      <p class="answer__empty-text">New questions from agents will arrive here in urgency order.</p>
+    </div>
+
+    <details class="answer__shelf" data-answer-shelf hidden>
+      <summary class="answer__shelf-summary" data-hot>
+        <Icon name="chevron-right" class="answer__chevron" />Answered<span class="answer__shelf-count tnum">1</span>
+      </summary>
+      <div class="answer__answered">
+        <Icon name="circle-check" class="answer__answered-mark" />
+        <span class="answer__lines">
+          <span class="answer__answered-ask">Tide chart default range</span>
+          <span class="answer__answered-from truncate">Tide chart redesign · harbor-map · answered just now</span>
+        </span>
+        <span class="btn-a btn-a--ghost btn-a--sm" aria-hidden="true">Open thread<Icon name="arrow-up-right" class="ico-35" /></span>
+      </div>
+    </details>
+  </div>
+</div>
+
+<style>
+  .answer {
+    --answer-emerald: oklch(69.6% 0.17 162.48);
+    min-height: 470px;
+  }
+
+  .answer__main { padding: 8px 28px 24px; }
+
+  .answer__head {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 16px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--a-border);
+  }
+
+  .answer__title { font-size: 24px; font-weight: 600; letter-spacing: -0.025em; line-height: 1.33; }
+  .answer__count { margin-top: 4px; font-size: 14px; color: var(--a-muted-fg); }
+
+  .answer summary { list-style: none; cursor: pointer; }
+  .answer summary::-webkit-details-marker { display: none; }
+  .answer summary:focus-visible { outline: 2px solid var(--a-primary); outline-offset: -2px; border-radius: 8px; }
+  .answer :global(.answer__chevron) { color: var(--a-muted-fg); transition: rotate 0.15s ease; }
+  .answer details[open] > summary :global(.answer__chevron) { rotate: 90deg; }
+
+  .answer__summary { display: flex; align-items: flex-start; gap: 16px; padding: 16px 4px; }
+  .answer__summary :global(.answer__chevron) { margin-top: 4px; }
+  .answer__badge { margin-top: 2px; text-transform: uppercase; letter-spacing: 0.025em; }
+  .answer__lines { display: block; min-width: 0; flex: 1; }
+  .answer__lines > span { display: block; }
+  /* Each part of the sender line wraps whole. A part's dot sits in the gap before it, and the row
+     clips the dot of a part that starts a line, so no line begins or ends with one. */
+  .answer .answer__from {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 19px;
+    overflow: hidden;
+    font-size: 12px;
+    color: var(--a-muted-fg);
+  }
+
+  .answer__from > * { position: relative; white-space: nowrap; }
+  .answer__from > * + *::before { content: "·"; position: absolute; left: -11px; opacity: 0.6; }
+  .answer__from b { font-weight: 500; color: color-mix(in srgb, var(--a-fg) 80%, transparent); }
+  .answer__ask { margin-top: 4px; font-size: 16px; font-weight: 600; line-height: 1.375; }
+
+  .answer__body {
+    padding: 16px 4px 20px 0;
+    margin-left: 96px;
+    border-top: 1px solid color-mix(in srgb, var(--a-border) 50%, transparent);
+  }
+
+  .answer__message { font-size: 14px; line-height: 20px; color: color-mix(in srgb, var(--a-fg) 90%, transparent); }
+  .answer__message + .answer__message { margin-top: 10px; }
+
+  .answer__reply {
+    display: block;
+    width: 100%;
+    min-height: 96px;
+    margin-top: 16px;
+    padding: 5px 11px;
+    border: 1px solid var(--a-input);
+    border-radius: 8px;
+    background: var(--a-control);
+    box-shadow: var(--a-shadow);
+    font: 400 14px/20px var(--a-font);
+    color: var(--a-fg);
+    resize: none;
+  }
+
+  /* Textarea's focus: the ring colour on the border, and 3px of it at 24% inside. */
+  .answer__reply:focus-visible {
+    outline: none;
+    border-color: var(--a-primary);
+    box-shadow: inset 0 0 0 3px color-mix(in srgb, var(--a-primary) 24%, transparent);
+  }
+
+  .answer__reply::placeholder { color: var(--a-muted-fg); }
+
+  .answer__files { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; list-style: none; }
+  .answer__files:not(:has(li:not([hidden]))) { display: none; }
+
+  .answer__files li {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 256px;
+    padding: 4px 2px 4px 4px;
+    border: 1px solid var(--a-border);
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--a-muted) 40%, transparent);
+    font-size: 12px;
+    line-height: 16px;
+  }
+
+  .answer__thumb { width: 32px; height: 32px; flex-shrink: 0; border-radius: 4px; }
+  .answer__files :global(.answer__file-icon) { margin: 0 4px; }
+  .answer__file-lines { display: flex; flex-direction: column; min-width: 0; }
+  .answer__file-lines b { font-weight: 500; }
+
+  .answer__actions { display: flex; align-items: center; gap: 4px; margin-top: 12px; }
+  .answer .answer__attach { width: 28px; padding: 0; }
+  .answer .answer__attach :global(.ico) { margin: 0; translate: 0 1px; }
+  .answer .answer__send { margin-left: auto; }
+  .answer :is(.answer__send, .answer__attach):disabled,
+  .answer__files button:disabled { opacity: 0.64; cursor: default; }
+
+  .answer__empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 48px 16px;
+    text-align: center;
+  }
+
+  .answer__empty-mark {
+    display: grid;
+    place-items: center;
+    width: 40px;
+    height: 40px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--answer-emerald) 10%, transparent);
+    color: var(--a-success-fg);
+  }
+
+  .answer__empty-mark :global(.ico) { width: 20px; height: 20px; }
+  .answer__empty-title { margin-top: 16px; font-size: 16px; font-weight: 500; }
+  .answer__empty-text { max-width: 384px; margin-top: 4px; font-size: 14px; line-height: 1.625; color: var(--a-muted-fg); }
+
+  .answer__shelf { padding-top: 16px; border-top: 1px solid var(--a-border); }
+
+  .answer__shelf-summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: fit-content;
+    padding: 8px 8px 8px 0;
+    border-radius: 6px;
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--a-muted-fg);
+    transition: color 0.15s ease;
+  }
+
+  .answer__shelf-summary:hover { color: var(--a-fg); }
+  .answer__shelf-count { color: color-mix(in srgb, var(--a-muted-fg) 80%, var(--a-fg)); }
+
+  .answer__answered {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    margin-top: 4px;
+    padding: 12px 0 12px 24px;
+  }
+
+  .answer :global(.answer__answered-mark) { margin-top: 2px; color: var(--a-success-fg); }
+  .answer__answered-ask { font-size: 14px; font-weight: 500; color: color-mix(in srgb, var(--a-fg) 80%, transparent); }
+  .answer__answered-from { margin-top: 2px; font-size: 12px; color: var(--a-muted-fg); }
+
+  @media (max-width: 640px) {
+    .answer__main { padding: 4px 14px 18px; }
+    .answer__summary { gap: 12px; }
+    .answer__body { margin-left: 0; padding-right: 0; }
+    .answer__answered { padding-left: 0; }
+    .answer__answered > :global(.btn-a) { display: none; }
+  }
+</style>
