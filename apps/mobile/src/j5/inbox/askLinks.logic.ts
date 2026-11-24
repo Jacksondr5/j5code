@@ -2,6 +2,8 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 import { parseThreadLinkHref, type ThreadLink } from "@t3tools/shared/threadLinks";
 
+import { resolveMarkdownLinkPresentation } from "../../lib/markdownLinks";
+
 /**
  * Where a link in an ask goes, as a thread sends it: a thread link opens that thread, a web link
  * goes to the pull request route (which opens the browser for anything but a known project's pull
@@ -27,4 +29,18 @@ export function askLinkTarget(
     };
   }
   return /^https?:\/\//i.test(href) ? { kind: "web" } : null;
+}
+
+/**
+ * A link pressed in an ask whose sender's workspace isn't known here: a file link stays inert,
+ * with nowhere to open it, and anything else opens as in a thread, or else in the browser.
+ */
+export function pressAskLinkWithoutWorkspace(
+  href: string,
+  openLink: (href: string) => boolean,
+  openExternal: (href: string) => void,
+) {
+  const presentation = resolveMarkdownLinkPresentation(href);
+  if (presentation.kind === "file" || !presentation.href) return;
+  if (!openLink(presentation.href)) openExternal(presentation.href);
 }

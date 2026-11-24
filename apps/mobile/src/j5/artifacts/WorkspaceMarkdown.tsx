@@ -35,6 +35,7 @@ import { useQuietThreadShell } from "../../state/entities";
 import { useEnvironmentThread } from "../../state/threads";
 import { ArtifactMarkdownImage } from "./ArtifactMarkdownImage";
 import { useOpenAskLink } from "../inbox/askLinks";
+import { pressAskLinkWithoutWorkspace } from "../inbox/askLinks.logic";
 import { useThreadCwd } from "./useThreadCwd";
 import {
   artifactLinkContextMenu,
@@ -152,7 +153,7 @@ export function WorkspaceMarkdown(props: {
 /**
  * An agent's words to a person, read as web reads them: in the sender's thread and its worktree
  * (or its project's root), with pull request and thread links opening in the app as they do in a
- * thread. Until that is known on this device, the links stay plain text.
+ * thread. Until that is known on this device, file links stay inert and the rest open as they can.
  */
 export function SenderMarkdown(props: {
   readonly markdown: string;
@@ -175,7 +176,17 @@ export function SenderMarkdown(props: {
   const workspaceRoot = useThreadCwd(senderThread);
   const projectId = useThreadProjectId(senderThread);
   if (props.senderThreadId === null || workspaceRoot === null) {
-    return <SelectableMarkdownText markdown={props.markdown} textStyle={styles.nativeTextStyle} />;
+    return (
+      <SelectableMarkdownText
+        markdown={props.markdown}
+        textStyle={styles.nativeTextStyle}
+        onLinkPress={(href) =>
+          pressAskLinkWithoutWorkspace(href, openLink, (url) => {
+            void tryOpenExternalUrl(url, "markdown-link");
+          })
+        }
+      />
+    );
   }
   return (
     <WorkspaceMarkdown

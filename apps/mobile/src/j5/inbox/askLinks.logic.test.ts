@@ -1,7 +1,7 @@
 import { EnvironmentId, ThreadId } from "@t3tools/contracts";
-import { expect, it } from "vite-plus/test";
+import { expect, it, vi } from "vite-plus/test";
 
-import { askLinkTarget } from "./askLinks.logic";
+import { askLinkTarget, pressAskLinkWithoutWorkspace } from "./askLinks.logic";
 
 const ask = EnvironmentId.make("env-ask");
 const other = { environmentId: EnvironmentId.make("env-other"), threadId: ThreadId.make("t-2") };
@@ -40,4 +40,34 @@ it.each([
   ["a mail link is left to the caller", "mailto:someone@example.com", null, null],
 ] as const)("%s", (_name, href, resolved, expected) => {
   expect(askLinkTarget(href, ask, () => resolved)).toEqual(expected);
+});
+
+it.each([
+  ["a known pull request opens in the app", "https://github.com/acme/billing/pull/42", true, "app"],
+  ["a thread link opens in the app", "t3-thread://v2/env-other/t-2", true, "app"],
+  [
+    "a web link the app doesn't take opens the browser",
+    "https://example.com/docs",
+    false,
+    "browser",
+  ],
+  [
+    "a file link stays inert, with no workspace to open it in",
+    "src/billing/invoice.ts:12",
+    true,
+    "none",
+  ],
+] as const)("with no sender workspace here, %s", (_name, href, appTakes, expected) => {
+  const openLink = vi.fn(() => appTakes);
+  const openExternal = vi.fn();
+
+  pressAskLinkWithoutWorkspace(href, openLink, openExternal);
+
+  const opened =
+    openExternal.mock.calls.length > 0
+      ? "browser"
+      : openLink.mock.calls.length > 0
+        ? "app"
+        : "none";
+  expect(opened).toBe(expected);
 });
