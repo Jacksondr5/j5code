@@ -80,12 +80,8 @@ import {
   outsideSpawnHasNoCheckout,
   outsideSpawnNeedsProject,
 } from "./mcp/outsideAgent.ts";
-// Values used only inside functions: tools.ts imports this module for its dependency list.
-import {
-  J5SpawnAgentResult,
-  type J5LinkedSpawnFacts,
-  type J5SpawnAgentInput,
-} from "./mcp/tools.ts";
+import type { J5SpawnAgentInput } from "./mcp/tools.ts";
+import { J5SpawnAgentResult, type J5LinkedSpawnFacts } from "./mcp/spawnContracts.ts";
 
 import * as RequestReplayService from "./RequestReplayService.ts";
 import * as SpawnWorkspace from "./spawnWorkspace.ts";
@@ -380,7 +376,7 @@ const linkedCallerAccess = (facts: J5LinkedSpawnFacts, linkLevel: RuntimeMode): 
   sandbox: facts.caller_access.sandbox,
 });
 
-// J5McpFailure's shape, declared here: tools.ts imports this module, so its values aren't ready yet.
+// J5McpFailure's shape, declared here: importing values from tools.ts would close an import cycle.
 const decodeRemoteJ5Failure = Schema.decodeOption(
   Schema.fromJsonString(Schema.Struct({ code: Schema.String, message: Schema.String })),
 );

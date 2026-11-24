@@ -83,7 +83,8 @@ import { spawnThreadId } from "../spawnIds.ts";
 import { J5ToolkitHandlersLive } from "./handlers.ts";
 import { PeerLinks } from "../../../peer/PeerLinks.ts";
 import { PeerMcpClient } from "../../../peer/PeerMcpClient.ts";
-import { J5SpawnAgentResult, J5Toolkit } from "./tools.ts";
+import { J5SpawnAgentResult } from "./spawnContracts.ts";
+import { J5Toolkit } from "./tools.ts";
 import { noDocumentTextLayer } from "../../test-support/documentText.ts";
 
 const orchestrationLayer = RuntimeLayer.layer.pipe(Layer.provideMerge(J5ThreadRegistrationLayer));
