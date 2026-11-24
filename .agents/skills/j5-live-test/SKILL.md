@@ -147,13 +147,6 @@ sampled, so it shows that a request happened but cannot show that one did not.
 Live turns also leave provider session files in `~/.claude` and `~/.codex`,
 and Browser panel screenshots are saved by the server you are running in.
 
-A test server's Codex shares `~/.codex`, sign-in included, so it could reach
-the account's ChatGPT connectors, one of which leads to the developer's live
-install. The script starts every server with Codex's apps and plugins off
-(`T3CODE_CODEX_LAUNCH_ARGS`). Leave that variable alone when you set your own;
-the script adds its switches after yours. If an agent still reaches for a
-`codex_apps` tool, stop the turn and report it.
-
 ### Other setups
 
 A worktree holds one setup at a time. Pass a flag to the first start, or to
