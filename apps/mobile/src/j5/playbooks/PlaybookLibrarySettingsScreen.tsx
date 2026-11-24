@@ -201,13 +201,13 @@ function PlaybookLibrary({
                 {
                   id: "chat",
                   title: "Prepare chat",
-                  attributes: { disabled: busy || !!playbook.issue },
+                  attributes: { disabled: busy || offline || !!playbook.issue },
                 },
                 { id: "steps", title: "View steps", attributes: { disabled: !!playbook.issue } },
                 {
                   id: "export",
                   title: "Export YAML",
-                  attributes: { disabled: busy || !!playbook.issue },
+                  attributes: { disabled: busy || offline || !!playbook.issue },
                 },
                 {
                   id: "rename",
@@ -228,7 +228,7 @@ function PlaybookLibrary({
                       entry.environmentId === environmentId
                         ? "Copy to library"
                         : `Copy to ${entry.label}`,
-                    attributes: { disabled: busy || !!playbook.issue },
+                    attributes: { disabled: busy || offline || !!playbook.issue },
                   })),
                 {
                   id: "delete",

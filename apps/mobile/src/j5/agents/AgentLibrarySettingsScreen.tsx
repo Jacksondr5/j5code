@@ -412,7 +412,7 @@ function OwnerAgentLibrarySettingsScreen() {
                 {
                   key: action,
                   label: "Export YAML",
-                  disabled: busy,
+                  disabled: busy || offline,
                   onPress: () => void exportPersona(id),
                 },
               ];
@@ -420,7 +420,7 @@ function OwnerAgentLibrarySettingsScreen() {
               return otherEnvironments.map((environment) => ({
                 key: `copy:${environment.environmentId}`,
                 label: `Copy to ${environment.environmentLabel}`,
-                disabled: busy,
+                disabled: busy || offline,
                 onPress: () =>
                   void copyPersona(id, {
                     environmentId: environment.environmentId,
