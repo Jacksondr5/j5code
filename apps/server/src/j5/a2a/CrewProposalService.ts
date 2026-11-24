@@ -921,8 +921,8 @@ export const layer = Layer.effect(
       const current = order.indexOf(run.currentStepId);
       if (current < 0)
         return yield* new CrewProposalRequestError({
-          detail: `The crew's playbook run is at step ${run.currentStepId}, which its definition can't show${run.issue ? ` (${run.issue.message})` : ""}, so the steps seat ${seatName} finished can't be told apart.`,
-          nextStep: "Fix the playbook or reselect a step, then request the replacement again.",
+          detail: `The crew's playbook run is at step ${run.currentStepId}, which its definition can't show, so the steps seat ${seatName} finished can't be told apart.`,
+          nextStep: "Cancel the run and start it again, then request the replacement again.",
         });
       const later = order.slice(current);
       return owned.filter((stepId) => later.includes(stepId));

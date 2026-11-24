@@ -193,9 +193,9 @@ export function PlaybookSteps(props: {
               Progress could not refresh. Showing the last received state.
             </Text>
           )}
-          {run.issue && (
+          {run.cancelReason && (
             <Text accessibilityRole="alert" className="my-2 text-xs text-foreground-muted">
-              {run.issue.message}
+              {run.cancelReason}
             </Text>
           )}
           {display.steps.map((step, index) => (

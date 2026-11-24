@@ -1,5 +1,5 @@
 import { ThreadId } from "@t3tools/contracts";
-import { PlaybookError, type PlaybookProgress } from "@t3tools/contracts/j5";
+import { type PlaybookProgress } from "@t3tools/contracts/j5";
 import { expect, it } from "vite-plus/test";
 
 import { act, render as renderUi } from "../../../test/render";
@@ -22,7 +22,6 @@ const active: PlaybookProgress = {
   ],
   position: 2,
   total: 3,
-  issue: null,
 };
 
 let viewKey = 0;
@@ -97,20 +96,19 @@ it("keeps stale, unavailable, and terminal states visible while collapsed", asyn
   await show([
     {
       ...active,
-      currentStepId: "removed",
+      status: "cancelled",
+      currentStepId: "legacy",
       position: null,
-      issue: new PlaybookError({
-        code: "step_missing",
-        message: "Current step was removed.",
-        availableStepIds: ["plan", "build", "review"],
-      }),
+      total: 0,
+      steps: [],
+      cancelReason: "started before runs kept their own copy; start it again.",
     },
   ]);
-  expect(container.textContent).toContain("Current step was removed");
-  expect(stages()?.querySelector('[aria-current="step"]')).toBeNull();
+  expect(container.textContent).toContain("started before runs kept their own copy");
+  expect(stages()).toBeNull();
   await act(() => toggle().click());
-  expect(toggle().textContent).toContain("Needs attention");
-  expect(toggle().getAttribute("aria-label")).toContain("Step unavailable");
+  expect(toggle().textContent).toContain("Cancelled");
+  expect(toggle().getAttribute("aria-label")).toContain("Last step: legacy");
 
   await show([{ ...active, status: "completed" }]);
   expect(toggle().textContent).toContain("Completed");

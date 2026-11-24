@@ -3,7 +3,6 @@ import * as SpawnAgentService from "./SpawnAgentService.ts";
 import * as Layer from "effect/Layer";
 import { layerEventSink as OrchestrationV2EventSinkLayerLive } from "../../orchestration-v2/runtimeLayer.ts";
 import { layer as playbookCrewRelayLayer } from "../playbooks/PlaybookCrewRelay.ts";
-import { layer as playbookDefinitionWatchLayer } from "../playbooks/PlaybookDefinitionWatch.ts";
 import { playbookStoreLayer } from "../playbooks/PlaybookStore.ts";
 import { FetchHttpClient } from "effect/http";
 
@@ -261,7 +260,6 @@ const makeJ5A2AAuxiliaryLayer = (
     // A thread moved to another project re-checks every narrowed feed, as a grant does.
     threadMovesLayer,
     // Moves the one store's revision when the YAML of an active run changes on disk.
-    playbookDefinitionWatchLayer.pipe(Layer.provide(playbookStoreLayer)),
     // Shared conversations: what a person's message carries to the agent, and who wrote it. It
     // ends a person's asks through the one lifecycle service, whose permit orders every drop.
     sharedConversationLayer.pipe(Layer.provide(lifecycleServiceProvided)),

@@ -27,7 +27,6 @@ import { playbookWorkspaceRoot } from "./workspace.ts";
 const Text = Schema.String.check(Schema.isNonEmpty());
 const Mutation = Schema.Struct({ runId: Text, client_request_id: Text });
 const Movement = Schema.Struct({ ...Mutation.fields, expectedStepId: Text });
-const Reselection = Schema.Struct({ ...Movement.fields, stepId: Text });
 const Start = Schema.Struct({
   name: Text,
   client_request_id: Text,
@@ -94,14 +93,14 @@ export const playbookTools = [
     dependencies: workspaceDependencies,
     parameters: Start,
     description:
-      "Start a named playbook in your own thread and retrieve its first live prompt. Only one run may be active. You perform the work and control advancement; the playbook never spawns or stops agents. As a Captain, pass crew_instance_id to run the playbook your Crew follows: each step then goes to the seat that owns it, and delivery says who holds it." +
+      "Start a named playbook in your own thread and retrieve its first saved prompt. Only one run may be active. You perform the work and control advancement; the playbook never spawns or stops agents. As a Captain, pass crew_instance_id to run the playbook your Crew follows: each step then goes to the seat that owns it, and delivery says who holds it." +
       mutationDescription,
   }).annotate(McpSchema.EnabledWhen, hiddenFromOutsideClients),
   Tool.make("j5_playbook_current", {
     ...common,
     parameters: Current,
     description:
-      "Retrieve your run's live prompt, purpose and progress without moving. Omit runId to recover your active (or latest) run after compaction or restart. If a current step was deleted, use j5_playbook_reselect.",
+      "Retrieve your run's saved prompt, purpose and progress without moving. Omit runId to recover your active (or latest) run after compaction or restart.",
   })
     .annotate(Tool.Readonly, true)
     .annotate(Tool.Destructive, false)
@@ -111,21 +110,14 @@ export const playbookTools = [
     ...common,
     parameters: Movement,
     description:
-      "Advance one step in the latest YAML order and retrieve its prompt. expectedStepId must equal your current step. At the last step, use j5_playbook_complete." +
+      "Advance one step in the saved step order and retrieve its prompt. expectedStepId must equal your current step. At the last step, use j5_playbook_complete." +
       mutationDescription,
   }).annotate(McpSchema.EnabledWhen, hiddenFromOutsideClients),
   Tool.make("j5_playbook_back", {
     ...common,
     parameters: Movement,
     description:
-      "Move back one step in the latest YAML order and retrieve its live prompt. This changes progress only; it does not undo work or file edits. expectedStepId guards against stale calls." +
-      mutationDescription,
-  }).annotate(McpSchema.EnabledWhen, hiddenFromOutsideClients),
-  Tool.make("j5_playbook_reselect", {
-    ...common,
-    parameters: Reselection,
-    description:
-      "Explicitly select an available stepId, including recovery when the stored current step was removed. expectedStepId must equal the stored currentStepId, even if that ID is absent from YAML." +
+      "Move back one step in the saved step order and retrieve its saved prompt. This changes progress only; it does not undo work or file edits. expectedStepId guards against stale calls." +
       mutationDescription,
   }).annotate(McpSchema.EnabledWhen, hiddenFromOutsideClients),
   Tool.make("j5_playbook_complete", {
@@ -139,8 +131,7 @@ export const playbookTools = [
     ...common,
     parameters: Mutation,
     description:
-      "Cancel your playbook even when its YAML is missing or invalid. This does not interrupt or archive your agent." +
-      mutationDescription,
+      "Cancel your playbook. This does not interrupt or archive your agent." + mutationDescription,
   }).annotate(McpSchema.EnabledWhen, hiddenFromOutsideClients),
 ] as const;
 
@@ -240,9 +231,6 @@ export const playbookHandlers = {
   ),
   j5_playbook_back: runsPlaybook((input: typeof Movement.Type) =>
     mutate({ ...input, operation: "back" }),
-  ),
-  j5_playbook_reselect: runsPlaybook((input: typeof Reselection.Type) =>
-    mutate({ ...input, operation: "reselect" }),
   ),
   j5_playbook_complete: runsPlaybook((input: typeof Movement.Type) =>
     mutate({ ...input, operation: "complete" }),

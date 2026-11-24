@@ -151,6 +151,7 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
       { migration_id: 57, name: "ParticipantMoved" },
       { migration_id: 58, name: "PeerLines" },
       { migration_id: 59, name: "LinkSessions" },
+      { migration_id: 60, name: "PlaybookRunSnapshots" },
     ]);
     assert.deepStrictEqual(
       migrationEntries.map(([id, name]) => [id, name]),
@@ -214,6 +215,7 @@ it.effect("tracks J5 A2A migrations independently from upstream migrations", () 
         [57, "ParticipantMoved"],
         [58, "PeerLines"],
         [59, "LinkSessions"],
+        [60, "PlaybookRunSnapshots"],
       ],
     );
   }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
@@ -1463,7 +1465,7 @@ it.effect("recreates earlier-shaped crews tables when 14 runs over them", () =>
       [
         13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35,
         36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 58,
-        59,
+        59, 60,
       ],
     );
     const memberColumns = yield* sql<{ readonly name: string }>`
@@ -1677,5 +1679,44 @@ it.effect("keeps every recorded peer as one that sends directly when poll mode a
       SELECT name FROM pragma_table_info('j5_a2a_delivery') WHERE name = 'handed_out_at'
     `;
     assert.lengthOf(handedOut, 1);
+  }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+);
+
+it.effect("cancels only active pre-copy playbook runs when adding snapshots", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    yield* runMigrations();
+    yield* runJ5A2AMigrations({ toMigrationInclusive: 59 });
+    for (const status of ["active", "completed", "cancelled"] as const) {
+      yield* sql`INSERT INTO j5_playbook_run
+        (run_id, owner_thread_id, definition_path, current_step_id, status, created_at, updated_at)
+        VALUES (${status}, ${status}, '/playbooks/demo.yaml', 'last', ${status}, 'before', 'unchanged')`;
+    }
+    yield* runJ5A2AMigrations();
+    const rows = yield* sql`SELECT run_id, status, definition_json, cancel_reason, updated_at
+      FROM j5_playbook_run ORDER BY run_id`;
+    assert.deepStrictEqual(rows, [
+      {
+        run_id: "active",
+        status: "cancelled",
+        definition_json: null,
+        cancel_reason: "started before runs kept their own copy; start it again.",
+        updated_at: "unchanged",
+      },
+      {
+        run_id: "cancelled",
+        status: "cancelled",
+        definition_json: null,
+        cancel_reason: null,
+        updated_at: "unchanged",
+      },
+      {
+        run_id: "completed",
+        status: "completed",
+        definition_json: null,
+        cancel_reason: null,
+        updated_at: "unchanged",
+      },
+    ]);
   }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
 );
