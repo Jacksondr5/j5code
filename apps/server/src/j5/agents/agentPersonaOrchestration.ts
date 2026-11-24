@@ -292,7 +292,7 @@ const resolveDelegatedPersonaLaunch = Effect.fn("j5.resolveDelegatedPersonaLaunc
     runtimeModeRank(picked.runtimeMode) > runtimeModeRank(linkLevel)
   )
     return yield* new AgentPersonaLibraryError({
-      message: `Persona ${personaId} runs in ${picked.runtimeMode} here, broader than the link from your machine allows (${linkLevel}). Choose a persona within that level, or link the machines again with broader access.`,
+      message: `Persona ${personaId} runs in ${picked.runtimeMode} here, broader than the link from your machine and your thread's own mode allow (${linkLevel}). Choose a persona within that level, delegate it from a thread that runs with more access, or link the machines again with broader access.`,
     });
   return {
     modelSelection: picked.assignment.resolvedModelSelection,
