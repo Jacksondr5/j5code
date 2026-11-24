@@ -21,6 +21,8 @@ import * as Scope from "effect/Scope";
 
 import {
   gradeSample,
+  pastedText,
+  worldFilePaths,
   type McpToolUseCase,
   type SampleRun,
   withDevices,
@@ -214,7 +216,10 @@ const collect = async (): Promise<{ rows: Array<Row>; regressions: Array<string>
     const durationMs = Date.now() - startedAt;
     const steer = steerFor(testCase);
     const checks = run
-      ? [...gradeSample(testCase.expect, run), ...(steer ? gradeSteer(steer, run) : [])]
+      ? [
+          ...gradeSample(testCase.expect, run, pastedText(testCase), worldFilePaths(testCase)),
+          ...(steer ? gradeSteer(steer, run) : []),
+        ]
       : [];
     const pass = run !== undefined && checks.every((check) => check.pass);
     const row: Row = {
