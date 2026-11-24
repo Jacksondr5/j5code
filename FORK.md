@@ -890,6 +890,7 @@ explicitly marked.
 | `apps/server/src/device/DeviceHubOperations.ts`                             | N       | Android shutdown patch                             |
 | `apps/server/src/device/DeviceService.test.ts`                              | N       | Android shutdown patch                             |
 | `apps/server/src/device/DeviceService.ts`                                   | N       | Android shutdown patch                             |
+| `evals/mcp-tool-use/cases/orchestration.ndjson`                             | N       | Settle eval cases patch                            |
 | `apps/server/src/cloud/pinnedRuntime.test.ts`                               | N       | 50                                                 |
 | `apps/server/src/cloud/pinnedRuntime.ts`                                    | N       | 50                                                 |
 | `apps/server/src/cloud/selfUpdate.ts`                                       | N       | 40, 120, B                                         |
