@@ -976,13 +976,37 @@ const buildPlaybookStore = Effect.gen(function* () {
                 );
               currentStepId = input.stepId;
             }
+            const previouslyPassed = new Set(
+              previousSteps
+                .slice(
+                  0,
+                  previousSteps.findIndex((step) => step.id === run.currentStepId),
+                )
+                .filter((step) => step.approval === "required")
+                .map((step) => step.id),
+            );
+            if (
+              definition.steps
+                .slice(0, ids.indexOf(currentStepId))
+                .some((step) => step.approval === "required" && !previouslyPassed.has(step.id))
+            )
+              return yield* playbookError(
+                "invalid_definition",
+                "The revision would skip a required approval.",
+              );
           } else if (definition) {
             const ids = definition.steps.map((step) => step.id);
             const index = ids.indexOf(run.currentStepId);
             if (index < 0)
               return yield* playbookError("invalid_snapshot", "The run has no current step.");
-            if (input.operation === "complete") status = "completed";
-            else if (input.operation !== "assign") {
+            if (input.operation === "complete") {
+              if (definition.steps.slice(index + 1).some((step) => step.approval === "required"))
+                return yield* playbookError(
+                  "step_boundary",
+                  "A later step requires approval before this run can complete.",
+                );
+              status = "completed";
+            } else if (input.operation !== "assign") {
               const target = ids[index + (input.operation === "next" ? 1 : -1)];
               if (!target)
                 return yield* playbookError(

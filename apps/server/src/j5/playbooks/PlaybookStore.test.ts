@@ -2089,3 +2089,65 @@ it.effect("withdraws an open checkpoint when the owner is archived or deleted", 
     }
   }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );
+
+it.effect("refuses completion ahead of a required checkpoint", () =>
+  Effect.gen(function* () {
+    const { store, workspaceRoot, write } = yield* makeFixture;
+    const procedure = definition(["prepare", "publish"]);
+    yield* write("demo", {
+      ...procedure,
+      steps: procedure.steps.map((step) =>
+        step.id === "publish" ? { ...step, approval: "required" } : step,
+      ),
+    });
+    const run = yield* store.start(owner, workspaceRoot, "demo", "start");
+    const error = yield* Effect.flip(
+      store.mutate(owner, {
+        operation: "complete",
+        runId: run.runId,
+        expectedStepId: "prepare",
+        client_request_id: "finish",
+      }),
+    );
+    const reordered = yield* Effect.flip(
+      store.mutate(owner, {
+        operation: "revise",
+        runId: run.runId,
+        expectedStepId: "prepare",
+        client_request_id: "reorder",
+        basis: "asked",
+        steps: [{ ...procedure.steps[1]!, approval: "required" }, procedure.steps[0]!],
+      }),
+    );
+    assert.equal(reordered.code, "invalid_definition");
+    assert.equal(error.code, "step_boundary");
+    assert.equal((yield* store.current(owner)).status, "active");
+    const { answer } = yield* seedPlaybookInbox(owner);
+    yield* store.mutate(owner, {
+      operation: "next",
+      runId: run.runId,
+      expectedStepId: "prepare",
+      client_request_id: "next",
+    });
+    const complete = {
+      operation: "complete" as const,
+      runId: run.runId,
+      expectedStepId: "publish",
+      client_request_id: "complete",
+      summary: "Ready to publish.",
+    };
+    assert.equal((yield* Effect.flip(store.mutate(owner, complete))).code, "approval_pending");
+    const request = (yield* store.current(owner)).checkpoint!;
+    yield* store.mutate(owner, {
+      operation: "back",
+      runId: run.runId,
+      expectedStepId: "publish",
+      client_request_id: "back",
+    });
+    assert.equal(
+      (yield* Effect.flip(answer(request.requestId, "Approve")))._tag,
+      "A2AExchangeNotOpenError",
+    );
+    assert.equal((yield* store.current(owner)).currentStepId, "prepare");
+  }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
+);
