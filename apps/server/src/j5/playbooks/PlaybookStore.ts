@@ -1,4 +1,11 @@
 import * as Option from "effect/Option";
+import {
+  makePlaybookRequests,
+  playbookRequestId,
+  readPlaybookRequest,
+} from "./PlaybookRequests.ts";
+import { A2ALedgerTransactionWriter, layer as ledgerLayer } from "../a2a/LedgerService.ts";
+import { A2ADeliveryWorker } from "../a2a/DeliveryWorker.ts";
 import { ThreadId } from "@t3tools/contracts";
 import {
   PlaybookError,
@@ -64,8 +71,12 @@ const decodeRequest = Schema.decodeUnknownEffect(Request);
 type NamedStep = PlaybookStep & { readonly persona: string };
 const namedSteps = (steps: ReadonlyArray<PlaybookStep>) =>
   steps.filter((step): step is NamedStep => step.persona !== undefined);
-const stepSummary = ({ id, title, persona }: PlaybookStep) =>
-  persona === undefined ? { id, title } : { id, title, persona };
+const stepSummary = ({ id, title, persona, approval }: PlaybookStep) => ({
+  id,
+  title,
+  ...(persona === undefined ? {} : { persona }),
+  ...(approval === undefined ? {} : { approval }),
+});
 
 /** Warnings retain uncertainty about absent personas when source files are invalid. */
 const stepPersonaWarnings = (
@@ -114,6 +125,7 @@ const encodeHolderStop = Schema.encodeSync(HolderStopJson);
 const decodeHolderStop = Schema.decodeUnknownSync(HolderStopJson);
 
 type RunRow = {
+  checkpoint_summary: string | null;
   run_id: string;
   owner_thread_id: string;
   definition_path: string;
@@ -193,6 +205,7 @@ const landingFromRow = (row: LandingRow): PlaybookLanding => ({
 export type PlaybookMutation = {
   readonly runId: string;
   readonly client_request_id: string;
+  readonly summary?: string;
 } & (
   | {
       readonly operation: "next" | "back";
@@ -209,8 +222,43 @@ export type PlaybookMutation = {
   | { readonly operation: "cancel" }
 );
 
-export const makePlaybookStore = Effect.gen(function* () {
+const buildPlaybookStore = Effect.gen(function* () {
   const sql = yield* SqlClient.SqlClient;
+  const writer = yield* A2ALedgerTransactionWriter;
+  const delivery = yield* Effect.serviceOption(A2ADeliveryWorker);
+  const requests = makePlaybookRequests(
+    sql,
+    writer,
+    Option.isSome(delivery) ? delivery.value.notify : Effect.void,
+  );
+  const closeCheckpoint = Effect.fn(function* (runId: string, at: string) {
+    const [row] = yield* sql<{
+      checkpoint_request_id: string | null;
+    }>`SELECT checkpoint_request_id FROM j5_playbook_run WHERE run_id = ${runId}`;
+    if (!row?.checkpoint_request_id) return;
+    yield* requests.close(row.checkpoint_request_id, at);
+    yield* sql`UPDATE j5_playbook_run SET checkpoint_request_id = NULL, checkpoint_summary = NULL WHERE run_id = ${runId}`;
+  });
+  const currentCheckpoint = Effect.fn(function* (run: StoredPlaybookRun) {
+    const [row] = yield* sql<{
+      checkpoint_request_id: string | null;
+      checkpoint_summary: string | null;
+    }>`SELECT checkpoint_request_id, checkpoint_summary FROM j5_playbook_run WHERE run_id = ${run.runId}`;
+    if (!row?.checkpoint_request_id || !run.currentStepId) return null;
+    const state = yield* readPlaybookRequest(sql, row.checkpoint_request_id);
+    if (!state) return null;
+    return {
+      ...state,
+      requestId: row.checkpoint_request_id,
+      runId: run.runId,
+      ownerThreadId: run.ownerThreadId,
+      stepId: run.currentStepId,
+      stepTitle:
+        run.definition?.steps.find((step) => step.id === run.currentStepId)?.title ??
+        run.currentStepId,
+      summary: row.checkpoint_summary ?? "",
+    };
+  });
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const crypto = yield* SecureRandom.SecureRandom;
@@ -297,7 +345,7 @@ export const makePlaybookStore = Effect.gen(function* () {
     reason: "owner_archived" | "owner_deleted",
     runId?: string,
   ) {
-    return yield* sql.withTransaction(
+    return yield* requests.transaction(
       Effect.gen(function* () {
         const timestamp = yield* now;
         const rows = yield* sql<RunRow>`UPDATE j5_playbook_run
@@ -305,7 +353,10 @@ export const makePlaybookStore = Effect.gen(function* () {
         WHERE owner_thread_id = ${owner} AND status = 'active'
         ${runId === undefined ? sql`` : sql`AND run_id = ${runId}`}
         RETURNING *`;
-        for (const row of rows) yield* skipPending(row.run_id, timestamp);
+        for (const row of rows) {
+          yield* skipPending(row.run_id, timestamp);
+          yield* closeCheckpoint(row.run_id, timestamp);
+        }
         if (rows.length > 0) yield* bumpRevision;
         return rows.map(fromRow);
       }),
@@ -376,9 +427,15 @@ export const makePlaybookStore = Effect.gen(function* () {
       replayed,
     };
   };
-  const view = Effect.fn("PlaybookStore.view")((run: StoredPlaybookRun, replayed = false) =>
-    Effect.succeed(present(run, run.definition, replayed)),
-  );
+  const view = Effect.fn("PlaybookStore.view")(function* (
+    run: StoredPlaybookRun,
+    replayed = false,
+  ) {
+    return {
+      ...present(run, run.definition, replayed),
+      checkpoint: yield* currentCheckpoint(run),
+    };
+  });
   const replay = Effect.fn("PlaybookStore.replay")(function* (
     owner: ThreadId,
     key: string,
@@ -744,7 +801,7 @@ export const makePlaybookStore = Effect.gen(function* () {
       if (previous) return yield* view(previous, true);
       // Capture the file before taking SQLite's writer lock. Decode these exact bytes in the insert transaction.
       const source = yield* Effect.result(readDefinitionText(definitionPath));
-      const result = yield* sql.withTransaction(
+      const result = yield* requests.transaction(
         Effect.gen(function* () {
           const previous = yield* replay(owner, key, request);
           if (previous) return { run: previous, replayed: true };
@@ -833,17 +890,19 @@ export const makePlaybookStore = Effect.gen(function* () {
             input.basis,
             playbookDigest(
               encodeJson(
-                input.steps.map(({ id, title, prompt, persona }) => ({
+                input.steps.map(({ id, title, prompt, persona, approval }) => ({
                   id,
                   title,
                   prompt,
                   ...(persona === undefined ? {} : { persona }),
+                  ...(approval === undefined ? {} : { approval }),
                 })),
               ),
             ),
           ]
         : []),
     ];
+    if (input.summary !== undefined) baseRequest.push("summary", input.summary);
     const request = encodeRequest(
       "assignee" in input && input.assignee !== undefined
         ? [...baseRequest, input.assignee]
@@ -853,7 +912,7 @@ export const makePlaybookStore = Effect.gen(function* () {
       yield* cancelOrphans();
       const previous = yield* replay(owner, input.client_request_id, request);
       if (previous) return yield* view(previous, true);
-      const result = yield* sql.withTransaction(
+      const result = yield* requests.transaction(
         Effect.gen(function* () {
           const previous = yield* replay(owner, input.client_request_id, request);
           if (previous) return { run: previous, replayed: true };
@@ -890,9 +949,23 @@ export const makePlaybookStore = Effect.gen(function* () {
                 "invalid_definition",
                 "A revision requires an asked or approved basis.",
               );
+            const previousSteps = definition.steps;
             definition = (yield* decodePlaybookDocument(
               encodeJson({ ...definition, steps: input.steps }),
             )).definition;
+            const requiredIds = new Set(
+              definition.steps
+                .filter((step) => step.approval === "required")
+                .map((step) => step.id),
+            );
+            const removed = previousSteps.find(
+              (step) => step.approval === "required" && !requiredIds.has(step.id),
+            );
+            if (removed)
+              return yield* playbookError(
+                "invalid_definition",
+                `The revision must keep the required approval on step '${removed.id}'.`,
+              );
             const ids = definition.steps.map((step) => step.id);
             if (!ids.includes(currentStepId)) {
               if (input.stepId === undefined || !ids.includes(input.stepId))
@@ -939,6 +1012,42 @@ export const makePlaybookStore = Effect.gen(function* () {
               ? yield* resolveHolder(owner, input.assignee)
               : null;
           const updatedAt = yield* now;
+          if (input.operation === "next" || input.operation === "complete") {
+            const step = run.definition?.steps.find((step) => step.id === run.currentStepId);
+            if (step?.approval === "required") {
+              const checkpoint = yield* currentCheckpoint(run);
+              const summary = input.summary?.trim();
+              const changedSummary = input.summary !== undefined && summary !== checkpoint?.summary;
+              if (checkpoint?.status !== "approved" || changedSummary) {
+                if (checkpoint?.status !== "pending" || changedSummary) {
+                  if (!input.summary || !summary || input.summary.length > 8000)
+                    return yield* playbookError(
+                      "approval_summary_required",
+                      "Submit a summary of the finished work to approve (1–8000 characters).",
+                    );
+                  if (checkpoint?.status === "pending")
+                    yield* closeCheckpoint(run.runId, updatedAt);
+                  const requestId = playbookRequestId(yield* crypto.uuidV4().pipe(Effect.orDie));
+                  yield* requests.open({
+                    requestId,
+                    threadId: owner,
+                    title: `Approve playbook step: ${step.title}`,
+                    body: summary,
+                    at: updatedAt,
+                  });
+                  yield* sql`UPDATE j5_playbook_run SET checkpoint_request_id = ${requestId}, checkpoint_summary = ${summary} WHERE run_id = ${run.runId}`;
+                }
+                return { run, replayed: false, approvalPending: true };
+              }
+            }
+          }
+          const oldStep = run.definition?.steps.find((step) => step.id === run.currentStepId);
+          const newStep = definition?.steps.find((step) => step.id === currentStepId);
+          if (
+            input.operation !== "assign" &&
+            (input.operation !== "revise" || encodeJson(oldStep) !== encodeJson(newStep))
+          )
+            yield* closeCheckpoint(run.runId, updatedAt);
           let revisionCount = run.revisionCount ?? 0;
           let latestRevision = run.latestRevision ?? null;
           if (input.operation === "revise") {
@@ -998,6 +1107,13 @@ export const makePlaybookStore = Effect.gen(function* () {
           };
         }),
       );
+      if ("approvalPending" in result) {
+        yield* bumpRevision;
+        return yield* playbookError(
+          "approval_pending",
+          "Waiting for a person to approve this checkpoint in the Inbox or owner chat. The run has not moved.",
+        );
+      }
       if (!result.replayed && result.run.status !== "active")
         yield* recordFinished(result.run, "agent");
       return yield* view(result.run, result.replayed);
@@ -1028,7 +1144,12 @@ export const makePlaybookStore = Effect.gen(function* () {
     const rows = yield* sql<RunRow>`SELECT * FROM j5_playbook_run WHERE owner_thread_id = ${owner}
       ORDER BY (status = 'active') DESC, rowid DESC LIMIT 20`;
     const runs = yield* progressRows(rows);
-    return { runs };
+    return {
+      runs: runs.map((run, index) => {
+        const summary = rows[index]?.checkpoint_summary;
+        return summary ? { ...run, checkpointSummary: summary } : run;
+      }),
+    };
   }, Effect.mapError(storageError));
   const listAll = Effect.fn("PlaybookStore.listAll")(function* (input: PlaybookRunsRequest) {
     yield* cancelOrphans();
@@ -1203,6 +1324,7 @@ export const makePlaybookStore = Effect.gen(function* () {
   return {
     // Include the current revision so subscribing after a mutation still refreshes the view.
     changes: SubscriptionRef.changes(revision),
+    refreshRequestStatus: bumpRevision,
     sources: () =>
       library.sources(undefined).pipe(
         Effect.map((folders) => ({
@@ -1241,8 +1363,12 @@ export const makePlaybookStore = Effect.gen(function* () {
   };
 });
 
+export const makePlaybookStore = buildPlaybookStore.pipe(Effect.provide(ledgerLayer));
+
 export class PlaybookStore extends Context.Service<
   PlaybookStore,
   Effect.Success<typeof makePlaybookStore>
 >()("t3/j5/playbooks/PlaybookStore") {}
-export const playbookStoreLayer = Layer.effect(PlaybookStore, makePlaybookStore);
+export const playbookStoreLayer = Layer.effect(PlaybookStore, buildPlaybookStore).pipe(
+  Layer.provide(ledgerLayer),
+);

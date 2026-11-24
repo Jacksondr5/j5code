@@ -43,6 +43,8 @@ Playbooks are linear sequences. The initiative-level view — a plan whose nodes
 
 18. On the user's explicit request or approved proposal, the owner can revise an active run's steps without changing the reusable definition or other runs. The run records each revision's basis, time, and owner; history shows its revision count and latest basis. A revision preserves the current step by stable ID or requires an explicit replacement step, and stale calls and retries cannot apply it twice.
 
+19. A step may require approval. Attempting to leave it opens one owner-attributed request containing the step title and the submitted work summary, then refuses movement until an Owner or Collaborator who writes to the owner thread approves. The Inbox and owner chat share its answer across devices; Viewers cannot answer. Decline returns its reason to the owner. Requests and results survive restart; revisits and changed current work require fresh approval, and cancellation or owner archive/deletion closes pending requests. Approval never advances the run or replaces other permission rules.
+
 ## Scenarios
 
 - **A release Playbook.** The user writes a five-step release Playbook and an agent starts it. The owner assigns step 2 to a Builder Peer Agent it spawned. Fleet shows step 2 beside the owner and names the Builder as holder. When the Builder reports back, the owner advances and assigns step 3 to a Crew member it captains. (AC2, AC3, AC5, AC6)
@@ -68,3 +70,5 @@ Playbooks are linear sequences. The initiative-level view — a plan whose nodes
 - 2026-11-24 — Owners can revise the steps of an active run. Run history records the revision count and latest reason ([#787](https://github.com/Jacksondr5/j5code/issues/787)).
 - 2026-11-24 — The run owner assigns each step at runtime to an eligible local holder. A Crew no longer assigns steps when its roster is proposed ([#788](https://github.com/Jacksondr5/j5code/issues/788)).
 - 2026-11-24 — Archiving or deleting the owner cancels its run. Recovery interrupts only the turn that received the cancelled step ([#789](https://github.com/Jacksondr5/j5code/issues/789)).
+
+- 2026-11-24 — required steps use a single Inbox exchange for the submitted work summary. The owner sees the decision in chat, and revisiting the step requires a fresh approval ([#790](https://github.com/Jacksondr5/j5code/issues/790)).

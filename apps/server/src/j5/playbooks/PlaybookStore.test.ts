@@ -1,4 +1,5 @@
-import { seedPersonas, seedPlaybookOwners } from "./testFixtures.ts";
+import { CommCommandId, ExchangeId, ParticipantId } from "../a2a/contracts.ts";
+import { seedPersonas, seedPlaybookOwners, seedPlaybookInbox } from "./testFixtures.ts";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
@@ -1872,4 +1873,219 @@ it.effect(
       );
       assert.equal((yield* store.listForThread(owner)).runs[0]?.revisionCount, 1);
     }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
+);
+
+it.effect(
+  "gates checkpoint departures once per visit, persists answers, and rejects obsolete approval",
+  () =>
+    Effect.gen(function* () {
+      const { store, workspaceRoot, write } = yield* makeFixture;
+      const { answer, personId, inbox, drain } = yield* seedPlaybookInbox(owner);
+      const checked = {
+        ...definition(["plan", "build"]),
+        steps: definition(["plan", "build"]).steps.map((step) => ({
+          ...step,
+          approval: "required" as const,
+        })),
+      };
+      yield* write("demo", checked);
+      const run = yield* store.start(owner, workspaceRoot, "demo", "checkpoint-start");
+      const leave = {
+        operation: "next" as const,
+        runId: run.runId,
+        expectedStepId: "plan",
+        client_request_id: "checkpoint-next",
+        summary: "Plan and tradeoffs are ready.",
+      };
+      assert.equal((yield* Effect.flip(store.mutate(owner, leave))).code, "approval_pending");
+      const first = (yield* store.current(owner)).checkpoint!;
+      assert.equal(
+        (yield* Effect.flip(store.mutate(owner, { ...leave, expectedStepId: "wrong" }))).code,
+        "step_conflict",
+      );
+      for (const [index, steps] of [
+        checked.steps.slice(1),
+        definition(["plan", "build"]).steps,
+      ].entries()) {
+        assert.equal(
+          (yield* Effect.flip(
+            store.mutate(owner, {
+              operation: "revise",
+              runId: run.runId,
+              expectedStepId: "plan",
+              stepId: "build",
+              steps,
+              basis: "approved",
+              client_request_id: `drop-checkpoint-${index}`,
+            }),
+          )).code,
+          "invalid_definition",
+        );
+        assert.deepStrictEqual((yield* store.current(owner)).checkpoint, first);
+      }
+      assert.equal(first.summary, leave.summary);
+      assert.equal(first.ownerThreadId, owner);
+      assert.equal(first.stepTitle, "Step plan");
+      assert.equal(
+        (yield* Effect.flip(store.mutate(owner, { ...leave, client_request_id: "repeat" }))).code,
+        "approval_pending",
+      );
+      const restarted = yield* makePlaybookStore;
+      assert.deepStrictEqual((yield* restarted.current(owner)).checkpoint, first);
+      yield* drain;
+      const open = yield* inbox.list(personId, "open");
+      assert.deepStrictEqual(
+        open.map((item) => item.exchangeId),
+        [first.requestId],
+      );
+      assert.equal(open[0]?.senderThreadId, owner);
+      const sql = yield* SqlClient.SqlClient;
+      const viewer = ParticipantId.make("human:viewer");
+      yield* sql`INSERT INTO j5_a2a_human_person(person_id, is_local_operator, created_at) VALUES (${viewer}, 0, 'now')`;
+      yield* sql`INSERT INTO j5_a2a_person_level(person_id, scope_kind, scope_id, level, created_at, updated_at)
+        VALUES (${viewer}, 'server', '', 'viewer', 'now', 'now')`;
+      assert.equal((yield* store.listForThread(owner)).runs[0]?.checkpointSummary, first.summary);
+      assert.equal(
+        (yield* Effect.flip(
+          inbox.answer({
+            commandId: CommCommandId.make("viewer"),
+            personId: viewer,
+            exchangeId: ExchangeId.make(first.requestId),
+            message: "Approve",
+            acceptedAt: "now",
+          }),
+        ))._tag,
+        "A2AAskNotYoursError",
+      );
+      const reply = yield* answer(first.requestId, "Decline: Add rollback instructions.");
+      assert.deepStrictEqual(
+        yield* answer(first.requestId, "Decline: Add rollback instructions."),
+        reply,
+      );
+      assert.equal(
+        (yield* Effect.flip(answer(first.requestId, "Approve", "second-device")))._tag,
+        "A2AAskAnsweredError",
+      );
+      assert.deepStrictEqual(
+        (yield* inbox.list(personId, "answered")).map((item) => item.exchangeId),
+        [first.requestId],
+      );
+      assert.equal(
+        (yield* restarted.current(owner)).checkpoint?.reason,
+        "Add rollback instructions.",
+      );
+      assert.equal((yield* Effect.flip(store.mutate(owner, leave))).code, "approval_pending");
+      const second = (yield* store.current(owner)).checkpoint!;
+      assert.notEqual(second.requestId, first.requestId);
+      yield* answer(second.requestId, "Approve");
+      assert.equal((yield* restarted.current(owner)).checkpoint?.status, "approved");
+      // Same work with a new holder keeps the approval.
+      yield* store.mutate(owner, {
+        operation: "assign",
+        runId: run.runId,
+        expectedStepId: "plan",
+        client_request_id: "assign-approved",
+      });
+      assert.equal((yield* store.current(owner)).checkpoint?.status, "approved");
+      yield* store.mutate(owner, leave);
+      const { summary: submittedSummary, ...withoutSummary } = leave;
+      assert.equal(
+        (yield* Effect.flip(store.mutate(owner, { ...withoutSummary, assignee: submittedSummary })))
+          .code,
+        "request_conflict",
+      );
+      yield* store.mutate(owner, {
+        operation: "back",
+        runId: run.runId,
+        expectedStepId: "build",
+        client_request_id: "back-checkpoint",
+      });
+      assert.equal(
+        (yield* Effect.flip(store.mutate(owner, { ...leave, client_request_id: "revisit" }))).code,
+        "approval_pending",
+      );
+      const revisit = (yield* store.current(owner)).checkpoint!;
+      assert.notEqual(revisit.requestId, second.requestId);
+      const revisedSteps = checked.steps.map((step) =>
+        step.id === "plan" ? { ...step, prompt: "A different plan." } : step,
+      );
+      yield* store.mutate(owner, {
+        operation: "revise",
+        runId: run.runId,
+        expectedStepId: "plan",
+        steps: revisedSteps,
+        basis: "asked",
+        client_request_id: "change-work",
+      });
+      assert.equal(
+        (yield* Effect.flip(answer(revisit.requestId, "Approve")))._tag,
+        "A2AExchangeNotOpenError",
+      );
+      assert.equal(
+        (yield* Effect.flip(store.mutate(owner, { ...leave, client_request_id: "changed-work" })))
+          .code,
+        "approval_pending",
+      );
+      const changed = (yield* store.current(owner)).checkpoint!;
+      yield* answer(changed.requestId, "Approve");
+      yield* store.mutate(owner, { ...leave, client_request_id: "approved-change" });
+      const complete = {
+        operation: "complete" as const,
+        runId: run.runId,
+        expectedStepId: "build",
+        client_request_id: "finish-checkpoint",
+        summary: "Implementation tested.",
+      };
+      assert.equal((yield* Effect.flip(store.mutate(owner, complete))).code, "approval_pending");
+      assert.equal((yield* store.current(owner)).currentStepId, "build");
+      const last = (yield* store.current(owner)).checkpoint!;
+      yield* store.mutate(owner, {
+        operation: "cancel",
+        runId: run.runId,
+        client_request_id: "cancel-checkpoint",
+      });
+      assert.equal(
+        (yield* Effect.flip(answer(last.requestId, "Approve")))._tag,
+        "A2AExchangeNotOpenError",
+      );
+    }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
+);
+
+it.effect("withdraws an open checkpoint when the owner is archived or deleted", () =>
+  Effect.gen(function* () {
+    const { store, workspaceRoot, write } = yield* makeFixture;
+    const { answer, inbox, personId, drain } = yield* seedPlaybookInbox(owner);
+    const sql = yield* SqlClient.SqlClient;
+    const checked = definition(["plan"]);
+    yield* write("demo", {
+      ...checked,
+      steps: checked.steps.map((step) => ({ ...step, approval: "required" })),
+    });
+    for (const column of ["archived_at", "deleted_at"] as const) {
+      const run = yield* store.start(owner, workspaceRoot, "demo", column);
+      assert.equal(
+        (yield* Effect.flip(
+          store.mutate(owner, {
+            operation: "complete",
+            expectedStepId: "plan",
+            runId: run.runId,
+            client_request_id: `finish:${column}`,
+            summary: "Please review.",
+          }),
+        )).code,
+        "approval_pending",
+      );
+      const pending = (yield* store.current(owner)).checkpoint!;
+      yield* drain;
+      assert.equal((yield* inbox.list(personId)).length, 1);
+      yield* sql`UPDATE orchestration_v2_projection_threads SET ${sql(column)} = '2026-11-24' WHERE thread_id = ${owner}`;
+      assert.equal((yield* store.current(owner)).status, "cancelled");
+      assert.equal((yield* inbox.list(personId)).length, 0);
+      assert.equal(
+        (yield* Effect.flip(answer(pending.requestId, "Approve")))._tag,
+        "A2AExchangeNotOpenError",
+      );
+      yield* sql`UPDATE orchestration_v2_projection_threads SET ${sql(column)} = NULL WHERE thread_id = ${owner}`;
+    }
+  }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );

@@ -6,7 +6,7 @@
  * @module ReadChangeFeeds
  */
 import type { OrchestrationV2StoredEvent } from "@t3tools/contracts";
-import type { J5ReadRevisionKey } from "@t3tools/contracts/j5";
+import { PLAYBOOK_EXCHANGE_PREFIX, type J5ReadRevisionKey } from "@t3tools/contracts/j5";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -135,13 +135,20 @@ export const layer = Layer.effectDiscard(
     const committed = yield* ledger.subscribeCommitted;
     yield* committed.pipe(
       Stream.runForEach((event) =>
-        Ref.get(hasPeers).pipe(
-          Effect.flatMap((some) =>
-            changes.notify(
-              ...readsChangedByLedgerEvent(event).filter((key) => some || key !== "peers"),
+        Effect.gen(function* () {
+          if (
+            (event.kind === "exchange.closed" || event.kind === "exchange.dropped") &&
+            event.exchangeId?.startsWith(PLAYBOOK_EXCHANGE_PREFIX)
+          )
+            yield* playbooks.refreshRequestStatus;
+          return yield* Ref.get(hasPeers).pipe(
+            Effect.flatMap((some) =>
+              changes.notify(
+                ...readsChangedByLedgerEvent(event).filter((key) => some || key !== "peers"),
+              ),
             ),
-          ),
-        ),
+          );
+        }),
       ),
       Effect.forkScoped,
     );
