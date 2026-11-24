@@ -103,7 +103,7 @@ const steps = [
         }
       </div>
       <p class="reply-a seq" style="--at: 4.7s">
-        CI failed on a runner that lost its network, so I re-ran it. #418 is merged, and #412 closed with it.
+        CI failed on a runner that lost its network, so I re-&#8288;ran it. #418 is merged, and #412 closed with it.
       </p>
     </div>
     <button type="button" class="btn-a btn-a--ghost-muted btn-a--xs story__replay" data-replay>
@@ -147,10 +147,18 @@ const steps = [
     display: flex;
     flex-direction: column;
     gap: 12px;
-    padding: 6px 20px 44px;
+    padding: 6px 20px 16px;
+  }
+
+  /* Room for Play again, which is offered only where motion is allowed. */
+  @media (prefers-reduced-motion: no-preference) {
+    .story__timeline { padding-bottom: 44px; }
   }
 
   .story__work { display: flex; flex-direction: column; }
+
+  /* "re-ran" stays whole, which could leave one word on the last line. */
+  .story .reply-a { text-wrap: balance; }
 
   /* Only where the sequence can play: with the script running and motion allowed. */
   .story .story__replay {

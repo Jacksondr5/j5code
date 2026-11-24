@@ -1,6 +1,9 @@
 /** The T3 Code versions the roundup covers, and its entries for a page's contents list. */
 export const UPSTREAM_RANGE = "0.1.8 to 0.1.11";
 
+/** Placed after the hyphen of "re-run", it keeps the word on one line. */
+export const WORD_JOINER = String.fromCharCode(0x2060);
+
 interface ContentsEntry {
   href: string;
   title: string;
@@ -14,19 +17,7 @@ export const ROUNDUP_CONTENTS: ReadonlyArray<ContentsEntry> = [
   {
     href: "#pull-requests",
     title: "Agents on pull requests and CI",
-    line: "Open, review, merge a stack, read failing logs, re-run checks.",
-    origin: "t3",
-  },
-  {
-    href: "#languages",
-    title: "Ten languages",
-    line: "The app in your language, with a Language setting.",
-    origin: "t3",
-  },
-  {
-    href: "#sessions",
-    title: "Fresh sessions you can see",
-    line: "/clear, and a divider wherever a session starts over.",
+    line: `Open, review, merge a stack, read failing logs, re-${WORD_JOINER}run checks.`,
     origin: "t3",
   },
   {
@@ -45,6 +36,12 @@ export const ROUNDUP_CONTENTS: ReadonlyArray<ContentsEntry> = [
     href: "#voice",
     title: "Voice dictation",
     line: "On a server, in the cloud, or on the phone.",
+    origin: "t3",
+  },
+  {
+    href: "#sessions",
+    title: "Fresh sessions you can see",
+    line: "/clear, and a divider wherever a session starts over.",
     origin: "t3",
   },
   {

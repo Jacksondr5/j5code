@@ -1,20 +1,11 @@
 /**
  * The upstream roundup's vignettes: the hero story's replay, tracker tabs, issue rows and the
- * thread picker, the language and voice pickers, port forwarding and the switch.
+ * thread picker, the voice picker, port forwarding and the switch.
  */
 import { select } from "./whatsNew";
 
 function pressOnly(buttons: ReadonlyArray<HTMLElement>, pressed: HTMLElement, attribute: string) {
   for (const button of buttons) button.setAttribute(attribute, String(button === pressed));
-}
-
-interface Locale {
-  code: string;
-  name: string;
-  display: string;
-  language: string;
-  system: string;
-  hint: string;
 }
 
 function replay(button: HTMLElement) {
@@ -28,13 +19,18 @@ function replay(button: HTMLElement) {
 
 /** A listbox of buttons: one tab stop, arrows move, and the option's own click selects. */
 function wireListbox(options: ReadonlyArray<HTMLElement>, onSelect: (option: HTMLElement) => void) {
+  // The tab stop follows focus, so Tab leaves the list from wherever the arrows have gone.
+  const stopAt = (target: HTMLElement) => {
+    for (const option of options) option.tabIndex = option === target ? 0 : -1;
+  };
   const settle = (selected: HTMLElement) => {
     pressOnly(options, selected, "aria-selected");
-    for (const option of options) option.tabIndex = option === selected ? 0 : -1;
+    stopAt(selected);
   };
   const initial = options.find((option) => option.getAttribute("aria-selected") === "true");
   if (initial) settle(initial);
   options.forEach((option, index) => {
+    option.addEventListener("focus", () => stopAt(option));
     option.addEventListener("click", () => {
       settle(option);
       onSelect(option);
@@ -54,6 +50,51 @@ function wireListbox(options: ReadonlyArray<HTMLElement>, onSelect: (option: HTM
       target.focus();
     });
   });
+}
+
+/**
+ * A picker drawn open closes on a choice, as the app's Select does, and its trigger opens it
+ * again. Returns the function that closes it.
+ */
+function wireOpenList(vignette: HTMLElement) {
+  const trigger = vignette.querySelector<HTMLElement>("[data-list-trigger]");
+  const list = vignette.querySelector<HTMLElement>('[role="listbox"]');
+  if (!trigger || !list) return () => {};
+  // Until this runs the trigger is a drawing: disabled, so it takes no focus and no click.
+  trigger.removeAttribute("disabled");
+  // The page draws the list open to show it, so only one the reader opened closes on a click away.
+  let openedByReader = false;
+  const chosen = () => list.querySelector<HTMLElement>('[aria-selected="true"]');
+  const show = (open: boolean) => {
+    const focusWasInside = list.contains(document.activeElement);
+    list.toggleAttribute("data-closed", !open);
+    list.classList.toggle("is-reopened", open);
+    trigger.setAttribute("aria-expanded", String(open));
+    openedByReader = open;
+    if (open) chosen()?.focus();
+    else if (focusWasInside) trigger.focus();
+  };
+  trigger.addEventListener("click", () => show(list.hasAttribute("data-closed")));
+  trigger.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") return show(false);
+    if (event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+    event.preventDefault();
+    if (list.hasAttribute("data-closed")) show(true);
+    else chosen()?.focus();
+  });
+  list.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") show(false);
+  });
+  const outside = (target: EventTarget | null) =>
+    target instanceof Node && !trigger.contains(target) && !list.contains(target);
+  document.addEventListener("pointerdown", (event) => {
+    if (openedByReader && outside(event.target)) show(false);
+  });
+  // Tab out of it, from the list or from its trigger, is the keyboard's click away.
+  vignette.addEventListener("focusout", (event) => {
+    if (openedByReader && outside(event.relatedTarget)) show(false);
+  });
+  return () => show(false);
 }
 
 function wireIssues(root: HTMLElement) {
@@ -92,11 +133,14 @@ function wireThreadPicker(issues: HTMLElement) {
   const search = dialog?.querySelector<HTMLInputElement>("[data-picker-search]");
   if (!dialog || !search) return;
   const threads = select<HTMLButtonElement>(dialog, "[data-thread]");
+  // The tracker buttons sit outside the window the dialog covers, so they are held while it is open.
+  const trackers = issues.querySelector<HTMLElement>(".issues__tabs");
   let opener: HTMLElement | null = null;
 
   const linkedOf = (panel: HTMLElement) => (panel.dataset.linked ?? "").split(",").filter(Boolean);
   const close = () => {
     dialog.hidden = true;
+    if (trackers) trackers.inert = false;
     opener?.focus();
     opener = null;
   };
@@ -131,6 +175,7 @@ function wireThreadPicker(issues: HTMLElement) {
       search.value = "";
       filter();
       dialog.hidden = false;
+      if (trackers) trackers.inert = true;
       search.focus();
     });
   }
@@ -171,38 +216,13 @@ function wireThreadPicker(issues: HTMLElement) {
   });
 }
 
-function wireLanguage(root: HTMLElement) {
-  for (const picker of select(root, "[data-language]")) {
-    const locales = JSON.parse(picker.dataset.locales ?? "[]") as ReadonlyArray<Locale>;
-    wireListbox(select(picker, "[data-locale]"), (option) => {
-      const locale = locales.find((entry) => entry.code === option.dataset.locale);
-      if (!locale) return;
-      const text: Record<string, string> = {
-        display: locale.display,
-        language: locale.language,
-        hint: locale.hint,
-        system: locale.system,
-        current: "system" in option.dataset ? locale.system : locale.name,
-      };
-      for (const node of select(picker, "[data-t]")) {
-        node.textContent = text[node.dataset.t ?? ""] ?? node.textContent;
-        node.lang = locale.code;
-      }
-      const word = picker.querySelector<HTMLElement>("[data-word]");
-      if (word) {
-        word.classList.remove("is-swapped");
-        void word.offsetWidth;
-        word.classList.add("is-swapped");
-      }
-    });
-  }
-}
-
 function wireVoice(root: HTMLElement) {
   for (const voice of select(root, "[data-voice]")) {
     const value = voice.querySelector<HTMLElement>("[data-voice-value]");
     if (!value) continue;
+    const close = wireOpenList(voice);
     wireListbox(select(voice, "[data-voice-option]"), (option) => {
+      close();
       const icon = option.querySelector("svg, img")?.cloneNode(true);
       const label = document.createElement("span");
       label.textContent = option.dataset.voiceOption ?? "";
@@ -239,7 +259,6 @@ function wireServers(root: HTMLElement) {
 
 export function startRoundup(root: HTMLElement) {
   wireIssues(root);
-  wireLanguage(root);
   wireVoice(root);
   wireServers(root);
   for (const button of select(root, "[data-replay]"))

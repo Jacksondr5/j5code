@@ -55,6 +55,11 @@
   cursor: pointer;
 }
 
+/* A trigger the script has not reached yet is a drawing. */
+.app .select-a:disabled {
+  cursor: default;
+}
+
 .app .select-a > .ico {
   width: 14px;
   height: 14px;
@@ -68,6 +73,23 @@
   border-radius: 8px;
   background: var(--a-card);
   box-shadow: 0 16px 40px -18px rgb(0 0 0 / 55%);
+}
+
+/* A list that starts open keeps its place when it closes, so nothing under it moves. */
+.app .popup-a[data-closed] {
+  visibility: hidden;
+}
+
+/* Its own keyframes: the list has already run wn-in, and an animation of the same name would not start again. */
+.wn-motion .app .popup-a.is-reopened {
+  animation: wn-reopen 0.14s ease-out;
+}
+
+@keyframes wn-reopen {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.985);
+  }
 }
 
 .app .option-a {
