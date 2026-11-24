@@ -126,11 +126,16 @@ const fixture = Effect.gen(function* () {
   const archived = yield* Ref.make(new Set<string>());
   const fault = yield* Ref.make(false);
   const delegatedStopFault = yield* Ref.make(false);
+  const waiting = yield* Ref.make(false);
   const ownerPlan = yield* Ref.make(false);
   const limits = yield* Ref.make<ReadonlyArray<unknown>>([]);
   const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
   const threads = ThreadManagementService.of({
-    getThreadRecords: (id: ThreadId) =>
+    getThreadRecords: (
+      id: ThreadId,
+      _fields: unknown,
+      filter?: { runStatuses?: readonly string[] },
+    ) =>
       Effect.gen(function* () {
         if (![owner, peer, crewMember, foreign].includes(id))
           return yield* new OrchestratorProjectionError({
@@ -142,15 +147,17 @@ const fixture = Effect.gen(function* () {
         const notice = (yield* Ref.get(dispatched)).findLast(
           (item) => item.type === "message.dispatch" && item.threadId === id,
         );
+        const status = (yield* Ref.get(waiting)) ? "waiting" : "running";
         return {
           ...result,
           runs:
-            notice?.type === "message.dispatch"
+            notice?.type === "message.dispatch" &&
+            (!filter?.runStatuses || filter.runStatuses.includes(status))
               ? [
                   {
                     id: RunId.make("run:" + notice.messageId),
                     userMessageId: notice.messageId,
-                    status: "running",
+                    status,
                   },
                 ]
               : [],
@@ -237,6 +244,7 @@ const fixture = Effect.gen(function* () {
     root,
     dispatched,
     ownerPlan,
+    waiting,
     limits,
     crews,
   };
@@ -381,7 +389,7 @@ it.effect.each([
   "serializes $operation with $startMode start delivery while other runs proceed",
   ({ startMode, operation }) =>
     Effect.gen(function* () {
-      const { store, start, fault, threads, root, notices } = yield* fixture;
+      const { store, crews, start, fault, threads, root, notices } = yield* fixture;
       if (startMode === "retry") {
         yield* Ref.set(fault, true);
         yield* start("start-race", peerId);
@@ -393,7 +401,7 @@ it.effect.each([
       const mutationEntered = yield* Deferred.make<void>();
       const armed = yield* Ref.make(false);
       const relay = yield* makePlaybookCrewRelay.pipe(
-        Effect.provide(Layer.mock(AgentCrewInstanceService)({})),
+        Effect.provideService(AgentCrewInstanceService, crews),
         Effect.provideService(PlaybookStore, {
           ...store,
           runById: (id) =>
@@ -461,11 +469,11 @@ it.effect(
   "a mutation winning the insertion-to-lock gap supersedes the start response and notice",
   () =>
     Effect.gen(function* () {
-      const { store, threads, root, notices } = yield* fixture;
+      const { store, crews, threads, root, notices } = yield* fixture;
       const inserted = yield* Deferred.make<void>();
       const releaseStart = yield* Deferred.make<void>();
       const relay = yield* makePlaybookCrewRelay.pipe(
-        Effect.provide(Layer.mock(AgentCrewInstanceService)({})),
+        Effect.provideService(AgentCrewInstanceService, crews),
         Effect.provideService(PlaybookStore, {
           ...store,
           start: (...input) =>
@@ -746,6 +754,18 @@ it.effect("persists Stop failure without failing cancellation or retrying Stop",
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );
 
+it.effect("withholds a peer handoff above the owner's current mode", () =>
+  Effect.gen(function* () {
+    const { start, ownerPlan, dispatched } = yield* fixture;
+    yield* Ref.set(ownerPlan, true);
+    const run = yield* start("restricted", peerId);
+    assert.equal(run.delivery?.state, "pending");
+    assert.isFalse(
+      (yield* Ref.get(dispatched)).some((command) => command.type === "message.dispatch"),
+    );
+  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);
+
 it.effect("uses owner modes for a peer and the Captain exemption for its Crew seat", () =>
   Effect.gen(function* () {
     const { start, relay, ownerPlan, limits } = yield* fixture;
@@ -767,10 +787,11 @@ it.effect(
   "cancels on owner lifecycle events and boot recovery without reopening on unarchive",
   () =>
     Effect.gen(function* () {
-      const { start, relay, sql, dispatched } = yield* fixture;
+      const { start, relay, sql, dispatched, waiting } = yield* fixture;
       for (const kind of ["archived", "deleted"] as const) {
         for (const boot of [false, true]) {
           yield* sql`UPDATE orchestration_v2_projection_threads SET archived_at = NULL, deleted_at = NULL WHERE thread_id = ${owner}`;
+          yield* Ref.set(waiting, boot);
           const run = yield* start(`${kind}-${boot}`, peerId);
           if (boot) {
             if (kind === "archived")
