@@ -7,7 +7,8 @@ import {
 } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { AgentPersonaCreateDraft } from "@t3tools/client-runtime/j5/agent-personas";
-import type { AgentPersonaEditInput, EnvironmentId } from "@t3tools/contracts";
+import type { AgentPersonaEditInput, EnvironmentId, ProjectId } from "@t3tools/contracts";
+import type { PlaybookSource } from "@t3tools/contracts/j5";
 import { useState, type ReactNode } from "react";
 import { Platform } from "react-native";
 import { KeyboardAwareScrollView, useKeyboardState } from "react-native-keyboard-controller";
@@ -35,6 +36,25 @@ export type SettingsFormRoutes = {
   SettingsPlaybookFolder: {
     readonly environmentId: EnvironmentId;
     readonly environmentLabel: string;
+  };
+  SettingsPlaybookEditor: {
+    readonly environmentId: EnvironmentId;
+    /** The project whose .j5/playbooks folder is in view, when one is. */
+    readonly projectId?: ProjectId;
+    readonly mode:
+      | { readonly kind: "import" }
+      | {
+          readonly kind: "copy";
+          readonly name: string;
+          readonly source: PlaybookSource;
+          readonly destination: EnvironmentId;
+        }
+      | {
+          readonly kind: "rename";
+          readonly name: string;
+          readonly title: string;
+          readonly source: PlaybookSource;
+        };
   };
 };
 

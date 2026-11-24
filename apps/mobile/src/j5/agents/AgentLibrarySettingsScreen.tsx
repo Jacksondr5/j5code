@@ -49,6 +49,8 @@ import { SettingsScreen } from "../../features/settings/components/SettingsScree
 import { ListActionRow as SettingsActionRow } from "../../components/ui/ListActionRow";
 import { ThemedSwitch } from "../../components/ui/ThemedSwitch";
 import { PlaybookLibrarySettingsSection } from "../playbooks/PlaybookLibrarySettingsScreen";
+import { j5Environment } from "../state";
+import { InfoRow } from "./InfoRow";
 
 const noProvidersAtom = Atom.make<ReadonlyArray<ServerProvider>>([]);
 
@@ -109,10 +111,22 @@ function OwnerAgentLibrarySettingsScreen() {
           input: {},
         }),
   );
+  // Read here too, the same atom the Playbooks section uses, so the page appears once rather
+  // than section by section. A read that fails counts as settled and shows its own error.
+  const playbooks = useEnvironmentQuery(
+    effectiveEnvironmentId === null
+      ? null
+      : j5Environment.playbookLibrary({ environmentId: effectiveEnvironmentId, input: {} }),
+  );
+  const settled = [catalog, librarySources, playbooks].every(
+    (query) => query.data !== null || query.error !== null,
+  );
   const setLibraryFolders = useAtomCommand(agentPersonaEnvironment.setLibraryFolders, {
     reportFailure: false,
   });
   const [busy, setBusy] = useState(false);
+  // The import row that was tapped shows the spinner; the rest keep their look (D17).
+  const [importingKind, setImportingKind] = useState<"folder" | "agent" | null>(null);
   // A session that may not change the library can still read and export it.
   const canOperate = useAtomValue(
     agentPersonaEnvironment.createAgentPersona.permissionAtom(effectiveEnvironmentId),
@@ -211,6 +225,7 @@ function OwnerAgentLibrarySettingsScreen() {
     if (effectiveEnvironmentId === null || busy) return;
     const environmentId = effectiveEnvironmentId;
     setBusy(true);
+    setImportingKind(kind);
     const imported = await settlePromise(async () => {
       const files = await pickAgentDefinitions(kind);
       if (files === null) return;
@@ -227,11 +242,15 @@ function OwnerAgentLibrarySettingsScreen() {
       if (result === null) return;
       setNotification({
         type: "success",
-        title: `Imported ${result.importedIds.length} persona(s).`,
+        title:
+          result.importedIds.length === 0
+            ? "Nothing imported. You kept your existing personas."
+            : `Imported ${result.importedIds.length} ${result.importedIds.length === 1 ? "persona" : "personas"}.`,
       });
       catalog.refresh();
     });
     setBusy(false);
+    setImportingKind(null);
     if (imported._tag === "Failure") {
       setNotification(failureNotice("Persona action failed", imported));
     }
@@ -431,9 +450,9 @@ function OwnerAgentLibrarySettingsScreen() {
         {
           accessibilityLabel: "Create persona",
           icon: "plus",
-          disabled: locked || effectiveEnvironmentId === null,
+          disabled: !canOperate || effectiveEnvironmentId === null,
           onPress: () => {
-            if (effectiveEnvironmentId !== null)
+            if (effectiveEnvironmentId !== null && !busy)
               navigation.navigate("SettingsPersonaNew", { environmentId: effectiveEnvironmentId });
           },
         },
@@ -456,19 +475,6 @@ function OwnerAgentLibrarySettingsScreen() {
         contentContainerClassName="gap-5 px-5 pt-4"
         contentContainerStyle={{ paddingBottom: Math.max(insets.bottom, 18) + 18 }}
       >
-        {catalog.data?.diagnostics?.length ? (
-          <SettingsSection title="Library errors">
-            {catalog.data.diagnostics.map((diagnostic, index) => (
-              <InfoRow
-                key={`${diagnostic.path}:${diagnostic.message}`}
-                borderTop={index > 0}
-                tone="danger"
-                text={`Invalid persona file: ${diagnostic.path}: ${diagnostic.message}`}
-              />
-            ))}
-          </SettingsSection>
-        ) : null}
-
         {connectedEnvironments.length > 1 ? (
           <SettingsSection title="Environment">
             <Menu
@@ -523,8 +529,8 @@ function OwnerAgentLibrarySettingsScreen() {
         >
           {effectiveEnvironmentId === null ? (
             <InfoRow text="No connected environments" />
-          ) : catalog.isPending && catalog.data == null ? (
-            <InfoRow text="Loading personas" />
+          ) : !settled ? (
+            <InfoRow text="Loading…" />
           ) : catalog.error ? (
             <InfoRow tone="danger" text={catalog.error} />
           ) : personas.length === 0 ? (
@@ -543,27 +549,40 @@ function OwnerAgentLibrarySettingsScreen() {
               />
             ))
           )}
-          {Platform.OS === "web" || effectiveEnvironmentId === null ? null : (
+          {/* Last in the card, so diagnostics that arrive late move nothing above them. */}
+          {settled
+            ? catalog.data?.diagnostics?.map((diagnostic) => (
+                <InfoRow
+                  key={`${diagnostic.path}:${diagnostic.message}`}
+                  borderTop
+                  tone="danger"
+                  text={`Invalid persona file: ${diagnostic.path}: ${diagnostic.message}`}
+                />
+              ))
+            : null}
+          {Platform.OS === "web" || effectiveEnvironmentId === null || !settled ? null : (
             <>
               <View className="border-t border-border-subtle" />
               <SettingsActionRow
                 icon="doc.text"
                 label="Import persona file"
-                disabled={locked}
+                disabled={!canOperate}
+                loading={importingKind === "agent"}
                 onPress={() => void importSelection("agent")}
               />
               <View className="border-t border-border-subtle" />
               <SettingsActionRow
                 icon="folder"
                 label="Import a folder of personas"
-                disabled={locked}
+                disabled={!canOperate}
+                loading={importingKind === "folder"}
                 onPress={() => void importSelection("folder")}
               />
             </>
           )}
         </SettingsSection>
 
-        {effectiveEnvironmentId !== null ? (
+        {effectiveEnvironmentId !== null && settled ? (
           <SettingsSection
             title="Persona library sources"
             footer={
@@ -572,9 +591,7 @@ function OwnerAgentLibrarySettingsScreen() {
                 : "Folders this environment reads YAML definitions from, on its machine; relative paths resolve from its state directory. Files are read on every catalog request, so edits and git pulls apply without a restart."
             }
           >
-            {librarySources.isPending && librarySources.data == null ? (
-              <InfoRow text="Loading folders" />
-            ) : librarySources.error ? (
+            {librarySources.error ? (
               <InfoRow tone="danger" text={librarySources.error} />
             ) : folders.length === 0 ? (
               <InfoRow text="No source folders. Only personal and imported personas are available." />
@@ -600,9 +617,9 @@ function OwnerAgentLibrarySettingsScreen() {
             <SettingsActionRow
               icon="plus"
               label="Add folder"
-              disabled={locked}
+              disabled={!canOperate}
               onPress={() => {
-                if (effectiveEnvironmentId !== null)
+                if (effectiveEnvironmentId !== null && !busy)
                   navigation.navigate("SettingsPersonaFolder", {
                     environmentId: effectiveEnvironmentId,
                     environmentLabel,
@@ -611,15 +628,21 @@ function OwnerAgentLibrarySettingsScreen() {
             />
           </SettingsSection>
         ) : null}
-        <SettingsSection title="Playbooks">
-          <PlaybookLibrarySettingsSection environmentId={effectiveEnvironmentId} />
-        </SettingsSection>
-        <SettingsSection title="Crews">
-          <InfoRow text="Crew settings (auto-approve, member models and reasoning) are in Agent Setup on web and desktop. The phone follows them." />
-        </SettingsSection>
-        <SettingsSection title="Skills">
-          <InfoRow text="Skills are installed and linked to providers in Settings → Skills on web and desktop. Installed skills work in chat here." />
-        </SettingsSection>
+        {settled ? (
+          <>
+            <SettingsSection title="Playbooks">
+              <PlaybookLibrarySettingsSection environmentId={effectiveEnvironmentId} />
+            </SettingsSection>
+            <PointerNote
+              title="Crews"
+              text="Crew settings (auto-approve, member models and reasoning) are in Agent Setup on web and desktop. The phone follows them."
+            />
+            <PointerNote
+              title="Skills"
+              text="Skills are installed and linked to providers in Settings → Skills on web and desktop. Installed skills work in chat here."
+            />
+          </>
+        ) : null}
       </ScreenScrollView>
       {notification ? (
         <AgentLibraryToast notification={notification} onDismiss={dismissNotification} />
@@ -647,11 +670,9 @@ function failureNotice(
   result: Parameters<typeof squashAtomCommandFailure>[0],
 ): AgentLibraryNotification {
   const error = squashAtomCommandFailure(result);
-  return {
-    type: "error",
-    title,
-    description: error instanceof Error ? error.message : String(error),
-  };
+  const message = error instanceof Error ? error.message : String(error);
+  // The reason leads; a class name such as "AgentPersonaLibraryError:" says nothing to a person.
+  return { type: "error", title, description: message.replace(/^\w+Error: /, "") };
 }
 
 /**
@@ -672,19 +693,20 @@ async function shareAgentDefinition(fileName: string, yaml: string) {
   await Sharing.shareAsync(uri, { mimeType: "application/yaml", dialogTitle: fileName });
 }
 
-function InfoRow(props: {
-  readonly text: string;
-  readonly tone?: "danger";
-  readonly borderTop?: boolean;
-}) {
+/** A topic managed elsewhere: a section title and one muted line, with no card (AG-13). */
+function PointerNote(props: { readonly title: string; readonly text: string }) {
   return (
-    <View className={cn("px-4 py-3", props.borderTop && "border-t border-border-subtle")}>
+    <View className="gap-2">
       <Text
+        textRole="footnote"
         className={cn(
-          "text-base",
-          props.tone === "danger" ? "text-danger-foreground" : "text-foreground-muted",
+          "font-t3-medium text-foreground-muted",
+          Platform.OS === "android" ? "px-4" : "px-2",
         )}
       >
+        {props.title}
+      </Text>
+      <Text textRole="footnote" className="px-4 text-foreground-muted">
         {props.text}
       </Text>
     </View>
@@ -717,7 +739,8 @@ function PersonaRow(props: {
   return (
     <View
       className={cn(
-        "flex-row items-center gap-2 py-2 pl-4 pr-4",
+        // ListRowLayout's height, so persona rows match the Import rows in the same card (D16).
+        "min-h-14 flex-row items-center gap-3 px-4 py-3",
         props.borderTop && "border-t border-border-subtle",
       )}
     >
@@ -729,7 +752,7 @@ function PersonaRow(props: {
         accessibilityHint="Opens its details and actions"
         disabled={props.busy}
         onPress={props.onOpen}
-        className="min-w-0 flex-1 gap-0.5 py-1 active:opacity-70"
+        className="min-w-0 flex-1 gap-1 active:opacity-70"
       >
         <Text
           textRole="body"

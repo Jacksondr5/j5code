@@ -15,6 +15,7 @@ import { useState } from "react";
 import { Pressable, ScrollView, View } from "react-native";
 
 import { SymbolView } from "../../components/ui/AppSymbol";
+import { Chip } from "../../components/ui/Chip";
 import { AppText as Text } from "../../components/ui/AppText";
 import { useEnvironmentServerConfig, useThreadShell } from "../../state/entities";
 import { useEnvironmentQuery } from "../../state/query";
@@ -166,25 +167,26 @@ export function PlaybookSteps(props: {
           accessibilityLabel="Playbook stages"
         >
           {runs.length > 1 && (
-            <ScrollView horizontal className="my-2" accessibilityLabel="Playbook runs">
+            <ScrollView
+              horizontal
+              className="my-2"
+              contentContainerClassName="gap-2"
+              accessibilityLabel="Playbook runs"
+            >
               {runs.map((entry, index) => (
-                <Pressable
+                <Chip
                   key={entry.runId}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: entry.runId === run.runId }}
+                  size="small"
+                  label={index === 0 ? "Latest" : runChipTime(entry.createdAt)}
+                  accessibilityLabel={`${entry.title}, ${entry.status}, ${new Date(entry.createdAt).toLocaleString()}`}
+                  selected={entry.runId === run.runId}
                   onPress={() =>
                     card.setView({
                       ...view,
                       selectedRunId: playbookRunSelection(runs, entry.runId),
                     })
                   }
-                  className="mr-3 min-h-11 justify-center rounded border border-border p-2"
-                >
-                  <Text className="text-xs text-foreground">
-                    {index === 0 ? "Latest: " : ""}
-                    {entry.title} · {entry.status} · {new Date(entry.createdAt).toLocaleString()}
-                  </Text>
-                </Pressable>
+                />
               ))}
             </ScrollView>
           )}
@@ -225,7 +227,7 @@ export function PlaybookSteps(props: {
                 )}
               </View>
               <Text
-                className={`min-w-0 flex-1 text-xs ${step.status === "completed" ? "text-foreground-muted/55" : step.status === "inProgress" ? "font-t3-medium text-foreground/90" : "text-foreground-muted/70"}`}
+                className={`min-w-0 flex-1 text-xs ${step.status === "inProgress" ? "font-t3-medium text-foreground" : "text-foreground-muted"}`}
               >
                 {index + 1}. {step.title}
               </Text>
@@ -235,4 +237,12 @@ export function PlaybookSteps(props: {
       </View>
     </View>
   );
+}
+
+/** A run's chip: its time today, or its date on another day. The status shows on the card face. */
+function runChipTime(createdAt: string): string {
+  const created = new Date(createdAt);
+  return created.toDateString() === new Date().toDateString()
+    ? created.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+    : created.toLocaleDateString([], { month: "short", day: "numeric" });
 }
