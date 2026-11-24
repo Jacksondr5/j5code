@@ -338,7 +338,10 @@ it.effect("sends a persona to a peered machine with its pick's facts, and nothin
         "is not peered with",
       ],
       [{ target: { environmentId: peered }, allow_once: "escalation:1" }, "on this machine only"],
-      [{ target: { environmentId: older } }, "runs an older J5"],
+      [
+        { target: { environmentId: older } },
+        "runs an older J5 that can't run a persona delegated from another machine. Update J5 there, or run the persona here without target. If it was just updated, try again once the two machines have reconnected.",
+      ],
       [
         { target: { environmentId: peered, model: otherModel } },
         "except target.environmentId to run it on a peered J5 machine",

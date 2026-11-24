@@ -206,7 +206,7 @@ const delegatePersonaToPeer = Effect.fn("j5.delegatePersonaToPeer")(function* (
       .personaDelegate !== true
   )
     return yield* refuse(
-      `"${peered.label}" runs an older J5 that can't run a persona delegated from another machine. Update J5 there, or run the persona here without target.`,
+      `"${peered.label}" runs an older J5 that can't run a persona delegated from another machine. Update J5 there, or run the persona here without target. If it was just updated, try again once the two machines have reconnected.`,
     );
   const parent = yield* (yield* ThreadManagementService)
     .getThreadRecords(thread.threadId, [])
