@@ -421,7 +421,7 @@ const handlers = {
       const crypto = yield* SecureRandom.SecureRandom;
       const service = yield* A2ASendService;
       const worker = yield* A2ADeliveryWorker;
-      // Only a steer or a restart is checked below; the default and `queue` act on no turn.
+      // Only a steer or a restart is checked below; the default and `queue` need no mode check.
       const mode = input.mode ?? "queue";
       const attachments = input.attachments ?? [];
       // A plain message needs nothing read first. A file is claimed into the receiver's

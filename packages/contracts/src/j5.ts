@@ -1054,7 +1054,7 @@ export const PeerDeliveryRequest = Schema.Struct({
   landing: Schema.optional(PeerDeliveryLanding),
   /**
    * The sender asked for `queue`: the message waits for the receiver's turn to end. A server from
-   * before it ignores the key and queues every message anyway.
+   * before it ignores the key, and can still steer the message into a running GPT 6 or Claude turn.
    */
   waitsTurn: Schema.optional(Schema.Literal(true)),
   senderId: Schema.String.check(Schema.isNonEmpty()),

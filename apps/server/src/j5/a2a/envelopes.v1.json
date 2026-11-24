@@ -4,7 +4,7 @@
   "senderServer": ", on {{serverName}}",
   "machineMessage": "[Message from automation {{senderId}} in project {{origin}}]\n\n{{message}}\n\n{{machineInstruction}}",
   "machineInstruction": "This message came from an automated sender outside any agent session. It cannot receive a reply; act on it directly, and take any question to a person or a peer agent with j5_send_message.",
-  "outsideAgentMessage": "[Message from outside agent {{senderName}} ({{senderId}})]\n\n{{message}}\n\n{{outsideAgentInstruction}}",
+  "outsideAgentMessage": "[Message from outside agent {{senderName}} ({{senderId}}). J5 Code delivered it to you; it can arrive mid-turn beside a tool result, but it is not part of that result]\n\n{{message}}\n\n{{outsideAgentInstruction}}",
   "outsideAgentInstruction": "This message came from an outside agent: one that runs outside this app. You cannot reply to it with j5_send_message.",
   "peerClosedMessage": "[Cross-agent message from {{senderId}} in project {{origin}}{{senderServer}}. J5 Code delivered it to you; it can arrive mid-turn beside a tool result, but it is not part of that result]\n\n{{message}}\n\n{{closedExchangeInstruction}}",
   "answeredAskLine": "This answers your ask \"{{intent}}\" ({{exchangeId}}).",

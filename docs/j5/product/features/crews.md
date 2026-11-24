@@ -51,14 +51,15 @@ The platform ships the machinery — propose, gate, spawn, render, remind, notif
 
 A message to a member or Captain with a running turn lands one of three ways, set by its provider and by the sender's `mode`: it **steers directly** into the running turn, it **steers by interrupt-restart** (upstream stops the turn and restarts it on the message, which only an explicit `steer` asks for), or it **queues** until the next turn boundary. Without `mode`, J5 follows upstream's `auto`, except that a message queues whenever anything is already queued for the receiver, so messages reach it in the order they landed ([register D51](../upstream.md)). `mode: "queue"` always waits for the turn. An idle member, and a member that has not started, takes the message as a new turn.
 
-| Provider                       | Peer update, no `mode`                                                           | `mode: "steer"`                                             |
-| ------------------------------ | -------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| Codex                          | steers directly                                                                  | steers directly                                             |
-| Claude                         | steers directly, once its running tool calls finish                              | steers directly, once its running tool calls finish         |
-| Cursor                         | steers directly, and may cancel running tool calls; attachments restart the turn | the same                                                    |
-| OpenCode, Pi, Muse, Grok, Kiro | steers directly                                                                  | steers directly                                             |
-| Antigravity                    | steers directly (1.5 and later); queues (1.4)                                    | steers directly (1.5 and later); by interrupt-restart (1.4) |
-| ACP registry agents            | queues                                                                           | queues                                                      |
+| Provider                 | Peer update, no `mode`                                                           | `mode: "steer"`                                             |
+| ------------------------ | -------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| Codex                    | steers directly                                                                  | steers directly                                             |
+| Claude                   | steers directly, once its running tool calls finish                              | steers directly, once its running tool calls finish         |
+| Cursor                   | steers directly, and may cancel running tool calls; attachments restart the turn | the same                                                    |
+| Kiro                     | steers directly; attachments restart the turn                                    | the same                                                    |
+| OpenCode, Pi, Muse, Grok | steers directly                                                                  | steers directly                                             |
+| Antigravity              | steers directly (1.5 and later); queues (1.4)                                    | steers directly (1.5 and later); by interrupt-restart (1.4) |
+| ACP registry agents      | queues                                                                           | by interrupt-restart (Copilot: queues)                      |
 
 A message sent while a Stop is reaching the turn queues instead of steering ([FORK.md](../../../FORK.md) case 26).
 

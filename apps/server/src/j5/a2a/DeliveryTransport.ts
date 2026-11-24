@@ -26,6 +26,7 @@ import * as Schema from "effect/Schema";
 import { HttpClient, HttpClientRequest } from "effect/http";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import { isNativeMaintenanceCommand } from "../../orchestration-v2/CommandPolicy.ts";
 import * as ThreadManagement from "../../orchestration-v2/ThreadManagementService.ts";
 import { DispatchModeLimit, type DispatchModes } from "../../orchestration-v2/DispatchModeLimit.ts";
 import { EffectOutboxV2 } from "../../orchestration-v2/EffectOutbox.ts";
@@ -265,12 +266,20 @@ export const deliverySendMode = (
 
 /**
  * The running turn upstream's `auto` would steer a default delivery into now, as
- * `resolveDeliveryIntent` decides it: a running provider turn whose provider steers directly.
+ * `resolveMessageDispatchIntent` decides it: a running provider turn whose provider steers
+ * directly, unless it is compaction or sign-out or Stop has reached it. `messages` and
+ * `turnItems` need only that run's message and its `run_interrupt_request` items.
  */
 export const autoSteeringRun = (
   target: Pick<
     OrchestrationV2ThreadProjection,
-    "thread" | "runs" | "providerTurns" | "providerThreads" | "providerSessions"
+    | "thread"
+    | "runs"
+    | "messages"
+    | "turnItems"
+    | "providerTurns"
+    | "providerThreads"
+    | "providerSessions"
   >,
 ) => {
   if (target.thread.archivedAt !== null || deliverySendMode(target, "peer", undefined) !== "auto")
@@ -283,7 +292,14 @@ export const autoSteeringRun = (
   const turns = target.providerSessions.find(
     (candidate) => candidate.id === providerThread?.providerSessionId,
   )?.capabilities.turns;
-  return turns?.supportsActiveSteering === true ? run : undefined;
+  if (turns?.supportsActiveSteering !== true) return undefined;
+  const message = target.messages.find((candidate) => candidate.id === run.userMessageId);
+  if (message !== undefined && isNativeMaintenanceCommand(message)) return undefined;
+  return target.turnItems.some(
+    (item) => item.type === "run_interrupt_request" && item.runId === run.id,
+  )
+    ? undefined
+    : run;
 };
 
 /**

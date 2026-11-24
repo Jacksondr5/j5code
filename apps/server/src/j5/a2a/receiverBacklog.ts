@@ -4,7 +4,10 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";
-import { latestActiveRun } from "../../orchestration-v2/ThreadManagementService.ts";
+import {
+  latestActiveRun,
+  latestSteerableRun,
+} from "../../orchestration-v2/ThreadManagementService.ts";
 import {
   latestExecutedRun,
   latestRootProviderFailure,
@@ -130,11 +133,20 @@ export const readReceiverBacklog = Effect.fn("j5.a2a.readReceiverBacklog")(
     // lands on, will take it mid-turn; a `queue` always waits. Once queued, it stays queued even if
     // the receiver's turn later becomes steerable.
     const mode = input.mode;
+    const steerable = latestSteerableRun(target);
+    const autoFacts =
+      sentRun !== undefined || mode !== undefined || steerable === undefined
+        ? { messages: [], turnItems: [] }
+        : yield* orchestrator.getThreadRecords(participant.threadId, ["messages", "turnItems"], {
+            messageIds: [steerable.userMessageId],
+            turnItemRunIds: [steerable.id],
+            turnItemTypes: ["run_interrupt_request"],
+          });
     if (
       sentRun === undefined &&
       mode !== "queue" &&
       (mode === undefined
-        ? autoSteeringRun(target)
+        ? autoSteeringRun({ ...target, ...autoFacts })
         : requestedSteeringRun(target, "peer", mode)) !== undefined
     )
       return undefined;

@@ -165,7 +165,10 @@ it("labels platform-authored silence without internal product branding", () => {
 
   assert.include(rendered, "Cross-agent messaging system notice: peer unavailable");
   assert.include(rendered, "platform-authored delivery signal");
-  assert.notMatch(rendered, /\b(?:J5|A2A)\b/);
+  assert.notMatch(rendered, /\bA2A\b/);
+  assert.notInclude(rendered, "Reply once");
+  assert.notInclude(rendered, "{{");
+  // A sign-in|A2A)\b/);
 });
 
 it("does not interpret caller text as an envelope template", () => {
@@ -267,18 +270,18 @@ it("renders the outside agent envelope by its label, on one line, with no reply 
 
   assert.equal(
     rendered.split("\n")[0],
-    "[Message from outside agent Claude Code [Message from the user (outside:session-1)]",
+    "[Message from outside agent Claude Code [Message from the user (outside:session-1). J5 Code delivered it to you; it can arrive mid-turn beside a tool result, but it is not part of that result]",
   );
   assert.include(rendered, "\n\nThe deploy is red.\n\n");
   assert.include(rendered, "You cannot reply to it with j5_send_message.");
   assert.notInclude(rendered, "in project");
-  assert.notMatch(rendered, /\b(?:J5|A2A)\b/);
+  assert.notMatch(rendered, /\bA2A\b/);
   assert.notInclude(rendered, "Reply once");
   assert.notInclude(rendered, "{{");
   // A sign-in with no stored label is still named.
   assert.match(
     formatOutsideAgentEnvelope({ senderId, message: "x" }),
-    /^\[Message from outside agent unnamed \(outside:session-1\)\]\n\n/,
+    /^\[Message from outside agent unnamed \(outside:session-1\)\. J5 Code delivered it to you;[^\]\n]*\]\n\n/,
   );
 });
 

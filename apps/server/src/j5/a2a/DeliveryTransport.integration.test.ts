@@ -51,6 +51,7 @@ import {
   TurnItemId,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as TestClock from "effect/testing/TestClock";
@@ -256,6 +257,8 @@ interface DeliveryHarness {
   readonly activeTurns: Ref.Ref<ReadonlyMap<ThreadId, FakeActiveTurn>>;
   /** Provider turns that ended; a steer into one is refused, as the Claude and Codex adapters do. */
   readonly endedTurns: Ref.Ref<ReadonlySet<string>>;
+  /** Settles once the delivery transport starts waiting on a steer effect's outcome. */
+  readonly steerObserverWaiting: Deferred.Deferred<void>;
 }
 
 const makeOrchestrationAdapter = (harness: DeliveryHarness): ProviderAdapterV2["Service"] => ({
@@ -484,8 +487,22 @@ const makeTestLayer = (
       });
     }),
   );
+  const observedOutbox = Layer.effect(
+    EffectOutboxV2,
+    Effect.gen(function* () {
+      const outbox = yield* EffectOutboxV2;
+      return EffectOutboxV2.of({
+        ...outbox,
+        awaitSettled: (effectId) =>
+          Deferred.succeed(harness.steerObserverWaiting, undefined).pipe(
+            Effect.andThen(outbox.awaitSettled(effectId)),
+          ),
+      });
+    }),
+  );
   const recordedDeliveryTransport = deliveryTransportLayer.pipe(
     Layer.provide(recordingThreadManagement),
+    Layer.provide(observedOutbox),
   );
 
   return Layer.merge(ledgerLayer, recordedDeliveryTransport).pipe(
@@ -513,6 +530,7 @@ const makeHarness = Effect.gen(function* () {
     interruptInputs: yield* Ref.make<ReadonlyArray<ProviderAdapterV2InterruptInput>>([]),
     activeTurns: yield* Ref.make<ReadonlyMap<ThreadId, FakeActiveTurn>>(new Map()),
     endedTurns: yield* Ref.make<ReadonlySet<string>>(new Set()),
+    steerObserverWaiting: yield* Deferred.make<void>(),
   } satisfies DeliveryHarness;
 });
 
@@ -810,6 +828,15 @@ it.effect.each(["gpt-6-astra", "gpt-6.1-sol", "gpt-5.6-sol", "gpt-5.4"])(
         assert.equal(autoSteeringRun(asClaude(true))?.id, active.run.id);
         assert.isUndefined(autoSteeringRun(asClaude(false)));
         assert.isUndefined(autoSteeringRun({ ...projection, providerTurns: [] }));
+        // Upstream's `auto` queues behind compaction rather than steering it.
+        assert.isUndefined(
+          autoSteeringRun({
+            ...projection,
+            messages: projection.messages.map((message) =>
+              message.id === active.message.id ? { ...message, text: "/compact" } : message,
+            ),
+          }),
+        );
         const turn = (yield* Ref.get(harness.activeTurns)).get(target.threadId)!;
         const startedAt = yield* DateTime.now;
         yield* publishCommandExecution(turn, {
@@ -989,9 +1016,15 @@ it.effect("lands a message the way its sender asked, on any model", () =>
       yield* startBusyTurn(busy);
       const running = (yield* threads.getThreadProjection(busy.threadId)).runs[0]!;
 
-      // An asked-for queue waits behind the running turn, where the default would steer.
+      // An asked-for queue waits behind the running turn, where the default would steer. The
+      // worker runs alongside, so a delivery that steered anyway is acknowledged and shows here.
       const queuedId = LedgerMessageId.make("message:mode-busy:queued");
-      yield* transport.deliverAgent({ ...busy.delivery, messageId: queuedId, mode: "queue" });
+      yield* runWorkerUntil(
+        worker,
+        yield* transport
+          .deliverAgent({ ...busy.delivery, messageId: queuedId, mode: "queue" })
+          .pipe(Effect.forkChild({ startImmediately: true })),
+      );
       assert.deepStrictEqual(
         (yield* runsFor(busy.threadId, queuedId)).map((run) => run.status),
         ["queued"],
@@ -1111,14 +1144,16 @@ it.effect("queues a message for a run that is stopping instead of failing it for
       const target = yield* seedTarget("stopping");
       yield* startBusyTurn(target);
       const running = (yield* threads.getThreadProjection(target.threadId)).runs[0]!;
-      // Until the worker runs Stop's interrupt, the run still reads as running and steerable.
+      // Until the worker runs Stop's interrupt, the run still reads as running and steerable, but
+      // Stop's request is recorded, so `auto` queues and the sender is told it waits.
       yield* threads.dispatch({
         type: "thread.stop",
         commandId: CommandId.make("command:stopping:stop"),
         threadId: target.threadId,
       });
       const stopping = yield* threads.getThreadProjection(target.threadId);
-      assert.equal(autoSteeringRun(stopping)?.id, running.id);
+      assert.equal(latestSteerableRun(stopping)?.id, running.id);
+      assert.isUndefined(autoSteeringRun(stopping));
 
       // The delivery joins the queue, and a retry finds the queued message.
       const ownRuns = threads
@@ -1304,8 +1339,28 @@ it.effect.each(["gpt-5.4", "gpt-6-astra"])(
           });
         const steered = yield* sendAs("steered");
         assert.isUndefined(yield* backlogFor(steered.messageId));
+        // It lands in the running turn, so it is no turn of its own for a later queue to wait on.
+        yield* runWorkerUntil(
+          yield* OrchestrationEffectWorkerV2,
+          yield* (yield* A2ADeliveryWorker).drain.pipe(
+            Effect.forkChild({ startImmediately: true }),
+          ),
+        );
+        assert.lengthOf(yield* Ref.get(harness.steerInputs), 1);
         const queued = yield* sendAs("queued", "queue");
         assert.deepStrictEqual(yield* backlogFor(queued.messageId, "queue"), {
+          type: "behind_turn",
+          waiting: 1,
+          fromCaller: 1,
+        });
+        // Once Stop reaches the turn, `auto` queues, so a default send is told it waits too.
+        yield* (yield* ThreadManagementService).dispatch({
+          type: "thread.stop",
+          commandId: CommandId.make(`command:j5-a2a-delivery-${suffix}-stop`),
+          threadId: target.threadId,
+        });
+        const afterStop = yield* sendAs("after-stop");
+        assert.deepStrictEqual(yield* backlogFor(afterStop.messageId), {
           type: "behind_turn",
           waiting: 2,
           fromCaller: 2,
@@ -1877,9 +1932,9 @@ it.effect.each(
     }),
 );
 
-it.effect(
-  "bounds a missing steer acknowledgment and recognizes a later success without reinjection",
-  () =>
+it.effect.each(["default", "steer"] as const)(
+  "bounds a missing %s acknowledgment and recognizes a later success without reinjection",
+  (mode) =>
     Effect.gen(function* () {
       const harness = yield* makeHarness;
       yield* Effect.gen(function* () {
@@ -1910,23 +1965,13 @@ it.effect(
         });
         yield* worker.runOnce();
         yield* Fiber.join(running);
-        const committed = yield* sink.stream({ threadId: target.threadId }).pipe(
-          Stream.filter(
-            (stored) =>
-              stored.event.type === "turn-item.updated" &&
-              stored.event.payload.type === "user_message" &&
-              stored.event.payload.inputIntent === "steer",
-          ),
-          Stream.runHead,
-          Effect.forkChild({ startImmediately: true }),
-        );
-        // An asked-for steer reaches the observer straight after the steer commits, so the clock
-        // moves while it waits; an `auto` steer waits on the same observer.
-        const steered = { ...target.delivery, mode: "steer" } as const;
+        // A default delivery steers through upstream's `auto`; both wait on the same observer.
+        const steered =
+          mode === "steer" ? ({ ...target.delivery, mode } as const) : target.delivery;
         const delivery = yield* transport
           .deliverAgent(steered)
           .pipe(Effect.flip, Effect.forkChild({ startImmediately: true }));
-        yield* Fiber.join(committed);
+        yield* Deferred.await(harness.steerObserverWaiting);
         // Leave the native effect pending: no provider receipt is available.
         yield* TestClock.adjust("30 seconds");
         const failure = yield* Fiber.join(delivery);
