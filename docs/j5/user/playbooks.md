@@ -108,12 +108,14 @@ select an earlier run. The stage list checks off stages before the current one,
 and checks every stage when the playbook completes. Going back reopens stages
 from that position onward. The counter shows completed stages.
 
-Each run belongs to one thread. Deleting that thread cancels its active run. You can remove
-the playbook file at any time because each run keeps its own copy. Archiving a thread leaves its run available when
-you return to it.
+Cancelling a run stops its current holder when that is another agent. The owner stays available, and work, artifacts, conversations, Crew, and workspaces remain. If Stop fails, the run still ends and the result gives a reason; retrying cancellation does not stop again.
+
+Each run belongs to one thread. Archiving or deleting that thread cancels its active run. You can remove the playbook file at any time because each run keeps its own copy.
 
 ## Assigning steps
 
 The agent that starts a playbook owns its run and advances the steps. It can name an eligible Peer Agent or a member of a Crew it captains as the holder when starting, moving forward, or going back. That agent receives the current step's saved instructions in its thread. The owner can also assign the current step to someone else or take it back without changing the step. A Crew seat does not automatically own a step.
 
 Fleet shows the run beside its owner and names the current holder. “Handing off” means the step notice has not reached that holder yet; the owner can reassign or take back a stuck hand-off. The owner advances after the holder reports back. Archiving a holder does not change the recorded assignment or move the run.
+
+Unarchiving the owner does not reopen a cancelled run. Archiving only its Crew leaves the run active; the owner can reassign an archived holder or take the step back. Continue after an interruption resumes the same run, step, holder, and saved procedure.

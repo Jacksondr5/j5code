@@ -33,8 +33,8 @@ Playbooks are linear sequences. The initiative-level view — a plan whose nodes
 8. Starting a run saves its parsed procedure. Editing a saved playbook changes future runs only; active runs keep their steps, prompts, title, and purpose.
 9. Deleting a saved playbook succeeds while a run uses its copy. On upgrade, active runs without a saved copy are cancelled. Past runs without a copy show their name, status, last step, and any cancellation reason without a step list.
 10. Back navigation changes the recorded position without undoing work, and retries cannot advance an active run twice.
-11. Completing or cancelling a run leaves its participants usable and preserves the run as history.
-12. Deleting the owner thread cancels its active run. Archiving its thread leaves the run resumable. Archiving a holder preserves the recorded assignment until the owner reassigns or takes it back.
+11. Cancelling ends the run before requesting upstream Stop on a non-owner holder, under the owner's Stop authority and mode limits. It never interrupts the owner's cancelling turn. The result durably reports no holder, owner-held, Stop requested, already idle, or failure with a reason; cancellation succeeds on Stop failure and retries never issue another Stop. Completion and cancellation preserve work, artifacts, conversation, Crew, workspaces, and run history.
+12. Archiving or deleting the owner thread cancels its active run with a reason, immediately or at boot if the server missed it. Unarchiving never reopens the run. Archiving a Crew alone leaves its owner's run active; an archived holder remains visible until the owner reassigns or takes back the step. An interruption and Continue preserve the active run, its saved copy, current step, and holder without repeating completed work.
 13. New playbooks are saved to the environment library by default and are available across its projects and worktrees without a promotion step.
 14. A project's `.j5/playbooks/` definitions are discovered in that project and override a same-named library definition there; creating one is an explicit choice.
 15. Duplicate library names and unavailable sources are visible errors; running procedures retain their saved copy when discovery changes.
@@ -67,3 +67,4 @@ Playbooks are linear sequences. The initiative-level view — a plan whose nodes
 
 - 2026-11-24 — Owners can revise the steps of an active run. Run history records the revision count and latest reason ([#787](https://github.com/Jacksondr5/j5code/issues/787)).
 - 2026-11-24 — The run owner assigns each step at runtime to an eligible local holder. A Crew no longer assigns steps when its roster is proposed ([#788](https://github.com/Jacksondr5/j5code/issues/788)).
+- 2026-11-24 — Archiving or deleting the owner cancels its run. Recovery interrupts only the turn that received the cancelled step ([#789](https://github.com/Jacksondr5/j5code/issues/789)).

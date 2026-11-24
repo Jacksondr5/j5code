@@ -27,7 +27,10 @@ import { OrchestrationEffectWorkerV2 } from "../../orchestration-v2/EffectWorker
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
 import * as ProviderTurnStartServiceTestkit from "../../orchestration-v2/ProviderTurnStartService.testkit.ts";
-import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
+import {
+  latestActiveRun,
+  ThreadManagementService,
+} from "../../orchestration-v2/ThreadManagementService.ts";
 import * as RuntimeLayer from "../../orchestration-v2/runtimeLayer.ts";
 import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import { ProjectEnrichmentService } from "../../project/ProjectEnrichmentService.ts";
@@ -302,6 +305,34 @@ it.layer(TestLayer)("Crew playbook hand-off through the real orchestrator", (it)
       assert.include(notices[0]?.text, "Read the change.");
       assert.notInclude(notices[0]?.text, "edited");
       assert.equal((yield* real.landing(started.runId, "start-1"))?.outcome, "delivered");
+      yield* relay.mutate(captainThread, {
+        runId: started.runId,
+        operation: "assign",
+        expectedStepId: "report",
+        client_request_id: "return-to-seat",
+        assignee: participantIdForThread(seatThread),
+      });
+      yield* worker.drain();
+      const active = latestActiveRun(yield* threads.getThreadProjection(seatThread));
+      assert.isDefined(active, "The assigned holder must have an active run before cancellation.");
+      const activeRunId = active!.id;
+      const cancel = {
+        runId: started.runId,
+        operation: "cancel",
+        client_request_id: "cancel",
+      } as const;
+      const ended = yield* relay.mutate(captainThread, cancel);
+      assert.equal(ended.status, "cancelled");
+      assert.equal(ended.holderStop?.status, "stop_requested");
+      yield* worker.drain();
+      const after = yield* threads.getThreadProjection(seatThread);
+      assert.equal(after.runs.find((run) => run.id === activeRunId)?.status, "interrupted");
+      const replay = yield* relay.mutate(captainThread, cancel);
+      assert.deepStrictEqual(replay.holderStop, ended.holderStop);
+      assert.equal(
+        (yield* threads.getThreadProjection(seatThread)).turnItems.length,
+        after.turnItems.length,
+      );
     }).pipe(Effect.scoped),
   );
 });

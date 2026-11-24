@@ -110,6 +110,12 @@ export const PlaybookReviseRequest = Schema.Struct({
 });
 export type PlaybookReviseRequest = typeof PlaybookReviseRequest.Type;
 
+export const PlaybookHolderStop = Schema.Struct({
+  status: Schema.Literals(["no_holder", "owner_held", "stop_requested", "already_idle", "failed"]),
+  reason: Schema.NullOr(Schema.String),
+});
+export type PlaybookHolderStop = typeof PlaybookHolderStop.Type;
+
 export const PlaybookRun = Schema.Struct({
   runId: Text,
   ownerThreadId: ThreadId,
@@ -118,6 +124,7 @@ export const PlaybookRun = Schema.Struct({
   holderParticipantId: Schema.optionalKey(Schema.NullOr(Schema.String)),
   holderThreadId: Schema.optionalKey(Schema.NullOr(ThreadId)),
   assignedByParticipantId: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  holderStop: Schema.optionalKey(Schema.NullOr(PlaybookHolderStop)),
   cancelReason: Schema.optionalKey(Schema.NullOr(Schema.String)),
   revisionCount: Schema.optionalKey(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   latestRevision: Schema.optionalKey(Schema.NullOr(PlaybookRevision)),
@@ -132,6 +139,7 @@ export type PlaybookRun = typeof PlaybookRun.Type;
 /** Pending means the named holder's notice has not been accepted yet. */
 export const PlaybookStepDelivery = Schema.Struct({
   state: Schema.Literals(["delivered", "captain", "pending"]),
+  holderArchived: Schema.optionalKey(Schema.Boolean),
   seat: Schema.NullOr(Schema.String),
   threadId: Schema.NullOr(Schema.String),
   participantId: Schema.optionalKey(Schema.NullOr(Schema.String)),
