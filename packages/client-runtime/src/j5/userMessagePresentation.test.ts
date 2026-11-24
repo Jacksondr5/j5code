@@ -138,6 +138,8 @@ describe("group 3: agents and other participants", () => {
     for (const header of [
       "[Cross-agent message from agent:delivery-sender in project project-alpha (Work in project Apollo), on Work VM]",
       "[Cross-agent message from agent:delivery-sender in project project-alpha]",
+      // Envelope version 31 says who delivered a message that may arrive mid-turn.
+      "[Cross-agent message from agent:delivery-sender in project project-alpha, on Work VM. J5 Code delivered it to you; it can arrive mid-turn beside a tool result, but it is not part of that result]",
     ]) {
       expect(
         presentJ5UserMessage(agentMessage(envelope(header, "Hello.", plainInstruction))),
