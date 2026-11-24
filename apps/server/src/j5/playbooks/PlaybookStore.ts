@@ -6,7 +6,8 @@ import {
 } from "./PlaybookRequests.ts";
 import { A2ALedgerTransactionWriter, layer as ledgerLayer } from "../a2a/LedgerService.ts";
 import { A2ADeliveryWorker } from "../a2a/DeliveryWorker.ts";
-import { ThreadId } from "@t3tools/contracts";
+import { typedByFirstOwner } from "../sharing/messageStamps.ts";
+import { type OrchestrationV2ConversationMessage, ThreadId } from "@t3tools/contracts";
 import {
   PlaybookProgress,
   PlaybookError,
@@ -262,6 +263,35 @@ const buildPlaybookStore = Effect.gen(function* () {
         run.currentStepId,
       summary: row.checkpoint_summary ?? "",
     };
+  });
+  const initiatedByOwner = Effect.fn("PlaybookStore.initiatedByOwner")(function* (
+    message: OrchestrationV2ConversationMessage | undefined,
+  ) {
+    if (message?.createdBy !== "user" || message.scheduledTaskId || message.senderThreadId)
+      return false;
+    const [author] = yield* sql<{ readonly allowed: number }>`
+      SELECT EXISTS (
+        SELECT 1 FROM j5_a2a_person_level AS level
+        JOIN j5_a2a_human_person AS person ON person.person_id = level.person_id
+        WHERE level.person_id = author.person_id AND person.removed_at IS NULL
+          AND level.scope_kind = 'server' AND level.level = 'owner'
+      ) AS allowed
+      FROM j5_a2a_message_author AS author
+      WHERE author.thread_id = ${message.threadId} AND author.message_id = ${message.id}
+    `;
+    if (author !== undefined) return author.allowed === 1;
+    const [shared] = yield* sql<{ readonly shared_at: string }>`
+      SELECT shared_at FROM j5_a2a_shared_thread WHERE thread_id = ${message.threadId}
+    `;
+    return typedByFirstOwner({
+      message_id: message.id,
+      created_by: message.createdBy,
+      creation_source: message.creationSource,
+      created_at: DateTime.formatIso(message.createdAt),
+      scheduled_task_id: null,
+      sender_thread_id: null,
+      shared_at: shared?.shared_at ?? null,
+    });
   });
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -605,7 +635,12 @@ const buildPlaybookStore = Effect.gen(function* () {
       Effect.gen(function* () {
         const selection = selectPlaybookSource(selected, name, selectedSource !== undefined);
         const source = selection.entry!;
-        const base = { name, source: source.source, overridesLibrary: selection.overridesLibrary };
+        const base = {
+          name,
+          source: source.source,
+          overridesLibrary: selection.overridesLibrary,
+          overridesFolder: selection.overridesFolder,
+        };
         const issue = selection.issue;
         const read =
           issue === null
@@ -1423,6 +1458,22 @@ const buildPlaybookStore = Effect.gen(function* () {
       ),
     saveDefinition: (input: PlaybookSaveRequest) =>
       library.save(input).pipe(permit.withPermits(1), Effect.tap(bumpRevision)),
+    saveDefinitionFromTurn: Effect.fn("PlaybookStore.saveDefinitionFromTurn")(
+      function* (
+        message: OrchestrationV2ConversationMessage | undefined,
+        input: PlaybookSaveRequest,
+      ) {
+        if (!(yield* initiatedByOwner(message))) {
+          return yield* playbookError(
+            "owner_required",
+            "Only an environment Owner can save a library playbook. Keep the full YAML draft in this conversation and ask an Owner to approve and save it in a new chat turn or in Settings.",
+          );
+        }
+        return yield* library.save(input).pipe(Effect.tap(bumpRevision));
+      },
+      Effect.mapError(storageError),
+      permit.withPermits(1),
+    ),
     setFolders: (input: PlaybookFoldersInput) =>
       library.setFolders(input).pipe(permit.withPermits(1), Effect.tap(bumpRevision)),
     startDefinitionPathFor,
