@@ -599,6 +599,20 @@ describe("playbook mention picker", () => {
 
 it("checks earlier composer stages and reopens stages when going back", () => {
   const middle = presentPlaybookStages(run);
+  expect(middle.revisionHistory).toBeNull();
+  const revised = presentPlaybookStages({
+    ...run,
+    revisionCount: 2,
+    latestRevision: {
+      basis: "approved",
+      revisedAt: run.createdAt,
+      ownerThreadId: run.ownerThreadId,
+      fromStepId: "research",
+      toStepId: "research",
+      stepsDigest: "a".repeat(64),
+    },
+  });
+  expect(revised.revisionHistory).toBe("Revised 2 times · Latest change approved");
   expect(middle.completedSteps).toBe(1);
   expect(middle.steps.map(({ status }) => status)).toEqual(["completed", "inProgress", "pending"]);
   const beginning = presentPlaybookStages({ ...run, position: 1, currentStepId: "research" });

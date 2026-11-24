@@ -703,3 +703,45 @@ it.effect(
       );
     }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );
+
+it.effect(
+  "revisions preserve the current holder or hand a replacement step its revised prompt once",
+  () =>
+    Effect.gen(function* () {
+      const { start, relay, notices, store, dispatchFault } = yield* fixture;
+      yield* Ref.set(dispatchFault, "transient");
+      const run = yield* start("revision-start");
+      const revision = {
+        operation: "revise" as const,
+        runId: run.runId,
+        expectedStepId: "inspect",
+        client_request_id: "revision",
+        basis: "asked" as const,
+        steps: review.steps.map((step) => ({ ...step, prompt: `Revised ${step.id}.` })),
+      };
+      assert.equal(
+        (yield* Effect.flip(relay.mutate(captainThread, revision))).code,
+        "delivery_pending",
+      );
+      assert.equal((yield* store.current(captainThread)).revisionCount, 0);
+      yield* Ref.set(dispatchFault, null);
+      const same = yield* relay.mutate(captainThread, revision);
+      assert.equal(same.delivery?.threadId, seatAThread);
+      assert.equal(same.currentStep?.prompt, "Revised inspect.");
+      assert.lengthOf(yield* notices, 1);
+      assert.isNull(yield* store.landing(run.runId, "revision"));
+      const replacement = {
+        ...revision,
+        client_request_id: "replace",
+        steps: revision.steps.slice(1),
+        stepId: "review",
+      };
+      const changed = yield* relay.mutate(captainThread, replacement);
+      assert.equal(changed.delivery?.threadId, seatBThread);
+      assert.equal(changed.currentStepId, "review");
+      assert.lengthOf(yield* notices, 2);
+      assert.include((yield* notices)[1]?.text, "Revised review.");
+      assert.isTrue((yield* relay.mutate(captainThread, replacement)).replayed);
+      assert.lengthOf(yield* notices, 2);
+    }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);

@@ -2,6 +2,8 @@ import * as Option from "effect/Option";
 import { ThreadId } from "@t3tools/contracts";
 import {
   PlaybookError,
+  PlaybookRevision,
+  type PlaybookReviseRequest,
   PLAYBOOK_RUNS_PAGE_SIZE,
   PLAYBOOK_MAX_BYTES,
   PLAYBOOK_NAME_PATTERN,
@@ -55,6 +57,7 @@ const invalidNameIssue = (file: string) => {
 };
 const Request = Schema.fromJsonString(Schema.Array(Schema.NullOr(Schema.String)));
 const encodeRequest = Schema.encodeSync(Request);
+const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Unknown));
 const decodeRequest = Schema.decodeUnknownEffect(Request);
 type NamedStep = PlaybookStep & { readonly persona: string };
 const namedSteps = (steps: ReadonlyArray<PlaybookStep>) =>
@@ -95,6 +98,9 @@ export type StoredPlaybookRun = PlaybookRun & { readonly definition: PlaybookDef
 const DefinitionJson = Schema.fromJsonString(PlaybookDefinition);
 const decodeDefinition = Schema.decodeUnknownOption(DefinitionJson);
 const encodeDefinition = Schema.encodeSync(DefinitionJson);
+const RevisionJson = Schema.fromJsonString(PlaybookRevision);
+const decodeRevision = Schema.decodeUnknownSync(RevisionJson);
+const encodeRevision = Schema.encodeSync(RevisionJson);
 
 type RunRow = {
   run_id: string;
@@ -107,11 +113,16 @@ type RunRow = {
   crew_instance_id: string | null;
   definition_json: string | null;
   cancel_reason: string | null;
+  revision_count: number;
+  latest_revision_json: string | null;
 };
 const fromRow = (row: RunRow): StoredPlaybookRun => ({
   definition:
     row.definition_json === null ? null : Option.getOrNull(decodeDefinition(row.definition_json)),
   cancelReason: row.cancel_reason,
+  revisionCount: row.revision_count,
+  latestRevision:
+    row.latest_revision_json === null ? null : decodeRevision(row.latest_revision_json),
   runId: row.run_id,
   ownerThreadId: ThreadId.make(row.owner_thread_id),
   definitionPath: row.definition_path,
@@ -160,6 +171,7 @@ export type PlaybookMutation = {
 } & (
   | { readonly operation: "next" | "back" | "complete"; readonly expectedStepId: string }
   | { readonly operation: "handoff"; readonly expectedStepId: string }
+  | ({ readonly operation: "revise" } & PlaybookReviseRequest)
   | { readonly operation: "cancel" }
 );
 
@@ -597,6 +609,8 @@ export const makePlaybookStore = Effect.gen(function* () {
           const run: StoredPlaybookRun = {
             definition,
             cancelReason: null,
+            revisionCount: 0,
+            latestRevision: null,
             runId: yield* crypto.uuidV4().pipe(Effect.orDie),
             ownerThreadId: owner,
             definitionPath,
@@ -655,7 +669,22 @@ export const makePlaybookStore = Effect.gen(function* () {
       input.operation,
       input.runId,
       "expectedStepId" in input ? input.expectedStepId : null,
-      null,
+      input.operation === "revise" ? (input.stepId ?? null) : null,
+      ...(input.operation === "revise"
+        ? [
+            input.basis,
+            playbookDigest(
+              encodeJson(
+                input.steps.map(({ id, title, prompt, persona }) => ({
+                  id,
+                  title,
+                  prompt,
+                  ...(persona === undefined ? {} : { persona }),
+                })),
+              ),
+            ),
+          ]
+        : []),
     ]);
     return yield* Effect.gen(function* () {
       yield* cancelOrphans();
@@ -666,7 +695,7 @@ export const makePlaybookStore = Effect.gen(function* () {
           const previous = yield* replay(owner, input.client_request_id, request);
           if (previous) return { run: previous, replayed: true };
           const run = yield* readRun(owner, input.runId);
-          const definition = run.definition;
+          let definition = run.definition;
           if (definition === null && input.operation !== "cancel")
             return yield* playbookError(
               "invalid_snapshot",
@@ -687,7 +716,31 @@ export const makePlaybookStore = Effect.gen(function* () {
           let currentStepId = run.currentStepId;
           let status: PlaybookRun["status"] = run.status;
           if (input.operation === "cancel") status = "cancelled";
-          else if (definition) {
+          else if (input.operation === "revise") {
+            if (definition === null)
+              return yield* playbookError(
+                "invalid_snapshot",
+                "This run has no saved playbook copy.",
+              );
+            if (input.basis !== "asked" && input.basis !== "approved")
+              return yield* playbookError(
+                "invalid_definition",
+                "A revision requires an asked or approved basis.",
+              );
+            definition = (yield* decodePlaybookDocument(
+              encodeJson({ ...definition, steps: input.steps }),
+            )).definition;
+            const ids = definition.steps.map((step) => step.id);
+            if (!ids.includes(currentStepId)) {
+              if (input.stepId === undefined || !ids.includes(input.stepId))
+                return yield* playbookError(
+                  "step_missing",
+                  "The revision removes the current step. Name an available replacement stepId.",
+                  ids,
+                );
+              currentStepId = input.stepId;
+            }
+          } else if (definition) {
             const ids = definition.steps.map((step) => step.id);
             const index = ids.indexOf(run.currentStepId);
             if (index < 0)
@@ -707,16 +760,46 @@ export const makePlaybookStore = Effect.gen(function* () {
             }
           }
           const updatedAt = yield* now;
+          let revisionCount = run.revisionCount ?? 0;
+          let latestRevision = run.latestRevision ?? null;
+          if (input.operation === "revise") {
+            latestRevision = {
+              basis: input.basis,
+              revisedAt: updatedAt,
+              ownerThreadId: owner,
+              fromStepId: run.currentStepId,
+              toStepId: currentStepId,
+              stepsDigest: playbookDigest(encodeJson(definition!.steps)),
+            };
+            revisionCount += 1;
+            yield* sql`INSERT INTO j5_playbook_revision (run_id, request_id, basis, revised_at, owner_thread_id, from_step_id, to_step_id, steps_digest)
+              VALUES (${run.runId}, ${input.client_request_id}, ${input.basis}, ${updatedAt}, ${owner}, ${run.currentStepId}, ${currentStepId}, ${latestRevision.stepsDigest})`;
+            yield* sql`UPDATE j5_playbook_run SET definition_json = ${encodeDefinition(definition!)}, revision_count = ${revisionCount}, latest_revision_json = ${encodeRevision(latestRevision)} WHERE run_id = ${run.runId}`;
+          }
           yield* sql`UPDATE j5_playbook_run SET current_step_id = ${currentStepId}, status = ${status}, updated_at = ${updatedAt}
           WHERE run_id = ${run.runId} AND owner_thread_id = ${owner}`;
           if (run.crewInstanceId !== undefined && run.crewInstanceId !== null) {
             // Every landing is handed to its owner exactly once; a finished run hands off nothing.
-            if (status === "active")
+            if (
+              status === "active" &&
+              (input.operation !== "revise" || currentStepId !== run.currentStepId)
+            )
               yield* land(run.runId, input.client_request_id, currentStepId, updatedAt);
-            else yield* skipPending(run.runId, updatedAt);
+            else if (status !== "active") yield* skipPending(run.runId, updatedAt);
           }
           yield* remember(owner, input.client_request_id, request, run.runId);
-          return { run: { ...run, currentStepId, status, updatedAt }, replayed: false };
+          return {
+            run: {
+              ...run,
+              definition,
+              currentStepId,
+              status,
+              updatedAt,
+              revisionCount,
+              latestRevision,
+            },
+            replayed: false,
+          };
         }),
       );
       if (!result.replayed && result.run.status !== "active")
