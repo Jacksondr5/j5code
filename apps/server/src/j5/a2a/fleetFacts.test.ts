@@ -10,7 +10,7 @@ import { runJ5A2AMigrations } from "./Migrations.ts";
 import { A2ALedger } from "./LedgerService.ts";
 import { ParticipantPlacementService } from "./PlacementService.ts";
 import { AgentCrewInstanceService } from "./AgentCrewInstanceService.ts";
-import { PlaybookCrewRelay } from "../playbooks/PlaybookCrewRelay.ts";
+import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
 import { CREW_ALERT_EXCHANGE_PREFIX } from "./crewFailureAlert.ts";
 import { makeFleetRead } from "./fleetRead.ts";
 import { LedgerProjectId, ParticipantId } from "./contracts.ts";
@@ -208,7 +208,7 @@ it.effect(
                 ]),
             }),
             Layer.mock(AgentCrewInstanceService)({ listForProject: () => Effect.succeed([]) }),
-            Layer.mock(PlaybookCrewRelay)({}),
+            Layer.mock(PlaybookStore)({ activeRunSummaries: () => Effect.succeed([]) }),
           ),
         ),
       );

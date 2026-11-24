@@ -131,7 +131,7 @@ describe("crew member edits", () => {
     expect(original.instructions).toBe("Review the patch");
   });
 
-  it("keeps the steps a seat owns when the person edits it", () => {
+  it("drops legacy fixed steps when the person edits a seat", () => {
     const owning = [
       { seat: "lead", agentId: null, reason: "Plans", instructions: "Plan.", steps: ["plan"] },
     ];
@@ -146,7 +146,6 @@ describe("crew member edits", () => {
       agentId: null,
       reason: "Plans",
       instructions: "Plan carefully.",
-      steps: ["plan"],
     });
   });
 
@@ -171,7 +170,6 @@ describe("inline roster drafts", () => {
     agentId: null,
     reason: "Build",
     instructions: "Implement",
-    steps: ["build"],
   };
   it("marks actual edits and clears the tag when the original values return", () => {
     const row = crewProposalRows([original])[0]!;

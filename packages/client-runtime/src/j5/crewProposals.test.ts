@@ -7,14 +7,10 @@ import {
   crewProposalReview,
   crewSeatStopsForApprovals,
   describeCrewSeatWorkspace,
-  describePersonaSwap,
   heldCrewApprovalSends,
   rememberPreviewedSeats,
-  removedSeatSteps,
   removeSeat,
   rosterGatesForThread,
-  stepTitle,
-  unownedSteps,
 } from "./crewProposals.ts";
 
 const proposal = (overrides: Partial<CrewProposal>): CrewProposal => ({
@@ -83,49 +79,10 @@ describe("crewProposalReview", () => {
   });
 });
 
-const playbook = {
-  name: "release",
-  title: "Release",
-  steps: [
-    { id: "plan", title: "Plan", persona: "planner" },
-    { id: "build", title: "Build" },
-    { id: "review", title: "Review" },
-  ],
-  issue: null,
-};
-const planSeats = [
-  { seat: "lead", agentId: null, reason: "Plans", steps: ["plan"] },
-  { seat: "maker", agentId: "builder-bot", reason: "Builds", steps: ["build"] },
-];
-
-describe("crew playbook plan on the card", () => {
-  it("leaves a removed seat's steps unowned and says which", () => {
-    expect(unownedSteps(playbook, planSeats)).toEqual(["review"]);
-    const remaining = removeSeat(planSeats, "lead");
-    expect(unownedSteps(playbook, remaining)).toEqual(["plan", "review"]);
-    expect(removedSeatSteps(planSeats, remaining)).toEqual([{ seat: "lead", steps: ["plan"] }]);
-    expect(unownedSteps(null, planSeats)).toEqual([]);
-  });
-
-  it("names steps by live title and falls back to the id", () => {
-    expect(stepTitle(playbook, "build")).toBe("Build");
-    expect(stepTitle(playbook, "ship")).toBe("ship");
-  });
-
-  it("describes a swap, including why the wanted persona could not staff it", () => {
-    expect(
-      describePersonaSwap(
-        { stepId: "plan", wanted: "planner", seatPersona: null, wantedProblem: "disabled" },
-        "lead",
-      ),
-    ).toBe("wants planner; lead is a custom seat (planner is turned off)");
-    expect(
-      describePersonaSwap(
-        { stepId: "plan", wanted: "planner", seatPersona: "builder-bot", wantedProblem: null },
-        "maker",
-      ),
-    ).toBe("wants planner; maker is builder-bot");
-  });
+it("removes only the selected seat from the roster", () => {
+  const seats = proposal({}).requestedSeats;
+  expect(removeSeat(seats, "critic")).toEqual([]);
+  expect(removeSeat(seats, "other")).toEqual(seats);
 });
 
 describe("crewSeatStopsForApprovals", () => {

@@ -1,6 +1,4 @@
 import type {
-  CrewPersonaSwap,
-  CrewProposalPlaybook,
   CrewProposalPreviewResponse,
   CrewProposalSeat,
   CrewProposalSeatRuntime,
@@ -52,44 +50,6 @@ export const describeCrewSeatWorkspace = (workspace: CrewSeatWorkspace): string 
       ? `New worktree from ${workspace.baseRef}${workspace.baseCommit === undefined ? "" : ` @ ${workspace.baseCommit.slice(0, 8)}`}`
       : `Existing worktree on ${workspace.branch ?? workspace.worktreePath}`;
 
-/** A step's live title for the card; the id when the definition no longer has it. */
-export const stepTitle = (playbook: CrewProposalPlaybook | null, id: string): string =>
-  playbook?.steps.find((step) => step.id === id)?.title ?? id;
-
-/** Steps no seat on the card owns, in YAML order; the Captain does them. */
-export const unownedSteps = (
-  playbook: CrewProposalPlaybook | null,
-  seats: ReadonlyArray<Pick<CrewProposalSeat, "steps">>,
-): ReadonlyArray<string> =>
-  playbook === null
-    ? []
-    : playbook.steps
-        .map(({ id }) => id)
-        .filter((id) => !seats.some((seat) => seat.steps?.includes(id)));
-
-/** Seats the person removed from the card that owned steps, so the card can say what they leave. */
-export const removedSeatSteps = (
-  requested: ReadonlyArray<CrewProposalSeat>,
-  seats: ReadonlyArray<CrewProposalSeat>,
-): ReadonlyArray<{ readonly seat: string; readonly steps: ReadonlyArray<string> }> =>
-  requested.flatMap((seat) =>
-    seat.steps === undefined ||
-    seat.steps.length === 0 ||
-    seats.some((current) => current.seat === seat.seat)
-      ? []
-      : [{ seat: seat.seat, steps: seat.steps }],
-  );
-
-/** "wants planner; lead is a custom seat (turned off)" */
-export const describePersonaSwap = (swap: CrewPersonaSwap, seatName: string): string =>
-  `wants ${swap.wanted}; ${seatName} is ${swap.seatPersona ?? "a custom seat"}${
-    swap.wantedProblem === "missing"
-      ? ` (${swap.wanted} is missing)`
-      : swap.wantedProblem === "disabled"
-        ? ` (${swap.wanted} is turned off)`
-        : ""
-  }`;
-
 /**
  * Whether a runtime preview answers for exactly these seats. An approval token authorizes only the
  * roster and settings that were shown, so a partial or mismatched preview must never enable it.
@@ -105,7 +65,7 @@ export const crewPreviewIsComplete = (
   seats.every((seat) => data.seats.filter((row) => row.seat === seat.seat).length === 1);
 
 const seatSettings = (seat: CrewProposalSeat) =>
-  JSON.stringify([seat.agentId, seat.modelSelection, seat.runtimeMode, seat.workspace, seat.steps]);
+  JSON.stringify([seat.agentId, seat.modelSelection, seat.runtimeMode, seat.workspace]);
 
 /**
  * The previewed runtime rows still true for the seats on screen: a seat whose settings changed

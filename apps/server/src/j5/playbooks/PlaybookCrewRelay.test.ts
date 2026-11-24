@@ -12,14 +12,16 @@ import type { PlaybookDefinition, PlaybookError } from "@t3tools/contracts/j5";
 import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Deferred from "effect/Deferred";
+import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
+import * as SqlClient from "effect/sql/SqlClient";
 import { stringify } from "yaml";
 
 import {
-  OrchestratorCommandRejectedError,
   OrchestratorDispatchError,
   OrchestratorProjectionError,
 } from "../../orchestration-v2/Orchestrator.ts";
@@ -29,8 +31,6 @@ import {
   AgentCrewInstanceService,
   layer as crewInstanceLayer,
 } from "../a2a/AgentCrewInstanceService.ts";
-import { A2AArchiveFacts } from "../a2a/ArchiveFactsService.ts";
-import { CrewStopService, layer as crewStopLayer } from "../a2a/CrewStopService.ts";
 import { participantIdForThread } from "../a2a/HomeRegistrar.ts";
 import { A2ALedger, layer as ledgerLayer } from "../a2a/LedgerService.ts";
 import { runJ5A2AMigrations } from "../a2a/Migrations.ts";
@@ -39,33 +39,31 @@ import { makePlaybookCrewRelay } from "./PlaybookCrewRelay.ts";
 import { makePlaybookStore, PlaybookStore } from "./PlaybookStore.ts";
 import { seedPlaybookOwners } from "./testFixtures.ts";
 
-const projectId = LedgerProjectId.make("project:relay");
-const captainThread = ThreadId.make("thread:relay:captain");
-const otherCaptainThread = ThreadId.make("thread:relay:other-captain");
-const seatAThread = ThreadId.make("thread:relay:a");
-const seatBThread = ThreadId.make("thread:relay:b");
-const createdAt = "2026-09-29T12:00:00.000Z";
-const crewId = "crew:relay";
-
-// inspect belongs to seat a, review to seat b, and nobody owns report.
-const review: PlaybookDefinition = {
+const projectId = LedgerProjectId.make("project:runtime-holders");
+const owner = ThreadId.make("thread:playbook:owner");
+const peer = ThreadId.make("thread:playbook:peer");
+const crewMember = ThreadId.make("thread:playbook:crew-member");
+const foreign = ThreadId.make("thread:playbook:foreign");
+const ownerId = participantIdForThread(owner);
+const peerId = participantIdForThread(peer);
+const crewId = participantIdForThread(crewMember);
+const foreignId = participantIdForThread(foreign);
+const at = "2026-11-17T12:00:00.000Z";
+const definition: PlaybookDefinition = {
   title: "Review a change",
-  description: "Inspect, review, and report.",
+  description: "Inspect, review, report.",
   steps: [
     { id: "inspect", title: "Inspect", prompt: "Read the change." },
     { id: "review", title: "Review", prompt: "Review the change." },
-    { id: "report", title: "Report", prompt: "Report the findings." },
+    { id: "report", title: "Report", prompt: "Report the result." },
   ],
 };
-
-type SeatState = "live" | "archived";
-
-const projection = (threadId: ThreadId, state: SeatState) =>
+const projection = (id: ThreadId, archived: boolean): OrchestrationV2ThreadProjection =>
   ({
     thread: {
-      id: threadId,
-      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.6-sol" },
-      archivedAt: state === "archived" ? createdAt : null,
+      id,
+      modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-6-sol" },
+      archivedAt: archived ? at : null,
       deletedAt: null,
     },
     messages: [],
@@ -75,84 +73,76 @@ const projection = (threadId: ThreadId, state: SeatState) =>
 const fixture = Effect.gen(function* () {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
-  const root = yield* fs.makeTempDirectoryScoped({ prefix: "j5-playbook-relay-" });
+  const sql = yield* SqlClient.SqlClient;
+  const root = yield* fs.makeTempDirectoryScoped({ prefix: "j5-runtime-holder-" });
   yield* fs.makeDirectory(path.join(root, ".j5/playbooks"), { recursive: true });
-  const write = (name: string, value: PlaybookDefinition) =>
-    fs.writeFileString(path.join(root, ".j5/playbooks", `${name}.yaml`), stringify(value));
-  yield* write("review", review);
-  yield* write("other", { ...review, title: "Another playbook" });
+  yield* fs.writeFileString(path.join(root, ".j5/playbooks/review.yaml"), stringify(definition));
   yield* runJ5A2AMigrations();
-  yield* seedPlaybookOwners([captainThread, otherCaptainThread]);
-
-  const storage = yield* Layer.build(Layer.mergeAll(ledgerLayer, crewInstanceLayer));
-  const crews = Context.get(storage, AgentCrewInstanceService);
-  yield* Context.get(storage, A2ALedger).ensureProject({ projectId: projectId, createdAt });
-  const seat = (name: string, threadId: ThreadId, steps: ReadonlyArray<string>) => ({
-    seatName: name,
-    agentId: null,
-    participantId: participantIdForThread(threadId),
-    threadId,
-    reason: null,
-    playbookStepIds: steps,
-  });
-  const record = (id: string, playbook: string, captain = captainThread) =>
-    crews.record({
-      id,
-      projectId,
-      captainParticipantId: participantIdForThread(captain),
-      captainThreadId: captain,
-      displayName: id,
-      brief: "Follow the playbook.",
-      createdAt,
-      playbook: {
-        name: playbook,
-        definitionPath: path.resolve(root, ".j5/playbooks", `${playbook}.yaml`),
-      },
-      members: [seat("a", seatAThread, ["inspect"]), seat("b", seatBThread, ["review"])],
+  yield* seedPlaybookOwners([owner, peer, crewMember, foreign]);
+  const services = yield* Layer.build(Layer.mergeAll(ledgerLayer, crewInstanceLayer));
+  yield* Context.get(services, A2ALedger).ensureProject({ projectId, createdAt: at });
+  const register = (id: ThreadId, spawnedBy: string | null) =>
+    Effect.gen(function* () {
+      const participant = participantIdForThread(id);
+      yield* sql`INSERT INTO j5_a2a_membership
+        (project_id, participant_id, participant_kind, thread_id, joined_seq, updated_seq, payload)
+        VALUES (${projectId}, ${participant}, 'agent', ${id}, 1, 1,
+          ${JSON.stringify({ kind: "agent", id: participant, threadId: id })})`;
+      if (spawnedBy !== null)
+        yield* sql`INSERT INTO j5_a2a_participant_placement
+          (project_id, participant_id, provenance_kind, provenance_participant_id,
+            provenance_source, placement_parent_id, created_event_seq, updated_event_seq)
+          VALUES (${projectId}, ${participant}, 'spawned-by', ${spawnedBy}, 'j5_spawn', ${spawnedBy}, 1, 1)`;
     });
-  yield* record(crewId, "review");
-
-  const seats = yield* Ref.make(
-    new Map<ThreadId, SeatState>([
-      [seatAThread, "live"],
-      [seatBThread, "live"],
-      [captainThread, "live"],
-    ]),
-  );
+  yield* register(owner, null);
+  yield* register(peer, ownerId);
+  yield* register(crewMember, null);
+  yield* register(foreign, null);
+  const crews = Context.get(services, AgentCrewInstanceService);
+  yield* crews.record({
+    id: "crew:runtime",
+    projectId,
+    captainParticipantId: ownerId,
+    captainThreadId: owner,
+    displayName: "Runtime Crew",
+    brief: "Review together.",
+    createdAt: at,
+    members: [
+      {
+        seatName: "critic",
+        agentId: null,
+        participantId: crewId,
+        threadId: crewMember,
+        reason: null,
+        playbookStepIds: [],
+      },
+    ],
+  });
+  const archived = yield* Ref.make(new Set<string>());
+  const fault = yield* Ref.make(false);
   const dispatched = yield* Ref.make<ReadonlyArray<OrchestrationV2Command>>([]);
-  // "transient" fails like a busy orchestrator; "reject" like a thread that refuses the notice.
-  const dispatchFault = yield* Ref.make<"transient" | "reject" | null>(null);
-  // A thread whose projection can't be read right now (not missing: the store can't answer).
-  const projectionFault = yield* Ref.make<ThreadId | null>(null);
   const threads = ThreadManagementService.of({
-    getThreadRecords: (threadId: ThreadId) =>
-      Effect.all([Ref.get(seats), Ref.get(projectionFault)]).pipe(
-        Effect.flatMap(([current, unreadable]) => {
-          if (unreadable === threadId)
-            return Effect.fail(new OrchestratorProjectionError({ threadId }));
-          const state = current.get(threadId);
-          return state === undefined
-            ? Effect.fail(
+    getThreadRecords: (id: ThreadId) =>
+      Ref.get(archived).pipe(
+        Effect.flatMap((ids) =>
+          [owner, peer, crewMember, foreign].includes(id)
+            ? Effect.succeed(projection(id, ids.has(id)))
+            : Effect.fail(
                 new OrchestratorProjectionError({
-                  threadId,
-                  cause: new ProjectionStoreThreadNotFoundError({ threadId }),
+                  threadId: id,
+                  cause: new ProjectionStoreThreadNotFoundError({ threadId: id }),
                 }),
-              )
-            : Effect.succeed(projection(threadId, state));
-        }),
+              ),
+        ),
       ),
     dispatch: (command: OrchestrationV2Command) =>
       Effect.gen(function* () {
-        const fault = yield* Ref.get(dispatchFault);
-        const commandId = "commandId" in command ? command.commandId : CommandId.make("none");
-        if (fault === "transient")
-          return yield* new OrchestratorDispatchError({ commandId, commandType: command.type });
-        if (fault === "reject")
-          return yield* new OrchestratorCommandRejectedError({
-            commandId,
+        if (yield* Ref.get(fault))
+          return yield* new OrchestratorDispatchError({
+            commandId: "commandId" in command ? command.commandId : CommandId.make("missing"),
             commandType: command.type,
           });
-        yield* Ref.update(dispatched, (items) => [...items, command]);
+        yield* Ref.update(dispatched, (rows) => [...rows, command]);
         return { sequence: 1, storedEvents: [] };
       }),
     stopDelegatedTasks: () => Effect.void,
@@ -160,588 +150,484 @@ const fixture = Effect.gen(function* () {
   const store = yield* makePlaybookStore;
   const relay = yield* makePlaybookCrewRelay.pipe(
     Effect.provideService(PlaybookStore, store),
-    Effect.provideService(AgentCrewInstanceService, crews),
     Effect.provideService(ThreadManagementService, threads),
   );
-  const stopCrew = Effect.gen(function* () {
-    const stops = yield* CrewStopService;
-    return yield* stops.stop({
-      callerParticipantId: participantIdForThread(captainThread),
-      projectId,
-      crewInstanceId: crewId,
-      commandIds: (seat) => ({ interruptCommandId: CommandId.make(`stop:${seat}`) }),
-    });
-  }).pipe(
-    Effect.provide(
-      crewStopLayer.pipe(
-        Layer.provide(Layer.succeed(AgentCrewInstanceService, crews)),
-        Layer.provide(Layer.succeed(ThreadManagementService, threads)),
-        Layer.provide(Layer.mock(A2AArchiveFacts)({})),
-      ),
-    ),
-  );
   const notices = Ref.get(dispatched).pipe(
-    Effect.map((commands) =>
-      commands.flatMap((command) =>
-        command.type === "message.dispatch"
-          ? [{ threadId: command.threadId, text: command.text }]
-          : [],
-      ),
-    ),
+    Effect.map((rows) => rows.filter((row) => row.type === "message.dispatch")),
   );
-  const start = (key: string, crewInstanceId = crewId, name = "review", owner = captainThread) =>
-    relay.start({ owner, root, name, key, crewInstanceId });
+  const start = (key: string, assignee?: string) =>
+    relay.start({
+      owner,
+      root,
+      name: "review",
+      key,
+      ...(assignee === undefined ? {} : { assignee }),
+    });
   const move = (
     runId: string,
-    operation: "next" | "back" | "complete",
+    operation: "next" | "back" | "assign",
     expectedStepId: string,
     key: string,
-  ) => relay.mutate(captainThread, { runId, operation, expectedStepId, client_request_id: key });
-  return {
-    root,
-    write,
-    store,
-    crews,
-    relay,
-    seats,
-    dispatchFault,
-    notices,
-    start,
-    move,
-    record,
-    projectionFault,
-    stopCrew,
-  };
+    assignee?: string,
+  ) =>
+    relay.mutate(owner, {
+      runId,
+      operation,
+      expectedStepId,
+      client_request_id: key,
+      ...(assignee === undefined ? {} : { assignee }),
+    });
+  return { store, relay, start, move, notices, fault, archived, sql, threads, root };
 });
-
 const TestLayer = Layer.mergeAll(
   NodeSqliteClient.layer({ filename: ":memory:" }),
-  Layer.mergeAll(NodeServices.layer, NodeCrypto.layer),
+  NodeServices.layer,
+  NodeCrypto.layer,
 );
-const failureCode = (error: PlaybookError) => error.code;
+const code = (error: PlaybookError) => error.code;
 
-it.effect("starting a Crew-linked run hands the first step to the seat that owns it", () =>
+it.effect("keeps an unassigned run with the owner and moves without a Crew", () =>
   Effect.gen(function* () {
-    const { start, notices, store } = yield* fixture;
-    const started = yield* start("start-1");
-    assert.deepStrictEqual(started.delivery, {
-      state: "delivered",
-      seat: "a",
-      threadId: seatAThread,
-    });
-    assert.equal(started.crewInstanceId, crewId);
-    const sent = yield* notices;
-    assert.lengthOf(sent, 1);
-    assert.equal(sent[0]?.threadId, seatAThread);
-    assert.include(sent[0]?.text, "<j5_playbook_step>");
-    assert.include(sent[0]?.text, "step: inspect | Inspect");
-    assert.include(sent[0]?.text, "position: 1 of 3");
-    assert.include(sent[0]?.text, "<step_prompt>\nRead the change.\n</step_prompt>");
-    const landing = yield* store.landing(started.runId, "start-1");
-    assert.equal(landing?.outcome, "delivered");
-    assert.isNotNull(landing?.resolvedAt);
+    const { start, move, notices, relay } = yield* fixture;
+    const run = yield* start("start-owner");
+    assert.equal(run.holderParticipantId, ownerId);
+    assert.equal(run.delivery?.state, "captain");
+    assert.equal((yield* relay.current(owner, run.runId)).delivery?.state, "captain");
+    const next = yield* move(run.runId, "next", "inspect", "next-owner");
+    assert.equal(next.currentStepId, "review");
+    assert.equal(next.delivery?.state, "captain");
+    assert.lengthOf(yield* notices, 0);
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );
 
-it.effect(
-  "refuses a Crew that isn't the caller's live Crew on that playbook, starting nothing",
-  () =>
-    Effect.gen(function* () {
-      const { start, record, crews, notices, store } = yield* fixture;
-      yield* record("crew:other-captain", "review", otherCaptainThread);
-      yield* record("crew:other-playbook", "other");
-      yield* record("crew:archived", "review");
-      yield* crews.markArchived("crew:archived", createdAt);
-      for (const crewInstanceId of [
-        "crew:other-captain",
-        "crew:other-playbook",
-        "crew:archived",
-        "crew:missing",
-      ]) {
-        const refusal = yield* start(`start:${crewInstanceId}`, crewInstanceId).pipe(Effect.flip);
-        assert.equal(failureCode(refusal), "crew_not_linkable");
-      }
-      assert.lengthOf(yield* notices, 0);
-      assert.lengthOf((yield* store.listForThread(captainThread)).runs, 0);
-    }).pipe(Effect.scoped, Effect.provide(TestLayer)),
-);
-
-it.effect("advancing hands the new step's saved prompt to exactly the seat that owns it", () =>
+it.effect("delivers fresh steps to a spawned Peer Agent and a Crew member", () =>
   Effect.gen(function* () {
-    const { start, move, notices, write } = yield* fixture;
-    const run = yield* start("start-1");
-    // Editing the library leaves the pending run's saved prompt unchanged.
-    yield* write("review", {
-      ...review,
-      steps: review.steps.map((step) =>
-        step.id === "review" ? { ...step, prompt: "Review the edited change." } : step,
-      ),
-    });
-    const next = yield* move(run.runId, "next", "inspect", "next-1");
-    assert.deepStrictEqual(next.delivery, { state: "delivered", seat: "b", threadId: seatBThread });
+    const { start, move, notices, relay } = yield* fixture;
+    const run = yield* start("start-peer", peerId);
+    assert.equal(run.delivery?.state, "delivered");
+    assert.equal(run.delivery?.participantId, peerId);
+    const next = yield* move(run.runId, "next", "inspect", "next-crew", crewId);
+    assert.equal(next.delivery?.seat, "critic");
+    assert.equal(next.delivery?.participantId, crewId);
     const sent = yield* notices;
     assert.deepStrictEqual(
-      sent.map(({ threadId }) => threadId),
-      [seatAThread, seatBThread],
+      sent.map((row) => row.threadId),
+      [peer, crewMember],
     );
-    assert.include(sent[1]?.text, review.steps[1]!.prompt);
-    assert.include(sent[1]?.text, "position: 2 of 3");
+    assert.include(sent[0]!.text, "<step_prompt>\nRead the change.\n</step_prompt>");
+    assert.include(sent[0]!.text, `report back to ${ownerId}`);
+    assert.equal((yield* relay.current(owner, run.runId)).holderParticipantId, crewId);
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );
 
-it.effect("an unowned step, a never-created seat, and an archived seat are the Captain's", () =>
+it.effect("refuses foreign and archived assignees without moving or recording a request", () =>
   Effect.gen(function* () {
-    const { start, move, notices, crews, seats, relay } = yield* fixture;
-    const run = yield* start("start-1");
-    yield* move(run.runId, "next", "inspect", "next-1");
-    const unowned = yield* move(run.runId, "next", "review", "next-2");
-    assert.deepStrictEqual(unowned.delivery, {
-      state: "captain",
-      seat: null,
-      threadId: captainThread,
-    });
-    assert.lengthOf(yield* notices, 2);
-
-    // Seat b's thread is archived: its step goes to the Captain, with no notice.
-    yield* Ref.update(seats, (current) => new Map(current).set(seatBThread, "archived"));
-    const archived = yield* move(run.runId, "back", "report", "back-1");
-    assert.equal(archived.delivery?.state, "captain");
-    assert.lengthOf(yield* notices, 2);
-
-    // Seat a never came to exist, so its row was dropped: its step is unowned.
-    yield* crews.removeMembers(crewId, ["a"]);
-    const dropped = yield* move(run.runId, "back", "review", "back-2");
-    assert.equal(dropped.delivery?.state, "captain");
-    assert.lengthOf(yield* notices, 2);
-    assert.equal((yield* relay.currentDelivery(run.runId, "inspect"))?.state, "captain");
+    const { start, move, store, sql, archived } = yield* fixture;
+    const run = yield* start("start-owner");
+    yield* Ref.update(archived, (ids) => new Set([...ids, peer]));
+    yield* sql`UPDATE orchestration_v2_projection_threads SET archived_at = ${at} WHERE thread_id = ${peer}`;
+    for (const assignee of [
+      foreignId,
+      peerId,
+      "human:someone",
+      "machine:automation",
+      "agent:j5:a2a:missing",
+    ]) {
+      const refused = yield* move(run.runId, "next", "inspect", `bad:${assignee}`, assignee).pipe(
+        Effect.flip,
+      );
+      assert.equal(code(refused), "invalid_assignee");
+      assert.equal((yield* store.runById(run.runId))?.currentStepId, "inspect");
+    }
+    const other = yield* move(run.runId, "next", "inspect", "bad:foreign", foreignId).pipe(
+      Effect.flip,
+    );
+    assert.equal(code(other), "invalid_assignee");
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );
 
-it.effect("a retried j5_playbook_next hands its step off once and replays the same delivery", () =>
+it.effect("a retry delivers once; the same request ID with another assignee conflicts", () =>
   Effect.gen(function* () {
-    const { start, move, notices, store } = yield* fixture;
-    const run = yield* start("start-1");
-    const first = yield* move(run.runId, "next", "inspect", "next-1");
-    const retry = yield* move(run.runId, "next", "inspect", "next-1");
-    assert.isTrue(retry.replayed);
-    assert.deepStrictEqual(retry.delivery, first.delivery);
+    const { start, move, notices } = yield* fixture;
+    const run = yield* start("start-peer", peerId);
+    const replay = yield* start("start-peer", peerId);
+    assert.isTrue(replay.replayed);
+    assert.lengthOf(yield* notices, 1);
+    assert.equal(code(yield* start("start-peer", crewId).pipe(Effect.flip)), "request_conflict");
+    yield* move(run.runId, "next", "inspect", "next-crew", crewId);
+    yield* move(run.runId, "next", "inspect", "next-crew", crewId);
     assert.lengthOf(yield* notices, 2);
-    assert.lengthOf(yield* store.pendingLandings(null), 0);
-    assert.equal((yield* store.landing(run.runId, "next-1"))?.outcome, "delivered");
+    assert.equal(
+      code(yield* move(run.runId, "next", "inspect", "next-crew", peerId).pipe(Effect.flip)),
+      "request_conflict",
+    );
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );
 
-it.effect("the run doesn't move past a hand-off that hasn't finished", () =>
+it.effect("assign replaces an archived pending target and old retries cannot revive it", () =>
   Effect.gen(function* () {
-    const { start, move, notices, dispatchFault, store } = yield* fixture;
-    yield* Ref.set(dispatchFault, "transient");
-    const run = yield* start("start-1");
-    assert.deepStrictEqual(run.delivery, { state: "pending", seat: "a", threadId: seatAThread });
+    const { start, move, relay, fault, notices, store, sql, archived } = yield* fixture;
+    yield* Ref.set(fault, true);
+    const run = yield* start("start-peer", peerId);
+    assert.equal(run.delivery?.state, "pending");
+    assert.equal((yield* relay.current(owner, run.runId)).delivery?.state, "pending");
     const blocked = yield* move(run.runId, "next", "inspect", "next-1").pipe(Effect.flip);
-    assert.equal(failureCode(blocked), "delivery_pending");
-    assert.equal((yield* store.runById(run.runId))?.currentStepId, "inspect");
-
-    // The same call, once the orchestrator recovers, hands off a's step first and then b's.
-    yield* Ref.set(dispatchFault, null);
-    const next = yield* move(run.runId, "next", "inspect", "next-1");
+    assert.equal(code(blocked), "delivery_pending");
+    yield* Ref.update(archived, (ids) => new Set([...ids, peer]));
+    yield* sql`UPDATE orchestration_v2_projection_threads SET archived_at = ${at} WHERE thread_id = ${peer}`;
+    const invalid = yield* move(run.runId, "assign", "inspect", "bad-takeover", foreignId).pipe(
+      Effect.flip,
+    );
+    assert.equal(code(invalid), "invalid_assignee");
+    assert.equal((yield* store.landing(run.runId, "start-peer"))?.outcome, null);
+    assert.equal((yield* store.runById(run.runId))?.holderParticipantId, peerId);
+    const taken = yield* move(run.runId, "assign", "inspect", "take-back");
+    assert.equal(taken.delivery?.state, "captain");
+    assert.equal(taken.currentStepId, "inspect");
+    assert.equal((yield* store.landing(run.runId, "start-peer"))?.outcome, "skipped");
+    yield* Ref.set(fault, false);
+    const old = yield* start("start-peer", peerId);
+    assert.equal(old.delivery?.state, "captain");
+    assert.lengthOf(yield* notices, 0);
+    const next = yield* move(run.runId, "next", "inspect", "next-2", crewId);
     assert.equal(next.delivery?.state, "delivered");
-    assert.deepStrictEqual(
-      (yield* notices).map(({ threadId }) => threadId),
-      [seatAThread, seatBThread],
-    );
-
-    // Nothing retries on its own: after a restart, the Captain's next move finishes a pending
-    // hand-off before it moves.
-    yield* Ref.set(dispatchFault, "transient");
-    yield* move(run.runId, "back", "review", "back-1");
-    yield* Ref.set(dispatchFault, null);
-    yield* move(run.runId, "next", "inspect", "next-2");
-    assert.deepStrictEqual(
-      (yield* notices).map(({ threadId }) => threadId),
-      [seatAThread, seatBThread, seatAThread, seatBThread],
-    );
-    assert.lengthOf(yield* store.pendingLandings(null), 0);
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );
 
-it.effect("another thread's move is refused before any pending hand-off is sent", () =>
+it.effect("only the owner can move a run whose holder is another agent", () =>
   Effect.gen(function* () {
-    const { start, relay, dispatchFault, store, notices } = yield* fixture;
-    yield* Ref.set(dispatchFault, "transient");
-    const run = yield* start("start-1");
-    yield* Ref.set(dispatchFault, null);
-    const refused = yield* relay
-      .mutate(otherCaptainThread, {
+    const { start, relay } = yield* fixture;
+    const run = yield* start("start-peer", peerId);
+    const refusal = yield* relay
+      .mutate(peer, {
         runId: run.runId,
         operation: "next",
         expectedStepId: "inspect",
-        client_request_id: "intruder-1",
+        client_request_id: "peer-next",
       })
       .pipe(Effect.flip);
-    assert.equal(failureCode(refused), "not_owner");
-    assert.lengthOf(yield* notices, 0);
-    assert.isNull((yield* store.landing(run.runId, "start-1"))?.resolvedAt);
+    assert.equal(code(refusal), "not_owner");
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );
 
-it.effect("cancelling with a hand-off still pending cancels and skips it", () =>
-  Effect.gen(function* () {
-    const { start, relay, dispatchFault, store, notices } = yield* fixture;
-    yield* Ref.set(dispatchFault, "transient");
-    const run = yield* start("start-1");
-    const cancelled = yield* relay.mutate(captainThread, {
-      runId: run.runId,
-      operation: "cancel",
-      client_request_id: "cancel-1",
-    });
-    assert.equal(cancelled.status, "cancelled");
-    assert.isNull(cancelled.delivery);
-    assert.equal((yield* store.landing(run.runId, "start-1"))?.outcome, "skipped");
-    yield* Ref.set(dispatchFault, null);
-    assert.lengthOf(yield* store.pendingLandings(null), 0);
-    assert.lengthOf(yield* notices, 0);
-  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
-);
-
-it.effect("a seat that refuses the notice leaves the step to the Captain", () =>
-  Effect.gen(function* () {
-    const { start, dispatchFault, store } = yield* fixture;
-    yield* Ref.set(dispatchFault, "reject");
-    const run = yield* start("start-1");
-    assert.deepStrictEqual(run.delivery, {
-      state: "captain",
-      seat: null,
-      threadId: captainThread,
-    });
-    // The seat stays on the row for the audit trail.
-    const landing = yield* store.landing(run.runId, "start-1");
-    assert.equal(landing?.targetSeat, "a");
-    assert.equal(landing?.outcome, "captain");
-  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
-);
-
-it.effect("back and next hand the step to its owner again", () =>
-  Effect.gen(function* () {
-    const { start, move, relay, notices } = yield* fixture;
-    const run = yield* start("start-1");
-    yield* move(run.runId, "next", "inspect", "next-1");
-    const back = yield* move(run.runId, "back", "review", "back-1");
-    assert.equal(back.delivery?.seat, "a");
-    const advanced = yield* relay.mutate(captainThread, {
-      runId: run.runId,
-      operation: "next",
-      expectedStepId: "inspect",
-      client_request_id: "next-again",
-    });
-    assert.equal(advanced.delivery?.seat, "b");
-    assert.deepStrictEqual(
-      (yield* notices).map(({ threadId }) => threadId),
-      [seatAThread, seatBThread, seatAThread, seatBThread],
-    );
-  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
-);
-
-it.effect("j5_playbook_current reports who holds the step without handing it off again", () =>
-  Effect.gen(function* () {
-    const { start, move, relay, notices } = yield* fixture;
-    const run = yield* start("start-1");
-    yield* move(run.runId, "next", "inspect", "next-1");
-    assert.deepStrictEqual((yield* relay.current(captainThread)).delivery, {
-      state: "delivered",
-      seat: "b",
-      threadId: seatBThread,
-    });
-    yield* move(run.runId, "next", "review", "next-2");
-    assert.deepStrictEqual((yield* relay.current(captainThread)).delivery, {
-      state: "captain",
-      seat: null,
-      threadId: captainThread,
-    });
-    assert.lengthOf(yield* notices, 2);
-  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
-);
-
-it.effect("a hand-off that hasn't finished reads as pending, never as the Captain's", () =>
-  Effect.gen(function* () {
-    const { start, move, relay, notices, dispatchFault, projectionFault } = yield* fixture;
-    const run = yield* start("start-1");
-    // The target is resolved and persisted, but its dispatch keeps failing.
-    yield* Ref.set(dispatchFault, "transient");
-    const next = yield* move(run.runId, "next", "inspect", "next-1");
-    assert.deepStrictEqual(next.delivery, { state: "pending", seat: "b", threadId: seatBThread });
-    assert.deepStrictEqual((yield* relay.current(captainThread)).delivery, next.delivery);
-    assert.lengthOf(yield* notices, 1);
-
-    // Retrying the same call once the orchestrator recovers delivers it.
-    yield* Ref.set(dispatchFault, null);
-    const retried = yield* move(run.runId, "next", "inspect", "next-1");
-    assert.equal(retried.delivery?.state, "delivered");
-    // No target yet: the owner's thread can't be read, so nothing is persisted.
-    yield* Ref.set(projectionFault, seatAThread);
-    const back = yield* move(run.runId, "back", "review", "back-1");
-    const unresolved = { state: "pending", seat: null, threadId: null } as const;
-    assert.deepStrictEqual(back.delivery, unresolved);
-    assert.deepStrictEqual((yield* relay.current(captainThread)).delivery, unresolved);
-    assert.deepStrictEqual(yield* relay.fleetRun(crewId), {
-      runId: run.runId,
-      position: 1,
-      total: 3,
-      stepId: "inspect",
-      stepTitle: "Inspect",
-      state: "pending",
-      seat: null,
-    });
-    assert.lengthOf(yield* notices, 2);
-  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
-);
-
-it.effect("Fleet reads the Crew's step and who holds it, and nothing once the run completes", () =>
-  Effect.gen(function* () {
-    const { start, move, relay } = yield* fixture;
-    assert.isNull(yield* relay.fleetRun(crewId));
-    const run = yield* start("start-1");
-    yield* move(run.runId, "next", "inspect", "next-1");
-    assert.deepStrictEqual(yield* relay.fleetRun(crewId), {
-      runId: run.runId,
-      position: 2,
-      total: 3,
-      stepId: "review",
-      stepTitle: "Review",
-      state: "delivered",
-      seat: "b",
-    });
-    yield* move(run.runId, "next", "review", "next-2");
-    const completed = yield* move(run.runId, "complete", "report", "complete-1");
-    assert.isNull(completed.delivery);
-    assert.isNull(yield* relay.fleetRun(crewId));
-  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
-);
-
-it.effect("a retry after later moves reports who holds the step it shows, and sends nothing", () =>
-  Effect.gen(function* () {
-    const { start, move, notices } = yield* fixture;
-    const run = yield* start("start-1");
-    yield* move(run.runId, "next", "inspect", "next-1");
-    // The retried start returns live progress at review, so its delivery is review's.
-    const retriedStart = yield* start("start-1");
-    assert.isTrue(retriedStart.replayed);
-    assert.equal(retriedStart.currentStepId, "review");
-    assert.deepStrictEqual(retriedStart.delivery, {
-      state: "delivered",
-      seat: "b",
-      threadId: seatBThread,
-    });
-    yield* move(run.runId, "back", "review", "back-1");
-    const retriedNext = yield* move(run.runId, "next", "inspect", "next-1");
-    assert.equal(retriedNext.currentStepId, "inspect");
-    assert.equal(retriedNext.delivery?.seat, "a");
-    assert.lengthOf(yield* notices, 3);
-    // Once the run has ended, a retry reports no delivery.
-    yield* move(run.runId, "next", "inspect", "next-2");
-    yield* move(run.runId, "next", "review", "next-3");
-    yield* move(run.runId, "complete", "report", "complete-1");
-    const afterEnd = yield* start("start-1");
-    assert.equal(afterEnd.status, "completed");
-    assert.isNull(afterEnd.delivery);
-    assert.lengthOf(yield* notices, 4);
-  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
-);
-
-it.effect("delivers saved steps after the library becomes unreadable or removes them", () =>
-  Effect.gen(function* () {
-    const { start, move, write, store, dispatchFault, notices } = yield* fixture;
-    yield* Ref.set(dispatchFault, "transient");
-    const run = yield* start("start-1");
-    yield* Ref.set(dispatchFault, null);
-    yield* write("review", { ...review, steps: review.steps.filter(({ id }) => id !== "inspect") });
-    const next = yield* move(run.runId, "next", "inspect", "next-1");
-    assert.equal(next.delivery?.seat, "b");
-    assert.equal((yield* store.landing(run.runId, "start-1"))?.outcome, "delivered");
-    assert.deepStrictEqual(
-      (yield* notices).map(({ threadId }) => threadId),
-      [seatAThread, seatBThread],
-    );
-  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
-);
-
-it.effect("stopping the Crew stops its seats and leaves its run where it is", () =>
-  Effect.gen(function* () {
-    const { start, move, stopCrew, store, notices } = yield* fixture;
-    const run = yield* start("start-1");
-    const before = yield* store.landing(run.runId, "start-1");
-    const stopped = yield* stopCrew;
-    assert.deepStrictEqual(
-      stopped.members.map(({ seatName, result }) => [seatName, result]),
-      // Both seats are stopped; neither fixture seat has a turn running.
-      [
-        ["a", "already_idle"],
-        ["b", "already_idle"],
-      ],
-    );
-    const after = yield* store.runById(run.runId);
-    assert.equal(after?.status, "active");
-    assert.equal(after?.currentStepId, "inspect");
-    assert.deepStrictEqual(yield* store.landing(run.runId, "start-1"), before);
-    assert.lengthOf(yield* notices, 1);
-    // The Captain carries on after a stop; the next step still reaches its seat.
-    const next = yield* move(run.runId, "next", "inspect", "next-1");
-    assert.equal(next.delivery?.state, "delivered");
-  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
-);
-
-it.effect("archiving the Crew cancels its run for good", () =>
-  Effect.gen(function* () {
-    const { start, move, store, dispatchFault } = yield* fixture;
-    yield* Ref.set(dispatchFault, "transient");
-    const run = yield* start("start-1");
-    assert.deepStrictEqual(yield* store.cancelForCrew(crewId), [run.runId]);
-    // Idempotent, so the archive's retry path can call it again.
-    assert.deepStrictEqual(yield* store.cancelForCrew(crewId), []);
-    assert.equal((yield* store.runById(run.runId))?.status, "cancelled");
-    assert.equal((yield* store.landing(run.runId, "start-1"))?.outcome, "skipped");
-    const after = yield* move(run.runId, "next", "inspect", "next-1").pipe(Effect.flip);
-    assert.equal(failureCode(after), "run_terminal");
-  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
-);
-
-const replacementThread = ThreadId.make("thread:relay:a2");
-const replaceSeat = (
-  crews: AgentCrewInstanceService["Service"],
-  seatName: string,
-  oldThread: ThreadId,
-  movedStepIds: ReadonlyArray<string>,
-) =>
-  crews.replaceMember(crewId, {
-    seatName,
-    participantId: participantIdForThread(oldThread),
-    member: {
-      seatName,
-      agentId: null,
-      participantId: participantIdForThread(replacementThread),
-      threadId: replacementThread,
-      reason: null,
-      playbookStepIds: [],
-    },
-    movedStepIds,
-    replacedAt: createdAt,
-  });
-
-it.effect("a replacement is handed the step its predecessor already held, once", () =>
-  Effect.gen(function* () {
-    const { start, relay, crews, seats, notices } = yield* fixture;
-    yield* Ref.update(seats, (current) => new Map([...current, [replacementThread, "live"]]));
-    const run = yield* start("start-1");
-    assert.equal(run.delivery?.threadId, seatAThread);
-    assert.equal((yield* replaceSeat(crews, "a", seatAThread, ["inspect"])).status, "replaced");
-    const handed = yield* relay.handOver({
-      crewInstanceId: crewId,
-      fromThreadId: seatAThread,
-      requestKey: "replace-1",
-    });
-    assert.deepStrictEqual(handed?.delivery, {
-      state: "delivered",
-      seat: "a",
-      threadId: replacementThread,
-    });
-    assert.isNull(
-      yield* relay.handOver({
-        crewInstanceId: crewId,
-        fromThreadId: seatAThread,
-        requestKey: "replace-1",
-      }),
-    );
-    assert.deepStrictEqual(
-      (yield* notices).map(({ threadId }) => threadId),
-      [seatAThread, replacementThread],
-    );
-  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
-);
-
-it.effect("a hand-off still pending toward the replaced member goes to its replacement", () =>
-  Effect.gen(function* () {
-    const { start, relay, crews, seats, notices, dispatchFault, store } = yield* fixture;
-    yield* Ref.update(seats, (current) => new Map([...current, [replacementThread, "live"]]));
-    yield* Ref.set(dispatchFault, "transient");
-    const run = yield* start("start-1");
-    assert.deepStrictEqual(run.delivery, { state: "pending", seat: "a", threadId: seatAThread });
-    yield* replaceSeat(crews, "a", seatAThread, ["inspect"]);
-    yield* Ref.set(dispatchFault, null);
-    const handed = yield* relay.handOver({
-      crewInstanceId: crewId,
-      fromThreadId: seatAThread,
-      requestKey: "replace-1",
-    });
-    assert.equal(handed?.delivery?.threadId, replacementThread);
-    assert.deepStrictEqual(
-      (yield* notices).map(({ threadId }) => threadId),
-      [replacementThread],
-    );
-    assert.lengthOf(yield* store.pendingLandings(null), 0);
-  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
-);
-
-it.effect(
-  "a replaced seat's step not yet reached goes to the replacement when the run gets there",
-  () =>
+it.effect.each([
+  { startMode: "first", operation: "assign" },
+  { startMode: "first", operation: "cancel" },
+  { startMode: "retry", operation: "assign" },
+  { startMode: "retry", operation: "cancel" },
+] as const)(
+  "serializes $operation with $startMode start delivery while other runs proceed",
+  ({ startMode, operation }) =>
     Effect.gen(function* () {
-      const { start, move, relay, crews, seats, notices } = yield* fixture;
-      yield* Ref.update(seats, (current) => new Map([...current, [replacementThread, "live"]]));
-      const run = yield* start("start-1");
-      yield* replaceSeat(crews, "b", seatBThread, ["review"]);
-      assert.isNull(
-        yield* relay.handOver({
-          crewInstanceId: crewId,
-          fromThreadId: seatBThread,
-          requestKey: "replace-1",
+      const { store, start, fault, threads, root, notices } = yield* fixture;
+      if (startMode === "retry") {
+        yield* Ref.set(fault, true);
+        yield* start("start-race", peerId);
+        yield* Ref.set(fault, false);
+      }
+      const dispatchEntered = yield* Deferred.make<void>();
+      const releaseDispatch = yield* Deferred.make<void>();
+      const runRead = yield* Deferred.make<void>();
+      const mutationEntered = yield* Deferred.make<void>();
+      const armed = yield* Ref.make(false);
+      const relay = yield* makePlaybookCrewRelay.pipe(
+        Effect.provideService(PlaybookStore, {
+          ...store,
+          runById: (id) =>
+            store
+              .runById(id)
+              .pipe(
+                Effect.tap(() =>
+                  Ref.get(armed).pipe(
+                    Effect.flatMap((active) =>
+                      active ? Deferred.succeed(runRead, undefined) : Effect.void,
+                    ),
+                  ),
+                ),
+              ),
+          mutate: (caller, input) =>
+            Deferred.succeed(mutationEntered, undefined).pipe(
+              Effect.andThen(store.mutate(caller, input)),
+            ),
+        }),
+        Effect.provideService(ThreadManagementService, {
+          ...threads,
+          dispatch: (command) =>
+            Deferred.succeed(dispatchEntered, undefined).pipe(
+              Effect.andThen(Deferred.await(releaseDispatch)),
+              Effect.andThen(threads.dispatch(command)),
+            ),
         }),
       );
-      const next = yield* move(run.runId, "next", "inspect", "next-1");
-      assert.equal(next.delivery?.threadId, replacementThread);
-      assert.deepStrictEqual(
-        (yield* notices).map(({ threadId }) => threadId),
-        [seatAThread, replacementThread],
-      );
+      const starting = yield* relay
+        .start({ owner, root, name: "review", key: "start-race", assignee: peerId })
+        .pipe(Effect.forkChild({ startImmediately: true }));
+      yield* Deferred.await(dispatchEntered);
+      const current = yield* store.current(owner);
+      yield* Ref.set(armed, true);
+      const mutation = yield* relay
+        .mutate(owner, {
+          runId: current.runId,
+          operation,
+          expectedStepId: "inspect",
+          client_request_id: "mutation-race",
+        })
+        .pipe(Effect.forkChild({ startImmediately: true }));
+      yield* Deferred.await(runRead);
+      const unrelated = yield* relay.start({
+        owner: foreign,
+        root,
+        name: "review",
+        key: "unrelated",
+      });
+      assert.equal(unrelated.delivery?.state, "captain");
+      assert.isFalse(yield* Deferred.isDone(mutationEntered));
+      assert.equal((yield* store.landing(current.runId, "start-race"))?.outcome, null);
+      yield* Deferred.succeed(releaseDispatch, undefined);
+      const started = yield* Fiber.join(starting);
+      assert.equal(started.delivery?.state, "delivered");
+      const changed = yield* Fiber.join(mutation);
+      assert.equal(changed.status, operation === "cancel" ? "cancelled" : "active");
+      assert.equal(changed.delivery?.state, operation === "assign" ? "captain" : undefined);
+      assert.lengthOf(yield* notices, 1);
+      assert.equal((yield* store.landing(current.runId, "start-race"))?.outcome, "delivered");
     }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );
 
 it.effect(
-  "revisions preserve the current holder or hand a replacement step its revised prompt once",
+  "a mutation winning the insertion-to-lock gap supersedes the start response and notice",
   () =>
     Effect.gen(function* () {
-      const { start, relay, notices, store, dispatchFault } = yield* fixture;
-      yield* Ref.set(dispatchFault, "transient");
-      const run = yield* start("revision-start");
-      const revision = {
+      const { store, threads, root, notices } = yield* fixture;
+      const inserted = yield* Deferred.make<void>();
+      const releaseStart = yield* Deferred.make<void>();
+      const relay = yield* makePlaybookCrewRelay.pipe(
+        Effect.provideService(PlaybookStore, {
+          ...store,
+          start: (...input) =>
+            store
+              .start(...input)
+              .pipe(
+                Effect.tap(() =>
+                  Deferred.succeed(inserted, undefined).pipe(
+                    Effect.andThen(Deferred.await(releaseStart)),
+                  ),
+                ),
+              ),
+        }),
+        Effect.provideService(ThreadManagementService, threads),
+      );
+      const starting = yield* relay
+        .start({ owner, root, name: "review", key: "start-gap", assignee: peerId })
+        .pipe(Effect.forkChild);
+      yield* Deferred.await(inserted);
+      const run = yield* store.current(owner);
+      yield* relay.mutate(owner, {
+        runId: run.runId,
+        operation: "assign",
+        expectedStepId: "inspect",
+        client_request_id: "take-back-gap",
+      });
+      yield* Deferred.succeed(releaseStart, undefined);
+      const response = yield* Fiber.join(starting);
+      assert.equal(response.holderParticipantId, ownerId);
+      assert.equal(response.delivery?.state, "captain");
+      assert.isFalse(response.replayed);
+      assert.equal((yield* store.landing(run.runId, "start-gap"))?.outcome, "skipped");
+      assert.lengthOf(yield* notices, 0);
+    }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);
+
+it.effect("an upgraded owner-held run without landings still reports its recorded owner", () =>
+  Effect.gen(function* () {
+    const { start, store, relay, sql, notices } = yield* fixture;
+    const run = yield* start("owner-before-upgrade");
+    yield* sql`DELETE FROM j5_playbook_step_delivery WHERE run_id = ${run.runId}`;
+    const current = yield* relay.current(owner, run.runId);
+    assert.equal(current.delivery?.state, "captain");
+    assert.equal(current.delivery?.participantId, ownerId);
+    assert.lengthOf(yield* notices, 0);
+    assert.isNull(yield* store.latestLanding(run.runId));
+  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);
+
+it.effect.each(["target", "owner"] as const)(
+  "an unresolved upgraded $0 identity requires explicit recovery",
+  (missing) =>
+    Effect.gen(function* () {
+      const { start, relay, fault, sql, notices, store, move } = yield* fixture;
+      yield* Ref.set(fault, true);
+      const run = yield* start("pending-before-upgrade", peerId);
+      if (missing === "target") {
+        yield* sql`UPDATE j5_playbook_run SET holder_participant_id = NULL WHERE run_id = ${run.runId}`;
+        yield* sql`UPDATE j5_playbook_step_delivery SET target_participant_id = NULL WHERE run_id = ${run.runId}`;
+      } else {
+        yield* sql`UPDATE j5_playbook_run SET assigned_by_participant_id = NULL WHERE run_id = ${run.runId}`;
+        yield* sql`UPDATE j5_playbook_step_delivery SET assigned_by_participant_id = NULL WHERE run_id = ${run.runId}`;
+      }
+      yield* Ref.set(fault, false);
+      const unavailable = yield* relay.current(owner).pipe(Effect.flip);
+      assert.equal(unavailable.code, "holder_unavailable");
+      assert.include(unavailable.message, "j5_playbook_assign");
+      assert.include(unavailable.message, `runId=${JSON.stringify(run.runId)}`);
+      assert.include(unavailable.message, `expectedStepId=${JSON.stringify(run.currentStepId)}`);
+      const blocked = yield* move(run.runId, "next", "inspect", "next-unresolved").pipe(
+        Effect.flip,
+      );
+      assert.equal(blocked.code, "delivery_pending");
+      assert.include(blocked.message, "recorded");
+      assert.lengthOf(yield* notices, 0);
+      assert.isNull((yield* store.landing(run.runId, "pending-before-upgrade"))?.resolvedAt);
+      const recovered = yield* move(run.runId, "assign", "inspect", "recover-upgrade");
+      assert.equal(recovered.delivery?.state, "captain");
+      assert.equal(recovered.assignedByParticipantId, ownerId);
+      assert.equal((yield* store.landing(run.runId, "pending-before-upgrade"))?.outcome, "skipped");
+    }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);
+
+it.effect(
+  "revises a no-Crew run to a Peer once, preserves its holder, and can return it to the owner",
+  () =>
+    Effect.gen(function* () {
+      const { start, relay, notices, store } = yield* fixture;
+      const run = yield* start("revision-owner");
+      const input = {
         operation: "revise" as const,
         runId: run.runId,
         expectedStepId: "inspect",
-        client_request_id: "revision",
+        client_request_id: "revise-peer",
         basis: "asked" as const,
-        steps: review.steps.map((step) => ({ ...step, prompt: `Revised ${step.id}.` })),
-      };
-      assert.equal(
-        (yield* Effect.flip(relay.mutate(captainThread, revision))).code,
-        "delivery_pending",
-      );
-      assert.equal((yield* store.current(captainThread)).revisionCount, 0);
-      yield* Ref.set(dispatchFault, null);
-      const same = yield* relay.mutate(captainThread, revision);
-      assert.equal(same.delivery?.threadId, seatAThread);
-      assert.equal(same.currentStep?.prompt, "Revised inspect.");
-      assert.lengthOf(yield* notices, 1);
-      assert.isNull(yield* store.landing(run.runId, "revision"));
-      const replacement = {
-        ...revision,
-        client_request_id: "replace",
-        steps: revision.steps.slice(1),
         stepId: "review",
+        assignee: peerId,
+        steps: definition.steps
+          .slice(1)
+          .map((step) => ({ ...step, prompt: `Revised ${step.id}.` })),
       };
-      const changed = yield* relay.mutate(captainThread, replacement);
-      assert.equal(changed.delivery?.threadId, seatBThread);
+      const { assignee, ...unassigned } = input;
+      const changed = yield* relay.mutate(owner, input);
       assert.equal(changed.currentStepId, "review");
+      assert.equal(changed.holderParticipantId, assignee);
+      assert.equal(changed.assignedByParticipantId, ownerId);
+      assert.equal(changed.delivery?.state, "delivered");
+      assert.equal(changed.currentStep?.prompt, "Revised review.");
+      assert.equal(changed.revisionCount, 1);
+      assert.include((yield* notices)[0]?.text, "Revised review.");
+      assert.equal((yield* store.landing(run.runId, "revise-peer"))?.targetParticipantId, peerId);
+      assert.isTrue((yield* relay.mutate(owner, input)).replayed);
+      assert.lengthOf(yield* notices, 1);
+      assert.equal(
+        (yield* Effect.flip(relay.mutate(owner, { ...input, assignee: crewId }))).code,
+        "request_conflict",
+      );
+      const edit = {
+        ...unassigned,
+        expectedStepId: "review",
+        client_request_id: "edit-held",
+        steps: input.steps.map((step) => ({ ...step, prompt: `Edited ${step.id}.` })),
+      };
+      const edited = yield* relay.mutate(owner, edit);
+      assert.equal(edited.holderParticipantId, peerId);
+      assert.equal(edited.delivery?.participantId, peerId);
+      assert.equal(edited.currentStep?.prompt, "Edited review.");
+      assert.equal((yield* store.landing(run.runId, "edit-held"))?.targetParticipantId, peerId);
+      assert.include((yield* notices)[1]?.text, "Edited review.");
+      assert.isTrue((yield* relay.mutate(owner, edit)).replayed);
+      yield* relay.mutate(owner, {
+        ...edit,
+        client_request_id: "edit-later-step",
+        steps: edit.steps.map((step) =>
+          step.id === "report" ? { ...step, prompt: "New report." } : step,
+        ),
+      });
       assert.lengthOf(yield* notices, 2);
-      assert.include((yield* notices)[1]?.text, "Revised review.");
-      assert.isTrue((yield* relay.mutate(captainThread, replacement)).replayed);
+      const returned = yield* relay.mutate(owner, {
+        ...unassigned,
+        expectedStepId: "review",
+        client_request_id: "return-owner",
+        steps: input.steps.slice(1),
+        stepId: "report",
+      });
+      assert.equal(returned.currentStepId, "report");
+      assert.equal(returned.holderParticipantId, ownerId);
+      assert.equal(returned.delivery?.state, "captain");
+      assert.equal(returned.revisionCount, 4);
       assert.lengthOf(yield* notices, 2);
     }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);
+
+it.effect(
+  "invalid revision assignees leave the snapshot, history, pointer and holder unchanged",
+  () =>
+    Effect.gen(function* () {
+      const { start, relay, store, sql, notices } = yield* fixture;
+      const run = yield* start("held-start", peerId);
+      const before = yield* store.runById(run.runId);
+      const input = {
+        operation: "revise" as const,
+        runId: run.runId,
+        expectedStepId: "inspect",
+        client_request_id: "invalid-revision",
+        basis: "approved" as const,
+        steps: definition.steps.map((step) => ({ ...step, prompt: "Changed prompt." })),
+        assignee: peerId,
+      };
+      assert.equal((yield* Effect.flip(relay.mutate(owner, input))).code, "invalid_assignee");
+      assert.deepStrictEqual(yield* store.runById(run.runId), before);
+      assert.equal(
+        (yield* Effect.flip(
+          relay.mutate(owner, {
+            ...input,
+            steps: input.steps.slice(1),
+            stepId: "review",
+            assignee: foreignId,
+          }),
+        )).code,
+        "invalid_assignee",
+      );
+      assert.deepStrictEqual(yield* store.runById(run.runId), before);
+      assert.lengthOf(
+        yield* sql`SELECT * FROM j5_playbook_revision WHERE run_id = ${run.runId}`,
+        0,
+      );
+      assert.lengthOf(
+        yield* sql`SELECT * FROM j5_playbook_request WHERE request_id = 'invalid-revision'`,
+        0,
+      );
+      assert.isNull(yield* store.landing(run.runId, "invalid-revision"));
+      assert.lengthOf(yield* notices, 1);
+    }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);
+
+it.effect("refuses pending, stale, foreign and terminal no-Crew revisions", () =>
+  Effect.gen(function* () {
+    const { start, relay, fault, store } = yield* fixture;
+    yield* Ref.set(fault, true);
+    const run = yield* start("pending-revision", peerId);
+    const input = {
+      operation: "revise" as const,
+      runId: run.runId,
+      expectedStepId: "inspect",
+      client_request_id: "refused-revision",
+      basis: "asked" as const,
+      steps: definition.steps.slice(1),
+      stepId: "review",
+      assignee: peerId,
+    };
+    assert.equal((yield* Effect.flip(relay.mutate(owner, input))).code, "delivery_pending");
+    assert.equal((yield* Effect.flip(relay.mutate(foreign, input))).code, "not_owner");
+    assert.equal((yield* store.current(owner)).revisionCount, 0);
+    yield* Ref.set(fault, false);
+    assert.equal(
+      (yield* Effect.flip(relay.mutate(owner, { ...input, expectedStepId: "stale" }))).code,
+      "step_conflict",
+    );
+    assert.equal((yield* store.current(owner)).currentStepId, "inspect");
+    yield* relay.mutate(owner, {
+      operation: "cancel",
+      runId: run.runId,
+      client_request_id: "cancel-revision",
+    });
+    assert.equal((yield* Effect.flip(relay.mutate(owner, input))).code, "run_terminal");
+    assert.equal((yield* store.current(owner)).revisionCount, 0);
+  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );

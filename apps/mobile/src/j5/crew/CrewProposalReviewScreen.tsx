@@ -3,12 +3,8 @@ import {
   crewProposalReview,
   crewSeatStopsForApprovals,
   describeCrewSeatWorkspace,
-  describePersonaSwap,
   heldCrewApprovalSends,
-  removedSeatSteps,
   removeSeat,
-  stepTitle,
-  unownedSteps,
 } from "@t3tools/client-runtime/j5/crew-proposals";
 import { askWaitsForServerLine } from "@t3tools/client-runtime/j5/inbox";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
@@ -78,12 +74,10 @@ function SeatRow(props: {
   readonly seat: CrewProposalSeat;
   readonly runtime: CrewProposalSeatRuntime | undefined;
   readonly runtimeLoading: boolean;
-  readonly playbook: CrewProposal["playbook"];
   readonly removable: boolean;
   readonly onRemove: () => void;
 }) {
   const { seat, runtime } = props;
-  const swaps = runtime?.personaSwaps ?? seat.personaSwaps ?? [];
   return (
     <View className="gap-1 border-b border-separator py-3">
       {/* Remove shares the name's line, centred on it. */}
@@ -117,16 +111,6 @@ function SeatRow(props: {
       {crewSeatStopsForApprovals(seat, runtime) ? (
         <Text className="text-sm text-warning-foreground">Asks for approvals</Text>
       ) : null}
-      {seat.steps?.length ? (
-        <Text className="text-sm text-foreground-muted">
-          Steps: {seat.steps.map((id) => stepTitle(props.playbook ?? null, id)).join(", ")}
-        </Text>
-      ) : null}
-      {swaps.map((swap) => (
-        <Text key={swap.stepId} className="text-sm text-warning-foreground">
-          {stepTitle(props.playbook ?? null, swap.stepId)} {describePersonaSwap(swap, seat.seat)}
-        </Text>
-      ))}
     </View>
   );
 }
@@ -151,11 +135,6 @@ function Review(props: {
   const [error, setError] = useState<string | null>(null);
   const seats = removed.reduce(removeSeat, proposal.requestedSeats);
   const preview = useCrewProposalPreview(environmentId, proposal.id, seats, !busy);
-  const playbook = preview.data?.playbook ?? proposal.playbook ?? null;
-  const titles = (ids: ReadonlyArray<string>) =>
-    ids.map((id) => stepTitle(playbook, id)).join(", ");
-  const unowned =
-    preview.data?.unownedSteps ?? (proposal.kind === "roster" ? unownedSteps(playbook, seats) : []);
   const answering = busy || waitingForPreview;
   // Nothing to approve until a runtime is shown; after that, a re-preview after Remove or
   // Restore keeps Approve as it is, and only a failed preview stops it.
@@ -211,16 +190,6 @@ function Review(props: {
           label={fullBrief ? "View less" : "View more"}
           onPress={() => setFullBrief((full) => !full)}
         />
-        {playbook === null ? null : (
-          <View className="gap-1">
-            <Text className="text-sm text-foreground-muted">
-              Follows playbook: <Text className="text-foreground">{playbook.title}</Text>
-            </Text>
-            {playbook.issue === null ? null : (
-              <Text className="text-sm text-danger-foreground">{playbook.issue}</Text>
-            )}
-          </View>
-        )}
         <View className="border-t border-separator">
           {/* Seats wait for their runtime, so each appears in its final shape (rubric §3.6). */}
           {preview.settled ? (
@@ -230,7 +199,6 @@ function Review(props: {
                 seat={seat}
                 runtime={preview.runtime.find((row) => row.seat === seat.seat)}
                 runtimeLoading={preview.loading}
-                playbook={playbook}
                 removable={props.canResolve && !answering && seats.length > 1}
                 onRemove={() => setRemoved([...removed, seat.seat])}
               />
@@ -239,16 +207,6 @@ function Review(props: {
             <Text className="py-3 text-sm text-foreground-muted">Resolving runtime…</Text>
           )}
         </View>
-        {removedSeatSteps(proposal.requestedSeats, seats).map(({ seat, steps }) => (
-          <Text key={seat} className="text-sm text-foreground-muted">
-            Removing {seat} leaves {titles(steps)} unowned.
-          </Text>
-        ))}
-        {playbook !== null && unowned.length > 0 ? (
-          <Text className="text-sm text-foreground-muted">
-            Unowned steps, done by the Captain: {titles(unowned)}
-          </Text>
-        ) : null}
         {removed.length > 0 ? (
           <TextAction
             label="Restore removed seats"

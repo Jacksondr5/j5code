@@ -1,5 +1,4 @@
 import { MessageId, ThreadId } from "@t3tools/contracts";
-import type { FleetCrew } from "@t3tools/contracts/j5";
 import {
   PlaybookError,
   type PlaybookStepDelivery,
@@ -9,12 +8,9 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
+import * as KeyedLock from "@t3tools/shared/KeyedLock";
 
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
-import {
-  AgentCrewInstanceService,
-  type AgentCrewInstance,
-} from "../a2a/AgentCrewInstanceService.ts";
 import { lifecycleCommandId, lifecycleId } from "../a2a/spawnIds.ts";
 import { getThreadRecordsIfPresent } from "../a2a/threadProjectionReads.ts";
 import { crewStepNoticeText } from "./crewStepNotice.ts";
@@ -25,26 +21,13 @@ import {
   type PlaybookMutation,
 } from "./PlaybookStore.ts";
 
-/**
- * Step notices derive their command id and message id from the run and the landing's request.
- * Both layers are wanted: a re-dispatch after a crash replays the command receipt, and the fixed
- * message id keeps a second copy out of the thread even if a receipt were lost.
- */
 const PLAYBOOK_STEP_SESSION = "j5-playbook-step";
-
 const isPlaybookError = Schema.is(PlaybookError);
+const jsonString = Schema.encodeSync(Schema.fromJsonString(Schema.String));
 const operationFailed = (error: unknown) =>
   isPlaybookError(error)
     ? error
     : playbookError("operation_failed", error instanceof Error ? error.message : String(error));
-
-/** The orchestrator will never accept this notice, so the Captain does the step. */
-const PERMANENT_REJECTIONS = new Set([
-  "OrchestratorCommandRejectedError",
-  "OrchestratorCommandPreviouslyRejectedError",
-  "OrchestratorCommandIdConflictError",
-]);
-
 const stepCommandId = (runId: string, requestId: string) =>
   lifecycleCommandId({
     providerSessionId: PLAYBOOK_STEP_SESSION,
@@ -61,189 +44,140 @@ const stepMessageId = (runId: string, requestId: string) =>
     }),
   );
 
-/** How a landing reads to the Captain and Fleet; null once it was skipped. */
 const deliveryOf = (
   landing: PlaybookLanding,
-  captainThreadId: string,
+  ownerThreadId: string,
 ): PlaybookStepDelivery | null => {
   if (landing.outcome === "skipped") return null;
-  if (landing.outcome === "captain")
-    return { state: "captain", seat: null, threadId: captainThreadId };
-  if (landing.outcome === "delivered")
-    return { state: "delivered", seat: landing.targetSeat, threadId: landing.targetThreadId };
-  return { state: "pending", seat: landing.targetSeat, threadId: landing.targetThreadId };
+  const own = landing.targetThreadId === ownerThreadId;
+  return {
+    state: own ? "captain" : landing.outcome === "delivered" ? "delivered" : "pending",
+    seat: landing.targetSeat,
+    threadId: landing.targetThreadId,
+    participantId: landing.targetParticipantId,
+  };
 };
-
-/** A step tool response with who holds a Crew-linked run's current step. */
 const withDelivery = (
   response: PlaybookStepResponse,
   delivery: PlaybookStepDelivery | null,
 ): PlaybookStepResponse => ({ ...response, delivery });
 
-/** The seat that owns a step in the Crew's live roster, if any. */
-const stepOwner = (instance: AgentCrewInstance, stepId: string) =>
-  instance.members.find((member) => (member.playbookStepIds ?? []).includes(stepId)) ?? null;
-
 export const makePlaybookCrewRelay = Effect.gen(function* () {
   const store = yield* PlaybookStore;
-  const crews = yield* AgentCrewInstanceService;
   const threads = yield* ThreadManagementService;
-  const readCrew = (id: string) => crews.read(id).pipe(Effect.mapError(operationFailed));
+  const locks = yield* KeyedLock.make<string>();
+  const withRun = locks.withLock;
 
-  /** Where a landing goes: a live seat that owns the step, or else the Captain. */
-  const resolveTarget = Effect.fn("PlaybookCrewRelay.resolveTarget")(function* (
-    instance: AgentCrewInstance,
-    stepId: string,
-  ) {
-    const owner = stepOwner(instance, stepId);
-    if (owner === null) return { seat: null, threadId: instance.captainThreadId };
-    const projection = yield* getThreadRecordsIfPresent(threads, owner.threadId, []);
-    const live =
-      projection !== null &&
-      projection.thread.archivedAt === null &&
-      projection.thread.deletedAt === null;
-    return live
-      ? { seat: owner.seatName, threadId: owner.threadId }
-      : { seat: null, threadId: instance.captainThreadId };
-  });
-
-  /**
-   * Hands one landing to its owner. The caller holds the Crew's lock. A resolved landing returns
-   * its stored delivery. Only a finished run, a retired Crew, or a live definition that no longer
-   * has the step skips a landing; anything that can't be read or sent right now leaves it pending
-   * for the Captain's retry or next move, with the reason.
-   */
   const handOff = Effect.fn("PlaybookCrewRelay.handOff")(function* (
     runId: string,
     requestId: string,
   ) {
-    let landing = yield* store.landing(runId, requestId);
+    const landing = yield* store.landing(runId, requestId);
     const run = yield* store.runById(runId);
     if (landing === null || run === null) return { delivery: null, reason: null };
-    const settled = (resolved: PlaybookLanding) => ({
-      delivery: deliveryOf(resolved, run.ownerThreadId),
-      reason: null,
-    });
-    const pending = (reason: string) => ({
-      delivery: deliveryOf(landing!, run.ownerThreadId),
+    const result = (record: PlaybookLanding, reason: string | null = null) => ({
+      delivery: deliveryOf(record, run.ownerThreadId),
       reason,
     });
-    if (landing.resolvedAt !== null) return settled(landing);
-    const instance = run.crewInstanceId ? yield* readCrew(run.crewInstanceId) : null;
-    if (run.status !== "active" || instance === null || instance.archivedAt !== null)
-      return settled(yield* store.resolveLanding(runId, requestId, "skipped"));
+    if (landing.resolvedAt !== null) return result(landing);
+    if (run.status !== "active")
+      return result(yield* store.resolveLanding(runId, requestId, "skipped"));
+    if (
+      landing.targetThreadId === null ||
+      landing.targetParticipantId === null ||
+      landing.assignedByParticipantId === null
+    )
+      return {
+        delivery: {
+          state: "pending" as const,
+          seat: landing.targetSeat,
+          threadId: landing.targetThreadId,
+          participantId: landing.targetParticipantId,
+        },
+        reason:
+          "the recorded holder or assigning owner identity cannot be resolved; use j5_playbook_assign to take back or reassign this step",
+      };
+    if (landing.targetThreadId === run.ownerThreadId)
+      return result(yield* store.resolveLanding(runId, requestId, "captain"));
     const { step, ...playbook } = yield* store.snapshotStep(run, landing.stepId);
-    if (step === null) return settled(yield* store.resolveLanding(runId, requestId, "skipped"));
-    if (landing.targetThreadId === null) {
-      // Persisted before dispatch, so a retry reuses this target and its command id.
-      const target = yield* resolveTarget(instance, step.id).pipe(Effect.option);
-      if (target._tag === "None")
-        return pending("the owning seat's thread can't be read right now");
-      landing = yield* store.targetLanding(runId, requestId, target.value);
-    }
-    // The Captain's own tool response already carries the prompt; no notice to its thread.
-    if (landing.targetSeat === null)
-      return settled(yield* store.resolveLanding(runId, requestId, "captain"));
-    const seatThreadId = ThreadId.make(landing.targetThreadId!);
-    const outcome = yield* Effect.gen(function* () {
-      const seat = yield* getThreadRecordsIfPresent(threads, seatThreadId, []);
-      if (seat === null) return "captain" as const;
+    if (step === null) return result(yield* store.resolveLanding(runId, requestId, "skipped"));
+    const targetThreadId = ThreadId.make(landing.targetThreadId);
+    const ownerParticipantId = landing.assignedByParticipantId;
+    const sent = yield* Effect.gen(function* () {
+      const target = yield* getThreadRecordsIfPresent(threads, targetThreadId, []);
+      if (target === null || target.thread.archivedAt !== null || target.thread.deletedAt !== null)
+        return false;
       yield* threads.dispatch({
         type: "message.dispatch",
         createdBy: "system",
         creationSource: "server",
         commandId: stepCommandId(runId, requestId),
-        threadId: seatThreadId,
+        threadId: targetThreadId,
         messageId: stepMessageId(runId, requestId),
         text: crewStepNoticeText({
           playbookName: playbook.name,
           playbookTitle: playbook.title,
-          crewInstanceId: instance.id,
           stepId: step.id,
           stepTitle: step.title,
           position: playbook.position,
           total: playbook.total,
-          captainParticipantId: instance.captainParticipantId,
+          ownerParticipantId,
           prompt: step.prompt,
         }),
         attachments: [],
-        modelSelection: seat.thread.modelSelection,
+        modelSelection: target.thread.modelSelection,
         dispatchMode: { type: "start_immediately" },
       });
-      return "delivered" as const;
+      return true;
     }).pipe(
       Effect.catch((error) =>
-        PERMANENT_REJECTIONS.has(error._tag)
-          ? Effect.succeed("captain" as const)
-          : Effect.logWarning("J5 playbook step hand-off failed; it stays pending", {
-              runId,
-              requestId,
-              error,
-            }).pipe(Effect.as(null)),
+        Effect.logWarning("J5 playbook step hand-off remains pending", {
+          runId,
+          requestId,
+          error,
+        }).pipe(Effect.as(false)),
       ),
     );
-    if (outcome === null) return pending("the orchestrator didn't accept the notice yet");
-    // A crash between dispatch and this write re-dispatches the same command id, which the
-    // orchestrator's command receipts replay without a second message.
-    const resolved = yield* store.resolveLanding(runId, requestId, outcome).pipe(Effect.option);
+    if (!sent) return result(landing, "the holder's thread could not accept the notice");
+    const resolved = yield* store.resolveLanding(runId, requestId, "delivered").pipe(Effect.option);
     return resolved._tag === "Some"
-      ? settled(resolved.value)
-      : pending("its hand-off couldn't be recorded");
+      ? result(resolved.value)
+      : result(landing, "the hand-off could not be recorded");
   }, Effect.mapError(operationFailed));
 
-  const deliverLocked = (runId: string, requestId: string) =>
-    handOff(runId, requestId).pipe(Effect.map(({ delivery }) => delivery));
-
-  /** Resolves every pending landing of a run, oldest first; the run must not move past one. */
   const drainLocked = Effect.fn("PlaybookCrewRelay.drainLocked")(function* (runId: string) {
     for (const landing of yield* store.pendingLandings(runId)) {
       const { delivery, reason } = yield* handOff(runId, landing.requestId);
       if (delivery?.state === "pending")
         return yield* playbookError(
           "delivery_pending",
-          `The hand-off of step ${landing.stepId} to ${delivery.seat ?? "its owner"} hasn't completed: ${reason ?? "it is still in progress"}. Retry the same call.`,
+          `The hand-off of step ${landing.stepId} to ${delivery.participantId ?? "its holder"} is pending: ${reason ?? "retry it"}. Use j5_playbook_assign to take back or reassign a stuck step.`,
         );
     }
   });
-
-  const withCrew = <A, E, R>(crewInstanceId: string, effect: Effect.Effect<A, E, R>) =>
-    crews.serialize(crewInstanceId, effect);
-
-  const deliver = Effect.fn("j5.playbooks.playbookCrewRelay.deliver")(function* (
-    runId: string,
-    requestId: string,
-  ) {
-    const run = yield* store.runById(runId);
-    if (!run?.crewInstanceId) return null;
-    return yield* withCrew(run.crewInstanceId, deliverLocked(runId, requestId));
-  });
-
-  const drainRun = Effect.fn("j5.playbooks.playbookCrewRelay.drainRun")(function* (runId: string) {
-    const run = yield* store.runById(runId);
-    if (!run?.crewInstanceId) return;
-    yield* withCrew(run.crewInstanceId, drainLocked(runId));
-  });
-
-  /** Who holds the run's current step, read-only: never dispatches, never drains. */
   const currentDelivery = Effect.fn("PlaybookCrewRelay.currentDelivery")(function* (
     runId: string,
     currentStepId: string,
   ) {
     const run = yield* store.runById(runId);
     const landing = yield* store.latestLanding(runId, currentStepId);
-    return run === null || landing === null ? null : deliveryOf(landing, run.ownerThreadId);
+    if (run === null) return null;
+    if (landing !== null) return deliveryOf(landing, run.ownerThreadId);
+    // Single-thread runs created before runtime staffing recorded no landing.
+    return run.holderThreadId === run.ownerThreadId && run.holderParticipantId !== null
+      ? {
+          state: "captain" as const,
+          seat: null,
+          threadId: run.ownerThreadId,
+          participantId: run.holderParticipantId,
+        }
+      : null;
   });
-
-  /**
-   * The delivery a step tool reports: the landing on the step the response shows. A retry
-   * returns live progress, so its own landing may be an older one; that one is still finished
-   * first, and a run that has ended reports none.
-   */
   const respond = Effect.fn("PlaybookCrewRelay.respond")(function* (
     response: PlaybookStepResponse,
     requestId: string,
   ) {
-    yield* deliverLocked(response.runId, requestId);
+    yield* handOff(response.runId, requestId);
     return withDelivery(
       response,
       response.status === "active"
@@ -251,119 +185,72 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
         : null,
     );
   });
-
-  /**
-   * Starts a Crew-linked run from its Captain's thread. The link, the run, and the first
-   * hand-off run under the Crew's lock, the one archive holds, so an archive can't interleave.
-   */
-  const start = (input: {
+  const start = Effect.fn("PlaybookCrewRelay.start")(function* (input: {
     readonly owner: ThreadId;
     readonly root: string;
     readonly name: string;
     readonly key: string;
-    readonly crewInstanceId: string;
-  }) =>
-    withCrew(
-      input.crewInstanceId,
+    readonly assignee?: string;
+  }) {
+    const response = yield* store.start(
+      input.owner,
+      input.root,
+      input.name,
+      input.key,
+      input.assignee,
+    );
+    return yield* withRun(
+      response.runId,
       Effect.gen(function* () {
-        const { definitionPath } = yield* store.startDefinitionPathFor(
-          input.owner,
-          input.root,
-          input.name,
-          input.key,
-          input.crewInstanceId,
-        );
-        const instance = yield* readCrew(input.crewInstanceId);
-        const refusal =
-          instance === null
-            ? `No Crew ${input.crewInstanceId} is recorded in this environment.`
-            : instance.archivedAt !== null
-              ? `Crew ${instance.id} is archived.`
-              : instance.captainThreadId !== input.owner
-                ? `Crew ${instance.id} is commanded from another thread; only its Captain starts its playbook.`
-                : instance.playbook?.definitionPath !== definitionPath
-                  ? `Crew ${instance.id} follows ${instance.playbook ? `playbook ${instance.playbook.name}` : "no playbook"}, not ${input.name}.`
-                  : null;
-        if (refusal !== null) return yield* playbookError("crew_not_linkable", refusal);
-        const response = yield* store.start(input.owner, input.root, input.name, input.key, {
-          crewInstanceId: input.crewInstanceId,
-        });
-        return yield* respond(response, input.key);
+        // A mutation may acquire the run between insertion and this lock.
+        const current = yield* store.current(input.owner, response.runId);
+        return yield* respond({ ...current, replayed: response.replayed }, input.key);
       }),
     );
-
-  /**
-   * Moves a run. A Crew-linked run first resolves every earlier hand-off, then moves, then hands
-   * the new step to its owner, all under the Crew's lock. Cancel always works and never drains.
-   */
+  });
   const mutate = Effect.fn("j5.playbooks.playbookCrewRelay.mutate")(function* (
     owner: ThreadId,
     input: PlaybookMutation,
   ) {
     const run = yield* store.runById(input.runId);
-    // Only the owner's own call hands anything off; anyone else gets the store's refusal
-    // (not_owner) before a pending landing is touched.
-    const crewInstanceId = run?.ownerThreadId === owner ? run.crewInstanceId : undefined;
-    if (!crewInstanceId) {
-      // A thread run's response carries no delivery at all.
-      const response: PlaybookStepResponse = yield* store.mutate(owner, input);
-      return response;
-    }
-    if (input.operation === "cancel") return withDelivery(yield* store.mutate(owner, input), null);
-    return yield* withCrew(
-      crewInstanceId,
+    if (run?.ownerThreadId !== owner) return yield* store.mutate(owner, input);
+    return yield* withRun(
+      run.runId,
       Effect.gen(function* () {
-        yield* drainLocked(input.runId);
+        if (input.operation !== "assign" && input.operation !== "cancel")
+          yield* drainLocked(run.runId);
         const response = yield* store.mutate(owner, input);
-        if (input.operation === "complete") return withDelivery(response, null);
+        if (input.operation === "complete" || input.operation === "cancel")
+          return withDelivery(response, null);
         return yield* respond(response, input.client_request_id);
       }),
     );
   });
-
-  /**
-   * After a seat is replaced, hands a current step the old member held to its new owner, by
-   * recording a new landing. A hand-off pending toward the old thread is
-   * skipped first so no drain sends it there; `requestKey` makes a retry replay. Null: nothing held.
-   */
-  const handOver = Effect.fn("j5.playbooks.playbookCrewRelay.handOver")(function* (input: {
-    readonly crewInstanceId: string;
-    readonly fromThreadId: ThreadId;
-    readonly requestKey: string;
-  }) {
-    return yield* withCrew(
-      input.crewInstanceId,
-      Effect.gen(function* () {
-        const active = yield* store.activeRunForCrew(input.crewInstanceId);
-        if (active === null) return null;
-        const landing = yield* store.latestLanding(active.runId, active.currentStepId);
-        if (
-          landing === null ||
-          landing.targetThreadId !== input.fromThreadId ||
-          landing.outcome === "captain"
-        )
-          return null;
-        if (landing.resolvedAt === null)
-          yield* store.resolveLanding(active.runId, landing.requestId, "skipped");
-        yield* drainLocked(active.runId);
-        const response = yield* store.mutate(active.ownerThreadId, {
-          runId: active.runId,
-          client_request_id: input.requestKey,
-          operation: "handoff",
-          expectedStepId: active.currentStepId,
-        });
-        return yield* respond(response, input.requestKey);
-      }),
+  const deliver = Effect.fn("j5.playbooks.playbookCrewRelay.deliver")(function* (
+    runId: string,
+    requestId: string,
+  ) {
+    return yield* withRun(
+      runId,
+      handOff(runId, requestId).pipe(Effect.map(({ delivery }) => delivery)),
     );
-  }, Effect.mapError(operationFailed));
-
-  /** The run's saved prompt and progress, with who holds a Crew-linked run's current step. */
+  });
+  const drainRun = Effect.fn("j5.playbooks.playbookCrewRelay.drainRun")(function* (runId: string) {
+    yield* withRun(runId, drainLocked(runId));
+  });
   const current = Effect.fn("j5.playbooks.playbookCrewRelay.current")(function* (
     owner: ThreadId,
     runId?: string,
   ) {
-    const response: PlaybookStepResponse = yield* store.current(owner, runId);
-    if (!response.crewInstanceId) return response;
+    const response = yield* store.current(owner, runId);
+    if (
+      response.status === "active" &&
+      (response.holderParticipantId == null || response.assignedByParticipantId == null)
+    )
+      return yield* playbookError(
+        "holder_unavailable",
+        `The run's recorded holder or assigning owner identity cannot be resolved. Use j5_playbook_assign with runId=${jsonString(response.runId)} and expectedStepId=${jsonString(response.currentStepId)} to take back or reassign this step, or j5_playbook_cancel with that runId to end the run.`,
+      );
     return withDelivery(
       response,
       response.status === "active"
@@ -371,34 +258,11 @@ export const makePlaybookCrewRelay = Effect.gen(function* () {
         : null,
     );
   });
-
-  /** Where a Crew's active run is and who holds its step, as Fleet shows it; null when none. */
-  const fleetRun = Effect.fn("PlaybookCrewRelay.fleetRun")(function* (crewInstanceId: string) {
-    const run = yield* store.activeRunForCrew(crewInstanceId);
-    if (run === null) return null;
-    const delivery = yield* currentDelivery(run.runId, run.currentStepId);
-    if (delivery === null) return null;
-    return {
-      runId: run.runId,
-      position: run.position!,
-      total: run.total,
-      stepId: run.currentStepId,
-      stepTitle: run.steps[run.position! - 1]?.title ?? run.currentStepId,
-      state: delivery.state,
-      seat: delivery.seat,
-    } satisfies NonNullable<FleetCrew["playbookRun"]>;
-  });
-
-  return { start, mutate, current, deliver, drainRun, currentDelivery, fleetRun, handOver };
+  return { start, mutate, current, deliver, drainRun, currentDelivery };
 });
 
 export class PlaybookCrewRelay extends Context.Service<
   PlaybookCrewRelay,
   Effect.Success<typeof makePlaybookCrewRelay>
 >()("t3/j5/playbooks/PlaybookCrewRelay") {}
-
-/**
- * Nothing sweeps pending hand-offs in the background: the Captain's next step call, or a retry
- * of the same one, finishes them before the run moves.
- */
 export const layer = Layer.effect(PlaybookCrewRelay, makePlaybookCrewRelay);
