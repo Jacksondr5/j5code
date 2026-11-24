@@ -1002,7 +1002,6 @@ const ThreadWorkLogRow = function ThreadWorkLogRow(
     call && shownItem.type === "command_execution" && shownItem.exitCode
       ? shownItem.exitCode
       : null;
-  // J5 (case 99): an answered question reads as its question and answer, not as its raw item.
   const fullDetail =
     expanded && !reasoning && !call && !row.workEntry.questionAnswer
       ? fetchedItem && !isRead

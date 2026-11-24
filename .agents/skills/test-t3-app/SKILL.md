@@ -15,8 +15,7 @@ automation system. For native mobile testing, use
 In J5 Code, set the server up with [j5-live-test](../j5-live-test/SKILL.md):
 it starts an isolated server and prints the ports and pairing URL used below.
 
-Otherwise reuse this task's healthy dev server, or run
-`env -u T3CODE_PORT -u T3CODE_HOST -u J5CODE_HOME vp run dev` from the
+Otherwise reuse this task's healthy dev server, or run `vp run dev` from the
 repository root and retain its terminal session. Use the worktree's ignored
 `.j5code` state and read the actual ports and pairing URL from the dev-runner
 output. Never run against `~/.j5code/userdata` or set `VITE_HTTP_URL` or
