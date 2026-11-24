@@ -508,6 +508,14 @@ export async function importAgentPersonasWithConfirmation(
 export const AGENT_PERSONA_IMPORT_CONFIRMATION_MESSAGE =
   "Turn off agents you don’t want to replace.";
 
+/** Removing a personal or imported persona deletes it, so both clients ask first. */
+export function agentPersonaRemovalQuestion(displayName: string) {
+  return {
+    title: `Remove ${displayName}?`,
+    message: "It's deleted from this environment and has to be imported again to come back.",
+  } as const;
+}
+
 const AGENT_PERSONA_ID_PATTERN = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
 
 /** Suggest a stable ID from a display name: lowercase, hyphenated, starting with a letter. */

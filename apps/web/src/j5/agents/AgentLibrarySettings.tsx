@@ -8,6 +8,7 @@ import { AgentImportConflictSelection } from "./AgentImportConflictSelection";
 import { AgentCreateDialog } from "./AgentCreateDialog";
 import {
   agentPersonaDuplicateDraft,
+  agentPersonaRemovalQuestion,
   type AgentPersonaCreateDraft,
 } from "@t3tools/client-runtime/j5/agent-personas";
 import { AgentEditorDialog } from "./AgentEditorDialog";
@@ -311,9 +312,24 @@ function MemberAgentLibrarySettings() {
       catalog.refresh();
     });
   }
-  async function removePersona(personaId: string) {
+  async function removePersona(persona: {
+    readonly personaId: string;
+    readonly displayName: string;
+    readonly imported: boolean;
+  }) {
     if (effectiveEnvironmentId === null || busy) return;
     const environmentId = effectiveEnvironmentId;
+    const { personaId } = persona;
+    // A folder persona comes back with Restore; anything else is deleted, so ask first.
+    if (persona.imported) {
+      const question = agentPersonaRemovalQuestion(persona.displayName);
+      const confirmed = await (requestConfirmDialog(
+        `${question.title}\n${question.message}`,
+        { variant: "destructive" },
+        { confirmLabel: "Remove" },
+      ) ?? Promise.resolve(false));
+      if (!confirmed) return;
+    }
     setBusy(true);
     await runPersonaAction("Persona action failed", async () => {
       const result = await removeAgent({
@@ -624,7 +640,7 @@ function MemberAgentLibrarySettings() {
                             <MenuItem
                               variant="destructive"
                               disabled={locked}
-                              onClick={() => void removePersona(persona.personaId)}
+                              onClick={() => void removePersona(persona)}
                             >
                               <Trash2Icon />
                               Remove

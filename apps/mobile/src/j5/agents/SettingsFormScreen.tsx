@@ -2,6 +2,7 @@ import {
   usePreventRemove,
   useNavigation,
   useRoute,
+  type NavigationAction,
   type RouteProp,
 } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
@@ -26,6 +27,14 @@ export type SettingsFormRoutes = {
     readonly environmentId: EnvironmentId;
     readonly initial: Omit<AgentPersonaEditInput, "instructions">;
   };
+  SettingsPersonaFolder: {
+    readonly environmentId: EnvironmentId;
+    readonly environmentLabel: string;
+  };
+  SettingsPlaybookFolder: {
+    readonly environmentId: EnvironmentId;
+    readonly environmentLabel: string;
+  };
 };
 
 export function useSettingsFormNavigation() {
@@ -44,14 +53,16 @@ export function useSettingsFormExit(options: {
   const navigation = useNavigation();
   // Set once the save lands, so the removal guard lets the form close.
   const saved = useRef(false);
-  // Native stack also cancels iOS's native Back and swipe while this holds, so one back button guards.
-  usePreventRemove(options.hasChanges || options.saving, ({ data }) => {
+  // Back during a save waits for it: the form leaves if it lands and stays if it fails.
+  const leaveWhenSaved = useRef<NavigationAction | null>(null);
+  const guardBack = options.hasChanges || options.saving;
+  usePreventRemove(guardBack, ({ data }) => {
     if (saved.current) {
       navigation.dispatch(data.action);
       return;
     }
     if (options.saving) {
-      Dialog.alert("Still working", "Wait for this to finish before leaving.");
+      leaveWhenSaved.current = data.action;
       return;
     }
     Dialog.alert("Discard changes?", "Your unsaved changes will be lost.", [
@@ -64,13 +75,15 @@ export function useSettingsFormExit(options: {
     ]);
   });
   return {
-    /** For a form that leaves by its own navigation action. */
-    allowLeaving: () => {
-      saved.current = true;
-    },
+    guardBack,
     leaveAfterSave: () => {
       saved.current = true;
-      if (navigation.isFocused()) navigation.goBack();
+      const action = leaveWhenSaved.current;
+      if (action !== null) navigation.dispatch(action);
+      else if (navigation.isFocused()) navigation.goBack();
+    },
+    saveFailed: () => {
+      leaveWhenSaved.current = null;
     },
   };
 }
@@ -78,12 +91,14 @@ export function useSettingsFormExit(options: {
 /** A pushed settings page, because Android's Menu can't draw over an RN Modal or Sheet. */
 export function SettingsFormScreen(props: {
   readonly title: string;
+  /** Native Back pops before removal guards; a bar action lets the guard run first. */
+  readonly guardBack?: boolean;
   readonly children: ReactNode;
 }) {
   const insets = useSafeAreaInsets();
   const keyboardVisible = useKeyboardState((state) => state.isVisible);
   return (
-    <SettingsScreen title={props.title}>
+    <SettingsScreen title={props.title} guardBack={props.guardBack}>
       {/* iOS keeps upstream's scroll view, which registers with the native header and insets for the
           keyboard; with it up, the home indicator area is already covered, so Save gets no extra
           padding. Android has no header marker, so keyboard-controller's scroll view lets the form

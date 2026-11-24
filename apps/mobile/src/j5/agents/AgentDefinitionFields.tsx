@@ -14,12 +14,15 @@ import {
 import type { AgentPersonaAccess, AgentPersonaModelEntry, EnvironmentId } from "@t3tools/contracts";
 import { Pressable, View } from "react-native";
 
-import { AppText as Text } from "../../components/ui/AppText";
+import { SymbolView } from "../../components/ui/AppSymbol";
+import { ListActionRow } from "../../components/ui/ListActionRow";
 import { Menu } from "../../components/ui/Menu";
-import { ThemedSwitch } from "../../components/ui/ThemedSwitch";
+import { SettingsSection } from "../../features/settings/components/SettingsSection";
+import { SettingsSwitchRow } from "../../features/settings/components/SettingsSwitchRow";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
 import { agentPersonaEnvironment } from "./agentPersonaAtoms";
+import { FormSelectRow } from "./PersonaFormRows";
 
 export interface AgentRoutePolicyValue {
   readonly access: AgentPersonaAccess;
@@ -27,7 +30,7 @@ export interface AgentRoutePolicyValue {
   readonly independentReviewer?: boolean | undefined;
 }
 
-/** Access level, ordered model entries and the reviewer flag, shared by the create and edit modals. */
+/** Access level, ordered model entries and the reviewer flag, shared by the create and edit forms. */
 export function AgentRoutePolicyFields(props: {
   environmentId: EnvironmentId;
   value: AgentRoutePolicyValue;
@@ -52,49 +55,34 @@ export function AgentRoutePolicyFields(props: {
     value.access,
     providers ?? [],
   );
+  const nextChoice = nextAgentPersonaModelChoice(choices, value.modelRoute, drivers);
   return (
     <>
-      <View className="gap-2">
-        <Text className="text-sm font-t3-medium">Access level</Text>
-        <View pointerEvents={disabled ? "none" : "auto"}>
-          <Menu
-            actions={AGENT_PERSONA_POLICY_OPTIONS.map((policy) => ({
-              id: policy.value,
-              title: policy.label,
-              state: policy.value === value.access ? "on" : "off",
-            }))}
-            onPressAction={({ nativeEvent }) => {
-              const policy = AGENT_PERSONA_POLICY_OPTIONS.find(
-                (item) => item.value === nativeEvent.event,
-              );
-              if (policy) props.onChange({ ...value, access: policy.value });
-            }}
-          >
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Access level"
-              accessibilityState={{ disabled }}
-              disabled={disabled}
-              className="rounded-xl border border-border px-3 py-3"
-            >
-              <Text numberOfLines={1}>
-                {AGENT_PERSONA_POLICY_OPTIONS.find((item) => item.value === value.access)?.label ??
-                  value.access}
-              </Text>
-            </Pressable>
-          </Menu>
-        </View>
-      </View>
-      {policyNote === null ? null : (
-        <Text className="text-xs text-foreground-muted">{policyNote}</Text>
-      )}
+      <SettingsSection title="Access" footer={policyNote ?? undefined}>
+        <FormSelectRow
+          label="Access level"
+          value={
+            AGENT_PERSONA_POLICY_OPTIONS.find((item) => item.value === value.access)?.label ??
+            value.access
+          }
+          disabled={disabled}
+          actions={AGENT_PERSONA_POLICY_OPTIONS.map((policy) => ({
+            id: policy.value,
+            title: policy.label,
+            state: policy.value === value.access ? "on" : "off",
+          }))}
+          onSelect={(id) => {
+            const policy = AGENT_PERSONA_POLICY_OPTIONS.find((item) => item.value === id);
+            if (policy) props.onChange({ ...value, access: policy.value });
+          }}
+        />
+      </SettingsSection>
       {value.modelRoute.map((target, index) => {
         const label = `Model ${index + 1}`;
         const effort = agentPersonaEntryReasoning(target);
         const driver = agentPersonaEntryDriver(target, providers ?? []);
         const unsupported = drivers && driver && !drivers.includes(driver);
         const selected = choices.find(({ id }) => id === agentPersonaModelChoiceId(target));
-        const reasoningDisabled = disabled || !selected?.efforts.length;
         const updateTarget = (next: AgentPersonaModelEntry) =>
           props.onChange({
             ...value,
@@ -110,178 +98,135 @@ export function AgentRoutePolicyFields(props: {
           props.onChange({ ...value, modelRoute: next });
         };
         return (
-          <View key={label} className="gap-3 rounded-xl border border-border p-3">
-            <View className="flex-row items-start gap-2">
-              <View className="min-w-0 flex-1 gap-2">
-                <Text className="text-sm font-t3-medium">{label}</Text>
-                <Menu
-                  actions={modelGroups.map((harness) => ({
-                    id: harness.driver,
-                    title: harness.label,
-                    // iOS shows each provider as a section, avoiding the submenu transition.
-                    displayInline: true,
-                    attributes: {
-                      disabled: disabled || harness.models.length === 0,
-                    },
-                    subactions: harness.models.map(({ id, modelLabel }) => ({
-                      id,
-                      title: modelLabel,
-                      state: id === agentPersonaModelChoiceId(target) ? "on" : "off",
-                      attributes: { disabled },
-                    })),
-                  }))}
-                  onPressAction={({ nativeEvent }) => {
-                    if (nativeEvent.event === agentPersonaModelChoiceId(target)) return;
-                    const choice = choices.find(({ id }) => id === nativeEvent.event);
-                    if (!disabled && choice?.available)
-                      updateTarget(
-                        typeof effort === "string" && choice.efforts.includes(effort)
-                          ? withAgentPersonaReasoning(
-                              choice.target,
-                              effort,
-                              choice.reasoningOptionId,
-                            )
-                          : choice.target,
-                      );
-                  }}
-                >
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel={label}
-                    disabled={disabled}
-                    className="rounded-xl border border-border px-3 py-3"
-                  >
-                    <Text numberOfLines={1}>{selected?.label}</Text>
-                  </Pressable>
-                </Menu>
-              </View>
-              <View className="w-28">
-                <View className="gap-2">
-                  <Text className="text-sm font-t3-medium">Reasoning</Text>
-                  <View pointerEvents={reasoningDisabled ? "none" : "auto"}>
-                    <Menu
-                      actions={(selected?.efforts ?? []).map((effort) => ({
-                        id: effort,
-                        title: effort,
-                        state: effort === agentPersonaEntryReasoning(target) ? "on" : "off",
-                      }))}
-                      onPressAction={({ nativeEvent }) =>
-                        !reasoningDisabled &&
-                        selected?.efforts.includes(nativeEvent.event) &&
-                        updateTarget(
-                          withAgentPersonaReasoning(
-                            target,
-                            nativeEvent.event,
-                            selected.reasoningOptionId,
-                          ),
-                        )
-                      }
-                    >
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel={`${label} reasoning`}
-                        accessibilityState={{ disabled: reasoningDisabled }}
-                        disabled={reasoningDisabled}
-                        className="rounded-xl border border-border px-3 py-3"
-                      >
-                        <Text numberOfLines={1}>{effort ?? "Default"}</Text>
-                      </Pressable>
-                    </Menu>
-                  </View>
-                </View>
-              </View>
-            </View>
-            {unsupported ? (
-              <Text className="text-xs text-foreground-muted">
-                This provider cannot enforce {value.access}.
-              </Text>
-            ) : null}
-            <View className="flex-row gap-4">
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`Move ${label} up`}
-                disabled={disabled || index === 0}
-                onPress={() => moveEntry(-1)}
-              >
-                <Text className={disabled || index === 0 ? "text-foreground-muted" : undefined}>
-                  Up
-                </Text>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`Move ${label} down`}
-                disabled={disabled || index === value.modelRoute.length - 1}
-                onPress={() => moveEntry(1)}
-              >
-                <Text
-                  className={
-                    disabled || index === value.modelRoute.length - 1
-                      ? "text-foreground-muted"
-                      : undefined
+          <SettingsSection
+            key={label}
+            title={label}
+            footer={unsupported ? `This provider cannot enforce ${value.access}.` : undefined}
+            trailing={
+              value.modelRoute.length > 1 ? (
+                <ModelEntryMenu
+                  label={label}
+                  first={index === 0}
+                  last={index === value.modelRoute.length - 1}
+                  disabled={disabled}
+                  onMove={moveEntry}
+                  onRemove={() =>
+                    props.onChange({
+                      ...value,
+                      modelRoute: value.modelRoute.filter((_, i) => i !== index),
+                    })
                   }
-                >
-                  Down
-                </Text>
-              </Pressable>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel={`Remove ${label}`}
-                disabled={disabled || value.modelRoute.length === 1}
-                onPress={() =>
-                  props.onChange({
-                    ...value,
-                    modelRoute: value.modelRoute.filter((_, i) => i !== index),
-                  })
-                }
-              >
-                <Text
-                  className={
-                    disabled || value.modelRoute.length === 1 ? "text-foreground-muted" : undefined
-                  }
-                >
-                  Remove
-                </Text>
-              </Pressable>
-            </View>
-          </View>
+                />
+              ) : undefined
+            }
+          >
+            <FormSelectRow
+              label="Model"
+              value={selected?.label ?? "Choose a model"}
+              disabled={disabled}
+              actions={modelGroups.map((harness) => ({
+                id: harness.driver,
+                title: harness.label,
+                // iOS shows each provider as a section, avoiding the submenu transition.
+                displayInline: true,
+                attributes: { disabled: harness.models.length === 0 },
+                subactions: harness.models.map(({ id, modelLabel }) => ({
+                  id,
+                  title: modelLabel,
+                  state: id === agentPersonaModelChoiceId(target) ? "on" : "off",
+                })),
+              }))}
+              onSelect={(id) => {
+                if (id === agentPersonaModelChoiceId(target)) return;
+                const choice = choices.find((candidate) => candidate.id === id);
+                if (!disabled && choice?.available)
+                  updateTarget(
+                    typeof effort === "string" && choice.efforts.includes(effort)
+                      ? withAgentPersonaReasoning(choice.target, effort, choice.reasoningOptionId)
+                      : choice.target,
+                  );
+              }}
+            />
+            <FormSelectRow
+              label="Reasoning"
+              value={typeof effort === "string" ? effort : "Default"}
+              borderTop
+              disabled={disabled || !selected?.efforts.length}
+              actions={(selected?.efforts ?? []).map((option) => ({
+                id: option,
+                title: option,
+                state: option === effort ? "on" : "off",
+              }))}
+              onSelect={(id) => {
+                if (selected?.efforts.includes(id))
+                  updateTarget(withAgentPersonaReasoning(target, id, selected.reasoningOptionId));
+              }}
+            />
+          </SettingsSection>
         );
       })}
-      <Pressable
-        accessibilityRole="button"
-        disabled={disabled || !nextAgentPersonaModelChoice(choices, value.modelRoute, drivers)}
-        onPress={() => {
-          const choice = nextAgentPersonaModelChoice(choices, value.modelRoute, drivers);
-          if (choice)
-            props.onChange({ ...value, modelRoute: [...value.modelRoute, choice.target] });
-        }}
-      >
-        <Text
-          className={
-            disabled || !nextAgentPersonaModelChoice(choices, value.modelRoute, drivers)
-              ? "text-foreground-muted"
-              : undefined
-          }
-        >
-          Add model
-        </Text>
-      </Pressable>
-      <Text className="text-xs text-foreground-muted">
-        Model availability and access level support are checked for each launch.
-      </Text>
-      <View className="flex-row items-center justify-between gap-3">
-        <View className="flex-1 gap-0.5">
-          <Text className="text-sm font-t3-medium">Independent reviewer</Text>
-          <Text className="text-xs text-foreground-muted">
-            Prefers a model that didn't write the work it reviews. Never blocks a launch.
-          </Text>
-        </View>
-        <ThemedSwitch
+      <SettingsSection footer="Model availability and access level support are checked for each launch.">
+        <ListActionRow
+          icon="plus"
+          label="Add model"
+          disabled={disabled || !nextChoice}
+          onPress={() => {
+            if (nextChoice)
+              props.onChange({ ...value, modelRoute: [...value.modelRoute, nextChoice.target] });
+          }}
+        />
+      </SettingsSection>
+      <SettingsSection>
+        <SettingsSwitchRow
+          label="Independent reviewer"
+          subtitle="Prefers a model that didn't write the work it reviews. Never blocks a launch."
           value={value.independentReviewer === true}
           disabled={disabled}
-          accessibilityLabel="Independent reviewer"
           onValueChange={(independentReviewer) => props.onChange({ ...value, independentReviewer })}
         />
-      </View>
+      </SettingsSection>
     </>
+  );
+}
+
+/** Move up, Move down and Remove for one model entry, behind the section's overflow button. */
+function ModelEntryMenu(props: {
+  readonly label: string;
+  readonly first: boolean;
+  readonly last: boolean;
+  readonly disabled: boolean;
+  readonly onMove: (offset: number) => void;
+  readonly onRemove: () => void;
+}) {
+  return (
+    <View pointerEvents={props.disabled ? "none" : "auto"}>
+      <Menu
+        actions={[
+          { id: "up", title: "Move up", attributes: { disabled: props.first } },
+          { id: "down", title: "Move down", attributes: { disabled: props.last } },
+          { id: "remove", title: "Remove", attributes: { destructive: true } },
+        ]}
+        onPressAction={({ nativeEvent }) => {
+          if (nativeEvent.event === "up") props.onMove(-1);
+          if (nativeEvent.event === "down") props.onMove(1);
+          if (nativeEvent.event === "remove") props.onRemove();
+        }}
+      >
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Actions for ${props.label}`}
+          accessibilityState={{ disabled: props.disabled }}
+          disabled={props.disabled}
+          className="size-11 items-center justify-center"
+        >
+          <SymbolView
+            name="ellipsis"
+            size={18}
+            tintColorClassName="accent-icon"
+            type="monochrome"
+          />
+        </Pressable>
+      </Menu>
+    </View>
   );
 }
