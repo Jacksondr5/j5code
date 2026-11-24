@@ -1,6 +1,6 @@
 # Peer messages in J5
 
-An agent whose provider can take messages mid-turn receives peer messages and replies during an active turn: Codex, Claude, Cursor, OpenCode, Grok, Kiro, and Antigravity 1.5 and later. A Claude agent reads a message once the tool calls it's running finish, without cancelling them; a Cursor agent may cancel tool calls in flight. An incoming update provides context for the ongoing task; it does not replace your instructions. The agent is told to incorporate relevant information and continue its unfinished work.
+An agent whose provider can take messages mid-turn receives peer messages and replies during an active turn: Codex, Claude, OpenCode, Grok, Kiro, and Antigravity 1.5 and later. A Claude agent reads a message once the tool calls it's running finish, without cancelling them. A Cursor agent gets them after its turn, because a message mid-turn can cancel its tool calls in flight; a sender can still ask to steer one in. An incoming update provides context for the ongoing task; it does not replace your instructions. The agent is told to incorporate relevant information and continue its unfinished work.
 
 Other agents receive peer messages after their current run ends. An idle agent starts work on an incoming message normally. Messages also wait when a turn is not yet ready to receive input or is finishing up, when anything is already queued for the agent, and when the sender asked for `queue`. Platform lifecycle and silence notices remain queued.
 

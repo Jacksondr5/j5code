@@ -40,8 +40,7 @@ export type Urgency = typeof Urgency.Type;
 /**
  * How a sender asks for its message to land on an agent, in upstream's words: `queue` waits for
  * the receiver's turn to end, `steer` joins the running turn, and `restart` interrupts the turn
- * and restarts it with the message. Absent is upstream's `auto`, with J5's ordering rule
- * (register D51): into the running turn where the provider can take it, else after the turn.
+ * and restarts it with the message. Absent is upstream's `auto`, with J5's rules (register D51).
  */
 export const SendMode = Schema.Literals(["queue", "steer", "restart"]);
 export type SendMode = typeof SendMode.Type;

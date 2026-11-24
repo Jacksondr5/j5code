@@ -249,18 +249,41 @@ const assertPersonReply = (input: AgentDeliveryInput): never => {
   );
 };
 
+/** The running turn a steer would land on, with its provider session's turn capabilities. */
+const steerableTurn = (
+  target: Pick<
+    OrchestrationV2ThreadProjection,
+    "runs" | "providerTurns" | "providerThreads" | "providerSessions"
+  >,
+) => {
+  const run = ThreadManagement.latestSteerableRun(target);
+  if (run === undefined) return undefined;
+  const providerThread = target.providerThreads.find(
+    (thread) => thread.id === run.providerThreadId,
+  );
+  const turns = target.providerSessions.find(
+    (candidate) => candidate.id === providerThread?.providerSessionId,
+  )?.capabilities.turns;
+  return { run, turns };
+};
+
 /**
  * How a delivery is handed to upstream (register D51). A sender's `queue` and J5's own notices
- * wait for the turn. Otherwise upstream's `auto` lands it in a running turn where the provider
- * can take it, unless anything is already queued for the receiver: upstream's own order guard
- * covers only queued agent messages, and messages reach an agent in the order they landed.
+ * wait for the turn, as does a default delivery when anything is queued for the receiver
+ * (upstream guards only queued agent messages) or its turn's steer would interrupt running tools.
  */
 export const deliverySendMode = (
-  target: Pick<OrchestrationV2ThreadProjection, "runs">,
+  target: Pick<
+    OrchestrationV2ThreadProjection,
+    "runs" | "providerTurns" | "providerThreads" | "providerSessions"
+  >,
   channel: DeliveryEnvelopeChannel,
   mode: "queue" | undefined,
 ) =>
-  mode === undefined && channel === "peer" && !target.runs.some((run) => run.status === "queued")
+  mode === undefined &&
+  channel === "peer" &&
+  !target.runs.some((run) => run.status === "queued") &&
+  steerableTurn(target)?.turns?.activeSteeringInterruptsTools !== true
     ? ("auto" as const)
     : ("queue" as const);
 
@@ -284,15 +307,9 @@ export const autoSteeringRun = (
 ) => {
   if (target.thread.archivedAt !== null || deliverySendMode(target, "peer", undefined) !== "auto")
     return undefined;
-  const run = ThreadManagement.latestSteerableRun(target);
-  if (run === undefined) return undefined;
-  const providerThread = target.providerThreads.find(
-    (thread) => thread.id === run.providerThreadId,
-  );
-  const turns = target.providerSessions.find(
-    (candidate) => candidate.id === providerThread?.providerSessionId,
-  )?.capabilities.turns;
-  if (turns?.supportsActiveSteering !== true) return undefined;
+  const steerable = steerableTurn(target);
+  if (steerable?.turns?.supportsActiveSteering !== true) return undefined;
+  const { run } = steerable;
   const message = target.messages.find((candidate) => candidate.id === run.userMessageId);
   if (message !== undefined && isNativeMaintenanceCommand(message)) return undefined;
   return target.turnItems.some(
@@ -317,15 +334,9 @@ export const requestedSteeringRun = (
   mode: Exclude<SendMode, "queue">,
 ) => {
   if (channel !== "peer" || target.thread.archivedAt !== null) return undefined;
-  const run = ThreadManagement.latestSteerableRun(target);
-  if (run === undefined) return undefined;
-  const providerThread = target.providerThreads.find(
-    (thread) => thread.id === run.providerThreadId,
-  );
-  const turns = target.providerSessions.find(
-    (candidate) => candidate.id === providerThread?.providerSessionId,
-  )?.capabilities.turns;
-  if (turns === undefined) return undefined;
+  const steerable = steerableTurn(target);
+  if (steerable?.turns === undefined) return undefined;
+  const { run, turns } = steerable;
   const restarts = turns.supportsInterrupt && turns.supportsSteeringByInterruptRestart;
   return (mode === "steer" ? turns.supportsActiveSteering || restarts : restarts) ? run : undefined;
 };

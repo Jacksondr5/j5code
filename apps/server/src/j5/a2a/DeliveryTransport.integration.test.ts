@@ -259,6 +259,8 @@ interface DeliveryHarness {
   readonly endedTurns: Ref.Ref<ReadonlySet<string>>;
   /** Settles once the delivery transport starts waiting on a steer effect's outcome. */
   readonly steerObserverWaiting: Deferred.Deferred<void>;
+  /** The fake session's steer cancels in-flight tools, as Cursor's does. */
+  readonly steeringInterruptsTools?: boolean;
 }
 
 const makeOrchestrationAdapter = (harness: DeliveryHarness): ProviderAdapterV2["Service"] => ({
@@ -277,7 +279,13 @@ const makeOrchestrationAdapter = (harness: DeliveryHarness): ProviderAdapterV2["
         status: "ready",
         cwd: sessionInput.runtimePolicy.cwd ?? process.cwd(),
         model: sessionInput.modelSelection.model,
-        capabilities: CodexProviderCapabilitiesV2,
+        capabilities: {
+          ...CodexProviderCapabilitiesV2,
+          turns: {
+            ...CodexProviderCapabilitiesV2.turns,
+            activeSteeringInterruptsTools: harness.steeringInterruptsTools === true,
+          },
+        },
         createdAt: now,
         updatedAt: now,
         lastError: null,
@@ -820,7 +828,7 @@ it.effect.each(["gpt-6-astra", "gpt-6.1-sol", "gpt-5.6-sol", "gpt-5.4"])(
               turns: {
                 ...session.capabilities.turns,
                 supportsActiveSteering,
-                activeSteeringInterruptsTools: true,
+                activeSteeringInterruptsTools: false,
               },
             },
           })),
@@ -1130,6 +1138,73 @@ it.effect("lands a message the way its sender asked, on any model", () =>
       );
       assert.lengthOf(yield* runsFor(raced.threadId, racedId), 1);
     }).pipe(Effect.provide(makeTestLayer(harness)));
+  }),
+);
+
+// Register D51: steering Cursor can cancel a running tool while reporting it succeeded.
+it.effect("waits for the turn by default where a steer would interrupt running tools", () =>
+  Effect.gen(function* () {
+    const harness = { ...(yield* makeHarness), steeringInterruptsTools: true };
+    yield* Effect.gen(function* () {
+      const threads = yield* ThreadManagementService;
+      const transport = yield* A2ADeliveryTransport;
+      const worker = yield* OrchestrationEffectWorkerV2;
+      const send = yield* A2ASendService;
+      const deliveries = yield* A2ADeliveryWorker;
+      const caller = yield* seedTarget("interrupts-caller");
+      const target = yield* seedTarget(
+        "interrupts",
+        modelSelection.model,
+        undefined,
+        caller.ledgerProjectId,
+      );
+      yield* startBusyTurn(target);
+      const running = (yield* threads.getThreadProjection(target.threadId)).runs[0]!;
+
+      const sent = yield* send.send({
+        commandId: CommCommandId.make("command:j5-a2a-delivery-interrupts-default"),
+        senderThreadId: caller.threadId,
+        to: target.receiverId,
+        message: "An update while your tool runs.",
+        acceptedAt: "2026-11-23T00:00:00.000Z",
+      });
+      assert.deepStrictEqual(
+        yield* readReceiverBacklog({
+          receiverId: target.receiverId,
+          callerThreadId: caller.threadId,
+          sentMessageId: sent.messageId,
+        }),
+        { type: "behind_turn", waiting: 1, fromCaller: 1 },
+      );
+      // The worker runs alongside, so a delivery that steered anyway is acknowledged and shows.
+      yield* runWorkerUntil(
+        worker,
+        yield* deliveries.drain.pipe(Effect.forkChild({ startImmediately: true })),
+      );
+      const after = yield* threads.getThreadProjection(target.threadId);
+      assert.deepStrictEqual(
+        after.runs
+          .filter((run) => run.userMessageId === deliveryMessageId(sent.messageId))
+          .map((run) => run.status),
+        ["queued"],
+      );
+      assert.lengthOf(yield* Ref.get(harness.steerInputs), 0);
+
+      const steeredId = LedgerMessageId.make("message:j5-a2a-delivery-interrupts-steer");
+      yield* runWorkerUntil(
+        worker,
+        yield* transport
+          .deliverAgent({ ...target.delivery, messageId: steeredId, mode: "steer" })
+          .pipe(Effect.forkChild({ startImmediately: true })),
+      );
+      assert.deepStrictEqual(
+        (yield* Ref.get(harness.steerInputs)).map((input) => [
+          input.runId,
+          input.message.messageId,
+        ]),
+        [[running.id, deliveryMessageId(steeredId)]],
+      );
+    }).pipe(Effect.provide(makeLifecycleTestLayer(harness)));
   }),
 );
 
