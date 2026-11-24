@@ -288,7 +288,17 @@ const j5Items: ReadonlyArray<Item> = [
     min-width: 0;
   }
 
-  .plate { scroll-margin-top: 72px; min-width: 0; }
+  /* A plate is a plain sheet with its dock set into the top, so no grid line runs behind its text. */
+  .plate {
+    scroll-margin-top: 72px;
+    min-width: 0;
+    padding: 0 28px 26px;
+    border: 1px solid var(--wn-line);
+    border-radius: 18px;
+    background: var(--wn-surface);
+  }
+
+  .plate .dock { margin: 0 -28px; border-width: 0 0 1px; border-radius: 17px 17px 0 0; }
   .plate h3 {
     margin-top: 22px;
     font-family: var(--font-display);
@@ -358,6 +368,8 @@ const j5Items: ReadonlyArray<Item> = [
 
   @media (max-width: 640px) {
     .dock { padding: 12px; border-radius: 14px; }
+    .plate { padding: 0 16px 20px; border-radius: 14px; }
+    .plate .dock { margin: 0 -16px; border-radius: 13px 13px 0 0; }
     .plates,
     .plates__col { gap: 44px; }
     .credit__inner { flex-direction: column; align-items: flex-start; }

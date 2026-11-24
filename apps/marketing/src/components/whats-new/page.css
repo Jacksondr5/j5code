@@ -155,6 +155,33 @@
   margin-top: 40px;
 }
 
+/* On chart paper, small text lies on a plain sheet, so no grid line runs behind its letters. */
+.wn .sheet,
+.wn .feature:not(.band--deep) .items {
+  padding: 28px;
+  border: 1px solid var(--wn-line);
+  border-radius: 14px;
+  background: var(--wn-surface);
+}
+
+/* A line of small text on chart paper gets a slip of the same plain paper, fitted to it. The slip
+   overhangs its text evenly, so the text keeps its place whether it fits one line or wraps. */
+.wn .slip,
+.wn .feature:not(.band--deep) .origin {
+  width: fit-content;
+  padding: 3px 9px;
+  margin-inline: -9px;
+  border-radius: 7px;
+  background: var(--wn-surface);
+}
+
+/* Inside a sheet the paper is already plain. */
+.wn .sheet .slip {
+  padding: 0;
+  margin-inline: 0;
+  background: none;
+}
+
 .wn .items--2 {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   margin-top: 0;
@@ -214,6 +241,11 @@
 
   .wn .feature {
     padding-top: 64px;
+  }
+
+  .wn .sheet,
+  .wn .feature:not(.band--deep) .items {
+    padding: 20px 16px;
   }
 
   .wn .items--2,
