@@ -19,13 +19,18 @@ function replay(button: HTMLElement) {
 
 /** A listbox of buttons: one tab stop, arrows move, and the option's own click selects. */
 function wireListbox(options: ReadonlyArray<HTMLElement>, onSelect: (option: HTMLElement) => void) {
+  // The tab stop follows focus, so Tab leaves the list from wherever the arrows have gone.
+  const stopAt = (target: HTMLElement) => {
+    for (const option of options) option.tabIndex = option === target ? 0 : -1;
+  };
   const settle = (selected: HTMLElement) => {
     pressOnly(options, selected, "aria-selected");
-    for (const option of options) option.tabIndex = option === selected ? 0 : -1;
+    stopAt(selected);
   };
   const initial = options.find((option) => option.getAttribute("aria-selected") === "true");
   if (initial) settle(initial);
   options.forEach((option, index) => {
+    option.addEventListener("focus", () => stopAt(option));
     option.addEventListener("click", () => {
       settle(option);
       onSelect(option);
@@ -81,9 +86,14 @@ function wireOpenList(vignette: HTMLElement) {
   list.addEventListener("keydown", (event) => {
     if (event.key === "Escape") show(false);
   });
+  const outside = (target: EventTarget | null) =>
+    target instanceof Node && !trigger.contains(target) && !list.contains(target);
   document.addEventListener("pointerdown", (event) => {
-    if (!openedByReader || !(event.target instanceof Node)) return;
-    if (!trigger.contains(event.target) && !list.contains(event.target)) show(false);
+    if (openedByReader && outside(event.target)) show(false);
+  });
+  // Tab out of it is the keyboard's click away.
+  list.addEventListener("focusout", (event) => {
+    if (openedByReader && outside(event.relatedTarget)) show(false);
   });
   return () => show(false);
 }
