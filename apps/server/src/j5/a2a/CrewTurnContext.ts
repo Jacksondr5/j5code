@@ -63,7 +63,7 @@ export class CrewTurnContext extends Context.Service<
 const DELIVERY_OPEN = "<j5_crew_delivery_context>\n";
 const DELIVERY_CLOSE = "\n</j5_crew_delivery_context>\n\n";
 /** Keeps the platform's context apart from the assignment that follows it. */
-const deliveryContext = (context: string) =>
+export const deliveryContext = (context: string) =>
   context === ""
     ? ""
     : `${DELIVERY_OPEN}${context.replaceAll("</j5_crew_delivery_context>", "<\\/j5_crew_delivery_context>")}${DELIVERY_CLOSE}`;

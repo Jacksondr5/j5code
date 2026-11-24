@@ -53,6 +53,7 @@ import {
 } from "../mcp-tool-use/run.ts";
 import { deviceFailure, isDeviceTool } from "../mcp-tool-use/devices.ts";
 import { j5Default } from "./j5Results.ts";
+import { withJ5Turns } from "./j5Turns.ts";
 
 export type Sample = ReturnType<typeof makeSample>;
 type BaseModel = Parameters<typeof buildBase>[1]["model"];
@@ -70,7 +71,7 @@ const readCases = (dir: string) =>
       NodeFS.readFileSync(NodePath.join(dir, name), "utf8")
         .split("\n")
         .filter((line) => line.trim())
-        .map((line) => decodeCase(line)),
+        .map((line) => withJ5Turns(decodeCase(line), JSON.parse(line))),
     );
 
 /**
@@ -93,7 +94,7 @@ export const loadCases = (ids: ReadonlyArray<string>, catalog: Catalog) => {
  * Upstream's sample state, built on its Claude template. Only the state is used here (the fake
  * world, linked PRs, task numbers); the real harness supplies its own prompt and tools.
  */
-export const sampleFor = (testCase: McpToolUseCase, model: string) => {
+export const sampleFor = (testCase: McpToolUseCase, model: string, catalog: Catalog) => {
   const template = JSON.parse(
     NodeZlib.gunzipSync(
       NodeFS.readFileSync(NodePath.join(upstreamDir, "templates/claude.json.gz")),
@@ -108,7 +109,19 @@ export const sampleFor = (testCase: McpToolUseCase, model: string) => {
     links: testCase.setup.linkedEnvironments === true,
     deviceAccess: testCase.setup.world?.deviceAgentAccess !== false,
   });
-  return makeSample(testCase, { ...base, model: model as BaseModel });
+  // Upstream's list lacks J5's tools; earlier turns that call one load it from the catalog.
+  const missing = t3McpTools(testCase, catalog)
+    .map((tool) => ({
+      name: `mcp__t3-code__${tool.name}`,
+      description: tool.description,
+      input_schema: tool.inputSchema,
+    }))
+    .filter((tool) => !base.deferred.some(({ name }) => name === tool.name));
+  return makeSample(testCase, {
+    ...base,
+    deferred: [...base.deferred, ...missing],
+    model: model as BaseModel,
+  });
 };
 
 /** Neither CLI can resume a turn without a new user message, which these cases need. */
