@@ -60,9 +60,8 @@ function wireOpenList(vignette: HTMLElement) {
   const trigger = vignette.querySelector<HTMLElement>("[data-list-trigger]");
   const list = vignette.querySelector<HTMLElement>('[role="listbox"]');
   if (!trigger || !list) return () => {};
-  // Until this runs the trigger is a drawing: out of the tab order and hidden from assistive tech.
-  trigger.removeAttribute("tabindex");
-  trigger.removeAttribute("aria-hidden");
+  // Until this runs the trigger is a drawing: disabled, so it takes no focus and no click.
+  trigger.removeAttribute("disabled");
   // The page draws the list open to show it, so only one the reader opened closes on a click away.
   let openedByReader = false;
   const chosen = () => list.querySelector<HTMLElement>('[aria-selected="true"]');

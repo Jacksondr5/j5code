@@ -55,6 +55,11 @@
   cursor: pointer;
 }
 
+/* A trigger the script has not reached yet is a drawing. */
+.app .select-a:disabled {
+  cursor: default;
+}
+
 .app .select-a > .ico {
   width: 14px;
   height: 14px;
