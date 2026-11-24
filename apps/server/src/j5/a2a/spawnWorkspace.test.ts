@@ -41,7 +41,7 @@ import { McpInvocationContext, type McpInvocationScope } from "../../mcp/McpInvo
 import * as PeerLinks from "../../peer/PeerLinks.ts";
 import * as PeerMcpClient from "../../peer/PeerMcpClient.ts";
 import type { PeerRecord } from "@t3tools/contracts/j5";
-import { runJ5A2AMigrations } from "./Migrations.ts";
+import * as NodeSqliteClient from "@t3tools/shared/nodeSqliteClient";
 import { findPeerRoute } from "./peerCounterparty.ts";
 import { PeerRegistryService } from "./PeerRegistryService.ts";
 import { OrchestratorMcpService } from "../../mcp/OrchestratorMcpService.ts";
@@ -243,6 +243,8 @@ const spawnHarness = (input: {
     readonly access?: AuthMcpClientAccess;
     readonly peered?: boolean;
     readonly answer?: Effect.Effect<unknown, OrchestratorMcpFailure>;
+    /** Routes can't be written here: the route table was never made. */
+    readonly routesUnwritable?: boolean;
   };
 }) =>
   Effect.gen(function* () {
@@ -293,10 +295,10 @@ const spawnHarness = (input: {
       input.memberModels ?? permissiveCrewMemberModels,
       agentPersonaEscalationsTestLayer(),
       noDocumentTextLayer,
-      // Routes are rows in J5's own tables, so a spawn elsewhere needs them migrated.
-      peer === undefined
-        ? layerMemory
-        : Layer.effectDiscard(runJ5A2AMigrations()).pipe(Layer.provideMerge(layerMemory)),
+      // A route is a row in a migrated table; a bare database has none to write.
+      peer?.routesUnwritable === true
+        ? NodeSqliteClient.layer({ filename: ":memory:" })
+        : layerMemory,
       Layer.mock(PeerLinks.PeerLinks)({
         enabled: Effect.succeed(true),
         get: (environmentId) =>
@@ -2510,6 +2512,11 @@ it.effect("refuses a spawn on another machine it can't make, and starts nothing"
       { name: "allow_once", args: { allow_once: "escalation:1" }, says: "Allow this once" },
       { name: "own checkout", args: { workspace: { type: "shared" } }, says: "your own checkout" },
       { name: "no project", args: { project_id: undefined }, says: "t3_project_list" },
+      {
+        name: "a linked machine's call",
+        scope: linkedScope({}),
+        says: "Only an agent in a thread on this machine",
+      },
     ];
     for (const refusal of cases) {
       const harness = yield* spawnHarness({
@@ -2618,19 +2625,97 @@ it.effect("an agent on a linked machine spawns here as a root, capped by its acc
   }),
 );
 
-it.effect("refuses a linked machine's spawn that names no agent of its own", () =>
+it.effect("refuses a linked machine's spawn with no agent of its own, or no way to reply", () =>
   Effect.gen(function* () {
-    for (const [scope, args] of [
-      [linkedScope({ sender: false }), linkedArgs],
-      [linkedScope({}), { ...linkedArgs, linked_spawn: undefined }],
+    for (const [scope, args, peered, says] of [
+      [linkedScope({ sender: false }), linkedArgs, true, "only for one of its own agents"],
+      [
+        linkedScope({}),
+        { ...linkedArgs, linked_spawn: undefined },
+        true,
+        "only for one of its own agents",
+      ],
+      // A half-removed link: this server holds no peering with the spawner's.
+      [linkedScope({}), linkedArgs, false, "not peered with yours"],
     ] as const) {
-      const harness = yield* spawnHarness({ checkout: { isRepo: false, refName: null }, scope });
+      const harness = yield* spawnHarness({
+        checkout: { isRepo: false, refName: null },
+        scope,
+        peer: { peered },
+      });
       yield* Effect.gen(function* () {
         const refused = yield* harness.call(JSON.parse(JSON.stringify(args)));
         assert.isTrue(refused.isFailure);
-        assert.include(message(refused), "only for one of its own agents");
+        assert.include(message(refused), says);
         assert.deepStrictEqual(yield* Ref.get(harness.commands), []);
       }).pipe(Effect.provide(harness.layer));
     }
+  }),
+);
+
+it.effect(
+  "names the generated key when the route to an agent started there can't be recorded",
+  () =>
+    Effect.gen(function* () {
+      const harness = yield* spawnHarness({
+        checkout: { isRepo: false, refName: null },
+        peer: { answer: Effect.succeed(remoteResult), routesUnwritable: true },
+      });
+      yield* Effect.gen(function* () {
+        const { client_request_id: _key, ...unkeyed } = remoteArgs;
+        const failed = yield* harness.call(unkeyed);
+        assert.isTrue(failed.isFailure);
+        const key = /client_request_id "([^"]+)"/.exec(message(failed))?.[1];
+        assert.isDefined(key);
+        // The retry the message asks for reaches the other machine under the first attempt's key.
+        yield* harness.call({ ...unkeyed, client_request_id: key! });
+        const [first, retry] = yield* Ref.get(harness.peerCalls);
+        assert.equal(retry?.arguments.client_request_id, first?.arguments.client_request_id);
+      }).pipe(Effect.provide(harness.layer));
+    }),
+);
+
+it.effect("a linked spawn's retry in a later turn finishes its first agent", () =>
+  Effect.gen(function* () {
+    // The spawner's server recomputes its facts on every call: a later turn's pick is the agent's.
+    const later = {
+      ...linkedArgs.linked_spawn,
+      pick_source: "agent",
+      caller_access: { runtime_mode: "approval-required" },
+    } as const;
+    const replayContext = yield* Layer.build(
+      RequestReplayService.layer.pipe(Layer.provide(layerMemory)),
+    );
+    const replay = yield* spawnHarness({
+      checkout: { isRepo: false, refName: null },
+      scope: linkedScope({}),
+      replay: Layer.succeed(
+        RequestReplayService.RequestReplayService,
+        Context.get(replayContext, RequestReplayService.RequestReplayService),
+      ),
+    });
+    yield* Effect.gen(function* () {
+      const first = yield* replay.call(linkedArgs);
+      assert.isFalse(first.isFailure, JSON.stringify(first.result));
+      const again = yield* replay.call({ ...linkedArgs, linked_spawn: later });
+      assert.isFalse(again.isFailure, JSON.stringify(again.result));
+      assert.deepStrictEqual(again.result, first.result);
+    }).pipe(Effect.provide(replay.layer));
+
+    // A person's persona, already created broader than the caller now runs, is finished all the same.
+    const persona = yield* spawnHarness({
+      checkout: { isRepo: false, refName: null },
+      scope: linkedScope({ narrowedTo: "approval-required" }),
+      existingChildRuntimeMode: "full-access",
+    });
+    yield* Effect.gen(function* () {
+      const { provider: _provider, model: _model, reasoning: _reasoning, ...args } = linkedArgs;
+      const retried = yield* persona.call({
+        ...args,
+        persona: "reviewer",
+        linked_spawn: later,
+      });
+      assert.isFalse(retried.isFailure, JSON.stringify(retried.result));
+    }).pipe(Effect.provide(persona.layer));
   }),
 );

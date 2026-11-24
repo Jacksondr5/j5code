@@ -357,6 +357,19 @@ const linkedSpawner = Effect.fn("j5.a2a.mcp.linkedSpawner")(function* (
       "A linked machine starts an agent here only for one of its own agents, and this call named none.",
       "Call j5_spawn_agent with environment_id from an agent on that machine, so its server names the agent.",
     );
+  // The agent's replies ride this server's peering with the spawner's, which can be half removed.
+  const peered = yield* (yield* PeerRegistryService)
+    .get(sender.environmentId)
+    .pipe(
+      Effect.mapError((error) =>
+        stateError(`Peering here cannot be read now: ${error.message}`, "Retry j5_spawn_agent."),
+      ),
+    );
+  if (peered === null)
+    return yield* stateError(
+      "This server is not peered with yours, so an agent started here could not reply to you.",
+      "Set up messaging on the pair's row in Sharing & access on either machine, then retry.",
+    );
   const directory = yield* Effect.serviceOption(PeerDirectory);
   const serverName = Option.isNone(directory)
     ? sender.environmentId
@@ -393,7 +406,9 @@ const spawnOnPeer = Effect.fn("j5.a2a.spawnOnPeer")(function* (
 ) {
   if (scope.thread === undefined)
     return yield* stateError(
-      "An outside agent starts agents on this machine only: another machine would have no agent to name as the spawner, and no way to reach you with a reply.",
+      scope.client?.linked === true
+        ? "Only an agent in a thread on this machine can start one on another; a linked machine's call can't be passed on."
+        : "An outside agent starts agents on this machine only: another machine would have no agent to name as the spawner, and no way to reach you with a reply.",
       "Retry j5_spawn_agent without environment_id.",
     );
   if (input.allow_once !== undefined)
@@ -540,7 +555,8 @@ const spawnOnPeer = Effect.fn("j5.a2a.spawnOnPeer")(function* (
     Effect.mapError((error) =>
       stateError(
         `Peer Agent ${result.participant_id} started on "${label}", but the way to it could not be recorded here: ${error.message}`,
-        "Retry j5_spawn_agent with the same client_request_id to record it.",
+        // A generated key exists only here, so the retry must be told it.
+        `Retry j5_spawn_agent with client_request_id "${requestKey}" to record it; that returns the same agent.`,
       ),
     ),
   );
@@ -599,6 +615,9 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
   const request = {
     ...input,
     client_request_id: undefined,
+    // Recomputed by the spawner's server on every call (a later turn's pick source, narrowed
+    // access), and a retry never picks again, so it is no part of the request a key binds.
+    linked_spawn: undefined,
     title: input.title,
     scratch: input.scratch ?? false,
     workspace: workspaceRequest,
@@ -701,7 +720,10 @@ const spawn = Effect.fn("j5.a2a.spawnAgent")(function* (
   // unless an outside agent's approved level caps it. The start checks after reading the thread
   // again, so an agent a concurrent attempt created counts too.
   const replayExceedsCaller = (caller: DispatchModes, thread: DispatchModes) => {
-    if (personaId !== undefined && outside === undefined) return Effect.void;
+    // A linked spawner's first attempt held the persona to the link's level, and a new link is a
+    // new session with new keys, so its persona's retry is exempt as a local one is.
+    if (personaId !== undefined && (outside === undefined || linked !== undefined))
+      return Effect.void;
     const exceeded = exceededDispatchModeLimit(caller, thread);
     return exceeded === undefined
       ? Effect.void
