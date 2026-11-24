@@ -11,6 +11,7 @@ import { credentialReplacements } from "@t3tools/client-runtime/j5/replaced-cred
 import { createRuntimeCommand } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { File, Paths } from "expo-file-system";
+import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/reactivity";
@@ -58,7 +59,13 @@ const loadSaved = (): ConnectionMemory => {
     const saved = file();
     return decodeMemory(saved.exists ? saved.textSync() : null);
   } catch (cause) {
-    console.warn("J5 could not read its saved connection memory", cause);
+    // Effect's Option decoder throws its own Error and keeps what really failed as its cause.
+    const inner = cause instanceof Error ? cause.cause : undefined;
+    console.warn(
+      "J5 could not read its saved connection memory",
+      cause,
+      Cause.isCause(inner) ? Cause.pretty(inner) : inner,
+    );
     return decodeMemory(null);
   }
 };
