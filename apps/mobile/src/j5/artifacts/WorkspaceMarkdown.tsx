@@ -34,6 +34,7 @@ import { useMarkdownImageSource } from "../../native/useMarkdownImageSource";
 import { useQuietThreadShell } from "../../state/entities";
 import { useEnvironmentThread } from "../../state/threads";
 import { ArtifactMarkdownImage } from "./ArtifactMarkdownImage";
+import { useOpenAskLink } from "../inbox/askLinks";
 import { useThreadCwd } from "./useThreadCwd";
 import {
   artifactLinkContextMenu,
@@ -55,6 +56,8 @@ export function WorkspaceMarkdown(props: {
     readonly workspaceRoot: string;
     readonly projectId: ProjectId | null;
   };
+  /** Opens a link no workspace file names, as a thread would; false falls back to the browser. */
+  readonly openLink?: (href: string) => boolean;
 }) {
   const navigation = useNavigation();
   const styles = useMarkdownPreviewStyles();
@@ -125,7 +128,8 @@ export function WorkspaceMarkdown(props: {
       });
       return;
     }
-    if (presentation.href) void tryOpenExternalUrl(presentation.href, "markdown-link");
+    if (!presentation.href || props.openLink?.(presentation.href) === true) return;
+    void tryOpenExternalUrl(presentation.href, "markdown-link");
   };
   return (
     <>
@@ -147,15 +151,22 @@ export function WorkspaceMarkdown(props: {
 
 /**
  * An agent's words to a person, read as web reads them: in the sender's thread and its worktree
- * (or its project's root). Until that is known on this device, the links stay plain text.
+ * (or its project's root), with pull request and thread links opening in the app as they do in a
+ * thread. Until that is known on this device, the links stay plain text.
  */
 export function SenderMarkdown(props: {
   readonly markdown: string;
   readonly environmentId: EnvironmentId;
+  /** The ask's project, which places its pull request links. */
+  readonly projectId: string;
   readonly senderThreadId: string | null;
 }) {
   const navigation = useNavigation();
   const styles = useMarkdownPreviewStyles();
+  const openLink = useOpenAskLink({
+    environmentId: props.environmentId,
+    projectId: props.projectId,
+  });
   const senderThread =
     props.senderThreadId === null
       ? null
@@ -176,6 +187,7 @@ export function SenderMarkdown(props: {
         workspaceRoot,
         projectId,
       }}
+      openLink={openLink}
     />
   );
 }
