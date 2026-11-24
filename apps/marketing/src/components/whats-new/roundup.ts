@@ -14,13 +14,8 @@ export const ROUNDUP_CONTENTS: ReadonlyArray<ContentsEntry> = [
   {
     href: "#pull-requests",
     title: "Agents on pull requests and CI",
-    line: "Open, review, merge a stack, read failing logs, re-run checks.",
-    origin: "t3",
-  },
-  {
-    href: "#languages",
-    title: "Ten languages",
-    line: "The app in your language, with a Language setting.",
+    // The word joiner keeps "re-run" on one line.
+    line: "Open, review, merge a stack, read failing logs, re-⁠run checks.",
     origin: "t3",
   },
   {

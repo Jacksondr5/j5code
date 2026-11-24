@@ -2,7 +2,6 @@
 import Boat from "../Boat.astro";
 import { T3_SITE_URL, UPSTREAM_REPOSITORY_URL } from "../../lib/site";
 import IssuesVignette from "./IssuesVignette.astro";
-import LanguageVignette from "./LanguageVignette.astro";
 import MaintenanceVignette from "./MaintenanceVignette.astro";
 import MobileShots from "./MobileShots.astro";
 import PullRequestVignette from "./PullRequestVignette.astro";
@@ -60,8 +59,9 @@ const pullRequestItems: ReadonlyArray<Item> = [
     body: "On GitHub, it reads the end of a failing check's log instead of guessing from the check's name.",
   },
   {
-    title: "Re-run checks",
-    body: "On GitHub, it re-runs the failing checks, or one check by name.",
+    // The word joiners keep "Re-run" and "re-runs" on one line.
+    title: "Re-⁠run checks",
+    body: "On GitHub, it re-⁠runs the failing checks, or one check by name.",
   },
 ];
 
@@ -128,23 +128,6 @@ const j5Items: ReadonlyArray<Item> = [
 
     <div class="plates">
       <div class="plates__col">
-        <article class="plate" id="languages">
-          <div class="dock"><LanguageVignette /></div>
-          <h3>Ten languages</h3>
-          <p>
-            The whole app, desktop menus included, comes in English, <span lang="de">Deutsch</span>,{" "}
-            <span lang="es">Español</span>, <span lang="fr">Français</span>, <span lang="ja">日本語</span>,{" "}
-            <span lang="ko">한국어</span>, <span lang="pt-BR">Português (Brasil)</span>,{" "}
-            <span lang="ru">Русский</span>, <span lang="sv">Svenska</span> and <span lang="zh">中文</span>.
-            <span class="live-only"> Pick one above to see the setting change.</span>
-          </p>
-          <p>
-            J5 Code's own screens, such as the Inbox and Crews, are still in English. They follow in a later
-            release.
-          </p>
-          <p class="plate__where">Settings → General → Language</p>
-        </article>
-
         <article class="plate" id="welcome">
           <div class="dock"><WelcomeVignette /></div>
           <h3>One Welcome page</h3>
@@ -154,6 +137,18 @@ const j5Items: ReadonlyArray<Item> = [
             start.
           </p>
           <p class="plate__where">Settings → About → Welcome page</p>
+        </article>
+
+        <article class="plate" id="servers">
+          <div class="dock dock--center"><ServersVignette /></div>
+          <h3>Other machines' dev servers open here</h3>
+          <p>
+            A dev server an agent starts on another machine shows up in the thread's Servers list. Select it and
+            it opens in the in-app browser, where <code>localhost</code> reaches that machine. In the desktop app,
+            the cable button forwards the port to your own computer, so your browser, <code>curl</code> or a
+            database client reaches it too.
+          </p>
+          <p class="plate__where">Thread details → Servers, or Forwarded ports in the command palette</p>
         </article>
 
         <article class="plate" id="voice">
@@ -180,18 +175,6 @@ const j5Items: ReadonlyArray<Item> = [
             Every other fresh start is marked too. When a thread moves to another provider, or its old session
             can't be resumed, a Context handoff divider says so.
           </p>
-        </article>
-
-        <article class="plate" id="servers">
-          <div class="dock dock--center"><ServersVignette /></div>
-          <h3>Other machines' dev servers open here</h3>
-          <p>
-            A dev server an agent starts on another machine shows up in the thread's Servers list. Select it and
-            it opens in the in-app browser, where <code>localhost</code> reaches that machine. In the desktop app,
-            the cable button forwards the port to your own computer, so your browser, <code>curl</code> or a
-            database client reaches it too.
-          </p>
-          <p class="plate__where">Thread details → Servers, or Forwarded ports in the command palette</p>
         </article>
 
         <article class="plate" id="upkeep">
@@ -315,9 +298,6 @@ const j5Items: ReadonlyArray<Item> = [
     line-height: 1.6;
     color: var(--wn-muted);
   }
-
-  /* A language's name stays whole: a line break inside 한국어 or 中文 reads as a typo. */
-  .plate span[lang] { white-space: nowrap; }
 
   .plate code {
     padding: 1px 5px;

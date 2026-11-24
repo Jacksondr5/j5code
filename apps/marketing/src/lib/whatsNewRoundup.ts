@@ -1,20 +1,11 @@
 /**
  * The upstream roundup's vignettes: the hero story's replay, tracker tabs, issue rows and the
- * thread picker, the language and voice pickers, port forwarding and the switch.
+ * thread picker, the voice picker, port forwarding and the switch.
  */
 import { select } from "./whatsNew";
 
 function pressOnly(buttons: ReadonlyArray<HTMLElement>, pressed: HTMLElement, attribute: string) {
   for (const button of buttons) button.setAttribute(attribute, String(button === pressed));
-}
-
-interface Locale {
-  code: string;
-  name: string;
-  display: string;
-  language: string;
-  system: string;
-  hint: string;
 }
 
 function replay(button: HTMLElement) {
@@ -210,35 +201,6 @@ function wireThreadPicker(issues: HTMLElement) {
   });
 }
 
-function wireLanguage(root: HTMLElement) {
-  for (const picker of select(root, "[data-language]")) {
-    const locales = JSON.parse(picker.dataset.locales ?? "[]") as ReadonlyArray<Locale>;
-    const close = wireOpenList(picker);
-    wireListbox(select(picker, "[data-locale]"), (option) => {
-      close();
-      const locale = locales.find((entry) => entry.code === option.dataset.locale);
-      if (!locale) return;
-      const text: Record<string, string> = {
-        display: locale.display,
-        language: locale.language,
-        hint: locale.hint,
-        system: locale.system,
-        current: "system" in option.dataset ? locale.system : locale.name,
-      };
-      for (const node of select(picker, "[data-t]")) {
-        node.textContent = text[node.dataset.t ?? ""] ?? node.textContent;
-        node.lang = locale.code;
-      }
-      const word = picker.querySelector<HTMLElement>("[data-word]");
-      if (word) {
-        word.classList.remove("is-swapped");
-        void word.offsetWidth;
-        word.classList.add("is-swapped");
-      }
-    });
-  }
-}
-
 function wireVoice(root: HTMLElement) {
   for (const voice of select(root, "[data-voice]")) {
     const value = voice.querySelector<HTMLElement>("[data-voice-value]");
@@ -282,7 +244,6 @@ function wireServers(root: HTMLElement) {
 
 export function startRoundup(root: HTMLElement) {
   wireIssues(root);
-  wireLanguage(root);
   wireVoice(root);
   wireServers(root);
   for (const button of select(root, "[data-replay]"))
