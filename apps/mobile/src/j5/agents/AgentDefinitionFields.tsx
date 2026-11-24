@@ -12,11 +12,10 @@ import {
   agentPersonaEntryDriver,
 } from "@t3tools/client-runtime/j5/agent-personas";
 import type { AgentPersonaAccess, AgentPersonaModelEntry, EnvironmentId } from "@t3tools/contracts";
-import { Pressable, View } from "react-native";
+import { View } from "react-native";
 
-import { SymbolView } from "../../components/ui/AppSymbol";
+import { IconButton } from "../../components/ui/IconButton";
 import { ListActionRow } from "../../components/ui/ListActionRow";
-import { Menu } from "../../components/ui/Menu";
 import { SettingsSection } from "../../features/settings/components/SettingsSection";
 import { SettingsSwitchRow } from "../../features/settings/components/SettingsSwitchRow";
 import { useEnvironmentQuery } from "../../state/query";
@@ -104,7 +103,7 @@ export function AgentRoutePolicyFields(props: {
             footer={unsupported ? `This provider cannot enforce ${value.access}.` : undefined}
             trailing={
               value.modelRoute.length > 1 ? (
-                <ModelEntryMenu
+                <ModelEntryButtons
                   label={label}
                   first={index === 0}
                   last={index === value.modelRoute.length - 1}
@@ -189,8 +188,8 @@ export function AgentRoutePolicyFields(props: {
   );
 }
 
-/** Move up, Move down and Remove for one model entry, behind the section's overflow button. */
-function ModelEntryMenu(props: {
+/** Move up, Move down and Remove for one model entry, beside its section title. */
+function ModelEntryButtons(props: {
   readonly label: string;
   readonly first: boolean;
   readonly last: boolean;
@@ -199,34 +198,26 @@ function ModelEntryMenu(props: {
   readonly onRemove: () => void;
 }) {
   return (
-    <View pointerEvents={props.disabled ? "none" : "auto"}>
-      <Menu
-        actions={[
-          { id: "up", title: "Move up", attributes: { disabled: props.first } },
-          { id: "down", title: "Move down", attributes: { disabled: props.last } },
-          { id: "remove", title: "Remove", attributes: { destructive: true } },
-        ]}
-        onPressAction={({ nativeEvent }) => {
-          if (nativeEvent.event === "up") props.onMove(-1);
-          if (nativeEvent.event === "down") props.onMove(1);
-          if (nativeEvent.event === "remove") props.onRemove();
-        }}
-      >
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`Actions for ${props.label}`}
-          accessibilityState={{ disabled: props.disabled }}
-          disabled={props.disabled}
-          className="size-11 items-center justify-center"
-        >
-          <SymbolView
-            name="ellipsis"
-            size={18}
-            tintColorClassName="accent-icon"
-            type="monochrome"
-          />
-        </Pressable>
-      </Menu>
+    <View className="flex-row items-center">
+      <IconButton
+        icon="arrow.up"
+        accessibilityLabel={`Move ${props.label} up`}
+        disabled={props.disabled || props.first}
+        onPress={() => props.onMove(-1)}
+      />
+      <IconButton
+        icon="arrow.down"
+        accessibilityLabel={`Move ${props.label} down`}
+        disabled={props.disabled || props.last}
+        onPress={() => props.onMove(1)}
+      />
+      <IconButton
+        icon="trash"
+        accessibilityLabel={`Remove ${props.label}`}
+        tintColorClassName="accent-danger-foreground"
+        disabled={props.disabled}
+        onPress={props.onRemove}
+      />
     </View>
   );
 }

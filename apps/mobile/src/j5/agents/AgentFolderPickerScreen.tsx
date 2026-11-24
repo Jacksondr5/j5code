@@ -45,6 +45,7 @@ export function AgentFolderPickerScreen() {
     <FolderPickerPage
       environmentId={props.environmentId}
       environmentLabel={props.environmentLabel}
+      ready={librarySources.data !== null}
       onChoose={async (path) => {
         const folders = (librarySources.data?.folders ?? []).map(
           ({ configuredPath }) => configuredPath,
@@ -72,6 +73,7 @@ export function PlaybookFolderPickerScreen() {
     <FolderPickerPage
       environmentId={props.environmentId}
       environmentLabel={props.environmentLabel}
+      ready={sources.data !== null}
       onChoose={async (path) => {
         const folders = (sources.data?.folders ?? []).flatMap((entry) =>
           entry.source.kind === "folder" ? [entry.source.path] : [],
@@ -91,6 +93,8 @@ export function PlaybookFolderPickerScreen() {
 function FolderPickerPage(props: {
   readonly environmentId: EnvironmentId;
   readonly environmentLabel: string;
+  /** The folders already configured have loaded; a save replaces the whole list. */
+  readonly ready: boolean;
   /** Rejects with the reason the folder wasn't added. */
   readonly onChoose: (path: string) => Promise<void>;
 }) {
@@ -120,7 +124,7 @@ function FolderPickerPage(props: {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   async function choose() {
-    if (selection === null || saving) return;
+    if (selection === null || saving || !props.ready) return;
     setSaving(true);
     setError(null);
     const result = await settlePromise(() => props.onChoose(selection));
@@ -157,7 +161,7 @@ function FolderPickerPage(props: {
         tone="primary"
         fullWidth
         loading={saving}
-        disabled={selection === null}
+        disabled={selection === null || !props.ready}
         onPress={() => void choose()}
       />
       <SettingsSection title="Browse folders">
