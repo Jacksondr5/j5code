@@ -11,9 +11,17 @@ it.each([
   { platform: "linux", hostArch: "x64", arch: 3, reason: "unexecutable target linux/arm64" },
   { platform: "linux", hostArch: "arm64", arch: 1, reason: "unexecutable target linux/x64" },
   { platform: "darwin", hostArch: "arm64", arch: 3, reason: "untrusted bundle", untrusted: true },
+  // J5 (FORK.md case 132): J5's native Windows build, which upstream's cross-build never runs.
+  {
+    platform: "win32",
+    hostArch: "x64",
+    arch: 1,
+    reason: "J5 build (J5_SKIP_SERVER_COMPILE_CACHE)",
+    j5Skip: true,
+  },
 ])(
   "skips cache generation for $reason",
-  async ({ platform, hostArch, arch, reason, untrusted }) => {
+  async ({ platform, hostArch, arch, reason, untrusted, j5Skip }) => {
     const { spawnSync } = await import("node:child_process");
     const hook = NodeURL.fileURLToPath(
       new URL("../prepare-server-compile-cache.cjs", import.meta.url),
@@ -28,7 +36,11 @@ it.each([
       ],
       {
         encoding: "utf8",
-        env: { ...process.env, T3CODE_DESKTOP_UNTRUSTED_BUNDLE: untrusted ? "true" : "" },
+        env: {
+          ...process.env,
+          T3CODE_DESKTOP_UNTRUSTED_BUNDLE: untrusted ? "true" : "",
+          J5_SKIP_SERVER_COMPILE_CACHE: j5Skip ? "true" : "",
+        },
       },
     );
     expect(result.status, result.stderr).toBe(0);
