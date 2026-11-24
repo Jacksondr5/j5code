@@ -2,7 +2,7 @@ import { runtimeModeRank } from "../../mcp/delegatedTaskModes.ts";
 import { clientModeCeiling, type McpClientCaller } from "../../mcp/McpInvocationContext.ts";
 import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
 import { ProviderRegistry } from "../../provider/ProviderRegistry.ts";
-import { pickDelegatedPersona } from "./agentPersonaPick.ts";
+import { personaElsewhereNextStep, pickDelegatedPersona } from "./agentPersonaPick.ts";
 import { CrewMemberModels } from "./crewMemberModels.ts";
 import {
   type AgentPersonaId,
@@ -284,7 +284,16 @@ const resolveDelegatedPersonaLaunch = Effect.fn("j5.resolveDelegatedPersonaLaunc
     Effect.provideService(ThreadManagementService, services.threads),
     Effect.provideService(CrewMemberModels, services.memberModels),
     Effect.mapError(
-      (error) => new AgentPersonaLibraryError({ message: `${error.message} ${blockedThere}` }),
+      (error) =>
+        new AgentPersonaLibraryError({
+          // Only a real block is lifted there; a persona that machine lacks is told as that.
+          message:
+            error.code !== undefined
+              ? `${error.message} ${personaElsewhereNextStep(error.code, personaId, "target")}`
+              : error.constraint !== null
+                ? `${error.message} ${blockedThere}`
+                : error.message,
+        }),
     ),
   );
   if (

@@ -897,6 +897,7 @@ it.effect("holds a task delegated from a linked environment to the project's mem
 const delegatedPersonaLaunch = (
   id: string,
   delegated?: Omit<OrchestrationV2DelegatedPersonaPick, "authorModels" | "authorsPartlyUnknown">,
+  personaId = "builder",
 ) => ({
   ...launchInput({ command: `command:${id}`, thread: `thread:${id}` }),
   delegatedFrom: {
@@ -905,7 +906,7 @@ const delegatedPersonaLaunch = (
     title: "Elsewhere",
   },
   agentPersona: {
-    personaId: "builder",
+    personaId,
     ...(delegated === undefined
       ? {}
       : { delegated: { ...delegated, authorModels: [], authorsPartlyUnknown: false } }),
@@ -920,8 +921,12 @@ it.effect(
     return Effect.gen(function* () {
       const launches = yield* ThreadLaunch.ThreadLaunchService;
       const threads = yield* ThreadManagement.ThreadManagementService;
-      const refused = (id: string, delegated?: Parameters<typeof delegatedPersonaLaunch>[1]) =>
-        launches.launch(delegatedPersonaLaunch(id, delegated)).pipe(
+      const refused = (
+        id: string,
+        delegated?: Parameters<typeof delegatedPersonaLaunch>[1],
+        personaId?: string,
+      ) =>
+        launches.launch(delegatedPersonaLaunch(id, delegated, personaId)).pipe(
           Effect.flip,
           Effect.tap(() =>
             threads
@@ -932,6 +937,14 @@ it.effect(
 
       const unsaid = yield* refused("delegated:unsaid");
       assert.include(unsaid.message, "without who picked it");
+      // A persona this machine lacks is no block, so the refusal doesn't say to unblock it.
+      const missing = yield* refused(
+        "delegated:missing",
+        { pickSource: "agent", callerAccess: { runtimeMode: "full-access" } },
+        "nobody-here",
+      );
+      assert.include(missing.message, "That machine's persona library has no nobody-here");
+      assert.notInclude(missing.message, "blocked on that machine");
       const overLink = yield* refused("delegated:over-link", {
         pickSource: "agent",
         callerAccess: { runtimeMode: "full-access" },
