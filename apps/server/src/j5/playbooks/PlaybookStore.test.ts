@@ -1105,26 +1105,36 @@ it.effect(
     }).pipe(Effect.scoped, Effect.provide(MemoryLayer)),
 );
 
-it.effect("keeps an unreadable snapshot in history and allows cancelling it", () =>
+it.effect("isolates unreadable snapshots and allows their cancellation", () =>
   Effect.gen(function* () {
     const { store, workspaceRoot } = yield* makeFixture;
     const sql = yield* SqlClient.SqlClient;
-    const run = yield* store.start(owner, workspaceRoot, "demo", "start");
-    yield* sql`UPDATE j5_playbook_run SET definition_json = 'malformed' WHERE run_id = ${run.runId}`;
-    const [history] = (yield* store.listAll({})).runs;
-    assert.equal(history?.title, "demo");
-    assert.strictEqual(history?.issue, null);
-    assert.equal(
-      (yield* Effect.flip(
+    yield* store.start(otherOwner, workspaceRoot, "demo", "healthy");
+    const run = yield* store.start(owner, workspaceRoot, "demo", "damaged");
+    for (const snapshot of ["{", '{"steps":["invalid"]}']) {
+      yield* sql`UPDATE j5_playbook_run SET definition_json = ${snapshot} WHERE run_id = ${run.runId}`;
+      const history = (yield* store.listForThread(owner)).runs[0]!;
+      assert.equal(history.title, "demo");
+      assert.isNull(history.issue);
+      assert.deepEqual(history.steps, []);
+      assert.equal((yield* store.listAll({ status: "all" })).runs.length, 2);
+      const summaries = yield* store.activeRunSummaries([owner, otherOwner]);
+      assert.equal(summaries.length, 2);
+      assert.equal(
+        summaries.find((summary) => summary.ownerThreadId === otherOwner)?.stepTitle,
+        "Step research",
+      );
+      assert.isNull((yield* store.current(owner)).currentStep);
+      const failure = yield* Effect.flip(
         store.mutate(owner, {
           operation: "complete",
           runId: run.runId,
           expectedStepId: "research",
-          client_request_id: "finish",
+          client_request_id: "complete",
         }),
-      )).code,
-      "invalid_snapshot",
-    );
+      );
+      assert.equal(failure.code, "invalid_snapshot");
+    }
     assert.equal(
       (yield* store.mutate(owner, {
         operation: "cancel",
