@@ -18,7 +18,7 @@ CLAUDE_TOKEN_FILE=<file> node evals/j5-cli/launch.ts run -- \
 ```
 
 - **Choosing what runs:**
-  - `--case <id>` (repeatable; default: every case for the harness), `--harness claude|codex`, `--model`, `--effort`.
+  - `--case <id>` (repeatable; default: every case for the harness), `--harness claude|codex`, `--model`, `--effort` (sent as J5 sends it: Codex's reasoning effort, Claude's effort option).
   - `--catalog j5|upstream`: the T3 tools listed. The default `j5` lists what J5's server lists, with J5's own tools. `upstream` lists upstream's set, for comparing with upstream's runner.
 - **Samples:** `--samples <n>`. Without it, each case runs 2 samples, and a 3rd when the first 2 disagree, as upstream does.
 - **Comparing:** `--baseline <results.jsonl>` adds the earlier pass rates. With `--stop-on-regression`, cases that passed every baseline sample run first, and the run stops at the first one that fails.
@@ -34,6 +34,7 @@ CLAUDE_TOKEN_FILE=<file> node evals/j5-cli/launch.ts run -- \
 - **Container:** one per run, with an empty home folder and the checkout mounted read-only at its own path. Its network reaches only the model providers' hosts, through `egress-proxy.ts`.
 - **T3 tools:** `mcp.ts` serves the real tool schemas from source and answers from the case's mocks. Each tool's own visibility rule decides whether it's listed for the case's thread. Device tools answer from upstream's fake device hosts. J5's own tools answer from `j5Results.ts` when the case doesn't mock them.
 - **J5's cases:** `cases/` holds J5's own cases. One whose `source.replaces` names an upstream case runs in its place on the J5 catalog, because the upstream case checks tools J5 replaced (`t3_thread_launch`, `create_threads`, `t3_thread_send`).
+- **Steering into a running turn:** a Claude case's `steer` names a Bash command (`during`, a regex) and a message, which may be a `{{j5:<name>}}` turn. The runner feeds Claude Code streaming input, as J5 does, holds that command once it starts, pushes the message with `priority: "next"`, and releases the command when Claude Code reports the message queued. The case passes when a later call's input contains `acted`. The row records the message's lifecycle and how the session file shows it.
 - **Turns J5's server writes:** a Crew seat's first delivery, another agent's message, and a Captain's launch report are rendered by the server's own functions (`j5Turns.ts`). A case names each under `j5Turns` and places it with `{{j5:<name>}}` in its prompt or an earlier turn's text, giving only the facts: brief, roster, message bodies.
 - **Accounts:** Codex's ChatGPT apps and plugins are off in `codex-requirements.toml`. They reach the account's connectors through `chatgpt.com`, which the allowlist must admit, and a connector can lead to a live server. Claude Code with a `setup-token` loads no claude.ai connectors.
 - **Earlier turns:**

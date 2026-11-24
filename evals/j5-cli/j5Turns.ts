@@ -15,6 +15,7 @@ import { formatPeerEnvelope } from "../../apps/server/src/j5/a2a/EnvelopeFormatt
 import { spawnFirstTurnText } from "../../apps/server/src/j5/a2a/spawnIds.ts";
 import type { McpToolUseCase } from "../mcp-tool-use/run.ts";
 import { PROJECT } from "./j5Results.ts";
+import { setSteer, Steer } from "./steer.ts";
 
 const PeerMessage = Schema.Struct({
   from: Schema.String,
@@ -130,19 +131,20 @@ const render = (turn: J5Turn): string => {
 };
 
 const decodeTurns = Schema.decodeUnknownSync(J5Turns);
+const decodeSteer = Schema.decodeUnknownSync(Steer);
 
-/** The case with each `{{j5:<name>}}` in its prompt and earlier turns replaced by that turn. */
+/** The case with each `{{j5:<name>}}` in its prompt, earlier turns and steer replaced by that turn. */
 export const withJ5Turns = (testCase: McpToolUseCase, raw: unknown): McpToolUseCase => {
-  const spec = (raw as { readonly j5Turns?: unknown }).j5Turns;
-  if (spec === undefined) return testCase;
-  const turns = decodeTurns(spec);
+  const { j5Turns: spec, steer } = raw as { readonly j5Turns?: unknown; readonly steer?: unknown };
+  if (spec === undefined && steer === undefined) return testCase;
+  const turns = spec === undefined ? {} : decodeTurns(spec);
   const fill = (text: string) =>
     text.replace(/\{\{j5:([\w-]+)\}\}/g, (_, name: string) => {
       const turn = turns[name];
       if (turn === undefined) throw new Error(`${testCase.id}: no j5Turns entry named ${name}.`);
       return render(turn);
     });
-  return {
+  const filled: McpToolUseCase = {
     ...testCase,
     prompt: fill(testCase.prompt),
     setup: {
@@ -156,4 +158,7 @@ export const withJ5Turns = (testCase: McpToolUseCase, raw: unknown): McpToolUseC
           }),
     },
   };
+  if (steer === undefined) return filled;
+  const decoded = decodeSteer(steer);
+  return setSteer(filled, { ...decoded, message: fill(decoded.message) });
 };
