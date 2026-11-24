@@ -80,7 +80,7 @@ export const playbookTools = [
   }).annotate(McpSchema.EnabledWhen, hiddenFromOutsideClients),
   Tool.make("j5_playbook_list", {
     description:
-      "Discover live YAML playbooks from this environment's libraries and your thread workspace's .j5/playbooks directory, with each step's persona. Invalid files include actionable errors; non-blocking warnings name steps whose persona is missing or turned off.",
+      "Find playbooks in this environment's libraries and the calling workspace. Invalid definitions include actionable errors. Warnings flag required personas that may need attention before you can do their steps.",
     success: PlaybookDiscovery,
     failure: Failure,
     failureMode: "return",
@@ -92,7 +92,7 @@ export const playbookTools = [
     .annotate(McpSchema.EnabledWhen, hiddenFromOutsideClients),
   Tool.make("j5_playbook_read", {
     description:
-      "Read a playbook's live definition, with every step's prompt and persona, its source, and the digest an edit through j5_playbook_save needs, without starting a run. Pass the same name as j5_playbook_start. warnings name steps whose persona is missing or turned off; they never block starting.",
+      "Read a playbook's current definition, step prompts, required personas, source, and the digest needed to edit with j5_playbook_save. This does not start a run. Use the same name in j5_playbook_start. Check warnings before staffing the run.",
     parameters: Read,
     success: PlaybookReadResponse,
     failure: Failure,
@@ -108,7 +108,7 @@ export const playbookTools = [
     dependencies: workspaceDependencies,
     parameters: Start,
     description:
-      "Start a named playbook in your own thread. Pass an assignee participant ID to hand the first step to an agent you spawned or a member of a Crew you captain; otherwise you hold it. Delivery reports whether the notice reached the holder. Only you advance the run." +
+      "Start a named playbook in your own thread and own its saved run. Scheduled turns may start only a playbook named in the configured task prompt. Pass an assignee participant ID to hand the first step to an eligible agent you spawned or a member of a Crew you captain. Omit it to hold the step yourself when eligible. Check requiredPersonas and personaApproval, and resolve blocked delivery with j5_playbook_assign. Only you advance the run." +
       mutationDescription,
   }).annotate(McpSchema.EnabledWhen, hiddenFromOutsideClients),
   Tool.make("j5_playbook_current", {
@@ -125,21 +125,21 @@ export const playbookTools = [
     ...common,
     parameters: Next,
     description:
-      "Advance one step in the saved step order and retrieve its prompt. Pass an optional assignee participant ID for that step; otherwise you hold it. expectedStepId must equal your current step. At the last step, use j5_playbook_complete. A required checkpoint needs a summary of the finished work; approval_pending means stop and wait for a person to answer." +
+      "Advance one step in the saved step order and retrieve its prompt. Pass an eligible assignee participant ID for the step, or omit it to hold the step yourself when eligible. expectedStepId must equal your current step. At the last step, use j5_playbook_complete. A required checkpoint needs a summary of the finished work; approval_pending means stop and wait for a person to answer." +
       mutationDescription,
   }).annotate(McpSchema.EnabledWhen, hiddenFromOutsideClients),
   Tool.make("j5_playbook_back", {
     ...common,
     parameters: Movement,
     description:
-      "Move back one step in the saved step order and retrieve its saved prompt. Pass an optional assignee participant ID for that step; otherwise you hold it. This changes progress only; it does not undo work or file edits. expectedStepId guards against stale calls." +
+      "Move back one step in the saved step order and retrieve its saved prompt. Pass an eligible assignee participant ID for the step, or omit it to hold the step yourself when eligible. This changes progress only; it does not undo work or file edits. expectedStepId guards against stale calls." +
       mutationDescription,
   }).annotate(McpSchema.EnabledWhen, hiddenFromOutsideClients),
   Tool.make("j5_playbook_assign", {
     ...common,
     parameters: Movement,
     description:
-      "Hand the current step to an assignee participant ID, or omit assignee to take it back without moving. This can replace a pending hand-off to an unavailable holder. expectedStepId guards against a stale assignment." +
+      "Hand the current step to an eligible assignee participant ID, or omit it to take the step back when eligible. Use this to staff a blocked step or replace a pending hand-off. expectedStepId guards against a stale assignment." +
       mutationDescription,
   }).annotate(McpSchema.EnabledWhen, hiddenFromOutsideClients),
   Tool.make("j5_playbook_revise", {
@@ -153,14 +153,14 @@ export const playbookTools = [
     ...common,
     parameters: Finish,
     description:
-      "Mark the playbook completed. A required checkpoint needs a summary and refuses with approval_pending until a person approves. expectedStepId guards against stale completion. Your agent and thread remain usable; you may start another playbook." +
+      "Mark the playbook completed after every required outcome and checkpoint is satisfied. A required checkpoint needs a summary and refuses with approval_pending until a person approves. expectedStepId guards against stale completion. End by reporting the result, verification, and remaining limitations." +
       mutationDescription,
   }).annotate(McpSchema.EnabledWhen, hiddenFromOutsideClients),
   Tool.make("j5_playbook_cancel", {
     ...common,
     parameters: Mutation,
     description:
-      "Cancel your playbook first, then stop its current holder if that is another agent. Your own turn is never interrupted. The result records whether Stop was requested, unnecessary, or failed; retries do not stop again. Work and history remain." +
+      "Cancel your run and request Stop on its current holder when another agent holds it. The result records the Stop outcome. Stop other agents you assigned with t3_thread_interrupt (stop: true) or task_cancel for delegated tasks. Report any worker the platform could not stop." +
       mutationDescription,
   }).annotate(McpSchema.EnabledWhen, hiddenFromOutsideClients),
 ] as const;
@@ -235,6 +235,9 @@ export const playbookHandlers = {
   j5_playbook_start: runsPlaybook((input: typeof Start.Type) =>
     Effect.gen(function* () {
       const { owner, root } = yield* workspace;
+      const message = yield* turnMessage;
+      if (message?.scheduledTaskId)
+        yield* (yield* PlaybookStore).authorizeScheduledStart(message.scheduledTaskId, input.name);
       return yield* (yield* PlaybookCrewRelay).start({
         owner,
         root,

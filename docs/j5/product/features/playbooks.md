@@ -11,7 +11,9 @@ An agent following a long procedure reads it once at the beginning and the later
 
 ## Definition
 
-A **Playbook** is user-authored, step-by-step content for a piece of work. Its run belongs to the thread that started it. A step can require a saved persona. The owner may assign a step to an eligible local agent it spawned or to a member of a Crew it captains. A required persona must match the holder's launch assignment, including when the owner holds the step. An unnamed step can go to any eligible agent or the owner.
+A **Playbook** is a saved, ordered procedure for a piece of work. In conversation, an agent can choose and name a playbook that clearly fits the request. It asks first when the choice is unclear. A scheduled turn can start a playbook only if its configured task prompt names it. Every run stays within the scope and approvals of the original request.
+
+The thread that starts a run owns it. Its agent can do the work directly, delegate independent work, or use a Crew when workers need to collaborate. It can change arrangements during a run and carry completed work forward. The owner can assign a step to an eligible local agent it spawned or a member of a Crew it captains. A required persona must match the holder's recorded launch assignment, including when the owner holds the step. The holder reports results and evidence to the owner, and only the owner advances. An owner completes the run after the required work and checkpoints are satisfied and reports the result, verification, and limitations.
 
 **The engine is the platform's; the steps are the user's.** The platform holds the step pointer, keeps instructions fresh, and renders progress. The steps, their content, and the judgment that a step is done belong to the Playbook and the agents following it. This is how a workflow like the PR Group becomes expressible on the platform without being codified into it.
 
@@ -58,7 +60,6 @@ Playbooks are linear sequences. The initiative-level view — a plan whose nodes
 
 ## History
 
-
 - 2026-08-22 — the concept; former R27 ([record](../../worklog/2026-08-21-design-review.md)).
 - 2026-09-08 — rewritten into the definition shape. Former identifiers: R27(a) → AC3–AC4; R27(b) → Definition (linear first); R27(c), skills per step → not part of the definition, parked. The questions for the Playbooks design session — the step schema, how a Playbook attaches at spawn, the delivery channel for step advancement, the initiative-level view, what "declared complete" means for a multi-agent step — are that session's, not this definition's.
 
@@ -78,3 +79,4 @@ Playbooks are linear sequences. The initiative-level view — a plan whose nodes
 - 2026-11-24 — The composer shows the current step and holder across web and mobile. Waiting for approval follows the checkpoint Exchange, and Blocked follows other open asks from the owner ([#791](https://github.com/Jacksondr5/j5code/issues/791)).
 - 2026-11-24 — an environment Owner can save a library override of a team-folder playbook. Conversation saves use the shared-conversation attribution of the message that started the turn ([#794](https://github.com/Jacksondr5/j5code/issues/794)).
 - 2026-11-24 — a required persona must hold its step. The start request covers the named personas for the rest of the run, replacing the earlier stand-in and Captain fallback rulings. [#792](https://github.com/Jacksondr5/j5code/issues/792)
+- 2026-11-24 — #793 supersedes the conversation rule from #387. The owner may choose a fitting playbook. A scheduled start checks whether its own task prompt names the playbook ([#793](https://github.com/Jacksondr5/j5code/issues/793)).

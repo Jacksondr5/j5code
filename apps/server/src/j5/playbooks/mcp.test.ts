@@ -684,3 +684,26 @@ it.effect("maps stored persona policies before permitting playbook definition wr
     ),
   ),
 );
+
+it.effect.each(["demo", "@playbook:demo"])(
+  "permits a scheduled MCP start when its own prompt names %s",
+  (name) =>
+    Effect.gen(function* () {
+      const { call } = yield* makeFixture(liveThreadShell, (id) =>
+        kickoffRecords(id, "Look at @playbook:demo", "scheduled"),
+      );
+      const sql = yield* SqlClient.SqlClient;
+      // The stored task's prompt is independent of the message delivered to the agent.
+      yield* sql`INSERT INTO scheduled_tasks (
+        task_id, title, prompt, enabled, schedule_json, project_id, workspace_strategy_json,
+        model_selection_json, runtime_mode, interaction_mode, created_by, creation_source,
+        created_at, updated_at, last_run_status, run_count
+      ) VALUES ('weekly', 'Weekly', 'Look at demo-weekly', 1, '{}', ${projectId}, '{}', '{}',
+        'full-access', 'default', 'agent', 'mcp', ${createdAt}, ${createdAt}, 'never', 0)`;
+      const input = { name: "demo", client_request_id: "start" };
+      const refusal = yield* call("j5_playbook_start", input);
+      assert.equal((yield* decodeFailure(refusal.result)).code, "scheduled_playbook_not_named");
+      yield* sql`UPDATE scheduled_tasks SET prompt = ${`This week, use ${name} for the review.`} WHERE task_id = 'weekly'`;
+      assert.isFalse((yield* call("j5_playbook_start", input)).isFailure);
+    }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);

@@ -137,6 +137,7 @@ A steer that races a Stop is a known case ([FORK.md](../../../FORK.md) case 26).
 - **A poisoned Crew.** The Critic has gone wrong and confused its crewmates. The Captain asks to archive the Crew; the refusal lists two open asks and one running turn seat by seat with a token; the Captain confirms after checking with the user, writes a fresh brief from the surviving branch and artifacts, and proposes a successor. (AC16, AC19, AC20)
 
 ## History
+
 - 2026-11-24 — The run owner assigns each step at runtime to an eligible local holder. A Crew no longer assigns steps when its roster is proposed ([#788](https://github.com/Jacksondr5/j5code/issues/788)).
 
 - 2026-08-21 — the concept: definition versus instance, archive as a unit, archive never destroys work, agents spawn Crews, one Squadron, Captains as derived status, Captain archive rights, members cannot spawn Crews, "you command what you brief", Captains never routers; former R12–R22 ([record](../../worklog/2026-08-21-design-review.md)). "Team" retired as a word.
@@ -195,3 +196,4 @@ A steer that races a Stop is a known case ([FORK.md](../../../FORK.md) case 26).
 - 2026-11-22 — only a failed seat run tells the Captain; a completed run posts nothing and the member reports its own finish (AC13). The Later item leaves the list (Jackson; [#1191](https://github.com/Jacksondr5/j5code/issues/1191)).
 - 2026-11-24 — Archiving a Crew leaves its Captain’s playbook active. Archiving the Captain cancels the run, and unarchiving the Captain leaves it in history ([#789](https://github.com/Jacksondr5/j5code/issues/789)).
 - 2026-11-24 — a Captain who owns a playbook run may launch its approved personas as person picks throughout that run, including when adding a Crew member. This replaces the stand-in rule for required personas. [#792](https://github.com/Jacksondr5/j5code/issues/792)
+- 2026-11-24 — The playbook owner can hand a step to a Crew member and choose its next holder if that member is replaced ([#793](https://github.com/Jacksondr5/j5code/issues/793)).
