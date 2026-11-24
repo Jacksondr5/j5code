@@ -4,7 +4,9 @@ import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
+import { tokenizeCliArgs } from "@t3tools/shared/cliArgs";
 import {
+  CODEX_CONNECTORS_OFF,
   PAIRING_SCOPES,
   classifyServer,
   descendantGroupsFromTable,
@@ -562,9 +564,32 @@ describe("liveTestEnvironment", () => {
       T3CODE_AUTO_BOOTSTRAP_PROJECT_FROM_CWD: "false",
       J5CODE_DEV_OWNER_NAME: "",
       J5CODE_SERVER_NAME: "Test (tree)",
+      T3CODE_CODEX_LAUNCH_ARGS: CODEX_CONNECTORS_OFF,
       NODE_OPTIONS: "--disable-warning=ExperimentalWarning",
       PATH: `/work/tree/node_modules/.bin${NodePath.delimiter}/usr/bin`,
     });
+  });
+
+  it("starts every Codex a test server runs with ChatGPT apps and plugins off, so no connector reaches the live install", () => {
+    for (const inherited of [{}, { T3CODE_CODEX_LAUNCH_ARGS: "-c features.apps=true" }]) {
+      // Upstream launches every Codex with this variable's args in place of the settings' own
+      // (`resolveCodexLaunchArgs`), split as `tokenizeCliArgs` splits them.
+      const args = tokenizeCliArgs(liveTestEnvironment(inherited, "/w").T3CODE_CODEX_LAUNCH_ARGS);
+      // Codex takes the last value a key is given.
+      const features = new Map(
+        args.flatMap((arg, index) => {
+          const setting = args[index - 1] === "-c" ? /^features\.(\w+)=(.*)$/.exec(arg) : null;
+          return setting === null ? [] : [[setting[1], setting[2]] as const];
+        }),
+      );
+      assert.deepEqual(Object.fromEntries(features), {
+        apps: "false",
+        plugins: "false",
+        remote_plugin: "false",
+        plugin_sharing: "false",
+        tool_suggest: "false",
+      });
+    }
   });
 
   it("silences only experimental warnings, keeping the node options it was given", () => {
