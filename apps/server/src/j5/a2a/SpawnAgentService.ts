@@ -541,7 +541,13 @@ const spawnOnPeer = Effect.fn("j5.a2a.spawnOnPeer")(function* (
       return new J5PeerToolError(
         Option.isSome(refused)
           ? { code: refused.value.code, message: `On "${label}": ${refused.value.message}` }
-          : { code: error.code, message: `"${label}": ${error.message}` },
+          : {
+              code: error.code,
+              message:
+                error.code === "peer_unreachable"
+                  ? `"${label}": ${error.message} Retry j5_spawn_agent with client_request_id "${requestKey}"; it returns the same agent if the spawn already started.`
+                  : `"${label}": ${error.message}`,
+            },
       );
     }),
   );

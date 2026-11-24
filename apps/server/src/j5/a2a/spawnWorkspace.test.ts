@@ -2490,7 +2490,8 @@ it.effect("refuses a spawn on another machine it can't make, and starts nothing"
           ),
         },
         code: "peer_unreachable",
-        says: '"Build box"',
+        // The machine named, and the key to retry with, which finds the agent if it started.
+        says: '"Build box": The linked environment stopped answering. Retry j5_spawn_agent with client_request_id "remote-1"',
       },
       {
         name: "refused there",
