@@ -54,6 +54,7 @@ import {
 
 import { CrewMemberModels } from "../agents/crewMemberModels.ts";
 import {
+  personaElsewhereNextStep,
   pickAgentPersona,
   resolveCallerAccess,
   turnPickSource,
@@ -237,7 +238,7 @@ const prepareSpawnPersona = Effect.fn("j5.a2a.mcp.prepareSpawnPersona")(function
         code: error.code,
         state,
         nextCommand: blockedElsewhere
-          ? "It is blocked on that machine: have it unblocked there, or run the work on your own machine."
+          ? personaElsewhereNextStep(error.code, input.persona, "environment_id")
           : error.constraint !== null && "approvedLevel" in pick.caller
             ? "Or retry with a persona within that level, or sign in again and have the person approve a higher one."
             : `Or choose another persona from j5_list_personas that fits the work, or ask the person to pick this one themselves with @persona:${input.persona}.`,
