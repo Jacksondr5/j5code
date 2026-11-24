@@ -162,8 +162,28 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # Upstream runs web component tests in a real headless Chromium (no jsdom since v0.1.3).
+      - name: Resolve Playwright version
+        id: playwright_version
+        run: echo "version=$(node -p "require('./apps/web/node_modules/playwright/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Chromium
+        id: chromium_cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-shell-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright_version.outputs.version }}
+
       - name: Install Chromium for web browser tests
-        run: node apps/web/node_modules/playwright/cli.js install --with-deps --only-shell chromium
+        if: steps.chromium_cache.outputs.cache-hit != 'true'
+        run: node apps/web/node_modules/playwright/cli.js install --only-shell chromium
+
+      - name: Install missing Chromium system dependencies
+        run: |
+          browser=$(find "$HOME/.cache/ms-playwright" -name chrome-headless-shell -type f -print -quit)
+          test -n "$browser"
+          if ldd "$browser" | grep '=> not found'; then
+            node apps/web/node_modules/playwright/cli.js install-deps chromium
+          fi
 
       - name: Test
         run: pnpm exec vp run --log grouped --filter '@t3tools/web' test --shard ${{ matrix.shard }}/${{ strategy.job-total }}
@@ -214,8 +234,28 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # src/preview's browser integration tests drive a real headless Chromium.
+      - name: Resolve Playwright version
+        id: playwright_version
+        run: echo "version=$(node -p "require('./apps/server/node_modules/playwright-core/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Chromium
+        id: chromium_cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-shell-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright_version.outputs.version }}
+
       - name: Install Chromium for server browser integration tests
-        run: node apps/server/node_modules/playwright-core/cli.js install --with-deps --only-shell chromium
+        if: steps.chromium_cache.outputs.cache-hit != 'true'
+        run: node apps/server/node_modules/playwright-core/cli.js install --only-shell chromium
+
+      - name: Install missing Chromium system dependencies
+        run: |
+          browser=$(find "$HOME/.cache/ms-playwright" -name chrome-headless-shell -type f -print -quit)
+          test -n "$browser"
+          if ldd "$browser" | grep '=> not found'; then
+            node apps/server/node_modules/playwright-core/cli.js install-deps chromium
+          fi
 
       - name: Test
         run: pnpm exec vp run --filter t3 test --shard ${{ matrix.shard }}/${{ strategy.job-total }}
