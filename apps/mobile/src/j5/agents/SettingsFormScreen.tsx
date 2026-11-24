@@ -8,7 +8,7 @@ import {
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
 import type { AgentPersonaCreateDraft } from "@t3tools/client-runtime/j5/agent-personas";
 import type { AgentPersonaEditInput, EnvironmentId } from "@t3tools/contracts";
-import { useRef, type ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import { Platform } from "react-native";
 import { KeyboardAwareScrollView, useKeyboardState } from "react-native-keyboard-controller";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -16,6 +16,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import * as Dialog from "../../components/ui/Dialog";
 import { ScreenScrollView as ScrollView } from "../../components/ui/ScreenScrollView";
 import { SettingsScreen } from "../../features/settings/components/SettingsScreen";
+import { createFormExit } from "./formExit";
 
 export type SettingsFormRoutes = {
   SettingsPersonaNew: {
@@ -51,20 +52,12 @@ export function useSettingsFormExit(options: {
   readonly saving: boolean;
 }) {
   const navigation = useNavigation();
-  // Set once the save lands, so the removal guard lets the form close.
-  const saved = useRef(false);
-  // Back during a save waits for it: the form leaves if it lands and stays if it fails.
-  const leaveWhenSaved = useRef<NavigationAction | null>(null);
+  const [exit] = useState(createFormExit<NavigationAction>);
   const guardBack = options.hasChanges || options.saving;
   usePreventRemove(guardBack, ({ data }) => {
-    if (saved.current) {
-      navigation.dispatch(data.action);
-      return;
-    }
-    if (options.saving) {
-      leaveWhenSaved.current = data.action;
-      return;
-    }
+    const outcome = exit.onBack(data.action, options.saving);
+    if (outcome === "leave") navigation.dispatch(data.action);
+    if (outcome !== "ask") return;
     Dialog.alert("Discard changes?", "Your unsaved changes will be lost.", [
       { text: "Keep editing", style: "cancel" },
       {
@@ -77,14 +70,11 @@ export function useSettingsFormExit(options: {
   return {
     guardBack,
     leaveAfterSave: () => {
-      saved.current = true;
-      const action = leaveWhenSaved.current;
+      const action = exit.saveLanded();
       if (action !== null) navigation.dispatch(action);
       else if (navigation.isFocused()) navigation.goBack();
     },
-    saveFailed: () => {
-      leaveWhenSaved.current = null;
-    },
+    saveFailed: exit.saveFailed,
   };
 }
 
