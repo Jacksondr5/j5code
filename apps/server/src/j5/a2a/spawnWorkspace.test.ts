@@ -2486,7 +2486,7 @@ it.effect("refuses a spawn on another machine it can't make, and starts nothing"
       {
         name: "an older J5 there",
         peer: { capabilities: { poll: true } },
-        says: "runs an older J5",
+        says: "runs an older J5 that can't start a Peer Agent for another machine. Update J5 there, or start the agent on your own machine without environment_id. If it was just updated, try again once the two machines have reconnected.",
       },
       {
         name: "unreachable",
