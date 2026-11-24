@@ -5,7 +5,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import { View } from "react-native";
 
 import { ComposerAttachmentStrip } from "../../components/ComposerAttachmentStrip";
-import { FilePreviewModal, type FilePreviewSource } from "../../components/FilePreviewModal";
+import { FilePreviewModal, type FilePreviewSource } from "../../components/ui/FilePreviewModal";
 import * as Dialog from "../../components/ui/Dialog";
 import { ComposerAttachmentButton } from "../../features/threads/ComposerAttachmentButton";
 import {
@@ -131,7 +131,7 @@ export function AnswerPasteTarget(props: {
   const paste = useNativePaste((uris) => {
     if (disabled || support === null) return;
     void whileAddingAnswerAttachments(target, async (stillWanted) => {
-      const images = await convertPastedImagesToAttachments({
+      const { attachments: images, error } = await convertPastedImagesToAttachments({
         uris,
         existingCount: existingCount(target),
       });
@@ -141,6 +141,8 @@ export function AnswerPasteTarget(props: {
       }
       if (attach(target, images) > 0) {
         Dialog.alert("Could not paste image", "Too many attachments.");
+      } else if (error) {
+        Dialog.alert("Could not paste image", error);
       }
     }).catch((error: unknown) =>
       Dialog.alert("Could not paste image", error instanceof Error ? error.message : "Try again."),

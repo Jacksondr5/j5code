@@ -21,7 +21,6 @@ import { AgentCrewInstanceService } from "./AgentCrewInstanceService.ts";
 import { canBeNotified } from "./deliveryNotices.ts";
 import { A2ADeliveryWorker } from "./DeliveryWorker.ts";
 import { deliveryMessageId, ledgerMessageIdOfDelivery } from "./DeliveryTransport.ts";
-import { j5ForgetClaudeSteers } from "./claudeAgentSteers.ts";
 import { recordQueuedEdit } from "./queuedEdits.ts";
 import { formatSilenceNoticeEnvelope } from "./EnvelopeFormatter.ts";
 import { A2ALedger, A2ALedgerTransactionWriter } from "./LedgerService.ts";
@@ -272,6 +271,28 @@ const makeLayer = (daemon: boolean) =>
 
       const readRunsAndMessages = (threadId: ThreadId) =>
         threads.getThreadRecords(threadId, ["runs", "messages"], { messageRoles: ["user"] });
+
+      /**
+       * A steer the run ended without reading is moved to a new run by upstream after this event
+       * (`requeueUnreadSteers` in Orchestrator.ts), and that run owes its reply, not this one.
+       */
+      const steerLeftUnread = (threadId: ThreadId, runId: RunId, messageId: LedgerMessageId) =>
+        threads
+          .getThreadRecords(threadId, ["turnItems"], {
+            turnItemTypes: ["user_message"],
+            turnItemStatuses: ["pending"],
+            turnItemRunIds: [runId],
+          })
+          .pipe(
+            Effect.map(({ turnItems }) =>
+              turnItems.some(
+                (item) =>
+                  item.type === "user_message" &&
+                  item.messageId === deliveryMessageId(messageId) &&
+                  (item.inputIntent === "steer" || item.inputIntent === "promoted_queued_to_steer"),
+              ),
+            ),
+          );
 
       /**
        * A seat's failed run reaches its Captain as a Crew fact, from the launch report or the
@@ -721,15 +742,6 @@ const makeLayer = (daemon: boolean) =>
         }
         const run = terminalRun(stored);
         if (run === undefined || run.completedAt === null) return [];
-        // FORK.md case 89: Stop and query failures may end without a clean SDK result.
-        if (run.status !== "completed") {
-          const records = yield* readRunsAndMessages(stored.event.threadId);
-          j5ForgetClaudeSteers(
-            records.messages
-              .filter((message) => message.runId === run.id)
-              .map((message) => message.id),
-          );
-        }
         const memberships = yield* sql<MembershipRow>`
           SELECT project_id, participant_id
           FROM j5_a2a_membership
@@ -773,7 +785,9 @@ const makeLayer = (daemon: boolean) =>
           // An Exchange stays open after its notice; later runs need not read the thread for it.
           if (yield* alreadyNoticed(exchange, delivery.message_id)) continue;
           thread ??= yield* readRunsAndMessages(stored.event.threadId);
-          if (owingRun(thread, LedgerMessageId.make(delivery.message_id))?.id !== run.id) continue;
+          const messageId = LedgerMessageId.make(delivery.message_id);
+          if (owingRun(thread, messageId)?.id !== run.id) continue;
+          if (yield* steerLeftUnread(stored.event.threadId, run.id, messageId)) continue;
           const payload = yield* deriveNotice(
             run,
             stored.event.threadId,

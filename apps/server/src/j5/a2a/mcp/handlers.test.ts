@@ -98,11 +98,8 @@ import { ProjectService } from "../../../project/ProjectService.ts";
 import { fakeSpawnWorkspaceLayer, noRepository } from "../test-support/spawnWorkspaceFakes.ts";
 import { J5ToolkitHandlersLive } from "./handlers.ts";
 import {
-  type J5ListParticipantsInput,
   J5ListParticipantsResult,
   J5Toolkit,
-  type J5ArchiveCrewInput,
-  type J5SendMessageInput,
   type J5ProposeCrewInput,
   type J5RequestCrewMemberInput,
   type J5SpawnAgentInput,
@@ -336,7 +333,7 @@ it.effect("namespaces mutating-tool idempotency and sender identity from authent
 
     yield* Effect.gen(function* () {
       const toolkit = yield* J5Toolkit;
-      const call = (args: J5SendMessageInput) =>
+      const call = (args: Schema.Json) =>
         toolkit
           .handle("j5_send_message", args)
           .pipe(
@@ -552,7 +549,7 @@ it.effect(
 
       yield* Effect.gen(function* () {
         const toolkit = yield* J5Toolkit;
-        const call = (args: J5SendMessageInput) =>
+        const call = (args: Schema.Json) =>
           toolkit
             .handle("j5_send_message", args)
             .pipe(
@@ -1037,7 +1034,7 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
       ),
     );
 
-    const call = (input: J5ListParticipantsInput) =>
+    const call = (input: Schema.Json) =>
       Effect.gen(function* () {
         const toolkit = yield* J5Toolkit;
         return yield* toolkit
@@ -1049,7 +1046,7 @@ it.effect("lists active and archived agent titles with one ambient shell snapsho
             Effect.provideService(McpInvocationContext, scope),
           );
       }).pipe(Effect.provide(layer));
-    const list = (input: J5ListParticipantsInput) =>
+    const list = (input: Schema.Json) =>
       call(input).pipe(
         Effect.flatMap((response) => decodeJ5ListParticipantsResult(response.encodedResult)),
       );
@@ -1504,7 +1501,7 @@ it.effect("preflights home before creation and records facts before the one stab
 
     yield* Effect.gen(function* () {
       const toolkit = yield* J5Toolkit;
-      const call = (args: J5SpawnAgentInput) =>
+      const call = (args: Schema.Json) =>
         toolkit
           .handle("j5_spawn_agent", args)
           .pipe(
@@ -1953,7 +1950,7 @@ it.effect("spawns a saved agent as a Peer Agent only within its declared routes"
 
     yield* Effect.gen(function* () {
       const toolkit = yield* J5Toolkit;
-      const call = (args: J5SpawnAgentInput, caller: McpInvocationScope = scope) =>
+      const call = (args: Schema.Json, caller: McpInvocationScope = scope) =>
         toolkit
           .handle("j5_spawn_agent", args)
           .pipe(
@@ -2507,7 +2504,7 @@ it.effect("archives a crew only as a unit through its captain with one confirmat
       const toolkit = yield* J5Toolkit;
       const message = (response: { readonly result: unknown }) =>
         (response.result as { readonly message: string }).message;
-      const run = (args: J5ArchiveCrewInput) =>
+      const run = (args: Schema.Json) =>
         toolkit
           .handle("j5_archive_crew", args)
           .pipe(
@@ -3188,7 +3185,7 @@ it.effect(
 
       yield* Effect.gen(function* () {
         const toolkit = yield* J5Toolkit;
-        const callList = (input: J5ListParticipantsInput) =>
+        const callList = (input: Schema.Json) =>
           toolkit
             .handle("j5_list_participants", input)
             .pipe(
@@ -3197,7 +3194,7 @@ it.effect(
               Effect.flatMap(Effect.fromOption),
               Effect.provideService(McpInvocationContext, scope),
             );
-        const list = (input: J5ListParticipantsInput) =>
+        const list = (input: Schema.Json) =>
           callList(input).pipe(
             Effect.flatMap((response) => decodeJ5ListParticipantsResult(response.encodedResult)),
           );

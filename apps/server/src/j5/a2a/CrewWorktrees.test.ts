@@ -38,6 +38,7 @@ import * as EventSink from "../../orchestration-v2/EventSink.ts";
 import { EventSinkV2 } from "../../orchestration-v2/EventSink.ts";
 import * as RunExecutionService from "../../orchestration-v2/RunExecutionService.ts";
 import * as RuntimePolicy from "../../orchestration-v2/RuntimePolicy.ts";
+import * as TurnItemPositionStore from "../../orchestration-v2/TurnItemPositionStore.ts";
 import * as ProviderAuthService from "../../provider/ProviderAuthService.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProviderSessionManager from "../../orchestration-v2/ProviderSessionManager.ts";
@@ -994,6 +995,7 @@ it.effect(
               }),
               Layer.mock(RunExecutionService.RunExecutionServiceV2)({}),
               Layer.mock(RuntimePolicy.RuntimePolicyV2)({}),
+              Layer.mock(TurnItemPositionStore.TurnItemPositionStoreV2)({}),
             ),
           ),
         );

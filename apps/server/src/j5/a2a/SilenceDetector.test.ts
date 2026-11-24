@@ -1,5 +1,3 @@
-import type { SDKMessage, SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
-import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import { assert, it } from "@effect/vitest";
 import {
   MessageId,
@@ -11,7 +9,6 @@ import {
   RunId,
   ThreadId,
 } from "@t3tools/contracts";
-import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
@@ -37,14 +34,6 @@ import {
   AgentCrewInstanceService,
   layer as crewInstanceLayer,
 } from "./AgentCrewInstanceService.ts";
-import type { ClaudeAgentSdkQuerySession } from "../../orchestration-v2/Adapters/ClaudeAdapterV2.ts";
-import {
-  j5ClaimMissedClaudeSteer,
-  j5ClaudeSteerFields,
-  j5NoteMissedClaudeSteers,
-  j5ObserveClaudeSteer,
-  j5OfferClaudeSteer,
-} from "./claudeAgentSteers.ts";
 import { A2ADeliveryWorker, manualLayer as deliveryWorkerLayer } from "./DeliveryWorker.ts";
 import {
   A2ADeliveryTransport,
@@ -126,12 +115,15 @@ const thread: {
   thread: { archivedAt: string | null; deletedAt: string | null };
   runs: Array<OrchestrationV2Run>;
   messages: Array<{ readonly id: MessageId; readonly runId: RunId }>;
-} = { thread: { archivedAt: null, deletedAt: null }, runs: [], messages: [] };
+  /** Pending `user_message` items: a steer the run has not read yet. */
+  pendingSteers: Array<{ readonly runId: RunId; readonly messageId: MessageId }>;
+} = { thread: { archivedAt: null, deletedAt: null }, runs: [], messages: [], pendingSteers: [] };
 
 const threadMock = (overrides: Partial<ThreadManagementService["Service"]> = {}) => {
   thread.thread = { archivedAt: null, deletedAt: null };
   thread.runs = [runOf(terminalEvent("completed"))];
   thread.messages = [];
+  thread.pendingSteers = [];
   return Layer.mock(ThreadManagementService)({
     getThreadRecords: (() => Effect.succeed(thread)) as never,
     ...overrides,
@@ -158,6 +150,12 @@ const makeTestLayer = () => {
                   status: "failed",
                   failure: failureDetail,
                 },
+                ...thread.pendingSteers.map((steer) => ({
+                  ...steer,
+                  type: "user_message",
+                  status: "pending",
+                  inputIntent: "steer",
+                })),
               ],
             }
           : thread,
@@ -712,6 +710,36 @@ it.effect("follows a queued ask promoted into the running turn (#435)", () =>
   }).pipe(Effect.provide(makeTestLayer())),
 );
 
+it.effect("waits for the run a steer Claude left unread is moved to", () =>
+  Effect.gen(function* () {
+    yield* seed();
+    const steered = otherRun("steered", 5, 101);
+    const ask = yield* seedInbound(2, runOf(steered).id);
+    // The run ended before Claude read the steer; upstream moves it to a new run after this event.
+    thread.pendingSteers = [
+      { runId: runOf(steered).id, messageId: deliveryMessageId(ask.messageId) },
+    ];
+    thread.runs = [runOf(steered)];
+    const detector = yield* A2ASilenceDetector;
+    yield* detector.handleStoredEvent(steered);
+    assert.lengthOf(yield* readNotices(), 0, "the run the steer moves to can still answer it");
+
+    thread.pendingSteers = [];
+    thread.messages = thread.messages.map((message) =>
+      message.id === deliveryMessageId(ask.messageId)
+        ? { ...message, runId: carrierRunId }
+        : message,
+    );
+    const carrier = carrierRun(ask.messageId, 7, 102);
+    thread.runs = [runOf(steered), runOf(carrier)];
+    yield* detector.handleStoredEvent(carrier);
+    const notices = yield* readNotices();
+    assert.lengthOf(notices, 1);
+    assert.equal(notices[0]?.state, "turn-ended-no-reply");
+    assert.equal(notices[0]?.runId, carrierRunId);
+  }).pipe(Effect.provide(makeTestLayer())),
+);
+
 /** A message the waiter sent the subject without asking for a reply, queued as `carrierRunId`. */
 const seedQueuedMessage = Effect.fn("test.j5.a2a.silence.seedQueuedMessage")(function* () {
   const sent = yield* (yield* A2ASendService).send({
@@ -746,9 +774,6 @@ const seedQueuedMessage = Effect.fn("test.j5.a2a.silence.seedQueuedMessage")(fun
   thread.runs = [runOf(removed)];
   return { removed, messageId: sent.messageId };
 });
-
-const claudeLifecycle = (commandUuid: string, state: string) =>
-  ({ type: "command_lifecycle", command_uuid: commandUuid, state }) as unknown as SDKMessage;
 
 const readRemovedNotices = Effect.fn("test.j5.a2a.silence.readRemovedNotices")(function* () {
   return yield* (yield* SqlClient.SqlClient)<{
@@ -787,69 +812,6 @@ it.effect("tells the sender once when its queued message is removed before it ru
       "it names the message by the id its send returned",
     );
   }).pipe(Effect.provide(makeTestLayer())),
-);
-
-// FORK.md case 89: cleanup survives removal of the unread-after-Stop notice.
-it.effect.each([
-  { status: "interrupted", registered: true },
-  { status: "failed", registered: true },
-  { status: "cancelled", registered: true },
-  { status: "rolled_back", registered: true },
-  { status: "interrupted", registered: false },
-] as const)(
-  "releases a $status Claude turn's waiting steer without a notice (registered=$registered)",
-  ({ status, registered }) =>
-    Effect.gen(function* () {
-      yield* seed();
-      const sent = yield* (yield* A2ASendService).send({
-        commandId: CommCommandId.make(`command:silence:send:steered:${status}`),
-        senderThreadId: waiter.threadId,
-        to: subject.id,
-        message: "Steered update",
-        acceptedAt: iso(1),
-      });
-      const threadMessageId = deliveryMessageId(sent.messageId);
-      thread.messages.push({ id: threadMessageId, runId: carrierRunId });
-      const query = {} as ClaudeAgentSdkQuerySession;
-      const providerTurnId = `provider-turn:silence:${status}`;
-      const steer = yield* j5ClaudeSteerFields(
-        { createdBy: "agent" },
-        yield* SecureRandom.SecureRandom,
-      );
-      yield* j5OfferClaudeSteer({
-        query,
-        providerTurnId,
-        messageId: threadMessageId,
-        steer,
-        offer: Effect.void,
-      });
-      j5ObserveClaudeSteer(query, claudeLifecycle(steer.uuid!, "queued"));
-      const result = {
-        type: "result",
-        subtype: "success",
-        is_error: false,
-        terminal_reason: "completed",
-      } as SDKResultMessage;
-      const ended = terminalEvent(status, 100, {
-        id: carrierRunId,
-        userMessageId: MessageId.make("message:silence:upstream"),
-        completedAtSecond: 3,
-      });
-      thread.runs = [runOf(ended)];
-      if (!registered) {
-        yield* (yield* SqlClient.SqlClient)`
-          DELETE FROM j5_a2a_membership WHERE thread_id = ${subject.threadId}
-        `;
-      }
-
-      yield* (yield* A2ASilenceDetector).handleStoredEvent(ended);
-
-      assert.lengthOf(yield* readRemovedNotices(), 0);
-      // A late result for the released turn finds no steer left to run.
-      const nativeThreadId = `native-thread:silence:${status}:${registered}`;
-      j5NoteMissedClaudeSteers({ query, nativeThreadId, providerTurnId, result });
-      assert.isUndefined(j5ClaimMissedClaudeSteer(nativeThreadId, query));
-    }).pipe(Effect.provide(Layer.merge(makeTestLayer(), NodeCrypto.layer))),
 );
 
 it.effect.each(["promoted into the running turn", "archived with its receiver"] as const)(

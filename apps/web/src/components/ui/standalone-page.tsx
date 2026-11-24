@@ -25,6 +25,7 @@ export function StandalonePageHeader({
       <div className="flex items-baseline justify-between gap-3 text-muted-foreground">
         <span className="flex items-baseline gap-1.5" role="img" aria-label="J5 Code">
           <J5Wordmark className="h-3 w-auto shrink-0 text-foreground" />
+          {/* oxlint-disable-next-line t3code/no-untranslated-copy -- product wordmark */}
           <span className="text-lg font-medium tracking-tight">Code</span>
         </span>
         {context ? <span className="text-sm">{context}</span> : null}

@@ -9,18 +9,15 @@
   "ignoreFiles": [
     "apps/mobile/src/components/T3Wordmark.tsx",
     "apps/web/src/components/T3Wordmark.tsx",
-    // J5's link section stands in for upstream's (FORK.md case 122).
-    "apps/web/src/components/settings/LinkedEnvironmentsSettings.tsx",
   ],
   "ignoreIssues": {
-    "apps/server/src/cli/thread.ts": ["exports"],
-    // Its dropdown was only upstream's link dialog's; the request card still uses the rest.
-    "apps/web/src/components/settings/LinkMachineSelect.tsx": ["exports"],
     // J5's dialog answers the request card; upstream's is exported so it stays (FORK.md case 123).
     "apps/web/src/components/chat/LinkRequestCard.tsx": ["exports"],
     // J5 answers release lookups from its own releases (FORK.md case 40).
     "apps/server/src/cloud/npmRelease.ts": ["exports"],
     "packages/shared/src/t3ProjectFile.ts": ["exports"],
+    // J5's search reads the same text without a shared conversation's lines (FORK.md case 91).
+    "apps/server/src/orchestration-v2/messageSearchIndex.ts": ["exports"],
   },
   "workspaces": {
     ".": {
@@ -30,6 +27,7 @@
         // CodeRabbit loads its configuration by filename.
         ".coderabbit.config.ts",
         ".github/scripts/thread-transfer-report.cjs",
+        ".github/scripts/pr-limits.cjs",
       ],
       "vite": { "entry": [".github/**/*.test.cjs"] },
       "vitest": { "entry": [".github/**/*.test.cjs"] },
@@ -51,13 +49,17 @@
         "linux-after-pack.ts",
         "mobile-behavior/run.ts",
         "mobile-native-client.ts",
+        // e2e loads its config and the scenarios by path, and starts the app script.
+        "e2e.config.ts",
+        "prove-scenario.ts",
+        "scenarios/*.ts",
         "setup-worktree.ts",
         "sign-macos.ts",
         "prepare-server-compile-cache.cjs",
         "smoke-desktop-app.ts",
         "verify-windows-desktop-artifact.ts",
       ],
-      "ignoreDependencies": ["agent-device", "esbuild"],
+      "ignoreDependencies": ["esbuild"],
       // The `t3` npm package's files: copied into the package, never imported.
       // knip-schemas.test.ts writes a throwaway project to .knip-test-*, which a
       // knip run beside it in check:changed must not report.
@@ -92,6 +94,7 @@
         "@t3tools/web",
         "@napi-rs/keyring",
         "ffi-rs",
+        "transcribe-cpp",
       ],
     },
     "apps/desktop": {
@@ -144,10 +147,13 @@
       // Fonts are configured as asset paths; Expo autolinks the native packages.
       "ignoreDependencies": [
         "@expo-google-fonts/dm-sans",
-        "@t3tools/mobile-highlights-native",
         "@t3tools/mobile-review-diff-native",
         "@t3tools/mobile-terminal-native",
       ],
+    },
+    "apps/mobile/modules/t3-highlights": {
+      // Nitrogen discovers HybridObject specifications by filename.
+      "entry": ["src/*.nitro.ts!"],
     },
     "apps/mobile/modules/t3-source-text": {
       // React Native codegen discovers component specifications by filename.
@@ -184,6 +190,11 @@
       "includeEntryExports": true,
       "entry": ["test/fixtures/*.ts"],
       "ignoreIssues": { "src/_generated/**": ["exports", "types"] },
+    },
+    "packages/issue-tracker-linear": {
+      // graphqlgen reads its config; the generated operations export every selection's class.
+      "entry": ["graphql.config.ts"],
+      "ignoreIssues": { "**/*.graphql.ts": ["exports", "types", "namespaceMembers"] },
     },
     "packages/source-control-github": {
       // graphqlgen reads its config; the generated operations export every selection's class.

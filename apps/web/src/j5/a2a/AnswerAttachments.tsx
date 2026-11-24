@@ -56,6 +56,9 @@ const NO_ATTACHMENTS: ReadonlyArray<AnswerAttachment> = [];
 const NO_IMAGES: ReadonlyArray<ComposerImageAttachment> = [];
 const NO_FILES: ReadonlyArray<ComposerFileAttachment> = [];
 const NO_IDS: ReadonlyArray<string> = [];
+// A snapshot copy carries composer context the Inbox answer has no composer for.
+const copySnapshotUnavailable = (): Promise<void> =>
+  Promise.reject(new Error("Copy this snapshot from its thread's composer."));
 const NO_PENDING_INPUTS: never[] = [];
 
 function without<T>(record: Readonly<Record<string, T>>, key: string): Record<string, T> {
@@ -359,6 +362,7 @@ export function AnswerAttachmentStrip(props: {
           onExpandImage={(preview) => openExpandedImagePreview(viewerKey, preview)}
           // Only videos with their bytes are tiled, and those open in the image viewer.
           onFileOpen={() => undefined}
+          onCopySnapshot={copySnapshotUnavailable}
           onRemoveImage={removeImage}
           onRemoveFile={removeFile}
         />

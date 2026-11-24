@@ -1,5 +1,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
+import { ThreadId, withMessageSenderNote } from "@t3tools/contracts";
+import { carriesJ5DeliveryEnvelope } from "@t3tools/contracts/j5";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 
@@ -293,4 +295,27 @@ it("names a person on their inbox reply once the server holds a name, and keeps 
   );
   // A label cannot close the header early.
   assert.strictEqual(reply("Jack]son\nX"), `[Message from Jack son X (human:dfc92701)]${body}`);
+});
+
+it("keeps every envelope as the only sender line a provider reads", () => {
+  const senderId = ParticipantId.make("agent:sender");
+  const originProjectId = LedgerProjectId.make("project:origin");
+  const agentDelivery = {
+    createdBy: "agent",
+    creationSource: "mcp",
+    senderThreadId: ThreadId.make("thread:sender"),
+  } as const;
+  const envelopes = [
+    formatPeerEnvelope({ senderId, originProjectId, exchangeId: null, message: "m" }),
+    formatClosedPeerEnvelope({ senderId, originProjectId, message: "m" }),
+    formatMachineEnvelope({ senderId, originProjectId, message: "m" }),
+    formatOutsideAgentEnvelope({ senderId, message: "m" }),
+    formatClosedHumanEnvelope({ senderId, message: "m" }),
+    formatClosedHumanEnvelope({ senderId, senderLabel: "Ada", message: "m" }),
+    formatSilenceNoticeEnvelope({ noticeType: "silence", message: "m" }),
+  ];
+  for (const envelope of envelopes) {
+    assert.isTrue(carriesJ5DeliveryEnvelope(envelope), envelope);
+    assert.equal(withMessageSenderNote(agentDelivery, envelope), envelope);
+  }
 });

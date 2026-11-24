@@ -563,7 +563,10 @@ export function ArtifactsPage({
                 {selectedName ?? "No artifact selected"}
               </p>
               {selectedPath !== null ? (
-                <DiffFilePathCopyButton filePath={`artifacts/${selectedPath}`} />
+                <DiffFilePathCopyButton
+                  filePath={`artifacts/${selectedPath}`}
+                  workspaceRoot={undefined}
+                />
               ) : null}
               <Tooltip>
                 <TooltipTrigger

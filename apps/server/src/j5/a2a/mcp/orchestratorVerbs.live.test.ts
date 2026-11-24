@@ -60,6 +60,7 @@ import { AntigravityInstallation } from "../../../provider/AntigravityInstallati
 import * as CodexInstallation from "../../../provider/CodexInstallation.ts";
 import * as CodexManagedTokenBroker from "../../../provider/CodexManagedTokenBroker.ts";
 import * as ModelManifest from "../../../provider/ModelManifest.ts";
+import * as ProviderInstallationGate from "../../../provider/ProviderInstallationGate.ts";
 import * as OpenCodeRuntime from "@t3tools/provider-opencode/server/OpenCodeRuntime";
 import * as OpenCodeServerLedger from "@t3tools/provider-opencode/server/OpenCodeServerLedger";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
@@ -80,7 +81,7 @@ import { PlacementCommandId } from "../placementContracts.ts";
 import { J5A2ARuntimeLayer, J5ThreadRegistrationLayer } from "../runtimeLayer.ts";
 import { spawnThreadId } from "../spawnIds.ts";
 import { J5ToolkitHandlersLive } from "./handlers.ts";
-import { type J5SpawnAgentInput, J5SpawnAgentResult, J5Toolkit } from "./tools.ts";
+import { J5SpawnAgentResult, J5Toolkit } from "./tools.ts";
 import { noDocumentTextLayer } from "../../test-support/documentText.ts";
 
 const orchestrationLayer = RuntimeLayer.layer.pipe(Layer.provideMerge(J5ThreadRegistrationLayer));
@@ -131,8 +132,12 @@ const providerInstanceRegistryLayer = ProviderInstanceRegistryHydration.layer.pi
     Layer.mergeAll(
       serverConfigLayer.pipe(Layer.provide(NodeServices.layer)),
       serverSettingsLayer,
+      // Shared by reference with the runtime layer's gate and database.
+      ProviderInstallationGate.layer,
+      SqlitePersistence.layerMemory,
       FetchHttpClient.layer,
       AntigravityInstallation.layer.pipe(
+        Layer.provide(serverSettingsLayer),
         Layer.provide(serverConfigLayer),
         Layer.provide(FetchHttpClient.layer),
         Layer.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
@@ -310,7 +315,7 @@ const runStatus = (threadId: ThreadId, statuses: ReadonlySet<string>) =>
     return event.type === "run.updated" ? event.payload : yield* Effect.die("unreachable");
   });
 
-const callSpawn = (input: J5SpawnAgentInput) =>
+const callSpawn = (input: Schema.Json) =>
   Effect.gen(function* () {
     const toolkit = yield* J5Toolkit;
     const response = yield* toolkit

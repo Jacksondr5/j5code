@@ -254,7 +254,7 @@ export function CrewMemberModelsSettings() {
       resetAction={
         list !== null || reasoning !== null ? (
           <SettingResetButton
-            label="Models for custom members"
+            ariaLabel="Reset models for custom members to every model and level"
             tooltip="Reset to every model and level"
             onClick={() => updateSettings({ crewMemberModels: null, crewMemberReasoning: null })}
           />

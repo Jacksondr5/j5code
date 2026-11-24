@@ -114,7 +114,7 @@ export function toolsExpiryLine(
   if (expiry.kind === "none") return null;
   const distance = Math.abs(expiry.at.epochMilliseconds - nowMs);
   if (expiry.kind === "running") {
-    return `Tool access runs out in ${days(Math.max(1, Math.ceil(distance / DAY_MS)))}`;
+    return `Tool access runs out in ${days(Math.max(1, Math.ceil(distance / DAY_MS)))} unless it's used`;
   }
   const ago = Math.floor(distance / DAY_MS);
   return `Tool access ran out ${ago === 0 ? "today" : `${days(ago)} ago`}.${messaging ? " Messages still work." : ""}`;

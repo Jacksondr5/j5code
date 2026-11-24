@@ -26,6 +26,7 @@ import { EnvironmentRegistry } from "../connection/registry.ts";
 import { EnvironmentSupervisor } from "../connection/supervisor.ts";
 import type { RpcSession } from "../rpc/session.ts";
 import type { ConnectionCatalogEntry } from "../connection/catalog.ts";
+import { runAtomCommand } from "../state/runtime.ts";
 import { createJ5EnvironmentAtoms } from "./state.ts";
 
 const READS = J5_CLIENT_READ_WS_METHODS;
@@ -329,7 +330,7 @@ it.effect("tells the person to update a server that does not have the read yet",
     expect(Exit.isFailure(defect) && Cause.hasDies(defect.cause)).toBe(true);
     // The reads a caller makes once go the same way.
     const once = yield* Effect.promise(() =>
-      atoms.listArtifacts.run(registry, {
+      runAtomCommand(registry, atoms.listArtifacts, {
         environmentId: bravoId,
         input: { projectId: ProjectId.make("project:shared") },
       }),

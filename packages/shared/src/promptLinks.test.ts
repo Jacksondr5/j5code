@@ -155,4 +155,16 @@ describe("link round trips", () => {
       "j5code://threads/env-1/thread-1?prompt=hi",
     );
   });
+
+  it("maps links in browsers without URL.canParse, such as Safari before 17", () => {
+    const canParse = URL.canParse;
+    Reflect.deleteProperty(URL, "canParse");
+    try {
+      expect(promptLinkAppPath("https://j5.codes/new?prompt=hi")).toBe("/new?prompt=hi");
+      expect(promptLinkAppPath("https://j5.codes/")).toBeNull();
+      expect(promptLinkAppPath("not a url")).toBeNull();
+    } finally {
+      URL.canParse = canParse;
+    }
+  });
 });

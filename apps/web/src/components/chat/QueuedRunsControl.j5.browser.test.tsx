@@ -8,7 +8,7 @@ const fixture = vi.hoisted(() => ({
 }));
 vi.mock(import("../../state/entities"), async (importOriginal) => ({
   ...(await importOriginal()),
-  useThreadProjection: (() => ({ projection: fixture.projection })) as never,
+  useQuietThreadProjection: (() => ({ projection: fixture.projection })) as never,
 }));
 vi.mock(import("../../j5/a2a/ParticipantIdentitiesClient"), async (importOriginal) => ({
   ...(await importOriginal()),
@@ -110,6 +110,7 @@ it("folds a queued peer message under its sender on the left, edits it with its 
       optimisticMessages={[]}
       editingRunId={null}
       editBlockedReason={null}
+      onImageExpand={() => undefined}
       onEditQueuedRun={onEditQueuedRun}
       onCancelEdit={() => {}}
       timestampFormat="locale"
@@ -187,6 +188,7 @@ it("puts queued automation and server messages on the left with the peer's", asy
       optimisticMessages={[]}
       editingRunId={null}
       editBlockedReason={null}
+      onImageExpand={() => undefined}
       onEditQueuedRun={() => {}}
       onCancelEdit={() => {}}
       timestampFormat="locale"

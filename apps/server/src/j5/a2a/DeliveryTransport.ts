@@ -14,6 +14,7 @@ import {
 import { codexModelFamily, normalizeModelSlug } from "@t3tools/shared/model";
 import {
   latestExecutedRun,
+  orchestrationV2WorktreePending,
   usageLimitBlockedRun,
 } from "@t3tools/shared/orchestrationV2ThreadError";
 import * as Context from "effect/Context";
@@ -274,9 +275,8 @@ export const peerSteeringRun = (
   );
   if (providerThread === undefined || session?.driver !== providerThread.driver) return undefined;
   const turns = session.capabilities.turns;
-  // Claude's adapter sends an agent's steer with priority "next", which waits for the running
-  // tool calls instead of cancelling them (case 89). Its capability still reports that steering
-  // interrupts tools, because a person's steer does.
+  // Claude's adapter sends a steer with priority "next", which waits for the running tool calls
+  // instead of cancelling them.
   const claudeTakesPeerUpdates =
     providerThread.driver === "claudeAgent" && turns.supportsActiveSteering === true;
   const gpt6TakesPeerUpdates =
@@ -317,8 +317,8 @@ export const requestedSteeringRun = (
 /**
  * Why a delivery to an idle agent waits unsent. Upstream refuses to resume a thread stopped by a
  * usage limit and would start the delivery into the same limit, and it holds a message queued
- * after a failed worktree setup (`worktreeMissingRun` in Orchestrator.ts), as resuming would run it
- * in the project checkout.
+ * after a failed worktree setup (`orchestrationV2WorktreePending`), as resuming would run it in the
+ * project checkout.
  */
 export const idleQueueHold = (
   target: Pick<
@@ -336,9 +336,8 @@ export const idleQueueHold = (
   const limitedRun = usageLimitBlockedRun(target.runs, target.turnItems, sessionError);
   if (limitedRun !== null) return { type: "usage_limit" as const, run: limitedRun };
   const latestRun = latestExecutedRun(target.runs);
-  return (latestRun?.status === "failed" || latestRun?.status === "interrupted") &&
-    latestRun.workspacePreparation?.type === "worktree" &&
-    target.thread.worktreePath === null
+  return latestRun !== null &&
+    orchestrationV2WorktreePending(target.thread.worktreePath, target.runs)
     ? { type: "worktree_setup_failed" as const, run: latestRun }
     : undefined;
 };

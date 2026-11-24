@@ -29,6 +29,7 @@ import {
 
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import * as ServerConfig from "../../config.ts";
+import * as SqlitePersistence from "../../persistence/Sqlite.ts";
 import * as ProcessRunner from "../../processRunner.ts";
 import { acquireServerOwnership } from "../../serverOwnership.ts";
 import { makePersistedServerRuntimeState } from "../../serverRuntimeState.ts";
@@ -56,6 +57,15 @@ const homeConfig = ServerConfig.ServerConfig.pipe(
 const holdHome = Effect.fn("test.holdHome")(function* (
   config: ServerConfig.ServerConfig["Service"],
 ) {
+  // A server migrates its home at startup (`layerConfig`) before it takes the home's lock.
+  yield* Effect.scoped(
+    Layer.build(
+      SqlitePersistence.layerConfig.pipe(
+        Layer.provide(ServerConfig.layer(config)),
+        Layer.provide(NodeServices.layer),
+      ),
+    ),
+  );
   const ownership = yield* acquireServerOwnership(config.serverRuntimeStatePath).pipe(
     Effect.provide(ProcessRunner.layer),
   );

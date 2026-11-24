@@ -1638,6 +1638,7 @@ const unitFixture = Effect.gen(function* () {
       ),
     );
   const archiveAgent = Layer.mock(ArchiveAgentService)({
+    runsDelegatedTasks: () => Effect.succeed(false),
     readFacts: (target) =>
       Effect.gen(function* () {
         yield* Ref.update(factsRead, (items) => [...items, target.threadId]);

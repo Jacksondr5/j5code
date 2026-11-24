@@ -1,0 +1,155 @@
+---
+import { getImage } from "astro:assets";
+import tabletDark from "../../assets/whats-new-0-0-54/ipad-three-pane-dark.webp";
+import tabletLight from "../../assets/whats-new-0-0-54/ipad-three-pane-light.webp";
+import chipDark from "../../assets/whats-new-0-0-54/iphone-cite-chip-dark.webp";
+import chipLight from "../../assets/whats-new-0-0-54/iphone-cite-chip-light.webp";
+import menuDark from "../../assets/whats-new-0-0-54/iphone-cite-menu-dark.webp";
+import menuLight from "../../assets/whats-new-0-0-54/iphone-cite-menu-light.webp";
+
+/**
+ * The mobile app, shown as captures from an iPhone and an iPad: native screens the page can't
+ * rebuild honestly in HTML. Each follows the visitor's light or dark scheme, like the page.
+ */
+const shot = async (light: ImageMetadata, dark: ImageMetadata, width: number) => ({
+  light: await getImage({ src: light, width, format: "webp" }),
+  dark: await getImage({ src: dark, width, format: "webp" }),
+});
+
+const menu = await shot(menuLight, menuDark, 540);
+const chip = await shot(chipLight, chipDark, 540);
+const tablet = await shot(tabletLight, tabletDark, 1400);
+
+const phones = [
+  {
+    ...menu,
+    alt: "J5 Code on an iPhone. One sentence of an agent's reply is selected, and a menu above it offers Cite, Copy and Copy as Markdown.",
+    caption: "Select a sentence, then choose Cite.",
+  },
+  {
+    ...chip,
+    alt: "J5 Code on an iPhone. The draft above the keyboard holds the selected sentence as a quote chip.",
+    caption: "The quote waits in your draft as a chip.",
+  },
+];
+---
+
+<div class="mobile">
+  <div class="mobile__row">
+    <ul class="items mobile__items">
+      <li>
+        <h3>Select and cite</h3>
+        <p>
+          Long-press an agent's reply, adjust the selection and choose Cite. The quote joins your draft as a chip, and
+          you can add a comment to it.
+        </p>
+      </li>
+      <li>
+        <h3>Issues on the phone</h3>
+        <p>Issues have a tab in the mobile app, in the slot they share with Pull requests.</p>
+      </li>
+    </ul>
+    <div class="mobile__phones">
+      {
+        phones.map((phone) => (
+          <figure class="shot shot--phone">
+            <picture>
+              <source srcset={phone.dark.src} media="(prefers-color-scheme: dark)" />
+              <img
+                src={phone.light.src}
+                width={phone.light.attributes.width}
+                height={phone.light.attributes.height}
+                alt={phone.alt}
+                loading="lazy"
+                decoding="async"
+              />
+            </picture>
+            <figcaption>{phone.caption}</figcaption>
+          </figure>
+        ))
+      }
+    </div>
+  </div>
+
+  <div class="mobile__row mobile__row--tablet">
+    <ul class="items mobile__items">
+      <li>
+        <h3>A layout for every size</h3>
+        <p>
+          On tablets and unfolded foldables, the sidebar, the thread and the inspector show as columns when there is
+          room for them. When there isn't, the sidebar steps aside or floats over the page, and the inspector opens as
+          a sheet.
+        </p>
+      </li>
+    </ul>
+    <figure class="shot shot--tablet">
+      <picture>
+        <source srcset={tablet.dark.src} media="(prefers-color-scheme: dark)" />
+        <img
+          src={tablet.light.src}
+          width={tablet.light.attributes.width}
+          height={tablet.light.attributes.height}
+          alt="J5 Code on an iPad in landscape. The thread list, the open thread and the Files inspector sit side by side as three columns."
+          loading="lazy"
+          decoding="async"
+        />
+      </picture>
+      <figcaption>An iPad in landscape: the thread list, the thread and the Files inspector as three columns.</figcaption>
+    </figure>
+  </div>
+</div>
+
+<style>
+  .mobile {
+    display: grid;
+    gap: 64px;
+  }
+
+  .mobile__row {
+    display: grid;
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    align-items: start;
+    gap: 56px;
+  }
+
+  /* The copy is one column here, so each item keeps its own two rows. */
+  .mobile .mobile__items {
+    grid-template-columns: minmax(0, 1fr);
+    margin-top: 0;
+  }
+
+  .mobile__phones {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 270px));
+    gap: 32px;
+  }
+
+  .shot picture,
+  .shot img {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
+  .shot img {
+    border: 1px solid var(--wn-window-edge);
+    box-shadow: var(--wn-window-shadow);
+  }
+
+  /* The corners of the screens themselves: an iPhone's are about a ninth of its width. */
+  .shot--phone img { border-radius: 11.5% / 5.3%; }
+  .shot--tablet img { border-radius: 2.2% / 2.9%; }
+
+  .shot figcaption {
+    margin-top: 14px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--wn-muted);
+  }
+
+  @media (max-width: 860px) {
+    .mobile { gap: 48px; }
+    .mobile__row { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+    .mobile__phones { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  }
+</style>

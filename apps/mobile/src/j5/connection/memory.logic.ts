@@ -34,15 +34,29 @@ const fingerprint = (text: string) => {
 
 /**
  * The paired credential a connection uses: its bearer token, which re-pairing replaces and a
- * reconnect keeps. A connection without one is known by its route.
+ * reconnect keeps. A key-bound (DPoP) token renews itself, so its credential-store slot names it
+ * instead, with how many re-pairs have replaced it this launch (`credentialReplacements`), since
+ * the slot survives a re-pair to the same address. A connection with neither is known by its route.
  */
-export const credentialKey = (prepared: {
-  readonly httpAuthorization: PreparedConnection["httpAuthorization"];
-  readonly target: unknown;
-}) =>
+export const credentialKey = (
+  prepared: {
+    readonly httpAuthorization:
+      | Extract<NonNullable<PreparedConnection["httpAuthorization"]>, { readonly _tag: "Bearer" }>
+      | {
+          readonly _tag: "Dpop";
+          readonly directConnection?: { readonly connectionId: string } | undefined;
+        }
+      | null;
+    readonly target: unknown;
+  },
+  replacements = 0,
+) =>
   prepared.httpAuthorization?._tag === "Bearer"
     ? `bearer:${fingerprint(prepared.httpAuthorization.token)}`
-    : `route:${fingerprint(JSON.stringify(prepared.target))}`;
+    : prepared.httpAuthorization?._tag === "Dpop" && prepared.httpAuthorization.directConnection
+      ? // A renewal keeps the slot and the count; a re-pair keeps the slot and bumps the count.
+        `dpop:${fingerprint(prepared.httpAuthorization.directConnection.connectionId)}:${String(replacements)}`
+      : `route:${fingerprint(JSON.stringify(prepared.target))}`;
 
 const emptyConnection = (credential: string): RememberedConnection => ({
   credential,

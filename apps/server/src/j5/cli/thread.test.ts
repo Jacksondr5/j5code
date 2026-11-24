@@ -91,9 +91,20 @@ it.effect("start --wait follows the run the agent's brief started, not another m
         },
       ],
       t3_thread_read: [
+        // Upstream's follow-wakes check finds no run after the brief's.
+        { recentRuns: [{ runId, ordinal: 1, status: "completed" }] },
         { thread: { pendingRequestCount: 0 }, items: [], hasMore: false, nextPosition: null },
       ],
-      t3_thread_wait: [{ threadId, runId, status: "completed", timedOut: false }],
+      t3_thread_wait: [
+        { threadId, runId, status: "completed", timedOut: false },
+        {
+          threadId,
+          runId,
+          status: "completed",
+          timedOut: false,
+          resultRun: { runId, status: "completed" },
+        },
+      ],
     });
     const args = { title: "Fix", brief: "Fix", workspace: { type: "root" }, persona: "builder" };
 

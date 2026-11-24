@@ -6,7 +6,7 @@ import {
 import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { Platform } from "react-native";
 
-import type { FilePreviewSource } from "../../components/FilePreviewModal";
+import type { FilePreviewSource } from "../../components/ui/FilePreviewModal";
 import {
   ThreadMarkdownImageUnavailable,
   ThreadMarkdownImageView,

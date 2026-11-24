@@ -2,7 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import { localSwitchBlockReason } from "../../components/sidebar/updateEverything.logic";
 
-// The decisions are tested on j5DatabaseMigrationGap; these rows check the plan uses it, in its words.
+// The decisions are tested on j5DatabaseMigrationGap; these rows check the plan uses it.
 describe("a track switch checks J5's ledgers", () => {
   const nightly = "0.1.4-nightly.20261027.3796";
   const stable = (j5DatabaseMigrations?: Record<string, number>) => ({
@@ -25,21 +25,23 @@ describe("a track switch checks J5's ledgers", () => {
       db: { ...heads, j5_a2a_migrations: 58 },
       release: heads,
       reason:
-        "its database has changes 0.1.3 does not support yet; stay on Nightly until Stable has them",
+        "This app cannot switch: its database has changes 0.1.3 does not support yet; stay on Nightly until Stable has them.",
     },
     {
       name: "blocks a server that reports no J5 ledgers",
       db: undefined,
       release: heads,
-      reason: "its server predates J5's database checks; update it on Nightly first",
+      reason:
+        "This app cannot switch: its server predates J5's database checks; update it on Nightly first.",
     },
     {
       name: "blocks a release that publishes no J5 ledgers",
       db: heads,
       release: undefined,
-      reason: "0.1.3 predates J5's database checks; wait for a newer Stable release",
+      reason:
+        "This app cannot switch: 0.1.3 predates J5's database checks; wait for a newer Stable release.",
     },
   ])("$name", ({ db, release, reason }) => {
-    expect(localSwitchBlockReason(nightly, stable(release), [server(db)], 1)).toBe(reason);
+    expect(localSwitchBlockReason(nightly, stable(release), [server(db)], 1, true)).toBe(reason);
   });
 });

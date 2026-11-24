@@ -39,6 +39,14 @@ const savesOf = (environmentId: EnvironmentId) => {
 };
 
 /**
+ * How many times a re-pair has replaced the environment's credential this launch. A key-bound
+ * (DPoP) credential keeps its connection slot through a re-pair and a renewal alike, so a cache
+ * keyed on the slot also reads this to tell a re-pair, possibly another person, from a renewal.
+ */
+export const credentialReplacements = (environmentId: EnvironmentId): number =>
+  environments.get(environmentId)?.replaced ?? 0;
+
+/**
  * Cache saves held to the environment's credential as it is now. A shell or thread made under a
  * replaced one lives in its follower's scope and outlasts the registry's teardown, so its last
  * flush would put the last person's rows back; once replaced, its saves do nothing.

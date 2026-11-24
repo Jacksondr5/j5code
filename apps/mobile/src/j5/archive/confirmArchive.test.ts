@@ -1,8 +1,6 @@
 import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import type { ArchiveWarning } from "@t3tools/client-runtime/j5/archive-flow";
 import type { PreArchiveFacts } from "@t3tools/contracts/j5";
-import * as Cause from "effect/Cause";
-import { AsyncResult } from "effect/reactivity";
 import { describe, expect, it, vi } from "vite-plus/test";
 
 import { makeThreadShellFixture } from "../../test-fixtures";
@@ -22,25 +20,27 @@ vi.mock("./ArchiveWarningSheet", () => ({
     new Promise<boolean>((resolve) => state.confirms.push({ warning, resolve })),
 }));
 vi.mock("../../state/atom-registry", () => ({ appAtomRegistry: {} }));
-vi.mock("../state", () => ({
-  j5Environment: {
-    readPreArchiveFacts: {
-      run: async () =>
-        state.facts === null
-          ? AsyncResult.failure(Cause.fail(new Error("offline")))
-          : AsyncResult.success(state.facts),
+// Commands run as Effects since v0.1.11 (`runAtomCommand`).
+vi.mock("../state", async () => {
+  const Effect = await import("effect/Effect");
+  return {
+    j5Environment: {
+      readPreArchiveFacts: {
+        run: () =>
+          state.facts === null ? Effect.fail("offline" as const) : Effect.succeed(state.facts),
+      },
+      readParticipantIdentities: {
+        run: () =>
+          Effect.succeed({
+            entries: state.labels.map(({ participantId, displayName }) => ({
+              participantId,
+              identity: { kind: "known", displayName },
+            })),
+          }),
+      },
     },
-    readParticipantIdentities: {
-      run: async () =>
-        AsyncResult.success({
-          entries: state.labels.map(({ participantId, displayName }) => ({
-            participantId,
-            identity: { kind: "known", displayName },
-          })),
-        }),
-    },
-  },
-}));
+  };
+});
 
 import { confirmJ5Archive } from "./confirmArchive";
 

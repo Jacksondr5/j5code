@@ -56,7 +56,7 @@ export function useSharingPaletteItems(input: {
   });
 
   const items: CommandPaletteActionItem[] = [];
-  if (activeThread !== null) {
+  if (activeThread) {
     items.push(
       share("action:j5-share-thread", "Share thread", activeThread.title, {
         kind: "share",

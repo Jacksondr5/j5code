@@ -3,7 +3,7 @@
  * Inbox piece work (links, tabs, the + menu, the panel controls, answering). Without this script
  * the page shows every vignette finished, and hides the hints that need it.
  */
-const select = <T extends Element = HTMLElement>(root: ParentNode, selector: string) =>
+export const select = <T extends Element = HTMLElement>(root: ParentNode, selector: string) =>
   Array.from(root.querySelectorAll<T>(selector));
 
 function playOnceWhenSeen(root: HTMLElement) {

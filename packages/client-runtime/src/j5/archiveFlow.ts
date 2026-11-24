@@ -8,6 +8,8 @@ import type {
 import * as Cause from "effect/Cause";
 import type { AtomRegistry } from "effect/reactivity";
 
+import { type AtomCommand, runAtomCommand } from "../state/runtime.ts";
+
 import {
   participantIdentitiesFromResponse,
   presentParticipantIdentity,
@@ -22,6 +24,13 @@ type J5Reads = Pick<
   "readPreArchiveFacts" | "readParticipantIdentities" | "readCrewArchiveWorktrees"
 >;
 
+/** Runs a read from outside Effect; its callers turn a failure into "couldn't check". */
+const settle = <W, A, E>(
+  registry: AtomRegistry.AtomRegistry,
+  command: AtomCommand<W, A, E>,
+  input: W,
+) => runAtomCommand(registry, command, input, { reportFailure: false, reportDefect: false });
+
 /** Unknown participants stay absent, and so does every one when the read fails. */
 export async function readParticipantIdentities(
   j5: Pick<J5Reads, "readParticipantIdentities">,
@@ -30,7 +39,7 @@ export async function readParticipantIdentities(
   participantIds: ReadonlyArray<string>,
 ): Promise<ParticipantIdentities> {
   if (participantIds.length === 0) return { labels: new Map(), threads: new Map() };
-  const result = await j5.readParticipantIdentities.run(registry, {
+  const result = await settle(registry, j5.readParticipantIdentities, {
     environmentId,
     input: { participantIds },
   });
@@ -56,7 +65,7 @@ export async function readCrewArchiveWorktrees(
   environmentId: EnvironmentId,
   crewInstanceIds: ReadonlyArray<string>,
 ): Promise<ArchiveWarningWorktrees> {
-  const result = await j5.readCrewArchiveWorktrees.run(registry, {
+  const result = await settle(registry, j5.readCrewArchiveWorktrees, {
     environmentId,
     input: { crewInstanceIds },
   });
@@ -69,7 +78,7 @@ export async function readArchivePreflight(
   registry: AtomRegistry.AtomRegistry,
   threadRef: ScopedThreadRef,
 ): Promise<ArchivePreflight> {
-  const result = await j5.readPreArchiveFacts.run(registry, {
+  const result = await settle(registry, j5.readPreArchiveFacts, {
     environmentId: threadRef.environmentId,
     input: { threadId: threadRef.threadId },
   });

@@ -13,6 +13,10 @@ import * as Schema from "effect/Schema";
 
 import { migrationManifest } from "../../persistence/Migrations.ts";
 import { J5_A2A_MIGRATIONS_TABLE, migrationEntries } from "../a2a/Migrations.ts";
+import {
+  RUN_OBSERVABILITY_MIGRATIONS_TABLE,
+  runObservabilityMigrationIds,
+} from "../run-observability/Migrations.ts";
 
 /**
  * How many pre-migration snapshots stay beside the database. Each is a full copy, so the number
@@ -50,6 +54,8 @@ export class MigrationSnapshotError extends Schema.TaggedError<MigrationSnapshot
 export interface RecordedMigrations {
   readonly upstream: number;
   readonly j5: number;
+  /** Not in a snapshot's name: the lane only adds an index, so a copy before it is the same data. */
+  readonly runObservability: number;
 }
 
 export interface SnapshotBeforeMigrationsOptions {
@@ -57,6 +63,8 @@ export interface SnapshotBeforeMigrationsOptions {
   readonly upstreamMigrationIds?: ReadonlyArray<number>;
   /** The J5 ledger migration ids this build knows. Defaults to `migrationEntries`. */
   readonly j5MigrationIds?: ReadonlyArray<number>;
+  /** The run-observability lane's ids this build knows. Defaults to its migrations. */
+  readonly runObservabilityMigrationIds?: ReadonlyArray<number>;
   /** Defaults to `MIGRATION_SNAPSHOTS_KEPT`. */
   readonly keep?: number;
 }
@@ -78,7 +86,7 @@ const PARTIAL_STALE_AFTER_MS = Duration.toMillis(Duration.hours(1));
 export const migrationSnapshotPath = (
   path: Path.Path,
   dbPath: string,
-  recorded: RecordedMigrations,
+  recorded: Pick<RecordedMigrations, "upstream" | "j5">,
 ) => {
   const pad = (id: number) => String(id).padStart(3, "0");
   return path.join(
@@ -86,6 +94,14 @@ export const migrationSnapshotPath = (
     `${path.basename(dbPath, ".sqlite")}.pre-migration-u${pad(recorded.upstream)}-j${pad(recorded.j5)}.sqlite`,
   );
 };
+
+// SQLITE_CORRUPT and SQLITE_NOTADB, as `persistence/Sqlite.ts` reads them.
+const isDamagedDatabase = (cause: unknown) =>
+  typeof cause === "object" &&
+  cause !== null &&
+  "errcode" in cause &&
+  typeof cause.errcode === "number" &&
+  [11, 26].includes(cause.errcode & 0xff);
 
 const readRecordedMigrations = (filename: string): RecordedMigrations => {
   const database = openReadOnly(filename);
@@ -98,7 +114,11 @@ const readRecordedMigrations = (filename: string): RecordedMigrations => {
       const row = database.prepare(`SELECT MAX(migration_id) AS latest FROM "${table}"`).get();
       return Number(row?.latest ?? 0);
     };
-    return { upstream: latest(UPSTREAM_MIGRATIONS_TABLE), j5: latest(J5_A2A_MIGRATIONS_TABLE) };
+    return {
+      upstream: latest(UPSTREAM_MIGRATIONS_TABLE),
+      j5: latest(J5_A2A_MIGRATIONS_TABLE),
+      runObservability: latest(RUN_OBSERVABILITY_MIGRATIONS_TABLE),
+    };
   } finally {
     database.close();
   }
@@ -176,6 +196,10 @@ export const snapshotBeforeMigrations = Effect.fn("snapshotBeforeMigrations")(fu
   const newestKnown = {
     upstream: Math.max(0, ...(options.upstreamMigrationIds ?? migrationManifest.map(([id]) => id))),
     j5: Math.max(0, ...(options.j5MigrationIds ?? migrationEntries.map(([id]) => id))),
+    runObservability: Math.max(
+      0,
+      ...(options.runObservabilityMigrationIds ?? runObservabilityMigrationIds),
+    ),
   };
   const failAt = (snapshotPath: string) => (cause: unknown) =>
     new MigrationSnapshotError({ databasePath: dbPath, snapshotPath, cause });
@@ -183,13 +207,27 @@ export const snapshotBeforeMigrations = Effect.fn("snapshotBeforeMigrations")(fu
 
   if (!(yield* fs.exists(dbPath).pipe(Effect.mapError(failBeforeNaming)))) return;
   const recorded = yield* Effect.try({
-    try: () => readRecordedMigrations(dbPath),
+    try: (): RecordedMigrations | null => {
+      try {
+        return readRecordedMigrations(dbPath);
+      } catch (cause) {
+        if (isDamagedDatabase(cause)) return null;
+        throw cause;
+      }
+    },
     catch: failBeforeNaming,
   });
+  // A file that is not a SQLite database has nothing to keep; opening it names the problem.
+  if (recorded === null) return;
   if (recorded.upstream === 0 && recorded.j5 === 0) return;
   // Each migrator runs every id above the newest it has recorded, so that is what pending means.
   // Upstream's renumbering of an older history is covered: such a history ends below the manifest.
-  if (recorded.upstream >= newestKnown.upstream && recorded.j5 >= newestKnown.j5) return;
+  if (
+    recorded.upstream >= newestKnown.upstream &&
+    recorded.j5 >= newestKnown.j5 &&
+    recorded.runObservability >= newestKnown.runObservability
+  )
+    return;
 
   const snapshotPath = migrationSnapshotPath(path, dbPath, recorded);
   const fail = failAt(snapshotPath);
@@ -211,7 +249,11 @@ export const snapshotBeforeMigrations = Effect.fn("snapshotBeforeMigrations")(fu
       try: () => readRecordedMigrations(partialPath),
       catch: fail,
     });
-    if (copied.upstream !== recorded.upstream || copied.j5 !== recorded.j5) {
+    if (
+      copied.upstream !== recorded.upstream ||
+      copied.j5 !== recorded.j5 ||
+      copied.runObservability !== recorded.runObservability
+    ) {
       yield* fs.remove(partialPath, { force: true }).pipe(Effect.mapError(fail));
       return false;
     }

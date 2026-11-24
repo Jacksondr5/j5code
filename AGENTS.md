@@ -1,6 +1,6 @@
 # J5 Code
 
-J5 Code is a fork of [T3 Code](https://github.com/pingdotgg/t3code), a minimal GUI for coding agents. T3 Code's Node WebSocket server wraps provider CLIs and agents (Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity, Kiro) and serves web, desktop, and mobile clients. J5 builds on that base to run a **fleet**: many agents working at once, coordinating with each other, and reaching the person only when they need to.
+J5 Code is a fork of [T3 Code](https://github.com/pingdotgg/t3code), a minimal GUI for coding agents. T3 Code's Node WebSocket server wraps provider CLIs and agents (Codex, Claude Code, Cursor, Grok, OpenCode, Antigravity, Kiro, Pi, Muse Code, fx) and serves web, desktop, and mobile clients. J5 builds on that base to run a **fleet**: many agents working at once, coordinating with each other, and reaching the person only when they need to.
 
 ## Know which zone you are in
 
@@ -73,23 +73,25 @@ The most common defect in this repo is a change that works on the path you teste
 
 - **Entry points.** A behavior reachable from the chat view is usually also reachable from Settings, the command palette, and a keybinding. Fixing one is not fixing the feature.
 - **Clients.** Web, desktop (wraps web, adds Electron shell/IPC), and mobile (React Native, separate navigation). Shared logic lives in `packages/client-runtime`.
-- **Providers.** Codex, Claude, Cursor, Grok, OpenCode, Antigravity, and Kiro each have an adapter. Provider-shaped features need a decision per adapter, even if the decision is "not supported here". For J5 features, Codex, Claude, and Cursor are the priority: support and test them first, and the rest are a lower priority. Priority isn't parity: where an adapter can't support a feature without changing upstream's adapter (zone 3), record "not supported here" for it.
+- **Providers.** Codex, Claude, Cursor, Grok, OpenCode, Antigravity, Kiro, Pi, Muse Code, fx, and ACP Registry each have an adapter. Provider-shaped features need a decision per adapter, even if the decision is "not supported here". For J5 features, Codex, Claude, and Cursor are the priority: support and test them first, and the rest are a lower priority. Priority isn't parity: where an adapter can't support a feature without changing upstream's adapter (zone 3), record "not supported here" for it.
 - **Agents.** A capability a person can trigger is usually one an agent should reach through MCP tools, and scheduled tasks run the same paths. That only works when it is a service method, not handler code.
 - **Contracts.** Anything crossing the wire is typed in `packages/contracts`. Change the schema and the server, web, mobile, and desktop all follow.
 - **Reverse states.** If you added a way in, add the way out and the way to see it. Snooze needs unsnooze. Close needs reopen. A one-way door is a bug.
 - **Connection modes.** Local, remote/relay, and tunnel behave differently. Multi-device and multi-environment cases are real.
+- **Languages.** Upstream's user-facing text ships in every locale: translate new keys in `apps/{web,mobile}/src/i18n/translations` after `vp run i18n:generate` (`vp run i18n:check` gates it). J5's own screens under `src/j5` are English for now and exempt from `t3code/no-untranslated-copy`; a J5 line inside an upstream file is wrapped like its neighbours.
 - **Docs.** Check whether the change makes existing guidance inaccurate. Apply the [documentation rules](#documentation) before adding anything.
 
 ## Dev servers
 
 - `vp i` installs. Worktrees get this from the t3.json setup script; if module resolution looks broken, it probably did not run.
 - Setup runs in the background. While `.t3/setup-running` names a live PID, wait for it and do not run `vp i`. It ends with `.t3/setup-done` or `.t3/setup-failed` (with the error tail). With no marker at all, setup never ran here, so run `vp i` yourself.
-- `vp run dev` starts server and web (with the variables from rule 3 unset). In a worktree, state defaults to that worktree's gitignored `.j5code`, which deliberately outranks an ambient `J5CODE_HOME` so you cannot land on shared state by accident. An explicit `--home-dir` still wins.
+- `vp run dev` starts server and web (with the variables from rule 3 unset). In a worktree, state defaults to that worktree's gitignored `.j5code`, which deliberately outranks an ambient `J5CODE_HOME` so you cannot land on shared state by accident. An explicit `--home-dir` still wins. A plain `git clone` is not a worktree: it shares `~/.j5code/dev` with the main checkout. To isolate one, run `vp run dev --home-dir <clone>/.j5code`.
 - Ports derive from the worktree path and are stable across restarts, but read the real ones from the `[dev-runner]` line since occupied ports shift. Confirm its `baseDir=` points inside your worktree.
 - Sharing over the tailnet is three steps: run `env -u T3CODE_PORT -u T3CODE_HOST -u J5CODE_HOME vp run dev --share` in the background, wait for the `pairingUrl:` line in its output, then give that full URL to an unpaired browser. Do not wire up `tailscale serve` by hand, open the URL yourself, or consume the user's pairing link. A browser with the reusable dev cookie can use the bare origin. If a normal one-time token was consumed, mint a fresh one with `node apps/server/src/bin.ts pair --person "<owner name>"`. It carries the same permissions as the startup URL, Connections settings included.
 - To reuse web dev auth across worktrees, configure one fixed `T3CODE_DEV_AUTH_TOKEN` in the main checkout's gitignored `.env`. The `t3.json` setup links that file into worktrees. Never commit or publish the token or a startup URL. See [Reusable dev credential](docs/operations/development.md#reusable-dev-credential).
 - A dev server sends no usage events by default. To check analytics, start it with `T3CODE_TELEMETRY_ENABLED=true` and `J5CODE_TELEMETRY_TAG=<a unique label>`, then filter on the `telemetryTag` property in the "J5 Code Dev" PostHog project. An opted-in dev server sends there, not to the real project; a `T3CODE_POSTHOG_KEY` in your shell or `.env` overrides that, so leave it unset.
-- Stop what you started, by the PID you tracked. See rule 1.
+- Stop what you started, by the PID you tracked. See rule 1. `vp` does not pass SIGTERM on, so signalling the `vp run dev` PID alone leaves Vite and the server running. Stop the background task with your harness's own stop, which ends the whole tree.
+- Run dev servers, Metro, and builds from your own shell so they end with your session. Do not detach them with `systemd-run`, `nohup`, `setsid`, or `tmux` unless the developer asks for one that outlives the session. Detached servers ran for weeks and filled RAM and swap. The dev runner stops itself above `--memory-limit-gb` (half of RAM, at most 16 GiB) on Linux.
 - Need a second checkout? `git worktree add` it next to this worktree, not in `/tmp`. Remove it when done.
 
 ## Test data
@@ -124,12 +126,13 @@ A copy of real data is for a server the developer will use, or for rehearsing a 
 
 - Smallest proof that the change works. While you iterate, run `vp test run <files>` for the tests you touched; for big files, add `-t "<name>"`.
 - Before you push, run `vp run check:changed`. It runs CI's fast checks for changed files (format, lint, knip, typecheck of affected packages and dependents, tests beside changes, and the cross-file checks those miss) against the merge base with `origin/j5/main`. CI still runs the full test suites.
-- Use `vp run typecheck` in the package you changed, not `npx tsc`; it caches per package. Both run tsc-rs (`typescript` is the `@tsc-rs/typescript` drop-in).
+- Use `vp run typecheck` in the package you changed; it caches per package. Each package runs `effect-tsgo tsrs --noEmit`, the Rust TypeScript 7 checker with Effect's diagnostics built in. There is no `typescript` package to run.
 - Run `node -e` snippets from `apps/server` or the owning package. `effect` does not resolve from the repo root.
 - Proof for a bug fix depends on the bug. Logic, data, state, and protocol bugs get a failing test first (the fewest that fail on `j5/main` for that reason, in an existing case of the module's test file where one fits), then the fix. Purely visual bugs (spacing, colour, alignment, a layout shift) get before/after captures as their proof and no test: do not add UI tests for nitpicks, and do not ask for one in review when a capture already shows it. A server-only fix with no visible surface ships the test plus a short runtime transcript.
 - Test behavior that can break, such as orchestration and event-sourcing, provider protocol translation, auth and permission guards, persistence and migrations, external-format parsing, race fixes, and the logic a bug fix changed. Leave out tests for what types already guarantee, trivial logic, copy text, smoke runs, mock-call mirrors, callback wiring, and props rendered to static markup.
 - Extend before you add. When an existing test or table covers the behavior, add a row or an assertion there. Write a new `it` only when no case fits.
 - Test at one layer: the lowest one that fails on `j5/main`. Do not repeat the case in a wrapper test, at each call site, or in web and mobile copies of the same logic.
+- Write a browser test only for behavior that needs a real browser: layout and scrolling, focus and pointer input, real workers, or a component wired to its hooks. Logic a component calls gets a unit test beside it (`*.logic.test.ts`). A browser test file spends seconds in CI loading its module graph before its first test runs; a unit test takes milliseconds.
 - [Testing](docs/internals/testing.md) carries upstream's version of these test rules, plus review guidance, for review bots.
 - **Do not run repo-wide checks.** No `vp check`, no `vp run -r test`, no `vp run -r typecheck` unless asked. CI owns the full suite.
 - Backend behavior changes ship with focused tests for that behavior.

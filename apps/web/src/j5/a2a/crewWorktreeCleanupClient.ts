@@ -2,7 +2,6 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import type { CrewWorktreeCleanupAnswerRequest } from "@t3tools/contracts/j5";
 import * as Cause from "effect/Cause";
 
-import { appAtomRegistry } from "../../rpc/atomRegistry";
 import {
   decidedWorktreeCleanupSourcesAtom,
   j5Environment,
@@ -10,13 +9,14 @@ import {
   refreshJ5Sources,
   worktreeCleanupQueryAtom,
 } from "../state";
+import { runJ5Command } from "../runCommand";
 
 /** Answer on the environment that holds the item; the refusal's message says why it failed. */
 export async function answerCrewWorktreeCleanup(
   environmentId: EnvironmentId,
   input: CrewWorktreeCleanupAnswerRequest,
 ) {
-  const result = await j5Environment.answerCrewWorktreeCleanup.run(appAtomRegistry, {
+  const result = await runJ5Command(j5Environment.answerCrewWorktreeCleanup, {
     environmentId,
     input,
   });

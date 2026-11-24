@@ -205,6 +205,7 @@ const makeServer = (
             id: deliveryMessageId(row.messageId),
             runId: roundTripRunId(threadId),
           })),
+          turnItems: [],
         })),
       )) as never,
   });

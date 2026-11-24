@@ -1,6 +1,5 @@
 import { ThreadId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
@@ -42,12 +41,15 @@ export interface AgentCrewReplacedMember {
 }
 
 /** Wrote nothing: a new seat claims a playbook step another seat of the Crew already owns. */
-export class CrewStepAlreadyOwnedError extends Data.TaggedError("CrewStepAlreadyOwnedError")<{
-  readonly crewInstanceId: string;
-  readonly stepId: string;
-  readonly ownerSeat: string;
-  readonly seat: string;
-}> {
+export class CrewStepAlreadyOwnedError extends Schema.TaggedError<CrewStepAlreadyOwnedError>()(
+  "CrewStepAlreadyOwnedError",
+  {
+    crewInstanceId: Schema.String,
+    stepId: Schema.String,
+    ownerSeat: Schema.String,
+    seat: Schema.String,
+  },
+) {
   override get message(): string {
     return `Step ${this.stepId} is already owned by seat ${this.ownerSeat}, so seat ${this.seat} cannot own it.`;
   }

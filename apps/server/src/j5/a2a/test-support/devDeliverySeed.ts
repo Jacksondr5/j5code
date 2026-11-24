@@ -59,6 +59,7 @@ import { layerFromPath as makeSqlitePersistenceLive } from "../../../persistence
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import { CodexProviderCapabilitiesV2 } from "../../../orchestration-v2/Adapters/CodexAdapterV2.ts";
 import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
+import * as ModelManifest from "../../../provider/ModelManifest.ts";
 import { ProviderInstanceRegistry } from "../../../provider/ProviderInstanceRegistry.ts";
 import { ServerSettingsService } from "../../../serverSettings.ts";
 import * as VcsDriverRegistry from "../../../vcs/VcsDriverRegistry.ts";
@@ -192,7 +193,7 @@ class DevDeliverySeedPreflightRollback extends Schema.TaggedError<DevDeliverySee
 
 class DevDeliverySeedScenarioError extends Schema.TaggedError<DevDeliverySeedScenarioError>()(
   "DevDeliverySeedScenarioError",
-  { name: Schema.String, cause: Schema.Defect() },
+  { scenario: Schema.String, cause: Schema.Defect() },
 ) {}
 
 const isDevDeliverySeedPreflightRollback = Schema.is(DevDeliverySeedPreflightRollback);
@@ -337,15 +338,18 @@ const makeRuntimeLayer = (databasePath: string, baseDir: string, cwd: string) =>
     orchestrationAdapter: unavailableAdapter,
     textGeneration: {} as ProviderInstance["textGeneration"],
   };
-  const providers = Layer.succeed(ProviderInstanceRegistry, {
-    getInstance: Effect.fn("ProviderInstanceRegistry.getInstance")(function (instanceId) {
-      return Effect.succeed(instanceId === fakeProviderInstanceId ? fakeProvider : undefined);
+  const providers = Layer.merge(
+    ModelManifest.layerTest,
+    Layer.succeed(ProviderInstanceRegistry, {
+      getInstance: Effect.fn("ProviderInstanceRegistry.getInstance")(function (instanceId) {
+        return Effect.succeed(instanceId === fakeProviderInstanceId ? fakeProvider : undefined);
+      }),
+      listInstances: Effect.succeed([fakeProvider]),
+      listUnavailable: Effect.succeed([]),
+      streamChanges: Stream.empty,
+      subscribeChanges: Effect.never,
     }),
-    listInstances: Effect.succeed([fakeProvider]),
-    listUnavailable: Effect.succeed([]),
-    streamChanges: Stream.empty,
-    subscribeChanges: Effect.never,
-  });
+  );
   // This assembles command/persistence services only. No effect worker is started and the
   // sole provider is deliberately unavailable; every seeded run is interrupted before exit.
   const orchestration = Layer.merge(
@@ -457,7 +461,9 @@ const interruptActiveSeedRun = Effect.fn("j5.a2a.devDeliverySeed.interruptActive
 );
 
 const scenario = <A, E, R>(name: string, effect: Effect.Effect<A, E, R>) =>
-  effect.pipe(Effect.mapError((cause) => new DevDeliverySeedScenarioError({ name, cause })));
+  effect.pipe(
+    Effect.mapError((cause) => new DevDeliverySeedScenarioError({ scenario: name, cause })),
+  );
 
 /**
  * Takes and rolls back a real production-ledger write before any scenario.
@@ -930,7 +936,7 @@ export const runDevDeliverySeed = Effect.fn("j5.a2a.devDeliverySeed.runDevDelive
       if (cancelledProviderStartEffectCount !== effectedCommandIds.length) {
         return yield* Effect.die("Disposable seed left a provider-turn start effect executable.");
       }
-      const nextClaimableAt = yield* outbox.nextClaimableAt;
+      const nextClaimableAt = yield* outbox.nextClaimableAt();
       if (Option.isSome(nextClaimableAt)) {
         return yield* Effect.die("Disposable seed left a claimable orchestration effect behind.");
       }

@@ -132,11 +132,16 @@ jobs:
 
   # The web suite imports the whole app into jsdom. Sharing a runner with the
   # other packages starved it until a setup hook timed out, so it runs alone,
-  # as upstream's `test_web` does.
+  # as upstream's `test_web` does. Two shards, as upstream's: one Chromium ran out
+  # of memory partway through the whole suite at v0.1.11.
   test_web:
-    name: Test Web
+    name: Test Web ${{ matrix.shard }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -161,7 +166,7 @@ jobs:
         run: node apps/web/node_modules/playwright/cli.js install --with-deps --only-shell chromium
 
       - name: Test
-        run: pnpm exec vp run --log grouped --filter '@t3tools/web' test
+        run: pnpm exec vp run --log grouped --filter '@t3tools/web' test --shard ${{ matrix.shard }}/${{ strategy.job-total }}
 
       # These gitlinks belong to vendored manifests, not this repository.
       # Remove them only from the disposable index before checkout's cleanup.

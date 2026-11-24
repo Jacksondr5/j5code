@@ -1,0 +1,365 @@
+---
+import Boat from "../Boat.astro";
+import { T3_SITE_URL, UPSTREAM_REPOSITORY_URL } from "../../lib/site";
+import IssuesVignette from "./IssuesVignette.astro";
+import LanguageVignette from "./LanguageVignette.astro";
+import MaintenanceVignette from "./MaintenanceVignette.astro";
+import MobileShots from "./MobileShots.astro";
+import PullRequestVignette from "./PullRequestVignette.astro";
+import ServersVignette from "./ServersVignette.astro";
+import SessionVignette from "./SessionVignette.astro";
+import VoiceVignette from "./VoiceVignette.astro";
+import WelcomeVignette from "./WelcomeVignette.astro";
+import { UPSTREAM_RANGE } from "./roundup";
+import "./roundup.css";
+
+/**
+ * Everything a release takes in from T3 Code 0.1.8 to 0.1.11, and the two things that changed on
+ * J5 Code's side with it. One component, so it sits whole on the page of the release that
+ * carries the advance.
+ */
+interface Item {
+  title: string;
+  body: string;
+}
+
+const issueItems: ReadonlyArray<Item> = [
+  {
+    title: "Five trackers in one list",
+    body: "Every project whose remote is on GitHub, GitLab, Azure DevOps or Forgejo lists its issues, grouped by tracker. Connect Linear with an API key to list a team's issues beside a project's.",
+  },
+  {
+    title: "Filter, search and save views",
+    body: "Filter by state, by your involvement, by label and by assignee. Save a search, filter and sort setup as a named view.",
+  },
+  {
+    title: "Read and answer in place",
+    body: "Select an issue to open it beside the list. Comment, edit, change labels and assignees, and close or reopen it, where the tracker and your account allow.",
+  },
+  {
+    title: "Linked to threads, both ways",
+    body: "Link an issue to a thread from the issue's header. The thread lists it under Linked items, and agents link the issues they work on.",
+  },
+];
+
+const pullRequestItems: ReadonlyArray<Item> = [
+  {
+    title: "Open",
+    body: "An agent opens a pull request from its thread's pushed branch and links it to the thread.",
+  },
+  {
+    title: "Review",
+    body: "It approves, requests changes or comments, with line comments, and replies to and resolves review threads.",
+  },
+  {
+    title: "Merge, even a stack",
+    body: "It merges a pull request now, or once the required checks pass. On GitHub it can merge a pull request and every open stack layer below it at once.",
+  },
+  {
+    title: "Read failing CI logs",
+    body: "On GitHub, it reads the end of a failing check's log instead of guessing from the check's name.",
+  },
+  {
+    title: "Re-run checks",
+    body: "On GitHub, it re-runs the failing checks, or one check by name.",
+  },
+];
+
+const j5Items: ReadonlyArray<Item> = [
+  {
+    title: "Claude finishes its command before it reads your steer",
+    body: "A message you send while Claude is running a command is read as soon as that command finishes, in the same turn. Stop still cuts in at once.",
+  },
+  {
+    title: "Links renew while you use them",
+    body: "Tool access over a link between two machines no longer runs out on a fixed date. It renews while it is used, and runs out after 30 days without use. A link to a machine still on an older release runs out after 30 days, as before. Messages keep working either way.",
+  },
+];
+---
+
+<section id="issues" class="feature">
+  <div class="container">
+    <header class="feature__head">
+      <p class="origin"><svg class="pennant pennant--t3" viewBox="0 0 14 10" aria-hidden="true"><path d="M0.6 0.6h12L8.7 5l3.9 4.4H0.6z"></path></svg>From T3 Code</p>
+      <h2 class="display">Issues, beside your threads</h2>
+      <p class="feature__intro">
+        A new Issues page lists the issues of your projects, whichever tracker they live in. Open it from the
+        sidebar, or with Open issues in the command palette.
+        <span class="live-only"> Try it: pick a tracker, open an issue, link it to a thread.</span>
+      </p>
+    </header>
+    <IssuesVignette />
+    <ul class="items items--4">
+      {issueItems.map((item) => <li><h3>{item.title}</h3><p>{item.body}</p></li>)}
+    </ul>
+  </div>
+</section>
+
+<section id="pull-requests" class="feature band--deep">
+  <div class="container split">
+    <div>
+      <header class="feature__head">
+        <p class="origin"><svg class="pennant pennant--t3" viewBox="0 0 14 10" aria-hidden="true"><path d="M0.6 0.6h12L8.7 5l3.9 4.4H0.6z"></path></svg>From T3 Code</p>
+        <h2 class="display">Agents can see a pull request through</h2>
+        <p class="feature__intro">
+          Agents have tools for the pull request itself, so they no longer reach for a command line to find out
+          why CI is red.
+        </p>
+      </header>
+    </div>
+    <div class="split__vignette">
+      <PullRequestVignette />
+    </div>
+  </div>
+  <div class="container">
+    <ul class="items items--5">
+      {pullRequestItems.map((item) => <li><h3>{item.title}</h3><p>{item.body}</p></li>)}
+    </ul>
+  </div>
+</section>
+
+<section id="t3-code" class="feature">
+  <div class="container">
+    <header class="feature__head">
+      <p class="origin"><svg class="pennant pennant--t3" viewBox="0 0 14 10" aria-hidden="true"><path d="M0.6 0.6h12L8.7 5l3.9 4.4H0.6z"></path></svg>From T3 Code</p>
+      <h2 class="display">More from T3&nbsp;Code {UPSTREAM_RANGE}</h2>
+      <p class="feature__intro">Smaller changes, each shown as a piece of the app.</p>
+    </header>
+
+    <div class="plates">
+      <div class="plates__col">
+        <article class="plate" id="languages">
+          <div class="dock"><LanguageVignette /></div>
+          <h3>Ten languages</h3>
+          <p>
+            The whole app, desktop menus included, comes in English, <span lang="de">Deutsch</span>,{" "}
+            <span lang="es">Español</span>, <span lang="fr">Français</span>, <span lang="ja">日本語</span>,{" "}
+            <span lang="ko">한국어</span>, <span lang="pt-BR">Português (Brasil)</span>,{" "}
+            <span lang="ru">Русский</span>, <span lang="sv">Svenska</span> and <span lang="zh">中文</span>.
+            <span class="live-only"> Pick one above to see the setting change.</span>
+          </p>
+          <p>
+            J5 Code's own screens, such as the Inbox and Crews, are still in English. They follow in a later
+            release.
+          </p>
+          <p class="plate__where">Settings → General → Language</p>
+        </article>
+
+        <article class="plate" id="welcome">
+          <div class="dock"><WelcomeVignette /></div>
+          <h3>One Welcome page</h3>
+          <p>
+            A new installation opens on one page instead of a three-step wizard. It checks which agents are on the
+            computer and offers your recent projects and conversations to import. One ready agent is enough to
+            start.
+          </p>
+          <p class="plate__where">Settings → About → Welcome page</p>
+        </article>
+
+        <article class="plate" id="voice">
+          <div class="dock"><VoiceVignette /></div>
+          <h3>Dictate, and choose where the audio goes</h3>
+          <p>
+            Dictation lands in your draft for you to review. Transcribe on one of your servers with a model you
+            download, in the cloud with OpenAI, Grok or OpenRouter, or on the phone itself. Nothing is sent until
+            you choose.
+          </p>
+          <p class="plate__where">Settings → Voice</p>
+        </article>
+      </div>
+
+      <div class="plates__col">
+        <article class="plate" id="sessions">
+          <div class="dock"><SessionVignette /></div>
+          <h3>Fresh sessions you can see</h3>
+          <p>
+            Send <code>/clear</code> on its own and your next message starts a new session in the same thread. The
+            thread marks the spot with New session, and earlier messages and diffs stay.
+          </p>
+          <p>
+            Every other fresh start is marked too. When a thread moves to another provider, or its old session
+            can't be resumed, a Context handoff divider says so.
+          </p>
+        </article>
+
+        <article class="plate" id="servers">
+          <div class="dock dock--center"><ServersVignette /></div>
+          <h3>Other machines' dev servers open here</h3>
+          <p>
+            A dev server an agent starts on another machine shows up in the thread's Servers list. Select it and
+            it opens in the in-app browser, where <code>localhost</code> reaches that machine. In the desktop app,
+            the cable button forwards the port to your own computer, so your browser, <code>curl</code> or a
+            database client reaches it too.
+          </p>
+          <p class="plate__where">Thread details → Servers, or Forwarded ports in the command palette</p>
+        </article>
+
+        <article class="plate" id="upkeep">
+          <div class="dock"><MaintenanceVignette /></div>
+          <h3>Awake while agents work, and a lighter database</h3>
+          <p>
+            J5 Code keeps the computer awake while agents work and lets it sleep when they finish.
+          </p>
+          <p>
+            When a database still holds a gigabyte or more of freed space, Settings says so. Where the desktop
+            app or the background service runs J5 Code, press Reclaim and confirm: J5 Code on that machine stops,
+            rebuilds its database and starts again, and agents running there stop with it. Elsewhere, Settings
+            gives you the command to run on that machine.
+          </p>
+          <p class="plate__where">Settings → Maintenance</p>
+        </article>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="mobile" class="feature">
+  <div class="container">
+    <header class="feature__head">
+      <p class="origin"><svg class="pennant pennant--t3" viewBox="0 0 14 10" aria-hidden="true"><path d="M0.6 0.6h12L8.7 5l3.9 4.4H0.6z"></path></svg>From T3 Code</p>
+      <h2 class="display">On the phone and tablet</h2>
+      <p class="feature__intro">The mobile app updates separately from the desktop app and the server.</p>
+    </header>
+    <MobileShots />
+  </div>
+</section>
+
+<section id="j5" class="feature band--deep">
+  <div class="container">
+    <header class="feature__head">
+      <p class="origin"><svg class="pennant pennant--j5" viewBox="0 0 14 10" aria-hidden="true"><path d="M0 0h14L9.5 5 14 10H0z"></path></svg>J5 Code's own</p>
+      <h2 class="display">Two changes on J5 Code's side</h2>
+      <p class="feature__intro">Moving onto T3 Code 0.1.11 changed two things J5 Code used to do its own way.</p>
+    </header>
+    <ul class="items items--2">
+      {j5Items.map((item) => <li><h3>{item.title}</h3><p>{item.body}</p></li>)}
+    </ul>
+  </div>
+</section>
+
+<section class="credit band--deep">
+  <div class="container credit__inner">
+    <Boat captain tone="dark" size={56} />
+    <p>
+      J5 Code is built on <a href={T3_SITE_URL} target="_blank" rel="noopener noreferrer">T3 Code</a>, and most of
+      this page is its work, from {UPSTREAM_RANGE}. There are many smaller fixes besides.{" "}
+      <a href={`${UPSTREAM_REPOSITORY_URL}/releases`} target="_blank" rel="noopener noreferrer">Read T3 Code's release notes</a>.
+    </p>
+  </div>
+</section>
+
+<style>
+  .split {
+    display: grid;
+    grid-template-columns: minmax(0, 5fr) minmax(0, 7fr);
+    align-items: center;
+    gap: 56px;
+  }
+
+  .split .feature__head { margin-bottom: 0; }
+
+  /* A dock: the slip of water an app window is moored in. */
+  .dock {
+    padding: 28px;
+    border: 1px solid var(--wn-line);
+    border-radius: 18px;
+    background: var(--wn-tint);
+  }
+
+  .dock--center {
+    display: flex;
+    justify-content: center;
+  }
+
+  .dock--center > :global(.app) { width: min(100%, 340px); }
+
+  /* Two columns that each stack on their own, so a short plate never leaves a hole beside a tall one. */
+  .plates {
+    display: grid;
+    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+    align-items: start;
+    gap: 40px;
+  }
+
+  .plates__col {
+    display: flex;
+    flex-direction: column;
+    gap: 64px;
+    min-width: 0;
+  }
+
+  .plate { scroll-margin-top: 72px; min-width: 0; }
+  .plate h3 {
+    margin-top: 22px;
+    font-family: var(--font-display);
+    font-size: 23px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+    line-height: 1.25;
+  }
+
+  .plate p {
+    max-width: 60ch;
+    margin-top: 8px;
+    font-size: 15.5px;
+    line-height: 1.6;
+    color: var(--wn-muted);
+  }
+
+  /* A language's name stays whole: a line break inside 한국어 or 中文 reads as a typo. */
+  .plate span[lang] { white-space: nowrap; }
+
+  .plate code {
+    padding: 1px 5px;
+    border-radius: 5px;
+    background: var(--wn-tint-strong);
+    font: 500 0.88em var(--font-mono);
+    color: var(--wn-fg);
+  }
+
+  .plate .plate__where {
+    margin-top: 12px;
+    font-size: 13px;
+    color: var(--wn-dim);
+  }
+
+
+  .credit {
+    padding: 40px 0 72px;
+    border-top: 1px solid var(--wn-line);
+    background: var(--navy-900);
+  }
+
+  .credit__inner {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+  }
+
+  .credit p {
+    max-width: 68ch;
+    font-size: 16px;
+    line-height: 1.6;
+    color: var(--wn-muted);
+  }
+
+  .credit a {
+    color: var(--wn-fg);
+    text-decoration: underline;
+    text-decoration-color: var(--wn-line-strong);
+    text-underline-offset: 3px;
+  }
+
+  @media (max-width: 1000px) {
+    .split { grid-template-columns: 1fr; gap: 36px; }
+    .plates { grid-template-columns: 1fr; gap: 56px; }
+    .plates__col { gap: 56px; }
+  }
+
+  @media (max-width: 640px) {
+    .dock { padding: 12px; border-radius: 14px; }
+    .plates,
+    .plates__col { gap: 44px; }
+    .credit__inner { flex-direction: column; align-items: flex-start; }
+  }
+</style>

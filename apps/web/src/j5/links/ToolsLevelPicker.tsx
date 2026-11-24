@@ -1,6 +1,7 @@
 import { AuthMcpClientAccess } from "@t3tools/contracts";
 
 import { accessConfig } from "../../components/auth/ConnectAgentSurface";
+import { m } from "../../i18n/messages";
 import {
   Select,
   SelectItem,
@@ -13,14 +14,14 @@ import type { ToolsLevel } from "./linkPairs";
 const LEVELS: ReadonlyArray<ToolsLevel> = ["off", ...AuthMcpClientAccess.literals];
 
 export const toolsLevelLabel = (level: ToolsLevel) =>
-  level === "off" ? "Off" : accessConfig[level].label;
+  level === "off" ? "Off" : m(accessConfig[level].label);
 
 const describe = (level: ToolsLevel, holder: string, other: string) =>
   level === "off"
     ? `Messages only. ${holder}'s agents can't use tools on ${other}.`
     : level === "full-access"
-      ? `${accessConfig[level].description} Also needed to act on ${other}'s own threads.`
-      : accessConfig[level].description;
+      ? `${m(accessConfig[level].description)} Also needed to act on ${other}'s own threads.`
+      : m(accessConfig[level].description);
 
 /** What one server's agents may do on the other: Off, then upstream's access levels. */
 export function ToolsLevelPicker({

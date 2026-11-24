@@ -6,6 +6,7 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import * as SessionStore from "../../auth/SessionStore.ts";
@@ -297,50 +298,98 @@ it.layer(accessLayer)("PairingIntents", (it) => {
     }),
   );
 
-  it.effect("refuses a Connections link whose maker's device is ended while it is made", () =>
+  it.effect(
+    "records a link made while its maker's device is ending as the maker's, never no one's",
+    () =>
+      Effect.gen(function* () {
+        const intents = yield* PairingIntents;
+        const sessions = yield* SessionStore.SessionStore;
+        const maker = yield* person("Ending", [{ scope: { kind: "server" }, level: "owner" }]);
+        const laptop = yield* device(maker.personId, LEVEL_PERMISSIONS.owner);
+        // Upstream's revoke waits here; the gate cuts the laptop loose only once it has ended.
+        const revoking = yield* Deferred.make<void>();
+        const resume = yield* Deferred.make<void>();
+        const auth = yield* EnvironmentAuth.EnvironmentAuth.pipe(
+          Effect.provide(
+            AccessGate.layerGatedEnvironmentAuth.pipe(
+              Layer.provide(
+                Layer.mock(EnvironmentAuth.EnvironmentAuth)({
+                  revokeSession: (sessionId) =>
+                    Deferred.succeed(revoking, undefined).pipe(
+                      Effect.andThen(Deferred.await(resume)),
+                      Effect.andThen(sessions.revoke(sessionId)),
+                      Effect.orDie,
+                    ),
+                }),
+              ),
+            ),
+          ),
+        );
+
+        // Another device ends the laptop just as upstream has minted a link on it.
+        const ending = yield* auth.revokeSession(laptop.sessionId).pipe(Effect.forkChild);
+        yield* Deferred.await(revoking);
+        // The record runs while the revoke is paused, with the laptop still live and still its
+        // person's: a session is cut loose only after upstream has ended it.
+        const recording = yield* recordConnectionsLinkCreator({
+          creator: laptop.identity,
+          link: { id: "pairing:ending", credential: "credential-ending" },
+          scopes: LEVEL_PERMISSIONS.owner,
+        }).pipe(Effect.forkChild({ startImmediately: true }));
+        yield* Deferred.succeed(resume, undefined);
+        yield* Fiber.join(ending);
+
+        yield* Fiber.join(recording);
+        assert.strictEqual(
+          (yield* intents.intentOf("credential-ending"))?.personId,
+          maker.personId,
+          "the link was recorded as no one's",
+        );
+      }),
+  );
+
+  it.effect("keeps a device that paired again on its key after upstream ended the old one", () =>
     Effect.gen(function* () {
-      const intents = yield* PairingIntents;
       const sessions = yield* SessionStore.SessionStore;
-      const maker = yield* person("Ending", [{ scope: { kind: "server" }, level: "owner" }]);
-      const laptop = yield* device(maker.personId, LEVEL_PERMISSIONS.owner);
-      // Upstream's revoke waits here, once the gate has cut the laptop loose from its person.
-      const revoking = yield* Deferred.make<void>();
-      const resume = yield* Deferred.make<void>();
+      const sql = yield* SqlClient.SqlClient;
+      const holder = yield* person("Rekeyed", [{ scope: { kind: "server" }, level: "owner" }]);
+      const dpop = { method: "dpop-access-token" } as const;
+      const ended = yield* device(holder.personId, LEVEL_PERMISSIONS.owner, dpop);
+      yield* sessions.revoke(ended.sessionId);
+      // Paired on the same key once upstream's revoke committed, before J5 cuts the key loose.
+      const paired = yield* device(holder.personId, LEVEL_PERMISSIONS.owner, dpop);
       const auth = yield* EnvironmentAuth.EnvironmentAuth.pipe(
         Effect.provide(
           AccessGate.layerGatedEnvironmentAuth.pipe(
             Layer.provide(
               Layer.mock(EnvironmentAuth.EnvironmentAuth)({
-                revokeSession: (sessionId) =>
-                  Deferred.succeed(revoking, undefined).pipe(
-                    Effect.andThen(Deferred.await(resume)),
-                    Effect.andThen(sessions.revoke(sessionId)),
-                    Effect.orDie,
-                  ),
+                revokeConnectDevice: () => Effect.succeed(true),
+                revokeOtherClientSessions: () => Effect.succeed(0),
               }),
             ),
           ),
         ),
       );
+      const bound = (sessionId: string) =>
+        sql<{ readonly n: number }>`
+          SELECT COUNT(*) AS n FROM j5_a2a_person_session WHERE session_id = ${sessionId}
+        `.pipe(Effect.map((rows) => rows[0]?.n ?? 0));
 
-      // Another device ends the laptop just as upstream has minted a link on it.
-      const ending = yield* auth.revokeSession(laptop.sessionId).pipe(Effect.forkChild);
-      yield* Deferred.await(revoking);
-      // The record runs as far as it can while the revoke is paused: before the cut and the
-      // revoke were one transaction, to its end, finding the laptop no one's and still live.
-      const recording = yield* recordConnectionsLinkCreator({
-        creator: laptop.identity,
-        link: { id: "pairing:ending", credential: "credential-ending" },
-        scopes: LEVEL_PERMISSIONS.owner,
-      }).pipe(Effect.forkChild({ startImmediately: true }));
-      yield* Deferred.succeed(resume, undefined);
-      yield* Fiber.join(ending);
+      yield* auth.revokeConnectDevice("test-key");
+      assert.deepStrictEqual(
+        [yield* bound(ended.sessionId), yield* bound(paired.sessionId)],
+        [0, 1],
+      );
 
-      // Refused, so upstream's handler revokes the link rather than leave it approving as no one.
-      const recorded = yield* Fiber.join(recording).pipe(Effect.result);
-      assert.isTrue(Result.isFailure(recorded), "the link was recorded as no one's");
-      if (Result.isFailure(recorded)) assert.strictEqual(recorded.failure.reason, "no_person");
-      assert.isNull(yield* intents.intentOf("credential-ending"));
+      // Revoke every other client: only ended sessions lose their person.
+      const again = yield* device(holder.personId, LEVEL_PERMISSIONS.owner, dpop);
+      yield* sessions.revoke(again.sessionId);
+      const caller = yield* device(holder.personId, LEVEL_PERMISSIONS.owner);
+      yield* auth.revokeOtherClientSessions(caller.sessionId);
+      assert.deepStrictEqual(
+        [yield* bound(again.sessionId), yield* bound(paired.sessionId)],
+        [0, 1],
+      );
     }),
   );
 });

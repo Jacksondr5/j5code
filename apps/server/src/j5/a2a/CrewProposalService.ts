@@ -10,7 +10,7 @@ import { MessageId } from "@t3tools/contracts";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import * as ServerSettings from "../../serverSettings.ts";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
+import * as Schema from "effect/Schema";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -89,36 +89,37 @@ const launchSeatOf = (seat: CrewProposalSeat): CrewLaunchSeat => {
   };
 };
 
-class CrewProposalRequestError extends Data.TaggedError("CrewProposalRequestError")<{
-  readonly detail: string;
-  readonly nextStep: string;
-}> {
+class CrewProposalRequestError extends Schema.TaggedError<CrewProposalRequestError>()(
+  "CrewProposalRequestError",
+  { detail: Schema.String, nextStep: Schema.String },
+) {
   override get message(): string {
     return `${this.detail} ${this.nextStep}`;
   }
 }
 
-export class CrewProposalNotOpenError extends Data.TaggedError("CrewProposalNotOpenError")<{
-  readonly proposalId: string;
-  readonly status: string;
-}> {
+export class CrewProposalNotOpenError extends Schema.TaggedError<CrewProposalNotOpenError>()(
+  "CrewProposalNotOpenError",
+  { proposalId: Schema.String, status: Schema.String },
+) {
   override get message(): string {
     return `Proposal ${this.proposalId} is ${this.status}, not open; nothing was changed.`;
   }
 }
 
-class CrewProposalNotFoundError extends Data.TaggedError("CrewProposalNotFoundError")<{
-  readonly proposalId: string;
-}> {
+class CrewProposalNotFoundError extends Schema.TaggedError<CrewProposalNotFoundError>()(
+  "CrewProposalNotFoundError",
+  { proposalId: Schema.String },
+) {
   override get message(): string {
     return `Proposal ${this.proposalId} does not exist in this environment.`;
   }
 }
 
-class CrewProposalOperationError extends Data.TaggedError("CrewProposalOperationError")<{
-  readonly phase: string;
-  readonly cause: unknown;
-}> {
+class CrewProposalOperationError extends Schema.TaggedError<CrewProposalOperationError>()(
+  "CrewProposalOperationError",
+  { phase: Schema.String, cause: Schema.Defect() },
+) {
   override get message(): string {
     return `Crew proposal failed while ${this.phase}: ${this.cause instanceof Error ? this.cause.message : String(this.cause)}`;
   }

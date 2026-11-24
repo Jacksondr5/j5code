@@ -114,7 +114,7 @@ const mcp = Mcp.layer.pipe(
   Layer.provide(registry),
   Layer.provide(adapters),
   Layer.provide(Layer.mock(ScheduledTaskService)({})),
-  Layer.provide(Layer.mock(ProjectService.ProjectService)({})),
+  Layer.provide(Layer.mock(ProjectService.ProjectService)({ getById: () => Effect.succeedNone })),
   Layer.provide(Layer.mock(SecretRequests.SecretRequests)({})),
   Layer.provide(Layer.mock(GitVcsDriver)({})),
   Layer.provide(Layer.mock(ThreadLaunchService)({})),

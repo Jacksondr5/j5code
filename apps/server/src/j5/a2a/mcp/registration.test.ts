@@ -65,6 +65,12 @@ import * as McpSessionRegistry from "../../../mcp/McpSessionRegistry.ts";
 import * as PreviewAutomationBroker from "../../../mcp/PreviewAutomationBroker.ts";
 import * as PreviewBrowser from "../../../preview/PreviewBrowser.ts";
 import { noDocumentTextLayer } from "../../test-support/documentText.ts";
+import { EnvironmentThemeService } from "../../../environmentTheme.ts";
+import { IssueService } from "../../../issue/IssueService.ts";
+import { ThreadIssueService } from "../../../orchestration-v2/ThreadIssueService.ts";
+import { AssetSigner } from "../../../assets/AssetSigner.ts";
+import { GitManager } from "../../../git/GitManager.ts";
+import { PullRequestService } from "../../../pullRequest/PullRequestService.ts";
 
 const layerStubServices = Layer.mergeAll(
   noDocumentTextLayer,
@@ -82,7 +88,8 @@ const layerStubServices = Layer.mergeAll(
   Layer.mock(ParticipantPlacementService)({ listParticipants: () => Effect.succeed([]) }),
   Layer.mock(A2ALedger)({ listProjectLedgers: () => Effect.succeed([]) }),
   peerDirectoryNoneLayer,
-  Layer.mock(ProjectionStore.ProjectionStoreV2)({}),
+  // Upstream reads the calling thread to decide whether its forge's pull request tools show.
+  Layer.mock(ProjectionStore.ProjectionStoreV2)({ getThreadShell: () => Effect.succeed(null) }),
   Layer.mock(DeviceService.DeviceService)({}),
   Layer.mock(ThreadManagementService.ThreadManagementService)({}),
   Layer.mock(ProviderRegistry.ProviderRegistry)({}),
@@ -91,6 +98,9 @@ const layerStubServices = Layer.mergeAll(
   Layer.mock(SecretRequests.SecretRequests)({}),
   Layer.mock(ProjectService.ProjectService)({}),
   Layer.mock(PullRequestReviewGuideService.PullRequestReviewGuideService)({}),
+  Layer.mock(PullRequestService)({}),
+  Layer.mock(GitManager)({}),
+  Layer.mock(AssetSigner)({}),
   ServerSettings.layerTest({}),
   Layer.mock(GitWorkflowService.GitWorkflowService)({}),
   Layer.mock(ProjectSetupScriptRunner.ProjectSetupScriptRunner)({}),
@@ -102,6 +112,10 @@ const layerStubServices = Layer.mergeAll(
   Layer.mock(SourceControlRepositoryService.SourceControlRepositoryService)({}),
   Layer.mock(ThreadLaunchService.ThreadLaunchService)({}),
   Layer.mock(ThreadSearch.ThreadSearch)({}),
+  // Upstream's issue and theme tools, admitted whole (register D2).
+  Layer.mock(IssueService)({}),
+  Layer.mock(ThreadIssueService)({}),
+  Layer.mock(EnvironmentThemeService)({}),
   // J5 tools declare these at registration; listing tools never calls them.
   Layer.mock(A2ADeliveryWorker)({}),
   Layer.mock(A2AHomeRegistrar)({}),
@@ -144,12 +158,24 @@ const ToolsListPayload = Schema.fromJsonString(
 );
 const encodeJson = Schema.encodeSync(Schema.fromJsonString(Schema.Json));
 const decodeJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
+// An event-stream reply can carry notifications, such as tools/list_changed, before its result.
+const lastRpcMessage = (body: string) =>
+  body
+    .split("\n")
+    .filter((line) => line.trim().length > 0)
+    .at(-1)!
+    .replace(/^data: /, "");
 
 const decodeRpcFailure = Schema.decodeUnknownEffect(
   Schema.Struct({ error: Schema.Struct({ code: Schema.Number, message: Schema.String }) }),
 );
 
 const decodeToolsListPayload = Schema.decodeUnknownEffect(ToolsListPayload);
+const decodeToolSearchText = Schema.decodeEffect(
+  Schema.fromJsonString(
+    Schema.Struct({ tools: Schema.Array(Schema.Struct({ name: Schema.String })) }),
+  ),
+);
 const decodeToolCallPayload = Schema.decodeUnknownEffect(
   Schema.fromJsonString(
     Schema.Struct({
@@ -255,7 +281,7 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         ),
       });
       const bodyText = yield* listResponse.text;
-      const payload = yield* decodeToolsListPayload(bodyText.match(/\{.*\}/s)![0]);
+      const payload = yield* decodeToolsListPayload(lastRpcMessage(bodyText));
       const tools = payload.result.tools;
       const toolNames = tools.map((tool) => tool.name);
       expect(toolNames).toContain("t3_worktree_handoff");
@@ -280,6 +306,8 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         "t3_thread_send",
         // An agent attaches files with j5_send_message.
         "t3_thread_send_attachments",
+        // Listed only to a session that defers its tools.
+        "tool_search",
       ]) {
         expect(toolNames).not.toContain(excluded);
       }
@@ -291,6 +319,10 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         A2A_SEND_TOOL_DESCRIPTION,
       );
       expect(toolNames.toSorted()).toEqual([
+        "ci_logs",
+        "ci_rerun",
+        "comment_on_issue",
+        "create_issue",
         "delegate_task",
         "delete_scheduled_task",
         "device_close",
@@ -323,9 +355,12 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         "j5_spawn_agent",
         "j5_stop_crew",
         "j5_write_artifact",
+        "link_issue",
         "link_pull_request",
         "link_pull_requests",
+        "list_issues",
         "list_scheduled_tasks",
+        "list_thread_issues",
         "list_thread_pull_requests",
         "orchestrator_capabilities",
         "preview_act",
@@ -340,10 +375,20 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         "preview_snapshot",
         "preview_status",
         "preview_wait_for",
+        "pull_request_create",
+        "pull_request_list",
+        "pull_request_merge",
+        "pull_request_read",
+        "pull_request_respond",
+        "pull_request_review",
+        "pull_request_update",
+        "read_issue",
         "read_pull_request_guide",
         "request_secret",
         "run_scheduled_task_now",
         "schedule_task",
+        "send_to_user",
+        "set_issue_state",
         "t3_attachment_discard",
         "t3_attachment_prepare_upload",
         "t3_background_wait",
@@ -358,6 +403,8 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         "t3_project_read",
         "t3_project_update",
         "t3_queue",
+        "t3_theme_read",
+        "t3_theme_set",
         "t3_thread_configure",
         "t3_thread_interrupt",
         "t3_thread_list",
@@ -373,12 +420,50 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         "t3_worktree_status",
         "task_cancel",
         "task_status",
+        "unlink_issue",
         "unlink_pull_request",
         "unlink_pull_requests",
         "unwatch_pull_request",
         "watch_pull_request",
         "write_pull_request_guides",
       ]);
+
+      // tool_search ranks only what this caller is offered: never the link-only launch, and
+      // never the raw send or bulk create J5 leaves out (register D2).
+      const searchResponse = yield* httpClient.post("/mcp", {
+        headers: {
+          accept: "application/json, text/event-stream",
+          authorization: auth,
+          "mcp-protocol-version": "2025-06-18",
+          ...(sessionId ? { "mcp-session-id": sessionId } : {}),
+        },
+        body: HttpBody.text(
+          encodeJson({
+            jsonrpc: "2.0",
+            id: 50,
+            method: "tools/call",
+            params: {
+              name: "tool_search",
+              arguments: { query: "t3_thread_launch t3_thread_send create_threads t3_thread_list" },
+            },
+          }),
+          "application/json",
+        ),
+      });
+      const searched = yield* decodeToolCallPayload(lastRpcMessage(yield* searchResponse.text));
+      expect(searched.result.isError).not.toBe(true);
+      const found = (yield* decodeToolSearchText(searched.result.content[0]!.text)).tools.map(
+        (tool) => tool.name,
+      );
+      expect(found).toContain("t3_thread_list");
+      for (const hidden of [
+        "t3_thread_launch",
+        "t3_thread_send",
+        "create_threads",
+        "tool_search",
+      ]) {
+        expect(found).not.toContain(hidden);
+      }
 
       const restricted = yield* sessions.issue({
         threadId: ThreadId.make("thread-without-browser"),
@@ -426,7 +511,7 @@ it.effect("production mcp layer lists worktree tools over http", () =>
         });
         expect(response.status).toBe(200);
         const text = yield* response.text;
-        return yield* decodeToolCallPayload(text.match(/\{.*\}/s)![0]);
+        return yield* decodeToolCallPayload(lastRpcMessage(text));
       });
       for (const [index, name] of ["t3_thread_launch", "t3_project_delete"].entries()) {
         const response = yield* httpClient.post("/mcp", {
@@ -447,7 +532,7 @@ it.effect("production mcp layer lists worktree tools over http", () =>
           ),
         });
         const responseText = yield* response.text;
-        const refused = yield* decodeRpcFailure(decodeJson(responseText.match(/\{.*\}/s)![0]));
+        const refused = yield* decodeRpcFailure(decodeJson(lastRpcMessage(responseText)));
         expect(refused.error.code).toBe(-32602);
         expect(refused.error.message).toContain(name);
       }
@@ -475,7 +560,7 @@ it.effect("production mcp layer lists worktree tools over http", () =>
           ),
         });
         const responseText = yield* response.text;
-        const refused = yield* decodeRpcFailure(decodeJson(responseText.match(/\{.*\}/s)![0]));
+        const refused = yield* decodeRpcFailure(decodeJson(lastRpcMessage(responseText)));
         expect(refused.error.code).toBe(-32602);
         expect(refused.error.message).toBe(`Tool '${name}' not found`);
       }
@@ -604,15 +689,43 @@ it.effect("offers t3_thread_launch to another environment's link and lets it cal
           })
           .pipe(Effect.flatMap((response) => response.text));
       const list = yield* rpc(2, "tools/list", {});
-      const payload = yield* decodeToolsListPayload(list.match(/\{.*\}/s)![0]);
-      expect(payload.result.tools.map((tool) => tool.name)).toContain("t3_thread_launch");
+      const payload = yield* decodeToolsListPayload(lastRpcMessage(list));
+      const linkTools = payload.result.tools.map((tool) => tool.name);
+      expect(linkTools).toContain("t3_thread_launch");
+      // A client from outside a thread is offered only what it can use without one.
+      for (const listed of [
+        "j5_send_message",
+        "j5_list_participants",
+        "j5_spawn_agent",
+        "t3_thread_interrupt",
+      ]) {
+        expect(linkTools).toContain(listed);
+      }
+      for (const threadOnly of [
+        "delegate_task",
+        "j5_list_artifacts",
+        "j5_read_artifact",
+        "j5_write_artifact",
+        "j5_propose_crew",
+        "j5_request_crew_member",
+        "j5_propose_persona",
+        "j5_stop_crew",
+        "j5_archive_crew",
+        "j5_clear_own_ask",
+        "j5_playbook_start",
+        "j5_playbook_list",
+        "send_to_user",
+        "tool_search",
+      ]) {
+        expect(linkTools).not.toContain(threadOnly);
+      }
       // The call reaches the launch handler as a tool result, where an agent's session is refused
       // the unknown tool (-32602) above. The handler's own services are stubs here.
       const called = yield* rpc(3, "tools/call", {
         name: "t3_thread_launch",
         arguments: { projectId: "project-scratch", title: "Delegated", message: "Do it" },
       });
-      yield* decodeToolCallPayload(called.match(/\{.*\}/s)![0]);
+      yield* decodeToolCallPayload(lastRpcMessage(called));
     }),
   ).pipe(
     Effect.provide(

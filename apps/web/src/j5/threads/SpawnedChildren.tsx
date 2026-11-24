@@ -1,7 +1,11 @@
 import { useAtomValue } from "@effect/atom-react";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
-import { type EnvironmentId, type ScopedThreadRef } from "@t3tools/contracts";
+import {
+  type ContextMenuSource,
+  type EnvironmentId,
+  type ScopedThreadRef,
+} from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { ChevronRightIcon } from "lucide-react";
 import {
@@ -12,6 +16,7 @@ import {
 } from "react";
 
 import { resolveThreadStatusPill } from "../../components/Sidebar.logic";
+import { contextMenuSourceOf } from "../../contextMenuSource";
 import { Badge } from "../../components/ui/badge";
 import { ProviderInstanceIcon } from "../../components/chat/ProviderInstanceIcon";
 import { toastManager } from "../../components/ui/toast";
@@ -56,12 +61,12 @@ const toggleExpansion = (expansionKey: string) => {
 /** The parent row's thread actions, so a child row gets the same menu and inline rename. */
 export interface SpawnedChildActions {
   readonly renamingThreadKey: string | null;
-  readonly onContextMenu: (threadRef: ScopedThreadRef, position: { x: number; y: number }) => void;
-  readonly onCommitRename: (
+  readonly onContextMenu: (
     threadRef: ScopedThreadRef,
-    title: string,
-    originalTitle: string,
+    position: { x: number; y: number },
+    source: ContextMenuSource,
   ) => void;
+  readonly onCommitRename: (threadRef: ScopedThreadRef, title: string) => void;
   readonly onCancelRename: () => void;
 }
 
@@ -252,7 +257,7 @@ function SpawnedChildGroupRows(
                   {isRenaming ? (
                     <SpawnedChildRenameInput
                       title={thread.title}
-                      onCommit={(title) => props.onCommitRename(threadRef, title, thread.title)}
+                      onCommit={(title) => props.onCommitRename(threadRef, title)}
                       onCancel={props.onCancelRename}
                     />
                   ) : (
@@ -311,7 +316,11 @@ function SpawnedChildGroupRows(
                     onContextMenu={(event) => {
                       event.preventDefault();
                       event.stopPropagation();
-                      props.onContextMenu(threadRef, { x: event.clientX, y: event.clientY });
+                      props.onContextMenu(
+                        threadRef,
+                        { x: event.clientX, y: event.clientY },
+                        contextMenuSourceOf(event),
+                      );
                     }}
                   >
                     {rowBody}

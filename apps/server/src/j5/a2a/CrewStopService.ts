@@ -1,6 +1,6 @@
 import type { CommandId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
+import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
@@ -40,28 +40,28 @@ export interface StopCrewOutcome {
   }>;
 }
 
-export class CrewStopNotFoundError extends Data.TaggedError("CrewStopNotFoundError")<{
-  readonly crewInstanceId: string;
-}> {
+export class CrewStopNotFoundError extends Schema.TaggedError<CrewStopNotFoundError>()(
+  "CrewStopNotFoundError",
+  { crewInstanceId: Schema.String },
+) {
   override get message() {
     return `Crew ${this.crewInstanceId} does not exist.`;
   }
 }
 
-class CrewStopRequestError extends Data.TaggedError("CrewStopRequestError")<{
-  readonly detail: string;
-  readonly nextStep: string;
-}> {
+class CrewStopRequestError extends Schema.TaggedError<CrewStopRequestError>()(
+  "CrewStopRequestError",
+  { detail: Schema.String, nextStep: Schema.String },
+) {
   override get message() {
     return this.detail;
   }
 }
 
-export class CrewStopOperationError extends Data.TaggedError("CrewStopOperationError")<{
-  readonly phase: string;
-  readonly seatName: string | null;
-  readonly cause: unknown;
-}> {
+export class CrewStopOperationError extends Schema.TaggedError<CrewStopOperationError>()(
+  "CrewStopOperationError",
+  { phase: Schema.String, seatName: Schema.NullOr(Schema.String), cause: Schema.Defect() },
+) {
   override get message() {
     return `Stopping the crew failed while ${this.phase}${this.seatName === null ? "" : ` (seat ${this.seatName})`}: ${this.cause instanceof Error ? this.cause.message : String(this.cause)}`;
   }

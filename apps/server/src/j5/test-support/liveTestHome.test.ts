@@ -15,6 +15,7 @@ import { parse as parseYaml } from "yaml";
 
 import { decodeAgentPersonaDefinition } from "../agents/agentPersonas.ts";
 import { buildLiveTestHome } from "./liveTestHome.ts";
+import { setProcessEnv } from "./processEnv.ts";
 
 const decodePlaybook = Schema.decodeUnknownEffect(PlaybookDefinition);
 
@@ -28,14 +29,7 @@ it.live("builds a home whose only project is the test repository", () =>
     );
     // A base and a head build are given the same clock so their threads are dated alike.
     const fixedNow = Math.floor((yield* Clock.currentTimeMillis) / 1000) * 1000 - 60 * 60 * 1000;
-    const previousNow = process.env.J5_LIVE_TEST_NOW;
-    process.env.J5_LIVE_TEST_NOW = String(fixedNow);
-    yield* Effect.addFinalizer(() =>
-      Effect.sync(() => {
-        if (previousNow === undefined) delete process.env.J5_LIVE_TEST_NOW;
-        else process.env.J5_LIVE_TEST_NOW = previousNow;
-      }),
-    );
+    yield* setProcessEnv({ J5_LIVE_TEST_NOW: String(fixedNow) });
     const build = buildLiveTestHome({
       root,
       // Stored trimmed, under the rule every person's name is held to.

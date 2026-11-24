@@ -21,6 +21,7 @@ import type * as HttpServerRequest from "effect/http/HttpServerRequest";
 import * as SqlClient from "effect/sql/SqlClient";
 import { TestClock } from "effect/testing";
 
+import * as AssetSigner from "../../assets/AssetSigner.ts";
 import * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
 import * as RpcAuthorization from "../../auth/RpcAuthorization.ts";
 import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
@@ -74,7 +75,10 @@ const testLayer = Layer.mergeAll(
     Layer.provide(WorkspacePaths.layer),
     Layer.provide(T3ProjectFileLoader.layer),
   ),
-  ServerSecretStore.layer.pipe(Layer.provide(layerConfig)),
+  // Upstream signs asset links with this since v0.1.11; the server provides it to every request.
+  AssetSigner.layer.pipe(
+    Layer.provideMerge(ServerSecretStore.layer.pipe(Layer.provide(layerConfig))),
+  ),
   ProjectStore.layer,
   Layer.mock(ProjectCloneTracker.ProjectCloneTracker)({ get: () => Effect.succeed(null) }),
 ).pipe(

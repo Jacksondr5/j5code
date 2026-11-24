@@ -14,6 +14,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
+import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 import type * as Scope from "effect/Scope";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -43,10 +44,20 @@ import {
 
 export class AccessRenewalError extends Schema.TaggedError<AccessRenewalError>()(
   "AccessRenewalError",
-  { sessionId: Schema.String, cause: Schema.optional(Schema.Defect()) },
+  {
+    sessionId: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+    /** The change was saved; only ending these sessions, listed in `sessionId`, failed. */
+    saved: Schema.optional(Schema.Boolean),
+  },
 ) {
   override get message(): string {
-    return `Could not end device ${this.sessionId}'s session so that it renews; nothing was changed.`;
+    // `saved: false` is only set by removing a person, whose devices end before the removal.
+    return this.saved === true
+      ? `The change was saved, but these sessions are still live: ${this.sessionId}. End them by hand in Sharing & access.`
+      : this.saved === false
+        ? "The person was not removed: one of their devices could not be signed out. Devices already signed out stay signed out. Try again, or end it in Sharing & access."
+        : `Could not end device ${this.sessionId}'s session so that it renews; nothing was changed.`;
   }
 }
 
@@ -138,9 +149,8 @@ export interface AccessShape {
       | { readonly kind: "new"; readonly displayName: string },
   ) => Effect.Effect<ParticipantId, ChangeError | PersonNameTakenError | DeviceAlreadyClaimedError>;
   /**
-   * Revokes for renewal every live device whose permissions are not what its person's level and
-   * its ceiling give now. Run once at startup, so a device paired under an older mapping, or a
-   * guest's device from before levels, renews into the mapping this server has.
+   * Revokes for renewal every live device holding a permission its person's level and its ceiling
+   * no longer give. Run once at startup; a device only short of a newly added one keeps its session.
    */
   readonly renewOutdatedDevices: Effect.Effect<number, ChangeError>;
   readonly subscribe: Effect.Effect<PubSub.Subscription<AccessChange>, never, Scope.Scope>;
@@ -254,25 +264,68 @@ const make = Effect.gen(function* () {
         ),
       );
 
-  /**
-   * Marks a live device's session as one J5 ended for renewal, and ends it upstream. The mark is
-   * set only on a binding not already marked, and only together with upstream revoking a session
-   * that was live; anything else fails, and with it the change being made.
-   */
-  const revokeForRenewal = Effect.fn("j5.sharing.access.revokeForRenewal")(function* (
+  /** Marks a live device's session as one J5 ends for renewal, inside the change's transaction. */
+  const markForRenewal = Effect.fn("j5.sharing.access.markForRenewal")(function* (
     sessionId: AuthSessionId,
   ) {
     const now = DateTime.formatIso(yield* DateTime.now);
     const marked = yield* sql`
-      UPDATE j5_a2a_person_session SET renew_pending_since = ${now}
-      WHERE session_id = ${sessionId} AND renew_pending_since IS NULL
+      UPDATE j5_a2a_person_session SET renew_pending_since = COALESCE(renew_pending_since, ${now})
+      WHERE session_id = ${sessionId}
       RETURNING session_id
     `.pipe(Effect.mapError((cause) => new AccessRenewalError({ sessionId, cause })));
-    const revoked = yield* sessions
-      .revoke(sessionId)
-      .pipe(Effect.mapError((cause) => new AccessRenewalError({ sessionId, cause })));
-    if (marked.length !== 1 || !revoked) return yield* new AccessRenewalError({ sessionId });
+    if (marked.length !== 1) return yield* new AccessRenewalError({ sessionId });
   });
+
+  /** Ends each session upstream, every one tried; names those still live, and whether the change was `saved`. */
+  const endAll = Effect.fn("j5.sharing.access.endAll")(function* (
+    sessionIds: ReadonlyArray<AuthSessionId>,
+    saved: boolean,
+  ) {
+    const stillLive: Array<AuthSessionId> = [];
+    let firstCause: unknown;
+    for (const sessionId of sessionIds) {
+      const outcome = yield* Effect.result(sessions.revoke(sessionId));
+      if (Result.isFailure(outcome)) {
+        stillLive.push(sessionId);
+        firstCause ??= outcome.failure;
+      }
+    }
+    if (stillLive.length > 0) {
+      return yield* new AccessRenewalError({
+        sessionId: stillLive.join(", "),
+        cause: firstCause,
+        saved,
+      });
+    }
+  });
+
+  /**
+   * Runs a change, then has upstream end the sessions it renews or ends once it commits: a socket
+   * reads the committed row, so a revoke inside the transaction closes no socket. A failed revoke
+   * leaves a renewed session live and marked, which the next change or start ends (`stillMarked`).
+   */
+  const committedRenewing = Effect.fn("j5.sharing.access.committedRenewing")(function* <A, E, R>(
+    body: (sessionsToEnd: {
+      readonly renew: (sessionId: AuthSessionId) => Effect.Effect<void, AccessRenewalError>;
+      readonly end: (sessionId: AuthSessionId) => Effect.Effect<void>;
+    }) => Effect.Effect<A, E, R>,
+  ) {
+    const marked: Array<AuthSessionId> = [];
+    const end = (sessionId: AuthSessionId) => Effect.sync(() => void marked.push(sessionId));
+    const result = yield* committed(
+      body({
+        renew: (sessionId) => markForRenewal(sessionId).pipe(Effect.andThen(end(sessionId))),
+        end,
+      }),
+    );
+    yield* endAll(marked, true);
+    return result;
+  });
+
+  /** A live device still marked for renewal: its revoke failed after a change, so it is due. */
+  const stillMarked = (device: { readonly renewPendingSince: unknown }) =>
+    device.renewPendingSince !== null;
 
   /** The live sessions bound to a person, with the permissions each holds now. */
   const liveDevices = Effect.fn("j5.sharing.access.liveDevices")(function* (
@@ -285,7 +338,8 @@ const make = Effect.gen(function* () {
       .pipe(Effect.mapError((cause) => new AccessRenewalError({ sessionId: "", cause })));
     return bound.flatMap((device) => {
       const session = active.find((entry) => entry.sessionId === device.sessionId);
-      return session === undefined || device.renewPendingSince !== null
+      // A marked session still live is one whose revoke failed; it is due again (`stillMarked`).
+      return session === undefined
         ? []
         : [{ ...device, scopes: session.permissions ?? session.scopes }];
     });
@@ -320,21 +374,19 @@ const make = Effect.gen(function* () {
   });
 
   /**
-   * Ends the MCP clients `personId` approved, in the transaction that lowers or removes them. A
-   * session already ended or expired is passed over.
+   * Ends the MCP clients `personId` approved once the change that lowers or removes them commits.
+   * One that cannot be ended is named in the change's error and is ended by hand in Sharing &
+   * access, since its approver is forgotten.
    */
   const endApprovedMcpClients = Effect.fn("j5.sharing.access.endApprovedMcpClients")(function* (
     personId: ParticipantId,
+    end: (sessionId: AuthSessionId) => Effect.Effect<void>,
   ) {
     const approved = yield* sql<{ readonly session_id: AuthSessionId }>`
       DELETE FROM j5_a2a_mcp_client_approver WHERE person_id = ${personId}
       RETURNING session_id
     `.pipe(Effect.mapError(mcpStorage("read the MCP clients a person approved")));
-    for (const { session_id: sessionId } of approved) {
-      yield* sessions
-        .revoke(sessionId)
-        .pipe(Effect.mapError(mcpStorage("end an MCP client a person approved")));
-    }
+    for (const { session_id: sessionId } of approved) yield* end(sessionId);
   });
 
   /**
@@ -342,7 +394,7 @@ const make = Effect.gen(function* () {
    * transaction; then tells subscribers.
    */
   const changing = <A, E>(personId: ParticipantId, change: Effect.Effect<A, E>) =>
-    committed(
+    committedRenewing(({ renew, end }) =>
       Effect.gen(function* () {
         const before = snapshotOf(yield* people.listLevels(personId));
         yield* beforeChange(personId);
@@ -353,13 +405,13 @@ const make = Effect.gen(function* () {
         const highest = highestOf(after.levels);
         for (const device of yield* liveDevices(personId)) {
           const target = devicePermissions(highest, device.ceiling);
-          if (narrowed || !samePermissions(target, device.scopes)) {
-            yield* revokeForRenewal(device.sessionId);
+          if (narrowed || stillMarked(device) || !samePermissions(target, device.scopes)) {
+            yield* renew(device.sessionId);
           }
         }
         if (before.owner && !after.owner) {
           yield* voidWaitingMcpApprovals;
-          yield* endApprovedMcpClients(personId);
+          yield* endApprovedMcpClients(personId, end);
         }
         return result;
       }),
@@ -386,7 +438,15 @@ const make = Effect.gen(function* () {
     }),
 
     removePerson: Effect.fn("j5.sharing.access.removePerson")(function* (personId) {
-      yield* committed(
+      // Their devices end first: one left live once unbound is a device no one has claimed,
+      // which AC5 offers to claim again. If one cannot be ended, nothing is removed.
+      const devices = yield* liveDevices(personId);
+      yield* endAll(
+        devices.map((device) => device.sessionId),
+        false,
+      );
+      // A device paired between that and the removal is ended after it, with the rest.
+      yield* committedRenewing(({ end }) =>
         Effect.gen(function* () {
           // Read inside the transaction, so a promotion just before cannot be missed.
           const owner = snapshotOf(yield* people.listLevels(personId)).owner;
@@ -423,14 +483,13 @@ const make = Effect.gen(function* () {
           );
           yield* beforeChange(personId);
           const ended = yield* people.removePerson(personId);
+          const endedFirst = new Set(devices.map((device) => device.sessionId));
           for (const sessionId of ended) {
-            yield* sessions
-              .revoke(sessionId)
-              .pipe(Effect.mapError((cause) => new AccessRenewalError({ sessionId, cause })));
+            if (!endedFirst.has(sessionId)) yield* end(sessionId);
           }
           yield* afterChange(personId);
           if (owner) yield* voidWaitingMcpApprovals;
-          yield* endApprovedMcpClients(personId);
+          yield* endApprovedMcpClients(personId, end);
         }),
       );
       yield* tell({ personId, kind: "removed" });
@@ -444,7 +503,7 @@ const make = Effect.gen(function* () {
     claimDevice: Effect.fn("j5.sharing.access.claimDevice")(function* (session, choice) {
       const reach = yield* people.sessionReach(session);
       if (reach.kind !== "unknown") return yield* new DeviceAlreadyClaimedError({});
-      const personId = yield* committed(
+      const personId = yield* committedRenewing(({ renew }) =>
         Effect.gen(function* () {
           const personId =
             choice.kind === "person"
@@ -463,7 +522,7 @@ const make = Effect.gen(function* () {
             ceiling: session.scopes,
           });
           yield* afterChange(personId);
-          yield* revokeForRenewal(session.sessionId);
+          yield* renew(session.sessionId);
           return personId;
         }),
       );
@@ -478,11 +537,14 @@ const make = Effect.gen(function* () {
       // permissions are their ceiling, and a phone among them could not renew.
       for (const record of everyone.filter((entry) => !entry.person.firstOwner)) {
         const highest = highestOf(record.levels);
-        yield* committed(
+        yield* committedRenewing(({ renew }) =>
           Effect.gen(function* () {
             for (const device of yield* liveDevices(record.person.personId)) {
-              if (!samePermissions(devicePermissions(highest, device.ceiling), device.scopes)) {
-                yield* revokeForRenewal(device.sessionId);
+              // Jackson, 2026-11-23 (AC16): only a device holding more than its level ends here;
+              // one short of a newly added permission gains it only with a new session.
+              const target = devicePermissions(highest, device.ceiling);
+              if (stillMarked(device) || device.scopes.some((scope) => !target.includes(scope))) {
+                yield* renew(device.sessionId);
                 renewed += 1;
               }
             }
@@ -521,9 +583,9 @@ export const layer: Layer.Layer<
 > = Layer.effect(Access, make);
 
 /**
- * Renews at startup every device whose permissions are not what its level gives: a guest's device
- * from before levels, or any device after an upstream advance reshaped the mapping. If it cannot
- * be done the server does not start, rather than run with devices above their level.
+ * Renews at startup every device holding more than its level gives: a guest's device from before
+ * levels, or one an upstream advance's new mapping narrows. If it cannot be done the server does
+ * not start, rather than run with devices above their level.
  */
 export const renewOutdatedDevicesAtStartup = Layer.effectDiscard(
   Effect.gen(function* () {

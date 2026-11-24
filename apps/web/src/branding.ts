@@ -1,7 +1,11 @@
 import type { DesktopAppBranding } from "@t3tools/contracts";
 
 import { J5_BRANDING } from "../../../scripts/lib/j5-branding.ts";
-import { formatAppDisplayName } from "./branding.logic";
+import {
+  formatAppDisplayName,
+  resolveHostedAppChannelLabel,
+  resolveWebAppStageLabel,
+} from "./branding.logic";
 
 function readInjectedDesktopAppBranding(): DesktopAppBranding | null {
   if (typeof window === "undefined") {
@@ -16,13 +20,14 @@ const hostedAppChannel = import.meta.env.VITE_HOSTED_APP_CHANNEL?.trim().toLower
 
 export const HOSTED_APP_CHANNEL =
   hostedAppChannel === "latest" || hostedAppChannel === "nightly" ? hostedAppChannel : null;
-export const HOSTED_APP_CHANNEL_LABEL =
-  HOSTED_APP_CHANNEL === "nightly" ? "Nightly" : HOSTED_APP_CHANNEL === "latest" ? "Latest" : null;
+export const HOSTED_APP_CHANNEL_LABEL = resolveHostedAppChannelLabel(HOSTED_APP_CHANNEL);
 export const APP_BASE_NAME = injectedDesktopAppBranding?.baseName ?? J5_BRANDING.desktop.baseName;
 export const APP_STAGE_LABEL =
   injectedDesktopAppBranding?.stageLabel ??
-  HOSTED_APP_CHANNEL_LABEL ??
-  (import.meta.env.DEV ? "Dev" : "Beta");
+  resolveWebAppStageLabel({
+    hostedAppChannel: HOSTED_APP_CHANNEL,
+    development: import.meta.env.DEV,
+  });
 export const APP_DISPLAY_NAME =
   injectedDesktopAppBranding?.displayName ??
   formatAppDisplayName({ baseName: APP_BASE_NAME, stageLabel: APP_STAGE_LABEL });
@@ -30,3 +35,5 @@ export const APP_VERSION = import.meta.env.APP_VERSION || "0.0.0";
 /** The PATH command release archives install (`install.sh` / `j5 update`); the wizard and pairing copy build subcommands on it. */
 export const CLI_COMMAND = J5_BRANDING.cli.command;
 export const DESKTOP_DOWNLOAD_URL = "https://j5.codes/download";
+// Redirects to the App Store or Google Play to match the phone that opens it.
+export const MOBILE_APP_URL = "https://t3.codes/mobile";

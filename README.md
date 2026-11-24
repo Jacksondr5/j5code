@@ -28,6 +28,8 @@ J5 Code drives the coding agents already set up on your machine. Install and sig
 | OpenCode    | Install [OpenCode](https://opencode.ai), then run `opencode auth login`.                     |
 | Antigravity | Enable it in Settings, then use **Install Antigravity** and **Sign in with Google**.         |
 
+Kiro, Pi, Muse Code, fx and any [ACP](./docs/user/providers-acp.md) agent work too; T3 Code's [provider guides](./docs/user/) cover their setup.
+
 ### Command line
 
 A self-contained server for macOS (Apple silicon), Linux x64 and Windows x64. No Node.js or npm is needed:
@@ -85,7 +87,7 @@ Found a bug or want a feature? [Open an issue](https://github.com/Jacksondr5/j5c
 
 ### Install `vp`
 
-J5 Code uses Vite+, so you need its global `vp` command-line tool and Node 24.
+J5 Code uses Vite+, so you need its global `vp` command-line tool and Node 26.
 
 macOS / Linux:
 

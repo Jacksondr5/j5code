@@ -1,3 +1,4 @@
+import { msg, T, useMessages } from "gt-react";
 import { useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
 
@@ -10,6 +11,7 @@ import {
 import {
   AlertDialog,
   AlertDialogClose,
+  AlertDialogAction,
   AlertDialogDescription,
   AlertDialogFooter,
   AlertDialogHeader,
@@ -17,18 +19,29 @@ import {
   AlertDialogTitle,
 } from "./ui/alert-dialog";
 import { Button } from "./ui/button";
+import { m as resolveMessage, type MessageResolver } from "../i18n/messages";
 
 type ConfirmationCopy = {
   readonly title: string;
   readonly description: string | null;
 };
 
-export const resolveConfirmDialogActionLabel = (confirmLabel?: string) => confirmLabel ?? "Confirm";
+// LocalApi.confirm takes one string; translated questions may end in a full-width mark.
+const QUESTION_MARK = /[?？]/;
 
-export function resolveConfirmDialogCopy(message: string): ConfirmationCopy {
+// J5: a caller's own action label, e.g. "Archive anyway" (FORK.md case 22).
+export const resolveConfirmDialogActionLabel = (
+  confirmLabel?: string,
+  resolve: MessageResolver = resolveMessage,
+) => confirmLabel ?? resolve(msg("Confirm"));
+
+export function resolveConfirmDialogCopy(
+  message: string,
+  resolve: MessageResolver = resolveMessage,
+): ConfirmationCopy {
   const normalizedMessage = message.trim();
   const lines = normalizedMessage.split("\n");
-  const questionLineIndex = lines.findIndex((line) => line.trim().endsWith("?"));
+  const questionLineIndex = lines.findIndex((line) => QUESTION_MARK.test(line.trim().slice(-1)));
 
   if (questionLineIndex >= 0) {
     const title = lines[questionLineIndex]!.trim();
@@ -39,7 +52,7 @@ export function resolveConfirmDialogCopy(message: string): ConfirmationCopy {
     return { title, description: description || null };
   }
 
-  const questionMarkIndex = normalizedMessage.indexOf("?");
+  const questionMarkIndex = normalizedMessage.search(QUESTION_MARK);
   if (questionMarkIndex >= 0) {
     return {
       title: normalizedMessage.slice(0, questionMarkIndex + 1).trim(),
@@ -48,8 +61,8 @@ export function resolveConfirmDialogCopy(message: string): ConfirmationCopy {
   }
 
   return {
-    title: "Confirm action",
-    description: normalizedMessage || "This action requires your confirmation.",
+    title: resolve(msg("Confirm action")),
+    description: normalizedMessage || resolve(msg("This action requires your confirmation.")),
   };
 }
 
@@ -67,6 +80,7 @@ export function ConfirmationDescription({
 }
 
 export function ConfirmDialogHost() {
+  const m = useMessages();
   const state = useSyncExternalStore(
     subscribeConfirmDialogHost,
     readConfirmDialogState,
@@ -74,12 +88,15 @@ export function ConfirmDialogHost() {
   );
 
   const message = state.status === "idle" ? "" : state.message;
-  const copy = resolveConfirmDialogCopy(message);
+  const copy = resolveConfirmDialogCopy(message, m);
   const content = state.status === "idle" ? undefined : state.content;
   const description = <ConfirmationDescription content={content} message={message} />;
   const confirmVariant = state.status === "idle" ? "default" : state.variant;
-  const confirmLabel =
-    state.status === "idle" ? "Confirm" : resolveConfirmDialogActionLabel(state.confirmLabel);
+  const focusConfirm = state.status !== "idle" && state.initialFocus === "confirm";
+  const confirmLabel = resolveConfirmDialogActionLabel(
+    state.status === "idle" ? undefined : state.confirmLabel,
+    m,
+  );
   const onCancel = () => respondToConfirmDialog(false);
   const onConfirm = () => respondToConfirmDialog(true);
 
@@ -107,10 +124,16 @@ export function ConfirmDialogHost() {
           ) : null}
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogClose render={<Button variant="outline" />}>Cancel</AlertDialogClose>
-          <Button variant={confirmVariant} onClick={onConfirm}>
-            {confirmLabel}
-          </Button>
+          <AlertDialogClose render={<Button variant="outline" />}>
+            <T>Cancel</T>
+          </AlertDialogClose>
+          {focusConfirm && confirmVariant === "default" ? (
+            <AlertDialogAction onClick={onConfirm}>{confirmLabel}</AlertDialogAction>
+          ) : (
+            <Button variant={confirmVariant} onClick={onConfirm}>
+              {confirmLabel}
+            </Button>
+          )}
         </AlertDialogFooter>
       </AlertDialogPopup>
     </AlertDialog>

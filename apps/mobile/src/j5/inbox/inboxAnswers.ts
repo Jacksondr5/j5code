@@ -15,6 +15,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { uuidv4 } from "../../lib/uuid";
 import { appAtomRegistry } from "../../state/atom-registry";
+import { runJ5Command } from "../runCommand";
 import { j5Environment } from "../state";
 import { readyAnswerAttachments } from "./answerAttachmentDrafts";
 import {
@@ -43,7 +44,7 @@ async function sendAnswer(
     readonly clientRequestId: string;
   },
 ) {
-  const result = await j5Environment.answerHumanExchange.run(appAtomRegistry, {
+  const result = await runJ5Command(j5Environment.answerHumanExchange, {
     environmentId,
     input,
   });

@@ -2,7 +2,10 @@ import { assert, it } from "@effect/vitest";
 import { CommandId, ProviderSessionId, RunId, ThreadId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Schema from "effect/Schema";
 import * as Ref from "effect/Ref";
+
+import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 
 import { ServerSecretStore } from "../../auth/ServerSecretStore.ts";
 import { AgentCrewInstanceService, type AgentCrewInstance } from "./AgentCrewInstanceService.ts";
@@ -16,6 +19,7 @@ import {
   ArchiveCrewConfirmationRequiredError,
   ArchiveCrewConfirmationStaleError,
   ArchiveCrewNotCaptainError,
+  ArchiveCrewDelegatedTasksError,
   ArchiveCrewPartialFailureError,
   ArchiveCrewService,
   layer as archiveCrewLayer,
@@ -25,6 +29,11 @@ import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
 import { ExchangeId, ParticipantId, LedgerProjectId } from "./contracts.ts";
 import { CrewWorktrees } from "./CrewWorktrees.ts";
 import type { CrewArchiveWorktree } from "@t3tools/contracts/j5";
+
+const isArchiveCrewConfirmationRequiredError = Schema.is(ArchiveCrewConfirmationRequiredError);
+const isArchiveCrewConfirmationStaleError = Schema.is(ArchiveCrewConfirmationStaleError);
+const isArchiveCrewDelegatedTasksError = Schema.is(ArchiveCrewDelegatedTasksError);
+const isArchiveCrewPartialFailureError = Schema.is(ArchiveCrewPartialFailureError);
 
 const projectId = LedgerProjectId.make("project:j5:archive-crew");
 const captain = ParticipantId.make("agent:j5:a2a:captain");
@@ -85,6 +94,8 @@ const fixture = Effect.gen(function* () {
   });
   const archived = yield* Ref.make<ReadonlyArray<ArchiveAgentInput>>([]);
   const failSeat = yield* Ref.make<ParticipantId | null>(null);
+  // Threads with delegated tasks still running, whose archive upstream refuses.
+  const delegating = yield* Ref.make<ReadonlySet<ThreadId>>(new Set());
   // A seat whose facts the store cannot read at all.
   const unreadableSeat = yield* Ref.make<ParticipantId | null>(null);
   const marked = yield* Ref.make<ReadonlyArray<string>>([]);
@@ -108,6 +119,7 @@ const fixture = Effect.gen(function* () {
   const layer = archiveCrewLayer.pipe(
     Layer.provide(
       Layer.mergeAll(
+        NodeCrypto.layerMac,
         Layer.mock(CrewWorktrees)({
           liveSessions: (seats) =>
             Effect.forEach(seats, (seat) => step(`read:${seat.threadId}`)).pipe(
@@ -131,6 +143,8 @@ const fixture = Effect.gen(function* () {
             ]).pipe(Effect.andThen(Ref.get(cleanupResult))),
         }),
         Layer.mock(ArchiveAgentService)({
+          runsDelegatedTasks: (threadId) =>
+            Ref.get(delegating).pipe(Effect.map((threads) => threads.has(threadId))),
           readFacts: (target) =>
             Effect.gen(function* () {
               if ((yield* Ref.get(unreadableSeat)) === target.participantId)
@@ -217,6 +231,7 @@ const fixture = Effect.gen(function* () {
     replaced,
     archived,
     failSeat,
+    delegating,
     unreadableSeat,
     marked,
     facts,
@@ -237,7 +252,7 @@ it.effect("refuses until the captain confirms every member's facts, then retires
       const service = yield* ArchiveCrewService;
       const refusal = yield* service.archive(input()).pipe(Effect.flip);
       assert.instanceOf(refusal, ArchiveCrewConfirmationRequiredError);
-      if (!(refusal instanceof ArchiveCrewConfirmationRequiredError)) return;
+      if (!isArchiveCrewConfirmationRequiredError(refusal)) return;
       assert.deepStrictEqual(
         refusal.facts.members.map((member) => [
           member.seatName,
@@ -340,13 +355,13 @@ it.effect("reports a partial failure by seat and finishes on retry with the same
     yield* Effect.gen(function* () {
       const service = yield* ArchiveCrewService;
       const refusal = yield* service.archive(input()).pipe(Effect.flip);
-      if (!(refusal instanceof ArchiveCrewConfirmationRequiredError)) return assert.fail();
+      if (!isArchiveCrewConfirmationRequiredError(refusal)) return assert.fail();
       yield* Ref.set(failSeat, critic);
       const partial = yield* service
         .archive(input({ confirmationToken: refusal.confirmationToken }))
         .pipe(Effect.flip);
       assert.instanceOf(partial, ArchiveCrewPartialFailureError);
-      if (partial instanceof ArchiveCrewPartialFailureError) {
+      if (isArchiveCrewPartialFailureError(partial)) {
         assert.deepStrictEqual(partial.archivedSeats, ["builder"]);
         assert.equal(partial.failedSeat, "critic");
         assert.include(partial.message, "same client_request_id and confirmation_token");
@@ -368,13 +383,36 @@ it.effect("reports a partial failure by seat and finishes on retry with the same
   }),
 );
 
+it.effect("archives no seat while one still has running delegated tasks", () =>
+  Effect.gen(function* () {
+    const { layer, input, archived, delegating, marked } = yield* fixture;
+    yield* Effect.gen(function* () {
+      const service = yield* ArchiveCrewService;
+      yield* Ref.set(delegating, new Set([ThreadId.make("t:c")]));
+      const refused = yield* service
+        .archive(input({ callerParticipantId: null, projectId: null, confirmationSatisfied: true }))
+        .pipe(Effect.flip);
+      if (!isArchiveCrewDelegatedTasksError(refused)) return assert.fail(String(refused));
+      assert.deepStrictEqual(refused.seats, ["critic"]);
+      assert.deepStrictEqual(yield* Ref.get(archived), []);
+      assert.deepStrictEqual(yield* Ref.get(marked), []);
+
+      yield* Ref.set(delegating, new Set());
+      const outcome = yield* service.archive(
+        input({ callerParticipantId: null, projectId: null, confirmationSatisfied: true }),
+      );
+      assert.equal(outcome.status, "archived");
+    }).pipe(Effect.provide(layer));
+  }),
+);
+
 it.effect("treats a token as stale when a member gains new work after confirmation", () =>
   Effect.gen(function* () {
     const { layer, input, facts, archived } = yield* fixture;
     yield* Effect.gen(function* () {
       const service = yield* ArchiveCrewService;
       const refusal = yield* service.archive(input()).pipe(Effect.flip);
-      if (!(refusal instanceof ArchiveCrewConfirmationRequiredError)) return assert.fail();
+      if (!isArchiveCrewConfirmationRequiredError(refusal)) return assert.fail();
       yield* Ref.update(facts, (current) => ({
         ...current,
         [critic]: {
@@ -389,7 +427,7 @@ it.effect("treats a token as stale when a member gains new work after confirmati
         .archive(input({ confirmationToken: refusal.confirmationToken }))
         .pipe(Effect.flip);
       assert.instanceOf(stale, ArchiveCrewConfirmationStaleError);
-      if (stale instanceof ArchiveCrewConfirmationStaleError) {
+      if (isArchiveCrewConfirmationStaleError(stale)) {
         assert.isNotNull(stale.confirmationToken);
         assert.notEqual(stale.confirmationToken, refusal.confirmationToken);
       }
@@ -505,7 +543,7 @@ it.effect(
           .archive(input({ callerParticipantId: null, confirmationSatisfied: true }))
           .pipe(Effect.flip);
         assert.instanceOf(failure, ArchiveCrewPartialFailureError);
-        if (!(failure instanceof ArchiveCrewPartialFailureError)) return;
+        if (!isArchiveCrewPartialFailureError(failure)) return;
         assert.equal(failure.failedSeat, "critic");
         assert.lengthOf(yield* Ref.get(archived), 0);
         assert.lengthOf(yield* Ref.get(marked), 0);

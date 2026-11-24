@@ -130,7 +130,7 @@ it("holds an answer while an image is still being prepared", async () => {
   await expect.element(screen.getByText("Ready to send")).toBeInTheDocument();
   await act(() =>
     addPreparingComposerImages(composerTargetKey(target), [
-      { id: "heic", name: "photo.heic", file: new File(["heic"], "photo.heic") },
+      { id: "heic", name: "photo.heic", file: new File(["heic"], "photo.heic"), hidden: false },
     ]),
   );
   await expect

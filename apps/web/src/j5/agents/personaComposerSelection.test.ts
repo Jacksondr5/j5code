@@ -119,6 +119,7 @@ describe("personaRouteToFollow", () => {
     const shown = () =>
       deriveEffectiveComposerModelState({
         draft: store.getComposerDraft(thread),
+        threadStarted: false,
         providers: [codexProvider],
         selectedProvider: ProviderDriverKind.make("codex"),
         selectedInstanceId: codex,

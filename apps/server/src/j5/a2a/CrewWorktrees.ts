@@ -19,7 +19,6 @@ import * as NodeCrypto from "node:crypto";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
-import * as Data from "effect/Data";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -60,25 +59,28 @@ const encodeEntries = Schema.encodeEffect(StoredCleanupEntries);
 
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
-class CrewWorktreeCleanupNotFoundError extends Data.TaggedError(
+class CrewWorktreeCleanupNotFoundError extends Schema.TaggedError<CrewWorktreeCleanupNotFoundError>()(
   "CrewWorktreeCleanupNotFoundError",
-)<{ readonly itemId: string }> {
+  { itemId: Schema.String },
+) {
   override get message(): string {
     return `There is no worktree cleanup item ${this.itemId}.`;
   }
 }
 
-class CrewWorktreeCleanupAnsweredError extends Data.TaggedError(
+class CrewWorktreeCleanupAnsweredError extends Schema.TaggedError<CrewWorktreeCleanupAnsweredError>()(
   "CrewWorktreeCleanupAnsweredError",
-)<{ readonly itemId: string }> {
+  { itemId: Schema.String },
+) {
   override get message(): string {
     return "This worktree cleanup was already answered.";
   }
 }
 
-class CrewWorktreeCleanupPathError extends Data.TaggedError("CrewWorktreeCleanupPathError")<{
-  readonly path: string;
-}> {
+class CrewWorktreeCleanupPathError extends Schema.TaggedError<CrewWorktreeCleanupPathError>()(
+  "CrewWorktreeCleanupPathError",
+  { path: Schema.String },
+) {
   override get message(): string {
     return `${this.path} is not one of this cleanup's worktrees.`;
   }

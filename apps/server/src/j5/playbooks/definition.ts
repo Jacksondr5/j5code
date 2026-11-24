@@ -27,11 +27,15 @@ export const decodePlaybookDocument = Effect.fn("decodePlaybookDocument")(
   function* (text: string) {
     if (new TextEncoder().encode(text).length > PLAYBOOK_MAX_BYTES)
       return yield* playbookError("invalid_definition", "Use a YAML file no larger than 256 KiB.");
-    const { document, raw } = yield* Effect.try(() => {
-      const document = parseDocument(text, { version: "1.2", uniqueKeys: true });
-      const issue = document.errors[0] ?? document.warnings[0];
-      if (issue) throw issue;
-      return { document, raw: document.toJS({ maxAliasCount: 0 }) as unknown };
+    const { document, raw } = yield* Effect.try({
+      try: () => {
+        const document = parseDocument(text, { version: "1.2", uniqueKeys: true });
+        const issue = document.errors[0] ?? document.warnings[0];
+        if (issue) throw issue;
+        return { document, raw: document.toJS({ maxAliasCount: 0 }) as unknown };
+      },
+      catch: (cause) =>
+        playbookError("invalid_definition", cause instanceof Error ? cause.message : String(cause)),
     });
     const definition = yield* decodeDefinition(raw);
     const ids = definition.steps.map((step) => step.id);

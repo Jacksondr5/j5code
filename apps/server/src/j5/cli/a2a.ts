@@ -27,7 +27,6 @@ import {
 import * as Cause from "effect/Cause";
 import * as Config from "effect/Config";
 import * as Console from "effect/Console";
-import * as Data from "effect/Data";
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -63,12 +62,13 @@ export const A2A_EXIT_CODES = {
 /** Documented ceiling for `--message`; larger payloads belong in a file the agent can read. */
 const A2A_MAX_MESSAGE_BYTES = 64 * 1024;
 
-class A2ACliFailure extends Data.TaggedError("A2ACliFailure")<{
-  readonly exitCode: number;
-  readonly error: string;
-  readonly message: string;
-  readonly extra?: Record<string, unknown> | undefined;
-}> {}
+class A2ACliFailure extends Schema.TaggedError<A2ACliFailure>()("A2ACliFailure", {
+  exitCode: Schema.Number,
+  error: Schema.String,
+  message: Schema.String,
+  extra: Schema.optional(Schema.Record(Schema.String, Schema.Unknown)),
+}) {}
+const isA2ACliFailure = Schema.is(A2ACliFailure);
 
 interface Outcome {
   readonly json: Record<string, unknown>;
@@ -335,14 +335,13 @@ const runOutcome = <E, R>(json: boolean, body: Effect.Effect<Outcome, E | A2ACli
       ),
     ),
     Effect.catch((error) => {
-      const failure =
-        error instanceof A2ACliFailure
-          ? error
-          : new A2ACliFailure({
-              exitCode: A2A_EXIT_CODES.failure,
-              error: "failure",
-              message: error instanceof Error ? error.message : String(error),
-            });
+      const failure = isA2ACliFailure(error)
+        ? error
+        : new A2ACliFailure({
+            exitCode: A2A_EXIT_CODES.failure,
+            error: "failure",
+            message: error instanceof Error ? error.message : String(error),
+          });
       process.exitCode = failure.exitCode;
       return json
         ? Console.log(

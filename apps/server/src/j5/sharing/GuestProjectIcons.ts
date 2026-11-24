@@ -11,13 +11,9 @@ import * as Schema from "effect/Schema";
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http";
 
 import { ASSET_ROUTE_PREFIX, issueAssetUrl, resolveAsset } from "../../assets/AssetAccess.ts";
+import * as PayloadSigner from "../../auth/PayloadSigner.ts";
 import * as ServerSecretStore from "../../auth/ServerSecretStore.ts";
-import {
-  base64UrlDecodeUtf8,
-  base64UrlEncode,
-  signPayload,
-  timingSafeEqualBase64Url,
-} from "../../auth/utils.ts";
+import { base64UrlDecodeUtf8, base64UrlEncode } from "../../auth/utils.ts";
 import { assetFileResponse } from "../../http.ts";
 import * as ProjectStore from "../../orchestration-v2/ProjectStore.ts";
 import * as ProjectCloneTracker from "../../project/ProjectCloneTracker.ts";
@@ -85,9 +81,9 @@ const onAmbientServices = <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effe
     Effect.provideContext(effect, context as Context.Context<R>),
   );
 
-const signingSecret = Effect.gen(function* () {
+const signer = Effect.gen(function* () {
   const secrets = yield* ServerSecretStore.ServerSecretStore;
-  return yield* secrets.getOrCreateRandom(SIGNING_SECRET_NAME, 32);
+  return yield* PayloadSigner.fromSecret(yield* secrets.getOrCreateRandom(SIGNING_SECRET_NAME, 32));
 });
 
 /**
@@ -136,7 +132,7 @@ export const issueGuestProjectIconUrl = (
               .slice(0, 32)}${extension}`;
       const expiresAt = (yield* Clock.currentTimeMillis) + GUEST_PROJECT_ICON_TTL_MS;
       const payload = base64UrlEncode(encodeClaims({ version: 1, projectId, expiresAt }));
-      const token = `${payload}.${signPayload(payload, yield* signingSecret)}`;
+      const token = `${payload}.${yield* (yield* signer).sign(payload)}`;
       return {
         relativeUrl: `${GUEST_PROJECT_ICON_ROUTE_PREFIX}/${token}/${name}`,
         expiresAt,
@@ -159,12 +155,14 @@ const projectOfToken = Effect.fn("j5.sharing.guestProjectIcons.projectOfToken")(
 ) {
   const [payload, signature, ...rest] = token.split(".");
   if (!payload || !signature || rest.length > 0) return undefined;
-  if (!timingSafeEqualBase64Url(signature, signPayload(payload, yield* signingSecret))) {
+  if (!(yield* (yield* signer).verify(payload, signature))) {
     return undefined;
   }
-  const claims = yield* Effect.try(() => decodeClaims(base64UrlDecodeUtf8(payload))).pipe(
-    Effect.orElseSucceed(() => Option.none()),
-  );
+  // A token that does not decode is no token: the icon route answers not found.
+  const claims = yield* Effect.try({
+    try: () => decodeClaims(base64UrlDecodeUtf8(payload)),
+    catch: () => undefined,
+  }).pipe(Effect.orElseSucceed(() => Option.none()));
   if (Option.isNone(claims) || claims.value.expiresAt <= (yield* Clock.currentTimeMillis)) {
     return undefined;
   }

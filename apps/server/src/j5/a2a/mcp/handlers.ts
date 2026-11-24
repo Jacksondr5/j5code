@@ -15,6 +15,7 @@ import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
+import * as Schema from "effect/Schema";
 
 import {
   McpInvocationContext,
@@ -98,13 +99,17 @@ import {
   type J5ProposeCrewInput,
 } from "./tools.ts";
 
+const isJ5PersonaBlockedError = Schema.is(J5PersonaBlockedError);
+const isArchiveCrewConfirmationRequiredError = Schema.is(ArchiveCrewConfirmationRequiredError);
+const isArchiveCrewConfirmationStaleError = Schema.is(ArchiveCrewConfirmationStaleError);
+const isArchiveCrewPartialFailureError = Schema.is(ArchiveCrewPartialFailureError);
+
 const failure = (error: unknown): J5McpFailure => ({
-  code:
-    error instanceof J5PersonaBlockedError
-      ? error.code
-      : typeof error === "object" && error !== null && "_tag" in error
-        ? String(error._tag)
-        : "J5A2AError",
+  code: isJ5PersonaBlockedError(error)
+    ? error.code
+    : typeof error === "object" && error !== null && "_tag" in error
+      ? String(error._tag)
+      : "J5A2AError",
   message: error instanceof Error ? error.message : String(error),
 });
 
@@ -135,17 +140,14 @@ const projectCrewArchiveFacts = (facts: ArchiveCrewConsequenceFacts) => ({
 
 const archiveCrewFailure = (error: unknown): J5ArchiveCrewFailure => {
   const base = failure(error);
-  if (
-    error instanceof ArchiveCrewConfirmationRequiredError ||
-    error instanceof ArchiveCrewConfirmationStaleError
-  ) {
+  if (isArchiveCrewConfirmationRequiredError(error) || isArchiveCrewConfirmationStaleError(error)) {
     return {
       ...base,
       ...projectCrewArchiveFacts(error.facts),
       confirmation_token: error.confirmationToken,
     };
   }
-  if (error instanceof ArchiveCrewPartialFailureError) {
+  if (isArchiveCrewPartialFailureError(error)) {
     return {
       ...base,
       archived_seats: [...error.archivedSeats],

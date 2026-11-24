@@ -1,0 +1,106 @@
+---
+import Icon from "./Icon.astro";
+import Mark from "./Mark.astro";
+
+/**
+ * A thread across two fresh starts: /clear arms the composer notice (ComposerFreshSession), the
+ * next message begins under a "New session" divider, and a switch to another provider leaves a
+ * "Context handoff" divider naming both models (TimelineSystemDivider, V2LifecycleRow).
+ */
+---
+
+<div class="app app--window session" data-vignette role="img" aria-label="A thread where /clear starts a new session, and a later switch of provider shows a Context handoff divider">
+  <div class="session__timeline">
+    <p class="reply-a">Done. Each import error now names the file and the row.</p>
+
+    <div class="session__fresh seq" style="--at: 2.3s">
+      <div class="divider-a"><span class="divider-a__pill"><Icon name="eraser" />New session</span></div>
+      <div class="session__turn"><div class="bubble-a">Now write the tide datum guide.</div></div>
+    </div>
+
+    <div class="session__handoff seq" style="--at: 3.6s">
+      <div class="divider-a">
+        <span class="divider-a__pill">
+          <Icon name="arrow-right-left" />Context handoff
+          <span class="divider-a__detail">
+            <img src="/harnesses/claude-ai-icon.svg" alt="" width="12" height="12" />
+            <span class="session__claude">Opus 5.5</span>
+            <Icon name="arrow-right" />
+            <Mark name="openai" class="ico-3" />
+            <span class="session__codex">Astra</span>
+          </span>
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <div class="session__dock">
+    <div class="session__notice seq-mid" style="--at: 0.9s; --until: 2.2s">
+      <Icon name="eraser" class="ico-3 t-muted" />
+      <span class="session__notice-title">Your next message starts a fresh session</span>
+      <span class="session__notice-desc truncate">The agent won't see earlier messages in this thread.</span>
+      <Icon name="x" class="ico-35 t-muted" />
+    </div>
+    <div class="composer-a">
+      <span class="composer-a__draft flip">
+        <span class="mono seq-from" style="--at: 0.9s">/clear</span>
+        <span class="composer-a__placeholder seq-to" style="--at: 0.9s">Ask anything</span>
+      </span>
+      <span class="btn-a btn-a--primary btn-a--pill"><Icon name="arrow-up" /></span>
+    </div>
+  </div>
+</div>
+
+<style>
+  .session {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-height: 330px;
+  }
+
+  .session__timeline { padding: 16px 16px 0; }
+  .session__turn { display: flex; flex-direction: column; padding-bottom: 6px; }
+  /* Claude's own orange measures 3:1 as small text on white, so by day it is a shade deeper. */
+  .session__claude { color: #a8492a; }
+  /* Each model's name is in its provider's colour; Codex's is the app's own foreground. */
+  .session__codex { color: var(--a-fg); }
+
+  @media (prefers-color-scheme: dark) {
+    .session__claude { color: #d97757; }
+  }
+  .session__handoff img { display: block; }
+
+  .session__dock { position: relative; padding: 10px 12px 12px; }
+
+  /* ComposerBanner: a strip that tucks under the composer's top edge. */
+  .session__notice {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    height: 34px;
+    padding: 0 12px 4px;
+    margin: 0 6px -5px;
+    border: 1px solid color-mix(in srgb, var(--a-fg) 8%, transparent);
+    border-bottom: 0;
+    border-radius: 16px 16px 0 0;
+    background: var(--a-card);
+    font-size: 12px;
+    line-height: 16px;
+    opacity: 0;
+  }
+
+  .session__notice-title {
+    min-width: 0;
+    overflow: hidden;
+    font-weight: 500;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .session__notice-desc { flex: 1; color: var(--a-muted-fg); }
+
+  @media (max-width: 480px) {
+    .session__notice-desc { display: none; }
+    .session__notice-title { flex: 1; }
+  }
+</style>

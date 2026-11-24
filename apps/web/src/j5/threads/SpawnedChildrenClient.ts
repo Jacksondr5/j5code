@@ -12,14 +12,14 @@ import type { SpawnedChild } from "@t3tools/contracts/j5";
 import * as Cause from "effect/Cause";
 import { useSyncExternalStore } from "react";
 
-import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { j5Environment } from "../state";
+import { runJ5Command } from "../runCommand";
 
 export type { SpawnedChild } from "@t3tools/contracts/j5";
 
 const store = createScopedThreadReadStore<SpawnedChildrenRow, SpawnedChildrenRowEntry>({
   load: async (environmentId, threadIds) => {
-    const result = await j5Environment.listSpawnedChildren.run(appAtomRegistry, {
+    const result = await runJ5Command(j5Environment.listSpawnedChildren, {
       environmentId,
       input: { threadIds },
     });

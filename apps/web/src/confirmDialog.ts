@@ -12,6 +12,7 @@ export type ConfirmDialogState =
       readonly status: "confirming";
       readonly message: string;
       readonly variant: ConfirmDialogVariant;
+      readonly initialFocus: ConfirmDialogOptions["initialFocus"];
       readonly content?: ReactNode;
       readonly confirmLabel?: string;
     }
@@ -19,6 +20,7 @@ export type ConfirmDialogState =
       readonly status: "closing";
       readonly message: string;
       readonly variant: ConfirmDialogVariant;
+      readonly initialFocus: ConfirmDialogOptions["initialFocus"];
       readonly content?: ReactNode;
       readonly confirmLabel?: string;
     };
@@ -26,6 +28,7 @@ export type ConfirmDialogState =
 type PendingConfirmation = {
   readonly message: string;
   readonly variant: ConfirmDialogVariant;
+  readonly initialFocus: ConfirmDialogOptions["initialFocus"];
   readonly content?: ReactNode;
   readonly confirmLabel?: string;
   readonly resolve: (confirmed: boolean) => void;
@@ -82,6 +85,7 @@ export function requestConfirmDialog(
     const pending = {
       message,
       variant: options?.variant ?? "default",
+      initialFocus: options?.initialFocus,
       ...(presentation?.content === undefined ? {} : { content: presentation.content }),
       ...(presentation?.confirmLabel === undefined
         ? {}
@@ -98,6 +102,7 @@ export function requestConfirmDialog(
       status: "confirming",
       message,
       variant: pending.variant,
+      initialFocus: pending.initialFocus,
       ...(pending.content === undefined ? {} : { content: pending.content }),
       ...(pending.confirmLabel === undefined ? {} : { confirmLabel: pending.confirmLabel }),
     });
@@ -120,6 +125,7 @@ export function respondToConfirmDialog(confirmed: boolean): void {
     status: "closing",
     message: state.message,
     variant: state.variant,
+    initialFocus: state.initialFocus,
     ...(state.content === undefined ? {} : { content: state.content }),
     ...(state.confirmLabel === undefined ? {} : { confirmLabel: state.confirmLabel }),
   });
@@ -139,6 +145,7 @@ export function completeConfirmDialogClose(): void {
     status: "confirming",
     message: next.message,
     variant: next.variant,
+    initialFocus: next.initialFocus,
     ...(next.content === undefined ? {} : { content: next.content }),
     ...(next.confirmLabel === undefined ? {} : { confirmLabel: next.confirmLabel }),
   });

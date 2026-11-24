@@ -189,6 +189,7 @@ const threadsFor = (delivered: Ref.Ref<Array<AgentDeliveryInput>>) =>
             id: deliveryMessageId(row.messageId),
             runId: pollRoundTripRunId(threadId),
           })),
+          turnItems: [],
         })),
       )) as never,
   });

@@ -31,16 +31,19 @@ it.layer(NodeServices.layer)("J5 migration ledgers", (it) => {
         "statev2.sqlite",
       );
       const db = new NodeSqlite.DatabaseSync(databasePath);
-      const record = (table: string, ids: ReadonlyArray<number>) => {
+      const record = (table: string, rows: ReadonlyArray<readonly [number, string]>) => {
         db.exec(`CREATE TABLE "${table}" (migration_id INTEGER PRIMARY KEY, name TEXT)`);
         const insert = db.prepare(`INSERT INTO "${table}" VALUES (?, ?)`);
-        for (const id of ids) insert.run(id, `Known${id}`);
+        for (const [id, name] of rows) insert.run(id, name);
       };
-      record(
-        "effect_sql_migrations",
-        migrationManifest.map(([id]) => id),
-      );
-      for (const { table, ids } of ledgers) record(table, ids);
+      // Upstream's real names: its preflight also checks the V2 history by name.
+      record("effect_sql_migrations", migrationManifest);
+      for (const { table, ids } of ledgers) {
+        record(
+          table,
+          ids.map((id) => [id, `Known${id}`] as const),
+        );
+      }
       const preflight = () =>
         runServicePreflight({ databasePath, launcherProtocol: SERVICE_LAUNCHER_PROTOCOL });
 

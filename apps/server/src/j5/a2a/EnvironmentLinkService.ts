@@ -10,6 +10,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
 import * as Stream from "effect/Stream";
+import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as HttpBody from "effect/http/HttpBody";
 import * as HttpClient from "effect/http/HttpClient";
 import * as HttpClientRequest from "effect/http/HttpClientRequest";
@@ -17,6 +18,7 @@ import * as HttpClientRequest from "effect/http/HttpClientRequest";
 import * as ServerEnvironment from "../../environment/ServerEnvironment.ts";
 import * as PeerLinks from "../../peer/PeerLinks.ts";
 import { isLineHost } from "./line/lineAddress.ts";
+import { noOwnLoopbackLayer } from "./ownLoopback.ts";
 import { layer as lineRegistryLayer, LineRegistry } from "./line/LineRegistry.ts";
 
 const LINK_SESSION_TIMEOUT = Duration.seconds(10);
@@ -40,7 +42,10 @@ export class EnvironmentLinkService extends Context.Service<
 
 const makeServices = Effect.gen(function* () {
   const links = yield* PeerLinks.PeerLinks;
-  const httpClient = yield* HttpClient.HttpClient;
+  // The link's token goes only to the origin it was made for, as upstream's link client does.
+  const httpClient = HttpClient.transform(yield* HttpClient.HttpClient, (response) =>
+    Effect.provideService(response, FetchHttpClient.RequestInit, { redirect: "manual" }),
+  );
   const environment = yield* ServerEnvironment.ServerEnvironment;
   const lines = yield* LineRegistry;
 
@@ -84,10 +89,14 @@ const makeServices = Effect.gen(function* () {
     let sessionRevoked = false;
     let detail: string | null = null;
     if (Result.isFailure(resolved)) {
-      // An expired link's session expired with it, and an unknown link holds none.
-      sessionRevoked =
-        resolved.failure.reason === "expired" || resolved.failure.reason === "unknown_link";
-      detail = sessionRevoked ? null : resolved.failure.message;
+      // An unknown link holds none. An expired one may not have: the other server renews a
+      // session each time it is used, and a renewal whose answer never came back is not seen here.
+      sessionRevoked = resolved.failure.reason === "unknown_link";
+      detail = sessionRevoked
+        ? null
+        : resolved.failure.reason === "expired"
+          ? "The link ran out here, so this server cannot ask the other to end its session."
+          : resolved.failure.message;
     } else {
       const label = resolved.success.link.label;
       const released = yield* Effect.result(sessionRequest("DELETE", resolved.success));
@@ -138,7 +147,17 @@ const makeServices = Effect.gen(function* () {
       return linked;
     },
   );
-  const claimingLinks = PeerLinks.PeerLinks.of({ ...links, link });
+  /** A link it leaves alone was claimed when it was made. */
+  const linkUnlessLinked: PeerLinks.PeerLinks["Service"]["linkUnlessLinked"] = Effect.fn(
+    "j5.a2a.environmentLinks.linkUnlessLinked",
+  )(function* (input) {
+    const host = URL.parse(input.url)?.hostname ?? "";
+    if (isLineHost(host)) yield* awaitLine(host);
+    const result = yield* links.linkUnlessLinked(input);
+    if (!result.alreadyLinked) yield* claim(result.link.environmentId);
+    return result;
+  });
+  const claimingLinks = PeerLinks.PeerLinks.of({ ...links, link, linkUnlessLinked });
 
   return Context.make(PeerLinks.PeerLinks, claimingLinks).pipe(
     Context.add(EnvironmentLinkService, EnvironmentLinkService.of({ forget })),
@@ -154,6 +173,7 @@ export const layerOver = Layer.effectContext(makeServices);
  */
 export const layer = layerOver.pipe(
   Layer.provide(PeerLinks.layer),
+  Layer.provide(noOwnLoopbackLayer),
   // The one registry: Effect builds this layer once however many layers name it.
   Layer.provide(lineRegistryLayer),
 );

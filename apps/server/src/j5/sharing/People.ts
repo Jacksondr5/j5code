@@ -388,23 +388,21 @@ export const layer: Layer.Layer<
       }),
 
       revokeDevice: Effect.fn("j5.sharing.people.revokeDevice")(function* (sessionId) {
-        // Cut loose from its person and ended together, so it can never renew (AC49, AC50).
-        yield* sql
-          .withTransaction(
-            Effect.gen(function* () {
-              const owner = yield* people.unbindSession(sessionId);
-              if (owner === null) return yield* new DeviceNotAPersonsError({ sessionId });
-              yield* sessions
-                .revoke(sessionId)
-                .pipe(Effect.mapError((cause) => new DeviceEndError({ cause })));
-            }),
-          )
-          .pipe(
-            Effect.catchTags({
-              SqlError: (cause) =>
-                Effect.fail(new PeopleStorageError({ operation: "end a device", cause })),
-            }),
-          );
+        // Its renewal mark is cleared, upstream ends it, then it is cut loose from its person, so it
+        // can never renew (AC49, AC50). Upstream's revoke runs outside any J5 transaction: it
+        // publishes as it writes, and an open socket closes only on the committed row.
+        const storage = (cause: unknown) =>
+          new PeopleStorageError({ operation: "end a device", cause });
+        const cleared = yield* sql<{ readonly session_id: string }>`
+          UPDATE j5_a2a_person_session SET renew_pending_since = NULL
+          WHERE session_id = ${sessionId}
+          RETURNING session_id
+        `.pipe(Effect.mapError(storage));
+        if (cleared.length === 0) return yield* new DeviceNotAPersonsError({ sessionId });
+        yield* sessions
+          .revoke(sessionId)
+          .pipe(Effect.mapError((cause) => new DeviceEndError({ cause })));
+        yield* people.unbindSession(sessionId).pipe(Effect.mapError(storage));
       }),
     });
   }),

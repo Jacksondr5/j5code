@@ -8,13 +8,13 @@ import * as Cause from "effect/Cause";
 import { Atom } from "effect/reactivity";
 import { useEffect, useSyncExternalStore } from "react";
 
-import { appAtomRegistry } from "../../state/atom-registry";
+import { runJ5Command } from "../runCommand";
 import { j5Environment } from "../state";
 import { threadReadConnectionsAtom } from "./spawnedChildren";
 
 const store = createScopedThreadReadStore<ThreadCrewMembership, CrewMembershipEntry>({
   load: async (environmentId, threadIds) => {
-    const result = await j5Environment.listCrewMemberships.run(appAtomRegistry, {
+    const result = await runJ5Command(j5Environment.listCrewMemberships, {
       environmentId,
       input: { threadIds },
     });

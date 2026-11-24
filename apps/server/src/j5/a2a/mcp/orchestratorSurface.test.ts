@@ -5,6 +5,7 @@ import { agentPersonaDraftsTestLayer } from "../../test-support/agentPersonaDraf
 import { agentPersonaEscalationsTestLayer } from "../../test-support/agentPersonaEscalations.ts";
 import {
   EnvironmentId,
+  OrchestratorMcpCapabilitiesResult,
   type OrchestratorMcpThreadInterruptInput,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -15,6 +16,7 @@ import {
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
+import * as Schema from "effect/Schema";
 import { McpSchema, McpServer } from "effect/ai";
 
 import * as McpHttpServer from "../../../mcp/McpHttpServer.ts";
@@ -40,6 +42,7 @@ import * as J5OrchestratorSurfaceHandlers from "./orchestratorSurfaceHandlers.ts
 
 const threadId = ThreadId.make("thread:j5:orchestrator-surface");
 const providerInstanceId = ProviderInstanceId.make("codex-j5-orchestrator-surface");
+const isCapabilitiesResult = Schema.is(OrchestratorMcpCapabilitiesResult);
 const invocation: McpInvocationScope = {
   environmentId: EnvironmentId.make("environment:j5:orchestrator-surface"),
   capabilities: new Set(["orchestration"] as const),
@@ -129,13 +132,6 @@ const TestLayer = McpHttpServer.toolkitRegistration(
   Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
 );
 
-const hasKey = (value: unknown, key: string): boolean => {
-  if (Array.isArray(value)) return value.some((item) => hasKey(item, key));
-  if (typeof value !== "object" || value === null) return false;
-  if (Object.hasOwn(value, key)) return true;
-  return Object.values(value).some((item) => hasKey(item, key));
-};
-
 it.effect("registers the orchestrator tools J5 declares, with factual descriptions", () =>
   Effect.gen(function* () {
     const server = yield* McpServer.McpServer;
@@ -160,7 +156,7 @@ it.effect("registers the orchestrator tools J5 declares, with factual descriptio
   }).pipe(Effect.provide(TestLayer)),
 );
 
-it.effect("maps capabilities with the inherited model and without delegation claims", () =>
+it.effect("answers upstream's capabilities shape, without the bulk create J5 leaves out", () =>
   Effect.gen(function* () {
     const server = yield* McpServer.McpServer;
     searches.length = 0;
@@ -173,43 +169,12 @@ it.effect("maps capabilities with the inherited model and without delegation cla
 
     expect(result.isError).toBe(false);
     expect(searches).toEqual(["sonnet 4.6"]);
+    // A linked environment's delegate_task decodes this with upstream's schema.
     expect(result.structuredContent).toEqual({
-      parentThreadId: threadId,
-      // J5's instructions compare a child's selection with the parent's instance and model.
-      inheritedProviderInstanceId: providerInstanceId,
-      inheritedModel: "gpt-5.6-sol",
-      // J5's instructions send same-model children through delegate_task when this is nonempty.
-      inheritedOptions: [{ id: "effort", value: "xhigh" }],
-      runtimeMode: "full-access",
-      interactionMode: "default",
-      providers: [
-        {
-          providerInstanceId,
-          driverKind: "codex",
-          displayName: "Codex",
-          models: rawCapabilities.providers[0]!.models,
-          omittedModels: 3,
-          // Delegation refuses a runtime mode the provider does not list, so the caller sees them.
-          runtimeModes: ["approval-required", "full-access"],
-          constraints: ["Provider authentication is required."],
-        },
-      ],
-      features: {
-        incrementalThreadRead: true,
-        scheduledTasks: true,
-      },
+      ...rawCapabilities,
+      features: { ...rawCapabilities.features, batchThreadCreation: false, maxBatchThreads: 0 },
     });
-
-    for (const excluded of [
-      "canRunChildTask",
-      "canRunCrossProviderChildTask",
-      "appOwnedSubagents",
-      "asyncPolling",
-      "cancellation",
-      "threadManagement",
-    ]) {
-      expect(hasKey(result.structuredContent, excluded)).toBe(false);
-    }
+    expect(isCapabilitiesResult(result.structuredContent)).toBe(true);
   }).pipe(Effect.provide(TestLayer)),
 );
 

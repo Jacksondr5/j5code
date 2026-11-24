@@ -1,18 +1,15 @@
-import { CommandId, type ThreadId } from "@t3tools/contracts";
+import { CommandId, ThreadId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 
+import * as Mac from "effect/crypto/Mac";
+
+import * as PayloadSigner from "../../auth/PayloadSigner.ts";
 import { ServerSecretStore } from "../../auth/ServerSecretStore.ts";
-import {
-  base64UrlDecodeUtf8,
-  base64UrlEncode,
-  signPayload,
-  timingSafeEqualBase64Url,
-} from "../../auth/utils.ts";
+import { base64UrlDecodeUtf8, base64UrlEncode } from "../../auth/utils.ts";
 import type { CrewArchiveWorktree } from "@t3tools/contracts/j5";
 import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
 import {
@@ -21,9 +18,8 @@ import {
   type AgentCrewInstance,
 } from "./AgentCrewInstanceService.ts";
 import {
+  ArchiveAgentConsequenceFacts,
   ArchiveAgentService,
-  type ArchiveAgentConsequenceFacts,
-  type ArchiveAgentError,
   type ArchiveAgentResult,
 } from "./ArchiveAgentService.ts";
 import { ParticipantId, LedgerProjectId } from "./contracts.ts";
@@ -34,22 +30,25 @@ const TOKEN_SECRET_NAME = "j5-a2a-archive-confirmation-v1";
 const TOKEN_SECRET_BYTES = 32;
 
 /** One member's consequences, keyed by seat so the Captain can see who is waiting on whom. */
-export interface ArchiveCrewMemberFacts {
-  readonly seatName: string;
-  readonly participantId: ParticipantId;
-  readonly threadId: ThreadId;
-  readonly alreadyArchived: boolean;
+const ArchiveCrewMemberFacts = Schema.Struct({
+  seatName: Schema.String,
+  participantId: ParticipantId,
+  threadId: ThreadId,
+  alreadyArchived: Schema.Boolean,
   /**
    * The seat's row was recorded but its thread never came to exist (a launch or addition that
    * failed before reaching it). Nothing runs there, so the unit retires past it.
    */
-  readonly neverCreated: boolean;
-  readonly facts: ArchiveAgentConsequenceFacts;
-}
+  neverCreated: Schema.Boolean,
+  // Lazy: ArchiveAgentService can still be initialising here through an import cycle.
+  facts: Schema.suspend((): typeof ArchiveAgentConsequenceFacts => ArchiveAgentConsequenceFacts),
+});
+export type ArchiveCrewMemberFacts = typeof ArchiveCrewMemberFacts.Type;
 
-export interface ArchiveCrewConsequenceFacts {
-  readonly members: ReadonlyArray<ArchiveCrewMemberFacts>;
-}
+const ArchiveCrewConsequenceFacts = Schema.Struct({
+  members: Schema.Array(ArchiveCrewMemberFacts),
+});
+export type ArchiveCrewConsequenceFacts = typeof ArchiveCrewConsequenceFacts.Type;
 
 export interface ArchiveCrewInput {
   readonly providerSessionId: string;
@@ -92,37 +91,41 @@ export interface ArchiveCrewOutcome {
   readonly worktrees: ReadonlyArray<CrewArchiveWorktree>;
 }
 
-export class ArchiveCrewNotFoundError extends Data.TaggedError("ArchiveCrewNotFoundError")<{
-  readonly crewInstanceId: string;
-}> {
+export class ArchiveCrewNotFoundError extends Schema.TaggedError<ArchiveCrewNotFoundError>()(
+  "ArchiveCrewNotFoundError",
+  { crewInstanceId: Schema.String },
+) {
   override get message(): string {
     return `Crew ${this.crewInstanceId} is not recorded in this environment. Call j5_list_participants to inspect the roster; only Crews launched from an approved roster can be archived as a unit.`;
   }
 }
 
-export class ArchiveCrewNotCaptainError extends Data.TaggedError("ArchiveCrewNotCaptainError")<{
-  readonly crewInstanceId: string;
-  readonly captainParticipantId: ParticipantId;
-  readonly callerParticipantId: ParticipantId;
-}> {
+export class ArchiveCrewNotCaptainError extends Schema.TaggedError<ArchiveCrewNotCaptainError>()(
+  "ArchiveCrewNotCaptainError",
+  {
+    crewInstanceId: Schema.String,
+    captainParticipantId: ParticipantId,
+    callerParticipantId: ParticipantId,
+  },
+) {
   override get message(): string {
     return `Crew ${this.crewInstanceId} is commanded by ${this.captainParticipantId}, not by ${this.callerParticipantId}. Only the Captain archives a Crew (R19); send the Captain an ask instead.`;
   }
 }
 
-class ArchiveCrewProjectMismatchError extends Data.TaggedError("ArchiveCrewProjectMismatchError")<{
-  readonly crewInstanceId: string;
-  readonly projectId: LedgerProjectId;
-  readonly expected: LedgerProjectId;
-}> {
+class ArchiveCrewProjectMismatchError extends Schema.TaggedError<ArchiveCrewProjectMismatchError>()(
+  "ArchiveCrewProjectMismatchError",
+  { crewInstanceId: Schema.String, projectId: LedgerProjectId, expected: LedgerProjectId },
+) {
   override get message(): string {
     return `Crew ${this.crewInstanceId} lives in project ${this.expected}, and the caller is in project ${this.projectId}. A Captain archives a Crew from the Crew's own project.`;
   }
 }
 
-export class ArchiveCrewConfirmationRequiredError extends Data.TaggedError(
+export class ArchiveCrewConfirmationRequiredError extends Schema.TaggedError<ArchiveCrewConfirmationRequiredError>()(
   "ArchiveCrewConfirmationRequiredError",
-)<{ readonly facts: ArchiveCrewConsequenceFacts; readonly confirmationToken: string }> {
+  { facts: ArchiveCrewConsequenceFacts, confirmationToken: Schema.String },
+) {
   override get message(): string {
     const waiting = this.facts.members.reduce(
       (count, member) => count + member.facts.openExchanges.length,
@@ -133,9 +136,10 @@ export class ArchiveCrewConfirmationRequiredError extends Data.TaggedError(
   }
 }
 
-export class ArchiveCrewConfirmationStaleError extends Data.TaggedError(
+export class ArchiveCrewConfirmationStaleError extends Schema.TaggedError<ArchiveCrewConfirmationStaleError>()(
   "ArchiveCrewConfirmationStaleError",
-)<{ readonly facts: ArchiveCrewConsequenceFacts; readonly confirmationToken: string | null }> {
+  { facts: ArchiveCrewConsequenceFacts, confirmationToken: Schema.NullOr(Schema.String) },
+) {
   override get message(): string {
     return this.confirmationToken === null
       ? "The confirmation_token is stale because the Crew no longer has consequential work. Retry j5_archive_crew without a token."
@@ -143,9 +147,10 @@ export class ArchiveCrewConfirmationStaleError extends Data.TaggedError(
   }
 }
 
-class ArchiveCrewConfirmationTokenError extends Data.TaggedError(
+class ArchiveCrewConfirmationTokenError extends Schema.TaggedError<ArchiveCrewConfirmationTokenError>()(
   "ArchiveCrewConfirmationTokenError",
-)<{ readonly reason: "malformed" | "unsupported-version" }> {
+  { reason: Schema.Literals(["malformed", "unsupported-version"]) },
+) {
   override get message(): string {
     return this.reason === "unsupported-version"
       ? "The confirmation_token uses an unsupported version. Call j5_archive_crew without a token to receive a current refusal."
@@ -153,21 +158,36 @@ class ArchiveCrewConfirmationTokenError extends Data.TaggedError(
   }
 }
 
-export class ArchiveCrewPartialFailureError extends Data.TaggedError(
+export class ArchiveCrewPartialFailureError extends Schema.TaggedError<ArchiveCrewPartialFailureError>()(
   "ArchiveCrewPartialFailureError",
-)<{
-  readonly crewInstanceId: string;
-  readonly archivedSeats: ReadonlyArray<string>;
-  readonly failedSeat: string;
-  readonly cause: ArchiveAgentError | unknown;
-}> {
+  {
+    crewInstanceId: Schema.String,
+    archivedSeats: Schema.Array(Schema.String),
+    failedSeat: Schema.String,
+    cause: Schema.Defect(),
+  },
+) {
   override get message(): string {
     const cause = this.cause instanceof Error ? this.cause.message : String(this.cause);
     return `j5_archive_crew retired seat(s) ${this.archivedSeats.join(", ") || "none"} of Crew ${this.crewInstanceId} but stopped at seat ${this.failedSeat}: ${cause} Retry j5_archive_crew with the same client_request_id and confirmation_token; retired seats replay as already archived and the rest continue.`;
   }
 }
 
+/**
+ * Upstream refuses to archive a thread with running delegated tasks. Checked for every seat before
+ * any is archived, so the unit never stops partway on it.
+ */
+export class ArchiveCrewDelegatedTasksError extends Schema.TaggedError<ArchiveCrewDelegatedTasksError>()(
+  "ArchiveCrewDelegatedTasksError",
+  { crewInstanceId: Schema.String, seats: Schema.Array(Schema.String) },
+) {
+  override get message(): string {
+    return `Crew ${this.crewInstanceId} was not archived: seat(s) ${this.seats.join(", ")} still have running delegated tasks. Stop those seats (their tasks stop with them) or wait, then archive again. Nothing was archived.`;
+  }
+}
+
 export type ArchiveCrewError =
+  | ArchiveCrewDelegatedTasksError
   | ArchiveCrewNotFoundError
   | ArchiveCrewNotCaptainError
   | ArchiveCrewProjectMismatchError
@@ -297,12 +317,17 @@ export const layer = Layer.effect(
     const secret = secrets
       .getOrCreateRandom(TOKEN_SECRET_NAME, TOKEN_SECRET_BYTES)
       .pipe(Effect.orDie);
+    const mac = yield* Mac.Mac;
+    const signer = secret.pipe(
+      Effect.flatMap(PayloadSigner.fromSecret),
+      Effect.provideService(Mac.Mac, mac),
+    );
 
     const issueToken = Effect.fn("j5.a2a.archiveCrew.issueToken")(function* (
       payload: TokenPayload,
     ) {
       const encoded = base64UrlEncode(encodeTokenPayloadJson(payload));
-      return `${encoded}.${signPayload(encoded, yield* secret)}`;
+      return `${encoded}.${yield* (yield* signer).sign(encoded)}`;
     });
 
     const parseToken = Effect.fn("j5.a2a.archiveCrew.parseToken")(function* (token: string) {
@@ -310,7 +335,7 @@ export const layer = Layer.effect(
       if (parts.length !== 2 || parts[0] === "" || parts[1] === "")
         return yield* new ArchiveCrewConfirmationTokenError({ reason: "malformed" });
       const [encoded, signature] = parts as [string, string];
-      if (!timingSafeEqualBase64Url(signature, signPayload(encoded, yield* secret)))
+      if (!(yield* (yield* signer).verify(encoded, signature)))
         return yield* new ArchiveCrewConfirmationTokenError({ reason: "malformed" });
       const text = yield* Effect.result(
         Effect.try({
@@ -448,6 +473,23 @@ export const layer = Layer.effect(
             confirmationToken: hasConsequences(facts) ? yield* issueToken(payload) : null,
           });
         }
+
+        const delegating: Array<string> = [];
+        for (const member of facts.members) {
+          if (member.neverCreated || member.alreadyArchived) continue;
+          if (yield* archiveAgent.runsDelegatedTasks(member.threadId))
+            delegating.push(member.seatName);
+        }
+        if (
+          input.withCaptain === true &&
+          (yield* archiveAgent.runsDelegatedTasks(instance.captainThreadId))
+        )
+          delegating.push("Captain");
+        if (delegating.length > 0)
+          return yield* new ArchiveCrewDelegatedTasksError({
+            crewInstanceId: instance.id,
+            seats: delegating,
+          });
 
         const results: Array<ArchiveCrewMemberResult> = [];
         const sessions: Array<CrewSeatSession> = [];

@@ -1,7 +1,7 @@
 import { useState, useSyncExternalStore, type CSSProperties } from "react";
 
 import { SettingResetButton, SettingsRow } from "../../components/settings/settingsLayout";
-import { searchableSetting } from "../../components/settings/settingsSearch";
+import { useSearchableSetting } from "../../components/settings/settingsSearch";
 import {
   getNotificationVolume,
   setNotificationVolume,
@@ -9,6 +9,7 @@ import {
 } from "./notificationVolume";
 
 export function NotificationVolumeSettings() {
+  const searchableSetting = useSearchableSetting();
   const volume = useSyncExternalStore(subscribeNotificationVolume, getNotificationVolume, () => 1);
   const [error, setError] = useState<string | null>(null);
   const percent = Math.round(volume * 100);
@@ -32,7 +33,10 @@ export function NotificationVolumeSettings() {
       status={error ? <span role="alert">{error}</span> : undefined}
       resetAction={
         volume !== 1 ? (
-          <SettingResetButton label="notification volume" onClick={() => save(1)} />
+          <SettingResetButton
+            ariaLabel="Reset notification volume to default"
+            onClick={() => save(1)}
+          />
         ) : null
       }
       control={

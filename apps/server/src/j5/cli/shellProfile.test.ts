@@ -7,6 +7,7 @@ import * as Path from "effect/Path";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { J5_PATH_MARKER } from "@t3tools/shared/j5/shellProfile";
 
+import { posixLauncherScript } from "../../cloud/pinnedRuntime.ts";
 import { planShellCleanup, removeAppLinks, removeJ5PathLines } from "./shellProfile.ts";
 
 // A person's home with an installed J5: the installer's link, a profile
@@ -46,6 +47,11 @@ it.layer(NodeServices.layer)("j5 uninstall's shell cleanup", (it) => {
       const { profiles, installerLink } = yield* plan(home, baseDir);
       assert.equal(installerLink, command);
       assert.deepStrictEqual(profiles, [path.join(home, ".zshrc")]);
+      // Installers now write a launcher script, not a link; it is the installer's too.
+      const executable = yield* fs.realPath(command);
+      yield* fs.remove(command);
+      yield* fs.writeFileString(command, posixLauncherScript(executable), { mode: 0o755 });
+      assert.equal((yield* plan(home, baseDir)).installerLink, command);
 
       yield* removeJ5PathLines(profiles);
       assert.equal(yield* fs.readFileString(path.join(home, ".zshrc")), before);

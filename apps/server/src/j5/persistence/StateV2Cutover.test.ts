@@ -34,7 +34,9 @@ const readJ5Rows = Effect.fn("readJ5Rows")(function* () {
   const sql = yield* SqlClient.SqlClient;
   const tables = yield* sql<{ readonly name: string }>`
     SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'j5\\_%' ESCAPE '\\'
-      AND name <> 'j5_upstream_migration_history' ORDER BY name`;
+      AND name <> 'j5_upstream_migration_history'
+      -- Startup runs this lane on the copy; its ledger is bookkeeping, not a J5 row to keep.
+      AND name <> 'j5_run_observability_migrations' ORDER BY name`;
   const rows: Record<string, ReadonlyArray<string>> = {};
   for (const { name } of tables) {
     const table = yield* sql.unsafe<Record<string, unknown>>(`SELECT * FROM "${name}"`);

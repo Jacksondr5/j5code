@@ -118,7 +118,7 @@ it("keeps focus in the artifact's preview when the window regains focus", async 
   await userEvent.click(screen.getByText("Artifact text"));
 
   expect(document.activeElement?.getAttribute("data-slot")).toBe("scroll-area-viewport");
-  expect(shouldRefocusComposerOnWindowFocus(document.activeElement)).toBe(false);
+  expect(shouldRefocusComposerOnWindowFocus(document.activeElement, null)).toBe(false);
 });
 
 it("Ctrl+F in an artifact on desktop opens the find bar over the preview", async () => {

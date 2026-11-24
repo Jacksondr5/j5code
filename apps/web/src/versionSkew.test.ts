@@ -20,12 +20,27 @@ const MISMATCH_HINT =
   "Version mismatch. Try syncing the client and server to the same J5 Code version.";
 
 describe("versionSkew", () => {
-  // J5 (case 40): servers install from release archives, so every kind updates with `j5 update`.
-  it("hands every install kind the j5 update command", () => {
+  // J5 (case 40): servers install from release archives, so every kind but the launcher updates
+  // with `j5 update`.
+  it("updates the proven launcher, safely quoted, and everything else with j5 update", () => {
     expect(manualServerUpdateCommand("0.0.45")).toBe("j5 update 0.0.45");
     expect(manualServerUpdateCommand("0.0.45", { kind: "npm-global", prefix: "/opt/node" })).toBe(
       "j5 update 0.0.45",
     );
+    expect(
+      manualServerUpdateCommand("0.0.45", {
+        kind: "t3-launcher",
+        launcher: "j5",
+        baseDir: "/home/u/.j5code",
+      }),
+    ).toBe("'j5' update --base-dir '/home/u/.j5code' 0.0.45");
+    expect(
+      manualServerUpdateCommand("0.0.45", {
+        kind: "t3-launcher",
+        launcher: "/opt/maria's bin/j5",
+        baseDir: "/data/j5 home",
+      }),
+    ).toBe("'/opt/maria'\\''s bin/j5' update --base-dir '/data/j5 home' 0.0.45");
   });
   beforeEach(() => {
     branding.APP_VERSION = "0.0.34";

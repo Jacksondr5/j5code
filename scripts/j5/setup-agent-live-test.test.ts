@@ -7,6 +7,8 @@ import * as NodePath from "node:path";
 import {
   PAIRING_SCOPES,
   classifyServer,
+  descendantGroupsFromTable,
+  processTableFromPs,
   configuredLivePort,
   formatGuest,
   formatInstructions,
@@ -671,7 +673,8 @@ describe("classifyServer", () => {
     worktree: "/w",
     record: { processGroup: 100, leaderStartTime: "4242" },
     facts,
-    groupMembers: () => [100, 101],
+    groupMembers: (group: number): ReadonlyArray<number> => (group === 100 ? [100, 101] : []),
+    descendantGroupsOf: (): ReadonlyArray<number> => [],
     listenerOn: (): number | undefined => 101,
     processGroupOf: (): number | undefined => 100,
     startTimeOf: (): string | undefined => "4242",
@@ -697,6 +700,39 @@ describe("classifyServer", () => {
     ]) {
       assert.equal(classifyServer({ ...ours, ...other }).kind, "notServing");
     }
+  });
+
+  it("follows the server into the group vp starts under the runner, and remembers it", () => {
+    // dev-runner 100 -> vp 200 (leads group 200) -> server 201, as `vp run dev` launches it.
+    const underVp = {
+      ...ours,
+      groupMembers: (group: number) => (group === 100 ? [100] : group === 200 ? [200, 201] : []),
+      descendantGroupsOf: () => [200],
+      listenerOn: () => 201,
+      processGroupOf: (pid: number) => (pid === 100 ? 100 : 200),
+    };
+    assert.deepInclude(classifyServer(underVp), { kind: "running", groups: [100, 200] });
+    // The runner is gone; a recorded child group still led by the same process is stopped too.
+    const orphaned = {
+      ...underVp,
+      record: {
+        ...ours.record,
+        childGroups: [{ group: 200, leaderStartTime: "4242" }],
+      },
+      groupMembers: (group: number) => (group === 200 ? [200, 201] : []),
+      descendantGroupsOf: () => [],
+    };
+    assert.deepInclude(classifyServer(orphaned), { kind: "running", groups: [200] });
+    // A recorded group now led by another process (a recycled pid) is never ours.
+    assert.equal(classifyServer({ ...orphaned, startTimeOf: () => "9999" }).kind, "stopped");
+  });
+
+  it("finds groups led under the runner, never a shared one", () => {
+    const table = processTableFromPs(
+      "  1     0     1\n100     1   100\n200   100   200\n201   200   200\n300   201   1\n400     1   400\n",
+    );
+    assert.deepStrictEqual(descendantGroupsFromTable(table, 100), [200]);
+    assert.deepStrictEqual(descendantGroupsFromTable(table, 400), []);
   });
 
   it("never treats a live group as ours when its leader is not the process that was spawned", () => {

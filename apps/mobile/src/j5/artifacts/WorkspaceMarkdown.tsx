@@ -9,7 +9,7 @@ import { useNavigation } from "@react-navigation/native";
 import * as Option from "effect/Option";
 import { useState } from "react";
 
-import { FilePreviewModal, type FilePreviewSource } from "../../components/FilePreviewModal";
+import { FilePreviewModal, type FilePreviewSource } from "../../components/ui/FilePreviewModal";
 import { useMarkdownPreviewStyles } from "../../features/files/FileMarkdownPreview";
 import {
   fileRoutePathSegments,
@@ -33,8 +33,8 @@ import {
 import { useMarkdownImageSource } from "../../native/useMarkdownImageSource";
 import { useQuietThreadShell } from "../../state/entities";
 import { useEnvironmentThread } from "../../state/threads";
-import { useThreadCwd } from "../../state/use-selected-thread-worktree";
 import { ArtifactMarkdownImage } from "./ArtifactMarkdownImage";
+import { useThreadCwd } from "./useThreadCwd";
 import {
   artifactLinkContextMenu,
   artifactPathForMarkdownLink,

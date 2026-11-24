@@ -65,6 +65,8 @@ export function InboxReplyEditor(props: {
           const intent = composerSubmissionIntentForKey({
             event,
             keybindings,
+            // The reply editor is editable and outside every terminal and preview.
+            context: { editableFocus: true },
             isSoftwareKeyboardOpen,
             isDraftThread: false,
             sendShortcut,

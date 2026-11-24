@@ -20,7 +20,7 @@ import type {
 } from "@t3tools/contracts/j5";
 import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
 import { useState } from "react";
-import { Pressable, View } from "react-native";
+import { Platform, Pressable, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { AppText as Text } from "../../components/ui/AppText";
@@ -29,6 +29,7 @@ import { EmptyState } from "../../components/ui/EmptyState";
 import { ScreenScrollView } from "../../components/ui/ScreenScrollView";
 import { cn } from "../../lib/cn";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
+import { AppBar } from "../../components/ui/AppBar";
 import { useEnvironmentQuery } from "../../state/query";
 import { useCanOperateThread } from "../sharing/guestAccess";
 import { j5Environment } from "../state";
@@ -310,7 +311,13 @@ export function CrewProposalReviewScreen(props: Params) {
   // Held from this page's own answer to the pop: the list may drop it before the answer returns.
   const [answering, setAnswering] = useState<CrewProposal | null>(null);
   const review = crewProposalReview(query.data, props.route.params.proposalId, answering);
-  const header = <NativeStackScreenOptions options={{ title: "Crew proposal" }} />;
+  // Android draws every page's bar in the screen; upstream's route presets hide the native one.
+  const header =
+    Platform.OS === "android" ? (
+      <AppBar title="Crew proposal" onBack={() => navigation.goBack()} />
+    ) : (
+      <NativeStackScreenOptions options={{ title: "Crew proposal" }} />
+    );
   if (review.kind !== "open") {
     return (
       <View className="flex-1 bg-sheet">

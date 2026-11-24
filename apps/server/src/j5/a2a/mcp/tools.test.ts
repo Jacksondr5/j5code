@@ -172,6 +172,8 @@ it("publishes closed-world, non-destructive hints for every read-only J5 tool", 
   );
   for (const tool of reads) {
     assert.isFalse(Context.get(tool.annotations, Tool.Destructive), tool.name);
+    // Upstream marks t3_background_wait read-only only so Claude Plan mode allows it, and leaves OpenWorld at its default.
+    if (tool.name === "t3_background_wait") continue;
     assert.isFalse(Context.get(tool.annotations, Tool.OpenWorld), tool.name);
   }
   for (const tool of [

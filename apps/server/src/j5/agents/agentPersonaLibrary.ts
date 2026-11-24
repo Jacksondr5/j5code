@@ -65,9 +65,20 @@ const decodeDefinitionJson = Schema.decodeUnknownEffect(
   Schema.fromJsonString(AgentPersonaDefinition),
 );
 /** Launch snapshots are server-written JSON, never user files. */
+/** A synchronous decode or lookup, failing as a library error with what it threw. */
+const tryLibrary = <A>(evaluate: () => A) =>
+  Effect.try({
+    try: evaluate,
+    catch: (cause) =>
+      new AgentPersonaLibraryError({
+        message: cause instanceof Error ? cause.message : String(cause),
+        cause,
+      }),
+  });
+
 const decodeSnapshot = Effect.fn("AgentPersonaLibrary.decodeSnapshot")(function* (text: string) {
   const definition = yield* decodeDefinitionJson(text);
-  return yield* Effect.try(() => decodeAgentPersonaDefinition(definition));
+  return yield* tryLibrary(() => decodeAgentPersonaDefinition(definition));
 });
 /** User-authored definitions (source folders and imports) are YAML documents. */
 const decodeDefinition = Effect.fn("AgentPersonaLibrary.decodeDefinition")(function* (
@@ -469,7 +480,7 @@ export function createAgentPersonaLibrary(storage?: {
     const definitions = yield* decodeImports(text);
     const ids = new Set<string>();
     for (const definition of definitions) {
-      yield* Effect.try(() => decodeAgentPersonaDefinition(definition));
+      yield* tryLibrary(() => decodeAgentPersonaDefinition(definition));
       if (ids.has(definition.id))
         return yield* new AgentPersonaLibraryError({
           message: `Duplicate imported persona id: ${definition.id}`,
@@ -665,7 +676,7 @@ export function createAgentPersonaLibrary(storage?: {
     input: AgentPersonaEditInput,
   ) {
     const { independentReviewer: storedFlag, ...kept } = original;
-    const updated = yield* Effect.try(() =>
+    const updated = yield* tryLibrary(() =>
       decodeAgentPersonaDefinition({
         ...kept,
         ...reviewerFlag(input.independentReviewer ?? storedFlag),
@@ -697,7 +708,7 @@ export function createAgentPersonaLibrary(storage?: {
       return yield* new AgentPersonaLibraryError({
         message: "Imported agent no longer exists. Refresh the library.",
       });
-    const original = yield* Effect.try(() => decodeAgentPersonaDefinition(current));
+    const original = yield* tryLibrary(() => decodeAgentPersonaDefinition(current));
     if (definitionDigest(original) !== input.expectedDigest)
       return yield* new AgentPersonaLibraryError({
         message:
@@ -748,7 +759,7 @@ export function createAgentPersonaLibrary(storage?: {
   const createdDefinition = Effect.fn("AgentPersonaLibrary.createdDefinition")(function* (
     input: AgentPersonaCreateInput,
   ) {
-    const definition = yield* Effect.try(() =>
+    const definition = yield* tryLibrary(() =>
       decodeAgentPersonaDefinition({
         id: input.id,
         version: 1,
@@ -920,7 +931,7 @@ export function createAgentPersonaLibrary(storage?: {
     assignment: OrchestrationV2AgentPersonaAssignment,
   ) {
     if (assignment.definitionDigest === undefined) {
-      const definition = yield* Effect.try(() => getBuiltInAgentPersona(assignment.personaId));
+      const definition = yield* tryLibrary(() => getBuiltInAgentPersona(assignment.personaId));
       if (definition.version !== assignment.definitionVersion)
         return yield* new AgentPersonaLibraryError({ message: "Unknown legacy persona version." });
       return definition;

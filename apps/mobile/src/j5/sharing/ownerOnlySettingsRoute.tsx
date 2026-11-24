@@ -2,7 +2,7 @@ import { useRoute } from "@react-navigation/native";
 import type { ComponentType } from "react";
 
 import { SettingsScreen } from "../../features/settings/components/SettingsScreen";
-import { useOwnerSomewhere } from "./guestAccess";
+import { useOwnerSomewhere, useWritesSomewhere } from "./guestAccess";
 import { settingsPageShown } from "./settingsAccess.logic";
 
 /**
@@ -13,7 +13,9 @@ import { settingsPageShown } from "./settingsAccess.logic";
 export function ownerOnlySettingsRoute(Screen: ComponentType, title: string): ComponentType {
   function OwnerOnlySettingsRoute() {
     const routeName = useRoute().name;
-    return settingsPageShown(routeName, useOwnerSomewhere()) ? (
+    const ownerSomewhere = useOwnerSomewhere();
+    const writesSomewhere = useWritesSomewhere();
+    return settingsPageShown(routeName, ownerSomewhere, writesSomewhere) ? (
       <Screen />
     ) : (
       <SettingsScreen title={title}>{null}</SettingsScreen>

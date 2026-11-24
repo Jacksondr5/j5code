@@ -11,6 +11,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import { Tool, Toolkit } from "effect/ai";
+import { topOfPinnedRunOrderKey } from "@t3tools/shared/pinOrderKey";
 
 import { McpInvocationContext } from "../../../mcp/McpInvocationContext.ts";
 import * as McpToolAccess from "../../../mcp/McpToolAccess.ts";
@@ -23,6 +24,7 @@ import {
 import { ThreadToolkit } from "../../../mcp/toolkits/thread/tools.ts";
 import { queuedRunsInDeliveryOrder } from "../../../orchestration-v2/QueuedRunOrder.ts";
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
+import * as ThreadMessageIntake from "../../../orchestration-v2/ThreadMessageIntake.ts";
 import { AgentCrewInstanceService } from "../AgentCrewInstanceService.ts";
 import { makeCrewSeatArchiveGuard } from "../crewSeatArchiveGuard.ts";
 import { ParticipantId } from "../contracts.ts";
@@ -117,6 +119,35 @@ function queueEntry(
   };
 }
 
+/** Only the queued runs and their messages, as upstream's `t3_queue` reads them. */
+const readQueued = Effect.fn("j5.mcp.readQueued")(function* (threadId: ThreadId | undefined) {
+  const read = yield* readThread(threadId, ["runs"], { runStatuses: ["queued"] });
+  const messages = yield* read.threads
+    .getMessagesById(
+      read.projection.thread.id,
+      read.projection.runs.map((run) => run.userMessageId),
+    )
+    .pipe(Effect.mapError(unavailable));
+  return {
+    ...read,
+    projection: {
+      thread: read.projection.thread,
+      runs: read.projection.runs,
+      messages: [...messages.values()],
+    },
+  };
+});
+
+/** Upstream's: an agent pin goes to the top of Pinned; without the index it lands keyless. */
+const topOfPinnedRunKey = Effect.fn("j5.mcp.topOfPinnedRunKey")(function* (
+  threads: Pick<ThreadManagementService["Service"], "listActiveShellIndex">,
+) {
+  const index = yield* threads.listActiveShellIndex().pipe(Effect.orElseSucceed(() => null));
+  if (index === null) return undefined;
+  const pinnedKeys = index.flatMap((entry) => (entry.pinnedAt == null ? [] : [entry.pinOrderKey]));
+  return topOfPinnedRunOrderKey(pinnedKeys) ?? undefined;
+});
+
 const dispatch = Effect.fn("j5.mcp.dispatchThreadCommand")(function* (
   threadId: ThreadId | undefined,
   command: (common: { commandId: CommandId; threadId: ThreadId }) => OrchestrationV2Command,
@@ -134,7 +165,7 @@ const editQueuedMessage = Effect.fn("j5.mcp.editQueuedMessage")(function* (input
   readonly queuedRunId: RunId;
   readonly text: string;
 }) {
-  const { threads, projection, caller } = yield* readThread(input.threadId, ["runs", "messages"]);
+  const { threads, projection, caller } = yield* readQueued(input.threadId);
   const run = projection.runs.find(
     (candidate) => candidate.id === input.queuedRunId && candidate.status === "queued",
   );
@@ -193,25 +224,34 @@ const editQueuedMessage = Effect.fn("j5.mcp.editQueuedMessage")(function* (input
     editorId = delivery?.row.sender_id;
   }
   const commandId = yield* newCommandId();
+  // Upstream's: an agent must not turn a queued message into a provider sign-out.
+  const command = yield* ThreadMessageIntake.withQueuedAttachmentsOnSignOutText({
+    type: "queued-run.edit",
+    commandId,
+    threadId: projection.thread.id,
+    runId: run.id,
+    text,
+  }).pipe(
+    Effect.mapError((error) =>
+      error._tag === "EnvironmentAuthorizationError"
+        ? new OrchestratorMcpFailure({
+            code: "invalid_request",
+            message: "A queued message cannot be edited into a provider sign-out.",
+          })
+        : dispatchFailure(error),
+    ),
+  );
   if (editorId !== undefined) {
     yield* claimQueuedEdit({ commandId, editorId: ParticipantId.make(editorId) }).pipe(
       Effect.mapError(unavailable),
     );
   }
-  const result = yield* threads
-    .dispatch({
-      type: "queued-run.edit",
-      commandId,
-      threadId: projection.thread.id,
-      runId: run.id,
-      text,
-    })
-    .pipe(
-      Effect.tapError(() =>
-        editorId === undefined ? Effect.void : Effect.ignore(releaseQueuedEditClaim(commandId)),
-      ),
-      Effect.mapError(dispatchFailure),
-    );
+  const result = yield* threads.dispatch(command).pipe(
+    Effect.tapError(() =>
+      editorId === undefined ? Effect.void : Effect.ignore(releaseQueuedEditClaim(commandId)),
+    ),
+    Effect.mapError(dispatchFailure),
+  );
   return { sequence: result.sequence };
 });
 
@@ -306,6 +346,12 @@ export const layer = McpToolAccess.toLayer(J5AdaptedThreadToolkit, {
         case "mark_unread":
           command = { ...common, type: "thread.mark-unread" };
           break;
+        case "pin": {
+          // Always keyed, as upstream: the reducer ignores the key for a pinned thread.
+          const orderKey = yield* topOfPinnedRunKey(threads);
+          command = { ...common, type: "thread.pin", ...(orderKey ? { orderKey } : {}) };
+          break;
+        }
         default:
           command = { ...common, type: `thread.${input.action}` };
       }
@@ -329,7 +375,7 @@ export const layer = McpToolAccess.toLayer(J5AdaptedThreadToolkit, {
     (input) => input.action === "list" || input.action === "read",
     McpToolAccess.reads((input) =>
       Effect.gen(function* () {
-        const { projection } = yield* readThread(input.threadId, ["runs", "messages"]);
+        const { projection } = yield* readQueued(input.threadId);
         if (input.action === "list") {
           const runs = queuedRunsInDeliveryOrder(projection);
           const cursor = input.cursor ?? 0;

@@ -7,6 +7,7 @@ import {
   credentialConnectionId,
   EnvironmentRegistry,
 } from "@t3tools/client-runtime/connection";
+import { credentialReplacements } from "@t3tools/client-runtime/j5/replaced-credential";
 import { createRuntimeCommand } from "@t3tools/client-runtime/state/runtime";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { File, Paths } from "expo-file-system";
@@ -22,6 +23,7 @@ import { appAtomRegistry } from "../../state/atom-registry";
 import { environmentSession } from "../../state/session";
 import { j5Sharing } from "../sharing/guestAccess";
 import { j5Environment } from "../state";
+import { runJ5Command } from "../runCommand";
 import {
   answeredSince,
   answerOnItsWay,
@@ -111,7 +113,7 @@ const credentialKeysAtom = Atom.make((get) => {
   const keys = new Map<EnvironmentId, string>();
   for (const id of get(environmentCatalog.catalogValueAtom).entries.keys()) {
     const prepared = Option.getOrNull(get(environmentSession.preparedConnectionValueAtom(id)));
-    if (prepared !== null) keys.set(id, credentialKey(prepared));
+    if (prepared !== null) keys.set(id, credentialKey(prepared, credentialReplacements(id)));
   }
   return keys;
 }).pipe(Atom.withLabel("mobile-j5:credential-keys"));
@@ -171,15 +173,25 @@ const storedCredentialKey = createRuntimeCommand(connectionAtomRuntime, {
     const registry = yield* EnvironmentRegistry.EnvironmentRegistry;
     const entry = (yield* SubscriptionRef.get(registry.entries)).get(environmentId);
     if (entry?.target._tag !== "BearerConnectionTarget") return null;
+    const target = entry.target;
     const store = yield* CredentialStore.ConnectionCredentialStore;
-    const stored = yield* store.get(credentialConnectionId(entry.target.connectionId));
+    const stored = yield* store.get(credentialConnectionId(target.connectionId));
     return Option.match(stored, {
       onNone: () => null,
       onSome: (credential) =>
-        credentialKey({
-          httpAuthorization: { _tag: "Bearer", token: credential.token },
-          target: entry.target,
-        }),
+        credentialKey(
+          {
+            httpAuthorization:
+              credential._tag === "BearerConnectionCredential"
+                ? { _tag: "Bearer", token: credential.token }
+                : {
+                    _tag: "Dpop",
+                    directConnection: { connectionId: credentialConnectionId(target.connectionId) },
+                  },
+            target,
+          },
+          credentialReplacements(environmentId),
+        ),
     });
   }),
 });
@@ -194,7 +206,7 @@ appAtomRegistry.subscribe(
       const previous = entries.get(environmentId);
       entries.set(environmentId, entry);
       if (previous === undefined || previous === entry) continue;
-      void storedCredentialKey.run(appAtomRegistry, environmentId).then((result) => {
+      void runJ5Command(storedCredentialKey, environmentId).then((result) => {
         if (result._tag === "Success" && result.value !== null)
           applyCredential(environmentId, result.value);
       });
@@ -271,7 +283,7 @@ export const connectionMemory = {
     namesInFlight.set(environmentId, inFlight);
     for (const id of ids) inFlight.add(id);
     try {
-      const result = await j5Environment.readParticipantIdentities.run(appAtomRegistry, {
+      const result = await runJ5Command(j5Environment.readParticipantIdentities, {
         environmentId,
         input: { participantIds: ids },
       });

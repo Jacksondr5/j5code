@@ -86,7 +86,7 @@ export const invokeAgent = Effect.fn("j5.invokeAgent")(function* (
   // delegateTask holds a child to the parent's stored mode. The pick has already judged access,
   // and the child's real permissions come from its persona snapshot, so a broader child inherits.
   const runtimeMode = (yield* resolveRuntimeMode(parent.thread.runtimeMode, childMode).pipe(
-    Effect.match({ onFailure: () => true, onSuccess: () => false }),
+    Effect.isFailure,
   ))
     ? "inherit"
     : childMode;

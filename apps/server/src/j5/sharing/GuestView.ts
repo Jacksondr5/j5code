@@ -251,6 +251,11 @@ const narrowThreadItem = (
   if (item.kind === "event" && carriesThread(item.event)) {
     return { ...item, event: { ...item.event, payload: narrowAppThread(item.event.payload) } };
   }
+  // A visit carries the thread's `opens` without the rest of it.
+  if (item.kind === "event" && item.event.type === "thread.visit-recorded") {
+    const { opens: _opens, ...visit } = item.event.payload;
+    return { ...item, event: { ...item.event, payload: visit } };
+  }
   return item;
 };
 
@@ -380,6 +385,11 @@ const makeShellFilter = (access: PersonAccess["Service"], reach: SessionReach, r
             switch (item.kind) {
               case "synchronized":
                 return pass(item);
+              case "snapshot-required":
+                // The HTTP snapshot it points to is refused to a narrowed connection, and this
+                // feed never resumes from a cursor; were one to come, begin again from a snapshot.
+                yield* restart;
+                return drop;
               case "snapshot": {
                 // A repository-identity refresh names host folders, and a narrowed sidebar's projects carry
                 // no repository identity for it to fill in.

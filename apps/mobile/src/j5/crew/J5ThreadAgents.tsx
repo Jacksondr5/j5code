@@ -33,9 +33,9 @@ import {
 } from "../../features/threads/SubagentStatusDot";
 import { cn } from "../../lib/cn";
 import { relativeTime } from "../../lib/time";
-import { appAtomRegistry } from "../../state/atom-registry";
 import { useThreadShells } from "../../state/entities";
 import { environmentThreadShells } from "../../state/threads";
+import { runJ5Command } from "../runCommand";
 import { j5Environment } from "../state";
 import { J5ParentRow, parentRoleLabel, useJ5ParentRow } from "./J5ParentRow";
 import { useServerConnection } from "./serverConnection";
@@ -161,11 +161,10 @@ function SpawnedAgentGroup(props: {
   const stopDisabled = stopping || !server.connected;
   const stop = (crew: { readonly crewInstanceId: string; readonly crewName: string }) => {
     setStopping(true);
-    void j5Environment.stopCrew
-      .run(appAtomRegistry, {
-        environmentId: props.environmentId,
-        input: { crewInstanceId: crew.crewInstanceId },
-      })
+    void runJ5Command(j5Environment.stopCrew, {
+      environmentId: props.environmentId,
+      input: { crewInstanceId: crew.crewInstanceId },
+    })
       .then((result) => {
         if (result._tag === "Failure") throw Cause.squash(result.cause);
       })

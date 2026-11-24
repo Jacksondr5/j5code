@@ -2,7 +2,7 @@ import type { EnvironmentId } from "@t3tools/contracts";
 import { PlusIcon } from "lucide-react";
 import { useState } from "react";
 
-import { searchableSetting } from "../../components/settings/settingsSearch";
+import { useSearchableSetting } from "../../components/settings/settingsSearch";
 import { SettingsRow, SettingsSection } from "../../components/settings/settingsLayout";
 import { Button } from "../../components/ui/button";
 import { useVisibleRefresh } from "../useVisibleRefresh";
@@ -23,6 +23,7 @@ export function LinkedEnvironmentsSection({
 }: {
   readonly primaryEnvironmentId: EnvironmentId | null;
 }) {
+  const searchableSetting = useSearchableSetting();
   const links = useManagedLinks();
   const { environments, servers, lists, pairs } = links;
   // A session revoked or expired on another server moves no revision here, and a link's reach is

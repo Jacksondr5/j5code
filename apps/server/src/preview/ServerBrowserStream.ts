@@ -20,8 +20,8 @@ import {
 } from "effect/http";
 import * as Socket from "effect/socket/Socket";
 
+import { authenticateMediaRequest, failEnvironmentInternal } from "../auth/http.ts";
 import * as SessionStore from "../auth/SessionStore.ts";
-import { authenticateMediaRequest } from "../auth/http.ts";
 import { assetResponseHeaders } from "../http.ts";
 import * as PreviewBrowserHost from "./PreviewBrowserHost.ts";
 import * as ServerBrowser from "./ServerBrowser.ts";
@@ -72,7 +72,6 @@ const makeHandler = Effect.fnUntraced(function* (browser: ServerBrowser.ServerBr
     return HttpServerResponse.text("Not Found", { status: 404 });
   }
   const session = yield* authenticateMediaRequest(AuthOrchestrationReadScope);
-  const sessions = yield* SessionStore.SessionStore;
   const params = url.value.searchParams;
   const canOperate =
     session.scopes.includes(AuthPreviewOperateScope) && params.get("interactive") !== "false";
@@ -81,7 +80,8 @@ const makeHandler = Effect.fnUntraced(function* (browser: ServerBrowser.ServerBr
   if (threadId.length === 0 || tabId.length === 0) {
     return HttpServerResponse.text("Not Found", { status: 404 });
   }
-  return yield* Effect.scoped(
+  const sessions = yield* SessionStore.SessionStore;
+  const stream = Effect.scoped(
     Effect.gen(function* () {
       const attached = yield* browser
         .attachViewer({
@@ -200,12 +200,11 @@ const makeHandler = Effect.fnUntraced(function* (browser: ServerBrowser.ServerBr
       const receiveInput = reader.pull.pipe(
         Effect.flatMap((chunks) => Effect.forEach(chunks, receive, { discard: true })),
       );
-      return yield* Effect.raceFirst(Effect.forever(sendOutput), Effect.forever(receiveInput));
+      return yield* Effect.raceFirst(Effect.forever(sendOutput), Effect.forever(receiveInput)).pipe(
+        Effect.onInterrupt(() => Effect.sync(() => transport.destroy())),
+      );
     }),
   ).pipe(
-    Effect.raceFirst(
-      sessions.awaitInvalidation(session.sessionId).pipe(Effect.as(HttpServerResponse.empty())),
-    ),
     Effect.catchTags({
       ServerBrowserLaunchError: (error) =>
         Effect.logWarning("server preview browser failed to start", { cause: error.cause }).pipe(
@@ -213,6 +212,16 @@ const makeHandler = Effect.fnUntraced(function* (browser: ServerBrowser.ServerBr
         ),
     }),
     Effect.orElseSucceed(() => HttpServerResponse.empty()),
+  );
+  return yield* Effect.raceFirst(
+    stream,
+    sessions.awaitInvalidation(session.sessionId).pipe(
+      Effect.as(HttpServerResponse.empty()),
+      Effect.catchTags({
+        SessionCredentialVerificationError: (error) =>
+          failEnvironmentInternal("internal_error", error),
+      }),
+    ),
   );
 });
 

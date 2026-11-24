@@ -24,7 +24,7 @@ import { RightPanelSurfaceContent } from "../../components/chat/RightPanelSurfac
 import { addBrowserSurface } from "../../components/preview/addBrowserSurface";
 import { usePreviewSession } from "../../components/preview/usePreviewSession";
 import { threadPullRequestPanelTarget } from "../../components/pullRequest/pullRequestDetail.logic";
-import { BrowserSettingsReadError } from "../../browser/openFileInPreview";
+import { isBrowserSettingsReadError } from "../../browser/openFileInPreview";
 import { recallCheckoutIsRepo } from "../../components/ChatView.logic";
 import { useDiffPanelStore } from "../../diffPanelStore";
 import { previewEnvironment } from "../../state/preview";
@@ -33,7 +33,7 @@ import { vcsEnvironment } from "../../state/vcs";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { Button } from "../../components/ui/button";
 import { toastManager } from "../../components/ui/toast";
-import { writeTextToClipboard } from "../../hooks/useCopyToClipboard";
+import { namedClipboardTarget, writeTextToClipboard } from "../../hooks/useCopyToClipboard";
 import { previewRuntimeTabId } from "../../browser/previewRuntimeTabId";
 import { isCommandPaletteOpen } from "../../commandPaletteBus";
 import { isElectron } from "../../env";
@@ -54,11 +54,7 @@ import {
 } from "../../rightPanelStore";
 import { useEnvironmentScope } from "../../state/session";
 import { useEnvironmentSupportsServerBrowser, useProject } from "../../state/entities";
-import {
-  primaryServerAvailableEditorsAtom,
-  primaryServerKeybindingsAtom,
-  serverEnvironment,
-} from "../../state/server";
+import { primaryServerKeybindingsAtom, serverEnvironment } from "../../state/server";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import {
   followInboxThreadPanelOpens,
@@ -244,8 +240,8 @@ function InboxThreadPanel(props: {
       : { environmentId: ref.environmentId, projectId: sender.projectId },
   );
   const workspaceRoot = sender.worktreePath ?? project?.workspaceRoot ?? undefined;
-  const availableEditors = useAtomValue(primaryServerAvailableEditorsAtom);
   const serverConfig = useAtomValue(serverEnvironment.configValueAtom(ref.environmentId));
+  const availableEditors = serverConfig?.availableEditors ?? [];
   const canOperatePreview = useEnvironmentScope(ref.environmentId, AuthPreviewOperateScope);
   const serverBrowser = useEnvironmentSupportsServerBrowser(ref.environmentId);
   const previewState = useThreadPreviewState(ref);
@@ -287,7 +283,7 @@ function InboxThreadPanel(props: {
     }).then((result) => {
       if (result._tag !== "Failure" || isAtomCommandInterrupted(result)) return;
       const error = squashAtomCommandFailure(result);
-      if (error instanceof BrowserSettingsReadError)
+      if (isBrowserSettingsReadError(error))
         toastManager.add({
           type: "error",
           title: "Unable to open browser",
@@ -342,7 +338,6 @@ function InboxThreadPanel(props: {
           </div>
         );
       default:
-        // v0.1.11 makes `issuesSupported` required here: pass `serverConfig !== null`, as for pull requests.
         return (
           <RightPanelSurfaceContent
             surface={surface}
@@ -355,6 +350,7 @@ function InboxThreadPanel(props: {
             configuredPreviewUrls={[]}
             workspaceMutationId={null}
             artifactsProjectId={sender.projectId}
+            issuesSupported={serverConfig?.environment.capabilities.issues === true}
             getShortcutContext={shortcutContext}
             onSendAnnotation={NOOP}
             onCloseSurface={closeSurface}
@@ -470,7 +466,7 @@ function copyFilePath(relativePath: string, workspaceRoot: string | undefined) {
     relativePath,
     resolvePathLinkTarget(relativePath, workspaceRoot ?? ""),
   );
-  void writeTextToClipboard(path, "path").then(
+  void writeTextToClipboard(path, namedClipboardTarget("path")).then(
     (copied) => {
       if (copied) toastManager.add({ type: "success", title: "Path copied", description: path });
     },

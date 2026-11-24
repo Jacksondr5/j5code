@@ -50,10 +50,11 @@ const layerGatedMcpOAuth = Layer.effect(
       if (input.decision._tag === "pairing-code") {
         return (yield* intents.intentOf(input.decision.code))?.personId ?? null;
       }
-      return yield* auth.authenticateBrowserSession(input.request).pipe(
+      // Upstream's approver is any signed-in session, a device's bearer or proof key included.
+      return yield* auth.authenticateHttpRequest(input.request).pipe(
         Effect.flatMap((session) => people.sessionReach(session)),
         Effect.map((reach) => (reach.kind === "person" ? reach.person.personId : null)),
-        // Upstream's approve refuses a browser that is not signed in.
+        // Upstream's approve refuses a request that is not signed in.
         Effect.catchIf(EnvironmentAuth.isServerAuthCredentialError, () => Effect.succeed(null)),
       );
     });

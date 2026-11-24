@@ -4,6 +4,7 @@ import * as Cause from "effect/Cause";
 
 import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { j5Environment, peersQueryAtom } from "../state";
+import { runJ5Command } from "../runCommand";
 
 export type { PeerRecord } from "@t3tools/contracts/j5";
 
@@ -12,7 +13,7 @@ export async function issuePeerCredential(
   environmentId: EnvironmentId,
   input: IssuePeerCredentialRequest,
 ) {
-  const result = await j5Environment.issuePeerCredential.run(appAtomRegistry, {
+  const result = await runJ5Command(j5Environment.issuePeerCredential, {
     environmentId,
     input,
   });
@@ -21,13 +22,13 @@ export async function issuePeerCredential(
 }
 
 export async function addPeer(environmentId: EnvironmentId, input: AddPeerRequest) {
-  const result = await j5Environment.addPeer.run(appAtomRegistry, { environmentId, input });
+  const result = await runJ5Command(j5Environment.addPeer, { environmentId, input });
   if (result._tag === "Failure") throw Cause.squash(result.cause);
   return result.value;
 }
 
 export async function removePeer(environmentId: EnvironmentId, peerEnvironmentId: string) {
-  const result = await j5Environment.removePeer.run(appAtomRegistry, {
+  const result = await runJ5Command(j5Environment.removePeer, {
     environmentId,
     input: { environmentId: peerEnvironmentId },
   });
@@ -40,7 +41,7 @@ export async function changePeerOrigin(
   peerEnvironmentId: string,
   origin: string,
 ) {
-  const result = await j5Environment.changePeerOrigin.run(appAtomRegistry, {
+  const result = await runJ5Command(j5Environment.changePeerOrigin, {
     environmentId,
     input: { environmentId: peerEnvironmentId, origin },
   });
@@ -49,7 +50,7 @@ export async function changePeerOrigin(
 }
 
 export async function listPeerAddresses(environmentId: EnvironmentId) {
-  const result = await j5Environment.listPeerAddresses.run(appAtomRegistry, {
+  const result = await runJ5Command(j5Environment.listPeerAddresses, {
     environmentId,
     input: {},
   });
@@ -58,7 +59,7 @@ export async function listPeerAddresses(environmentId: EnvironmentId) {
 }
 
 export async function probePeer(environmentId: EnvironmentId, origin: string) {
-  const result = await j5Environment.probePeer.run(appAtomRegistry, {
+  const result = await runJ5Command(j5Environment.probePeer, {
     environmentId,
     input: { origin },
   });

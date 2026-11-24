@@ -1,6 +1,6 @@
 import { type ChatAttachment, OrchestratorMcpFailure } from "@t3tools/contracts";
 import * as SecureRandom from "effect/crypto/SecureRandom";
-import * as Data from "effect/Data";
+import * as Schema from "effect/Schema";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 
@@ -24,10 +24,10 @@ import type { J5SendMessageInput } from "./tools.ts";
  * An outside agent is an MCP client signed in through upstream's OAuth flow: a session, a label
  * and an approved level, with no thread. This module holds what J5's tools do for one.
  */
-class J5OutsideAgentToolError extends Data.TaggedError("J5OutsideAgentToolError")<{
-  readonly state: string;
-  readonly nextCommand: string;
-}> {
+class J5OutsideAgentToolError extends Schema.TaggedError<J5OutsideAgentToolError>()(
+  "J5OutsideAgentToolError",
+  { state: Schema.String, nextCommand: Schema.String },
+) {
   override get message(): string {
     return `${this.state} ${this.nextCommand}`;
   }

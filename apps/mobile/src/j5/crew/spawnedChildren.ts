@@ -24,12 +24,13 @@ import { environmentSession } from "../../state/session";
 import type { WorkspaceState } from "../../state/workspaceModel";
 import { answerExpectedAtom, connectionMemory } from "../connection/memory";
 import { crewListedThreads, crewListWaiting, type ListedThread } from "../connection/memory.logic";
+import { runJ5Command } from "../runCommand";
 import { j5Environment } from "../state";
 
 const store = createScopedThreadReadStore<SpawnedChildrenRow, SpawnedChildrenRowEntry>({
   load: async (environmentId, threadIds) => {
     const ticket = connectionMemory.ticketOf(environmentId);
-    const result = await j5Environment.listSpawnedChildren.run(appAtomRegistry, {
+    const result = await runJ5Command(j5Environment.listSpawnedChildren, {
       environmentId,
       input: { threadIds },
     });

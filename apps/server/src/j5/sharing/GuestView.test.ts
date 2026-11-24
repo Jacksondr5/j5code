@@ -33,6 +33,7 @@ import * as PubSub from "effect/PubSub";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 
 import type * as EnvironmentAuth from "../../auth/EnvironmentAuth.ts";
@@ -1262,6 +1263,32 @@ live(
       );
     assert.deepStrictEqual(yield* loaded(MEMBER), [true, true]);
     assert.deepStrictEqual(yield* loaded(GUEST), [false, false]);
+
+    // Upstream's visit event carries `opens` without the rest of the thread.
+    const visit = {
+      kind: "event",
+      sequence: renamed + 1,
+      event: {
+        type: "thread.visit-recorded",
+        threadId: id,
+        payload: { lastVisitedAt: AT, opens },
+      },
+    } as unknown as OrchestrationV2ThreadStreamItem;
+    const visitPayload = (who: EnvironmentAuth.AuthenticatedSession) =>
+      GuestView.connectionView(who).pipe(
+        Effect.flatMap((view) => Stream.runHead(view.threadStream(Stream.make(visit)))),
+        Effect.map((sent) =>
+          Option.match(sent, {
+            onNone: () => null,
+            onSome: (item) =>
+              item.kind === "event" && item.event.type === "thread.visit-recorded"
+                ? item.event.payload
+                : null,
+          }),
+        ),
+      );
+    assert.deepStrictEqual(yield* visitPayload(MEMBER), { lastVisitedAt: AT, opens } as never);
+    assert.deepStrictEqual(yield* visitPayload(GUEST), { lastVisitedAt: AT } as never);
   }).pipe(Effect.scoped),
 );
 

@@ -13,7 +13,7 @@
 #   T3CODE_VERSION           exact version to install (overrides T3CODE_CHANNEL)
 #   J5CODE_HOME              J5 home directory (default: ~/.j5code). T3CODE_HOME
 #                            belongs to T3 Code and is never read.
-#   T3CODE_INSTALL_BIN_DIR   where the `j5` symlink goes (default: ~/.local/bin)
+#   T3CODE_INSTALL_BIN_DIR   where the `j5` command goes (default: ~/.local/bin)
 #   J5CODE_NO_MODIFY_PATH    set to leave shell startup files alone and only print
 #                            the PATH line to add
 #   T3CODE_RELEASE_BASE_URL  mirror for releases/download (default: GitHub)
@@ -35,6 +35,11 @@ case "$t3_home" in
     ;;
 esac
 bin_dir="${T3CODE_INSTALL_BIN_DIR:-$HOME/.local/bin}"
+# Trailing slashes would put `//` in the paths the j5 command guard compares.
+while [ "${t3_home%/}" != "$t3_home" ] && [ "$t3_home" != / ]; do t3_home="${t3_home%/}"; done
+while [ "${bin_dir%/}" != "$bin_dir" ] && [ "$bin_dir" != / ]; do bin_dir="${bin_dir%/}"; done
+# Absolute, so the PATH hint never adds a folder that changes with the working directory.
+case "$bin_dir" in /*) ;; *) bin_dir="$PWD/$bin_dir" ;; esac
 
 fail() {
   printf '\nj5 install: %s\n' "$1" >&2
@@ -60,10 +65,24 @@ if "$interactive"; then
 fi
 step "Finding your release..."
 
+# Sleeps 1, 2, then 4 s before retrying a 408, 429, 5xx, or network error. Not curl
+# --retry: older curl waits out any Retry-After, however long.
+backoff() {
+  case "$1" in 408 | 429) ;; 4??) return 1 ;; esac
+  [ "$2" -lt 4 ] && sleep "$((1 << ($2 - 1)))"
+}
+
 # Exit 44 on a 404 so callers can tell "no such asset" from a network failure.
 fetch() {
   if command -v curl >/dev/null 2>&1; then
-    status="$(curl -sSL -H "Accept: ${3:-*/*}" -w '%{http_code}' "$1" -o "$2")" || return 1
+    attempt=1
+    while :; do
+      code=0; status="$(curl -sSL -H "Accept: ${3:-*/*}" -w '%{http_code}' "$1" -o "$2")" || code=$?
+      case "$code:$status" in 0:2??) break ;; esac
+      backoff "$status" "$attempt" || break
+      attempt=$((attempt + 1))
+    done
+    [ "$code" -eq 0 ] || return 1
     case "$status" in
       2??) return 0 ;;
       404) return 44 ;;
@@ -82,18 +101,30 @@ mb() {
   tenths=$((($1 * 10 + 524288) / 1048576))
   printf '%s.%s' "$((tenths / 10))" "$((tenths % 10))"
 }
-# Poll the file written by the downloader; no progress-output parsing or extra request.
-download() {
-  if ! "$interactive"; then fetch "$1" "$2"; return; fi
+download_start() {
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL -D "$2.headers" "$1" -o "$2" 2>"$2.errors" &
+    curl -fsSL -w '%{http_code}' -D "$2.headers" "$1" -o "$2" >"$2.status" 2>"$2.errors" &
   else
     wget -q --server-response "$1" -O "$2" 2>"$2.headers" &
   fi
   download_pid=$!
+}
+# Reaps the finished download, then restarts it if curl hit a transient error.
+download_retry() {
+  result=0; wait "$download_pid" || result=$?
+  download_pid=
+  [ "$result" -ne 0 ] && [ -f "$2.status" ] && backoff "$(cat "$2.status")" "$attempt" || return 1
+  attempt=$((attempt + 1))
+  download_start "$1" "$2"
+}
+# Poll the file written by the downloader; no progress-output parsing or extra request.
+download() {
+  if ! "$interactive"; then fetch "$1" "$2"; return; fi
+  attempt=1
+  download_start "$1" "$2"
   previous=-1
   cr="$(printf '\r')"
-  while kill -0 "$download_pid" 2>/dev/null; do
+  while kill -0 "$download_pid" 2>/dev/null || download_retry "$1" "$2"; do
     bytes=0; total=0
     if [ -f "$2" ]; then bytes="$(wc -c < "$2")"; fi
     if [ -f "$2.headers" ]; then
@@ -121,8 +152,6 @@ download() {
     fi
     sleep 0.1
   done
-  result=0; wait "$download_pid" || result=$?
-  download_pid=
   if [ "$result" -ne 0 ]; then
     printf '\n' >&2
     if [ -f "$2.errors" ]; then cat "$2.errors" >&2; else cat "$2.headers" >&2; fi
@@ -130,7 +159,7 @@ download() {
   fi
   size="$(mb "$(wc -c < "$2")")"
   printf '\r\033[2K  %s■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■■%s 100%%  %s%s / %s MB%s\n' "$accent" "$reset" "$muted" "$size" "$size" "$reset" >&2
-  rm -f "$2.headers" "$2.errors"
+  rm -f "$2.headers" "$2.errors" "$2.status"
 }
 
 case "$(uname -s)" in
@@ -221,8 +250,8 @@ else
     fail "could not download the release checksums"
   fi
   expected="$(grep " \*\{0,1\}${archive}\$" "${staging}/SHA256SUMS" | cut -d' ' -f1)"
-  [ -n "$expected" ] || fail "t3 ${version} has no release archive for ${platform}-${arch}"
-  download "${base_url}/v${version}/${archive}" "${staging}/${archive}"
+  [ -n "$expected" ] || fail "j5 ${version} has no release archive for ${platform}-${arch}"
+  download "${base_url}/v${version}/${archive}" "${staging}/${archive}" || fail "could not download ${archive}"
 
   step "Verifying the download..."
   actual="$(checksum "${staging}/${archive}")"
@@ -237,13 +266,90 @@ else
 
   rm -rf "$target_dir"
   mv "$staging" "$target_dir"
+  # When a concurrent install published first, mv moved this copy inside it; keep only theirs.
+  rm -rf "${target_dir}/${staging##*/}"
   trap - EXIT
 fi
 
 step "Setting up the j5 command..."
 mkdir -p "$bin_dir"
+# J5: a pinned pre-rename version (T3CODE_VERSION) ships only `t3` (FORK.md case 50).
 if [ -e "${target_dir}/j5" ]; then exe=j5; else exe=t3; fi
-ln -sfn "${target_dir}/${exe}" "${bin_dir}/j5"
+# Exec by absolute path: through a symlink, argv0 is the link, and the Cursor SDK looks for its
+# helpers beside it. j5 update and j5 install write the same script.
+nl='
+'
+launcher_head="#!/bin/sh${nl}exec '"
+launcher_tail="' \"\$@\"${nl}"
+# The x keeps a trailing newline in the path through command substitution.
+launcher_script() {
+  quoted="$(printf '%sx' "$1" | sed "s/'/'\\\\''/g")"
+  printf '%s%s%s' "$launcher_head" "${quoted%x}" "$launcher_tail"
+}
+# The executable an unedited launcher script at $1 runs; a user's own wrapper prints nothing.
+script_t3() {
+  [ -f "$1" ] && [ ! -L "$1" ] && [ "$(wc -c < "$1")" -le 4096 ] || return 0
+  contents="$(cat "$1"; printf x)"
+  contents="${contents%x}"
+  case "$contents" in "$launcher_head"*"$launcher_tail") ;; *) return 0 ;; esac
+  quoted="${contents#"$launcher_head"}"
+  unquoted="$(printf '%sx' "${quoted%"$launcher_tail"}" | sed "s/'\\\\''/'/g")"
+  unquoted="${unquoted%x}"
+  [ -n "$unquoted" ] && [ "$(launcher_script "$unquoted"; printf x)" = "${contents}x" ] && printf '%s' "$unquoted"
+  return 0
+}
+# Replace only this home's own j5 launchers: into its versions, or the desktop app's launcher.
+# Anything else (a user's script, a copied binary) belongs to someone else.
+# Exactly <versions>/<version>/j5 ($1 under $2), never another program inside a version; J5:
+# or the archive's `t3` alias an earlier J5 installer linked.
+version_t3() {
+  case "$1" in "$2"/*) ;; *) return 1 ;; esac
+  case "${1#"$2"/}" in */*/*) return 1 ;; */j5 | */t3) return 0 ;; *) return 1 ;; esac
+}
+slot_empty=true
+if [ -e "${bin_dir}/j5" ] || [ -L "${bin_dir}/j5" ]; then
+  slot_empty=false
+  owned=false
+  real_versions_dir="$(CDPATH='' cd -P -- "$versions_dir" && pwd)"
+  if [ -L "${bin_dir}/j5" ]; then
+    existing="$(readlink "${bin_dir}/j5" 2>/dev/null || true)"
+    case "$existing" in /*) ;; *) existing="${bin_dir}/${existing}" ;; esac
+  else
+    existing="$(script_t3 "${bin_dir}/j5")"
+  fi
+  if [ -n "$existing" ]; then
+    # Through a symlinked J5 home the path names the alias; resolve its folder to compare.
+    existing_dir="$(CDPATH='' cd -P -- "$(dirname -- "$existing")" 2>/dev/null && pwd || true)"
+    # The text alone counts only without . or .. segments (a pruned version leaves a dangling path).
+    case "$existing" in
+      */./* | */../* | */. | */..) ;;
+      *)
+        if version_t3 "$existing" "$versions_dir" || version_t3 "$existing" "$real_versions_dir" ||
+          [ "$existing" = "${t3_home}/bin/j5" ]; then owned=true; fi
+        ;;
+    esac
+    if [ -n "$existing_dir" ] && version_t3 "${existing_dir}/${existing##*/}" "$real_versions_dir"; then
+      owned=true
+    fi
+  fi
+  "$owned" || fail "another j5 is already at ${bin_dir}/j5. Remove it and run this again, or run ${target_dir}/${exe} directly."
+fi
+launcher_tmp="$(mktemp "${bin_dir}/.j5.XXXXXX")"
+trap 'rm -f "$launcher_tmp"' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+launcher_script "${target_dir}/${exe}" > "$launcher_tmp"
+chmod 755 "$launcher_tmp"
+# An empty spot is hard-linked without -f, so a file that appears after the check above is kept.
+if "$slot_empty"; then
+  ln "$launcher_tmp" "${bin_dir}/j5" || fail "could not write ${bin_dir}/j5; something else was created there."
+else
+  # Known race, accepted: a file written here after the ownership check above is overwritten.
+  # mv replaces a legacy symlink rather than writing through it.
+  mv -f "$launcher_tmp" "${bin_dir}/j5"
+fi
+rm -f "$launcher_tmp"
+trap - EXIT
 # Pruning keeps what this launcher points at; a background service cannot see bin_dir otherwise.
 launcher="$(CDPATH='' cd -P -- "$bin_dir" && pwd)/j5"
 launchers="${t3_home}/runtime/launchers"
@@ -251,7 +357,7 @@ grep -qxF "$launcher" "$launchers" 2>/dev/null || printf '%s\n' "$launcher" >> "
 if "$interactive"; then printf '\r\033[2K' >&2; fi
 printf '  %sInstalled J5 Code %s%s\n\n' "$green" "$version" "$reset" >&2
 case ":${PATH}:" in
-  *":${bin_dir}:"*) printf '  Run %sj5%s to use J5 Code here, or %sj5 up%s to use it from your other devices.\n\n' "$bold" "$reset" "$bold" "$reset"; exit 0 ;;
+  *":${bin_dir}:"* | *":${bin_dir}/:"*) printf '  Run %sj5%s to use J5 Code here, or %sj5 up%s to use it from your other devices.\n\n' "$bold" "$reset" "$bold" "$reset"; exit 0 ;;
 esac
 
 # J5: put bin_dir on PATH for new terminals with one marked line in the shell's

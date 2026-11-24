@@ -11,6 +11,12 @@ import {
 } from "./archiveFlow";
 import * as client from "./archiveFlowClient";
 
+// Rows render upstream's relative clock, which reads GT's messages; static markup has no GTProvider.
+vi.mock("gt-react", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("gt-react")>()),
+  useMessages: () => (text: string) => text,
+}));
+
 const registered = (overrides: Partial<client.PreArchiveFacts> = {}): client.ArchivePreflight => ({
   facts: {
     state: "registered",

@@ -1,19 +1,16 @@
 import { CommandId, OrchestrationV2RunStatus, RunId, ThreadId } from "@t3tools/contracts";
 import * as Context from "effect/Context";
-import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
 
+import * as Mac from "effect/crypto/Mac";
+
+import * as PayloadSigner from "../../auth/PayloadSigner.ts";
 import { ServerSecretStore } from "../../auth/ServerSecretStore.ts";
-import {
-  base64UrlDecodeUtf8,
-  base64UrlEncode,
-  signPayload,
-  timingSafeEqualBase64Url,
-} from "../../auth/utils.ts";
+import { base64UrlDecodeUtf8, base64UrlEncode } from "../../auth/utils.ts";
 import type { ProjectionRecords } from "../../orchestration-v2/ProjectionStore.ts";
 import {
   ThreadManagementService,
@@ -27,6 +24,7 @@ import {
 import { A2ALedger } from "./LedgerService.ts";
 import { A2ALifecycleService } from "./LifecycleService.ts";
 import { stopThread } from "./stopThread.ts";
+import { runsDelegatedTasks } from "./crewSeatArchiveGuard.ts";
 import { getThreadRecordsIfPresent } from "./threadProjectionReads.ts";
 import {
   ExchangeDroppedPayload,
@@ -43,31 +41,35 @@ const TOKEN_VERSION = "j5-archive-confirmation/v1" as const;
 const TOKEN_SECRET_NAME = "j5-a2a-archive-confirmation-v1";
 const TOKEN_SECRET_BYTES = 32;
 
-export interface ArchiveAgentOpenExchangeFact {
-  readonly exchangeId: ExchangeId;
-  readonly direction: "inbound" | "outbound";
-  readonly replyObligation: "participant-owes-reply" | "counterparty-owes-reply";
-  readonly counterpartyId: ParticipantId;
-  readonly intent: string;
-  readonly urgency: Urgency | null;
-  readonly openedAt: string;
-}
+const ArchiveAgentOpenExchangeFact = Schema.Struct({
+  exchangeId: ExchangeId,
+  direction: Schema.Literals(["inbound", "outbound"]),
+  replyObligation: Schema.Literals(["participant-owes-reply", "counterparty-owes-reply"]),
+  counterpartyId: ParticipantId,
+  intent: Schema.String,
+  urgency: Schema.NullOr(Urgency),
+  openedAt: Schema.String,
+});
+export type ArchiveAgentOpenExchangeFact = typeof ArchiveAgentOpenExchangeFact.Type;
 
-export interface ArchiveAgentRunningTurnFact {
-  readonly runId: RunId;
-  readonly status: OrchestrationV2RunStatus;
-}
+const ArchiveAgentRunningTurnFact = Schema.Struct({
+  runId: RunId,
+  status: OrchestrationV2RunStatus,
+});
+export type ArchiveAgentRunningTurnFact = typeof ArchiveAgentRunningTurnFact.Type;
 
-export interface ArchiveAgentConsequenceFacts {
-  readonly openExchanges: ReadonlyArray<ArchiveAgentOpenExchangeFact>;
-  readonly runningTurn: ArchiveAgentRunningTurnFact | null;
-}
+export const ArchiveAgentConsequenceFacts = Schema.Struct({
+  openExchanges: Schema.Array(ArchiveAgentOpenExchangeFact),
+  runningTurn: Schema.NullOr(ArchiveAgentRunningTurnFact),
+});
+export type ArchiveAgentConsequenceFacts = typeof ArchiveAgentConsequenceFacts.Type;
 
-export interface ArchiveAgentTarget {
-  readonly projectId: LedgerProjectId;
-  readonly participantId: ParticipantId;
-  readonly threadId: ThreadId;
-}
+const ArchiveAgentTarget = Schema.Struct({
+  projectId: LedgerProjectId,
+  participantId: ParticipantId,
+  threadId: ThreadId,
+});
+export type ArchiveAgentTarget = typeof ArchiveAgentTarget.Type;
 
 export interface ArchiveAgentInput {
   readonly providerSessionId: string;
@@ -87,23 +89,19 @@ export interface ArchiveAgentInput {
 
 export type ArchiveAgentResult = "archived" | "already_archived";
 
-export class ArchiveAgentConfirmationRequiredError extends Data.TaggedError(
+export class ArchiveAgentConfirmationRequiredError extends Schema.TaggedError<ArchiveAgentConfirmationRequiredError>()(
   "ArchiveAgentConfirmationRequiredError",
-)<{
-  readonly facts: ArchiveAgentConsequenceFacts;
-  readonly confirmationToken: string;
-}> {
+  { facts: ArchiveAgentConsequenceFacts, confirmationToken: Schema.String },
+) {
   override get message(): string {
     return "Archiving would end active work. Review the exact facts and retry the archive operation with the confirmation_token.";
   }
 }
 
-export class ArchiveAgentConfirmationStaleError extends Data.TaggedError(
+export class ArchiveAgentConfirmationStaleError extends Schema.TaggedError<ArchiveAgentConfirmationStaleError>()(
   "ArchiveAgentConfirmationStaleError",
-)<{
-  readonly facts: ArchiveAgentConsequenceFacts;
-  readonly confirmationToken: string | null;
-}> {
+  { facts: ArchiveAgentConsequenceFacts, confirmationToken: Schema.NullOr(Schema.String) },
+) {
   override get message(): string {
     return this.confirmationToken === null
       ? "The confirmation_token is stale because the target no longer has consequential work. Retry the archive operation without a token."
@@ -111,11 +109,10 @@ export class ArchiveAgentConfirmationStaleError extends Data.TaggedError(
   }
 }
 
-export class ArchiveAgentConfirmationTokenError extends Data.TaggedError(
+export class ArchiveAgentConfirmationTokenError extends Schema.TaggedError<ArchiveAgentConfirmationTokenError>()(
   "ArchiveAgentConfirmationTokenError",
-)<{
-  readonly reason: "malformed" | "unsupported-version";
-}> {
+  { reason: Schema.Literals(["malformed", "unsupported-version"]) },
+) {
   override get message(): string {
     return this.reason === "unsupported-version"
       ? "The confirmation_token uses an unsupported version. Retry the archive operation without a token to receive a current refusal."
@@ -123,37 +120,36 @@ export class ArchiveAgentConfirmationTokenError extends Data.TaggedError(
   }
 }
 
-export class ArchiveAgentTargetMismatchError extends Data.TaggedError(
+export class ArchiveAgentTargetMismatchError extends Schema.TaggedError<ArchiveAgentTargetMismatchError>()(
   "ArchiveAgentTargetMismatchError",
-)<{
-  readonly expected: ArchiveAgentTarget;
-  readonly observed: string;
-}> {
+  { expected: ArchiveAgentTarget, observed: Schema.String },
+) {
   override get message(): string {
     return `The archive operation selected ${this.expected.projectId}/${this.expected.participantId}/${this.expected.threadId}, but the durable target reads resolve ${this.observed}. No archive side effect was attempted.`;
   }
 }
 
-export class ArchiveAgentOperationError extends Data.TaggedError("ArchiveAgentOperationError")<{
-  readonly phase: string;
-  readonly cause: unknown;
-}> {
+export class ArchiveAgentOperationError extends Schema.TaggedError<ArchiveAgentOperationError>()(
+  "ArchiveAgentOperationError",
+  { phase: Schema.String, cause: Schema.Defect() },
+) {
   override get message(): string {
     return `The archive operation failed while ${this.phase}: ${this.cause instanceof Error ? this.cause.message : String(this.cause)}.`;
   }
 }
 
-export class ArchiveAgentPartialFailureError extends Data.TaggedError(
+export class ArchiveAgentPartialFailureError extends Schema.TaggedError<ArchiveAgentPartialFailureError>()(
   "ArchiveAgentPartialFailureError",
-)<{
-  readonly interruptRequested: boolean;
-  readonly threadArchived: boolean;
-  readonly participantRetired: boolean;
-  readonly participantArchived: boolean;
-  readonly pendingExchangeIds: ReadonlyArray<ExchangeId>;
-  readonly runningTurn: ArchiveAgentRunningTurnFact | null;
-  readonly cause: unknown;
-}> {
+  {
+    interruptRequested: Schema.Boolean,
+    threadArchived: Schema.Boolean,
+    participantRetired: Schema.Boolean,
+    participantArchived: Schema.Boolean,
+    pendingExchangeIds: Schema.Array(ExchangeId),
+    runningTurn: Schema.NullOr(ArchiveAgentRunningTurnFact),
+    cause: Schema.Defect(),
+  },
+) {
   override get message(): string {
     const runClaim =
       this.runningTurn === null
@@ -330,6 +326,8 @@ export interface ArchiveAgentServiceShape {
   readonly readFacts: (
     target: ArchiveAgentTarget,
   ) => Effect.Effect<ArchiveAgentTargetFacts | null, ArchiveAgentError>;
+  /** Whether upstream would refuse the thread's archive for its running delegated tasks. */
+  readonly runsDelegatedTasks: (threadId: ThreadId) => Effect.Effect<boolean>;
 }
 
 export class ArchiveAgentService extends Context.Service<
@@ -349,6 +347,11 @@ export const layer = Layer.effect(
     const secret = secrets
       .getOrCreateRandom(TOKEN_SECRET_NAME, TOKEN_SECRET_BYTES)
       .pipe(Effect.mapError(operationError("loading the confirmation-token signing secret")));
+    const mac = yield* Mac.Mac;
+    const signer = secret.pipe(
+      Effect.flatMap(PayloadSigner.fromSecret),
+      Effect.provideService(Mac.Mac, mac),
+    );
 
     const readArchiveFacts = (target: ArchiveAgentTarget) =>
       archiveFacts
@@ -394,7 +397,7 @@ export const layer = Layer.effect(
       payload: TokenPayload,
     ) {
       const encoded = base64UrlEncode(canonicalPayload(payload));
-      return `${encoded}.${signPayload(encoded, yield* secret)}`;
+      return `${encoded}.${yield* (yield* signer).sign(encoded)}`;
     });
 
     const parseToken = Effect.fn("j5.a2a.archiveAgent.parseToken")(function* (token: string) {
@@ -403,8 +406,7 @@ export const layer = Layer.effect(
         return yield* new ArchiveAgentConfirmationTokenError({ reason: "malformed" });
       }
       const [encoded, signature] = parts as [string, string];
-      const expected = signPayload(encoded, yield* secret);
-      if (!timingSafeEqualBase64Url(signature, expected)) {
+      if (!(yield* (yield* signer).verify(encoded, signature))) {
         return yield* new ArchiveAgentConfirmationTokenError({ reason: "malformed" });
       }
       const decodedText = yield* Effect.result(
@@ -661,6 +663,16 @@ export const layer = Layer.effect(
       };
     });
 
-    return ArchiveAgentService.of({ archive, readFacts });
+    return ArchiveAgentService.of({
+      archive,
+      readFacts,
+      runsDelegatedTasks: Effect.fn("ArchiveAgentService.runsDelegatedTasks")(
+        (threadId: ThreadId) =>
+          runsDelegatedTasks(threadId).pipe(
+            Effect.provideService(ThreadManagementService, threadManagement),
+            Effect.orDie,
+          ),
+      ),
+    });
   }),
 );

@@ -8,7 +8,7 @@ import {
   OrchestratorMcpFailure,
 } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
-import { Tool, Toolkit } from "effect/ai";
+import { McpSchema, Tool, Toolkit } from "effect/ai";
 
 import { ThreadManagementService } from "../../../orchestration-v2/ThreadManagementService.ts";
 import { ArtifactMcpService } from "../../ArtifactMcpService.ts";
@@ -34,7 +34,8 @@ const ListArtifactsTool = Tool.make("j5_list_artifacts", {
   .annotate(Tool.Title, "List project artifacts")
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false)
-  .annotate(Tool.Idempotent, true);
+  .annotate(Tool.Idempotent, true)
+  .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
 
 const ReadArtifactTool = Tool.make("j5_read_artifact", {
   description:
@@ -48,7 +49,8 @@ const ReadArtifactTool = Tool.make("j5_read_artifact", {
   .annotate(Tool.Title, "Read a project artifact")
   .annotate(Tool.Readonly, true)
   .annotate(Tool.Destructive, false)
-  .annotate(Tool.Idempotent, true);
+  .annotate(Tool.Idempotent, true)
+  .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
 
 const WriteArtifactTool = Tool.make("j5_write_artifact", {
   description:
@@ -62,6 +64,7 @@ const WriteArtifactTool = Tool.make("j5_write_artifact", {
   .annotate(Tool.Title, "Write a project artifact")
   .annotate(Tool.Readonly, false)
   .annotate(Tool.Destructive, true)
-  .annotate(Tool.Idempotent, true);
+  .annotate(Tool.Idempotent, true)
+  .annotate(McpSchema.EnabledWhen, McpInvocationContext.hiddenFromOutsideClients);
 
 export const ArtifactToolkit = Toolkit.make(ListArtifactsTool, ReadArtifactTool, WriteArtifactTool);

@@ -13,7 +13,8 @@ vi.mock(import("@tanstack/react-router"), async (importOriginal) => ({
 }));
 vi.mock(import("../../state/entities"), async (importOriginal) => ({
   ...(await importOriginal()),
-  useThreadProjection: (() => ({ projection: state.projection })) as never,
+  // v0.1.11's relationships panel reads the quiet projection.
+  useQuietThreadProjection: (() => ({ projection: state.projection })) as never,
   useThreadRelationshipShells: (() => []) as never,
   useProjects: (() => []) as never,
   // The lineage row's saved-agent identity reads the child shell.

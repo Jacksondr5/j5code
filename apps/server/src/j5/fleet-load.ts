@@ -40,6 +40,7 @@ import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
 import { ServerSettingsService } from "../serverSettings.ts";
 import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
 import * as VcsProcess from "../vcs/VcsProcess.ts";
+import * as ModelManifest from "../provider/ModelManifest.ts";
 
 const OrchestrationV2LayerLive = UpstreamOrchestrationV2LayerLive.pipe(
   Layer.provideMerge(J5ThreadRegistrationLayer),
@@ -123,6 +124,7 @@ const HarnessLayer = Layer.merge(OrchestrationV2LayerLive, OrchestrationV2EventS
   Layer.provide(ServerConfigLayer),
   Layer.provide(ServerSettingsService.layerTest()),
   Layer.provide(ProviderRegistryTestLayer),
+  Layer.provide(ModelManifest.layerTest),
   Layer.provide(NodeServices.layer),
 );
 

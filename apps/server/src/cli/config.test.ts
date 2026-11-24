@@ -33,6 +33,7 @@ import {
 import { deriveServerPaths } from "../config.ts";
 import { resolveBaseDir } from "../os-jank.ts";
 import { resolveServerConfig } from "./config.ts";
+import { setProcessEnv, setProcessHome } from "../j5/test-support/processEnv.ts";
 import { createDevRunnerEnv } from "../../../../scripts/dev-runner.ts";
 
 const deriveExplicitServerPaths = (baseDir: string, devUrl: URL | undefined) =>
@@ -214,6 +215,60 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
         expect(String(error)).toContain(`pid ${child.pid}`);
         expect(yield* fs.exists(cwd)).toBe(false);
       }),
+  );
+
+  it.effect("names the pair command for the refused server's home", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const child = yield* liveProcess;
+      assert(child.pid !== undefined);
+      // J5: the home variable is J5CODE_HOME and the default home ~/.j5code (FORK.md cases 15, 25).
+      for (const source of ["flag", "J5CODE_HOME", "default"] as const) {
+        const home = yield* fs.makeTempDirectoryScoped({ prefix: "t3-cli-preflight-pair-" });
+        const baseDir = source === "default" ? path.join(home, ".j5code") : home;
+        const stateDir = path.join(baseDir, "userdata");
+        yield* fs.makeDirectory(stateDir, { recursive: true });
+        yield* fs.writeFileString(
+          path.join(stateDir, "server-runtime.json"),
+          yield* encodeUnknownJson({
+            version: 1,
+            pid: child.pid,
+            port: 3773,
+            origin: "http://127.0.0.1:3773",
+            startedAt: "2026-10-01T00:00:00.000Z",
+          }),
+        );
+        const error = yield* resolveServerConfig(
+          {
+            ...minimalWebFlags(baseDir),
+            baseDir: source === "flag" ? Option.some(baseDir) : Option.none(),
+            cwd: Option.some(path.join(home, "project")),
+          },
+          Option.none(),
+          { rejectRunningServer: true },
+        ).pipe(
+          Effect.provide(
+            Layer.merge(
+              NetService.layer,
+              ConfigProvider.layer(
+                ConfigProvider.fromEnv({
+                  env: source === "J5CODE_HOME" ? { J5CODE_HOME: baseDir } : {},
+                }),
+              ),
+            ),
+          ),
+          Effect.provideService(HostProcess.HomeDirectory, home),
+          Effect.provideService(HostProcess.Platform, "linux"),
+          Effect.flip,
+        );
+        // A temp dir with spaces or backslashes is single-quoted for the shell.
+        const homePattern = baseDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        expect(String(error)).toMatch(
+          new RegExp(`pair --base-dir (${homePattern}|'${homePattern}')`),
+        );
+      }
+    }),
   );
 
   it.effect("enables a trimmed reusable auth token only for web dev mode", () =>
@@ -445,62 +500,45 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const home = yield* fs.makeTempDirectoryScoped({ prefix: "t3-cli-config-default-home-" });
-      const originalHome = process.env.HOME;
-      const originalUserProfile = process.env.USERPROFILE;
-
-      try {
-        process.env.HOME = home;
-        process.env.USERPROFILE = home;
-        const resolved = yield* resolveServerConfig(
-          {
-            mode: Option.none(),
-            port: Option.none(),
-            host: Option.none(),
-            baseDir: Option.none(),
-            cwd: Option.none(),
-            devUrl: Option.none(),
-            noBrowser: Option.none(),
-            bootstrapFd: Option.none(),
-            autoBootstrapProjectFromCwd: Option.none(),
-            logWebSocketEvents: Option.none(),
-            tailscaleServeEnabled: Option.none(),
-            tailscaleServePort: Option.none(),
-            lan: Option.none(),
-          },
-          Option.none(),
-          { startupPresentation: "headless" },
-        ).pipe(
-          Effect.provide(
-            Layer.mergeAll(
-              ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })),
-              NetService.layer,
-            ),
+      yield* setProcessHome(home);
+      const resolved = yield* resolveServerConfig(
+        {
+          mode: Option.none(),
+          port: Option.none(),
+          host: Option.none(),
+          baseDir: Option.none(),
+          cwd: Option.none(),
+          devUrl: Option.none(),
+          noBrowser: Option.none(),
+          bootstrapFd: Option.none(),
+          autoBootstrapProjectFromCwd: Option.none(),
+          logWebSocketEvents: Option.none(),
+          tailscaleServeEnabled: Option.none(),
+          tailscaleServePort: Option.none(),
+          lan: Option.none(),
+        },
+        Option.none(),
+        { startupPresentation: "headless" },
+      ).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })),
+            NetService.layer,
           ),
+        ),
+        Effect.provideService(HostProcess.HomeDirectory, home),
+      );
+
+      assert.equal(resolved.baseDir, path.join(home, ".j5code"));
+      assert.equal(resolved.stateDir, path.join(home, ".j5code", "userdata"));
+      assert.equal(yield* fs.exists(path.join(home, ".j5code")), true);
+      assert.equal(yield* fs.exists(path.join(home, ".t3")), false);
+      assert.equal(
+        yield* resolveBaseDir(undefined).pipe(
           Effect.provideService(HostProcess.HomeDirectory, home),
-        );
-
-        assert.equal(resolved.baseDir, path.join(home, ".j5code"));
-        assert.equal(resolved.stateDir, path.join(home, ".j5code", "userdata"));
-        assert.equal(yield* fs.exists(path.join(home, ".j5code")), true);
-        assert.equal(yield* fs.exists(path.join(home, ".t3")), false);
-        assert.equal(
-          yield* resolveBaseDir(undefined).pipe(
-            Effect.provideService(HostProcess.HomeDirectory, home),
-          ),
-          path.join(home, ".j5code"),
-        );
-      } finally {
-        if (originalHome === undefined) {
-          delete process.env.HOME;
-        } else {
-          process.env.HOME = originalHome;
-        }
-        if (originalUserProfile === undefined) {
-          delete process.env.USERPROFILE;
-        } else {
-          process.env.USERPROFILE = originalUserProfile;
-        }
-      }
+        ),
+        path.join(home, ".j5code"),
+      );
     }),
   );
 
@@ -510,64 +548,40 @@ it.layer(NodeServices.layer)("cli config resolution", (it) => {
       const path = yield* Path.Path;
       const home = yield* fs.makeTempDirectoryScoped({ prefix: "t3-cli-config-upstream-home-" });
       const upstreamHome = path.join(home, "upstream-t3");
-      const originalHome = process.env.HOME;
-      const originalUserProfile = process.env.USERPROFILE;
-      const originalUpstreamHome = process.env.T3CODE_HOME;
-
-      try {
-        process.env.HOME = home;
-        process.env.USERPROFILE = home;
-        // Set on both the process and the config provider so a fallback read
-        // through either path would be caught.
-        process.env.T3CODE_HOME = upstreamHome;
-        const resolved = yield* resolveServerConfig(
-          {
-            mode: Option.none(),
-            port: Option.none(),
-            host: Option.none(),
-            baseDir: Option.none(),
-            cwd: Option.none(),
-            devUrl: Option.none(),
-            noBrowser: Option.none(),
-            bootstrapFd: Option.none(),
-            autoBootstrapProjectFromCwd: Option.none(),
-            logWebSocketEvents: Option.none(),
-            tailscaleServeEnabled: Option.none(),
-            tailscaleServePort: Option.none(),
-            lan: Option.none(),
-          },
-          Option.none(),
-          { startupPresentation: "headless" },
-        ).pipe(
-          Effect.provide(
-            Layer.mergeAll(
-              ConfigProvider.layer(ConfigProvider.fromEnv({ env: { T3CODE_HOME: upstreamHome } })),
-              NetService.layer,
-            ),
+      // Set on both the process and the config provider so a fallback read
+      // through either path would be caught.
+      yield* setProcessEnv({ HOME: home, USERPROFILE: home, T3CODE_HOME: upstreamHome });
+      const resolved = yield* resolveServerConfig(
+        {
+          mode: Option.none(),
+          port: Option.none(),
+          host: Option.none(),
+          baseDir: Option.none(),
+          cwd: Option.none(),
+          devUrl: Option.none(),
+          noBrowser: Option.none(),
+          bootstrapFd: Option.none(),
+          autoBootstrapProjectFromCwd: Option.none(),
+          logWebSocketEvents: Option.none(),
+          tailscaleServeEnabled: Option.none(),
+          tailscaleServePort: Option.none(),
+          lan: Option.none(),
+        },
+        Option.none(),
+        { startupPresentation: "headless" },
+      ).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            ConfigProvider.layer(ConfigProvider.fromEnv({ env: { T3CODE_HOME: upstreamHome } })),
+            NetService.layer,
           ),
-          Effect.provideService(HostProcess.HomeDirectory, home),
-        );
+        ),
+        Effect.provideService(HostProcess.HomeDirectory, home),
+      );
 
-        assert.equal(resolved.baseDir, path.join(home, ".j5code"));
-        assert.equal(resolved.stateDir, path.join(home, ".j5code", "userdata"));
-        assert.equal(yield* fs.exists(upstreamHome), false);
-      } finally {
-        if (originalHome === undefined) {
-          delete process.env.HOME;
-        } else {
-          process.env.HOME = originalHome;
-        }
-        if (originalUserProfile === undefined) {
-          delete process.env.USERPROFILE;
-        } else {
-          process.env.USERPROFILE = originalUserProfile;
-        }
-        if (originalUpstreamHome === undefined) {
-          delete process.env.T3CODE_HOME;
-        } else {
-          process.env.T3CODE_HOME = originalUpstreamHome;
-        }
-      }
+      assert.equal(resolved.baseDir, path.join(home, ".j5code"));
+      assert.equal(resolved.stateDir, path.join(home, ".j5code", "userdata"));
+      assert.equal(yield* fs.exists(upstreamHome), false);
     }),
   );
 

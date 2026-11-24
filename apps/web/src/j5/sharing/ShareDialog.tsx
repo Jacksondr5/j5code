@@ -2,11 +2,9 @@ import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId } from "@t3tools/contracts";
 import type { PeopleEntry, PeopleLink, PersonLevel, PersonScope } from "@t3tools/contracts/j5";
 import { isPersonName, levelReaches } from "@t3tools/contracts/j5";
-import { Check, Copy } from "lucide";
-import { Link2Icon, XIcon } from "lucide-react";
+import { CheckIcon, CopyIcon, Link2Icon, XIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
-import { MorphIcon } from "../../components/MorphIcon";
 import { ProjectFavicon } from "../../components/ProjectFavicon";
 import { Alert, AlertDescription } from "../../components/ui/alert";
 import {
@@ -36,7 +34,7 @@ import {
 } from "../../components/ui/select";
 import { toastManager } from "../../components/ui/toast";
 import { Toggle, ToggleGroup } from "../../components/ui/toggle-group";
-import { useCopyToClipboard } from "../../hooks/useCopyToClipboard";
+import { namedClipboardTarget, useCopyToClipboard } from "../../hooks/useCopyToClipboard";
 import { useNowMinute } from "../../hooks/useNowMinute";
 import { useEnvironmentQuery } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
@@ -420,7 +418,7 @@ export function LinkLine({
   const revokeLink = useAtomCommand(sharingManage.revokeLink, { reportFailure: false });
   const [busy, setBusy] = useState(false);
   const { copyToClipboard, isCopied } = useCopyToClipboard({
-    target: "link",
+    target: namedClipboardTarget("link"),
     onCopy: () => toastManager.add({ type: "success", title: "Link copied" }),
     onError: (error) =>
       toastManager.add({ type: "error", title: "Could not copy", description: error.message }),
@@ -456,10 +454,11 @@ export function LinkLine({
           disabled={address === null}
           onClick={() => (address === null ? undefined : copyToClipboard(address, undefined))}
         >
-          <MorphIcon
-            className={isCopied ? "size-3.5 text-success" : "size-3.5"}
-            icon={isCopied ? Check : Copy}
-          />
+          {isCopied ? (
+            <CheckIcon className="size-3.5 text-success" />
+          ) : (
+            <CopyIcon className="size-3.5" />
+          )}
         </IconAction>
         <Button
           size="xs"

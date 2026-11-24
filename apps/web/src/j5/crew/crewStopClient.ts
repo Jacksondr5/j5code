@@ -1,12 +1,12 @@
 import type { EnvironmentId } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 
-import { appAtomRegistry } from "../../rpc/atomRegistry";
 import { j5Environment } from "../state";
+import { runJ5Command } from "../runCommand";
 
 /** Interrupt every running seat of a Crew on the environment that holds it; nothing is retired. */
 export async function stopCrew(environmentId: EnvironmentId, crewInstanceId: string) {
-  const result = await j5Environment.stopCrew.run(appAtomRegistry, {
+  const result = await runJ5Command(j5Environment.stopCrew, {
     environmentId,
     input: { crewInstanceId },
   });

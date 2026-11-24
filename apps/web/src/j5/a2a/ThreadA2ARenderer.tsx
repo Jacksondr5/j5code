@@ -157,7 +157,8 @@ export function useJ5UserMessagePresentation(message: ChatMessage) {
   const authorName = j5MessageAuthorName({
     presentation: j5,
     participantLabels: ctx.participantLabels,
-    senderThreadTitle: senderThread?.title,
+    // A linked environment's sender keeps the title it sent, as upstream's row does.
+    senderThreadTitle: senderThread?.title || message.linkedSender?.title,
   });
   const literalContext = j5?.unwrapped ? literalUserMessageContext(presentation.text) : null;
   return {

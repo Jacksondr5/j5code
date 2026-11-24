@@ -1,6 +1,6 @@
 /**
  * Mobile's Settings pages about the device itself, shown to everyone (People and access AC28):
- * its look and input, its saved servers and notifications, and About. Every other Settings page
+ * its look, language and input, its saved servers and notifications, and About. Every other Settings page
  * is an Owner's, so a page upstream adds later is shown to Owners only until someone decides
  * otherwise, as on web.
  */
@@ -12,7 +12,7 @@ const PAGES_FOR_EVERYONE: ReadonlySet<string> = new Set([
   "SettingsFollowUp",
   "SettingsNavigation",
   "SettingsKeyboard",
-  "SettingsMicrophone",
+  "SettingsLanguage",
   "SettingsNotifications",
   "SettingsEnvironments",
   "SettingsEnvironmentDetail",
@@ -28,10 +28,21 @@ const PAGES_FOR_EVERYONE: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Pages also shown to a Collaborator: Voice, where they opt their own device in and use what an
+ * Owner set up. Its model and key controls need `settings:write`, which only Owners hold.
+ */
+const PAGES_FOR_WRITERS: ReadonlySet<string> = new Set(["SettingsVoice"]);
+
+/**
  * Whether a screen is shown, by its route name. Only an answer withholds one: while servers are
  * still answering, an Owner's page stays, and the server refuses what is not theirs to read.
  */
-export const settingsPageShown = (routeName: string, ownerSomewhere: boolean | "loading") =>
+export const settingsPageShown = (
+  routeName: string,
+  ownerSomewhere: boolean | "loading",
+  writesSomewhere: boolean,
+) =>
   ownerSomewhere !== false ||
   !routeName.startsWith("Settings") ||
-  PAGES_FOR_EVERYONE.has(routeName);
+  PAGES_FOR_EVERYONE.has(routeName) ||
+  (writesSomewhere && PAGES_FOR_WRITERS.has(routeName));

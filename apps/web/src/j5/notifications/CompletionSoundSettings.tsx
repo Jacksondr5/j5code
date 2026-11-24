@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { getClientSettings } from "../../hooks/useSettings";
 import { Button } from "../../components/ui/button";
 import { SettingsRow } from "../../components/settings/settingsLayout";
-import { searchableSetting } from "../../components/settings/settingsSearch";
+import { useSearchableSetting } from "../../components/settings/settingsSearch";
 import { useScopedSettings } from "../../components/settings/useScopedSettings";
 import {
   hasNotificationSound,
@@ -14,6 +14,7 @@ import { completionSoundManager, importCompletionSound } from "./completionSound
 import type { CompletionSound } from "./completionSoundStorage";
 
 export function CompletionSoundSettings() {
+  const searchableSetting = useSearchableSetting();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const mode = useScopedSettings((settings) => settings.notificationMode);
   const [sound, setSound] = useState<CompletionSound | null>(null);
@@ -63,8 +64,8 @@ export function CompletionSoundSettings() {
         <span className="block space-y-2">
           <span className="block">
             Choose an MP3 up to 5 MiB and 30 seconds. Saved only in this browser profile or desktop
-            installation, for this app address; it does not sync to other devices. Input and
-            approval alerts keep their default sound.
+            app, for this app address; it does not sync. Input and approval alerts keep their
+            default sound.
           </span>
           <span className="block">
             {sound ? `${sound.name} (${sound.duration.toFixed(1)} seconds)` : "Bundled default"}

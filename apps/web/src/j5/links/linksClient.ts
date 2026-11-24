@@ -20,6 +20,7 @@ import { addPeer, issuePeerCredential, removePeer } from "../peering/peeringClie
 import { j5Environment, peersQueryAtom } from "../state";
 import type { LinkOps } from "./linkChanges";
 import type { PairLinkOps } from "./linkSetup";
+import { runJ5Command } from "../runCommand";
 
 export function refreshLinks(environmentId: EnvironmentId) {
   appAtomRegistry.refresh(peerLinkEnvironment.list({ environmentId, input: {} }));
@@ -37,7 +38,7 @@ const runsJ5 = (environmentId: EnvironmentId) => {
 /** Each call authorizes against the server it names, as every other read or write does. */
 export const linkOps: LinkOps = {
   enableLinkedEnvironments: async (environmentId) => {
-    const result = await serverEnvironment.updateSettings.run(appAtomRegistry, {
+    const result = await runJ5Command(serverEnvironment.updateSettings, {
       environmentId,
       input: { patch: { linkedEnvironmentsEnabled: true } },
     });
@@ -49,7 +50,7 @@ export const linkOps: LinkOps = {
     return minted.success;
   },
   link: async (holder, input) => {
-    const result = await peerLinkEnvironment.link.run(appAtomRegistry, {
+    const result = await runJ5Command(peerLinkEnvironment.link, {
       environmentId: holder,
       input,
     });
@@ -58,7 +59,7 @@ export const linkOps: LinkOps = {
   forget: async (holder, other) => {
     // A server that runs T3 Code has upstream's forget alone, which leaves the session it held.
     if (!runsJ5(holder)) {
-      const result = await peerLinkEnvironment.unlink.run(appAtomRegistry, {
+      const result = await runJ5Command(peerLinkEnvironment.unlink, {
         environmentId: holder,
         input: { environmentId: other },
       });
@@ -69,7 +70,7 @@ export const linkOps: LinkOps = {
           : null,
       };
     }
-    const result = await j5Environment.forgetEnvironmentLink.run(appAtomRegistry, {
+    const result = await runJ5Command(j5Environment.forgetEnvironmentLink, {
       environmentId: holder,
       input: { environmentId: other },
     });

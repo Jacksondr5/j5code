@@ -117,6 +117,8 @@ const runFriendlyLabelCommand = Effect.fn("runFriendlyLabelCommand")(function* (
     .run({
       command: input.command,
       args: input.args,
+      // Server startup waits on this; hostnamectl can block on D-Bus when hostnamed is down.
+      timeout: "5 seconds",
       timeoutBehavior: "timedOutResult",
     })
     .pipe(
@@ -180,6 +182,17 @@ const resolveFriendlyHostLabel = Effect.fn("resolveFriendlyHostLabel")(function*
   return null;
 });
 
+const isWsl = Effect.fn("isWsl")(function* () {
+  if ((yield* HostProcess.Platform) !== "linux") {
+    return false;
+  }
+  const fileSystem = yield* FileSystem.FileSystem;
+  const kernelRelease = yield* fileSystem
+    .readFileString("/proc/sys/kernel/osrelease")
+    .pipe(Effect.orElseSucceed(() => ""));
+  return kernelRelease.toLowerCase().includes("microsoft");
+});
+
 export const resolveServerEnvironmentLabel = Effect.fn("resolveServerEnvironmentLabel")(function* (
   input: ResolveServerEnvironmentLabelInput,
 ) {
@@ -195,6 +208,11 @@ export const resolveServerEnvironmentLabel = Effect.fn("resolveServerEnvironment
 
   const hostname = normalizeLabel(yield* HostProcess.Hostname);
   if (hostname) {
+    // WSL inherits the Windows hostname, so qualify it to tell the two environments apart.
+    if (yield* isWsl()) {
+      const distro = normalizeLabel((yield* HostProcess.Environment).WSL_DISTRO_NAME);
+      return distro ? `${hostname} WSL (${distro})` : `${hostname} WSL`;
+    }
     return hostname;
   }
 

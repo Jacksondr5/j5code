@@ -1598,8 +1598,7 @@ it.effect.each(["cancelled", "delivered"] as const)(
               deliverHuman: () => Effect.void,
             },
             {
-              afterTransportSuccess: () =>
-                Ref.get(afterTransport).pipe(Effect.flatMap((effect) => effect)),
+              afterTransportSuccess: () => Ref.get(afterTransport).pipe(Effect.flatten),
             },
           ),
         ),

@@ -67,7 +67,7 @@ export const J5_COORDINATION_TOOLS: ReadonlyArray<string> = [
   "j5_playbook_cancel",
 ];
 
-/** Mirrors the adapters' runtime-mode default: only full-access resolves to `never` on its own. */
+/** Full access without a policy counts as `never`; upstream's granular Codex policy asks nothing. */
 export const j5ApprovalPolicyIsNever = (runtimePolicy: J5RuntimePolicy | undefined): boolean =>
   runtimePolicy !== undefined &&
   (runtimePolicy.approvalPolicy === undefined

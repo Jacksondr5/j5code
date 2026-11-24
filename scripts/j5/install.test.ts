@@ -121,8 +121,9 @@ describe.skipIf(
               encoding: "utf8",
             }).trim(),
           ).toBe(`${executable} v1.2.3`);
-          expect(await NodeFSP.readlink(NodePath.join(root, "bin/j5"))).toBe(
-            NodePath.join(versions, version, executable),
+          // The installer writes upstream's launcher script, which execs the version by path.
+          expect(await NodeFSP.readFile(NodePath.join(root, "bin/j5"), "utf8")).toBe(
+            `#!/bin/sh\nexec '${NodePath.join(versions, version, executable)}' "$@"\n`,
           );
           expect(await NodeFSP.readdir(versions)).toEqual([version]);
           expect(await NodeFSP.readdir(NodePath.join(root, "bin"))).toEqual(["j5"]);
@@ -209,6 +210,23 @@ describe.skipIf(
         `fish_add_path --path --append "${bin}" ${J5_PATH_MARKER}\n`,
       );
       expect(output).toContain(`in ${config}`);
+    } finally {
+      await NodeFSP.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("adds no second line beside the desktop app's Add to PATH line", async () => {
+    // The desktop app's line (DesktopCliCommand.ts) carries the same marker.
+    const desktopLine = `export PATH="$PATH:$HOME/.local/bin" ${J5_PATH_MARKER}\n`;
+    const { root, home, output } = await runInstaller(
+      async ({ home }) => {
+        await NodeFSP.writeFile(NodePath.join(home, ".zshrc"), desktopLine);
+      },
+      () => ({ SHELL: "/bin/zsh" }),
+    );
+    try {
+      expect(output).toContain("already has the PATH line");
+      expect(await NodeFSP.readFile(NodePath.join(home, ".zshrc"), "utf8")).toBe(desktopLine);
     } finally {
       await NodeFSP.rm(root, { recursive: true, force: true });
     }

@@ -57,12 +57,13 @@ const createJ5ActionCommand = <R, E, TTag extends EnvironmentUnaryRpcTag>(
   tag: TTag,
 ) => {
   const command = createEnvironmentRpcCommand(runtime, { label, tag });
-  const run: typeof command.run = async (registry, target) => {
-    const result = await command.run(registry, target);
-    return AsyncResult.isFailure(result) && isUnknownRequestTag(result.cause, tag)
-      ? AsyncResult.failure(Cause.fail(needsNewerServer(target.environmentId, "action")))
-      : result;
-  };
+  const run: typeof command.run = (registry, target) =>
+    command.run(registry, target).pipe(
+      Effect.catchCauseIf(
+        (cause) => isUnknownRequestTag(cause, tag),
+        () => Effect.fail(needsNewerServer(target.environmentId, "action")),
+      ),
+    );
   return { ...command, run };
 };
 
