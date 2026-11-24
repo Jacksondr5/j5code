@@ -255,7 +255,7 @@ function OpenBody({
   const buttons = cleanupButtons(selected, item.entries);
   const hold = !canAnswer || pending;
   return (
-    <div className="border-t border-border/50 px-1 pb-5 pt-4 sm:ms-24 sm:px-0 sm:pe-1">
+    <div className="border-t border-border/50 px-1 pb-5 pt-4">
       <p className="mb-2.5 text-sm text-foreground/85">
         Removing a worktree keeps its branch and discards its uncommitted changes.
       </p>
@@ -321,7 +321,7 @@ function ResultBody({
   readonly error: string | undefined;
 }) {
   return (
-    <div className="border-t border-border/50 px-1 pb-5 pt-4 sm:ms-24 sm:px-0 sm:pe-1">
+    <div className="border-t border-border/50 px-1 pb-5 pt-4">
       {error === undefined ? null : (
         <p aria-live="polite" className="mb-3 text-sm text-destructive-foreground">
           {error}

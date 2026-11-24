@@ -258,7 +258,7 @@ export function InboxMessage({
   const markdown = (text: string) => (
     <div className="group/inbox-message flex flex-col gap-1">
       <ChatMarkdown
-        className="max-w-[72ch] text-sm text-foreground/90"
+        className="text-sm text-foreground/90"
         cwd={cwd}
         environmentId={item.environmentId}
         lineBreaks={shouldPreserveAssistantLineBreaks(text)}
@@ -423,7 +423,7 @@ function OpenInboxItem({
             className="mt-1 size-4 shrink-0 text-muted-foreground transition-transform duration-150 group-open/details:rotate-90"
           />
         </summary>
-        <div className="border-t border-border/50 px-1 pb-5 pt-4 sm:ms-24 sm:px-0 sm:pe-1">
+        <div className="border-t border-border/50 px-1 pb-5 pt-4">
           <InboxMessage
             expanded={expanded}
             item={item}
@@ -806,97 +806,106 @@ export function HumanInboxPage() {
           </WorkspaceBreadcrumb>
         </WorkspacePageHeader>
         <ScrollArea className="min-h-0 flex-1">
-          <main className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-8 sm:py-10">
-            <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border pb-5">
-              <div>
-                <h1 className="text-balance text-2xl font-semibold tracking-tight">Inbox</h1>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  {loading && items.length === 0
-                    ? "Loading questions waiting on you…"
-                    : inboxSummary({
-                        questions: items.length,
-                        complete,
-                        agentRequests: runtimeRequests.length + nativeQuestions.length,
-                        worktreeCleanups: cleanups.openCount,
-                      })}
-                </p>
+          {/* Upstream's lane, so the Inbox takes Settings → Appearance → Chat width as a thread does. */}
+          <main className="px-4 py-8 sm:px-8 sm:py-10">
+            <div className="chat-content-lane">
+              <div className="flex flex-wrap items-end justify-between gap-4 border-b border-border pb-5">
+                <div>
+                  <h1 className="text-balance text-2xl font-semibold tracking-tight">Inbox</h1>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {loading && items.length === 0
+                      ? "Loading questions waiting on you…"
+                      : inboxSummary({
+                          questions: items.length,
+                          complete,
+                          agentRequests: runtimeRequests.length + nativeQuestions.length,
+                          worktreeCleanups: cleanups.openCount,
+                        })}
+                  </p>
+                </div>
+                <Button
+                  aria-label="Refresh inbox"
+                  disabled={refreshing}
+                  onClick={() => void refresh().catch(() => undefined)}
+                  size="sm"
+                  type="button"
+                  variant="ghost"
+                >
+                  <RefreshCwIcon aria-hidden className="size-4" />
+                  Refresh
+                </Button>
               </div>
-              <Button
-                aria-label="Refresh inbox"
-                disabled={refreshing}
-                onClick={() => void refresh().catch(() => undefined)}
-                size="sm"
-                type="button"
-                variant="ghost"
-              >
-                <RefreshCwIcon aria-hidden className="size-4" />
-                Refresh
-              </Button>
+
+              {notices.length > 0 ? (
+                <ul aria-live="polite" className="mt-4 space-y-1 text-sm text-muted-foreground">
+                  {notices.map((notice) => (
+                    <li key={notice}>{notice}</li>
+                  ))}
+                </ul>
+              ) : null}
+
+              <CrewRuntimeRequestsSection
+                requests={runtimeRequests}
+                onOpenThread={openCrewThread}
+              />
+              <NativeQuestionInboxSection
+                questions={nativeQuestions}
+                onOpenThread={openCrewThread}
+              />
+
+              {complete &&
+              !loading &&
+              shownItems.length === 0 &&
+              cleanups.inPlace.length === 0 &&
+              runtimeRequests.length === 0 &&
+              nativeQuestions.length === 0 ? (
+                <div className="flex min-h-56 flex-col items-center justify-center px-6 py-12 text-center">
+                  <span className="flex size-10 items-center justify-center rounded-full bg-success/10 text-success">
+                    <InboxIcon aria-hidden className="size-5" />
+                  </span>
+                  <h2 className="mt-4 text-base font-medium">Nothing is waiting on you</h2>
+                  <p className="mt-1 max-w-sm text-sm leading-relaxed text-muted-foreground">
+                    New questions from agents will arrive here in urgency order.
+                  </p>
+                </div>
+              ) : (
+                <ol className="divide-y divide-border/70">
+                  {shownItems.map((item) => (
+                    <OpenInboxItem
+                      closed={closedOf(item)}
+                      answer={answer}
+                      answerText={answers[scopedInboxItemKey(item)] ?? ""}
+                      attachments={answerAttachments}
+                      item={item}
+                      key={scopedInboxItemKey(item)}
+                      onOpenThread={openThread}
+                      pending={sends.isPending(scopedInboxItemKey(item))}
+                      error={sends.errorOf(scopedInboxItemKey(item))}
+                      senderLabels={senderLabels}
+                      projectNameOf={projectNameOf}
+                      showEnvironment={showEnvironment}
+                    />
+                  ))}
+                </ol>
+              )}
+
+              <CrewWorktreeCleanupSection
+                errors={cleanups.errors}
+                items={cleanups.inPlace}
+                onAnswer={cleanups.answer}
+                pendingKey={cleanups.pendingKey}
+                showEnvironment={showEnvironment}
+              />
+
+              <AnsweredShelf
+                cleanups={cleanups.shelf}
+                items={answeredItems}
+                onOpenThread={openThread}
+                senderLabels={senderLabels}
+                projectNameOf={projectNameOf}
+                showEnvironment={showEnvironment}
+              />
             </div>
-
-            {notices.length > 0 ? (
-              <ul aria-live="polite" className="mt-4 space-y-1 text-sm text-muted-foreground">
-                {notices.map((notice) => (
-                  <li key={notice}>{notice}</li>
-                ))}
-              </ul>
-            ) : null}
-
-            <CrewRuntimeRequestsSection requests={runtimeRequests} onOpenThread={openCrewThread} />
-            <NativeQuestionInboxSection questions={nativeQuestions} onOpenThread={openCrewThread} />
-
-            {complete &&
-            !loading &&
-            shownItems.length === 0 &&
-            cleanups.inPlace.length === 0 &&
-            runtimeRequests.length === 0 &&
-            nativeQuestions.length === 0 ? (
-              <div className="flex min-h-56 flex-col items-center justify-center px-6 py-12 text-center">
-                <span className="flex size-10 items-center justify-center rounded-full bg-success/10 text-success">
-                  <InboxIcon aria-hidden className="size-5" />
-                </span>
-                <h2 className="mt-4 text-base font-medium">Nothing is waiting on you</h2>
-                <p className="mt-1 max-w-sm text-sm leading-relaxed text-muted-foreground">
-                  New questions from agents will arrive here in urgency order.
-                </p>
-              </div>
-            ) : (
-              <ol className="divide-y divide-border/70">
-                {shownItems.map((item) => (
-                  <OpenInboxItem
-                    closed={closedOf(item)}
-                    answer={answer}
-                    answerText={answers[scopedInboxItemKey(item)] ?? ""}
-                    attachments={answerAttachments}
-                    item={item}
-                    key={scopedInboxItemKey(item)}
-                    onOpenThread={openThread}
-                    pending={sends.isPending(scopedInboxItemKey(item))}
-                    error={sends.errorOf(scopedInboxItemKey(item))}
-                    senderLabels={senderLabels}
-                    projectNameOf={projectNameOf}
-                    showEnvironment={showEnvironment}
-                  />
-                ))}
-              </ol>
-            )}
-
-            <CrewWorktreeCleanupSection
-              errors={cleanups.errors}
-              items={cleanups.inPlace}
-              onAnswer={cleanups.answer}
-              pendingKey={cleanups.pendingKey}
-              showEnvironment={showEnvironment}
-            />
-
-            <AnsweredShelf
-              cleanups={cleanups.shelf}
-              items={answeredItems}
-              onOpenThread={openThread}
-              senderLabels={senderLabels}
-              projectNameOf={projectNameOf}
-              showEnvironment={showEnvironment}
-            />
           </main>
         </ScrollArea>
       </InboxWithThreadPanel>
