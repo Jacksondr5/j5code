@@ -475,7 +475,7 @@ const spawnOnPeer = Effect.fn("j5.a2a.spawnOnPeer")(function* (
   )
     return yield* stateError(
       `"${label}" runs an older J5 that can't start a Peer Agent for another machine.`,
-      "Update J5 there, or start the agent on your own machine without environment_id.",
+      "Update J5 there, or start the agent on your own machine without environment_id. If it was just updated, try again once the two machines have reconnected.",
     );
 
   const pickSource =
