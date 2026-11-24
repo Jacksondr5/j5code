@@ -2490,7 +2490,8 @@ it.effect("refuses a spawn on another machine it can't make, and starts nothing"
           ),
         },
         code: "peer_unreachable",
-        says: '"Build box"',
+        // The machine named, and the key to retry with, which finds the agent if it started.
+        says: '"Build box": The linked environment stopped answering. Retry j5_spawn_agent with client_request_id "remote-1"',
       },
       {
         name: "refused there",
@@ -2637,6 +2638,13 @@ it.effect("refuses a linked machine's spawn with no agent of its own, or no way 
       ],
       // A half-removed link: this server holds no peering with the spawner's.
       [linkedScope({}), linkedArgs, false, "not peered with yours"],
+      // A persona this machine lacks is no block: there is nothing to unblock here.
+      [
+        linkedScope({}),
+        { ...withoutModel(linkedArgs), persona: "nobody-here" },
+        true,
+        "That machine's persona library has no nobody-here",
+      ],
     ] as const) {
       const harness = yield* spawnHarness({
         checkout: { isRepo: false, refName: null },
@@ -2719,3 +2727,10 @@ it.effect("a linked spawn's retry in a later turn finishes its first agent", () 
     }).pipe(Effect.provide(persona.layer));
   }),
 );
+
+function withoutModel<A extends { provider?: unknown; model?: unknown; reasoning?: unknown }>(
+  args: A,
+): Omit<A, "provider" | "model" | "reasoning"> {
+  const { provider: _provider, model: _model, reasoning: _reasoning, ...rest } = args;
+  return rest;
+}

@@ -558,3 +558,14 @@ export const turnPickSource = Effect.fn("j5.agents.turnPickSource")(function* (
     ? ("person" as const)
     : ("agent" as const);
 });
+
+/**
+ * What to do about a persona refused on the other machine of a link: a missing or unreadable
+ * library there is no block, so only a real block is lifted there.
+ */
+export const personaElsewhereNextStep = (code: string, personaId: string, here: string) =>
+  code === "persona_not_found" || code === "library_empty"
+    ? `That machine's persona library has no ${personaId}. Ask the person which personas it has, or run this one on your own machine without ${here}.`
+    : code === "library_unreadable"
+      ? `That machine's persona library can't be read now. Retry, or run the work on your own machine without ${here}.`
+      : "It is blocked on that machine: have it unblocked there, or run the work on your own machine.";
