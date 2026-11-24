@@ -91,8 +91,8 @@ function wireOpenList(vignette: HTMLElement) {
   document.addEventListener("pointerdown", (event) => {
     if (openedByReader && outside(event.target)) show(false);
   });
-  // Tab out of it is the keyboard's click away.
-  list.addEventListener("focusout", (event) => {
+  // Tab out of it, from the list or from its trigger, is the keyboard's click away.
+  vignette.addEventListener("focusout", (event) => {
     if (openedByReader && outside(event.relatedTarget)) show(false);
   });
   return () => show(false);
