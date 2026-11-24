@@ -444,6 +444,15 @@ const SEAMS: ReadonlyArray<Seam> = [
     ],
   },
   {
+    file: "features/threads/thread-list-v2-items.tsx",
+    record: "case 90: a thread row's New thread on its branch follows the person's level",
+    from: "../../j5/sharing/startAccess",
+    reaches: [
+      "useCanStartTaskIn(thread.environmentId, thread.projectId)",
+      "...(thread.branch && canStartOnBranch",
+    ],
+  },
+  {
     file: "features/keyboard/CommandPalette.tsx",
     record: "case 90: the palette's New thread and Add project follow the person's level",
     from: "../../j5/sharing/startAccess",
