@@ -192,17 +192,21 @@ const delegatePersonaToPeer = Effect.fn("j5.delegatePersonaToPeer")(function* (
   const scope = yield* McpInvocationContext;
   const { thread } = yield* requireThreadScope(scope, "delegate_task");
   const environmentId = input.target.environmentId;
-  const peered = yield* (yield* PeerRegistryService)
-    .get(environmentId)
-    .pipe(
-      Effect.mapError(
-        (error) =>
-          new OrchestratorMcpFailure({ code: "orchestration_error", message: error.message }),
-      ),
-    );
+  const peers = yield* PeerRegistryService;
+  const storeFailure = (error: { readonly message: string }) =>
+    new OrchestratorMcpFailure({ code: "orchestration_error", message: error.message });
+  const peered = yield* peers.get(environmentId).pipe(Effect.mapError(storeFailure));
   if (peered === null)
     return yield* refuse(
       `This server is not peered with ${environmentId}. Only J5 machines peer, and a persona delegated to a machine that isn't one would run as a plain delegate instead. Peer the two machines, or run the persona here without target.`,
+    );
+  // An older J5 there would drop the persona and run a plain delegate in its place.
+  if (
+    (yield* peers.capabilities(environmentId).pipe(Effect.mapError(storeFailure)))
+      .personaDelegate !== true
+  )
+    return yield* refuse(
+      `"${peered.label}" runs an older J5 that can't run a persona delegated from another machine. Update J5 there, or run the persona here without target.`,
     );
   const parent = yield* (yield* ThreadManagementService)
     .getThreadRecords(thread.threadId, [])

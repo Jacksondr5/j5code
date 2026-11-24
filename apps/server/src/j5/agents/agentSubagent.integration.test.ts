@@ -20,6 +20,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { RemoteDelegation } from "../../peer/RemoteDelegation.ts";
 import { PeerRegistryService } from "../a2a/PeerRegistryService.ts";
+import { ownPeerCapabilities } from "../a2a/peerProtocol.ts";
 import { layerMemory as SqlitePersistenceMemory } from "../../persistence/Sqlite.ts";
 import { layerWithRegistry as makeOrchestratorV2ReplayLayerWithRegistry } from "../../orchestration-v2/testkit/ProviderReplayHarness.ts";
 import { layerFromAdapters as makeLayer } from "../../orchestration-v2/ProviderAdapterRegistry.ts";
@@ -304,6 +305,8 @@ it.effect("sends a persona to a peered machine with its pick's facts, and nothin
   Effect.gen(function* () {
     const { orchestrator, scope, threadId } = yield* runningParent;
     const peered = EnvironmentId.make("environment:peered");
+    // Peered, but on a J5 from before persona delegation: it would run a plain delegate.
+    const older = EnvironmentId.make("environment:older");
     const sent: Array<Parameters<Mcp.OrchestratorMcpServiceShape["delegateTask"]>[1]> = [];
     const machines = Layer.merge(
       Layer.mock(Mcp.OrchestratorMcpService)({
@@ -314,7 +317,13 @@ it.effect("sends a persona to a peered machine with its pick's facts, and nothin
       }),
       Layer.mock(PeerRegistryService)({
         get: (environmentId) =>
-          Effect.succeed(environmentId === peered ? ({ environmentId } as never) : null),
+          Effect.succeed(
+            environmentId === peered || environmentId === older
+              ? ({ environmentId, label: environmentId } as never)
+              : null,
+          ),
+        capabilities: (environmentId) =>
+          Effect.succeed(environmentId === older ? { spawn: true } : ownPeerCapabilities),
       }),
     );
     const delegate = (input: Omit<Parameters<typeof delegateTask>[0], "task" | "persona">) =>
@@ -329,6 +338,7 @@ it.effect("sends a persona to a peered machine with its pick's facts, and nothin
         "is not peered with",
       ],
       [{ target: { environmentId: peered }, allow_once: "escalation:1" }, "on this machine only"],
+      [{ target: { environmentId: older } }, "runs an older J5"],
       [
         { target: { environmentId: peered, model: otherModel } },
         "except target.environmentId to run it on a peered J5 machine",

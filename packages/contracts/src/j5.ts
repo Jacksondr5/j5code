@@ -988,6 +988,8 @@ export const PeerCapabilities = Schema.Struct({
   line: Schema.optionalKey(Schema.Boolean),
   /** This server starts a Peer Agent that an agent on a linked J5 machine asks for (j5_spawn_agent). */
   spawn: Schema.optionalKey(Schema.Boolean),
+  /** This server runs a persona that a linked J5 machine delegates (delegate_task), from its own library. */
+  personaDelegate: Schema.optionalKey(Schema.Boolean),
 });
 export type PeerCapabilities = typeof PeerCapabilities.Type;
 

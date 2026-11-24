@@ -378,7 +378,7 @@ it("answers hello with this environment and the credential's subject, and comple
     assert.equal(body.peerProtocolVersion, PEER_PROTOCOL_VERSION);
     assert.deepStrictEqual(
       body.capabilities,
-      { poll: true, landing: true, line: true, spawn: true },
+      { poll: true, landing: true, line: true, spawn: true, personaDelegate: true },
       "this server stores for a poller, and lands a message as its sender asked",
     );
     assert.deepStrictEqual(
@@ -739,7 +739,7 @@ it("shows a recorded peer only the agents it could address, and nobody else the 
     assert.equal(response.status, 200);
     assert.deepStrictEqual(await response.json(), {
       label: "Work VM",
-      capabilities: { poll: true, landing: true, line: true, spawn: true },
+      capabilities: { poll: true, landing: true, line: true, spawn: true, personaDelegate: true },
       agents: [
         {
           participantId: "agent:j5:a2a:thread:local-triage",
