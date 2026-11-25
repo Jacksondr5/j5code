@@ -552,7 +552,11 @@ const spawnOnPeer = Effect.fn("j5.a2a.spawnOnPeer")(function* (
         error.code === "orchestration_error" ? decodeRemoteJ5Failure(error.message) : Option.none();
       return new J5PeerToolError(
         Option.isSome(refused)
-          ? { code: refused.value.code, message: `On "${label}": ${refused.value.message}` }
+          ? {
+              code: refused.value.code,
+              // A retry key that machine names is its own derived one, which this caller can't pass.
+              message: `On "${label}": ${refused.value.message} Retry j5_spawn_agent with client_request_id "${requestKey}"; it returns the same agent if the spawn already started.`,
+            }
           : {
               code: error.code,
               message:
