@@ -10,7 +10,12 @@
 import * as NodeChildProcess from "node:child_process";
 
 export const MAX_ATTEMPTS = 5;
-const CAPACITY_ANNOTATION = "The job was not acquired by Runner of type hosted";
+/** `gh run watch` calls per re-run before giving up on seeing the new attempt complete. */
+export const MAX_WATCHES = 3;
+const CAPACITY_ANNOTATION =
+  "The job was not acquired by Runner of type hosted even after multiple attempts";
+// GitHub-hosted macOS labels only, such as macos-15, macos-15-xlarge or macos-latest.
+const HOSTED_MACOS_LABEL = /^macos-(\d+|latest)(-\w+)?$/;
 const PASSING_CONCLUSIONS = new Set(["success", "skipped", "neutral"]);
 
 export interface RunJob {
@@ -22,6 +27,7 @@ export interface RunJob {
 }
 
 export interface RunAttempt {
+  readonly completed: boolean;
   readonly conclusion: string | null;
   readonly attempt: number;
   readonly jobs: ReadonlyArray<RunJob>;
@@ -34,9 +40,9 @@ export interface RetryDecision {
 
 const isCapacityCancellation = (job: RunJob) =>
   job.conclusion === "cancelled" &&
-  job.labels.some((label) => /macos/i.test(label)) &&
+  job.labels.some((label) => HOSTED_MACOS_LABEL.test(label)) &&
   job.failures.length > 0 &&
-  job.failures.every((message) => message.includes(CAPACITY_ANNOTATION));
+  job.failures.every((message) => message === CAPACITY_ANNOTATION);
 
 const describe = (job: RunJob) =>
   `${job.name} (${[job.conclusion ?? "no conclusion", ...job.failures].join(": ")})`;
@@ -71,10 +77,9 @@ export function decideCapacityRetry(run: RunAttempt): RetryDecision {
 }
 
 export interface RetryLoopGh {
-  /** The run's latest attempt, once it has completed. */
   readonly readLatest: () => RunAttempt;
   readonly rerunFailed: () => void;
-  /** Blocks until the run's latest attempt completes. */
+  /** Blocks until the latest attempt completes; returns at once if it reads one already completed. */
   readonly waitForRun: () => void;
 }
 
@@ -91,15 +96,33 @@ export function runRetryLoop(
     if (!decision.rerun) return decision;
     gh.rerunFailed();
     log(`Run ${runId}: waiting for attempt ${run.attempt + 1} to complete.`);
+    run = waitForNewerAttempt(runId, run.attempt, gh);
+  }
+}
+
+function waitForNewerAttempt(runId: string, previous: number, gh: RetryLoopGh): RunAttempt {
+  for (let watch = 1; ; watch++) {
     gh.waitForRun();
-    const next = gh.readLatest();
-    if (next.attempt <= run.attempt) {
+    const latest = gh.readLatest();
+    if (latest.attempt > previous && latest.completed) return latest;
+    if (watch === MAX_WATCHES) {
+      const seen =
+        latest.attempt > previous
+          ? `attempt ${latest.attempt} still hasn't completed`
+          : `the latest attempt is still ${latest.attempt}`;
       throw new Error(
-        `Run ${runId}: re-ran attempt ${run.attempt}, but the latest attempt is still ${next.attempt}.`,
+        `Run ${runId}: re-ran attempt ${previous}, but after ${watch} waits ${seen}.`,
       );
     }
-    run = next;
   }
+}
+
+/** A re-run attempt's own `workflow_run`, if GitHub sends one, finds the loop already handled it. */
+export function isEventCurrent(
+  run: { readonly status: string; readonly run_attempt: number },
+  eventAttempt: number,
+): boolean {
+  return run.status === "completed" && run.run_attempt === eventAttempt;
 }
 
 interface ApiJob {
@@ -118,18 +141,26 @@ interface ApiRun {
 const ghJson = <T>(path: string): T =>
   JSON.parse(NodeChildProcess.execFileSync("gh", ["api", path], { encoding: "utf8" })) as T;
 
+const ghPages = <T>(path: string): ReadonlyArray<T> =>
+  JSON.parse(
+    NodeChildProcess.execFileSync("gh", ["api", "--paginate", "--slurp", path], {
+      encoding: "utf8",
+    }),
+  ) as ReadonlyArray<T>;
+
 const readRun = (runId: string) => ghJson<ApiRun>(`repos/{owner}/{repo}/actions/runs/${runId}`);
 
 function readAttempt(runId: string, attempt: number | undefined): RunAttempt {
   const run = readRun(runId);
   const n = attempt ?? run.run_attempt;
   // An earlier attempt's own conclusion isn't exposed; it failed, or there'd be a later one.
-  const conclusion = n === run.run_attempt ? run.conclusion : "failure";
-  const { jobs } = ghJson<{ jobs: ReadonlyArray<ApiJob> }>(
+  const latest = n === run.run_attempt;
+  const jobs = ghPages<{ jobs: ReadonlyArray<ApiJob> }>(
     `repos/{owner}/{repo}/actions/runs/${runId}/attempts/${n}/jobs?per_page=100`,
-  );
+  ).flatMap((page) => page.jobs);
   return {
-    conclusion,
+    completed: !latest || run.status === "completed",
+    conclusion: latest ? run.conclusion : "failure",
     attempt: n,
     jobs: jobs.map((job) => ({
       name: job.name,
@@ -137,9 +168,10 @@ function readAttempt(runId: string, attempt: number | undefined): RunAttempt {
       labels: job.labels,
       failures: PASSING_CONCLUSIONS.has(job.conclusion ?? "")
         ? []
-        : ghJson<ReadonlyArray<{ annotation_level: string; message: string }>>(
-            `repos/{owner}/{repo}/check-runs/${job.id}/annotations`,
+        : ghPages<ReadonlyArray<{ annotation_level: string; message: string }>>(
+            `repos/{owner}/{repo}/check-runs/${job.id}/annotations?per_page=100`,
           )
+            .flat()
             .filter((annotation) => annotation.annotation_level === "failure")
             .map((annotation) => annotation.message),
     })),
@@ -179,9 +211,8 @@ if (import.meta.main) {
     process.exit(0);
   }
   if (eventAttempt !== undefined) {
-    // A re-run attempt's own `workflow_run`, if GitHub sends one, finds the loop already handled it.
     const run = readRun(runId);
-    if (run.status !== "completed" || run.run_attempt !== eventAttempt) {
+    if (!isEventCurrent(run, eventAttempt)) {
       console.log(
         `Run ${runId}: nothing to do; attempt ${eventAttempt} triggered this, and the latest is attempt ${run.run_attempt} (${run.status}).`,
       );
@@ -197,12 +228,15 @@ if (import.meta.main) {
           stdio: "inherit",
         }),
       // Without --exit-status: a failed attempt is expected here, and the decision reads it.
-      waitForRun: () =>
+      waitForRun: () => {
+        // `gh run rerun` returns before the new attempt shows; watch returns at once on a completed run.
+        NodeChildProcess.execFileSync("sleep", ["30"]);
         NodeChildProcess.execFileSync(
           "gh",
           ["run", "watch", runId, "--compact", "--interval", "60"],
           { stdio: ["ignore", "ignore", "inherit"] },
-        ),
+        );
+      },
     },
     (line) => console.log(line),
   );

@@ -2,7 +2,9 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   decideCapacityRetry,
+  isEventCurrent,
   MAX_ATTEMPTS,
+  MAX_WATCHES,
   runRetryLoop,
   type RunAttempt,
   type RunJob,
@@ -40,7 +42,8 @@ const nightly = (overrides: Record<string, RunJob>) =>
     job("Release / release", "skipped", "ubuntu-24.04"),
   ].map((entry) => overrides[entry.name] ?? entry);
 
-const stable = (attempt: number, overrides: Record<string, RunJob>) => ({
+const stable = (attempt: number, overrides: Record<string, RunJob>): RunAttempt => ({
+  completed: true,
   conclusion: "failure",
   attempt,
   jobs: [...nightly(overrides), overrides[BUMP] ?? job(BUMP, "success", "ubuntu-24.04")],
@@ -57,8 +60,13 @@ describe("decideCapacityRetry", () => {
       rerun: true,
     },
     {
-      run: "the CLI archive not picked up, the DMG built (45383247803)",
+      run: "the CLI archive not picked up, the DMG built",
       jobs: nightly({ [CLI_MAC]: job(CLI_MAC, "cancelled", "macos-15", [NOT_ACQUIRED]) }),
+      rerun: true,
+    },
+    {
+      run: "a larger hosted macOS label not picked up",
+      jobs: nightly({ [DMG]: job(DMG, "cancelled", "macos-latest-xlarge", [NOT_ACQUIRED]) }),
       rerun: true,
     },
     {
@@ -71,7 +79,7 @@ describe("decideCapacityRetry", () => {
       rerun: false,
     },
     {
-      run: "a macOS job not picked up beside a failed Windows job (45383247803 as it ran)",
+      run: "a macOS job not picked up beside a failed Windows job (45383247803)",
       jobs: nightly({
         [CLI_MAC]: job(CLI_MAC, "cancelled", "macos-15", [NOT_ACQUIRED]),
         [WINDOWS]: job(WINDOWS, "failure", "windows-2025", [EXIT_1]),
@@ -84,15 +92,29 @@ describe("decideCapacityRetry", () => {
       rerun: false,
     },
     {
+      run: "a capacity annotation with other error text",
+      jobs: nightly({
+        [DMG]: job(DMG, "cancelled", "macos-15", [`${NOT_ACQUIRED}. ${EXIT_1}`]),
+      }),
+      rerun: false,
+    },
+    {
       run: "a non-macOS job carrying the capacity annotation",
       jobs: nightly({ [WINDOWS]: job(WINDOWS, "cancelled", "windows-2025", [NOT_ACQUIRED]) }),
       rerun: false,
     },
+    {
+      run: "a self-hosted label that only contains macos",
+      jobs: nightly({ [DMG]: job(DMG, "cancelled", "build-macos-assets", [NOT_ACQUIRED]) }),
+      rerun: false,
+    },
   ])("$run: rerun $rerun", ({ jobs, rerun }) => {
-    expect(decideCapacityRetry({ conclusion: "failure", attempt: 1, jobs }).rerun).toBe(rerun);
+    expect(
+      decideCapacityRetry({ completed: true, conclusion: "failure", attempt: 1, jobs }).rerun,
+    ).toBe(rerun);
   });
 
-  it("re-runs a stable promotion that keeps losing macOS jobs until the attempt cap (45258474262)", () => {
+  it("re-runs a stable promotion that keeps losing macOS jobs until the attempt cap", () => {
     const lost = {
       [CLI_MAC]: job(CLI_MAC, "cancelled", "macos-15", [NOT_ACQUIRED]),
       [DMG]: job(DMG, "cancelled", "macos-15", [NOT_ACQUIRED]),
@@ -116,33 +138,50 @@ describe("decideCapacityRetry", () => {
   });
 });
 
+describe("isEventCurrent", () => {
+  it.each([
+    { run: { status: "completed", run_attempt: 3 }, eventAttempt: 2, current: false },
+    { run: { status: "in_progress", run_attempt: 2 }, eventAttempt: 2, current: false },
+    { run: { status: "queued", run_attempt: 3 }, eventAttempt: 2, current: false },
+    { run: { status: "completed", run_attempt: 2 }, eventAttempt: 2, current: true },
+  ])("attempt $eventAttempt with latest $run.run_attempt $run.status: $current", (row) => {
+    expect(isEventCurrent(row.run, row.eventAttempt)).toBe(row.current);
+  });
+});
+
 describe("runRetryLoop", () => {
   const lost = {
     [CLI_MAC]: job(CLI_MAC, "cancelled", "macos-15", [NOT_ACQUIRED]),
     [DMG]: job(DMG, "cancelled", "macos-15", [NOT_ACQUIRED]),
   };
   const succeeded = (attempt: number): RunAttempt => ({
+    completed: true,
     conclusion: "success",
     attempt,
     jobs: nightly({}),
   });
+  const running = (attempt: number): RunAttempt => ({
+    completed: false,
+    conclusion: null,
+    attempt,
+    jobs: nightly({}),
+  });
 
-  // Each attempt in `attempts` is what the run reads as after the previous re-run completes.
-  const fakeGh = (attempts: ReadonlyArray<RunAttempt>) => {
+  // `reads` is what each successive read of the latest attempt returns.
+  const fakeGh = (reads: ReadonlyArray<RunAttempt>) => {
     const calls: string[] = [];
-    let latest = 0;
+    let next = 0;
     return {
       calls,
       gh: {
         readLatest: () => {
-          const run = attempts[latest];
+          const run = reads[next++];
           if (!run) throw new Error("read past the last attempt");
-          calls.push(`read ${run.attempt}`);
+          calls.push(`read ${run.attempt}${run.completed ? "" : " running"}`);
           return run;
         },
         rerunFailed: () => {
           calls.push("rerun");
-          latest += 1;
         },
         waitForRun: () => {
           calls.push("wait");
@@ -158,6 +197,22 @@ describe("runRetryLoop", () => {
     expect(decision.rerun).toBe(false);
   });
 
+  it("waits again when the wait ends before the new attempt completes", () => {
+    const { calls, gh } = fakeGh([stable(1, lost), stable(1, lost), running(2), succeeded(2)]);
+    const decision = runRetryLoop("1", gh, () => {});
+    expect(calls).toEqual([
+      "read 1",
+      "rerun",
+      "wait",
+      "read 1",
+      "wait",
+      "read 2 running",
+      "wait",
+      "read 2",
+    ]);
+    expect(decision.reason).toContain("conclusion is success");
+  });
+
   it("stops at the attempt cap", () => {
     const { calls, gh } = fakeGh([1, 2, 3, 4, 5].map((attempt) => stable(attempt, lost)));
     const decision = runRetryLoop("1", gh, () => {});
@@ -166,8 +221,15 @@ describe("runRetryLoop", () => {
     expect(decision.reason).toContain(`cap of ${MAX_ATTEMPTS}`);
   });
 
-  it("fails when the wait ends before a new attempt exists", () => {
-    const { gh } = fakeGh([stable(1, lost), stable(1, lost)]);
-    expect(() => runRetryLoop("1", gh, () => {})).toThrow("latest attempt is still 1");
+  it.each([
+    { latest: stable(1, lost), error: "latest attempt is still 1" },
+    { latest: running(2), error: "attempt 2 still hasn't completed" },
+  ])("fails when no newer attempt completes: $error", ({ latest, error }) => {
+    const { calls, gh } = fakeGh([
+      stable(1, lost),
+      ...Array.from({ length: MAX_WATCHES }, () => latest),
+    ]);
+    expect(() => runRetryLoop("1", gh, () => {})).toThrow(error);
+    expect(calls.filter((call) => call === "wait")).toHaveLength(MAX_WATCHES);
   });
 });
