@@ -68,7 +68,7 @@ on:
     outputs:
       published:
         description: "'true' when the version is published, by this run or an earlier one; never for a draft"
-        value: ${{ jobs.resolve.outputs.published == 'true' || jobs.release.outputs.published == 'true' }}
+        value: ${{ inputs.draft != true && (jobs.resolve.outputs.published == 'true' || jobs.release.outputs.published == 'true') }}
     secrets:
       CSC_LINK:
         required: true

@@ -41,11 +41,14 @@ const release = readWorkflow("j5-release.yml");
 const releasePublished = (jobs: {
   resolvePublished: "true" | "false";
   releasePublished: "true" | "";
+  dryRun: boolean;
 }) => {
   const value = release.on.workflow_call?.outputs?.published?.value;
   if (value === undefined) return "";
   return String(
     evaluate(value, {
+      // J5 Stable calls J5 Release with `draft: inputs.dry_run == true`.
+      inputs: { draft: jobs.dryRun },
       jobs: {
         resolve: { outputs: { published: jobs.resolvePublished } },
         release: { outputs: { published: jobs.releasePublished } },
@@ -110,5 +113,9 @@ describe("J5 Stable's version bump", () => {
         dryRun: true,
       }),
     ).toBe(false);
+    // The output itself is never true for a draft, even for a version published earlier.
+    expect(releasePublished({ resolvePublished: "true", releasePublished: "", dryRun: true })).toBe(
+      "false",
+    );
   });
 });
