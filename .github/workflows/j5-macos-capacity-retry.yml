@@ -1,0 +1,53 @@
+name: J5 macOS Capacity Retry
+
+# GitHub's hosted macOS arm64 pool is short (#1246): release jobs on `macos-15`
+# can wait about 15 minutes and be cancelled with "The job was not acquired by
+# Runner of type hosted even after multiple attempts". When a release run failed
+# only that way, re-run its failed jobs, up to the attempt cap in
+# scripts/j5/macos-capacity-retry.ts. Any other failure is left for a person.
+# Every re-run attempt completes as a new `workflow_run` event, which comes back
+# here; this workflow isn't in its own list, so it never triggers itself.
+
+on:
+  workflow_run:
+    # J5 Release runs on its own only when dispatched by hand; called from
+    # J5 Nightly or J5 Stable, its jobs belong to the caller's run.
+    workflows: [J5 Nightly, J5 Stable, J5 Release]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  retry:
+    name: Re-run macOS jobs GitHub didn't pick up
+    if: github.repository == 'Jacksondr5/j5code' && github.event.workflow_run.conclusion == 'failure'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: write
+      checks: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+
+      - name: Decide, and re-run the failed jobs if only capacity failed them
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: node scripts/j5/macos-capacity-retry.ts "$RUN_ID" --rerun
+
+      - name: Exclude vendored gitlinks from checkout cleanup
+        if: always()
+        run: |
+          python3 - <<'PYTHON'
+          import subprocess
+          entries = subprocess.check_output(["git", "ls-files", "--stage", "-z", ".repos"])
+          paths = [entry.split(b"\t", 1)[1] for entry in entries.split(b"\0") if entry.startswith(b"160000 ")]
+          if paths:
+              subprocess.run(["git", "update-index", "--force-remove", "-z", "--stdin"], input=b"\0".join(paths) + b"\0", check=True)
+          PYTHON
