@@ -1044,8 +1044,8 @@ explicitly marked.
 | `scripts/build-cli-archive.ts`                                              | N       | 50                                                 |
 | `scripts/build-desktop-artifact.test.ts`                                    | A       | B, S, 50                                           |
 | `scripts/build-desktop-artifact.ts`                                         | R       | B, S, 50                                           |
-| `scripts/prepare-server-compile-cache.cjs`                                  | N       | 132                                                |
-| `scripts/lib/server-compile-cache.test.ts`                                  | N       | 132                                                |
+| `scripts/prepare-server-compile-cache.cjs`                                  | N       | 131                                                |
+| `scripts/lib/server-compile-cache.test.ts`                                  | N       | 131                                                |
 | `scripts/check-changed.ts`                                                  | N       | 93                                                 |
 | `scripts/dev-runner.test.ts`                                                | R       | H, 63, 83, 88                                      |
 | `scripts/dev-runner.ts`                                                     | R       | H, 63, 83, 88                                      |
