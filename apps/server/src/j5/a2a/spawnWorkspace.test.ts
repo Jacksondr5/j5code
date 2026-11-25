@@ -2516,7 +2516,8 @@ it.effect("refuses a spawn on another machine it can't make, and starts nothing"
           ),
         },
         code: "J5AgentToolStateError",
-        says: 'On "Build box": This server has no project',
+        // The key to retry with is the caller's, not the one that machine derived from it.
+        says: 'On "Build box": This server has no project ledger:j5:build-box. Retry j5_spawn_agent with client_request_id "remote-1"',
       },
       { name: "an outside agent", scope: outsideScope("full-access"), says: "outside agent" },
       { name: "allow_once", args: { allow_once: "escalation:1" }, says: "Allow this once" },
