@@ -1,10 +1,12 @@
 // @effect-diagnostics nodeBuiltinImport:off globalConsole:off - a CI step run as a standalone Node script.
 // Decides whether a failed release run lost only macOS jobs that GitHub's hosted arm64 pool never
-// picked up (#1246), and if so re-runs its failed jobs. Any other failure, or the attempt cap, stops it.
+// picked up (#1246), and if so re-runs its failed jobs, waits for that attempt, and decides again.
+// Any other failure, or the attempt cap, stops it.
 //
-//   node scripts/j5/macos-capacity-retry.ts <run-id> [--attempt <n>] [--rerun]
+//   node scripts/j5/macos-capacity-retry.ts <run-id> [--attempt <n>] [--rerun [--event-attempt <n>]]
 //
-// Without --rerun it only prints the decision. --attempt reads an earlier attempt and can't re-run.
+// Without --rerun it only prints the decision; --attempt reads an earlier attempt. --event-attempt is
+// the attempt that triggered the workflow: if it is no longer the latest, completed one, it does nothing.
 import * as NodeChildProcess from "node:child_process";
 
 export const MAX_ATTEMPTS = 5;
@@ -68,6 +70,38 @@ export function decideCapacityRetry(run: RunAttempt): RetryDecision {
   };
 }
 
+export interface RetryLoopGh {
+  /** The run's latest attempt, once it has completed. */
+  readonly readLatest: () => RunAttempt;
+  readonly rerunFailed: () => void;
+  /** Blocks until the run's latest attempt completes. */
+  readonly waitForRun: () => void;
+}
+
+/** Re-runs and waits in one job, so the loop never depends on a re-run firing `workflow_run` again. */
+export function runRetryLoop(
+  runId: string,
+  gh: RetryLoopGh,
+  log: (line: string) => void,
+): RetryDecision {
+  let run = gh.readLatest();
+  for (;;) {
+    const decision = decideCapacityRetry(run);
+    log(`Run ${runId}: ${decision.rerun ? "re-run" : "no re-run"}, because ${decision.reason}.`);
+    if (!decision.rerun) return decision;
+    gh.rerunFailed();
+    log(`Run ${runId}: waiting for attempt ${run.attempt + 1} to complete.`);
+    gh.waitForRun();
+    const next = gh.readLatest();
+    if (next.attempt <= run.attempt) {
+      throw new Error(
+        `Run ${runId}: re-ran attempt ${run.attempt}, but the latest attempt is still ${next.attempt}.`,
+      );
+    }
+    run = next;
+  }
+}
+
 interface ApiJob {
   readonly id: number;
   readonly name: string;
@@ -75,13 +109,19 @@ interface ApiJob {
   readonly labels: ReadonlyArray<string>;
 }
 
+interface ApiRun {
+  readonly status: string;
+  readonly conclusion: string | null;
+  readonly run_attempt: number;
+}
+
 const ghJson = <T>(path: string): T =>
   JSON.parse(NodeChildProcess.execFileSync("gh", ["api", path], { encoding: "utf8" })) as T;
 
+const readRun = (runId: string) => ghJson<ApiRun>(`repos/{owner}/{repo}/actions/runs/${runId}`);
+
 function readAttempt(runId: string, attempt: number | undefined): RunAttempt {
-  const run = ghJson<{ conclusion: string | null; run_attempt: number }>(
-    `repos/{owner}/{repo}/actions/runs/${runId}`,
-  );
+  const run = readRun(runId);
   const n = attempt ?? run.run_attempt;
   // An earlier attempt's own conclusion isn't exposed; it failed, or there'd be a later one.
   const conclusion = n === run.run_attempt ? run.conclusion : "failure";
@@ -106,25 +146,64 @@ function readAttempt(runId: string, attempt: number | undefined): RunAttempt {
   };
 }
 
+const option = (args: ReadonlyArray<string>, name: string) => {
+  const index = args.indexOf(name);
+  return index === -1 ? undefined : Number(args[index + 1]);
+};
+
 if (import.meta.main) {
   const args = process.argv.slice(2);
   const runId = args[0];
-  const attemptIndex = args.indexOf("--attempt");
-  const attempt = attemptIndex === -1 ? undefined : Number(args[attemptIndex + 1]);
+  const attempt = option(args, "--attempt");
+  const eventAttempt = option(args, "--event-attempt");
   const rerun = args.includes("--rerun");
-  if (!runId || !/^\d+$/.test(runId) || (attempt !== undefined && !Number.isInteger(attempt))) {
-    console.error("Usage: macos-capacity-retry.ts <run-id> [--attempt <n>] [--rerun]");
+  if (
+    !runId ||
+    !/^\d+$/.test(runId) ||
+    [attempt, eventAttempt].some((n) => n !== undefined && !Number.isInteger(n))
+  ) {
+    console.error(
+      "Usage: macos-capacity-retry.ts <run-id> [--attempt <n>] [--rerun [--event-attempt <n>]]",
+    );
     process.exit(2);
   }
   if (rerun && attempt !== undefined) {
     console.error("--rerun acts on the latest attempt only; drop --attempt.");
     process.exit(2);
   }
-  const decision = decideCapacityRetry(readAttempt(runId, attempt));
-  console.log(
-    `Run ${runId}: ${decision.rerun ? "re-run" : "no re-run"}, because ${decision.reason}.`,
-  );
-  if (decision.rerun && rerun) {
-    NodeChildProcess.execFileSync("gh", ["run", "rerun", runId, "--failed"], { stdio: "inherit" });
+  if (!rerun) {
+    const decision = decideCapacityRetry(readAttempt(runId, attempt));
+    console.log(
+      `Run ${runId}: ${decision.rerun ? "re-run" : "no re-run"}, because ${decision.reason}.`,
+    );
+    process.exit(0);
   }
+  if (eventAttempt !== undefined) {
+    // A re-run attempt's own `workflow_run`, if GitHub sends one, finds the loop already handled it.
+    const run = readRun(runId);
+    if (run.status !== "completed" || run.run_attempt !== eventAttempt) {
+      console.log(
+        `Run ${runId}: nothing to do; attempt ${eventAttempt} triggered this, and the latest is attempt ${run.run_attempt} (${run.status}).`,
+      );
+      process.exit(0);
+    }
+  }
+  runRetryLoop(
+    runId,
+    {
+      readLatest: () => readAttempt(runId, undefined),
+      rerunFailed: () =>
+        NodeChildProcess.execFileSync("gh", ["run", "rerun", runId, "--failed"], {
+          stdio: "inherit",
+        }),
+      // Without --exit-status: a failed attempt is expected here, and the decision reads it.
+      waitForRun: () =>
+        NodeChildProcess.execFileSync(
+          "gh",
+          ["run", "watch", runId, "--compact", "--interval", "60"],
+          { stdio: ["ignore", "ignore", "inherit"] },
+        ),
+    },
+    (line) => console.log(line),
+  );
 }

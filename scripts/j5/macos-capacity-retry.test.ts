@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { decideCapacityRetry, MAX_ATTEMPTS, type RunJob } from "./macos-capacity-retry.ts";
+import {
+  decideCapacityRetry,
+  MAX_ATTEMPTS,
+  runRetryLoop,
+  type RunAttempt,
+  type RunJob,
+} from "./macos-capacity-retry.ts";
 
 const NOT_ACQUIRED =
   "The job was not acquired by Runner of type hosted even after multiple attempts";
@@ -107,5 +113,61 @@ describe("decideCapacityRetry", () => {
       }),
     );
     expect(decision).toEqual({ rerun: false, reason: expect.stringContaining(BUMP) });
+  });
+});
+
+describe("runRetryLoop", () => {
+  const lost = {
+    [CLI_MAC]: job(CLI_MAC, "cancelled", "macos-15", [NOT_ACQUIRED]),
+    [DMG]: job(DMG, "cancelled", "macos-15", [NOT_ACQUIRED]),
+  };
+  const succeeded = (attempt: number): RunAttempt => ({
+    conclusion: "success",
+    attempt,
+    jobs: nightly({}),
+  });
+
+  // Each attempt in `attempts` is what the run reads as after the previous re-run completes.
+  const fakeGh = (attempts: ReadonlyArray<RunAttempt>) => {
+    const calls: string[] = [];
+    let latest = 0;
+    return {
+      calls,
+      gh: {
+        readLatest: () => {
+          const run = attempts[latest];
+          if (!run) throw new Error("read past the last attempt");
+          calls.push(`read ${run.attempt}`);
+          return run;
+        },
+        rerunFailed: () => {
+          calls.push("rerun");
+          latest += 1;
+        },
+        waitForRun: () => {
+          calls.push("wait");
+        },
+      },
+    };
+  };
+
+  it("re-runs and waits until an attempt is not lost to capacity", () => {
+    const { calls, gh } = fakeGh([stable(1, lost), stable(2, lost), succeeded(3)]);
+    const decision = runRetryLoop("1", gh, () => {});
+    expect(calls).toEqual(["read 1", "rerun", "wait", "read 2", "rerun", "wait", "read 3"]);
+    expect(decision.rerun).toBe(false);
+  });
+
+  it("stops at the attempt cap", () => {
+    const { calls, gh } = fakeGh([1, 2, 3, 4, 5].map((attempt) => stable(attempt, lost)));
+    const decision = runRetryLoop("1", gh, () => {});
+    expect(calls.filter((call) => call === "rerun")).toHaveLength(MAX_ATTEMPTS - 1);
+    expect(calls.at(-1)).toBe(`read ${MAX_ATTEMPTS}`);
+    expect(decision.reason).toContain(`cap of ${MAX_ATTEMPTS}`);
+  });
+
+  it("fails when the wait ends before a new attempt exists", () => {
+    const { gh } = fakeGh([stable(1, lost), stable(1, lost)]);
+    expect(() => runRetryLoop("1", gh, () => {})).toThrow("latest attempt is still 1");
   });
 });
