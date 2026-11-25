@@ -4,14 +4,17 @@ import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";
-import { latestActiveRun } from "../../orchestration-v2/ThreadManagementService.ts";
+import {
+  latestActiveRun,
+  latestSteerableRun,
+} from "../../orchestration-v2/ThreadManagementService.ts";
 import {
   latestExecutedRun,
   latestRootProviderFailure,
 } from "@t3tools/shared/orchestrationV2ThreadError";
 
 import {
-  peerSteeringRun,
+  autoSteeringRun,
   deliveryMessageId,
   idleQueueHold,
   isDeliveryMessageId,
@@ -44,7 +47,7 @@ const decodeParticipant = Schema.decodeUnknownEffect(Schema.fromJsonString(Parti
 
 /**
  * What a just-sent message waits behind: the receiver's running turn and the A2A messages queued or
- * not yet handed over after it, or a held queue or usage limit (D4). Undefined when it will not
+ * not yet handed over after it, or a held queue or usage limit (D51). Undefined when it will not
  * wait (idle receiver, mid-turn delivery, not a local agent, already run or never will). Advice
  * measured on call, never stored, so a failed read logs and reads as undefined.
  */
@@ -53,7 +56,7 @@ export const readReceiverBacklog = Effect.fn("j5.a2a.readReceiverBacklog")(
     readonly receiverId: ParticipantId;
     readonly callerThreadId: ThreadId;
     readonly sentMessageId: LedgerMessageId;
-    /** How the sender asked for the message to land; absent means `queue`. */
+    /** How the sender asked for the message to land; absent means upstream's `auto`. */
     readonly mode?: SendMode | undefined;
   }) {
     const sql = yield* SqlClient.SqlClient;
@@ -126,19 +129,29 @@ export const readReceiverBacklog = Effect.fn("j5.a2a.readReceiverBacklog")(
             : null,
       } satisfies ReceiverBacklog;
     }
-    // Not yet handed over, so a running Claude or GPT 6 turn, or the turn a steer or restart lands on,
-    // will take it mid-turn. Once queued, it stays queued even if the receiver's turn later
-    // becomes steerable.
-    const mode = input.mode ?? "queue";
+    // Not yet handed over, so a turn upstream's `auto` steers into, or the turn a steer or restart
+    // lands on, will take it mid-turn; a `queue` always waits. Once queued, it stays queued even if
+    // the receiver's turn later becomes steerable.
+    const mode = input.mode;
+    const steerable = latestSteerableRun(target);
+    const autoFacts =
+      sentRun !== undefined || mode !== undefined || steerable === undefined
+        ? { messages: [], turnItems: [] }
+        : yield* orchestrator.getThreadRecords(participant.threadId, ["messages", "turnItems"], {
+            messageIds: [steerable.userMessageId],
+            turnItemRunIds: [steerable.id],
+            turnItemTypes: ["run_interrupt_request"],
+          });
     if (
       sentRun === undefined &&
-      (mode === "queue"
-        ? peerSteeringRun(target, "peer")
+      mode !== "queue" &&
+      (mode === undefined
+        ? autoSteeringRun({ ...target, ...autoFacts })
         : requestedSteeringRun(target, "peer", mode)) !== undefined
     )
       return undefined;
     // A busy receiver's held queue is resumed by the delivery, so the message waits only behind
-    // the queue it joins (register D4).
+    // the queue it joins (register D51).
     const callerId = (yield* sql<{ readonly sender_id: string }>`
       SELECT sender_id FROM j5_a2a_delivery WHERE message_id = ${input.sentMessageId} LIMIT 1
     `)[0]?.sender_id;

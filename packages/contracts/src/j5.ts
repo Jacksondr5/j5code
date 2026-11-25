@@ -1052,8 +1052,13 @@ export type PeerDeliveryLanding = typeof PeerDeliveryLanding.Type;
 
 export const PeerDeliveryRequest = Schema.Struct({
   messageId: Schema.String.check(Schema.isNonEmpty()),
-  /** Absent for a message that waits its turn, which is every message from an older server. */
+  /** Absent for a message that takes the receiver's default delivery, as every one from an older server does. */
   landing: Schema.optional(PeerDeliveryLanding),
+  /**
+   * The sender asked for `queue`: the message waits for the receiver's turn to end. A server from
+   * before it ignores the key, and can still steer the message into a running GPT 6 or Claude turn.
+   */
+  waitsTurn: Schema.optional(Schema.Literal(true)),
   senderId: Schema.String.check(Schema.isNonEmpty()),
   receiverId: Schema.String.check(Schema.isNonEmpty()),
   exchangeId: Schema.NullOr(Schema.String.check(Schema.isNonEmpty())),

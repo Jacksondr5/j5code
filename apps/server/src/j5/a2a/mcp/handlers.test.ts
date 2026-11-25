@@ -577,8 +577,8 @@ it.effect(
         );
         assert.deepStrictEqual(
           (yield* Ref.get(sends)).map((send) => send.mode),
-          ["steer", undefined],
-          "queue is the default and is not recorded",
+          ["steer", "queue"],
+          "an asked-for queue is recorded, as the default is not queue",
         );
 
         const toPerson = yield* call({ to: personParticipantId, message, mode: "steer" });
