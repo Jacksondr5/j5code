@@ -184,7 +184,7 @@ export interface OrchestratorMcpServiceShape {
     scope: McpInvocationScope,
     input: OrchestratorMcpDelegateTaskInput & {
       readonly agentPersonaAssignment?: OrchestrationV2AgentPersonaCommandAssignment;
-      /** A persona a linked J5 machine resolves; only a remote target carries it (case 131). */
+      /** A persona a linked J5 machine resolves; only a remote target carries it (case 132). */
       readonly agentPersona?: OrchestrationV2AgentPersonaRequest;
       /** Called with the model the child will run on, before anything is created. */
       readonly authorizeTarget?: (target: {

@@ -913,7 +913,7 @@ const delegatedPersonaLaunch = (
   },
 });
 
-// FORK.md case 131: builder runs with Repository write on Codex, so a Supervised cap refuses it.
+// FORK.md case 132: builder runs with Repository write on Codex, so a Supervised cap refuses it.
 it.effect(
   "holds an agent's pick of a delegated persona to its caller's access and the link",
   () => {

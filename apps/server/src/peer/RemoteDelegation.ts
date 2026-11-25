@@ -95,7 +95,7 @@ export class RemoteDelegation extends Context.Service<
         readonly target: NonNullable<OrchestratorMcpDelegateTaskInput["target"]> & {
           readonly environmentId: EnvironmentId;
         };
-        /** J5 (FORK.md case 131): a persona the linked J5 machine resolves from its own library. */
+        /** J5 (FORK.md case 132): a persona the linked J5 machine resolves from its own library. */
         readonly agentPersona?: OrchestrationV2AgentPersonaRequest;
       },
     ) => Effect.Effect<{ readonly taskId: NodeId }, OrchestratorMcpFailure>;
@@ -365,7 +365,7 @@ const make = Effect.gen(function* () {
             threadId: parent.thread.id,
             title: parent.thread.title,
           },
-          // J5 (FORK.md case 131)
+          // J5 (FORK.md case 132)
           ...(input.agentPersona === undefined ? {} : { agentPersona: input.agentPersona }),
         },
       );

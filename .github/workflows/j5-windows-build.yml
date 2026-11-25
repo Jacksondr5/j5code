@@ -113,6 +113,9 @@ jobs:
         env:
           T3CODE_DESKTOP_UPDATE_REPOSITORY: Jacksondr5/j5code
           T3CODE_DESKTOP_REUSE_RESOURCE_MONITOR: "true"
+          # Upstream cross-builds Windows and ships no server compile cache there. A native build
+          # would add a file per server chunk, past upstream's 80-file payload cap (#1244).
+          J5_SKIP_SERVER_COMPILE_CACHE: "true"
         run: >-
           node scripts/build-desktop-artifact.ts
           --platform win
