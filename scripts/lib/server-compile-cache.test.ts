@@ -11,7 +11,7 @@ it.each([
   { platform: "linux", hostArch: "x64", arch: 3, reason: "unexecutable target linux/arm64" },
   { platform: "linux", hostArch: "arm64", arch: 1, reason: "unexecutable target linux/x64" },
   { platform: "darwin", hostArch: "arm64", arch: 3, reason: "untrusted bundle", untrusted: true },
-  // J5 (FORK.md case 132): J5's native Windows build, which upstream's cross-build never runs.
+  // J5 (FORK.md case 131): J5's native Windows build, which upstream's cross-build never runs.
   {
     platform: "win32",
     hostArch: "x64",
