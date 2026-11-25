@@ -52,7 +52,7 @@ const stable = (attempt: number, overrides: Record<string, RunJob>): RunAttempt 
 describe("decideCapacityRetry", () => {
   it.each([
     {
-      run: "both macOS jobs not picked up (45603621283)",
+      run: "both macOS jobs not picked up",
       jobs: nightly({
         [CLI_MAC]: job(CLI_MAC, "cancelled", "macos-15", [NOT_ACQUIRED]),
         [DMG]: job(DMG, "cancelled", "macos-15", [NOT_ACQUIRED]),
@@ -70,7 +70,7 @@ describe("decideCapacityRetry", () => {
       rerun: true,
     },
     {
-      run: "both macOS jobs failed in their own steps (45107797516)",
+      run: "both macOS jobs failed in their own steps",
       jobs: nightly({
         [CLI_MAC]: job(CLI_MAC, "failure", "macos-15", [EXIT_1]),
         [DMG]: job(DMG, "failure", "macos-15", [EXIT_1]),
@@ -79,7 +79,7 @@ describe("decideCapacityRetry", () => {
       rerun: false,
     },
     {
-      run: "a macOS job not picked up beside a failed Windows job (45383247803)",
+      run: "a macOS job not picked up beside a failed Windows job",
       jobs: nightly({
         [CLI_MAC]: job(CLI_MAC, "cancelled", "macos-15", [NOT_ACQUIRED]),
         [WINDOWS]: job(WINDOWS, "failure", "windows-2025", [EXIT_1]),
@@ -124,14 +124,11 @@ describe("decideCapacityRetry", () => {
     expect(decisions[4]?.reason).toContain(`cap of ${MAX_ATTEMPTS}`);
   });
 
-  it("never re-runs a version bump that failed on its own (45258474262, attempt 2)", () => {
+  it("never re-runs a version bump that failed on its own", () => {
     const decision = decideCapacityRetry(
       stable(2, {
         [CLI_MAC]: job(CLI_MAC, "cancelled", "macos-15", [NOT_ACQUIRED]),
-        [BUMP]: job(BUMP, "failure", "ubuntu-24.04", [
-          EXIT_1,
-          "j5/release-0.0.53 already exists. Open or merge its pull request, or delete the branch and re-run this job.",
-        ]),
+        [BUMP]: job(BUMP, "failure", "ubuntu-24.04", [EXIT_1, "j5/release-9.9.9 already exists."]),
       }),
     );
     expect(decision).toEqual({ rerun: false, reason: expect.stringContaining(BUMP) });
