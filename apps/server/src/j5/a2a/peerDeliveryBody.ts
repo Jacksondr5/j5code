@@ -57,7 +57,7 @@ export const buildPeerDeliveryBody = Effect.fn("j5.a2a.peer.deliveryBody")(funct
   } satisfies PeerDeliveryRequest;
 });
 
-/** The steer or restart its sender asked for, with the sender's limit, read back from the sent row. */
+/** The mode its sender asked for, read back from the sent row: a steer or restart with the sender's limit, or a queue. */
 const landing = Effect.fn("j5.a2a.peer.deliveryBody.landing")(function* (
   sql: SqlClient.SqlClient,
   row: PeerBodyRow,
@@ -70,7 +70,8 @@ const landing = Effect.fn("j5.a2a.peer.deliveryBody.landing")(function* (
   `;
   if (sent[0]?.kind !== "message.sent") return {};
   const payload = yield* decodeSentPayload(sent[0].payload);
-  return payload.mode === undefined || payload.mode === "queue" || payload.modeLimit === undefined
+  if (payload.mode === "queue") return { waitsTurn: true as const };
+  return payload.mode === undefined || payload.modeLimit === undefined
     ? {}
     : { landing: { mode: payload.mode, limit: payload.modeLimit } };
 });

@@ -181,9 +181,9 @@ and it reaches agents the way any other outside agent does. Its messages come fr
   `--provider` and `--model` (with `--reasoning` for a model that has a reasoning level). The
   model must be one the project lists in Models for custom members. The agent runs with full
   access unless you pass `--runtime-mode`.
-- `j5 thread send` delivers the message as any agent's message: a busy Claude or GPT 6 agent takes
-  it into the turn it is running, and other agents take it after their turn ends. `send` doesn't
-  take `--wait`; follow up with `j5 thread show`.
+- `j5 thread send` delivers the message as any agent's message: a busy agent whose provider can
+  take messages mid-turn takes it into the turn it is running, and other agents take it after
+  their turn ends. `send` doesn't take `--wait`; follow up with `j5 thread show`.
 
 `j5 thread start --wait`, `show` and `list` work as described.
 

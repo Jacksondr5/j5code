@@ -38,10 +38,9 @@ export const Urgency = Schema.Literals(["blocking", "soon", "fyi"]);
 export type Urgency = typeof Urgency.Type;
 
 /**
- * How a sender asks for its message to land on an agent, in upstream's words: `queue` is J5's
- * ordinary delivery (after the receiver's turn ends, or into it for the models D4 excepts),
- * `steer` joins the running turn, and `restart` interrupts the turn and restarts it with the
- * message. Upstream's `auto` is left out: it steers whenever it can.
+ * How a sender asks for its message to land on an agent, in upstream's words: `queue` waits for
+ * the receiver's turn to end, `steer` joins the running turn, and `restart` interrupts the turn
+ * and restarts it with the message. Absent is upstream's `auto`, with J5's rules (register D51).
  */
 export const SendMode = Schema.Literals(["queue", "steer", "restart"]);
 export type SendMode = typeof SendMode.Type;
@@ -206,7 +205,7 @@ export const MessageReceivedPayload = Schema.Struct({
   injection: Schema.optional(Schema.Literal("none")),
   /** From a peer delivery: the sender's display name its server sent, read by the client identity lookup and nothing else. */
   senderLabel: Schema.optional(PeerSenderLabel),
-  /** From a peer delivery whose sender asked for a steer or a restart, with the sender's limit. */
+  /** From a peer delivery whose sender asked for a mode: a steer or a restart with the sender's limit, or `queue`. */
   mode: Schema.optional(SendMode),
   modeLimit: Schema.optional(SendModeLimit),
   message: Schema.Json,
@@ -333,7 +332,7 @@ export type TerminalFact = typeof TerminalFact.Type;
 
 export const MessageSentPayload = Schema.Struct({
   attachments: Schema.optional(Schema.Array(ChatAttachment)),
-  /** How the sender asked for the message to land; absent means `queue`. */
+  /** How the sender asked for the message to land; absent means upstream's `auto`. */
   mode: Schema.optional(SendMode),
   modeLimit: Schema.optional(SendModeLimit),
   /** Present on a terminal notice headed to a peer server: the fact it carries, fixed when the notice is written. */
