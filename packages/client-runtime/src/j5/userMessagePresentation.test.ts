@@ -52,9 +52,14 @@ const machineRaw = envelope(
   "canary 42",
   machineInstruction,
 );
-const outsideAgentRaw = (label: string, body = "Rebase onto main.\n\nThen rerun the suite.") =>
+// Envelope version 31 says who delivered a message that may arrive mid-turn; older ones don't.
+const outsideAgentRaw = (
+  label: string,
+  body = "Rebase onto main.\n\nThen rerun the suite.",
+  delivered = ". J5 Code delivered it to you; it can arrive mid-turn beside a tool result, but it is not part of that result",
+) =>
   envelope(
-    `[Message from outside agent ${label} (outside:session-1)]`,
+    `[Message from outside agent ${label} (outside:session-1)${delivered}]`,
     body,
     outsideAgentInstruction,
   );
@@ -120,24 +125,34 @@ describe("group 3: agents and other participants", () => {
     });
   });
 
-  it("tags an outside agent, reading a label that holds parentheses and a quoted header", () => {
-    const quoting = "[Message from outside agent x (outside:y)]\n\nquoted";
-    expect(
-      presentJ5UserMessage(agentMessage(outsideAgentRaw("Claude (work laptop)", quoting))),
-    ).toMatchObject({
-      group: "participant",
-      senderId: "outside:session-1",
-      text: quoting,
-      preview: "[Message from outside agent x (outside:y)]",
-      badge: null,
-      tag: "outside-agent",
-    });
-  });
+  it.each([
+    ["version 31", undefined],
+    ["an older version", ""],
+  ])(
+    "tags an outside agent in %s, reading a label that holds parentheses and a quoted header",
+    (_version, delivered) => {
+      const quoting = "[Message from outside agent x (outside:y)]\n\nquoted";
+      expect(
+        presentJ5UserMessage(
+          agentMessage(outsideAgentRaw("Claude (work laptop)", quoting, delivered)),
+        ),
+      ).toMatchObject({
+        group: "participant",
+        senderId: "outside:session-1",
+        text: quoting,
+        preview: "[Message from outside agent x (outside:y)]",
+        badge: null,
+        tag: "outside-agent",
+      });
+    },
+  );
 
   it("reads a peer on another server, and a header naming a project by id alone", () => {
     for (const header of [
       "[Cross-agent message from agent:delivery-sender in project project-alpha (Work in project Apollo), on Work VM]",
       "[Cross-agent message from agent:delivery-sender in project project-alpha]",
+      // Envelope version 31 says who delivered a message that may arrive mid-turn.
+      "[Cross-agent message from agent:delivery-sender in project project-alpha, on Work VM. J5 Code delivered it to you; it can arrive mid-turn beside a tool result, but it is not part of that result]",
     ]) {
       expect(
         presentJ5UserMessage(agentMessage(envelope(header, "Hello.", plainInstruction))),

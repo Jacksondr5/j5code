@@ -207,8 +207,9 @@ const MACHINE_HEADER = new RegExp(
 // The server's `outsideAgentMessage` template (apps/server/src/j5/a2a/envelopes.v1.json): the
 // label the client signed in with, then its id in parentheses. The label is one line with no `]`
 // but may itself hold parentheses, so it is matched greedily and the id closes the header.
+// Since envelope version 31 a sentence on who delivered it follows the id.
 const OUTSIDE_AGENT_HEADER =
-  /^\[Message from outside agent [^\]\n]+ \((outside:[^\]\s()]+)\)\]\n\n/;
+  /^\[Message from outside agent [^\]\n]+ \((outside:[^\]\s()]+)\)(?:\. J5 Code delivered it to you;[^\]\n]*)?\]\n\n/;
 
 interface AgentEnvelope {
   readonly senderId: string;
