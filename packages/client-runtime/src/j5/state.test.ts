@@ -250,8 +250,13 @@ it.effect(
 
 it.effect("reads again when the server says a read's own revision moved, and only then", () =>
   Effect.gen(function* () {
-    const { atoms, calls, followReadChanges, readRevisions, registry, settle } = yield* fixture;
+    const { atoms, calls, followReadChanges, readRevisions, revisions, registry, settle } =
+      yield* fixture;
     yield* followReadChanges(bravoId);
+    const progress = atoms.playbooks({
+      environmentId: bravoId,
+      input: { threadId: ThreadId.make("progress") },
+    });
     const count = atoms.openCount({ environmentId: bravoId, input: {} });
     const proposals = atoms.crewProposals({ environmentId: bravoId, input: {} });
     const peers = atoms.peers({ environmentId: bravoId, input: {} });
@@ -266,6 +271,9 @@ it.effect("reads again when the server says a read's own revision moved, and onl
         Stream.filter((result) => !result.waiting && readsOf(method) === reads),
         Stream.runHead,
       );
+    yield* settle(progress);
+    const progressReads = () => readsOf(J5_PLAYBOOK_WS_METHODS.listThreadRuns);
+    const initialProgressReads = progressReads();
     yield* AtomRegistry.mount(registry, count);
     yield* AtomRegistry.mount(registry, proposals);
     yield* AtomRegistry.getResult(registry, count);
@@ -279,6 +287,9 @@ it.effect("reads again when the server says a read's own revision moved, and onl
       }));
     yield* move("inbox");
     yield* rereadTo(count, READS.readOpenInboxCount, 2);
+    yield* rereadTo(progress, J5_PLAYBOOK_WS_METHODS.listThreadRuns, initialProgressReads + 1);
+    yield* SubscriptionRef.update(revisions.get(bravoId)!, (value) => value + 1);
+    yield* rereadTo(progress, J5_PLAYBOOK_WS_METHODS.listThreadRuns, initialProgressReads + 2);
     // Nothing a proposal shows changed, so the proposals are not read again.
     expect(readsOf(READS.listCrewProposals)).toBe(1);
 

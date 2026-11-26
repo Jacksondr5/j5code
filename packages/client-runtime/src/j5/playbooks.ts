@@ -305,18 +305,34 @@ export function playbookSelectionText(text: string, trigger: PlaybookTriggerRang
 
 export function presentPlaybook(run: PlaybookProgress) {
   const current = run.steps.find((step) => step.id === run.currentStepId);
+  const position =
+    run.position === null
+      ? `Last step: ${run.currentStepId}`
+      : `Step ${run.position} of ${run.total}`;
+  const currentTitle = current?.title ?? run.currentStepId;
   return {
+    headline: `${position} · ${currentTitle}`,
+    flags: [
+      run.waitingForApproval ? "Waiting for approval" : null,
+      run.blocked ? "Blocked" : null,
+    ].filter((flag) => flag !== null),
+    holder: run.holderName ? `Held by ${run.holderName}` : null,
+    cancelReason:
+      run.cancelReason === "owner_archived"
+        ? "The owning conversation was archived."
+        : run.cancelReason === "owner_deleted"
+          ? "The owning conversation was deleted."
+          : run.cancelReason === "agent_cancelled"
+            ? "Cancelled by the playbook owner."
+            : (run.cancelReason ?? null),
     status:
       run.status === "active"
         ? "In progress"
         : run.status === "completed"
           ? "Completed"
           : "Cancelled",
-    position:
-      run.position === null
-        ? `Last step: ${run.currentStepId}`
-        : `Step ${run.position} of ${run.total}`,
-    currentTitle: current?.title ?? run.currentStepId,
+    position,
+    currentTitle,
     revisionHistory: run.latestRevision
       ? `Revised ${run.revisionCount ?? 1} ${(run.revisionCount ?? 1) === 1 ? "time" : "times"} · Latest change ${run.latestRevision.basis === "asked" ? "requested" : "approved"}`
       : null,
@@ -344,29 +360,6 @@ export function presentPlaybook(run: PlaybookProgress) {
         }[state],
       } as const;
     }),
-  };
-}
-
-/** Task-style stage progress follows the live order; backtracking reopens following stages. */
-export function presentPlaybookStages(run: PlaybookProgress) {
-  const display = presentPlaybook(run);
-  const steps = display.steps.map((step) => {
-    const status =
-      run.status === "completed" || step.state === "earlier"
-        ? "completed"
-        : step.current
-          ? "inProgress"
-          : "pending";
-    return {
-      ...step,
-      status,
-      label: { completed: "Completed", inProgress: "Running", pending: "Pending" }[status],
-    } as const;
-  });
-  return {
-    ...display,
-    steps,
-    completedSteps: steps.filter((step) => step.status === "completed").length,
   };
 }
 

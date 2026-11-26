@@ -2,9 +2,12 @@
 
 Playbooks give an agent an ordered sequence of prompts. The agent does the work
 in its existing thread and decides when to advance. The progress bar above the
-chat box shows the current stage and whether the run is active, completed, or
-cancelled. On the phone it is a card that shows only while a run is active. A
-checked stage means the agent moved past it, not that its work was verified.
+chat box shows the current step’s position and title. This is recorded progress,
+not proof that earlier work passed. Expand it to see the full procedure and who
+holds the step. **Waiting for approval** means the run has an open checkpoint;
+**Blocked** means its owner has another open ask to a person. Everyone viewing the
+thread sees these labels, even when someone else must answer.
+On the phone, the playbook card appears while a run is active.
 
 Open **Settings → Agent Setup** to manage playbooks. Playbooks in the environment
 library are available across all projects and worktrees on its environment. Choose
@@ -108,9 +111,7 @@ was requested or approved.
 Ask the agent to go back when you want to revisit a phase. Going back changes its
 position, not your files or previous work. Progress survives context compaction and
 provider restarts. Expand the playbook above the chat box to see its stages or
-select an earlier run. The stage list checks off stages before the current one,
-and checks every stage when the playbook completes. Going back reopens stages
-from that position onward. The counter shows completed stages.
+select an earlier run. The stage list marks the recorded position, including when the agent goes back.
 
 Cancelling a run stops its current holder when that is another agent. The owner stays available, and work, artifacts, conversations, Crew, and workspaces remain. If Stop fails, the run still ends and the result gives a reason; retrying cancellation does not stop again.
 

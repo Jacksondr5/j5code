@@ -24,7 +24,6 @@ import {
   playbookMenuItems,
   playbookSelectionText,
   presentPlaybook,
-  presentPlaybookStages,
   playbookRunSelection,
   playbookStagesView,
   rememberPlaybookStagesView,
@@ -409,6 +408,18 @@ const run: PlaybookProgress = {
 it("presents the current phase without inventing success for earlier steps", () => {
   const display = presentPlaybook(run);
   expect(display.position).toBe("Step 2 of 3");
+  expect(display.headline).toBe("Step 2 of 3 · Build");
+  expect(display.flags).toEqual([]);
+  expect(presentPlaybook({ ...run, waitingForApproval: true }).flags).toEqual([
+    "Waiting for approval",
+  ]);
+  expect(presentPlaybook({ ...run, blocked: true }).flags).toEqual(["Blocked"]);
+  expect(presentPlaybook({ ...run, waitingForApproval: true, blocked: true }).flags).toEqual([
+    "Waiting for approval",
+    "Blocked",
+  ]);
+  expect(presentPlaybook({ ...run, waitingForApproval: false, blocked: false }).flags).toEqual([]);
+  expect(presentPlaybook({ ...run, holderName: "Builder" }).holder).toBe("Held by Builder");
   expect(display.currentTitle).toBe("Build");
   expect(display.steps.map(({ label }) => label)).toEqual(["Earlier", "Current", "Later"]);
   expect(presentPlaybook({ ...run, status: "cancelled" })).toMatchObject({
@@ -595,45 +606,6 @@ describe("playbook mention picker", () => {
       "@playbook:code-release ",
     );
   });
-});
-
-it("checks earlier composer stages and reopens stages when going back", () => {
-  const middle = presentPlaybookStages(run);
-  expect(middle.revisionHistory).toBeNull();
-  const revised = presentPlaybookStages({
-    ...run,
-    revisionCount: 2,
-    latestRevision: {
-      basis: "approved",
-      revisedAt: run.createdAt,
-      ownerThreadId: run.ownerThreadId,
-      fromStepId: "research",
-      toStepId: "research",
-      stepsDigest: "a".repeat(64),
-    },
-  });
-  expect(revised.revisionHistory).toBe("Revised 2 times · Latest change approved");
-  expect(middle.completedSteps).toBe(1);
-  expect(middle.steps.map(({ status }) => status)).toEqual(["completed", "inProgress", "pending"]);
-  const beginning = presentPlaybookStages({ ...run, position: 1, currentStepId: "research" });
-  expect(beginning.completedSteps).toBe(0);
-  expect(beginning.steps.map(({ status }) => status)).toEqual(["inProgress", "pending", "pending"]);
-});
-
-it("checks every composer stage when the playbook completes, even when ended early", () => {
-  const completed = presentPlaybookStages({ ...run, status: "completed" });
-  expect(completed.completedSteps).toBe(3);
-  expect(completed.steps.every((step) => step.status === "completed")).toBe(true);
-  expect(completed.steps.some((step) => step.current)).toBe(false);
-  const cancelled = presentPlaybookStages({ ...run, status: "cancelled" });
-  expect(cancelled.completedSteps).toBe(1);
-  expect(cancelled.steps.map(({ status }) => status)).toEqual(["completed", "pending", "pending"]);
-});
-
-it("leaves stages unchecked when the current position is unavailable", () => {
-  const unavailable = presentPlaybookStages({ ...run, position: null, currentStepId: "removed" });
-  expect(unavailable.completedSteps).toBe(0);
-  expect(unavailable.steps.every((step) => step.status === "pending")).toBe(true);
 });
 
 it("follows new runs again once the latest run is picked from history", () => {

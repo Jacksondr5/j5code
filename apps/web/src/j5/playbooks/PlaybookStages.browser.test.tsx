@@ -55,19 +55,19 @@ it("starts collapsed, follows pointer changes, and preserves disclosure when mov
   await show([]);
   expect(container.textContent).toBe("");
   await show([active]);
-  expect(toggle().textContent).toContain("Release");
+  expect(toggle().textContent).toContain("Step 2 of 3 · Build the change");
   expect(toggle().getAttribute("aria-label")).toContain("Build the change");
   expect(stages()).toBeNull();
 
   await act(() => toggle().click());
-  expect(stages()?.textContent).toContain("Completed: 1. Plan the release");
-  expect(stages()?.textContent).toContain("Running: 2. Build the change");
-  expect(stages()?.textContent).toContain("Pending: 3. Review the change");
-  expect(toggle().textContent).toContain("1/3");
+  expect(stages()?.textContent).toContain("Earlier: 1. Plan the release");
+  expect(stages()?.textContent).toContain("Current: 2. Build the change");
+  expect(stages()?.textContent).toContain("Later: 3. Review the change");
+  expect(toggle().textContent).toContain("Step 2 of 3 · Build the change");
   expect(container.querySelector('[aria-label="Playbook stages"]')?.textContent).not.toContain(
     active.description,
   );
-  expect(container.querySelector('[aria-label="Playbook stages"]')?.textContent).not.toContain(
+  expect(container.querySelector('[aria-label="Playbook stages"]')?.textContent).toContain(
     active.title,
   );
 
@@ -75,8 +75,8 @@ it("starts collapsed, follows pointer changes, and preserves disclosure when mov
   expect(stages()?.querySelector('[aria-current="step"]')?.textContent).toContain(
     "Plan the release",
   );
-  expect(stages()?.textContent).toContain("Pending: 2. Build the change");
-  expect(toggle().textContent).toContain("0/3");
+  expect(stages()?.textContent).toContain("Later: 2. Build the change");
+  expect(toggle().textContent).toContain("Step 1 of 3 · Plan the release");
   await act(() => toggle().click());
   expect(stages()).toBeNull();
   await show([{ ...active, currentStepId: "review", position: 3 }]);
@@ -112,13 +112,13 @@ it("keeps stale, unavailable, and terminal states visible while collapsed", asyn
 
   await show([{ ...active, status: "completed" }]);
   expect(toggle().textContent).toContain("Completed");
-  expect(toggle().textContent).toContain("3/3");
+  expect(toggle().textContent).toContain("of 3");
   await act(() => toggle().click());
-  expect(stages()?.textContent).toContain("Completed: 2. Build the change");
+  expect(stages()?.textContent).toContain("Last position: 2. Build the change");
   expect(stages()?.querySelector('[aria-current="step"]')).toBeNull();
   await show([{ ...active, currentStepId: "review", position: 3, status: "completed" }]);
-  expect(toggle().textContent).toContain("3/3");
-  expect(stages()?.textContent).toContain("Completed: 3. Review the change");
+  expect(toggle().textContent).toContain("of 3");
+  expect(stages()?.textContent).toContain("Last position: 3. Review the change");
   await act(() => toggle().click());
   await show([{ ...active, status: "cancelled" }]);
   expect(toggle().textContent).toContain("Cancelled");
@@ -140,7 +140,7 @@ it("inspects history without confusing it with the latest run, then returns to l
   await act(() => picker().click());
   const oldOption = option("Earlier release");
   await act(() => oldOption.click());
-  expect(toggle().textContent).toContain("Earlier release");
+  expect(container.textContent).toContain("Earlier release");
   expect(toggle().textContent).toContain("History");
   await act(() => toggle().click());
   expect(toggle().getAttribute("aria-label")).toContain("Earlier run");
@@ -149,11 +149,11 @@ it("inspects history without confusing it with the latest run, then returns to l
   const latestOption = option("Latest:");
   await act(() => latestOption.click());
   expect(toggle().textContent).not.toContain("History");
-  expect(toggle().textContent).toContain("Release");
+  expect(toggle().textContent).toContain("Step 2 of 3 · Build the change");
 
   const next = { ...active, runId: "next", title: "Next release" };
   await show([next, active, previous]);
-  expect(toggle().textContent).toContain("Next release");
+  expect(container.textContent).toContain("Next release");
   expect(toggle().textContent).not.toContain("History");
 });
 
@@ -173,5 +173,5 @@ it("comes back expanded on the same run after the composer hides it for a questi
   await view.screen.rerender(null);
   await show([active, previous]);
   expect(stages()).not.toBeNull();
-  expect(toggle().textContent).toContain("Earlier release");
+  expect(container.textContent).toContain("Earlier release");
 });
