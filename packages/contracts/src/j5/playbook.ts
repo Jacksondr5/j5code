@@ -4,6 +4,7 @@ import { EnvironmentAuthorizationError } from "../auth.ts";
 import { ProjectId, ThreadId } from "../baseSchemas.ts";
 import { AgentPersonaId } from "./agentPersona.ts";
 
+export const PLAYBOOK_EXCHANGE_PREFIX = "exchange:j5-playbook:";
 export const PLAYBOOK_MAX_BYTES = 262144;
 export const PLAYBOOK_MAX_STEPS = 100;
 /** A playbook's name is its file stem: lowercase words joined by hyphens, like persona ids. */
@@ -41,6 +42,7 @@ export const PlaybookStep = Schema.Struct({
   title: Text,
   prompt: Text,
   persona: Schema.optionalKey(AgentPersonaId),
+  approval: Schema.optionalKey(Schema.Literal("required")),
 });
 export type PlaybookStep = typeof PlaybookStep.Type;
 export const PlaybookDefinition = Schema.Struct({
@@ -153,12 +155,27 @@ export const PlaybookProgress = Schema.Struct({
   title: Schema.String,
   description: Schema.String,
   steps: Schema.Array(Schema.Struct({ id: Text, title: Text })),
+  checkpointSummary: Schema.optionalKey(Text),
   position: Schema.NullOr(Schema.Int),
   total: Schema.Int,
 });
 export type PlaybookProgress = typeof PlaybookProgress.Type;
+export const PlaybookCheckpoint = Schema.Struct({
+  requestId: Text,
+  runId: Text,
+  ownerThreadId: ThreadId,
+  stepId: Text,
+  stepTitle: Text,
+  summary: Text,
+  status: Schema.Literals(["pending", "approved", "declined", "closed"]),
+  createdAt: Text,
+  answeredAt: Schema.NullOr(Text),
+  reason: Schema.NullOr(Schema.String),
+});
+export type PlaybookCheckpoint = typeof PlaybookCheckpoint.Type;
 export const PlaybookStepResponse = Schema.Struct({
   ...PlaybookProgress.fields,
+  checkpoint: Schema.optionalKey(Schema.NullOr(PlaybookCheckpoint)),
   currentStep: Schema.NullOr(PlaybookStep),
   replayed: Schema.Boolean,
   delivery: Schema.optionalKey(Schema.NullOr(PlaybookStepDelivery)),
@@ -184,7 +201,12 @@ export const PlaybookDiscovery = Schema.Struct({
       description: Schema.String,
       stepCount: Schema.Int,
       steps: Schema.Array(
-        Schema.Struct({ id: Text, title: Text, persona: Schema.optionalKey(AgentPersonaId) }),
+        Schema.Struct({
+          id: Text,
+          title: Text,
+          persona: Schema.optionalKey(AgentPersonaId),
+          approval: Schema.optionalKey(Schema.Literal("required")),
+        }),
       ),
       issue: Schema.NullOr(PlaybookError),
       // Optional so a newer client still reads an older server; this server always sends it.

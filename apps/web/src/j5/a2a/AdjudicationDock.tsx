@@ -1,3 +1,5 @@
+import { PLAYBOOK_EXCHANGE_PREFIX } from "@t3tools/contracts/j5";
+import { PlaybookDecisionButtons } from "./PlaybookDecisionButtons";
 import { useAtomValue } from "@effect/atom-react";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
@@ -69,7 +71,7 @@ export function AdjudicationDock(props: {
     ),
   );
   const query = useEnvironmentQuery(
-    captain && environmentId !== undefined ? openInboxQueryAtom(environmentId) : null,
+    threadId != null && environmentId !== undefined ? openInboxQueryAtom(environmentId) : null,
   );
   const mayAnswer = useAtomValue(
     j5Environment.answerHumanExchange.permissionAtom(environmentId ?? null),
@@ -92,7 +94,9 @@ export function AdjudicationDock(props: {
   const editorRef = useRef<ComposerPromptEditorHandle>(null);
 
   const asks = adjudicationAsks({
-    items: query.data?.items ?? [],
+    items: (query.data?.items ?? []).filter(
+      (item) => captain || item.exchangeId.startsWith(PLAYBOOK_EXCHANGE_PREFIX),
+    ),
     refused,
     threadId,
     hasWords: (exchangeId) => {
@@ -105,18 +109,19 @@ export function AdjudicationDock(props: {
   const view = pickShownAsk(asks, picked);
   const attachments = useAnswerAttachments();
   const shownKey = view === null ? "" : keyOf(view.shown);
-  useAnswerUploads(shownKey, environmentId, captain && mayAnswer && view !== null);
+  useAnswerUploads(shownKey, environmentId, mayAnswer && view !== null);
   const intake = useAnswerAttachmentIntake({
     answerKey: shownKey,
     support,
     onError: (message) => attachments.setError(shownKey, message),
   });
   const [dragActive, setDragActive] = useState(false);
-  if (!captain || !mayAnswer || environmentId === undefined || view === null) return null;
+  if (!mayAnswer || environmentId === undefined || view === null) return null;
   const { shown, others, next: nextAsk } = view;
   const isOpen = (query.data?.items ?? []).some((item) => item.exchangeId === shown.exchangeId);
   const answerKey = keyOf(shown);
   const words = wordsOf(shown);
+  const playbookDecision = shown.exchangeId.startsWith(PLAYBOOK_EXCHANGE_PREFIX);
   const message = answerToDeliver(words);
   const pending = sends.isPending(answerKey);
   const error = sends.errorOf(answerKey);
@@ -143,15 +148,15 @@ export function AdjudicationDock(props: {
           onDrop: fileInput.onDrop,
         };
 
-  const answer = async () => {
-    if (!sendable || message === null || "blocked" in readiness) return;
+  const answer = async (messageToSend = message) => {
+    if (!isOpen || pending || messageToSend === null || "blocked" in readiness) return;
     const attachmentIds = readiness.attachments.map((attachment) => attachment.id).join("\n");
     // A retry of the same words and files reuses its request id, so a lost reply cannot answer twice.
     const previous = attempts.current.get(shown.exchangeId);
     const request =
-      previous?.message === message && previous.attachmentIds === attachmentIds
+      previous?.message === messageToSend && previous.attachmentIds === attachmentIds
         ? previous
-        : { message, attachmentIds, clientRequestId: randomUUID() };
+        : { message: messageToSend, attachmentIds, clientRequestId: randomUUID() };
     attempts.current.set(shown.exchangeId, request);
     sends.setPending(answerKey, true);
     sends.setError(answerKey, null);
@@ -249,9 +254,13 @@ export function AdjudicationDock(props: {
             onChange={(value) => setInboxAnswerText(answerKey, value)}
             onPaste={fileInput?.onPaste}
             onSubmit={() => {
-              if (sendable && !pending) void answer();
+              if (!playbookDecision && sendable && !pending) void answer();
             }}
-            placeholder="Type the answer exactly as it should be delivered"
+            placeholder={
+              playbookDecision
+                ? "Optional reason for declining"
+                : "Type the answer exactly as it should be delivered"
+            }
             readOnly={!isOpen}
             value={words}
           />
@@ -283,7 +292,13 @@ export function AdjudicationDock(props: {
                 size="sm"
               />
             ) : null}
-            {isOpen ? (
+            {isOpen && playbookDecision ? (
+              <PlaybookDecisionButtons
+                reason={words}
+                disabled={pending || waitingOn !== null}
+                submit={answer}
+              />
+            ) : isOpen ? (
               <Button
                 disabled={!sendable || pending}
                 onClick={() => void answer()}

@@ -166,6 +166,11 @@ export function PlaybookStages({
                   Progress could not refresh. Showing the last received state.
                 </p>
               )}
+              {run.checkpointSummary && (
+                <p className="my-2 whitespace-pre-wrap text-muted-foreground">
+                  Submitted for approval: {run.checkpointSummary}
+                </p>
+              )}
               {display.revisionHistory && (
                 <p className="my-2 text-muted-foreground">{display.revisionHistory}</p>
               )}

@@ -8,8 +8,18 @@ describe("playbook step persona", () => {
   const encode = Schema.encodeSync(PlaybookStep);
 
   it("round-trips a step that names a persona", () => {
-    const step = { id: "plan", title: "Plan", prompt: "Write the plan.", persona: "planner" };
+    const step = {
+      id: "plan",
+      title: "Plan",
+      prompt: "Write the plan.",
+      persona: "planner",
+      approval: "required",
+    };
     expect(encode(decode(step))).toStrictEqual(step);
+  });
+
+  it.each(["optional", true, "", null])("rejects invalid approval %j", (approval) => {
+    expect(() => decode({ id: "plan", title: "Plan", prompt: "Plan.", approval })).toThrow();
   });
 
   it("decodes a step without a persona and adds no persona key", () => {

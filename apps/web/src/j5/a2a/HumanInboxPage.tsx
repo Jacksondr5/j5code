@@ -1,3 +1,5 @@
+import { PLAYBOOK_EXCHANGE_PREFIX } from "@t3tools/contracts/j5";
+import { PlaybookDecisionButtons } from "./PlaybookDecisionButtons";
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import {
   ProjectId,
@@ -332,7 +334,7 @@ function OpenInboxItem({
         readonly answeredReadSinceClose: boolean;
       }
     | undefined;
-  readonly answer: (item: HumanInboxItem) => void;
+  readonly answer: (item: HumanInboxItem, decision?: string) => void;
   readonly senderLabels: SenderLabels;
   readonly projectNameOf: ProjectNameOf;
   readonly answerText: string;
@@ -363,6 +365,7 @@ function OpenInboxItem({
   });
   const [dragActive, setDragActive] = useState(false);
   const addFiles = support === null || closedText !== null || pending ? null : intake.addFiles;
+  const playbookDecision = item.exchangeId.startsWith(PLAYBOOK_EXCHANGE_PREFIX);
   const readiness = attachments.ready(itemKey, item.environmentId, intake.preparing);
   const waitingOn = "blocked" in readiness ? readiness.blocked : null;
   const sendable =
@@ -464,9 +467,13 @@ function OpenInboxItem({
                     onChange={(value) => setInboxAnswerText(itemKey, value)}
                     onPaste={fileInput?.onPaste}
                     onSubmit={() => {
-                      if (sendable && !pending) answer(item);
+                      if (!playbookDecision && sendable && !pending) answer(item);
                     }}
-                    placeholder="Type the answer exactly as it should be delivered"
+                    placeholder={
+                      playbookDecision
+                        ? "Optional reason for declining"
+                        : "Type the answer exactly as it should be delivered"
+                    }
                     readOnly={!canAnswer || closedText !== null}
                     value={answerText}
                   />
@@ -508,18 +515,26 @@ function OpenInboxItem({
                       item={item}
                       size="default"
                     />
-                    <Button
-                      disabled={!sendable || pending}
-                      title={
-                        canAnswer
-                          ? (waitingOn ?? undefined)
-                          : "This environment is unavailable or this connection is read-only."
-                      }
-                      onClick={() => answer(item)}
-                      type="button"
-                    >
-                      {pending ? "Delivering…" : "Answer"}
-                    </Button>
+                    {playbookDecision ? (
+                      <PlaybookDecisionButtons
+                        reason={answerText}
+                        disabled={!canAnswer || pending || waitingOn !== null}
+                        submit={(decision) => answer(item, decision)}
+                      />
+                    ) : (
+                      <Button
+                        disabled={!sendable || pending}
+                        title={
+                          canAnswer
+                            ? (waitingOn ?? undefined)
+                            : "This environment is unavailable or this connection is read-only."
+                        }
+                        onClick={() => answer(item)}
+                        type="button"
+                      >
+                        {pending ? "Delivering…" : "Answer"}
+                      </Button>
+                    )}
                   </div>
                 )}
               </div>
@@ -758,9 +773,9 @@ export function HumanInboxPage() {
       if (!keep(key)) answerAttempts.current.delete(key);
   }, [personScopes]);
 
-  const answer = async (item: HumanInboxItem) => {
+  const answer = async (item: HumanInboxItem, decision?: string) => {
     const itemKey = scopedInboxItemKey(item);
-    const message = answerToDeliver(answers[itemKey] ?? "");
+    const message = decision ?? answerToDeliver(answers[itemKey] ?? "");
     const readiness = answerAttachments.ready(itemKey, item.environmentId);
     // A kept ask has closed (AC17); its words stay to read, not to send.
     if (message === null || !item.sourceReady || kept.has(itemKey) || "blocked" in readiness)

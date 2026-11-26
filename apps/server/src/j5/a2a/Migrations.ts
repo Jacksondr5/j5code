@@ -66,6 +66,7 @@ import Migration0060 from "./migrations/060_PlaybookRunSnapshots.ts";
 import Migration0061 from "./migrations/061_PlaybookRunRevisions.ts";
 import Migration0062 from "./migrations/062_PlaybookRuntimeHolders.ts";
 import Migration0063 from "./migrations/063_PlaybookCancellation.ts";
+import Migration0064 from "./migrations/064_PlaybookCheckpoints.ts";
 
 export const J5_A2A_MIGRATIONS_TABLE = "j5_a2a_migrations";
 
@@ -140,6 +141,7 @@ export const migrationEntries = [
   [61, "PlaybookRunRevisions", Migration0061],
   [62, "PlaybookRuntimeHolders", Migration0062],
   [63, "PlaybookCancellation", Migration0063],
+  [64, "PlaybookCheckpoints", Migration0064],
 ] as const;
 
 const makeMigrationLoader = (throughId?: number) =>

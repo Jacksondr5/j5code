@@ -32,7 +32,15 @@ const Movement = Schema.Struct({
   expectedStepId: Text,
   assignee: Schema.optional(Text),
 });
-const Finish = Schema.Struct({ ...Mutation.fields, expectedStepId: Text });
+const Next = Schema.Struct({
+  ...Movement.fields,
+  summary: Schema.optionalKey(Text.check(Schema.isMaxLength(8000))),
+});
+const Finish = Schema.Struct({
+  ...Mutation.fields,
+  expectedStepId: Text,
+  summary: Schema.optionalKey(Text.check(Schema.isMaxLength(8000))),
+});
 const Start = Schema.Struct({
   name: Text,
   client_request_id: Text,
@@ -114,9 +122,9 @@ export const playbookTools = [
     .annotate(McpSchema.EnabledWhen, hiddenFromOutsideClients),
   Tool.make("j5_playbook_next", {
     ...common,
-    parameters: Movement,
+    parameters: Next,
     description:
-      "Advance one step in the saved step order and retrieve its prompt. Pass an optional assignee participant ID for that step; otherwise you hold it. expectedStepId must equal your current step. At the last step, use j5_playbook_complete." +
+      "Advance one step in the saved step order and retrieve its prompt. Pass an optional assignee participant ID for that step; otherwise you hold it. expectedStepId must equal your current step. At the last step, use j5_playbook_complete. A required checkpoint needs a summary of the finished work; approval_pending means stop and wait for a person to answer." +
       mutationDescription,
   }).annotate(McpSchema.EnabledWhen, hiddenFromOutsideClients),
   Tool.make("j5_playbook_back", {
@@ -144,7 +152,7 @@ export const playbookTools = [
     ...common,
     parameters: Finish,
     description:
-      "Mark the playbook completed. expectedStepId guards against stale completion. Your agent and thread remain usable; you may start another playbook." +
+      "Mark the playbook completed. A required checkpoint needs a summary and refuses with approval_pending until a person approves. expectedStepId guards against stale completion. Your agent and thread remain usable; you may start another playbook." +
       mutationDescription,
   }).annotate(McpSchema.EnabledWhen, hiddenFromOutsideClients),
   Tool.make("j5_playbook_cancel", {
@@ -240,7 +248,7 @@ export const playbookHandlers = {
       return yield* (yield* PlaybookCrewRelay).current(yield* ownerScope, input.runId);
     }),
   ),
-  j5_playbook_next: runsPlaybook((input: typeof Movement.Type) =>
+  j5_playbook_next: runsPlaybook((input: typeof Next.Type) =>
     mutate({ ...input, operation: "next" }),
   ),
   j5_playbook_back: runsPlaybook((input: typeof Movement.Type) =>

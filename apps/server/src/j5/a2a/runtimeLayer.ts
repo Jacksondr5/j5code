@@ -3,7 +3,7 @@ import * as SpawnAgentService from "./SpawnAgentService.ts";
 import * as Layer from "effect/Layer";
 import { layerEventSink as OrchestrationV2EventSinkLayerLive } from "../../orchestration-v2/runtimeLayer.ts";
 import { layer as playbookCrewRelayLayer } from "../playbooks/PlaybookCrewRelay.ts";
-import { playbookStoreLayer } from "../playbooks/PlaybookStore.ts";
+import { playbookStoreLayer as playbookStoreBase } from "../playbooks/PlaybookStore.ts";
 import { FetchHttpClient } from "effect/http";
 
 import { layer as artifactDeletionLayer } from "../artifacts/ArtifactDeletion.ts";
@@ -129,6 +129,7 @@ const makeJ5A2AAuxiliaryLayer = (
   const deliveryWorkerProvided = deliveryWorkerLayer.pipe(
     Layer.provideMerge(deliveryTransportProvided),
   );
+  const playbookStoreLayer = playbookStoreBase.pipe(Layer.provide(deliveryWorkerProvided));
   // The detector reads Crew membership to stay quiet about a seat failure its Captain hears elsewhere.
   const silenceDetectorProvided = silenceDetectorLayer.pipe(
     Layer.provideMerge(deliveryWorkerProvided),

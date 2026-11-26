@@ -459,13 +459,20 @@ export const layer: Layer.Layer<A2AHumanInbox, never, A2ALedger | SqlClient.SqlC
           ];
           // A reply that is not recorded leaves the ask open for someone else to answer.
           const result = yield* ledger
-            .appendEvents({
-              commandId: input.commandId,
-              projectId,
-              acceptedAt: input.acceptedAt,
-              events,
-            })
+            .appendEventsIfExchangeOpen(
+              {
+                commandId: input.commandId,
+                projectId,
+                acceptedAt: input.acceptedAt,
+                events,
+              },
+              input.exchangeId,
+            )
             .pipe(Effect.onError(() => (forEveryone ? releaseClaim : Effect.void)));
+          if (!result) {
+            if (forEveryone) yield* releaseClaim;
+            return yield* new A2AExchangeNotOpenError({ exchangeId: input.exchangeId });
+          }
           const sent = result.events.find((event) => event.kind === "message.sent");
           if (sent === undefined) {
             return yield* new A2AParticipantNotFoundError({ participantId: input.personId });

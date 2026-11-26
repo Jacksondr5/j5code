@@ -1,4 +1,17 @@
-import { ProviderDriverKind } from "@t3tools/contracts";
+import { FetchHttpClient } from "effect/http";
+import * as Layer from "effect/Layer";
+import { EffectOutboxV2 } from "../../orchestration-v2/EffectOutbox.ts";
+import { OrchestratorV2 } from "../../orchestration-v2/Orchestrator.ts";
+import { ThreadManagementService } from "../../orchestration-v2/ThreadManagementService.ts";
+import { PeerRegistryService } from "../a2a/PeerRegistryService.ts";
+import { live as deliveryTransport } from "../a2a/DeliveryTransport.ts";
+import { A2ADeliveryWorker, manualLayer } from "../a2a/DeliveryWorker.ts";
+import { ensureLocalOperatorHumanPerson } from "../a2a/HumanPersonRegistry.ts";
+import { A2AHumanInbox, layer as inboxLayer } from "../a2a/HumanInboxService.ts";
+import { A2ALedger, layer as ledgerLayer } from "../a2a/LedgerService.ts";
+import { CommCommandId, ExchangeId, LedgerProjectId } from "../a2a/contracts.ts";
+import { participantIdForThread } from "../a2a/HomeRegistrar.ts";
+import { ThreadId, ProviderDriverKind } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -48,4 +61,61 @@ export const seedPersonas = Effect.fn(function* (
     if (!enabled) yield* library.setEnabled(id, false);
   }
   return stateDir;
+});
+
+/** Use production exchange projection and answer paths for playbook gates. */
+export const seedPlaybookInbox = Effect.fn(function* (owner: ThreadId) {
+  const sql = yield* SqlClient.SqlClient;
+  const at = "2026-11-24T00:00:00.000Z";
+  const personId = yield* ensureLocalOperatorHumanPerson(sql);
+  const projectId = LedgerProjectId.make("project:playbook-test");
+  const ledger = yield* A2ALedger.pipe(Effect.provide(ledgerLayer));
+  yield* ledger.ensureProject({ projectId, createdAt: at });
+  const id = participantIdForThread(owner);
+  yield* ledger.appendEvents({
+    projectId,
+    commandId: CommCommandId.make(`register:${owner}`),
+    acceptedAt: at,
+    events: [
+      {
+        kind: "participant.joined",
+        sender: null,
+        receiver: id,
+        exchangeId: null,
+        correlationId: null,
+        createdAt: at,
+        payload: { participant: { kind: "agent", id, threadId: owner } },
+      },
+    ],
+  });
+  const inbox = yield* A2AHumanInbox.pipe(
+    Effect.provide(inboxLayer.pipe(Layer.provide(ledgerLayer))),
+  );
+  const transport = deliveryTransport.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        FetchHttpClient.layer,
+        Layer.mock(PeerRegistryService)({}),
+        Layer.mock(OrchestratorV2)({}),
+        Layer.mock(ThreadManagementService)({}),
+        Layer.mock(EffectOutboxV2)({}),
+      ),
+    ),
+  );
+  const worker = yield* A2ADeliveryWorker.pipe(
+    Effect.provide(manualLayer.pipe(Layer.provide(Layer.merge(ledgerLayer, transport)))),
+  );
+  return {
+    personId,
+    inbox,
+    drain: worker.drain,
+    answer: (requestId: string, message: string, clientRequestId = `answer:${requestId}`) =>
+      inbox.answer({
+        personId,
+        exchangeId: ExchangeId.make(requestId),
+        message,
+        commandId: CommCommandId.make(clientRequestId),
+        acceptedAt: at,
+      }),
+  };
 });
