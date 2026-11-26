@@ -132,8 +132,10 @@ jobs:
 
   # The web suite imports the whole app into jsdom. Sharing a runner with the
   # other packages starved it until a setup hook timed out, so it runs alone,
-  # as upstream's `test_web` does. Two shards, as upstream's: one Chromium ran out
-  # of memory partway through the whole suite at v0.1.11.
+  # as upstream's `test_web` does. One Chromium ran out of memory partway through
+  # the whole suite at v0.1.11, and at two shards, as upstream's, J5's larger
+  # browser suite still lost a shard's Chromium a few minutes in, in a different
+  # file each time (#1248). Its memory climbs across files, so three shards.
   test_web:
     name: Test Web ${{ matrix.shard }}
     runs-on: ubuntu-24.04
@@ -141,7 +143,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [1, 2]
+        shard: [1, 2, 3]
     steps:
       - name: Checkout
         uses: actions/checkout@v6

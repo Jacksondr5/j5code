@@ -176,7 +176,8 @@ export const sendAsOutsideAgent = Effect.fn("j5.a2a.mcp.sendAsOutsideAgent")(fun
       receiverProjectId: receiver.projectId,
       message: input.message,
       // A steer or a restart carries the limit to delivery, as a thread sender's does.
-      ...(mode === "queue" ? {} : { mode, modeLimit: limits }),
+      ...(input.mode == null ? {} : { mode: input.mode }),
+      ...(mode === "queue" ? {} : { modeLimit: limits }),
       ...(claimed === undefined ? {} : { attachments: claimed }),
       acceptedAt,
     });
