@@ -30,7 +30,7 @@ Every upstream mechanism is judged by one question: _does it carry an opinion ab
 
 Upstream's thread-send, and the server seam beneath it, is **transport**: it injects text into a thread and nothing more. Agent-to-agent communication is transport **plus the record**: the envelope naming the sender and its project, the ledger row that makes the message part of the communication graph, the Exchange and what it owes, the delivery receipt, and silence measurement. J5's `j5_send_message` is upstream's thread-send wearing that record. A raw thread-send between agents is untracked peer communication — it can cause the exact silent stall the ledger exists to make visible — so J5 consumes the seam server-side and the raw tool never appears on the agent surface.
 
-Delivery to a busy agent queues behind the active turn; steering is the person's act, with one ruled exception for a peer's update into a running Codex GPT 6 or Claude turn ([A2A definition](index.md), Delivery).
+Delivery to a busy agent follows upstream's `auto`: into the running turn where its provider can take it, else behind the turn, and behind anything already queued for it ([A2A definition](index.md), Delivery).
 
 ### The ownership rule
 
