@@ -1,3 +1,4 @@
+import * as SqlClient from "effect/sql/SqlClient";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
@@ -513,6 +514,17 @@ it.effect("Fleet reads the Crew's step and who holds it, and nothing once the ru
     yield* move(run.runId, "next", "review", "next-2");
     const completed = yield* move(run.runId, "complete", "report", "complete-1");
     assert.isNull(completed.delivery);
+    assert.isNull(yield* relay.fleetRun(crewId));
+  }).pipe(Effect.scoped, Effect.provide(TestLayer)),
+);
+
+it.effect("Fleet omits an active Crew run with a landing and an unreadable snapshot", () =>
+  Effect.gen(function* () {
+    const { start, relay } = yield* fixture;
+    const run = yield* start("start-1");
+    assert.isNotNull(yield* relay.fleetRun(crewId));
+    const sql = yield* SqlClient.SqlClient;
+    yield* sql`UPDATE j5_playbook_run SET definition_json = 'invalid' WHERE run_id = ${run.runId}`;
     assert.isNull(yield* relay.fleetRun(crewId));
   }).pipe(Effect.scoped, Effect.provide(TestLayer)),
 );
