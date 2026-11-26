@@ -11,7 +11,6 @@ import * as PayloadSigner from "../../auth/PayloadSigner.ts";
 import { ServerSecretStore } from "../../auth/ServerSecretStore.ts";
 import { base64UrlDecodeUtf8, base64UrlEncode } from "../../auth/utils.ts";
 import type { CrewArchiveWorktree } from "@t3tools/contracts/j5";
-import { PlaybookStore } from "../playbooks/PlaybookStore.ts";
 import {
   AgentCrewInstanceService,
   crewArchiveThreads,
@@ -311,7 +310,6 @@ export const layer = Layer.effect(
   Effect.gen(function* () {
     const archiveAgent = yield* ArchiveAgentService;
     const crews = yield* AgentCrewInstanceService;
-    const playbooks = yield* PlaybookStore;
     const worktrees = yield* CrewWorktrees;
     const secrets = yield* ServerSecretStore;
     const secret = secrets
@@ -427,15 +425,11 @@ export const layer = Layer.effect(
             callerParticipantId: input.callerParticipantId,
           });
 
-        // Archiving a Crew ends its playbook run. Idempotent, and also on the already-archived
-        // retry, so a crash between the cancel and the retired stamp is repaired.
-        const cancelPlaybookRun = playbooks.cancelForCrew(instance.id).pipe(Effect.orDie);
         const facts = yield* readFacts(instance);
         if (
           instance.archivedAt !== null &&
           facts.members.every((member) => member.alreadyArchived || member.neverCreated)
         ) {
-          yield* cancelPlaybookRun;
           return {
             status: "already_archived" as const,
             members: facts.members.map((member) => ({
@@ -542,7 +536,6 @@ export const layer = Layer.effect(
             );
           results.push({ seatName: member.seatName, participantId: member.participantId, result });
         }
-        yield* cancelPlaybookRun;
         yield* crews
           .markArchived(instance.id, input.archivedAt, { withCaptain: input.withCaptain === true })
           .pipe(Effect.orDie);
