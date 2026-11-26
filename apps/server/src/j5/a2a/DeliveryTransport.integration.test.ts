@@ -51,6 +51,7 @@ import {
   TurnItemId,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as TestClock from "effect/testing/TestClock";
@@ -111,8 +112,9 @@ import * as VcsProcess from "../../vcs/VcsProcess.ts";
 import {
   A2ADeliveryHeldError,
   A2ADeliveryTransport,
-  peerSteeringRun,
+  autoSteeringRun,
   deliveryMessageId,
+  deliverySendMode,
   formatAgentDeliveryEnvelope,
   live as deliveryTransportLive,
 } from "./DeliveryTransport.ts";
@@ -255,6 +257,10 @@ interface DeliveryHarness {
   readonly activeTurns: Ref.Ref<ReadonlyMap<ThreadId, FakeActiveTurn>>;
   /** Provider turns that ended; a steer into one is refused, as the Claude and Codex adapters do. */
   readonly endedTurns: Ref.Ref<ReadonlySet<string>>;
+  /** Settles once the delivery transport starts waiting on a steer effect's outcome. */
+  readonly steerObserverWaiting: Deferred.Deferred<void>;
+  /** The fake session's steer cancels in-flight tools, as Cursor's does. */
+  readonly steeringInterruptsTools?: boolean;
 }
 
 const makeOrchestrationAdapter = (harness: DeliveryHarness): ProviderAdapterV2["Service"] => ({
@@ -273,7 +279,13 @@ const makeOrchestrationAdapter = (harness: DeliveryHarness): ProviderAdapterV2["
         status: "ready",
         cwd: sessionInput.runtimePolicy.cwd ?? process.cwd(),
         model: sessionInput.modelSelection.model,
-        capabilities: CodexProviderCapabilitiesV2,
+        capabilities: {
+          ...CodexProviderCapabilitiesV2,
+          turns: {
+            ...CodexProviderCapabilitiesV2.turns,
+            activeSteeringInterruptsTools: harness.steeringInterruptsTools === true,
+          },
+        },
         createdAt: now,
         updatedAt: now,
         lastError: null,
@@ -483,8 +495,22 @@ const makeTestLayer = (
       });
     }),
   );
+  const observedOutbox = Layer.effect(
+    EffectOutboxV2,
+    Effect.gen(function* () {
+      const outbox = yield* EffectOutboxV2;
+      return EffectOutboxV2.of({
+        ...outbox,
+        awaitSettled: (effectId) =>
+          Deferred.succeed(harness.steerObserverWaiting, undefined).pipe(
+            Effect.andThen(outbox.awaitSettled(effectId)),
+          ),
+      });
+    }),
+  );
   const recordedDeliveryTransport = deliveryTransportLayer.pipe(
     Layer.provide(recordingThreadManagement),
+    Layer.provide(observedOutbox),
   );
 
   return Layer.merge(ledgerLayer, recordedDeliveryTransport).pipe(
@@ -512,6 +538,7 @@ const makeHarness = Effect.gen(function* () {
     interruptInputs: yield* Ref.make<ReadonlyArray<ProviderAdapterV2InterruptInput>>([]),
     activeTurns: yield* Ref.make<ReadonlyMap<ThreadId, FakeActiveTurn>>(new Map()),
     endedTurns: yield* Ref.make<ReadonlySet<string>>(new Set()),
+    steerObserverWaiting: yield* Deferred.make<void>(),
   } satisfies DeliveryHarness;
 });
 
@@ -611,7 +638,7 @@ const seedTarget = (
   });
 
 it.effect.each(["gpt-5.4", "gpt-6-astra"])(
-  "starts an idle %s recipient immediately without the implicit auto mode",
+  "starts an idle %s recipient immediately under upstream's auto mode",
   (idleModel) =>
     Effect.gen(function* () {
       const harness = yield* makeHarness;
@@ -652,7 +679,7 @@ it.effect.each(["gpt-5.4", "gpt-6-astra"])(
           (yield* Ref.get(harness.deliveryInvocations))
             .filter((invocation) => invocation.messageId === upstreamMessageId)
             .map((invocation) => invocation.mode),
-          ["queue", "queue"],
+          ["auto", "auto"],
         );
         const worker = yield* OrchestrationEffectWorkerV2;
         const sink = yield* EventSinkV2;
@@ -667,7 +694,7 @@ it.effect.each(["gpt-5.4", "gpt-6-astra"])(
         );
         yield* worker.runOnce();
         yield* Fiber.join(running);
-        // A queue receipt stays valid after its Astra run becomes steerable.
+        // A receipt stays valid after its run becomes steerable.
         yield* transport.deliverAgent(target.delivery);
         assert.lengthOf(yield* Ref.get(harness.steerInputs), 0);
         assert.lengthOf((yield* threads.getThreadProjection(target.threadId)).runs, 1);
@@ -725,106 +752,58 @@ const publishCommandExecution = (
     },
   });
 
-it.effect.each([
-  "gpt-6-astra",
-  "gpt-6-luna",
-  "gpt-6-sol",
-  "gpt-6.1-sol",
-  "openai.gpt-6-luna",
-  "gpt-6-astra-custom",
-])("delivers updates into a running %s turn without restarting its tools", (model) =>
-  Effect.gen(function* () {
-    const harness = yield* makeHarness;
-    yield* Effect.gen(function* () {
-      const threads = yield* ThreadManagementService;
-      const transport = yield* A2ADeliveryTransport;
-      const worker = yield* OrchestrationEffectWorkerV2;
-      const sink = yield* EventSinkV2;
-      const target = yield* seedTarget(model, model);
-      const active = yield* threads.sendToThread({
-        projectId: target.projectId,
-        threadId: target.threadId,
-        commandId: CommandId.make(`command:${model}:start`),
-        messageId: MessageId.make(`message:${model}:start`),
-        text: "Finish the original build while receiving updates.",
-        attachments: [],
-        mode: "queue",
-        createdBy: "user",
-        creationSource: "web",
-      });
-      // Starting/preparing is not a live provider turn: never use auto/restart.
-      const starting = yield* threads.getThreadProjection(target.threadId);
-      assert.isUndefined(peerSteeringRun(starting, "peer"));
-      const running = yield* sink.stream({ threadId: target.threadId }).pipe(
-        Stream.filter(
-          (stored) =>
-            stored.event.type === "provider-turn.updated" &&
-            stored.event.payload.status === "running",
-        ),
-        Stream.runHead,
-        Effect.forkChild({ startImmediately: true }),
-      );
-      yield* worker.runOnce();
-      yield* Fiber.join(running);
-      const projection = yield* threads.getThreadProjection(target.threadId);
-      assert.equal(peerSteeringRun(projection, "peer")?.id, active.run.id);
-      for (const channel of ["silence_notice", "lifecycle_notice"] as const) {
-        assert.isUndefined(peerSteeringRun(projection, channel));
-      }
-      for (const otherModel of [
-        "gpt-5.6-sol",
-        "openai.gpt-5.6-sol",
-        "gpt-5.4",
-        "gpt-60-nova",
-        "claude-fable-5-1",
-      ]) {
-        assert.isUndefined(
-          peerSteeringRun(
-            {
-              ...projection,
-              runs: projection.runs.map((run) => ({
-                ...run,
-                modelSelection: { ...run.modelSelection, model: otherModel },
-              })),
-            },
-            "peer",
+it.effect.each(["gpt-6-astra", "gpt-6.1-sol", "gpt-5.6-sol", "gpt-5.4"])(
+  "delivers updates into a running %s turn without restarting its tools",
+  (model) =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const threads = yield* ThreadManagementService;
+        const transport = yield* A2ADeliveryTransport;
+        const worker = yield* OrchestrationEffectWorkerV2;
+        const sink = yield* EventSinkV2;
+        const target = yield* seedTarget(model, model);
+        const active = yield* threads.sendToThread({
+          projectId: target.projectId,
+          threadId: target.threadId,
+          commandId: CommandId.make(`command:${model}:start`),
+          messageId: MessageId.make(`message:${model}:start`),
+          text: "Finish the original build while receiving updates.",
+          attachments: [],
+          mode: "queue",
+          createdBy: "user",
+          creationSource: "web",
+        });
+        // Starting/preparing is not a live provider turn, so `auto` would queue.
+        const starting = yield* threads.getThreadProjection(target.threadId);
+        assert.isUndefined(autoSteeringRun(starting));
+        const running = yield* sink.stream({ threadId: target.threadId }).pipe(
+          Stream.filter(
+            (stored) =>
+              stored.event.type === "provider-turn.updated" &&
+              stored.event.payload.status === "running",
           ),
+          Stream.runHead,
+          Effect.forkChild({ startImmediately: true }),
         );
-      }
-      assert.isUndefined(
-        peerSteeringRun(
-          {
+        yield* worker.runOnce();
+        yield* Fiber.join(running);
+        const projection = yield* threads.getThreadProjection(target.threadId);
+        assert.equal(autoSteeringRun(projection)?.id, active.run.id);
+        assert.equal(deliverySendMode(projection, "peer", undefined), "auto");
+        assert.equal(deliverySendMode(projection, "peer", "queue"), "queue");
+        for (const channel of ["silence_notice", "lifecycle_notice"] as const) {
+          assert.equal(deliverySendMode(projection, channel, undefined), "queue");
+        }
+        assert.isUndefined(autoSteeringRun({ ...projection, providerSessions: [] }));
+        assert.isUndefined(
+          autoSteeringRun({
             ...projection,
-            providerThreads: projection.providerThreads.map((thread) => ({
-              ...thread,
-              driver: ProviderDriverKind.make("claude"),
-            })),
-          },
-          "peer",
-        ),
-      );
-      assert.isUndefined(peerSteeringRun({ ...projection, providerSessions: [] }, "peer"));
-      assert.isUndefined(
-        peerSteeringRun(
-          { ...projection, thread: { ...projection.thread, archivedAt: yield* DateTime.now } },
-          "peer",
-        ),
-      );
-      assert.isUndefined(
-        peerSteeringRun(
-          {
-            ...projection,
-            providerSessions: projection.providerSessions.map((session) => ({
-              ...session,
-              driver: ProviderDriverKind.make("claude"),
-            })),
-          },
-          "peer",
-        ),
-      );
-      assert.isUndefined(
-        peerSteeringRun(
-          {
+            thread: { ...projection.thread, archivedAt: yield* DateTime.now },
+          }),
+        );
+        assert.isUndefined(
+          autoSteeringRun({
             ...projection,
             providerSessions: projection.providerSessions.map((session) => ({
               ...session,
@@ -833,162 +812,160 @@ it.effect.each([
                 turns: { ...session.capabilities.turns, supportsActiveSteering: false },
               },
             })),
-          },
-          "peer",
-        ),
-      );
-      const asClaude = (supportsActiveSteering: boolean) => ({
-        ...projection,
-        providerThreads: projection.providerThreads.map((thread) => ({
-          ...thread,
-          driver: CLAUDE_PROVIDER,
-        })),
-        providerSessions: projection.providerSessions.map((session) => ({
-          ...session,
-          driver: CLAUDE_PROVIDER,
-          capabilities: {
-            ...session.capabilities,
-            turns: {
-              ...session.capabilities.turns,
-              supportsActiveSteering,
-              activeSteeringInterruptsTools: true,
+          }),
+        );
+        const asClaude = (supportsActiveSteering: boolean) => ({
+          ...projection,
+          providerThreads: projection.providerThreads.map((thread) => ({
+            ...thread,
+            driver: CLAUDE_PROVIDER,
+          })),
+          providerSessions: projection.providerSessions.map((session) => ({
+            ...session,
+            driver: CLAUDE_PROVIDER,
+            capabilities: {
+              ...session.capabilities,
+              turns: {
+                ...session.capabilities.turns,
+                supportsActiveSteering,
+                activeSteeringInterruptsTools: false,
+              },
             },
-          },
-        })),
-      });
-      assert.equal(peerSteeringRun(asClaude(true), "peer")?.id, active.run.id);
-      assert.isUndefined(peerSteeringRun(asClaude(false), "peer"));
-      assert.isUndefined(peerSteeringRun({ ...projection, providerTurns: [] }, "peer"));
-      const turn = (yield* Ref.get(harness.activeTurns)).get(target.threadId)!;
-      const startedAt = yield* DateTime.now;
-      yield* publishCommandExecution(turn, {
-        ordinal: 1,
-        command: "long build",
-        status: "running",
-        startedAt,
-        completedAt: null,
-      });
-      // The picker can change while the current run retains its original model.
-      const orchestrator = yield* OrchestratorV2;
-      yield* orchestrator.dispatch({
-        type: "thread.model-selection.set",
-        commandId: CommandId.make(`command:${model}:picker-change`),
-        threadId: target.threadId,
-        modelSelection: { ...modelSelection, model: "gpt-5.6-sol" },
-      });
-      const firstDelivery = yield* transport
-        .deliverAgent(target.delivery)
-        .pipe(Effect.forkChild({ startImmediately: true }));
-      yield* runWorkerUntil(worker, firstDelivery);
-      yield* transport.deliverAgent(target.delivery);
-      const secondId = LedgerMessageId.make(`message:${model}:second`);
-      const secondInput = {
-        ...target.delivery,
-        messageId: secondId,
-        exchangeRole: "reply",
-        message: "The answer to your question.",
-      } as const;
-      const secondDelivery = yield* transport
-        .deliverAgent(secondInput)
-        .pipe(Effect.forkChild({ startImmediately: true }));
-      yield* runWorkerUntil(worker, secondDelivery);
-      const steers = yield* Ref.get(harness.steerInputs);
-      assert.lengthOf(steers, 2);
-      // A steered delivery carries the ordinary envelope and nothing else.
-      assert.sameDeepMembers(
-        steers.map((input) => [input.message.messageId, input.message.text]),
-        [
-          [deliveryMessageId(target.messageId), formatAgentDeliveryEnvelope(target.delivery)],
-          [deliveryMessageId(secondId), formatAgentDeliveryEnvelope(secondInput)],
-        ],
-      );
-      for (const steer of steers) {
-        assert.equal(steer.runId, active.run.id);
-        assert.equal(steer.providerTurnId, turn.providerTurnId);
-      }
-      const toolCompleted = yield* sink.stream({ threadId: target.threadId }).pipe(
-        Stream.filter(
-          (stored) =>
-            stored.event.type === "turn-item.updated" &&
-            stored.event.payload.type === "command_execution" &&
-            stored.event.payload.status === "completed",
-        ),
-        Stream.runHead,
-        Effect.forkChild({ startImmediately: true }),
-      );
-      yield* publishCommandExecution(turn, {
-        ordinal: 1,
-        command: "long build",
-        status: "completed",
-        startedAt,
-        completedAt: yield* DateTime.now,
-      });
-      yield* Fiber.join(toolCompleted);
-      const after = yield* threads.getThreadProjection(target.threadId);
-      assert.lengthOf(after.runs, 1);
-      assert.equal(after.runs[0]?.status, "running");
-      assert.lengthOf(after.attempts, 1);
-      assert.lengthOf(yield* Ref.get(harness.interruptInputs), 0);
-      assert.lengthOf(
-        after.messages.filter((message) => message.id === deliveryMessageId(target.messageId)),
-        1,
-      );
-      // Notices remain queued even for Astra; they do not become peer steers.
-      for (const channel of ["silence_notice", "lifecycle_notice"] as const) {
-        yield* transport.deliverAgent({
-          ...target.delivery,
-          messageId: LedgerMessageId.make(`message:${model}:${channel}`),
-          envelopeChannel: channel,
+          })),
         });
-      }
-      assert.isFalse(yield* worker.runOnce());
-      assert.lengthOf(yield* Ref.get(harness.steerInputs), 2);
-      const withNotices = yield* threads.getThreadProjection(target.threadId);
-      assert.equal(withNotices.runs.filter((run) => run.status === "queued").length, 2);
-      // A provider turn can finish between the eligibility read and dispatch.
-      // Keep the stale eligibility snapshot while the real projection moves on.
-      const ended = yield* sink.stream({ threadId: target.threadId }).pipe(
-        Stream.filter(
-          (stored) =>
-            stored.event.type === "provider-turn.updated" &&
-            stored.event.payload.status === "completed",
-        ),
-        Stream.runHead,
-        Effect.forkChild({ startImmediately: true }),
-      );
-      yield* PubSub.publish(turn.events, {
-        type: "provider_turn.updated",
-        driver,
-        providerTurn: {
-          ...projection.providerTurns[0]!,
+        assert.equal(autoSteeringRun(asClaude(true))?.id, active.run.id);
+        assert.isUndefined(autoSteeringRun(asClaude(false)));
+        assert.isUndefined(autoSteeringRun({ ...projection, providerTurns: [] }));
+        // Upstream's `auto` queues behind compaction rather than steering it.
+        assert.isUndefined(
+          autoSteeringRun({
+            ...projection,
+            messages: projection.messages.map((message) =>
+              message.id === active.message.id ? { ...message, text: "/compact" } : message,
+            ),
+          }),
+        );
+        const turn = (yield* Ref.get(harness.activeTurns)).get(target.threadId)!;
+        const startedAt = yield* DateTime.now;
+        yield* publishCommandExecution(turn, {
+          ordinal: 1,
+          command: "long build",
+          status: "running",
+          startedAt,
+          completedAt: null,
+        });
+        const firstDelivery = yield* transport
+          .deliverAgent(target.delivery)
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        yield* runWorkerUntil(worker, firstDelivery);
+        yield* transport.deliverAgent(target.delivery);
+        const secondId = LedgerMessageId.make(`message:${model}:second`);
+        const secondInput = {
+          ...target.delivery,
+          messageId: secondId,
+          exchangeRole: "reply",
+          message: "The answer to your question.",
+        } as const;
+        const secondDelivery = yield* transport
+          .deliverAgent(secondInput)
+          .pipe(Effect.forkChild({ startImmediately: true }));
+        yield* runWorkerUntil(worker, secondDelivery);
+        const steers = yield* Ref.get(harness.steerInputs);
+        assert.lengthOf(steers, 2);
+        // A steered delivery carries the ordinary envelope and nothing else.
+        assert.sameDeepMembers(
+          steers.map((input) => [input.message.messageId, input.message.text]),
+          [
+            [deliveryMessageId(target.messageId), formatAgentDeliveryEnvelope(target.delivery)],
+            [deliveryMessageId(secondId), formatAgentDeliveryEnvelope(secondInput)],
+          ],
+        );
+        for (const steer of steers) {
+          assert.equal(steer.runId, active.run.id);
+          assert.equal(steer.providerTurnId, turn.providerTurnId);
+        }
+        const toolCompleted = yield* sink.stream({ threadId: target.threadId }).pipe(
+          Stream.filter(
+            (stored) =>
+              stored.event.type === "turn-item.updated" &&
+              stored.event.payload.type === "command_execution" &&
+              stored.event.payload.status === "completed",
+          ),
+          Stream.runHead,
+          Effect.forkChild({ startImmediately: true }),
+        );
+        yield* publishCommandExecution(turn, {
+          ordinal: 1,
+          command: "long build",
           status: "completed",
+          startedAt,
           completedAt: yield* DateTime.now,
-        },
-      });
-      yield* Fiber.join(ended);
-      yield* Ref.set(harness.staleProjection, projection);
-      const racedDelivery = {
-        ...target.delivery,
-        messageId: LedgerMessageId.make(`message:${model}:race`),
-      };
-      for (let retry = 0; retry < 2; retry++) yield* transport.deliverAgent(racedDelivery);
-      yield* Ref.set(harness.staleProjection, undefined);
-      const afterRace = yield* threads.getThreadProjection(target.threadId);
-      assert.lengthOf(
-        afterRace.messages.filter(
-          (message) => message.id === deliveryMessageId(racedDelivery.messageId),
-        ),
-        1,
-      );
-      const queuedFollowUps = afterRace.runs.filter(
-        (run) => run.userMessageId === deliveryMessageId(racedDelivery.messageId),
-      );
-      assert.lengthOf(queuedFollowUps, 1);
-      assert.equal(queuedFollowUps[0]!.status, "queued");
-      assert.equal(queuedFollowUps[0]!.modelSelection.model, model);
-      assert.lengthOf(yield* Ref.get(harness.interruptInputs), 0);
-    }).pipe(Effect.provide(makeTestLayer(harness)));
-  }),
+        });
+        yield* Fiber.join(toolCompleted);
+        const after = yield* threads.getThreadProjection(target.threadId);
+        assert.lengthOf(after.runs, 1);
+        assert.equal(after.runs[0]?.status, "running");
+        assert.lengthOf(after.attempts, 1);
+        assert.lengthOf(yield* Ref.get(harness.interruptInputs), 0);
+        assert.lengthOf(
+          after.messages.filter((message) => message.id === deliveryMessageId(target.messageId)),
+          1,
+        );
+        // Platform notices wait for the turn; they never steer.
+        for (const channel of ["silence_notice", "lifecycle_notice"] as const) {
+          yield* transport.deliverAgent({
+            ...target.delivery,
+            messageId: LedgerMessageId.make(`message:${model}:${channel}`),
+            envelopeChannel: channel,
+          });
+        }
+        assert.isFalse(yield* worker.runOnce());
+        assert.lengthOf(yield* Ref.get(harness.steerInputs), 2);
+        const withNotices = yield* threads.getThreadProjection(target.threadId);
+        assert.equal(withNotices.runs.filter((run) => run.status === "queued").length, 2);
+        // A provider turn can finish between the eligibility read and dispatch.
+        // Keep the stale eligibility snapshot while the real projection moves on.
+        const ended = yield* sink.stream({ threadId: target.threadId }).pipe(
+          Stream.filter(
+            (stored) =>
+              stored.event.type === "provider-turn.updated" &&
+              stored.event.payload.status === "completed",
+          ),
+          Stream.runHead,
+          Effect.forkChild({ startImmediately: true }),
+        );
+        yield* PubSub.publish(turn.events, {
+          type: "provider_turn.updated",
+          driver,
+          providerTurn: {
+            ...projection.providerTurns[0]!,
+            status: "completed",
+            completedAt: yield* DateTime.now,
+          },
+        });
+        yield* Fiber.join(ended);
+        yield* Ref.set(harness.staleProjection, projection);
+        const racedDelivery = {
+          ...target.delivery,
+          messageId: LedgerMessageId.make(`message:${model}:race`),
+        };
+        for (let retry = 0; retry < 2; retry++) yield* transport.deliverAgent(racedDelivery);
+        yield* Ref.set(harness.staleProjection, undefined);
+        const afterRace = yield* threads.getThreadProjection(target.threadId);
+        assert.lengthOf(
+          afterRace.messages.filter(
+            (message) => message.id === deliveryMessageId(racedDelivery.messageId),
+          ),
+          1,
+        );
+        const queuedFollowUps = afterRace.runs.filter(
+          (run) => run.userMessageId === deliveryMessageId(racedDelivery.messageId),
+        );
+        assert.lengthOf(queuedFollowUps, 1);
+        assert.equal(queuedFollowUps[0]!.status, "queued");
+        assert.lengthOf(yield* Ref.get(harness.interruptInputs), 0);
+      }).pipe(Effect.provide(makeTestLayer(harness)));
+    }),
 );
 
 /** Starts a user turn on the target and returns once its provider turn is running. */
@@ -1043,13 +1020,19 @@ it.effect("lands a message the way its sender asked, on any model", () =>
       assert.lengthOf(yield* runsFor(idle.threadId, idle.messageId), 1);
       assert.lengthOf(yield* Ref.get(harness.steerInputs), 0);
 
-      const busy = yield* seedTarget("mode-busy");
+      const busy = yield* seedTarget("mode-busy", "gpt-6-astra");
       yield* startBusyTurn(busy);
       const running = (yield* threads.getThreadProjection(busy.threadId)).runs[0]!;
 
-      // The default still waits behind the running turn.
+      // An asked-for queue waits behind the running turn, where the default would steer. The
+      // worker runs alongside, so a delivery that steered anyway is acknowledged and shows here.
       const queuedId = LedgerMessageId.make("message:mode-busy:queued");
-      yield* transport.deliverAgent({ ...busy.delivery, messageId: queuedId });
+      yield* runWorkerUntil(
+        worker,
+        yield* transport
+          .deliverAgent({ ...busy.delivery, messageId: queuedId, mode: "queue" })
+          .pipe(Effect.forkChild({ startImmediately: true })),
+      );
       assert.deepStrictEqual(
         (yield* runsFor(busy.threadId, queuedId)).map((run) => run.status),
         ["queued"],
@@ -1158,27 +1141,96 @@ it.effect("lands a message the way its sender asked, on any model", () =>
   }),
 );
 
-// Upstream refuses a steer to a run that Stop has reached, and keeps the refusal for its command.
-it.effect("queues a message for a GPT 6 run that is stopping instead of failing it for good", () =>
+// Register D51: steering Cursor can cancel a running tool while reporting it succeeded.
+it.effect("waits for the turn by default where a steer would interrupt running tools", () =>
+  Effect.gen(function* () {
+    const harness = { ...(yield* makeHarness), steeringInterruptsTools: true };
+    yield* Effect.gen(function* () {
+      const threads = yield* ThreadManagementService;
+      const transport = yield* A2ADeliveryTransport;
+      const worker = yield* OrchestrationEffectWorkerV2;
+      const send = yield* A2ASendService;
+      const deliveries = yield* A2ADeliveryWorker;
+      const caller = yield* seedTarget("interrupts-caller");
+      const target = yield* seedTarget(
+        "interrupts",
+        modelSelection.model,
+        undefined,
+        caller.ledgerProjectId,
+      );
+      yield* startBusyTurn(target);
+      const running = (yield* threads.getThreadProjection(target.threadId)).runs[0]!;
+
+      const sent = yield* send.send({
+        commandId: CommCommandId.make("command:j5-a2a-delivery-interrupts-default"),
+        senderThreadId: caller.threadId,
+        to: target.receiverId,
+        message: "An update while your tool runs.",
+        acceptedAt: "2026-11-23T00:00:00.000Z",
+      });
+      assert.deepStrictEqual(
+        yield* readReceiverBacklog({
+          receiverId: target.receiverId,
+          callerThreadId: caller.threadId,
+          sentMessageId: sent.messageId,
+        }),
+        { type: "behind_turn", waiting: 1, fromCaller: 1 },
+      );
+      // The worker runs alongside, so a delivery that steered anyway is acknowledged and shows.
+      yield* runWorkerUntil(
+        worker,
+        yield* deliveries.drain.pipe(Effect.forkChild({ startImmediately: true })),
+      );
+      const after = yield* threads.getThreadProjection(target.threadId);
+      assert.deepStrictEqual(
+        after.runs
+          .filter((run) => run.userMessageId === deliveryMessageId(sent.messageId))
+          .map((run) => run.status),
+        ["queued"],
+      );
+      assert.lengthOf(yield* Ref.get(harness.steerInputs), 0);
+
+      const steeredId = LedgerMessageId.make("message:j5-a2a-delivery-interrupts-steer");
+      yield* runWorkerUntil(
+        worker,
+        yield* transport
+          .deliverAgent({ ...target.delivery, messageId: steeredId, mode: "steer" })
+          .pipe(Effect.forkChild({ startImmediately: true })),
+      );
+      assert.deepStrictEqual(
+        (yield* Ref.get(harness.steerInputs)).map((input) => [
+          input.runId,
+          input.message.messageId,
+        ]),
+        [[running.id, deliveryMessageId(steeredId)]],
+      );
+    }).pipe(Effect.provide(makeLifecycleTestLayer(harness)));
+  }),
+);
+
+// Upstream's `auto` queues a send to a run that Stop has reached instead of steering it.
+it.effect("queues a message for a run that is stopping instead of failing it for good", () =>
   Effect.gen(function* () {
     const harness = yield* makeHarness;
     yield* Effect.gen(function* () {
       const threads = yield* ThreadManagementService;
       const transport = yield* A2ADeliveryTransport;
       const worker = yield* OrchestrationEffectWorkerV2;
-      const target = yield* seedTarget("gpt6-stopping", "gpt-6-astra");
+      const target = yield* seedTarget("stopping");
       yield* startBusyTurn(target);
       const running = (yield* threads.getThreadProjection(target.threadId)).runs[0]!;
-      // Until the worker runs Stop's interrupt, the run still reads as running and steerable.
+      // Until the worker runs Stop's interrupt, the run still reads as running and steerable, but
+      // Stop's request is recorded, so `auto` queues and the sender is told it waits.
       yield* threads.dispatch({
         type: "thread.stop",
-        commandId: CommandId.make("command:gpt6-stopping:stop"),
+        commandId: CommandId.make("command:stopping:stop"),
         threadId: target.threadId,
       });
       const stopping = yield* threads.getThreadProjection(target.threadId);
-      assert.equal(peerSteeringRun(stopping, "peer")?.id, running.id);
+      assert.equal(latestSteerableRun(stopping)?.id, running.id);
+      assert.isUndefined(autoSteeringRun(stopping));
 
-      // The refused steer falls back to the queue, and a retry finds the queued message.
+      // The delivery joins the queue, and a retry finds the queued message.
       const ownRuns = threads
         .getThreadProjection(target.threadId)
         .pipe(
@@ -1223,11 +1275,13 @@ it.effect("measures the backlog a send waits behind on a busy receiver", () =>
         caller.ledgerProjectId,
       );
       let sequence = 0;
+      // Asked to wait, as a default send would steer into the busy turn.
       const sendInput = (from: typeof caller, name: string) => ({
         commandId: CommCommandId.make(`command:j5-a2a-delivery-backlog-${name}`),
         senderThreadId: from.threadId,
         to: target.receiverId,
         message: `Update ${name}`,
+        mode: "queue" as const,
         acceptedAt: `2026-09-24T00:00:0${sequence++}.000Z`,
       });
       const backlogFor = (sent: { readonly messageId: LedgerMessageId }) =>
@@ -1235,6 +1289,7 @@ it.effect("measures the backlog a send waits behind on a busy receiver", () =>
           receiverId: target.receiverId,
           callerThreadId: caller.threadId,
           sentMessageId: sent.messageId,
+          mode: "queue",
         });
 
       // An idle receiver takes the message at once: nothing to warn about.
@@ -1330,27 +1385,67 @@ it.effect("counts a message queued before an Astra turn became steerable", () =>
   }),
 );
 
-it.effect(
-  "reports no backlog for a running Astra receiver, which takes peer messages mid-turn",
-  () =>
+it.effect.each(["gpt-5.4", "gpt-6-astra"])(
+  "reports no backlog for a default send to a running %s turn, and the wait for an asked queue",
+  (model) =>
     Effect.gen(function* () {
       const harness = yield* makeHarness;
       yield* Effect.gen(function* () {
-        const target = yield* seedTarget("backlog-astra", "gpt-6-astra");
+        const send = yield* A2ASendService;
+        const suffix = `backlog-steer-${model.replaceAll(".", "-")}`;
+        const caller = yield* seedTarget(`${suffix}-caller`);
+        const target = yield* seedTarget(suffix, model, undefined, caller.ledgerProjectId);
         yield* startBusyTurn(target);
-        assert.isUndefined(
-          yield* readReceiverBacklog({
+        const sendAs = (name: string, mode?: "queue") =>
+          send.send({
+            commandId: CommCommandId.make(`command:j5-a2a-delivery-${suffix}-${name}`),
+            senderThreadId: caller.threadId,
+            to: target.receiverId,
+            message: `Update ${name}`,
+            ...(mode === undefined ? {} : { mode }),
+            acceptedAt: "2026-09-24T00:00:00.000Z",
+          });
+        const backlogFor = (messageId: LedgerMessageId, mode?: "queue") =>
+          readReceiverBacklog({
             receiverId: target.receiverId,
-            callerThreadId: ThreadId.make("thread:j5-a2a-delivery-backlog-astra-caller"),
-            sentMessageId: target.messageId,
-          }),
+            callerThreadId: caller.threadId,
+            sentMessageId: messageId,
+            mode,
+          });
+        const steered = yield* sendAs("steered");
+        assert.isUndefined(yield* backlogFor(steered.messageId));
+        // It lands in the running turn, so it is no turn of its own for a later queue to wait on.
+        yield* runWorkerUntil(
+          yield* OrchestrationEffectWorkerV2,
+          yield* (yield* A2ADeliveryWorker).drain.pipe(
+            Effect.forkChild({ startImmediately: true }),
+          ),
         );
-      }).pipe(Effect.provide(makeTestLayer(harness)));
+        assert.lengthOf(yield* Ref.get(harness.steerInputs), 1);
+        const queued = yield* sendAs("queued", "queue");
+        assert.deepStrictEqual(yield* backlogFor(queued.messageId, "queue"), {
+          type: "behind_turn",
+          waiting: 1,
+          fromCaller: 1,
+        });
+        // Once Stop reaches the turn, `auto` queues, so a default send is told it waits too.
+        yield* (yield* ThreadManagementService).dispatch({
+          type: "thread.stop",
+          commandId: CommandId.make(`command:j5-a2a-delivery-${suffix}-stop`),
+          threadId: target.threadId,
+        });
+        const afterStop = yield* sendAs("after-stop");
+        assert.deepStrictEqual(yield* backlogFor(afterStop.messageId), {
+          type: "behind_turn",
+          waiting: 2,
+          fromCaller: 2,
+        });
+      }).pipe(Effect.provide(makeLifecycleTestLayer(harness)));
     }),
 );
 
 it.effect(
-  "queues behind a busy recipient's active turn and never aborts its running tool batch",
+  "queues behind a busy recipient's active turn when asked to, and never aborts its running tool batch",
   () =>
     Effect.gen(function* () {
       const harness = yield* makeHarness;
@@ -1400,8 +1495,8 @@ it.effect(
           completedAt: null,
         });
 
-        yield* transport.deliverAgent(target.delivery);
-        yield* transport.deliverAgent(target.delivery);
+        yield* transport.deliverAgent({ ...target.delivery, mode: "queue" });
+        yield* transport.deliverAgent({ ...target.delivery, mode: "queue" });
         // Queueing schedules no provider effect: nothing steers or interrupts.
         assert.isFalse(yield* worker.runOnce());
 
@@ -1582,7 +1677,7 @@ it.effect("attributes human-origin delivery to the user actor", () =>
         (yield* Ref.get(harness.deliveryInvocations)).filter(
           (invocation) => invocation.messageId === upstreamMessageId,
         ),
-        [{ messageId: upstreamMessageId, mode: "queue", createdBy: "user" }],
+        [{ messageId: upstreamMessageId, mode: "auto", createdBy: "user" }],
       );
     }).pipe(Effect.provide(makeTestLayer(harness)));
   }),
@@ -1912,9 +2007,9 @@ it.effect.each(
     }),
 );
 
-it.effect(
-  "bounds a missing steer acknowledgment and recognizes a later success without reinjection",
-  () =>
+it.effect.each(["default", "steer"] as const)(
+  "bounds a missing %s acknowledgment and recognizes a later success without reinjection",
+  (mode) =>
     Effect.gen(function* () {
       const harness = yield* makeHarness;
       yield* Effect.gen(function* () {
@@ -1945,20 +2040,13 @@ it.effect(
         });
         yield* worker.runOnce();
         yield* Fiber.join(running);
-        const committed = yield* sink.stream({ threadId: target.threadId }).pipe(
-          Stream.filter(
-            (stored) =>
-              stored.event.type === "turn-item.updated" &&
-              stored.event.payload.type === "user_message" &&
-              stored.event.payload.inputIntent === "steer",
-          ),
-          Stream.runHead,
-          Effect.forkChild({ startImmediately: true }),
-        );
+        // A default delivery steers through upstream's `auto`; both wait on the same observer.
+        const steered =
+          mode === "steer" ? ({ ...target.delivery, mode } as const) : target.delivery;
         const delivery = yield* transport
-          .deliverAgent(target.delivery)
+          .deliverAgent(steered)
           .pipe(Effect.flip, Effect.forkChild({ startImmediately: true }));
-        yield* Fiber.join(committed);
+        yield* Deferred.await(harness.steerObserverWaiting);
         // Leave the native effect pending: no provider receipt is available.
         yield* TestClock.adjust("30 seconds");
         const failure = yield* Fiber.join(delivery);
@@ -1967,7 +2055,7 @@ it.effect(
         assert.lengthOf(yield* Ref.get(harness.steerInputs), 0);
         // Timing out only detaches the observer. The original effect can settle.
         yield* worker.drain();
-        yield* transport.deliverAgent(target.delivery);
+        yield* transport.deliverAgent(steered);
         assert.lengthOf(yield* Ref.get(harness.steerInputs), 1);
         const after = yield* threads.getThreadProjection(target.threadId);
         assert.lengthOf(after.runs, 1);
@@ -2847,6 +2935,7 @@ it.effect.each([false, true])(
           senderThreadId: source.threadId,
           to: target.receiverId,
           message: "Must not execute if cancelled",
+          mode: "queue",
           acceptedAt: "2026-09-12T00:00:00.000Z",
         });
         // A real dispatch receipt exists, but the process has not yet committed its A2A outcome.
@@ -2858,6 +2947,7 @@ it.effect.each([false, true])(
           exchangeId: null,
           exchangeRole: "none",
           message: "Must not execute if cancelled",
+          mode: "queue",
         });
         const queued = (yield* threads.getThreadProjection(target.threadId)).runs.find(
           (run) => run.userMessageId === deliveryMessageId(sent.messageId),
@@ -3536,56 +3626,66 @@ it.effect(
     }),
 );
 
-it.effect("queues a peer update behind a held queue instead of steering a GPT 6 turn", () =>
-  Effect.gen(function* () {
-    const harness = yield* makeHarness;
-    yield* Effect.gen(function* () {
-      const target = yield* seedTarget("held-steer", "gpt-6-astra");
-      const threads = yield* ThreadManagementService;
-      const transport = yield* A2ADeliveryTransport;
-      yield* startBusyTurn(target);
-      const earlier = yield* threads.sendToThread({
-        projectId: target.projectId,
-        threadId: target.threadId,
-        commandId: CommandId.make("command:held-steer:earlier"),
-        messageId: MessageId.make("message:held-steer:earlier"),
-        text: "Earlier work",
-        attachments: [],
-        mode: "queue",
-        createdBy: "user",
-        creationSource: "web",
-      });
-      yield* (yield* EventSinkV2).write({
-        events: [
-          {
-            id: EventId.make("event:held-steer:earlier"),
-            type: "run.updated",
-            threadId: target.threadId,
-            runId: earlier.run.id,
-            providerInstanceId: earlier.run.providerInstanceId,
-            occurredAt: yield* DateTime.now,
-            payload: { ...earlier.run, status: "queued", queueHeld: true },
-          },
-        ],
-      });
-      const busy = yield* threads.getThreadProjection(target.threadId);
-      const steerable = peerSteeringRun(busy, "peer");
-      assert.isDefined(steerable);
+// Upstream's own order guard covers only queued agent messages, and a held queue not at all.
+it.effect.each([
+  { queue: "held", model: "gpt-5.4" },
+  { queue: "unheld", model: "gpt-6-astra" },
+])(
+  "queues a peer update behind a person's $queue queued message instead of steering",
+  ({ queue, model }) =>
+    Effect.gen(function* () {
+      const harness = yield* makeHarness;
+      yield* Effect.gen(function* () {
+        const target = yield* seedTarget(`${queue}-steer`, model);
+        const threads = yield* ThreadManagementService;
+        const transport = yield* A2ADeliveryTransport;
+        yield* startBusyTurn(target);
+        const earlier = yield* threads.sendToThread({
+          projectId: target.projectId,
+          threadId: target.threadId,
+          commandId: CommandId.make(`command:${queue}-steer:earlier`),
+          messageId: MessageId.make(`message:${queue}-steer:earlier`),
+          text: "Earlier work",
+          attachments: [],
+          mode: "queue",
+          createdBy: "user",
+          creationSource: "web",
+        });
+        if (queue === "held") {
+          yield* (yield* EventSinkV2).write({
+            events: [
+              {
+                id: EventId.make(`event:${queue}-steer:earlier`),
+                type: "run.updated",
+                threadId: target.threadId,
+                runId: earlier.run.id,
+                providerInstanceId: earlier.run.providerInstanceId,
+                occurredAt: yield* DateTime.now,
+                payload: { ...earlier.run, status: "queued", queueHeld: true },
+              },
+            ],
+          });
+        }
+        const busy = yield* threads.getThreadProjection(target.threadId);
+        const steerable = latestSteerableRun(busy);
+        assert.isDefined(steerable);
+        assert.isUndefined(autoSteeringRun(busy));
 
-      yield* transport.deliverAgent(target.delivery);
+        yield* transport.deliverAgent(target.delivery);
+        assert.lengthOf(yield* Ref.get(harness.steerInputs), 0);
 
-      const after = yield* threads.getThreadProjection(target.threadId);
-      assert.equal(after.runs.find((run) => run.id === steerable!.id)?.status, steerable!.status);
-      const queued = after.runs
-        .filter((run) => run.status === "queued")
-        .toSorted((left, right) => left.ordinal - right.ordinal);
-      assert.deepStrictEqual(
-        queued.map((run) => run.userMessageId),
-        [earlier.run.userMessageId, deliveryMessageId(target.messageId)],
-      );
-      assert.isTrue(queued.every((run) => run.queueHeld !== true));
-    }).pipe(Effect.provide(makeTestLayer(harness)));
-  }),
+        const after = yield* threads.getThreadProjection(target.threadId);
+        assert.equal(after.runs.find((run) => run.id === steerable!.id)?.status, steerable!.status);
+        const queued = after.runs
+          .filter((run) => run.status === "queued")
+          .toSorted((left, right) => left.ordinal - right.ordinal);
+        assert.deepStrictEqual(
+          queued.map((run) => run.userMessageId),
+          [earlier.run.userMessageId, deliveryMessageId(target.messageId)],
+        );
+        assert.isTrue(queued.every((run) => run.queueHeld !== true));
+      }).pipe(Effect.provide(makeTestLayer(harness)));
+    }),
 );
 
 /** Leaves a target idle with one held message: its turn ends while its queue is held. */
@@ -4623,7 +4723,7 @@ it.effect(
             from === "ordinary" ? `${ordinaryProject} (Ordinary)` : `${noProject} (No project)`;
           assert.include(
             delivered?.text,
-            `[Cross-agent message from ${participantIdForThread(threadId(from))} in project ${origin}]`,
+            `[Cross-agent message from ${participantIdForThread(threadId(from))} in project ${origin}. J5 Code`,
           );
           assert.equal(delivered?.senderThreadId, threadId(from));
         }
@@ -4660,6 +4760,8 @@ it.effect(
             senderThreadId: threadId(from),
             to,
             message: `${name} from ${from}`,
+            // Waits its turn, so delivery order is what this test reads.
+            mode: "queue",
             acceptedAt: "2026-11-09T00:00:00.000Z",
             ...(options.expectReply ? { expectReply: true, intent: `Answer ${name}` } : {}),
             ...(options.exchangeId === undefined ? {} : { exchangeId: options.exchangeId }),
@@ -4836,6 +4938,8 @@ it.effect(
             senderThreadId: from.threadId,
             to: receiver.receiverId,
             message: `Original ${name}`,
+            // Queued, as an edit reaches only a queued message.
+            mode: "queue",
             acceptedAt: "2026-10-24T00:00:00.000Z",
           });
         const own = yield* sendFrom(editor, "own");
